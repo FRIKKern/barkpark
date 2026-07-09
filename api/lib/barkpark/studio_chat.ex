@@ -77,14 +77,28 @@ defmodule Barkpark.StudioChat do
     end
   end
 
+  # A managed sidebar never renders an unbounded list — the recency-desc order
+  # keeps live work on top, so 50 is a generous fold with no pagination chrome.
+  @sidebar_cap 50
+
   @doc """
-  List sessions for the sidebar, most-recently-active first. Selects only the
-  sidebar fields (no message scan).
+  List sessions for the sidebar, most-recently-active first, capped at
+  #{@sidebar_cap}. Selects only the sidebar fields (no message scan).
+
+  Options:
+
+    * `:archived` — `false` (default) lists the active side of the shelf
+      (`archived_at IS NULL`, the partial-indexed hot path); `true` lists the
+      archived shelf (`archived_at IS NOT NULL`).
   """
-  @spec list_sessions() :: [Session.t()]
-  def list_sessions do
+  @spec list_sessions(keyword()) :: [Session.t()]
+  def list_sessions(opts \\ []) do
+    archived? = Keyword.get(opts, :archived, false)
+
     Session
+    |> archived_filter(archived?)
     |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(^@sidebar_cap)
     |> select([s], %Session{
       id: s.id,
       title: s.title,
@@ -92,15 +106,20 @@ defmodule Barkpark.StudioChat do
       status: s.status,
       summary: s.summary,
       message_count: s.message_count,
+      pending_approvals: s.pending_approvals,
       input_tokens: s.input_tokens,
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
       last_active_at: s.last_active_at,
+      archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     })
     |> Repo.all()
   end
+
+  defp archived_filter(query, true), do: where(query, [s], not is_nil(s.archived_at))
+  defp archived_filter(query, false), do: where(query, [s], is_nil(s.archived_at))
 
   @doc """
   List a session's messages in `seq` order.
@@ -114,8 +133,59 @@ defmodule Barkpark.StudioChat do
   end
 
   # ---------------------------------------------------------------------------
+  # lifecycle: archive + delete (wave 2 — the sidebar as a managed resource list)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Permanently delete a session and its messages. The `chat_messages` FK is
+  `on_delete: :delete_all`, so one `Repo.delete` cascades — no manual cleanup.
+  UUID-guarded: a missing/non-UUID id is a clean `:noop`, never a crash.
+  """
+  @spec delete_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
+  def delete_session(id) do
+    case get_session(id) do
+      nil -> :noop
+      session -> Repo.delete(session)
+    end
+  end
+
+  @doc """
+  Archive a session — stamp `archived_at` so it drops off the active sidebar and
+  onto the archived shelf. Orthogonal to `status`: a working/exited session can
+  be archived without touching its liveness. `:noop` if the session is gone.
+  """
+  @spec archive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
+  def archive_session(id), do: set_archived_at(id, DateTime.utc_now())
+
+  @doc """
+  Unarchive a session — clear `archived_at` so it returns to the active sidebar.
+  `:noop` if the session is gone.
+  """
+  @spec unarchive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
+  def unarchive_session(id), do: set_archived_at(id, nil)
+
+  defp set_archived_at(id, value) do
+    case get_session(id) do
+      nil ->
+        :noop
+
+      session ->
+        session
+        |> Ecto.Changeset.change(archived_at: value)
+        |> Repo.update()
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # messages
   # ---------------------------------------------------------------------------
+
+  # A truly-concurrent same-session append is retried this many times before we
+  # give up: two tabs (or a takeover racing the old owner) can both read the
+  # same MAX(seq) and try to claim seq N — the UNIQUE index rejects the loser,
+  # and a fresh transaction re-reads MAX and takes N+1. Three attempts covers
+  # any realistic contention on one session (charter D20b).
+  @append_retries 3
 
   @doc """
   Append a completed message to a session in ONE transaction: allocate the next
@@ -126,6 +196,16 @@ defmodule Barkpark.StudioChat do
   `:role`; `:source_markdown` and `:metadata` are optional. `:seq` is IGNORED —
   always allocated here.
 
+  ## Concurrent-append discipline (charter D20b)
+
+  `next_seq/1` is a SELECT-max + 1: two writers on the same session can compute
+  the same seq and collide on the UNIQUE `[session_id, seq]` index. That is a
+  transient, self-healing conflict — the loser retries with a FRESH max and
+  wins the next slot. We retry the mapped `chat_messages_session_id_seq_index`
+  changeset error up to #{@append_retries} times so a same-session race NEVER
+  silently drops a message. Any OTHER error (or exhausted retries) surfaces as
+  `{:error, _}` — callers must not discard it.
+
   Returns `{:ok, %Message{}}` or `{:error, reason}`.
   """
   @spec append_message(Session.t() | String.t(), map()) ::
@@ -133,25 +213,52 @@ defmodule Barkpark.StudioChat do
   def append_message(%Session{id: id}, attrs), do: append_message(id, attrs)
 
   def append_message(session_id, attrs) when is_binary(session_id) do
-    attrs = normalize_keys(attrs)
+    do_append(session_id, normalize_keys(attrs), @append_retries)
+  end
+
+  defp do_append(session_id, attrs, attempts) do
     now = DateTime.utc_now()
 
-    Repo.transaction(fn ->
-      next_seq = next_seq(session_id)
+    result =
+      Repo.transaction(fn ->
+        next_seq = next_seq(session_id)
 
-      message_attrs =
-        attrs
-        |> Map.put(:session_id, session_id)
-        |> Map.put(:seq, next_seq)
+        message_attrs =
+          attrs
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:seq, next_seq)
 
-      case %Message{} |> Message.changeset(message_attrs) |> Repo.insert() do
-        {:ok, message} ->
-          bump_on_append(session_id, message, now)
-          message
+        case %Message{} |> Message.changeset(message_attrs) |> Repo.insert() do
+          {:ok, message} ->
+            bump_on_append(session_id, message, now)
+            message
 
-        {:error, changeset} ->
-          Repo.rollback(changeset)
-      end
+          {:error, changeset} ->
+            Repo.rollback(changeset)
+        end
+      end)
+
+    case result do
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if attempts > 1 and seq_conflict?(changeset) do
+          do_append(session_id, attrs, attempts - 1)
+        else
+          {:error, changeset}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  # True when the failure is the UNIQUE [session_id, seq] index specifically —
+  # the ONLY error we retry (a foreign-key or validation error must surface, not
+  # loop). Matched by the mapped constraint NAME so it is robust to which field
+  # Ecto pins the error on.
+  defp seq_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, opts}} ->
+      Keyword.get(opts, :constraint) == :unique and
+        Keyword.get(opts, :constraint_name) == "chat_messages_session_id_seq_index"
     end)
   end
 
@@ -173,7 +280,11 @@ defmodule Barkpark.StudioChat do
   # bump activity but never clobber the preview.
   @summary_roles ~w(user assistant)
   defp bump_on_append(session_id, %Message{source_markdown: md, role: role}, now) do
-    updates = [inc: [message_count: 1], set: [last_active_at: now, updated_at: now]]
+    # An appended approval row is an ask — always pending at creation — so it
+    # raises the denormalised pending counter. The −1 lands when it resolves
+    # (`update_approval_status/3`) or is force-canceled (`cancel_pending_approvals/1`).
+    inc = if role == "approval", do: [message_count: 1, pending_approvals: 1], else: [message_count: 1]
+    updates = [inc: inc, set: [last_active_at: now, updated_at: now]]
 
     updates =
       case role in @summary_roles && summary_preview(md) do
@@ -230,6 +341,26 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  Persist a mid-session permission-mode switch (charter D17). Mirrors
+  `update_status/2`: `validate_inclusion` against `Session.modes/0` and refresh
+  `last_active_at`, so a reopened session shows the mode you switched to AND the
+  next lazy `--resume` spawn's `build_args` carries it. Returns `{:ok, session}`,
+  `{:error, changeset}`, or `{:error, :not_found}`.
+  """
+  @spec set_mode(String.t(), String.t()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+  def set_mode(session_id, mode) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(mode: mode, last_active_at: DateTime.utc_now())
+      |> Ecto.Changeset.validate_inclusion(:mode, Session.modes())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Mark a session `exited` (its port died — crash or clean exit). Next send
   lazy-resumes. `:noop` if the session is gone.
   """
@@ -239,6 +370,109 @@ defmodule Barkpark.StudioChat do
       {:error, :not_found} -> :noop
       other -> other
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # approvals (charter D11/D14 — persisted lifecycle, denormalised pending count)
+  # ---------------------------------------------------------------------------
+
+  # An approval message carries its lifecycle in `metadata.approval_status`:
+  # "pending" → one of the terminal states below. The row's markdown/tool_name
+  # let the reopened terminal-state card render without a live subprocess.
+  @approval_terminal ~w(allowed denied canceled)
+
+  @doc """
+  Resolve ONE approval to a terminal state (`allowed | denied | canceled`),
+  addressed by its `request_id`. Updates the message row's
+  `metadata.approval_status` and, if the row was still `pending`, decrements the
+  session's denormalised `pending_approvals` (guarded ≥ 0) in the same
+  transaction.
+
+  Returns `{:ok, %Message{}}`, `{:error, :not_found}` (no such pending/known
+  approval), or `{:error, :bad_status}` for an unknown terminal state.
+  """
+  @spec update_approval_status(String.t(), String.t(), String.t()) ::
+          {:ok, Message.t()} | {:error, :not_found | :bad_status}
+  def update_approval_status(_session_id, _request_id, status)
+      when status not in @approval_terminal,
+      do: {:error, :bad_status}
+
+  def update_approval_status(session_id, request_id, status) do
+    Repo.transaction(fn ->
+      case find_approval(session_id, request_id) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        %Message{} = message ->
+          was_pending? = approval_pending?(message)
+          meta = Map.put(message.metadata || %{}, "approval_status", status)
+
+          {:ok, updated} =
+            message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()
+
+          if was_pending?, do: dec_pending(session_id)
+          updated
+      end
+    end)
+    |> case do
+      {:ok, message} -> {:ok, message}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Force-cancel EVERY still-pending approval for a session — the shared teardown
+  path (a port crash / a reopen with no live control channel) can never deliver
+  a decision, so a dangling ask is `canceled`, honestly, not left hanging. Flips
+  each pending row's `metadata.approval_status` to `"canceled"` and zeroes the
+  session's `pending_approvals`. Returns the number of approvals canceled.
+  """
+  @spec cancel_pending_approvals(String.t()) :: non_neg_integer()
+  def cancel_pending_approvals(session_id) do
+    Repo.transaction(fn ->
+      pending =
+        Message
+        |> where([m], m.session_id == ^session_id and m.role == "approval")
+        |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+        |> Repo.all()
+
+      Enum.each(pending, fn message ->
+        meta = Map.put(message.metadata || %{}, "approval_status", "canceled")
+        message |> Ecto.Changeset.change(metadata: meta) |> Repo.update!()
+      end)
+
+      Session
+      |> where([s], s.id == ^session_id)
+      |> Repo.update_all(set: [pending_approvals: 0, updated_at: DateTime.utc_now()])
+
+      length(pending)
+    end)
+    |> case do
+      {:ok, count} -> count
+      _ -> 0
+    end
+  end
+
+  # The approval message for a request_id (unique per ask). Newest wins if a
+  # request_id were ever reused; never raises on 0/N rows.
+  defp find_approval(session_id, request_id) do
+    Message
+    |> where([m], m.session_id == ^session_id and m.role == "approval")
+    |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))
+    |> order_by([m], desc: m.seq)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp approval_pending?(%Message{metadata: meta}),
+    do: Map.get(meta || %{}, "approval_status") == "pending"
+
+  # Guarded decrement — the counter never underflows if a resolve races a
+  # cancel-all that already zeroed it.
+  defp dec_pending(session_id) do
+    Session
+    |> where([s], s.id == ^session_id and s.pending_approvals > 0)
+    |> Repo.update_all(inc: [pending_approvals: -1], set: [updated_at: DateTime.utc_now()])
   end
 
   # ---------------------------------------------------------------------------
@@ -303,10 +537,21 @@ defmodule Barkpark.StudioChat do
 
   @doc """
   Accumulate usage from a claude result frame onto the session's denormalised
-  totals, atomically (`UPDATE ... SET x = x + ?`). Model-agnostic: reads token
-  counts from a flat map or a nested `usage` sub-map, and cost from
-  `total_cost_usd`. Unknown/absent keys count as zero. Also refreshes
-  `last_active_at`.
+  totals, atomically. Model-agnostic: reads token counts from a flat map or a
+  nested `usage` sub-map, and cost from `total_cost_usd`. Unknown/absent keys
+  count as zero. Also refreshes `last_active_at`.
+
+  Two axes are updated in one UPDATE (charter D19):
+
+    * The lifetime totals `input_tokens` / `output_tokens` / `total_cost_usd`
+      are `inc:`-summed across turns (cost + usage history).
+    * The context-headroom snapshot `last_context_tokens` / `context_window` is
+      **SET** (not inc) from THIS frame only — the ring shows how full the window
+      is *right now*, not a cumulative sum. `last_context_tokens =
+      input + cache_read + cache_creation + output` of this frame; `context_window`
+      is the integer the caller extracted from `modelUsage.<model>.contextWindow`.
+      A nil/absent `context_window` leaves the prior value untouched (never
+      clobbers a known window to unknown — honest headroom).
 
   Accepts string- or atom-keyed maps. Returns `{:ok, session}` or
   `{:error, :not_found}`.
@@ -319,15 +564,31 @@ defmodule Barkpark.StudioChat do
 
     input = num(Map.get(frame, :input_tokens, Map.get(usage, :input_tokens, 0)))
     output = num(Map.get(frame, :output_tokens, Map.get(usage, :output_tokens, 0)))
+    cache_read = num(Map.get(usage, :cache_read_input_tokens, Map.get(frame, :cache_read_input_tokens, 0)))
+
+    cache_creation =
+      num(Map.get(usage, :cache_creation_input_tokens, Map.get(frame, :cache_creation_input_tokens, 0)))
+
     cost = fnum(Map.get(frame, :total_cost_usd, Map.get(usage, :total_cost_usd, 0)))
 
-    set = [last_active_at: DateTime.utc_now()]
+    # Snapshot (SET): the tokens riding in the model's context on THIS turn.
+    last_context = input + cache_read + cache_creation + output
+
+    set = [last_active_at: DateTime.utc_now(), last_context_tokens: last_context]
 
     # Track the model that actually answered (callers derive it from the
     # result frame's modelUsage keys) so a reopened session can show it.
     set =
       case Map.get(frame, :model) do
         model when is_binary(model) and model != "" -> [{:model, model} | set]
+        _ -> set
+      end
+
+    # Capture the window ONLY when the frame carries it — never clobber a known
+    # window to unknown, and never invent one from a hardcoded model→window map.
+    set =
+      case num_or_nil(Map.get(frame, :context_window)) do
+        window when is_integer(window) and window > 0 -> [{:context_window, window} | set]
         _ -> set
       end
 
@@ -353,7 +614,8 @@ defmodule Barkpark.StudioChat do
   # Accept string- OR atom-keyed maps from callers/JSON frames — normalise the
   # keys we care about to atoms. Only atomises known keys (no atom-exhaustion).
   @known_keys ~w(role source_markdown metadata session_id seq usage input_tokens
-                 output_tokens total_cost_usd model)a
+                 output_tokens total_cost_usd model cache_read_input_tokens
+                 cache_creation_input_tokens context_window)a
   @known_key_strings Enum.map(@known_keys, &Atom.to_string/1)
 
   defp normalize_keys(map) when is_map(map) do
@@ -372,6 +634,12 @@ defmodule Barkpark.StudioChat do
   defp num(n) when is_integer(n), do: n
   defp num(n) when is_float(n), do: trunc(n)
   defp num(_), do: 0
+
+  # Like num/1 but preserves the "absent" signal: nil/garbage → nil (so the
+  # window-capture can distinguish "no window in this frame" from a real zero).
+  defp num_or_nil(n) when is_integer(n), do: n
+  defp num_or_nil(n) when is_float(n), do: trunc(n)
+  defp num_or_nil(_), do: nil
 
   defp fnum(n) when is_number(n), do: n / 1
   defp fnum(_), do: 0.0

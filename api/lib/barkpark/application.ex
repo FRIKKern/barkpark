@@ -132,6 +132,15 @@ defmodule Barkpark.Application do
           # construction). Node-local; a BEAM restart clears it with the
           # sessions. See Barkpark.Plugins.Sheets.Session.ReplayRing.
           Barkpark.Plugins.Sheets.Session.ReplayRing,
+          # Studio Claude chat single-writer registry (charter D20). A unique
+          # Registry keyed by the minted session UUID: when a session id is
+          # pinned, `ClaudeChat.Session` registers under it, so a SECOND tab
+          # opening the same resumed session gets `{:already_started, pid}` and
+          # ADOPTS the running process instead of spawning a second
+          # `claude --resume` writer on the CLI's own transcript. NO
+          # DynamicSupervisor — session lifetime stays owner-tab-bound (dies
+          # with the current sink; the other tab lazy-resumes on its next send).
+          {Registry, keys: :unique, name: Barkpark.StudioChat.SessionRegistry},
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,

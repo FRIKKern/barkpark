@@ -22,6 +22,9 @@ defmodule Barkpark.StudioChat.Session do
   # exited   — the process died (crash or clean exit); next send lazy-resumes
   @statuses ~w(active working exited)
   @title_sources ~w(default ai human)
+  # Permission modes the CLI accepts (mirrors BarkparkWeb.Studio.ClaudeChat.modes/0,
+  # kept here so the context layer validates a mode without reaching into web).
+  @modes ~w(plan default acceptEdits)
 
   @primary_key {:id, Ecto.UUID, autogenerate: false}
   @foreign_key_type Ecto.UUID
@@ -37,11 +40,25 @@ defmodule Barkpark.StudioChat.Session do
 
     field :last_active_at, :utc_datetime_usec
 
+    # Archive shelf (wave 2): nil = active side of the sidebar, a timestamp =
+    # archived. Orthogonal to `status` (liveness) BY DESIGN — see the migration.
+    field :archived_at, :utc_datetime_usec
+
     field :summary, :string
     field :message_count, :integer, default: 0
+    # Denormalised count of approvals still awaiting a decision — the sidebar
+    # reads it to raise a "needs you" pill (charter D14, slice scc-w2-approvals).
+    # Bumped +1 on ask, −1 on resolve, zeroed on cancel-all. Never < 0.
+    field :pending_approvals, :integer, default: 0
     field :input_tokens, :integer, default: 0
     field :output_tokens, :integer, default: 0
     field :total_cost_usd, :float, default: 0.0
+
+    # Per-turn context snapshot (charter D19) — the LATEST result frame's window
+    # occupancy, SET (never inc). Nullable: unknown until the first result, and
+    # the header ring renders hollow rather than a fake arc when they are nil.
+    field :last_context_tokens, :integer
+    field :context_window, :integer
 
     has_many :messages, Barkpark.StudioChat.Message,
       foreign_key: :session_id,
@@ -55,6 +72,9 @@ defmodule Barkpark.StudioChat.Session do
 
   @doc "Legal title sources."
   def title_sources, do: @title_sources
+
+  @doc "Legal permission modes."
+  def modes, do: @modes
 
   @create_fields ~w(id title title_source cwd mode model status last_active_at summary)a
 

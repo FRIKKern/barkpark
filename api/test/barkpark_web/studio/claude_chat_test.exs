@@ -79,7 +79,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       {_exe, ask_args} = with_default_command(fn -> ClaudeChat.command("default") end)
 
       refute "--permission-prompt-tool" in plan_args
-      assert Enum.chunk_every(ask_args, 2, 1) |> Enum.member?(["--permission-prompt-tool", "stdio"])
+
+      assert Enum.chunk_every(ask_args, 2, 1)
+             |> Enum.member?(["--permission-prompt-tool", "stdio"])
+
       assert Enum.chunk_every(ask_args, 2, 1) |> Enum.member?(["--permission-mode", "default"])
     end
 
@@ -203,7 +206,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
 
     test "unsupported control requests are auto-answered with an error (never hang)" do
-      req = ~s({"type":"control_request","request_id":"req-2","request":{"subtype":"mystery_capability"}})
+      req =
+        ~s({"type":"control_request","request_id":"req-2","request":{"subtype":"mystery_capability"}})
+
       script = ~s(printf '%s\n' '#{req}'; cat)
       put_chat_config(command: {"sh", ["-c", script]})
 
@@ -416,15 +421,210 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # Typed control-response dispatch (charter D17). A control_response whose
+  # request_id matches one WE minted must reach the sink as a TYPED
+  # {:claude_chat_control, kind, response} — not fall through the generic
+  # dispatch into the ChatLive catch-all (which drops it). The reflector fake
+  # reads our outbound control_request, extracts its (randomly minted)
+  # request_id, and echoes a control_response with that SAME id — the only
+  # deterministic way to prove the request_id → kind map since we mint the id.
+  describe "typed control-response dispatch (charter D17)" do
+    test "a set_permission_mode ack dispatches {:claude_chat_control, :set_mode, echo}" do
+      put_chat_config(command: {"sh", ["-c", mode_reflector()]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, _rid} = ClaudeChat.set_permission_mode(session, "acceptEdits")
+
+      assert_receive {:claude_chat_control, :set_mode, %{"mode" => "acceptEdits"}}, 2_000
+      ClaudeChat.close(session)
+    end
+
+    test "an interrupt ack dispatches {:claude_chat_control, :interrupt, _}" do
+      put_chat_config(command: {"sh", ["-c", mode_reflector()]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, _rid} = ClaudeChat.interrupt(session)
+
+      assert_receive {:claude_chat_control, :interrupt, response}, 2_000
+      assert is_map(response)
+      ClaudeChat.close(session)
+    end
+
+    test "an UNTRACKED control_response (id we never sent) still flows as a plain event" do
+      # request_id "bp-req-abc" was never minted by this session — it is not in
+      # pending_controls, so it must degrade to the generic sink event (the
+      # pre-D17 behavior for any ack the LiveView can't correlate).
+      ack =
+        ~s({"type":"control_response","response":{"subtype":"success","request_id":"bp-req-abc","response":{"mode":"acceptEdits"}}})
+
+      script = ~s(printf '%s\\n' '#{ack}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "control_response",
+                        "response" => %{"request_id" => "bp-req-abc"}
+                      }},
+                     2_000
+
+      refute_receive {:claude_chat_control, _, _}, 200
+    end
+  end
+
+  # Single-writer discipline (charter D20). A pinned/resumed session registers
+  # under its minted uuid in Barkpark.StudioChat.SessionRegistry, so a SECOND
+  # tab on the same session gets `{:already_started, pid}` and ADOPTS the running
+  # process instead of spawning a second `claude --resume` writer on the CLI's
+  # own transcript. adopt_sink swaps ownership: the old sink is detached, and the
+  # session's lifetime follows the NEW sink.
+  describe "single-writer registry + adopt_sink (charter D20)" do
+    test "a pinned session registers — a second start on the same id is already_started" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, s1} = ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      # NOT a new process: the registry returns the incumbent pid, so no second
+      # writer is spawned against the same transcript.
+      assert {:error, {:already_started, ^s1}} =
+               ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      ClaudeChat.close(s1)
+    end
+
+    test "a resume keys on the SAME uuid — it collides with a live pinned session" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, s1} = ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      assert {:error, {:already_started, ^s1}} =
+               ClaudeChat.start_session(%{
+                 sink: self(),
+                 session_opts: %{session_id: uuid, resume: true}
+               })
+
+      ClaudeChat.close(s1)
+    end
+
+    test "distinct session ids each start their own process" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, a} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: Ecto.UUID.generate()}
+        })
+
+      {:ok, b} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: Ecto.UUID.generate()}
+        })
+
+      assert a != b
+      ClaudeChat.close(a)
+      ClaudeChat.close(b)
+    end
+
+    test "anonymous sessions (no session id) stay unnamed — two coexist" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, a} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, b} = ClaudeChat.start_session(%{sink: self()})
+
+      assert a != b
+      ClaudeChat.close(a)
+      ClaudeChat.close(b)
+    end
+
+    test "adopt_sink detaches the old sink and re-homes the session on the new one" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+      observer = self()
+
+      old_sink = spawn_sink(observer, :old)
+      new_sink = spawn_sink(observer, :new)
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: old_sink, session_opts: %{session_id: uuid}})
+
+      ref = Process.monitor(session)
+
+      ClaudeChat.adopt_sink(session, new_sink)
+
+      # The old tab is told it lost ownership (→ honest banner in the LV).
+      assert_receive {:old, {:claude_chat_detached}}, 2_000
+
+      # Old sink death no longer stops the session — it was demonitored.
+      Process.exit(old_sink, :kill)
+      refute_receive {:DOWN, ^ref, :process, ^session, _}, 400
+
+      # The session's lifetime now follows the NEW sink (single owner).
+      Process.exit(new_sink, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "adopting into the same sink is a harmless no-op (no self-detach)" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      ClaudeChat.adopt_sink(session, self())
+      refute_receive {:claude_chat_detached}, 300
+
+      ClaudeChat.close(session)
+    end
+  end
+
+  # A bare receiver that forwards every message it gets to `observer`, tagged, so
+  # a test can watch what each sink receives (detach notice, DOWN, …).
+  defp spawn_sink(observer, tag) do
+    spawn(fn -> sink_loop(observer, tag) end)
+  end
+
+  defp sink_loop(observer, tag) do
+    receive do
+      msg ->
+        send(observer, {tag, msg})
+        sink_loop(observer, tag)
+    end
+  end
+
   # --- capture helpers (argv echo + stdin frame capture) --------------------
 
+  # Reads our first outbound control_request, extracts its minted request_id, and
+  # echoes back a control_response carrying that id (subtype:success, mode echo).
+  # `printf` before an external `cat` flushes the frame promptly (same proven
+  # pattern the canned-event tests rely on).
+  defp mode_reflector do
+    """
+    IFS= read -r line
+    rid=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\\([^"]*\\)".*/\\1/p')
+    printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"mode":"acceptEdits"}}}\\n' "$rid"
+    cat
+    """
+  end
+
+  # Capture file names must be unique ACROSS `mix test` runs, not just within
+  # one: `System.unique_integer/1` restarts every BEAM boot, and a fake command
+  # can flush its capture file AFTER the owning test's on_exit rm_rf already ran
+  # (the port outlives the test by a beat) — a later RUN that mints the same
+  # small integer would then `read_frame` a STALE frame from a previous run and
+  # fail on a request_id that nobody in this run minted. The OS pid pins the
+  # name to this BEAM instance; rm_rf-before-use belts-and-suspenders it.
   defp capture_path(kind) do
     file =
       Path.join(
         System.tmp_dir!(),
-        "claude_chat_#{kind}_#{System.unique_integer([:positive])}"
+        "claude_chat_#{kind}_#{System.pid()}_#{System.unique_integer([:positive])}"
       )
 
+    File.rm_rf(file)
     on_exit(fn -> File.rm_rf(file) end)
     file
   end

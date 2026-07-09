@@ -54,7 +54,12 @@ ExUnit.start(
     :boot_test,
     :plugin_routes,
     # Live IdP interop (needs the Keycloak container) — scripts/idp-interop.sh
-    :idp_interop
+    :idp_interop,
+    # Real-binary Studio-chat E2E (spawns the actual `claude` CLI: ~$0.43 +
+    # ~40s per run, needs OAuth login). Opt-in via scripts/claude-chat-e2e.sh —
+    # NEVER in the default lane or CI. See
+    # test/barkpark_web/studio/claude_chat_real_binary_test.exs (charter D20).
+    :real_binary
   ]
 )
 

@@ -152,6 +152,114 @@ quality."
   `scripts/studio-literal-check.sh` must pass. Prefix tab-highlight
   (nav.ex:478 starts_with?) keeps the chat tab active on deep links for free.
 
+### Wave-2 decisions (2026-07-09, decided from explorer evidence)
+
+- **D15 — Archive is a shelf axis, NOT a status.** New nullable
+  `archived_at :utc_datetime_usec` column on `chat_sessions` (+ partial index
+  `ON (last_active_at) WHERE archived_at IS NULL`). NEVER fold "archived" into
+  `status` — `@statuses ~w(active working exited)` is a *liveness* axis validated
+  in two sites (session.ex:23/71, studio_chat.ex:225) and `update_status`/
+  `mark_exited` would clobber an archive-as-status on the next turn. `list_sessions`
+  filters `is_nil(archived_at)` and gains a **cap of 50** (recency-desc means a
+  live session always sorts to the top — no working-session exemption needed;
+  `list_sessions(archived: true)` lists the shelf). Delete = `Repo.delete(session)`
+  — the message FK is already `on_delete: :delete_all` (migration line 63), no
+  manual cleanup. Deleting/archiving the session ON SCREEN must
+  `push_patch(to: "/studio/chat")` (handle_params only auto-resets on navigation,
+  not on handle_event — chat_live.ex:80-106).
+- **D16 — Rename prior art is the SHEET TAB, not board_live.** Clone the
+  begin/commit/cancel triad from sheet_grid.ex:1159-1172 + 3005-3035
+  (`renaming_session` assign, dblclick/F2 to start, form phx-submit to commit,
+  Escape cancels) and the row kebab menu from the sheet context menu
+  (sheet_grid.ex:2988-2997, `role="menu"`/`role="menuitem"` buttons). ONE
+  divergence: blur COMMITS (resource-list semantics), unlike the sheet's
+  cancel-on-blur. Store side is done — `StudioChat.rename/2` pins
+  `title_source:"human"`.
+- **D17 — control_response gets a typed dispatch; the catch-all stops eating it.**
+  Today the interrupt ACK and the set_permission_mode echo both fall through
+  Session's generic dispatch (claude_chat.ex:479) into ChatLive's catch-all
+  (chat_live.ex:320) and are DROPPED. Fix at the Session: track minted
+  `request_id → kind` (`:interrupt | :set_mode | :set_model`) and dispatch
+  `{:claude_chat_control, kind, response_map}` to the sink. ChatLive: on
+  `{:claude_chat_control, :set_mode, resp}` assert the echoed `resp["mode"]` —
+  on mismatch/absence revert the optimistic assign + honest system line (D12
+  vacuous-green: never trust subtype:success). Mode PERSISTENCE: new
+  `StudioChat.set_mode/2` (mirror of update_status/2, validate_inclusion on
+  modes), called in BOTH set-mode branches (live AND no-live-session) whenever
+  `store_session_id` is set — reopen must show the mode you switched to, and the
+  next lazy spawn's build_args must carry it. `set_model` gets NO persistence
+  this wave (no UI exists; model is already persisted off the result frame —
+  symmetry here would be speculative surface).
+- **D18 — :interrupting gets a timeout guard; teardown is extracted + idempotent.**
+  `stop_turn` schedules `Process.send_after(self(), {:interrupt_timeout, sid},
+  @interrupt_timeout_ms)` (8_000, config-overridable for tests). On fire, if
+  `status == :interrupting` still: `ClaudeChat.close(session)` + full teardown.
+  A `result` arriving first makes the timer a no-op (guard on status; no cancel
+  needed). CRITICAL correction to the direction: `:close` does NOT emit
+  `{:claude_chat_exit}` (that fires only on real port exit_status,
+  claude_chat.ex:415-416) — so the inline crash-recovery at chat_live.ex:328-346
+  (cancel pending approvals, mark_session_exited, honest system message,
+  status :offline) must be EXTRACTED into one shared idempotent private fn
+  called by the exit handler, the interrupt-timeout handler, and the
+  (currently thin) DOWN handler. Idempotence guard: already `:offline` ⇒ no-op
+  (the close-then-DOWN sequence double-fires otherwise).
+- **D19 — Headroom ring: per-turn snapshot columns, window captured from the
+  frame, geometry-first SVG, header placement.** The denormalized session totals
+  are `inc:`-summed across turns and CANNOT drive the ring. Migration adds
+  `last_context_tokens :integer` + `context_window :integer` (nullable) to
+  `chat_sessions`; `record_result`/`record_result_metrics` additionally SET
+  (not inc) `last_context_tokens = input + cache_read + cache_creation + output`
+  of the most-recent result frame and `context_window =
+  modelUsage.<model>.contextWindow` captured from the frame — NEVER a hardcoded
+  model→window map (goes stale silently). Render: from-scratch inline-SVG circle
+  (stroke-dasharray arc — the arc length IS context_used/window; there is NO
+  ring prior art in Studio) in the chat HEADER next to the mode select (NOT the
+  sidebar — the sidebar belongs to the lifecycle slice), plus session
+  `total_cost_usd` as text. Color = token ramp: `--ok` <70%, `--warn` 70–90%,
+  `--danger` ≥90%, track `--primary-soft`; all `var(--…)`, studio-literal-check
+  must pass. HONEST unknown state: nil `context_window` (pre-migration session,
+  no result yet) renders a hollow ring + "—", never a fake full/empty arc.
+- **D20 — Single-writer via Registry takeover; next_seq retries; E2E proof rides
+  along.** Two tabs on one session today spawn two `claude --resume` OS
+  processes (the real harm: concurrent writers on the CLI's own transcript) and
+  race next_seq (loser's message SILENTLY dropped — callers discard
+  `{:error, _}`). Fix: (a) `Barkpark.StudioChat.SessionRegistry`
+  (`Registry, keys: :unique`, added to the application supervision tree);
+  `Session.start` gains `name: {:via, Registry, {SessionRegistry, uuid}}`; on
+  `{:error, {:already_started, pid}}` ChatLive TAKES OVER via a new
+  `ClaudeChat.adopt_sink(pid, self())` (Session demonitors old sink, monitors
+  new, sends `{:claude_chat_detached}` to the old sink; old tab shows an honest
+  "opened in another tab" banner, composer disabled, sending again takes back).
+  Session lifetime stays owner-tab-bound (dies on current sink DOWN; other tab
+  lazy-resumes on next send) — NO DynamicSupervisor this wave. (b)
+  `append_message` retries on the mapped `chat_messages_session_id_seq_index`
+  constraint error (re-read max, re-insert, ≤3 attempts); persist callers stop
+  discarding `{:error, _}` (log + honest system line). (c) The real-binary E2E
+  resume proof is an ACCEPTANCE CRITERION of this slice, not a slice:
+  `@moduletag :real_binary` ExUnit test through OUR seam (`:binary` override
+  with env-resolved absolute path — `claude` is NOT on PATH on this host;
+  the `:command` override bypasses build_args and proves nothing), two turns —
+  codeword stamped, close, `--resume`, `recall =~ codeword` (substring, model
+  may wrap it) — 60_000ms assert_receive timeouts, excluded by default in
+  test_helper.exs (one-line append; @moduletag not @tag, see
+  phase8_e2e_test.exs:20), opt-in via `scripts/claude-chat-e2e.sh` (idp-interop
+  pattern: resolve CLAUDE_BIN or refuse; ~$0.43 + ~40s per run, never in the
+  default lane or CI).
+- **D21 — Approvals persist end-to-end; the pending pill is downstream of that.**
+  approval_status is persisted NOWHERE today (roles :approval/:system never hit
+  the store; a pending-at-exit approval simply VANISHES on reopen). Slice:
+  (1) persist on ask — `append_message` role `"approval"`, metadata
+  `{request_id, tool_name, input, approval_status: "pending"}`; (2) new
+  `StudioChat.update_approval_status/3` updates that row's metadata on resolve
+  (allowed/denied) and on crash-cancel (all pending → "canceled"); (3)
+  `replay_role/1` learns `"approval"` and replay reconstructs
+  `approval_status` + `tool_name` for the terminal-state card; a row still
+  "pending" at reopen RENDERS as canceled AND the flip is persisted during
+  replay (the store never lies twice). (4) Sidebar pill: denormalized
+  `pending_approvals :integer default 0` on chat_sessions (inc on ask, dec on
+  resolve, zero on cancel-all); `session_pill/1` precedence
+  PendingApproval (`--warn`) > Working > Exited > Idle.
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -230,6 +338,33 @@ denormalized summaries (instant render), empty state that teaches. Test law:
 distrust-vacuous-green — see D9; LiveViewTest render_submit bypasses disabled
 attrs, so assert attributes, not just outcomes.
 
+## Wave 2 plan (decided 2026-07-09) — "trustworthy and managed"
+
+Wave 1 made sessions a place; wave 2 makes that place trustworthy: a managed
+resource list (rename/archive/delete, bounded), a UI that never lies under
+adversity (wedged interrupt, stale mode, vanished approvals), visible session
+economics (headroom ring), and single-writer discipline for the same session
+in two tabs. Four of five slices FINISH wave-1 promises; only the ring is new
+surface.
+
+| # | Slice (bp task) | Owns | Migration |
+|---|---|---|---|
+| S1 | `scc-w2-lifecycle` | sidebar as product: rename UI, kebab menu, archive/unarchive, delete, list cap 50 + archived toggle (D15/D16) | `archived_at` + partial index |
+| S2 | `scc-w2-honest-state` | control_response typed dispatch, mode persistence (`set_mode/2`), :interrupting timeout + extracted idempotent teardown (D17/D18) | none |
+| S3 | `scc-w2-headroom-ring` | per-turn context snapshot capture + header SVG headroom ring + cost text (D19) | `last_context_tokens` + `context_window` |
+| S4 | `scc-w2-single-writer` | SessionRegistry + adopt_sink takeover, next_seq retry-on-conflict, real-binary E2E resume proof as AC (D20) | none |
+| S5 | `scc-w2-approvals` | approval persistence end-to-end, replay as terminal states, pending-approval sidebar pill (D21) | `pending_approvals` count |
+
+File ownership: S1 owns the SIDEBAR region of chat_live.ex + the list side of
+studio_chat.ex; S2 owns the composer/handler region of chat_live.ex + the
+control-frame region of claude_chat.ex; S3 owns record_result + the header
+region; S4 owns Session start/init/adopt in claude_chat.ex + append_message in
+studio_chat.ex + ensure_session; S5 owns the approval handlers/replay + pill.
+Integration order **S1 → S2 → S3 → S4 → S5** (S2 before S4: both touch
+claude_chat.ex; S1+S2 before S5: pill rides list_sessions select, teardown fn
+absorbs the approval cancel-persist). Builders build against main; the
+integrator reconciles in that order.
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
@@ -239,6 +374,64 @@ attrs, so assert attributes, not just outcomes.
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+### Wave 2026-07-09 (wave 2 BUILT + REVIEWED — trustworthy and managed)
+
+All five slices built green and reviewed at the Kinsta/Vercel bar; nothing
+stalled. As in wave 1, the reviewer serialized the wave into ONE integration
+chain — each `-r` branch contains everything before it, so the lead merges
+**`loop-epic/w2-approvals-that-survive-persist-approv-4-r`** (chain head:
+S1 → S2-r → S3-r → S4-r → S5-r, integration order per the plan) and gets the
+whole wave. Combined gate on the chain head: **173 tests 0 failures**
+(chat_live + claude_chat + studio_chat, ran across 3 seeds), the charter
+three-file gate green (134 tests), studio-literal-check PASS, and
+`mix compile --force --warnings-as-errors` clean.
+
+- **Landed**: sidebar as a managed resource list — inline rename (sheet-tab
+  triad, blur commits), kebab menu, archive shelf (`archived_at` + partial
+  index), delete, cap 50, teaching empty states (S1); typed control-response
+  dispatch + mode persistence (`set_mode/2`) + un-wedgeable Stop (8s
+  interrupt timeout + ONE idempotent `teardown_session/2`) (S2);
+  context-headroom ring — per-turn snapshot columns, frame-captured
+  contextWindow, geometry-first SVG arc + cost in the header, honest
+  unknown state (S3); single-writer sessions — SessionRegistry +
+  `adopt_sink/2` takeover with honest detached banner, `next_seq` retry ≤3
+  on the unique index, real-binary E2E resume proof (`:real_binary` tag +
+  `scripts/claude-chat-e2e.sh`) (S4); approvals persisted end-to-end —
+  pending rows, resolve/cancel-all flips, canceled-on-reopen, denormalised
+  `pending_approvals` + "needs you" pill (S5).
+- **Reviewer fixes worth knowing**: (1) S2×S4 claude_chat.ex conflicts
+  reconciled (init state carries BOTH `pending_controls` and `sink_ref`);
+  (2) S5's cancel-persist moved from the pre-S2 inline exit handler into the
+  extracted `teardown_session/2` (as the plan required), so crash,
+  interrupt-timeout AND unexpected-DOWN all persist approval cancellation;
+  (3) S5's `persist_approval_ask` re-routed through S4's
+  `persist_store_logged` (log-don't-discard discipline); (4) fixed a LATENT
+  wave-1 test flake: `capture_path` tmp files collided ACROSS `mix test`
+  runs (`System.unique_integer` restarts per BEAM; a fake command can flush
+  its capture file after on_exit's rm_rf) — stale frames from a previous run
+  failed the interrupt write-path test intermittently; names now carry
+  `System.pid()` + rm_rf-before-use. Verified 5 seeds green.
+- **Known seams for the NEXT wave** (reviewed, deliberate, not blockers):
+  (a) reopen-cancels-pending (S5) vs single-writer (S4): tab B merely
+  VIEWING a session that tab A drives will cancel-persist tab A's live
+  pending approvals — reopen doesn't consult the SessionRegistry yet;
+  (b) rapid double mode-switch can mis-revert (acks are correlated by value,
+  not request_id); (c) `take_over` stamps store status "working" even when
+  no turn runs (mirrors the spawn path's convention; self-corrects on next
+  result); (d) the kebab menu can clip at the scroll-container edge on the
+  last row; (e) real-binary E2E happy path is code-reviewed, not yet run on
+  this host (refuse path verified) — run `scripts/claude-chat-e2e.sh` once
+  before calling D20c proven.
+- **Next wave should take**: (1) run the real-binary E2E once on the host
+  (~$0.43) and stamp D20c; (2) registry-aware reopen (don't cancel approvals
+  a live owner can still resolve; consider a live "view-only" reopen);
+  (3) correlate mode-switch acks by request_id; (4) message-level polish
+  toward t3 parity — optimistic echo + restore-on-failure (t3 item 10),
+  images as base64 blocks (t3 item 11), git checkpoint/rewind (t3 item 6);
+  (5) sidebar search/filter once real usage grows past the 50 cap;
+  (6) surface `last_context_tokens` compaction awareness (ring resets after
+  CLI compaction — verify against a real long session).
 
 ### Wave 2026-07-09 (wave 1 BUILT + REVIEWED — sessions are a place)
 
@@ -282,6 +475,24 @@ green.
   real-binary E2E resume proof on the host (harness pattern exists,
   uncommitted); (8) `next_seq` retry-on-conflict for truly concurrent
   same-session appends.
+
+- **2026-07-09 wave 2 DECIDED** (post-merge of #1681): five slices filed as
+  scc-w2-lifecycle / scc-w2-honest-state / scc-w2-headroom-ring /
+  scc-w2-single-writer / scc-w2-approvals under epic `studio-claude-chat`
+  (D15–D21 above). Explorer corrections folded in: archive = `archived_at`
+  column (status is a liveness axis — folding archive in breaks two
+  validate_inclusion sites + the pill map); rename prior art = sheet tab
+  triad, NOT board_live/org_admin (they have no inline rename); `:close` does
+  NOT emit `{:claude_chat_exit}` so the interrupt-timeout teardown is an
+  extract-and-share refactor, not a free reuse; the ring CANNOT ride the
+  summed totals (needs per-turn snapshot + frame-captured contextWindow —
+  grep proves contextWindow appears nowhere in the repo today); the
+  two-tab harm is two `--resume` OS processes on the CLI's own transcript,
+  fixed by Registry takeover (Sheets.Session is the house pattern) with
+  next_seq retry as belt-and-suspenders; approvals are persisted NOWHERE, so
+  slice 5 is real persistence work, not pill cosmetics; the real-binary E2E
+  proof rides S4 as an AC (excluded-by-default `:real_binary` tag + script,
+  ~$0.43/run).
 
 - **2026-07-09 wave 1 DECIDED**: store = Ecto pair (doc route disqualified —
   private-schema query gate is any-token, query_controller.ex:375); resume =

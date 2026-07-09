@@ -274,6 +274,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     "bp-req-" <> (8 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower))
   end
 
+  @doc """
+  Take over a running session's event stream (charter D20 — single writer).
+
+  Two tabs must never each spawn a `claude --resume` process against the same
+  session: two OS processes writing the CLI's own transcript concurrently. The
+  `Session` registers under `{:via, Barkpark.StudioChat.SessionRegistry, uuid}`
+  when its `session_id` is pinned, so the SECOND tab's `start_session/1` returns
+  `{:error, {:already_started, pid}}` instead of spawning. That tab calls this
+  to become the sole sink: the `Session` demonitors the previous sink, monitors
+  the caller, and sends `{:claude_chat_detached}` to the old sink so its tab can
+  show an honest "opened in another tab" banner and disable its composer. The
+  old tab takes back the same way on its next send. Adopting into the SAME sink
+  is a harmless no-op.
+  """
+  @spec adopt_sink(pid(), pid()) :: :ok
+  def adopt_sink(session, new_sink) when is_pid(session) and is_pid(new_sink) do
+    GenServer.cast(session, {:adopt_sink, new_sink})
+  end
+
   @doc "Terminate the session subprocess."
   @spec close(pid()) :: :ok
   def close(session) when is_pid(session) do
@@ -324,8 +343,34 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     alias BarkparkWeb.Studio.ClaudeChat
 
+    # Single-writer registry (charter D20). When a session id is pinned, the
+    # process registers here under the uuid so a SECOND tab that tries to start
+    # the same session gets `{:error, {:already_started, pid}}` and adopts the
+    # running process rather than spawning a second `claude --resume` writer.
+    @registry Barkpark.StudioChat.SessionRegistry
+
     @spec start(%{sink: pid()}) :: {:ok, pid()} | {:error, term()}
-    def start(opts), do: GenServer.start(__MODULE__, opts)
+    def start(opts) do
+      case pinned_session_id(opts) do
+        nil ->
+          # Anonymous one-shot (no session identity) — nothing to serialize on,
+          # so it stays unnamed (two anonymous chats never share a transcript).
+          GenServer.start(__MODULE__, opts)
+
+        uuid ->
+          GenServer.start(__MODULE__, opts, name: {:via, Registry, {@registry, uuid}})
+      end
+    end
+
+    # A pinned OR resumed session both key on the same minted uuid — the whole
+    # point of D8's one-identity design: `--session-id` and `--resume` name the
+    # same transcript, so both must register under it.
+    defp pinned_session_id(opts) do
+      case Map.get(opts, :session_opts, %{}) do
+        %{session_id: id} when is_binary(id) -> id
+        _ -> nil
+      end
+    end
 
     @impl true
     def init(%{sink: sink} = opts) do
@@ -343,8 +388,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
               [:binary, :exit_status, :hide, args: args, cd: ClaudeChat.cwd()]
             )
 
-          Process.monitor(sink)
-          {:ok, %{port: port, sink: sink, buffer: ""}}
+          # Keep the monitor ref so an adopt can cleanly demonitor the outgoing
+          # sink (a bare Process.monitor/1 leaks a ref that would fire a stale
+          # DOWN and stop a session the new owner is still driving).
+          sink_ref = Process.monitor(sink)
+
+          {:ok, %{port: port, sink: sink, sink_ref: sink_ref, buffer: "", pending_controls: %{}}}
       end
     rescue
       e ->
@@ -389,8 +438,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     # Outbound control_request (interrupt / set_permission_mode / set_model).
-    # The CLI answers with a control_response echoing this request_id, which
-    # flows to the sink through the fallback dispatch clause below.
+    # The CLI answers with a control_response echoing this request_id. We map
+    # request_id → kind here so the inbound ack dispatches as a TYPED
+    # {:claude_chat_control, kind, response} (charter D17) — otherwise the ack
+    # falls through to the generic sink event and the ChatLive catch-all eats it.
     def handle_cast({:control_request, request_id, request}, state) do
       line =
         Jason.encode!(%{
@@ -400,7 +451,32 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
+
+      state =
+        case control_kind(request) do
+          nil -> state
+          kind -> put_in(state.pending_controls[request_id], kind)
+        end
+
       {:noreply, state}
+    end
+
+    # Single-writer takeover (charter D20). A second tab that found this session
+    # already running adopts it as the sole sink: demonitor the outgoing sink
+    # (flush any in-flight DOWN so it can't stop us), monitor the newcomer, and
+    # tell the old sink it was detached so its tab shows the honest banner. The
+    # session lifetime now follows the NEW sink; the old tab takes back the same
+    # way on its next send.
+    def handle_cast({:adopt_sink, new_sink}, %{sink: old_sink} = state)
+        when is_pid(new_sink) do
+      if new_sink == old_sink do
+        {:noreply, state}
+      else
+        if ref = state[:sink_ref], do: Process.demonitor(ref, [:flush])
+        new_ref = Process.monitor(new_sink)
+        send(old_sink, {:claude_chat_detached})
+        {:noreply, %{state | sink: new_sink, sink_ref: new_ref}}
+      end
     end
 
     def handle_cast(:close, state), do: {:stop, :normal, state}
@@ -408,8 +484,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     @impl true
     def handle_info({port, {:data, chunk}}, %{port: port} = state) do
       {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
-      Enum.each(events, &dispatch_event(&1, state))
-      {:noreply, %{state | buffer: rest}}
+      # Thread state so a control_response ack can prune its pending entry.
+      state = Enum.reduce(events, %{state | buffer: rest}, &dispatch_event/2)
+      {:noreply, state}
     end
 
     def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -437,7 +514,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # Permission asks become a dedicated sink message; any other control
     # request gets an immediate error response so the CLI never hangs waiting
     # on a capability this bridge doesn't implement. Everything else flows
-    # through as a plain chat event.
+    # through as a plain chat event. Each clause RETURNS the (possibly updated)
+    # state — the data handler reduces over events threading it.
     defp dispatch_event(
            %{
              "type" => "control_request",
@@ -457,6 +535,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
            decision_reason: Map.get(request, "decision_reason")
          }}
       )
+
+      state
     end
 
     defp dispatch_event(
@@ -474,9 +554,49 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
+      state
     end
 
-    defp dispatch_event(event, state), do: send(state.sink, {:claude_chat_event, event})
+    # The CLI's ack for one of OUR control_requests (interrupt / set_mode /
+    # set_model). Match it by the request_id we minted and dispatch a TYPED
+    # {:claude_chat_control, kind, response} (charter D17) so ChatLive can assert
+    # the echoed mode instead of trusting a bare subtype:success (D12). An
+    # untracked control_response (not one we sent) flows through as a plain event
+    # — the previous behavior for any ack the LiveView doesn't correlate.
+    defp dispatch_event(%{"type" => "control_response", "response" => response} = event, state)
+         when is_map(response) do
+      case pop_pending(state, Map.get(response, "request_id")) do
+        {nil, state} ->
+          send(state.sink, {:claude_chat_event, event})
+          state
+
+        {kind, state} ->
+          send(state.sink, {:claude_chat_control, kind, Map.get(response, "response") || %{}})
+          state
+      end
+    end
+
+    defp dispatch_event(event, state) do
+      send(state.sink, {:claude_chat_event, event})
+      state
+    end
+
+    # Classify an outbound control_request by its subtype so the inbound ack can
+    # be typed. Anything else (or a malformed request) is left untracked.
+    defp control_kind(%{"subtype" => "interrupt"}), do: :interrupt
+    defp control_kind(%{"subtype" => "set_permission_mode"}), do: :set_mode
+    defp control_kind(%{"subtype" => "set_model"}), do: :set_model
+    defp control_kind(_), do: nil
+
+    # Pull a pending control's kind by request_id (nil if untracked/absent).
+    defp pop_pending(state, request_id) when is_binary(request_id) do
+      case Map.pop(state.pending_controls, request_id) do
+        {nil, _} -> {nil, state}
+        {kind, rest} -> {kind, %{state | pending_controls: rest}}
+      end
+    end
+
+    defp pop_pending(state, _), do: {nil, state}
 
     defp safe_command(port, data) when is_port(port) do
       Port.command(port, data)

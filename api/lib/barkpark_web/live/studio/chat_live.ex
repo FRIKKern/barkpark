@@ -29,10 +29,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   use BarkparkWeb, :live_view
 
+  require Logger
+
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias BarkparkWeb.Studio.ClaudeChat
+
+  # How long a Stop may sit in `:interrupting` before we force-close a wedged
+  # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
+  @default_interrupt_timeout_ms 8_000
 
   # Mount no longer spawns (the eager-spawn contract is inverted, charter D8/D14):
   # mount lays out the chrome + loads the sidebar session list; `handle_params/3`
@@ -54,6 +60,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
          store_session_id: nil,
          session_id: nil,
          sessions: StudioChat.list_sessions(),
+         show_archived: false,
+         renaming_session: nil,
+         open_menu_session: nil,
          mode: "plan",
          status: :new,
          init: nil,
@@ -62,7 +71,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
          streaming: nil,
          composer_rev: 0,
          interrupt_requested: false,
+         mode_switch_from: nil,
+         detached: false,
          last_result: nil,
+         ring: blank_ring(),
          title_source: "default",
          title_kicked: false
        )}
@@ -149,6 +161,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `interrupt_requested` so the result classifies as "interrupted", never an
   # error, and flip to a transient `:interrupting` status for honest feedback.
   # A late ack (or a duplicate Stop) is harmless — the cast is idempotent.
+  #
+  # Stopping cannot wedge (charter D18): we arm an {:interrupt_timeout, sid}
+  # timer. If a terminal `result` arrives first, status leaves `:interrupting`
+  # and the timer no-ops; if the CLI wedges (no result), the timer force-closes
+  # the subprocess and runs the shared honest teardown so the composer never
+  # sticks at "Stopping…" forever.
   def handle_event("stop_turn", _params, socket) do
     case socket.assigns.session do
       nil ->
@@ -156,6 +174,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       session ->
         ClaudeChat.interrupt(session)
+
+        Process.send_after(
+          self(),
+          {:interrupt_timeout, socket.assigns[:store_session_id]},
+          interrupt_timeout_ms()
+        )
+
         {:noreply, assign(socket, interrupt_requested: true, status: :interrupting)}
     end
   end
@@ -164,7 +189,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # control frame (key `mode`, charter D12) — the model's context is preserved,
   # no respawn. With no live subprocess (the common case now that spawn is lazy)
   # it is a silent selector update; the next spawn carries the mode via
-  # build_args.
+  # build_args. Either way we PERSIST the switch (charter D17) so a reopened
+  # session shows the mode you chose and the next lazy `--resume` spawn carries
+  # it — the store row no longer keeps its stale creation mode.
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     mode = ClaudeChat.normalize_mode(mode)
 
@@ -173,16 +200,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       session = socket.assigns.session ->
+        # Optimistic: move the selector + persist now, but remember the prior
+        # mode so the echoed control_response can revert it if the switch didn't
+        # take (the CLI acks subtype:success even for a silent no-op — D12).
+        prev = socket.assigns.mode
         ClaudeChat.set_permission_mode(session, mode)
+        persist_mode(socket, mode)
 
         {:noreply,
          socket
-         |> assign(mode: mode)
+         |> assign(mode: mode, mode_switch_from: prev)
          |> append_message(:system, "Permission mode → #{mode_label(mode)}.")}
 
       true ->
+        persist_mode(socket, mode)
         {:noreply, assign(socket, mode: mode)}
     end
+  end
+
+  # Take the session back after another tab adopted it (charter D20). Clears the
+  # detached banner and re-acquires the live process via `ensure_session` —
+  # which, finding the other tab still registered, ADOPTS it (the other tab now
+  # sees the detached banner). One writer at a time, ownership ping-pongs
+  # honestly.
+  def handle_event("take_over", _params, socket) do
+    {:noreply, socket |> assign(detached: false) |> ensure_session()}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -191,6 +233,74 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_event("deny", %{"rid" => request_id}, socket) do
     {:noreply, resolve_permission(socket, request_id, {:deny, "The user declined this action."})}
+  end
+
+  # ── sidebar as a managed resource list (wave 2) ──────────────────────────
+
+  # Toggle the per-row kebab menu (idempotent open/close). `phx-click-away` on
+  # the open menu closes it; opening a different row's menu replaces the target.
+  def handle_event("session-menu-toggle", %{"id" => id}, socket) do
+    next = if socket.assigns.open_menu_session == id, do: nil, else: id
+    {:noreply, assign(socket, open_menu_session: next)}
+  end
+
+  def handle_event("session-menu-close", _params, socket) do
+    {:noreply, assign(socket, open_menu_session: nil)}
+  end
+
+  # Inline rename triad (cloned from the sheet-tab rename, sheet_grid.ex) with
+  # ONE divergence: blur COMMITS (a click-away while editing keeps your edit).
+  def handle_event("session-rename-start", %{"id" => id}, socket) do
+    {:noreply, assign(socket, renaming_session: id, open_menu_session: nil)}
+  end
+
+  # Commit path shared by Enter (form submit → `title`) and blur (→ `value`).
+  # A blank/whitespace title cancels rather than erroring through the required
+  # validation — an empty rename is a no-op, never a wipe.
+  def handle_event("session-rename", %{"id" => id} = params, socket) do
+    title = (params["title"] || params["value"] || "") |> String.trim()
+    socket = assign(socket, renaming_session: nil)
+
+    socket =
+      if title == "" do
+        socket
+      else
+        # rename/2 pins title_source: "human" — a human name is never
+        # overwritten by the AI titler (charter D13).
+        StudioChat.rename(id, title)
+        refresh_sessions(socket)
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("session-rename-cancel", _params, socket) do
+    {:noreply, assign(socket, renaming_session: nil)}
+  end
+
+  def handle_event("session-archive", %{"id" => id}, socket) do
+    StudioChat.archive_session(id)
+    {:noreply, after_lifecycle_mutation(socket, id)}
+  end
+
+  # Unarchive keeps an on-screen session on screen (store_session_id unchanged);
+  # it only leaves the archived shelf, so a refresh is enough — no push_patch.
+  def handle_event("session-unarchive", %{"id" => id}, socket) do
+    StudioChat.unarchive_session(id)
+    {:noreply, socket |> assign(open_menu_session: nil) |> refresh_sessions()}
+  end
+
+  def handle_event("session-delete", %{"id" => id}, socket) do
+    StudioChat.delete_session(id)
+    {:noreply, after_lifecycle_mutation(socket, id)}
+  end
+
+  # Flip the active ⇄ archived shelf. refresh_sessions reads the new flag.
+  def handle_event("toggle-archived", _params, socket) do
+    show = not (socket.assigns.show_archived == true)
+
+    {:noreply,
+     socket |> assign(show_archived: show, open_menu_session: nil) |> refresh_sessions()}
   end
 
   # Stale/unknown client events must never crash the chat — mirror the other
@@ -276,7 +386,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           append_message(socket, :system, "The turn ended with an error (#{ev["subtype"]}).")
       end
 
-    record_result(socket, ev)
+    socket = record_result(socket, ev)
     last_result = %{duration_ms: ev["duration_ms"], cost_usd: ev["total_cost_usd"]}
 
     {:noreply,
@@ -297,57 +407,127 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, refresh_sessions(socket)}
   end
 
+  # The CLI acked a permission-mode switch (charter D17). NEVER trust the bare
+  # subtype:success — assert the ECHOED mode (D12 vacuous-green: the alt wire key
+  # no-ops silently, returning an empty echo). A confirmed echo clears the revert
+  # marker; an empty/mismatched echo reverts the optimistic selector + persisted
+  # mode and says so honestly, so the UI never claims a switch that didn't land.
+  def handle_info({:claude_chat_control, :set_mode, response}, socket) do
+    echoed = if is_map(response), do: response["mode"], else: nil
+
+    if echoed == socket.assigns.mode do
+      {:noreply, assign(socket, mode_switch_from: nil)}
+    else
+      revert_to = socket.assigns[:mode_switch_from] || socket.assigns.mode
+      persist_mode(socket, revert_to)
+
+      {:noreply,
+       socket
+       |> assign(mode: revert_to, mode_switch_from: nil)
+       |> append_message(
+         :system,
+         "Couldn't switch permission mode — still #{mode_label(revert_to)}."
+       )}
+    end
+  end
+
+  # Interrupt / set_model acks need no UI action: the interrupt's real outcome
+  # arrives as the terminal `result` frame, and set_model has no surface. Swallow
+  # them so they never fall to the noisy catch-all.
+  def handle_info({:claude_chat_control, _kind, _response}, socket), do: {:noreply, socket}
+
   def handle_info({:claude_chat_permission, ask}, socket) do
     id = socket.assigns.next_id
+    text = ask.title || tool_line(ask.tool_name, ask.input)
 
     message = %{
       id: id,
       role: :approval,
-      text: ask.title || tool_line(ask.tool_name, ask.input),
+      text: text,
       html: nil,
       request_id: ask.request_id,
       tool_name: ask.tool_name,
       approval_status: :pending
     }
 
+    # Persist the ask as a "pending" approval row (D11) so it SURVIVES a crash
+    # or a tab close: on reopen the terminal-state card renders from the store.
+    # Appending bumps the session's `pending_approvals`, so `refresh_sessions`
+    # raises the "needs you" sidebar pill.
+    socket = persist_approval_ask(socket, ask, text)
+
     {:noreply,
-     assign(socket,
+     socket
+     |> assign(
        messages: socket.assigns.messages ++ [message],
        next_id: id + 1
-     )}
+     )
+     |> refresh_sessions()}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
-  # A subprocess crash/exit must never leave the UI lying. Fail the in-flight
-  # turn (drop the streaming buffer), force-cancel EVERY pending approval —
-  # their control-response can never be delivered, so a hanging Allow/Deny
-  # would be a dead button — mark the persisted session exited (nil-safe), and
-  # let the sidebar pill go offline. The CLI keeps the memory: the next send
-  # lazy-resumes.
+  # A real port exit (exit_status frame). Run the shared honest teardown.
   def handle_info({:claude_chat_exit, status}, socket) do
-    messages =
-      Enum.map(socket.assigns.messages, fn
-        %{role: :approval, approval_status: :pending} = m -> %{m | approval_status: :canceled}
-        m -> m
-      end)
-
-    mark_session_exited(socket.assigns[:store_session_id])
-
     {:noreply,
-     socket
-     |> assign(messages: messages)
-     |> append_message(
-       :system,
+     teardown_session(
+       socket,
        "Claude session ended (exit #{status}). Send a message to resume it."
-     )
-     |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
-     |> refresh_sessions()}
+     )}
   end
 
+  # The interrupt timed out (charter D18). CRITICAL: `ClaudeChat.close/1` does
+  # NOT emit {:claude_chat_exit} (only a real port exit_status does), so this
+  # path must force-close AND run teardown itself. Guarded: a `result` arriving
+  # first left `:interrupting`, and a session switch changed `store_session_id`
+  # — both make a stale timer a no-op.
+  def handle_info({:interrupt_timeout, sid}, socket) do
+    if socket.assigns.status == :interrupting and socket.assigns[:store_session_id] == sid do
+      if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+
+      {:noreply,
+       teardown_session(
+         socket,
+         "Stopping timed out — the session was force-closed. Send a message to resume it."
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Another tab took this session over (charter D20 single-writer). The session
+  # process now drives that tab; ours must stop pretending to own it. Drop the
+  # live pid, freeze the composer behind an honest banner, and let "Take over
+  # here" re-acquire it. Idempotent — a second detach (ownership ping-pong) is a
+  # no-op so the system line never stacks.
+  def handle_info({:claude_chat_detached}, socket) do
+    if socket.assigns[:detached] do
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(
+         detached: true,
+         session: nil,
+         status: :detached,
+         streaming: nil,
+         interrupt_requested: false
+       )
+       |> append_message(
+         :system,
+         "This chat is now active in another tab. Use “Take over here” to continue."
+       )}
+    end
+  end
+
+  # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
+  # the DOWN that follows our own force-close). Only act while WE still own that
+  # pid — after a teardown set `session: nil`, the double-fire DOWN finds no
+  # match and no-ops; teardown itself is idempotent besides.
   def handle_info({:DOWN, _ref, :process, pid, _reason}, socket) do
     if socket.assigns.session == pid do
-      {:noreply, assign(socket, session: nil, status: :offline, streaming: nil)}
+      {:noreply,
+       teardown_session(socket, "Claude session ended unexpectedly. Send a message to resume it.")}
     else
       {:noreply, socket}
     end
@@ -380,8 +560,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
           background: var(--primary);
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
-        .bp-chat-session { display: block; }
-        .bp-chat-session:hover { background: hsl(var(--primary-hsl) / 0.08) !important; }
+        .bp-chat-session-row { position: relative; border-radius: 8px; }
+        /* !important beats the inline `background` the active/inactive row style
+           sets, so an inactive row still lights on hover. */
+        .bp-chat-session-row:hover { background: hsl(var(--primary-hsl) / 0.08) !important; }
+        .bp-chat-session-link { display: block; text-decoration: none; }
+        /* Kebab: a quiet affordance — revealed on row hover, keyboard focus, or
+           while its own menu is open, so a resting sidebar stays calm. */
+        .bp-chat-kebab {
+          position: absolute; top: 6px; right: 6px;
+          width: 22px; height: 22px; line-height: 1; font-size: 15px;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: transparent; border: none; border-radius: 6px; cursor: pointer;
+          opacity: 0; transition: opacity 0.12s ease;
+        }
+        .bp-chat-session-row:hover .bp-chat-kebab,
+        .bp-chat-kebab:focus,
+        .bp-chat-kebab[aria-expanded="true"] { opacity: 1; }
+        .bp-chat-kebab:hover { background: hsl(var(--primary-hsl) / 0.14); }
+        .bp-chat-menu {
+          position: absolute; top: 30px; right: 6px; z-index: 20;
+          min-width: 132px; padding: 4px;
+          display: flex; flex-direction: column; gap: 1px;
+          background: var(--bg); border: 1px solid var(--border-muted);
+          border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+        }
+        .bp-chat-menuitem {
+          text-align: left; padding: 6px 9px; font-size: 0.8125rem;
+          background: transparent; color: var(--text); border: none;
+          border-radius: 5px; cursor: pointer;
+        }
+        .bp-chat-menuitem:hover { background: hsl(var(--primary-hsl) / 0.12); }
+        .bp-chat-menuitem-danger { color: var(--danger); }
+        .bp-chat-menuitem-danger:hover { background: hsl(var(--danger-hsl) / 0.12); }
+        .bp-chat-rename-input {
+          width: 100%; box-sizing: border-box; font: inherit;
+          background: var(--bg); color: var(--text);
+          border: 1px solid var(--primary); border-radius: 6px; padding: 6px 8px;
+        }
       </style>
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
@@ -399,9 +615,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
         <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 6px;">
           <div
-            :if={@sessions == []}
+            :if={@sessions == [] and @show_archived}
             class="text-xs text-dim"
             style="padding: 14px 10px; line-height: 1.55;"
+            data-test-id="chat-archived-empty"
+          >
+            <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
+              No archived chats
+            </div>
+            <p style="margin: 0;">
+              Archived chats rest here. Archive one from its <span aria-hidden="true">⋯</span>
+              menu to tuck it away without deleting it — it stays fully resumable.
+            </p>
+          </div>
+
+          <div
+            :if={@sessions == [] and not @show_archived}
+            class="text-xs text-dim"
+            style="padding: 14px 10px; line-height: 1.55;"
+            data-test-id="chat-empty"
           >
             <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
               No chats yet
@@ -418,36 +650,139 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
           <nav :if={@sessions != []} style="display: flex; flex-direction: column; gap: 2px;">
             <% active_id = @session_id %>
-            <.link
+            <div
               :for={s <- @sessions}
-              patch={"/studio/chat/#{s.id}"}
-              class="bp-chat-session"
+              class="bp-chat-session-row"
               style={session_row_style(s.id == active_id)}
+              data-test-id="chat-session-row"
             >
-              <% {pill_class, pill_text} = session_pill(s.status) %>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
-                  <%= pill_text %>
-                </span>
-                <span class="text-xs text-dim" style="margin-left: auto;">
-                  <%= session_stamp(s) %>
-                </span>
-              </div>
-              <div
-                class="text-sm"
-                style="font-weight: 600; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-              >
-                <%= s.title %>
-              </div>
-              <div
-                :if={s.summary}
-                class="text-xs text-dim"
-                style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-              >
-                <%= s.summary %>
-              </div>
-            </.link>
+              <%= if @renaming_session == s.id do %>
+                <%!-- Inline rename (sheet-tab triad) — blur COMMITS (divergence);
+                      Enter submits, Escape cancels. The commit path accepts both
+                      the form's `title` and blur's `value`. --%>
+                <form phx-submit="session-rename" phx-value-id={s.id} style="display: block;">
+                  <input
+                    name="title"
+                    type="text"
+                    value={s.title}
+                    class="bp-chat-rename-input"
+                    autocomplete="off"
+                    autofocus
+                    aria-label={"Rename #{s.title}"}
+                    phx-blur="session-rename"
+                    phx-value-id={s.id}
+                    phx-keydown="session-rename-cancel"
+                    phx-key="Escape"
+                    data-test-id={"chat-session-rename-input-#{s.id}"}
+                  />
+                </form>
+              <% else %>
+                <.link patch={"/studio/chat/#{s.id}"} class="bp-chat-session-link">
+                  <% {pill_class, pill_text} = session_pill(s) %>
+                  <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
+                    <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
+                      <%= pill_text %>
+                    </span>
+                    <span class="text-xs text-dim" style="margin-left: auto;">
+                      <%= session_stamp(s) %>
+                    </span>
+                  </div>
+                  <div
+                    class="text-sm"
+                    style="font-weight: 600; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  >
+                    <%= s.title %>
+                  </div>
+                  <div
+                    :if={s.summary}
+                    class="text-xs text-dim"
+                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  >
+                    <%= s.summary %>
+                  </div>
+                </.link>
+
+                <button
+                  type="button"
+                  class="bp-chat-kebab text-dim"
+                  phx-click="session-menu-toggle"
+                  phx-value-id={s.id}
+                  aria-haspopup="menu"
+                  aria-expanded={to_string(@open_menu_session == s.id)}
+                  aria-label={"Actions for #{s.title}"}
+                  data-test-id={"chat-session-menu-#{s.id}"}
+                >
+                  ⋯
+                </button>
+
+                <div
+                  :if={@open_menu_session == s.id}
+                  class="bp-chat-menu"
+                  role="menu"
+                  aria-label={"Actions for #{s.title}"}
+                  phx-click-away="session-menu-close"
+                  data-test-id={"chat-session-menu-list-#{s.id}"}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem"
+                    phx-click="session-rename-start"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-rename-#{s.id}"}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    :if={@show_archived}
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem"
+                    phx-click="session-unarchive"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-unarchive-#{s.id}"}
+                  >
+                    Unarchive
+                  </button>
+                  <button
+                    :if={not @show_archived}
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem"
+                    phx-click="session-archive"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-archive-#{s.id}"}
+                  >
+                    Archive
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem bp-chat-menuitem-danger"
+                    phx-click="session-delete"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-delete-#{s.id}"}
+                  >
+                    Delete
+                  </button>
+                </div>
+              <% end %>
+            </div>
           </nav>
+        </div>
+
+        <div style="flex: none; border-top: 1px solid var(--border-muted); padding: 6px 10px;">
+          <button
+            type="button"
+            class="text-xs text-dim"
+            phx-click="toggle-archived"
+            aria-pressed={to_string(@show_archived)}
+            data-test-id="chat-archived-toggle"
+            style="display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; cursor: pointer; padding: 4px 6px;"
+          >
+            <.icon name={if @show_archived, do: "arrow-left", else: "archive"} size={12} />
+            <%= if @show_archived, do: "Back to active chats", else: "Show archived" %>
+          </button>
         </div>
       </aside>
 
@@ -470,6 +805,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </option>
           </select>
         </form>
+        <.context_ring ring={@ring} />
         <span class="text-xs text-dim" style="margin-left: auto;">
           <%= status_label(@status) %> — Claude on this host, admins only.
         </span>
@@ -595,7 +931,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
       </div>
 
       <div style="flex: none; border-top: 1px solid var(--border-muted); padding: 10px 16px;">
-        <form phx-submit="send" style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;">
+        <%!-- Single-writer honesty (charter D20): another tab holds this
+              session's process. Freeze the composer behind a banner rather than
+              spawn a second writer; "Take over here" re-acquires it. --%>
+        <div
+          :if={@detached}
+          style="display: flex; align-items: center; gap: 12px; max-width: 860px; margin: 0 auto; padding: 10px 12px; border: 1px solid var(--border-muted); border-left: 3px solid var(--warn); border-radius: 8px;"
+        >
+          <div style="flex: 1; min-width: 0;">
+            <div class="text-sm" style="font-weight: 600;">This chat is open in another tab</div>
+            <div class="text-xs text-dim">
+              Only one tab drives a session at a time, so its history never tears. Take over to continue here.
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary" phx-click="take_over">
+            Take over here
+          </button>
+        </div>
+        <form
+          :if={not @detached}
+          phx-submit="send"
+          style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;"
+        >
           <input
             id={"chat-composer-#{@composer_rev}"}
             type="text"
@@ -758,7 +1115,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # Ready as soon as the subprocess is up. The CLI emits its init event
         # only when the FIRST turn starts — gating the composer on init would
         # deadlock the tab (nothing sent → no init → composer never enables).
-        socket |> assign(session: session, status: :ready) |> refresh_sessions()
+        socket |> assign(session: session, status: :ready, detached: false) |> refresh_sessions()
+
+      # Another tab already owns this session's process (charter D20). Adopt it
+      # as the sole sink instead of spawning a second `claude --resume` writer —
+      # the other tab gets the detached banner. Single writer, no torn transcript.
+      {:error, {:already_started, other}} when is_pid(other) ->
+        ClaudeChat.adopt_sink(other, self())
+        Process.monitor(other)
+        StudioChat.update_status(store_id, "working")
+        socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
 
       {:error, reason} ->
         socket
@@ -772,6 +1138,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # subprocess from the previously-viewed session is torn down so we never leak.
   defp load_stored_session(socket, session) do
     if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+
+    # Reopen has no live control channel, so any approval left "pending" is dead:
+    # persist the cancellation BEFORE replay so the store agrees with what the
+    # screen shows (canceled) and the sidebar pending pill drops (D11).
+    StudioChat.cancel_pending_approvals(session.id)
 
     messages = replay_messages(session.id)
 
@@ -788,11 +1159,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
       streaming: nil,
       interrupt_requested: false,
+      mode_switch_from: nil,
+      detached: false,
       last_result: nil,
+      # Reopen must show the last-known headroom (charter D19) — read the snapshot
+      # off the stored row; nil window renders hollow, never a fake arc.
+      ring: ring_from_session(session),
       # Title state follows the STORED session: a titled (ai/human) session
       # never re-kicks; a still-default one may kick on its next good turn.
       title_source: session.title_source || "default",
-      title_kicked: false
+      title_kicked: false,
+      # Any half-open sidebar affordance is stale after a navigation.
+      renaming_session: nil,
+      open_menu_session: nil
     )
   end
 
@@ -813,59 +1192,207 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: 0,
       streaming: nil,
       interrupt_requested: false,
+      mode_switch_from: nil,
+      detached: false,
       last_result: nil,
+      ring: blank_ring(),
       title_source: "default",
-      title_kicked: false
+      title_kicked: false,
+      renaming_session: nil,
+      open_menu_session: nil
     )
   end
 
-  defp refresh_sessions(socket), do: assign(socket, sessions: StudioChat.list_sessions())
+  defp refresh_sessions(socket) do
+    assign(socket,
+      sessions: StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true)
+    )
+  end
+
+  # A row-level archive/delete. Always refresh the sidebar; when the mutated row
+  # is the ON-SCREEN session, push_patch to /studio/chat so `handle_params/3`
+  # (the single source of truth) re-resets to the clean new-chat state — a
+  # background row leaves the open session untouched. The refreshed session list
+  # survives the patch (reset_to_new_chat never re-lists), so the deleted row is
+  # gone from the sidebar too.
+  defp after_lifecycle_mutation(socket, id) do
+    socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
+
+    if socket.assigns.store_session_id == id do
+      push_patch(socket, to: "/studio/chat")
+    else
+      socket
+    end
+  end
+
+  # ONE idempotent honest teardown for a dead/wedged subprocess (charter D18),
+  # shared by the port-exit handler, the interrupt-timeout guard, and the DOWN
+  # handler. Fail the in-flight turn (drop the streaming buffer), force-cancel
+  # EVERY pending approval — their control-response can never be delivered, so a
+  # hanging Allow/Deny would be a dead button — mark the persisted session exited
+  # (nil-safe), and go offline. The CLI keeps the memory: the next send
+  # lazy-resumes. Idempotent: already `:offline` ⇒ no-op, so a close-then-DOWN
+  # double-fire never duplicates the system line or re-cancels approvals.
+  defp teardown_session(socket, message) do
+    if socket.assigns.status == :offline do
+      socket
+    else
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{role: :approval, approval_status: :pending} = m -> %{m | approval_status: :canceled}
+          m -> m
+        end)
+
+      # Persist the cancellation too (D21): the store row must not stay
+      # "pending" forever — a reopen would otherwise revive a dead card. Zeroes
+      # the denormalised pending count so the sidebar "needs you" pill drops.
+      if store_id = socket.assigns[:store_session_id],
+        do: StudioChat.cancel_pending_approvals(store_id)
+
+      mark_session_exited(socket.assigns[:store_session_id])
+
+      socket
+      |> assign(messages: messages)
+      |> append_message(:system, message)
+      |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
+      |> refresh_sessions()
+    end
+  end
+
+  # Persist a mode switch onto the store row (charter D17) — no-op with no store
+  # session yet (a brand-new chat before its first send has no row to write).
+  defp persist_mode(socket, mode) do
+    if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
+    :ok
+  end
+
+  defp interrupt_timeout_ms do
+    Application.get_env(
+      :barkpark,
+      :studio_chat_interrupt_timeout_ms,
+      @default_interrupt_timeout_ms
+    )
+  end
 
   # ── persistence (D7 — source markdown, on completion only) ──────────────
 
+  # Persist the user's turn (D7). A store write can fail (e.g. a same-session
+  # append race that outlived its retries) — we never discard that error: log it
+  # and tell the user honestly that THIS message may not survive a reopen, so
+  # the transcript never lies about what was remembered (charter D20b).
   defp persist_user_message(socket, text) do
-    if store_id = socket.assigns.store_session_id do
-      StudioChat.append_message(store_id, %{role: "user", source_markdown: text, metadata: %{}})
-    end
+    socket =
+      case persist_store(socket, %{role: "user", source_markdown: text, metadata: %{}}) do
+        {:error, reason} ->
+          Logger.warning("studio chat: failed to persist user message: #{inspect(reason)}")
+
+          append_message(
+            socket,
+            :system,
+            "⚠ This message could not be saved — it may not appear if you reopen this chat."
+          )
+
+        _ ->
+          socket
+      end
 
     refresh_sessions(socket)
   end
 
-  defp persist_assistant_blocks(socket, blocks) do
-    if store_id = socket.assigns.store_session_id do
-      Enum.each(blocks, fn
-        %{"type" => "text", "text" => text} when is_binary(text) ->
-          if String.trim(text) != "",
-            do: StudioChat.append_message(store_id, %{role: "assistant", source_markdown: text})
+  # Persist an approval ask as a "pending" row. String metadata keys mirror the
+  # jsonb round-trip, so replay reads them back verbatim (request_id + tool_name
+  # rebuild the terminal-state card; approval_status carries the lifecycle).
+  defp persist_approval_ask(socket, ask, text) do
+    persist_store_logged(
+      socket,
+      %{
+        role: "approval",
+        source_markdown: text,
+        metadata: %{
+          "request_id" => ask.request_id,
+          "tool_name" => ask.tool_name,
+          "input" => ask.input,
+          "approval_status" => "pending"
+        }
+      },
+      "approval"
+    )
 
-        %{"type" => "tool_use", "name" => name} = block ->
-          StudioChat.append_message(store_id, %{
+    socket
+  end
+
+  defp persist_assistant_blocks(socket, blocks) do
+    Enum.each(blocks, fn
+      %{"type" => "text", "text" => text} when is_binary(text) ->
+        if String.trim(text) != "",
+          do:
+            persist_store_logged(socket, %{role: "assistant", source_markdown: text}, "assistant")
+
+      %{"type" => "tool_use", "name" => name} = block ->
+        persist_store_logged(
+          socket,
+          %{
             role: "tool",
             source_markdown: tool_line(name, block["input"]),
             metadata: %{"tool" => name, "input" => block["input"]}
-          })
+          },
+          "tool"
+        )
 
-        _ ->
-          :ok
-      end)
-    end
+      _ ->
+        :ok
+    end)
 
     :ok
   end
 
+  # Append to the store when a session row exists; `:no_store` when this chat is
+  # still unsaved (a pre-first-send draft), otherwise the append result verbatim
+  # so callers can react to `{:error, _}` (never silently drop it).
+  defp persist_store(socket, attrs) do
+    case socket.assigns.store_session_id do
+      nil -> :no_store
+      store_id -> StudioChat.append_message(store_id, attrs)
+    end
+  end
+
+  defp persist_store_logged(socket, attrs, kind) do
+    case persist_store(socket, attrs) do
+      {:error, reason} ->
+        Logger.warning("studio chat: failed to persist #{kind} message: #{inspect(reason)}")
+
+      _ ->
+        :ok
+    end
+  end
+
+  # Record the turn's usage AND capture the per-turn context snapshot for the
+  # header ring (charter D19). The lifetime totals stay summed; last_context_tokens
+  # / context_window are SET from THIS frame (input + both cache reads + output,
+  # and the answering model's contextWindow — never a hardcoded window map). The
+  # returned session drives the ring assign so the header updates on every result.
   defp record_result(socket, ev) do
     if store_id = socket.assigns.store_session_id do
-      StudioChat.record_result_metrics(store_id, %{
-        input_tokens: get_in(ev, ["usage", "input_tokens"]),
-        output_tokens: get_in(ev, ["usage", "output_tokens"]),
-        total_cost_usd: ev["total_cost_usd"],
-        model: result_model(ev)
-      })
+      result =
+        StudioChat.record_result_metrics(store_id, %{
+          input_tokens: get_in(ev, ["usage", "input_tokens"]),
+          output_tokens: get_in(ev, ["usage", "output_tokens"]),
+          cache_read_input_tokens: get_in(ev, ["usage", "cache_read_input_tokens"]),
+          cache_creation_input_tokens: get_in(ev, ["usage", "cache_creation_input_tokens"]),
+          total_cost_usd: ev["total_cost_usd"],
+          model: result_model(ev),
+          context_window: result_context_window(ev)
+        })
 
       StudioChat.update_status(store_id, "active")
-    end
 
-    :ok
+      case result do
+        {:ok, session} -> assign(socket, ring: ring_from_session(session))
+        _ -> socket
+      end
+    else
+      socket
+    end
   end
 
   defp result_model(%{"modelUsage" => usage}) when is_map(usage) do
@@ -874,23 +1401,62 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp result_model(_), do: nil
 
+  # The context window for the answering model, read off the frame's modelUsage
+  # (never a hardcoded model→window map — that goes stale silently). nil when the
+  # frame doesn't carry it → the store keeps the last-known window, ring stays honest.
+  defp result_context_window(%{"modelUsage" => usage} = ev) when is_map(usage) do
+    case usage[result_model(ev)] do
+      %{"contextWindow" => cw} when is_integer(cw) and cw > 0 -> cw
+      _ -> nil
+    end
+  end
+
+  defp result_context_window(_), do: nil
+
   # Rebuild the transcript message list from the persisted store. Assistant
   # markdown re-renders through the SAME paper engine used live, so the improving
   # renderer wins on every reopen (D7).
   defp replay_messages(session_id) do
     session_id
     |> StudioChat.list_messages()
-    |> Enum.map(fn m ->
-      role = replay_role(m.role)
-
-      html =
-        if role == :assistant and is_binary(m.source_markdown) and
-             String.trim(m.source_markdown) != "",
-           do: render_paper_html(m.source_markdown)
-
-      %{id: m.seq, role: role, text: m.source_markdown, html: html}
-    end)
+    |> Enum.map(&replay_message/1)
   end
+
+  # An approval row rebuilds its card from metadata (request_id + tool_name +
+  # lifecycle). A dangling "pending" approval can NEVER be resolved on reopen —
+  # there is no live control channel — so it renders as the honest terminal
+  # state, canceled (the persisted flip is done separately in load_stored_session
+  # so the store agrees with the screen).
+  defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}) do
+    meta = meta || %{}
+
+    %{
+      id: seq,
+      role: :approval,
+      text: md,
+      html: nil,
+      request_id: Map.get(meta, "request_id"),
+      tool_name: Map.get(meta, "tool_name"),
+      approval_status: replay_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  defp replay_message(m) do
+    role = replay_role(m.role)
+
+    html =
+      if role == :assistant and is_binary(m.source_markdown) and
+           String.trim(m.source_markdown) != "",
+         do: render_paper_html(m.source_markdown)
+
+    %{id: m.seq, role: role, text: m.source_markdown, html: html}
+  end
+
+  defp replay_approval_status("allowed"), do: :allowed
+  defp replay_approval_status("denied"), do: :denied
+  # pending (dangling) OR an unknown value → canceled: an unresolvable ask is
+  # never shown as a live card on reopen.
+  defp replay_approval_status(_), do: :canceled
 
   # A stored role must never make a session unopenable: map the known roles and
   # degrade anything else (a future wave's vocabulary) to a system line.
@@ -933,7 +1499,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
           m -> m
         end)
 
-      assign(socket, messages: messages)
+      # Persist the decision (D11) and drop the pending count so the sidebar
+      # "needs you" pill clears on the next sidebar refresh.
+      if store_id = socket.assigns[:store_session_id],
+        do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
+
+      socket |> assign(messages: messages) |> refresh_sessions()
     else
       socket
     end
@@ -1089,6 +1660,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp status_label(:thinking), do: "working"
   defp status_label(:interrupting), do: "stopping…"
   defp status_label(:offline), do: "offline"
+  defp status_label(:detached), do: "open in another tab"
 
   # A turn is in flight while the model works or while we're aborting it — both
   # states show Stop, never Send (there is no queue; the only in-turn control
@@ -1111,12 +1683,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # ── sidebar helpers ─────────────────────────────────────────────────────
 
-  # Store status → tokenized pill. Priority read is Working > idle(active) >
-  # offline(exited); PendingApproval elevation is live-only (approval state is
-  # per-mount, not persisted this wave) and is an S4 follow-up.
-  defp session_pill("working"), do: {"badge-chat-working", "working"}
-  defp session_pill("exited"), do: {"badge-chat-offline", "offline"}
-  defp session_pill(_), do: {"badge-chat-idle", "idle"}
+  # Session → tokenized pill. Precedence (charter D14): PendingApproval > Working
+  # > Exited > Idle. A session with a persisted pending approval outranks every
+  # status — it is the one row that needs the admin RIGHT NOW, so it wears the
+  # warn-toned "needs you" pill even mid-turn.
+  defp session_pill(%{pending_approvals: n}) when is_integer(n) and n > 0,
+    do: {"badge-chat-approval", "needs you"}
+
+  defp session_pill(%{status: status}), do: session_pill_by_status(status)
+
+  defp session_pill_by_status("working"), do: {"badge-chat-working", "working"}
+  defp session_pill_by_status("exited"), do: {"badge-chat-offline", "offline"}
+  defp session_pill_by_status(_), do: {"badge-chat-idle", "idle"}
 
   # The active row wears the evergreen accent; the rest are transparent (hover
   # tint lives in the render <style>). All colours are emitted tokens.
@@ -1146,6 +1724,101 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp session_stamp(%{last_active_at: t}) when not is_nil(t), do: age_label(t)
   defp session_stamp(%{inserted_at: t}), do: age_label(t)
   defp session_stamp(_), do: nil
+
+  # ── header context-headroom ring (charter D19) ──────────────────────────
+  #
+  # A from-scratch inline-SVG arc (no ring prior art in Studio). The arc length
+  # IS last_context_tokens / context_window — geometry encodes the datum, colour
+  # only reinforces it. Honest unknown: a nil window (pre-migration session, no
+  # result yet) draws the track alone + an em-dash, NEVER a fake full/empty arc.
+
+  # Circumference of the r=15.5 arc, evaluated at compile time. The progress
+  # circle's stroke-dasharray is "<arc> <circ>" — arc = fraction × circ.
+  @ring_circ 2 * :math.pi() * 15.5
+
+  # A ring datum carried in assigns: the CURRENT-turn snapshot, not the summed
+  # totals (which cannot express window occupancy). `cost` is the lifetime total.
+  defp blank_ring, do: %{context_tokens: nil, context_window: nil, cost: 0.0}
+
+  defp ring_from_session(session) do
+    %{
+      context_tokens: session.last_context_tokens,
+      context_window: session.context_window,
+      cost: session.total_cost_usd || 0.0
+    }
+  end
+
+  # Known only when BOTH the used-tokens and a positive window are present.
+  defp ring_geometry(%{context_tokens: used, context_window: window})
+       when is_integer(used) and used >= 0 and is_integer(window) and window > 0 do
+    frac = min(used / window, 1.0)
+    %{known: true, frac: frac, pct: round(frac * 100)}
+  end
+
+  defp ring_geometry(_), do: %{known: false, frac: 0.0, pct: nil}
+
+  # Token ramp (charter D19): ok < 70% · warn 70–90% · danger ≥ 90%. All tokens.
+  defp ring_color(frac) when frac >= 0.9, do: "var(--danger)"
+  defp ring_color(frac) when frac >= 0.7, do: "var(--warn)"
+  defp ring_color(_), do: "var(--ok)"
+
+  defp ring_dash(frac) do
+    arc = frac * @ring_circ
+    "#{Float.round(arc, 2)} #{Float.round(@ring_circ, 2)}"
+  end
+
+  defp ring_title(%{context_tokens: used, context_window: window})
+       when is_integer(used) and is_integer(window) and window > 0 do
+    "Context: #{used} / #{window} tokens"
+  end
+
+  defp ring_title(_), do: "Context window unknown until the first result"
+
+  defp format_cost(cost) when is_number(cost) and cost > 0 do
+    "$" <> :erlang.float_to_binary(cost / 1, decimals: 4)
+  end
+
+  defp format_cost(_), do: "$0.0000"
+
+  attr :ring, :map, required: true
+
+  defp context_ring(assigns) do
+    assigns = assign(assigns, :geo, ring_geometry(assigns.ring))
+
+    ~H"""
+    <div style="display: inline-flex; align-items: center; gap: 8px;" title={ring_title(@ring)}>
+      <div style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
+        <svg width="30" height="30" viewBox="0 0 36 36" style="display: block;" aria-hidden="true">
+          <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--primary-soft)" stroke-width="3.5" />
+          <circle
+            :if={@geo.known}
+            cx="18"
+            cy="18"
+            r="15.5"
+            fill="none"
+            stroke={ring_color(@geo.frac)}
+            stroke-width="3.5"
+            stroke-linecap="round"
+            stroke-dasharray={ring_dash(@geo.frac)}
+            transform="rotate(-90 18 18)"
+          />
+        </svg>
+        <span
+          class="text-dim"
+          style="position: absolute; font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums;"
+        >
+          <%= if @geo.known, do: "#{@geo.pct}%", else: "—" %>
+        </span>
+      </div>
+      <span
+        class="text-xs text-dim"
+        style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;"
+      >
+        <%= format_cost(@ring.cost) %>
+      </span>
+    </div>
+    """
+  end
 
   defp format_duration(ms) when is_integer(ms) and ms >= 1000,
     do: "#{Float.round(ms / 1000, 1)}s"

@@ -154,6 +154,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     id
   end
 
+  # A stored session whose LAST message is an approval left "pending" — the shape
+  # a crash or a tab-close leaves behind. Reopen must render it as the honest
+  # terminal state (canceled), never a live card no one can resolve.
+  defp seed_session_with_pending_approval(request_id) do
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+    {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "do a thing"})
+
+    {:ok, _} =
+      StudioChat.append_message(id, %{
+        role: "approval",
+        source_markdown: "Allow Bash?",
+        metadata: %{
+          "request_id" => request_id,
+          "tool_name" => "Bash",
+          "input" => %{"command" => "ls"},
+          "approval_status" => "pending"
+        }
+      })
+
+    id
+  end
+
   describe "gate" do
     test "disabled → mount redirects even for an admin", %{conn: conn} do
       Application.put_env(:barkpark, :claude_chat, enabled: false)
@@ -269,6 +292,33 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "an empty message is ignored", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "   "})
       refute html =~ "working"
+    end
+
+    # Single-writer honesty (charter D20): when another tab adopts this session,
+    # the Session sends {:claude_chat_detached}. The composer must be REPLACED by
+    # an honest banner — never left live to spawn a second `claude --resume`
+    # writer — with a Take-over affordance to re-acquire it.
+    test "a detach notice freezes the composer behind a take-over banner", %{view: view} do
+      send(view.pid, {:claude_chat_detached})
+      html = render(view)
+
+      assert html =~ "open in another tab"
+      assert html =~ "Take over here"
+      assert html =~ ~s(phx-click="take_over")
+      # the send form is gone while detached — no path to a second writer
+      refute has_element?(view, "form[phx-submit=send]")
+    end
+
+    test "take over dismisses the banner and restores the composer", %{view: view} do
+      send(view.pid, {:claude_chat_detached})
+      refute has_element?(view, "form[phx-submit=send]")
+
+      render_click(element(view, "button[phx-click=take_over]"))
+
+      assert has_element?(view, "form[phx-submit=send]")
+      # the banner + its button are gone (the persisted system line still quotes
+      # the phrase, so assert the control element, not raw text)
+      refute has_element?(view, "button[phx-click=take_over]")
     end
 
     test "init event surfaces the model in the header", %{view: view} do
@@ -501,6 +551,59 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "1.5s"
     end
 
+    # ── context-headroom ring (charter D19) ─────────────────────────────────
+
+    test "the header ring is hollow (honest unknown) before any result", %{view: view} do
+      # A fresh mount has no context snapshot — no fake arc, an em-dash, and a
+      # title that names the unknown.
+      html = render(view)
+      assert html =~ "Context window unknown until the first result"
+      refute html =~ "stroke-dasharray"
+    end
+
+    test "a result frame fills the ring geometry-first + shows cost", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "success",
+           "total_cost_usd" => 0.05,
+           "usage" => %{
+             "input_tokens" => 60_000,
+             "output_tokens" => 4_000,
+             "cache_read_input_tokens" => 0,
+             "cache_creation_input_tokens" => 0
+           },
+           "modelUsage" => %{"claude-opus-4" => %{"contextWindow" => 200_000}}
+         }}
+      )
+
+      html = render(view)
+      # 64000 / 200000 = 32% — the arc length IS the ratio (geometry encodes it).
+      assert html =~ "stroke-dasharray"
+      assert html =~ "32%"
+      # 32% is below 70% → the ok token, never warn/danger.
+      assert html =~ "var(--ok)"
+      assert html =~ "Context: 64000 / 200000 tokens"
+      assert html =~ "$0.0500"
+    end
+
+    test "reopening a stored session shows its last-known headroom", %{view: view} do
+      id = seed_session("resumed chat")
+
+      # A near-full window (185k / 200k = 93%) — the danger ramp.
+      {:ok, _} =
+        StudioChat.record_result_metrics(id, %{input_tokens: 185_000, context_window: 200_000})
+
+      html = render_patch(view, "/studio/chat/#{id}")
+
+      assert html =~ "93%"
+      assert html =~ "var(--danger)"
+    end
+
     test "an error result surfaces a system line", %{view: view} do
       send(
         view.pid,
@@ -711,6 +814,145 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "offline"
     end
 
+    # ── control acks: the UI never lies about a mode switch (scc-w2, D17) ──
+
+    test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      # the CLI echoes back exactly the mode we asked for → confirmed
+      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "default"}})
+
+      html = render(view)
+      assert html =~ "ask to act"
+      refute html =~ "Couldn't switch permission mode"
+    end
+
+    test "an empty mode echo reverts the optimistic selector + posts an honest line",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      # optimistic switch to acceptEdits…
+      html =
+        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+
+      assert html =~ "auto-accept edits"
+
+      # …but the CLI's ack carries an EMPTY response (the silent-no-op trap, D12):
+      # we must NOT trust subtype:success, so the switch reverts to plan.
+      send(view.pid, {:claude_chat_control, :set_mode, %{}})
+      html = render(view)
+      assert html =~ "switch permission mode"
+      assert html =~ "plan (read-only)"
+    end
+
+    test "a mismatched mode echo reverts to the prior mode", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      # the CLI reports a DIFFERENT mode than we asked → the switch did not take
+      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "plan"}})
+
+      html = render(view)
+      assert html =~ "switch permission mode"
+      assert html =~ "plan (read-only)"
+    end
+
+    # ── Stopping… cannot wedge (scc-w2, D18) ──────────────────────────────
+
+    test "a wedged interrupt times out, force-closes, and frees the composer", %{view: view} do
+      Application.put_env(:barkpark, :studio_chat_interrupt_timeout_ms, 60)
+      on_exit(fn -> Application.delete_env(:barkpark, :studio_chat_interrupt_timeout_ms) end)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      render_click(element(view, ~s(button[phx-click=stop_turn])))
+      assert render(view) =~ "stopping"
+
+      # NO terminal result arrives — the CLI wedged. The timeout must fire.
+      Process.sleep(180)
+      html = render(view)
+      assert html =~ "offline"
+      assert html =~ "force-closed"
+      # the composer is usable again — Stop is gone, Send is back
+      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
+    end
+
+    test "a result arriving before the timeout makes the timer a no-op", %{view: view} do
+      Application.put_env(:barkpark, :studio_chat_interrupt_timeout_ms, 60)
+      on_exit(fn -> Application.delete_env(:barkpark, :studio_chat_interrupt_timeout_ms) end)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      render_click(element(view, ~s(button[phx-click=stop_turn])))
+
+      # the interrupt result lands FIRST → back to ready
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "error_during_execution",
+           "terminal_reason" => "aborted_streaming"
+         }}
+      )
+
+      assert render(view) =~ "ready"
+
+      # let the (now stale) timer fire — it must NOT flip offline
+      Process.sleep(180)
+      html = render(view)
+      refute html =~ "offline"
+      assert html =~ "ready"
+    end
+
+    # ── extracted teardown is idempotent (scc-w2, D18) ────────────────────
+
+    test "a close-then-DOWN double fire does not duplicate the offline system line",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      pid = session_pid(view)
+
+      send(view.pid, {:claude_chat_exit, 2})
+      # the DOWN that follows the process death — teardown already ran, so this
+      # must find no matching session pid and no-op (never a second system line)
+      send(view.pid, {:DOWN, make_ref(), :process, pid, :normal})
+
+      html = render(view)
+      count = html |> String.split("Send a message to resume it") |> length() |> Kernel.-(1)
+      assert count == 1
+      assert html =~ "offline"
+    end
+
+    test "a bare process DOWN (no exit frame) runs the honest teardown", %{view: view} do
+      # a live turn with a pending approval, then a crash surfacing ONLY as DOWN
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      pid = session_pid(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "req-down",
+           tool_name: "Bash",
+           input: %{},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      send(view.pid, {:DOWN, make_ref(), :process, pid, :killed})
+      html = render(view)
+
+      assert html =~ "offline"
+      assert html =~ "ended unexpectedly"
+      # the pending approval is force-canceled, never a dead button
+      assert html =~ "✗ canceled"
+      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+    end
+
     test "an unknown stale event does not crash the LiveView", %{view: view} do
       render_hook(view, "totally-unknown-event", %{})
       send(view.pid, {:claude_chat_event, %{"type" => "mystery"}})
@@ -859,6 +1101,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "No chats yet"
     end
 
+    test "switching mode on a reopened (no-live) session persists so reopen shows it",
+         %{conn: conn} do
+      sid = seed_session("Modey")
+      assert StudioChat.get_session(sid).mode == "plan"
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      # reopen did NOT spawn — this is the no-live-session set-mode branch
+      assert session_pid(view) == nil
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+
+      # the store row carries the switch (not its stale creation mode)…
+      assert StudioChat.get_session(sid).mode == "acceptEdits"
+
+      # …so a fresh reopen shows it in the selector + drives the next spawn's mode
+      {:ok, view2, _html2} = live(conn, "/studio/chat/#{sid}")
+      assert lv_assigns(view2)[:mode] == "acceptEdits"
+    end
+
     test "the first successful turn kicks an async AI title that lands in the sidebar",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, "/studio/chat")
@@ -880,6 +1141,278 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       await(fn -> StudioChat.get_session(sid).title_source == "ai" end)
       assert StudioChat.get_session(sid).title == "Refactor the auth layer"
       assert render(view) =~ "Refactor the auth layer"
+    end
+  end
+
+  describe "the sidebar as a managed resource list (rename/archive/delete, wave 2)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "each row carries a kebab menu (role=menu, menuitems) with Rename/Archive/Delete",
+         %{conn: conn} do
+      sid = seed_session("Managed chat")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      # the menu is closed until the kebab is toggled
+      refute has_element?(view, ~s([data-test-id="chat-session-menu-list-#{sid}"]))
+
+      html = render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      assert html =~ ~s(role="menu")
+      assert has_element?(view, ~s([data-test-id="chat-session-rename-#{sid}"][role="menuitem"]))
+      assert has_element?(view, ~s([data-test-id="chat-session-archive-#{sid}"][role="menuitem"]))
+      assert has_element?(view, ~s([data-test-id="chat-session-delete-#{sid}"][role="menuitem"]))
+    end
+
+    test "inline rename commits via submit, persists title_source human, and survives the AI titler",
+         %{conn: conn} do
+      sid = seed_session("Original")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+      # the inline editor is now open on this row
+      assert has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+
+      render_submit(element(view, "form[phx-submit=session-rename]"), %{
+        "title" => "My renamed chat"
+      })
+
+      s = StudioChat.get_session(sid)
+      assert s.title == "My renamed chat"
+      # rename/2 pins human — the AI titler must not clobber it (charter D13)
+      assert s.title_source == "human"
+      assert :noop = StudioChat.maybe_set_ai_title(sid, "AI would pick this")
+      assert StudioChat.get_session(sid).title == "My renamed chat"
+      # the sidebar reflects the new title, editor closed
+      html = render(view)
+      assert html =~ "My renamed chat"
+      refute has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+    end
+
+    test "blur COMMITS the rename (the sheet-tab divergence)", %{conn: conn} do
+      sid = seed_session("Before blur")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+
+      render_blur(element(view, ~s([data-test-id="chat-session-rename-input-#{sid}"])), %{
+        "value" => "Committed by blur"
+      })
+
+      assert StudioChat.get_session(sid).title == "Committed by blur"
+    end
+
+    test "a blank rename is a no-op, never a wipe", %{conn: conn} do
+      sid = seed_session("Keep me")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+      render_submit(element(view, "form[phx-submit=session-rename]"), %{"title" => "   "})
+
+      assert StudioChat.get_session(sid).title == "Keep me"
+    end
+
+    test "Escape cancels the rename without touching the title", %{conn: conn} do
+      sid = seed_session("Unchanged")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+      assert has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+
+      render_keydown(element(view, ~s([data-test-id="chat-session-rename-input-#{sid}"])), %{
+        "key" => "Escape"
+      })
+
+      refute has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+      assert StudioChat.get_session(sid).title == "Unchanged"
+    end
+
+    test "deleting the ON-SCREEN session push_patches to /studio/chat and lands on new-chat",
+         %{conn: conn} do
+      sid = seed_session("Open + doomed")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      assert store_id(view) == sid
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-delete-#{sid}"])))
+
+      assert_patched(view, "/studio/chat")
+      # the single source of truth reset to the clean new-chat state
+      assert store_id(view) == nil
+      assert session_pid(view) == nil
+      # gone from the DB and from the sidebar
+      assert StudioChat.get_session(sid) == nil
+      refute render(view) =~ "Open + doomed"
+    end
+
+    test "archiving the ON-SCREEN session push_patches to /studio/chat", %{conn: conn} do
+      sid = seed_session("Open + archived")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-archive-#{sid}"])))
+
+      assert_patched(view, "/studio/chat")
+      assert store_id(view) == nil
+      # archived, not deleted — the row leaves the active sidebar but survives
+      assert StudioChat.get_session(sid).archived_at != nil
+      refute render(view) =~ "Open + archived"
+    end
+
+    test "deleting a BACKGROUND session leaves the open session untouched", %{conn: conn} do
+      open = seed_session("Stays open")
+      victim = seed_session("Background victim")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{open}")
+      assert store_id(view) == open
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{victim}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-delete-#{victim}"])))
+
+      # no navigation — the open session is intact
+      assert store_id(view) == open
+      assert StudioChat.get_session(victim) == nil
+      html = render(view)
+      refute html =~ "Background victim"
+      assert html =~ "Stays open"
+    end
+
+    test "the Show-archived toggle reveals the archived shelf and its unarchive action",
+         %{conn: conn} do
+      _active = seed_session("Active one")
+      shelved = seed_session("Shelved one")
+      StudioChat.archive_session(shelved)
+
+      {:ok, view, html} = live(conn, "/studio/chat")
+      # the active list shows only the non-archived session
+      assert html =~ "Active one"
+      refute html =~ "Shelved one"
+
+      html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
+      # now the shelf is shown: archived session visible, active hidden
+      assert html =~ "Shelved one"
+      refute html =~ "Active one"
+
+      # its menu offers Unarchive (not Archive)
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{shelved}"])))
+      assert has_element?(view, ~s([data-test-id="chat-session-unarchive-#{shelved}"]))
+      refute has_element?(view, ~s([data-test-id="chat-session-archive-#{shelved}"]))
+
+      render_click(element(view, ~s([data-test-id="chat-session-unarchive-#{shelved}"])))
+      assert StudioChat.get_session(shelved).archived_at == nil
+    end
+
+    test "an archived session opened by URL still replays and offers unarchive", %{conn: conn} do
+      sid = seed_session_with_history()
+      StudioChat.archive_session(sid)
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+      # archived is not deleted — the history replays and the session loads
+      assert store_id(view) == sid
+      assert html =~ "prev question"
+
+      # the sidebar defaults to the active shelf (the open archived row isn't in it),
+      # but flipping to the archived shelf surfaces it with an Unarchive action
+      render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      assert has_element?(view, ~s([data-test-id="chat-session-unarchive-#{sid}"]))
+    end
+
+    test "the empty archived shelf teaches instead of showing nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
+      assert html =~ "No archived chats"
+    end
+  end
+
+  describe "approvals that survive (persistence + reopen, scc-w2)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "an ask persists a pending row and raises the 'needs you' sidebar pill", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "req-live",
+           tool_name: "Write",
+           input: %{"file_path" => "/opt/x"},
+           title: "Claude wants to write /opt/x",
+           decision_reason: nil
+         }}
+      )
+
+      html = render(view)
+      # the sidebar elevates this session with the warn-toned pending pill…
+      assert html =~ "badge-chat-approval"
+      assert html =~ "needs you"
+      # …and it is PERSISTED, not just in-memory (survives a crash / reopen)
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "approval"))
+      assert [%{metadata: %{"approval_status" => "pending", "request_id" => "req-live"}}] = rows
+    end
+
+    test "resolving an ask clears the persisted pending count and the pill", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "req-live",
+           tool_name: "Write",
+           input: %{},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      render(view)
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      html = render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=req-live])))
+      assert html =~ "✓ allowed"
+      # the store agrees with the screen: the terminal state is persisted…
+      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert approval.metadata["approval_status"] == "allowed"
+      # …and the pending count dropped, so the sidebar pill is no longer "needs you"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+      refute html =~ "needs you"
+    end
+
+    test "reopening a session with a dangling pending approval renders ✗ canceled and persists it",
+         %{conn: conn} do
+      sid = seed_session_with_pending_approval("req-dangling")
+      # the seeded ask really is pending in the store before reopen
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # NO live card no one can resolve — the honest terminal state instead…
+      assert html =~ "✗ canceled"
+      refute has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-dangling]))
+      refute has_element?(view, ~s(button[phx-click=deny][phx-value-rid=req-dangling]))
+      # …and reopen was DISPLAY-only (no spawn — the vacuous-green trap)
+      assert session_pid(view) == nil
+
+      # the flip is PERSISTED: reopening again cannot revive the dead card
+      assert StudioChat.get_session(sid).pending_approvals == 0
+
+      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert approval.metadata["approval_status"] == "canceled"
     end
   end
 
