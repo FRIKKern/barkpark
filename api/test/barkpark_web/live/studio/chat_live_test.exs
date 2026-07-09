@@ -2420,6 +2420,118 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "nested agent traces (charter D40)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "spawn dispatch is name- AND shape-tolerant: Task, Agent, and a shaped tool all show the description",
+         %{view: view, sid: sid} do
+      # name Task
+      send_frame(sid, spawn_frame("toolu_t", "Task", "Task-named work"))
+      # name Agent
+      send_frame(sid, spawn_frame("toolu_a", "Agent", "Agent-named work"))
+      # shape only, under an arbitrary tool name
+      send_frame(sid, spawn_frame("toolu_s", "Dispatch", "Shape-only work"))
+
+      html = render(view)
+      assert html =~ "Task-named work"
+      assert html =~ "Agent-named work"
+      assert html =~ "Shape-only work"
+    end
+
+    test "interleaved child frames render indented under the spawn row (data-parent)",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Audit the recorder"))
+
+      # a frame emitted by the sub-agent — top-level parent_tool_use_id set
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "reading the file"},
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_child",
+                 "name" => "Bash",
+                 "input" => %{"command" => "grep -rn parent_tool_use_id"}
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      # the spawn headline, the indented child rows, and their connecting gutter
+      assert html =~ "Audit the recorder"
+      assert html =~ ~s(data-parent="toolu_spawn")
+      assert html =~ "reading the file"
+      assert html =~ "grep -rn parent_tool_use_id"
+      assert html =~ "border-left: 2px solid var(--primary)"
+    end
+
+    test "reopening replays the nested trace from the store", %{conn: conn, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Persisted spawn"))
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_child",
+                 "name" => "Read",
+                 "input" => %{"file_path" => "/x"}
+               }
+             ]
+           }
+         }}
+      )
+
+      {:ok, _view2, html} = live(conn, "/studio/chat/#{sid}")
+      assert html =~ "Persisted spawn"
+      assert html =~ ~s(data-parent="toolu_spawn")
+    end
+
+    test "the parent tool_result (subagent summary) still attaches to the spawn row",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Summarize"))
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_spawn",
+                 "content" => "the subagent finished"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "⎿"
+      assert html =~ "the subagent finished"
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -2988,5 +3100,28 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         "delta" => %{"type" => "text_delta", "text" => text}
       }
     }
+  end
+
+  # A Task/agent spawn frame (charter D40): a single tool_use carrying the
+  # sub-agent input shape, so both name- and shape-tolerant dispatch light up.
+  defp spawn_frame(id, name, description) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => name,
+             "input" => %{
+               "description" => description,
+               "prompt" => "do the thing",
+               "subagent_type" => "explore"
+             }
+           }
+         ]
+       }
+     }}
   end
 end

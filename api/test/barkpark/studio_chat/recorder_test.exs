@@ -280,6 +280,85 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "nested agent traces (charter D40)" do
+    test "a child frame stamps parent_tool_use_id on every row; a top-level frame omits it",
+         %{sid: sid, recorder: recorder} do
+      # Top-level: a Task spawn (its own frame has NO parent_tool_use_id).
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_spawn",
+                 "name" => "Task",
+                 "input" => %{
+                   "description" => "Explore the recorder",
+                   "prompt" => "audit it",
+                   "subagent_type" => "explore"
+                 }
+               }
+             ]
+           }
+         }}
+      )
+
+      # A frame emitted BY the sub-agent: top-level parent_tool_use_id set, and it
+      # carries both a text block and a tool_use — BOTH rows must inherit it.
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "child is thinking"},
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_child",
+                 "name" => "Bash",
+                 "input" => %{"command" => "grep -rn foo"}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+
+      spawn_row = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_spawn"))
+      refute spawn_row.metadata["parent_tool_use_id"]
+
+      child_text =
+        Enum.find(rows, &(&1.role == "assistant" and &1.source_markdown == "child is thinking"))
+
+      assert child_text.metadata["parent_tool_use_id"] == "toolu_spawn"
+
+      child_tool = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_child"))
+      assert child_tool.metadata["parent_tool_use_id"] == "toolu_spawn"
+    end
+
+    test "an empty-string parent_tool_use_id is treated as top-level (no stamp)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "",
+           "message" => %{"content" => [%{"type" => "text", "text" => "top level"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "top level"))
+      refute row.metadata["parent_tool_use_id"]
+    end
+  end
+
   describe "live activity feed (wave 5)" do
     setup %{sid: sid} do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())

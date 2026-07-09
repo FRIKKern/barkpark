@@ -170,7 +170,7 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_info({:claude_chat_event, %{"type" => "assistant"} = ev} = msg, state) do
     blocks = get_in(ev, ["message", "content"])
-    persist_assistant_blocks(state.session_id, blocks)
+    persist_assistant_blocks(state.session_id, blocks, ev)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(assistant_activity(blocks, state.activity)) |> touch()}
   end
@@ -285,11 +285,22 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # ── persistence (mirrors the store shapes replay reads back) ───────────────
 
-  defp persist_assistant_blocks(session_id, blocks) when is_list(blocks) do
+  # `ev` is the whole assistant frame so we can stamp its top-level
+  # `parent_tool_use_id` onto EVERY row it produces (charter D40): a non-nil id
+  # means these rows belong to the sub-agent that spawn created, and replay reads
+  # the id back to indent them under the matching spawn row. A top-level frame
+  # (null parent) writes the same shape it always did.
+  defp persist_assistant_blocks(session_id, blocks, ev) when is_list(blocks) do
+    parent = parent_meta(ev)
+
     Enum.each(blocks, fn
       %{"type" => "text", "text" => text} when is_binary(text) ->
         if String.trim(text) != "" do
-          persist(session_id, %{role: "assistant", source_markdown: text}, "assistant")
+          persist(
+            session_id,
+            %{role: "assistant", source_markdown: text, metadata: parent},
+            "assistant"
+          )
         end
 
       %{"type" => "tool_use", "name" => name} = block ->
@@ -298,11 +309,15 @@ defmodule Barkpark.StudioChat.Recorder do
           %{
             role: "tool",
             source_markdown: tool_line(name, block["input"]),
-            metadata: %{
-              "tool" => name,
-              "input" => block["input"],
-              "tool_use_id" => block["id"]
-            }
+            metadata:
+              Map.merge(
+                %{
+                  "tool" => name,
+                  "input" => block["input"],
+                  "tool_use_id" => block["id"]
+                },
+                parent
+              )
           },
           "tool"
         )
@@ -312,7 +327,18 @@ defmodule Barkpark.StudioChat.Recorder do
     end)
   end
 
-  defp persist_assistant_blocks(_session_id, _), do: :ok
+  defp persist_assistant_blocks(_session_id, _, _), do: :ok
+
+  # `%{"parent_tool_use_id" => id}` for a sub-agent frame; `%{}` for a top-level
+  # frame (null parent) so the row's metadata is unchanged.
+  defp parent_meta(ev) when is_map(ev) do
+    case ev["parent_tool_use_id"] do
+      id when is_binary(id) and id != "" -> %{"parent_tool_use_id" => id}
+      _ -> %{}
+    end
+  end
+
+  defp parent_meta(_), do: %{}
 
   defp persist_approval_ask(session_id, ask) do
     text = ask.title || tool_line(ask.tool_name, ask.input)

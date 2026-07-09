@@ -37,6 +37,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ClaudeChat
 
+  # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
+  # helpers shared by the live render and the store-replay path.
+  import BarkparkWeb.Studio.ChatToolRenderer, only: [spawn?: 2, spawn_label: 2]
+
   # How long a Stop may sit in `:interrupting` before we force-close a wedged
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
   @default_interrupt_timeout_ms 8_000
@@ -713,23 +717,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info(
-        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}}},
+        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}} = ev},
         socket
       )
       when is_list(blocks) do
+    # A sub-agent's frames carry a top-level parent_tool_use_id (charter D40);
+    # every row this frame produces inherits it so children indent under the
+    # spawn row. Top-level frames leave it nil (no indent).
+    parent_id = ev["parent_tool_use_id"]
+
     socket =
       Enum.reduce(blocks, socket, fn
         %{"type" => "text", "text" => text}, acc when is_binary(text) ->
           if String.trim(text) == "" do
             acc
           else
-            append_message(acc, :assistant, text, html: render_paper_html(text))
+            append_message(acc, :assistant, text,
+              html: render_paper_html(text),
+              parent_tool_use_id: parent_id
+            )
           end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
           append_message(acc, :tool, tool_line(name, block["input"]),
             tool_use_id: block["id"],
-            output: nil
+            output: nil,
+            parent_tool_use_id: parent_id,
+            spawn?: spawn?(name, block["input"]),
+            spawn_label: spawn_label(name, block["input"])
           )
 
         _block, acc ->
@@ -1384,7 +1399,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             phx-hook="PaperMermaid"
             style="display: flex; flex-direction: column; gap: 10px;"
           >
-            <div :for={message <- @messages} data-role={message.role}>
+            <div
+              :for={message <- @messages}
+              data-role={message.role}
+              data-parent={message[:parent_tool_use_id]}
+              style={message[:parent_tool_use_id] && trace_child_style()}
+            >
             <%= case message.role do %>
               <% :user -> %>
                 <%!-- Terminal anatomy: the user's prompt wears the ❯ gutter,
@@ -1448,7 +1468,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   </div>
                 </div>
               <% :tool -> %>
-                <div class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                <%!-- A Task/agent spawn (charter D40) gets a headline row: the
+                      ● gutter plus the sub-agent's description; the frames it
+                      emits interleave below, indented under it. A plain tool row
+                      keeps the terse mono line. --%>
+                <div :if={message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                  <span style="color: var(--primary);">●</span>
+                  <span style="font-weight: 650;"><%= message[:spawn_label] || message.text %></span>
+                  <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+                </div>
+                <div :if={!message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
                   <span style="color: var(--primary);">●</span>
                   <span><%= message.text %></span>
                 </div>
@@ -2462,13 +2491,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # A tool row replays with its captured output so the ⎿ line survives reopen.
+  # The spawn heuristics + nested-trace parentage (charter D40) reconstruct from
+  # the persisted tool name/input + parent_tool_use_id, so a reopened transcript
+  # shows the same ● spawn row and indented children the live tab drew.
   defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    meta = meta || %{}
+    name = Map.get(meta, "tool")
+    input = Map.get(meta, "input")
+
     %{
       id: seq,
       role: :tool,
       text: md,
       html: nil,
-      output: Map.get(meta || %{}, "output")
+      output: Map.get(meta, "output"),
+      parent_tool_use_id: Map.get(meta, "parent_tool_use_id"),
+      spawn?: spawn?(name, input),
+      spawn_label: spawn_label(name, input)
     }
   end
 
@@ -2480,7 +2519,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
            String.trim(m.source_markdown) != "",
          do: render_paper_html(m.source_markdown)
 
-    %{id: m.seq, role: role, text: m.source_markdown, html: html}
+    %{
+      id: m.seq,
+      role: role,
+      text: m.source_markdown,
+      html: html,
+      parent_tool_use_id: Map.get(m.metadata || %{}, "parent_tool_use_id")
+    }
   end
 
   # Rebuild the inline image list from a user row's metadata attachment pointers.
@@ -3091,6 +3136,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp tool_line(name, _input), do: name
+
+  # A sub-agent's rows (charter D40) indent under their spawn row with a
+  # connecting evergreen gutter — the nested-trace feel of the terminal. Tokens
+  # only (no color literals): the gate stays green.
+  defp trace_child_style,
+    do: "margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--primary);"
 
   defp model_label("haiku"), do: "Haiku — fastest"
   defp model_label("sonnet"), do: "Sonnet — balanced"
