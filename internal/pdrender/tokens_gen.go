@@ -30,7 +30,7 @@ var (
 // pdrender's own copy (it can't import internal/semrole); threaded by
 // theme.go's pdAccent/pdInk/pdBody/pdDim chrome vars.
 var (
-	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"}
+	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
 	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
 	GenChromeTextSecondary = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}
 	GenChromeDim           = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"}
