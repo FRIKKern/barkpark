@@ -74,10 +74,14 @@ func TestCloudInstanceRoundtripFake(t *testing.T) {
 		t.Fatalf("create should report the box + its fake IP:\n%s", stdout)
 	}
 
-	// list shows it
+	// list shows it, under a PROVIDER identity column stamped from the resolved
+	// kind (S10 activation, Decision 34 — free from the kind the command holds).
 	stdout, _, code = runInstanceCapture(t, "table", "list", "--provider", "s5fake")
 	if code != exitOK || !strings.Contains(stdout, "web-1") {
 		t.Fatalf("list should show the created box: exit=%d\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "PROVIDER") || !strings.Contains(stdout, "s5fake") {
+		t.Fatalf("list should carry a PROVIDER column stamped with the kind:\n%s", stdout)
 	}
 
 	// ip prints the bare address (scriptable)

@@ -8,6 +8,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // seedCloudLogin writes a config under the test's temp config home carrying a
@@ -313,8 +317,8 @@ func TestBarkparksHitsControlPlane(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth, gotPath = r.Header.Get("Authorization"), r.URL.Path
 		_, _ = io.WriteString(w, `{"barkparks":[
-			{"id":"bp-1","name":"prod","slug":"prod","url":"https://prod.example.com","mode":"managed","health_status":"up","agent_status":"online","team_id":"team-1"},
-			{"id":"bp-2","name":"staging","slug":"staging","host":"staging.example.com","mode":"byo","health_status":"unknown","agent_status":"offline","team_id":"team-1"}
+			{"id":"bp-1","name":"prod","slug":"prod","provider":"hetzner","url":"https://prod.example.com","host":"prod.example.com","mode":"managed","health_status":"up","agent_status":"online","team_id":"team-1"},
+			{"id":"bp-2","name":"staging","slug":"staging","provider":"azure","host":"staging.example.com","mode":"byo","health_status":"unknown","agent_status":"offline","team_id":"team-1"}
 		]}`)
 	}))
 	defer srv.Close()
@@ -333,9 +337,15 @@ func TestBarkparksHitsControlPlane(t *testing.T) {
 	if gotAuth != "Bearer sess-abc" {
 		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
 	}
-	// The rendered table carries the authoritative rows (NAME + HEALTH columns),
-	// and the staging row's URL falls back to its host.
-	for _, want := range []string{"prod", "https://prod.example.com", "up", "online", "staging", "staging.example.com", "HEALTH", "AGENT"} {
+	// The rendered table carries the authoritative rows plus the neutral vocabulary
+	// (S10 activation, Decision 34): a PROVIDER identity column (hetzner/azure) and
+	// a STATUS column folded to the S4 lifecycle vocabulary (both boxes have a host
+	// → live). HEALTH/AGENT stay; the staging row's URL falls back to its host.
+	for _, want := range []string{
+		"prod", "https://prod.example.com", "up", "online",
+		"staging", "staging.example.com", "HEALTH", "AGENT",
+		"PROVIDER", "STATUS", "hetzner", "azure", "live",
+	} {
 		if !bytes.Contains([]byte(stdout), []byte(want)) {
 			t.Fatalf("rendered table missing %q:\n%s", want, stdout)
 		}
@@ -343,6 +353,98 @@ func TestBarkparksHitsControlPlane(t *testing.T) {
 	// It must NOT fall back to the local-config "no Barkparks known" hint.
 	if bytes.Contains([]byte(stdout), []byte("register ssh")) {
 		t.Fatalf("token present must use the control plane, not the local hint:\n%s", stdout)
+	}
+}
+
+// TestRegistryLifecycleToken pins the Go port of the SPA's lifecyclePillState
+// (app.js:674-682 over instanceLifecycle :2375-2383): the same boolean ladder,
+// the same precedence, the same "" fall-through. The first six cases MIRROR the
+// SPA's own __app.test.mjs lifecyclePillState assertions verbatim so the two
+// surfaces provably fold identical inputs to the same S4 state (Decision 34);
+// the rest lock the precedence corners.
+func TestRegistryLifecycleToken(t *testing.T) {
+	cases := []struct {
+		name string
+		b    cloudclient.Barkpark
+		want string
+	}{
+		// Cross-surface parity with __app.test.mjs (lifecyclePillState).
+		{"live: has host", cloudclient.Barkpark{Host: "h"}, "live"},
+		{"provisioning: no host, not failed", cloudclient.Barkpark{}, "provisioning"},
+		{"degraded: provision failed, no host", cloudclient.Barkpark{ProvisionStatus: "failed"}, "degraded"},
+		{"degraded: deprovision failed even with host", cloudclient.Barkpark{DeprovisionStatus: "failed", Host: "h"}, "degraded"},
+		{"stopped: suspended with host", cloudclient.Barkpark{Host: "h", Suspended: true}, "stopped"},
+		{"decommissioned: deprovision pending with host", cloudclient.Barkpark{DeprovisionStatus: "pending", Host: "h"}, "decommissioned"},
+		// Precedence corners beyond the SPA test.
+		{"decommissioned: deprovision claimed", cloudclient.Barkpark{DeprovisionStatus: "claimed"}, "decommissioned"},
+		{"removing wins over suspended", cloudclient.Barkpark{DeprovisionStatus: "pending", Suspended: true, Host: "h"}, "decommissioned"},
+		{"live: provision failed but host present is not failed", cloudclient.Barkpark{ProvisionStatus: "failed", Host: "h"}, "live"},
+		{"suspended fold needs a host to not be provisioning-first? no — suspended beats provisioning", cloudclient.Barkpark{Suspended: true}, "stopped"},
+	}
+	for _, c := range cases {
+		if got := registryLifecycleToken(c.b); got != c.want {
+			t.Errorf("%s: registryLifecycleToken = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestBarkparksFleetTableGolden pins the migrated control-plane fleet table
+// (renderCloudBarkparksTable → the shared renderHzTable) with a mixed-provider,
+// mixed-lifecycle fleet: the PROVIDER identity column and the STATUS lifecycle
+// column are present and folded, and — color OFF (the test writer is not a tty) —
+// the bytes are stable. A pre-migration row (blank provider) blanks its PROVIDER
+// cell rather than guessing.
+func TestBarkparksFleetTableGolden(t *testing.T) {
+	list := []cloudclient.Barkpark{
+		{Name: "prod", Provider: "hetzner", URL: "https://prod.example.com", Host: "prod.example.com", Mode: "managed", HealthStatus: "up", AgentStatus: "online"},
+		{Name: "spinning", Provider: "azure", Mode: "managed", HealthStatus: "unknown", AgentStatus: "offline"},
+		{Name: "broken", Provider: "hetzner", ProvisionStatus: "failed", Mode: "managed", HealthStatus: "unknown", AgentStatus: "offline"},
+		{Name: "paused", Provider: "azure", Host: "paused.example.com", Suspended: true, Mode: "byo", HealthStatus: "up", AgentStatus: "online"},
+		{Name: "leaving", Provider: "hetzner", Host: "leaving.example.com", DeprovisionStatus: "pending", Mode: "managed", HealthStatus: "up", AgentStatus: "online"},
+		{Name: "legacy", Host: "legacy.example.com", Mode: "byo", HealthStatus: "up", AgentStatus: "online"},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderCloudBarkparksTable(w, list)
+	assertGolden(t, "barkparks_fleet_table", stdout.String())
+}
+
+// TestBarkparksFleetTableColorTints proves the fleet path itself lights up the
+// #1739 header-driven chrome (criterion 1): under a TrueColor profile with color
+// ON, the PROVIDER + STATUS cells carry SGR, and stripping the SGR yields the
+// EXACT color-off golden bytes — tint only, no glyphs or injected columns.
+func TestBarkparksFleetTableColorTints(t *testing.T) {
+	oldProfile := lipgloss.ColorProfile()
+	oldDark := lipgloss.HasDarkBackground()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.SetHasDarkBackground(true)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(oldProfile)
+		lipgloss.SetHasDarkBackground(oldDark)
+	})
+
+	list := []cloudclient.Barkpark{
+		{Name: "prod", Provider: "hetzner", URL: "https://prod.example.com", Host: "prod.example.com", Mode: "managed", HealthStatus: "up", AgentStatus: "online"},
+		{Name: "spinning", Provider: "azure", Mode: "managed", HealthStatus: "unknown", AgentStatus: "offline"},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	w.color = true
+	renderCloudBarkparksTable(w, list)
+	got := stdout.String()
+	if !bytes.Contains([]byte(got), []byte("\x1b[")) {
+		t.Fatalf("color-on fleet table carried no SGR — PROVIDER/STATUS chrome did not paint:\n%q", got)
+	}
+
+	// Stripping SGR must reproduce the color-off bytes exactly (tint-only contract).
+	var offOut, offErr bytes.Buffer
+	wo := newWriter(&offOut, &offErr) // buffer → not a tty → color off
+	wo.output = "table"
+	renderCloudBarkparksTable(wo, list)
+	if strip := stripANSI(got); strip != offOut.String() {
+		t.Fatalf("color-on minus SGR must equal color-off bytes:\n--- stripped ---\n%q\n--- color-off ---\n%q", strip, offOut.String())
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/mattn/go-runewidth"
 	"golang.org/x/term"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -342,6 +341,7 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"slug":          b.Slug,
 		"url":           b.URL,
 		"host":          b.Host,
+		"provider":      b.Provider,
 		"mode":          b.Mode,
 		"health_status": b.HealthStatus,
 		"agent_status":  b.AgentStatus,
@@ -351,53 +351,30 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 	}
 }
 
-// renderCloudBarkparksTable prints the aligned fleet table: NAME · URL · MODE ·
-// HEALTH · AGENT. Column widths are computed from the data so the output is
-// stable for golden comparison. URL falls back to the host when the server has no
-// URL yet (still provisioning).
+// renderCloudBarkparksTable prints the aligned fleet table through the ONE shared
+// cloud/hetzner renderer (renderHzTable), so the neutral vocabulary finally paints
+// on every row: PROVIDER (identity → GenProviderMark) + STATUS (the folded
+// GenInstanceLifecycle state → its role hue), alongside NAME · URL · MODE ·
+// HEALTH · AGENT (Decision 34 activates the merged-but-dormant #1739 chrome on the
+// registry leg). renderHzTable measures widths on bare strings and only tints when
+// out.color is on, so color-off output stays byte-stable. URL falls back to the
+// host when the server has no URL yet (still provisioning); an empty PROVIDER or
+// STATUS cell (a pre-migration or unplaceable row) blanks honestly rather than
+// guessing.
 func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
-	const (
-		hName   = "NAME"
-		hURL    = "URL"
-		hMode   = "MODE"
-		hHealth = "HEALTH"
-		hAgent  = "AGENT"
-	)
-	// Widths are measured in terminal display cells (runewidth), not bytes: a
-	// multibyte name or URL is fewer cells than bytes, so a byte width would shear
-	// the alignment. FillRight pads to that same cell width. Matches renderHzTable.
-	nameW, urlW, modeW, healthW := runewidth.StringWidth(hName), runewidth.StringWidth(hURL), runewidth.StringWidth(hMode), runewidth.StringWidth(hHealth)
-	display := make([]string, len(list))
-	for i, b := range list {
+	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT"}
+	rows := make([][]string, 0, len(list))
+	for _, b := range list {
 		u := b.URL
 		if u == "" {
 			u = b.Host
 		}
-		display[i] = u
-		if n := runewidth.StringWidth(b.Name); n > nameW {
-			nameW = n
-		}
-		if n := runewidth.StringWidth(u); n > urlW {
-			urlW = n
-		}
-		if n := runewidth.StringWidth(b.Mode); n > modeW {
-			modeW = n
-		}
-		if n := runewidth.StringWidth(b.HealthStatus); n > healthW {
-			healthW = n
-		}
+		rows = append(rows, []string{
+			b.Name, b.Provider, u, registryLifecycleToken(b),
+			b.Mode, b.HealthStatus, b.AgentStatus,
+		})
 	}
-
-	out.outf("%s", strings.Join([]string{
-		runewidth.FillRight(hName, nameW), runewidth.FillRight(hURL, urlW),
-		runewidth.FillRight(hMode, modeW), runewidth.FillRight(hHealth, healthW), hAgent,
-	}, "  "))
-	for i, b := range list {
-		out.outf("%s", strings.Join([]string{
-			runewidth.FillRight(b.Name, nameW), runewidth.FillRight(display[i], urlW),
-			runewidth.FillRight(b.Mode, modeW), runewidth.FillRight(b.HealthStatus, healthW), b.AgentStatus,
-		}, "  "))
-	}
+	renderHzTable(out, headers, rows)
 }
 
 // runProvider is the `bp provider <verb>` built-in. Today the only verb is `add`:
