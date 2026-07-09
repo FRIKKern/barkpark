@@ -265,7 +265,20 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		// `role=warm-image` snapshot when one exists, else the env-pinned
 		// BARKPARK_SERVER_IMAGE fallback — a one-shot go-live boots the same
 		// fresh bake the pool does.
-		base.Image = cloud.FreshSpec(ctx, cloud.ProviderHetzner).Image
+		fresh := cloud.FreshSpec(ctx, cloud.ProviderHetzner)
+		// azh-w3: an UNPINNED hetzner claim now emits nil region/server_type (the
+		// signal tryWarmAssign reads as "pool-compatible"). Fill the empties from
+		// the env-derived FreshSpec so the resilience ladder never leads with an
+		// empty create — on the one-shot fallback OR when a filled-to-base spec is
+		// handed to a warm assign. A real PIN (fsn1/cx32) is left untouched, so the
+		// warm pin-guard still sees the difference and one-shots it.
+		if base.Region == "" {
+			base.Region = fresh.Region
+		}
+		if base.ServerType == "" {
+			base.ServerType = fresh.ServerType
+		}
+		base.Image = fresh.Image
 	} else {
 		// Azure prereq (S2 carry): the SSH public key the worker installs on every
 		// VM MUST be configured, else the created box is unreachable. Fail HERE,

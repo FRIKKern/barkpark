@@ -1195,7 +1195,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   ## Internal endpoints — worker auth + behaviour
 
   describe "POST /v1/internal/provision-jobs/claim" do
-    test "worker token + a pending job → 200 {job_id, name, slug, region, server_type}" do
+    test "worker token + a pending job → 200 {job_id, name, slug, region=nil, server_type=nil}" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team, %{name: "Acme", slug: "acme"})
       {:ok, job} = Registry.enqueue_provision_job(bp)
@@ -1212,8 +1212,11 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert body["slug"] == Barkpark.provisioning_subdomain(bp)
       assert body["slug"] == "acme-" <> Barkpark.team_short_id(team.id)
       assert body["slug"] != "acme"
-      assert body["region"] == Registry.default_region()
-      assert body["server_type"] == Registry.default_server_type()
+      # azh-w3: an UNPINNED row emits nil region/server_type (not the warm-pool
+      # default) — the signal the Go warm pin-guard reads as "serve from the pool";
+      # the worker fills the env-derived hetzner default before any one-shot create.
+      assert body["region"] == nil
+      assert body["server_type"] == nil
 
       # The job is now claimed.
       assert Repo.get(ProvisionJob, job.id).status == "claimed"

@@ -98,10 +98,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # Provider-neutral hosting (charter Decision 9). `provider` is the cloud slug
     # the box lives on (`hetzner` | `azure`), defaulting to hetzner so a legacy row
     # and a provider-less launch are Hetzner by construction. `region` /
-    # `server_type` pin the launch placement + size; NULL → the warm-pool defaults
-    # the claim payload falls back to (`Registry.default_region/0` /
-    # `default_server_type/0`). `provider` is surfaced in barkpark JSON (the SPA
-    # fleet provider-chip); it never doubles as a status axis.
+    # `server_type` pin the launch placement + size; NULL → the claim payload emits
+    # nil (azh-w3) and the Go WORKER fills its own provider default (hetzner: the
+    # env-derived FreshSpec, which is the warm pool's own truth, so an unpinned
+    # launch stays warm-pool-compatible; azure: eastus/Standard_B1s). Stamping a
+    # default into the claim here made every unpinned launch look pinned and skipped
+    # the warm path. `provider` is surfaced in barkpark JSON (the SPA fleet
+    # provider-chip); it never doubles as a status axis.
     field :provider, :string, default: "hetzner"
     field :region, :string
     field :server_type, :string
