@@ -3,7 +3,8 @@ defmodule Barkpark.StructureCleanDeskTest do
   Desk safety net for the clean-profile world (premium-setup A4): a fresh
   `bp setup` install registers ONLY paper + mediaAsset + mediaCollection —
   no post/page/project, no Settings singletons. Pins that the Studio desk
-  renders that world without crashing: Papers list + Media group, no
+  renders that world without crashing: Papers list, media OUT of the tree by
+  default (its placement is :top_menu — studio-structure-polish), no
   Settings node, and a zero-schema dataset still builds.
   """
 
@@ -42,7 +43,7 @@ defmodule Barkpark.StructureCleanDeskTest do
     end
   end
 
-  test "paper+media-only desk: Papers list + Media group, no Settings, no crash" do
+  test "paper+media-only desk: Papers list, media out of tree, no Settings, no crash" do
     dataset = "structure_clean_desk"
     seed_clean_schemas!(dataset)
 
@@ -53,13 +54,20 @@ defmodule Barkpark.StructureCleanDeskTest do
 
     assert %Node{type_name: "paper", title: "Papers"} = paper
 
-    media = Enum.find(tree.items, &(&1.id == "media-desk"))
-    assert %Node{type: :list, title: "Media"} = media
+    # Tiered desk (studio-structure-polish): media declares placement
+    # :top_menu, so by DEFAULT the Media group is OUT of the tree (the host
+    # top-menu Media tab is its home) and its types are claimed — they must
+    # not resurface in …Rest.
+    refute Enum.find(tree.items, &(&1.id == "media-desk")),
+           "media placement is :top_menu by default → no Media group in the tree"
 
-    media_child_names = Enum.map(media.items, & &1.type_name)
-    assert "mediaAsset" in media_child_names
-    assert "mediaCollection" in media_child_names
-    assert Enum.any?(media.items, &(&1.id == "media-library"))
+    rest = Enum.find(tree.items, &(&1.id == "rest"))
+
+    if rest do
+      rest_types = Enum.map(rest.items, & &1.type_name)
+      refute "mediaAsset" in rest_types, "top-menu media types must not leak into …Rest"
+      refute "mediaCollection" in rest_types
+    end
 
     # mediaAsset/mediaCollection are excluded from Settings by name and paper
     # is public — with no other private schema there must be NO Settings node.

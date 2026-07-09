@@ -20,7 +20,38 @@ defmodule Barkpark.Content.Analytics do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent}
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope,
+    only: [scope_to_workspace_or_global: 3, scope_to_workspace_including_global: 3]
+
+  @doc """
+  Count documents grouped by `type`, scoped to MIRROR `Barkpark.Structure.build`'s
+  schema scope for the …Rest census (studio-structure-polish charter, Decision 6).
+
+  Same `group_by(:type)` shape as `document_stats/2` — selects ONLY `type` +
+  the total count, so it leaks no content (field-visibility safe) — but the
+  tenancy scope differs deliberately:
+
+    * INCLUDE nil-workspace globals (`scope_to_workspace_including_global/3`), and
+    * do NOT narrow by `project_id`.
+
+  The stock `document_stats/2` scope (`scope_to_workspace_or_global/3`) narrows
+  to a single project when `project_id` is present, which would MISREPORT the
+  census versus the desk tree (the desk lists workspace-level types spanning
+  every project). `total` counts ALL rows of the type — DRAFTS INCLUDED — so the
+  …Rest counts are honest about the database.
+  """
+  @spec type_census(String.t(), keyword()) :: [%{type: String.t(), total: non_neg_integer()}]
+  def type_census(dataset, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+
+    Document
+    |> scope_to_dataset(dataset, workspace_id: workspace_id)
+    |> scope_to_workspace_including_global(workspace_id, nil)
+    |> group_by([d], d.type)
+    |> select([d], %{type: d.type, total: count(d.id)})
+    |> order_by([d], asc: d.type)
+    |> Repo.all()
+  end
 
   @doc "Count documents grouped by type, with published/draft breakdown."
   def document_stats(dataset, opts \\ []) do
