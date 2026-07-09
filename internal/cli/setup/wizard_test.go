@@ -120,8 +120,9 @@ func TestWizardNoKnownServersSkipsPickList(t *testing.T) {
 // seeding target: target → inputs (docker toggle) → PROFILE → plugins.
 func TestWizardLocalFlowEntersProfileStage(t *testing.T) {
 	m := newWizardModel(nil)
-	// down to Local (index 1), enter → inputs (docker toggle), enter → profile.
-	m = drive(m, "down", "enter", "enter")
+	// down×2 to Local (index 2 — Cloud sits at index 1), enter → inputs (docker
+	// toggle), enter → profile.
+	m = drive(m, "down", "down", "enter", "enter")
 
 	if m.stage != stageProfile {
 		t.Fatalf("local inputs should advance to the profile stage, got %d", m.stage)
@@ -159,7 +160,7 @@ func TestWizardConnectSkipsProfileStage(t *testing.T) {
 // multi-select, and the assembled plan carries Profile=clean.
 func TestWizardProfileDefaultCleanPrechecksBulldocsAndTasks(t *testing.T) {
 	m := newWizardModel(nil)
-	m = drive(m, "down", "enter", "enter", "enter") // local → inputs → profile → plugins
+	m = drive(m, "down", "down", "enter", "enter", "enter") // local → inputs → profile → plugins
 
 	if m.stage != stagePlugins {
 		t.Fatalf("expected plugins stage, got %d", m.stage)
@@ -191,7 +192,7 @@ func TestWizardProfileDefaultCleanPrechecksBulldocsAndTasks(t *testing.T) {
 // default and the plan carries Profile=demo (Plugins nil = all bundled).
 func TestWizardProfileDemoKeepsAllPlugins(t *testing.T) {
 	m := newWizardModel(nil)
-	m = drive(m, "down", "enter", "enter", "down", "enter") // profile: down → Demo
+	m = drive(m, "down", "down", "enter", "enter", "down", "enter") // local → profile: down → Demo
 
 	plan := m.plan()
 	if plan.Profile != ProfileDemo {
@@ -206,8 +207,8 @@ func TestWizardProfileDemoKeepsAllPlugins(t *testing.T) {
 // toggle survives even when the user navigates the profile stage afterwards.
 func TestWizardProfilePrecheckNeverOverridesTouchedPlugins(t *testing.T) {
 	m := newWizardModel(nil)
-	m = drive(m, "down", "enter", "enter", "enter") // land on plugins (clean precheck)
-	m = drive(m, "a")                               // user checks ALL — a deliberate touch
+	m = drive(m, "down", "down", "enter", "enter", "enter") // local → land on plugins (clean precheck)
+	m = drive(m, "a")                                       // user checks ALL — a deliberate touch
 	if !m.pluginsTouched {
 		t.Fatalf("toggling should mark pluginsTouched")
 	}
@@ -223,7 +224,7 @@ func TestWizardProfilePrecheckNeverOverridesTouchedPlugins(t *testing.T) {
 // line for a seeding target.
 func TestWizardConfirmShowsProfileLine(t *testing.T) {
 	m := newWizardModel(nil)
-	m = drive(m, "down", "enter", "enter", "enter", "enter") // through to confirm
+	m = drive(m, "down", "down", "enter", "enter", "enter", "enter") // local → through to confirm
 
 	if m.stage != stageConfirm {
 		t.Fatalf("expected confirm stage, got %d", m.stage)
