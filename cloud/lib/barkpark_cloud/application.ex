@@ -27,6 +27,11 @@ defmodule BarkparkCloud.Application do
         # challenge (mirrors Coolify's RateLimiter::for('two-factor')). Started
         # in every env — in test it's a singleton with reset/0 for determinism.
         BarkparkCloud.Accounts.TwoFactorRateLimiter,
+        # bp-login-ux: the ETS-backed rate limiter for the device-authorization
+        # login flow (poll 20/min, start 10/min per IP, approve 10/min per user).
+        # Same table-owning-GenServer shape as TwoFactorRateLimiter, its OWN table
+        # (key shapes differ). Started in every env with reset/0 for test determinism.
+        BarkparkCloud.DeviceAuth.RateLimiter,
         # azure-retail-pricing: an ETS-backed ~24h cache of Azure's global,
         # UNAUTHENTICATED Retail Prices sheet (no tenant, no credential), read to
         # stamp real monthly USD onto the neutral catalog's azure server types.
