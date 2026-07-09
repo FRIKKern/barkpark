@@ -313,11 +313,16 @@ func doInstanceList(out *writer, p cloud.CloudProvider, kind string) int {
 		out.outf("no instances on %s — create one with 'bp cloud instance create --provider %s --name <name>'", kind, kind)
 		return exitOK
 	}
+	// PROVIDER is the kind this list was resolved for — free identity the command
+	// already holds, painted through GenProviderMark (renderHzTable's header-driven
+	// chrome). Every row on one `bp cloud instance list` shares the same provider,
+	// so the column is a constant, but it makes a mixed-fleet operator's provider
+	// unambiguous and matches the control-plane fleet table's vocabulary.
 	table := make([][]string, 0, len(servers))
 	for _, s := range servers {
-		table = append(table, []string{hzCell(s.Name), hzCell(s.IP), hzCell(s.ID)})
+		table = append(table, []string{hzCell(kind), hzCell(s.Name), hzCell(s.IP), hzCell(s.ID)})
 	}
-	renderHzTable(out, []string{"NAME", "IPV4", "ID"}, table)
+	renderHzTable(out, []string{"PROVIDER", "NAME", "IPV4", "ID"}, table)
 	return exitOK
 }
 

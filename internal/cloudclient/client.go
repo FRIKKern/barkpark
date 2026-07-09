@@ -85,6 +85,12 @@ type Barkpark struct {
 	TeamID       string `json:"team_id"`
 	InsertedAt   string `json:"inserted_at"`
 
+	// Provider is the cloud the box runs on (hetzner/azure). The control plane
+	// stamps it on every row (migration default 'hetzner', Decision 9); it is
+	// IDENTITY only — the fleet table paints it through GenProviderMark, never as
+	// a status voice. Empty on a pre-migration row → the PROVIDER cell blanks.
+	Provider string `json:"provider"`
+
 	// Additive (charter decision 15) — the triage-status axes.
 	Suspended         bool   `json:"suspended"`
 	SuspendedReason   string `json:"suspended_reason"`
