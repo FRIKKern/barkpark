@@ -9,6 +9,7 @@ package taskboard
 // fixed clock; reuses render_test.go's -update flag.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -343,6 +344,116 @@ func TestFreeScrollUpSettlesAtTop(t *testing.T) {
 	}
 	if strings.Contains(ansi.Strip(Compose(m)), "↑ more above") {
 		t.Error("settled viewport still reports content above the top")
+	}
+}
+
+// ── Reading viewport clamp matches the paint (off-by-one guard) ──────────────
+
+// longBodyFixture is the compose fixture with the subject task's detail padded to
+// a body far taller than any tested pane, so the reading window is always full
+// and the free-scroll clamp is genuinely exercised.
+func longBodyFixture() Model {
+	m := composeFixture()
+	d := m.details[composeSubjectID]
+	var b strings.Builder
+	b.WriteString(d.Description)
+	b.WriteString("\n\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "- body line %02d marks a distinct paragraph in the reading frame\n", i)
+	}
+	d.Description = b.String()
+	m.details[composeSubjectID] = d
+	return m
+}
+
+// paintedBodyWindow counts the reading-window lines Compose ACTUALLY painted for a
+// pushed frame — the ground truth readingViewportHeight() must equal. Compose
+// prepends one blank row and composeAt reserves the breadcrumb in both modes plus
+// the footer in narrow, so the window is total lines minus that chrome. Measuring
+// the real paint (not re-deriving the formula) is what makes this a regression
+// guard: change composeAt's reserved chrome and this count moves with it.
+func paintedBodyWindow(t *testing.T, m Model) int {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(Compose(m)), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("compose produced too few lines to hold a window: %d", len(lines))
+	}
+	if m.wide {
+		return len(lines) - 2 // leading blank + spanning breadcrumb
+	}
+	return len(lines) - 3 // leading blank + breadcrumb + footer
+}
+
+// readingViewportHeight() must equal the body-window Compose paints, at EVERY
+// height in both modes — the helper fed Compose height while the paint runs at
+// composeAt's height-1 (the leading blank row), so a naive split under-clamped
+// free-scroll by one and hid the last body line under a stuck ↓-more marker.
+func TestReadingViewportHeightMatchesPaint(t *testing.T) {
+	withChrome(t)
+	for _, wide := range []bool{false, true} {
+		for h := 8; h <= 30; h++ {
+			m := longBodyFixture()
+			m.wide = wide
+			if wide {
+				m.width = 120 // above the two-pane threshold
+			} else {
+				m.width = 80
+			}
+			m.height = h
+			(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+			want := paintedBodyWindow(t, m)
+			if got := m.readingViewportHeight(); got != want {
+				t.Errorf("wide=%v h=%d: readingViewportHeight()=%d but Compose painted %d body-window lines",
+					wide, h, got, want)
+			}
+		}
+	}
+}
+
+// Free-scrolling to the clamp on a long body must land on the LAST body line with
+// NO ↓-more marker — proving the clamp reaches bottom (the off-by-one under-scroll
+// left the final line hidden). Both modes.
+func TestFreeScrollReachesLastBodyLine(t *testing.T) {
+	withChrome(t)
+	for _, wide := range []bool{false, true} {
+		m := longBodyFixture()
+		m.wide = wide
+		if wide {
+			m.width = 120
+		} else {
+			m.width = 80
+		}
+		m.height = 20
+		(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+
+		body, _ := m.frameContent(m.topFrame(), m.readingWidth(), m.now())
+		avail := m.readingViewportHeight()
+		if len(body) <= avail {
+			t.Fatalf("wide=%v: fixture must overflow the pane (body %d <= avail %d)", wide, len(body), avail)
+		}
+		// Scroll down past the end; the clamp must settle exactly at the bottom
+		// window (top = len(body)-avail), not one short of it.
+		for i := 0; i < len(body); i++ {
+			(&m).freeScroll(1)
+		}
+		if got, wantTop := m.topFrame().Scroll, len(body)-avail; got != wantTop {
+			t.Errorf("wide=%v: scroll clamp settled at %d, want the bottom window %d", wide, got, wantTop)
+		}
+		frame := ansi.Strip(Compose(m))
+		if strings.Contains(frame, "more below") {
+			t.Errorf("wide=%v: ↓-more marker still shown after scrolling to the bottom:\n%s", wide, frame)
+		}
+		// The last non-blank body line is on screen.
+		lastIdx := len(body) - 1
+		for lastIdx >= 0 && strings.TrimSpace(ansi.Strip(body[lastIdx])) == "" {
+			lastIdx--
+		}
+		if lastIdx >= 0 {
+			last := strings.TrimSpace(ansi.Strip(body[lastIdx]))
+			if last != "" && !strings.Contains(frame, last) {
+				t.Errorf("wide=%v: last body line %q not painted at the bottom:\n%s", wide, last, frame)
+			}
+		}
 	}
 }
 
