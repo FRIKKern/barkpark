@@ -652,6 +652,152 @@ quality."
   interrupted one shows "interrupted" (D45 teardown), never a fake spinner.
   All chrome via emitted tokens; studio-literal-check passes.
 
+### Wave-9 decisions (2026-07-09, decided from explorer ground truth — mission control)
+
+- **D47 — Agents rail: task_id-keyed, one new jsonb column, EXTEND the D45
+  clauses.** `system/background_tasks_changed` is a task_id-keyed SNAPSHOT
+  carrying NO tool_use_id (t3-patterns:147-149 is the spec of record), so the
+  rail keys on `task_id` — the spawn-row `merge_tool_metadata` route is
+  DISQUALIFIED (matches on tool_use_id, cannot express snapshot drain) and a
+  `role:"rail"` message row is DISQUALIFIED (occupies a transcript seq).
+  Persistence = NEW jsonb column `chat_sessions.rail_snapshot`, map
+  `%{task_id => %{"row" => %{task_type, description}, "workflow" => tree,
+  "status" => "running"|"completed"|"interrupted", "usage" => last-known
+  totals}}`, updated in place (migration sibling of model_choice's).
+  Recorder: `rail_snapshot` lives in `new_state` as SESSION-LIFETIME state
+  (exactly like task_index — NEVER inside the per-turn init reset,
+  recorder.ex:237-241). New `background_tasks_changed` clause ABOVE the
+  catch-all (recorder.ex:331): replace the live row set; a task_id that
+  vanished from the wire snapshot flips its persisted entry to a terminal
+  status ("completed" unless already terminal) — entries are never deleted,
+  so replay shows the last-known rail. The EXISTING `task_progress` clause
+  (recorder.ex:304-311) GROWS rail capture of `ev["workflow_progress"]`
+  (first-match dispatch — a second clause would never fire); task_updated/
+  task_notification stamp entry status when the task_id has a rail entry.
+  Change-only law (both files, ONE shared signature fn): structural signature
+  = the workflow tree with token/usage fields stripped (phase titles + agent
+  labels + models + states) — structural/state change ⇒ persist + re-render;
+  token-only tick ⇒ Recorder skips the Repo.update, ChatLive throttles the
+  assign (D46 value-equality + wave-5 change-only precedents; reuse ONE
+  computation for the agent block and the rail or they diverge). ChatLive:
+  new clauses above ITS catch-all (chat_live.ex:1145) — that catch-all
+  silently dropping these frames is exactly why the user saw no agents.
+  Render: a NEW rail region directly below the composer, Claude-Code-TUI
+  style — one row per live snapshot task (`task_type` glyph + description),
+  workflow rows expand (per-tab `rail_expanded` map, agent_expanded
+  precedent) into the phase→agent tree: state glyph breathing while running
+  (D46 pattern), model, token counts. Replay: hydrate the rail from
+  `rail_snapshot`; `interrupt_running_tasks/1` (studio_chat.ex:672) EXTENDS
+  its contract to also flip rail entries `"running"` → `"interrupted"` in the
+  same call — a reopened session never shows a fake live rail. Rail rows and
+  D45/D46 transcript spawn rows are intentionally DISTINCT surfaces (mission
+  control vs history) — no dedup. Bloat guard: persist the structural tree +
+  last-known totals only (never per-frame usage churn), cap 20 entries
+  (prune oldest terminal).
+- **D48 — Settings: real modes, ceremonial bypass, effort as model's twin.**
+  (a) Both `@modes` constants (claude_chat.ex:36, session.ex:27) become the
+  REAL six: `plan acceptEdits auto dontAsk manual bypassPermissions`.
+  Audit verdict (probed, v2.1.205): `--permission-mode default` is
+  SILENTLY ACCEPTED and echoed back — a correctness alignment, not a crash
+  fix. Legacy handling: NO data migration, NO read-time rewrite — a stored
+  `"default"` keeps spawning verbatim (proven safe); the footer select
+  renders one extra `<option value="default">ask (legacy)</option>` ONLY
+  while the current session carries it, so the select never renders
+  unselected; the `/default` builtin is DELETED (mode_label learns the six).
+  The "invalid mode" test (studio_chat_test.exs:309-315) and
+  claude_chat_test.exs:92/149 default-argv pins are REWRITTEN with the list
+  (use a genuinely-invalid string like "yolo").
+  (b) bypassPermissions fail-closed law: `normalize_mode/1` KEEPS mapping
+  `"bypassPermissions"` → `"plan"` (claude_chat_test.exs:97 stands and now
+  encodes the law — an untrusted string can never fail open into bypass).
+  The ONLY road to bypass: the footer pick opens an inline arm panel
+  (--danger tokens, loud) requiring type-to-confirm ("bypass") + an explicit
+  Arm button (net-new UX; data-confirm is not enough); the arm handler
+  persists mode via `set_mode` (whose validate_inclusion now admits it).
+  Spawn threading: `session_opts` gains `bypass_armed: boolean`, set by
+  ChatLive ONLY from the persisted session row (never a raw event param);
+  build_args resolves `mode == "bypassPermissions" and bypass_armed` ⇒ emit
+  `--permission-mode bypassPermissions --allow-dangerously-skip-permissions`
+  (both flags — lead-probed requirement); otherwise the mode goes through
+  normalize_mode as today. NO live steer into bypass: an armed pick
+  mid-session persists + honest "applies from the next resume" line (the
+  running process lacks the allow flag). Non-bypass picks keep D12/D17 live
+  set_permission_mode steering.
+  (c) Effort clones model_choice across all seven sites: migration
+  `add :effort_choice, :string`; session field; `set_effort_choice/2` +
+  `recent_effort_choice/0` (dedicated query — never list_sessions, D36d
+  vacuous-green); `effort_args(%{effort: e})` ⇒ `["--effort", e]` appended
+  in build_args (allowlist `low medium high xhigh max`, fail-closed to nil =
+  omit the flag; D9 pure-unit + :binary argv-echo proofs); recorder
+  session_opts gains `effort:`; ChatLive mount/reopen/new-chat seeds mirror
+  model_choice. UI: an effort select as a sibling
+  `<form phx-change="set-effort">` in the composer-footer left cluster,
+  composed visually with the model select as one "Fable · high" group
+  (model_label + new effort_label). Mid-session effort change: persist +
+  honest "effort applies from the next resume" system line — NO set_effort
+  control verb exists (grep-proven; the four control subtypes are closed).
+- **D49 — Plans as papers: server-side projection, deterministic slug,
+  request_id-keyed metadata merge.** New thin seam module
+  `Barkpark.StudioChat.PlanPapers`: `publish(session_id, request_id,
+  plan_markdown)` = `FromMarkdown.blocks/1` → `Content.upsert_paper(%{"slug"
+  => slug, "blocks" => blocks, "style" => "article", "dataset" =>
+  "production"})` — SCOPE-LESS (resolve_write_scope([]) lands the seeded
+  Default workspace, the same tenant `/papers/:slug` reads; upsert publishes
+  unconditionally, block_ops.ex:209) — no HTTP, no ingest token. Slug is
+  DETERMINISTIC: `"chat-plan-" <> first 12 hex of sha256(session_id <>
+  request_id)` — upsert's {dataset, slug} keying makes re-approve
+  idempotent by construction. paper_id == slug; paper_url =
+  `"/papers/#{slug}"`. THE gap the explorers found: no request_id-keyed
+  metadata merge exists (merge_tool_metadata keys on tool_use_id which plan
+  rows lack; update_approval_status writes approval_status only) — add
+  `StudioChat.merge_approval_metadata(session_id, request_id, patch)`
+  reusing `find_approval/2` (already role-inclusive of "plan") +
+  `Map.merge` + `Repo.update`. Hook: inside `resolve_permission`
+  (chat_live.ex:3143), gated `role == :plan` AND decision == allow, AFTER
+  the allow hits the wire: `Task.start` fire-and-forget — publish → merge
+  `%{"paper_id" => id, "paper_url" => url}` onto the plan row → broadcast
+  `{:plan_paper, request_id, %{...}}` on `studio_chat:<id>` (all tabs
+  converge; the Task never touches the socket). Failure honesty: a publish
+  failure broadcasts `{:plan_paper_failed, request_id}` → live-only honest
+  system line; the approve NEVER fails or blocks. Create on APPROVE only
+  (keep-planning plans stay chat ephemera). Render: the plan card's
+  TERMINAL branch (chat_live.ex:1492-1498) gains a quiet "→ published as
+  Paper" link off `@message.paper_url`; replay: `build_plan_message` +
+  the role-"plan" replay clause carry paper_id/paper_url from metadata —
+  the link survives reopen forever. D7 stands: the markdown in metadata is
+  the source; the Paper is a projection.
+- **D50 — Gutter matrix: one flush-text helper, honest margin ceiling,
+  fixture-driven rows.** The three shipped bugs (#1844 pre-wrap template
+  whitespace, #1849 first-block margin, tool-row wrap) share one blind
+  spot: nothing asserts rendered-HTML geometry — both existing regression
+  tests are string-presence proxies (#1849 would pass with zero matching
+  elements; #1844's assertion actually fires on the setup's user row).
+  Build: (i) a tiny stable hook — `data-gutter-text` attribute added to
+  each gutter text node in message_body/agent_block/live-chrome
+  (ATTRIBUTE-ONLY edits; the :plan branch is covered via its existing
+  `.bp-chat-md` class — S3 owns that region); (ii) ONE generic helper
+  `assert_flush_gutter_text/1..2` over the raw render(view) string: for
+  every data-gutter-text carrier, refute `~r/>\s*\n/` immediately after the
+  opening tag (the defect lives in the SERIALIZED bytes — raw regex is MORE
+  faithful than a normalizing parser), plus a LazyHTML structural check
+  (lazy_html is already the LV 1.1.28 test parser; Floki is NOT a dep —
+  never add it) that `.bp-paper-surface.bp-chat-md > :first-child` exists
+  and is a block element the margin rule targets. HONEST CEILING accepted:
+  computed margin-top is unobservable without a browser (stylesheet rule +
+  static HTML) — the margin half is rule-presence + structural assertion,
+  documented as such; NO headless-browser harness this wave. Matrix = row
+  type × the shapes that row actually renders (never a forced cartesian):
+  ❯ user (plain/multiline/wrapped/long-word), ● assistant paper-html
+  (heading-first/paragraph/multiline), ● tool + ⎿ output (long label wrap,
+  multiline pre), ✻ thinking, todo card, agent block (header + running
+  line + report), plan card body, queued badge row — all driven by
+  enable_fake_chat + send_frame fixtures through the REAL Recorder
+  (chat_live_test.exs:55/131 machinery). OUT of scope: #1831 (morphdom
+  class, not geometry), the assistant plain-fallback cell (unreachable
+  without a render crash), streaming delta chrome (stretch only). Bugs
+  found are filed as fixes in the owning slice's region or tiny standalone
+  commits — never template rewrites inside this slice.
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -873,15 +1019,113 @@ integration: #1831 (`phx-update="ignore"` on #chat-slash-menu) and #1844
 (pre-wrap tight text nodes + tool-row hanging indent) — their regression
 tests must stay green untouched.
 
+## Wave 9 plan (decided 2026-07-09) — "mission control"
+
+Waves 1–8 built the cockpit; wave 9 makes it mission control: you LAUNCH and
+WATCH multi-agent work from the chat (the rail), the settings stop lying
+(real modes, ceremonial bypass, effort), approved plans graduate into real
+Papers, and the alignment-bug class dies under a rendered-HTML matrix. Four
+slices, buildable in parallel; the rail gets the strongest builder.
+
+| # | Slice (bp task) | Owns | Migration |
+|---|---|---|---|
+| S1 | `scc-w9-agents-rail` | rail region below the composer + Recorder background_tasks_changed/workflow_progress capture + `rail_snapshot` persistence + replay hydration + interrupt flip (D47) | `rail_snapshot` jsonb |
+| S2 | `scc-w9-settings-surface` | real six-mode list + legacy-default handling + bypass arm ceremony + `bypass_armed` threading + effort_choice end-to-end + composer-footer model·effort group (D48) | `effort_choice` string |
+| S3 | `scc-w9-plan-papers` | `PlanPapers` seam module + `merge_approval_metadata/3` + resolve_permission :plan hook + plan-card link + replay (D49) | none |
+| S4 | `scc-w9-gutter-matrix` | rendered-HTML geometry matrix + flush-text helper + `data-gutter-text` attribute-only hooks (D50) | none |
+
+Region contract (chat_live.ex is hot — FOUR-way split): **S1 owns** a NEW
+rail region directly below the composer block, its new handle_info clauses
+above the catch-all (~1245 after #1863/#1878 drift), rail replay hydration, recorder.ex task-clause
+extensions + the new background_tasks_changed clause, and the rail side of
+studio_chat.ex (`rail_snapshot` persistence fns + the interrupt_running_tasks
+extension). **S2 owns** the composer-footer form cluster (~2138-2218), the
+arm-panel UI, mode/effort labels, claude_chat.ex (@modes, normalize_mode,
+build_args, effort_args, session_opts), session.ex (@modes + effort_choice
+field), studio_chat.ex set_mode/set_effort_choice/recent_effort_choice, and
+the recorder session_opts line (~110-119, one-key addition — lead reconciles
+with S1's recorder work). **S3 owns** the `:plan` template branch + plan
+replay clause + resolve_permission's :plan hook + the new PlanPapers module +
+`merge_approval_metadata/3` in studio_chat.ex (disjoint function from S1/S2's
+studio_chat regions). **S4 owns** tests + attribute-only `data-gutter-text`
+additions to message_body/agent_block/live-chrome text nodes — NOT the :plan
+branch (S3), NOT the composer footer (S2), NOT the rail (S1). Builders build
+against main in isolated worktrees; the lead integrates S1 → S2 → S3 → S4 and
+reconciles the recorder.ex and studio_chat.ex touch points.
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
-  (worktree recipe: `ln -sfn $MAIN/api/deps deps && cp -R $MAIN/api/_build/test _build/test` — verified working in the gui-premium epic)
+  (worktree recipe: `ln -sfn $MAIN/api/deps deps && mkdir -p _build && cp -R $MAIN/api/_build/test _build/test` — verified working in the gui-premium epic; the `mkdir -p _build` is REQUIRED on a fresh worktree or the cp dies)
+- Wave-9 pinned five-file chat suite (374 tests, 0 failures baseline on main 1da4ea5d, 3 seeds 37/74/111):
+  `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/studio_chat_test.exs test/barkpark/studio_chat/recorder_test.exs test/barkpark/studio_chat/titles_test.exs`
 - Studio chrome: `bash scripts/studio-literal-check.sh` (no color literals)
 - Real-binary E2E harnesses exist in the session scratchpad (not committed) —
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+- **2026-07-09 wave 9 CRASH RECOVERY** (host crash ~18:20 killed all four
+  epic-builder processes; the bp ledger survived intact): this is a
+  RESURRECTION, not a re-decision — D47–D50, the four-way region contract and
+  the S1→S2→S3→S4 integration order all stand; the four published briefs were
+  re-perfected in place (append-only amendments, re-published), NOT re-filed.
+  What the recovery established: (1) all four tasks still `in_progress` at
+  epoch 1 under the dead `epic-builder-w9-s*` workers — builders re-claim with
+  the EXACT worker string from `claim.worker` (same-worker renewal passes the
+  fence, bumps the epoch; read the new epoch from `doc.claim.epoch`, never
+  hard-code 2); because the briefs were amended AFTER the original claims, the
+  digest close-fence WILL 409 `doc_changed_since_claim` — resolve per the verb
+  contract: re-read, close with `--set observed_rev=<rev>`. (2) The lone
+  recoverable debris is S3's: rescue branch `rescue/scc-w9-plan-papers-partial`
+  (ceb06778, parented on main HEAD 1da4ea5d) carries a faithful-to-D49
+  `plan_papers.ex` + `StudioChat.merge_approval_metadata/3` + one alias line —
+  ADOPTED as S3's starting commit (builder branches a fresh worktree FROM
+  ceb06778; the rescue branch itself sits in a locked worktree and cannot be
+  checked out twice); remaining S3 work = the resolve_permission :plan hook,
+  {:plan_paper,…} broadcast/handle_info, card link, replay threading, and the
+  ENTIRE test suite (branch has zero tests, was never compiled). S1/S2/S4 left
+  zero debris — clean starts from main. (3) Anchor drift under
+  #1863/#1868/#1878/#1849 corrected in the briefs: chat_live handle_info
+  catch-all 1145→1245 (the dangerous one), recorder merge_tool_metadata
+  494-499→def studio_chat.ex:469 + call recorder.ex:650-651, task_index
+  helpers →662-683, agent_expanded is a DOUBLED reset site (2533 AND 2607),
+  build_args →104, S4's gutter region extends to 1631 (the #1849 first-child
+  CSS rule lives at 1629-1631), chat suite path gains the `/studio/` segment.
+  (4) Gate pinned: the wave-9 five-file suite (chat_live + claude_chat +
+  studio_chat + recorder + titles) = 374 tests, 0 failures baseline proven on
+  main in a throwaway worktree; recipe needs `mkdir -p _build`; 3 seeds
+  37/74/111; studio-literal-check + warnings-as-errors unchanged. No w9
+  fragment pre-landed on main (rail_snapshot / effort_choice / bypass_armed /
+  PlanPapers / data-gutter-text all grep-clean) — every slice is genuinely
+  unbuilt.
+
+- **2026-07-09 wave 9 DECIDED** (post-merge of waves 1–8 + hotfixes #1831
+  #1844 #1849 #1863): four slices filed as scc-w9-agents-rail /
+  scc-w9-settings-surface / scc-w9-plan-papers / scc-w9-gutter-matrix under
+  epic `studio-claude-chat` (D47–D50 above). Explorer corrections folded in:
+  (1) the rail keys on `task_id`, NOT the D45 tool_use_id spawn row —
+  background_tasks_changed carries no tool_use_id and is a snapshot; persist
+  = new `chat_sessions.rail_snapshot` jsonb (merge-onto-spawn-row and
+  role:"rail" message both provably wrong); (2) `--permission-mode default`
+  is SILENTLY ACCEPTED by the real binary (echoed verbatim) — settings is an
+  alignment, not a panic fix; no data migration, legacy option renders only
+  while carried; (3) two tests INVERT when the mode list grows
+  (studio_chat_test.exs:309-315 uses bypassPermissions as its invalid
+  example; claude_chat_test.exs:97 pins normalize_mode fail-closed — the
+  latter STAYS as law, bypass arming lives OUTSIDE normalize_mode via
+  session_opts.bypass_armed read from the persisted row only); (4) no
+  set_effort control verb exists — effort is spawn-time `--effort`,
+  mid-session change honestly says next-resume; (5) plans-as-papers is small
+  but needs ONE new seam: a request_id-keyed metadata merge
+  (merge_tool_metadata and update_approval_status both provably don't fit);
+  upsert_paper publishes unconditionally into the same Default tenant
+  /papers/:slug reads — deterministic sha-slug makes re-approve idempotent;
+  (6) the first-block-margin half of the QA helper is UNOBSERVABLE from
+  render(view) (stylesheet rule, no CSSOM) — scoped honestly to
+  rule-presence + structural first-child; the flush-text half asserts raw
+  serialized bytes; a tiny data-gutter-text hook is the one markup edit the
+  tests-only slice may make.
 
 - **2026-07-09 wave 8 DECIDED** (post-merge of waves 1–7 + hotfixes #1831
   #1844): three slices filed as scc-w8-composer / scc-w8-agent-lifecycle /
@@ -904,6 +1148,46 @@ tests must stay green untouched.
   ships WITH the lifecycle slice or crashed sessions replay fake spinners;
   (8) grouping must key on parent_tool_use_id ID MATCH — parallel spawns'
   children interleave in seq order, consecutive chunking misattributes.
+
+### Wave 2026-07-09 (wave 9 BUILT + REVIEWED — mission control, crash-recovery rebuild)
+
+All four resurrected slices rebuilt green and reviewed at the Kinsta/Vercel
+bar; nothing stalled. Reviewer fixes, in place: **S2** (a) the two builders
+had filed migrations under the SAME version `20260709210000` (rail_snapshot
+vs effort_choice — Ecto rejects duplicate versions on a fresh DB; the shared
+test DB masked it) — effort_choice renumbered to `20260709211000` on the
+`-r` branch and proven to apply cleanly; (b) the bypass arm panel's form had
+`phx-change` but no `phx-submit`, so Enter in the confirm input fell through
+to a NATIVE form submit (navigates the LiveView away) — `phx-submit` added
+riding the same server-side exact-word guard, protective test added. **S3**:
+a RAISE inside `PlanPapers.publish` crashed the fire-and-forget Task
+silently and the promised `{:plan_paper_failed}` honest line never appeared —
+rescue scoped to the publish call only (a raise after a successful publish
+can never lie). S1/S4 needed no fixes. Ledger: S2's criterion-4 evidence
+re-stamped with the renumbered migration; all four tasks verified
+`in_progress` at epoch 2 under the exact resurrected worker names, 7/8
+(S4: 6/7) criteria met with evidence, only "PR merged" open for the lead.
+Integration DRY-RUN onto origin/main (6d075683) in S1 → S2-r → S3-r → S4-r
+order: ONE trivial conflict (S1's `interrupt_rail_entries` and S3's
+`merge_approval_metadata` both insert before `find_approval` in
+studio_chat.ex — resolution: keep both); combined six-file suite on the
+integrated state **453 tests, 0 failures** across seeds 37/74/111,
+`--warnings-as-errors` clean, studio-literal-check PASS. Merge the **`-r`
+branches for S2/S3**, the **originals for S1/S4**. This charter copy rides
+the S2 `-r` branch (the wave-9 recovery + decide entries were still
+uncommitted in the main checkout — wave-8 precedent). Known honest ceilings
+for the NEXT wave (builder-flagged, none blocking): the `workflow_progress`
+wire shape is built to the t3-patterns FLAT-list spec but UNPROVEN on a real
+binary (a nested `children` tree would neither render nor trip the
+change-only guard); the D34 post-plan `permissionMode: "default"` assumption
+is unverified against the six-mode CLI; `--effort` acceptance is
+allowlist-proven but not binary-proven; a reopened armed-bypass session
+re-arms on the next spawn with no re-ceremony (persisted mode IS the arming
+record — deliberate, worth a product look); rail token counts lag until the
+next structural change (per D47); a `background_tasks_changed` snapshot also
+flips rail entries that only ever arrived via `task_progress` (e.g. a
+foreground workflow) to "completed" — spec-ambiguous, revisit with real wire
+capture; recorder_test idle-reaper flake filed as task-c0cbe467eb44c161.
 
 ### Wave 2026-07-09 (wave 8 BUILT + REVIEWED — cockpit and crew)
 
