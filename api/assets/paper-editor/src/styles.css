@@ -29,17 +29,6 @@
  * run `scripts/paper-editor-mirror-check.sh --write`. */
 /* BEGIN GENERATED: paper-surface (from api/assets/paper-surface/paper-surface.css — do not edit by hand; run scripts/paper-editor-mirror-check.sh --write) */
 :root, :host {
-  --paper-bg: #f6faf9;
-  --paper-bg-deep: #eaf1ee;
-  --paper-ink: #15211d;
-  --paper-ink-soft: #55635e;
-  --paper-ink-faint: #82918b;
-  --paper-rule: rgba(21, 33, 29, 0.09);
-  --paper-edit-hover: rgba(21, 33, 29, 0.08);
-  --paper-accent: #1e5347;
-  --paper-accent-soft: rgba(30, 83, 71, 0.10);
-  --paper-chrome-bg: #f6faf9;
-  --paper-chrome-border: rgba(21, 33, 29, 0.12);
   --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
   --paper-font-mono: ui-monospace, Menlo, monospace;
   --bp-tone-info-bg: #e9eff7;
@@ -86,6 +75,17 @@
   --st-ok: #0d9488;
   --st-warn: #d97706;
   --st-danger: #dc2626;
+  --paper-bg: #f6faf9;
+  --paper-bg-deep: #eaf1ee;
+  --paper-ink: #15211d;
+  --paper-ink-soft: #55635e;
+  --paper-ink-faint: #82918b;
+  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent: #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg: #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
   --tok-reading-body-size: 18px;
@@ -112,17 +112,6 @@
 }
 
 :root[data-theme="dark"], :host([data-theme="dark"]) {
-  --paper-bg: #0e1614;
-  --paper-bg-deep: #131d19;
-  --paper-ink: #e7ede9;
-  --paper-ink-soft: #9aaaa3;
-  --paper-ink-faint: #6c7a74;
-  --paper-rule: rgba(231, 237, 233, 0.10);
-  --paper-edit-hover: rgba(231, 237, 233, 0.09);
-  --paper-accent: #45b394;
-  --paper-accent-soft: rgba(70, 179, 148, 0.16);
-  --paper-chrome-bg: #131d19;
-  --paper-chrome-border: rgba(231, 237, 233, 0.13);
   --bp-tone-info-bg: #172032;
   --bp-tone-info-fg: #9db8ff;
   --bp-tone-success-bg: #12241c;
@@ -137,6 +126,17 @@
   --st-ok: #2dd4bf;
   --st-warn: #fbbf24;
   --st-danger: #f87171;
+  --paper-bg: #0e1614;
+  --paper-bg-deep: #131d19;
+  --paper-ink: #e7ede9;
+  --paper-ink-soft: #9aaaa3;
+  --paper-ink-faint: #6c7a74;
+  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent: #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg: #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
   --ok-hsl: 142 52% 52%;
   --warn-hsl: 38 94% 56%;
   --danger-hsl: 0 82% 66%;

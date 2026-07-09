@@ -44,6 +44,13 @@ export const instRoleChannels = (role) =>
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
 // ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
 export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
+// Paper reading-surface `--paper-*` color roles, in emission order. Sourced from
+// color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
+// for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
+export const PAPER_ROLES = [
+  "bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule",
+  "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border",
+];
 
 const softAlpha = tokens.color._convention.softAlpha;   // { light, dark }
 const strongAlpha = tokens.color._convention.strongAlpha; // { light, dark, _note }
@@ -163,6 +170,15 @@ function cloudBlock() {
 // glyph-tone classes (.bp-lg--<state>) that give the CSS/GUI half of the §6
 // cross-surface parity assertion its hues. Additive (.bp-lg-- is a fresh, un-
 // consumed class set; the hand-authored .bp-g-- ladder is untouched).
+// The `--paper-*` reading-surface theme colours for ONE theme (color.paper.surface,
+// VERBATIM). Emitted on the html[data-theme=…] + bare-fallback token scopes — the
+// same three-way structure the hand region used (attr blocks win over the light
+// fallback so a pre-paint no-data-theme load still gets the light bp theme).
+function paperColorVars(theme, indent) {
+  const s = tokens.color.paper.surface;
+  return PAPER_ROLES.map((role) => indent + `--paper-${role}: ${s[role][theme]};`).join("\n");
+}
+
 function paperBlock() {
   const r = tokens.type.reading;
   const readingVars = [
@@ -182,6 +198,22 @@ function paperBlock() {
     LIFE_ORDER.map((s) => `.bp-lg--${s} { color: ${tokens.lifecycle[s].color[theme]}; }`).join("\n");
 
   return [
+    "/* ── `--paper-*` reading-surface theme tokens (color.paper.surface — relocated",
+    "   from the hand region into this GENERATED block; Barkpark aesthetic-unification:",
+    "   cool near-white ground, evergreen accent, replacing the legacy warm parchment).",
+    "   Scoped to .bp-paper-surface; the html[data-theme] blocks win over the light",
+    "   fallback so a pre-paint no-data-theme load still gets the light bp theme. */",
+    'html[data-theme="light"] .bp-paper-surface,',
+    'html[data-theme="light"] .bp-paper-body {',
+    paperColorVars("light", "  "),
+    "}",
+    'html[data-theme="dark"] .bp-paper-surface,',
+    'html[data-theme="dark"] .bp-paper-body {',
+    paperColorVars("dark", "  "),
+    "}",
+    ".bp-paper-surface, .bp-paper-body {",
+    paperColorVars("light", "  "),
+    "}",
     ".bp-paper-surface, .bp-paper-body {",
     readingVars,
     statusVars("light", "  "),
@@ -833,6 +865,115 @@ function sheetsBlock() {
   ].join("\n");
 }
 
+// ── surface: /papers reader skin (api/lib/barkpark_web/layouts/bulldocs.html.heex)
+// The reader article's `--paper-*` skin overrides (color.paper.reader) PLUS the
+// mail-client popup chrome (color.mailChrome, the ONLY --mail-* copy, relocated
+// into this one marker region). The reader theme-swaps via prefers-color-scheme
+// (it NEVER stamps data-theme), and DELIBERATELY diverges from the shared
+// paper-surface skin on --paper-rule (solid vs rgba) — never collapsed onto the
+// shared tokens this wave (charter D4). The load-bearing rationale comments are
+// emitted VERBATIM so `emit --write` preserves them; the callout --bp-tone-*
+// re-stamps stay verbatim literals (they become the paperCallout family in ts-w2).
+// Indented 4 spaces to sit inside the reader <style>; the marker block is CSS
+// comments, invisible to the browser.
+function bulldocsBlock() {
+  const rl = tokens.color.paper.reader.light;
+  const rd = tokens.color.paper.reader.dark;
+  const mc = tokens.color.mailChrome;
+  return [
+    "    /* Article chrome — applied only when BulldocsLive marks the doc as",
+    "       `content[\"style\"] == \"article\"` (the LiveView stamps the",
+    "       `.bp-paper-article` class on its <main>). Cool bp-theme page, a",
+    "       centered ~720px reading column (incl. padding), serif base — so the",
+    "       inline-styled article blocks sit on a proper page, not bare white",
+    "       full-width. Non-article papers keep the dark chrome above, untouched.",
+    "",
+    "       READER SKIN: token overrides layered over the canonical paper-surface",
+    "       source (embedded above). These `--paper-*` values are the historical",
+    "       bp-theme reader look. They are set on the <body> AND on the reader",
+    "       <main> (`.bp-paper-shell.bp-paper-article`, which now also carries",
+    "       `bp-paper-surface`) so they WIN over the shared source's fallback",
+    "       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline",
+    "       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on",
+    "       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,",
+    "       etc.). Dark-mode note: the shared source keys dark on",
+    "       `html[data-theme=\"dark\"]`, which the reader NEVER stamps — so the shared",
+    "       dark tokens never match here, and the `prefers-color-scheme: dark` block",
+    "       below (also carried onto <main>) is what owns reader dark mode, flipping",
+    "       the palette to cool bp-dark with light ink so the inline `var(--paper-*)`",
+    "       HTML stays readable. Without the <main>-scoped override the shared light",
+    "       fallback would paint dark ink on the browser's dark theme — the",
+    "       visibility bug. */",
+    "    body:has(.bp-paper-article),",
+    "    body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {",
+    `      --paper-bg:         ${rl["bg"]};`,
+    `      --paper-bg-deep:    ${rl["bg-deep"]};`,
+    `      --paper-ink:        ${rl["ink"]};`,
+    `      --paper-ink-soft:   ${rl["ink-soft"]};`,
+    `      --paper-rule:       ${rl["rule"]};`,
+    `      --paper-accent:     ${rl["accent"]};`,
+    "      /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links",
+    "         read it). Light value matches the shared source's fallback; the dark",
+    "         block below MUST re-skin it — otherwise dark-mode link borders resolve",
+    "         to this light rgba and vanish against the dark page. */",
+    `      --paper-accent-soft: ${rl["accent-soft"]};`,
+    "    }",
+    "    body:has(.bp-paper-article) {",
+    "      background: var(--paper-bg-deep);",
+    "      color: var(--paper-ink);",
+    "      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;",
+    "    }",
+    "    @media (prefers-color-scheme: dark) {",
+    "      body:has(.bp-paper-article),",
+    "      body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {",
+    `        --paper-bg:         ${rd["bg"]};`,
+    `        --paper-bg-deep:    ${rd["bg-deep"]};`,
+    `        --paper-ink:        ${rd["ink"]};`,
+    `        --paper-ink-soft:   ${rd["ink-soft"]};`,
+    `        --paper-rule:       ${rd["rule"]};`,
+    `        --paper-accent:     ${rd["accent"]};`,
+    "        /* Warm-dark link border (same value as Studio's html[data-theme=dark]",
+    "           block in paper-surface.css) — without it links keep the light-theme",
+    "           rgba(162,57,37,0.10) border, invisible on the dark page. */",
+    `        --paper-accent-soft: ${rd["accent-soft"]};`,
+    "        /* Callout TONE tokens + faint ink + chrome — the SAME reason as the",
+    "           --paper-* above: paper-surface.css keys their DARK values on",
+    "           `html[data-theme=\"dark\"]`, which the reader NEVER stamps, so an",
+    "           OS-dark reader (prefers-color-scheme, no toggle) was left with the",
+    "           LIGHT callout tones (#eff6ff on a #131d19 page — a light box on the",
+    "           dark article). Re-skin them here, byte-mirroring the dark values in",
+    "           paper-surface.css's `html[data-theme=\"dark\"] .bp-paper-surface` block.",
+    "           Edit surfaces stamp data-theme and get those directly; this is the",
+    "           reader's prefers-color-scheme companion. */",
+    `        --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `        --paper-chrome-bg:    ${rd["chrome-bg"]};`,
+    `        --paper-chrome-border: ${rd["chrome-border"]};`,
+    "        --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;",
+    "        --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;",
+    "        --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;",
+    "        --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;",
+    "        --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;",
+    "      }",
+    "    }",
+    "    /* Mail-client popup chrome (color.mailChrome) — the --mail-* window skin",
+    "       for the Email view, relocated here (from #bp-mailapp) so the reader",
+    "       palette + the mail chrome are single-sourced in ONE marker region; the",
+    "       #bp-mailapp consumers stay below. Theme-aware like a real dark mail",
+    "       client showing a light HTML email; the served email bytes never change",
+    "       with the theme. */",
+    "    #bp-mailapp {",
+    `      --mail-paper: ${mc.paper.light}; --mail-bar: ${mc.bar.light}; --mail-rule: ${mc.rule.light};`,
+    `      --mail-ink: ${mc.ink.light}; --mail-soft: ${mc.soft.light}; --mail-accent: ${mc.accent.light};`,
+    "    }",
+    "    @media (prefers-color-scheme: dark) {",
+    "      #bp-mailapp {",
+    `        --mail-paper: ${mc.paper.dark}; --mail-bar: ${mc.bar.dark}; --mail-rule: ${mc.rule.dark};`,
+    `        --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
+    "      }",
+    "    }",
+  ].join("\n");
+}
+
 // ── artifact registry ────────────────────────────────────────────────────────
 // kind "css"             : splice content between the shared marker block.
 // kind "go"/"ts"/"elixir": the build() is the WHOLE file.
@@ -840,6 +981,7 @@ export const ARTIFACTS = [
   { name: "cloud SPA", path: "cloud/priv/static/app.css", kind: "css", build: cloudBlock },
   { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
   { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
+  { name: "/papers reader skin", path: "api/lib/barkpark_web/layouts/bulldocs.html.heex", kind: "css", build: bulldocsBlock },
   { name: "web demo", path: "web/app/globals.css", kind: "css", build: webBlock },
   { name: "web TS tokens", path: "web/lib/tokens.gen.ts", kind: "ts", build: webTokensTs },
   { name: "Go board", path: "internal/taskboard/tokens_gen.go", kind: "go", build: taskboardGo },
