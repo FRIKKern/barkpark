@@ -960,6 +960,147 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # Charter D25: images ride the turn — paste/drop into the composer, base64 on
+  # the wire, D6-clean data-URI replay. The paste/drop hook is JS (bp-chat-
+  # composer.js); the server half is exercised through LiveViewTest's
+  # file_input/render_upload, which drives the SAME allow_upload the hook feeds.
+  describe "image attachments (charter D25)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+
+      dir = Path.join(System.tmp_dir!(), "bp_chat_live_attach_#{System.unique_integer([:positive])}")
+      prev = Application.get_env(:barkpark, StudioChat)
+      Application.put_env(:barkpark, StudioChat, attachments_dir: dir)
+
+      on_exit(fn ->
+        File.rm_rf(dir)
+        if prev, do: Application.put_env(:barkpark, StudioChat, prev)
+      end)
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    test "the composer wires the paste/drop hook + a hidden file input", %{view: view} do
+      assert has_element?(view, "form#chat-composer-form[phx-hook=ChatComposer]")
+      assert has_element?(view, "input[type=file]")
+    end
+
+    test "an uploaded image lands an attachment chip with a remove button", %{view: view} do
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{name: "shot.png", content: "PNGBYTES", type: "image/png"}
+        ])
+
+      html = render_upload(avatar, "shot.png")
+      assert html =~ "shot.png"
+      assert has_element?(view, "button[phx-click=cancel_upload]")
+    end
+
+    test "an oversize image is rejected with an honest inline error", %{view: view} do
+      big = :binary.copy(<<7>>, 3_000_001)
+
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{name: "big.png", content: big, type: "image/png"}
+        ])
+
+      html =
+        case render_upload(avatar, "big.png") do
+          {:error, _} -> render(view)
+          rendered when is_binary(rendered) -> rendered
+        end
+
+      assert html =~ "larger than 3 MB"
+    end
+
+    test "sending an image stores a pointer (no base64 in the DB), renders inline, no /media route",
+         %{view: view} do
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{name: "pic.png", content: "PNGDATA", type: "image/png"}
+        ])
+
+      render_upload(avatar, "pic.png")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "look at this"})
+
+      # Live bubble inlines the image server-side as a data-URI — never /media.
+      assert html =~ "data:image/png;base64,#{Base.encode64("PNGDATA")}"
+      assert html =~ "look at this"
+      refute html =~ "/media/files"
+
+      sid = store_id(view)
+
+      user_msg =
+        sid |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+
+      assert [ptr] = user_msg.metadata["attachments"]
+      assert ptr["media_type"] == "image/png"
+      assert ptr["sha256"] == (:sha256 |> :crypto.hash("PNGDATA") |> Base.encode16(case: :lower))
+      assert ptr["byte_size"] == byte_size("PNGDATA")
+      # the jsonb pointer carries NO base64 / bytes
+      refute Map.has_key?(ptr, "data")
+      refute Map.has_key?(ptr, "bytes")
+    end
+
+    test "replay inlines the stored image as a data-URI, server-side (no route)", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+      {:ok, ptr} = StudioChat.store_attachment(id, "REPLAYBYTES", "image/png")
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "user",
+          source_markdown: "recall this",
+          metadata: %{"attachments" => [attachment_json(ptr)]}
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "data:image/png;base64,#{Base.encode64("REPLAYBYTES")}"
+      refute html =~ "/media/files"
+    end
+
+    test "a replayed image whose file is gone renders an honest placeholder, never crashes",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "user",
+          source_markdown: "was an image",
+          metadata: %{
+            "attachments" => [
+              %{
+                "path" => "#{id}/deadbeef",
+                "media_type" => "image/png",
+                "sha256" => "deadbeef",
+                "byte_size" => 3
+              }
+            ]
+          }
+        })
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "attachment missing"
+      refute html =~ "data:image/png;base64,"
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  defp attachment_json(ptr) do
+    %{
+      "path" => ptr.path,
+      "media_type" => ptr.media_type,
+      "sha256" => ptr.sha256,
+      "byte_size" => ptr.byte_size
+    }
+  end
+
   describe "sessions become a place (persistence + resume, S3)" do
     setup %{conn: conn} do
       enable_fake_chat()

@@ -219,10 +219,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     GenServer.cast(session, {:respond_permission, request_id, decision})
   end
 
-  @doc "Send a user turn to the session as a stream-json user message."
-  @spec send_message(pid(), String.t()) :: :ok
-  def send_message(session, text) when is_pid(session) and is_binary(text) do
-    GenServer.cast(session, {:send_user_message, text})
+  @doc """
+  Send a user turn to the session as a stream-json user message.
+
+  `content` is EITHER a plain `String.t()` (the text-only default shape) OR a
+  ready content-block list — `[%{"type" => "text", …}, %{"type" => "image",
+  "source" => %{"type" => "base64", "media_type" => …, "data" => …}}]` — so a
+  turn can carry pasted/dropped images alongside the text (charter D25, proven
+  on the real binary v2.1.205: a mixed text+image content list is accepted and
+  the model sees the image). A binary is wrapped into a single text block; a
+  list rides the user frame verbatim.
+  """
+  @spec send_message(pid(), String.t() | [map()]) :: :ok
+  def send_message(session, content)
+      when is_pid(session) and (is_binary(content) or is_list(content)) do
+    GenServer.cast(session, {:send_user_message, content})
   end
 
   @doc """
@@ -402,13 +413,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     @impl true
-    def handle_cast({:send_user_message, text}, state) do
+    def handle_cast({:send_user_message, content}, state) do
       line =
         Jason.encode!(%{
           "type" => "user",
           "message" => %{
             "role" => "user",
-            "content" => [%{"type" => "text", "text" => text}]
+            "content" => user_content_blocks(content)
           }
         }) <> "\n"
 
@@ -580,6 +591,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       send(state.sink, {:claude_chat_event, event})
       state
     end
+
+    # A plain string is the text-only default shape (wrap as ONE text block —
+    # unchanged w1–w2 behavior); a caller-assembled content-block list (text +
+    # base64 image blocks, charter D25) rides the user frame verbatim.
+    defp user_content_blocks(text) when is_binary(text),
+      do: [%{"type" => "text", "text" => text}]
+
+    defp user_content_blocks(blocks) when is_list(blocks), do: blocks
 
     # Classify an outbound control_request by its subtype so the inbound ack can
     # be typed. Anything else (or a malformed request) is left untracked.

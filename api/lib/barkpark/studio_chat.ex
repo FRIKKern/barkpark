@@ -140,12 +140,27 @@ defmodule Barkpark.StudioChat do
   Permanently delete a session and its messages. The `chat_messages` FK is
   `on_delete: :delete_all`, so one `Repo.delete` cascades — no manual cleanup.
   UUID-guarded: a missing/non-UUID id is a clean `:noop`, never a crash.
+
+  Its attachment files (charter D25) are removed too — the bytes live in a
+  chat-owned dir keyed by the session id and must not outlive the row. Archiving
+  keeps files; only a permanent delete purges them. The file purge runs AFTER a
+  successful row delete and never raises (a stray FS error can't fail the delete).
   """
   @spec delete_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
   def delete_session(id) do
     case get_session(id) do
-      nil -> :noop
-      session -> Repo.delete(session)
+      nil ->
+        :noop
+
+      session ->
+        case Repo.delete(session) do
+          {:ok, _} = ok ->
+            delete_session_attachments(session.id)
+            ok
+
+          other ->
+            other
+        end
     end
   end
 
@@ -606,6 +621,118 @@ defmodule Barkpark.StudioChat do
       _ -> {:error, :not_found}
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # attachments (charter D25 — chat-owned file store, NEVER the media plugin)
+  # ---------------------------------------------------------------------------
+  #
+  # Pasted/dropped images ride the turn as base64 content blocks (built at send
+  # time), but the BYTES are NOT kept in jsonb (D7 smell) and NEVER routed through
+  # the media plugin — `GET /media/files/*` is public and its "private" delivery
+  # is any-token (access.ex:114), the exact leak charter D6 disqualified. Bytes
+  # live under a chat-owned dir keyed by the session id; the message metadata
+  # carries only a lightweight pointer `{path, media_type, sha256, byte_size}`.
+  # Replay reads the file SERVER-SIDE inside the admin-gated LiveView and inlines
+  # a `data:` URI — no HTTP route over these files, ever.
+
+  @doc """
+  The root directory attachment bytes are written under. Configured via
+  `config :barkpark, Barkpark.StudioChat, attachments_dir: <dir>` (test env
+  points at a tmp dir); falls back to a stable subdir of the OS temp dir so a
+  missing config never crashes a send.
+  """
+  @spec attachments_dir() :: String.t()
+  def attachments_dir do
+    Application.get_env(:barkpark, __MODULE__, [])
+    |> Keyword.get(:attachments_dir) ||
+      Path.join(System.tmp_dir!(), "barkpark_studio_chat_attachments")
+  end
+
+  @doc """
+  Persist one image's bytes under `<attachments_dir>/<session_id>/<sha256>` and
+  return a pointer map `%{path, media_type, sha256, byte_size}` for the message
+  metadata (`path` is RELATIVE — `<session_id>/<sha256>` — so the store row is
+  location-independent). Content-addressed: the same bytes de-dupe to the same
+  file. Returns `{:error, reason}` if the write fails (the caller surfaces it
+  honestly — never a base64 blob in the DB).
+  """
+  @spec store_attachment(String.t(), binary(), String.t() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def store_attachment(session_id, bytes, media_type)
+      when is_binary(session_id) and is_binary(bytes) do
+    sha = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+    dir = Path.join(attachments_dir(), session_id)
+    abs = Path.join(dir, sha)
+
+    with :ok <- File.mkdir_p(dir),
+         :ok <- File.write(abs, bytes) do
+      {:ok,
+       %{
+         path: Path.join(session_id, sha),
+         media_type: normalize_media_type(media_type),
+         sha256: sha,
+         byte_size: byte_size(bytes)
+       }}
+    end
+  end
+
+  @doc """
+  Read an attachment's bytes back by its RELATIVE pointer path (as stored in
+  message metadata). Returns `{:ok, bytes}` or `{:error, :missing}` — a file
+  removed out from under the row (or a traversal-looking path) degrades to an
+  honest miss so replay renders a placeholder instead of crashing.
+  """
+  @spec read_attachment(String.t() | nil) :: {:ok, binary()} | {:error, :missing}
+  def read_attachment(rel_path) when is_binary(rel_path) do
+    if safe_rel_path?(rel_path) do
+      case File.read(Path.join(attachments_dir(), rel_path)) do
+        {:ok, bytes} -> {:ok, bytes}
+        {:error, _} -> {:error, :missing}
+      end
+    else
+      {:error, :missing}
+    end
+  end
+
+  def read_attachment(_), do: {:error, :missing}
+
+  @doc """
+  Remove a session's entire attachment directory. Called on permanent delete
+  (files must not outlive the row) and safe to call for a session that never had
+  an attachment (a missing dir is a clean success). Never raises.
+  """
+  @spec delete_session_attachments(String.t()) :: :ok
+  def delete_session_attachments(session_id) when is_binary(session_id) do
+    if uuid_like?(session_id) do
+      File.rm_rf(Path.join(attachments_dir(), session_id))
+    end
+
+    :ok
+  rescue
+    _ -> :ok
+  end
+
+  def delete_session_attachments(_), do: :ok
+
+  # png|jpeg|gif|webp — the accepted set (charter D25). Anything else (or a nil)
+  # falls back to png so the base64 block still has a valid media_type; the
+  # composer's allow_upload accept-list is the real gate.
+  @image_media_types ~w(image/png image/jpeg image/gif image/webp)
+  defp normalize_media_type(mt) when mt in @image_media_types, do: mt
+  defp normalize_media_type("image/jpg"), do: "image/jpeg"
+  defp normalize_media_type(_), do: "image/png"
+
+  # A stored pointer is always "<session-uuid>/<sha256-hex>" — reject anything
+  # with a path separator escape or "..", so read_attachment can never be walked
+  # outside the attachments root even if metadata were tampered with.
+  defp safe_rel_path?(path) do
+    parts = Path.split(path)
+
+    length(parts) == 2 and
+      Enum.all?(parts, &(&1 != "" and &1 != "." and &1 != ".." and not String.contains?(&1, "/")))
+  end
+
+  defp uuid_like?(id), do: match?({:ok, _}, Ecto.UUID.cast(id))
 
   # ---------------------------------------------------------------------------
   # helpers

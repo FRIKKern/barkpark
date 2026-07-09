@@ -244,6 +244,48 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       ClaudeChat.close(session)
     end
 
+    test "a content-block list rides the user frame verbatim (text + base64 image)" do
+      # Charter D25: send_message accepts a ready content-block list so a turn can
+      # carry pasted/dropped images. The Port loopback (`cat`) echoes exactly what
+      # was written to stdin, proving the frame's content is the blocks we passed —
+      # NOT a hardcoded single text block.
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+
+      blocks = [
+        %{"type" => "text", "text" => "what is this?"},
+        %{
+          "type" => "image",
+          "source" => %{"type" => "base64", "media_type" => "image/png", "data" => "aGVsbG8="}
+        }
+      ]
+
+      ClaudeChat.send_message(session, blocks)
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "user",
+                        "message" => %{
+                          "role" => "user",
+                          "content" => [
+                            %{"type" => "text", "text" => "what is this?"},
+                            %{
+                              "type" => "image",
+                              "source" => %{
+                                "type" => "base64",
+                                "media_type" => "image/png",
+                                "data" => "aGVsbG8="
+                              }
+                            }
+                          ]
+                        }
+                      }},
+                     2_000
+
+      ClaudeChat.close(session)
+    end
+
     test "delivers canned events and the exit status" do
       script = ~s(printf '%s\\n' '{"type":"system","subtype":"init","model":"test-model"}')
       put_chat_config(command: {"sh", ["-c", script]})
