@@ -4353,7 +4353,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # workflow's tree (visible now that rows default expanded) must never show a
   # running agent off a stale node state.
   defp rail_node_running?(entry, node),
-    do: rail_running?(entry) and node["state"] in ["running", "in_progress", "active"]
+    do: rail_running?(entry) and rail_node_state_running?(node)
+
+  # TERMINAL-SET semantics (wave-10 real-binary truth): the CLI emits only
+  # "start" and "done" for a workflow agent's state — never "running". A positive
+  # running-set (the old ["running","in_progress","active"]) matched none of them,
+  # so a live agent never breathed. Instead: "done" and the obvious failure
+  # terminals are settled; ANYTHING ELSE (incl. "start", "queued") is running.
+  @rail_node_terminal ~w(done completed failed error canceled cancelled aborted)
+  defp rail_node_state_running?(node) when is_map(node) do
+    case node["state"] do
+      s when is_binary(s) -> String.downcase(s) not in @rail_node_terminal
+      _ -> false
+    end
+  end
+
+  defp rail_node_state_running?(_), do: false
 
   defp rail_status_label("completed"), do: "done"
   defp rail_status_label("interrupted"), do: "interrupted"

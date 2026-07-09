@@ -3622,6 +3622,69 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "explorer"
       refute html =~ ~s(class="bp-chat-agent-run")
     end
+
+    test "a real \"start\" agent state BREATHES, \"done\" settles (terminal-set, wave 10)",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+      )
+
+      # the real wire only ever emits "start"/"done" for an agent — the old
+      # positive running-set matched neither, so live agents never breathed
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            %{
+              "type" => "workflow_agent",
+              "label" => "phase-one-echo",
+              "model" => "claude-haiku-4-5",
+              "state" => "start",
+              "tokens" => 0
+            }
+          ],
+          %{"total_tokens" => 0}
+        )
+      )
+
+      # the tree is EXPANDED by default (user mandate 2026-07-09), so the agent
+      # node renders with no click needed.
+      # count the breathing markers WITHIN the rail region only (the assistant
+      # turn from setup also breathes transiently — scope past it): the outer row
+      # (status running) + the agent node (state start ⇒ running under
+      # terminal-set) ⇒ one MORE than when the node settles to "done".
+      breathing = fn ->
+        render(view)
+        |> String.split(~s(data-role="agents-rail"))
+        |> List.last()
+        |> String.split("bp-chat-agent-run")
+        |> length()
+      end
+
+      started = breathing.()
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            %{
+              "type" => "workflow_agent",
+              "label" => "phase-one-echo",
+              "model" => "claude-haiku-4-5",
+              "state" => "done",
+              "tokens" => 42
+            }
+          ],
+          %{"total_tokens" => 42}
+        )
+      )
+
+      settled = breathing.()
+      assert started == settled + 1
+    end
   end
 
   describe "model picker (wave 5)" do
