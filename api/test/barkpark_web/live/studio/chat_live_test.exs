@@ -394,6 +394,17 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "studio-tab active"
     end
 
+    # Keyboard-first affordances are documented UNCONDITIONALLY (charter D42):
+    # the footer hint is present on the very first mount, before any turn runs or
+    # cost strip appears — a sibling of that conditional strip, never gated on it.
+    test "the keyboard footer hint renders on fresh mount, before any turn completes", %{html: html} do
+      assert html =~ "esc interrupt"
+      assert html =~ "/ commands"
+      assert html =~ "↵ send"
+      # the cost strip is still conditional — no result yet, so no cost line
+      refute html =~ "⏵"
+    end
+
     test "sending a message renders the user bubble and goes to working", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hei Claude"})
       assert html =~ "hei Claude"
@@ -1156,14 +1167,115 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
     end
 
-    test "there is no send queue — a submit while a turn runs is a server-side no-op",
+    # ── mid-turn sends queue honestly instead of dropping (charter D43) ──────
+
+    test "a mid-turn submit is NOT dropped — it echoes with a ⧗ queued badge and persists queued=true",
          %{view: view} do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "first turn"})
-      # render_submit bypasses the missing submit button, so this proves the
-      # SERVER refuses the overlapping send, not just the hidden button.
+      # the turn is live (cat never sends a result), so the second send is mid-turn
+      assert turn_active_status?(view)
+
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "second turn"})
-      refute html =~ "second turn"
+      # both words are on screen now (the drop-gate is gone) and the second wears
+      # the live queued badge…
       assert html =~ "first turn"
+      assert html =~ "second turn"
+      assert html =~ "⧗ queued"
+
+      # …the row persists immediately with metadata.queued=true (words are never
+      # deferred — the frame is dispatched right away, the binary buffers it).
+      sid = store_id(view)
+      queued_rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.metadata["queued"] == true))
+      assert [%{source_markdown: "second turn"}] = queued_rows
+    end
+
+    test "the queued badge is LIVE-ONLY — the next system/init clears it in place", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "first turn"})
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "queued one"})
+      assert html =~ "⧗ queued"
+
+      # the queued turn starts → system/init fires → the badge clears in memory,
+      # but the words stay on screen (the row is now a plain ❯ prompt).
+      send(view.pid, {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "sonnet"}})
+      html = render(view)
+      refute html =~ "⧗ queued"
+      assert html =~ "queued one"
+    end
+
+    test "a failed mid-turn (queued) dispatch withdraws the echo and restores the draft verbatim (D24)",
+         %{view: view} do
+      # A peer tab's send (the co-view broadcast) flips THIS idle tab to a running
+      # turn WITH NO local subprocess — the deterministic way to reach the queued
+      # path without an async kill race. Status is :thinking, session still nil.
+      send(view.pid, {:chat_user_message, "peer turn", []})
+      _ = render(view)
+      assert turn_active_status?(view)
+      assert session_pid(view) == nil
+
+      # Arm a hard spawn failure for the deferred dispatch (charter D24 restore).
+      Application.put_env(:barkpark, :public_demo_studio, true)
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "keep me too"})
+      # phase 1: the queued echo is on screen with its live badge…
+      assert html =~ "keep me too"
+      assert html =~ "⧗ queued"
+
+      # phase 2: the deferred dispatch can't spawn (demo gate) → restore fires.
+      _ = render(view)
+
+      # the words are handed back to the composer verbatim and the queued echo is
+      # gone (no stranded ⧗ row that never reached the model)…
+      assert has_element?(view, ~s(input#chat-composer[value="keep me too"]))
+      html = render(view)
+      refute html =~ "⧗ queued"
+      assert html =~ "not enabled on this host"
+      # …and NO orphan chat_messages row (persist is gated on a dispatched frame).
+      assert StudioChat.list_messages(store_id(view)) == []
+    end
+
+    test "a queued user row replays as a plain ❯ prompt — the badge is chrome, never stored",
+         %{conn: conn} do
+      sid = seed_session("Queued replay")
+      # a stored user row carrying the historical queued=true fact
+      {:ok, _} =
+        StudioChat.append_message(sid, %{
+          role: "user",
+          source_markdown: "buffered words",
+          metadata: %{"queued" => true}
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{sid}")
+      assert html =~ "buffered words"
+      # replay never renders the live-only badge glyph
+      refute html =~ "⧗"
+    end
+
+    # Esc fires stop_turn from anywhere now (charter D42), so the handler must be
+    # a strict no-op unless a turn is actually running — a stray Escape at an idle
+    # composer must never interrupt a live-but-quiescent session.
+    test "stop_turn is a server-side no-op when no turn is running (idle live session)",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      # complete the turn — the session stays live, but idle
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      render(view)
+      refute turn_active_status?(view)
+      pid = session_pid(view)
+      assert is_pid(pid)
+
+      # an Esc-driven stop_turn while idle changes nothing: no :interrupting flip,
+      # the session is untouched
+      render_hook(view, "stop_turn", %{})
+      refute turn_active_status?(view)
+      assert lv_assigns(view)[:status] != :interrupting
+      assert session_pid(view) == pid
+    end
+
+    test "stop_turn is a no-op with no session at all", %{view: view} do
+      assert session_pid(view) == nil
+      render_hook(view, "stop_turn", %{})
+      assert session_pid(view) == nil
+      refute turn_active_status?(view)
     end
 
     test "Stop interrupts the turn; the interrupted result keeps the session live", %{view: view} do

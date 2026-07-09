@@ -76,6 +76,26 @@
         this._input.addEventListener("keydown", this._onKeyDown);
         this._input.addEventListener("blur", this._onBlur);
       }
+
+      // ── global Esc interrupt (charter D42) ──────────────────────────────
+      // Esc stops the running turn from ANYWHERE on the page, mirroring the
+      // Claude Code terminal — not just when the composer holds focus. A
+      // document-level listener in the BUBBLE phase (never capture) lets the
+      // two surfaces that already own Escape claim it first: the slash combobox
+      // stopPropagation()s while its menu is open (see _onSlashKey), and the
+      // session-rename input is skipped by its data attribute below. The server
+      // handler is a no-op unless a turn is actually running, so a stray Esc at
+      // an idle composer never interrupts a quiescent session.
+      this._onDocKeydown = (e) => {
+        if (e.key !== "Escape") return;
+        // The session-rename input owns Escape (it cancels the rename); never
+        // let a global Esc also fire an interrupt while renaming.
+        if (e.target && e.target.closest && e.target.closest("[data-chat-rename]")) return;
+        // We never close native <details>/popovers here — pushing stop_turn is
+        // the whole job; leave the rest of the page's Escape behavior intact.
+        this.pushEvent("stop_turn", {});
+      };
+      document.addEventListener("keydown", this._onDocKeydown);
     },
 
     updated() {
@@ -94,6 +114,11 @@
         this._input.removeEventListener("input", this._onInput);
         this._input.removeEventListener("keydown", this._onKeyDown);
         this._input.removeEventListener("blur", this._onBlur);
+      }
+
+      if (this._onDocKeydown) {
+        document.removeEventListener("keydown", this._onDocKeydown);
+        this._onDocKeydown = null;
       }
     },
 
@@ -226,7 +251,12 @@
           }
           break;
         case "Escape":
+          // Claim Escape while the menu is open: preventDefault + stopPropagation
+          // so the document-level interrupt listener (charter D42) does NOT also
+          // fire — a first Esc closes the menu, a second (menu now closed) stops
+          // the turn.
           e.preventDefault();
+          e.stopPropagation();
           this._closeMenu();
           break;
         default:

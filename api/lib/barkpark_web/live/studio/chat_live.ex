@@ -222,30 +222,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
          |> clear_composer()}
 
       :none ->
-        # No send queue (t3 item 10): while a turn runs the only control is
-        # Stop — a stray Enter-submit must not fire a second overlapping turn.
-        # An image-only turn (text blank but attachments present) is valid (D25).
         cond do
           text == "" and not has_attachments? ->
             {:noreply, socket}
 
-          turn_active?(socket.assigns.status) ->
-            {:noreply, socket}
-
           true ->
+            # Queue-honest send (charter D43): a mid-turn send is NO LONGER
+            # dropped. The real binary buffers a mid-turn stdin user frame and
+            # runs it as the NEXT turn (probe-proven — never steers, never
+            # errors), so a mid-turn send runs the SAME two-phase path; its echo
+            # just wears a '⧗ queued' badge and the row persists metadata.queued.
+            # Words are never lost to a silent drop.
+            queued? = turn_active?(socket.assigns.status)
+
             # PHASE 1 (charter D24): echo instantly, clear the composer, and defer
             # every failure-prone step to {:dispatch_send}. An image-only turn gets
             # its bubble in phase 2 when the staged files are consumed (D25) — the
             # attachment strip keeps showing the thumbnails until that next diff,
             # so nothing visually vanishes in between.
             echo_id = socket.assigns.next_id
-            send(self(), {:dispatch_send, text})
+            send(self(), {:dispatch_send, text, queued?})
 
             socket =
               if text == "" do
                 assign(socket, pending_echo_id: nil)
               else
-                socket |> append_message(:user, text) |> assign(pending_echo_id: echo_id)
+                socket
+                |> append_message(:user, text, queued: queued?)
+                |> assign(pending_echo_id: echo_id)
               end
 
             # The stuck draft is history the instant a turn dispatches (charter
@@ -253,10 +257,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
             # not the words that just went to the model.
             socket = clear_persisted_draft(socket)
 
-            {:noreply,
-             socket
-             |> start_turn_clock()
-             |> assign(status: :thinking, interrupt_requested: false, composer_draft: "")}
+            # A FRESH send starts the turn clock and flips to :thinking; a QUEUED
+            # send rides the already-running turn, so leave its clock and status
+            # untouched — the live spinner keeps its own elapsed time.
+            socket =
+              if queued? do
+                assign(socket, composer_draft: "")
+              else
+                socket
+                |> start_turn_clock()
+                |> assign(status: :thinking, interrupt_requested: false, composer_draft: "")
+              end
+
+            {:noreply, socket}
         end
     end
   end
@@ -280,12 +293,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the subprocess and runs the shared honest teardown so the composer never
   # sticks at "Stopping…" forever.
   def handle_event("stop_turn", _params, socket) do
-    case socket.assigns.session do
-      nil ->
+    # Esc now fires stop_turn from ANYWHERE (charter D42), so this must be a
+    # strict no-op unless a turn is actually running: a stray Escape at an idle
+    # composer must never interrupt a live-but-quiescent session (nor a dead one).
+    cond do
+      is_nil(socket.assigns.session) ->
         {:noreply, socket}
 
-      session ->
-        ClaudeChat.interrupt(session)
+      not turn_active?(socket.assigns.status) ->
+        {:noreply, socket}
+
+      true ->
+        ClaudeChat.interrupt(socket.assigns.session)
 
         Process.send_after(
           self(),
@@ -605,7 +624,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #     STAYS and the composer stays CLEARED (restoring would double-send);
   #     `persist_user_message` warns that this row may not survive a reopen.
   @impl true
-  def handle_info({:dispatch_send, text}, socket) do
+  def handle_info({:dispatch_send, text, queued?}, socket) do
     socket = ensure_session(socket)
 
     case socket.assigns.session do
@@ -662,7 +681,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
                 {:noreply,
                  socket
-                 |> persist_user_message(text, attachments)
+                 |> persist_user_message(text, attachments, queued?)
                  |> assign(status: :thinking, pending_echo_id: nil)}
 
               {:error, reason} ->
@@ -692,9 +711,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     status = if socket.assigns.status == :starting, do: :ready, else: socket.assigns.status
 
+    # system/init fires once per TURN (charter): the queued turn is now starting,
+    # so drop the live-only '⧗ queued' badge on any echoed row (charter D43). The
+    # metadata.queued fact stays in the store; only the chrome clears.
     {:noreply,
      socket
-     |> assign(init: init, status: status)
+     |> assign(init: init, status: status, messages: clear_queued_badges(socket.assigns.messages))
      |> observe_permission_mode(observed)}
   end
 
@@ -1186,6 +1208,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     phx-value-id={s.id}
                     phx-keydown="session-rename-cancel"
                     phx-key="Escape"
+                    data-chat-rename
                     data-test-id={"chat-session-rename-input-#{s.id}"}
                   />
                 </form>
@@ -1419,6 +1442,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     >
                       <%= message.text %>
                     </div>
+                  </div>
+                  <%!-- Queue-honest badge (charter D43): a mid-turn send lands
+                        immediately and is dispatched right away — the binary runs
+                        it as the next turn. The badge is LIVE-ONLY; it clears when
+                        that turn's system/init fires, and replay never shows it. --%>
+                  <div
+                    :if={message[:queued]}
+                    class="text-xs text-dim"
+                    style="font-family: var(--font-mono); padding-left: 22px;"
+                  >
+                    ⧗ queued
                   </div>
                 </div>
               <% :assistant -> %>
@@ -1738,8 +1772,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
               >
               </ul>
             </div>
-            <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
-                  to cancel, never to queue a second turn (t3: no send queue). --%>
+            <%!-- While a turn runs the primary button becomes Stop (interrupt),
+                  but pressing ↵ still submits: a mid-turn send is queued honestly
+                  (charter D43) — dispatched immediately, run as the next turn. --%>
             <button
               :if={turn_active?(@status)}
               type="button"
@@ -1759,6 +1794,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </form>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
           <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
+        </p>
+        <%!-- Keyboard-first footer hint (charter D42): unconditional so the
+              affordances are visible from the very first mount, before any turn
+              completes — a sibling of the cost strip, never gated on it. --%>
+        <p class="text-xs text-dim" style="max-width: 860px; margin: 4px auto 0; font-family: var(--font-mono); opacity: 0.7;">
+          esc interrupt · / commands · ↵ send
         </p>
       </div>
       </div>
@@ -2245,7 +2286,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # append race that outlived its retries) — we never discard that error: log it
   # and tell the user honestly that THIS message may not survive a reopen, so
   # the transcript never lies about what was remembered (charter D20b).
-  defp persist_user_message(socket, text, attachments) do
+  defp persist_user_message(socket, text, attachments, queued?) do
     # Only the lightweight pointer rides the jsonb — NEVER the base64/bytes
     # (charter D25/D7). An attachment-free send keeps the empty-metadata shape.
     metadata =
@@ -2253,6 +2294,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
         [] -> %{}
         list -> %{"attachments" => Enum.map(list, &attachment_pointer_json/1)}
       end
+
+    # A mid-turn send is stamped queued=true (charter D43) as HISTORICAL FACT:
+    # replay keeps the row a plain ❯ (the '⧗ queued' badge is live-only chrome),
+    # but the metadata records that this word landed while a turn was running.
+    metadata = if queued?, do: Map.put(metadata, "queued", true), else: metadata
 
     socket =
       case persist_store(socket, %{role: "user", source_markdown: text, metadata: metadata}) do
@@ -2527,6 +2573,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: socket.assigns.messages ++ [message],
       next_id: id + 1
     )
+  end
+
+  # Drop the live-only '⧗ queued' badge (charter D43) when the queued turn starts
+  # (the next system/init). Historical fact lives in the store's metadata.queued;
+  # this only clears the in-memory chrome so the row settles to a plain ❯ prompt.
+  defp clear_queued_badges(messages) do
+    Enum.map(messages, fn m ->
+      if Map.get(m, :queued), do: Map.put(m, :queued, false), else: m
+    end)
   end
 
   # Resolve a pending needs-you card (approval | question | plan) with a
