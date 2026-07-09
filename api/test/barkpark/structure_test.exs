@@ -1,15 +1,54 @@
 defmodule Barkpark.StructureTest do
   use Barkpark.DataCase, async: true
 
+  alias Barkpark.Content
+  alias Barkpark.Content.Document
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Structure
   alias Barkpark.Structure.Node
+
+  import Barkpark.TenancyFixtures
 
   defp insert_schema!(attrs) do
     %SchemaDefinition{}
     |> SchemaDefinition.changeset(attrs)
     |> Repo.insert!()
   end
+
+  # Insert `n` bare documents of `type` into `dataset` (optionally workspace-
+  # scoped) so `Analytics.type_census/2` counts them. Drafts and published both
+  # count — the …Rest count is deliberately honest about the whole database.
+  defp insert_docs!(type, dataset, n, opts \\ []) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    published = Keyword.get(opts, :published, n)
+
+    for i <- 1..n do
+      Repo.insert!(%Document{
+        doc_id: if(i <= published, do: "#{type}-#{i}", else: "drafts.#{type}-#{i}"),
+        type: type,
+        dataset: dataset,
+        status: if(i <= published, do: "published", else: "draft"),
+        title: "#{type} #{i}",
+        rev: "rev-#{type}-#{i}",
+        workspace_id: workspace_id,
+        content: %{}
+      })
+    end
+  end
+
+  # All type_names anywhere in the tree (recursive).
+  defp all_type_names(%Structure.Node{items: items}), do: collect_tn(items, [])
+
+  defp collect_tn(items, acc) do
+    Enum.reduce(items, acc, fn node, acc ->
+      acc = if node.type_name, do: [node.type_name | acc], else: acc
+      collect_tn(node.items || [], acc)
+    end)
+  end
+
+  defp top_node(tree, id), do: Enum.find(tree.items, &(&1.id == id))
+  defp plugins_node(tree), do: top_node(tree, "plugins")
+  defp rest_node(tree), do: top_node(tree, "rest")
 
   defp seed_legacy(dataset) do
     insert_schema!(%{
@@ -90,8 +129,8 @@ defmodule Barkpark.StructureTest do
   end
 
   describe "build/1" do
-    test "surfaces book in the top-level nav and excludes it from Settings" do
-      dataset = "structure_test_with_book"
+    test "with OnixEdit disabled by default, book is NOT top-level and its docs fall into …Rest" do
+      dataset = "structure_test_book_rest"
       seed_legacy(dataset)
 
       insert_schema!(%{
@@ -103,22 +142,27 @@ defmodule Barkpark.StructureTest do
         fields: []
       })
 
+      # Two book documents exist in the database.
+      insert_docs!("book", dataset, 2)
+
       tree = Structure.build(dataset)
 
-      book_node =
-        Enum.find(tree.items, fn n ->
-          n.type == :document_type_list and n.id == "book"
-        end)
+      # OnixEdit is default-disabled, so the books group is NOT surfaced
+      # top-level (its old always-on home).
+      refute Enum.any?(tree.items, fn n ->
+               n.type == :document_type_list and n.id == "book"
+             end),
+             "book must not be top-level when OnixEdit is disabled by default"
 
-      assert %Node{} = book_node, "expected a book doc-type-list node in top-level items"
-      assert book_node.type_name == "book"
-      assert book_node.visibility == :public
+      # …Rest tells the truth: book docs still exist, so they surface there with
+      # an honest count and a drillable list (the book schema is in scope).
+      rest = rest_node(tree)
+      assert %Node{} = rest, "expected a …Rest node when unplaced doc types exist"
 
-      settings = settings_node(tree)
-      assert %Node{} = settings, "expected a settings sub-list to still exist"
-
-      refute Enum.any?(settings.items, fn n -> n.id == "book" end),
-             "book must not also appear under Settings"
+      book_rest = Enum.find(rest.items, &(&1.type_name == "book"))
+      assert %Node{} = book_rest, "book docs must surface under …Rest, never silently hidden"
+      assert book_rest.type == :document_type_list, "book has a schema → drillable"
+      assert book_rest.title == "book (2)"
     end
 
     test "without book, tree contains only legacy groups and no stray dividers" do
@@ -264,6 +308,210 @@ defmodule Barkpark.StructureTest do
       assert editor[:doc].doc_id == slug
       assert is_list(get_in(editor[:doc].content, ["blocks"]))
     end
+  end
+
+  describe "tiered desk — MAIN / Plugins / …Rest (studio-structure-polish)" do
+    test "media is hidden from the tree by default (top-menu placement), never in …Rest" do
+      dataset = "structure_test_media_hidden"
+      seed_legacy(dataset)
+
+      insert_schema!(%{
+        name: "mediaAsset",
+        title: "Media Assets",
+        icon: "image",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      insert_schema!(%{
+        name: "mediaCollection",
+        title: "Media Collections",
+        icon: "folder",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      # Media documents exist in the DB…
+      insert_docs!("mediaAsset", dataset, 4)
+      insert_docs!("mediaCollection", dataset, 1)
+
+      tree = Structure.build(dataset)
+      names = all_type_names(tree)
+
+      # …but Media rides the TOP MENU by default, so its types are absent from
+      # the structure tree entirely.
+      refute "mediaAsset" in names, "media types must not appear in the tree by default"
+      refute "mediaCollection" in names
+
+      # And because the top menu is their home, they are NOT dumped into …Rest.
+      case rest_node(tree) do
+        nil ->
+          :ok
+
+        %Node{items: items} ->
+          rest_types = Enum.map(items, & &1.type_name)
+          refute "mediaAsset" in rest_types, "media has a home (top menu) → not …Rest"
+          refute "mediaCollection" in rest_types
+      end
+    end
+
+    test "a workspace placement override to \"main\" restores Media into the MAIN tier" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "test"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "mediaAsset", "title" => "Media Assets", "visibility" => "private", "fields" => []},
+          dataset,
+          scope
+        )
+
+      {:ok, _} = Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{"media" => %{"placement" => "main"}})
+
+      tree = Structure.build(dataset, scope)
+
+      assert "mediaAsset" in all_type_names(tree),
+             "a workspace override to placement=main restores Media into the tree"
+    end
+
+    test "promoting OnixEdit into MAIN surfaces the books group top-level (not in …Rest)" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "test"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "book", "title" => "Books", "visibility" => "private", "fields" => []},
+          dataset,
+          scope
+        )
+
+      insert_docs!("book", dataset, 3, workspace_id: ws.id)
+
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "onixedit" => %{"enabled" => true, "placement" => "main"}
+        })
+
+      tree = Structure.build(dataset, scope)
+
+      book_top =
+        Enum.find(tree.items, fn n -> n.type == :document_type_list and n.id == "book" end)
+
+      assert %Node{} = book_top, "promoting OnixEdit to main surfaces book top-level"
+
+      # Claimed by the placed node → not double-listed under …Rest.
+      case rest_node(tree) do
+        nil -> :ok
+        %Node{items: items} -> refute Enum.any?(items, &(&1.type_name == "book"))
+      end
+    end
+
+    test "enabling a :plugins-placement plugin surfaces a Plugins node holding its group" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "test"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "book", "title" => "Books", "visibility" => "private", "fields" => []},
+          dataset,
+          scope
+        )
+
+      insert_docs!("book", dataset, 2, workspace_id: ws.id)
+
+      # Enable OnixEdit but keep its default :plugins placement.
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{"onixedit" => %{"enabled" => true}})
+
+      tree = Structure.build(dataset, scope)
+
+      plugins = plugins_node(tree)
+      assert %Node{type: :list} = plugins, "expected a Plugins tier node when a :plugins plugin is enabled"
+      assert plugins.title == "Plugins"
+
+      # The books group landed UNDER the Plugins node (placement :plugins), not
+      # top-level and not in …Rest.
+      assert "book" in collect_tn(plugins.items, []),
+             "an enabled :plugins plugin's types live under the Plugins node"
+
+      refute Enum.any?(tree.items, fn n -> n.type == :document_type_list and n.id == "book" end),
+             "book is under Plugins, not top-level"
+    end
+
+    test "a disabled plugin's doc types fall into …Rest with an honest count" do
+      dataset = "structure_test_disabled_rest"
+      seed_legacy(dataset)
+
+      # tickets is default-disabled. Register its schema (public, so the host
+      # Settings catch-all for private singletons does not surface it) so the
+      # …Rest node is drillable, and seed 3 published + 1 draft (count = 4).
+      insert_schema!(%{
+        name: "ticket",
+        title: "Tickets",
+        icon: "🎫",
+        visibility: "public",
+        dataset: dataset,
+        fields: []
+      })
+
+      insert_docs!("ticket", dataset, 4, published: 3)
+
+      tree = Structure.build(dataset)
+
+      # No ticket desk item anywhere in MAIN / Plugins (tickets disabled).
+      refute "ticket" in all_type_names(rest_stripped(tree)),
+             "a disabled plugin contributes no placed desk item"
+
+      rest = rest_node(tree)
+      assert %Node{} = rest
+      ticket_rest = Enum.find(rest.items, &(&1.type_name == "ticket"))
+      assert %Node{type: :document_type_list} = ticket_rest
+      assert ticket_rest.title == "ticket (4)", "count includes the draft — honest about the DB"
+    end
+
+    test "an orphaned doc type (no schema) still surfaces in …Rest as a plain node" do
+      dataset = "structure_test_orphan_rest"
+      seed_legacy(dataset)
+
+      # Documents of a type whose schema was force-deleted — no schema in scope.
+      insert_docs!("ghostType", dataset, 5)
+
+      tree = Structure.build(dataset)
+      rest = rest_node(tree)
+      assert %Node{} = rest
+
+      ghost = Enum.find(rest.items, &(&1.type_name == "ghostType"))
+      assert %Node{} = ghost, "orphaned types are NEVER silently hidden"
+      assert ghost.type == :document, "no schema → plain, non-drillable node"
+      assert ghost.title == "ghostType (5)"
+    end
+
+    test "…Rest is absent when every present doc type is claimed by a placed node" do
+      dataset = "structure_test_no_rest"
+      seed_legacy(dataset)
+
+      # Only `post` documents exist — and `post` is claimed by the content group.
+      insert_docs!("post", dataset, 2)
+
+      tree = Structure.build(dataset)
+
+      assert rest_node(tree) == nil,
+             "no …Rest node when the tree already accounts for every present type"
+    end
+  end
+
+  # Tree with the …Rest node removed, for asserting a type is absent from the
+  # PLACED tiers (MAIN + Plugins) specifically.
+  defp rest_stripped(%Structure.Node{items: items} = tree) do
+    %{tree | items: Enum.reject(items, &(&1.id == "rest"))}
   end
 
   describe "parse_filter/1" do

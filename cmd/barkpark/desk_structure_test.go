@@ -101,6 +101,85 @@ func TestFromDeskNodeConversion(t *testing.T) {
 	}
 }
 
+// Tiered desk (studio-structure-polish): the server tiers the tree with a
+// nested "plugins" :list node and a trailing "rest" :list node, using ONLY
+// existing node types so THIS (old-shape) fromDeskNode switch renders every
+// tier — a new node `type` would hit the default→nil arm and drop the whole
+// subtree. This pins that Plugins/…Rest arrive as drillable list groups and no
+// subtree is lost.
+const tieredDeskJSON = `{"structure":{
+  "id":"root","title":"Structure","type":"list","items":[
+    {"id":"post","title":"Post","icon":"📄","type":"document_type_list","typeName":"post"},
+    {"id":"paper","title":"Papers","type":"document_type_list","typeName":"paper"},
+    {"type":"divider"},
+    {"id":"plugins","title":"Plugins","icon":"🧩","type":"list","items":[
+      {"id":"plugin-grp-onixedit","title":"Onix","type":"list","items":[
+        {"id":"book","title":"Books","type":"document_type_list","typeName":"book"}
+      ]}
+    ]},
+    {"type":"divider"},
+    {"id":"rest","title":"…Rest","icon":"🗂","type":"list","items":[
+      {"id":"rest-ticket","title":"ticket (4)","type":"document_type_list","typeName":"ticket"},
+      {"id":"rest-ghostType","title":"ghostType (5)","type":"document","typeName":"ghostType"}
+    ]}
+  ]}}`
+
+func TestTieredDeskSurvivesOldBinaries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tieredDeskJSON))
+	}))
+	defer srv.Close()
+
+	c := apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"})
+	tree, err := c.LoadStructure()
+	if err != nil {
+		t.Fatalf("LoadStructure: %v", err)
+	}
+	root := fromDeskNode(*tree)
+	if root == nil || root.Type != NodeList {
+		t.Fatalf("root conversion wrong: %+v", root)
+	}
+
+	find := func(nodes []*StructureNode, id string) *StructureNode {
+		for _, n := range nodes {
+			if n.ID == id {
+				return n
+			}
+		}
+		return nil
+	}
+
+	// The Plugins tier survives as a drillable list group holding a per-plugin
+	// sub-group that itself holds a drillable doc-type list — no subtree lost.
+	plugins := find(root.Items, "plugins")
+	if plugins == nil || plugins.Type != NodeList {
+		t.Fatalf("Plugins node missing or not a list: %+v", plugins)
+	}
+	onix := find(plugins.Items, "plugin-grp-onixedit")
+	if onix == nil || onix.Type != NodeList || len(onix.Items) != 1 {
+		t.Fatalf("per-plugin group missing/empty: %+v", onix)
+	}
+	if onix.Items[0].Type != NodeDocumentTypeList || onix.Items[0].TypeName != "book" {
+		t.Errorf("book list under Plugins wrong: %+v", onix.Items[0])
+	}
+
+	// The …Rest tier survives with BOTH kinds of child: a drillable
+	// document_type_list (schema in scope) and a plain document leaf (orphaned
+	// type). Neither is dropped — the truth invariant holds on old binaries too.
+	rest := find(root.Items, "rest")
+	if rest == nil || rest.Type != NodeList || len(rest.Items) != 2 {
+		t.Fatalf("…Rest node missing/wrong arity: %+v", rest)
+	}
+	ticket := find(rest.Items, "rest-ticket")
+	if ticket == nil || ticket.Type != NodeDocumentTypeList || ticket.TypeName != "ticket" {
+		t.Errorf("drillable …Rest child wrong: %+v", ticket)
+	}
+	ghost := find(rest.Items, "rest-ghostType")
+	if ghost == nil || ghost.Type != NodeDocument || ghost.DocID != "ghostType" {
+		t.Errorf("orphaned …Rest child must survive as a document leaf: %+v", ghost)
+	}
+}
+
 func TestBuildDeskFallsBackOnOldServers(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

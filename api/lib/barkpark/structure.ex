@@ -3,9 +3,36 @@ defmodule Barkpark.Structure do
   Builds the navigation structure tree from schema definitions.
   Mirrors Sanity Studio's deskStructure — supports grouping, filtered views,
   singletons, dividers, and nested lists at any depth.
+
+  ## Tiered desk (studio-structure-polish charter, Decisions 1/6/7)
+
+  The tree is composed in THREE tiers, using ONLY existing node types so old Go
+  TUI binaries render every tier without a client change (a NEW node `type`
+  would be dropped wholesale by `cmd/barkpark/structure.go`'s `fromDeskNode`
+  switch; nested `:list` recurses fine):
+
+    * **MAIN** — flat, TOP-LEVEL (no wrapper, preserving deep-links): the host
+      content/papers/sheets/taxonomy/settings groups, plus the desk items of any
+      plugin whose effective placement is `:main` (tasks by default, or any
+      promoted plugin). Books follow OnixEdit's enablement/placement; Media
+      follows the media plugin's (`:top_menu` default = out of the tree).
+    * **Plugins** — ONE nested `:list` node (`id: "plugins"`) holding the desk
+      items of ENABLED plugins with placement `:plugins`, grouped per plugin.
+      Emitted only when non-empty.
+    * **…Rest** — ONE nested `:list` node (`id: "rest"`), LAST, emitted only when
+      non-empty: one child per doc TYPE present in the dataset
+      (`Analytics.type_census/2`) that no placed node claimed. Drillable
+      `:document_type_list` when a schema exists; a plain `:document` node when
+      the type is orphaned (schema force-deleted). Counts include drafts — the
+      tree never silently hides a doc type, it only organizes it.
+
+  Per-workspace enablement/placement resolves through
+  `Barkpark.Plugins.Enablement.effective/1`.
   """
 
   alias Barkpark.Content
+  alias Barkpark.Content.Analytics
+  alias Barkpark.Plugins.Enablement
 
   defmodule Node do
     @moduledoc "A node in the structure tree."
@@ -69,66 +96,212 @@ defmodule Barkpark.Structure do
   # This is the equivalent of Sanity's deskStructure export.
   # Edit this function to change the navigation tree.
 
+  # Compose the tiered desk (charter Decisions 1/6/7): MAIN (flat top-level),
+  # one nested Plugins node, one trailing …Rest node. See the moduledoc.
   defp build_desk_items(schemas, dataset, opts) do
-    host_items =
-      [
-        build_content_group(schemas),
-        build_papers_group(schemas),
-        build_sheets_group(schemas),
-        build_books_group(schemas),
-        build_media_group(schemas, dataset),
-        build_taxonomy_group(schemas),
-        build_settings_group(schemas)
-      ]
-      |> maybe_join()
+    workspace_id = Keyword.get(opts, :workspace_id)
+    enablement = Enablement.effective(workspace_id)
 
-    # Run the plugin resolver chain seeded with the host's built-in desk
-    # items as `:baseline`. Plugins that override `resolve_desk_items/2`
-    # see the host structure as the leading `%Node{}` slice and can drop
-    # / reorder / amend entries symmetric with how they treat sibling-
-    # plugin contributions. The default lift (no override) simply
-    # appends plugin map entries — behaviour-equivalent to the legacy
-    # host-side concat.
-    resolved =
-      safe_collect_desk_items(host_items, %{
-        dataset: dataset,
-        # Part of the documented plugin ctx contract (`Barkpark.Plugin`
-        # resolve_desk_items/2 §ctx). Desk builds are not per-URL today,
-        # so no caller threads a live path — plugins always see nil.
-        current_path: nil,
-        scope: opts
-      })
+    # ── MAIN host groups: always top-level, in charter order ──
+    host_main = [
+      build_content_group(schemas),
+      build_papers_group(schemas),
+      build_sheets_group(schemas),
+      build_taxonomy_group(schemas),
+      build_settings_group(schemas)
+    ]
 
-    # Partition the chain's mixed output by BASELINE MEMBERSHIP, not
-    # struct-ness: only nodes the host itself built count as host. A
-    # `%Node{}` a plugin returned (new or amended) is a plugin
-    # contribution and must ride the same workspace gating as the
-    # map-shaped items (`%{type: :link | :document_list | :nested |
-    # :divider, …}`) — classifying on struct-ness alone let any
-    # struct-returning plugin bypass `scope_plugin_nodes/4` and leak
-    # into every workspace's desk. Consequence of the partition: plugin
-    # contributions always render AFTER the host slice (with a divider,
-    # via `maybe_join/2`) — a plugin can drop or reorder host entries
-    # but cannot interleave its own items between them.
-    {host_part, plugin_part} =
-      Enum.split_with(resolved, fn
-        %Node{} = node -> node in host_items
-        _ -> false
-      end)
+    # ── Placement-driven host groups: books follow OnixEdit, media follows
+    # the media plugin. Each returns {main_placed_nodes, plugins_placed_nodes}. ──
+    {books_main, books_plugins} =
+      place_host_group(build_books_group(schemas), enablement, "onixedit")
 
-    plugin_nodes =
-      plugin_part
-      |> Enum.with_index()
-      |> Enum.map(fn {item, idx} -> plugin_item_to_node(item, idx) end)
-      |> Enum.reject(&is_nil/1)
-      |> scope_plugin_nodes(schemas, dataset, opts)
+    {media_main, media_plugins} =
+      place_host_group(build_media_group(schemas, dataset), enablement, "media")
 
-    if plugin_nodes == [] do
-      host_part
-    else
-      maybe_join([host_part, plugin_nodes], "plugjoin")
+    # ── Plugin desk items, attributed per plugin and split by placement ──
+    {plugin_main, plugin_plugins} =
+      dataset
+      |> safe_collect_attributed(opts)
+      |> split_attributed(enablement, schemas, dataset, opts)
+
+    # ── MAIN tier (flat, top-level) ──
+    main_groups = host_main ++ [books_main, media_main, plugin_main]
+
+    # ── Plugins tier: one nested :list node, only when non-empty ──
+    plugins_children = books_plugins ++ media_plugins ++ plugin_plugins
+
+    plugins_tier =
+      if plugins_children == [] do
+        []
+      else
+        [%Node{id: "plugins", title: "Plugins", icon: "🧩", type: :list, items: plugins_children}]
+      end
+
+    non_rest_groups = main_groups ++ [plugins_tier]
+
+    # ── …Rest tier: honest census of every DB type with no home, LAST ──
+    placed_nodes = List.flatten(non_rest_groups)
+    claimed = collect_claimed_types(placed_nodes, top_menu_claimed_types(enablement))
+    rest_children = build_rest_children(claimed, schemas, dataset, opts)
+
+    rest_tier =
+      if rest_children == [] do
+        []
+      else
+        [%Node{id: "rest", title: "…Rest", icon: "🗂", type: :list, items: rest_children}]
+      end
+
+    maybe_join(non_rest_groups ++ [rest_tier])
+  end
+
+  # Place a host group (books / media) by its owning plugin's effective
+  # enablement + placement. Disabled → dropped (its doc types then surface in
+  # …Rest). `:main` → MAIN tier; `:plugins` → under the Plugins node; anything
+  # else (`:top_menu`) → out of the tree (types claimed via
+  # `top_menu_claimed_types/1` so they never leak into …Rest).
+  defp place_host_group([], _enablement, _plugin_name), do: {[], []}
+
+  defp place_host_group(nodes, enablement, plugin_name) do
+    decl = Enablement.for_plugin(enablement, plugin_name)
+
+    cond do
+      not decl.enabled -> {[], []}
+      decl.placement == :main -> {nodes, []}
+      decl.placement == :plugins -> {[], nodes}
+      true -> {[], []}
     end
   end
+
+  # Collect plugin desk items attributed to their owning plugin (charter
+  # Decision 4). Defensive: any failure degrades to no plugin items rather than
+  # crashing the desk.
+  defp safe_collect_attributed(dataset, opts) do
+    Barkpark.Plugins.Registry.collect_desk_items_attributed(
+      baseline: [],
+      ctx: %{dataset: dataset, current_path: nil, scope: opts}
+    )
+  rescue
+    _ -> %{host: [], plugins: []}
+  catch
+    _, _ -> %{host: [], plugins: []}
+  end
+
+  # Split attributed plugin items into {main_flat_nodes, plugins_group_nodes} by
+  # each plugin's effective enablement/placement. Disabled plugins contribute
+  # nothing (their types fall into …Rest). `:main` plugins ride the MAIN tier
+  # flat (promotion); `:plugins` plugins get one per-plugin group node under the
+  # Plugins tier; `:top_menu` plugins are surfaced outside the tree entirely.
+  defp split_attributed(%{plugins: pairs}, enablement, schemas, dataset, opts) do
+    Enum.reduce(pairs, {[], []}, fn {name, items}, {main_acc, plugins_acc} ->
+      decl = Enablement.for_plugin(enablement, name)
+
+      if not decl.enabled do
+        {main_acc, plugins_acc}
+      else
+        nodes =
+          items
+          |> Enum.with_index()
+          |> Enum.map(fn {item, idx} -> plugin_item_to_node(item, idx) end)
+          |> Enum.reject(&is_nil/1)
+          |> scope_plugin_nodes(schemas, dataset, opts)
+
+        cond do
+          nodes == [] -> {main_acc, plugins_acc}
+          decl.placement == :main -> {main_acc ++ nodes, plugins_acc}
+          decl.placement == :top_menu -> {main_acc, plugins_acc}
+          true -> {main_acc, plugins_acc ++ [plugin_group_node(name, nodes)]}
+        end
+      end
+    end)
+  end
+
+  defp split_attributed(_attributed, _enablement, _schemas, _dataset, _opts), do: {[], []}
+
+  # One per-plugin group node under the Plugins tier — "grouped per plugin"
+  # (charter Decision 1). A nested :list, so it recurses on every consumer.
+  defp plugin_group_node(name, nodes) do
+    %Node{id: "plugin-grp-#{name}", title: plugin_display_name(name), type: :list, items: nodes}
+  end
+
+  # Human labels for the Plugins-tier group headers. Falls back to a
+  # title-cased plugin name for any plugin not explicitly mapped.
+  defp plugin_display_name("onixedit"), do: "Onix"
+  defp plugin_display_name("tickets"), do: "Tickets"
+  defp plugin_display_name("pulse"), do: "Lightning Storm"
+  defp plugin_display_name("frt"), do: "Frame & Time"
+  defp plugin_display_name("github"), do: "GitHub"
+
+  defp plugin_display_name(name) when is_binary(name),
+    do: name |> String.replace("_", " ") |> String.capitalize()
+
+  # ── …Rest census (charter Decision 6) ──────────────────────────────────
+
+  # The set of doc-type names already claimed by a placed node — the recursive,
+  # deduped walk of MAIN + Plugins tiers (a type surfaces via several nodes,
+  # e.g. `doc_type_with_filters/1`'s status sub-views). Seeded with the types
+  # owned by out-of-tree (:top_menu) plugins so those never fall into …Rest.
+  defp collect_claimed_types(nodes, extra) do
+    Enum.reduce(nodes, MapSet.new(extra), &collect_type_names/2)
+  end
+
+  defp collect_type_names(%Node{type_name: tn, items: items}, acc) do
+    acc = if is_binary(tn) and tn != "", do: MapSet.put(acc, tn), else: acc
+    Enum.reduce(items || [], acc, &collect_type_names/2)
+  end
+
+  defp collect_type_names(_, acc), do: acc
+
+  # …Rest children: every censused type not claimed by a placed node. Drillable
+  # when a schema exists in scope; a plain :document leaf when orphaned (schema
+  # force-deleted) — either way the count is honest (drafts included) and the
+  # type is NEVER silently hidden.
+  defp build_rest_children(claimed, schemas, dataset, opts) do
+    dataset
+    |> Analytics.type_census(census_opts(opts))
+    |> Enum.reject(fn %{type: type} -> is_nil(type) or MapSet.member?(claimed, type) end)
+    |> Enum.map(fn %{type: type, total: total} -> rest_child_node(type, total, schemas) end)
+  end
+
+  # The census MIRRORS `build/2`'s schema scope: workspace + nil-workspace
+  # globals, project NOT narrowed. `Analytics.type_census/2` enforces that; we
+  # only forward the workspace id (dropping :project_id).
+  defp census_opts(opts), do: Keyword.take(opts, [:workspace_id])
+
+  defp rest_child_node(type, total, schemas) do
+    title = "#{type} (#{total})"
+
+    case Map.get(schemas, type) do
+      nil ->
+        # Orphaned type — no schema in scope. A plain, non-drillable :document
+        # leaf (Go keeps it; pane_builder renders nothing to drill). Truth over
+        # silence: these rows exist and the tree says so.
+        %Node{id: "rest-#{type}", title: title, type: :document, type_name: type}
+
+      schema ->
+        %Node{
+          id: "rest-#{type}",
+          title: title,
+          icon: Map.get(schema, :icon),
+          type: :document_type_list,
+          type_name: type
+        }
+    end
+  end
+
+  # Schema types OWNED by an enabled plugin surfaced OUTSIDE the tree
+  # (`:top_menu`) — claimed so they do not fall into …Rest (they have a home in
+  # the top menu). Only top-menu-capable plugins need entries; every other
+  # plugin's types are claimed through its placed tree nodes.
+  defp top_menu_claimed_types(enablement) do
+    enablement
+    |> Enum.filter(fn {_name, decl} -> decl.enabled and decl.placement == :top_menu end)
+    |> Enum.flat_map(fn {name, _decl} -> plugin_owned_types(name) end)
+  end
+
+  defp plugin_owned_types("media"), do: ["mediaAsset", "mediaCollection"]
+  defp plugin_owned_types("onixedit"), do: ["book"]
+  defp plugin_owned_types(_), do: []
 
   # When the desk is workspace-scoped, plugin desk contributions must be
   # gated to the workspace's own schemas. Plugins register globally (e.g.
@@ -217,16 +390,6 @@ defmodule Barkpark.Structure do
 
   defp content_row?(%Node{type: :list, items: items}), do: Enum.any?(items, &content_row?/1)
   defp content_row?(_), do: false
-
-  defp safe_collect_desk_items(baseline, ctx) do
-    try do
-      Barkpark.Plugins.Registry.collect_desk_items(baseline: baseline, ctx: ctx)
-    rescue
-      _ -> baseline
-    catch
-      _, _ -> baseline
-    end
-  end
 
   # `idx` is the item's position in the plugin slice (nested items compose
   # "#{parent}-#{child}") — used only where the item carries nothing unique
