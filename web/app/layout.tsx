@@ -47,14 +47,19 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        {/* Seed data-theme BEFORE first paint (no FOUC, no next-themes dep):
-            localStorage.theme wins; else the OS prefers-color-scheme. The
-            emitted [data-theme="dark"] block then flips every --color-* var.
-            The ThemeToggle island (styleguide) flips + persists this at runtime. */}
+        {/* Seed BOTH orthogonal theme switches BEFORE first paint (no FOUC, no
+            next-themes dep):
+              • data-theme (mode): localStorage.theme wins, else OS
+                prefers-color-scheme — the emitted [data-theme="dark"] block flips
+                every --color-* var.
+              • data-bp-theme (identity): localStorage.bp_theme, default
+                "evergreen" — the emitted [data-bp-theme=…] block swaps the
+                palette. Identity and mode are independent (theme-system D23).
+            The ThemeToggle island (styleguide) flips + persists these at runtime. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();",
+              "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||'evergreen';}catch(e){}})();",
           }}
         />
       </head>

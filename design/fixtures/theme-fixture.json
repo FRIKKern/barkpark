@@ -1,0 +1,16 @@
+{
+  "name": "fixture",
+  "_note": "TEST-ONLY theme (theme-system Wave 4, charter D24). NOT a shipped theme — it lives OUTSIDE design/themes/ so check.mjs Part F never characterizes it, and emit.mjs never renders it into a real artifact. Its only job is to prove the N-theme emission path: a second authored {bg,ink,accent} skin flows through derive() → themePalette() → a distinct [data-bp-theme=\"fixture\"] block whose values differ from evergreen. Consumed exclusively by design/theme-emit.test.mjs.",
+  "modes": {
+    "light": {
+      "bg": "0 0% 100%",
+      "ink": "240 10% 3.9%",
+      "accent": "265 60% 45%"
+    },
+    "dark": {
+      "bg": "240 10% 3.9%",
+      "ink": "0 0% 95%",
+      "accent": "265 70% 70%"
+    }
+  }
+}

@@ -72,6 +72,25 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
+      /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
+      html[data-bp-theme="evergreen"] .bp-auth {
+        --primary: hsl(163 46% 22%);
+        --primary-fg: hsl(0 0% 100%);
+        --ring: hsl(163 42% 30%);
+        --ring-soft: hsl(163 42% 30% / 0.15);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: hsl(163 46% 17%);
+      }
+      html[data-bp-theme="evergreen"][data-theme="dark"] .bp-auth {
+        --primary: hsl(160 42% 62%);
+        --primary-fg: hsl(163 45% 8%);
+        --ring: hsl(160 42% 62%);
+        --ring-soft: hsl(160 42% 62% / 0.2);
+        --btn-bg: hsl(163 45% 30%);
+        --btn-fg: hsl(0 0% 100%);
+        --btn-bg-hover: hsl(163 45% 26%);
+      }
       /* END GENERATED: tokens */
       .bp-auth {
         min-height: 100vh;

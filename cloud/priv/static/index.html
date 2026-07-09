@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="light" data-bp-theme="evergreen">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,8 +7,10 @@
     <meta name="description" content="Barkpark Cloud — fleet, launch, billing & providers control plane." />
     <!-- Inter is self-hosted (@font-face in app.css → /fonts/) so the console
          renders fully offline — no third-party hosts (charter decision 27). -->
-    <!-- Pre-paint theme: storage key mirrors `var THEME = "bpcloud.theme"` in app.js -->
-    <script>try{var t=localStorage.getItem("bpcloud.theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+    <!-- Pre-paint theme: mode key mirrors `var THEME = "bpcloud.theme"` in app.js;
+         identity key is `bp_theme` (default "evergreen"). data-theme (mode) and
+         data-bp-theme (identity) are two orthogonal switches (theme-system D23). -->
+    <script>try{var t=localStorage.getItem("bpcloud.theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);document.documentElement.setAttribute("data-bp-theme",localStorage.getItem("bp_theme")||"evergreen")}catch(e){}</script>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>

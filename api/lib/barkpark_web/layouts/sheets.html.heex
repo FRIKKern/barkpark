@@ -48,6 +48,9 @@
     /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
     :root { --info: #2563eb; --ring: var(--info); }
     @media (prefers-color-scheme: dark) { :root { --info: #3b82f6; } }
+    /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
+    html[data-bp-theme="evergreen"] { --info: #2563eb; --ring: var(--info); }
+    @media (prefers-color-scheme: dark) { html[data-bp-theme="evergreen"] { --info: #3b82f6; } }
     /* END GENERATED: tokens */
     body {
       margin: 0; background: var(--paper-bg-deep); color: var(--paper-ink);

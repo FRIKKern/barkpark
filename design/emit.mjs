@@ -12,7 +12,7 @@
 // must already exist (mirrors the status-tones precedent). Go surfaces are whole
 // generated *_gen.go files. check.mjs imports the builders here for the drift gate
 // and the §6 cross-surface parity assertion.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
@@ -75,6 +75,65 @@ const adaptedColor = structuredClone(rawTokens.color);
     deepEqualColor(adaptedColor, rawTokens.color);
 }
 export const tokens = { ...rawTokens, color: adaptedColor };
+
+// ── theme identity axis (theme-system Wave 4 — charter D23/D24) ───────────────
+// A THEME is an authored design/themes/<name>.json skin (per-mode {bg,ink,accent}
+// + overrides + passthrough); design/derive.mjs expands it into a full palette.
+// Every CSS surface renders each theme into its OWN [data-bp-theme=<name>] block
+// (a light AND a dark mode scope) INSIDE the generated marker, layered over the
+// bare/evergreen declarations that render when no attribute is present (the FOUC-
+// free fallback). Theme identity (data-bp-theme) and light/dark mode (data-theme
+// / prefers-color-scheme) are two ORTHOGONAL switches.
+//
+// design/themes/ ships evergreen ONLY; the N-theme path is proven with a fixture
+// theme injected in tests (D24). loadThemes() is the default source (the real
+// dir); tests pass their own theme list straight to themeBlocks().
+export const THEMES_DIR = join(here, "themes");
+
+export function loadThemes() {
+  return readdirSync(THEMES_DIR)
+    .filter((f) => f.endsWith(".json"))
+    .sort()
+    .map((f) => {
+      const spec = JSON.parse(readFileSync(join(THEMES_DIR, f), "utf8"));
+      return { name: spec.name || f.replace(/\.json$/, ""), spec };
+    });
+}
+
+// Overlay derive(spec) onto a deep clone of tokens.color → a full tokens-shaped
+// palette for one theme. Passthrough families (provider, lifecycle, statusChrome,
+// readerInfo, authButton, …) and every non-color token family (type, font) come
+// from base tokens UNCHANGED; only the theme-varying SLOTS are swapped. For
+// evergreen this equals tokens byte-for-byte (check.mjs Part F proves
+// derive(evergreen) === tokens), so the evergreen theme block renders identically
+// to the bare fallback — no visual change, only a new attribute hook.
+export function themePalette(spec) {
+  const t = JSON.parse(JSON.stringify(tokens));
+  const { values, slots } = derive(spec);
+  for (const slot of slots) {
+    const v = values[slot];
+    if (v === undefined) continue;
+    const parts = slot.split(".");
+    let o = t.color;
+    for (let i = 0; i < parts.length - 1; i++) o = o[parts[i]];
+    o[parts[parts.length - 1]] = v;
+  }
+  return t;
+}
+
+// Render one surface's per-theme [data-bp-theme] blocks. `render(name, palette)`
+// returns the block text for a single theme given its derived palette; the
+// passthrough families that check.mjs Parts B/D count POSITIONALLY (--life-*,
+// --provider-*, .bp-lg--, .bp-inst--) are NEVER re-declared inside these blocks
+// (charter D25). Returns "" when no theme is present (older callers stay safe).
+export function themeBlocks(themes, render) {
+  return themes.map(({ name, spec }) => render(name, themePalette(spec))).join("\n");
+}
+
+// A short banner emitted just above the per-theme blocks in each CSS surface, so
+// the generated output reads clearly (theme identity vs the evergreen fallback).
+const THEME_BANNER =
+  "/* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */";
 
 // ── shared vocabulary ───────────────────────────────────────────────────────
 export const BASE_ROLES = [
@@ -147,10 +206,14 @@ export function hslToHex(channels) {
 export const glyphOf = (cp) => String.fromCodePoint(parseInt(cp.slice(2), 16));
 
 // ── CSS var fragments (shared by every CSS surface) ─────────────────────────
-const baseVar = (role, theme) => `--${role}: ${hsl(tokens.color[role][theme])};`;
+// Each helper reads from a tokens-shaped palette `t` (default: the base tokens
+// singleton). The bare/evergreen callers pass no `t` and get identical bytes to
+// before; the per-theme block builders pass themePalette(spec) so the SAME
+// formatting logic produces each theme's values — one code path, zero drift.
+const baseVar = (role, theme, t = tokens) => `--${role}: ${hsl(t.color[role][theme])};`;
 
-function statusVars(theme, indent) {
-  const st = tokens.color.status;
+function statusVars(theme, indent, t = tokens) {
+  const st = t.color.status;
   const lines = [
     STATUS_ROLES.map((r) => `--${r}-hsl: ${st[r][theme]};`).join(" "),
     STATUS_ROLES.map((r) => `--${r}: hsl(var(--${r}-hsl));`).join(" "),
@@ -163,16 +226,16 @@ function statusVars(theme, indent) {
   return lines.map((l) => indent + l).join("\n");
 }
 
-function baseVars(theme, indent) {
-  return BASE_ROLES.map((r) => indent + baseVar(r, theme)).join("\n");
+function baseVars(theme, indent, t = tokens) {
+  return BASE_ROLES.map((r) => indent + baseVar(r, theme, t)).join("\n");
 }
 
 // --primary carries the same -hsl/-soft machinery the status roles use, so blue
 // accent TINTS being swept off literals have an evergreen --primary-soft to bind
 // to. (--primary and --primary-hover themselves are emitted by baseVars via
 // BASE_ROLES; this only adds the derived -hsl channel + the soft-tint fill.)
-function primaryVars(theme, indent) {
-  const ch = tokens.color.primary[theme];
+function primaryVars(theme, indent, t = tokens) {
+  const ch = t.color.primary[theme];
   const lines = [
     `--primary-hsl: ${ch};`,
     `--primary-soft: hsl(var(--primary-hsl) / ${alpha(softAlpha[theme])});`,
@@ -201,8 +264,26 @@ function instClasses() {
     .map((s) => `.bp-inst--${s} { color: var(${INST_ROLE_CSS[il[s].role]}); }`)
     .join("\n");
 }
-function cloudBlock() {
-  return [
+// Cloud theme block: base + primary + status re-declared under the theme
+// attribute (light on html[data-bp-theme=X], dark on the +[data-theme=dark]
+// compound — equal-idiom to the bare :root/[data-theme=dark] pair, one step more
+// specific so the theme wins). Provider tints + .bp-inst-- glyph tones are
+// theme-INVARIANT passthrough (Part D counts them positionally) — NOT here (D25).
+const cloudThemeBlock = (name, t) => [
+  `html[data-bp-theme="${name}"] {`,
+  baseVars("light", "  ", t),
+  primaryVars("light", "  ", t),
+  statusVars("light", "  ", t),
+  "}",
+  `html[data-bp-theme="${name}"][data-theme="dark"] {`,
+  baseVars("dark", "  ", t),
+  primaryVars("dark", "  ", t),
+  statusVars("dark", "  ", t),
+  "}",
+].join("\n");
+
+function cloudBlock(themes = loadThemes()) {
+  const lines = [
     ":root {",
     baseVars("light", "  "),
     primaryVars("light", "  "),
@@ -220,7 +301,10 @@ function cloudBlock() {
     "   the referenced role var flips per theme. A later wave rewires statusPill/",
     "   bucketOf onto these. */",
     instClasses(),
-  ].join("\n");
+  ];
+  const themed = themeBlocks(themes, cloudThemeBlock);
+  if (themed) lines.push(THEME_BANNER, themed);
+  return lines.join("\n");
 }
 
 // ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
@@ -232,12 +316,30 @@ function cloudBlock() {
 // VERBATIM). Emitted on the html[data-theme=…] + bare-fallback token scopes — the
 // same three-way structure the hand region used (attr blocks win over the light
 // fallback so a pre-paint no-data-theme load still gets the light bp theme).
-function paperColorVars(theme, indent) {
-  const s = tokens.color.paper.surface;
+function paperColorVars(theme, indent, t = tokens) {
+  const s = t.color.paper.surface;
   return PAPER_ROLES.map((role) => indent + `--paper-${role}: ${s[role][theme]};`).join("\n");
 }
 
-function paperBlock() {
+// Paper theme block: the `--paper-*` reading-surface skin + status tones under
+// the theme attribute. paper-surface is an ATTRIBUTE surface (edit surfaces stamp
+// data-theme), so the dark scope keys on [data-theme=dark] (NOT @media) — that
+// keeps the reader-dark-parity guard untouched (it scans `html[data-theme="dark"]`
+// and prefers-color-scheme blocks; `html[data-bp-theme=X][data-theme=dark]`
+// matches neither substring). Reading-type vars are theme-invariant and the
+// .bp-lg-- glyph tones are positional passthrough (D25) — both excluded here.
+const paperThemeBlock = (name, t) => [
+  `html[data-bp-theme="${name}"] .bp-paper-surface, html[data-bp-theme="${name}"] .bp-paper-body {`,
+  paperColorVars("light", "  ", t),
+  statusVars("light", "  ", t),
+  "}",
+  `html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="${name}"][data-theme="dark"] .bp-paper-body {`,
+  paperColorVars("dark", "  ", t),
+  statusVars("dark", "  ", t),
+  "}",
+].join("\n");
+
+function paperBlock(themes = loadThemes()) {
   const r = tokens.type.reading;
   const readingVars = [
     `--tok-reading-font: ${tokens.font.reading.stack};`,
@@ -255,6 +357,7 @@ function paperBlock() {
   const lifeClasses = (theme) =>
     LIFE_ORDER.map((s) => `.bp-lg--${s} { color: ${tokens.lifecycle[s].color[theme]}; }`).join("\n");
 
+  const themed = themeBlocks(themes, paperThemeBlock);
   return [
     "/* ── `--paper-*` reading-surface theme tokens (color.paper.surface — relocated",
     "   from the hand region into this GENERATED block; Barkpark aesthetic-unification:",
@@ -292,6 +395,7 @@ function paperBlock() {
     "@media (prefers-color-scheme: dark) {",
     lifeClasses("dark").split("\n").map((l) => "  " + l).join("\n"),
     "}",
+    ...(themed ? [THEME_BANNER, themed] : []),
   ].join("\n");
 }
 
@@ -313,12 +417,12 @@ const STATUS_FG = ["ok-fg", "warn-fg", "danger-fg", "info-fg"];
 const CHROME_ALIASES = ["bg-accent", "border-muted", "fg-dim", "fg-accent"];
 const chromeVal = (v) => (v.startsWith("var(") ? v : hsl(v));
 
-function onStatusVars(theme, indent) {
-  const os = tokens.color.onStatus;
+function onStatusVars(theme, indent, t = tokens) {
+  const os = t.color.onStatus;
   return STATUS_FG.map((r) => indent + `--${r}: ${hsl(os[r][theme])};`).join("\n");
 }
-function chromeVars(theme, indent) {
-  const ch = tokens.color.studioChrome;
+function chromeVars(theme, indent, t = tokens) {
+  const ch = t.color.studioChrome;
   return CHROME_ALIASES.map((r) => indent + `--${r}: ${chromeVal(ch[r][theme])};`).join("\n");
 }
 
@@ -343,9 +447,35 @@ function lifeVars(theme, indent) {
   return LIFE_ORDER.map((s) => indent + `--life-${s}: ${life[s].color[theme]};`).join("\n");
 }
 
-function studioBlock() {
+// Studio theme block: base + primary + status + on-status + chrome under the
+// theme attribute (all inside the <style>, so the 4-space block indent). The
+// dark scope keys on [data-theme=dark] — Studio always seeds data-theme, so the
+// toggle carries status dark too (a superset of the bare @media path). Chrome
+// type-scale (theme-invariant px) and --life-* glyph tones (positional
+// passthrough, Part B) are excluded (D25).
+const studioThemeBlock = (name, t) => {
   const ind = "    ";
   return [
+    ind + `html[data-bp-theme="${name}"] {`,
+    baseVars("light", ind + "  ", t),
+    primaryVars("light", ind + "  ", t),
+    statusVars("light", ind + "  ", t),
+    onStatusVars("light", ind + "  ", t),
+    chromeVars("light", ind + "  ", t),
+    ind + "}",
+    ind + `html[data-bp-theme="${name}"][data-theme="dark"] {`,
+    baseVars("dark", ind + "  ", t),
+    primaryVars("dark", ind + "  ", t),
+    statusVars("dark", ind + "  ", t),
+    onStatusVars("dark", ind + "  ", t),
+    chromeVars("dark", ind + "  ", t),
+    ind + "}",
+  ].join("\n");
+};
+
+function studioBlock(themes = loadThemes()) {
+  const ind = "    ";
+  const lines = [
     ind + ":root {",
     baseVars("light", ind + "  "),
     primaryVars("light", ind + "  "),
@@ -367,7 +497,10 @@ function studioBlock() {
     statusVars("dark", ind + "    "),
     ind + "  }",
     ind + "}",
-  ].join("\n");
+  ];
+  const themed = themeBlocks(themes, studioThemeBlock);
+  if (themed) lines.push(ind + THEME_BANNER, themed);
+  return lines.join("\n");
 }
 
 // ── surface: web demo (web/app/globals.css — Tailwind v4 @theme) ─────────────
@@ -379,9 +512,28 @@ function studioBlock() {
 // OS-only @media block is intentionally dropped: default theme comes from the
 // data-theme island (seeded from prefers-color-scheme), so the explicit toggle
 // is the single source of truth and always wins.
-function webBlock() {
-  const st = tokens.color.status;
+// Web theme block: the @theme registration must stay TOP-LEVEL (Tailwind v4
+// forbids nesting it), so per-theme values are plain [data-bp-theme=X] selectors
+// that redefine the same --color-* the theme registered. Light on the attribute,
+// dark on the +[data-theme=dark] compound (one step more specific, so it wins
+// over both the bare [data-theme=dark] and the theme-light block).
+const webThemeBlock = (name, t) => {
+  const st = t.color.status;
   return [
+    `[data-bp-theme="${name}"] {`,
+    ...BASE_ROLES.map((r) => `  --color-${r}: ${hsl(t.color[r].light)};`),
+    ...STATUS_ROLES.map((r) => `  --color-${r}: ${hsl(st[r].light)};`),
+    "}",
+    `[data-bp-theme="${name}"][data-theme="dark"] {`,
+    ...BASE_ROLES.map((r) => `  --color-${r}: ${hsl(t.color[r].dark)};`),
+    ...STATUS_ROLES.map((r) => `  --color-${r}: ${hsl(st[r].dark)};`),
+    "}",
+  ].join("\n");
+};
+
+function webBlock(themes = loadThemes()) {
+  const st = tokens.color.status;
+  const lines = [
     "@theme {",
     ...BASE_ROLES.map((r) => `  --color-${r}: ${hsl(tokens.color[r].light)};`),
     ...STATUS_ROLES.map((r) => `  --color-${r}: ${hsl(st[r].light)};`),
@@ -390,7 +542,10 @@ function webBlock() {
     ...BASE_ROLES.map((r) => `  --color-${r}: ${hsl(tokens.color[r].dark)};`),
     ...STATUS_ROLES.map((r) => `  --color-${r}: ${hsl(st[r].dark)};`),
     "}",
-  ].join("\n");
+  ];
+  const themed = themeBlocks(themes, webThemeBlock);
+  if (themed) lines.push(THEME_BANNER, themed);
+  return lines.join("\n");
 }
 
 // ── surface: web TS token artifact (web/lib/tokens.gen.ts) ────────────────────
@@ -897,10 +1052,15 @@ const pageVal = (v) => (v.startsWith("var(") || v.startsWith("#") ? v : hsl(v));
 // html[data-theme="dark"] .bp-auth (Studio themes via the data-theme attribute).
 // Indented 6 spaces to sit inside the ~H <style>. The ring-soft alpha reuses the
 // shared softAlpha convention (0.15 light / 0.2 dark).
-function sessionAuthBlock() {
-  const c = tokens.color;
+// The auth brand-override rows for one mode, from a palette `t`. primary/primary-
+// fg/ring are theme-varying; the --btn-* auth-button fills are theme-invariant
+// passthrough (color.authButton), but they are NOT positionally counted by
+// check.mjs, so they are safely re-declared in the per-theme block (D25 only bans
+// --life-*/--provider-*/.bp-lg--/.bp-inst--).
+const authRows = (theme, t = tokens) => {
+  const c = t.color;
   const ab = c.authButton;
-  const rows = (theme) => [
+  return [
     `--primary: ${hsl(c.primary[theme])};`,
     `--primary-fg: ${hsl(c["primary-fg"][theme])};`,
     `--ring: ${hsl(c.ring[theme])};`,
@@ -909,15 +1069,33 @@ function sessionAuthBlock() {
     `--btn-fg: ${pageVal(ab.fg[theme])};`,
     `--btn-bg-hover: ${pageVal(ab.bgHover[theme])};`,
   ];
+};
+
+const sessionAuthThemeBlock = (name, t) => {
   const ind = "      ";
   return [
-    ind + ".bp-auth {",
-    ...rows("light").map((l) => ind + "  " + l),
+    ind + `html[data-bp-theme="${name}"] .bp-auth {`,
+    ...authRows("light", t).map((l) => ind + "  " + l),
     ind + "}",
-    ind + 'html[data-theme="dark"] .bp-auth {',
-    ...rows("dark").map((l) => ind + "  " + l),
+    ind + `html[data-bp-theme="${name}"][data-theme="dark"] .bp-auth {`,
+    ...authRows("dark", t).map((l) => ind + "  " + l),
     ind + "}",
   ].join("\n");
+};
+
+function sessionAuthBlock(themes = loadThemes()) {
+  const ind = "      ";
+  const lines = [
+    ind + ".bp-auth {",
+    ...authRows("light").map((l) => ind + "  " + l),
+    ind + "}",
+    ind + 'html[data-theme="dark"] .bp-auth {',
+    ...authRows("dark").map((l) => ind + "  " + l),
+    ind + "}",
+  ];
+  const themed = themeBlocks(themes, sessionAuthThemeBlock);
+  if (themed) lines.push(ind + THEME_BANNER, themed);
+  return lines.join("\n");
 }
 
 // ── surface: error page (api/lib/barkpark_web/controllers/error_html.ex) ─────
@@ -943,15 +1121,33 @@ function errorPageBlock() {
 // tones stay OUTSIDE this block — the tones are inline-style DATA emitted via
 // BarkparkWeb.Studio.TokensGen.status_health/0. Indented 6 spaces (heredoc
 // <style>). Hex passthrough (bespoke zinc, byte-preserving the chrome).
-function statusChromeBlock() {
-  const sc = tokens.color.statusChrome;
-  const vars = (theme) =>
-    ["bg", "fg", "muted", "card", "line"].map((r) => `--${r}:${sc[r][theme]};`).join(" ");
+// statusChrome is a theme-INVARIANT passthrough family (charter D21), so the
+// per-theme block re-declares the same bespoke zinc under the attribute hook —
+// the structural guarantee that theme identity reaches every surface even where
+// its palette does not vary. MEDIA surface: mode stays prefers-color-scheme, so
+// the per-theme dark re-declaration nests inside the same @media idiom.
+const statusChromeVars = (sc, theme) =>
+  ["bg", "fg", "muted", "card", "line"].map((r) => `--${r}:${sc[r][theme]};`).join(" ");
+
+const statusChromeThemeBlock = (name, t) => {
+  const sc = t.color.statusChrome;
   const ind = "      ";
   return [
-    ind + `:root { ${vars("light")} }`,
-    ind + `@media (prefers-color-scheme: dark){ :root{ ${vars("dark")} } }`,
+    ind + `html[data-bp-theme="${name}"] { ${statusChromeVars(sc, "light")} }`,
+    ind + `@media (prefers-color-scheme: dark){ html[data-bp-theme="${name}"]{ ${statusChromeVars(sc, "dark")} } }`,
   ].join("\n");
+};
+
+function statusChromeBlock(themes = loadThemes()) {
+  const sc = tokens.color.statusChrome;
+  const ind = "      ";
+  const lines = [
+    ind + `:root { ${statusChromeVars(sc, "light")} }`,
+    ind + `@media (prefers-color-scheme: dark){ :root{ ${statusChromeVars(sc, "dark")} } }`,
+  ];
+  const themed = themeBlocks(themes, statusChromeThemeBlock);
+  if (themed) lines.push(ind + THEME_BANNER, themed);
+  return lines.join("\n");
 }
 
 // ── surface: /sheets reader (api/lib/barkpark_web/layouts/sheets.html.heex) ──
@@ -961,13 +1157,28 @@ function statusChromeBlock() {
 // rings stay blue (their prior hardcoded fallback intent). Indented 4 spaces
 // (heex <style>). Sits AFTER the hand-authored parchment :root; global :root
 // vars, so they cascade to .sheet-link / .btn / .sheet-* focus rules.
-function sheetsBlock() {
-  const ri = tokens.color.readerInfo;
+// readerInfo is a theme-INVARIANT passthrough family (charter D21); the per-theme
+// block carries the same info-blue under the attribute hook. MEDIA surface: the
+// per-theme dark re-declaration nests inside the same prefers-color-scheme idiom.
+const sheetsThemeBlock = (name, t) => {
+  const ri = t.color.readerInfo;
   const ind = "    ";
   return [
+    ind + `html[data-bp-theme="${name}"] { --info: ${ri.light}; --ring: var(--info); }`,
+    ind + `@media (prefers-color-scheme: dark) { html[data-bp-theme="${name}"] { --info: ${ri.dark}; } }`,
+  ].join("\n");
+};
+
+function sheetsBlock(themes = loadThemes()) {
+  const ri = tokens.color.readerInfo;
+  const ind = "    ";
+  const lines = [
     ind + `:root { --info: ${ri.light}; --ring: var(--info); }`,
     ind + `@media (prefers-color-scheme: dark) { :root { --info: ${ri.dark}; } }`,
-  ].join("\n");
+  ];
+  const themed = themeBlocks(themes, sheetsThemeBlock);
+  if (themed) lines.push(ind + THEME_BANNER, themed);
+  return lines.join("\n");
 }
 
 // ── surface: /papers reader skin (api/lib/barkpark_web/layouts/bulldocs.html.heex)
@@ -982,11 +1193,75 @@ function sheetsBlock() {
 // TokensGen.callout/1) — byte-identical emission, single-sourced tone values.
 // Indented 4 spaces to sit inside the reader <style>; the marker block is CSS
 // comments, invisible to the browser.
-function bulldocsBlock() {
+// Bulldocs reader theme block. The reader is a MEDIA surface (it NEVER stamps
+// data-theme; it theme-swaps via prefers-color-scheme) — so the per-theme dark
+// re-declarations nest inside the same @media idiom, prefixed with the theme
+// attribute. The reader page never stamps data-bp-theme today, so this block is
+// the structural hook (a theme swap reaches the reader skin the moment a surface
+// sets the attribute); reader-dark-parity stays green because the selectors carry
+// `html[data-bp-theme=X]` (not the bare `html[data-theme="dark"]` the guard
+// scans) and the dark re-skins live inside prefers-color-scheme blocks the guard
+// treats as reader coverage.
+const bulldocsThemeBlock = (name, t) => {
+  const rl = t.color.paper.reader.light;
+  const rd = t.color.paper.reader.dark;
+  const mc = t.color.mailChrome;
+  const cd = t.color.paperCallout.dark;
+  const p = `html[data-bp-theme="${name}"]`;
+  const readerVars = (r, extra = []) =>
+    [
+      `--paper-bg: ${r["bg"]};`,
+      `--paper-bg-deep: ${r["bg-deep"]};`,
+      `--paper-ink: ${r["ink"]};`,
+      `--paper-ink-soft: ${r["ink-soft"]};`,
+      `--paper-rule: ${r["rule"]};`,
+      `--paper-accent: ${r["accent"]};`,
+      `--paper-accent-soft: ${r["accent-soft"]};`,
+      ...extra,
+    ].map((l) => "        " + l);
+  const darkExtra = [
+    `--paper-ink-faint: ${rd["ink-faint"]};`,
+    `--paper-chrome-bg: ${rd["chrome-bg"]};`,
+    `--paper-chrome-border: ${rd["chrome-border"]};`,
+    `--bp-tone-info-bg: ${cd.info.bg}; --bp-tone-info-fg: ${cd.info.fg};`,
+    `--bp-tone-success-bg: ${cd.success.bg}; --bp-tone-success-fg: ${cd.success.fg};`,
+    `--bp-tone-warning-bg: ${cd.warning.bg}; --bp-tone-warning-fg: ${cd.warning.fg};`,
+    `--bp-tone-danger-bg: ${cd.danger.bg}; --bp-tone-danger-fg: ${cd.danger.fg};`,
+    `--bp-tone-neutral-bg: ${cd.neutral.bg}; --bp-tone-neutral-fg: ${cd.neutral.fg};`,
+  ];
+  const mailVars = (theme) =>
+    [
+      `--mail-paper: ${mc.paper[theme]}; --mail-bar: ${mc.bar[theme]}; --mail-rule: ${mc.rule[theme]};`,
+      `--mail-ink: ${mc.ink[theme]}; --mail-soft: ${mc.soft[theme]}; --mail-accent: ${mc.accent[theme]};`,
+    ].map((l) => "      " + l);
+  return [
+    `    ${p} body:has(.bp-paper-article),`,
+    `    ${p} body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
+    ...readerVars(rl).map((l) => l.replace(/^ {8}/, "      ")),
+    "    }",
+    "    @media (prefers-color-scheme: dark) {",
+    `      ${p} body:has(.bp-paper-article),`,
+    `      ${p} body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
+    ...readerVars(rd, darkExtra),
+    "      }",
+    "    }",
+    `    ${p} #bp-mailapp {`,
+    ...mailVars("light"),
+    "    }",
+    "    @media (prefers-color-scheme: dark) {",
+    `      ${p} #bp-mailapp {`,
+    ...mailVars("dark").map((l) => "  " + l),
+    "      }",
+    "    }",
+  ].join("\n");
+};
+
+function bulldocsBlock(themes = loadThemes()) {
   const rl = tokens.color.paper.reader.light;
   const rd = tokens.color.paper.reader.dark;
   const mc = tokens.color.mailChrome;
   const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
+  const themed = themeBlocks(themes, bulldocsThemeBlock);
   return [
     "    /* Article chrome — applied only when BulldocsLive marks the doc as",
     "       `content[\"style\"] == \"article\"` (the LiveView stamps the",
@@ -1078,6 +1353,7 @@ function bulldocsBlock() {
     `        --mail-ink: ${mc.ink.dark}; --mail-soft: ${mc.soft.dark}; --mail-accent: ${mc.accent.dark};`,
     "      }",
     "    }",
+    ...(themed ? ["    " + THEME_BANNER, themed] : []),
   ].join("\n");
 }
 

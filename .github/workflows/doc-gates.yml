@@ -42,6 +42,10 @@ on:
       - "design/derive.mjs"
       - "design/derive.test.mjs"
       - "design/themes/**"
+      # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
+      - "design/theme-emit.test.mjs"
+      - "design/paper-editor-mirror.mjs"
+      - "design/fixtures/**"
       - "cloud/priv/static/app.css"
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
@@ -95,6 +99,10 @@ on:
       - "design/derive.mjs"
       - "design/derive.test.mjs"
       - "design/themes/**"
+      # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
+      - "design/theme-emit.test.mjs"
+      - "design/paper-editor-mirror.mjs"
+      - "design/fixtures/**"
       - "cloud/priv/static/app.css"
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
@@ -162,6 +170,10 @@ jobs:
           # tests. Runs here so a change to design/derive.mjs re-proves the colour
           # math / serializer byte-formats / AA-walk + on-accent contracts.
           node design/derive.test.mjs
+          # theme-system Wave 4 (D24/D27): the N-theme [data-bp-theme] emission +
+          # paper-editor mirror-scoping proofs, driven by a fixture theme OUTSIDE
+          # design/themes/ so a second theme is exercised without a shipped skin.
+          node design/theme-emit.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
