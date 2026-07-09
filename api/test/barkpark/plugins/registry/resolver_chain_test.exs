@@ -127,4 +127,41 @@ defmodule Barkpark.Plugins.Registry.ResolverChainTest do
       assert b.icon == nil
     end
   end
+
+  # ── nil-workspace declaration-default gating (snav-w1-gating-determinism) ──
+  #
+  # A surfacing callback (`resolve_top_menu_entries`) whose ctx carries NO
+  # workspace_id must resolve enablement via `Enablement.effective(nil)` →
+  # declaration defaults, never the raw installed list. An off-by-default
+  # plugin therefore contributes no tab on workspace-less surfaces (the leak
+  # this slice closed), while an enabled-by-default plugin still surfaces.
+
+  defmodule OnByDefaultTopMenuPlugin do
+    def default_enabled?, do: true
+    def structure_placement, do: :top_menu
+    def top_menu_entries, do: [%{label: "OnTab", path: "/admin/on", order: 90}]
+  end
+
+  defmodule OffByDefaultTopMenuPlugin do
+    def default_enabled?, do: false
+    def structure_placement, do: :plugins
+    def top_menu_entries, do: [%{label: "OffTab", path: "/admin/off", order: 90}]
+  end
+
+  describe "compute_top_menu_entries/2 — nil-workspace enablement gating" do
+    test "an off-by-default plugin contributes no entry when ctx has no workspace_id" do
+      on = "rcct-on-#{System.unique_integer([:positive])}"
+      off = "rcct-off-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(OnByDefaultTopMenuPlugin, %{"plugin_name" => on})
+      :ok = Registry.register(OffByDefaultTopMenuPlugin, %{"plugin_name" => off})
+
+      labels =
+        ResolverChain.compute_top_menu_entries([], %{})
+        |> Enum.map(& &1.label)
+
+      # Enabled-by-default surfaces; off-by-default is gated out (no leak).
+      assert "OnTab" in labels
+      refute "OffTab" in labels
+    end
+  end
 end

@@ -88,29 +88,68 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
     end)
   end
 
-  # Per-workspace enablement filter (ssp-w1-plugin-enablement). Resolves the
-  # ordered plugin list, then — ONLY for a surfacing callback whose `ctx`
-  # carries a workspace_id — drops plugins the workspace has disabled.
+  # Per-workspace enablement filter (ssp-w1-plugin-enablement; nil-workspace
+  # top-menu leak closed snav-w1-gating-determinism). Resolves the ordered
+  # plugin list, then — ONLY for a SURFACING callback — drops plugins the
+  # effective enablement map does not surface.
   #
-  # NEVER resolves enablement without a workspace. The Registry GenServer
-  # registration path (`refresh_snapshot/1`) drives the chain with `ctx = %{}`;
-  # `ctx_workspace_id/1` returns nil there, so no `Enablement.effective/1` call
-  # is made and no Repo read happens inside the registry process (which would
-  # deadlock). With no workspace_id the returned list is byte-identical to
-  # `load_ordered_plugins/0`, so the legacy collectors are unchanged.
+  # A workspace_id in `ctx` resolves that workspace's effective map (legacy
+  # ssp-w1 behaviour, unchanged). The determinism fix is the NIL-workspace arm,
+  # and it is deliberately scoped to the TOP-MENU callback only:
+  #
+  #   * `:resolve_top_menu_entries` — nav.ex renders `collect_top_menu_entries`
+  #     DIRECTLY with NO downstream enablement filter, and the cached snapshot
+  #     is computed workspace-less at registration. So on any surface where
+  #     `current_workspace` did not resolve (unseeded tenancy;
+  #     `layouts/studio.html.heex` passes `workspace_id` only when present) a
+  #     nil workspace_id used to return the RAW installed list → every
+  #     off-by-default plugin tab leaked (nav entries appearing on some pages,
+  #     vanishing on others). Now a nil workspace_id resolves declaration
+  #     defaults via `Enablement.effective(nil)` (structure-polish Decision 4 —
+  #     bulldocs/sheets/tasks/media on, onixedit/tickets/pulse/frt/github off).
+  #
+  #   * `:resolve_desk_items` / `:resolve_doc_actions` — KEEP the legacy
+  #     nil→unfiltered contract. Their sole consumer, `Barkpark.Structure`,
+  #     collects UNFILTERED on purpose (it passes scope nested under `:scope`,
+  #     not a top-level `:workspace_id`) and does its OWN per-plugin enablement
+  #     tiering in `split_attributed/5` using the workspace's effective map —
+  #     including a `gating: :none` resolution mode (PaneBuilder) that must see
+  #     EVERY plugin so a disabled plugin's deep link still resolves. Filtering
+  #     here would drop a workspace-enabled plugin before Structure could tier
+  #     it. Enablement of the desk is structure-polish's turf; we don't touch it.
+  #
+  # Deadlock-safe on the Registry GenServer registration path
+  # (`refresh_snapshot/1` drives `compute_top_menu_entries([], %{})` with
+  # `ctx = %{}`): `Enablement.effective(nil)` does NO Repo read
+  # (`workspace_overrides(nil) -> %{}`) and reads the plugin list from the
+  # `:persistent_term` snapshot (`Registry.all/0`, which `refresh_snapshot/1`
+  # installs BEFORE driving the chain), never a `GenServer.call` to self.
+  #
+  # Non-surfacing callbacks (lifecycle hooks, content renderers, routes,
+  # workers, capabilities) are NEVER filtered — an installed plugin's
+  # data-integrity gates and public rendering always run — so their returned
+  # list stays byte-identical to `load_ordered_plugins/0`.
   @doc false
   def enablement_filtered_plugins(callback_name, ctx) do
     plugins = load_ordered_plugins()
 
-    case ctx_workspace_id(ctx) do
-      nil ->
+    cond do
+      callback_name not in @surfacing_callbacks ->
         plugins
 
-      workspace_id when callback_name in @surfacing_callbacks ->
+      (workspace_id = ctx_workspace_id(ctx)) != nil ->
         effective = Barkpark.Plugins.Enablement.effective(workspace_id)
         Enum.filter(plugins, &Barkpark.Plugins.Enablement.enabled?(effective, &1.name))
 
-      _workspace_id ->
+      callback_name == :resolve_top_menu_entries ->
+        # Nil/absent workspace on the direct-rendered top menu → declaration
+        # defaults, never the raw installed list (the leak this slice closed).
+        effective = Barkpark.Plugins.Enablement.effective(nil)
+        Enum.filter(plugins, &Barkpark.Plugins.Enablement.enabled?(effective, &1.name))
+
+      true ->
+        # Desk items / doc actions on a nil workspace: unfiltered — the consumer
+        # (Barkpark.Structure) re-filters by the workspace's effective map.
         plugins
     end
   end

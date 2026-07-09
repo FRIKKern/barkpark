@@ -63,6 +63,11 @@ defmodule Barkpark.Plugins.RegistryDeskItemsTest do
     end
 
     test "OnixEdit's Bokbasen items are reachable through the collector" do
+      # DESK collectors stay unfiltered on a workspace-less ctx (the consumer,
+      # Barkpark.Structure, tiers by enablement itself). Only the TOP-MENU
+      # collector gates off-by-default plugins on a nil workspace
+      # (snav-w1-gating-determinism), so OnixEdit's desk items remain reachable
+      # here.
       items = Registry.collect_desk_items("production")
       labels = Enum.map(items, &Map.get(&1, :label))
 
