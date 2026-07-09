@@ -10,12 +10,12 @@ Every target below wires the same `bp mcp serve` tool catalog (curated task tool
 | Surface | Config it speaks | Onramp |
 |---|---|---|
 | Cursor (desktop) | `.cursor/rules` + `.cursor/mcp.json` | [CURSOR.md](CURSOR.md) |
-| Cursor Cloud | `.cursor/environment.json` + Secrets | `docs/setup/CURSOR-CLOUD.md` |
+| Cursor Cloud | `.cursor/environment.json` + Secrets | [CURSOR-CLOUD.md](CURSOR-CLOUD.md) |
 | Claude Code | `CLAUDE.md` + `.mcp.json` | `docs/setup/CLAUDE-CODE.md` |
 | Codex CLI / Desktop | `AGENTS.md` + `~/.codex/config.toml` | `docs/setup/CODEX.md` |
 | ChatGPT · Claude.ai | Custom GPT Actions · remote MCP | `docs/setup/REMOTE.md` |
 
-Only `CURSOR.md` is a live link — the four siblings are code spans until their PRs land; open them by path.
+`CURSOR.md` and `CURSOR-CLOUD.md` are live links — the other three are code spans until their PRs land; open them by path.
 
 ## AUTH
 
@@ -67,9 +67,16 @@ With `bp` connected, the whole API is one call away — `bp capabilities -o json
 # 0. Learn the surface — every noun, verb, route, in one call.
 bp capabilities -o json | less
 
-# 1. A content type (schema v2) — scaffold, then upsert.
-bp make schema note > note.json
-bp schema apply --file note.json
+# 1. A content type (schema v2) — a minimal two-field type, upserted as-is.
+cat > note.schema.json <<'JSON'
+{"name":"note","title":"Note","fields":[
+  {"name":"title","title":"Title","type":"string"},
+  {"name":"body","title":"Body","type":"text"}
+]}
+JSON
+bp schema apply --file note.schema.json
+# Richer types: `bp make schema note` prints a full annotated skeleton —
+# edit it down (its _comment keys explain each field), then apply.
 
 # 2. A document of that type — `seed` fabricates a schema-valid draft.
 bp seed note --count 1
@@ -83,7 +90,10 @@ bp task ready
 
 # 4. A paper — Barkpark's block document, read anywhere.
 cat > paper.json <<'JSON'
-{"slug":"hello","body_html":"<h1>Hello</h1><p>My first paper, from an agent.</p>"}
+{"slug":"hello","blocks":[
+  {"id":"t1","type":"heading","level":1,"text":"Hello"},
+  {"id":"p1","type":"paragraph","content":[{"type":"text","value":"My first paper, from an agent."}]}
+]}
 JSON
 bp bulldocs publish hello --file paper.json
 bp paper view hello
