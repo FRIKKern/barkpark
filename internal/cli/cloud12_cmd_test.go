@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -26,6 +27,365 @@ func seedCloudLogin(t *testing.T, cloudURL string) {
 	}
 	if err := SaveConfig(cfg); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
+	}
+}
+
+// fleetHits records which auto-register routes a fake control plane saw, so the
+// steal-guard / headless-frozen tests can assert what did (and did NOT) fire.
+type fleetHits struct {
+	barkparks    int
+	credentials  int
+	capabilities int
+}
+
+// newFleetControlPlane stands up ONE httptest server that plays BOTH the control
+// plane (GET /v1/barkparks, GET /v1/barkparks/:id/credentials) AND the picked
+// barkpark itself (GET /v1/capabilities for the connect probe), so a single-fleet
+// auto-connect resolves end-to-end against it. fleetBody is called at request time
+// with the server's OWN url so a test can point the single barkpark back at this
+// server (making the connect probe land). credsToken is the admin token
+// /credentials returns (url = the server itself); a blank token makes /credentials
+// 404 with no_admin_token.
+func newFleetControlPlane(t *testing.T, hits *fleetHits, fleetBody func(self string) string, credsToken string) *httptest.Server {
+	t.Helper()
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/barkparks":
+			hits.barkparks++
+			_, _ = io.WriteString(w, fleetBody(srv.URL))
+		case strings.HasSuffix(r.URL.Path, "/credentials"):
+			hits.credentials++
+			if credsToken == "" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = io.WriteString(w, `{"error":"no_admin_token"}`)
+				return
+			}
+			_, _ = io.WriteString(w, `{"admin_token":"`+credsToken+`","url":"`+srv.URL+`","host":""}`)
+		case r.URL.Path == "/v1/capabilities":
+			hits.capabilities++
+			_, _ = io.WriteString(w, `{"auth_tier":"admin","server":{"name":"my-park","version":"1.0"}}`)
+		case r.URL.Path == "/v1/meta":
+			_, _ = io.WriteString(w, `{"serverTime":"2026-07-09T00:00:00Z","minApiVersion":"1","maxApiVersion":"1"}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// staticFleet returns a fleetBody func that ignores the server URL and always
+// yields body — for the steal-guard / multi / zero cases that never connect back.
+func staticFleet(body string) func(string) string {
+	return func(string) string { return body }
+}
+
+// ttyWriter builds an in-memory writer that PRETENDS stdout is a terminal (isTTY)
+// so the auto-register tail (finishLoginConnect) engages, while still capturing
+// bytes into buffers for assertions.
+func ttyWriter(stdout, stderr *bytes.Buffer) *writer {
+	w := newWriter(stdout, stderr)
+	w.output = "table"
+	w.isTTY = true
+	return w
+}
+
+// TestFinishLoginConnectSingleAutoConnects: a one-barkpark fleet on a TTY
+// auto-connects — credentials are fetched, the connect path persists the server,
+// and "Connected to <name> — <url>" announces it before the connect summary.
+func TestFinishLoginConnectSingleAutoConnects(t *testing.T) {
+	withTempConfigHome(t)
+
+	// ONE server plays control plane AND the picked barkpark: the single fleet
+	// entry's URL is the server itself, so the connect probe (GET /v1/capabilities)
+	// lands right back here. The fleet body is stamped after the server exists.
+	var hits fleetHits
+	srv := newFleetControlPlane(t, &hits, func(self string) string {
+		return `{"barkparks":[{"id":"bp-1","name":"my-park","url":"` + self + `"}]}`
+	}, "admin-secret")
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	out := ttyWriter(&stdout, &stderr)
+	finishLoginConnect(out, cfg)
+
+	if hits.barkparks == 0 {
+		t.Fatalf("auto-register must list the fleet")
+	}
+	if hits.credentials == 0 {
+		t.Fatalf("a single barkpark must have its credentials fetched")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("Connected to my-park")) {
+		t.Fatalf("missing the 'Connected to <name>' announcement:\n%s", stdout.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("run 'bp'")) {
+		t.Fatalf("missing the next-step 'run bp' hint:\n%s", stdout.String())
+	}
+	loaded, _ := LoadConfig()
+	if normalizeServerURL(loaded.ActiveServer()) != normalizeServerURL(srv.URL) {
+		t.Fatalf("connect must default bp at the barkpark; active = %q, want %q", loaded.ActiveServer(), srv.URL)
+	}
+	if e, ok := loaded.FindServer(srv.URL); !ok || e.Token != "admin-secret" {
+		t.Fatalf("admin token must be saved as the server token; entry = %+v ok=%v", e, ok)
+	}
+}
+
+// TestFinishLoginConnectDeskOfferWiredAfterAutoConnect: on a genuine both-streams
+// terminal a successful single-barkpark auto-connect ends with the Enter-to-desk
+// offer — a bare Enter propagates the ExitOpenDesk sentinel out of
+// finishLoginConnect (main() turns it into runTUI in-process), and typing n
+// declines to a plain exitOK with the reminder. This is the decision-23 wiring
+// proof: offerOpenDesk is not a dead seam.
+func TestFinishLoginConnectDeskOfferWiredAfterAutoConnect(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin string
+		want  int
+	}{
+		{"bare Enter opens the desk", "\n", ExitOpenDesk},
+		{"n stays put", "n\n", exitOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			forceDeviceTTY(t, true) // both streams a terminal → the offer fires
+
+			var hits fleetHits
+			srv := newFleetControlPlane(t, &hits, func(self string) string {
+				return `{"barkparks":[{"id":"bp-1","name":"my-park","url":"` + self + `"}]}`
+			}, "admin-secret")
+
+			cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+			if err := SaveConfig(cfg); err != nil {
+				t.Fatalf("SaveConfig: %v", err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			out := ttyWriter(&stdout, &stderr)
+
+			var code int
+			withStdin(t, tc.stdin, func() { code = finishLoginConnect(out, cfg) })
+
+			if code != tc.want {
+				t.Fatalf("finishLoginConnect = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, tc.want, stdout.String(), stderr.String())
+			}
+			if hits.credentials == 0 {
+				t.Fatal("the auto-connect must have run before the offer")
+			}
+			if !bytes.Contains(stderr.Bytes(), []byte("open the desk")) {
+				t.Fatalf("the desk offer should have prompted on stderr:\n%s", stderr.String())
+			}
+			if tc.want == exitOK && !bytes.Contains(stdout.Bytes(), []byte("Run 'bp'")) {
+				t.Fatalf("declining should leave the 'Run bp' reminder:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
+// TestFinishLoginConnectStealGuardLeavesActiveServer: with bp already connected to
+// a DIFFERENT saved server, a single-barkpark fleet does NOT silently re-point bp
+// — it reports and leaves c.Server untouched, never fetching credentials.
+func TestFinishLoginConnectStealGuardLeavesActiveServer(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits fleetHits
+	oneFleet := `{"barkparks":[{"id":"bp-1","name":"my-park","url":"https://mypark.example.com"}]}`
+	srv := newFleetControlPlane(t, &hits, staticFleet(oneFleet), "admin-secret")
+
+	// Seed a DIFFERENT active saved server (the one bp is currently pointed at).
+	seed := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	seed.RememberServer(ServerEntry{
+		Name: "other", Server: "https://other.example.com", Token: "other-tok",
+		Tier: "admin", LastConnected: "2026-06-06T00:00:00Z",
+	})
+	if err := SaveConfig(seed); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	var stdout, stderr bytes.Buffer
+	out := ttyWriter(&stdout, &stderr)
+
+	finishLoginConnect(out, cfg)
+
+	if hits.credentials != 0 {
+		t.Fatalf("steal-guard must NOT fetch credentials on the different-server branch; got %d hits", hits.credentials)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("leaving that as is")) {
+		t.Fatalf("steal-guard should report it left the active server alone:\n%s", stdout.String())
+	}
+	loaded, _ := LoadConfig()
+	if normalizeServerURL(loaded.ActiveServer()) != normalizeServerURL("https://other.example.com") {
+		t.Fatalf("c.Server must be UNTOUCHED on the report branch; active = %q", loaded.ActiveServer())
+	}
+	if e, ok := loaded.FindServer("https://other.example.com"); !ok || e.Token != "other-tok" {
+		t.Fatalf("the active server's token must survive; entry=%+v ok=%v", e, ok)
+	}
+}
+
+// TestFinishLoginConnectMultiNonTTYPrintsFleet: a many-barkpark fleet with stdin
+// NOT a terminal never prompts — it prints the fleet plus a one-line connect
+// command and connects nothing (no credentials fetched).
+func TestFinishLoginConnectMultiNonTTYPrintsFleet(t *testing.T) {
+	withTempConfigHome(t)
+	forceDeviceTTY(t, false) // stdin is NOT a terminal → no interactive pick
+
+	var hits fleetHits
+	twoFleet := `{"barkparks":[{"id":"bp-1","name":"alpha","url":"https://alpha.example.com"},{"id":"bp-2","name":"beta","host":"beta.example.com"}]}`
+	srv := newFleetControlPlane(t, &hits, staticFleet(twoFleet), "admin-secret")
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	var stdout, stderr bytes.Buffer
+	out := ttyWriter(&stdout, &stderr)
+
+	finishLoginConnect(out, cfg)
+
+	if hits.credentials != 0 {
+		t.Fatalf("no interactive pick → no credentials fetch; got %d", hits.credentials)
+	}
+	for _, want := range []string{"alpha", "beta", "https://alpha.example.com", "beta.example.com", "bp setup --target cloud"} {
+		if !bytes.Contains(stdout.Bytes(), []byte(want)) {
+			t.Fatalf("multi non-tty fleet listing missing %q:\n%s", want, stdout.String())
+		}
+	}
+	loaded, _ := LoadConfig()
+	if loaded.ActiveServer() != "" {
+		t.Fatalf("nothing should be connected on the print-only path; active=%q", loaded.ActiveServer())
+	}
+}
+
+// TestFinishLoginConnectZeroFleetGuidance: an empty fleet finishes logged-in with
+// launch/deploy guidance (never a dead end, never a connect).
+func TestFinishLoginConnectZeroFleetGuidance(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits fleetHits
+	srv := newFleetControlPlane(t, &hits, staticFleet(`{"barkparks":[]}`), "admin-secret")
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	var stdout, stderr bytes.Buffer
+	out := ttyWriter(&stdout, &stderr)
+
+	finishLoginConnect(out, cfg)
+
+	if hits.credentials != 0 {
+		t.Fatalf("an empty fleet has nothing to fetch; got %d", hits.credentials)
+	}
+	for _, want := range []string{"don't have any Barkparks yet", "bp launch hetzner", "bp go-live"} {
+		if !bytes.Contains(stdout.Bytes(), []byte(want)) {
+			t.Fatalf("empty-fleet guidance missing %q:\n%s", want, stdout.String())
+		}
+	}
+}
+
+// TestFinishLoginConnectHeadlessFrozen: on the machine-output path (and on a
+// non-tty) finishLoginConnect is a complete no-op — it never even lists the fleet,
+// so the -o json contract carries no auto-register side effect.
+func TestFinishLoginConnectHeadlessFrozen(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits fleetHits
+	srv := newFleetControlPlane(t, &hits, staticFleet(`{"barkparks":[{"id":"bp-1","name":"my-park","url":"https://x"}]}`), "admin-secret")
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+
+	// (a) json output, even with isTTY true → frozen.
+	var o1, e1 bytes.Buffer
+	w1 := newWriter(&o1, &e1)
+	w1.output = "json"
+	w1.isTTY = true
+	finishLoginConnect(w1, cfg)
+
+	// (b) table output but NOT a tty (a pipe) → frozen.
+	var o2, e2 bytes.Buffer
+	w2 := newWriter(&o2, &e2)
+	w2.output = "table"
+	w2.isTTY = false
+	finishLoginConnect(w2, cfg)
+
+	if hits.barkparks != 0 {
+		t.Fatalf("headless / non-tty must never auto-register; barkparks hit %d times", hits.barkparks)
+	}
+	if o1.Len() != 0 || o2.Len() != 0 {
+		t.Fatalf("frozen path must print nothing on stdout; got %q / %q", o1.String(), o2.String())
+	}
+}
+
+// TestFinishLoginConnectSameServerReconnects: when bp is ALREADY connected to the
+// one barkpark, the steal-guard falls through (not a report) — it fetches a FRESH
+// admin token and reconnects, announcing it. Proves the same-server branch.
+func TestFinishLoginConnectSameServerReconnects(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits fleetHits
+	srv := newFleetControlPlane(t, &hits, func(self string) string {
+		return `{"barkparks":[{"id":"bp-1","name":"my-park","url":"` + self + `"}]}`
+	}, "fresh-admin-token")
+
+	// Pre-seed the SAME server as active but with a STALE token.
+	seed := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	seed.RememberServer(ServerEntry{Name: "my-park", Server: srv.URL, Token: "stale-token", Tier: "admin", LastConnected: "2026-06-06T00:00:00Z"})
+	if err := SaveConfig(seed); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	var stdout, stderr bytes.Buffer
+	out := ttyWriter(&stdout, &stderr)
+
+	finishLoginConnect(out, cfg)
+
+	if hits.credentials == 0 {
+		t.Fatalf("same-server reconnect must fetch a fresh admin token")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("Connected to my-park")) {
+		t.Fatalf("same-server reconnect should announce + connect (not report):\n%s", stdout.String())
+	}
+	loaded, _ := LoadConfig()
+	if e, ok := loaded.FindServer(srv.URL); !ok || e.Token != "fresh-admin-token" {
+		t.Fatalf("reconnect must refresh the stored token to the fresh one; entry=%+v ok=%v", e, ok)
+	}
+}
+
+// TestFinishLoginConnectFleetErrorWarns: a fleet-resolution failure AFTER a good
+// login is a stderr warning, never a failure — finishLoginConnect prints nothing
+// on stdout, warns on stderr, and mutates no config (the login already succeeded).
+func TestFinishLoginConnectFleetErrorWarns(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits fleetHits
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/barkparks" {
+			hits.barkparks++
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":"registry unavailable"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+	var stdout, stderr bytes.Buffer
+	out := ttyWriter(&stdout, &stderr)
+
+	finishLoginConnect(out, cfg)
+
+	if hits.barkparks == 0 {
+		t.Fatalf("the fleet lookup should have been attempted")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("a fleet error must not print to stdout; got %q", stdout.String())
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("couldn't reach your fleet")) {
+		t.Fatalf("a fleet error should warn on stderr:\n%s", stderr.String())
+	}
+	loaded, _ := LoadConfig()
+	if loaded.ActiveServer() != "" {
+		t.Fatalf("a fleet error must not connect anything; active=%q", loaded.ActiveServer())
 	}
 }
 

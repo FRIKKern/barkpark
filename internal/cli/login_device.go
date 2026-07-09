@@ -160,6 +160,12 @@ func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error
 // emitDeviceLoginSuccess writes the SAME success surface a password login does:
 // the {ok, cloud_url, team_id} envelope for machine consumers, else the human
 // confirmation lines on stdout (runLoginCloud's tail, verbatim).
+//
+// It stops at the "logged in" confirmation and NO LONGER prints a next-step hint:
+// the caller (runLoginCloud) drives finishLoginConnect right after, which
+// auto-registers the fleet and lands the user in a working surface — the former
+// dead-end "run 'bp barkparks'" line is gone (bp-login-ux W2). The wizard's
+// cloudSetupDeviceLogin reuse is unaffected: it continues into cloudFleetPick.
 func emitDeviceLoginSuccess(out *writer, base, teamID string) {
 	if out.isTTY {
 		out.errf("") // close the heartbeat dots line before the confirmation
@@ -175,7 +181,6 @@ func emitDeviceLoginSuccess(out *writer, base, teamID string) {
 	if teamID != "" {
 		out.outf("  team: %s", teamID)
 	}
-	out.outf("  run 'bp barkparks' to see your fleet")
 }
 
 // classifyDevicePollError maps a terminal poll error onto the CLI's exit scheme:

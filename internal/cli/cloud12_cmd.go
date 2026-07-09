@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
@@ -32,6 +33,66 @@ import (
 // future caller (or test) can swap in a cancellable / deadlined context without
 // threading one through every signature; today it is the process background.
 var cloudCtx = context.Background
+
+// ExitOpenDesk is a SENTINEL "exit code" a login-connect path returns from
+// cli.Execute to ask main() to open the TUI desk IN-PROCESS instead of exiting.
+// It is never a real process status: main.go intercepts it before os.Exit and
+// launches runTUI against the just-saved server (see cmd/barkpark/main.go). The
+// value sits well outside the real 0–8 exit scheme AND the 0–255 range a shell
+// can read, so it can never be mistaken for a genuine status — if it ever leaked
+// to os.Exit that is a wiring bug, not a valid code.
+const ExitOpenDesk = 256
+
+// offerOpenDesk is the tail of a SUCCESSFUL auto-connect: the user is signed in
+// AND a real content server was just saved, so we offer to drop them straight
+// into the working desk rather than leave them at a hint. On a bare Enter it
+// returns the ExitOpenDesk sentinel main() reads to launch the TUI in-process;
+// declining (typing n / no) returns exitOK with a one-line reminder so the
+// prompt is never a trap.
+//
+// The offer appears ONLY on the interactive human path — a real TTY and a
+// non-machine output shape. On -o json/yaml (the report branch), a pipe, or any
+// non-tty it is a SILENT no-op returning exitOK, so the {ok,…} envelope and
+// headless/CI callers are untouched (charter decision 12: no chrome, no prompts
+// on the machine path). The caller must only invoke it when auto-connect
+// actually ran. The read is cooked-mode Fscanln — the same terminal-safe read
+// the wizard→desk fall-through already relies on.
+func offerOpenDesk(out *writer) int {
+	if !out.isTTY || out.machineOut() {
+		return exitOK
+	}
+	fmt.Fprint(out.stderr, "Press Enter to open the desk (or type n to stay here): ")
+	var line string
+	// Fscanln returns an error on a bare Enter (no token scanned) — that empty
+	// line IS the default "yes, open it". Only an explicit n / no declines; any
+	// other input is treated as assent, since the prompt asked for Enter.
+	_, _ = fmt.Fscanln(os.Stdin, &line)
+	line = strings.TrimSpace(line)
+	if line == "n" || line == "N" || strings.EqualFold(line, "no") {
+		out.outf("Run 'bp' any time to open the desk.")
+		return exitOK
+	}
+	return ExitOpenDesk
+}
+
+// LoggedInWithoutServer reports the "signed in to Barkpark Cloud but no barkpark
+// connected" state: a Cloud session token is stored, yet no active CONTENT
+// server is resolvable (no BARKPARK_* server env, no saved active server). In
+// that state the TUI falls to the baked localhost floor, fails to load schemas,
+// and — because saving the Cloud token makes FirstRun() false — would otherwise
+// print the misleading "Is the Phoenix API running?" hint. main() consults this
+// to print setup guidance instead. Exported and side-effect-free (a pure read of
+// env + on-disk config) so it is unit-testable.
+func LoggedInWithoutServer() bool {
+	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+		return false
+	}
+	c, err := LoadConfig()
+	if err != nil || c == nil {
+		return false
+	}
+	return c.HasCloudToken() && strings.TrimSpace(c.Server) == ""
+}
 
 // cloudFail maps a cloud-client error onto the CLI's exit contract. cloudclient
 // prefixes every 401 with "unauthorized:" precisely so callers can read the auth
@@ -94,7 +155,14 @@ func runLoginCloud(out *writer, args []string) int {
 			}
 			return useError(out, "failed", derr.Error(), exitGeneric)
 		}
-		return exitOK
+		// AUTO-REGISTER (bp-login-ux W2): resolve the fleet and, on a single
+		// barkpark, connect bp to it — landing the user in a working surface, not
+		// at a hint. runDeviceLoginFlow already emitted the {ok,cloud_url,team_id}
+		// envelope, so there is NO json early-return here to lean on;
+		// finishLoginConnect gates itself strictly to the human TTY path. Its
+		// return is exitOK — or the ExitOpenDesk sentinel when the user accepted
+		// the "Press Enter to open the desk" offer (decision 23).
+		return finishLoginConnect(out, cfg)
 	}
 
 	// Email: flag wins, else prompt on a TTY. No silent default — an empty email is
@@ -137,6 +205,8 @@ func runLoginCloud(out *writer, args []string) int {
 		"cloud_url": base,
 		"team_id":   resp.TeamID,
 	}) {
+		// Headless / -o json: the envelope is byte-identical to before — NO
+		// auto-connect side effects on the machine path.
 		return exitOK
 	}
 
@@ -144,8 +214,191 @@ func runLoginCloud(out *writer, args []string) int {
 	if resp.TeamID != "" {
 		out.outf("  team: %s", resp.TeamID)
 	}
-	out.outf("  run 'bp barkparks' to see your fleet")
+	// AUTO-REGISTER (bp-login-ux W2): replaces the former dead-end
+	// "run 'bp barkparks'" hint — resolve the fleet and connect on a single
+	// barkpark (gated to the human TTY path inside finishLoginConnect). Returns
+	// exitOK, or the ExitOpenDesk sentinel on an accepted desk offer.
+	return finishLoginConnect(out, cfg)
+}
+
+// finishLoginConnect is the shared AUTO-REGISTER tail both `bp login` paths run
+// after the session is stored (bp-login-ux W2): it resolves the logged-in user's
+// fleet and, when there is exactly ONE barkpark (the overwhelmingly common case),
+// fetches its admin credentials and connects bp to it — landing the user in a
+// working surface instead of at a "run bp barkparks" hint.
+//
+// It is gated STRICTLY to the human terminal path (out.isTTY && !out.machineOut()):
+//   - the headless / -o json contract is frozen — the {ok,cloud_url,team_id}
+//     envelope is byte-identical and NO auto-connect side effect fires. The device
+//     branch calls this AFTER runDeviceLoginFlow already emitted its envelope, so
+//     the gate here (not a json early-return) is what protects the machine path.
+//
+// Every outcome is a complete, non-dead-end success — it returns exitOK on every
+// path except one: a successful single-barkpark auto-connect on a both-streams
+// terminal ends with the "Press Enter to open the desk" offer, whose acceptance
+// returns the ExitOpenDesk sentinel (decision 23; main() turns it into runTUI).
+// A fleet error after a good login is a stderr warning. Zero barkparks →
+// launch/deploy guidance. One → auto-connect + announce (with a steal-guard,
+// below). Many → an interactive pick when both streams are a TTY, else the fleet
+// printed with a one-line connect command.
+func finishLoginConnect(out *writer, cfg *Config) int {
+	// A human terminal only. Never auto-connect on the headless / machine path.
+	if !out.isTTY || out.machineOut() {
+		return exitOK
+	}
+
+	client := cfg.CloudClient()
+	list, err := client.ListBarkparks(cloudCtx())
+	if err != nil {
+		// Logged in IS success; a fleet lookup blip is a warning, not a failure.
+		out.errf("logged in, but couldn't reach your fleet (%v) — try `bp barkparks`.", err)
+		return exitOK
+	}
+
+	switch len(list) {
+	case 0:
+		out.outf("")
+		out.outf("You're logged in — you don't have any Barkparks yet.")
+		out.outf("  launch one:    bp launch hetzner --name <name>")
+		out.outf("  fully-managed: bp go-live --name <name>")
+		return exitOK
+	case 1:
+		return finishSingleBarkpark(out, client, list[0])
+	default:
+		return finishMultiBarkpark(out, client, list)
+	}
+}
+
+// finishSingleBarkpark auto-connects the one-barkpark fleet: it fetches the
+// barkpark's admin credentials and delegates to the unchanged connect path, then
+// announces "Connected to <name> — <url>" before the connect summary.
+//
+// STEAL-GUARD (decision 17): if bp is already pointed at a DIFFERENT active saved
+// server, we do NOT silently re-point it — we report the barkpark and how to
+// connect, leaving the active server untouched (exit 0). When the active server IS
+// this barkpark, it's a reconnect: we fall through and re-save with a FRESH admin
+// token (GetCredentials always mints/returns the current one).
+func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) int {
+	target := fleetTarget(only.URL, only.Host)
+
+	if active, ok := activeSavedServer(); ok && strings.TrimSpace(active.Server) != "" {
+		if normalizeServerURL(active.Server) != normalizeServerURL(target) {
+			out.outf("")
+			out.outf("You're logged in. Your Barkpark: %s  %s", only.Name, orDash(target))
+			out.outf("bp is currently connected to %s — leaving that as is.", active.Server)
+			out.outf("Connect to %s any time with:  bp setup --target cloud", only.Name)
+			return exitOK
+		}
+		// Same server → a reconnect: fall through to fetch a fresh token + re-save.
+	}
+
+	creds, gerr := client.GetCredentials(cloudCtx(), only.ID)
+	if gerr != nil {
+		if strings.Contains(gerr.Error(), "no_admin_token") {
+			// No stored admin token (an older / ip-only provision): fall back to the
+			// manual-paste path — never a dead end.
+			out.outf("")
+			out.outf("%q has no stored admin token (an older or ip-only provision).", only.Name)
+			out.outf("Connect by pasting an admin token:  bp setup --target cloud")
+			return exitOK
+		}
+		out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
+		return exitOK
+	}
+
+	connectTarget := fleetTarget(creds.URL, creds.Host)
+	if connectTarget == "" {
+		out.errf("logged in — %q has no address yet (still provisioning). Re-run `bp setup --target cloud` once it's up.", only.Name)
+		return exitOK
+	}
+
+	out.outf("")
+	out.outf("Connected to %s — %s", only.Name, connectTarget)
+	if !connectToBarkpark(out, connectTarget, creds.AdminToken, only.Name) {
+		return exitOK
+	}
+	// TAKE ME FURTHER (decision 23): a successful AUTO-connect ends with the
+	// Enter-to-desk offer — but only on a genuine both-streams terminal.
+	// out.isTTY covers stdout alone; a piped stdin would hand offerOpenDesk an
+	// immediate EOF that reads as assent and launch the desk unasked.
+	out.outf("")
+	if deviceTTYCheck() {
+		return offerOpenDesk(out)
+	}
+	out.outf("  run 'bp' to open your desk")
 	return exitOK
+}
+
+// finishMultiBarkpark handles a fleet with more than one barkpark. On a genuine
+// both-streams terminal it reuses the wizard's cloudFleetPick (numbered list →
+// pick → credentials → connect). When stdin is NOT a terminal (a rare
+// `bp login < /dev/null` at a tty) it never prompts: it prints the fleet with a
+// one-line connect command. Always exitOK: the Enter-to-desk offer is reserved
+// for the AUTO-connect (decision 23) — after a user-driven pick the "run 'bp'"
+// hint stands.
+func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclient.Barkpark) int {
+	if deviceTTYCheck() { // both stdin AND stdout are a real terminal
+		res, err := cloudFleetPick(out, client, os.Stdin)
+		if err != nil {
+			out.errf("logged in, but couldn't pick a Barkpark (%v) — try `bp setup --target cloud`.", err)
+			return exitOK
+		}
+		if res.LoggedInOnly || strings.TrimSpace(res.Server) == "" {
+			// cloudFleetPick already printed the actionable guidance (skip / no token).
+			return exitOK
+		}
+		out.outf("")
+		out.outf("Connected to %s — %s", res.Name, res.Server)
+		if connectToBarkpark(out, res.Server, res.Token, res.Name) {
+			out.outf("")
+			out.outf("  run 'bp' to open your desk")
+		}
+		return exitOK
+	}
+
+	out.outf("")
+	out.outf("You're logged in. Your Barkparks:")
+	for _, b := range list {
+		out.outf("  %s  %s", b.Name, orDash(fleetTarget(b.URL, b.Host)))
+	}
+	out.outf("")
+	out.outf("Connect to one with:  bp setup --target cloud")
+	return exitOK
+}
+
+// connectToBarkpark delegates to the UNCHANGED setup connect path (TargetConnect
+// over configStoreAdapter) so the server is probed, the admin token is persisted,
+// bp is defaulted here, and the same premium connect summary prints — exactly like
+// the wizard's cloud target. We never hand-roll RememberServer. A connect failure
+// after a good login is a warning, not a failure (the user stays logged in) —
+// reported as ok=false so the caller skips the next-step tail (hint or desk offer).
+func connectToBarkpark(out *writer, server, token, name string) bool {
+	plan := setup.SetupPlan{
+		Target: setup.TargetConnect,
+		Server: server,
+		Token:  token,
+		Name:   strings.TrimSpace(name),
+	}
+	opts := setup.Options{
+		Out:          out.stdout,
+		Store:        configStoreAdapter{},
+		KnownServers: loadKnownServers(),
+	}
+	if err := setup.Execute(plan, opts); err != nil {
+		out.errf("logged in, but connecting to %s failed: %v", server, err)
+		out.errf("  you can retry with:  bp setup --target cloud")
+		return false
+	}
+	return true
+}
+
+// orDash renders an empty string as the house em-dash so a provisioning barkpark
+// with no URL/host yet reads honestly rather than as a bare gap.
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "—"
+	}
+	return s
 }
 
 // runSignupCloud is the `bp signup` built-in — the registration sibling of
