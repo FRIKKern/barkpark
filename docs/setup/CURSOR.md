@@ -130,6 +130,11 @@ all enabled servers and silently drops the excess.** The full Barkpark manifest 
 ~107 commands, so `all` blows past the cap. Keep the default `tasks` unless you
 know exactly which handful you need.
 
+### Validation
+
+`bp mcp serve` is proven against a live server (real JSON-RPC transcript, not a
+fixture) in [`../ops/mcp-serve-validation.md`](../ops/mcp-serve-validation.md).
+
 ## Troubleshooting
 
 - **`bp: command not found` in Cursor's terminal** — the installer puts `bp` in
