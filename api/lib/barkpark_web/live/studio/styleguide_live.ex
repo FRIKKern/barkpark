@@ -32,6 +32,8 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
 
   use BarkparkWeb, :live_view
 
+  alias Barkpark.Tenancy
+  alias Barkpark.PortableDoc.Render.Palettes
   alias BarkparkWeb.Studio.TokensGen
 
   # Vocabulary only — role NAMES + emitted VAR names, never colour values. The
@@ -72,6 +74,26 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
   # emitted var(--text-<step>) / var(--text-<step>-lh) (Decision D2).
   @type_steps ~w(2xl xl lg base sm xs)
 
+  # The two orthogonal light/dark modes each theme cell is previewed in. The
+  # SHOWROOM matrix is known_themes() × these (ts-w5d) — it GROWS to N×2 with no
+  # edit here when ts-w5c registers ember + fjord (the "theme N+1 = one file"
+  # invariant made observable on one screen).
+  @theme_modes ~w(light dark)
+
+  # Mail-chrome skin slots shown per theme — {label, skin key}. The email skin is
+  # BYTES a mail client renders (not CSS vars a browser resolves), so its hex is
+  # read from Palettes.email_skin/1 (generated, theme-keyed) and applied inline —
+  # never hand-copied, the same documented exception the categorical swatches use.
+  @mail_slots [
+    {"page_bg", :page_bg},
+    {"paper", :paper},
+    {"brand", :brand},
+    {"brand_text", :brand_text},
+    {"text", :text},
+    {"muted", :muted},
+    {"rule", :rule}
+  ]
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -86,8 +108,21 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
        sheet_cf: TokensGen.sheet_cf_backgrounds(),
        sheet_tabs: TokensGen.sheet_tab_colors(),
        lifecycle: TokensGen.lifecycle(),
-       frames: TokensGen.lifecycle_frames()
+       frames: TokensGen.lifecycle_frames(),
+       themes: Tenancy.known_themes(),
+       theme_modes: @theme_modes,
+       mail_skins: mail_skins()
      )}
+  end
+
+  # Resolve every known theme's email skin to labelled hex — generated +
+  # theme-keyed (never hand-copied), so registering a theme grows this list with
+  # no edit here. Shaped {theme, [{label, hex}]} for the showroom mail rows.
+  defp mail_skins do
+    for theme <- Tenancy.known_themes() do
+      skin = Palettes.email_skin(theme)
+      {theme, for({label, key} <- @mail_slots, do: {label, Map.fetch!(skin, key)})}
+    end
   end
 
   @impl true
@@ -129,6 +164,60 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
         <code style="font-family: var(--font-mono);">design/tokens.json</code>. Flip the theme
         above to prove both light and dark from one page.
       </p>
+
+      <section data-test-id="sg-showroom" style="margin: 0 0 2.5rem;">
+        <h2 style="margin: 0 0 .25rem;">Theme showroom</h2>
+        <p style="color: var(--muted-text); font-size: 13px; margin: 0 0 1rem;">
+          Every registered theme (<code style="font-family: var(--font-mono);">Tenancy.known_themes/0</code>)
+          × light / dark, each cell an
+          <code style="font-family: var(--font-mono);">&lt;iframe&gt;</code> owning its own
+          <code style="font-family: var(--font-mono);">&lt;html data-bp-theme … data-theme …&gt;</code>
+          so the html-anchored studio-chrome / status / reader skins actually fire — the
+          showroom parses the SHIPPED stylesheet, it never hand-rebuilds a palette. Drop one
+          file in <code style="font-family: var(--font-mono);">design/themes/</code>, and this
+          grid grows a row with no edit here.
+        </p>
+
+        <div :for={theme <- @themes} data-test-id="sg-theme-row" data-theme-id={theme} style="margin: 0 0 1.75rem;">
+          <div style="display: flex; align-items: baseline; gap: 10px; margin: 0 0 .5rem;">
+            <strong style="font-family: var(--font-mono); font-size: 13px;">{theme}</strong>
+            <span style="color: var(--muted-text); font-size: 11px;">theme identity · light + dark</span>
+          </div>
+
+          <%!-- Mail-chrome row — email skin hex, generated + theme-keyed (Palettes.email_skin);
+                applied inline (the documented exception for byte-rendered skins, not CSS vars). --%>
+          <div style="margin: 0 0 .6rem;">
+            <div style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text); margin: 0 0 4px;">
+              mail-chrome — email_skin (generated hex, not a CSS var)
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <div
+                :for={{label, hex} <- Map.get(Map.new(@mail_skins), theme, [])}
+                data-test-id="sg-mail-chip"
+                style="display: flex; flex-direction: column; align-items: center; gap: 3px;"
+              >
+                <span style={"width: 26px; height: 26px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: #{hex};"}></span>
+                <span style="font-family: var(--font-mono); font-size: 9px; color: var(--muted-text);">{label}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px;">
+            <div :for={mode <- @theme_modes} data-test-id="sg-theme-cell" data-cell-theme={theme} data-cell-mode={mode}>
+              <div style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text); margin: 0 0 4px;">
+                {theme} · {mode}
+              </div>
+              <iframe
+                src={"/studio/styleguide/swatch?theme=#{theme}&mode=#{mode}"}
+                title={"#{theme} #{mode} preview"}
+                loading="lazy"
+                style="width: 100%; height: 340px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);"
+              >
+              </iframe>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section style="margin: 0 0 2.5rem;">
         <h2 style="margin: 0 0 .75rem;">Palette</h2>

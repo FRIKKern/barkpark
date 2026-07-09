@@ -146,12 +146,25 @@ defmodule Barkpark.StudioChat.Recorder do
       session: session,
       timer: arm_idle(nil),
       activity: nil,
+      # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
+      # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
+      # one in the same turn UPDATES this persisted row's input in place rather
+      # than appending — replay then reconstructs ONE final-state checklist card.
+      # Reset to nil on every `system/init` (the per-turn boundary).
+      todo_tool_use_id: nil,
       # The advertised slash-command list (charter D36a). `commands` is the rich
       # authoritative list from the initialize ack; `slash_commands` is the
       # name-only fallback captured off `system/init`; a live/late tab reads the
       # best available via `advertised_commands/1`.
       commands: nil,
-      slash_commands: nil
+      slash_commands: nil,
+      # The current thinking bout's token count (charter D41). Accumulated off
+      # `system/thinking_tokens` (`estimated_tokens` is monotonic cumulative — we
+      # take the max seen since the last flush, NEVER sum thinking_delta counts),
+      # flushed as a compact `"thinking"` row the instant the turn's assistant
+      # blocks (or the terminal result) land so replay renders the pulse in-order.
+      # nil ⇒ no active bout.
+      pending_thinking: nil
     }
   end
 
@@ -170,15 +183,35 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_info({:claude_chat_event, %{"type" => "assistant"} = ev} = msg, state) do
     blocks = get_in(ev, ["message", "content"])
-    persist_assistant_blocks(state.session_id, blocks)
+    # A thinking bout that preceded these blocks flushes FIRST (charter D41), so
+    # replay reconstructs the ✻ pulse row in the same order it streamed live.
+    state = flush_thinking(state)
+    state = persist_assistant_blocks(state, blocks, ev)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(assistant_activity(blocks, state.activity)) |> touch()}
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev} = msg, state) do
+    # Edge case: a turn that thought then produced NO assistant blocks (straight
+    # to result) still flushes its pulse row so the thought is never lost.
+    state = flush_thinking(state)
     record_result(state.session_id, ev)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :idle, line: nil}) |> touch()}
+  end
+
+  # The extended-thinking pulse (charter D41). The wire never carries thinking
+  # TEXT (empty across models) — only a monotonic cumulative `estimated_tokens`
+  # and an encrypted signature we NEVER persist. Track the bout's high-water mark
+  # so the flushed row reports how much thinking happened; rebroadcast verbatim so
+  # live tabs run their own counter. This clause MUST precede the generic
+  # `{:claude_chat_event, _ev}` catch-all below.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "thinking_tokens"} = ev} = msg,
+        state
+      ) do
+    broadcast(state, msg)
+    {:noreply, state |> accumulate_thinking(thinking_tokens_count(ev)) |> touch()}
   end
 
   # A turn is starting (the CLI emits init per TURN): the session is working.
@@ -191,7 +224,14 @@ defmodule Barkpark.StudioChat.Recorder do
         state
       ) do
     StudioChat.update_status(state.session_id, "working")
-    state = maybe_capture_slash_commands(state, ev)
+    # A new turn begins: forget the previous turn's todo row (D39) and drop any
+    # unflushed thinking count from a prior turn (D41) — both are per-turn state.
+    state = %{
+      maybe_capture_slash_commands(state, ev)
+      | todo_tool_use_id: nil,
+        pending_thinking: nil
+    }
+
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :working, line: "thinking…"}) |> touch()}
   end
@@ -285,34 +325,107 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # ── persistence (mirrors the store shapes replay reads back) ───────────────
 
-  defp persist_assistant_blocks(session_id, blocks) when is_list(blocks) do
-    Enum.each(blocks, fn
-      %{"type" => "text", "text" => text} when is_binary(text) ->
+  # `ev` is the whole assistant frame so we can stamp its top-level
+  # `parent_tool_use_id` onto EVERY row it produces (charter D40): a non-nil id
+  # means these rows belong to the sub-agent that spawn created, and replay reads
+  # the id back to indent them under the matching spawn row. A top-level frame
+  # (null parent) writes the same shape it always did.
+  defp persist_assistant_blocks(state, blocks, ev) when is_list(blocks) do
+    parent = parent_meta(ev)
+
+    Enum.reduce(blocks, state, fn
+      %{"type" => "text", "text" => text}, st when is_binary(text) ->
         if String.trim(text) != "" do
-          persist(session_id, %{role: "assistant", source_markdown: text}, "assistant")
+          persist(
+            st.session_id,
+            %{role: "assistant", source_markdown: text, metadata: parent},
+            "assistant"
+          )
         end
 
-      %{"type" => "tool_use", "name" => name} = block ->
-        persist(
-          session_id,
-          %{
-            role: "tool",
-            source_markdown: tool_line(name, block["input"]),
-            metadata: %{
-              "tool" => name,
-              "input" => block["input"],
-              "tool_use_id" => block["id"]
-            }
-          },
-          "tool"
-        )
+        st
 
-      _ ->
-        :ok
+      %{"type" => "tool_use", "name" => name} = block, st ->
+        input = block["input"]
+
+        if StudioChat.todo_shaped?(input) and parent == %{} do
+          # Only a TOP-LEVEL TodoWrite is the turn's living checklist (D39) —
+          # a sub-agent's todo list must never hijack the main turn's card, so
+          # a child frame's TodoWrite persists as a plain (indented) tool row.
+          persist_todo_block(st, name, block)
+        else
+          persist(
+            st.session_id,
+            %{
+              role: "tool",
+              source_markdown: tool_line(name, input),
+              metadata:
+                Map.merge(
+                  %{
+                    "tool" => name,
+                    "input" => input,
+                    "tool_use_id" => block["id"]
+                  },
+                  parent
+                )
+            },
+            "tool"
+          )
+
+          st
+        end
+
+      _, st ->
+        st
     end)
   end
 
-  defp persist_assistant_blocks(_session_id, _), do: :ok
+  defp persist_assistant_blocks(state, _, _), do: state
+
+  # `%{"parent_tool_use_id" => id}` for a sub-agent frame; `%{}` for a top-level
+  # frame (null parent) so the row's metadata is unchanged.
+  defp parent_meta(ev) when is_map(ev) do
+    case ev["parent_tool_use_id"] do
+      id when is_binary(id) and id != "" -> %{"parent_tool_use_id" => id}
+      _ -> %{}
+    end
+  end
+
+  defp parent_meta(_), do: %{}
+
+  # TodoWrite collapse (charter D39). The turn's FIRST TodoWrite persists a fresh
+  # "todo" row and becomes the turn's canonical checklist; every later TodoWrite
+  # in the SAME turn updates that row's `metadata.input` in place (never appends),
+  # so replay reconstructs ONE final-state card. Reset happens on `system/init`.
+  defp persist_todo_block(%{todo_tool_use_id: nil} = state, name, block) do
+    persist(
+      state.session_id,
+      %{
+        role: "todo",
+        source_markdown: tool_line(name, block["input"]),
+        metadata: %{
+          "tool" => name,
+          "input" => block["input"],
+          "tool_use_id" => block["id"]
+        }
+      },
+      "todo"
+    )
+
+    %{state | todo_tool_use_id: block["id"]}
+  end
+
+  defp persist_todo_block(%{todo_tool_use_id: tool_use_id} = state, _name, block) do
+    case StudioChat.update_tool_input(state.session_id, tool_use_id, block["input"]) do
+      {:error, reason} ->
+        Logger.warning("studio chat recorder: failed to update todo row: #{inspect(reason)}")
+
+      _ ->
+        :ok
+    end
+
+    state
+  end
 
   defp persist_approval_ask(session_id, ask) do
     text = ask.title || tool_line(ask.tool_name, ask.input)
@@ -348,6 +461,45 @@ defmodule Barkpark.StudioChat.Recorder do
   defp needs_you_line("AskUserQuestion"), do: "asking you"
   defp needs_you_line("ExitPlanMode"), do: "plan ready"
   defp needs_you_line(tool_name), do: "waiting: #{tool_name}"
+
+  # Accumulate a thinking bout's token high-water mark (charter D41). The wire's
+  # `estimated_tokens` is monotonic cumulative WITHIN a bout, so max/2 is safe
+  # against out-of-order or repeated frames and never regresses.
+  defp accumulate_thinking(state, n) when is_integer(n) and n > 0 do
+    %{state | pending_thinking: max(state.pending_thinking || 0, n)}
+  end
+
+  defp accumulate_thinking(state, _), do: state
+
+  # Persist the pending bout as a compact `"thinking"` row and clear it. The
+  # signature is NEVER stored — only the count (charter D41). A bout with no
+  # positive count leaves no row ("no thinking frames ⇒ no row").
+  defp flush_thinking(%{pending_thinking: n} = state) when is_integer(n) and n > 0 do
+    persist(
+      state.session_id,
+      %{
+        role: "thinking",
+        source_markdown: thinking_label(n),
+        metadata: %{"tokens" => n}
+      },
+      "thinking"
+    )
+
+    %{state | pending_thinking: nil}
+  end
+
+  defp flush_thinking(state), do: %{state | pending_thinking: nil}
+
+  defp thinking_label(n), do: "thought for ~#{n} tokens"
+
+  # The cumulative estimated-token count off a `system/thinking_tokens` frame.
+  # Zero for a frame missing the field — accumulate_thinking treats it as a noop.
+  defp thinking_tokens_count(ev) do
+    case ev["estimated_tokens"] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 0
+    end
+  end
 
   defp record_result(session_id, ev) do
     StudioChat.record_result_metrics(session_id, %{
@@ -519,18 +671,33 @@ defmodule Barkpark.StudioChat.Recorder do
   defp result_text(_), do: nil
 
   # Same preview shape ChatLive renders, so live lines and replayed rows agree.
+  # A diff-shaped call (Edit/Write/MultiEdit by SHAPE — mirrors
+  # BarkparkWeb.Studio.ChatToolRenderer.classify/1, which the core-side Recorder
+  # must not call) headlines only the path: the D38 diff below carries the
+  # content, so a duplicate old/new-string preview would just be noise.
   defp tool_line(name, input) when is_map(input) do
-    preview =
-      input
-      |> Enum.filter(fn {_k, v} -> is_binary(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
-      |> Enum.take(2)
-      |> Enum.join(" · ")
+    if diff_shaped?(input) do
+      "#{name} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+        |> Enum.take(2)
+        |> Enum.join(" · ")
 
-    if preview == "", do: name, else: "#{name} — #{preview}"
+      if preview == "", do: name, else: "#{name} — #{preview}"
+    end
   end
 
   defp tool_line(name, _input), do: name
+
+  defp diff_shaped?(input) when is_map(input) do
+    is_binary(input["file_path"]) and
+      ((is_binary(input["old_string"]) and is_binary(input["new_string"])) or
+         is_binary(input["content"]) or
+         (is_list(input["edits"]) and input["edits"] != []))
+  end
 
   defp result_model(ev) do
     case ev["modelUsage"] do

@@ -11,7 +11,7 @@ Runbooks: ops/{PROD_OPS,npm-rollback-playbook,merge-gates,adding-a-domain,bokbas
 
 Learn: learn/{README,plugins-catalog}.md · PHILOSOPHY.md
 
-Setup: setup/{QUICKSTART,CLOUD-QUICKSTART,GO-LIVE,SETUP,WINDOWS,TASK-SYSTEM,personal-local}.md
+Setup: setup/{QUICKSTART,CLOUD-QUICKSTART,GO-LIVE,SETUP,WINDOWS,TASK-SYSTEM,personal-local,CURSOR}.md
 
 Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 

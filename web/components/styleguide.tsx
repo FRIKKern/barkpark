@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemePicker } from "@/components/theme-picker";
 
 /* Unified-aesthetic W1.4 scaffold — the living token spec for the web demo.
  * Every swatch is painted with `var(--color-…)`, resolving live from the
@@ -59,8 +60,13 @@ export function Styleguide() {
         }}
       >
         <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Web style guide</h1>
-        {/* AC3 proof: explicit data-theme toggle — every swatch below flips live. */}
-        <ThemeToggle />
+        {/* Two orthogonal switches (theme-system D36): the picker swaps the whole
+            palette (data-bp-theme), the toggle flips light/dark (data-theme).
+            Every swatch below re-skins live off the emitted vars for both. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ThemePicker />
+          <ThemeToggle />
+        </div>
       </div>
       <p style={{ color: "var(--color-muted-text)", maxWidth: "66ch", margin: "0 0 1.75rem" }}>
         The living token spec for the web demo. Every swatch is painted with{" "}
