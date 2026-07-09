@@ -126,6 +126,66 @@ ever touches a live cloud: Azure and Hetzner APIs are faked/recorded in tests.
     ARM/hcloud HTTP fixtures for real clients, node:vm `__bpTestHook` helpers for
     every new SPA pure function, cross-runtime committed fixtures where Go and JS
     must agree. — Lead constraint + the distrust-vacuous-green doctrine.
+15. **Azure retail pricing = a sibling `BarkparkCloud.Azure.Pricing` client, its
+    OWN slice (S7a), NOT an `Azure.Client` callback and NOT inside S7.** The
+    Retail Prices API (`prices.azure.com/api/retail/prices`) is unauthenticated
+    and global — hanging it off the per-credential `Azure.Client` behaviour is a
+    category error, and S7 is app.js-solo while pricing is Elixir. Own injectable
+    transport fn under its own config key (third key beside `:azure_http_client`
+    and `{BarkparkCloud.Azure, :http_client}`), fail-closed like
+    `RealClient.request/1`. Join is direct equality: `armSkuName` == server_type
+    slug, `armRegionName` == region slug (verified live). monthly =
+    `retailPrice × 730`; per server_type reduce to CHEAPEST monthly across
+    offered regions (parity with Hetzner's `cheapest_monthly`). Exclude
+    Spot/Low-Priority (meterName/skuName) and Windows (productName) rows —
+    fixtures MUST carry those decoys or a spot price silently poses as
+    on-demand. ETS GenServer cache ~24h TTL (`TwoFactorRateLimiter` pattern),
+    credential-free, app child. Enrichment stamps `monthlyPriceUsd` onto
+    vm_sizes in `build_provider_catalog("azure")` BEFORE `AzureCatalog.normalize`
+    (the normalizer already reads that key — zero change). A pricing outage
+    degrades to `monthly_price: nil` + catalog still 200 — NEVER the 502
+    `catalog_unavailable`. The normalized shape grows `currency` ("EUR" hetzner /
+    "USD" azure) so the side-by-side comparison is honest; SPA copy reads
+    "from ~$X/mo compute" (retail excludes disk/egress/licensing).
+16. **Fake-provider visibility is decided ONCE, in `providers_capabilities.json`,
+    as a `tier` attribute — landed via a `ProviderRow` wrapper struct** (`Tier`
+    + embedded `Capabilities`) so `DetectCapabilities`/the parity test keep
+    comparing pure capability bools (a bare Tier field on `Capabilities` reds
+    parity; a fixture-only key is silently discarded by the plain unmarshal —
+    both dead ends, verified). `fake` gets `"tier":"dev"`; `bp cloud providers`
+    hides dev-tier rows by default, `--all` reveals; golden CLI tests gate their
+    "fake" expectations behind `--all`. The SPA needs NO change this wave — its
+    hardcoded PROVIDERS list never contained fake, so surfaces already agree;
+    the CP-served capability/tier conduit that makes CLI+SPA read one contract
+    by construction is Wave-3 work (fold into S11). The fixture OWNS the
+    attribute from today, so nothing forks meanwhile.
+17. **Two credential planes, on purpose.** Managed Hetzner keeps provisioning in
+    the PLATFORM account (worker-env `HCLOUD_TOKEN`, no providers row — status
+    quo, untouched). Azure go-live is BYO: it REQUIRES the team's verified azure
+    providers row; `POST /v1/launch {provider:"azure"}` without one is a 422
+    `provider_not_connected` + FailureCopy remediation at launch time (fail at
+    the button, not in the job). Azure creds reach the worker DECRYPTED inside
+    `claim_json`, mirroring exactly how `env` is decrypted at claim time
+    (router.ex:6411) — the single sanctioned plaintext crossing, over the
+    already-authed worker channel.
+18. **The launch write path is S6's, and S6 spans BOTH stacks.** Exploration
+    disproved "S6 is Elixir-only" and found the structural gap: `go_live` DROPS
+    the `provider` param, no provider/region/server_type columns exist, the
+    claim payload hardcodes nbg1/cax11, Go `JobSpec` carries no kind/creds, and
+    `ProvisionWith` uses a hardcoded Hetzner singleton — `ProviderFor` is dead
+    code w.r.t. provisioning. S6 = barkparks migration (provider default
+    'hetzner', region, server_type) + launch accepts/persists them + claim_json
+    threads kind/region/size/creds + Go JobSpec/ProvisionWith route
+    kind→`ProviderFor` with the hetzner path BYTE-UNTOUCHED (kind ""|"hetzner"
+    keeps `seams.Provider` + warm pool; "azure" forces pool-size-zero +
+    provider-aware FreshSpec). Until S6 lands, S7's priced picker is
+    display-only — that is why the extension is a named AC, not a hope.
+19. **The SPA renders verify-failure remediation IN the credential sheet;
+    `friendly()` never touches it.** `friendly()` reads only
+    `data.error`/`data.details` and silently DROPS `data.remediation` — a live
+    bug on the Hetzner path today, fixed for both kinds by S7. Remediation copy
+    stays server-owned in `FailureCopy.connect_remediation`; never duplicated in
+    JS.
 
 ## Roadmap
 
@@ -151,20 +211,47 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
   block + Go chrome sibling), contrast-gate, styleguide swatches. Does NOT rewire
   consumers (later waves). design/ + generated blocks only.
 
-**Wire-together (Wave 2):**
-- **S5 · Neutral CLI verbs + azure wiring** [medium] — `bp cloud instance <verb>`
-  routing through `ProviderFor`, `bp launch azure`, `bp cloud azure` escape hatch,
-  register AzureProvider in the seam. Needs S1+S2.
-- **S6 · Azure go-live through the step machine** [large] — `provision_job`/
-  barkpark rows carry provider kind, worker resolves kind+creds and cold-creates
-  Azure through the seam chain pool-size-zero, azure quota/RBAC failure copy
-  reaches the job error, orphan sweep/teardown per-provider via ARM tags. Needs
-  S2+S3.
-- **S7 · SPA: Azure card + verified connect + neutral launch catalog** [large] —
-  Azure `available:true` with the 4-field credential sheet, submit runs the
-  preflight and renders success/remediation, launch fetches the normalized
-  catalog and renders region+size WITH prices, provider chips + lifecycle pills
-  consume S4 tokens. THE app.js slice — solo. Needs S3+S4.
+**Wire-together (Wave 2) — integration order S5 → S6 → S7a → S7:**
+- **S5 · Neutral CLI verbs + azure wiring + tier honesty** [medium] — azure
+  `Factory` + self-registration via the azure package's own `init()`
+  (`cloud.Register(ProviderAzure, azure.Factory)`, blank-import in the cli
+  package); new `runCloud` arms `instance` (core verbs list/create/delete/ip +
+  labels through `ProviderFor`, `--provider` flag, honest degrade on missing
+  capability) and `azure` (raw escape hatch, creds flag>env AZURE_* 4-tuple);
+  fixture flips azure core/labels/pause=true (catalog/lifecycle stay false);
+  `ProviderRow`/tier work per Decision 16. `bp launch azure` is ALREADY an
+  opaque pass-through at the CLI layer — prove it, don't rebuild it. Lifecycle
+  verbs stay on `bp cloud hetzner` until S9. Needs S1+S2 (merged ✓).
+- **S6 · Azure go-live through the step machine** [large] — BOTH stacks, per
+  Decision 17/18: barkparks migration + launch write path + claim_json creds
+  threading (Elixir) AND JobSpec.Kind/Credentials + kind-routed ProvisionWith
+  (Go). Azure narrates the same steps pool-size-zero; quota/RBAC raw ARM errors
+  reach the job error and classify through the EXISTING FailureCopy-at-serialize
+  (no Elixir vocab change). Carries S2's deferred edges as ACs:
+  `BARKPARK_AZURE_SSH_PUBKEY` prereq with honest failure copy, O(all-VMs) List
+  scoped or explicitly waived, fixtures documented replay-not-validate. Go tests
+  route kind through the FAKE provider (no build-time dependency on S5's
+  factory); azure resolution proven at integration after S5. Needs S2+S3
+  (merged ✓); integrate after S5.
+- **S7a · Azure Retail Prices client + priced neutral catalog** [medium] —
+  Decision 15 verbatim: sibling Pricing client + fixtures-with-decoys +
+  NextPageLink replay + ETS cache + enrichment in `build_provider_catalog`
+  + nil-degrade-never-502 + `currency` in the normalized shape (both
+  normalizers). Elixir-only; router.ex overlap with S6 is in a DIFFERENT region
+  (~5702 catalog vs ~5049/6394 launch+claim). Needs S3 (merged ✓).
+- **S7 · SPA: Azure card + verified connect + priced neutral launch** [large] —
+  Azure `available:true`; credential sheet branches on kind (hetzner token vs
+  azure 4-tuple → `{kind, credentials:{...}}`); 422 remediation rendered
+  IN-SHEET per Decision 19; launch grows a provider→region+size picker fed by
+  `GET /v1/providers/:kind/catalog` with monthly_price + currency + honest
+  "price unavailable" nil state, submitting
+  `{provider,name,region,server_type}` (honored once S6 lands; extra fields are
+  ignored harmlessly before that) while preserving the three mount points and
+  the name→402-plan→checkout reducer; provider chip component consumes S4
+  tokens (`--provider-*`), retires the drifted `.brand-hetzner` #d50c2d, and
+  renders on fleet rows ONLY when the payload carries `provider` (no fake
+  identity). New pure helpers exported via `__bpTestHook` + asserted in
+  `__app.test.mjs`. THE app.js slice — solo. Needs S3+S4 (merged ✓).
 
 **Depth (Wave 3+):**
 - **S8 · Hetzner native cutover** [large] — seam → hcloud-go, env-gated,
@@ -194,7 +281,11 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
 
 ## Wave log
 
-### Wave 2026-07-09 — Foundation (S1–S4)
+### Wave 2026-07-09 — Foundation (S1–S4) — ALL MERGED
+
+Merged to main: S1 #1629, S2 #1630, S3 #1631, S4 #1632, plus #1633 (pre-existing
+clause-grouping warning that was red-lining every cloud/** PR). Tasks
+azh-w1-s1..s4 closed.
 
 **Landed (green, near-merge):**
 - **S1 · Go seam v2** — `internal/cli/cloud.CloudProvider` promoted to canonical; optional capability interfaces (Cataloger/InstanceLifecycler/Pauser/Authenticator) advertised by satisfaction; `Capabilities`+`DetectCapabilities`; slug→factory registry (`ProviderFactory`/`Register`/`ProviderFor`, loud unknown-kind error) with hetzner+fake registered and a documented azure slot; committed `providers_capabilities.json` cross-surface contract + drift-parity test (fixture claim vs actual Go interface satisfaction); `bp cloud providers` matrix (table+json, golden test); `@canonical capability:cloud-provider-seam` in provider.go. Verified live against the built binary.
@@ -211,3 +302,107 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
 - **Integration hygiene** — S3 gate ran on a borrowed build (symlinked deps + copied _build); run the FULL cloud suite at integration, not just touched-route tests.
 
 **Next wave:** Wave 2 wire-together — S5 (neutral CLI verbs + azure registry wiring; needs S1+S2 ✓), S6 (Azure go-live through the provision_job step machine, pool-size-zero; needs S2+S3 ✓), S7 (SPA Azure card + verified connect + neutral launch catalog; needs S3 ✓ + S4 — merge S4 first). All three are largely file-isolated (S5=Go CLI, S6=Elixir worker, S7=app.js solo); sequence S6 after S3's Elixir surface settles.
+
+### Wave 2026-07-09b — Wire-together (S5, S6, S7a, S7) — PLANNED
+
+Decisions 15–19 ratified this wave (pricing sibling client as own slice S7a;
+tier-in-fixture via ProviderRow; two credential planes, Azure BYO; launch write
+path owned by S6 across BOTH stacks; remediation in-sheet). Exploration
+corrections folded in:
+
+- The old "S6 = Elixir worker, file-isolated" framing was WRONG. Provisioning is
+  Go-worker-driven end to end; Elixir is the queue + narration store. `go_live`
+  drops `provider`, no provider/region/size columns exist, claim payload
+  hardcodes nbg1/cax11, JobSpec carries no kind/creds, ProvisionWith uses the
+  hardcoded Hetzner singleton — `ProviderFor` was DEAD w.r.t. provisioning. S6
+  builds that plumbing in both stacks (Decision 18).
+- `bp launch azure` was already wired at the CLI arg layer (opaque provider
+  positional) — S5's real work is Factory + registry + `bp cloud instance`/
+  `bp cloud azure` arms + fixture/tier honesty, not launch.
+- FailureCopy azure classes already ship and classify at the JSON serialize
+  boundary — S6 needs zero Elixir vocab change, only honest raw ARM strings.
+- Hetzner monthly_price is REAL in prod already (S16 dividend landed with S3);
+  Azure's is nil until S7a. `friendly()` drops `data.remediation` — live bug on
+  the Hetzner path too, fixed by S7 for both kinds.
+- `freshen` is a Hetzner-warm-pool-only step; Azure never emits it and the SPA
+  hides unreported steps — no lying spinner.
+
+Tasks: azh-w2-s5-neutral-cli-verbs, azh-w2-s6-azure-provision-job,
+azh-w2-s7a-azure-retail-pricing (new), azh-w2-s7-spa-azure-card — children of
+azure-hetzner-hosting-epic. Integration order S5 → S6 → S7a → S7 (S6's azure
+resolution needs S5's factory at integration; all four build in parallel — S6's
+Go tests use the fake kind). Non-negotiables: mix format/gofmt before every
+commit; all gates offline; FULL cloud suite at integration; api/
+AuditWebhooksTest red on an untouched tree = rerun, not a bug.
+
+NOT this wave: Hetzner native cutover (S8), lifecycle verbs through the seam
+(S9), portable archives (S14), metrics (S12), CP-served capability/tier conduit
+for the SPA (fold into S11).
+
+### Wave 2026-07-09c — Wire-together (S5, S6, S7a, S7) — BUILT + REVIEWED
+
+All four slices built green and reviewer-passed. Integrate in order S5 → S6 →
+S7a → S7 from the reviewer branches (`…-r` where fixed):
+
+- **S5 · bp speaks Azure** — `loop-epic/s5-bp-speaks-azure-azure-in-providerfor--0-r`.
+  Azure self-registers via factory.go init() (NAMED import in cli — the escape
+  hatch needs azure.ResolveCredentials for flag>env, init still fires); Pause/
+  Resume wrappers satisfy cloud.Pauser; fixture azure=core/labels/pause,
+  fake=tier:dev via ProviderRow wrapper; `bp cloud instance
+  list|create|delete|ip|label --provider …` with honest capability degrade;
+  `bp cloud azure` escape hatch; `bp launch azure` pass-through pinned by test.
+  Reviewer fix: gofmt'd the two PRE-EXISTING dirty files (table_status_test.go,
+  template.go) so `gofmt -l internal/` is literally clean repo-wide.
+- **S6 · Azure go-live** — `loop-epic/s6-azure-go-live-provider-region-size-cr-1-r`.
+  Migration 20260709120000 (provider NOT NULL default hetzner + region/
+  server_type); launch validates provider + 422 provider_not_connected w/
+  remediation; claim_json threads kind + decrypted 4-tuple (hetzner payload
+  byte-identical, refute-tested); Go JobSpec.Kind/Credentials + ProvisionWith
+  kind-routing, pool-size-zero, SSH-pubkey prereq before any box. Reviewer fix
+  (REAL bug): claim region/size fallback is now PROVIDER-AWARE — an unpinned
+  azure launch (`bp launch azure --name x` sends neither) was inheriting
+  Hetzner's nbg1/cax11 into the ARM call; azure rows now emit nil and the Go
+  azure provider fills its own eastus/Standard_B1s defaults (+ regression test).
+- **S7a · Azure retail pricing** — `loop-epic/s7a-real-azure-prices-in-the-neutral-cat-2`
+  (no reviewer changes — clean). Sibling credential-free Pricing ETS client,
+  decoy-proven fixtures (Spot/Low-Priority/Windows) + NextPageLink replay,
+  fail-closed transport (3rd config key), nil-degrade-never-502, `currency`
+  (EUR/USD) added to both normalizers. Full cloud suite 1543/0.
+- **S7 · SPA Azure card** — `loop-epic/s7-spa-azure-card-4-field-verified-conne-3-r`.
+  4-field verified connect w/ in-sheet remediation (friendly() drop proven);
+  priced provider→region+size launch picker w/ honest
+  loading/no_provider/unavailable/error states; provider chip on S4 tokens,
+  #d50c2d retired. Reviewer fixes: (1) prices now render the CATALOG's currency
+  — hetzner EUR was being dressed as "$" (S7a lands first, so currency is
+  always present); (2) azure no_provider copy no longer promises a managed
+  fallback (azure is BYO-only per Decision 17 — the old copy contradicted S6's
+  422); (3) the launch-submit 422 path surfaces server remediation instead of
+  friendly() dropping it (Decision 19, launch edition).
+
+**Ledger:** S5/S6/S7a criteria stamped by builders; S7's criteria 0–5 were left
+unstamped (builder believed no in_progress write path existed) — reviewer
+stamped them via doc patch+publish. All four remain claimed (epoch 1) +
+not-done; the LEAD closes the "PR merged" criterion + lifecycle on merge.
+
+**Carried / next wave:**
+- **Warm-pool ignores a pinned Hetzner region/size** — S7's picker + S6's claim
+  thread e.g. fsn1/cx32, but tryWarmAssign hands out a default nbg1/cax11 warm
+  box regardless. Charter-protected this wave (hetzner path byte-untouched);
+  fix in S16/S9: skip warm assign when the pin differs from the pool's default.
+- **Azure end-to-end lights up only at integration** — S6 alone can't resolve
+  the azure factory (S5 registers it); after merging S5+S6 run one wired smoke
+  of a kind=azure job through the real binary.
+- **Azure List still O(all-VMs)** (S2 waiver, restated by S6) — scope to the
+  fleet RG before real fleets grow.
+- **Retail Prices first-fetch latency** — the unscoped global sheet fetch runs
+  synchronously in the first catalog request after TTL expiry; consider a
+  region-scoped $filter or background refresh. The armSkuName==slug join still
+  needs one LIVE verification (only fixtures prove it today).
+- **SPA tier conduit** (fold into S11) — CLI hides dev-tier from the fixture;
+  the SPA never listed fake, but the CP-served capability/tier conduit is still
+  the Wave-3 unification.
+- **Recommended next wave:** S9 (neutral lifecycle verbs + SPA lifecycle
+  actions — the biggest remaining parity gap now that create/launch are
+  neutral), S11 (console fleet/infra tab consuming barkpark_json's new
+  provider/region/server_type), and the S16 warm-pool-pin fix. S8 (hetzner
+  native) and S14 (portable archives) stay behind those.
