@@ -101,6 +101,14 @@ defmodule Barkpark.Structure do
   defp build_desk_items(schemas, dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
 
+    # ── Harvested plugin-schema ownership (charter Decisions 11/12) ──
+    # ONE `plugin_name => [owned type names]` map per desk build, from every
+    # registered plugin's `owned_schema_types/0`. Feeds BOTH the …Rest
+    # top-menu claim set and the Settings catch-all reject set — no hardcodes,
+    # so adding plugin N+1 needs zero edits here. Ownership is enablement-
+    # independent (a disabled plugin still owns its types).
+    owned_map = plugin_owned_type_map()
+
     # `gating: :none` — RESOLUTION mode (PaneBuilder): enablement tiering is a
     # DISPLAY concern; nav-path resolution must see every type the database
     # holds, or a top-menu surface (Media) / disabled plugin's deep link could
@@ -125,7 +133,7 @@ defmodule Barkpark.Structure do
       build_papers_group(schemas),
       build_sheets_group(schemas),
       build_taxonomy_group(schemas),
-      build_settings_group(schemas)
+      build_settings_group(schemas, owned_map)
     ]
 
     # ── Placement-driven host groups: books follow OnixEdit, media follows
@@ -164,7 +172,7 @@ defmodule Barkpark.Structure do
 
     # ── …Rest tier: honest census of every DB type with no home, LAST ──
     placed_nodes = List.flatten(non_rest_groups)
-    claimed = collect_claimed_types(placed_nodes, top_menu_claimed_types(enablement))
+    claimed = collect_claimed_types(placed_nodes, top_menu_claimed_types(enablement, owned_map))
     rest_children = build_rest_children(claimed, schemas, dataset, opts)
 
     rest_tier =
@@ -314,16 +322,51 @@ defmodule Barkpark.Structure do
   # Schema types OWNED by an enabled plugin surfaced OUTSIDE the tree
   # (`:top_menu`) — claimed so they do not fall into …Rest (they have a home in
   # the top menu). Only top-menu-capable plugins need entries; every other
-  # plugin's types are claimed through its placed tree nodes.
-  defp top_menu_claimed_types(enablement) do
+  # plugin's types are claimed through its placed tree nodes. The owned type
+  # names come from the harvested `owned_map` (Decision 11) — no hardcode.
+  defp top_menu_claimed_types(enablement, owned_map) do
     enablement
     |> Enum.filter(fn {_name, decl} -> decl.enabled and decl.placement == :top_menu end)
-    |> Enum.flat_map(fn {name, _decl} -> plugin_owned_types(name) end)
+    |> Enum.flat_map(fn {name, _decl} -> Map.get(owned_map, name, []) end)
   end
 
-  defp plugin_owned_types("media"), do: ["mediaAsset", "mediaCollection"]
-  defp plugin_owned_types("onixedit"), do: ["book"]
-  defp plugin_owned_types(_), do: []
+  # ── Harvested plugin-schema ownership (charter Decisions 11/12) ──────────
+  #
+  # ONE `plugin_name => [owned type names]` map, built per desk build from every
+  # registered plugin's `owned_schema_types/0`. Defensive at both layers: the
+  # `use Barkpark.Plugin` default already wraps `register_schemas([])` in
+  # try/rescue, and this harvester guards missing/raising overrides too, so one
+  # malformed plugin degrades to "owns nothing" rather than killing the desk.
+  defp plugin_owned_type_map do
+    for %{name: name, module: module} <- Barkpark.Plugins.Registry.all(),
+        is_binary(name),
+        into: %{} do
+      {name, safe_owned_schema_types(module)}
+    end
+  rescue
+    _ -> %{}
+  end
+
+  defp safe_owned_schema_types(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :owned_schema_types, 0) do
+      case module.owned_schema_types() do
+        types when is_list(types) -> Enum.filter(types, &is_binary/1)
+        _ -> []
+      end
+    else
+      []
+    end
+  rescue
+    _ -> []
+  end
+
+  # The flat set of EVERY plugin-owned schema name across the harvested map.
+  defp owned_type_set(owned_map) do
+    owned_map
+    |> Map.values()
+    |> List.flatten()
+    |> MapSet.new()
+  end
 
   # When the desk is workspace-scoped, plugin desk contributions must be
   # gated to the workspace's own schemas. Plugins register globally (e.g.
@@ -633,22 +676,22 @@ defmodule Barkpark.Structure do
     items
   end
 
-  # Settings — singletons grouped under a sub-list
-  defp build_settings_group(schemas) do
-    # Plugin-owned schemas surfaced in their own nav group are excluded here
-    # so they don't render twice (book lives in build_books_group/1).
-    #
-    # frt plugin: all 25 frt schemas are visibility:"private" but are rendered
-    # via the plugin's own desk_items/1 groups (Frt.desk_items/1). Exclude them
-    # by name so they don't ALSO appear under Settings (double-listing).
-    frt_owned = frt_schema_names()
+  # Settings — HOST private singletons (siteSettings/navigation/colors, …)
+  # grouped under a sub-list. The catch-all rejects by plugin OWNERSHIP, not
+  # enablement (charter Decision 12): any private schema whose name is in the
+  # harvested `owned_map` is a plugin's type, not a host singleton — enabled or
+  # not — so it must NOT masquerade here. An enabled plugin renders its type via
+  # its own desk group (no double-list); a disabled plugin's private type falls
+  # to …Rest with an honest count (no Settings-singleton leak). Host singletons
+  # are unowned and stay.
+  defp build_settings_group(schemas, owned_map) do
+    owned = owned_type_set(owned_map)
 
     private =
       schemas
       |> Map.values()
       |> Enum.filter(&(&1.visibility == "private"))
-      |> Enum.reject(&(&1.name in ["book", "mediaAsset", "mediaCollection"]))
-      |> Enum.reject(&(&1.name in frt_owned))
+      |> Enum.reject(&MapSet.member?(owned, &1.name))
 
     if private == [] do
       []
@@ -729,21 +772,6 @@ defmodule Barkpark.Structure do
       type_name: schema.name,
       visibility: :public
     }
-  end
-
-  # frt plugin: names of the schemas the frt plugin renders via its own
-  # desk_items/1 groups. Pulled from the plugin module (single source of
-  # truth) so adding/removing an frt type never needs a host edit here.
-  # Guarded with ensure_loaded? so the host stays decoupled when the plugin
-  # is absent (returns [] → no exclusion).
-  defp frt_schema_names do
-    mod = Barkpark.Plugins.Frt
-
-    if Code.ensure_loaded?(mod) and function_exported?(mod, :schema_names, 0) do
-      mod.schema_names()
-    else
-      []
-    end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────

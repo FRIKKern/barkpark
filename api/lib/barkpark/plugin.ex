@@ -923,11 +923,31 @@ defmodule Barkpark.Plugin do
   """
   @callback structure_placement() :: :main | :plugins | :top_menu
 
+  @doc """
+  The set of schema `name`s this plugin OWNS — the harvested truth the host's
+  Desk Structure builder uses to (a) claim a plugin's types for its top-menu
+  surface so they never leak into …Rest, and (b) reject a plugin-owned PRIVATE
+  schema from the host "Settings" catch-all (which is for host singletons like
+  siteSettings/navigation, NOT a plugin's private types). Ownership, not
+  enablement: a DISABLED plugin still owns its types (they fall to …Rest, never
+  Settings).
+
+  The `use Barkpark.Plugin` default derives this from the plugin's own
+  `register_schemas([])` (`|> Enum.map(& &1.name)`), wrapped in a `try/rescue`
+  that degrades to `[]` — one malformed plugin must never kill the desk build
+  (mirrors `Barkpark.Plugins.Bootstrap`'s guard). Schema `name`s are
+  dataset-independent, so the empty-opts call is safe. A plugin whose
+  `register_schemas/1` is EXPENSIVE (e.g. frt parses 25 JSON files) SHOULD
+  override this with a cheap compile-time list so a desk build never re-parses.
+  """
+  @callback owned_schema_types() :: [String.t()]
+
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       oban_crontab: 0,
                       default_enabled?: 0,
                       structure_placement: 0,
+                      owned_schema_types: 0,
                       register_schemas: 1,
                       validate_settings: 1,
                       checkers: 0,
@@ -1026,6 +1046,24 @@ defmodule Barkpark.Plugin do
 
       @impl Barkpark.Plugin
       def structure_placement, do: :plugins
+
+      # ── Owned-schema harvest default (ssp-w2-owned-types-settings) ──
+      #
+      # Derive the owned type names from the plugin's own register_schemas/1.
+      # Wrapped in try/rescue → [] so a plugin whose register_schemas/1 raises
+      # (malformed JSON, missing file) degrades to "owns nothing" rather than
+      # crashing the desk build (mirrors Bootstrap's per-plugin guard). Schema
+      # `name`s are dataset-independent so the empty-opts call is safe. A plugin
+      # with an EXPENSIVE register_schemas/1 (frt) overrides this with a cheap
+      # compile-time list.
+      @impl Barkpark.Plugin
+      def owned_schema_types do
+        try do
+          register_schemas([]) |> Enum.map(& &1.name)
+        rescue
+          _ -> []
+        end
+      end
 
       # ── Resolver defaults ──────────────────────────────────────────
       #
@@ -1175,6 +1213,7 @@ defmodule Barkpark.Plugin do
                      oban_crontab: 0,
                      default_enabled?: 0,
                      structure_placement: 0,
+                     owned_schema_types: 0,
                      register_schemas: 1,
                      validate_settings: 1,
                      checkers: 0,
