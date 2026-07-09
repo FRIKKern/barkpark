@@ -1,0 +1,326 @@
+package cli
+
+// cloud_domain_cmd_test.go proves `bp cloud domain status` against a fake
+// control plane: the per-host checklist renders every stage combination
+// (all-serving, mid-issuance pending, failed) honestly, the SERVER's
+// remediation string is rendered VERBATIM under a non-ok rung (never client
+// copy), `-o json` is the envelope BYTES verbatim, the exit code is a real gate
+// (0 only when every domain is serving), and the auth/usage/help edges match
+// the cloud-verb contract. The CLI never probes — it renders the CP's truth.
+
+import (
+	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// The committed envelope shapes, mirroring the control-plane domain-status
+// serialization (status is ok|pending|failed; remediation is present only where
+// the server chose to guide a non-ok rung).
+const domainAllServingEnvelope = `{"ok":true,"checked_at":"2026-07-09T10:00:00Z","instance":{"id":"11111111-2222-3333-4444-555555555555","host":"blog.barkpark.cloud"},"domains":[` +
+	`{"host":"blog.barkpark.cloud","kind":"platform","overall":"ok","stages":[` +
+	`{"stage":"dns_found","label":"DNS found","status":"ok","evidence":"A record → 91.99.1.2","remediation":""},` +
+	`{"stage":"points_here","label":"Points here","status":"ok","evidence":"resolves to this instance","remediation":""},` +
+	`{"stage":"tls","label":"TLS issued","status":"ok","evidence":"cert valid until 2026-10-07","remediation":""},` +
+	`{"stage":"serving","label":"Serving","status":"ok","evidence":"HTTPS 200","remediation":""}]}]}`
+
+const domainPendingEnvelope = `{"ok":false,"checked_at":"2026-07-09T10:00:00Z","instance":{"id":"11111111-2222-3333-4444-555555555555","host":"blog.barkpark.cloud"},"domains":[` +
+	`{"host":"shop.example.com","kind":"custom","overall":"pending","stages":[` +
+	`{"stage":"dns_found","label":"DNS found","status":"ok","evidence":"A record → 91.99.1.2","remediation":""},` +
+	`{"stage":"points_here","label":"Points here","status":"ok","evidence":"resolves to this instance","remediation":""},` +
+	`{"stage":"tls","label":"TLS issued","status":"pending","evidence":"issuance in progress","remediation":"TLS can take a few minutes after DNS points here — keep this open."},` +
+	`{"stage":"serving","label":"Serving","status":"pending","evidence":"waiting on TLS","remediation":"serving turns green once the certificate is installed."}]}]}`
+
+const domainFailedEnvelope = `{"ok":false,"checked_at":"2026-07-09T10:00:00Z","instance":{"id":"11111111-2222-3333-4444-555555555555","host":"blog.barkpark.cloud"},"domains":[` +
+	`{"host":"shop.example.com","kind":"custom","overall":"failed","stages":[` +
+	`{"stage":"dns_found","label":"DNS found","status":"failed","evidence":"NXDOMAIN","remediation":"Add an A record for shop.example.com pointing at 91.99.1.2."},` +
+	`{"stage":"points_here","label":"Points here","status":"pending","evidence":"blocked on DNS","remediation":"once the A record resolves this turns green."},` +
+	`{"stage":"tls","label":"TLS issued","status":"pending","evidence":"blocked on DNS","remediation":""},` +
+	`{"stage":"serving","label":"Serving","status":"pending","evidence":"blocked on DNS","remediation":""}]}]}`
+
+const domainNoneEnvelope = `{"ok":true,"checked_at":"2026-07-09T10:00:00Z","instance":{"id":"11111111-2222-3333-4444-555555555555","host":"blog.barkpark.cloud"},"domains":[]}`
+
+// newDomainServer stands up a fake control plane answering the domain-status
+// route with the given status + body, seeds a cloud login pointed at it, and
+// records the method/path/auth it saw.
+func newDomainServer(t *testing.T, status int, body string) (gotMethod, gotPath, gotAuth *string) {
+	t.Helper()
+	var m, p, a string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		m, p, a = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	withTempConfigHome(t)
+	seedCloudLogin(t, srv.URL)
+	return &m, &p, &a
+}
+
+// runDomain drives runCloudDomain with an in-memory writer at the chosen output
+// shape + color, returning stdout, stderr, exit.
+func runDomain(t *testing.T, output string, color bool, args ...string) (string, string, int) {
+	t.Helper()
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = output
+	w.color = color
+	code := runCloudDomain(w, globals{}, args)
+	return sout.String(), serr.String(), code
+}
+
+// TestRunCloudDomainAllServing: a fully-live domain renders the header, one row
+// per rung, and exits 0 — and the request is a Bearer-authed GET to the
+// domain-status route (a UUID instance needs no fleet-list resolve).
+func TestRunCloudDomainAllServing(t *testing.T) {
+	method, path, auth := newDomainServer(t, 200, domainAllServingEnvelope)
+
+	stdout, stderr, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if *method != "GET" || *path != "/v1/barkparks/"+testInstanceID+"/domain-status" {
+		t.Fatalf("hit %s %s, want GET /v1/barkparks/%s/domain-status", *method, *path, testInstanceID)
+	}
+	if *auth != "Bearer sess-abc" {
+		t.Fatalf("auth = %q, want the cloud session bearer", *auth)
+	}
+	if !strings.Contains(stdout, "blog.barkpark.cloud") || !strings.Contains(stdout, "platform domain") {
+		t.Fatalf("missing host header + kind:\n%s", stdout)
+	}
+	for _, label := range []string{"DNS found", "Points here", "TLS issued", "Serving"} {
+		if !strings.Contains(stdout, label) {
+			t.Fatalf("missing rung label %q:\n%s", label, stdout)
+		}
+	}
+	if strings.Contains(stdout, "failed") || strings.Contains(stdout, "pending") {
+		t.Fatalf("an all-serving domain must paint no non-ok token:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDomainPending: a mid-issuance domain renders pending rungs and
+// the SERVER's remediation VERBATIM under them, with a non-zero exit (a
+// not-yet-serving domain is not a passing gate).
+func TestRunCloudDomainPending(t *testing.T) {
+	newDomainServer(t, 200, domainPendingEnvelope)
+
+	stdout, _, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d (a pending domain is not serving)", code, exitGeneric)
+	}
+	if !strings.Contains(stdout, "pending") {
+		t.Fatalf("a mid-issuance rung must show pending:\n%s", stdout)
+	}
+	// The server's remediation copy is rendered VERBATIM under the pending rung —
+	// the CLI never invents its own fix text.
+	if !strings.Contains(stdout, "TLS can take a few minutes after DNS points here — keep this open.") {
+		t.Fatalf("the server remediation must render verbatim under the pending rung:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDomainFailed: a failed rung renders its evidence + verbatim
+// remediation, the failed overall, and a non-zero exit. A pending rung with an
+// EMPTY remediation prints no dangling arrow.
+func TestRunCloudDomainFailed(t *testing.T) {
+	newDomainServer(t, 200, domainFailedEnvelope)
+
+	stdout, _, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if !strings.Contains(stdout, "NXDOMAIN") {
+		t.Fatalf("the failing rung's evidence must be visible:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "Add an A record for shop.example.com pointing at 91.99.1.2.") {
+		t.Fatalf("the failed rung's server remediation must render verbatim:\n%s", stdout)
+	}
+	// The tls/serving rungs are pending with an EMPTY remediation — no lone "→".
+	if strings.Contains(stdout, "→ \n") || strings.Contains(stdout, "→  ") {
+		t.Fatalf("an empty remediation must not render a dangling arrow:\n%q", stdout)
+	}
+}
+
+// TestRunCloudDomainNoDomains: an instance with no attached domains renders the
+// honest empty note and still exits 0 (nothing is broken — there's nothing to
+// serve).
+func TestRunCloudDomainNoDomains(t *testing.T) {
+	newDomainServer(t, 200, domainNoneEnvelope)
+
+	stdout, _, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "No domains are attached yet") {
+		t.Fatalf("missing the honest empty note:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDomainJSONPassthrough: `-o json` emits the control-plane envelope
+// BYTES verbatim (the envelope IS the contract) and the exit still follows the
+// verdict.
+func TestRunCloudDomainJSONPassthrough(t *testing.T) {
+	newDomainServer(t, 200, domainAllServingEnvelope)
+	stdout, _, code := runDomain(t, "json", false, "status", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if stdout != domainAllServingEnvelope+"\n" {
+		t.Fatalf("json output must be the envelope verbatim:\n got: %q\nwant: %q", stdout, domainAllServingEnvelope+"\n")
+	}
+}
+
+// TestRunCloudDomainJSONFailExit: json mode on a not-serving domain still exits
+// non-zero — machine consumers gate on the exit code too.
+func TestRunCloudDomainJSONFailExit(t *testing.T) {
+	newDomainServer(t, 200, domainPendingEnvelope)
+	stdout, _, code := runDomain(t, "json", false, "status", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if stdout != domainPendingEnvelope+"\n" {
+		t.Fatalf("json output must be the envelope verbatim:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDomainColorRoles: with color on, an ok rung paints green, a
+// pending rung cyan (info), and a failed rung red — the same statusRole seam as every
+// other table — while the colorless run of the same envelope carries no ANSI.
+func TestRunCloudDomainColorRoles(t *testing.T) {
+	newDomainServer(t, 200, domainFailedEnvelope)
+	colored, _, _ := runDomain(t, "table", true, "status", testInstanceID)
+	if !strings.Contains(colored, "\033[31m") { // failed → red
+		t.Fatalf("want a red (failed) cell in colored output:\n%q", colored)
+	}
+	if !strings.Contains(colored, "\033[36m") { // pending → info (cyan)
+		t.Fatalf("want a cyan (pending) cell in colored output:\n%q", colored)
+	}
+
+	newDomainServer(t, 200, domainAllServingEnvelope)
+	green, _, _ := runDomain(t, "table", true, "status", testInstanceID)
+	if !strings.Contains(green, "\033[32m") { // ok → green
+		t.Fatalf("want a green (ok) cell in colored output:\n%q", green)
+	}
+
+	newDomainServer(t, 200, domainFailedEnvelope)
+	plain, _, _ := runDomain(t, "table", false, "status", testInstanceID)
+	if strings.Contains(plain, "\033[") {
+		t.Fatalf("colorless output must carry no ANSI:\n%q", plain)
+	}
+}
+
+// TestRunCloudDomainStageNameScrub: an unknown/future stage label carrying a
+// smuggled ANSI escape is rendered scrubbed (never dropped, never a
+// terminal-escape vector) — the sanitizeCell rule that every server-authored
+// cell obeys.
+func TestRunCloudDomainStageNameScrub(t *testing.T) {
+	smuggle := `{"ok":false,"checked_at":"2026-07-09T10:00:00Z","instance":{"id":"x","host":"h"},"domains":[` +
+		`{"host":"h","kind":"custom","overall":"failed","stages":[` +
+		`{"stage":"dns_found","label":"DNS\u001b[31m","status":"failed","evidence":"NXDOMAIN","remediation":"fix\u001b[31m dns"}]}]}`
+	newDomainServer(t, 200, smuggle)
+
+	stdout, _, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if !strings.Contains(stdout, "DNS[31m") {
+		t.Fatalf("an unknown stage label must pass through scrubbed:\n%q", stdout)
+	}
+	if strings.Contains(stdout, "\x1b[31m") {
+		t.Fatalf("server-authored cells must carry no escape bytes:\n%q", stdout)
+	}
+}
+
+// TestRunCloudDomainRefusal: a control-plane failure (e.g. a team-scoped 404)
+// routes through the shared cloudFail seam — a bp: sentence on stderr, generic
+// exit, clean stdout.
+func TestRunCloudDomainRefusal(t *testing.T) {
+	newDomainServer(t, 404, `{"error":"not_found"}`)
+	stdout, stderr, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d", code, exitGeneric)
+	}
+	if !strings.Contains(stderr, "bp:") || !strings.Contains(stderr, "not_found") {
+		t.Fatalf("want a bp:-prefixed failure sentence on stderr:\n%s", stderr)
+	}
+	if strings.TrimSpace(stdout) != "" {
+		t.Fatalf("a failure must keep stdout clean:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDomainNoToken: without a Cloud session the command is an auth
+// error with a `bp login` hint and makes no network call.
+func TestRunCloudDomainNoToken(t *testing.T) {
+	withTempConfigHome(t)
+	_, stderr, code := runDomain(t, "table", false, "status", testInstanceID)
+	if code != exitAuth {
+		t.Fatalf("exit = %d, want %d (auth)", code, exitAuth)
+	}
+	if !strings.Contains(stderr, "bp login") {
+		t.Fatalf("expected a login hint on stderr:\n%s", stderr)
+	}
+}
+
+// TestRunCloudDomainUsage: a missing verb, an unknown verb, or the wrong
+// positional count are usage errors, exit 2.
+func TestRunCloudDomainUsage(t *testing.T) {
+	withTempConfigHome(t)
+	if _, _, code := runDomain(t, "table", false); code != exitUsage {
+		t.Fatalf("no-verb exit = %d, want %d", code, exitUsage)
+	}
+	if _, _, code := runDomain(t, "table", false, "bogus"); code != exitUsage {
+		t.Fatalf("unknown-verb exit = %d, want %d", code, exitUsage)
+	}
+	if _, _, code := runDomain(t, "table", false, "status"); code != exitUsage {
+		t.Fatalf("no-instance exit = %d, want %d", code, exitUsage)
+	}
+	if _, _, code := runDomain(t, "table", false, "status", "a", "b"); code != exitUsage {
+		t.Fatalf("two-instance exit = %d, want %d", code, exitUsage)
+	}
+}
+
+// TestRunCloudDomainHelp: -h anywhere prints usage and exits 0 without a network
+// call or a config requirement.
+func TestRunCloudDomainHelp(t *testing.T) {
+	withTempConfigHome(t)
+	stdout, _, code := runDomain(t, "table", false, "-h")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "bp cloud domain") {
+		t.Fatalf("help must name the command:\n%s", stdout)
+	}
+}
+
+// TestRunCloudDomainYAMLPassthrough: -o yaml re-encodes the envelope faithfully
+// (a spot-check that the machine path decodes + re-emits without error).
+func TestRunCloudDomainYAMLPassthrough(t *testing.T) {
+	newDomainServer(t, 200, domainAllServingEnvelope)
+	stdout, _, code := runDomain(t, "yaml", false, "status", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	// A faithful re-encode carries the host + a rung label somewhere in the doc.
+	if !strings.Contains(stdout, "blog.barkpark.cloud") {
+		t.Fatalf("yaml re-encode must carry the host:\n%s", stdout)
+	}
+	// Sanity: the raw JSON bytes must not decode to an error envelope.
+	var probe cloudDomainProbe
+	if err := json.Unmarshal([]byte(domainAllServingEnvelope), &probe); err != nil {
+		t.Fatalf("fixture is not valid json: %v", err)
+	}
+	if !probe.OK || len(probe.Domains) != 1 {
+		t.Fatalf("fixture decoded wrong: %+v", probe)
+	}
+}
+
+// cloudDomainProbe is a local decode shape for the fixture sanity check above.
+type cloudDomainProbe struct {
+	OK      bool `json:"ok"`
+	Domains []struct {
+		Host string `json:"host"`
+	} `json:"domains"`
+}

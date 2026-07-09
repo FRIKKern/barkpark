@@ -3402,3 +3402,155 @@ test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back 
   // rollback with nothing remembered is a no-op (total, never throws).
   assert.equal(hooks.lifecycleOptimistic(base, "rollback"), base);
 });
+
+// ── S13 domainStages: the per-host DNS/TLS checklist fold ────────────────────
+// The pure reducer behind `bp cloud domain status` (Go) and the console Domain
+// rail. NEITHER surface probes — both fold the SAME control-plane envelope. The
+// four rung roles (ok/active/pending/failed), the active-front promotion, the
+// terminal (poll-stop) flag, and the server-owned remediation gate are pinned
+// here; the DOM mount + 4s poll are browser-verified.
+
+const DOMAIN_SERVING = {
+  ok: true, checked_at: "2026-07-09T10:00:00Z",
+  instance: { id: "i1", host: "blog.barkpark.cloud" },
+  domains: [{
+    host: "blog.barkpark.cloud", kind: "platform", overall: "ok",
+    stages: [
+      { stage: "dns_found", label: "DNS found", status: "ok", evidence: "A → 91.99.1.2", remediation: "" },
+      { stage: "points_here", label: "Points here", status: "ok", evidence: "this instance", remediation: "" },
+      { stage: "tls", label: "TLS issued", status: "ok", evidence: "valid", remediation: "" },
+      { stage: "serving", label: "Serving", status: "ok", evidence: "HTTPS 200", remediation: "" },
+    ],
+  }],
+};
+
+const DOMAIN_PENDING = {
+  ok: false, checked_at: "2026-07-09T10:00:00Z",
+  instance: { id: "i1", host: "blog.barkpark.cloud" },
+  domains: [{
+    host: "shop.example.com", kind: "custom", overall: "pending",
+    stages: [
+      { stage: "dns_found", label: "DNS found", status: "ok", evidence: "A → 91.99.1.2", remediation: "" },
+      { stage: "points_here", label: "Points here", status: "ok", evidence: "this instance", remediation: "" },
+      { stage: "tls", label: "TLS issued", status: "pending", evidence: "issuing", remediation: "TLS takes a few minutes — keep this open." },
+      { stage: "serving", label: "Serving", status: "pending", evidence: "waiting on TLS", remediation: "" },
+    ],
+  }],
+};
+
+const DOMAIN_FAILED = {
+  ok: false, checked_at: "2026-07-09T10:00:00Z",
+  instance: { id: "i1", host: "blog.barkpark.cloud" },
+  domains: [{
+    host: "shop.example.com", kind: "custom", overall: "failed",
+    stages: [
+      { stage: "dns_found", label: "DNS found", status: "failed", evidence: "NXDOMAIN", remediation: "Add an A record for shop.example.com → 91.99.1.2." },
+      { stage: "points_here", label: "Points here", status: "pending", evidence: "blocked on DNS", remediation: "" },
+    ],
+  }],
+};
+
+test("S13: domainStages exposes the pure helpers", () => {
+  for (const name of ["domainStages", "domainStageRows", "domainChecklistHtml", "domainRungChip", "domainKindChip"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("S13: a fully-serving domain is all-ok and terminal (poll stops)", () => {
+  const m = hooks.domainStages(DOMAIN_SERVING, 0);
+  assert.equal(m.ok, true);
+  assert.equal(m.empty, false);
+  assert.equal(m.terminal, true); // every rung ok → nothing to poll
+  assert.equal(m.checkedAt, "2026-07-09T10:00:00Z");
+  assert.equal(m.domains.length, 1);
+  const d = m.domains[0];
+  assert.equal(d.overallRole, "ok");
+  assert.deepEqual([...d.rows.map((r) => r.role)], ["ok", "ok", "ok", "ok"]);
+  // No ok rung ever shows remediation.
+  assert.ok(d.rows.every((r) => r.showRemediation === false));
+});
+
+test("S13: a mid-issuance domain promotes the first pending rung to the active front, and is NOT terminal", () => {
+  const m = hooks.domainStages(DOMAIN_PENDING, 0);
+  assert.equal(m.ok, false);
+  assert.equal(m.terminal, false); // still resolving → keep polling
+  const roles = [...m.domains[0].rows.map((r) => r.role)];
+  // dns/points ok; the FIRST pending (tls) becomes "active"; serving stays pending.
+  assert.deepEqual(roles, ["ok", "ok", "active", "pending"]);
+  assert.equal(m.domains[0].overallRole, "pending");
+});
+
+test("S13: remediation shows ONLY under a non-ok rung that carries server copy, verbatim", () => {
+  const rows = hooks.domainStageRows(DOMAIN_PENDING.domains[0].stages);
+  const tls = rows.find((r) => r.stage === "tls");
+  const serving = rows.find((r) => r.stage === "serving");
+  // tls: active (non-ok) + has copy → shown, verbatim.
+  assert.equal(tls.showRemediation, true);
+  assert.equal(tls.remediation, "TLS takes a few minutes — keep this open.");
+  // serving: pending (non-ok) but EMPTY remediation → not shown (no dangling row).
+  assert.equal(serving.showRemediation, false);
+  assert.equal(serving.remediation, "");
+});
+
+test("S13: a failed rung settles, but a skipped-pending rung downstream keeps polling (the operator can fix + watch)", () => {
+  const m = hooks.domainStages(DOMAIN_FAILED, 0);
+  const roles = [...m.domains[0].rows.map((r) => r.role)];
+  // dns failed; points_here never had a prior ok, so it stays pending (no active).
+  assert.deepEqual(roles, ["failed", "pending"]);
+  // A pending rung remains → NOT terminal (the box may still be actioned).
+  assert.equal(m.terminal, false);
+  assert.equal(m.domains[0].overallRole, "failed");
+  const dns = m.domains[0].rows[0];
+  assert.equal(dns.showRemediation, true);
+  assert.equal(dns.remediation, "Add an A record for shop.example.com → 91.99.1.2.");
+});
+
+test("S13: an empty domain set folds to empty+terminal (keeps the static Domain rail row)", () => {
+  const m = hooks.domainStages({ ok: true, domains: [] }, 0);
+  assert.equal(m.empty, true);
+  assert.equal(m.terminal, true); // nothing to poll
+  const html = hooks.domainChecklistHtml(m, { custom_host: "acme.barkpark.cloud" });
+  // Degrades to the original single Domain rail row, not a checklist card.
+  assert.match(html, /rail-row/);
+  assert.match(html, /acme\.barkpark\.cloud/);
+  assert.ok(html.indexOf("vf-card") === -1);
+});
+
+test("S13: domainStages is TOTAL — a null/garbage payload never throws", () => {
+  for (const bad of [null, undefined, {}, { domains: null }, { domains: [null, {}] }]) {
+    const m = hooks.domainStages(bad, 0);
+    assert.equal(Array.isArray(m.domains), true);
+    assert.equal(typeof m.terminal, "boolean");
+  }
+  // A domain with no stages array is an empty (terminal) host.
+  const m = hooks.domainStages({ domains: [{ host: "h" }] }, 0);
+  assert.deepEqual([...m.domains[0].rows], []);
+});
+
+test("S13: domainChecklistHtml renders one vf-card per host with escaped, role-mapped chips", () => {
+  const m = hooks.domainStages(DOMAIN_PENDING, 0);
+  const html = hooks.domainChecklistHtml(m, {});
+  assert.match(html, /vf-card/);
+  assert.match(html, /shop\.example\.com/);
+  assert.match(html, /vf-chip--pass/);    // the two ok rungs
+  assert.match(html, /vf-chip--unknown/); // active + pending render as neutral chips
+  assert.match(html, /TLS takes a few minutes/); // remediation surfaced verbatim
+  // The kind chip is present.
+  assert.match(html, /custom/);
+});
+
+test("S13: domainRungChip escapes a hostile label + evidence (no raw markup leaks)", () => {
+  const chip = hooks.domainRungChip({
+    role: "failed", label: "<b>x</b>", evidence: "<script>1</script>", remediation: "", showRemediation: false,
+  });
+  assert.ok(chip.indexOf("<b>x</b>") === -1, "label must be escaped");
+  assert.ok(chip.indexOf("<script>") === -1, "evidence must be escaped");
+  assert.match(chip, /vf-chip--fail/);
+});
+
+test("S13: domainKindChip maps the two known kinds and passes an unknown through", () => {
+  assert.equal(hooks.domainKindChip("platform"), "platform");
+  assert.equal(hooks.domainKindChip("custom"), "custom");
+  assert.equal(hooks.domainKindChip(""), "");
+  assert.equal(hooks.domainKindChip("byo"), "byo");
+});

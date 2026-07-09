@@ -2308,6 +2308,7 @@
         });
         loadInstanceSites(bp);
         loadInstanceVerify(bp); // C8: golden-path chips beside the fresh box
+        if (bp.host) loadInstanceDomains(bp); // S13: per-host DNS/TLS checklist
       } else {
         // Overview: the C3 provisioning timeline + sites + rail, wired exactly as
         // before (the tab seam only wraps the SAME render in a panel).
@@ -2315,6 +2316,7 @@
         startInstanceTicker(bp);         // C3: live per-step elapsed (tick, no remount)
         loadInstanceSites(bp);
         loadInstanceVerify(bp);          // C8: golden-path verify chips (host-set boxes)
+        if (bp.host) loadInstanceDomains(bp); // S13: per-host DNS/TLS checklist
       }
     });
   }
@@ -2494,7 +2496,11 @@
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("ID", bp.id) +
           railRowCopy("Host", bp.host || "—") +
-          railRow("Domain", bp.custom_host || "—") +
+          // S13 (azure-hetzner hosting): the Domain rail row GROWS into the live
+          // per-host DNS/TLS checklist. The slot renders the static value first
+          // (no layout jump); loadInstanceDomains replaces it with the checklist
+          // when the box has attached domains (GET /v1/barkparks/:id/domain-status).
+          '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div>" +
           railRow("Mode", bp.mode || "—") +
           railRow("Health", railValue(cap(health), hasHost)) +
           railRow("Agent", railValue(cap(agent), hasHost)) +
@@ -2710,8 +2716,11 @@
     if (btn) { btn.disabled = true; btn.textContent = "Attaching…"; }
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/domain", { domain: value }).then(function (r) {
       if (r.status === 202) {
+        // S13: the fire-and-forget toast is replaced by the LIVE per-host
+        // checklist. loadInstance re-renders the overview (Domain rail slot),
+        // and loadInstanceDomains fetches + polls it — the operator watches
+        // DNS → points here → TLS → serving turn green in place.
         closeModal();
-        toast({ kind: "success", title: "Domain attaching", body: "DNS + TLS will be live shortly." });
         fleetCache = null;
         loadInstance(bp.id);
         return;
@@ -3910,6 +3919,166 @@
       btn.disabled = false;
       btn.textContent = label;
       toast({ kind: "error", title: "Couldn't run the check", body: friendly(r.data, "Please try again in a moment.") });
+    });
+  }
+
+  // ================================================== DOMAIN CHECKLIST (S13)
+  // The per-host DNS/TLS checklist — DNS found → points here → TLS issued →
+  // serving — for the azure-hetzner hosting parity work. The CLI (`bp cloud
+  // domain status`) and this rail render the SAME control-plane envelope (GET
+  // /v1/barkparks/:id/domain-status); NEITHER surface probes — the CP owns the
+  // truth. domainStages is the ONE pure fold, node-pinned in __app.test.mjs;
+  // the DOM mount + 4s poll (loadInstanceDomains) are browser-verified.
+
+  // Fold one host's stage array into display rows. Roles: ok/failed pass
+  // through; a pending rung is "pending" (waiting) EXCEPT the first pending rung
+  // after at least one ok rung, which becomes "active" (the front currently
+  // being established) — the checklist shows honest motion (the markNextStep
+  // idiom). showRemediation is true ONLY under a non-ok rung that carries a
+  // server remediation string (server-owned copy, rendered verbatim — the SPA
+  // never invents fix text).
+  function domainStageRows(stages) {
+    stages = Array.isArray(stages) ? stages : [];
+    var rows = [], seenOk = false, sawActive = false;
+    for (var i = 0; i < stages.length; i++) {
+      var s = stages[i] || {};
+      var status = typeof s.status === "string" ? s.status : "";
+      var role = status === "ok" ? "ok" : status === "failed" ? "failed" : "pending";
+      if (role === "ok") seenOk = true;
+      if (role === "pending" && seenOk && !sawActive) { role = "active"; sawActive = true; }
+      var remediation = typeof s.remediation === "string" ? s.remediation : "";
+      var label = (typeof s.label === "string" && s.label) ? s.label
+        : (typeof s.stage === "string" ? s.stage : "");
+      rows.push({
+        stage: typeof s.stage === "string" ? s.stage : "",
+        label: label,
+        role: role,
+        status: status,
+        evidence: typeof s.evidence === "string" ? s.evidence : "",
+        remediation: remediation,
+        showRemediation: role !== "ok" && !!remediation,
+      });
+    }
+    return rows;
+  }
+
+  // The canonical fold: the domain-status envelope → a render-ready model. Each
+  // host carries its rolled-up overall (role-mapped) + its rung rows. `terminal`
+  // is true when nothing is still pending/active (every host's rungs are all
+  // ok-or-failed) — the DOM mount stops polling there. `empty` (no attached
+  // domains) keeps the original single Domain rail row.
+  function domainStages(payload, now) {
+    now = (typeof now === "number") ? now : Date.now();
+    var domains = (payload && Array.isArray(payload.domains)) ? payload.domains : [];
+    var out = domains.map(function (d) {
+      d = d || {};
+      var overall = typeof d.overall === "string" ? d.overall : "";
+      var overallRole = overall === "ok" ? "ok" : overall === "failed" ? "failed" : "pending";
+      return {
+        host: typeof d.host === "string" ? d.host : "",
+        kind: typeof d.kind === "string" ? d.kind : "",
+        overall: overall,
+        overallRole: overallRole,
+        rows: domainStageRows(d.stages),
+      };
+    });
+    var terminal = out.every(function (d) {
+      return d.rows.every(function (r) { return r.role === "ok" || r.role === "failed"; });
+    });
+    return {
+      ok: !!(payload && payload.ok),
+      checkedAt: (payload && typeof payload.checked_at === "string") ? payload.checked_at : null,
+      empty: out.length === 0,
+      terminal: terminal,
+      domains: out,
+    };
+  }
+
+  // The host-kind chip copy (platform = a name.barkpark.cloud subdomain we own
+  // end to end; custom = a BYO domain pointed at the box). Unknown kinds pass
+  // through; empty yields "".
+  function domainKindChip(kind) {
+    if (kind === "platform") return "platform";
+    if (kind === "custom") return "custom";
+    return kind || "";
+  }
+
+  // Pure: one rung chip. Reuses the verify-card chip vocabulary (.vf-chip) so it
+  // is styled without new CSS: ok → pass (✓), failed → fail (✗), pending/active
+  // → the neutral "unknown" chip (·). The accessible name carries the state in
+  // WORDS, never colour alone.
+  function domainRungChip(row) {
+    var vfRole = row.role === "ok" ? "pass" : row.role === "failed" ? "fail" : "unknown";
+    var glyph = vfRole === "pass" ? "&#10003;" : vfRole === "fail" ? "&#10007;" : "&middot;";
+    var state = row.role === "ok" ? "done"
+      : row.role === "failed" ? "failed"
+      : row.role === "active" ? "in progress" : "waiting";
+    return '<span class="vf-chip vf-chip--' + vfRole + '" role="listitem" aria-label="' +
+      esc(row.label + " — " + state) + '">' +
+      '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +
+      esc(row.label) +
+      (row.evidence ? '<span class="vf-chip-code">' + esc(row.evidence) + "</span>" : "") +
+      "</span>";
+  }
+
+  // Pure: the whole rail checklist. Empty (no attached domains) degrades to the
+  // original single Domain rail row. Otherwise one .vf-card per host — head
+  // (host + kind), the rung chips, then the server's remediation lines under any
+  // non-ok rung, verbatim.
+  function domainChecklistHtml(model, bp) {
+    if (!model || model.empty) {
+      return railRow("Domain", (bp && bp.custom_host) || "—");
+    }
+    return model.domains.map(function (d) {
+      var head = esc(d.host) +
+        (domainKindChip(d.kind) ? ' <span class="vf-chip-code">' + esc(domainKindChip(d.kind)) + "</span>" : "");
+      var rungs = d.rows.map(domainRungChip).join("");
+      var remedies = d.rows.filter(function (r) { return r.showRemediation; })
+        .map(function (r) { return '<div class="vf-note">' + esc(r.remediation) + "</div>"; }).join("");
+      var when = model.checkedAt
+        ? '<div class="vf-meta">checked ' + esc(relTime(model.checkedAt)) + "</div>"
+        : "";
+      return '<div class="vf-card">' +
+        '<div class="vf-head"><h2>' + head + "</h2></div>" +
+        '<div class="vf-chips" role="list" aria-label="Domain checks for ' + esc(d.host) + '">' +
+          rungs +
+        "</div>" +
+        remedies + when +
+        "</div>";
+    }).join("");
+  }
+
+  // Which mount owns the #instance-domains slot + its poll right now. A newer
+  // load (navigation, re-render, attach) bumps the seq, invalidating older
+  // in-flight GETs and any pending poll re-arm (the verifySeq guard, applied to
+  // a self-limiting setTimeout chain rather than a fixed interval).
+  var domainSeq = 0;
+  var domainPollTimer = null;
+
+  // The thin DOM mount: fetch the checklist, paint it, and poll every 4s (the
+  // /new idiom) while any rung is still pending/active. A 404 (route not
+  // deployed yet) / error / non-live box keeps the static Domain rail row —
+  // never an error in the rail. ALL logic lives in the pure helpers above;
+  // browser-verified only.
+  function loadInstanceDomains(bp) {
+    var box = $("#instance-domains");
+    if (!box) return;
+    var seq = ++domainSeq;
+    clearTimeout(domainPollTimer);
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/domain-status").then(function (r) {
+      if (seq !== domainSeq) return; // a newer load owns the slot
+      var b = $("#instance-domains");
+      if (!b) return;
+      if (!r.ok || !r.data) return; // keep the static Domain row on 404/error
+      var model = domainStages(r.data, Date.now());
+      b.innerHTML = domainChecklistHtml(model, bp);
+      if (!model.terminal) {
+        clearTimeout(domainPollTimer);
+        domainPollTimer = setTimeout(function () {
+          if (seq !== domainSeq) return;
+          loadInstanceDomains(bp);
+        }, 4000);
+      }
     });
   }
 
@@ -8591,6 +8760,12 @@
       verifySummaryText: verifySummaryText, verifyChipHtml: verifyChipHtml,
       verifyCardHtml: verifyCardHtml, verifyNoteHtml: verifyNoteHtml,
       verifyProbes: VERIFY_PROBES.map(function (p) { return { name: p.name, label: p.label }; }),
+      // S13 (azure-hetzner hosting): the per-host domain DNS/TLS checklist. Only
+      // the pure fold (domainStages) + its render are node-pinned; the DOM mount
+      // (loadInstanceDomains) + 4s poll are browser-verified.
+      domainStages: domainStages, domainStageRows: domainStageRows,
+      domainChecklistHtml: domainChecklistHtml, domainRungChip: domainRungChip,
+      domainKindChip: domainKindChip,
       // Liveness chip (OC6): topbar SSE health dot + honest "as of" freshness.
       // Pure state helpers + the DOM seams (fake-DOM smoke drives the mount/paint,
       // the same way mountInstanceTimeline is exercised — real browser is live).
