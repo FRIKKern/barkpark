@@ -614,8 +614,13 @@ defmodule BarkparkWeb.Router do
       live("/tmux", TmuxLive)
       # Claude chat — admin-gated here; ChatLive.mount also hard-gates on
       # ClaudeChat.enabled? (host `claude` binary + config flag; refused on
-      # public-demo hosts). Wave 1: pure chat in plan mode.
+      # public-demo hosts). Both routes share this live_session + module, so a
+      # session switch is a `push_patch` with NO remount (charter D14):
+      # `/chat` is the new-chat empty state; `/chat/:session_id` replays a
+      # remembered session's history. `handle_params/3` is the single source of
+      # truth.
       live("/chat", ChatLive)
+      live("/chat/:session_id", ChatLive)
     end
   end
 

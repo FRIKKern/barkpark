@@ -8,7 +8,8 @@ defmodule Barkpark.StudioChat.TitlesTest do
 
   defmodule FakeAdapter do
     # Reads its canned response from Application env so each test can steer it.
-    def post(_url, _body, _headers), do: Application.get_env(:barkpark, :test_title_api, {:error, :unset})
+    def post(_url, _body, _headers),
+      do: Application.get_env(:barkpark, :test_title_api, {:error, :unset})
   end
 
   defmodule FakeCli do
@@ -70,6 +71,7 @@ defmodule Barkpark.StudioChat.TitlesTest do
       assert req["max_tokens"] == 64
       assert req["output_config"]["effort"] == "low"
       assert req["output_config"]["format"]["type"] == "json_schema"
+
       assert req["output_config"]["format"]["schema"]["properties"] == %{
                "title" => %{"type" => "string"}
              }
@@ -119,7 +121,9 @@ defmodule Barkpark.StudioChat.TitlesTest do
     end
 
     test "tolerates a rambling preamble around the fence" do
-      raw = "Sure! Here is your title:\n```json\n{\"title\":\"Ship the parser\"}\n```\nHope that helps."
+      raw =
+        "Sure! Here is your title:\n```json\n{\"title\":\"Ship the parser\"}\n```\nHope that helps."
+
       assert Titles.parse_title(raw) == {:ok, "Ship the parser"}
     end
 
@@ -167,7 +171,9 @@ defmodule Barkpark.StudioChat.TitlesTest do
       Application.put_env(:barkpark, :anthropic_api_key, "sk-test")
       Application.put_env(:barkpark, :studio_chat_title_http_adapter, FakeAdapter)
 
-      Application.put_env(:barkpark, :test_title_api,
+      Application.put_env(
+        :barkpark,
+        :test_title_api,
         {:ok, 200, %{"content" => [%{"type" => "text", "text" => ~s({"title":"API title"})}]}}
       )
 
@@ -256,6 +262,19 @@ defmodule Barkpark.StudioChat.TitlesTest do
       # supervised task; kick_title swallows it.
       {:ok, _pid} = Titles.kick_title("sess-3", "make a title", self())
       refute_receive {:chat_title, "sess-3", _}, 300
+    end
+
+    test "the canonical store shape {:ok, %Session{}} counts as an accepted write" do
+      # Barkpark.StudioChat.maybe_set_ai_title/2 returns {:ok, %Session{}} —
+      # a struct, not a bare title. The notify branch must recognise it.
+      defmodule CanonicalStore do
+        def maybe_set_ai_title(_session_id, title), do: {:ok, %{title: title <> "!"}}
+      end
+
+      Application.put_env(:barkpark, :studio_chat_store, CanonicalStore)
+
+      {:ok, _pid} = Titles.kick_title("sess-4", "make a title", self())
+      assert_receive {:chat_title, "sess-4", "Generated title!"}, 2_000
     end
   end
 end

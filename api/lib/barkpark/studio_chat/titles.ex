@@ -180,7 +180,13 @@ defmodule Barkpark.StudioChat.Titles do
       title = generate(first_message)
 
       try do
+        # Accepted-write shapes: the canonical store returns {:ok, %Session{}}
+        # (notify with its applied title); tolerate {:ok, title} / plain :ok
+        # from simpler stores. Anything else is a refusal — stay silent.
         case store().maybe_set_ai_title(session_id, title) do
+          {:ok, %{title: applied}} when is_binary(applied) ->
+            send(notify_pid, {:chat_title, session_id, applied})
+
           {:ok, applied} when is_binary(applied) ->
             send(notify_pid, {:chat_title, session_id, applied})
 
