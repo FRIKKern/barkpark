@@ -55,6 +55,7 @@ type loggedRequest struct {
 	Method string
 	URL    string
 	Route  string
+	Body   string // the request body bytes, captured so a test can assert what was SENT
 }
 
 func newFakeTransport(t *testing.T, routes []fakeRoute) *fakeTransport {
@@ -72,10 +73,12 @@ func fixturesDir(t *testing.T) string {
 }
 
 func (ft *fakeTransport) Do(req *http.Request) (*http.Response, error) {
-	// Drain the request body so a caller that inspects it later can't block; we
-	// don't assert on request bodies (the fake is a replayer, not a validator).
+	// Drain the request body so a caller that inspects it later can't block, and
+	// CAPTURE it: the fake replays fixtures for responses, but a test may still need
+	// to assert on what the SDK SENT (e.g. that a Tags PATCH carries barkpark-fqdn).
+	var reqBody []byte
 	if req.Body != nil {
-		_, _ = io.ReadAll(req.Body)
+		reqBody, _ = io.ReadAll(req.Body)
 		_ = req.Body.Close()
 	}
 	lower := strings.ToLower(req.URL.String())
@@ -90,7 +93,7 @@ func (ft *fakeTransport) Do(req *http.Request) (*http.Response, error) {
 		if !allContain(lower, r.contains) || anyContain(lower, r.absent) {
 			continue
 		}
-		ft.log = append(ft.log, loggedRequest{Method: req.Method, URL: req.URL.String(), Route: r.name})
+		ft.log = append(ft.log, loggedRequest{Method: req.Method, URL: req.URL.String(), Route: r.name, Body: string(reqBody)})
 		idx := ft.calls[r.name]
 		ft.calls[r.name]++
 		if idx >= len(r.fixtures) {
@@ -138,6 +141,20 @@ func (ft *fakeTransport) hits(route string) int {
 	ft.mu.Lock()
 	defer ft.mu.Unlock()
 	return ft.calls[route]
+}
+
+// lastBody returns the captured request body of the most recent hit on a named
+// route (empty if the route was never served) — so a test can assert what the SDK
+// actually PUT/PATCHed, not just how many times.
+func (ft *fakeTransport) lastBody(route string) string {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	for i := len(ft.log) - 1; i >= 0; i-- {
+		if ft.log[i].Route == route {
+			return ft.log[i].Body
+		}
+	}
+	return ""
 }
 
 func allContain(s string, subs []string) bool {

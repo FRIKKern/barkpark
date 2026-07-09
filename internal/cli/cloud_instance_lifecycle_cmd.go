@@ -417,6 +417,13 @@ func runAzureInstanceAudit(out *writer, g globals, args []string) int {
 	for _, s := range servers {
 		fqdn := s.Labels[cloud.FQDNLabelKey]
 		if fqdn == "" {
+			// A pre-baked warm-pool box is LEGITIMATELY identity-less: its FQDN is
+			// stamped only when it is assigned to a customer (cloud warmpool_assign
+			// labelFQDN), so flagging it as unlabeled would be a false positive.
+			// Skip it — it is not an orphan, it is inventory awaiting a claim.
+			if _, warm := s.Labels[cloud.WarmLabelKey]; warm {
+				continue
+			}
 			findings = append(findings, finding{"unlabeled-vm", s.Name, "managed VM with no " + cloud.FQDNLabelKey + " tag"})
 			continue
 		}

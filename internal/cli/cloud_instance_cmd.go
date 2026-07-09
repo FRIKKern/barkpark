@@ -340,6 +340,35 @@ func doInstanceCreate(out *writer, p cloud.CloudProvider, kind, name, typ, regio
 	if err != nil {
 		return useError(out, "failed", fmt.Sprintf("%s: create instance %q: %s", kind, name, err.Error()), exitGeneric)
 	}
+
+	// Stamp the box's public FQDN identity (barkpark-fqdn) exactly as the warm-pool
+	// one-shot does (cloud.WarmPool.labelFQDN, warmpool.go) — the tag a name-safe
+	// delete and the fleet audit both key on. The fqdn is derived HERE from the
+	// operator's --name (never inside the provider's Create: a provider may mangle
+	// the box name, and deriving there would stamp a lie). Mirror labelFQDN's
+	// fail-closed intent, but on THIS operator escape path we do NOT auto-teardown a
+	// created box — a silent success that leaves an unlabeled box is the failure we
+	// refuse, so we error LOUD naming the box the operator now owns. A provider that
+	// cannot label degrades with a printed reason (never a fatal for an unlabelable
+	// provider — the box is still real and reported).
+	fqdn := cloud.Fqdn(name, instDefaultZone)
+	if labeler, ok := p.(cloud.ServerLabeler); ok {
+		if lerr := labeler.LabelServer(ctx, srv.Name, cloud.FQDNLabelKey, fqdn); lerr != nil {
+			return useError(out, "failed",
+				fmt.Sprintf("%s: created instance %q but could NOT stamp its %s=%s identity: %s — the box EXISTS and is unlabeled (a fleet audit will flag it; a name-safe delete cannot confirm it). Fix it with `bp cloud instance label set %s %s %s --provider %s`, or delete the box.",
+					kind, srv.Name, cloud.FQDNLabelKey, fqdn, lerr.Error(),
+					srv.Name, cloud.FQDNLabelKey, fqdn, kind),
+				exitGeneric)
+		}
+		if srv.Labels == nil {
+			srv.Labels = map[string]string{}
+		}
+		srv.Labels[cloud.FQDNLabelKey] = fqdn
+	} else {
+		out.info("provider %q cannot label servers — %q was created WITHOUT its %s identity; a fleet audit will flag it and a name-safe delete cannot confirm the box",
+			kind, srv.Name, cloud.FQDNLabelKey)
+	}
+
 	if out.emitStructured(map[string]any{
 		"ok": true, "provider": kind, "action": "create", "instance": instanceRow(srv),
 	}) {

@@ -190,6 +190,31 @@ func TestTagLifecycle_Roundtrip(t *testing.T) {
 	}
 }
 
+// TestLabelServer_StampsFQDNTagPatch proves the mechanism the neutral create path
+// (doInstanceCreate) uses to give a direct-created box its barkpark-fqdn identity:
+// LabelServer with the FQDN key issues a SINGLE Tags PATCH (Merge, so it never
+// clobbers barkpark-managed) whose body carries barkpark-fqdn=<fqdn>. This is what
+// stops the fleet audit from flagging a warm/go-live-parity box as unlabeled.
+func TestLabelServer_StampsFQDNTagPatch(t *testing.T) {
+	p, ft := newTestProvider(t, append(authRoutes(), tagRoute()))
+
+	if err := p.LabelServer(context.Background(), "web-1", cloud.FQDNLabelKey, "web-1.barkpark.cloud"); err != nil {
+		t.Fatalf("LabelServer: %v", err)
+	}
+	if got := ft.hits("tags-patch"); got != 1 {
+		t.Fatalf("fqdn stamp must issue exactly ONE Tags PATCH, got %d", got)
+	}
+	body := ft.lastBody("tags-patch")
+	if !strings.Contains(body, cloud.FQDNLabelKey) || !strings.Contains(body, "web-1.barkpark.cloud") {
+		t.Errorf("the Tags PATCH body must carry %s=web-1.barkpark.cloud, got: %s", cloud.FQDNLabelKey, body)
+	}
+	// Merge — the fqdn stamp must PRESERVE the box's other tags (barkpark-managed),
+	// never replace the whole tag set.
+	if !strings.Contains(strings.ToLower(body), "merge") {
+		t.Errorf("the fqdn stamp must be a tag Merge (preserve barkpark-managed), got: %s", body)
+	}
+}
+
 func TestList_KeepsOnlyManaged(t *testing.T) {
 	p, _ := newTestProvider(t, append(authRoutes(), listRoute()))
 	servers, err := p.List(context.Background())
