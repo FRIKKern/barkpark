@@ -374,10 +374,9 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # from the same captured accent/ground hex above — never a re-stamped literal.
   # The anonymous parser lives in a module attribute so it is a compile-time
   # constant (module-local functions aren't callable during compilation).
-  @hex_to_rgb (fn "#" <> <<r::binary-2, g::binary-2, b::binary-2>> ->
-                 {String.to_integer(r, 16), String.to_integer(g, 16),
-                  String.to_integer(b, 16)}
-               end)
+  @hex_to_rgb fn "#" <> <<r::binary-2, g::binary-2, b::binary-2>> ->
+    {String.to_integer(r, 16), String.to_integer(g, 16), String.to_integer(b, 16)}
+  end
   @email_accent_rgb @hex_to_rgb.(@email_accent)
   @email_ground_rgb @hex_to_rgb.(@email_ground)
 
