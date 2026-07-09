@@ -65,3 +65,38 @@ restartable actor whose only durable identity is a session_id pointer.
 ## Caveat
 Do not lean on ~/.claude/projects/*.jsonl as the history store — t3 deliberately
 does not. Our store owns display; the CLI owns model memory.
+
+## UX pass 2 (2026-07-09, lead skim of apps/web/src — ranked for waves 6+)
+
+1. **AskUserQuestion → real question UI** (`pendingUserInput.ts`): option chips +
+   custom-answer field, multi-question progress (questionIndex/isLastQuestion/
+   canAdvance), answered-count. Arrives on OUR wire as a can_use_tool
+   control_request for tool AskUserQuestion (input carries the questions);
+   today we render a generic Allow/Deny card. Highest-leverage gap.
+2. **ExitPlanMode → proposed-plan card** (`proposedPlan.ts`): title from first
+   markdown heading (proposedPlanTitle), strip leading heading/Summary
+   (stripDisplayedPlanMarkdown), collapsed 8-line preview
+   (buildCollapsedProposedPlanPreviewMarkdown) + expand; Approve / keep
+   planning actions. t3 intercepts the ExitPlanMode can_use_tool: captures
+   plan, DENIES with "wait for feedback", then the human decides. Plan mode is
+   our default — we currently print plans as prose with a generic card.
+3. **Slash commands**: composer `/` menu = builtins (/model /plan /default)
+   merged with the CLI's OWN advertised commands from the initialize control
+   response (we already receive that list — charter wave-1 wire notes).
+4. **Sticky drafts + sticky model** (`composerDraftStore.ts`,
+   DEFAULT_MODEL_BY_PROVIDER): per-thread composer drafts survive switching
+   away (we clear); last model pick = default for new chats.
+5. **@-file mentions** (`composer-editor-mentions.ts`): cwd path autocomplete,
+   inserted as chips.
+6. **Files-changed diff panel** (`diffPanelStore.ts`, `diffFileActions.ts`):
+   per-turn diffs of what the agent touched. Memory-rewind stays CUT (D26);
+   the file-side VIEW is viable alone.
+7. **Keybindings** (`keybindings.ts`): Esc interrupt, thread-jump ⌘1-9,
+   model-picker jump, focus-aware (terminalFocus/previewFocus guards).
+8. **Command palette + unseen-completion dot**: fuzzy session search;
+   dot keyed off lastVisitedAt for "finished while you were away".
+9. **Steering**: a mid-turn send JOINS the running turn (same turnId) instead
+   of being gated behind Stop.
+
+Wave-6 recommended cut: #1 + #2 (agent-asks/human-answers surfaces), #3+#4 as
+one composer slice. Wave-7: #6 diff panel (bold), #7+#8 polish, #9 steering.
