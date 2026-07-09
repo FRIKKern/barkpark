@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -167,6 +168,83 @@ func TestNeutralArchiveAzureBundleSSHPath(t *testing.T) {
 	}
 	if _, has := secrets["BARKPARK_KEK_PREVIOUS"]; has {
 		t.Errorf("empty BARKPARK_KEK_PREVIOUS must be dropped (when-set only): %v", secrets)
+	}
+}
+
+// TestNeutralArchiveHetznerStampsSpecHints proves the hetzner portable archive
+// records the box's resurrection SPEC HINTS ({region, server_type}) read off the
+// live hcloud server, so a later resurrect can re-shape its target. The box is
+// resolved through the (faked) hcloud API — which returns location=fsn1,
+// server_type=cx23 — its bytes come over the (faked) ssh runner, and the written
+// manifest carries those hints. No live cloud, S3 or ssh.
+func TestNeutralArchiveHetznerStampsSpecHints(t *testing.T) {
+	st := withFakeBundleStore(t)
+	withFakeRemoteStream(t, cannedBundleTar(t))
+
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(9, "bp-okey-1", "192.0.2.9", "okey.barkpark.cloud")+`]}`)
+	})
+
+	stdout, stderr, code := runInstanceCapture(t, "json", "archive", "--provider", "hetzner", "okey.barkpark.cloud")
+	if code != exitOK {
+		t.Fatalf("hetzner bundle archive exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	keys := bundleManifestKeys(t, st)
+	if len(keys) != 1 {
+		t.Fatalf("hetzner archive should land one bp-bundle-v1 manifest, got %v", keys)
+	}
+	prefix := strings.TrimSuffix(keys[0], "manifest.json")
+	man, err := cloud.ReadManifest(context.Background(), st, prefix)
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	if man.SourceProvider != "hetzner" {
+		t.Errorf("manifest not tagged hetzner: %+v", man)
+	}
+	// The load-bearing assertion: the shape hints are stamped from the live box.
+	if man.Spec.Region != "fsn1" {
+		t.Errorf("spec.region = %q, want fsn1 (read off the hcloud server's location)", man.Spec.Region)
+	}
+	if man.Spec.ServerType != "cx23" {
+		t.Errorf("spec.server_type = %q, want cx23 (read off the hcloud server's server_type)", man.Spec.ServerType)
+	}
+}
+
+// TestNeutralArchiveEmptySpecHintsTolerated proves a bundle written with NO shape
+// hints (every pre-existing bundle, and the azure/fake providers that carry no
+// hints) still writes, lists and reads back cleanly — empty hints are legitimate,
+// never a failure (charter Decision 12).
+func TestNeutralArchiveEmptySpecHintsTolerated(t *testing.T) {
+	st := withFakeBundleStore(t)
+
+	_, stderr, code := runInstanceCapture(t, "json", "archive", "--provider", "fake", "web-1")
+	if code != exitOK {
+		t.Fatalf("fake archive exit=%d stderr=%s", code, stderr)
+	}
+	keys := bundleManifestKeys(t, st)
+	if len(keys) != 1 {
+		t.Fatalf("fake archive should land one manifest, got %v", keys)
+	}
+	prefix := strings.TrimSuffix(keys[0], "manifest.json")
+	man, err := cloud.ReadManifest(context.Background(), st, prefix)
+	if err != nil {
+		t.Fatalf("read manifest (empty-spec bundle must still read): %v", err)
+	}
+	if man.Spec.Region != "" || man.Spec.ServerType != "" {
+		t.Errorf("fake provider carries no shape hints, want empty spec, got %+v", man.Spec)
+	}
+	// The empty-spec bundle still lists.
+	stdout, _, code := runInstanceCapture(t, "json", "archives")
+	if code != exitOK {
+		t.Fatalf("archives list over an empty-spec bundle exit=%d", code)
+	}
+	if !strings.Contains(stdout, "web-1.barkpark.cloud") {
+		t.Errorf("empty-spec bundle must still appear in the list:\n%s", stdout)
 	}
 }
 
