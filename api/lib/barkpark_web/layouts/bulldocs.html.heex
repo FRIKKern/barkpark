@@ -283,8 +283,8 @@
       gap: 0.6rem;
       margin: 0 0 1.75rem;
       padding: 0.75rem 0;
-      background: #fbfaf6;
-      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+      background: var(--paper-bg);
+      border-bottom: 1px solid var(--paper-rule);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .bp-paper-article .bp-paper-action {
@@ -294,26 +294,26 @@
       font-size: 0.82rem;
       font-weight: 600;
       letter-spacing: 0.01em;
-      color: #1e5347;
-      background: #fdfcf8;
-      border: 1px solid rgba(162, 57, 37, 0.35);
+      color: var(--paper-accent);
+      background: var(--paper-bg);
+      border: 1px solid var(--paper-rule);
       border-radius: 6px;
       padding: 0.45rem 0.9rem;
       transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }
     .bp-paper-article .bp-paper-action:hover {
-      background: #1e5347;
-      color: #fdfcf8;
-      border-color: #1e5347;
+      background: var(--paper-accent);
+      color: var(--paper-bg);
+      border-color: var(--paper-accent);
     }
     .bp-paper-article .bp-paper-action:focus-visible {
-      outline: 2px solid #1e5347;
+      outline: 2px solid var(--paper-accent);
       outline-offset: 2px;
     }
     .bp-paper-article .bp-paper-action-ack {
       font-size: 0.78rem;
       font-style: italic;
-      color: #55635e;
+      color: var(--paper-ink-soft);
       margin-left: 0.25rem;
     }
 
@@ -338,13 +338,13 @@
       gap: 0.5rem;
     }
     .bp-paper-article .bp-paper-action-reject {
-      color: #55635e;
-      border-color: rgba(26, 26, 26, 0.18);
+      color: var(--paper-ink-soft);
+      border-color: var(--paper-rule);
     }
     .bp-paper-article .bp-paper-action-reject:hover {
-      background: #55635e;
-      color: #fdfcf8;
-      border-color: #55635e;
+      background: var(--paper-ink-soft);
+      color: var(--paper-bg);
+      border-color: var(--paper-ink-soft);
     }
 
     /* P6.U2 goal-path rail — a 240px sticky right-rail showing the paper's
@@ -380,9 +380,9 @@
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #1e5347;
+      color: var(--paper-accent);
       padding-bottom: 0.5rem;
-      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+      border-bottom: 1px solid var(--paper-rule);
     }
     .bp-paper-article .bp-goal-rail #goal-path-graph {
       margin: 0 0 1rem;
@@ -412,22 +412,22 @@
       padding: 0.35rem 0.5rem;
       border-radius: 4px;
       font-size: 0.85rem;
-      color: #3a3a3a;
+      color: var(--paper-ink);
       cursor: pointer;
       transition: background 0.12s ease;
     }
     .bp-paper-article .bp-goal-rail-event:hover {
-      background: rgba(162, 57, 37, 0.06);
+      background: var(--paper-accent-soft);
     }
     .bp-paper-article .bp-goal-rail-event.is-selected {
-      background: rgba(162, 57, 37, 0.12);
-      box-shadow: inset 3px 0 0 #1e5347;
+      background: var(--paper-accent-soft);
+      box-shadow: inset 3px 0 0 var(--paper-accent);
     }
     .bp-paper-article .bp-goal-rail-event-idx {
       flex: 0 0 auto;
       font-size: 0.72rem;
       font-weight: 600;
-      color: #1e5347;
+      color: var(--paper-accent);
       min-width: 1.1em;
       text-align: right;
     }
@@ -471,7 +471,7 @@
       width: min(760px, 100%);
       max-height: 80vh;
       overflow: auto;
-      background: #fdfcf8;
+      background: var(--paper-bg);
       border: 1px solid rgba(26, 26, 26, 0.12);
       border-radius: 8px;
       box-shadow: 0 12px 40px rgba(20, 18, 14, 0.3);
@@ -484,7 +484,7 @@
       gap: 1rem;
       margin: 0 0 1rem;
       padding-bottom: 0.6rem;
-      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+      border-bottom: 1px solid var(--paper-rule);
     }
     .bp-paper-article .bp-diff-title {
       margin: 0;
@@ -495,16 +495,16 @@
       font-size: 0.85rem;
       font-weight: 600;
       letter-spacing: 0.04em;
-      color: #3a3a3a;
+      color: var(--paper-ink);
     }
     .bp-paper-article .bp-diff-from,
     .bp-paper-article .bp-diff-to {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      color: #1e5347;
+      color: var(--paper-accent);
     }
     .bp-paper-article .bp-diff-arrow {
       margin: 0 0.4rem;
-      color: #8a8a8a;
+      color: var(--paper-ink-soft);
     }
     .bp-paper-article .bp-diff-close {
       flex: 0 0 auto;
@@ -512,15 +512,15 @@
       background: none;
       font-size: 1.4rem;
       line-height: 1;
-      color: #55635e;
+      color: var(--paper-ink-soft);
       cursor: pointer;
       padding: 0 0.25rem;
       border-radius: 4px;
       transition: background 0.12s ease, color 0.12s ease;
     }
     .bp-paper-article .bp-diff-close:hover {
-      background: rgba(162, 57, 37, 0.08);
-      color: #1e5347;
+      background: var(--paper-accent-soft);
+      color: var(--paper-accent);
     }
 
     /* The diff body itself — TextDiff.format_diff_html/1 emits
@@ -535,9 +535,11 @@
       white-space: pre-wrap;
       word-break: break-word;
       /* Neutralize the shared `.bp-paper-surface pre` code-block chrome —
-         this diff is a naked aside inside the (always-light) modal panel;
-         the shared bp-theme box would even resolve DARK here in dark mode
-         (the tokens are main-scoped). Reader-chrome override, Decision 5. */
+         this diff is a naked aside inside the modal panel; the shared bp-theme
+         box would otherwise grow a bordered inset here. Reader-chrome override,
+         Decision 5. (The panel + diff lines now theme via the --paper-*/
+         --bp-tone-* tokens, so an OS-dark reader gets a dark modal, not a
+         blinding-light one.) */
       background: none;
       border: 0;
       border-radius: 0;
@@ -549,15 +551,15 @@
       border-radius: 2px;
     }
     .bp-paper-article .bp-diff-add {
-      background: rgba(47, 122, 77, 0.12);
-      color: #1f5c39;
+      background: var(--bp-tone-success-bg);
+      color: var(--bp-tone-success-fg);
     }
     .bp-paper-article .bp-diff-del {
-      background: rgba(162, 57, 37, 0.1);
-      color: #8a2d1c;
+      background: var(--bp-tone-danger-bg);
+      color: var(--bp-tone-danger-fg);
     }
     .bp-paper-article .bp-diff-ctx {
-      color: #55635e;
+      color: var(--paper-ink-soft);
     }
 
     /* Sheet-embed default alignment. The walker (PortableDoc.Render.Walk)
