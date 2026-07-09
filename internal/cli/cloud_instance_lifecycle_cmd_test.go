@@ -121,7 +121,7 @@ func TestNeutralHetznerLifecycleByteIdentical(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("neutral bundle archive exit=%d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	keys := st.manifestKeys()
+	keys := bundleManifestKeys(t, st)
 	if len(keys) != 1 {
 		t.Fatalf("neutral archive should land exactly one bp-bundle-v1 manifest, got %v", keys)
 	}
@@ -547,7 +547,7 @@ func TestNeutralFakeFacetsExecute(t *testing.T) {
 	if b, _ := arch["bundle"].(map[string]any); b == nil || b["format"] != "bp-bundle-v1" {
 		t.Errorf("fake archive receipt missing the bp-bundle-v1 bundle: %v", arch["bundle"])
 	}
-	if keys := st.manifestKeys(); len(keys) != 1 {
+	if keys := bundleManifestKeys(t, st); len(keys) != 1 {
 		t.Errorf("fake archive should write exactly one manifest, got %v", keys)
 	}
 

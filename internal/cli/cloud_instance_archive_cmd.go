@@ -5,7 +5,8 @@ package cli
 // takes a Hetzner snapshot — it collects the instance as a PORTABLE bp-bundle-v1
 // (manifest + db.dump + media.tar.gz + secrets.enc) into object storage, so the
 // same archive can be resurrected on the OTHER provider. Every provider —
-// hetzner, azure, fake — produces the same bundle shape through one writer.
+// hetzner, azure, fake — produces the same bundle shape through ONE writer:
+// cloud.WriteBundle (S14a's canonical library, internal/cli/cloud/bundle.go).
 //
 //	bp cloud instance archive  <fqdn|name> --provider hetzner|azure|fake  [--fast]
 //	bp cloud instance archives [<fqdn>]     [--provider …]
@@ -15,23 +16,14 @@ package cli
 // archive` (the raw escape hatch, untouched). On any other provider `--fast` is
 // an honest error — there is no snapshot substrate to be fast about.
 //
-// ─────────────────────────────────────────────────────────────────────────────
-// S14a SEAM (integration note). The BundleStore interface, the bp-bundle-v1
-// manifest, the object-storage writer and the in-memory FakeBundleStore below
-// are S14a's PINNED contract, reconstructed here so S14b builds and tests fully
-// offline ahead of S14a's merge. When S14a lands, its canonical writer replaces
-// this substrate (same names / same key prefix archives/<team|_>/<fqdn>/<stamp>/
-// so the rewire is mechanical) and this block collapses into it. The S14b
-// surface — the neutral archive verb, the --fast demotion, the archives list and
-// the honesty flip — is what this slice owns; the substrate is a stand-in.
-// ─────────────────────────────────────────────────────────────────────────────
+// This file owns the VERB: target resolution, ssh collection, the archives
+// list. Format, sealing (AES-256-GCM under BARKPARK_BUNDLE_KEK) and the
+// newest-first reader live in the cloud bundle library.
 
 import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -41,156 +33,30 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
-	"github.com/FRIKKern/barkpark/internal/hetzner/objstore"
 )
-
-// bundleFormat is the portable-archive layout tag; resurrect refuses anything
-// else. Distinct from the transfer command's bp-export-v1 (a single tarball) —
-// a bundle is a KEY-PREFIXED SET of objects so a resurrect can pull just the
-// manifest to inspect before hydrating the whole box.
-const bundleFormat = "bp-bundle-v1"
 
 // bundleClock is the archive timestamp source — a var so a test can pin it.
 var bundleClock = func() time.Time { return time.Now().UTC() }
 
-// ── S14a substrate: BundleStore + manifest + writer ──────────────────────────
-
-// bundleStore is the object-storage sink for portable archives (S14a's pinned
-// BundleStore). Put streams one object; List enumerates a prefix; Get pulls one
-// object back (the archives list reads each manifest.json). Reconstructed here —
-// see the S14a SEAM note above.
-type bundleStore interface {
-	Put(ctx context.Context, key string, body io.Reader) error
-	List(ctx context.Context, prefix string) ([]bundleObject, error)
-	Get(ctx context.Context, key string) ([]byte, error)
-}
-
-// bundleObject is one stored object's key + size + last-modified (the ListObjects
-// shape, provider-neutral).
-type bundleObject struct {
-	Key      string
-	Size     int64
-	Modified time.Time
-}
-
-// bundleManifest is the bp-bundle-v1 manifest.json — the self-describing header a
-// resurrect reads first. The three payload fields name the sibling objects under
-// the same key prefix; region/server_type are best-effort spec HINTS for the
-// resurrection target (omitted when unknown).
-type bundleManifest struct {
-	Format     string    `json:"format"` // bundleFormat
-	FQDN       string    `json:"fqdn"`   // the box's DNS identity
-	Provider   string    `json:"provider"`
-	Team       string    `json:"team"` // owning team id, or "_" when standalone
-	Created    time.Time `json:"created"`
-	ArchiveID  string    `json:"archive_id,omitempty"`
-	DB         string    `json:"db"`      // db.dump
-	Media      string    `json:"media"`   // media.tar.gz
-	Secrets    string    `json:"secrets"` // secrets.enc
-	Region     string    `json:"region,omitempty"`
-	ServerType string    `json:"server_type,omitempty"`
-}
-
 // bundlePayload is the collected bytes of one instance: a custom-format pg_dump,
-// a gzipped media tar, and the SEALED identity secrets. The secret set is the
-// corrected one (SECRET_KEY_BASE / BARKPARK_CLOAK_KEY / PREVIEW_JWT_SECRET /
-// BARKPARK_INGEST_TOKEN) — NOT the whole .env the transfer export copied, so a
-// resurrected box keeps its OWN DATABASE_URL / PHX_* and only inherits identity.
+// a gzipped media tar, and the PLAINTEXT identity env lines (KEY=VALUE) as
+// collected on the box. The secret set is the D36 identity set (see
+// cloud.IdentitySecretKeys) — NOT the whole .env the transfer export copied, so
+// a resurrected box keeps its OWN DATABASE_URL / PHX_* and only inherits
+// identity. Sealing happens in cloud.WriteBundle, never in the store.
 type bundlePayload struct {
 	DB      []byte
 	Media   []byte
 	Secrets []byte
 }
 
-// bundleKeyPrefix is the canonical object-storage prefix for one archive:
-// archives/<team|_>/<fqdn>/<stamp>/ (S14a's pinned key layout).
-func bundleKeyPrefix(team, fqdn string, at time.Time) string {
-	if team == "" {
-		team = "_"
-	}
-	return "archives/" + team + "/" + fqdn + "/" + at.Format("20060102-150405") + "/"
-}
-
-// writeBundle streams a payload into the store as a bp-bundle-v1 and returns the
-// manifest + the key prefix it landed under. The manifest is written LAST so a
-// concurrent archives-list never sees a bundle before its payload is complete.
-func writeBundle(ctx context.Context, st bundleStore, kind, fqdn, team, archiveID string, p bundlePayload) (bundleManifest, string, error) {
-	at := bundleClock()
-	prefix := bundleKeyPrefix(team, fqdn, at)
-	man := bundleManifest{
-		Format: bundleFormat, FQDN: fqdn, Provider: kind, Team: teamOrStandalone(team),
-		Created: at, ArchiveID: archiveID,
-		DB: "db.dump", Media: "media.tar.gz", Secrets: "secrets.enc",
-	}
-	for _, part := range []struct {
-		name string
-		body []byte
-	}{
-		{"db.dump", p.DB},
-		{"media.tar.gz", p.Media},
-		{"secrets.enc", p.Secrets},
-	} {
-		if err := st.Put(ctx, prefix+part.name, bytes.NewReader(part.body)); err != nil {
-			return bundleManifest{}, "", fmt.Errorf("write %s: %w", part.name, err)
-		}
-	}
-	manBytes, err := json.Marshal(man)
-	if err != nil {
-		return bundleManifest{}, "", err
-	}
-	if err := st.Put(ctx, prefix+"manifest.json", bytes.NewReader(manBytes)); err != nil {
-		return bundleManifest{}, "", fmt.Errorf("write manifest: %w", err)
-	}
-	return man, prefix, nil
-}
-
-func teamOrStandalone(team string) string {
-	if team == "" {
-		return "_"
-	}
-	return team
-}
-
-// objBundleStore is the production BundleStore over Hetzner Object Storage (the
-// same objstore.Client the storage/backup surfaces use). S14a's real writer will
-// add server-side sealing of secrets.enc; here the payload is stored as collected.
-type objBundleStore struct {
-	c      *objstore.Client
-	bucket string
-}
-
-func (o *objBundleStore) Put(ctx context.Context, key string, body io.Reader) error {
-	return o.c.PutLarge(ctx, o.bucket, key, body)
-}
-
-func (o *objBundleStore) List(ctx context.Context, prefix string) ([]bundleObject, error) {
-	objs, err := o.c.ListObjects(ctx, o.bucket, prefix)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]bundleObject, 0, len(objs))
-	for _, ob := range objs {
-		out = append(out, bundleObject{Key: ob.Key, Size: ob.Size, Modified: ob.LastModified})
-	}
-	return out, nil
-}
-
-func (o *objBundleStore) Get(ctx context.Context, key string) ([]byte, error) {
-	rc, err := o.c.GetObject(ctx, o.bucket, key)
-	if err != nil {
-		return nil, err
-	}
-	defer rc.Close()
-	return io.ReadAll(rc)
-}
-
 // bundleStoreProvider resolves the object-storage sink. A package var so tests
-// swap in a FakeBundleStore. The default reads the store credentials from the
-// environment (HETZNER_S3_ACCESS_KEY / HETZNER_S3_SECRET_KEY + the target bucket
-// BARKPARK_BUNDLE_BUCKET) and, when any is missing, emits the LOUD Console-gate
-// error naming the human step — S3 credentials and the bucket are created once in
-// the Hetzner Console (there is no API for the credential mint).
-var bundleStoreProvider = func(out *writer) (bundleStore, bool) {
+// swap in a cloud.NewFakeBundleStore. The default reads the store credentials
+// from the environment (HETZNER_S3_ACCESS_KEY / HETZNER_S3_SECRET_KEY + the
+// target bucket BARKPARK_BUNDLE_BUCKET) and, when any is missing, emits the LOUD
+// Console-gate error naming the human step — S3 credentials and the bucket are
+// created once in the Hetzner Console (there is no API for the credential mint).
+var bundleStoreProvider = func(out *writer) (cloud.BundleStore, bool) {
 	ak := strings.TrimSpace(os.Getenv("HETZNER_S3_ACCESS_KEY"))
 	sk := strings.TrimSpace(os.Getenv("HETZNER_S3_SECRET_KEY"))
 	bucket := strings.TrimSpace(os.Getenv("BARKPARK_BUNDLE_BUCKET"))
@@ -203,7 +69,7 @@ var bundleStoreProvider = func(out *writer) (bundleStore, bool) {
 		useError(out, "failed", err.Error(), exitGeneric)
 		return nil, false
 	}
-	return &objBundleStore{c: c, bucket: bucket}, true
+	return cloud.NewObjstoreBundleStore(c, bucket), true
 }
 
 // ── remote collection (the ssh/exec seam) ────────────────────────────────────
@@ -214,21 +80,25 @@ var bundleStoreProvider = func(out *writer) (bundleStore, bool) {
 var bundleRemoteStream = instSSHStream
 
 // bundleArchiveScript is the remote collection pipeline: dump the DB, tar the
-// media, seal ONLY the identity secrets (the corrected set — NOT the whole .env),
-// and stream db.dump + media.tar.gz + secrets.enc as one gzipped tar to stdout.
-// PURE (string in, string out) so a test asserts the load-bearing pieces without
-// a box. fqdn is charset-fenced by the caller (instFqdnSafe).
+// media, stage ONLY the identity secrets (the D36 set from
+// cloud.IdentitySecretKeys plus BARKPARK_KEK_PREVIOUS-when-set — NOT the whole
+// .env), and stream db.dump + media.tar.gz + secrets.env as one gzipped tar to
+// stdout. The staged secrets are PLAINTEXT env lines; the CLI seals them via
+// cloud.WriteBundle before they touch object storage. PURE (string in, string
+// out) so a test asserts the load-bearing pieces without a box. fqdn is
+// charset-fenced by the caller (instFqdnSafe).
 func bundleArchiveScript(fqdn string) string {
+	keys := append(append([]string{}, cloud.IdentitySecretKeys...), "BARKPARK_KEK_PREVIOUS")
 	return `set -e
 STAGE=$(mktemp -d /tmp/bp-bundle.XXXXXX)
 trap 'rm -rf "$STAGE"' EXIT
 sudo -u postgres pg_dump --format=custom --no-owner barkpark_prod > "$STAGE/db.dump"
 if [ -d /opt/barkpark/api/uploads ]; then tar -C /opt/barkpark/api -czf "$STAGE/media.tar.gz" uploads; else tar -czf "$STAGE/media.tar.gz" -T /dev/null; fi
-: > "$STAGE/secrets.enc"
-for key in SECRET_KEY_BASE BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_INGEST_TOKEN; do
-  grep "^$key=" /opt/barkpark/.env >> "$STAGE/secrets.enc" 2>/dev/null || true
+: > "$STAGE/secrets.env"
+for key in ` + strings.Join(keys, " ") + `; do
+  grep "^$key=" /opt/barkpark/.env >> "$STAGE/secrets.env" 2>/dev/null || true
 done
-tar -C "$STAGE" -czf - db.dump media.tar.gz secrets.enc`
+tar -C "$STAGE" -czf - db.dump media.tar.gz secrets.env`
 }
 
 // collectRemotePayload runs bundleArchiveScript on host and unpacks its gzipped
@@ -243,8 +113,9 @@ func collectRemotePayload(host, fqdn string) (bundlePayload, error) {
 	return untarBundle(pr)
 }
 
-// untarBundle reads a gzipped tar of db.dump / media.tar.gz / secrets.enc into a
-// payload. Shared by the real collection and the test doubles.
+// untarBundle reads a gzipped tar of db.dump / media.tar.gz / secrets.env into a
+// payload. Shared by the real collection and the test doubles. (The old member
+// name secrets.enc is still accepted — same plaintext staging bytes.)
 func untarBundle(r io.Reader) (bundlePayload, error) {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
@@ -271,7 +142,7 @@ func untarBundle(r io.Reader) (bundlePayload, error) {
 			p.DB, seen["db"] = body, true
 		case "media.tar.gz":
 			p.Media, seen["media"] = body, true
-		case "secrets.enc":
+		case "secrets.env", "secrets.enc":
 			p.Secrets, seen["secrets"] = body, true
 		}
 	}
@@ -279,6 +150,26 @@ func untarBundle(r io.Reader) (bundlePayload, error) {
 		return bundlePayload{}, fmt.Errorf("bundle stream missing db.dump")
 	}
 	return p, nil
+}
+
+// parseEnvSecrets turns collected KEY=VALUE lines into the identity map,
+// filtered through cloud.SelectIdentitySecrets so the bundle carries EXACTLY
+// the D36 set (BARKPARK_KEK always; BARKPARK_KEK_PREVIOUS only when non-empty)
+// — a stray line the script version drift might collect never rides along.
+func parseEnvSecrets(raw []byte) map[string]string {
+	env := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		env[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"`)
+	}
+	return cloud.SelectIdentitySecrets(env)
 }
 
 // ── the neutral archive verb ─────────────────────────────────────────────────
@@ -313,6 +204,11 @@ func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
 	if !ok {
 		return exitAuth
 	}
+	// The bundle seals its identity secrets under BARKPARK_BUNDLE_KEK — fail
+	// loud BEFORE collecting anything (resurrect will need the SAME key).
+	if strings.TrimSpace(os.Getenv("BARKPARK_BUNDLE_KEK")) == "" {
+		return useError(out, "auth", "BARKPARK_BUNDLE_KEK is required — the bundle's identity secrets are sealed under it (AES-256-GCM), and resurrect needs the SAME key. Set it to a strong operator secret and keep it safe.", exitAuth)
+	}
 
 	zone := a.val("zone")
 	if zone == "" {
@@ -324,22 +220,33 @@ func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
 		return code
 	}
 
-	payload, archiveID, code, ok := collectArchivePayload(out, kind, host, fqdn, store)
+	payload, archiveID, code, ok := collectArchivePayload(out, kind, host, fqdn)
 	if !ok {
 		return code
 	}
 
 	team := resolveArchiveTeam(a, fqdn, zone)
+	slug, _ := instLabelOf(fqdn)
 	ctx := cloudInstanceCtx()
-	man, prefix, werr := writeBundle(ctx, store, kind, fqdn, team, archiveID, payload)
+	man, werr := cloud.WriteBundle(ctx, store, cloud.BundleWriteSpec{
+		FQDN:           fqdn,
+		Slug:           slug,
+		TeamID:         team,
+		SourceProvider: kind,
+		CreatedAt:      bundleClock(),
+		DB:             bytes.NewReader(payload.DB),
+		Media:          bytes.NewReader(payload.Media),
+		Secrets:        parseEnvSecrets(payload.Secrets),
+	})
 	if werr != nil {
 		return useError(out, "failed", "archive "+fqdn+": "+werr.Error(), exitGeneric)
 	}
+	prefix := man.Prefix()
 
 	report := map[string]any{
 		"ok": true, "provider": kind, "action": "archive",
 		"bundle": map[string]any{
-			"format": man.Format, "fqdn": fqdn, "team": man.Team,
+			"format": man.Format, "fqdn": fqdn, "team": teamOrStandalone(man.TeamID),
 			"key_prefix": prefix, "manifest": prefix + "manifest.json",
 		},
 	}
@@ -351,6 +258,15 @@ func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
 	}
 	out.outf("✓ archived %s on %s → bp-bundle-v1 %s", fqdn, kind, prefix)
 	return exitOK
+}
+
+// teamOrStandalone renders the manifest's team_id for display: "_" when the
+// bundle is standalone (matching its key prefix segment).
+func teamOrStandalone(team string) string {
+	if team == "" {
+		return "_"
+	}
+	return team
 }
 
 // resolveArchiveTarget resolves the box's SSH host + its fqdn identity through the
@@ -415,7 +331,7 @@ func seamHostFor(p cloud.CloudProvider, target, fqdn string) (string, error) {
 // ssh; every other provider (the fake) yields a synthetic payload — and, when the
 // provider is an Archiver, records a stateful archive id so the receipt keeps its
 // lineage while the bundle proves the full write path.
-func collectArchivePayload(out *writer, kind, host, fqdn string, _ bundleStore) (bundlePayload, string, int, bool) {
+func collectArchivePayload(out *writer, kind, host, fqdn string) (bundlePayload, string, int, bool) {
 	switch kind {
 	case cloud.ProviderHetzner, cloud.ProviderAzure:
 		p, err := collectRemotePayload(host, fqdn)
@@ -466,18 +382,18 @@ func normalizeArchiveFqdn(a *hzArgs, zone string) string {
 
 // resolveArchiveTeam picks the owning team for the key prefix: an explicit --team
 // wins; otherwise the control-plane registry row (when reachable) supplies it;
-// otherwise the archive is standalone ("_").
+// otherwise the archive is standalone ("" — the library keys it under "_").
 func resolveArchiveTeam(a *hzArgs, fqdn, zone string) string {
 	if t := strings.TrimSpace(a.val("team")); t != "" {
 		return t
 	}
 	cp := instCP(a)
 	if cp == nil {
-		return "_"
+		return ""
 	}
 	rows, err := cp.List()
 	if err != nil {
-		return "_"
+		return ""
 	}
 	label, fzone := instLabelOf(fqdn)
 	if fzone == "" {
@@ -486,7 +402,7 @@ func resolveArchiveTeam(a *hzArgs, fqdn, zone string) string {
 	if row := cpFindRow(rows, label, fzone, ""); row != nil && row.TeamID != "" {
 		return row.TeamID
 	}
-	return "_"
+	return ""
 }
 
 // stripFlag removes every occurrence of a bare flag token from a tail — used to
@@ -532,7 +448,7 @@ func runInstanceArchivesList(out *writer, args []string) int {
 	if t := strings.TrimSpace(a.val("team")); t != "" {
 		prefix += t + "/"
 	}
-	objs, lerr := store.List(ctx, prefix)
+	keys, lerr := store.List(ctx, prefix)
 	if lerr != nil {
 		return useError(out, "failed", "list archives: "+lerr.Error(), exitGeneric)
 	}
@@ -545,28 +461,25 @@ func runInstanceArchivesList(out *writer, args []string) int {
 		Bundle   string `json:"bundle"`
 	}
 	var rows []archiveRow
-	for _, ob := range objs {
-		if path.Base(ob.Key) != "manifest.json" {
+	for _, key := range keys {
+		if path.Base(key) != "manifest.json" {
 			continue
 		}
-		raw, gerr := store.Get(ctx, ob.Key)
-		if gerr != nil {
-			continue // a manifest we can't read is skipped, not fatal to the list
-		}
-		var man bundleManifest
-		if json.Unmarshal(raw, &man) != nil || man.Format != bundleFormat {
-			continue
+		bundlePrefix := strings.TrimSuffix(key, "manifest.json")
+		man, merr := cloud.ReadManifest(ctx, store, bundlePrefix)
+		if merr != nil {
+			continue // a manifest we can't read (or a foreign format) is skipped, not fatal to the list
 		}
 		if fqdnFilter != "" && man.FQDN != fqdnFilter {
 			continue
 		}
-		if providerFilter != "" && man.Provider != providerFilter {
+		if providerFilter != "" && man.SourceProvider != providerFilter {
 			continue
 		}
 		rows = append(rows, archiveRow{
-			FQDN: man.FQDN, Provider: man.Provider, Team: man.Team,
-			Created: man.Created.UTC().Format(time.RFC3339),
-			Bundle:  strings.TrimSuffix(ob.Key, "manifest.json"),
+			FQDN: man.FQDN, Provider: man.SourceProvider, Team: teamOrStandalone(man.TeamID),
+			Created: man.CreatedAt.UTC().Format(time.RFC3339),
+			Bundle:  bundlePrefix,
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {

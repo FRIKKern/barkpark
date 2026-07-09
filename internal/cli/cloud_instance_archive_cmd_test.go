@@ -4,7 +4,10 @@ package cli
 // fully OFFLINE: the neutral archive writes a bp-bundle-v1 for fake AND for the
 // azure/hetzner ssh-collected path (the ssh runner is faked), the store
 // credential gate errors loud when unset, --fast is hetzner-only, and the
-// archives list renders the stored manifests. Zero live cloud/S3/ssh calls.
+// archives list renders the stored manifests. The store is S14a's canonical
+// cloud.NewFakeBundleStore; sealing rides cloud.WriteBundle for real (the
+// wrong-key/authentication proofs live in the bundle library's own tests).
+// Zero live cloud/S3/ssh calls.
 
 import (
 	"archive/tar"
@@ -13,9 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
@@ -23,69 +24,48 @@ import (
 
 // ── shared test doubles ──────────────────────────────────────────────────────
 
-// fakeBundleStore is an in-memory BundleStore (S14a's substrate faked) so the
-// full write path is exercised without object storage.
-type fakeBundleStore struct {
-	mu   sync.Mutex
-	objs map[string][]byte
-}
-
-func newFakeBundleStore() *fakeBundleStore { return &fakeBundleStore{objs: map[string][]byte{}} }
-
-func (f *fakeBundleStore) Put(_ context.Context, key string, body io.Reader) error {
-	b, err := io.ReadAll(body)
-	if err != nil {
-		return err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.objs[key] = b
-	return nil
-}
-
-func (f *fakeBundleStore) List(_ context.Context, prefix string) ([]bundleObject, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []bundleObject
-	for k, v := range f.objs {
-		if strings.HasPrefix(k, prefix) {
-			out = append(out, bundleObject{Key: k, Size: int64(len(v))})
-		}
-	}
-	return out, nil
-}
-
-func (f *fakeBundleStore) Get(_ context.Context, key string) ([]byte, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	b, ok := f.objs[key]
-	if !ok {
-		return nil, io.EOF
-	}
-	return b, nil
-}
-
-func (f *fakeBundleStore) manifestKeys() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var keys []string
-	for k := range f.objs {
-		if strings.HasSuffix(k, "/manifest.json") {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// withFakeBundleStore swaps the store provider for an in-memory one for the test.
-func withFakeBundleStore(t *testing.T) *fakeBundleStore {
+// withFakeBundleStore swaps the store provider for the in-memory canonical fake
+// and pins the bundle KEK (WriteBundle refuses to seal without one).
+func withFakeBundleStore(t *testing.T) *cloud.FakeBundleStore {
 	t.Helper()
-	st := newFakeBundleStore()
+	st := cloud.NewFakeBundleStore()
 	old := bundleStoreProvider
-	bundleStoreProvider = func(*writer) (bundleStore, bool) { return st, true }
+	bundleStoreProvider = func(*writer) (cloud.BundleStore, bool) { return st, true }
+	t.Setenv("BARKPARK_BUNDLE_KEK", "test-bundle-kek")
 	t.Cleanup(func() { bundleStoreProvider = old })
 	return st
+}
+
+// bundleManifestKeys lists every stored manifest key, sorted (the store's List
+// is deterministic).
+func bundleManifestKeys(t *testing.T, st *cloud.FakeBundleStore) []string {
+	t.Helper()
+	keys, err := st.List(context.Background(), "archives/")
+	if err != nil {
+		t.Fatalf("list store: %v", err)
+	}
+	var out []string
+	for _, k := range keys {
+		if strings.HasSuffix(k, "/manifest.json") {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// storeObject reads one raw object out of the fake store.
+func storeObject(t *testing.T, st *cloud.FakeBundleStore, key string) []byte {
+	t.Helper()
+	rc, err := st.Get(context.Background(), key)
+	if err != nil {
+		t.Fatalf("get %s: %v", key, err)
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read %s: %v", key, err)
+	}
+	return b
 }
 
 // withFakeRemoteStream swaps the ssh collection pipe for one that emits canned
@@ -101,7 +81,7 @@ func withFakeRemoteStream(t *testing.T, tarGz []byte) {
 	t.Cleanup(func() { bundleRemoteStream = old })
 }
 
-// cannedBundleTar builds a gzipped tar of db.dump / media.tar.gz / secrets.enc,
+// cannedBundleTar builds a gzipped tar of db.dump / media.tar.gz / secrets.env,
 // the exact members bundleArchiveScript streams, so untarBundle round-trips it.
 func cannedBundleTar(t *testing.T) []byte {
 	t.Helper()
@@ -111,7 +91,7 @@ func cannedBundleTar(t *testing.T) []byte {
 	for _, m := range []struct{ name, body string }{
 		{"db.dump", "PGDUMP-BYTES"},
 		{"media.tar.gz", "MEDIA-BYTES"},
-		{"secrets.enc", "SECRET_KEY_BASE=x\n"},
+		{"secrets.env", "SECRET_KEY_BASE=x\nBARKPARK_KEK=kek-material\nBARKPARK_KEK_PREVIOUS=\n"},
 	} {
 		if err := tw.WriteHeader(&tar.Header{Name: m.name, Mode: 0o600, Size: int64(len(m.body))}); err != nil {
 			t.Fatalf("tar header: %v", err)
@@ -133,8 +113,8 @@ func cannedBundleTar(t *testing.T) []byte {
 
 // TestNeutralArchiveAzureBundleSSHPath proves azure now archives via the portable
 // bundle: the box is resolved through the (faked) azure provider, its bytes come
-// over the (faked) ssh runner, and a bp-bundle-v1 lands in the store. No live ARM,
-// S3 or ssh.
+// over the (faked) ssh runner, and a bp-bundle-v1 lands in the store with the
+// identity secrets SEALED (D36: never plaintext at rest). No live ARM, S3 or ssh.
 func TestNeutralArchiveAzureBundleSSHPath(t *testing.T) {
 	st := withFakeBundleStore(t)
 	withFakeRemoteStream(t, cannedBundleTar(t))
@@ -151,7 +131,7 @@ func TestNeutralArchiveAzureBundleSSHPath(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("azure bundle archive exit=%d stderr=%s stdout=%s", code, stderr, stdout)
 	}
-	keys := st.manifestKeys()
+	keys := bundleManifestKeys(t, st)
 	if len(keys) != 1 {
 		t.Fatalf("azure archive should land one bp-bundle-v1 manifest, got %v", keys)
 	}
@@ -159,22 +139,34 @@ func TestNeutralArchiveAzureBundleSSHPath(t *testing.T) {
 		t.Errorf("manifest key missing the fqdn: %s", keys[0])
 	}
 	// The stored manifest is a real bp-bundle-v1 tagged to azure.
-	raw, err := st.Get(context.Background(), keys[0])
+	prefix := strings.TrimSuffix(keys[0], "manifest.json")
+	man, err := cloud.ReadManifest(context.Background(), st, prefix)
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	var man bundleManifest
-	if err := json.Unmarshal(raw, &man); err != nil {
-		t.Fatalf("manifest not JSON: %v: %s", err, raw)
-	}
-	if man.Format != "bp-bundle-v1" || man.Provider != "azure" {
+	if man.Format != "bp-bundle-v1" || man.SourceProvider != "azure" {
 		t.Errorf("manifest not a bp-bundle-v1/azure: %+v", man)
 	}
 	// The collected db.dump is what the ssh runner emitted.
-	dbKey := strings.TrimSuffix(keys[0], "manifest.json") + "db.dump"
-	db, err := st.Get(context.Background(), dbKey)
-	if err != nil || string(db) != "PGDUMP-BYTES" {
-		t.Errorf("db.dump not the collected bytes: %q (err=%v)", db, err)
+	if db := storeObject(t, st, prefix+"db.dump"); string(db) != "PGDUMP-BYTES" {
+		t.Errorf("db.dump not the collected bytes: %q", db)
+	}
+	// secrets are SEALED at rest (no plaintext), and unseal to the D36-filtered
+	// identity set: SECRET_KEY_BASE + BARKPARK_KEK carried; the EMPTY
+	// BARKPARK_KEK_PREVIOUS line is dropped (when-set only).
+	raw := storeObject(t, st, prefix+"secrets.enc")
+	if bytes.Contains(raw, []byte("SECRET_KEY_BASE")) || bytes.Contains(raw, []byte("kek-material")) {
+		t.Errorf("secrets.enc stored PLAINTEXT — the bundle must seal identity secrets: %q", raw)
+	}
+	secrets, err := cloud.OpenSecrets(context.Background(), st, prefix)
+	if err != nil {
+		t.Fatalf("unseal secrets: %v", err)
+	}
+	if secrets["SECRET_KEY_BASE"] != "x" || secrets["BARKPARK_KEK"] != "kek-material" {
+		t.Errorf("unsealed secrets missing identity keys: %v", secrets)
+	}
+	if _, has := secrets["BARKPARK_KEK_PREVIOUS"]; has {
+		t.Errorf("empty BARKPARK_KEK_PREVIOUS must be dropped (when-set only): %v", secrets)
 	}
 }
 
@@ -209,6 +201,28 @@ func TestNeutralArchiveMissingStoreIsLoud(t *testing.T) {
 	}
 }
 
+// TestNeutralArchiveMissingKEKIsLoud proves the seal-key gate: a configured
+// store but no BARKPARK_BUNDLE_KEK fails AUTH naming the env var, before any
+// collection happens.
+func TestNeutralArchiveMissingKEKIsLoud(t *testing.T) {
+	st := cloud.NewFakeBundleStore()
+	old := bundleStoreProvider
+	bundleStoreProvider = func(*writer) (cloud.BundleStore, bool) { return st, true }
+	t.Cleanup(func() { bundleStoreProvider = old })
+	t.Setenv("BARKPARK_BUNDLE_KEK", "")
+
+	_, stderr, code := runInstanceCapture(t, "table", "archive", "--provider", "fake", "web-1")
+	if code != exitAuth {
+		t.Fatalf("missing KEK should exit %d (auth), got %d\n%s", exitAuth, code, stderr)
+	}
+	if !strings.Contains(stderr, "BARKPARK_BUNDLE_KEK") {
+		t.Errorf("KEK-gate error should name the env var:\n%s", stderr)
+	}
+	if keys := bundleManifestKeys(t, st); len(keys) != 0 {
+		t.Errorf("no bundle may be written without the seal key, got %v", keys)
+	}
+}
+
 // ── the archives list ────────────────────────────────────────────────────────
 
 // TestInstanceArchivesList archives two fake boxes and proves the list renders
@@ -221,8 +235,8 @@ func TestInstanceArchivesList(t *testing.T) {
 			t.Fatalf("seed archive %s exit=%d stderr=%s", name, code, stderr)
 		}
 	}
-	if len(st.manifestKeys()) != 2 {
-		t.Fatalf("expected two seeded manifests, got %v", st.manifestKeys())
+	if len(bundleManifestKeys(t, st)) != 2 {
+		t.Fatalf("expected two seeded manifests, got %v", bundleManifestKeys(t, st))
 	}
 
 	stdout, stderr, code := runInstanceCapture(t, "json", "archives")
@@ -280,16 +294,33 @@ func TestInstanceArchivesList(t *testing.T) {
 // ── the collection script ────────────────────────────────────────────────────
 
 // TestBundleArchiveScriptShape pins the corrected secret set: the script collects
-// db.dump / media.tar.gz / secrets.enc and seals ONLY the identity secrets — it
+// db.dump / media.tar.gz / secrets.env and stages ONLY the identity secrets —
+// the D36 set INCLUDING BARKPARK_KEK (+ BARKPARK_KEK_PREVIOUS when set) — it
 // does NOT copy the whole .env the way the transfer export did.
 func TestBundleArchiveScriptShape(t *testing.T) {
 	s := bundleArchiveScript("okey.barkpark.cloud")
-	for _, want := range []string{"pg_dump", "db.dump", "media.tar.gz", "secrets.enc", "SECRET_KEY_BASE", "BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET", "BARKPARK_INGEST_TOKEN"} {
+	for _, want := range []string{"pg_dump", "db.dump", "media.tar.gz", "secrets.env", "SECRET_KEY_BASE", "BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET", "BARKPARK_INGEST_TOKEN", "BARKPARK_KEK", "BARKPARK_KEK_PREVIOUS"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("archive script missing %q:\n%s", want, s)
 		}
 	}
 	if strings.Contains(s, `cp /opt/barkpark/.env`) {
 		t.Errorf("archive script must NOT copy the whole .env (corrected secret set — seal identity keys only):\n%s", s)
+	}
+}
+
+// TestParseEnvSecretsD36 pins the CLI-side filter: collected lines project down
+// to EXACTLY the D36 identity set — foreign keys are dropped, BARKPARK_KEK rides
+// along, and an empty BARKPARK_KEK_PREVIOUS is omitted.
+func TestParseEnvSecretsD36(t *testing.T) {
+	got := parseEnvSecrets([]byte("SECRET_KEY_BASE=a\nDATABASE_URL=postgres://nope\nBARKPARK_KEK=k\nBARKPARK_KEK_PREVIOUS=\n# comment\n"))
+	if got["SECRET_KEY_BASE"] != "a" || got["BARKPARK_KEK"] != "k" {
+		t.Errorf("identity keys must survive: %v", got)
+	}
+	if _, has := got["DATABASE_URL"]; has {
+		t.Errorf("non-identity keys must be dropped (a resurrected box keeps its own): %v", got)
+	}
+	if _, has := got["BARKPARK_KEK_PREVIOUS"]; has {
+		t.Errorf("empty BARKPARK_KEK_PREVIOUS must be omitted: %v", got)
 	}
 }

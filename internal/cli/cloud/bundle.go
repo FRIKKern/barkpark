@@ -275,6 +275,13 @@ func WriteBundle(ctx context.Context, store BundleStore, spec BundleWriteSpec) (
 	return manifest, nil
 }
 
+// Prefix returns the object-store key prefix this manifest's bundle lives
+// under — archives/<team_id|_>/<fqdn>/<utc-stamp>/ — so a caller that just
+// wrote a bundle can report where it landed without re-deriving the layout.
+func (m BundleManifest) Prefix() string {
+	return bundlePrefix(m.TeamID, m.FQDN, m.CreatedAt)
+}
+
 // BundleRef is a discovered, COMPLETE bundle (it has a manifest): its store
 // prefix and the CreatedAt parsed from the stamp segment. It is the handle the
 // reader hands to ReadManifest / OpenObject / OpenSecrets.
