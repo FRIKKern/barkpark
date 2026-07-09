@@ -275,6 +275,69 @@ defmodule Barkpark.PreviewTest do
     end
   end
 
+  describe "description — inline-mark children recurse (D15 garble fix)" do
+    # The canonical stored inline shape (inline.ex compose_inline) wraps a marked
+    # span's text under "children", NOT "content". Before the children clause,
+    # node_text saw no text under a strong/em/code/link node and every marked span
+    # silently vanished — the live 'Barkpahis paper… writes , a compiler' garble.
+    defp text_node(value), do: %{"type" => "text", "value" => value}
+    defp mark(type, children), do: %{"type" => type, "children" => children}
+    defp para(nodes), do: %{"id" => "p", "type" => "paragraph", "content" => nodes}
+
+    defp desc(nodes),
+      do: Preview.project(%{}, [para(nodes)], %{})["description"]
+
+    test "a strong span's text is included, not dropped" do
+      assert desc([text_node("before "), mark("strong", [text_node("bold")]), text_node(" after")]) ==
+               "before bold after"
+    end
+
+    test "an em span's text is included" do
+      assert desc([text_node("say "), mark("em", [text_node("emphasis")]), text_node(" now")]) ==
+               "say emphasis now"
+    end
+
+    test "code carried as children recurses" do
+      assert desc([text_node("call "), mark("code", [text_node("project/3")]), text_node(" here")]) ==
+               "call project/3 here"
+    end
+
+    test "code carried as a value leaf still reads (both shapes exist)" do
+      code_value = %{"type" => "code", "value" => "compose_inline"}
+      assert desc([text_node("run "), code_value, text_node(" once")]) == "run compose_inline once"
+    end
+
+    test "nested strong > em recurses through both marks" do
+      nested = mark("strong", [mark("em", [text_node("deep")])])
+      assert desc([text_node("go "), nested, text_node(" down")]) == "go deep down"
+    end
+
+    test "a theme-system-shaped paragraph (text/strong/text/strong/text) reads clean" do
+      # Reproduces the live garble class: two strong spans between plain text. With
+      # the fix the spans survive and the sentence reads clean; before it, the
+      # dropped spans collapsed adjacent whitespace into the tell-tale double space.
+      nodes = [
+        text_node("Barkpark "),
+        mark("strong", [text_node("theme-system")]),
+        text_node(" lets this paper describe how the compiler "),
+        mark("strong", [text_node("writes CSS")]),
+        text_node(", a compiler for brand tokens across every single surface.")
+      ]
+
+      d = desc(nodes)
+
+      # Both marked spans present — the garble dropped exactly these.
+      assert d =~ "theme-system"
+      assert d =~ "writes CSS"
+      # No collapsed double space where a span used to vanish.
+      refute d =~ "  "
+      # Long lead → word-boundary cut at ~110 with an ellipsis.
+      assert String.ends_with?(d, "…")
+      assert String.length(d) <= 111
+      assert String.starts_with?(d, "Barkpark theme-system lets this paper")
+    end
+  end
+
   describe "extensions — sparse, per-doctype (D9)" do
     test "paper: published_time / authors / tags / section, only when present" do
       content = %{
@@ -299,15 +362,27 @@ defmodule Barkpark.PreviewTest do
       assert ext == %{"authors" => ["Ada"]}
     end
 
-    test "task: status / assignee / done_ratio" do
+    test "task: status / assignee / done_ratio / priority" do
       content = %{
         "lifecycle_status" => "in_progress",
         "assignee" => "worker-1",
-        "done_ratio" => 0.5
+        "done_ratio" => 0.5,
+        "priority" => 1
       }
 
       ext = Preview.project(content, [], %{doc_type: "task"})["extensions"]
-      assert ext == %{"status" => "in_progress", "assignee" => "worker-1", "done_ratio" => 0.5}
+
+      assert ext == %{
+               "status" => "in_progress",
+               "assignee" => "worker-1",
+               "done_ratio" => 0.5,
+               "priority" => 1
+             }
+    end
+
+    test "task: priority 0 (highest) is kept, not compacted away" do
+      ext = Preview.project(%{"priority" => 0}, [], %{doc_type: "task"})["extensions"]
+      assert ext == %{"priority" => 0}
     end
 
     test "sheet: tab_count from tabs/sheets list" do
@@ -320,13 +395,21 @@ defmodule Barkpark.PreviewTest do
              }
     end
 
-    test "ticket: key / state" do
-      ext =
-        Preview.project(%{"key" => "SUP-42", "state" => "open"}, [], %{doc_type: "ticket"})[
-          "extensions"
-        ]
+    test "ticket: key / state read the REAL fields key_name / status (D16)" do
+      # Real ticket docs store the sender under `key_name` and the turn indicator
+      # under `status` (tickets.ex) — the shipped `key`/`state` reads never matched.
+      content = %{"key_name" => "acme-support", "status" => "open"}
+      ext = Preview.project(content, [], %{doc_type: "ticket"})["extensions"]
 
-      assert ext == %{"key" => "SUP-42", "state" => "open"}
+      # Output keys stay key/state per D9, sourced from the real fields.
+      assert ext == %{"key" => "acme-support", "state" => "open"}
+    end
+
+    test "ticket: the legacy key/state fields no longer populate the ext" do
+      # A doc carrying only the old (non-existent-in-prod) field names yields an
+      # empty ext — proof we read key_name/status, not key/state.
+      ext = Preview.project(%{"key" => "X", "state" => "Y"}, [], %{doc_type: "ticket"})["extensions"]
+      assert ext == %{}
     end
 
     test "extensions are SPARSE — absent fields are omitted, not nil" do

@@ -190,6 +190,15 @@ defmodule Barkpark.Preview do
   defp node_text(%{"content" => nodes}) when is_list(nodes),
     do: Enum.map_join(nodes, "", &node_text/1)
 
+  # The canonical stored inline-mark shape (inline.ex `compose_inline`) wraps a
+  # span's text under "children", NOT "content" — strong/em/code/strike/link/
+  # wikilink all do. Without this clause every marked span vanishes, producing
+  # the live 'Barkpahis paper… writes , a compiler' garble (D15). No corpus node
+  # carries both "children" and "value", so this clause precedes the value clause
+  # safely; nested marks recurse.
+  defp node_text(%{"children" => nodes}) when is_list(nodes),
+    do: Enum.map_join(nodes, "", &node_text/1)
+
   defp node_text(%{"value" => v}) when is_binary(v), do: v
   defp node_text(%{"text" => t}) when is_binary(t), do: t
   defp node_text(_), do: ""
@@ -287,7 +296,8 @@ defmodule Barkpark.Preview do
     compact(%{
       "status" => first_string(content, ["lifecycle_status", "status"]),
       "assignee" => first_string(content, ["assignee"]),
-      "done_ratio" => number(content, ["done_ratio"])
+      "done_ratio" => number(content, ["done_ratio"]),
+      "priority" => number(content, ["priority"])
     })
   end
 
@@ -295,10 +305,14 @@ defmodule Barkpark.Preview do
     compact(%{"tab_count" => tab_count(content)})
   end
 
+  # Real ticket docs store the sender key under `key_name` and the turn indicator
+  # under `status` (tickets.ex:137/154) — the shipped `key`/`state` reads never
+  # matched, so this ext was always empty (D16). Read the real fields; the
+  # manifest output keys stay `key`/`state` per D9.
   defp extensions("ticket", content) do
     compact(%{
-      "key" => first_string(content, ["key"]),
-      "state" => first_string(content, ["state"])
+      "key" => first_string(content, ["key_name"]),
+      "state" => first_string(content, ["status"])
     })
   end
 
