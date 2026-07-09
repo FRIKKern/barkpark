@@ -735,6 +735,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
         /* The sidebar's live pulse (wave 5): a busy session breathes — same
            keyframes, stronger floor so the dot stays legible at 6px. */
         .bp-chat-live-dot { animation: bp-skel-pulse 1.2s ease-in-out infinite; opacity: 0.9; }
+        /* Chat bubbles borrow the paper TYPOGRAPHY from .bp-paper-surface —
+           NOT the page. The reader class also carries page-scale layout:
+           min-height:100% (inside the transcript this stretched the streaming
+           block viewport-tall, shoving the forming-component skeleton to the
+           bottom of the screen), a 720px centered measure, and 56px page
+           padding. Neutralize the page, keep the type. */
+        .bp-paper-surface.bp-chat-md {
+          min-height: 0;
+          max-width: none;
+          margin: 0;
+          padding: 2px 0;
+          background: transparent;
+        }
         /* Primary (evergreen) fill, NOT --border-muted: the dark theme's border
            tone is an 11%-lightness gray on a dark bg — the shapes rendered
            invisible. Primary reads in both schemes; the pulse keeps it a ghost. */

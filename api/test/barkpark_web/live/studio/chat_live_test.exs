@@ -481,6 +481,16 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-skel="diagram")
     end
 
+    test "chat bubbles neutralize the paper PAGE rules (skeleton stays inline)", %{view: view} do
+      html = render(view)
+      # regression: .bp-paper-surface is the reader PAGE class — its
+      # min-height:100% stretched the streaming block viewport-tall and pushed
+      # the skeleton to the bottom of the screen. The chat must pin the
+      # neutralizer with higher specificity.
+      assert html =~ ".bp-paper-surface.bp-chat-md"
+      assert html =~ "min-height: 0;"
+    end
+
     test "skeleton shapes use the primary fill, never the invisible border tone", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("```mermaid\ngraph")})
       html = render(view)
