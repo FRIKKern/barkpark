@@ -112,7 +112,14 @@ defmodule Barkpark.Plugins.Github.Health do
       # distinguishes a genuinely healthy zero-snapshot from the all-zeros a dead
       # DB would otherwise silently produce (every section falls back to zeros).
       # The console/`bp github status` reads it to tell "quiet" from "blind".
-      db_ok: safe(fn -> Repo.query!("SELECT 1"); true end, false),
+      db_ok:
+        safe(
+          fn ->
+            Repo.query!("SELECT 1")
+            true
+          end,
+          false
+        ),
       repo: repo,
       conflicts: conflicts_snapshot(repo),
       datasets: datasets_snapshot(),

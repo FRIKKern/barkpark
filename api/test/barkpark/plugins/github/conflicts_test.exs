@@ -103,14 +103,18 @@ defmodule Barkpark.Plugins.Github.ConflictsTest do
       # + the ledger-owned GitHub fields that diverged (the MirrorJob update path).
       assert {:ok, first} =
                Conflicts.record(
-                 base(%{detail: %{"observed_fp" => 7, "github_fields" => %{"title" => "hand-edited"}}})
+                 base(%{
+                   detail: %{"observed_fp" => 7, "github_fields" => %{"title" => "hand-edited"}}
+                 })
                )
 
       # A LATER touch on the SAME {repo,issue,kind} from a DIFFERENT source — e.g.
       # a Projects-v2 GraphQL projection error folded into the frozen
       # out_of_band_edit kind — must not clobber the human-drift detail.
       assert {:ok, second} =
-               Conflicts.record(base(%{detail: %{"source" => "graphql", "graphql_error" => "RATE_LIMITED"}}))
+               Conflicts.record(
+                 base(%{detail: %{"source" => "graphql", "graphql_error" => "RATE_LIMITED"}})
+               )
 
       # Same open row, and BOTH sources survive on it.
       assert first.id == second.id
