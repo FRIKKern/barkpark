@@ -114,7 +114,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   def walk(%{"kind" => "PdInlineCode"} = n, _width, pal) do
-    ~s(<code style="background:#{pal.code_bg};padding:2px 6px;font-family:#{@font_mono};font-size:0.95em">) <>
+    ~s(<code style="background:#{pal.code_bg};padding:1px 5px;border-radius:4px;font-family:#{@font_mono};font-size:0.88em">) <>
       escape_html(Map.get(n, "value", "")) <> "</code>"
   end
 
@@ -386,7 +386,49 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     end
   end
 
-  defp apply_text_role(out, inner, _n, _pal), do: {out, inner, nil}
+  # Stylesheet-less palettes (email / standalone export): the role typography
+  # rides INLINE (mail clients strip stylesheets — Outlook is the contract).
+  # Same roles the article classes express, tuned to the email measure.
+  defp apply_text_role(out, inner, n, pal) do
+    case Map.get(n, "_role") do
+      "eyebrow" ->
+        {out ++
+           [
+             "font-size:12px",
+             "letter-spacing:0.14em",
+             "text-transform:uppercase",
+             "color:#{pal.muted}",
+             "font-weight:600",
+             "margin:0 0 6px"
+           ], inner, nil}
+
+      "byline" ->
+        {out ++
+           [
+             "font-size:13px",
+             "color:#{pal.muted}",
+             "margin:0 0 20px",
+             "padding-bottom:10px",
+             "border-bottom:1px solid #{pal.rule}"
+           ], inner, nil}
+
+      "ingress" ->
+        {out ++ ["font-size:18px", "line-height:1.55", "margin:0 0 10px"], inner, nil}
+
+      "pullquote" ->
+        {out ++
+           [
+             "font-size:19px",
+             "color:#{pal.text}",
+             "border-left:3px solid #{pal.accent}",
+             "padding:2px 0 2px 16px",
+             "margin:22px 0"
+           ], inner, nil}
+
+      _ ->
+        {out, inner, nil}
+    end
+  end
 
   # Heading declarations by clamped level — the NON-ARTICLE fallback only
   # (article headings are bare `<h#>` styled by `.bp-paper-surface`; see the
@@ -397,8 +439,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
       "letter-spacing:-0.02em",
-      "line-height:1.1",
-      "margin:0",
+      "line-height:1.15",
+      "margin:0 0 12px",
       "font-weight:600",
       "font-size:32px"
     ]
@@ -408,8 +450,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "line-height:1.2",
-      "margin:0",
+      "line-height:1.25",
+      "margin:30px 0 10px",
       "font-weight:600",
       "font-size:24px"
     ]
@@ -419,8 +461,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
-      "line-height:1.25",
-      "margin:0",
+      "line-height:1.3",
+      "margin:24px 0 8px",
       "font-weight:600",
       "font-size:20px"
     ]
@@ -839,7 +881,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp hr(n, pal) do
     t = Map.get(n, "thickness") || 1
 
-    ~s(<hr style="border:none;border-top:#{escape_attr(to_string(t))}px solid #{pal.rule};margin:16px 0">)
+    ~s(<hr style="border:none;border-top:#{escape_attr(to_string(t))}px solid #{pal.rule};margin:30px 0 26px">)
   end
 
   defp image(n) do
@@ -910,6 +952,27 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   end
 
   defp table(n, width, pal) do
+    # Email table: horizontal rules only (a full 1px grid reads as a 2003
+    # default); an opt-in header band mirrors the article thead. All inline —
+    # mail clients strip stylesheets.
+    head = Map.get(n, "head", []) |> List.wrap()
+
+    thead =
+      if head == [] do
+        ""
+      else
+        cells =
+          head
+          |> Enum.map(fn cell ->
+            inner = render_children(cell, width, pal)
+
+            ~s(<th align="left" style="border-bottom:2px solid #{pal.text};padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#{pal.muted};text-transform:uppercase;font-weight:600">#{inner}</th>)
+          end)
+          |> Enum.join("")
+
+        "<thead><tr>#{cells}</tr></thead>"
+      end
+
     rows =
       Map.get(n, "rows", [])
       |> Enum.map(fn row ->
@@ -918,7 +981,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           |> Enum.map(fn cell ->
             inner = render_children(cell, width, pal)
 
-            ~s(<td style="border:1px solid #{pal.rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
+            ~s(<td style="border-bottom:1px solid #{pal.rule};padding:10px 12px;vertical-align:top">#{inner}</td>)
           end)
           |> Enum.join("")
 
@@ -926,7 +989,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{rows}</table>)
+    ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0">#{thead}<tbody>#{rows}</tbody></table>)
   end
 
   # PdSheet — dense spreadsheet value grid; the same node shape the TUI's
@@ -1307,7 +1370,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     if Map.get(n, "collapsible") == true do
       collapsible_callout(n, tone, inner)
     else
-      ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{callout_title_html(n)}#{inner}</div>)
+      title =
+        case Map.get(n, "title") do
+          t when t in [nil, ""] ->
+            ""
+
+          t ->
+            ~s(<div style="color:#{tone.fg};font-weight:600;margin:0 0 6px">#{escape_html(t)}</div>)
+        end
+
+      ~s(<div style="border-left:3px solid #{tone.fg};background:#{tone.bg};padding:14px 18px;border-radius:0 8px 8px 0;color:#{pal.text};margin:20px 0">#{title}#{inner}</div>)
     end
   end
 

@@ -8,7 +8,12 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
   describe "compose_block/1 (email/default style)" do
     test "heading emits a semantic PdHeading in every style (email included)" do
       b = %{"type" => "heading", "level" => 1, "text" => "Hello"}
-      assert Compose.compose_block(b) == %{"kind" => "PdHeading", "level" => 1, "children" => ["Hello"]}
+
+      assert Compose.compose_block(b) == %{
+               "kind" => "PdHeading",
+               "level" => 1,
+               "children" => ["Hello"]
+             }
     end
 
     test "heading level defaults to 2 for unknown level" do
@@ -309,7 +314,11 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     # the degrade placeholder.
     test "render_blocks: a poisoned unknown-type sibling degrades, healthy blocks still render" do
       blocks = [
-        %{"id" => "p-1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]},
+        %{
+          "id" => "p-1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "alive"}]
+        },
         %{"id" => "x-1", "type" => "future-widget", "text" => "boom"}
       ]
 
@@ -348,7 +357,7 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
   describe "compose_block/2 fail-soft coercion on author-controlled leaf fields" do
     test "eyebrow text as a map degrades to empty children (no 500)" do
       result = Compose.compose_block(%{"type" => "eyebrow", "text" => %{}}, :email)
-      assert result["kind"] == "PdText"
+      assert result["kind"] == "PdParagraph"
       assert result["children"] == [""]
     end
 

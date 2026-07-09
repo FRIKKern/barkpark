@@ -104,8 +104,8 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
             "background:#fef3c7",
             "color:#dc2626",
             # callouts (tones + collapsible)
-            "border-left:4px solid #1e6b52",
-            "border-left:4px solid #a63a2e",
+            "border-left:3px solid #1e6b52",
+            "border-left:3px solid #a63a2e",
             "<details",
             "<summary",
             # box geometry

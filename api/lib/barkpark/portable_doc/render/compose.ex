@@ -105,11 +105,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # class="bp-role-eyebrow">` inherits the SAME block rhythm the reader does —
     # otherwise the edit `<p>` picks up the generic `.bp-paper-editor-body p`
     # 12pt margin the reader's inline `<span>` never had (View↔Edit drift).
-    # Email/default keeps the byte-stable `<span>` form.
-    kind = if style == :article, do: "PdParagraph", else: "PdText"
+    # EVERY style emits a real `<p>` since the email-polish wave: the old
+    # email `<span>` form fused the masthead into one line (eyebrow + byline +
+    # ingress ran together with zero block separation in mail clients).
+    _ = style
 
     %{
-      "kind" => kind,
+      "kind" => "PdParagraph",
       "_role" => "eyebrow",
       "children" => [stringish(Map.get(b, "text", ""))]
     }
@@ -127,19 +129,18 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         _ -> stringish(Map.get(b, "text", ""))
       end
 
-    kind = if style == :article, do: "PdParagraph", else: "PdText"
-    %{"kind" => kind, "_role" => "byline", "children" => [text]}
+    _ = style
+    %{"kind" => "PdParagraph", "_role" => "byline", "children" => [text]}
   end
 
   def compose_block(%{"type" => "ingress"} = b, style) do
     # Lead paragraph — heavier weight + larger size in article mode.
-    # Article mode: real `<p>` carrying the ingress role's inline style so
-    # the editor's block-level paragraph rules also apply (margin rhythm,
-    # hyphens). Email/default mode keeps the byte-stable `<span>` form.
-    kind = if style == :article, do: "PdParagraph", else: "PdText"
+    # EVERY style emits a real `<p>` (see the eyebrow clause — the email
+    # `<span>` form fused the masthead into one line).
+    _ = style
 
     %{
-      "kind" => kind,
+      "kind" => "PdParagraph",
       "_role" => "ingress",
       "children" => compose_inline_children(Map.get(b, "content", []))
     }
@@ -159,8 +160,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # to a plain italic span (no border / sizing cues) via the same `_role` hook
   # the other typographic roles use, so it stays a single styled `<span>`.
   def compose_block(%{"type" => "pullquote"} = b, _style) do
+    # A real `<p>` in every style — inline spans can't carry the pullquote's
+    # vertical margins (email-prose-polish).
     %{
-      "kind" => "PdText",
+      "kind" => "PdParagraph",
       "_role" => "pullquote",
       "italic" => true,
       "children" => compose_inline_children(Map.get(b, "content", []))
@@ -480,7 +483,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     pd = %{"kind" => "PdTable", "rows" => rows}
 
-    case Map.get(b, "head") do
+    case Map.get(b, "head") || Map.get(b, "header") do
       nil -> pd
       [] -> pd
       head_row -> Map.put(pd, "head", compose_row.(head_row))
