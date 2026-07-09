@@ -69,14 +69,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
          messages: [],
          next_id: 0,
          streaming: nil,
-         composer_rev: 0,
+         # Server-bound composer (charter D24): the input renders `value=` from
+         # this draft, so a send can clear it and a failed dispatch can restore
+         # the words verbatim — an uncontrolled DOM input is invisible to render/1.
+         composer_draft: "",
+         # The id of the optimistic user echo awaiting a dispatch verdict. A hard
+         # failure withdraws exactly this row; a dispatched frame clears the marker.
+         pending_echo_id: nil,
          interrupt_requested: false,
-         mode_switch_from: nil,
+         pending_mode: nil,
          detached: false,
          last_result: nil,
          ring: blank_ring(),
          title_source: "default",
          title_kicked: false
+       )
+       |> allow_upload(:attachments,
+         # Charter D25: paste/drop images ride the SAME user turn as base64
+         # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
+         # payload stays under the Anthropic ~5MB-per-image cap. The composer
+         # phx-hook feeds files into this upload; consume happens on send.
+         accept: ~w(.png .jpg .jpeg .gif .webp),
+         max_entries: 4,
+         max_file_size: 3_000_000
        )}
     else
       {:ok,
@@ -117,41 +132,60 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, reset_to_new_chat(socket)}
   end
 
+  # Keep the server-bound composer draft in step with what the user types
+  # (charter D24). Without this, `value={@composer_draft}` would fight the DOM:
+  # a restore-on-failure could never be SEEN and a clear-on-send could never
+  # stick. Enter still submits via the form's `phx-submit="send"`.
+  def handle_event("composer-change", %{"message" => text}, socket) do
+    {:noreply, assign(socket, composer_draft: text)}
+  end
+
+  # Two-phase send (charter D24). PHASE 1 is instant and pure UI: echo the user
+  # bubble, clear the composer, flip to `:thinking`, and return — the first diff
+  # carries the words before any spawn/write/persist runs. The slow, failure-prone
+  # work (ensure_session → wire write → persist) is handed to `{:dispatch_send}`
+  # so the tab never blocks on a subprocess. A hard failure there withdraws the
+  # echo and hands the words back verbatim; nothing is ever silently lost.
   @impl true
   def handle_event("send", %{"message" => text}, socket) do
     text = String.trim(text)
+    has_attachments? = socket.assigns.uploads.attachments.entries != []
 
     # No send queue (t3 item 10): while a turn runs the only control is Stop —
     # a stray Enter-submit must not fire a second overlapping turn. Enter is a
-    # server-side no-op here; the composer shows Stop, not Send.
+    # server-side no-op here; the composer shows Stop, not Send. An image-only
+    # turn (text blank but attachments present) is a valid send (charter D25).
     cond do
-      text == "" ->
+      text == "" and not has_attachments? ->
         {:noreply, socket}
 
       turn_active?(socket.assigns.status) ->
         {:noreply, socket}
 
       true ->
-        socket = ensure_session(socket)
+        # PHASE 1 (charter D24): echo instantly, clear the composer, and defer
+        # every failure-prone step to {:dispatch_send}. An image-only turn gets
+        # its bubble in phase 2 when the staged files are consumed (D25) — the
+        # attachment strip keeps showing the thumbnails until that next diff,
+        # so nothing visually vanishes in between.
+        echo_id = socket.assigns.next_id
+        send(self(), {:dispatch_send, text})
 
-        case socket.assigns.session do
-          nil ->
-            {:noreply, socket}
+        socket =
+          if text == "" do
+            assign(socket, pending_echo_id: nil)
+          else
+            socket |> append_message(:user, text) |> assign(pending_echo_id: echo_id)
+          end
 
-          session ->
-            ClaudeChat.send_message(session, text)
-
-            {:noreply,
-             socket
-             |> persist_user_message(text)
-             |> append_message(:user, text)
-             |> assign(
-               status: :thinking,
-               interrupt_requested: false,
-               composer_rev: socket.assigns.composer_rev + 1
-             )}
-        end
+        {:noreply,
+         assign(socket, status: :thinking, interrupt_requested: false, composer_draft: "")}
     end
+  end
+
+  # Cancel a staged attachment before send (the × on its chip).
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :attachments, ref)}
   end
 
   # Stop a running turn. The interrupt is a control-request frame on stdin
@@ -189,9 +223,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # control frame (key `mode`, charter D12) — the model's context is preserved,
   # no respawn. With no live subprocess (the common case now that spawn is lazy)
   # it is a silent selector update; the next spawn carries the mode via
-  # build_args. Either way we PERSIST the switch (charter D17) so a reopened
-  # session shows the mode you chose and the next lazy `--resume` spawn carries
-  # it — the store row no longer keeps its stale creation mode.
+  # build_args.
+  #
+  # Persistence is ACK-driven for a live session (charter D23): the store's mode
+  # is the last value the CLI actually confirmed, never the optimistic guess.
+  # We record the minted request_id in `pending_mode` (with the mode to revert to
+  # if it fails) so ONLY the ack matching the LATEST outstanding switch may commit
+  # or revert — a stale ack from a superseded rapid switch is ignored, never a
+  # mis-revert. With no live session there is no ack to wait on, so we persist
+  # immediately and the next lazy `--resume` spawn carries the mode.
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     mode = ClaudeChat.normalize_mode(mode)
 
@@ -200,21 +240,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       session = socket.assigns.session ->
-        # Optimistic: move the selector + persist now, but remember the prior
-        # mode so the echoed control_response can revert it if the switch didn't
-        # take (the CLI acks subtype:success even for a silent no-op — D12).
-        prev = socket.assigns.mode
-        ClaudeChat.set_permission_mode(session, mode)
-        persist_mode(socket, mode)
+        # Optimistic: move the selector now for instant feedback, but DON'T
+        # persist yet — the persisted mode is the last ACKED value (D23). Remember
+        # the request_id (latest-outstanding correlation) and the revert target:
+        # the last known-good mode, which a chain of unconfirmed rapid switches
+        # must preserve rather than fold into an intermediate optimistic value.
+        {:ok, request_id} = ClaudeChat.set_permission_mode(session, mode)
+        revert_to = revert_target(socket)
 
         {:noreply,
          socket
-         |> assign(mode: mode, mode_switch_from: prev)
+         |> assign(mode: mode, pending_mode: %{req: request_id, revert_to: revert_to})
          |> append_message(:system, "Permission mode → #{mode_label(mode)}.")}
 
       true ->
         persist_mode(socket, mode)
-        {:noreply, assign(socket, mode: mode)}
+        {:noreply, assign(socket, mode: mode, pending_mode: nil)}
     end
   end
 
@@ -307,7 +348,79 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # admin LVs' tolerant catch-all.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
+  # PHASE 2 of send (charter D24): the deferred, failure-prone work. Bring the
+  # session up (creating the store row + resuming the CLI as needed), write the
+  # user turn, and — only once the frame is DISPATCHED — persist it. Every hard
+  # failure withdraws the optimistic echo and restores the words verbatim so a
+  # send never disappears into a lie:
+  #
+  #   * create/spawn error → `ensure_session` already posted an honest system
+  #     line and went `:offline`; we just undo the echo + hand the words back.
+  #   * port-write error   → the model never got the turn; system line + go
+  #     offline (the next send lazy-resumes) + hand the words back.
+  #   * DISPATCHED + persist-exhaustion → the model DID get the turn, so the echo
+  #     STAYS and the composer stays CLEARED (restoring would double-send);
+  #     `persist_user_message` warns that this row may not survive a reopen.
   @impl true
+  def handle_info({:dispatch_send, text}, socket) do
+    socket = ensure_session(socket)
+
+    case socket.assigns.session do
+      nil ->
+        # Nothing consumed yet — staged attachments survive in the strip, the
+        # words go back to the composer. A send never disappears into a lie.
+        {:noreply, restore_failed_send(socket, text)}
+
+      session ->
+        # Consume the pasted/dropped images only once a session exists (D25):
+        # store each under the chat-owned dir and build the content blocks.
+        {attachments, socket} = consume_attachments(socket)
+
+        case build_user_content(text, attachments) do
+          [] ->
+            # Every image failed to store AND there was no text — never write
+            # an empty user frame; say so honestly and keep the composer live.
+            {:noreply,
+             socket
+             |> append_message(:system, "⚠ Nothing to send — the attachment could not be read.")
+             |> restore_failed_send(text)
+             |> assign(status: :ready)}
+
+          blocks ->
+            case ClaudeChat.send_message(session, blocks) do
+              :ok ->
+                # With images, upgrade the phase-1 text echo to the full bubble
+                # (text + thumbnails) now that the stored data-URIs exist.
+                socket =
+                  if attachments != [] do
+                    socket
+                    |> withdraw_pending_echo()
+                    |> append_user_message(text, attachments)
+                  else
+                    socket
+                  end
+
+                {:noreply,
+                 socket
+                 |> persist_user_message(text, attachments)
+                 |> assign(status: :thinking, pending_echo_id: nil)}
+
+              {:error, reason} ->
+                note =
+                  if attachments != [],
+                    do: " Your attached images were not sent — re-attach them.",
+                    else: ""
+
+                {:noreply,
+                 socket
+                 |> append_message(:system, send_error_text(reason) <> note)
+                 |> assign(session: nil, status: :offline)
+                 |> restore_failed_send(text)}
+            end
+        end
+    end
+  end
+
   def handle_info({:claude_chat_event, %{"type" => "system", "subtype" => "init"} = ev}, socket) do
     init = %{
       model: ev["model"],
@@ -407,34 +520,53 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, refresh_sessions(socket)}
   end
 
-  # The CLI acked a permission-mode switch (charter D17). NEVER trust the bare
-  # subtype:success — assert the ECHOED mode (D12 vacuous-green: the alt wire key
-  # no-ops silently, returning an empty echo). A confirmed echo clears the revert
-  # marker; an empty/mismatched echo reverts the optimistic selector + persisted
-  # mode and says so honestly, so the UI never claims a switch that didn't land.
-  def handle_info({:claude_chat_control, :set_mode, response}, socket) do
-    echoed = if is_map(response), do: response["mode"], else: nil
+  # The CLI acked a permission-mode switch (charter D17/D23). Two guards, in
+  # order:
+  #
+  #   1. CORRELATE by request_id — only the ack matching the LATEST outstanding
+  #      switch may act. A stale ack (a rapid re-switch superseded this one) is
+  #      dropped: acting on it would mis-revert a switch the user has already
+  #      moved past. This is the fix for the wave-2 seam (acks were value-matched).
+  #   2. Never trust the bare subtype:success — assert the ECHOED mode (D12
+  #      vacuous-green: the alt wire key no-ops silently, returning an empty echo).
+  #
+  # A confirmed echo COMMITS: it persists the acked mode (the store's mode is the
+  # last confirmed value, D23) and clears the pending marker. An empty/mismatched
+  # echo REVERTS the optimistic selector to the pending switch's known-good mode,
+  # persists that, and says so honestly — the UI never claims a switch that didn't
+  # land.
+  def handle_info({:claude_chat_control, :set_mode, request_id, response}, socket) do
+    case socket.assigns[:pending_mode] do
+      %{req: ^request_id} = pending ->
+        echoed = if is_map(response), do: response["mode"], else: nil
 
-    if echoed == socket.assigns.mode do
-      {:noreply, assign(socket, mode_switch_from: nil)}
-    else
-      revert_to = socket.assigns[:mode_switch_from] || socket.assigns.mode
-      persist_mode(socket, revert_to)
+        if echoed == socket.assigns.mode do
+          persist_mode(socket, echoed)
+          {:noreply, assign(socket, pending_mode: nil)}
+        else
+          revert_to = pending.revert_to
+          persist_mode(socket, revert_to)
 
-      {:noreply,
-       socket
-       |> assign(mode: revert_to, mode_switch_from: nil)
-       |> append_message(
-         :system,
-         "Couldn't switch permission mode — still #{mode_label(revert_to)}."
-       )}
+          {:noreply,
+           socket
+           |> assign(mode: revert_to, pending_mode: nil)
+           |> append_message(
+             :system,
+             "Couldn't switch permission mode — still #{mode_label(revert_to)}."
+           )}
+        end
+
+      _ ->
+        # Stale ack (superseded switch) or no pending switch at all — ignore it.
+        {:noreply, socket}
     end
   end
 
   # Interrupt / set_model acks need no UI action: the interrupt's real outcome
   # arrives as the terminal `result` frame, and set_model has no surface. Swallow
   # them so they never fall to the noisy catch-all.
-  def handle_info({:claude_chat_control, _kind, _response}, socket), do: {:noreply, socket}
+  def handle_info({:claude_chat_control, _kind, _request_id, _response}, socket),
+    do: {:noreply, socket}
 
   def handle_info({:claude_chat_permission, ask}, socket) do
     id = socket.assigns.next_id
@@ -463,6 +595,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
        next_id: id + 1
      )
      |> refresh_sessions()}
+  end
+
+  # The CLI compacted the conversation to reclaim context window (charter D27).
+  # Today this system subtype is eaten by the catch-all below — but compaction is
+  # exactly the moment the headroom ring resets, so an unexplained shrink would
+  # read as a bug. Surface an honest, EPHEMERAL system line naming the trigger and
+  # the pre-compaction size. Deliberately NOT persisted (D7 store is display
+  # history; a compaction is a live event, and the next result's snapshot already
+  # tells the durable story via the ring).
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "compact_boundary"} = ev},
+        socket
+      ) do
+    meta = ev["compact_metadata"] || %{}
+    pre = meta["pre_tokens"]
+
+    line =
+      case meta["trigger"] do
+        "manual" -> "Conversation compacted manually#{compact_size(pre)}."
+        _ -> "Conversation compacted automatically#{compact_size(pre)}."
+      end
+
+    {:noreply, append_message(socket, :system, line)}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
@@ -829,8 +984,32 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <div :for={message <- @messages} data-role={message.role}>
             <%= case message.role do %>
               <% :user -> %>
-                <div style="display: flex; justify-content: flex-end;">
-                  <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-raised, rgba(127,127,127,0.08)); border: 1px solid var(--border-muted); border-radius: 10px; padding: 8px 12px; max-width: 85%;">
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                  <%!-- Image attachments (charter D25) render inline as data-URIs
+                        (live: from the just-sent bytes; replay: read server-side
+                        from the chat-owned store — never an HTTP route). A file
+                        missing on disk degrades to an honest placeholder. --%>
+                  <div
+                    :if={user_images(message) != []}
+                    style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 85%;"
+                  >
+                    <%= for img <- user_images(message) do %>
+                      <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
+                        attachment missing
+                      </div>
+                      <img
+                        :if={img[:data_uri]}
+                        src={img.data_uri}
+                        alt="attachment"
+                        style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border-muted);"
+                      />
+                    <% end %>
+                  </div>
+                  <div
+                    :if={message.text not in [nil, ""]}
+                    class="text-sm"
+                    style="white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-raised, rgba(127,127,127,0.08)); border: 1px solid var(--border-muted); border-radius: 10px; padding: 8px 12px; max-width: 85%;"
+                  >
                     <%= message.text %>
                   </div>
                 </div>
@@ -950,34 +1129,96 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </div>
         <form
           :if={not @detached}
+          id="chat-composer-form"
+          phx-hook="ChatComposer"
           phx-submit="send"
-          style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;"
+          phx-change="composer-change"
+          style="display: flex; flex-direction: column; gap: 8px; max-width: 860px; margin: 0 auto;"
         >
-          <input
-            id={"chat-composer-#{@composer_rev}"}
-            type="text"
-            name="message"
-            autocomplete="off"
-            placeholder={composer_placeholder(@status)}
-            style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
-          />
-          <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
-                to cancel, never to queue a second turn (t3: no send queue). --%>
-          <button
-            :if={turn_active?(@status)}
-            type="button"
-            class="btn"
-            phx-click="stop_turn"
-            disabled={@status == :interrupting}
-            aria-label="Stop the current turn"
-            style="display: inline-flex; align-items: center; gap: 6px;"
+          <%!-- The upload the paste/drop hook feeds (charter D25). Kept in the
+                DOM (allow_upload needs it) but visually hidden — files are added
+                programmatically via `this.upload("attachments", …)`. The form's
+                phx-change (composer-change, which also owns the server-bound
+                draft per D24) is what lets allow_upload validate staged entries. --%>
+          <.live_file_input upload={@uploads.attachments} style="display: none;" />
+
+          <%!-- Attachment strip: a thumbnail chip per staged image with a remove
+                button; per-entry + form-level upload errors render honestly. --%>
+          <div
+            :if={@uploads.attachments.entries != []}
+            style="display: flex; flex-wrap: wrap; gap: 8px;"
           >
-            <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
-            <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
-          </button>
-          <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
-            <.icon name="send" size={14} />
-          </button>
+            <div
+              :for={entry <- @uploads.attachments.entries}
+              style="display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-muted); border-radius: 8px; padding: 4px 6px; background: var(--bg);"
+            >
+              <.live_img_preview
+                entry={entry}
+                style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px;"
+              />
+              <span
+                class="text-xs text-dim"
+                style="max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+              >
+                <%= entry.client_name %>
+              </span>
+              <button
+                type="button"
+                class="btn"
+                phx-click="cancel_upload"
+                phx-value-ref={entry.ref}
+                aria-label="Remove attachment"
+                style="padding: 0 6px; line-height: 1;"
+              >
+                ×
+              </button>
+              <span
+                :for={err <- upload_errors(@uploads.attachments, entry)}
+                class="text-xs"
+                role="alert"
+                style="color: var(--danger);"
+              >
+                <%= upload_error_label(err) %>
+              </span>
+            </div>
+          </div>
+          <p
+            :for={err <- upload_errors(@uploads.attachments)}
+            class="text-xs"
+            role="alert"
+            style="color: var(--danger); margin: 0;"
+          >
+            <%= upload_error_label(err) %>
+          </p>
+
+          <div style="display: flex; gap: 8px;">
+            <input
+              id="chat-composer"
+              type="text"
+              name="message"
+              value={@composer_draft}
+              autocomplete="off"
+              placeholder={composer_placeholder(@status)}
+              style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
+            />
+            <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
+                  to cancel, never to queue a second turn (t3: no send queue). --%>
+            <button
+              :if={turn_active?(@status)}
+              type="button"
+              class="btn"
+              phx-click="stop_turn"
+              disabled={@status == :interrupting}
+              aria-label="Stop the current turn"
+              style="display: inline-flex; align-items: center; gap: 6px;"
+            >
+              <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
+              <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
+            </button>
+            <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
+              <.icon name="send" size={14} />
+            </button>
+          </div>
         </form>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0;">
           last turn: <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
@@ -1083,27 +1324,45 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp ensure_session(%{assigns: %{session: session}} = socket) when is_pid(session), do: socket
 
   defp ensure_session(socket) do
-    {store_id, resume?, socket} =
-      case socket.assigns.store_session_id do
-        nil ->
-          id = Ecto.UUID.generate()
+    case socket.assigns.store_session_id do
+      nil ->
+        id = Ecto.UUID.generate()
 
-          {:ok, _} =
-            StudioChat.create_session(%{
-              id: id,
-              cwd: ClaudeChat.cwd(),
-              mode: socket.assigns.mode
-            })
+        # De-fanged strict match (charter D24): a create failure must NOT crash
+        # the LiveView (a crashed tab restores nothing). Post an honest line and
+        # go offline; the caller withdraws the echo and hands the words back.
+        case StudioChat.create_session(%{
+               id: id,
+               cwd: ClaudeChat.cwd(),
+               mode: socket.assigns.mode
+             }) do
+          {:ok, _} ->
+            socket
+            |> assign(store_session_id: id, session_id: id, status: :working)
+            |> push_patch(to: "/studio/chat/#{id}")
+            |> spawn_session(id, false)
 
-          {id, false,
-           socket
-           |> assign(store_session_id: id, session_id: id, status: :working)
-           |> push_patch(to: "/studio/chat/#{id}")}
+          {:error, reason} ->
+            Logger.warning("studio chat: failed to create session row: #{inspect(reason)}")
 
-        id ->
-          {id, true, socket}
-      end
+            socket
+            |> append_message(
+              :system,
+              "⚠ Couldn't start a new chat — the session store is unavailable. Your message was kept; try again."
+            )
+            |> assign(session: nil, status: :offline)
+        end
 
+      id ->
+        spawn_session(socket, id, true)
+    end
+  end
+
+  # Bring the subprocess up for `store_id` (fresh: `--session-id`; reopen:
+  # `--resume`). Extracted from `ensure_session` so the create-vs-reopen fork
+  # stays legible. Adoption (another tab owns it) and a spawn error both stay
+  # honest: the composer never lies about a session that isn't there.
+  defp spawn_session(socket, store_id, resume?) do
     case ClaudeChat.start_session(%{
            sink: self(),
            mode: socket.assigns.mode,
@@ -1120,11 +1379,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Another tab already owns this session's process (charter D20). Adopt it
       # as the sole sink instead of spawning a second `claude --resume` writer —
       # the other tab gets the detached banner. Single writer, no torn transcript.
+      #
+      # Harden the adopt (charter D22): the incumbent was alive when the registry
+      # handed it back, but it can die in the sliver before we take it over. If it
+      # has, adopting a corpse casts into the void and an immediate DOWN fires,
+      # yet the send path would still persist + echo a user turn the model never
+      # received. Re-check liveness: only a still-alive owner becomes our session
+      # pid. A dead one yields an honest system line and NO live pid — the send
+      # handler's nil-session branch then skips the phantom persist/echo, and the
+      # next send lazy-resumes once the registry has reaped the stale entry.
       {:error, {:already_started, other}} when is_pid(other) ->
-        ClaudeChat.adopt_sink(other, self())
-        Process.monitor(other)
-        StudioChat.update_status(store_id, "working")
-        socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
+        if Process.alive?(other) do
+          ClaudeChat.adopt_sink(other, self())
+          Process.monitor(other)
+          StudioChat.update_status(store_id, "working")
+          socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
+        else
+          socket
+          |> append_message(:system, "That chat's process just ended — send again to resume it.")
+          |> assign(session: nil, status: :offline)
+        end
 
       {:error, reason} ->
         socket
@@ -1133,25 +1407,73 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Replay a remembered session INSTANTLY from our own store — no subprocess is
-  # started (D8: reopen is display-only until the next send lazy-resumes). Any
-  # subprocess from the previously-viewed session is torn down so we never leak.
+  # Undo the optimistic echo (charter D24): drop exactly the pending echo row and
+  # hand the words back to the composer verbatim so nothing is lost. Status/system
+  # lines are the caller's to set (they differ per failure). A no-op when there is
+  # no pending echo (idempotent).
+  defp restore_failed_send(socket, text) do
+    echo_id = socket.assigns[:pending_echo_id]
+
+    assign(socket,
+      messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
+      composer_draft: text,
+      pending_echo_id: nil
+    )
+  end
+
+  # Drop the phase-1 text-only echo WITHOUT restoring the composer — used when a
+  # dispatched turn carries images (D25) and the echo upgrades to the full
+  # text+thumbnails bubble. A no-op when there is no pending echo.
+  defp withdraw_pending_echo(socket) do
+    echo_id = socket.assigns[:pending_echo_id]
+
+    assign(socket,
+      messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
+      pending_echo_id: nil
+    )
+  end
+
+  # Replay a remembered session from our own store. Registry-aware (charter D22):
+  # if ANOTHER tab is live-driving this exact session, ADOPT its running process
+  # instead of cancelling the approvals it can still resolve — the reopened tab
+  # becomes the sole sink, the replayed pending cards stay answerable through the
+  # adopted pid, and the old tab gets the honest detached banner. Only a session
+  # with NO live owner is truly dead; there (and only there) we cancel-persist
+  # its dangling approvals and go display-only until the next send lazy-resumes.
+  # Any subprocess from the previously-viewed session is torn down so we never leak.
   defp load_stored_session(socket, session) do
     if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
 
-    # Reopen has no live control channel, so any approval left "pending" is dead:
-    # persist the cancellation BEFORE replay so the store agrees with what the
-    # screen shows (canceled) and the sidebar pending pill drops (D11).
-    StudioChat.cancel_pending_approvals(session.id)
+    {session_pid, status, live?} =
+      case live_owner(session.id) do
+        nil ->
+          # No live control channel: a still-"pending" approval can never be
+          # answered, so persist its cancellation BEFORE replay — the store then
+          # agrees with the canceled cards on screen and the sidebar "needs you"
+          # pill drops (D11). Replay is display-only (status :resumable).
+          StudioChat.cancel_pending_approvals(session.id)
+          {nil, :resumable, false}
 
-    messages = replay_messages(session.id)
+        owner ->
+          # Live elsewhere: take over as the single writer (charter D20/D22).
+          # adopt_sink transfers FUTURE frames only — a mid-turn reopen shows a
+          # brief gap until the next port frame (accepted gap: the Session never
+          # snapshots streaming/turn state). The old tab receives
+          # {:claude_chat_detached} and freezes behind its take-over banner.
+          ClaudeChat.adopt_sink(owner, self())
+          Process.monitor(owner)
+          StudioChat.update_status(session.id, "working")
+          {owner, :ready, true}
+      end
+
+    messages = replay_messages(session.id, live?)
 
     assign(socket,
-      session: nil,
+      session: session_pid,
       store_session_id: session.id,
       session_id: session.id,
       mode: session.mode || "plan",
-      status: :resumable,
+      status: status,
       init: replay_init(session),
       messages: messages,
       # Strictly past every replayed id (seqs are 1-based), so a live append
@@ -1159,7 +1481,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
       streaming: nil,
       interrupt_requested: false,
-      mode_switch_from: nil,
+      pending_mode: nil,
       detached: false,
       last_result: nil,
       # Reopen must show the last-known headroom (charter D19) — read the snapshot
@@ -1171,8 +1493,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
       title_kicked: false,
       # Any half-open sidebar affordance is stale after a navigation.
       renaming_session: nil,
-      open_menu_session: nil
+      open_menu_session: nil,
+      # A reopened session starts with a clean composer (charter D24): any draft
+      # or in-flight echo belonged to the session we navigated away from.
+      composer_draft: "",
+      pending_echo_id: nil
     )
+    # Both branches mutate the stored row (cancel-persist, or mark "working" on
+    # adopt), so re-read the sidebar list once — the pending pill and the working
+    # pill both stay honest on reopen.
+    |> refresh_sessions()
+  end
+
+  # The live process currently driving this session, or nil. Charter D22: the
+  # LiveView consults the single-writer registry BEFORE any store write so a
+  # reopen of a session another tab is actively driving ADOPTS it rather than
+  # cancelling approvals its live owner can still resolve. A registry entry that
+  # points at an already-dead pid (reaped asynchronously) is treated as no owner.
+  defp live_owner(session_id) do
+    case Registry.lookup(Barkpark.StudioChat.SessionRegistry, session_id) do
+      [{pid, _} | _] when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
+      _ -> nil
+    end
   end
 
   # The new-chat empty state: no store row, no subprocess. A previously-viewed
@@ -1192,14 +1534,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: 0,
       streaming: nil,
       interrupt_requested: false,
-      mode_switch_from: nil,
+      pending_mode: nil,
       detached: false,
       last_result: nil,
       ring: blank_ring(),
       title_source: "default",
       title_kicked: false,
       renaming_session: nil,
-      open_menu_session: nil
+      open_menu_session: nil,
+      composer_draft: "",
+      pending_echo_id: nil
     )
   end
 
@@ -1259,6 +1603,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # The mode to fall back to if the pending switch fails: the last known-good
+  # mode. When a switch is already in flight, keep ITS revert target (the mode
+  # confirmed before the chain started) rather than the current optimistic value
+  # — otherwise a failed second switch would revert to an unconfirmed first.
+  defp revert_target(socket) do
+    case socket.assigns[:pending_mode] do
+      %{revert_to: rt} -> rt
+      _ -> socket.assigns.mode
+    end
+  end
+
   # Persist a mode switch onto the store row (charter D17) — no-op with no store
   # session yet (a brand-new chat before its first send has no row to write).
   defp persist_mode(socket, mode) do
@@ -1280,9 +1635,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # append race that outlived its retries) — we never discard that error: log it
   # and tell the user honestly that THIS message may not survive a reopen, so
   # the transcript never lies about what was remembered (charter D20b).
-  defp persist_user_message(socket, text) do
+  defp persist_user_message(socket, text, attachments) do
+    # Only the lightweight pointer rides the jsonb — NEVER the base64/bytes
+    # (charter D25/D7). An attachment-free send keeps the empty-metadata shape.
+    metadata =
+      case attachments do
+        [] -> %{}
+        list -> %{"attachments" => Enum.map(list, &attachment_pointer_json/1)}
+      end
+
     socket =
-      case persist_store(socket, %{role: "user", source_markdown: text, metadata: %{}}) do
+      case persist_store(socket, %{role: "user", source_markdown: text, metadata: metadata}) do
         {:error, reason} ->
           Logger.warning("studio chat: failed to persist user message: #{inspect(reason)}")
 
@@ -1298,6 +1661,82 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     refresh_sessions(socket)
   end
+
+  # ── image attachments (charter D25) ─────────────────────────────────────────
+
+  # Consume the staged uploads: read each into memory, store the bytes under the
+  # chat-owned dir keyed by the session id, and carry the bytes forward (for the
+  # base64 wire block + the live bubble data-URI). A store/read failure drops that
+  # one image honestly (logged) rather than failing the whole turn.
+  defp consume_attachments(socket) do
+    store_id = socket.assigns.store_session_id
+
+    attachments =
+      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
+        with {:ok, bytes} <- File.read(tmp_path),
+             {:ok, pointer} <- StudioChat.store_attachment(store_id, bytes, entry.client_type) do
+          {:ok, Map.put(pointer, :bytes, bytes)}
+        else
+          {:error, reason} ->
+            Logger.warning("studio chat: failed to attach image: #{inspect(reason)}")
+            {:ok, :error}
+        end
+      end)
+
+    {Enum.reject(attachments, &(&1 == :error)), socket}
+  end
+
+  # Assemble the user frame's content-block list: the text block (omitted when
+  # blank — an image-only turn) followed by one base64 image block per attachment
+  # (charter D25 wire shape, proven on the real binary).
+  defp build_user_content(text, attachments) do
+    text_blocks = if text == "", do: [], else: [%{"type" => "text", "text" => text}]
+
+    image_blocks =
+      Enum.map(attachments, fn a ->
+        %{
+          "type" => "image",
+          "source" => %{
+            "type" => "base64",
+            "media_type" => a.media_type,
+            "data" => Base.encode64(a.bytes)
+          }
+        }
+      end)
+
+    text_blocks ++ image_blocks
+  end
+
+  # Live user bubble carrying the just-sent images as data-URIs (bytes in hand —
+  # no disk re-read). Replay rebuilds the same shape from the store.
+  defp append_user_message(socket, text, attachments) do
+    images = Enum.map(attachments, fn a -> %{data_uri: data_uri(a.media_type, a.bytes)} end)
+    id = socket.assigns.next_id
+    message = %{id: id, role: :user, text: text, html: nil, images: images}
+    assign(socket, messages: socket.assigns.messages ++ [message], next_id: id + 1)
+  end
+
+  # The jsonb pointer for a stored attachment — path/media_type/sha256/byte_size
+  # ONLY, never the bytes.
+  defp attachment_pointer_json(a) do
+    %{
+      "path" => a.path,
+      "media_type" => a.media_type,
+      "sha256" => a.sha256,
+      "byte_size" => a.byte_size
+    }
+  end
+
+  defp data_uri(media_type, bytes),
+    do: "data:#{media_type};base64,#{Base.encode64(bytes)}"
+
+  # Images on a message map (live or replayed); older/other user rows have none.
+  defp user_images(message), do: Map.get(message, :images, []) || []
+
+  defp upload_error_label(:too_large), do: "Image is larger than 3 MB."
+  defp upload_error_label(:not_accepted), do: "Only PNG, JPEG, GIF, or WebP images."
+  defp upload_error_label(:too_many_files), do: "Up to 4 images per message."
+  defp upload_error_label(_), do: "That file could not be attached."
 
   # Persist an approval ask as a "pending" row. String metadata keys mirror the
   # jsonb round-trip, so replay reads them back verbatim (request_id + tool_name
@@ -1416,18 +1855,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Rebuild the transcript message list from the persisted store. Assistant
   # markdown re-renders through the SAME paper engine used live, so the improving
   # renderer wins on every reopen (D7).
-  defp replay_messages(session_id) do
+  defp replay_messages(session_id, live?) do
     session_id
     |> StudioChat.list_messages()
-    |> Enum.map(&replay_message/1)
+    |> Enum.map(&replay_message(&1, live?))
   end
 
   # An approval row rebuilds its card from metadata (request_id + tool_name +
-  # lifecycle). A dangling "pending" approval can NEVER be resolved on reopen —
-  # there is no live control channel — so it renders as the honest terminal
-  # state, canceled (the persisted flip is done separately in load_stored_session
-  # so the store agrees with the screen).
-  defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}) do
+  # lifecycle). `live?` decides the fate of a still-"pending" row: on a display-
+  # only reopen (no live owner) it can NEVER be resolved, so it renders as the
+  # honest terminal state, canceled (the persisted flip already ran in
+  # load_stored_session so the store agrees with the screen). On a reopen that
+  # ADOPTED a live owner (charter D22) the ask stays answerable — the card keeps
+  # its :pending status and resolve_permission holds the adopted pid.
+  defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}, live?) do
     meta = meta || %{}
 
     %{
@@ -1437,11 +1878,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
       html: nil,
       request_id: Map.get(meta, "request_id"),
       tool_name: Map.get(meta, "tool_name"),
-      approval_status: replay_approval_status(Map.get(meta, "approval_status"))
+      approval_status: replay_approval_status(Map.get(meta, "approval_status"), live?)
     }
   end
 
-  defp replay_message(m) do
+  # A user row rebuilds its image attachments (charter D25) from the metadata
+  # pointers, read SERVER-SIDE from the chat-owned store and inlined as data-URIs
+  # — no HTTP route ever (D6). A file missing on disk degrades to an honest
+  # placeholder so replay never crashes.
+  defp replay_message(%{role: "user", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
+  end
+
+  defp replay_message(m, _live?) do
     role = replay_role(m.role)
 
     html =
@@ -1452,11 +1901,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: m.seq, role: role, text: m.source_markdown, html: html}
   end
 
-  defp replay_approval_status("allowed"), do: :allowed
-  defp replay_approval_status("denied"), do: :denied
-  # pending (dangling) OR an unknown value → canceled: an unresolvable ask is
-  # never shown as a live card on reopen.
-  defp replay_approval_status(_), do: :canceled
+  # Rebuild the inline image list from a user row's metadata attachment pointers.
+  defp replay_images(meta) do
+    case Map.get(meta || %{}, "attachments") do
+      list when is_list(list) -> Enum.map(list, &replay_image/1)
+      _ -> []
+    end
+  end
+
+  defp replay_image(%{"path" => path, "media_type" => media_type}) when is_binary(path) do
+    case StudioChat.read_attachment(path) do
+      {:ok, bytes} -> %{data_uri: data_uri(media_type, bytes)}
+      {:error, :missing} -> %{missing: true}
+    end
+  end
+
+  defp replay_image(_), do: %{missing: true}
+
+  defp replay_approval_status("allowed", _live?), do: :allowed
+  defp replay_approval_status("denied", _live?), do: :denied
+  # pending under a live owner stays answerable (D22); pending with no owner, or
+  # any unknown value, degrades to canceled — never a dead card no one can click.
+  defp replay_approval_status("pending", true), do: :pending
+  defp replay_approval_status(_, _live?), do: :canceled
 
   # A stored role must never make a session unopenable: map the known roles and
   # degrade anything else (a future wave's vocabulary) to a system line.
@@ -1652,6 +2119,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp mode_label("acceptEdits"), do: "auto-accept edits"
   defp mode_label(other), do: other
 
+  # The "(was ~N tokens)" tail on a compaction line — only when the CLI reports a
+  # pre-compaction size, so we never invent a number we don't have.
+  defp compact_size(pre) when is_integer(pre) and pre > 0, do: " (was ~#{pre} tokens)"
+  defp compact_size(_), do: ""
+
   defp status_label(:new), do: "new chat"
   defp status_label(:resumable), do: "resumable"
   defp status_label(:starting), do: "starting"
@@ -1835,6 +2307,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp spawn_error_text(_),
     do: "Failed to start the Claude session."
+
+  # Honest line for a user turn that never reached the model (charter D24): the
+  # port write failed or the session had already gone. The words are restored to
+  # the composer, so this is a "try again", not a "your message is lost".
+  defp send_error_text(_reason),
+    do:
+      "That message didn't reach Claude — the session dropped. Your words were kept; send again."
 
   defp default_dataset do
     case Barkpark.Content.list_datasets() do

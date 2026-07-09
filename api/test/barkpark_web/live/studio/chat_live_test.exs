@@ -132,6 +132,42 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   defp session_pid(view), do: lv_assigns(view)[:session]
   defp store_id(view), do: lv_assigns(view)[:store_session_id]
 
+  # A successful result frame whose context occupancy is `input` tokens against a
+  # 200k window — drives the header ring to `input / 200000`.
+  defp big_result(input) do
+    %{
+      "type" => "result",
+      "subtype" => "success",
+      "total_cost_usd" => 0.01,
+      "usage" => %{
+        "input_tokens" => input,
+        "output_tokens" => 0,
+        "cache_read_input_tokens" => 0,
+        "cache_creation_input_tokens" => 0
+      },
+      "modelUsage" => %{"claude-opus-4" => %{"contextWindow" => 200_000}}
+    }
+  end
+
+  # Establish a LIVE session whose subprocess does NOT loop our control frames
+  # back. Plain `cat` echoes every control_request, and our own dispatch answers
+  # each with an error control_response that `cat` echoes AGAIN — minting a
+  # spurious EMPTY set_mode ack that races the ack under test (with the real
+  # binary there is no such loopback). `cat >/dev/null` keeps stdin open (port
+  # alive) and stays silent, so the only acks the LV sees are the ones the test
+  # injects — exactly the shape the Session forwards from the real CLI.
+  defp spawn_silent_session(view) do
+    Application.put_env(:barkpark, :claude_chat,
+      enabled: true,
+      command: {"sh", ["-c", "cat >/dev/null"]}
+    )
+
+    render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+    send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+    refute session_pid(view) == nil
+    :ok
+  end
+
   defp seed_session(title, opts \\ []) do
     id = Ecto.UUID.generate()
     {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
@@ -814,51 +850,152 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "offline"
     end
 
-    # ── control acks: the UI never lies about a mode switch (scc-w2, D17) ──
+    # ── control acks: the UI never lies about a mode switch (scc-w2/w3, D17/D23) ──
+    #
+    # The ack is now correlated by request_id — the LV records the minted id in
+    # `:pending_mode`, so a test reads it from assigns to forge a matching ack.
+
+    defp pending_mode_req(view), do: lv_assigns(view)[:pending_mode][:req]
 
     test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
-      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
-      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      spawn_silent_session(view)
 
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      rid = pending_mode_req(view)
       # the CLI echoes back exactly the mode we asked for → confirmed
-      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "default"}})
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "default"}})
 
       html = render(view)
       assert html =~ "ask to act"
       refute html =~ "Couldn't switch permission mode"
+      # confirmed = persisted: the store's mode is the ACKED value (D23), and the
+      # pending marker is cleared.
+      assert lv_assigns(view)[:pending_mode] == nil
+      assert StudioChat.get_session(store_id(view)).mode == "default"
     end
 
     test "an empty mode echo reverts the optimistic selector + posts an honest line",
          %{view: view} do
-      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
-      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      spawn_silent_session(view)
 
       # optimistic switch to acceptEdits…
       html =
         render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
 
       assert html =~ "auto-accept edits"
+      rid = pending_mode_req(view)
 
       # …but the CLI's ack carries an EMPTY response (the silent-no-op trap, D12):
       # we must NOT trust subtype:success, so the switch reverts to plan.
-      send(view.pid, {:claude_chat_control, :set_mode, %{}})
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{}})
+      html = render(view)
+      assert html =~ "switch permission mode"
+      assert html =~ "plan (read-only)"
+      # revert persists too: the store never keeps a mode the CLI refused.
+      assert StudioChat.get_session(store_id(view)).mode == "plan"
+    end
+
+    test "a mismatched mode echo reverts to the prior mode", %{view: view} do
+      spawn_silent_session(view)
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      rid = pending_mode_req(view)
+      # the CLI reports a DIFFERENT mode than we asked → the switch did not take
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "plan"}})
+
       html = render(view)
       assert html =~ "switch permission mode"
       assert html =~ "plan (read-only)"
     end
 
-    test "a mismatched mode echo reverts to the prior mode", %{view: view} do
-      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
-      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+    test "a stale ack from a superseded rapid switch is ignored (no mis-revert)",
+         %{view: view} do
+      spawn_silent_session(view)
 
+      # rapid double switch: acceptEdits (req A) then default (req B) before any ack
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
-      # the CLI reports a DIFFERENT mode than we asked → the switch did not take
-      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "plan"}})
+      rid_a = pending_mode_req(view)
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      rid_b = pending_mode_req(view)
+      refute rid_a == rid_b
+
+      # req A's ack lands LATE echoing acceptEdits. Value-matching (the wave-2 bug)
+      # would see echo "acceptEdits" != current "default" and MIS-REVERT. By
+      # request_id it is stale (B superseded it) → ignored, mode stays default.
+      send(view.pid, {:claude_chat_control, :set_mode, rid_a, %{"mode" => "acceptEdits"}})
+      html = render(view)
+      assert html =~ "ask to act"
+      refute html =~ "Couldn't switch permission mode"
+
+      # req B's ack then confirms default honestly.
+      send(view.pid, {:claude_chat_control, :set_mode, rid_b, %{"mode" => "default"}})
+      html = render(view)
+      assert html =~ "ask to act"
+      refute html =~ "Couldn't switch permission mode"
+      assert lv_assigns(view)[:pending_mode] == nil
+      assert StudioChat.get_session(store_id(view)).mode == "default"
+    end
+
+    # ── compaction is visible, not a silent ring reset (scc-w3, D27) ──────────
+
+    test "an auto compact_boundary posts an honest ephemeral system line", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "compact_boundary",
+           "compact_metadata" => %{"trigger" => "auto", "pre_tokens" => 152_000}
+         }}
+      )
 
       html = render(view)
-      assert html =~ "switch permission mode"
-      assert html =~ "plan (read-only)"
+      assert html =~ "compacted automatically"
+      assert html =~ "152000"
+    end
+
+    test "a manual compact_boundary names the manual trigger", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "compact_boundary",
+           "compact_metadata" => %{"trigger" => "manual", "pre_tokens" => 90_000}
+         }}
+      )
+
+      assert render(view) =~ "compacted manually"
+    end
+
+    test "after compaction a smaller result frame shrinks the ring (SET, never summed)",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      # a near-full window pre-compaction: 180k / 200k = 90%
+      send(view.pid, {:claude_chat_event, big_result(180_000)})
+      html = render(view)
+      assert html =~ "90%"
+
+      # the CLI compacts…
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "compact_boundary",
+           "compact_metadata" => %{"trigger" => "auto", "pre_tokens" => 180_000}
+         }}
+      )
+
+      # …and the NEXT turn reports far fewer context tokens. Because the snapshot
+      # is SET (not summed), the ring shrinks to the post-compaction reality. If
+      # someone regressed the formula to `inc:`, 180k+40k would clamp at 100% and
+      # this refute would fail — the guard.
+      send(view.pid, {:claude_chat_event, big_result(40_000)})
+      html = render(view)
+      assert html =~ "20%"
+      refute html =~ "90%"
     end
 
     # ── Stopping… cannot wedge (scc-w2, D18) ──────────────────────────────
@@ -958,6 +1095,154 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_event, %{"type" => "mystery"}})
       assert Process.alive?(view.pid)
     end
+  end
+
+  # Charter D25: images ride the turn — paste/drop into the composer, base64 on
+  # the wire, D6-clean data-URI replay. The paste/drop hook is JS (bp-chat-
+  # composer.js); the server half is exercised through LiveViewTest's
+  # file_input/render_upload, which drives the SAME allow_upload the hook feeds.
+  describe "image attachments (charter D25)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+
+      dir =
+        Path.join(System.tmp_dir!(), "bp_chat_live_attach_#{System.unique_integer([:positive])}")
+
+      prev = Application.get_env(:barkpark, StudioChat)
+      Application.put_env(:barkpark, StudioChat, attachments_dir: dir)
+
+      on_exit(fn ->
+        File.rm_rf(dir)
+        if prev, do: Application.put_env(:barkpark, StudioChat, prev)
+      end)
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    test "the composer wires the paste/drop hook + a hidden file input", %{view: view} do
+      assert has_element?(view, "form#chat-composer-form[phx-hook=ChatComposer]")
+      assert has_element?(view, "input[type=file]")
+    end
+
+    test "an uploaded image lands an attachment chip with a remove button", %{view: view} do
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{name: "shot.png", content: "PNGBYTES", type: "image/png"}
+        ])
+
+      html = render_upload(avatar, "shot.png")
+      assert html =~ "shot.png"
+      assert has_element?(view, "button[phx-click=cancel_upload]")
+    end
+
+    test "an oversize image is rejected with an honest inline error", %{view: view} do
+      big = :binary.copy(<<7>>, 3_000_001)
+
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{name: "big.png", content: big, type: "image/png"}
+        ])
+
+      html =
+        case render_upload(avatar, "big.png") do
+          {:error, _} -> render(view)
+          rendered when is_binary(rendered) -> rendered
+        end
+
+      assert html =~ "larger than 3 MB"
+    end
+
+    test "sending an image stores a pointer (no base64 in the DB), renders inline, no /media route",
+         %{view: view} do
+      avatar =
+        file_input(view, "#chat-composer-form", :attachments, [
+          %{name: "pic.png", content: "PNGDATA", type: "image/png"}
+        ])
+
+      render_upload(avatar, "pic.png")
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "look at this"})
+
+      # Two-phase send (D24): the submit diff carries only the instant text
+      # echo; the image bubble lands in the {:dispatch_send} diff — a render
+      # roundtrip drains it.
+      html = render(view)
+
+      # Live bubble inlines the image server-side as a data-URI — never /media.
+      assert html =~ "data:image/png;base64,#{Base.encode64("PNGDATA")}"
+      assert html =~ "look at this"
+      refute html =~ "/media/files"
+
+      sid = store_id(view)
+
+      user_msg =
+        sid |> StudioChat.list_messages() |> Enum.find(&(&1.role == "user"))
+
+      assert [ptr] = user_msg.metadata["attachments"]
+      assert ptr["media_type"] == "image/png"
+      assert ptr["sha256"] == :sha256 |> :crypto.hash("PNGDATA") |> Base.encode16(case: :lower)
+      assert ptr["byte_size"] == byte_size("PNGDATA")
+      # the jsonb pointer carries NO base64 / bytes
+      refute Map.has_key?(ptr, "data")
+      refute Map.has_key?(ptr, "bytes")
+    end
+
+    test "replay inlines the stored image as a data-URI, server-side (no route)", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+      {:ok, ptr} = StudioChat.store_attachment(id, "REPLAYBYTES", "image/png")
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "user",
+          source_markdown: "recall this",
+          metadata: %{"attachments" => [attachment_json(ptr)]}
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "data:image/png;base64,#{Base.encode64("REPLAYBYTES")}"
+      refute html =~ "/media/files"
+    end
+
+    test "a replayed image whose file is gone renders an honest placeholder, never crashes",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "user",
+          source_markdown: "was an image",
+          metadata: %{
+            "attachments" => [
+              %{
+                "path" => "#{id}/deadbeef",
+                "media_type" => "image/png",
+                "sha256" => "deadbeef",
+                "byte_size" => 3
+              }
+            ]
+          }
+        })
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "attachment missing"
+      refute html =~ "data:image/png;base64,"
+      assert Process.alive?(view.pid)
+    end
+  end
+
+  defp attachment_json(ptr) do
+    %{
+      "path" => ptr.path,
+      "media_type" => ptr.media_type,
+      "sha256" => ptr.sha256,
+      "byte_size" => ptr.byte_size
+    }
   end
 
   describe "sessions become a place (persistence + resume, S3)" do
@@ -1416,6 +1701,152 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "reopen of a live session adopts it (registry-aware, charter D22)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    # Drive a tab to a LIVE session (fresh send spawns the registered `cat`
+    # process) that carries one PERSISTED pending approval — the exact shape a
+    # second tab must NOT trample.
+    defp start_live_session_with_pending(conn, request_id) do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view)
+      owner = session_pid(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: request_id,
+           tool_name: "Bash",
+           input: %{"command" => "ls"},
+           title: "Allow Bash?",
+           decision_reason: nil
+         }}
+      )
+
+      render(view)
+      {view, sid, owner}
+    end
+
+    test "a second tab ADOPTS the running process — it does not spawn a second writer",
+         %{conn: conn} do
+      {_viewA, sid, owner} = start_live_session_with_pending(conn, "req-adopt")
+      assert is_pid(owner) and Process.alive?(owner)
+
+      {:ok, viewB, _html} = live(conn, "/studio/chat/#{sid}")
+
+      # tab B took over the SAME process (no `claude --resume` second writer),
+      # so the CLI transcript keeps a single owner.
+      assert session_pid(viewB) == owner
+    end
+
+    test "the old tab is detached (honest banner, composer frozen) when the new tab adopts",
+         %{conn: conn} do
+      {viewA, sid, _owner} = start_live_session_with_pending(conn, "req-detach")
+
+      {:ok, _viewB, _html} = live(conn, "/studio/chat/#{sid}")
+
+      await(fn -> lv_assigns(viewA)[:detached] == true end)
+      assert lv_assigns(viewA)[:status] == :detached
+      # the take-over banner replaces the composer (no second-writer path)
+      render(viewA)
+      assert has_element?(viewA, "button[phx-click=take_over]")
+      refute has_element?(viewA, "form[phx-submit=send]")
+    end
+
+    test "the store never lies on reopen-of-live: the pending approval stays pending and answerable",
+         %{conn: conn} do
+      {_viewA, sid, _owner} = start_live_session_with_pending(conn, "req-answer")
+
+      # the ask really is pending in the store before the second tab opens
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      {:ok, viewB, html} = live(conn, "/studio/chat/#{sid}")
+
+      # NOT cancelled — the live owner can still resolve it, so the card replays
+      # as an answerable approval (never the ✗ canceled terminal state)
+      refute html =~ "✗ canceled"
+      assert has_element?(viewB, ~s(button[phx-click=approve][phx-value-rid=req-answer]))
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert row.metadata["approval_status"] == "pending"
+
+      # …and answering THROUGH the adopted pid resolves it end-to-end
+      render_click(element(viewB, ~s(button[phx-click=approve][phx-value-rid=req-answer])))
+
+      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert approval.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "reopen of a session with NO live owner still cancel-persists its dangling approval",
+         %{conn: conn} do
+      # seeded row, never spawned → the registry holds no owner for this id
+      sid = seed_session_with_pending_approval("req-dead")
+      assert [] = Registry.lookup(Barkpark.StudioChat.SessionRegistry, sid)
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # display-only (no spawn) AND the dangling ask is honestly canceled
+      assert session_pid(view) == nil
+      assert html =~ "✗ canceled"
+      refute has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-dead]))
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "re-navigating to the session you already own does not re-adopt or self-detach",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      sid = store_id(view)
+      owner = session_pid(view)
+      assert is_pid(owner)
+      # a fresh send is mid-turn — the live state we must NOT clobber
+      assert lv_assigns(view)[:status] == :thinking
+
+      # patch to our OWN url again: handle_params' store_session_id == sid
+      # short-circuit keeps the live pid untouched — no load_stored_session, so
+      # no adopt, no self-detach, no replay that would drop the live turn.
+      render_patch(view, "/studio/chat/#{sid}")
+
+      assert session_pid(view) == owner
+      assert lv_assigns(view)[:status] == :thinking
+      refute lv_assigns(view)[:detached]
+    end
+
+    test "a send after the live owner died never holds a dead session pid (no phantom, not stuck)",
+         %{conn: conn} do
+      {view, sid, owner} = start_live_session_with_pending(conn, "req-gone")
+
+      # the owner dies; our DOWN handler tears the tab down to an honest offline
+      Process.exit(owner, :kill)
+      await(fn -> lv_assigns(view)[:status] == :offline end)
+      before = StudioChat.get_session(sid).message_count
+
+      # sending again lazy-resumes: the registry reaped the dead entry, so
+      # start_session heals to a FRESH process that really receives the message —
+      # the adopt-a-corpse guard means the LiveView NEVER holds a dead session
+      # pid, so no user turn is echoed against the void.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "still there?"})
+
+      # invariant across BOTH honest branches (registry heals to a fresh resume,
+      # or the guard refuses a dead incumbent): the LiveView NEVER holds a dead
+      # session pid, and it never shows :thinking without a live session — so a
+      # user turn is never echoed against the void.
+      sp = session_pid(view)
+      refute is_pid(sp) and not Process.alive?(sp)
+      refute lv_assigns(view)[:status] == :thinking and not (is_pid(sp) and Process.alive?(sp))
+      # at most one NEW user row (the real resend) — never a phantom double-write
+      assert StudioChat.get_session(sid).message_count in [before, before + 1]
+    end
+  end
+
   describe "resume flag end-to-end (argv-echo :binary fake, D9)" do
     setup %{conn: conn} do
       marker = enable_argv_echo_chat()
@@ -1451,6 +1882,114 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute argv =~ "--resume"
     end
   end
+
+  # ── send is instant and never loses your words (optimistic echo, D24) ──────
+  describe "send: optimistic echo + restore-on-failure (charter D24)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    test "the user bubble lands in the FIRST diff, before phase 2 runs", %{view: view} do
+      # Arm a dispatch FAILURE so the echo can't be riding on a successful
+      # spawn/persist: it must already be on screen from phase 1, which returns
+      # before the deferred {:dispatch_send} ever runs.
+      Application.put_env(:barkpark, :public_demo_studio, true)
+
+      html =
+        render_submit(element(view, "form[phx-submit=send]"), %{"message" => "did you get this"})
+
+      # This is the phase-1 render (the handle_event reply) — the words + the
+      # working status are here INSTANTLY, before any subprocess work.
+      assert html =~ "did you get this"
+      assert html =~ "working"
+      assert html =~ ~s(data-role="user")
+    end
+
+    test "a spawn failure withdraws the echo, restores the words verbatim, and leaves no orphan message row",
+         %{view: view} do
+      # Deterministic hard failure: disable AFTER mount so the lazy spawn returns
+      # {:error, :disabled} in phase 2 (the create/spawn 'session nil' path).
+      Application.put_env(:barkpark, :public_demo_studio, true)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "keep my words"})
+      # let phase 2 (the deferred {:dispatch_send}) run
+      _ = render(view)
+
+      # the optimistic user bubble is withdrawn (no stranded row that never sent)…
+      refute has_element?(view, ~s([data-role="user"]))
+      # …the words are handed back to the composer VERBATIM (server-bound value)…
+      assert has_element?(view, ~s(input#chat-composer[value="keep my words"]))
+      # …an honest line explains why, and we are NOT stuck thinking…
+      assert render(view) =~ "not enabled on this host"
+      assert lv_assigns(view)[:status] == :offline
+      refute turn_active_status?(view)
+
+      # …and NO orphan chat_messages row was persisted (persist is gated on a
+      # dispatched frame — the session row exists but carries zero messages).
+      sid = store_id(view)
+      assert is_binary(sid)
+      assert StudioChat.list_messages(sid) == []
+    end
+
+    test "the composer is server-bound: value tracks the draft while typing and clears on send",
+         %{view: view} do
+      # phx-change keeps the server draft in step; the input renders it as value=
+      render_change(element(view, "form[phx-submit=send]"), %{"message" => "half typed"})
+      assert has_element?(view, ~s(input#chat-composer[value="half typed"]))
+
+      # a send clears the composer — the input value is no longer the typed text
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "half typed"})
+      refute has_element?(view, ~s(input#chat-composer[value="half typed"]))
+    end
+
+    test "a DISPATCHED send whose persist is rejected keeps the echo and stays CLEARED (no double-send)",
+         %{conn: conn} do
+      sid = seed_session("Doomed store")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      # Delete the row so the post-dispatch append hits the terminal {:error} of
+      # do_append (a vanished-session FK). A true concurrent seq-conflict cannot
+      # be forced on one sandbox connection; this exercises the SAME exhaustion
+      # branch of persist_user_message with a deterministic {:error}.
+      Barkpark.Repo.delete!(StudioChat.get_session(sid))
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "resend me"})
+      _ = render(view)
+
+      # The model DID get the turn (cat dispatched it), so the echo STAYS…
+      assert has_element?(view, ~s([data-role="user"]))
+      html = render(view)
+      assert html =~ "resend me"
+      # …the honest warn line fires…
+      assert html =~ "could not be saved"
+      # …and the composer stays CLEARED — restoring here would DOUBLE-SEND.
+      refute has_element?(view, ~s(input#chat-composer[value="resend me"]))
+    end
+
+    test "reopening after an optimistically-echoed send shows exactly ONE user bubble",
+         %{conn: conn, view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "just once"})
+      sid = store_id(view)
+      # finish the turn cleanly
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      render(view)
+
+      # Reopen in a fresh mount — replay rebuilds SOLELY from the store, so the
+      # optimistic echo is replaced by the one persisted row (never doubled).
+      {:ok, view2, _html} = live(conn, "/studio/chat/#{sid}")
+      html2 = render(view2)
+      assert html2 =~ "just once"
+      assert count_substring(html2, ~s(data-role="user")) == 1
+    end
+  end
+
+  # Is the on-screen chat in a turn-active state (thinking/interrupting)?
+  defp turn_active_status?(view), do: lv_assigns(view)[:status] in [:thinking, :interrupting]
+
+  defp count_substring(haystack, needle), do: length(String.split(haystack, needle)) - 1
 
   defp stream_delta(text) do
     %{

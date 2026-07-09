@@ -244,6 +244,48 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       ClaudeChat.close(session)
     end
 
+    test "a content-block list rides the user frame verbatim (text + base64 image)" do
+      # Charter D25: send_message accepts a ready content-block list so a turn can
+      # carry pasted/dropped images. The Port loopback (`cat`) echoes exactly what
+      # was written to stdin, proving the frame's content is the blocks we passed —
+      # NOT a hardcoded single text block.
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+
+      blocks = [
+        %{"type" => "text", "text" => "what is this?"},
+        %{
+          "type" => "image",
+          "source" => %{"type" => "base64", "media_type" => "image/png", "data" => "aGVsbG8="}
+        }
+      ]
+
+      ClaudeChat.send_message(session, blocks)
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "user",
+                        "message" => %{
+                          "role" => "user",
+                          "content" => [
+                            %{"type" => "text", "text" => "what is this?"},
+                            %{
+                              "type" => "image",
+                              "source" => %{
+                                "type" => "base64",
+                                "media_type" => "image/png",
+                                "data" => "aGVsbG8="
+                              }
+                            }
+                          ]
+                        }
+                      }},
+                     2_000
+
+      ClaudeChat.close(session)
+    end
+
     test "delivers canned events and the exit status" do
       script = ~s(printf '%s\\n' '{"type":"system","subtype":"init","model":"test-model"}')
       put_chat_config(command: {"sh", ["-c", script]})
@@ -282,6 +324,32 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       send(sink, :stop)
 
       assert_receive {:DOWN, ^ref, :process, ^session, _reason}, 2_000
+    end
+
+    # send_message is a GenServer.call (charter D24): the reply carries the REAL
+    # write outcome so the composer can distinguish a dispatched turn from a lost
+    # one. safe_command no longer swallows failures to a false :ok.
+    test "send_message reports :ok when the frame reaches the port" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert ClaudeChat.send_message(session, "hi") == :ok
+
+      ClaudeChat.close(session)
+    end
+
+    test "send_message reports an honest {:error} once the session/port is gone — never a false :ok" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _reason}, 2_000
+
+      # The subprocess (and its port) is gone; the write cannot land. The seam
+      # returns {:error, _}, so the LiveView withdraws the echo instead of
+      # rendering a message that never sent.
+      assert {:error, _reason} = ClaudeChat.send_message(session, "too late")
     end
   end
 
@@ -421,31 +489,34 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
-  # Typed control-response dispatch (charter D17). A control_response whose
+  # Typed control-response dispatch (charter D17/D23). A control_response whose
   # request_id matches one WE minted must reach the sink as a TYPED
-  # {:claude_chat_control, kind, response} — not fall through the generic
-  # dispatch into the ChatLive catch-all (which drops it). The reflector fake
-  # reads our outbound control_request, extracts its (randomly minted)
-  # request_id, and echoes a control_response with that SAME id — the only
+  # {:claude_chat_control, kind, request_id, response} — not fall through the
+  # generic dispatch into the ChatLive catch-all (which drops it). The dispatch
+  # carries the request_id so the consumer can correlate the ack to the SPECIFIC
+  # outbound request (latest-outstanding wins; a stale ack is ignored). The
+  # reflector fake reads our outbound control_request, extracts its (randomly
+  # minted) request_id, and echoes a control_response with that SAME id — the only
   # deterministic way to prove the request_id → kind map since we mint the id.
-  describe "typed control-response dispatch (charter D17)" do
-    test "a set_permission_mode ack dispatches {:claude_chat_control, :set_mode, echo}" do
+  describe "typed control-response dispatch (charter D17/D23)" do
+    test "a set_permission_mode ack dispatches {:claude_chat_control, :set_mode, rid, echo}" do
       put_chat_config(command: {"sh", ["-c", mode_reflector()]})
 
       {:ok, session} = ClaudeChat.start_session(%{sink: self()})
-      {:ok, _rid} = ClaudeChat.set_permission_mode(session, "acceptEdits")
+      {:ok, rid} = ClaudeChat.set_permission_mode(session, "acceptEdits")
 
-      assert_receive {:claude_chat_control, :set_mode, %{"mode" => "acceptEdits"}}, 2_000
+      # The ack carries OUR minted request_id back — that is the correlation key.
+      assert_receive {:claude_chat_control, :set_mode, ^rid, %{"mode" => "acceptEdits"}}, 2_000
       ClaudeChat.close(session)
     end
 
-    test "an interrupt ack dispatches {:claude_chat_control, :interrupt, _}" do
+    test "an interrupt ack dispatches {:claude_chat_control, :interrupt, rid, _}" do
       put_chat_config(command: {"sh", ["-c", mode_reflector()]})
 
       {:ok, session} = ClaudeChat.start_session(%{sink: self()})
-      {:ok, _rid} = ClaudeChat.interrupt(session)
+      {:ok, rid} = ClaudeChat.interrupt(session)
 
-      assert_receive {:claude_chat_control, :interrupt, response}, 2_000
+      assert_receive {:claude_chat_control, :interrupt, ^rid, response}, 2_000
       assert is_map(response)
       ClaudeChat.close(session)
     end
@@ -469,7 +540,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                       }},
                      2_000
 
-      refute_receive {:claude_chat_control, _, _}, 200
+      refute_receive {:claude_chat_control, _, _, _}, 200
     end
   end
 

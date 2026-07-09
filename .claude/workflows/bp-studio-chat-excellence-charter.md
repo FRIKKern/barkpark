@@ -502,3 +502,44 @@ green.
   Judge-API → claude-p-haiku → derived, clobber-guarded. Slices scc-w1-store,
   scc-w1-wire-seam, scc-w1-sessions-ui, scc-w1-honest-turns, scc-w1-ai-title
   filed under epic `studio-claude-chat`.
+
+### Wave 2026-07-09 (wave 3 BUILT + LEAD-INTEGRATED — reviewer phase lost to spend cap)
+
+Landed (4 slices, integrated by the lead after the Fable reviewer hit the monthly
+spend limit; lead resolved the S3×S4 send-path collision by hand and re-gated):
+- **scc-w3-reopen-adopt (D22)**: reopen of a LIVE session adopts it via
+  SessionRegistry (adopt_sink + monitor); replayed pending approval cards stay
+  answerable through the adopted pid; only ownerless sessions cancel-persist.
+  Dead-pid adopt race yields an honest offline line, never a phantom send.
+- **scc-w3-control-honesty (D23/D27)**: control acks carry request_id end-to-end
+  ({:claude_chat_control, kind, request_id, resp}); a stale set-mode ack can no
+  longer mis-revert; persisted mode = last ACKED value; compact_boundary frames
+  surface as an honest system line.
+- **scc-w3-send-honesty (D24)**: two-phase send — phase 1 echoes + clears the
+  (now server-bound) composer in the first diff; {:dispatch_send} does
+  ensure_session → wire write (send_message is now a GenServer.call returning
+  the REAL dispatch outcome) → persist; every hard failure withdraws the echo
+  and restores the words verbatim; persist-exhaustion warns but never restores
+  (anti-double-send).
+- **scc-w3-images (D25)**: paste/drop images ride the same user frame as base64
+  content blocks; chat-owned attachment store (attachments_dir/<session>/<sha256>,
+  pointer-only jsonb, server-side data-URI replay, no HTTP route); 3MB cap with
+  honest inline errors; image-only sends valid.
+
+Lead integration notes: union of S3-call semantics × S4-widened content on
+send_message; phase-1 echo upgrades to the full text+thumbnail bubble on
+dispatch when attachments exist (withdraw_pending_echo); image-only sends skip
+the empty text echo; S4's validate_send no-op handler removed (composer-change
+owns the form's phx-change and feeds allow_upload validation). Gate: 224 tests
+0 failures × seeds default/42/99999; studio-literal-check PASS; format clean.
+
+Cut: checkpoint/rewind (D26 — --fork-session keeps full memory; no rewind
+primitive exists). Disproven: compaction ring lie (D27 — totalUsage resets per
+user message).
+
+Next wave should take: (1) real-browser verify of paste/drop + adopt flows;
+(2) attachment GC for deleted/aged sessions beyond delete_session purge;
+(3) sidebar search/filter when the 50-cap starts hiding real sessions;
+(4) restore staged attachments on dispatch failure (today only text restores —
+the strip empties if the wire write fails after consume); (5) charter D20c
+follow-through: periodic real-binary E2E in a scheduled lane, not just on-demand.

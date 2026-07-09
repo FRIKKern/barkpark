@@ -219,10 +219,34 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     GenServer.cast(session, {:respond_permission, request_id, decision})
   end
 
-  @doc "Send a user turn to the session as a stream-json user message."
-  @spec send_message(pid(), String.t()) :: :ok
-  def send_message(session, text) when is_pid(session) and is_binary(text) do
-    GenServer.cast(session, {:send_user_message, text})
+  @doc """
+  Send a user turn to the session as a stream-json user message.
+
+  A `GenServer.call` (charter D24) — the reply carries the REAL write outcome so
+  the caller can tell a DISPATCHED turn (the model has it; keep the optimistic
+  echo, clear the composer) from a failed one (withdraw the echo, hand the words
+  back). `:ok` means the frame reached the port; `{:error, reason}` means it did
+  not (a closed/absent port, a write that raised, or a session that has already
+  gone — never a false `:ok`). The honesty bar is DISPATCHED, not delivered: a
+  later result frame still reports the model's answer.
+
+  `content` is EITHER a plain `String.t()` (the text-only default shape) OR a
+  ready content-block list — `[%{"type" => "text", …}, %{"type" => "image",
+  "source" => %{"type" => "base64", "media_type" => …, "data" => …}}]` — so a
+  turn can carry pasted/dropped images alongside the text (charter D25, proven
+  on the real binary v2.1.205: a mixed text+image content list is accepted and
+  the model sees the image). A binary is wrapped into a single text block; a
+  list rides the user frame verbatim.
+  """
+  @spec send_message(pid(), String.t() | [map()]) :: :ok | {:error, term()}
+  def send_message(session, content)
+      when is_pid(session) and (is_binary(content) or is_list(content)) do
+    GenServer.call(session, {:send_user_message, content})
+  catch
+    # The session GenServer died between the caller's `ensure_session` and this
+    # call (port exit, teardown). That is a failed dispatch, not a crash — the
+    # composer must restore, so surface it as an honest {:error}.
+    :exit, reason -> {:error, {:not_running, reason}}
   end
 
   @doc """
@@ -402,20 +426,22 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     @impl true
-    def handle_cast({:send_user_message, text}, state) do
+    def handle_call({:send_user_message, content}, _from, state) do
       line =
         Jason.encode!(%{
           "type" => "user",
           "message" => %{
             "role" => "user",
-            "content" => [%{"type" => "text", "text" => text}]
+            "content" => user_content_blocks(content)
           }
         }) <> "\n"
 
-      safe_command(state.port, line)
-      {:noreply, state}
+      # Reply with the REAL write outcome (charter D24) — the LiveView gates its
+      # optimistic echo on a DISPATCHED frame, so a swallowed failure would lie.
+      {:reply, safe_command(state.port, line), state}
     end
 
+    @impl true
     def handle_cast({:respond_permission, request_id, decision}, state) do
       payload =
         case decision do
@@ -440,8 +466,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # Outbound control_request (interrupt / set_permission_mode / set_model).
     # The CLI answers with a control_response echoing this request_id. We map
     # request_id → kind here so the inbound ack dispatches as a TYPED
-    # {:claude_chat_control, kind, response} (charter D17) — otherwise the ack
-    # falls through to the generic sink event and the ChatLive catch-all eats it.
+    # {:claude_chat_control, kind, request_id, response} (charter D17/D23) —
+    # otherwise the ack falls through to the generic sink event and the ChatLive
+    # catch-all eats it. The request_id rides the dispatch so the consumer can
+    # ignore a stale ack from a superseded switch (correlate, don't guess).
     def handle_cast({:control_request, request_id, request}, state) do
       line =
         Jason.encode!(%{
@@ -559,19 +587,29 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     # The CLI's ack for one of OUR control_requests (interrupt / set_mode /
     # set_model). Match it by the request_id we minted and dispatch a TYPED
-    # {:claude_chat_control, kind, response} (charter D17) so ChatLive can assert
-    # the echoed mode instead of trusting a bare subtype:success (D12). An
-    # untracked control_response (not one we sent) flows through as a plain event
-    # — the previous behavior for any ack the LiveView doesn't correlate.
+    # {:claude_chat_control, kind, request_id, response} (charter D17/D23) so
+    # ChatLive can (a) assert the echoed mode instead of trusting a bare
+    # subtype:success (D12) AND (b) correlate the ack to the SPECIFIC outbound
+    # request by its id — a rapid double mode-switch acks twice and only the
+    # LATEST outstanding request per kind may commit/revert; a stale ack is
+    # dropped by the consumer. An untracked control_response (not one we sent)
+    # flows through as a plain event — the previous behavior for any ack the
+    # LiveView doesn't correlate.
     defp dispatch_event(%{"type" => "control_response", "response" => response} = event, state)
          when is_map(response) do
-      case pop_pending(state, Map.get(response, "request_id")) do
+      request_id = Map.get(response, "request_id")
+
+      case pop_pending(state, request_id) do
         {nil, state} ->
           send(state.sink, {:claude_chat_event, event})
           state
 
         {kind, state} ->
-          send(state.sink, {:claude_chat_control, kind, Map.get(response, "response") || %{}})
+          send(
+            state.sink,
+            {:claude_chat_control, kind, request_id, Map.get(response, "response") || %{}}
+          )
+
           state
       end
     end
@@ -580,6 +618,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       send(state.sink, {:claude_chat_event, event})
       state
     end
+
+    # A plain string is the text-only default shape (wrap as ONE text block —
+    # unchanged w1–w2 behavior); a caller-assembled content-block list (text +
+    # base64 image blocks, charter D25) rides the user frame verbatim.
+    defp user_content_blocks(text) when is_binary(text),
+      do: [%{"type" => "text", "text" => text}]
+
+    defp user_content_blocks(blocks) when is_list(blocks), do: blocks
 
     # Classify an outbound control_request by its subtype so the inbound ack can
     # be typed. Anything else (or a malformed request) is left untracked.
@@ -598,15 +644,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     defp pop_pending(state, _), do: {nil, state}
 
+    # Honest write (charter D24): return the outcome instead of swallowing every
+    # failure to `:ok`. A port that has already closed is NOT in `Port.list/0`;
+    # writing to it would raise, so we check first and report `{:error, ...}`.
+    # Outbound acks/control frames ignore the return; the user-turn write threads
+    # it back to the composer so a lost frame is never rendered as sent.
     defp safe_command(port, data) when is_port(port) do
-      Port.command(port, data)
-      :ok
+      if port in Port.list() do
+        Port.command(port, data)
+        :ok
+      else
+        {:error, :port_closed}
+      end
     rescue
       e ->
         Logger.warning("claude chat: write to subprocess failed: #{inspect(e)}")
-        :ok
+        {:error, e}
     end
 
-    defp safe_command(_port, _data), do: :ok
+    defp safe_command(_port, _data), do: {:error, :no_port}
   end
 end
