@@ -739,11 +739,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
           input = block["input"]
 
           if StudioChat.todo_shaped?(input) do
+            # A TodoWrite-shaped call becomes the turn's ONE living checklist
+            # card (D39) instead of a generic tool row.
             apply_todo_block(acc, input)
           else
+            # Thread the FULL input + tool name so the diff renderer (D38) can
+            # dispatch on input SHAPE; the store already persists both verbatim
+            # (recorder.ex), so live and replay render the identical diff.
             append_message(acc, :tool, tool_line(name, input),
               tool_use_id: block["id"],
-              output: nil
+              output: nil,
+              tool: name,
+              input: input
             )
           end
 
@@ -1467,6 +1474,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <span style="color: var(--primary);">●</span>
                   <span><%= message.text %></span>
                 </div>
+                <%!-- D38: a file-mutating tool call renders as a real colored
+                      diff (dispatch on input SHAPE, not tool name) beneath the
+                      ● header; a non-diff shape renders nothing here and keeps
+                      the generic ⎿ row below. --%>
+                <ChatToolRenderer.tool_diff
+                  :if={ChatToolRenderer.diff?(message[:input])}
+                  input={message.input}
+                />
                 <%!-- The terminal's ⎿ result line: first line inline; multi-
                       line outputs expand on click (details/summary). --%>
                 <div
@@ -2500,14 +2515,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
-  # A tool row replays with its captured output so the ⎿ line survives reopen.
+  # A tool row replays with its captured output so the ⎿ line survives reopen,
+  # AND its input + tool name so the diff renderer (D38) reproduces the identical
+  # colored diff on a reopened session — replay parity is first-class.
   defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    meta = meta || %{}
+
     %{
       id: seq,
       role: :tool,
       text: md,
       html: nil,
-      output: Map.get(meta || %{}, "output")
+      output: Map.get(meta, "output"),
+      tool: Map.get(meta, "tool"),
+      input: Map.get(meta, "input"),
+      tool_use_id: Map.get(meta, "tool_use_id")
     }
   end
 
@@ -2579,7 +2601,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     todos = ChatToolRenderer.parse_todos(input)
     tracked = socket.assigns[:todo_card_id]
 
-    if is_integer(tracked) and Enum.any?(socket.assigns.messages, &(&1.id == tracked and &1.role == :todo)) do
+    if is_integer(tracked) and
+         Enum.any?(socket.assigns.messages, &(&1.id == tracked and &1.role == :todo)) do
       messages =
         Enum.map(socket.assigns.messages, fn
           %{id: ^tracked} = m -> %{m | todos: todos}
@@ -3146,15 +3169,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp tool_output_lines(out) when is_binary(out),
     do: out |> String.split("\n") |> Enum.count(&(String.trim(&1) != ""))
 
+  # A diff-shaped call (Edit/Write/MultiEdit by SHAPE) renders its content as a
+  # colored diff right below the header (D38) — the header shows only the path,
+  # terminal style (`● Update(path)`), never a duplicate old/new-string preview.
   defp tool_line(name, input) when is_map(input) do
-    preview =
-      input
-      |> Enum.filter(fn {_k, v} -> is_binary(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
-      |> Enum.take(2)
-      |> Enum.join(" · ")
+    if ChatToolRenderer.diff?(input) do
+      "#{name} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+        |> Enum.take(2)
+        |> Enum.join(" · ")
 
-    if preview == "", do: name, else: "#{name} — #{preview}"
+      if preview == "", do: name, else: "#{name} — #{preview}"
+    end
   end
 
   defp tool_line(name, _input), do: name

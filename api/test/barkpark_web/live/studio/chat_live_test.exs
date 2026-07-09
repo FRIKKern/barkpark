@@ -2433,7 +2433,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send_frame(
         sid,
         todo_frame("tu1", [
-          %{"content" => "read charter", "status" => "in_progress", "activeForm" => "reading the charter"},
+          %{
+            "content" => "read charter",
+            "status" => "in_progress",
+            "activeForm" => "reading the charter"
+          },
           %{"content" => "write code", "status" => "pending"}
         ])
       )
@@ -2451,7 +2455,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         sid,
         todo_frame("tu2", [
           %{"content" => "read charter", "status" => "completed"},
-          %{"content" => "write code", "status" => "in_progress", "activeForm" => "writing the code"}
+          %{
+            "content" => "write code",
+            "status" => "in_progress",
+            "activeForm" => "writing the code"
+          }
         ])
       )
 
@@ -2487,6 +2495,167 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       )
 
       refute render(view) =~ "Update todos"
+    end
+  end
+
+  # ── D38: Edit/Write tool calls render as real colored diffs ─────────────────
+  #
+  # Dispatch is on input SHAPE, never tool name (host-binary-dependent). The full
+  # input is threaded through BOTH render paths (live append + replay) and the
+  # persisted store, so a reopened session reproduces the identical diff.
+  describe "tool diffs (D38)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp send_tool_use(sid, name, input) do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "id" => "toolu_x", "name" => name, "input" => input}
+             ]
+           }
+         }}
+      )
+    end
+
+    test "an Edit-shaped input renders a line diff with +/− token rows", %{view: view, sid: sid} do
+      send_tool_use(sid, "Edit", %{
+        "file_path" => "/app/x.ex",
+        "old_string" => "alpha\nbeta\ngamma",
+        "new_string" => "alpha\nBETA\ngamma",
+        "replace_all" => false
+      })
+
+      html = render(view)
+      # removed old line + added new line, each with its role-color token pair
+      assert html =~ "var(--danger-soft)"
+      assert html =~ "var(--ok-soft)"
+      assert html =~ "beta"
+      assert html =~ "BETA"
+      # unchanged context survives
+      assert html =~ "alpha"
+      # the ● header shows only the path — the diff below carries the content,
+      # so the old preview ("old_string: …") would duplicate it
+      assert html =~ "Edit — /app/x.ex"
+      refute html =~ "old_string:"
+      refute html =~ "new_string:"
+    end
+
+    test "dispatch is on SHAPE, not tool name — a renamed Edit tool still diffs",
+         %{view: view, sid: sid} do
+      # The cmux fork renames tools; an Edit-shaped input under ANY name diffs.
+      send_tool_use(sid, "CustomFileEditor", %{
+        "file_path" => "/app/y.ex",
+        "old_string" => "was here",
+        "new_string" => "now here"
+      })
+
+      html = render(view)
+      assert html =~ "var(--ok-soft)"
+      assert html =~ "now here"
+      assert html =~ "was here"
+    end
+
+    test "a Write-shaped input renders an all-added diff", %{view: view, sid: sid} do
+      send_tool_use(sid, "Write", %{
+        "file_path" => "/app/new.ex",
+        "content" => "line one\nline two\nline three"
+      })
+
+      html = render(view)
+      assert html =~ "var(--ok-soft)"
+      refute html =~ "var(--danger-soft)"
+      assert html =~ "line one"
+      assert html =~ "line two"
+    end
+
+    test "a MultiEdit-shaped input renders stacked hunks defensively",
+         %{view: view, sid: sid} do
+      send_tool_use(sid, "MultiEdit", %{
+        "file_path" => "/app/z.ex",
+        "edits" => [
+          %{"old_string" => "first old", "new_string" => "first new"},
+          %{"old_string" => "second old", "new_string" => "second new"}
+        ]
+      })
+
+      html = render(view)
+      assert html =~ "first old"
+      assert html =~ "first new"
+      assert html =~ "second old"
+      assert html =~ "second new"
+    end
+
+    test "an unknown shape falls back to the generic row, no diff", %{view: view, sid: sid} do
+      send_tool_use(sid, "Bash", %{"command" => "ls -la"})
+
+      html = render(view)
+      assert html =~ "Bash"
+      refute html =~ "var(--ok-soft)"
+    end
+
+    test "a >100-line Write collapses to ~20 lines with an accurate overflow count",
+         %{view: view, sid: sid} do
+      content = 1..120 |> Enum.map(&"row #{&1}") |> Enum.join("\n")
+      send_tool_use(sid, "Write", %{"file_path" => "/app/big.ex", "content" => content})
+
+      html = render(view)
+      assert html =~ "<details>"
+      # first ~20 lines visible in the collapsed summary
+      assert html =~ "row 1"
+      assert html =~ "row 20"
+      # honest overflow: 120 total − 20 shown = 100 more
+      assert html =~ "+100 more lines"
+    end
+
+    test "the diff engine is TextDiff — no second diff engine in api/lib" do
+      # Guard against a copy-pasted Myers/LCS. TextDiff.diff_lines/2 is the ONE
+      # engine; only its own definition may mention myers_difference.
+      hits =
+        "lib"
+        |> Path.join("**/*.ex")
+        |> Path.wildcard()
+        |> Enum.filter(&(File.read!(&1) =~ "myers_difference"))
+
+      assert hits == [], "unexpected diff engine(s): #{inspect(hits)}"
+    end
+
+    test "replay parity: a reopened session with a persisted Edit row shows the same diff",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Edit — file_path: /app/r.ex",
+          metadata: %{
+            "tool" => "Edit",
+            "tool_use_id" => "toolu_r",
+            "input" => %{
+              "file_path" => "/app/r.ex",
+              "old_string" => "stored old",
+              "new_string" => "stored new"
+            }
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      # display-only reopen reproduces the identical colored diff from the store
+      assert html =~ "var(--ok-soft)"
+      assert html =~ "var(--danger-soft)"
+      assert html =~ "stored old"
+      assert html =~ "stored new"
     end
   end
 
@@ -3067,7 +3236,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
        "type" => "assistant",
        "message" => %{
          "content" => [
-           %{"type" => "tool_use", "id" => id, "name" => "TodoWrite", "input" => %{"todos" => todos}}
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => "TodoWrite",
+             "input" => %{"todos" => todos}
+           }
          ]
        }
      }}
