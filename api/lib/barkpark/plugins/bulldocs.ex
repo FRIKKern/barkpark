@@ -34,6 +34,10 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
 
+  # Papers is core content — surfaced in the MAIN tier of the Desk Structure.
+  @impl Barkpark.Plugin
+  def structure_placement, do: :main
+
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.PortableDoc.BodyWalk
 

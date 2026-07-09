@@ -892,9 +892,42 @@ defmodule Barkpark.Plugin do
               ctx :: map()
             ) :: [cli_command()]
 
+  # ── Per-workspace enablement declaration (ssp-w1-plugin-enablement) ───
+  #
+  # Two OPTIONAL callbacks that let a plugin declare, at compile time, how it
+  # participates in a fresh workspace's Desk Structure. The `__using__/1`
+  # defaults (`default_enabled?/0 => true`, `structure_placement/0 => :plugins`)
+  # keep every existing plugin unchanged unless it overrides them. The
+  # per-workspace `workspaces.settings["plugins"]` override map (resolved by
+  # `Barkpark.Plugins.Enablement.effective/1`) wins over these declarations —
+  # this is only the baked-in default a fresh workspace starts from.
+
+  @doc """
+  Whether this plugin is SURFACED by default in a fresh workspace's Studio /
+  desk. `false` means the plugin is still installed/loaded (schemas, routes,
+  and workers all register at boot) but hidden from the three surfacing
+  collectors — desk items, top-menu tabs, doc actions — until an admin turns
+  it on for that workspace. The default (`use Barkpark.Plugin`) is `true`.
+  """
+  @callback default_enabled?() :: boolean()
+
+  @doc """
+  Where this plugin's desk items land in the tiered Desk Structure:
+
+    * `:main`     — top-level in the MAIN tier alongside Papers/Sheets/Tasks
+    * `:plugins`  — under the collapsed "Plugins" node (the default)
+    * `:top_menu` — out of the tree entirely; reached via a top-menu tab
+
+  Consumed by the tiered-tree builder; a per-workspace override promotes or
+  demotes a specific plugin. The default (`use Barkpark.Plugin`) is `:plugins`.
+  """
+  @callback structure_placement() :: :main | :plugins | :top_menu
+
   @optional_callbacks register_routes: 1,
                       register_workers: 1,
                       oban_crontab: 0,
+                      default_enabled?: 0,
+                      structure_placement: 0,
                       register_schemas: 1,
                       validate_settings: 1,
                       checkers: 0,
@@ -981,6 +1014,18 @@ defmodule Barkpark.Plugin do
 
       @impl Barkpark.Plugin
       def desk_items(_dataset), do: []
+
+      # ── Per-workspace enablement declaration defaults (ssp-w1) ──────
+      #
+      # A fresh workspace surfaces the plugin (`default_enabled?/0 => true`)
+      # under the "Plugins" node (`structure_placement/0 => :plugins`).
+      # Plugins that belong in MAIN, live in the top menu, or ship off by
+      # default override these.
+      @impl Barkpark.Plugin
+      def default_enabled?, do: true
+
+      @impl Barkpark.Plugin
+      def structure_placement, do: :plugins
 
       # ── Resolver defaults ──────────────────────────────────────────
       #
@@ -1128,6 +1173,8 @@ defmodule Barkpark.Plugin do
                      register_routes: 1,
                      register_workers: 1,
                      oban_crontab: 0,
+                     default_enabled?: 0,
+                     structure_placement: 0,
                      register_schemas: 1,
                      validate_settings: 1,
                      checkers: 0,

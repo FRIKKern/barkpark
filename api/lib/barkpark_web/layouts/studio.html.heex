@@ -41,6 +41,7 @@
         nav_section={assigns[:nav_section]}
         current_path={assigns[:current_path]}
         admin?={assigns[:shares_admin?] == true}
+        workspace_id={assigns[:current_workspace] && assigns[:current_workspace].id}
       />
     </:tabs>
     <:actions>

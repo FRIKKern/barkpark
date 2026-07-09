@@ -66,6 +66,11 @@ defmodule Barkpark.Plugins.Github do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
 
+  # Installed but OFF by default — surfaced under the "Plugins" node only when
+  # an admin enables it for the workspace.
+  @impl Barkpark.Plugin
+  def default_enabled?, do: false
+
   # The settings row every credential lands in (leading dot-segment of each
   # field name). Kept as one constant so the schema and the validator agree.
   @settings_row "github"

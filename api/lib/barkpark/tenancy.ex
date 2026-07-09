@@ -242,6 +242,74 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_theme(_workspace_or_id, _theme), do: {:error, :not_found}
 
+  # ── Workspace plugin enablement (ssp-w1-plugin-enablement) ────────────────
+  #
+  # The per-workspace SURFACING overrides for plugins live in the same
+  # `settings` jsonb bag as `theme`, under the `"plugins"` key. These two
+  # accessors mirror `workspace_theme/1` / `set_workspace_theme/2` exactly:
+  # read guards a nil/legacy row to the empty map; write merges into `settings`
+  # so the theme (and any other preference) is preserved. The resolution logic
+  # — merging these overrides with each plugin's declaration defaults — lives in
+  # `Barkpark.Plugins.Enablement.effective/1`, NOT here; this module only
+  # persists and reads back the raw override map.
+
+  @doc """
+  Read a workspace's raw plugin-override map from its `settings` bag.
+
+  Returns `settings["plugins"]` when it is a map, else `%{}`. Guards a `nil`
+  workspace and a workspace whose `settings` is nil/not-a-map (a legacy row) →
+  `%{}`. The map shape is
+  `%{"<plugin>" => %{"enabled" => bool, "placement" => "main"|"plugins"|"top_menu"}}`;
+  interpreting it against the plugin declarations is `Enablement.effective/1`'s job.
+  """
+  @spec workspace_plugin_settings(Workspace.t() | nil) :: map()
+  def workspace_plugin_settings(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["plugins"] do
+      plugins when is_map(plugins) -> plugins
+      _ -> %{}
+    end
+  end
+
+  def workspace_plugin_settings(_), do: %{}
+
+  @doc """
+  Persist a workspace's plugin-override map into its `settings` bag.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Merges into the
+  existing `settings` map under the `"plugins"` key so the theme and unrelated
+  preferences are preserved. A non-map `plugins` value returns
+  `{:error, :invalid_plugins}` without touching the DB; a missing workspace
+  returns `{:error, :not_found}`.
+  """
+  @spec set_workspace_plugin_settings(Workspace.t() | binary(), map()) ::
+          {:ok, Workspace.t()} | {:error, :invalid_plugins | :not_found | Ecto.Changeset.t()}
+  def set_workspace_plugin_settings(workspace_or_id, plugins) when is_map(plugins) do
+    do_set_workspace_plugin_settings(workspace_or_id, plugins)
+  end
+
+  def set_workspace_plugin_settings(_workspace_or_id, _plugins), do: {:error, :invalid_plugins}
+
+  defp do_set_workspace_plugin_settings(%Workspace{} = workspace, plugins) do
+    settings = Map.put(workspace.settings || %{}, "plugins", plugins)
+
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      settings: settings
+    })
+    |> Repo.update()
+  end
+
+  defp do_set_workspace_plugin_settings(id, plugins) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_workspace_plugin_settings(workspace, plugins)
+    end
+  end
+
+  defp do_set_workspace_plugin_settings(_workspace_or_id, _plugins), do: {:error, :not_found}
+
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
   def get_project_by_id(nil), do: nil

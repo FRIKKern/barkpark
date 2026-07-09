@@ -54,6 +54,11 @@ defmodule Barkpark.Plugins.Tickets do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
 
+  # Installed but OFF by default — surfaced under the "Plugins" node only when
+  # an admin enables it for the workspace.
+  @impl Barkpark.Plugin
+  def default_enabled?, do: false
+
   alias Barkpark.Content.SchemaDefinition
 
   @dataset_default "production"

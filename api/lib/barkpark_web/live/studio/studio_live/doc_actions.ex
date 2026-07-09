@@ -44,12 +44,23 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   defp socket_to_assigns(assigns) when is_map(assigns), do: assigns
 
   defp doc_actions_ctx(assigns) do
+    # `:workspace_id` threads the current workspace into the resolver ctx so
+    # the doc-actions surfacing collector skips per-workspace-disabled plugins
+    # (ssp-w1-plugin-enablement). Nil when no workspace is resolved → no filter.
     %{
       dataset: assigns[:dataset],
       doc_id: doc_id_from_assigns(assigns),
       doc_type: assigns[:editor_type],
-      doc: assigns[:editor_doc]
+      doc: assigns[:editor_doc],
+      workspace_id: workspace_id_from_assigns(assigns)
     }
+  end
+
+  defp workspace_id_from_assigns(assigns) do
+    case assigns[:current_workspace] do
+      %{id: id} -> id
+      _ -> nil
+    end
   end
 
   defp doc_id_from_assigns(assigns) do

@@ -31,6 +31,11 @@ defmodule Barkpark.Plugins.OnixEdit do
   use Barkpark.Plugin,
     manifest_path: "../../../priv/plugins/onixedit/plugin.json"
 
+  # Installed but OFF by default — surfaced under the "Plugins" node only when
+  # an admin enables it for the workspace.
+  @impl Barkpark.Plugin
+  def default_enabled?, do: false
+
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.OnixEdit.Schemas.{Contributor, TextContent}
 

@@ -58,6 +58,10 @@ defmodule Barkpark.Plugins.Sheets do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
 
+  # Sheets is core content — surfaced in the MAIN tier of the Desk Structure.
+  @impl Barkpark.Plugin
+  def structure_placement, do: :main
+
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: SheetCore
