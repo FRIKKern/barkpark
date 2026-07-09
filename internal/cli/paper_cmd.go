@@ -194,10 +194,13 @@ func runPaperView(out *writer, g globals, args []string) int {
 		return paperError(out, jsonOut, "decode", "decode blocks: "+derr.Error(), exitGeneric)
 	}
 
-	// Resolve width + theme + profile from stdout's nature.
+	// Resolve width + theme + profile from stdout's nature. The theme IDENTITY
+	// (which emitted skin) comes from BP_THEME/config via ResolveThemeID; the
+	// --theme flag (opt.theme) still selects the light/dark MODE this wave (D30).
 	stdoutTTY := isatty.IsTerminal(os.Stdout.Fd())
 	width := paperResolveWidth(opt, stdoutTTY)
-	theme := paperResolveTheme(opt.theme)
+	cfg, _ := LoadConfig() // missing/unreadable config → nil → env/default theme id
+	theme := paperResolveTheme(opt.theme, ResolveThemeID(cfg))
 	profile := paperResolveProfile(opt.profile, stdoutTTY)
 
 	// Bind lipgloss's GLOBAL color profile to the resolved pdrender.Profile. This
@@ -352,19 +355,22 @@ func paperResolveWidth(opt parsedPaperArgs, stdoutTTY bool) int {
 // same one-shot global-mutation pattern as the SetColorProfile bridge below;
 // the CLI renders once and exits, so a global set is safe. auto leaves
 // detection untouched and just picks the preset via HasDarkBackground().
-func paperResolveTheme(theme string) pdrender.Theme {
-	switch strings.ToLower(strings.TrimSpace(theme)) {
+// themeID selects the emitted skin (pdrender.ThemeFor resolves it; unknown →
+// evergreen); mode is the --theme flag value (light/dark/auto), still MODE this
+// wave per D30. Identity and mode are the two orthogonal switches.
+func paperResolveTheme(mode, themeID string) pdrender.Theme {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "light":
 		lipgloss.SetHasDarkBackground(false)
-		return pdrender.LightTheme()
+		return pdrender.ThemeFor(themeID, "light")
 	case "dark":
 		lipgloss.SetHasDarkBackground(true)
-		return pdrender.DarkTheme()
+		return pdrender.ThemeFor(themeID, "dark")
 	default: // auto + unknown — don't force; honour the detected background
 		if lipgloss.HasDarkBackground() {
-			return pdrender.DarkTheme()
+			return pdrender.ThemeFor(themeID, "dark")
 		}
-		return pdrender.LightTheme()
+		return pdrender.ThemeFor(themeID, "light")
 	}
 }
 

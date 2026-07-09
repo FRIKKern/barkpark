@@ -518,3 +518,54 @@ func TestSetActiveServer(t *testing.T) {
 		t.Errorf("SetActiveServer should not blank unset scope: w=%q p=%q", c.Workspace, c.Project)
 	}
 }
+
+// TestResolveThemeID pins the theme-identity precedence (ts-w4c): BP_THEME env >
+// config.json "theme" > the evergreen default, with empty/whitespace at any tier
+// falling through. The --theme flag is unrelated (it selects light/dark MODE).
+func TestResolveThemeID(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string // "" = unset
+		cfg  *Config
+		want string
+	}{
+		{"nil config, no env → default", "", nil, DefaultThemeID},
+		{"empty config, no env → default", "", &Config{}, DefaultThemeID},
+		{"config theme, no env", "", &Config{Theme: "midnight"}, "midnight"},
+		{"env overrides config", "amber", &Config{Theme: "midnight"}, "amber"},
+		{"env, nil config", "amber", nil, "amber"},
+		{"whitespace config falls through to default", "", &Config{Theme: "   "}, DefaultThemeID},
+		{"whitespace env falls through to config", "  ", &Config{Theme: "midnight"}, "midnight"},
+		{"env is trimmed", "  amber  ", nil, "amber"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// t.Setenv("") sets an empty value (auto-restored); ResolveThemeID
+			// treats empty == unset, so this covers the "no env" tiers too.
+			t.Setenv("BP_THEME", c.env)
+			if got := ResolveThemeID(c.cfg); got != c.want {
+				t.Errorf("ResolveThemeID(env=%q, cfg=%+v) = %q, want %q", c.env, c.cfg, got, c.want)
+			}
+		})
+	}
+}
+
+// TestConfigThemeRoundTrips proves the theme key persists through save/load and an
+// old config without it loads cleanly (empty → default via ResolveThemeID).
+func TestConfigThemeRoundTrips(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv("BP_THEME", "")
+	if err := SaveConfig(&Config{Server: "http://localhost:4000", Theme: "midnight"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.Theme != "midnight" {
+		t.Errorf("Theme did not round-trip: got %q, want %q", got.Theme, "midnight")
+	}
+	if id := ResolveThemeID(got); id != "midnight" {
+		t.Errorf("ResolveThemeID after load = %q, want midnight", id)
+	}
+}

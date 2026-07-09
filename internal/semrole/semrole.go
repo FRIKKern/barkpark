@@ -108,7 +108,17 @@ func Roles() []string { return []string{"ok", "info", "warn", "danger"} }
 // seam the CLI/TUI paint their status dots through, so an `ok` dot in a `bp`
 // table is byte-identically the same design token as the SPA's --ok.
 func RoleColor(role string) (color lipgloss.AdaptiveColor, ok bool) {
-	tone, found := GenStatusTone[role]
+	return RoleColorFor(DefaultTheme, role)
+}
+
+// RoleColorFor is the theme-parameterized RoleColor: it reads the status tone for
+// one role out of Resolve(theme) (tokens_gen.go's theme-keyed map), defaulting to
+// the evergreen skin for an unknown/empty theme id. RoleColor is this with the
+// default theme — the byte-frozen evergreen accessor every current caller uses.
+// The seam a later wave threads a resolved theme id through so a `bp` status dot
+// changes with the theme identity, orthogonally to light/dark mode.
+func RoleColorFor(theme, role string) (color lipgloss.AdaptiveColor, ok bool) {
+	tone, found := Resolve(theme).StatusTone[role]
 	return tone, found
 }
 
@@ -119,8 +129,26 @@ func RoleColor(role string) (color lipgloss.AdaptiveColor, ok bool) {
 // ok=false for any non-lifecycle string — never a guess. done/closed stay TEAL
 // here (their lifecycle hue), deliberately distinct from status.ok green.
 func LifecycleColor(state string) (color lipgloss.AdaptiveColor, ok bool) {
-	hue, found := GenLifecycleHue[state]
+	return LifecycleColorFor(DefaultTheme, state)
+}
+
+// LifecycleColorFor is the theme-parameterized LifecycleColor, reading the glyph
+// hue out of Resolve(theme).LifecycleHue and defaulting to evergreen for an
+// unknown/empty id. LifecycleColor is this with the default theme.
+func LifecycleColorFor(theme, state string) (color lipgloss.AdaptiveColor, ok bool) {
+	hue, found := Resolve(theme).LifecycleHue[state]
 	return hue, found
+}
+
+// ChromeColorFor returns a theme's CLI/TUI chrome role colour (chrome-accent,
+// chrome-text-secondary, chrome-dim, chrome-ink, …) out of ResolveChrome(theme),
+// defaulting to evergreen for an unknown/empty id. It is the chrome peer of
+// RoleColorFor: the taskboard reads its neutral/dim/title chrome through it so a
+// theme change moves the board's chrome with every other surface. An unrecognised
+// role yields the zero AdaptiveColor and ok=false — callers must not paint on !ok.
+func ChromeColorFor(theme, role string) (color lipgloss.AdaptiveColor, ok bool) {
+	c, found := ResolveChrome(theme).Chrome[role]
+	return c, found
 }
 
 // Color resolves a coloured token to its light/dark hex pair, sourced from the

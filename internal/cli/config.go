@@ -35,6 +35,12 @@ type Config struct {
 	Dataset     string `json:"dataset,omitempty"`
 	Output      string `json:"output,omitempty"`
 
+	// Theme is the persisted theme IDENTITY the CLI/TUI renders with (the emitted
+	// skin — "evergreen" today). It is ORTHOGONAL to light/dark MODE (the --theme
+	// flag still selects mode this wave, D30). Empty → the evergreen default.
+	// BP_THEME overrides it per invocation; ResolveThemeID applies the precedence.
+	Theme string `json:"theme,omitempty"`
+
 	// Cloud control-plane credentials (cloud-12). These are SEPARATE from the
 	// per-server Token above: Token authenticates against ONE content server,
 	// CloudToken authenticates the user against the Barkpark Cloud control plane
@@ -72,6 +78,30 @@ func (c *Config) CloudClient() *cloudclient.Client {
 // authed Cloud commands check before making any control-plane call.
 func (c *Config) HasCloudToken() bool {
 	return c != nil && strings.TrimSpace(c.CloudToken) != ""
+}
+
+// DefaultThemeID is the built-in skin every surface falls back to. It mirrors the
+// emitted pdrender.DefaultTheme / semrole.DefaultTheme const, duplicated here so
+// internal/cli need not import a render package for one string.
+const DefaultThemeID = "evergreen"
+
+// ResolveThemeID picks the active theme IDENTITY by precedence: the BP_THEME env
+// (highest — a per-invocation override), then the persisted config.json "theme"
+// key, then the built-in evergreen default. An empty/whitespace value at any tier
+// falls through to the next. This is theme identity only — orthogonal to the
+// light/dark MODE the --theme flag selects this wave (charter D30). An unknown id
+// is returned as-is; the render-side Resolve(theme) is what falls back to
+// evergreen for it, so a typo degrades to the default skin instead of erroring.
+func ResolveThemeID(c *Config) string {
+	if env := strings.TrimSpace(os.Getenv("BP_THEME")); env != "" {
+		return env
+	}
+	if c != nil {
+		if t := strings.TrimSpace(c.Theme); t != "" {
+			return t
+		}
+	}
+	return DefaultThemeID
 }
 
 // ServerEntry is one remembered connection in the connect history. It carries

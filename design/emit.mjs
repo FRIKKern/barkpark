@@ -603,6 +603,19 @@ function alignEq(rows) {
   const w = Math.max(...p.map((x) => x.head.length));
   return p.map((x) => `${x.head.padEnd(w)} = ${x.tail}`);
 }
+// alignFields formats gofmt-canonical struct-field decls ("<name> <type>"): the
+// field name is padded so the type column aligns (spaces, exactly like gofmt).
+function alignFields(rows) {
+  const p = rows.map((r) => { const i = r.indexOf(" "); return { head: r.slice(0, i), tail: r.slice(i + 1).trimStart() }; });
+  const w = Math.max(...p.map((x) => x.head.length));
+  return p.map((x) => `${x.head.padEnd(w)} ${x.tail}`);
+}
+
+// DEFAULT_THEME is the built-in evergreen skin every Go Resolve(theme) defaults
+// to for an unknown/empty id. Emitted as a `DefaultTheme` const in each generated
+// package. Adding theme N+1 grows the genTheme* maps — one keyed entry — and the
+// Resolve seam already threads it to every consumer (charter D28/D30).
+const DEFAULT_THEME = "evergreen";
 
 function goHeader(pkg) {
   return [
@@ -645,6 +658,35 @@ function taskboardGo() {
     "",
     "// GenBrailleStill is the reduced-motion steady frame.",
     `var GenBrailleStill = "${glyphOf(life.in_progress.framesStill)}"`,
+    "",
+    // ── theme resolution seam (ts-w4c) ──────────────────────────────────────
+    "// DefaultTheme is the built-in evergreen skin. Resolve defaults to it for an",
+    "// unknown/empty theme id; theme.go's buildPalette reads Resolve(theme).Lifecycle.",
+    `const DefaultTheme = ${JSON.stringify(DEFAULT_THEME)}`,
+    "",
+    "// ThemeLifecycle bundles one theme's lifecycle token map + braille frames.",
+    "type ThemeLifecycle struct {",
+    ...alignFields([
+      "\tLifecycle map[string]GenLifecycleToken",
+      "\tBrailleFrames [10]string",
+      "\tBrailleStill string",
+    ]),
+    "}",
+    "",
+    "// genLifecycleThemes keys each theme's lifecycle set by id (evergreen REFERENCES",
+    "// GenLifecycle/GenBrailleFrames/GenBrailleStill — no re-typed literals).",
+    "var genLifecycleThemes = map[string]ThemeLifecycle{",
+    `\t${JSON.stringify(DEFAULT_THEME)}: {Lifecycle: GenLifecycle, BrailleFrames: GenBrailleFrames, BrailleStill: GenBrailleStill},`,
+    "}",
+    "",
+    "// Resolve returns a theme's lifecycle token set, defaulting to evergreen for an",
+    "// unknown or empty id.",
+    "func Resolve(theme string) ThemeLifecycle {",
+    "\tif t, ok := genLifecycleThemes[theme]; ok {",
+    "\t\treturn t",
+    "\t}",
+    "\treturn genLifecycleThemes[DefaultTheme]",
+    "}",
     "",
   ].join("\n");
 }
@@ -719,6 +761,68 @@ function pdrenderGo() {
     `\tGenReadingBodySize      = ${r.body.size}`,
     ")",
     "",
+    // ── theme resolution seam (ts-w4c) ──────────────────────────────────────
+    "// DefaultTheme is the built-in evergreen skin. Resolve defaults to it for any",
+    "// unknown/empty theme id, so today (evergreen-only) every id yields these exact",
+    "// bytes — the styleguide golden stays frozen. Adding theme N+1 grows genPalette",
+    "// (one keyed entry); theme.go's buildTheme already reads Resolve(themeID).",
+    `const DefaultTheme = ${JSON.stringify(DEFAULT_THEME)}`,
+    "",
+    "// Palette is one theme's resolved pdrender token set. The Chrome* roles are the",
+    "// zinc cliChrome family (ChromeInk/ChromeDim are NOT the warmer reading Ink/Dim —",
+    "// the decoy guard theme.go documents); ReadingMuted/ReadingAccent are the reading",
+    "// family; Tone* are the semantic status tones the Callout builder paints.",
+    "type Palette struct {",
+    ...alignFields([
+      "\tChromeAccent lipgloss.AdaptiveColor",
+      "\tChromeInk lipgloss.AdaptiveColor",
+      "\tChromeTextSecondary lipgloss.AdaptiveColor",
+      "\tChromeDim lipgloss.AdaptiveColor",
+      "\tRule lipgloss.AdaptiveColor",
+      "\tCodeFg lipgloss.AdaptiveColor",
+      "\tCodeBg lipgloss.AdaptiveColor",
+      "\tReadingMuted lipgloss.AdaptiveColor",
+      "\tReadingAccent lipgloss.AdaptiveColor",
+      "\tToneInfo lipgloss.AdaptiveColor",
+      "\tToneOK lipgloss.AdaptiveColor",
+      "\tToneWarn lipgloss.AdaptiveColor",
+      "\tToneDanger lipgloss.AdaptiveColor",
+      "\tToneNeutral lipgloss.AdaptiveColor",
+    ]),
+    "}",
+    "",
+    "// genPalette keys each theme's Palette by id. Values REFERENCE the Gen* vars",
+    "// above (no re-typed literals) so the evergreen skin is byte-identical to them.",
+    "var genPalette = map[string]Palette{",
+    `\t${JSON.stringify(DEFAULT_THEME)}: {`,
+    ...alignMap([
+      "\t\tChromeAccent: GenChromeAccent,",
+      "\t\tChromeInk: GenChromeInk,",
+      "\t\tChromeTextSecondary: GenChromeTextSecondary,",
+      "\t\tChromeDim: GenChromeDim,",
+      "\t\tRule: GenRule,",
+      "\t\tCodeFg: GenCodeFg,",
+      "\t\tCodeBg: GenCodeBg,",
+      "\t\tReadingMuted: GenDim,",
+      "\t\tReadingAccent: GenReadingAccent,",
+      "\t\tToneInfo: GenToneInfo,",
+      "\t\tToneOK: GenToneOK,",
+      "\t\tToneWarn: GenToneWarn,",
+      "\t\tToneDanger: GenToneDanger,",
+      "\t\tToneNeutral: GenToneNeutral,",
+    ]),
+    "\t},",
+    "}",
+    "",
+    "// Resolve returns the pdrender Palette for a theme id, defaulting to evergreen",
+    "// for an unknown or empty id (never a partial/zero palette).",
+    "func Resolve(theme string) Palette {",
+    "\tif p, ok := genPalette[theme]; ok {",
+    "\t\treturn p",
+    "\t}",
+    "\treturn genPalette[DefaultTheme]",
+    "}",
+    "",
   ].join("\n");
 }
 
@@ -769,6 +873,36 @@ function semroleGo() {
     "// cross-surface coherence fix.",
     "var GenANSI16 = map[string]int{",
     ...alignMap(SEMROLE_TONES.map(([, role]) => `\t"${role}": ${SEMROLE_ANSI16[role]},`)),
+    "}",
+    "",
+    // ── theme resolution seam (ts-w4c) ──────────────────────────────────────
+    "// DefaultTheme is the built-in evergreen skin every Resolve defaults to for an",
+    "// unknown/empty theme id. Adding theme N+1 grows genTones (one keyed entry);",
+    "// the RoleColorFor/LifecycleColorFor accessors already thread the id through.",
+    `const DefaultTheme = ${JSON.stringify(DEFAULT_THEME)}`,
+    "",
+    "// ThemeTones bundles one theme's status + lifecycle + ANSI-16 token maps.",
+    "type ThemeTones struct {",
+    ...alignFields([
+      "\tStatusTone map[string]lipgloss.AdaptiveColor",
+      "\tLifecycleHue map[string]lipgloss.AdaptiveColor",
+      "\tANSI16 map[string]int",
+    ]),
+    "}",
+    "",
+    "// genTones keys each theme's tones by id. The evergreen entry REFERENCES the",
+    "// Gen* maps above (no re-typed literals) so it is byte-identical to them.",
+    "var genTones = map[string]ThemeTones{",
+    `\t${JSON.stringify(DEFAULT_THEME)}: {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},`,
+    "}",
+    "",
+    "// Resolve returns a theme's status/lifecycle/ANSI-16 token set, defaulting to",
+    "// evergreen for an unknown or empty id.",
+    "func Resolve(theme string) ThemeTones {",
+    "\tif t, ok := genTones[theme]; ok {",
+    "\t\treturn t",
+    "\t}",
+    "\treturn genTones[DefaultTheme]",
     "}",
     "",
   ].join("\n");
@@ -842,6 +976,27 @@ function cliChromeGo() {
     "// GenChrome maps a cliChrome role name to its adaptive colour.",
     "var GenChrome = map[string]lipgloss.AdaptiveColor{",
     ...alignMap(all.map(([name, role]) => `\t"${role}": GenChrome${name},`)),
+    "}",
+    "",
+    // ── theme resolution seam (ts-w4c) ──────────────────────────────────────
+    "// ThemeChrome bundles one theme's CLI/TUI chrome role map. Keyed off the same",
+    "// DefaultTheme const (tokens_gen.go); ResolveChrome defaults to evergreen for an",
+    "// unknown/empty id so ChromeColorFor never returns a partial palette.",
+    "type ThemeChrome struct {",
+    "\tChrome map[string]lipgloss.AdaptiveColor",
+    "}",
+    "",
+    "// genChrome keys each theme's chrome map by id (evergreen REFERENCES GenChrome).",
+    "var genChrome = map[string]ThemeChrome{",
+    `\t${JSON.stringify(DEFAULT_THEME)}: {Chrome: GenChrome},`,
+    "}",
+    "",
+    "// ResolveChrome returns a theme's chrome role map, defaulting to evergreen.",
+    "func ResolveChrome(theme string) ThemeChrome {",
+    "\tif c, ok := genChrome[theme]; ok {",
+    "\t\treturn c",
+    "\t}",
+    "\treturn genChrome[DefaultTheme]",
     "}",
     "",
     "// GenProviderMark is the generated cloud-provider IDENTITY palette",

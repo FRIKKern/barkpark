@@ -5,7 +5,10 @@
 // the exact same `internal/pdrender` code `bp paper view` runs; there is no
 // second/imitation renderer. It exposes one JS global:
 //
-//	bpRenderTUI(blocksJSON string, width int, theme string) -> htmlString
+//	bpRenderTUI(blocksJSON string, width int, mode string, themeID string) -> htmlString
+//
+// mode is the light/dark switch ("dark" default); themeID is the optional theme
+// identity (which emitted skin — "evergreen" default). The two are orthogonal.
 //
 // The render produces ANSI (SGR), which we convert to self-contained HTML
 // (colored <span>s inside a <pre>) here in Go so the caller gets a
@@ -31,9 +34,16 @@ func renderTUI(_ js.Value, args []js.Value) any {
 	if len(args) > 1 && args[1].Type() == js.TypeNumber && args[1].Int() > 0 {
 		width = args[1].Int()
 	}
-	themeName := "dark"
+	// arg[2] is the light/dark MODE (the JS "theme" arg — a documented mode/theme
+	// name collision, D30); arg[3] is the optional theme IDENTITY (which emitted
+	// skin — "evergreen" today, empty → evergreen via pdrender.Resolve).
+	mode := "dark"
 	if len(args) > 2 && args[2].Type() == js.TypeString {
-		themeName = args[2].String()
+		mode = args[2].String()
+	}
+	themeID := pdrender.DefaultTheme
+	if len(args) > 3 && args[3].Type() == js.TypeString && args[3].String() != "" {
+		themeID = args[3].String()
 	}
 
 	lipgloss.SetColorProfile(termenv.TrueColor)
@@ -42,10 +52,7 @@ func renderTUI(_ js.Value, args []js.Value) any {
 	if err != nil {
 		return "<pre>decode error: " + htmlEscape(err.Error()) + "</pre>"
 	}
-	theme := pdrender.DarkTheme()
-	if themeName == "light" {
-		theme = pdrender.LightTheme()
-	}
+	theme := pdrender.ThemeFor(themeID, mode)
 	ctx := pdrender.RenderCtx{Width: width, Theme: theme, Profile: pdrender.TrueColor}
 	ansi := pdrender.DefaultRegistry(theme).RenderDoc(blocks, ctx)
 	return ansiToHTML(ansi)

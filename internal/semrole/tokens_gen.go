@@ -53,3 +53,30 @@ var GenANSI16 = map[string]int{
 	"warn":   33,
 	"danger": 31,
 }
+
+// DefaultTheme is the built-in evergreen skin every Resolve defaults to for an
+// unknown/empty theme id. Adding theme N+1 grows genTones (one keyed entry);
+// the RoleColorFor/LifecycleColorFor accessors already thread the id through.
+const DefaultTheme = "evergreen"
+
+// ThemeTones bundles one theme's status + lifecycle + ANSI-16 token maps.
+type ThemeTones struct {
+	StatusTone   map[string]lipgloss.AdaptiveColor
+	LifecycleHue map[string]lipgloss.AdaptiveColor
+	ANSI16       map[string]int
+}
+
+// genTones keys each theme's tones by id. The evergreen entry REFERENCES the
+// Gen* maps above (no re-typed literals) so it is byte-identical to them.
+var genTones = map[string]ThemeTones{
+	"evergreen": {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},
+}
+
+// Resolve returns a theme's status/lifecycle/ANSI-16 token set, defaulting to
+// evergreen for an unknown or empty id.
+func Resolve(theme string) ThemeTones {
+	if t, ok := genTones[theme]; ok {
+		return t
+	}
+	return genTones[DefaultTheme]
+}
