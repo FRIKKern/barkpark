@@ -3473,15 +3473,58 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         )
       )
 
-      # collapsed by default → the phase→agent tree is hidden
-      refute render(view) =~ "explorer"
-
-      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      # EXPANDED by default (user mandate 2026-07-09) → the phase→agent tree
+      # renders immediately, no click needed
       html = render(view)
       assert html =~ "Explore"
       assert html =~ "explorer"
       assert html =~ "fable"
       assert html =~ "128 tok"
+
+      # the manual toggle is the per-tab override that wins
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      refute render(view) =~ "explorer"
+    end
+
+    test "a manual collapse survives a later workflow_progress re-render",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+      )
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running"}],
+          %{"total_tokens" => 10}
+        )
+      )
+
+      assert render(view) =~ "explorer"
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      refute render(view) =~ "explorer"
+
+      # a structural re-render (new agent node appears) must NOT reopen the row
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            %{"type" => "workflow_agent", "label" => "explorer", "state" => "done"},
+            %{"type" => "workflow_agent", "label" => "builder", "state" => "running"}
+          ],
+          %{"total_tokens" => 20}
+        )
+      )
+
+      html = render(view)
+      refute html =~ "explorer"
+      refute html =~ "builder"
+      # the row itself is still there, honestly collapsed
+      assert html =~ ~s(data-rail-task="t")
+      assert html =~ "expand"
     end
 
     test "a token-only workflow tick does NOT re-render the rail; a state flip does",
@@ -3571,6 +3614,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "was running"
       # the honest last-known rail: NOTHING renders as a live running row
       refute html =~ ~s(data-rail-status="running")
+
+      # default-expanded means the tree IS visible on reopen — but its stale
+      # "running" node must not breathe on an interrupted entry (the bare
+      # class= form is the rail glyphs' rendered shape; the ever-present
+      # inline CSS rule spells it .bp-chat-agent-run and never matches)
+      assert html =~ "explorer"
+      refute html =~ ~s(class="bp-chat-agent-run")
     end
   end
 
