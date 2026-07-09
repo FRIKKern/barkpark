@@ -107,7 +107,8 @@ defmodule BarkparkWeb.PulseAbuseDrillTest do
       before = Pulse.total("abuse-bytes")
 
       # all three fields present + valid → coerced payload ~28 B > the 20 B cap
-      resp = post_event(conn, "abuse-bytes", %{"hue" => 200, "x" => 0.5, "y" => 0.25}, {192, 0, 2, 7})
+      resp =
+        post_event(conn, "abuse-bytes", %{"hue" => 200, "x" => 0.5, "y" => 0.25}, {192, 0, 2, 7})
 
       assert %{"error" => %{"code" => "invalid_event", "message" => msg}} =
                json_response(resp, 400)
@@ -120,10 +121,17 @@ defmodule BarkparkWeb.PulseAbuseDrillTest do
     test "the byte cap itself rejects an oversize clean map (unit-level, protective)" do
       {:ok, cfg} = Pulse.channel("abuse-bytes")
       # a fully-valid, fully-declared payload still overflows the 20 B ceiling
-      assert {:error, reason} = Pulse.validate_payload(cfg, %{"hue" => 200, "x" => 0.5, "y" => 0.25})
+      assert {:error, reason} =
+               Pulse.validate_payload(cfg, %{"hue" => 200, "x" => 0.5, "y" => 0.25})
+
       assert reason =~ "exceeds 20 bytes"
       # a payload under the ceiling passes the same gate
-      assert {:ok, _} = Pulse.validate_payload(%{cfg | "max_bytes" => 200}, %{"hue" => 1, "x" => 0.0, "y" => 0.0})
+      assert {:ok, _} =
+               Pulse.validate_payload(%{cfg | "max_bytes" => 200}, %{
+                 "hue" => 1,
+                 "x" => 0.0,
+                 "y" => 0.0
+               })
     end
   end
 
@@ -150,11 +158,16 @@ defmodule BarkparkWeb.PulseAbuseDrillTest do
       base = %{"hue" => 200, "x" => 0.5, "y" => 0.25, "mega" => false}
 
       junk = [
-        Map.put(base, "evil", 1),               # unknown field
-        %{base | "hue" => 9999},                # out of range
-        %{base | "mega" => "yes"},              # wrong type
-        Map.delete(base, "hue"),                # missing required
-        %{"junk" => String.duplicate("A", 50_000)}  # oversize garbage body
+        # unknown field
+        Map.put(base, "evil", 1),
+        # out of range
+        %{base | "hue" => 9999},
+        # wrong type
+        %{base | "mega" => "yes"},
+        # missing required
+        Map.delete(base, "hue"),
+        # oversize garbage body
+        %{"junk" => String.duplicate("A", 50_000)}
       ]
 
       statuses =
@@ -167,7 +180,9 @@ defmodule BarkparkWeb.PulseAbuseDrillTest do
           |> Map.get(:status)
         end
 
-      assert Enum.all?(statuses, &(&1 in [400, 413])), "expected all junk rejected, got #{inspect(statuses)}"
+      assert Enum.all?(statuses, &(&1 in [400, 413])),
+             "expected all junk rejected, got #{inspect(statuses)}"
+
       refute_5xx(statuses)
       # not one junk strike was recorded
       assert Pulse.total("test-storm") == before
