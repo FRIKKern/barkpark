@@ -3100,15 +3100,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp tool_output_lines(out) when is_binary(out),
     do: out |> String.split("\n") |> Enum.count(&(String.trim(&1) != ""))
 
+  # A diff-shaped call (Edit/Write/MultiEdit by SHAPE) renders its content as a
+  # colored diff right below the header (D38) — the header shows only the path,
+  # terminal style (`● Update(path)`), never a duplicate old/new-string preview.
   defp tool_line(name, input) when is_map(input) do
-    preview =
-      input
-      |> Enum.filter(fn {_k, v} -> is_binary(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
-      |> Enum.take(2)
-      |> Enum.join(" · ")
+    if ChatToolRenderer.diff?(input) do
+      "#{name} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+        |> Enum.take(2)
+        |> Enum.join(" · ")
 
-    if preview == "", do: name, else: "#{name} — #{preview}"
+      if preview == "", do: name, else: "#{name} — #{preview}"
+    end
   end
 
   defp tool_line(name, _input), do: name

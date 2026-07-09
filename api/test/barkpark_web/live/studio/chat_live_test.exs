@@ -2465,6 +2465,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "BETA"
       # unchanged context survives
       assert html =~ "alpha"
+      # the ● header shows only the path — the diff below carries the content,
+      # so the old preview ("old_string: …") would duplicate it
+      assert html =~ "Edit — /app/x.ex"
+      refute html =~ "old_string:"
+      refute html =~ "new_string:"
     end
 
     test "dispatch is on SHAPE, not tool name — a renamed Edit tool still diffs",

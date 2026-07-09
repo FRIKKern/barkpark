@@ -519,18 +519,33 @@ defmodule Barkpark.StudioChat.Recorder do
   defp result_text(_), do: nil
 
   # Same preview shape ChatLive renders, so live lines and replayed rows agree.
+  # A diff-shaped call (Edit/Write/MultiEdit by SHAPE — mirrors
+  # BarkparkWeb.Studio.ChatToolRenderer.classify/1, which the core-side Recorder
+  # must not call) headlines only the path: the D38 diff below carries the
+  # content, so a duplicate old/new-string preview would just be noise.
   defp tool_line(name, input) when is_map(input) do
-    preview =
-      input
-      |> Enum.filter(fn {_k, v} -> is_binary(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
-      |> Enum.take(2)
-      |> Enum.join(" · ")
+    if diff_shaped?(input) do
+      "#{name} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+        |> Enum.take(2)
+        |> Enum.join(" · ")
 
-    if preview == "", do: name, else: "#{name} — #{preview}"
+      if preview == "", do: name, else: "#{name} — #{preview}"
+    end
   end
 
   defp tool_line(name, _input), do: name
+
+  defp diff_shaped?(input) when is_map(input) do
+    is_binary(input["file_path"]) and
+      ((is_binary(input["old_string"]) and is_binary(input["new_string"])) or
+         is_binary(input["content"]) or
+         (is_list(input["edits"]) and input["edits"] != []))
+  end
 
   defp result_model(ev) do
     case ev["modelUsage"] do
