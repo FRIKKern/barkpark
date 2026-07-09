@@ -4305,6 +4305,129 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       argv = read_marker(marker)
       refute argv =~ "--allow-dangerously-skip-permissions"
     end
+
+    # ── bypass arming is a LIVE act — reopen DISARMS (charter D55) ────────────
+
+    # A remembered bypassPermissions session must NOT silently re-arm on reopen:
+    # the persisted mode is the record of a PAST arming, not a standing licence.
+    # The live token drops to false on reopen, so the next --resume spawns
+    # fail-closed (plan, no danger flag) until the ceremony re-runs.
+    test "a reopened bypass session spawns fail-closed (plan, no danger flag) until re-armed",
+         %{conn: conn, marker: marker} do
+      sid = seed_session_with_history()
+      {:ok, _} = StudioChat.set_mode(sid, "bypassPermissions")
+      # store-level derivation still reads armed — the FAIL-CLOSED gate is the
+      # ChatLive live token, not this row fact (D55).
+      assert StudioChat.bypass_armed?(sid)
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      # reopen did not spawn — the resume happens lazily on this send
+      assert session_pid(view) == nil
+      # the selector still shows the persisted mode, but the live token is off
+      assert lv_assigns(view)[:mode] == "bypassPermissions"
+      refute lv_assigns(view)[:bypass_live_armed]
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "resume disarmed"})
+
+      argv = read_marker(marker)
+      assert argv =~ "--resume"
+      assert argv =~ "--permission-mode"
+      assert argv =~ "plan"
+      refute argv =~ "--allow-dangerously-skip-permissions"
+    end
+
+    # Re-running the type-"bypass" ceremony after a reopen flips the live token
+    # back on, so the very next resume is armed again — full reopen→ceremony→spawn.
+    test "reopen → re-run the ceremony → the resume spawns armed again",
+         %{conn: conn, marker: marker} do
+      sid = seed_session_with_history()
+      {:ok, _} = StudioChat.set_mode(sid, "bypassPermissions")
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      refute lv_assigns(view)[:bypass_live_armed]
+
+      # re-run the ceremony this lifetime
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      render_click(element(view, ~s(button[phx-click=arm-bypass])))
+      assert lv_assigns(view)[:bypass_live_armed]
+      assert lv_assigns(view)[:mode] == "bypassPermissions"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "armed again"})
+
+      argv = read_marker(marker)
+      assert argv =~ "--resume"
+      assert argv =~ "bypassPermissions"
+      assert argv =~ "--allow-dangerously-skip-permissions"
+    end
+  end
+
+  # ── reopening a bypass session is honest about being disarmed (charter D55) ─
+  describe "reopen disarms bypass with an honest auto-opened panel (D55)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "reopening a bypass session auto-opens the arm panel with the honest disarmed line",
+         %{conn: conn} do
+      sid = seed_session("Dangerous chat")
+      {:ok, _} = StudioChat.set_mode(sid, "bypassPermissions")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # the arm panel is auto-open (arming_bypass) and honestly disarmed…
+      assert lv_assigns(view)[:arming_bypass]
+      assert lv_assigns(view)[:bypass_disarmed]
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+      assert html =~ "Bypass disarmed — re-arm to enable"
+      # …the selector keeps showing the persisted mode (nothing was un-persisted)
+      assert lv_assigns(view)[:mode] == "bypassPermissions"
+      assert StudioChat.get_session(sid).mode == "bypassPermissions"
+    end
+
+    test "cancelling the auto-opened panel closes it and drops the disarmed line",
+         %{conn: conn} do
+      sid = seed_session("Dangerous chat")
+      {:ok, _} = StudioChat.set_mode(sid, "bypassPermissions")
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      assert lv_assigns(view)[:bypass_disarmed]
+
+      render_click(element(view, ~s(button[phx-click=cancel-arm-bypass])))
+      refute lv_assigns(view)[:arming_bypass]
+      refute lv_assigns(view)[:bypass_disarmed]
+    end
+
+    test "reopening a NON-bypass session leaves the panel closed",
+         %{conn: conn} do
+      sid = seed_session("Safe chat")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+      refute lv_assigns(view)[:arming_bypass]
+      refute lv_assigns(view)[:bypass_disarmed]
+      refute html =~ "Bypass disarmed"
+    end
+
+    test "a reopen while the runtime is still LIVE never shows the false disarmed banner",
+         %{conn: conn} do
+      # tab A spawns the live runtime for this session
+      {:ok, view_a, _html} = live(conn, "/studio/chat")
+      render_submit(element(view_a, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view_a)
+      assert is_pid(session_pid(view_a))
+      {:ok, _} = StudioChat.set_mode(sid, "bypassPermissions")
+
+      # tab B reopens the SAME session — the runtime is LIVE (adopted, D22) and
+      # runs under ITS spawn-time arming; "disarmed — re-arm to enable" would be
+      # a false banner here, and re-arming only ever applies at the next spawn.
+      {:ok, view_b, html} = live(conn, "/studio/chat/#{sid}")
+      refute lv_assigns(view_b)[:arming_bypass]
+      refute lv_assigns(view_b)[:bypass_disarmed]
+      refute html =~ "Bypass disarmed"
+      # the live token still starts false in this tab (D55): once that runtime
+      # dies, the next respawn fail-closes to plan exactly as a cold reopen does.
+      refute lv_assigns(view_b)[:bypass_live_armed]
+    end
   end
 
   # ── send is instant and never loses your words (optimistic echo, D24) ──────
