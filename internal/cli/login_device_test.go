@@ -43,8 +43,8 @@ func stubBrowserOpener(t *testing.T) *string {
 
 // deviceServer stands up a fake control plane that answers device/start with a
 // fixed code pair, then answers the first (pendingPolls) device/poll calls with
-// authorization_pending before approving with the given token/team. It records
-// how many times each route was hit.
+// the charter's 200 {"status":"pending"} before approving with the given
+// token/team. It records how many times each route was hit.
 type deviceServer struct {
 	startHits atomic.Int64
 	pollHits  atomic.Int64
@@ -68,8 +68,8 @@ func newDeviceServer(t *testing.T, ds *deviceServer, pendingPolls int, token, te
 		case "/v1/auth/device/poll":
 			n := ds.pollHits.Add(1)
 			if int(n) <= pendingPolls {
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+				// The control plane's pending steady-state (charter decision 10).
+				_, _ = io.WriteString(w, `{"status":"pending"}`)
 				return
 			}
 			_, _ = io.WriteString(w, `{"token":"`+token+`","team_id":"`+team+`"}`)
@@ -189,11 +189,11 @@ func TestDeviceLoginSlowDownBacksOff(t *testing.T) {
 			switch pollHits.Add(1) {
 			case 1:
 				// First poll pending → a sleep at the BASE interval.
-				w.WriteHeader(http.StatusBadRequest)
-				_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+				_, _ = io.WriteString(w, `{"status":"pending"}`)
 			case 2:
-				// Second poll slow_down → widen the interval, then sleep wider.
-				w.WriteHeader(http.StatusBadRequest)
+				// Second poll slow_down (the real 429) → widen the interval, then
+				// sleep wider.
+				w.WriteHeader(http.StatusTooManyRequests)
 				_, _ = io.WriteString(w, `{"error":"slow_down"}`)
 			default:
 				_, _ = io.WriteString(w, `{"token":"sess-slow","team_id":"team-slow"}`)
@@ -223,9 +223,9 @@ func TestDeviceLoginSlowDownBacksOff(t *testing.T) {
 	}
 }
 
-// TestDeviceLoginDenialExitsAuth: a control-plane access_denied is a terminal
-// AUTH failure — runDeviceLoginFlow returns a *deviceAuthError (→ exitAuth) and
-// writes NO token.
+// TestDeviceLoginDenialExitsAuth: the control plane folds denied / expired /
+// replayed into one 404 expired_or_invalid — a terminal AUTH failure:
+// runDeviceLoginFlow returns a *deviceAuthError (→ exitAuth) and writes NO token.
 func TestDeviceLoginDenialExitsAuth(t *testing.T) {
 	withTempConfigHome(t)
 	withInstantDevicePolls(t, 10)
@@ -235,8 +235,8 @@ func TestDeviceLoginDenialExitsAuth(t *testing.T) {
 		case "/v1/auth/device/start":
 			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
 		case "/v1/auth/device/poll":
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"error":"access_denied"}`)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = io.WriteString(w, `{"error":"expired_or_invalid"}`)
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -269,8 +269,7 @@ func TestDeviceLoginTimeoutExitsAuth(t *testing.T) {
 		case "/v1/auth/device/start":
 			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
 		case "/v1/auth/device/poll":
-			w.WriteHeader(http.StatusBadRequest)
-			_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+			_, _ = io.WriteString(w, `{"status":"pending"}`)
 		}
 	}))
 	t.Cleanup(srv.Close)

@@ -337,15 +337,19 @@ func (c *Client) DeviceStart(ctx context.Context, clientName string) (DeviceStar
 
 // DevicePoll asks the control plane whether the device grant has been approved
 // via POST /v1/auth/device/poll (charter decision 10). It is UNauthed like
-// DeviceStart — the deviceCode IS the credential. The RFC-8628 outcomes map as:
+// DeviceStart — the deviceCode IS the credential. The control plane's outcomes
+// (frozen in the charter; implemented by /v1/auth/device/poll) map as:
 //
+//	200 {status:"pending"}                  → DevicePollPending  (keep waiting)
 //	200 {token, team_id}                    → DevicePollApproved (store it)
-//	4xx {"error":"authorization_pending"}   → DevicePollPending  (keep waiting)
-//	4xx {"error":"slow_down"}               → DevicePollSlowDown (back off)
-//	4xx anything else (access_denied /      → a Go error via cloudError
-//	    expired_token / unauthorized)          (the caller stops the loop)
+//	429 {"error":"slow_down"}               → DevicePollSlowDown (back off)
+//	404 {"error":"expired_or_invalid"}      → a Go error via cloudError
+//	                                           (denied / expired / replayed —
+//	                                           the caller stops the loop)
 //
-// Pending and slow_down are the EXPECTED steady-state of a poll loop, so they are
+// The RFC-8628 spellings (a 4xx {"error":"authorization_pending"}) are tolerated
+// as aliases so the client also speaks to a stock device-auth server. Pending and
+// slow_down are the EXPECTED steady-state of a poll loop, so they are
 // deliberately NOT errors — the caller acts on the status. A terminal refusal is
 // an error carrying the control plane's code so the CLI can classify it.
 func (c *Client) DevicePoll(ctx context.Context, deviceCode string) (DevicePollResult, error) {
@@ -356,14 +360,27 @@ func (c *Client) DevicePoll(ctx context.Context, deviceCode string) (DevicePollR
 		return DevicePollResult{}, err
 	}
 	if ok(status) {
-		var login LoginResp
-		if err := json.Unmarshal(body, &login); err != nil {
+		// A 200 is either the pending steady-state ({status:"pending"}) or the
+		// approval ({token, team_id}) — discriminate BEFORE trusting a token, so
+		// a pending body can never masquerade as an approval with an empty token.
+		var out struct {
+			Status string `json:"status"`
+			Token  string `json:"token"`
+			TeamID string `json:"team_id"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
 			return DevicePollResult{}, fmt.Errorf("decode device poll response: %w", err)
 		}
-		return DevicePollResult{Status: DevicePollApproved, Login: login}, nil
+		if out.Status == "pending" {
+			return DevicePollResult{Status: DevicePollPending}, nil
+		}
+		if out.Token == "" {
+			return DevicePollResult{}, fmt.Errorf("device poll: 200 response carried neither a pending status nor a token")
+		}
+		return DevicePollResult{Status: DevicePollApproved, Login: LoginResp{Token: out.Token, TeamID: out.TeamID}}, nil
 	}
-	// A non-2xx is either an expected polling state (pending / slow_down) or a
-	// terminal refusal. Discriminate on the control plane's error code.
+	// A non-2xx is either an expected polling state (RFC-spelled pending, or the
+	// 429 slow_down) or a terminal refusal. Discriminate on the error code.
 	var env struct {
 		Error string `json:"error"`
 	}
@@ -375,7 +392,7 @@ func (c *Client) DevicePoll(ctx context.Context, deviceCode string) (DevicePollR
 			return DevicePollResult{Status: DevicePollSlowDown}, nil
 		}
 	}
-	// access_denied, expired_token, unauthorized, or anything unrecognised → stop.
+	// expired_or_invalid, access_denied, expired_token, or anything unrecognised → stop.
 	return DevicePollResult{}, cloudError(status, body)
 }
 

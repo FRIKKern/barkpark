@@ -82,14 +82,15 @@ func TestDeviceStartSurfacesRateLimit(t *testing.T) {
 	}
 }
 
-// TestDevicePollPending: a 4xx authorization_pending is the steady poll state —
-// NOT an error, decoded as DevicePollPending with the deviceCode echoed in the body.
+// TestDevicePollPending: the control plane's steady poll state is a
+// 200 {"status":"pending"} (charter decision 10) — NOT an error, decoded as
+// DevicePollPending with the deviceCode echoed in the body, and CRUCIALLY never
+// mistaken for an approval carrying an empty token.
 func TestDevicePollPending(t *testing.T) {
 	var gotBody map[string]any
 	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
 		gotBody = readJSON(t, r)
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+		_, _ = io.WriteString(w, `{"status":"pending"}`)
 	})
 	res, err := c.DevicePoll(context.Background(), "dev-secret-xyz")
 	if err != nil {
@@ -98,16 +99,35 @@ func TestDevicePollPending(t *testing.T) {
 	if res.Status != DevicePollPending {
 		t.Fatalf("status = %d, want DevicePollPending", res.Status)
 	}
+	if res.Login.Token != "" {
+		t.Fatalf("a pending poll must carry no token; got %q", res.Login.Token)
+	}
 	if gotBody["device_code"] != "dev-secret-xyz" {
 		t.Fatalf("device_code = %v", gotBody["device_code"])
 	}
 }
 
-// TestDevicePollSlowDown: a 4xx slow_down decodes as DevicePollSlowDown, again
-// not an error.
-func TestDevicePollSlowDown(t *testing.T) {
+// TestDevicePollPendingRFCSpelling: a stock RFC-8628 server spells pending as a
+// 4xx {"error":"authorization_pending"} — tolerated as an alias.
+func TestDevicePollPendingRFCSpelling(t *testing.T) {
 	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":"authorization_pending"}`)
+	})
+	res, err := c.DevicePoll(context.Background(), "d")
+	if err != nil {
+		t.Fatalf("pending must not be an error; got %v", err)
+	}
+	if res.Status != DevicePollPending {
+		t.Fatalf("status = %d, want DevicePollPending", res.Status)
+	}
+}
+
+// TestDevicePollSlowDown: the control plane's 429 slow_down decodes as
+// DevicePollSlowDown, again not an error.
+func TestDevicePollSlowDown(t *testing.T) {
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = io.WriteString(w, `{"error":"slow_down"}`)
 	})
 	res, err := c.DevicePoll(context.Background(), "d")
@@ -116,6 +136,18 @@ func TestDevicePollSlowDown(t *testing.T) {
 	}
 	if res.Status != DevicePollSlowDown {
 		t.Fatalf("status = %d, want DevicePollSlowDown", res.Status)
+	}
+}
+
+// TestDevicePollMalformed200IsError: a 200 with neither a pending status nor a
+// token is a decode-level failure, never a silent "approved with empty token".
+func TestDevicePollMalformed200IsError(t *testing.T) {
+	c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"unexpected":true}`)
+	})
+	_, err := c.DevicePoll(context.Background(), "d")
+	if err == nil {
+		t.Fatal("a token-less, status-less 200 must be an error")
 	}
 }
 
@@ -137,14 +169,23 @@ func TestDevicePollApproved(t *testing.T) {
 	}
 }
 
-// TestDevicePollTerminalErrors: access_denied and expired_token are terminal —
-// they surface as Go errors (via cloudError) so the caller stops the loop.
+// TestDevicePollTerminalErrors: the control plane's 404 expired_or_invalid
+// (denied / expired / replayed, deliberately indistinguishable) plus the RFC
+// spellings are terminal — they surface as Go errors (via cloudError) so the
+// caller stops the loop.
 func TestDevicePollTerminalErrors(t *testing.T) {
-	for _, code := range []string{"access_denied", "expired_token"} {
-		code := code
+	for _, tc := range []struct {
+		code   string
+		status int
+	}{
+		{"expired_or_invalid", http.StatusNotFound},
+		{"access_denied", http.StatusBadRequest},
+		{"expired_token", http.StatusBadRequest},
+	} {
+		code, status := tc.code, tc.status
 		t.Run(code, func(t *testing.T) {
 			c := newFake(t, "", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusBadRequest)
+				w.WriteHeader(status)
 				_, _ = io.WriteString(w, `{"error":"`+code+`"}`)
 			})
 			_, err := c.DevicePoll(context.Background(), "d")
