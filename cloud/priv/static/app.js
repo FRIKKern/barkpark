@@ -8324,7 +8324,7 @@
         : "";
       var quotaCls = d.bar.tone === "ok" ? "usage-bar-quota dim" : "usage-bar-quota";
       barHtml =
-        '<div class="usage-bar usage-bar--' + d.bar.tone + '" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + d.bar.pct + '">' +
+        '<div class="usage-bar usage-bar--' + d.bar.tone + '" role="progressbar" aria-label="' + esc(d.label) + ' quota" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + d.bar.pct + '" aria-valuetext="' + esc(d.bar.quotaText) + '">' +
           '<span class="usage-bar-fill" style="width:' + d.bar.pct + '%"></span>' +
         "</div>" +
         '<div class="usage-bar-meta token-meta">' +
