@@ -468,4 +468,146 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
            #{Enum.join(mismatches, "\n")}
            """
   end
+
+  # ── 8. The section-divider VALUE lockstep — reader inline styles ↔ edit CSS ──
+  # loop-epic/parity-divider-lockstep. The reader paints the § section divider as
+  # INLINE styles on a `<div>`/`<span>` pair (Figures.section_divider_html/0,
+  # figures.ex:33-37) with light-only hex fallbacks. The edit side re-expresses the
+  # SAME values as a hand-mirrored `.bp-section-divider` / `.bp-section-divider__mark`
+  # CSS pair in BOTH root.html.heex (~L3392-3400) and styles.css (~L452-460), bound
+  # off the same custom props (dark-aware, no hex fallback). §5/§6 lock the two CSS
+  # copies together but NOTHING locked them to the reader's inline source — and it
+  # drifted once already (the figures.ex hex fallbacks changed after the mjs
+  # structure test was written and nothing turned red). This section closes that
+  # gap: it parses the inline `style="…"` decls out of the figures.ex sigil source,
+  # strips var() fallbacks on every side, and asserts each visual property is
+  # byte-identical across all THREE producers (reader inline / Studio CSS / bundle
+  # CSS). Values verified matching 2026-07-09; no production code changed.
+  @figures_ex Path.expand(
+                "../../../../lib/barkpark/portable_doc/render/figures.ex",
+                __DIR__
+              )
+
+  # The two divider sub-elements and the inline `style=` order they appear in the
+  # figures.ex source: the outer `<div>` maps to `.bp-section-divider`, the inner
+  # `<span>` to `.bp-section-divider__mark`.
+  @divider_container_selector ".bp-section-divider"
+  @divider_mark_selector ".bp-section-divider__mark"
+
+  # Reconstruct the concatenated HTML string emitted by section_divider_html/0 and
+  # pull the two inline declaration sets out of its `style="…"` attributes. The body
+  # is three `~s|…| <> ~s|…|` fragments; strip the sigil delimiters + `<>` glue so a
+  # `style="…"` that straddles a fragment boundary (the span's is split across L35/36)
+  # reads as one attribute. Returns %{container: decls, mark: decls}, var()-fallbacks
+  # stripped so `var(--paper-rule, #dde7e2)` compares equal to the CSS `var(--paper-rule)`.
+  defp figures_divider_decls do
+    src = File.read!(@figures_ex)
+
+    [_, body] =
+      Regex.run(~r/def section_divider_html do(.*?)\n  end/s, src)
+
+    stitched =
+      body
+      # drop the `| <> ~s|` concatenation glue between adjacent sigil fragments
+      |> String.replace(~r/\|\s*<>\s*~s\|/, "")
+      # drop the leading `~s|` opener and the final `|` closer
+      |> String.replace(~r/~s\|/, "")
+      |> String.replace("|", "")
+
+    styles =
+      ~r/style="([^"]*)"/
+      |> Regex.scan(stitched)
+      |> Enum.map(fn [_, s] -> s end)
+
+    [container_style, mark_style] = styles
+
+    %{
+      container: container_style |> parse_decls() |> strip_var_fallbacks(),
+      mark: mark_style |> parse_decls() |> strip_var_fallbacks()
+    }
+  end
+
+  # Normalise every value in a decl map so `var(--name, fallback)` -> `var(--name)`.
+  # The reader carries light-only hex fallbacks; the CSS mirrors carry none. Comparing
+  # fallback-stripped isolates the ACTUAL bound values (custom props + literals) and
+  # lets the CSS side stay a legitimate dark-aware improvement without tripping the wire.
+  defp strip_var_fallbacks(decls) when is_map(decls) do
+    Map.new(decls, fn {prop, value} ->
+      {prop, Regex.replace(~r/var\(\s*(--[a-z0-9-]+)\s*,[^)]*\)/, value, "var(\\1)")}
+    end)
+  end
+
+  # The CSS-side decls for a divider selector, var()-fallbacks stripped, from one
+  # editor stylesheet (root.html.heex inline OR the bundle styles.css).
+  defp divider_css_decls(css, selector),
+    do: css |> declarations_for("bp-paper-editor-body", selector) |> strip_var_fallbacks()
+
+  test "section-divider inline decls byte-match the .bp-section-divider CSS in Studio and the bundle" do
+    reader = figures_divider_decls()
+    studio = edit_css()
+    bundle = bundle_css()
+
+    pairs = [
+      {@divider_container_selector, reader.container},
+      {@divider_mark_selector, reader.mark}
+    ]
+
+    mismatches =
+      for {selector, reader_decls} <- pairs,
+          css <- [{"Studio", divider_css_decls(studio, selector)}, {"Bundle", divider_css_decls(bundle, selector)}],
+          {label, css_decls} = css,
+          {prop, value} <- Enum.to_list(reader_decls),
+          Map.get(css_decls, prop) != value do
+        "#{selector}.#{prop}: Reader=#{inspect(value)} #{label}=#{inspect(Map.get(css_decls, prop))}"
+      end
+
+    assert mismatches == [],
+           """
+           Section-divider value drift — a property the reader paints INLINE
+           (Figures.section_divider_html/0, figures.ex) disagrees with the edit
+           CSS mirror (.bp-section-divider / .bp-section-divider__mark in
+           root.html.heex or assets/paper-editor/src/styles.css). The edit canvas
+           divider would then look different from the /papers reader. Re-align the
+           mirror to the reader value (var() fallbacks are stripped before compare,
+           so this is about the ACTUAL bound value, not the light-only hex). Divergences:
+
+           #{Enum.join(mismatches, "\n")}
+           """
+  end
+
+  test "section-divider extractors found non-empty decl sets in all three sources (parser sanity)" do
+    # distrust-vacuous-green: a sigil-shape change in figures.ex, a selector rename
+    # in either stylesheet, or the container/mark split collapsing would silently
+    # empty the diff above into a vacuous pass. Assert every extractor pulled a
+    # non-empty set AND that the reader carries the expected visual property keys.
+    reader = figures_divider_decls()
+    studio = edit_css()
+    bundle = bundle_css()
+
+    assert map_size(reader.container) > 0,
+           "figures.ex divider container inline decls came back empty — sigil source shape changed"
+
+    assert map_size(reader.mark) > 0,
+           "figures.ex divider mark inline decls came back empty — sigil source shape changed"
+
+    assert MapSet.subset?(
+             MapSet.new(~w(position text-align margin border-top)),
+             MapSet.new(Map.keys(reader.container))
+           ),
+           "figures.ex divider container is missing an expected property: #{inspect(Map.keys(reader.container))}"
+
+    assert MapSet.subset?(
+             MapSet.new(~w(position top display padding background color font-size)),
+             MapSet.new(Map.keys(reader.mark))
+           ),
+           "figures.ex divider mark is missing an expected property: #{inspect(Map.keys(reader.mark))}"
+
+    for {name, css} <- [{"Studio", studio}, {"Bundle", bundle}],
+        selector <- [@divider_container_selector, @divider_mark_selector] do
+      decls = divider_css_decls(css, selector)
+
+      assert map_size(decls) > 0,
+             "#{name} stylesheet has no `#{selector}` declarations — a selector rename likely broke the divider lockstep parser"
+    end
+  end
 end
