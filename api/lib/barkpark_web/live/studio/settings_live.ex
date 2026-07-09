@@ -241,9 +241,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   def handle_event("set_plugin_placement", %{"plugin" => name, "placement" => placement}, socket)
       when placement in ["main", "plugins", "top_menu"] do
-    put_plugin_override(socket, name, %{"placement" => placement},
-      flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
-    )
+    # Same unknown-plugin guard as toggle_plugin: a forged plugin name must not
+    # persist a junk override entry into the workspace settings.
+    case current_row(socket, name) do
+      %{} ->
+        put_plugin_override(socket, name, %{"placement" => placement},
+          flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
+        )
+
+      nil ->
+        {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+    end
   end
 
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
@@ -683,7 +691,16 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     case socket.assigns[:current_workspace] do
       %{id: ws_id} = ws ->
         plugins = Tenancy.workspace_plugin_settings(ws)
-        entry = Map.merge(Map.get(plugins, name, %{}), changes)
+
+        # Guard a hand-edited/malformed existing entry (a non-map value would
+        # crash Map.merge): fall back to a fresh override for this plugin.
+        base =
+          case Map.get(plugins, name) do
+            %{} = existing -> existing
+            _ -> %{}
+          end
+
+        entry = Map.merge(base, changes)
         updated = Map.put(plugins, name, entry)
 
         case Tenancy.set_workspace_plugin_settings(ws_id, updated) do
@@ -703,8 +720,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
-  # A plugin's registry key is the display key too; humanize it for the label
-  # (registry manifests carry no separate title today).
+  # Human labels for the plugin rows — the SAME vocabulary the tiered Desk
+  # Structure uses for its Plugins-tier group headers
+  # (Barkpark.Structure.plugin_display_name/1), so the Settings UI and the
+  # tree never disagree about a plugin's name. Falls back to a humanized
+  # registry key for any plugin not explicitly mapped.
+  defp display_name("onixedit"), do: "Onix"
+  defp display_name("tickets"), do: "Tickets"
+  defp display_name("pulse"), do: "Lightning Storm"
+  defp display_name("frt"), do: "Frame & Time"
+  defp display_name("github"), do: "GitHub"
+
   defp display_name(name) when is_binary(name) do
     name
     |> String.split(~r/[_\-]/, trim: true)
