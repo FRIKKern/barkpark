@@ -280,6 +280,87 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "thinking pulse persistence (charter D41)" do
+    defp thinking_tokens(n),
+      do: {:claude_chat_event, %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}}
+
+    defp assistant_text(text) do
+      {:claude_chat_event,
+       %{"type" => "assistant", "message" => %{"content" => [%{"type" => "text", "text" => text}]}}}
+    end
+
+    test "a thinking bout flushes a 'thinking' row BEFORE the turn's assistant blocks",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, thinking_tokens(40))
+      frame(recorder, thinking_tokens(120))
+      frame(recorder, assistant_text("the answer"))
+
+      rows = StudioChat.list_messages(sid)
+      think = Enum.find(rows, &(&1.role == "thinking"))
+      answer = Enum.find(rows, &(&1.role == "assistant"))
+
+      assert think.metadata["tokens"] == 120
+      assert think.source_markdown =~ "thought for ~120 tokens"
+      # order: the ✻ pulse row precedes the answer it thought toward
+      assert think.seq < answer.seq
+      # NEVER the signature — only the count is persisted
+      refute Map.has_key?(think.metadata, "signature")
+    end
+
+    test "the count is the CUMULATIVE max, never the sum of per-frame counts",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, thinking_tokens(50))
+      frame(recorder, thinking_tokens(90))
+      frame(recorder, thinking_tokens(70))
+      frame(recorder, assistant_text("done"))
+
+      think = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "thinking"))
+      # max(50,90,70) = 90 — a naive sum would be 210
+      assert think.metadata["tokens"] == 90
+    end
+
+    test "no thinking frames ⇒ no thinking row", %{sid: sid, recorder: recorder} do
+      frame(recorder, assistant_text("straight to prose"))
+      assert StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "thinking")) == []
+    end
+
+    test "each bout flushes its own row across a multi-turn session",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, thinking_tokens(30))
+      frame(recorder, assistant_text("first"))
+      # a new turn opens a fresh bout
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, thinking_tokens(80))
+      frame(recorder, assistant_text("second"))
+
+      counts =
+        StudioChat.list_messages(sid)
+        |> Enum.filter(&(&1.role == "thinking"))
+        |> Enum.map(& &1.metadata["tokens"])
+
+      assert counts == [30, 80]
+    end
+
+    test "a new turn's init drops a stale unflushed bout", %{sid: sid, recorder: recorder} do
+      frame(recorder, thinking_tokens(45))
+      # init before any assistant block: the bout never produced output, so the
+      # next turn's init resets it and it leaves no row.
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, assistant_text("fresh turn, no prior thought"))
+
+      assert StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "thinking")) == []
+    end
+
+    test "a thinking_tokens frame rebroadcasts to subscribers", %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      frame(recorder, thinking_tokens(12))
+
+      assert_receive {:claude_chat_event,
+                      %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => 12}}
+    end
+  end
+
   describe "live activity feed (wave 5)" do
     setup %{sid: sid} do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())

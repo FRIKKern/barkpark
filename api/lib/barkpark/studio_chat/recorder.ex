@@ -151,7 +151,14 @@ defmodule Barkpark.StudioChat.Recorder do
       # name-only fallback captured off `system/init`; a live/late tab reads the
       # best available via `advertised_commands/1`.
       commands: nil,
-      slash_commands: nil
+      slash_commands: nil,
+      # The current thinking bout's token count (charter D41). Accumulated off
+      # `system/thinking_tokens` (`estimated_tokens` is monotonic cumulative — we
+      # take the max seen since the last flush, NEVER sum thinking_delta counts),
+      # flushed as a compact `"thinking"` row the instant the turn's assistant
+      # blocks (or the terminal result) land so replay renders the pulse in-order.
+      # nil ⇒ no active bout.
+      pending_thinking: nil
     }
   end
 
@@ -170,15 +177,35 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_info({:claude_chat_event, %{"type" => "assistant"} = ev} = msg, state) do
     blocks = get_in(ev, ["message", "content"])
+    # A thinking bout that preceded these blocks flushes FIRST (charter D41), so
+    # replay reconstructs the ✻ pulse row in the same order it streamed live.
+    state = flush_thinking(state)
     persist_assistant_blocks(state.session_id, blocks)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(assistant_activity(blocks, state.activity)) |> touch()}
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev} = msg, state) do
+    # Edge case: a turn that thought then produced NO assistant blocks (straight
+    # to result) still flushes its pulse row so the thought is never lost.
+    state = flush_thinking(state)
     record_result(state.session_id, ev)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :idle, line: nil}) |> touch()}
+  end
+
+  # The extended-thinking pulse (charter D41). The wire never carries thinking
+  # TEXT (empty across models) — only a monotonic cumulative `estimated_tokens`
+  # and an encrypted signature we NEVER persist. Track the bout's high-water mark
+  # so the flushed row reports how much thinking happened; rebroadcast verbatim so
+  # live tabs run their own counter. This clause MUST precede the generic
+  # `{:claude_chat_event, _ev}` catch-all below.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "thinking_tokens"} = ev} = msg,
+        state
+      ) do
+    broadcast(state, msg)
+    {:noreply, state |> accumulate_thinking(thinking_tokens_count(ev)) |> touch()}
   end
 
   # A turn is starting (the CLI emits init per TURN): the session is working.
@@ -192,6 +219,9 @@ defmodule Barkpark.StudioChat.Recorder do
       ) do
     StudioChat.update_status(state.session_id, "working")
     state = maybe_capture_slash_commands(state, ev)
+    # A new turn opens a fresh thinking bout (charter D41): any unflushed count
+    # from a prior turn is stale — drop it.
+    state = %{state | pending_thinking: nil}
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :working, line: "thinking…"}) |> touch()}
   end
@@ -348,6 +378,45 @@ defmodule Barkpark.StudioChat.Recorder do
   defp needs_you_line("AskUserQuestion"), do: "asking you"
   defp needs_you_line("ExitPlanMode"), do: "plan ready"
   defp needs_you_line(tool_name), do: "waiting: #{tool_name}"
+
+  # Accumulate a thinking bout's token high-water mark (charter D41). The wire's
+  # `estimated_tokens` is monotonic cumulative WITHIN a bout, so max/2 is safe
+  # against out-of-order or repeated frames and never regresses.
+  defp accumulate_thinking(state, n) when is_integer(n) and n > 0 do
+    %{state | pending_thinking: max(state.pending_thinking || 0, n)}
+  end
+
+  defp accumulate_thinking(state, _), do: state
+
+  # Persist the pending bout as a compact `"thinking"` row and clear it. The
+  # signature is NEVER stored — only the count (charter D41). A bout with no
+  # positive count leaves no row ("no thinking frames ⇒ no row").
+  defp flush_thinking(%{pending_thinking: n} = state) when is_integer(n) and n > 0 do
+    persist(
+      state.session_id,
+      %{
+        role: "thinking",
+        source_markdown: thinking_label(n),
+        metadata: %{"tokens" => n}
+      },
+      "thinking"
+    )
+
+    %{state | pending_thinking: nil}
+  end
+
+  defp flush_thinking(state), do: %{state | pending_thinking: nil}
+
+  defp thinking_label(n), do: "thought for ~#{n} tokens"
+
+  # The cumulative estimated-token count off a `system/thinking_tokens` frame.
+  # Zero for a frame missing the field — accumulate_thinking treats it as a noop.
+  defp thinking_tokens_count(ev) do
+    case ev["estimated_tokens"] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 0
+    end
+  end
 
   defp record_result(session_id, ev) do
     StudioChat.record_result_metrics(session_id, %{

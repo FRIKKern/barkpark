@@ -89,6 +89,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
          messages: [],
          next_id: 0,
          streaming: nil,
+         # The live extended-thinking pulse (charter D41): nil, or
+         # %{tokens: N, text: ""}. Driven by `system/thinking_tokens` frames — the
+         # wire never carries thinking text, so the row shows a "✻ thinking… ~N
+         # tokens" counter that settles into a durable `:thinking` message the
+         # instant real output (text/tool/result) begins.
+         thinking_pulse: nil,
          # Advertised slash commands (charter D36a) — the CLI's initialize list,
          # held by the Recorder and delivered on subscribe + broadcast. The
          # composer's slash menu merges these with the builtin floor.
@@ -709,7 +715,66 @@ defmodule BarkparkWeb.Studio.ChatLive do
          }},
         socket
       ) do
+    # The first text delta is the moment thinking gives way to prose — settle any
+    # live pulse into its durable row (charter D41) before the bubble streams.
+    socket = settle_thinking(socket)
     {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
+  end
+
+  # The thinking block opens (charter D41): show the ✻ row immediately, even
+  # before the first `thinking_tokens` count lands, so a bout that thinks briefly
+  # still pulses. Idempotent — a live pulse already open keeps its count.
+  def handle_info(
+        {:claude_chat_event,
+         %{
+           "type" => "stream_event",
+           "event" => %{
+             "type" => "content_block_start",
+             "content_block" => %{"type" => "thinking"}
+           }
+         }},
+        socket
+      ) do
+    {:noreply, assign(socket, thinking_pulse: socket.assigns[:thinking_pulse] || blank_pulse())}
+  end
+
+  # A thinking delta (charter D41). The count comes from `thinking_tokens`, NEVER
+  # from a delta's per-block count. Forward-compatible: today `delta["thinking"]`
+  # is always "" (the wire carries no thinking text), but if a future CLI ever
+  # populates it we append it live and fall back to the counter otherwise. The
+  # encrypted signature is never read.
+  def handle_info(
+        {:claude_chat_event,
+         %{
+           "type" => "stream_event",
+           "event" => %{
+             "type" => "content_block_delta",
+             "delta" => %{"type" => "thinking_delta"} = delta
+           }
+         }},
+        socket
+      ) do
+    pulse = socket.assigns[:thinking_pulse] || blank_pulse()
+
+    pulse =
+      case delta["thinking"] do
+        text when is_binary(text) and text != "" -> %{pulse | text: pulse.text <> text}
+        _ -> pulse
+      end
+
+    {:noreply, assign(socket, thinking_pulse: pulse)}
+  end
+
+  # The cumulative thinking-token counter (charter D41). `estimated_tokens` is
+  # monotonic across a bout — bump the pulse's high-water mark. This clause and
+  # the two above MUST precede the `{:claude_chat_event, _event}` catch-all.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "thinking_tokens"} = ev},
+        socket
+      ) do
+    pulse = socket.assigns[:thinking_pulse] || blank_pulse()
+    tokens = max(pulse.tokens, thinking_tokens_count(ev))
+    {:noreply, assign(socket, thinking_pulse: %{pulse | tokens: tokens})}
   end
 
   def handle_info(
@@ -717,6 +782,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
         socket
       )
       when is_list(blocks) do
+    # A thinking bout with no intervening prose (thinking → tool_use) settles here
+    # so its ✻ row lands just before the tool row, matching the persisted order.
+    socket = settle_thinking(socket)
+
     socket =
       Enum.reduce(blocks, socket, fn
         %{"type" => "text", "text" => text}, acc when is_binary(text) ->
@@ -746,6 +815,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev}, socket) do
+    # A turn that thought then produced no prose/tool still settles its pulse
+    # here so the ✻ row is never lost (charter D41).
+    socket = settle_thinking(socket)
+
     # An interrupted turn arrives as `error_during_execution` too — the ONLY
     # way to tell it from a genuine error is that WE asked to stop
     # (`interrupt_requested`) or the CLI tagged the terminus
@@ -775,6 +848,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> assign(
        status: :ready,
        streaming: nil,
+       thinking_pulse: nil,
        last_result: last_result,
        interrupt_requested: false
      )
@@ -1592,12 +1666,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 >
                   <%= plan_outcome_label(message.approval_status) %> — <%= message.title %>
                 </div>
+              <% :thinking -> %>
+                <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
+                      ever — only "thought for ~N tokens". Same shape live and on
+                      replay. --%>
+                <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+                  <span aria-hidden="true">✻</span> <%= message.text %>
+                </div>
               <% _ -> %>
                 <div class="text-xs text-dim" style="font-family: var(--font-mono);">
                   <span aria-hidden="true">✻</span> <%= message.text %>
                 </div>
             <% end %>
             </div>
+          </div>
+
+          <%!-- The LIVE thinking pulse (charter D41): a ✻ counter that breathes
+                while the model thinks, before any prose streams. It settles into a
+                durable :thinking message (above) the moment real output begins. --%>
+          <div
+            :if={@thinking_pulse}
+            class="text-xs text-dim"
+            style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px;"
+          >
+            <span class="bp-chat-spinner" aria-hidden="true"></span>
+            <span :if={@thinking_pulse.text in [nil, ""]}>
+              thinking… ~<%= @thinking_pulse.tokens %> tokens
+            </span>
+            <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;">
+              <%= @thinking_pulse.text %>
+            </span>
           </div>
 
           <div :if={@streaming} style="opacity: 0.92;">
@@ -1626,7 +1724,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
 
           <div
-            :if={@streaming == nil and turn_active?(@status)}
+            :if={@streaming == nil and @thinking_pulse == nil and turn_active?(@status)}
             class="text-xs text-dim"
             style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px;"
           >
@@ -2043,6 +2141,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # never collides with a replayed message's id.
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
       streaming: nil,
+      thinking_pulse: nil,
       interrupt_requested: false,
       pending_mode: nil,
       last_result: nil,
@@ -2118,6 +2217,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: [],
       next_id: 0,
       streaming: nil,
+      thinking_pulse: nil,
       # A new chat has no runtime yet, so no advertised commands — the slash menu
       # floors to builtins until the first send spawns + initializes (D36a).
       commands: [],
@@ -2186,7 +2286,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       socket
       |> assign(messages: messages)
       |> append_message(:system, message)
-      |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
+      |> assign(
+        session: nil,
+        status: :offline,
+        streaming: nil,
+        thinking_pulse: nil,
+        interrupt_requested: false
+      )
       |> refresh_sessions()
     end
   end
@@ -2472,6 +2578,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
+  # A thinking row (charter D41) rebuilds the ✻ pulse from its persisted count —
+  # the signature was never stored, only `metadata.tokens`. `source_markdown` is
+  # the human-readable fallback for an older/thinner row with no count.
+  defp replay_message(%{role: "thinking", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    tokens = Map.get(meta || %{}, "tokens")
+    text = if is_integer(tokens), do: thinking_label(tokens), else: md || "thought"
+    %{id: seq, role: :thinking, text: text, html: nil}
+  end
+
   defp replay_message(m, _live?) do
     role = replay_role(m.role)
 
@@ -2527,6 +2642,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: socket.assigns.messages ++ [message],
       next_id: id + 1
     )
+  end
+
+  # Settle the live thinking pulse into a durable `:thinking` message (charter
+  # D41). Called at the first real output of a bout (text delta / assistant
+  # blocks / result) so live order matches the persisted replay order. A bout
+  # with a positive count leaves a "thought for ~N tokens" row; one that never
+  # counted (no thinking frames) leaves nothing. Always clears the pulse, so
+  # repeated calls within a turn are idempotent.
+  defp settle_thinking(socket) do
+    case socket.assigns[:thinking_pulse] do
+      %{tokens: n} when is_integer(n) and n > 0 ->
+        socket
+        |> append_message(:thinking, thinking_label(n))
+        |> assign(thinking_pulse: nil)
+
+      _ ->
+        assign(socket, thinking_pulse: nil)
+    end
+  end
+
+  defp blank_pulse, do: %{tokens: 0, text: ""}
+
+  defp thinking_label(n), do: "thought for ~#{n} tokens"
+
+  # The cumulative estimated-token count off a `system/thinking_tokens` frame.
+  defp thinking_tokens_count(ev) do
+    case ev["estimated_tokens"] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 0
+    end
   end
 
   # Resolve a pending needs-you card (approval | question | plan) with a

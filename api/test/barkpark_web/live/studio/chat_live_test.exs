@@ -463,6 +463,81 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view) =~ "Hello!"
     end
 
+    # charter D41 — the wire carries no thinking text, so the pulse is a live
+    # counter off `system/thinking_tokens` (cumulative `estimated_tokens`).
+    test "thinking_tokens frames render a live ✻ pulse with the cumulative count",
+         %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(64)})
+      send(view.pid, {:claude_chat_event, thinking_tokens(210)})
+      html = render(view)
+      assert html =~ "thinking…"
+      # the cumulative high-water mark, not a per-frame count
+      assert html =~ "~210 tokens"
+    end
+
+    test "the pulse settles into a durable 'thought for ~N tokens' line when prose begins",
+         %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(128)})
+      assert render(view) =~ "thinking…"
+
+      # the first text delta is the moment thinking gives way to prose
+      send(view.pid, {:claude_chat_event, stream_delta("Here")})
+      html = render(view)
+      refute html =~ "thinking…"
+      assert html =~ "thought for ~128 tokens"
+    end
+
+    # Forward-compat (charter D41): today `delta.thinking` is always "" so the
+    # counter shows; if a future CLI ever populates it, the handler appends the
+    # text and shows it in place of the counter.
+    test "a non-empty thinking_delta renders the text in place of the counter", %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(20)})
+      assert render(view) =~ "~20 tokens"
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "stream_event",
+           "event" => %{
+             "type" => "content_block_delta",
+             "delta" => %{"type" => "thinking_delta", "thinking" => "weighing the options"}
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "weighing the options"
+      refute html =~ "~20 tokens"
+    end
+
+    test "a bout that never counted leaves no pulse and no durable row", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("no prior thought")})
+      html = render(view)
+      refute html =~ "thinking…"
+      refute html =~ "thought for"
+    end
+
+    test "a stored thinking row replays as a dim ✻ thought line", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "thinking",
+          source_markdown: "thought for ~90 tokens",
+          metadata: %{"tokens" => 90}
+        })
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{role: "assistant", source_markdown: "the answer"})
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+      assert html =~ "thought for ~90 tokens"
+      assert html =~ "the answer"
+    end
+
     test "completed blocks render as components BEFORE the message finishes", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("## Findings\n")})
       send(view.pid, {:claude_chat_event, stream_delta("\nstill typing")})
@@ -2988,5 +3063,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         "delta" => %{"type" => "text_delta", "text" => text}
       }
     }
+  end
+
+  # A cumulative thinking-token frame (charter D41): the wire's monotonic
+  # `estimated_tokens`, no thinking text ever.
+  defp thinking_tokens(n) do
+    %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}
   end
 end
