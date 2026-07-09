@@ -48,7 +48,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
           next_id: 0,
           streaming: nil,
           composer_rev: 0,
-          last_result: nil
+          last_result: nil,
+          chat_title: nil,
+          title_kicked: false
         )
 
       {:ok, if(connected?(socket), do: start_session(socket), else: socket)}
@@ -169,12 +171,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev}, socket) do
     socket =
       case ev["subtype"] do
-        "success" -> socket
+        "success" -> maybe_kick_title(socket)
         subtype -> append_message(socket, :system, "The turn ended with an error (#{subtype}).")
       end
 
     last_result = %{duration_ms: ev["duration_ms"], cost_usd: ev["total_cost_usd"]}
     {:noreply, assign(socket, status: :ready, streaming: nil, last_result: last_result)}
+  end
+
+  # The async AI title landed for this session — refresh the sidebar title. The
+  # store's clobber guard already refused any write that would stomp a human
+  # rename, so whatever arrives here is safe to show.
+  def handle_info({:chat_title, session_id, title}, socket) do
+    if session_matches?(socket, session_id) do
+      {:noreply, assign(socket, chat_title: title)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:claude_chat_permission, ask}, socket) do
@@ -464,6 +477,45 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # ── internals ──────────────────────────────────────────────────────────
+
+  # Fire the AI title generation once per session, on the first successful turn,
+  # while the title is still the default (the store makes a human rename
+  # authoritative regardless). Fire-and-forget under Barkpark.TaskSupervisor —
+  # a failure keeps the default title silently and never touches this LV.
+  defp maybe_kick_title(socket) do
+    cond do
+      socket.assigns[:title_kicked] ->
+        socket
+
+      Map.get(socket.assigns, :title_source, "default") != "default" ->
+        socket
+
+      true ->
+        with sid when is_binary(sid) <- session_id(socket),
+             first when is_binary(first) <- first_user_message(socket) do
+          Barkpark.StudioChat.Titles.kick_title(sid, first, self())
+          assign(socket, title_kicked: true)
+        else
+          _ -> socket
+        end
+    end
+  end
+
+  defp session_id(socket) do
+    case socket.assigns[:init] do
+      %{session_id: sid} -> sid
+      _ -> nil
+    end
+  end
+
+  defp first_user_message(socket) do
+    case Enum.find(socket.assigns.messages, &(&1.role == :user)) do
+      %{text: text} -> text
+      _ -> nil
+    end
+  end
+
+  defp session_matches?(socket, session_id), do: session_id(socket) == session_id
 
   defp start_session(socket) do
     case ClaudeChat.start_session(%{sink: self(), mode: socket.assigns.mode}) do
