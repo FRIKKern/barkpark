@@ -344,6 +344,26 @@ func warmBaseSpec(ctx context.Context) cloud.ServerSpec {
 	return spec
 }
 
+// warmSpecCompatible reports whether a go-live's requested spec can be served
+// from the uniform warm pool. Each of region / server_type is compatible when it
+// is EMPTY (unpinned — take the pool default) or EQUAL to the pool base; a set
+// field that DIFFERS from base makes the whole request incompatible, so the
+// caller one-shots with the pin rather than assign a mismatched warm box. base is
+// warmBaseSpec's env truth — never a hardcoded region/type — so a
+// BARKPARK_SERVER_TYPE/LOCATION override that re-bakes the pool moves this bar
+// with it. Image is intentionally ignored: a warm box's baked image is always
+// current (it is freshened before entering the pool), and a go-live never pins an
+// image.
+func warmSpecCompatible(req, base cloud.ServerSpec) bool {
+	if req.Region != "" && req.Region != base.Region {
+		return false
+	}
+	if req.ServerType != "" && req.ServerType != base.ServerType {
+		return false
+	}
+	return true
+}
+
 // tryWarmAssign claims a warm box and assigns it into a live instance — the
 // ≤15s path. Returns (live, true) on success; (_, false) when the pool is empty,
 // the claim errored, or the assign failed (in which case the box was already torn
@@ -354,6 +374,19 @@ func warmBaseSpec(ctx context.Context) cloud.ServerSpec {
 // the pool stays warm between reconciler passes; a refill failure is logged and
 // the next claim/reconcile re-tops the pool.
 func tryWarmAssign(ctx context.Context, seams Seams, wp *cloud.WarmPool, spec cloud.GoLiveSpec) (cloud.LiveServer, bool) {
+	// Pin guard (azh-w3): the warm pool is UNIFORM — every box is baked at the
+	// env-derived warmBaseSpec region/server_type. A go-live that pins a region or
+	// server_type the pool wasn't baked for (e.g. fsn1/cx32 against an nbg1/cx23
+	// pool) must NOT be handed a wrong-region / wrong-size warm box; it falls
+	// through to a one-shot create that HONORS the pin (return false BEFORE any
+	// claim, so no box is consumed and no refill fires). An unpinned go-live — the
+	// hetzner branch has already filled its empties with warmBaseSpec's own
+	// region/type — or a pin that EQUALS the pool base stays on the ≤15s warm path,
+	// byte-for-byte as before.
+	if !warmSpecCompatible(spec.Spec, warmBaseSpec(ctx)) {
+		return cloud.LiveServer{}, false
+	}
+
 	ws, ok, err := seams.WarmClient.Claim(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm claim failed, falling back to one-shot: %v\n", err)
