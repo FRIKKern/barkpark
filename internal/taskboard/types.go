@@ -256,6 +256,15 @@ type UIState struct {
 	// highlight via FlashLevel; the heartbeat prunes expired entries. Never
 	// populated by a first snapshot or a cache load — cold paints are still.
 	Flashes map[string]time.Time
+	// HoverTarget is the Ref (task doc_id / fold key) of the selectable spine
+	// row currently under the mouse pointer, "" for none (charter D94/D95). It
+	// is resolved by the ttm-s1 compose-level hit map from a Motion MouseMsg and
+	// set through setHoverTarget (the hover-changed guard IS the debounce — a
+	// Motion onto the same row is a no-op, so an all-motion stream never
+	// re-renders). Render paints hoverStyle over exactly this row; a "" target
+	// paints nothing, so a board with no mouse is byte-identical. Cleared on any
+	// key input, so the keyboard flow is untouched.
+	HoverTarget string
 }
 
 // ActionStrip is the single role-colored status line rendered directly above

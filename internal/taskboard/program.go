@@ -409,12 +409,34 @@ func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
 // is transient — "cleared on the next keypress"), and every key EXCEPT a
 // repeated x disarms the close guard (a second consecutive x is the only thing
 // that confirms a close; anything else cancels it).
+// setHoverTarget is the whole flicker discipline for the mouse hover tint
+// (charter D95, the never-flickers law). It stores the ttm-s1-resolved pointer
+// target (a selectable row's Ref, "" when the pointer is over nothing
+// selectable) and reports whether it CHANGED. The hover-changed guard IS the
+// debounce: bubbletea's cell-motion reporting fires one Motion MouseMsg per cell
+// the pointer crosses, but every Motion that resolves to the SAME row returns
+// changed=false, so the caller short-circuits the re-render — no timer, no new
+// cadence, the 100ms heartbeat stays armed only while Alive(). A "" target
+// clears the tint (the pointer left every selectable row, or a key was pressed).
+func setHoverTarget(st UIState, target string) (UIState, bool) {
+	if target == st.HoverTarget {
+		return st, false
+	}
+	st.HoverTarget = target
+	return st, true
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key != "x" {
 		m.pendingClose = ""
 	}
 	m.ui.Strip = ActionStrip{}
+	// Any key yields the hover tint back to the keyboard (charter D95): the mouse
+	// pointer's highlight clears the moment the user reaches for the keyboard, so
+	// the two input modes never fight over the selection. Routed through the same
+	// guard the pointer uses, so a board with no active hover pays nothing.
+	m.ui, _ = setHoverTarget(m.ui, "")
 
 	switch key {
 	case "ctrl+c", "q":
