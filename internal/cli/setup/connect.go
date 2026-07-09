@@ -145,6 +145,7 @@ func writeNextSteps(w interface{ Write([]byte) (int, error) }, server, profile s
 		fmt.Fprintf(w, "  bp paper view welcome        read the welcome paper in your terminal\n")
 	}
 	fmt.Fprintf(w, "  bp setup                     re-run this wizard any time\n")
+	fmt.Fprintf(w, "  bp onramp <target>           wire an AI agent to this server — docs/setup/AGENT-ONRAMPS.md\n")
 	fmt.Fprintf(w, "  bp help                      every command (manifest-driven)\n")
 }
 
@@ -154,7 +155,9 @@ func nextSteps(profile string) []string {
 	if profile == ProfileClean {
 		next = append(next, "bp paper view welcome")
 	}
-	return append(next, "bp setup", "bp help")
+	// Discovery: point agents at the onramp hub — the twin of the human
+	// writeNextSteps line, kept in sync (agent-onramps epic, decision 10).
+	return append(next, "bp setup", "bp onramp <target> — docs/setup/AGENT-ONRAMPS.md", "bp help")
 }
 
 // writeKnownServersLine prints a tight one-line summary of the connect history.
