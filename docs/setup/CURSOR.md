@@ -128,7 +128,10 @@ tool (`bp_<noun>_<verb>`), auto-derived from the live capabilities — a new plu
 verbs appear with zero code changes. Caveat: **Cursor hard-caps 40 MCP tools across
 all enabled servers and silently drops the excess.** The full Barkpark manifest is
 ~107 commands, so `all` blows past the cap. Keep the default `tasks` unless you
-know exactly which handful you need.
+know exactly which handful you need. On a Barkpark with the Tasks plugin
+disabled, `--tools all` still starts (bridge-only, after a one-line stderr
+warning) whereas the default `--tools tasks` refuses — there are no task verbs to
+back the curated tools.
 
 ## Troubleshooting
 

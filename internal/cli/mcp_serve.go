@@ -69,8 +69,9 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		Version: cliVersion,
 	}, nil)
 
-	// The curated five task tools are ALWAYS registered — they are the point of
-	// this server. --tools all additionally exposes every other bp capability as a
+	// The curated six task tools are ALWAYS registered (under --tools tasks) —
+	// they are the point of this server. --tools all additionally exposes every
+	// other bp capability as a
 	// generic tool via the bridge (bridge slice owns registerBridgeTools).
 	// Headless liveness (charter decision 5): tool handlers ride the guard-free
 	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a
@@ -78,9 +79,21 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 	// protocol pipe.
 	g.yes = true
 
+	// Under the default --tools tasks the curated task tools ARE the server, so a
+	// missing task verb is fatal (fail fast, decision 10). Under --tools all the
+	// bridge exposes whatever the manifest DOES carry, so a tasks-less instance is
+	// served bridge-only after a stderr warning rather than refused — a Barkpark
+	// with the Tasks plugin off still gets a useful MCP surface. registerTaskTools
+	// batches every verb Lookup before the first AddTool, so a failure leaves
+	// NOTHING half-registered on srv; and bridgeShadowedIDs is inert when the
+	// task verbs are absent (there is no twin to skip) — so continuing is safe.
 	if err := registerTaskTools(srv, g, ctx, m); err != nil {
-		out.userErr("mcp serve: register task tools: %v", err)
-		return exitGeneric
+		if toolset != "all" {
+			out.userErr("mcp serve: register task tools: %v", err)
+			return exitGeneric
+		}
+		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
+		out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
 	}
 	if toolset == "all" {
 		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
