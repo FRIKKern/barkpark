@@ -2344,7 +2344,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <p class="text-xs text-dim" style="margin: 0 0 8px;">
             Type <strong>bypass</strong> to confirm, then Arm. It takes effect on the next spawn, not the running turn.
           </p>
-          <form phx-change="bypass-confirm" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <%!-- phx-submit rides along so Enter in the confirm input ARMS (server-guarded
+                on the exact word) instead of falling through to a native form submit
+                that would navigate the whole LiveView away. --%>
+          <form
+            phx-change="bypass-confirm"
+            phx-submit="arm-bypass"
+            style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"
+          >
             <input
               type="text"
               name="confirm"

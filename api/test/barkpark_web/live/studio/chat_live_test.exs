@@ -3403,6 +3403,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute has_element?(view, ~s(button[phx-click=arm-bypass]))
       assert lv_assigns(view)[:mode] == "plan"
     end
+
+    # Enter in the confirm input must ARM (phx-submit), never fall through to a
+    # native form submit that navigates the LiveView away — and the submit path
+    # rides the SAME server-side exact-word guard as the button.
+    test "Enter in the confirm input arms via phx-submit, word-guarded", %{view: view} do
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
+      # wrong word: submit never arms, panel stays open for another try
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "nope"})
+      render_submit(element(view, ~s(form[phx-submit=arm-bypass])), %{"confirm" => "nope"})
+      assert lv_assigns(view)[:mode] == "plan"
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+
+      # exact word: Enter arms without touching the button
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      html = render_submit(element(view, ~s(form[phx-submit=arm-bypass])), %{"confirm" => "bypass"})
+      assert lv_assigns(view)[:mode] == "bypassPermissions"
+      assert html =~ "ARMED"
+    end
   end
 
   describe "living sidebar cards (wave 5)" do
