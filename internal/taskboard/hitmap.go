@@ -183,31 +183,14 @@ func frameHitTargets(body []string, stops []Stop, cursor, scroll, avail int) []L
 	return out
 }
 
-// composeInner is the (width, height) Compose hands composeAt — the gutter/clamp
-// math from Compose re-derived in one place (byte-equal to Compose's gl/gr math)
-// so the hit map is built against the SAME inner surface the frame is painted on.
-// It is the narrow-mode geometry; wide two-pane is ttm-s5 (the mouse no-ops
-// there this slice), so ComposeHitMap never calls this in wide mode.
+// composeInner is the (width, height) Compose hands composeAt — the SAME
+// gutter/clamp math the shell already re-derives in boardGeometry, so the hit
+// map is built against the inner surface the frame is painted on without a
+// third copy of that math. It is narrow-mode only: boardGeometry's wide branch
+// is guarded by m.wide, and ComposeHitMap returns nil before calling this in
+// wide mode (the two-pane mouse map is ttm-s5).
 func (m Model) composeInner() (int, int) {
-	width, height := m.width, m.height
-	if width < 20 {
-		width = 20
-	}
-	if height < 8 {
-		height = 8
-	}
-	gl, gr := 1, 3
-	if width < 56 {
-		gl, gr = 1, 2
-	}
-	width, height = width-gl-gr, height-1
-	if width < 20 {
-		width = 20
-	}
-	if height < 8 {
-		height = 8
-	}
-	return width, height
+	return m.boardGeometry()
 }
 
 // ComposeHitMap is the compose-level hit map: the ONE seam that applies ALL
