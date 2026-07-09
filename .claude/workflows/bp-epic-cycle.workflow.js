@@ -238,6 +238,7 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: STRAT_MODEL }
 )
 
+if (!architect) throw new Error('Decide phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
 const wave = (architect.wave || []).slice(0, 5)
 log(`Architect cut ${wave.length} slices; charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}`)
 if (wave.length === 0) {
