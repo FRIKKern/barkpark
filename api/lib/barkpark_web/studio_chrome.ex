@@ -88,7 +88,40 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:create_open, fn -> nil end)
       |> assign_new(:scope_menu, fn -> nil end)
 
-    {:cont, attach_hook(socket, :studio_chrome_nav, :handle_event, &chrome_event/3)}
+    {:cont,
+     socket
+     |> attach_hook(:studio_chrome_nav, :handle_event, &chrome_event/3)
+     |> attach_hook(:studio_chrome_path, :handle_params, &chrome_path/3)}
+  end
+
+  # ── current_path (ALL chrome surfaces — the ONE producer) ────────────────
+  #
+  # Active-state highlighting is a pure function of `current_path`
+  # (`StudioComponents.Nav.plugin_tab_active?/2`). `handle_params` fires on
+  # every connected mount AND every push_patch, so deriving it here — once,
+  # for every studio-layout live_session — lights the right tab on EVERY
+  # surface (ApiTester/Settings/Styleguide/OrgAdmin/plugin-admin used to
+  # render with none) and keeps it fresh across live patches (ChatLive used
+  # to freeze at `/studio/chat` while patched to `/studio/chat/:session_id`).
+  # This is the SINGLE producer: no LiveView hand-sets `current_path`.
+  #
+  # Normalized: `URI.parse/1` already drops query + fragment; we strip a
+  # trailing slash (except bare root) so `active_when` boundary matches
+  # ("/studio/media" vs "/studio/media/") stay deterministic.
+  defp chrome_path(_params, uri, socket) when is_binary(uri) do
+    {:cont, assign(socket, :current_path, normalize_path(URI.parse(uri).path))}
+  end
+
+  defp chrome_path(_params, _uri, socket), do: {:cont, socket}
+
+  defp normalize_path(nil), do: nil
+  defp normalize_path("/"), do: "/"
+
+  defp normalize_path(path) when is_binary(path) do
+    case String.trim_trailing(path, "/") do
+      "" -> "/"
+      trimmed -> trimmed
+    end
   end
 
   # ── scope menu (ALL chrome surfaces — StudioLive included) ───────────────
