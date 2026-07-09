@@ -76,6 +76,16 @@ Wave 3+ (filed when wave 2 lands):
 
 ## Wave log
 
+### Wave 2 recovery (2026-07-09) — integration + visual addendum, reviewer log
+
+**Wave 2 is COMPLETE.** All three slices landed and the ledger is truthful (8 epic children done, 1 open follow-up).
+
+- **Integration (ssp-w2-studio-honest-desk)**: PR #1890 squash-merged as 8f7489fd on the Elixir Test gate (S1 #1882/b8fbef76 was already in); task closed 7/7 on the live cc-showcase epoch-3 claim; charter unioned on main as 9a1f6f3c (Decisions 11–14 + R1–R5 landed, reviewer-log Charter-gap sentence reconciled, zero conflict markers). Reviewer re-ran the slice gate green against origin/main — no fixes needed.
+- **Visual addendum (ssp-w2-visual-addendum)**: TWO independent runs shot live guerrilla post-deploy (build stamped 8f7489fd in the shots' footers) and reached the same verdict — the tiered/honest desk is live, correct, on-theme in both themes; **NO token-value change needed** (studio-literal-check 203 files/0 literals + design/check.mjs 16 surfaces green on the untouched tree). Both evidence Papers are linked to the task: `/papers/ssp-visual-addendum` (authoritative close, staged in vizcheck) and `/papers/ssp-w2-visual-addendum-evidence` (carries the explicit no-change verdict). Reviewer spot-checked pixels against the live tree — genuine.
+- **Reviewer fixes (ledger + environment, no code)**: (1) the vizcheck throwaway workspace was NOT deleted at close time despite criterion 4 — removed server-side by the reviewer (0 media, 3 fixture docs; SQL cascade — **there is NO HTTP DELETE route for workspaces**, only `Tenancy.delete_workspace/1`, so the runbook's cleanup step was mechanically impossible for an agent; wave-3 candidate: expose workspace delete/archive over the API). (2) Criterion-4 evidence corrected on the published ledger to record both the leftover and the fact that the two papers shot Default in DIFFERENT plugin-override states (one shows onixedit+tickets override-enabled on the same build; live Default ended at declaration defaults with an honest …Rest census book/bossType/metric/ticket — verified post-cleanup).
+
+**Next wave (wave 3) queue:** ssp-w3-settings-scope-bind (p1, FILED — Workspace Settings binds its workspace at mount and ignores the scope switcher: wrong-workspace write hazard, the epic's only known real defect); typeless-enable UX feedback (enabling a plugin with no matching types changes nothing visibly — correct but silent; noted in the evidence paper, not yet filed); workspace delete/archive API gap (above); then the standing wave-3 list below (deep-link courtesy redirects, docs/cards/studio.md + plugins card refresh, paper-editor CSS onboarding only if pixels ever prove bleed).
+
 ### Wave 2 (2026-07-09) — reviewer log
 
 **Landed (review-fixed, gates green, UNMERGED — lead integrates slice 1 first, then slice 2):**
