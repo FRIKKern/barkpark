@@ -42,7 +42,7 @@ import (
 // the envelope it renders.
 var usageMeterOrder = []string{
 	"documents", "datasets", "webhooks", "db_size", "disk", "seats",
-	"api_requests", "bandwidth",
+	"api_requests", "bandwidth", "instances",
 }
 
 var usageMeterLabels = map[string]string{
@@ -54,6 +54,7 @@ var usageMeterLabels = map[string]string{
 	"seats":        "Seats",
 	"api_requests": "API requests",
 	"bandwidth":    "Bandwidth",
+	"instances":    "Instances",
 }
 
 // unmeteredValue is the honest "no truth here" sentinel the envelope carries in
@@ -230,16 +231,36 @@ func usageMeterLabel(name string) string {
 }
 
 // usageStateToken maps a meter onto a statusRole token so the STATE cell colours
-// identically to a dashboard dot: a metered meter is "live" (green — the pipe is
-// reporting), an unmetered one is "unmetered" (neutral/dim — no truth here,
-// never a fake zero). A meter absent from the envelope is honestly "unmetered"
-// too. The tokens route through the shared statusRole seam ("live" → ok, an
-// unrecognised "unmetered" → neutral), so no new vocabulary is added.
+// identically to a dashboard dot, and the token IS the cell text (painted through
+// the shared seam, never a direct-role bypass):
+//
+//   - a metered meter at/past its plan quota → "over_limit" (danger/red; the
+//     comparison is INCLUSIVE — value >= quota — matching the create-time guard
+//     that rejects value == quota, so a meter sitting exactly on the ceiling is
+//     over, not merely near);
+//   - a metered meter at/past its warn line but under the ceiling → "near_limit"
+//     (warn/amber);
+//   - any other metered meter → "live" (green — the pipe is reporting, no limit
+//     tripped or no limit present, the v1 all-unmetered shape);
+//   - an unmetered/absent meter → "unmetered" (neutral/dim — no truth here,
+//     never a fake zero, so a quiet pipe can never read as over/near-limit).
+//
+// The quota states light up ONLY when the envelope carries the limit; an
+// unlimited meter (quota/warn_at nil) stays "live", so no fake ceiling is
+// implied. near_limit/over_limit are the deliberate cross-surface vocabulary
+// extension in semrole.For (warn/danger).
 func usageStateToken(m cloudclient.UsageMeter, present bool) string {
-	if present && usageIsMetered(m) {
-		return "live"
+	if !present || !usageIsMetered(m) {
+		return "unmetered"
 	}
-	return "unmetered"
+	n, _ := usageNumber(m.Value) // ok — usageIsMetered guaranteed a number
+	if m.Quota != nil && n >= *m.Quota {
+		return "over_limit"
+	}
+	if m.WarnAt != nil && n >= *m.WarnAt {
+		return "near_limit"
+	}
+	return "live"
 }
 
 // usageValueCell renders a meter's value for the VALUE column: the formatted
@@ -258,11 +279,10 @@ func usageValueCell(name string, m cloudclient.UsageMeter, present bool) string 
 }
 
 // usageLimitCell renders the quota as a "value / quota" fraction when a limit is
-// present (OC7 — quota-aware NOW), or an em dash when unlimited. v1 emits no
-// quotas, so this is always a dash today; a later Elixir-only slice sources real
-// plan limits and the fraction appears here with zero CLI change. Painting the
-// over/near-limit tone is deferred with the data (drawing a coloured bar "to
-// nowhere" for an unlimited meter is exactly the dishonesty the wish forbids).
+// present (OC7 — quota-aware NOW), or an em dash when unlimited. When a plan
+// limit rides the envelope the fraction shows here; the near/over-limit TONE
+// rides the STATE cell (usageStateToken), not this column, so an unlimited meter
+// draws no coloured bar "to nowhere" — exactly the dishonesty the wish forbids.
 func usageLimitCell(m cloudclient.UsageMeter) string {
 	if m.Quota == nil {
 		return "—"
@@ -373,12 +393,14 @@ WHAT IT SHOWS
 
     documents · datasets · webhooks    instance-sourced inventory counts
     db_size · disk                     the agent's health-beat telemetry
-    seats                              your team's members (+ pending invites)
+    seats · instances                  your team's members + provisioned boxes
     api_requests · bandwidth           flow meters (not yet metered)
 
   Every meter is a real number or an honest "unmetered" with its source named —
   never a fake zero. A meter with a snapshot time shows "as of …"; a live read
-  shows "live". Quotas ride as a fraction when a plan limit is present.
+  shows "live". Quotas ride as a fraction when a plan limit is present, and the
+  STATE cell warns "near_limit" / "over_limit" as a metered value nears or
+  crosses that ceiling.
 
   <instance> is a fleet name or id (the forms bp cloud status shows); needs
   'bp login'. Instance-sourced counts are "unmetered" until the backend lands
