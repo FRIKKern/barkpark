@@ -76,7 +76,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   describe "permission modes" do
     test "the stdio permission bridge ships in ALL modes, plan included (charter D33)" do
       {_exe, plan_args} = with_default_command(fn -> ClaudeChat.command("plan") end)
-      {_exe, ask_args} = with_default_command(fn -> ClaudeChat.command("default") end)
+      # A real six-mode ASK mode (charter D48 — `default` is retired; acceptEdits
+      # is a genuine non-plan mode that still routes asks to us).
+      {_exe, ask_args} = with_default_command(fn -> ClaudeChat.command("acceptEdits") end)
 
       # Plan mode is the product default and every plan session hits
       # ExitPlanMode — without the flag that ask never reaches Barkpark, so the
@@ -89,13 +91,31 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert Enum.chunk_every(ask_args, 2, 1)
              |> Enum.member?(["--permission-prompt-tool", "stdio"])
 
-      assert Enum.chunk_every(ask_args, 2, 1) |> Enum.member?(["--permission-mode", "default"])
+      assert Enum.chunk_every(ask_args, 2, 1)
+             |> Enum.member?(["--permission-mode", "acceptEdits"])
+    end
+
+    test "the six real modes are offered; the retired default is not" do
+      assert ClaudeChat.modes() == ~w(plan acceptEdits auto dontAsk manual bypassPermissions)
+      refute "default" in ClaudeChat.modes()
+    end
+
+    test "a legacy stored `default` mode still spawns --permission-mode default verbatim" do
+      # No data migration, no read-time rewrite (charter D48): an existing row
+      # carrying `default` keeps spawning it byte-for-byte — build_args passes the
+      # mode through untouched.
+      args = ClaudeChat.build_args("default", %{})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "default"])
     end
 
     test "normalize_mode fails closed to plan" do
       assert ClaudeChat.normalize_mode("acceptEdits") == "acceptEdits"
+      # FAIL-CLOSED LAW (charter D48): an untrusted string never fails OPEN into
+      # bypass — bypassPermissions is the one road-blocked mode.
       assert ClaudeChat.normalize_mode("bypassPermissions") == "plan"
       assert ClaudeChat.normalize_mode(nil) == "plan"
+      # every real ask mode round-trips
+      for m <- ~w(auto dontAsk manual), do: assert(ClaudeChat.normalize_mode(m) == m)
     end
 
     defp with_default_command(fun) do
@@ -144,9 +164,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
 
     test "session args are appended onto the mode's base args" do
-      args = ClaudeChat.build_args("default", %{session_id: @uuid})
+      args = ClaudeChat.build_args("acceptEdits", %{session_id: @uuid})
       # the base permission args survive the append
-      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "default"])
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "acceptEdits"])
       assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-prompt-tool", "stdio"])
       assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--session-id", @uuid])
     end
@@ -862,6 +882,73 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert ClaudeChat.normalize_model("fable") == "fable"
       assert ClaudeChat.normalize_model("gpt-4; rm -rf /") == nil
       assert ClaudeChat.normalize_model(nil) == nil
+    end
+  end
+
+  describe "build_args/2 effort choice (wave 9, charter D48)" do
+    test "a chosen effort tier rides the spawn as --effort" do
+      args = ClaudeChat.build_args("plan", %{session_id: "u-1", effort: "high"})
+      assert ["--effort", "high"] ==
+               Enum.slice(args, Enum.find_index(args, &(&1 == "--effort")), 2)
+
+      assert "--session-id" in args
+    end
+
+    test "a resume carries the effort too" do
+      args = ClaudeChat.build_args("plan", %{session_id: "u-1", resume: true, effort: "xhigh"})
+      assert "--resume" in args
+      assert ["--effort", "xhigh"] == Enum.slice(args, Enum.find_index(args, &(&1 == "--effort")), 2)
+    end
+
+    test "absent or nil effort emits NO --effort flag" do
+      refute "--effort" in ClaudeChat.build_args("plan", %{session_id: "u-1"})
+      refute "--effort" in ClaudeChat.build_args("plan", %{session_id: "u-1", effort: nil})
+    end
+
+    test "every allowlisted tier is accepted; junk omits the flag (fail-closed)" do
+      for e <- ~w(low medium high xhigh max) do
+        assert "--effort" in ClaudeChat.build_args("plan", %{effort: e})
+      end
+
+      refute "--effort" in ClaudeChat.build_args("plan", %{effort: "ultra"})
+      refute "--effort" in ClaudeChat.build_args("plan", %{effort: "high; rm -rf /"})
+    end
+
+    test "normalize_effort fail-closes unknown strings to nil" do
+      assert ClaudeChat.normalize_effort("high") == "high"
+      assert ClaudeChat.normalize_effort("max") == "max"
+      assert ClaudeChat.normalize_effort("ludicrous") == nil
+      assert ClaudeChat.normalize_effort(nil) == nil
+    end
+  end
+
+  describe "build_args/2 bypass arming (wave 9, charter D48 — the two-key gate)" do
+    test "armed bypass emits BOTH --permission-mode bypassPermissions and the danger flag" do
+      args = ClaudeChat.build_args("bypassPermissions", %{session_id: "u-1", bypass_armed: true})
+
+      assert Enum.chunk_every(args, 2, 1)
+             |> Enum.member?(["--permission-mode", "bypassPermissions"])
+
+      assert "--allow-dangerously-skip-permissions" in args
+    end
+
+    test "UNARMED bypass falls back to plan and emits NO danger flag (fail-closed)" do
+      args = ClaudeChat.build_args("bypassPermissions", %{session_id: "u-1", bypass_armed: false})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
+      refute "bypassPermissions" in args
+      refute "--allow-dangerously-skip-permissions" in args
+    end
+
+    test "a missing bypass_armed key is treated as unarmed (fail-closed to plan)" do
+      args = ClaudeChat.build_args("bypassPermissions", %{session_id: "u-1"})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
+      refute "--allow-dangerously-skip-permissions" in args
+    end
+
+    test "bypass_armed alone (non-bypass mode) never emits the danger flag" do
+      args = ClaudeChat.build_args("acceptEdits", %{session_id: "u-1", bypass_armed: true})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "acceptEdits"])
+      refute "--allow-dangerously-skip-permissions" in args
     end
   end
 end

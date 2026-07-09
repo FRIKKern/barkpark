@@ -383,7 +383,7 @@ defmodule Barkpark.StudioChat do
     with %Session{} = session <- get_session(session_id) do
       session
       |> Ecto.Changeset.change(mode: mode, last_active_at: DateTime.utc_now())
-      |> Ecto.Changeset.validate_inclusion(:mode, Session.modes())
+      |> Ecto.Changeset.validate_inclusion(:mode, Session.persistable_modes())
       |> Repo.update()
     else
       nil -> {:error, :not_found}
@@ -536,6 +536,53 @@ defmodule Barkpark.StudioChat do
     |> limit(1)
     |> select([s], s.model_choice)
     |> Repo.one()
+  end
+
+  @doc """
+  Persist the user's picked reasoning-effort tier (nil = CLI default). The exact
+  mirror of `set_model_choice/2` (charter D48): choice is intent — it rides the
+  next spawn as `--effort`. There is no observed-effort fact, so nothing else
+  writes this column.
+  """
+  def set_effort_choice(session_id, choice) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(effort_choice: choice, last_active_at: DateTime.utc_now())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  The most-recently-active session's `effort_choice` — the seed for a NEW chat's
+  effort picker, so "high" stays sticky across new chats. The exact mirror of
+  `recent_model_choice/0`, and a DEDICATED query for the SAME reason: `list_sessions`
+  selects sidebar fields and OMITS `effort_choice`, so seeding off a listed row
+  reads `nil` forever (the vacuous-green trap). Returns the tier string or `nil`.
+  """
+  @spec recent_effort_choice() :: String.t() | nil
+  def recent_effort_choice do
+    Session
+    |> where([s], not is_nil(s.effort_choice) and s.effort_choice != "default")
+    |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(1)
+    |> select([s], s.effort_choice)
+    |> Repo.one()
+  end
+
+  @doc """
+  True when this session's PERSISTED mode is `bypassPermissions` — the ONLY
+  signal that the dangerous `--allow-dangerously-skip-permissions` flag may ride
+  its spawn (charter D48). Derived from the stored row, NEVER a live event param:
+  bypass reaches the mode column solely through the armed ceremony
+  (`ClaudeChat.normalize_mode` fails every untrusted string closed to plan), so a
+  persisted `bypassPermissions` is itself the proof of arming. Fail-closed on a
+  missing row.
+  """
+  @spec bypass_armed?(String.t() | nil) :: boolean()
+  def bypass_armed?(session_id) do
+    match?(%Session{mode: "bypassPermissions"}, get_session(session_id))
   end
 
   @doc """

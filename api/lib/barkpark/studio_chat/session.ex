@@ -24,7 +24,13 @@ defmodule Barkpark.StudioChat.Session do
   @title_sources ~w(default ai human)
   # Permission modes the CLI accepts (mirrors BarkparkWeb.Studio.ClaudeChat.modes/0,
   # kept here so the context layer validates a mode without reaching into web).
-  @modes ~w(plan default acceptEdits)
+  # The two constants move TOGETHER (charter D48). `bypassPermissions` is a legal
+  # PERSISTED mode — the store validates inclusion so the armed ceremony can write
+  # it — but it is reachable only through that ceremony (ClaudeChat.normalize_mode
+  # fails every untrusted string closed to plan). The retired `default` is NOT in
+  # this list: an existing row keeps spawning it verbatim, but no NEW switch lands
+  # it (a legacy-`default` select re-pick normalizes to plan).
+  @modes ~w(plan acceptEdits auto dontAsk manual bypassPermissions)
 
   @primary_key {:id, Ecto.UUID, autogenerate: false}
   @foreign_key_type Ecto.UUID
@@ -37,6 +43,10 @@ defmodule Barkpark.StudioChat.Session do
     field :mode, :string
     field :model, :string
     field :model_choice, :string
+    # The USER'S picked reasoning-effort tier (low/medium/high/xhigh/max), nil =
+    # CLI default. Intent-only (charter D48), the exact mirror of `model_choice`:
+    # rides the next spawn as `--effort`, seeded sticky across new chats.
+    field :effort_choice, :string
     # Sticky composer draft (charter D36c): the unsent words left behind when the
     # user switched away from this session. Nullable; restored on reopen (via the
     # FULL struct — `list_sessions` deliberately omits it), cleared on send.
@@ -85,8 +95,17 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Legal title sources."
   def title_sources, do: @title_sources
 
-  @doc "Legal permission modes."
+  @doc "Legal permission modes OFFERED in the picker (mirrors ClaudeChat.modes/0)."
   def modes, do: @modes
+
+  # Modes that may be PERSISTED — the offered six PLUS the grandfathered `default`.
+  # `default` is not an offered choice, but the CLI still reports it as its own
+  # post-plan mode (charter D34), so `set_mode/2` must accept it when observed and
+  # an existing row that carries it stays valid (charter D48).
+  @persistable_modes @modes ++ ["default"]
+
+  @doc "Modes `set_mode/2` may persist — the offered six plus the legacy `default`."
+  def persistable_modes, do: @persistable_modes
 
   @create_fields ~w(id title title_source cwd mode model status last_active_at summary)a
 

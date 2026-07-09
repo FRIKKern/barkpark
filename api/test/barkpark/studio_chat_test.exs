@@ -308,10 +308,23 @@ defmodule Barkpark.StudioChatTest do
 
     test "an invalid mode is rejected (validate_inclusion)" do
       s = new_session(%{mode: "plan"})
-      assert {:error, changeset} = StudioChat.set_mode(s.id, "bypassPermissions")
+      # A genuinely-invalid string — bypassPermissions is now a LEGAL persisted
+      # mode (the armed ceremony writes it), so it can no longer stand in for the
+      # invalid example (charter D48).
+      assert {:error, changeset} = StudioChat.set_mode(s.id, "wideOpen")
       assert %{mode: _} = errors_on(changeset)
       # the row is untouched
       assert StudioChat.get_session(s.id).mode == "plan"
+    end
+
+    test "bypassPermissions IS a legal persisted mode (armed-ceremony write)" do
+      s = new_session(%{mode: "plan"})
+      # The store validates inclusion so the armed ceremony can persist bypass;
+      # the FAIL-CLOSED guard is upstream (ClaudeChat.normalize_mode never yields
+      # it), not here.
+      assert {:ok, switched} = StudioChat.set_mode(s.id, "bypassPermissions")
+      assert switched.mode == "bypassPermissions"
+      assert StudioChat.bypass_armed?(s.id)
     end
 
     test "set_mode on a missing session is honest" do
@@ -871,6 +884,66 @@ defmodule Barkpark.StudioChatTest do
     test "nil when no session ever picked a non-default model" do
       _ = new_session()
       assert StudioChat.recent_model_choice() == nil
+    end
+  end
+
+  describe "effort_choice — the exact mirror of model_choice (charter D48)" do
+    test "set_effort_choice persists the tier and is read back on reopen" do
+      s = new_session()
+      {:ok, updated} = StudioChat.set_effort_choice(s.id, "high")
+      assert updated.effort_choice == "high"
+      assert StudioChat.get_session(s.id).effort_choice == "high"
+    end
+
+    test "set_effort_choice on a missing session is honest" do
+      assert {:error, :not_found} = StudioChat.set_effort_choice(Ecto.UUID.generate(), "high")
+    end
+
+    test "recent_effort_choice returns the most-recently-active NON-default tier" do
+      older = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(older.id, "low")
+      newer = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(newer.id, "xhigh")
+
+      assert StudioChat.recent_effort_choice() == "xhigh"
+    end
+
+    test "recent_effort_choice ignores nil and literal \"default\"" do
+      a = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(a.id, "medium")
+      b = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(b.id, "default")
+
+      assert StudioChat.recent_effort_choice() == "medium"
+    end
+
+    test "nil when no session ever picked an effort tier" do
+      _ = new_session()
+      assert StudioChat.recent_effort_choice() == nil
+    end
+
+    test "list_sessions never selects effort_choice (dedicated-query law)" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(s.id, "high")
+      # The sidebar select omits :effort_choice — a listed row reads the struct
+      # default (nil), which is exactly why recent_effort_choice/0 is dedicated.
+      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert listed.effort_choice == nil
+    end
+  end
+
+  describe "bypass_armed?/1 — persisted-mode gate (charter D48)" do
+    test "true only when the PERSISTED mode is bypassPermissions" do
+      s = new_session(%{mode: "plan"})
+      refute StudioChat.bypass_armed?(s.id)
+
+      {:ok, _} = StudioChat.set_mode(s.id, "bypassPermissions")
+      assert StudioChat.bypass_armed?(s.id)
+    end
+
+    test "false (fail-closed) for a missing session" do
+      refute StudioChat.bypass_armed?(Ecto.UUID.generate())
+      refute StudioChat.bypass_armed?(nil)
     end
   end
 

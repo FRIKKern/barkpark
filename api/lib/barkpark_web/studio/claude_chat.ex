@@ -33,8 +33,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   require Logger
 
   @default_binary "claude"
-  @modes ~w(plan default acceptEdits)
+  # The real `--permission-mode` choices the CLI documents (probed v2.1.205,
+  # charter D48). Moves TOGETHER with Session's @modes. `default` (our retired
+  # middle mode) is deliberately absent — a stored legacy `default` still spawns
+  # verbatim (default_args passes the mode through), but it is no longer an
+  # offered choice. `bypassPermissions` is offered but GUARDED: it only reaches
+  # the argv through the armed ceremony (see build_args/normalize_mode below).
+  @modes ~w(plan acceptEdits auto dontAsk manual bypassPermissions)
+  # Modes an UNTRUSTED string may normalize INTO. bypassPermissions is excluded
+  # by law: it is the one road-blocked mode — a raw event string must never fail
+  # OPEN into dangerous bypass (charter D48 fail-closed law).
+  @normalizable_modes @modes -- ["bypassPermissions"]
   @default_mode "plan"
+  # Reasoning-effort tiers the CLI's `--effort` flag accepts (probed v2.1.205,
+  # charter D48). Ascending intensity; defined here so build_args' guard sees it.
+  @efforts ~w(low medium high xhigh max)
 
   @doc """
   Whether the chat may run on this host. ON by default; requires the flag
@@ -102,8 +115,34 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   """
   @spec build_args(String.t(), map()) :: [String.t()]
   def build_args(mode, session_opts \\ %{}) do
-    default_args(mode) ++ session_args(session_opts) ++ model_args(session_opts)
+    default_args(permission_mode(mode, session_opts)) ++
+      bypass_args(mode, session_opts) ++
+      session_args(session_opts) ++
+      model_args(session_opts) ++
+      effort_args(session_opts)
   end
+
+  # The permission mode that actually reaches `--permission-mode`. bypassPermissions
+  # rides the argv ONLY when the persisted row armed it (`bypass_armed: true`,
+  # threaded by ChatLive from the stored mode, never a raw event param); an unarmed
+  # bypass falls back to plan (fail-closed). Every other mode — including a legacy
+  # stored `default` — passes through verbatim.
+  defp permission_mode("bypassPermissions", %{bypass_armed: true}), do: "bypassPermissions"
+  defp permission_mode("bypassPermissions", _), do: @default_mode
+  defp permission_mode(mode, _), do: mode
+
+  # The dangerous arming flag is emitted ONLY alongside an armed bypass — the
+  # second half of the two-key gate (mode == bypassPermissions AND bypass_armed).
+  defp bypass_args("bypassPermissions", %{bypass_armed: true}),
+    do: ["--allow-dangerously-skip-permissions"]
+
+  defp bypass_args(_mode, _opts), do: []
+
+  # A chosen reasoning-effort tier rides the spawn (`--effort <tier>`); absent =
+  # the CLI's own default. Allowlisted tiers only — an unknown value omits the
+  # flag (fail-closed), never a raw user string on the argv.
+  defp effort_args(%{effort: e}) when e in @efforts, do: ["--effort", e]
+  defp effort_args(_), do: []
 
   # Resume wins over a fresh pin: --resume and --session-id are mutually
   # exclusive, so a resume never also emits --session-id.
@@ -122,6 +161,18 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec models() :: [String.t()]
   def models, do: @models
 
+  @doc "Reasoning-effort tiers the picker may choose (`--effort`)."
+  @spec efforts() :: [String.t()]
+  def efforts, do: @efforts
+
+  @doc ~S"""
+  Clamp a picker value to an allowlisted effort tier, or nil for the CLI default.
+  Fail-closed: an unknown string never reaches the argv (mirror of normalize_model/1).
+  """
+  @spec normalize_effort(term()) :: String.t() | nil
+  def normalize_effort(e) when e in @efforts, do: e
+  def normalize_effort(_), do: nil
+
   @doc ~S"""
   Clamp a picker value to an allowlisted model alias, or nil for the CLI
   default. Fail-closed: an unknown string never reaches the argv.
@@ -134,9 +185,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec modes() :: [String.t()]
   def modes, do: @modes
 
-  @doc "Clamp an arbitrary mode string to a supported one (fail-closed to plan)."
+  @doc """
+  Clamp an arbitrary mode string to a supported one (fail-closed to plan).
+
+  bypassPermissions is deliberately NOT normalizable (charter D48): an untrusted
+  string — a raw select param, a slash arg, a CLI-echoed init frame — must never
+  fail OPEN into dangerous bypass. The only road to bypass is the armed ceremony
+  in ChatLive, which persists the mode directly; every other path lands plan.
+  """
   @spec normalize_mode(term()) :: String.t()
-  def normalize_mode(mode) when mode in @modes, do: mode
+  def normalize_mode(mode) when mode in @normalizable_modes, do: mode
   def normalize_mode(_), do: @default_mode
 
   defp default_args(mode) do
@@ -224,9 +282,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         {:error, :disabled}
 
       true ->
+        # Pass the mode THROUGH — build_args/2 is the single fail-closed seam now
+        # (charter D9/D48): it clamps an UNARMED bypassPermissions to plan and lets
+        # a legacy `default` spawn verbatim. Re-normalizing here would wrongly clamp
+        # BOTH (armed bypass → plan, legacy default → plan), so it must not.
         __MODULE__.Session.start(%{
           sink: sink,
-          mode: normalize_mode(opts[:mode]),
+          mode: opts[:mode] || @default_mode,
           session_opts: Map.get(opts, :session_opts, %{})
         })
     end
