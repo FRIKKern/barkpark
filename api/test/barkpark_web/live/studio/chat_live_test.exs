@@ -144,6 +144,31 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # Poll the tee'd stdin capture until a frame of the wanted type appears, then
+  # decode it. respond_permission is a cast + port write, so the bytes land
+  # asynchronously after render_click returns.
+  defp await_wire_frame(path, type, tries \\ 200) do
+    frame =
+      if File.exists?(path) do
+        path
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(fn line ->
+          case Jason.decode(line) do
+            {:ok, decoded} -> decoded
+            _ -> nil
+          end
+        end)
+        |> Enum.find(&(is_map(&1) and &1["type"] == type))
+      end
+
+    cond do
+      is_map(frame) -> frame
+      tries <= 0 -> flunk("no #{type} frame reached the wire capture: #{path}")
+      true -> Process.sleep(20) && await_wire_frame(path, type, tries - 1)
+    end
+  end
+
   # Poll an async condition (fire-and-forget title task) to a verdict.
   defp await(fun, tries \\ 100) do
     cond do
@@ -786,6 +811,301 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       assert html =~ "✓ allowed"
       refute html =~ "✗ denied"
+    end
+
+    # ── AskUserQuestion answer form + ExitPlanMode plan card (charter D31/D32) ─
+
+    defp ask_question(view, rid, questions) do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: rid,
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => questions},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+    end
+
+    test "an AskUserQuestion ask renders an answer FORM, not an Allow/Deny card",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "help me choose"})
+
+      ask_question(view, "q-1", [
+        %{
+          "question" => "Which pet?",
+          "header" => "Pets",
+          "multiSelect" => false,
+          "options" => [
+            %{"label" => "Cat", "description" => "aloof"},
+            %{"label" => "Dog", "description" => "loyal"}
+          ]
+        }
+      ])
+
+      html = render(view)
+      assert html =~ "The agent is asking you"
+      assert html =~ "Which pet?"
+      assert html =~ "Cat"
+      assert html =~ "Dog"
+      assert html =~ ~s(data-question="q-1")
+      assert html =~ ~s(phx-click="question-submit")
+      assert html =~ ~s(phx-click="question-toggle")
+      # a question is NOT a bare approval card
+      refute html =~ "Allow AskUserQuestion?"
+    end
+
+    test "selecting a chip and submitting resolves the question as answered",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-2", [
+        %{
+          "question" => "Which pet?",
+          "multiSelect" => false,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-2"])))
+
+      assert html =~ "✓ answered"
+      refute html =~ "The agent is asking you"
+    end
+
+    test "a multiSelect question accumulates chips (toggle, not replace)", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose many"})
+
+      ask_question(view, "q-3", [
+        %{
+          "question" => "Which pets?",
+          "multiSelect" => true,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      # both chips selected — a multiSelect adds rather than replaces
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      html =
+        render_click(
+          element(
+            view,
+            ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Dog"])
+          )
+        )
+
+      # both chips read as pressed (accumulated selection, not a single winner)
+      assert html =~ ~s(phx-value-label="Cat" aria-pressed="true") or
+               html =~ ~s(aria-pressed="true")
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-3"])))
+
+      assert html =~ "✓ answered"
+    end
+
+    # Charter D32, end-to-end through the LiveView: the multiSelect answer that
+    # reaches the WIRE is the comma-joined labels, keyed by the QUESTION STRING.
+    # The fake subprocess tees every stdin line to a capture file, so this
+    # asserts the literal control_response bytes the CLI would read — chip
+    # clicks → build_answers → respond_permission → port write.
+    test "a multiSelect answer reaches the wire comma-joined, keyed by the question string",
+         %{view: view} do
+      wire =
+        Path.join(
+          System.tmp_dir!(),
+          "chat_live_wire_#{System.pid()}_#{System.unique_integer([:positive])}"
+        )
+
+      File.rm_rf(wire)
+      on_exit(fn -> File.rm_rf(wire) end)
+
+      Application.put_env(:barkpark, :claude_chat,
+        enabled: true,
+        command: {"sh", ["-c", "tee '#{wire}' >/dev/null"]}
+      )
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose many"})
+
+      ask_question(view, "q-wire", [
+        %{
+          "question" => "Which pets?",
+          "multiSelect" => true,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Dog"])
+        )
+      )
+
+      render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-wire"])))
+
+      frame = await_wire_frame(wire, "control_response")
+
+      assert %{
+               "response" => %{
+                 "subtype" => "success",
+                 "request_id" => "q-wire",
+                 "response" => %{"behavior" => "allow", "updatedInput" => updated}
+               }
+             } = frame
+
+      assert updated["answers"] == %{"Which pets?" => "Cat, Dog"}
+      # the questions ride back unchanged next to the answers (charter D32)
+      assert [%{"question" => "Which pets?"} | _] = updated["questions"]
+    end
+
+    test "a custom free-text answer resolves the question", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-4", [%{"question" => "Anything?", "options" => []}])
+      render(view)
+
+      render_hook(view, "question-custom", %{
+        "rid" => "q-4",
+        "qi" => "0",
+        "value" => "surprise me"
+      })
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-4"])))
+
+      assert html =~ "✓ answered"
+    end
+
+    test "dismissing the questions denies honestly", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-5", [%{"question" => "X", "options" => [%{"label" => "A"}]}])
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-dismiss][phx-value-rid="q-5"])))
+
+      assert html =~ "✗ dismissed"
+      refute html =~ "The agent is asking you"
+    end
+
+    # (S1's minimal plan-card fallback test was superseded by the rich S2 card —
+    # see "the proposed-plan card (ExitPlanMode, charter D34)" describe below.)
+
+    # Charter D35 — a resolution BROADCASTS so a co-viewing tab's open form
+    # converges instead of lingering answerable after the ask is already handled.
+    test "resolving a question converges a co-viewing tab", %{view: view, conn: conn} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+      sid = store_id(view)
+
+      {:ok, view_b, _html} = live(conn, "/studio/chat/#{sid}")
+
+      send_frame(
+        sid,
+        {:claude_chat_permission,
+         %{
+           request_id: "q-9",
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => [%{"question" => "Pick", "options" => [%{"label" => "A"}]}]},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      # both tabs render the open form
+      assert render(view) =~ "The agent is asking you"
+      assert render(view_b) =~ "The agent is asking you"
+
+      # answer on tab A
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="A"])
+        )
+      )
+
+      render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-9"])))
+
+      # tab B converges: the form is gone, the terminal line is shown
+      html_b = render(view_b)
+      assert html_b =~ "✓ answered"
+      refute html_b =~ "The agent is asking you"
+    end
+
+    # Reopen honesty for the question role (charter D31): a stored question row
+    # replays in its terminal state, and a dangling "pending" row with no live
+    # owner renders as canceled — never a dead answer form, never a bare
+    # :system fallback line.
+    defp seed_session_with_question(request_id, status) do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+      {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "choose"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "question",
+          source_markdown: "AskUserQuestion",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "AskUserQuestion",
+            "input" => %{"questions" => [%{"question" => "Which pet?", "options" => ["Cat"]}]},
+            "approval_status" => status
+          }
+        })
+
+      id
+    end
+
+    test "an answered question row reopens as its terminal line, not a form", %{conn: conn} do
+      sid = seed_session_with_question("q-done", "allowed")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      assert html =~ "✓ answered"
+      refute html =~ "The agent is asking you"
+      refute has_element?(view, ~s(button[phx-click=question-submit][phx-value-rid="q-done"]))
+    end
+
+    test "a dangling pending question row reopens as ✗ canceled, never a live form",
+         %{conn: conn} do
+      sid = seed_session_with_question("q-hang", "pending")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # pending + no live owner → the honest terminal state, not a dead form
+      assert html =~ "✗ canceled"
+      refute html =~ "The agent is asking you"
+      refute has_element?(view, ~s(button[phx-click=question-submit][phx-value-rid="q-hang"]))
     end
 
     test "switching mode steers the LIVE session in place (no respawn, no teardown)",
@@ -1840,7 +2160,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, plan_ask("plan-ok", @plan_md))
       render(view)
 
-      html = render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-ok])))
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-ok])))
+
       assert html =~ "✓ plan approved"
       refute html =~ "Approve plan"
       refute html =~ "Keep planning"
