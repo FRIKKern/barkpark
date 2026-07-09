@@ -1152,4 +1152,129 @@ defmodule Barkpark.StudioChatTest do
       assert rail["done"]["status"] == "completed"
     end
   end
+
+  # Real v2.1.205 captures committed under test/fixtures/claude_chat/. These
+  # ALWAYS-ON (untagged) tests decode the real bytes and drive the pure folds —
+  # the wire assumptions the agents rail was built on are now PERMANENT
+  # regression tests, not one-off probe notes (wave-10 fixture law).
+  @fixtures_dir Path.expand("../fixtures/claude_chat", __DIR__)
+
+  defp load_ndjson(name) do
+    @fixtures_dir
+    |> Path.join(name)
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+  end
+
+  defp workflow_progress_frames(frames) do
+    Enum.filter(frames, fn f ->
+      f["subtype"] == "task_progress" and is_list(f["workflow_progress"])
+    end)
+  end
+
+  defp background_snapshot_frames(frames),
+    do: Enum.filter(frames, &(&1["subtype"] == "background_tasks_changed"))
+
+  describe "agents rail: real-binary fixture folds (charter D47 — wave 10 wire truth)" do
+    test "the FLAT-LIST workflow_progress frames fold into rail agent nodes carrying title/label/model/state" do
+      frames = "workflow_progress.ndjson" |> load_ndjson() |> workflow_progress_frames()
+      assert frames != []
+
+      rail = Enum.reduce(frames, %{}, &StudioChat.rail_capture_progress(&2, &1))
+
+      # one workflow task, keyed by its real task_id
+      assert map_size(rail) == 1
+      [{tid, entry}] = Map.to_list(rail)
+      assert is_binary(tid)
+
+      nodes = entry["workflow"]
+      assert is_list(nodes)
+
+      phases = Enum.filter(nodes, &(&1["type"] == "workflow_phase"))
+      agents = Enum.filter(nodes, &(&1["type"] == "workflow_agent"))
+      assert phases != []
+      assert agents != []
+      # the real nodes carry exactly the render fields the rail reads
+      assert Enum.all?(phases, &is_binary(&1["title"]))
+
+      assert Enum.all?(
+               agents,
+               &(is_binary(&1["label"]) and is_binary(&1["model"]) and is_binary(&1["state"]))
+             )
+    end
+
+    test "real agent states are ONLY start/done and rail_signature moves across the lifecycle" do
+      frames = "workflow_progress.ndjson" |> load_ndjson() |> workflow_progress_frames()
+
+      states =
+        frames
+        |> Enum.flat_map(& &1["workflow_progress"])
+        |> Enum.filter(&(&1["type"] == "workflow_agent"))
+        |> Enum.map(& &1["state"])
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      # the wire truth the terminal-set fold is built on: no "running" ever
+      assert states == ["done", "start"]
+
+      [first | _] = frames
+      sig_first = StudioChat.rail_signature(StudioChat.rail_capture_progress(%{}, first))
+
+      sig_last =
+        StudioChat.rail_signature(
+          Enum.reduce(frames, %{}, &StudioChat.rail_capture_progress(&2, &1))
+        )
+
+      # start → done is a structural state change, so the signature (which
+      # strips token churn but keeps state) must differ
+      refute sig_first == sig_last
+    end
+
+    test "a workflow entry SURVIVES an unrelated background snapshot; a vanished background entry flips to completed" do
+      wf_frames = "workflow_progress.ndjson" |> load_ndjson() |> workflow_progress_frames()
+      bg_frames = "background_tasks.ndjson" |> load_ndjson() |> background_snapshot_frames()
+
+      assert length(bg_frames) == 2
+      [bg_live, bg_empty] = bg_frames
+      assert bg_live["tasks"] != []
+      assert bg_empty["tasks"] == []
+
+      # a live workflow rail — NO background provenance
+      rail = Enum.reduce(wf_frames, %{}, &StudioChat.rail_capture_progress(&2, &1))
+      [{wf_tid, _}] = Map.to_list(rail)
+      assert rail[wf_tid]["status"] == "running"
+      refute rail[wf_tid]["origin"] == "background"
+
+      # an unrelated background agent's snapshot arrives
+      rail = StudioChat.rail_apply_background(rail, bg_live)
+      [bg_tid] = Enum.map(bg_live["tasks"], & &1["task_id"])
+      assert bg_tid != wf_tid
+      assert rail[bg_tid]["origin"] == "background"
+      assert rail[bg_tid]["status"] == "running"
+      # the provenance gate: the workflow entry is untouched by the background fold
+      assert rail[wf_tid]["status"] == "running"
+
+      # the background task completes (empty snapshot): its own entry flips, the
+      # workflow entry — never a background-snapshot member — stays running
+      rail = StudioChat.rail_apply_background(rail, bg_empty)
+      assert rail[bg_tid]["status"] == "completed"
+      assert rail[wf_tid]["status"] == "running"
+    end
+
+    test "the foreground-task capture carries NO rail frames — folding it leaves the rail empty" do
+      frames = load_ndjson("foreground_task.ndjson")
+      refute Enum.any?(frames, &(&1["subtype"] == "background_tasks_changed"))
+      refute Enum.any?(frames, &is_list(&1["workflow_progress"]))
+
+      rail =
+        Enum.reduce(frames, %{}, fn f, rail ->
+          rail
+          |> StudioChat.rail_apply_background(f)
+          |> StudioChat.rail_capture_progress(f)
+        end)
+
+      assert rail == %{}
+    end
+  end
 end

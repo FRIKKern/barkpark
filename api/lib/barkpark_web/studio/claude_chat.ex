@@ -262,7 +262,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     * `{:claude_chat_event, map}` — one decoded stream-json event per NDJSON
       line the CLI emits (`system/init`, `stream_event`, `assistant`,
       `result`, …)
-    * `{:claude_chat_exit, status}` — the subprocess ended
+    * `{:claude_chat_exit, status, stderr_tail}` — the subprocess ended; the
+      bounded tail of the child's captured stderr rides along (empty on a clean
+      exit, `nil` on the crash/idle-reap paths that carry no captured stderr) so
+      the UI can tell a rejected-argv death from an ordinary end (charter D54)
 
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
@@ -485,6 +488,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # running process rather than spawning a second `claude --resume` writer.
     @registry Barkpark.StudioChat.SessionRegistry
 
+    # The child's stderr is captured through this shell so stdout stays pristine
+    # ndjson (charter D54). `/bin/sh` is POSIX-guaranteed on every host we run.
+    @shell "/bin/sh"
+    # Bound the exit reason we read back: at most the last few KB / lines of
+    # stderr, so a chatty process can never blow up the exit message.
+    @stderr_tail_bytes 8_192
+    @stderr_tail_lines 20
+
     @spec start(%{sink: pid()}) :: {:ok, pid()} | {:error, term()}
     def start(opts) do
       case pinned_session_id(opts) do
@@ -518,10 +529,28 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           {:stop, :binary_not_found}
 
         path ->
+          # Capture the child's stderr WITHOUT polluting stdout (charter D54).
+          # A rejected argv exits nonzero with the reason on stderr and ZERO
+          # ndjson frames on stdout; a plain Port drops the only diagnosis, so
+          # the UI keeps inviting a resume that re-dies identically. Spawn
+          # through `/bin/sh -c 'exec "$0" "$@" 2>>file'`: `exec` REPLACES the
+          # shell with `claude`, so Port close/signals still reach the CLI and
+          # stdout stays pristine — only fd 2 is redirected to a bounded
+          # per-session file we tail on exit. Transparent to any executable, so
+          # the fake-subprocess test harness runs through it unchanged.
+          stderr_path = stderr_path(opts)
+          _ = File.rm(stderr_path)
+
           port =
             Port.open(
-              {:spawn_executable, path},
-              [:binary, :exit_status, :hide, args: args, cd: ClaudeChat.cwd()]
+              {:spawn_executable, @shell},
+              [
+                :binary,
+                :exit_status,
+                :hide,
+                args: ["-c", ~s(exec "$0" "$@" 2>>"#{stderr_path}"), path | args],
+                cd: ClaudeChat.cwd()
+              ]
             )
 
           # Keep the monitor ref so an adopt can cleanly demonitor the outgoing
@@ -534,6 +563,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
              port: port,
              sink: sink,
              sink_ref: sink_ref,
+             stderr_path: stderr_path,
              buffer: "",
              pending_controls: %{},
              # request_id → the ORIGINAL ask input, tracked so a plain `:allow`
@@ -653,7 +683,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-      send(state.sink, {:claude_chat_exit, status})
+      # Carry the bounded stderr tail (charter D54) so the UI can distinguish a
+      # rejected-argv death (nonzero, zero frames — a resume would re-die) from
+      # an ordinary end that resumes cleanly.
+      send(state.sink, {:claude_chat_exit, status, read_stderr_tail(state[:stderr_path])})
       {:stop, :normal, %{state | port: nil}}
     end
 
@@ -664,15 +697,73 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     def handle_info(_msg, state), do: {:noreply, state}
 
     @impl true
-    def terminate(_reason, %{port: port}) when is_port(port) do
+    def terminate(_reason, %{port: port} = state) when is_port(port) do
       # Closing the Port closes the subprocess's stdin; the CLI exits on EOF.
       if port in Port.list(), do: Port.close(port)
+      cleanup_stderr(state)
       :ok
     rescue
       _ -> :ok
     end
 
-    def terminate(_reason, _state), do: :ok
+    def terminate(_reason, state) do
+      cleanup_stderr(state)
+      :ok
+    end
+
+    # The stderr capture file must not outlive the session (charter D54) — remove
+    # it on every teardown path (clean close, exit, crash). Best-effort.
+    defp cleanup_stderr(%{stderr_path: path}) when is_binary(path), do: File.rm(path)
+    defp cleanup_stderr(_), do: :ok
+
+    # A per-session file for the child's stderr. Keyed by the pinned session id
+    # (stable across a resume respawn) or a unique token for an anonymous chat;
+    # lives under the OS temp dir and is removed on teardown.
+    defp stderr_path(opts) do
+      token =
+        case pinned_session_id(opts) do
+          id when is_binary(id) -> id
+          _ -> "anon-#{System.unique_integer([:positive])}-#{System.system_time(:nanosecond)}"
+        end
+
+      Path.join(System.tmp_dir!(), "barkpark-claude-#{token}.stderr")
+    end
+
+    # The last few KB / lines of the child's stderr, for an honest exit reason.
+    # Bounded (seek to EOF minus the byte cap, keep the trailing lines) so a
+    # chatty process can never balloon the exit message; nil-safe for the paths
+    # that carry no captured stderr.
+    defp read_stderr_tail(nil), do: ""
+
+    defp read_stderr_tail(path) do
+      case File.open(path, [:read, :binary]) do
+        {:ok, io} ->
+          size =
+            case :file.position(io, :eof) do
+              {:ok, s} -> s
+              _ -> 0
+            end
+
+          _ = :file.position(io, max(size - @stderr_tail_bytes, 0))
+
+          data =
+            case :file.read(io, @stderr_tail_bytes) do
+              {:ok, d} -> d
+              _ -> ""
+            end
+
+          File.close(io)
+
+          data
+          |> String.split("\n", trim: true)
+          |> Enum.take(-@stderr_tail_lines)
+          |> Enum.join("\n")
+          |> String.trim()
+
+        _ ->
+          ""
+      end
+    end
 
     # Permission asks become a dedicated sink message; any other control
     # request gets an immediate error response so the CLI never hangs waiting

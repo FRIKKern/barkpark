@@ -385,14 +385,63 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                       %{"type" => "system", "subtype" => "init", "model" => "test-model"}},
                      2_000
 
-      assert_receive {:claude_chat_exit, 0}, 2_000
+      assert_receive {:claude_chat_exit, 0, _tail}, 2_000
     end
 
     test "reports a non-zero exit status" do
       put_chat_config(command: {"sh", ["-c", "exit 3"]})
 
       {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
-      assert_receive {:claude_chat_exit, 3}, 2_000
+      assert_receive {:claude_chat_exit, 3, _tail}, 2_000
+    end
+
+    # ── stderr capture: honest dead spawns (charter D54) ──────────────────────
+    #
+    # A rejected argv exits nonzero with the reason on stderr and ZERO stdout
+    # frames. The exec-wrapper (`/bin/sh -c 'exec "$0" "$@" 2>>file'`) must
+    # capture that reason and carry its tail on the exit message — otherwise the
+    # UI keeps inviting a resume that re-dies identically.
+    test "captures the child's stderr tail on a nonzero exit" do
+      script = ~s(printf 'boom: unknown option --nope\\n' 1>&2; exit 1)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
+
+      assert_receive {:claude_chat_exit, 1, tail}, 2_000
+      assert tail =~ "boom: unknown option --nope"
+    end
+
+    # The wrapper redirects fd 2 ONLY — stdout ndjson must stay pristine even
+    # when the child also writes noise to stderr (a leak would make the JSON
+    # line un-parseable and this event would never arrive).
+    test "stderr capture leaves stdout ndjson pristine" do
+      script =
+        ~s(printf '%s\\n' '{"type":"system","subtype":"init","model":"m"}'; ) <>
+          ~s(printf 'noise on stderr\\n' 1>&2)
+
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
+
+      assert_receive {:claude_chat_event, %{"type" => "system", "subtype" => "init"}}, 2_000
+      assert_receive {:claude_chat_exit, 0, tail}, 2_000
+      assert tail =~ "noise on stderr"
+    end
+
+    # The stderr capture file must not outlive the session (charter D54). Pin a
+    # session id so the path is deterministic (no shared-dir wildcard flake).
+    test "removes the stderr capture file on close" do
+      uuid = Ecto.UUID.generate()
+      path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.stderr")
+
+      put_chat_config(command: {"cat", []})
+      {:ok, session} = ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+      ref = Process.monitor(session)
+
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+
+      refute File.exists?(path)
     end
 
     test "session dies with its sink (no leaked subprocess owner)" do
