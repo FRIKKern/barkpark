@@ -123,6 +123,13 @@ claim-first contract in its own description:
 - **`task_prime`** — one-call rehydration for a resuming agent: in-progress
   claims (with close-ready epochs), ready head, recent events, counts.
 
+### Resources: published papers
+
+The server also exposes every **published paper** as a read-only MCP resource
+(`barkpark://papers/<id>`, raw JSON) — browse them in the client's resource
+picker and pull one into context. Independent of `--tools`; if the API is
+unreachable at startup the list degrades gracefully (papers still read by id).
+
 ### `--tools all` (expert only)
 
 `"args": ["mcp", "serve", "--tools", "all"]` exposes **every** manifest verb as a

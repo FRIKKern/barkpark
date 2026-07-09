@@ -176,6 +176,9 @@ flags:
                       task_create, task_prime. "all" additionally bridges every
                       other bp capability into a generic tool.
 
+Published papers are also exposed as read-only MCP resources
+(barkpark://papers/<id>), independent of --tools.
+
 The server resolves its target Barkpark the same way every other bp command
 does (-s / --token / BARKPARK_* env / saved config). Register it in Cursor via
 ~/.cursor/mcp.json (global) or .cursor/mcp.json (per-project):
