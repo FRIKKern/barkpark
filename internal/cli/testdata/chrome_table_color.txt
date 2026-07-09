@@ -1,0 +1,5 @@
+NAME    PROVIDER  STATUS
+web-1   [38;2;240;113;138mhetzner [0m  [38;2;69;195;116mlive    [0m
+db-1    [38;2;73;163;224mazure   [0m  [38;2;248;171;36mdegraded[0m
+cache   [38;2;240;113;138mhetzner [0m  stopped
+legacy  gcp       running

@@ -1,0 +1,5 @@
+NAME    PROVIDER  STATUS
+web-1   hetzner   live
+db-1    azure     degraded
+cache   hetzner   stopped
+legacy  gcp       running
