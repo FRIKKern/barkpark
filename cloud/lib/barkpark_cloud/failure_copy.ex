@@ -249,4 +249,49 @@ defmodule BarkparkCloud.FailureCopy do
   def capability_gap_reason(_kind, capability) when is_binary(capability) do
     "The #{capability} capability isn't available on this provider yet."
   end
+
+  @doc """
+  The server-owned remediation for a non-ok domain-status stage (charter S13 —
+  `BarkparkCloud.DomainStatus`). Keyed on `(kind, stage)` where `kind` is
+  `"platform"` (the provisioning FQDN) or `"custom"` (an attached `custom_host`)
+  and `stage` is one of `"dns_found"`, `"points_here"`, `"tls"`, `"serving"`.
+
+  The cert story genuinely differs by kind: the PLATFORM FQDN's certificate is
+  issued and renewed by the provision-time Caddy automatically, while a CUSTOM
+  host's certificate is requested on demand by the attach step
+  (`/v1/tls/ask` — `registry.ex` `domain_registered?/1` deliberately excludes the
+  platform FQDN), so the two `pending` stories point the operator at different
+  things. Every OTHER stage's copy is kind-agnostic. The terminal default clause
+  GUARANTEES no non-ok stage is ever reason-less — the console (S13b) and CLI
+  read this one copy through the domain-status envelope, so they can't drift.
+  """
+  @spec domain_stage_remediation(String.t(), String.t()) :: String.t()
+
+  def domain_stage_remediation(_kind, "dns_found") do
+    "This domain isn't resolving publicly yet. If you just launched or attached it, DNS records take up to a minute to propagate — give it a moment and re-check."
+  end
+
+  def domain_stage_remediation(_kind, "points_here") do
+    "This domain resolves, but not to this instance's address. It's pointed automatically when the instance is provisioned; if it persists, re-attach the domain or contact support."
+  end
+
+  # PLATFORM cert: provision-time Caddy issues + renews it automatically.
+  def domain_stage_remediation("platform", "tls") do
+    "The TLS certificate for this domain is issued and renewed automatically by the platform. If it isn't ready, it's usually still being issued on first HTTPS request — give it ~60s and re-check."
+  end
+
+  # CUSTOM cert: requested on demand by the attach step (/v1/tls/ask).
+  def domain_stage_remediation("custom", "tls") do
+    "The certificate for your custom domain is requested on demand when it's attached. If it isn't ready, give it ~60s and re-check; if it persists, re-attach the domain."
+  end
+
+  def domain_stage_remediation(_kind, "serving") do
+    "The domain and certificate check out, but this instance isn't returning a healthy response yet. If it just launched it may still be booting — check the instance status, then re-check."
+  end
+
+  # Terminal default: any stage (including a skipped, still-pending one) gets a
+  # reason so no non-ok stage is ever rendered reason-less.
+  def domain_stage_remediation(_kind, _stage) do
+    "This check hasn't passed yet. It runs after the earlier steps succeed — resolve those first, then re-check."
+  end
 end

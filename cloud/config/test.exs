@@ -40,6 +40,15 @@ config :barkpark_cloud,
 config :barkpark_cloud,
   azure_http_client: BarkparkCloud.Azure.FakeClient
 
+# domain-status (S13): the three DomainStatus outbound seams (DNS resolve, TLS
+# dial, serving GET) default to a FAIL-CLOSED offline guard in test, so no test
+# can touch the network by accident. Tests that assert real behaviour inject
+# their own seam fakes (per-call opts or Application.put_env), which win.
+config :barkpark_cloud,
+  domain_status_dns: &BarkparkCloud.DomainStatusOfflineGuard.getaddrs/2,
+  domain_status_tls: &BarkparkCloud.DomainStatusOfflineGuard.tls/2,
+  domain_status_http: &BarkparkCloud.DomainStatusOfflineGuard.http/1
+
 # Speed up the test suite: the default 12 bcrypt log_rounds (~250ms/hash) is
 # overkill for tests. 1 round keeps register/verify cycles fast while still
 # exercising the real Bcrypt code path.
