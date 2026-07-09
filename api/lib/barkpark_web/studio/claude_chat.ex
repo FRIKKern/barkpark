@@ -177,6 +177,32 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     GenServer.cast(session, {:send_user_message, text})
   end
 
+  # NOTE: interrupt/2 + set_permission_mode/2 are the control-frame seam owned
+  # by `scc-w1-wire-seam` (S2). Provided here in a minimal, spec-faithful form
+  # so the honest-turns slice (S4) compiles and tests in isolation; S2's
+  # canonical version (with build_args + set_model) supersedes on integration.
+
+  @doc """
+  Interrupt the running turn via a `control_request`/`interrupt` frame on
+  stdin (proven on the raw wire). The turn aborts with a terminal `result`
+  (`terminal_reason: "aborted_streaming"`) but the SESSION survives — the next
+  user message runs normally. Idempotent: a duplicate interrupt is harmless.
+  """
+  @spec interrupt(pid()) :: :ok
+  def interrupt(session) when is_pid(session) do
+    GenServer.cast(session, :interrupt)
+  end
+
+  @doc """
+  Steer the LIVE session's permission mode via a `set_permission_mode` control
+  frame (key `mode` — the alt key `permission_mode` is a silent no-op). The
+  model's context is preserved; no respawn.
+  """
+  @spec set_permission_mode(pid(), String.t()) :: :ok
+  def set_permission_mode(session, mode) when is_pid(session) and is_binary(mode) do
+    GenServer.cast(session, {:set_permission_mode, normalize_mode(mode)})
+  end
+
   @doc "Terminate the session subprocess."
   @spec close(pid()) :: :ok
   def close(session) when is_pid(session) do
@@ -290,6 +316,16 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       {:noreply, state}
     end
 
+    def handle_cast(:interrupt, state) do
+      write_control_request(state.port, "interrupt", %{})
+      {:noreply, state}
+    end
+
+    def handle_cast({:set_permission_mode, mode}, state) do
+      write_control_request(state.port, "set_permission_mode", %{"mode" => mode})
+      {:noreply, state}
+    end
+
     def handle_cast(:close, state), do: {:stop, :normal, state}
 
     @impl true
@@ -364,6 +400,20 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     defp dispatch_event(event, state), do: send(state.sink, {:claude_chat_event, event})
+
+    # Control-request frame on stdin: `{type, request_id, request{subtype,…}}`.
+    # A minted request_id keeps each in-band control uniquely correlatable with
+    # its `control_response` ack (which we tolerate, not require).
+    defp write_control_request(port, subtype, extra) do
+      line =
+        Jason.encode!(%{
+          "type" => "control_request",
+          "request_id" => "#{subtype}-#{System.unique_integer([:positive, :monotonic])}",
+          "request" => Map.merge(%{"subtype" => subtype}, extra)
+        }) <> "\n"
+
+      safe_command(port, line)
+    end
 
     defp safe_command(port, data) when is_port(port) do
       Port.command(port, data)

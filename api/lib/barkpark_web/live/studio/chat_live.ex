@@ -64,42 +64,71 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_event("send", %{"message" => text}, socket) do
     text = String.trim(text)
 
-    if text == "" do
-      {:noreply, socket}
-    else
-      socket = if socket.assigns.session, do: socket, else: start_session(socket)
+    # No send queue (t3 item 10): while a turn runs the only control is Stop —
+    # a stray Enter-submit must not fire a second overlapping turn. Enter is a
+    # server-side no-op here; the composer shows Stop, not Send.
+    cond do
+      text == "" ->
+        {:noreply, socket}
 
-      case socket.assigns.session do
-        nil ->
-          {:noreply, socket}
+      turn_active?(socket.assigns.status) ->
+        {:noreply, socket}
 
-        session ->
-          ClaudeChat.send_message(session, text)
+      true ->
+        socket = if socket.assigns.session, do: socket, else: start_session(socket)
 
-          {:noreply,
-           socket
-           |> append_message(:user, text)
-           |> assign(status: :thinking, composer_rev: socket.assigns.composer_rev + 1)}
-      end
+        case socket.assigns.session do
+          nil ->
+            {:noreply, socket}
+
+          session ->
+            ClaudeChat.send_message(session, text)
+
+            {:noreply,
+             socket
+             |> append_message(:user, text)
+             |> assign(
+               status: :thinking,
+               interrupt_requested: false,
+               composer_rev: socket.assigns.composer_rev + 1
+             )}
+        end
     end
   end
 
-  # Switching permission mode restarts the subprocess (the CLI fixes its mode
-  # at spawn). The transcript survives in the LiveView; the model's context
-  # does not — an honest system line says so.
+  # Stop a running turn. The interrupt is a control-request frame on stdin
+  # (proven on the raw wire): the CLI aborts the turn and emits a terminal
+  # `result` with subtype `error_during_execution` /
+  # `terminal_reason: "aborted_streaming"` — but the session SURVIVES. We flag
+  # `interrupt_requested` so the result classifies as "interrupted", never an
+  # error, and flip to a transient `:interrupting` status for honest feedback.
+  # A late ack (or a duplicate Stop) is harmless — the cast is idempotent.
+  def handle_event("stop_turn", _params, socket) do
+    case socket.assigns.session do
+      nil ->
+        {:noreply, socket}
+
+      session ->
+        ClaudeChat.interrupt(session)
+        {:noreply, assign(socket, interrupt_requested: true, status: :interrupting)}
+    end
+  end
+
+  # Switching permission mode steers the LIVE session via a `set_permission_mode`
+  # control frame (key `mode`) — the model's context is preserved, no respawn.
+  # With no live session we just record the choice; the next spawn carries it.
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     mode = ClaudeChat.normalize_mode(mode)
 
     if mode == socket.assigns.mode do
       {:noreply, socket}
     else
-      if session = socket.assigns.session, do: ClaudeChat.close(session)
+      if session = socket.assigns.session, do: ClaudeChat.set_permission_mode(session, mode)
 
       {:noreply,
        socket
-       |> assign(mode: mode, session: nil, streaming: nil)
-       |> append_message(:system, "Permission mode → #{mode}. New session started.")
-       |> start_session()}
+       |> assign(mode: mode)
+       |> append_message(:system, "Permission mode → #{mode_label(mode)}.")}
     end
   end
 
@@ -167,14 +196,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev}, socket) do
+    # An interrupted turn arrives as `error_during_execution` too — the ONLY
+    # way to tell it from a genuine error is that WE asked to stop
+    # (`interrupt_requested`) or the CLI tagged the terminus
+    # `aborted_streaming`. Classify honestly: an interrupt is a normal outcome,
+    # not a failure, and the session stays live for a follow-up.
+    interrupted? =
+      socket.assigns[:interrupt_requested] == true or
+        ev["terminal_reason"] == "aborted_streaming"
+
     socket =
-      case ev["subtype"] do
-        "success" -> socket
-        subtype -> append_message(socket, :system, "The turn ended with an error (#{subtype}).")
+      cond do
+        ev["subtype"] == "success" ->
+          socket
+
+        interrupted? ->
+          append_message(socket, :system, "⊘ Interrupted — the session is still live.")
+
+        true ->
+          append_message(socket, :system, "The turn ended with an error (#{ev["subtype"]}).")
       end
 
     last_result = %{duration_ms: ev["duration_ms"], cost_usd: ev["total_cost_usd"]}
-    {:noreply, assign(socket, status: :ready, streaming: nil, last_result: last_result)}
+
+    {:noreply,
+     assign(socket,
+       status: :ready,
+       streaming: nil,
+       last_result: last_result,
+       interrupt_requested: false
+     )}
   end
 
   def handle_info({:claude_chat_permission, ask}, socket) do
@@ -199,14 +250,30 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
+  # A subprocess crash/exit must never leave the UI lying. Fail the in-flight
+  # turn (drop the streaming buffer), force-cancel EVERY pending approval —
+  # their control-response can never be delivered, so a hanging Allow/Deny
+  # would be a dead button — and mark the persisted session exited (nil-safe:
+  # `store_session_id` is set only once sessions persistence is wired).
   def handle_info({:claude_chat_exit, status}, socket) do
-    {:noreply,
-     socket
-     |> append_message(
-       :system,
-       "Claude session ended (exit #{status}). Send a message to start a new one."
-     )
-     |> assign(session: nil, status: :offline, streaming: nil)}
+    messages =
+      Enum.map(socket.assigns.messages, fn
+        %{role: :approval, approval_status: :pending} = m -> %{m | approval_status: :canceled}
+        m -> m
+      end)
+
+    socket =
+      socket
+      |> assign(messages: messages)
+      |> append_message(
+        :system,
+        "Claude session ended (exit #{status}). Send a message to start a new one."
+      )
+      |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
+
+    mark_session_exited(socket.assigns[:store_session_id])
+
+    {:noreply, socket}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, socket) do
@@ -346,7 +413,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   class="text-xs text-dim"
                   style="font-family: var(--font-mono); overflow-wrap: anywhere;"
                 >
-                  <%= if message.approval_status == :allowed, do: "✓ allowed", else: "✗ denied" %> — <%= message.tool_name %>
+                  <%= approval_outcome_label(message.approval_status) %> — <%= message.tool_name %>
                 </div>
               <% _ -> %>
                 <div class="text-xs text-dim" style="font-style: italic;">
@@ -397,7 +464,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
             placeholder={composer_placeholder(@status)}
             style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
           />
-          <button type="submit" class="btn btn-primary">
+          <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
+                to cancel, never to queue a second turn (t3: no send queue). --%>
+          <button
+            :if={turn_active?(@status)}
+            type="button"
+            class="btn"
+            phx-click="stop_turn"
+            disabled={@status == :interrupting}
+            aria-label="Stop the current turn"
+            style="display: inline-flex; align-items: center; gap: 6px;"
+          >
+            <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
+            <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
+          </button>
+          <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
             <.icon name="send" size={14} />
           </button>
         </form>
@@ -661,9 +742,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp status_label(:starting), do: "starting"
   defp status_label(:ready), do: "ready"
   defp status_label(:thinking), do: "working"
+  defp status_label(:interrupting), do: "stopping…"
   defp status_label(:offline), do: "offline"
 
+  # A turn is in flight while the model works or while we're aborting it — both
+  # states show Stop, never Send (there is no queue; the only in-turn control
+  # is to cancel).
+  defp turn_active?(status), do: status in [:thinking, :interrupting]
+
+  defp approval_outcome_label(:allowed), do: "✓ allowed"
+  defp approval_outcome_label(:canceled), do: "✗ canceled"
+  defp approval_outcome_label(_), do: "✗ denied"
+
+  # S1 (scc-w1-store) provides `Barkpark.StudioChat.mark_exited/1`; until it
+  # lands `store_session_id` is always nil, so this is a no-op in isolation.
+  defp mark_session_exited(nil), do: :ok
+  defp mark_session_exited(id), do: Barkpark.StudioChat.mark_exited(id)
+
   defp composer_placeholder(:offline), do: "Send a message to start a new session…"
+  defp composer_placeholder(:thinking), do: "Claude is working — press Stop to interrupt…"
+  defp composer_placeholder(:interrupting), do: "Stopping…"
   defp composer_placeholder(_), do: "Message Claude…"
 
   defp format_duration(ms) when is_integer(ms) and ms >= 1000,

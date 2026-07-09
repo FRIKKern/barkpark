@@ -423,10 +423,16 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "✗ denied"
     end
 
-    test "switching mode restarts the session and says so", %{view: view} do
+    test "switching mode steers the LIVE session (no respawn) and records it", %{view: view} do
       html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
-      assert html =~ "Permission mode → default"
+      # the mode change is recorded honestly with the friendly label…
+      assert html =~ "Permission mode → ask to act"
       assert html =~ "ask to act"
+      # …but the session is steered in place, never respawned — the old
+      # respawn path (which destroyed the model's context) is gone.
+      refute html =~ "New session started"
+      # still ready and live (a restart would have flipped through starting)
+      assert html =~ "ready"
     end
 
     test "mode selector clamps junk to plan (no-op when already plan)", %{view: view} do
@@ -435,6 +441,110 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       refute html =~ "Permission mode → bypass"
       assert html =~ "plan (read-only)"
+    end
+
+    # ── honest turn outcomes (scc-w1-honest-turns) ───────────────────────
+
+    test "while a turn runs, Stop replaces Send (attribute-level, not disabled)", %{view: view} do
+      # render_submit bypasses the disabled attribute, so assert on the button
+      # IDENTITY, not on disabled: the submit button is GONE, Stop is present.
+      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
+      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      assert has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
+      refute has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+    end
+
+    test "there is no send queue — a submit while a turn runs is a server-side no-op",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "first turn"})
+      # render_submit bypasses the missing submit button, so this proves the
+      # SERVER refuses the overlapping send, not just the hidden button.
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "second turn"})
+      refute html =~ "second turn"
+      assert html =~ "first turn"
+    end
+
+    test "Stop interrupts the turn; the interrupted result keeps the session live", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      render_click(element(view, ~s(button[phx-click=stop_turn])))
+      assert render(view) =~ "stopping"
+
+      # the interrupt lands as error_during_execution + aborted_streaming…
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "error_during_execution",
+           "terminal_reason" => "aborted_streaming"
+         }}
+      )
+
+      html = render(view)
+      # …but it reads as an interrupt, never a failure, and the session lives on
+      assert html =~ "Interrupted"
+      refute html =~ "ended with an error"
+      assert html =~ "ready"
+      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+    end
+
+    test "an aborted_streaming result reads as interrupted even without a prior Stop",
+         %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "error_during_execution",
+           "terminal_reason" => "aborted_streaming"
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Interrupted"
+      refute html =~ "ended with an error"
+    end
+
+    test "a genuine error result still surfaces as an error (not interrupted)", %{view: view} do
+      # no interrupt_requested, no aborted_streaming → a real failure
+      send(
+        view.pid,
+        {:claude_chat_event, %{"type" => "result", "subtype" => "error_max_turns"}}
+      )
+
+      html = render(view)
+      assert html =~ "ended with an error"
+      assert html =~ "error_max_turns"
+      refute html =~ "Interrupted"
+    end
+
+    test "a subprocess crash force-cancels every pending approval to ✗ canceled", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "req-crash",
+           tool_name: "Bash",
+           input: %{"command" => "rm -rf /tmp/x"},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      assert has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-crash]))
+
+      send(view.pid, {:claude_chat_exit, 1})
+      html = render(view)
+
+      # POSITIVELY assert the cancellation, then refute the live buttons — a
+      # dead Allow/Deny post-exit would be a button that lies.
+      assert html =~ "✗ canceled"
+      refute has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-crash]))
+      refute has_element?(view, ~s(button[phx-click=deny][phx-value-rid=req-crash]))
+      assert html =~ "offline"
     end
 
     test "an unknown stale event does not crash the LiveView", %{view: view} do
