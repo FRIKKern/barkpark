@@ -409,10 +409,18 @@ const failedBeforeF = failed;
 // the SAME diff (a pin was retired to a native derivation — the ratchet must follow).
 const OVERRIDE_COUNT_FROZEN = { evergreen: 56 };
 
-// tokens-side leaf reader: every theme-varying family lives under tokens.color
-// (ts-w3c moved paperEmail/paperCallout there — #1707).
+// Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
+// DISK — never the `tokens` singleton re-exported by emit.mjs. Since the w4 seam
+// (charter D22) emit.mjs now overlays derive(evergreen) onto its exported color
+// tree, comparing derive against `emit.tokens` would compare derive against derive
+// (vacuous green). The raw file is the frozen mirror; comparing derive against it
+// keeps the byte gate honest.
+const rawTokensDisk = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8"));
+
+// tokens-side leaf reader: every theme-varying family lives under color.* in the
+// RAW on-disk tokens (ts-w3c moved paperEmail/paperCallout there — #1707).
 const tokenSlot = (path) =>
-  path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), tokens.color);
+  path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), rawTokensDisk.color);
 
 // Collect every theme-varying color LEAF actually present in tokens.json (color.*
 // families minus declared passthroughs, plus the two top-level paper families) — the
@@ -428,7 +436,7 @@ function collectTokenLeaves() {
       else if (v && typeof v === "object") walk(p, v);
     }
   };
-  for (const [fam, v] of Object.entries(tokens.color)) {
+  for (const [fam, v] of Object.entries(rawTokensDisk.color)) {
     if (fam.startsWith("_") || PASS.has(fam)) continue;
     if (v && typeof v === "object") walk(fam, v);
   }
