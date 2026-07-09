@@ -1277,4 +1277,259 @@ defmodule Barkpark.StudioChatTest do
       assert rail == %{}
     end
   end
+
+  # ── Wave-11 phase journey (charter D57–D59, D62) ────────────────────────────
+  #
+  # FIXTURE PROVENANCE (charter D62). Two committed fixtures whose workflow-agent
+  # NODE PAYLOADS are VERBATIM from real epic-cycle runs (never invented — only
+  # the frame envelope and the progressive start→done state replay are derived,
+  # following the committed workflow_progress.ndjson grammar: bg-add → task_started
+  # → progressive task_progress in real startedAt/durationMs order → completed
+  # only: empty-bg → task_updated → task_notification):
+  #
+  #   * epic_cycle_progress.ndjson — the COMPLETED 7-phase 29-agent run
+  #     wf_49614704-d80 (all-opus claude-opus-4-8[1m]; design:/impl:/
+  #     verify:encryption:leak labels), every agent walked to `done`.
+  #   * epic_cycle_interrupted.ndjson — the KILLED 7-phase bp-epic-cycle run
+  #     wf_1e38c940-f75 (fable strategist done, 4 opus explorers in `progress`,
+  #     phases 3–7 declared agentless), ending mid-flight with NO terminal frames.
+  #
+  # The fixture-fed tests fold the FULL INTERLEAVED stream (bg frames INCLUDED)
+  # exactly as the Recorder's dispatch does — the wave-10 filtered-fold blind spot
+  # (workflow entry never seeing its bg-add) dies here.
+
+  # Fold a full frame stream into a rail map EXACTLY as recorder.ex dispatches
+  # (background_tasks_changed → rail_apply_background; task_progress →
+  # rail_capture_progress; task_updated/notification → rail_stamp_status).
+  defp fold_rail(frames) do
+    Enum.reduce(frames, %{}, fn ev, rail ->
+      case ev["subtype"] do
+        "background_tasks_changed" -> StudioChat.rail_apply_background(rail, ev)
+        "task_progress" -> StudioChat.rail_capture_progress(rail, ev)
+        "task_updated" -> StudioChat.rail_stamp_status(rail, ev["task_id"], get_in(ev, ["patch", "status"]))
+        "task_notification" -> StudioChat.rail_stamp_status(rail, ev["task_id"], ev["status"])
+        _ -> rail
+      end
+    end)
+  end
+
+  # The teardown interrupt flip (interrupt_rail_entries): every still-"running"
+  # entry → "interrupted". Mirrors studio_chat.ex exactly, purely, so the journey
+  # of a dead session is what production replays.
+  defp interrupt_flip(rail) do
+    Map.new(rail, fn
+      {tid, %{"status" => "running"} = e} -> {tid, Map.put(e, "status", "interrupted")}
+      other -> other
+    end)
+  end
+
+  defp only_entry(rail) do
+    assert map_size(rail) == 1
+    [{_tid, entry}] = Map.to_list(rail)
+    entry
+  end
+
+  describe "workflow_journey/1 — completed fixture (charter D57/D58/D62)" do
+    test "the completed 7-phase 29-agent run reads 7/7 :done, honest aggregates" do
+      entry = "epic_cycle_progress.ndjson" |> load_ndjson() |> fold_rail() |> only_entry()
+
+      # the full-stream fold: the workflow rode the bg-add, so it is
+      # background-origin and its terminal status arrives redundantly (D62)
+      assert entry["origin"] == "background"
+      assert entry["status"] == "completed"
+
+      %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
+
+      assert length(phases) == 7
+      assert Enum.all?(phases, &(&1.status == :done))
+      assert Enum.map(phases, & &1.title) |> hd() == "Design"
+
+      assert s.entry_status == :completed
+      assert s.phases_total == 7
+      assert s.phases_done == 7
+      assert s.phases_skipped == 0
+      assert s.current_index == nil
+      assert s.agents_total == 29
+      assert s.agents_running == 0
+      assert s.agents_done == 29
+      assert s.agents_failed == 0
+      # verbatim token truth summed from the real done nodes
+      assert s.tokens_total == 2_137_873
+    end
+
+    test "phase 1 groups its four design agents by phaseIndex, model family Opus" do
+      entry = "epic_cycle_progress.ndjson" |> load_ndjson() |> fold_rail() |> only_entry()
+      %{phases: [design | _]} = StudioChat.workflow_journey(entry)
+
+      assert design.title == "Design"
+      assert design.agent_count == 4
+      assert design.model == "Opus"
+      assert Enum.map(design.agents, & &1["label"]) ==
+               ~w(design:encryption design:visibility design:ownership design:hardening)
+    end
+  end
+
+  describe "workflow_journey/1 — interrupted fixture (charter D58/D62)" do
+    test "a killed run shows the frontier :interrupted, an :unreached tail, phase 1 :done" do
+      rail = "epic_cycle_interrupted.ndjson" |> load_ndjson() |> fold_rail()
+
+      # ends mid-flight — no terminal frames, so the fold leaves it running
+      assert only_entry(rail)["status"] == "running"
+
+      # the session-teardown interrupt flip supplies "interrupted" (as prod does)
+      entry = rail |> interrupt_flip() |> only_entry()
+      assert entry["status"] == "interrupted"
+
+      %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
+      by_index = Map.new(phases, &{&1.index, &1.status})
+
+      assert by_index[1] == :done
+      assert by_index[2] == :interrupted
+      # phases 3–7 are agentless on a dead entry → :unreached tail
+      assert Enum.all?(3..7, &(by_index[&1] == :unreached))
+
+      assert s.entry_status == :interrupted
+      assert s.current_index == 2
+      assert s.current_title == "Explore"
+      assert s.phases_done == 1
+      assert s.agents_total == 5
+      # the 4 explorers are still `progress` (non-terminal) — running, not done
+      assert s.agents_running == 4
+      assert s.agents_done == 1
+      assert s.agents_failed == 0
+    end
+  end
+
+  describe "workflow_journey/1 — derived-truth edges (charter D58)" do
+    test ":skipped falls out of a COMPLETED entry with an agentless trailing phase" do
+      entry = %{
+        "status" => "completed",
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Build"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Review"},
+          %{"type" => "workflow_phase", "index" => 3, "title" => "Perfect"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "build", "state" => "done"},
+          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "review", "state" => "done"}
+        ]
+      }
+
+      %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
+      assert Enum.map(phases, & &1.status) == [:done, :done, :skipped]
+      # honest "2 of 3 phases · 1 skipped", never a fake 3/3
+      assert s.phases_done == 2
+      assert s.phases_skipped == 1
+    end
+
+    test "an `error` agent renders failed — never counted as done, phase still settles" do
+      entry = %{
+        "status" => "completed",
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Judge"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "judge:ok", "state" => "done", "tokens" => 100},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "judge:boom", "state" => "error", "error" => "kaboom", "tokens" => 50}
+        ]
+      }
+
+      %{phases: [judge], summary: s} = StudioChat.workflow_journey(entry)
+      # both agents are terminal, so the phase settles :done…
+      assert judge.status == :done
+      # …but the errored agent is a FAILURE terminal, not a success
+      assert s.agents_done == 1
+      assert s.agents_failed == 1
+      assert s.agents_running == 0
+      assert StudioChat.workflow_node_terminal?(%{"state" => "error"})
+    end
+
+    test "a live run's highest-with-agents phase is :active, earlier :done, later :future" do
+      entry = %{
+        "status" => "running",
+        "workflow" => [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
+          %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
+          %{"type" => "workflow_phase", "index" => 3, "title" => "Review"},
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "explore", "state" => "done"},
+          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "build:a", "state" => "done"},
+          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "build:b", "state" => "start"}
+        ]
+      }
+
+      %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
+      assert Enum.map(phases, & &1.status) == [:done, :active, :future]
+      assert s.current_index == 2
+      assert s.current_title == "Build"
+      assert s.agents_running == 1
+      assert s.agents_done == 2
+    end
+  end
+
+  describe "workflow_journey/1 signature law (charter D57)" do
+    test "a phaseIndex regrouping re-signs; a token tick does not" do
+      base = %{
+        "wf" => %{
+          "status" => "running",
+          "workflow" => [
+            %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "a", "state" => "start", "tokens" => 10}
+          ]
+        }
+      }
+
+      token_tick =
+        put_in(base, ["wf", "workflow"], [
+          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "a", "state" => "start", "tokens" => 9_999}
+        ])
+
+      regrouped =
+        put_in(base, ["wf", "workflow"], [
+          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "a", "state" => "start", "tokens" => 10}
+        ])
+
+      # phaseIndex is now inside strip_workflow_node's take list (charter D57)
+      assert StudioChat.rail_signature(base) == StudioChat.rail_signature(token_tick)
+      refute StudioChat.rail_signature(base) == StudioChat.rail_signature(regrouped)
+    end
+
+    test "the interrupted fixture's start→interrupted flip re-signs" do
+      rail = "epic_cycle_interrupted.ndjson" |> load_ndjson() |> fold_rail()
+      refute StudioChat.rail_signature(rail) == StudioChat.rail_signature(interrupt_flip(rail))
+    end
+  end
+
+  describe "workflow_label_parts/1 (charter D59)" do
+    test "first-colon split for a slug head; multi-colon rest kept; bare otherwise" do
+      assert StudioChat.workflow_label_parts("design:encryption") == {:pair, "design", "encryption"}
+      assert StudioChat.workflow_label_parts("verify:encryption:leak") ==
+               {:pair, "verify", "encryption:leak"}
+
+      assert StudioChat.workflow_label_parts("sec:1") == {:pair, "sec", "1"}
+      assert StudioChat.workflow_label_parts("strategist") == {:bare, "strategist"}
+      # a non-slug head (spaces/caps — a raw-prompt fallback) never splits
+      assert StudioChat.workflow_label_parts("Fix the leak: now") == {:bare, "Fix the leak: now"}
+      assert StudioChat.workflow_label_parts(nil) == {:bare, ""}
+    end
+  end
+
+  describe "model_family/1 (charter D59)" do
+    test "wire ids map by prefix; picker slugs resolve; unknown stays raw" do
+      assert StudioChat.model_family("claude-opus-4-8[1m]") == "Opus"
+      assert StudioChat.model_family("claude-fable-5") == "Fable"
+      assert StudioChat.model_family("claude-sonnet-4-5") == "Sonnet"
+      assert StudioChat.model_family("claude-haiku-4-5") == "Haiku"
+      assert StudioChat.model_family("opus") == "Opus"
+      assert StudioChat.model_family("fable") == "Fable"
+      assert StudioChat.model_family("gpt-9") == "gpt-9"
+      assert StudioChat.model_family(nil) == nil
+    end
+  end
+
+  describe "format_tokens/1 (charter D59)" do
+    test "raw < 1k; one-decimal k < 10k; integer k < 1M; one-decimal M above" do
+      assert StudioChat.format_tokens(845) == "845"
+      assert StudioChat.format_tokens(9_645) == "9.6k"
+      assert StudioChat.format_tokens(68_272) == "68k"
+      assert StudioChat.format_tokens(145_000) == "145k"
+      assert StudioChat.format_tokens(2_137_873) == "2.1M"
+      # honest unknown, never a fake 0
+      assert StudioChat.format_tokens(nil) == "—"
+    end
+  end
 end
