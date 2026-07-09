@@ -192,26 +192,38 @@ func parsePaperList(body []byte) ([]paperMeta, error) {
 	return out, nil
 }
 
-// paperDocShape is the minimal shape parsePaperList reads out of a rendered paper
-// document: its _id and its content.blocks (for the level-1 heading title).
+// paperBlockShape is the sliver of a PortableDoc block the title derivation
+// reads: type + level + text, enough to find the first level-1 heading.
+type paperBlockShape struct {
+	Type  string `json:"type"`
+	Level int    `json:"level"`
+	Text  string `json:"text"`
+}
+
+// paperDocShape is the minimal shape parsePaperList reads out of a rendered
+// paper document: its _id and its blocks (for the level-1 heading title). The
+// live query endpoint renders content fields FLAT on the document (top-level
+// "blocks" — verified against guerrilla), while an unflattened doc nests them
+// under "content"; read both so the title never silently degrades to the _id
+// on one of the two shapes.
 type paperDocShape struct {
-	ID      string `json:"_id"`
+	ID      string            `json:"_id"`
+	Blocks  []paperBlockShape `json:"blocks"`
 	Content struct {
-		Blocks []struct {
-			Type  string `json:"type"`
-			Level int    `json:"level"`
-			Text  string `json:"text"`
-		} `json:"blocks"`
+		Blocks []paperBlockShape `json:"blocks"`
 	} `json:"content"`
 }
 
 // paperTitle returns the paper's display title: the text of its first level-1
-// heading block, or the _id when there is no such heading (charter fallback).
+// heading block (top-level blocks first — the rendered shape — then
+// content.blocks), or the _id when there is no such heading (charter fallback).
 func paperTitle(doc paperDocShape) string {
-	for _, b := range doc.Content.Blocks {
-		if b.Type == "heading" && b.Level == 1 {
-			if t := strings.TrimSpace(b.Text); t != "" {
-				return t
+	for _, blocks := range [][]paperBlockShape{doc.Blocks, doc.Content.Blocks} {
+		for _, b := range blocks {
+			if b.Type == "heading" && b.Level == 1 {
+				if t := strings.TrimSpace(b.Text); t != "" {
+					return t
+				}
 			}
 		}
 	}

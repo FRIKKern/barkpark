@@ -34,11 +34,13 @@ const mcpResourcesManifest = `{
   ]
 }`
 
-// The body the paper-list (doc.ls) stub returns: two published papers. p1 has a
-// level-1 heading (its title), p2 has none (title must fall back to its _id).
+// The body the paper-list (doc.ls) stub returns: two published papers in the
+// LIVE query-endpoint shape — content fields rendered FLAT on the document, so
+// "blocks" is top-level (verified against guerrilla). p1 has a level-1 heading
+// (its title), p2 has none (title must fall back to its _id).
 const mcpPaperListBody = `{"result":{"documents":[` +
-	`{"_id":"p1","content":{"blocks":[{"type":"paragraph","text":"intro"},{"type":"heading","level":2,"text":"Not the title"},{"type":"heading","level":1,"text":"First Paper"}]}},` +
-	`{"_id":"p2","content":{"blocks":[{"type":"paragraph","text":"no heading here"}]}}` +
+	`{"_id":"p1","blocks":[{"type":"paragraph","text":"intro"},{"type":"heading","level":2,"text":"Not the title"},{"type":"heading","level":1,"text":"First Paper"}]},` +
+	`{"_id":"p2","blocks":[{"type":"paragraph","text":"no heading here"}]}` +
 	`],"count":2,"perspective":"published"}}`
 
 // The body the doc.get stub returns for p1 — the read handler must round-trip
@@ -291,10 +293,12 @@ func TestPaperTitleFromBlocks(t *testing.T) {
 		body string
 		want string
 	}{
-		{"level-1 heading wins", `{"_id":"p1","content":{"blocks":[{"type":"heading","level":2,"text":"sub"},{"type":"heading","level":1,"text":"Title"}]}}`, "Title"},
-		{"no heading falls back to id", `{"_id":"p9","content":{"blocks":[{"type":"paragraph","text":"x"}]}}`, "p9"},
-		{"empty heading text falls back to id", `{"_id":"p7","content":{"blocks":[{"type":"heading","level":1,"text":"   "}]}}`, "p7"},
-		{"no content falls back to id", `{"_id":"p5"}`, "p5"},
+		{"top-level blocks (live rendered shape) wins", `{"_id":"p1","blocks":[{"type":"heading","level":2,"text":"sub"},{"type":"heading","level":1,"text":"Title"}]}`, "Title"},
+		{"content-nested blocks also read", `{"_id":"p2","content":{"blocks":[{"type":"heading","level":1,"text":"Nested Title"}]}}`, "Nested Title"},
+		{"no heading falls back to id", `{"_id":"p9","blocks":[{"type":"paragraph","text":"x"}]}`, "p9"},
+		{"empty heading text falls back to id", `{"_id":"p7","blocks":[{"type":"heading","level":1,"text":"   "}]}`, "p7"},
+		{"null blocks falls back to id", `{"_id":"p6","blocks":null}`, "p6"},
+		{"no blocks at all falls back to id", `{"_id":"p5"}`, "p5"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
