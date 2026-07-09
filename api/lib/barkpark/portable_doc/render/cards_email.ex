@@ -80,7 +80,11 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
                 ~s|<td style="width:50%;vertical-align:top;padding:0 6px 12px 6px">#{c}</td>|
               end)
 
-            pad = if length(row) == 1, do: ~s|<td style="width:50%;padding:0 6px 12px 6px"></td>|, else: ""
+            pad =
+              if length(row) == 1,
+                do: ~s|<td style="width:50%;padding:0 6px 12px 6px"></td>|,
+                else: ""
+
             "<tr>#{tds}#{pad}</tr>"
           end)
 
