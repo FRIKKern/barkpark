@@ -139,3 +139,29 @@ under ~/.claude/projects/<proj>/<session>/subagents/workflows/wf_*/:
   persist the paper id/URL onto the plan row's metadata, link it from the plan
   card, and let the paper radiate to reader + TUI. Plans stop being chat
   ephemera and become first-class documents.
+
+## Wave-9 ground truth #2: the agents rail is ALREADY ON THE WIRE (lead probe 2026-07-09)
+
+User mandate: "I need it to work like the Claude Code TUI — see the agents below
+the chat." A live Workflow run over our exact wire (--print stream-json) emits:
+- `system/background_tasks_changed` {tasks: [{task_id, task_type
+  (local_workflow/…), description}]} — THE rail rows, pushed on every change
+  (appears on launch, empties on completion). This is the below-input agent
+  list the TUI renders.
+- `system/task_started` {task_id, tool_use_id, workflow_name, prompt, task_type}
+- `system/task_progress` — the crown jewel: carries `workflow_progress` = the
+  FULL phase/agent tree ({type: workflow_phase|workflow_agent, title/label,
+  model, state, tokens…}) + usage {total_tokens, tool_uses, duration_ms} +
+  description "P: <agent-label>" + last_tool_name. Emitted repeatedly — apply
+  the wave-5 change-only discipline before broadcasting to sidebars.
+- `system/task_updated` {patch:{status,end_time}} + `system/task_notification`
+  {status, output_file, summary} on completion.
+NO disk tailing required for live rendering (the earlier journal/transcript
+notes remain valid for HISTORICAL runs the session didn't watch). The Recorder
+already rebroadcasts these frames verbatim; ChatLive drops them today. Build:
+persist the rail snapshot per session (replay parity), render the rail below
+the composer (rows = background tasks; expand a workflow row = phase→agent
+tree from the latest workflow_progress), co-viewing via the existing PubSub.
+Headless gotcha: dynamic workflows hit a "Review dynamic workflow before
+running" permission ask — our approval card already handles it (proven by the
+user actually running one from the chat).
