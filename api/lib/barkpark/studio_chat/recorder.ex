@@ -146,6 +146,12 @@ defmodule Barkpark.StudioChat.Recorder do
       session: session,
       timer: arm_idle(nil),
       activity: nil,
+      # The tool_use_id of THIS turn's FIRST TodoWrite-shaped block (charter D39).
+      # Each TodoWrite arrives as a fresh tool_use with a unique id, so a later
+      # one in the same turn UPDATES this persisted row's input in place rather
+      # than appending — replay then reconstructs ONE final-state checklist card.
+      # Reset to nil on every `system/init` (the per-turn boundary).
+      todo_tool_use_id: nil,
       # The advertised slash-command list (charter D36a). `commands` is the rich
       # authoritative list from the initialize ack; `slash_commands` is the
       # name-only fallback captured off `system/init`; a live/late tab reads the
@@ -170,7 +176,7 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_info({:claude_chat_event, %{"type" => "assistant"} = ev} = msg, state) do
     blocks = get_in(ev, ["message", "content"])
-    persist_assistant_blocks(state.session_id, blocks)
+    state = persist_assistant_blocks(state, blocks)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(assistant_activity(blocks, state.activity)) |> touch()}
   end
@@ -191,7 +197,9 @@ defmodule Barkpark.StudioChat.Recorder do
         state
       ) do
     StudioChat.update_status(state.session_id, "working")
-    state = maybe_capture_slash_commands(state, ev)
+    # A new turn begins: forget the previous turn's todo row so this turn's first
+    # TodoWrite starts a fresh living-checklist card (charter D39).
+    state = %{maybe_capture_slash_commands(state, ev) | todo_tool_use_id: nil}
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :working, line: "thinking…"}) |> touch()}
   end
@@ -285,34 +293,78 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # ── persistence (mirrors the store shapes replay reads back) ───────────────
 
-  defp persist_assistant_blocks(session_id, blocks) when is_list(blocks) do
-    Enum.each(blocks, fn
-      %{"type" => "text", "text" => text} when is_binary(text) ->
+  defp persist_assistant_blocks(state, blocks) when is_list(blocks) do
+    Enum.reduce(blocks, state, fn
+      %{"type" => "text", "text" => text}, st when is_binary(text) ->
         if String.trim(text) != "" do
-          persist(session_id, %{role: "assistant", source_markdown: text}, "assistant")
+          persist(st.session_id, %{role: "assistant", source_markdown: text}, "assistant")
         end
 
-      %{"type" => "tool_use", "name" => name} = block ->
-        persist(
-          session_id,
-          %{
-            role: "tool",
-            source_markdown: tool_line(name, block["input"]),
-            metadata: %{
-              "tool" => name,
-              "input" => block["input"],
-              "tool_use_id" => block["id"]
-            }
-          },
-          "tool"
-        )
+        st
 
-      _ ->
-        :ok
+      %{"type" => "tool_use", "name" => name} = block, st ->
+        input = block["input"]
+
+        if StudioChat.todo_shaped?(input) do
+          persist_todo_block(st, name, block)
+        else
+          persist(
+            st.session_id,
+            %{
+              role: "tool",
+              source_markdown: tool_line(name, input),
+              metadata: %{
+                "tool" => name,
+                "input" => input,
+                "tool_use_id" => block["id"]
+              }
+            },
+            "tool"
+          )
+
+          st
+        end
+
+      _, st ->
+        st
     end)
   end
 
-  defp persist_assistant_blocks(_session_id, _), do: :ok
+  defp persist_assistant_blocks(state, _), do: state
+
+  # TodoWrite collapse (charter D39). The turn's FIRST TodoWrite persists a fresh
+  # "todo" row and becomes the turn's canonical checklist; every later TodoWrite
+  # in the SAME turn updates that row's `metadata.input` in place (never appends),
+  # so replay reconstructs ONE final-state card. Reset happens on `system/init`.
+  defp persist_todo_block(%{todo_tool_use_id: nil} = state, name, block) do
+    persist(
+      state.session_id,
+      %{
+        role: "todo",
+        source_markdown: tool_line(name, block["input"]),
+        metadata: %{
+          "tool" => name,
+          "input" => block["input"],
+          "tool_use_id" => block["id"]
+        }
+      },
+      "todo"
+    )
+
+    %{state | todo_tool_use_id: block["id"]}
+  end
+
+  defp persist_todo_block(%{todo_tool_use_id: tool_use_id} = state, _name, block) do
+    case StudioChat.update_tool_input(state.session_id, tool_use_id, block["input"]) do
+      {:error, reason} ->
+        Logger.warning("studio chat recorder: failed to update todo row: #{inspect(reason)}")
+
+      _ ->
+        :ok
+    end
+
+    state
+  end
 
   defp persist_approval_ask(session_id, ask) do
     text = ask.title || tool_line(ask.tool_name, ask.input)

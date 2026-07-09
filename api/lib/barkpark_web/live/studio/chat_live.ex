@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
+  alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
 
   # How long a Stop may sit in `:interrupting` before we force-close a wedged
@@ -88,6 +89,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
          init: nil,
          messages: [],
          next_id: 0,
+         # The in-memory id of THIS turn's TodoWrite living-checklist card
+         # (charter D39). The turn's first TodoWrite appends a :todo card and
+         # records its id here; every later TodoWrite supersedes that card in
+         # place. Reset to nil on the broadcast `system/init` (the per-turn
+         # boundary) and on every session load.
+         todo_card_id: nil,
          streaming: nil,
          # Advertised slash commands (charter D36a) — the CLI's initialize list,
          # held by the Recorder and delivered on subscribe + broadcast. The
@@ -694,7 +701,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      socket
-     |> assign(init: init, status: status)
+     # A new turn is starting: forget the previous turn's checklist card so this
+     # turn's first TodoWrite starts a fresh living card (charter D39).
+     |> assign(init: init, status: status, todo_card_id: nil)
      |> observe_permission_mode(observed)}
   end
 
@@ -727,10 +736,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
           end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
-          append_message(acc, :tool, tool_line(name, block["input"]),
-            tool_use_id: block["id"],
-            output: nil
-          )
+          input = block["input"]
+
+          if StudioChat.todo_shaped?(input) do
+            apply_todo_block(acc, input)
+          else
+            append_message(acc, :tool, tool_line(name, input),
+              tool_use_id: block["id"],
+              output: nil
+            )
+          end
 
         _block, acc ->
           acc
@@ -1471,6 +1486,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     ⎿ <%= tool_output_head(message.output) %>
                   <% end %>
                 </div>
+              <% :todo -> %>
+                <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
+                      Recorder collapsed + the reducer superseded, so it renders
+                      the turn's LATEST todo state whether live or replayed. --%>
+                <ChatToolRenderer.todo_card todos={message.todos} />
               <% :approval -> %>
                 <div
                   :if={message.approval_status == :pending}
@@ -2042,6 +2062,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Strictly past every replayed id (seqs are 1-based), so a live append
       # never collides with a replayed message's id.
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
+      # A reopen starts no turn — the next live TodoWrite opens a fresh card
+      # (charter D39). A replayed todo row is already the final collapsed state.
+      todo_card_id: nil,
       streaming: nil,
       interrupt_requested: false,
       pending_mode: nil,
@@ -2117,6 +2140,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       init: nil,
       messages: [],
       next_id: 0,
+      todo_card_id: nil,
       streaming: nil,
       # A new chat has no runtime yet, so no advertised commands — the slash menu
       # floors to builtins until the first send spawns + initializes (D36a).
@@ -2461,6 +2485,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
   end
 
+  # A todo row replays as ONE final-state living checklist (charter D39): the
+  # Recorder collapsed every TodoWrite of the turn into this single row's
+  # metadata.input, so parsing it here reconstructs exactly the last state.
+  defp replay_message(%{role: "todo", seq: seq, metadata: meta}, _live?) do
+    input = Map.get(meta || %{}, "input") || %{}
+
+    %{
+      id: seq,
+      role: :todo,
+      text: "Update todos",
+      html: nil,
+      todos: ChatToolRenderer.parse_todos(input)
+    }
+  end
+
   # A tool row replays with its captured output so the ⎿ line survives reopen.
   defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
     %{
@@ -2527,6 +2566,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: socket.assigns.messages ++ [message],
       next_id: id + 1
     )
+  end
+
+  # A TodoWrite-shaped tool_use is ONE living checklist card per turn (charter
+  # D39). The turn's first TodoWrite appends a :todo card and records its id;
+  # every later one supersedes that card's list IN PLACE (never appends). The
+  # tracked id resets on the broadcast `system/init` (per-turn boundary), so a
+  # mid-turn joiner — whose id is nil — appends one latest-state card (accepted;
+  # reopen converges to the single persisted row). The existence guard keeps a
+  # stale id (from a session we just left) from silently dropping the card.
+  defp apply_todo_block(socket, input) do
+    todos = ChatToolRenderer.parse_todos(input)
+    tracked = socket.assigns[:todo_card_id]
+
+    if is_integer(tracked) and Enum.any?(socket.assigns.messages, &(&1.id == tracked and &1.role == :todo)) do
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{id: ^tracked} = m -> %{m | todos: todos}
+          m -> m
+        end)
+
+      assign(socket, messages: messages)
+    else
+      id = socket.assigns.next_id
+
+      socket
+      |> append_message(:todo, "Update todos", todos: todos)
+      |> assign(todo_card_id: id)
+    end
   end
 
   # Resolve a pending needs-you card (approval | question | plan) with a

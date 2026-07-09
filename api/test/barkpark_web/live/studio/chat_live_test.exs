@@ -2420,6 +2420,76 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "TodoWrite living checklist card (charter D39)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "two TodoWrites in one turn render ONE card, updated in place", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        todo_frame("tu1", [
+          %{"content" => "read charter", "status" => "in_progress", "activeForm" => "reading the charter"},
+          %{"content" => "write code", "status" => "pending"}
+        ])
+      )
+
+      html = render(view)
+      assert todo_card_count(html) == 1
+      assert html =~ "read charter"
+      # in_progress glyph + its activeForm live line
+      assert html =~ "◐"
+      assert html =~ "reading the charter"
+
+      # A FRESH tool_use id (as the real binary emits) — the collapse must
+      # supersede the existing card, never append a second one.
+      send_frame(
+        sid,
+        todo_frame("tu2", [
+          %{"content" => "read charter", "status" => "completed"},
+          %{"content" => "write code", "status" => "in_progress", "activeForm" => "writing the code"}
+        ])
+      )
+
+      html = render(view)
+      assert todo_card_count(html) == 1
+      assert html =~ "☒"
+      assert html =~ "writing the code"
+      refute html =~ "reading the charter"
+
+      # The store collapsed to a single todo row too (Recorder-owned, D39).
+      todos = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      assert length(todos) == 1
+    end
+
+    test "reopen replays exactly ONE final-state checklist card", %{conn: conn, sid: sid} do
+      send_frame(sid, todo_frame("tu1", [%{"content" => "step one", "status" => "pending"}]))
+      send_frame(sid, todo_frame("tu2", [%{"content" => "step one", "status" => "completed"}]))
+
+      {:ok, _view2, html} = live(conn, "/studio/chat/#{sid}")
+      assert todo_card_count(html) == 1
+      assert html =~ "step one"
+      assert html =~ "☒"
+    end
+
+    test "no TodoWrite ⇒ no checklist card renders", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "just prose"}]}
+         }}
+      )
+
+      refute render(view) =~ "Update todos"
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -2989,4 +3059,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       }
     }
   end
+
+  # A TodoWrite-shaped assistant frame (charter D39) with a FRESH tool_use id.
+  defp todo_frame(id, todos) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "message" => %{
+         "content" => [
+           %{"type" => "tool_use", "id" => id, "name" => "TodoWrite", "input" => %{"todos" => todos}}
+         ]
+       }
+     }}
+  end
+
+  # How many living-checklist cards a rendered transcript carries.
+  defp todo_card_count(html), do: length(String.split(html, "Update todos")) - 1
 end

@@ -280,6 +280,94 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # A TodoWrite-shaped assistant frame (dispatch on shape, not name — the cmux
+  # binary lacks TodoWrite, so we synthesize the shape). Each call is a FRESH
+  # tool_use id, exactly as the real binary emits per TodoWrite.
+  defp todo_frame(id, todos) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => "TodoWrite",
+             "input" => %{"todos" => todos}
+           }
+         ]
+       }
+     }}
+  end
+
+  describe "TodoWrite living checklist collapse (charter D39)" do
+    test "two TodoWrites in ONE turn collapse to a single todo row with the latest input",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      frame(
+        recorder,
+        todo_frame("toolu_todo_1", [
+          %{"content" => "read charter", "status" => "in_progress", "activeForm" => "reading"}
+        ])
+      )
+
+      # A FRESH tool_use id (as the real binary emits) — must NOT append a 2nd row.
+      frame(
+        recorder,
+        todo_frame("toolu_todo_2", [
+          %{"content" => "read charter", "status" => "completed"},
+          %{"content" => "write code", "status" => "in_progress", "activeForm" => "writing"}
+        ])
+      )
+
+      todos = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      assert length(todos) == 1
+
+      [row] = todos
+      # The persisted input is the LATEST state; replay reconstructs one card.
+      items = row.metadata["input"]["todos"]
+      assert length(items) == 2
+      assert Enum.at(items, 0)["status"] == "completed"
+      assert Enum.at(items, 1)["status"] == "in_progress"
+      # The row keeps the FIRST TodoWrite's tool_use_id (updated in place).
+      assert row.metadata["tool_use_id"] == "toolu_todo_1"
+    end
+
+    test "a new turn (init resets the tracker) starts a SEPARATE todo row",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, todo_frame("toolu_a", [%{"content" => "step", "status" => "pending"}]))
+
+      # Second turn.
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, todo_frame("toolu_b", [%{"content" => "step", "status" => "completed"}]))
+
+      rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      assert length(rows) == 2
+    end
+
+    test "a non-todo tool_use is unaffected — still a plain tool row",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "id" => "t1", "name" => "Bash", "input" => %{"command" => "ls"}}
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+      assert Enum.any?(rows, &(&1.role == "tool"))
+      assert Enum.filter(rows, &(&1.role == "todo")) == []
+    end
+  end
+
   describe "live activity feed (wave 5)" do
     setup %{sid: sid} do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
