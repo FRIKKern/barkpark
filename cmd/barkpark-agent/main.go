@@ -23,8 +23,10 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/agent"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
@@ -75,6 +77,9 @@ func run(args []string) int {
 		ReportProbes: agent.ReportConfig{
 			Checkout:      *checkout,
 			DiskProbe:     dfRootProbe,
+			CPUProbe:      cpuProcProbe,
+			MemProbe:      memProcProbe,
+			LoadProbe:     loadProcProbe,
 			HealthBaseURL: *healthURL,
 			HealthToken:   *healthTok,
 			HealthGateOpts: setup.HealthGate{
@@ -142,4 +147,113 @@ func dfRootProbe() (int, error) {
 		}
 	}
 	return 0, fmt.Errorf("df: no capacity column")
+}
+
+// cpuProcProbe reports host CPU busy-percent from two /proc/stat samples ~200ms
+// apart: busy = 100 * (Δtotal - Δidle) / Δtotal. Dep-free and cgo-free (prod is
+// linux/arm64); on a host without /proc (dev macOS) the read errors and the
+// vital reports "unwired" via the -1 sentinel upstream — never a fake reading.
+func cpuProcProbe() (int, error) {
+	t1, i1, err := readCPUStat()
+	if err != nil {
+		return 0, err
+	}
+	time.Sleep(200 * time.Millisecond)
+	t2, i2, err := readCPUStat()
+	if err != nil {
+		return 0, err
+	}
+	dt, di := t2-t1, i2-i1
+	if dt <= 0 {
+		return 0, fmt.Errorf("cpu: non-positive total delta")
+	}
+	busy := float64(dt-di) / float64(dt) * 100
+	return clampPercent(busy), nil
+}
+
+// readCPUStat returns (total, idle) jiffies from the aggregate "cpu " line of
+// /proc/stat. idle counts fields idle+iowait (indices 3 and 4 after the label).
+func readCPUStat() (total, idle int64, err error) {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, "cpu ") {
+			continue
+		}
+		fields := strings.Fields(line)[1:] // drop the "cpu" label
+		for i, f := range fields {
+			v, e := strconv.ParseInt(f, 10, 64)
+			if e != nil {
+				return 0, 0, fmt.Errorf("cpu stat: %w", e)
+			}
+			total += v
+			if i == 3 || i == 4 { // idle + iowait
+				idle += v
+			}
+		}
+		return total, idle, nil
+	}
+	return 0, 0, fmt.Errorf("cpu: no aggregate cpu line in /proc/stat")
+}
+
+// memProcProbe reports used-memory percent from /proc/meminfo:
+// used = MemTotal - MemAvailable, percent = 100 * used / MemTotal.
+func memProcProbe() (int, error) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return 0, err
+	}
+	var total, avail int64
+	var haveTotal, haveAvail bool
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "MemTotal:":
+			total, _ = strconv.ParseInt(fields[1], 10, 64)
+			haveTotal = true
+		case "MemAvailable:":
+			avail, _ = strconv.ParseInt(fields[1], 10, 64)
+			haveAvail = true
+		}
+	}
+	if !haveTotal || !haveAvail || total <= 0 {
+		return 0, fmt.Errorf("meminfo: missing MemTotal/MemAvailable")
+	}
+	if avail > total {
+		avail = total
+	}
+	return clampPercent(float64(total-avail) / float64(total) * 100), nil
+}
+
+// loadProcProbe reports the 1-minute load average (first field of /proc/loadavg).
+func loadProcProbe() (float64, error) {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 {
+		return 0, fmt.Errorf("loadavg: empty")
+	}
+	l, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return 0, fmt.Errorf("loadavg: %w", err)
+	}
+	return l, nil
+}
+
+// clampPercent rounds v to the nearest int and pins it into 0..100.
+func clampPercent(v float64) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return int(v + 0.5)
 }

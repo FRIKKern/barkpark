@@ -50,6 +50,19 @@ type Report struct {
 	// PGSizeBytes is the Postgres database size from the injected probe. -1 when
 	// not wired/failed.
 	PGSizeBytes int64 `json:"pg_size_bytes"`
+
+	// Vitals — the host's live resource pressure, gathered every beat behind the
+	// same injectable-probe seam as disk (Linux /proc readers in production).
+	// Each carries a -1 sentinel when its probe was not wired or failed, so a
+	// partial box still phones home the rest and the control plane renders a null
+	// point (nil-not-zero) rather than a fake reading.
+	//
+	// CPUUsedPercent is host CPU busy percent (0..100). -1 when not wired/failed.
+	CPUUsedPercent int `json:"cpu_percent"`
+	// MemUsedPercent is used-memory percent (0..100). -1 when not wired/failed.
+	MemUsedPercent int `json:"mem_used_percent"`
+	// Load1 is the 1-minute load average. -1 when the probe was not wired/failed.
+	Load1 float64 `json:"load1"`
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
 	// recent backup present and scheduled?
 	BackupOK     bool   `json:"backup_ok"`
@@ -126,6 +139,12 @@ type ReportConfig struct {
 
 	// DiskProbe returns root-fs used-percent (0..100). nil → DiskUsedPercent=-1.
 	DiskProbe func() (int, error)
+	// CPUProbe returns host CPU busy-percent (0..100). nil → CPUUsedPercent=-1.
+	CPUProbe func() (int, error)
+	// MemProbe returns used-memory percent (0..100). nil → MemUsedPercent=-1.
+	MemProbe func() (int, error)
+	// LoadProbe returns the 1-minute load average. nil → Load1=-1.
+	LoadProbe func() (float64, error)
 	// PGSizeProbe returns the Postgres DB size in bytes. nil → PGSizeBytes=-1.
 	PGSizeProbe func() (int64, error)
 	// BackupProbe returns (ok, human-detail). nil → BackupOK=false, detail noted.
@@ -151,6 +170,9 @@ func gatherReport(cfg ReportConfig) Report {
 		HealthStatus:    "unknown",
 		DiskUsedPercent: -1,
 		PGSizeBytes:     -1,
+		CPUUsedPercent:  -1,
+		MemUsedPercent:  -1,
+		Load1:           -1,
 	}
 
 	// Git signals (deployed commit + dirty tree).
@@ -164,6 +186,23 @@ func gatherReport(cfg ReportConfig) Report {
 	if cfg.DiskProbe != nil {
 		if pct, err := cfg.DiskProbe(); err == nil {
 			r.DiskUsedPercent = pct
+		}
+	}
+
+	// CPU / memory / load — the per-beat vitals, each independently fail-soft.
+	if cfg.CPUProbe != nil {
+		if pct, err := cfg.CPUProbe(); err == nil {
+			r.CPUUsedPercent = pct
+		}
+	}
+	if cfg.MemProbe != nil {
+		if pct, err := cfg.MemProbe(); err == nil {
+			r.MemUsedPercent = pct
+		}
+	}
+	if cfg.LoadProbe != nil {
+		if l, err := cfg.LoadProbe(); err == nil {
+			r.Load1 = l
 		}
 	}
 
