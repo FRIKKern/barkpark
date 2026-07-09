@@ -89,6 +89,11 @@ for (const sub of ["fg", "bg"]) {
   }
 }
 
+// --- neutral callout tone (color.cliCalloutNeutral): pdrender-only hex pair ---
+const calloutNeutral = color.cliCalloutNeutral || {};
+ok(HEX.test(calloutNeutral.light || ""), `color.cliCalloutNeutral.light must be #rrggbb, got ${JSON.stringify(calloutNeutral.light)}`);
+ok(HEX.test(calloutNeutral.dark || ""), `color.cliCalloutNeutral.dark must be #rrggbb, got ${JSON.stringify(calloutNeutral.dark)}`);
+
 // --- CLI/TUI chrome roles (color.cliChrome): 9 NEW hex pairs + 5 var refs -----
 const cliChrome = color.cliChrome || {};
 const CLI_NEW = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary",

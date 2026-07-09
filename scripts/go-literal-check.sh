@@ -22,6 +22,9 @@
 #   • internal/cli/**            (the WHOLE CLI: setup wizard, style_cmd, table,
 #                                 seed, every command surface — au-w4-cli-ratchet)
 #   • internal/taskboard/theme.go (the portrait board palette)
+#   • internal/pdrender/theme.go  (the WASM-reader chrome palette — ts-w2b threaded
+#                                  its 11 pd*/tone* vars onto tokens_gen.go twins;
+#                                  only pdBtnFg, pure-white on-primary, stays a lit-allow)
 #
 # AUDIT (au-w4-cli-ratchet, 2026-07-08): when the walk was broadened from the
 # narrow internal/cli/setup subtree to the whole internal/cli tree, the tree was
@@ -116,7 +119,8 @@ if _selftest:
 else:
     ROOTS = [os.path.join(root, "cmd", "barkpark"),
              os.path.join(root, "internal", "cli")]  # au-w4: whole CLI tree (subsumes setup/ + style_cmd.go)
-    FILES = [os.path.join(root, "internal", "taskboard", "theme.go")]
+    FILES = [os.path.join(root, "internal", "taskboard", "theme.go"),
+             os.path.join(root, "internal", "pdrender", "theme.go")]  # ts-w2b: pdrender chrome threaded onto tokens_gen.go; only pdBtnFg stays a lit-allow
 
 # A 3/6/8-digit #hex colour literal. Go has no hsl().
 LITERAL = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")

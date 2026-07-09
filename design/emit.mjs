@@ -456,6 +456,16 @@ function pdrenderGo() {
   // Additive: pdrender's ingress points at GenInk in a later wave.
   const code = (name, sub) =>
     `\tGenCode${name} = lipgloss.AdaptiveColor{Light: "${c.code[sub].light}", Dark: "${c.code[sub].dark}"}`;
+  // CLI-chrome tones (color.cliChrome → hex; hex directly). pdrender's OWN copy
+  // of the four chrome roles it threads (accent/ink/text-secondary/dim) — it may
+  // import only lipgloss+x/ansi+stdlib, so it can NEVER read internal/semrole's
+  // GenChrome* twins; these are byte-identical siblings. NOT the color.text/
+  // muted-text reading family above (GenInk/GenDim are a DIFFERENT, warmer set).
+  const cliChrome = (name, role) =>
+    `\tGenChrome${name} = lipgloss.AdaptiveColor{Light: "${c.cliChrome[role].light}", Dark: "${c.cliChrome[role].dark}"}`;
+  // Neutral callout tone (color.cliCalloutNeutral → hex) — the neutral peer of
+  // the four status tones, consumed by Theme.Callout's "neutral" arm.
+  const neut = c.cliCalloutNeutral;
   return [
     goHeader("pdrender"),
     'import "github.com/charmbracelet/lipgloss"',
@@ -465,12 +475,25 @@ function pdrenderGo() {
     ...alignEq([tone("Info", "info"), tone("OK", "ok"), tone("Warn", "warn"), tone("Danger", "danger")]),
     ")",
     "",
+    "// Generated neutral callout tone (design/tokens.json color.cliCalloutNeutral).",
+    `var GenToneNeutral = lipgloss.AdaptiveColor{Light: "${neut.light}", Dark: "${neut.dark}"}`,
+    "",
     "// Generated chrome + reading-accent tokens (design/tokens.json color.* → hex).",
     "var (",
     ...alignEq([
       chrome("Primary", "primary"), chrome("PrimaryFg", "primary-fg"),
       chrome("Ink", "text"), chrome("Dim", "muted-text"), chrome("Rule", "border"),
       chrome("ReadingAccent", "reading-accent"),
+    ]),
+    ")",
+    "",
+    "// Generated CLI-chrome tokens (design/tokens.json color.cliChrome → hex).",
+    "// pdrender's own copy (it can't import internal/semrole); threaded by",
+    "// theme.go's pdAccent/pdInk/pdBody/pdDim chrome vars.",
+    "var (",
+    ...alignEq([
+      cliChrome("Accent", "chrome-accent"), cliChrome("Ink", "chrome-ink"),
+      cliChrome("TextSecondary", "chrome-text-secondary"), cliChrome("Dim", "chrome-dim"),
     ]),
     ")",
     "",
