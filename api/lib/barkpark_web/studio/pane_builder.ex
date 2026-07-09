@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   alias Barkpark.{Content, Structure}
   alias Barkpark.Content.Graph
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   @doc """
   Build the full pane tree for `dataset` along `nav_path`. Returns
@@ -34,6 +35,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       workspace/project's content. Empty `[]` is nil-safe — the
       `Barkpark.Content` query path no-ops on an absent scope, so the desk
       keeps its pre-tenancy shape on an unscoped mount.
+
+    * `:scope_prefix` — the `/w/:ws/p/:proj` URL prefix (or `""` on a flat
+      surface). Threaded into `list_items/2` so plugin `:plugin_link` hrefs
+      are canonicalised to the `/d/` shape at SOURCE (via
+      `Paths.plugin_link_href/2`), instead of being rewritten later at
+      render time. Absent → `""` → the legacy flat hrefs, unchanged.
   """
   @spec build(String.t(), [String.t()]) :: {[map()], map() | nil}
   def build(dataset, nav_path), do: build(dataset, nav_path, [])
@@ -57,7 +64,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
     root_pane = %{
       title: gated.title,
-      items: list_items(gated),
+      items: list_items(gated, scope_prefix(opts)),
       selected: Enum.at(segments, 0)
     }
 
@@ -229,7 +236,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       %{type: :list} = node ->
         list_pane = %{
           title: node.title,
-          items: list_items(node),
+          items: list_items(node, scope_prefix(opts)),
           selected: Enum.at(rest, 0)
         }
 
@@ -523,6 +530,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     end
   end
 
+  # The `/w/:ws/p/:proj` URL prefix threaded from `rebuild_panes` (or `""` on
+  # a flat surface). Feeds `list_items/2`'s plugin-link canonicalisation.
+  defp scope_prefix(opts) do
+    case Keyword.get(opts, :scope_prefix) do
+      prefix when is_binary(prefix) -> prefix
+      _ -> ""
+    end
+  end
+
   # ── doc-row items + list_preview ───────────────────────────────────────────
   #
   # Shared row builder for BOTH document-list branches
@@ -660,9 +676,18 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   `:plugin_link` rows the LV turns into outbound navigation (NOT
   `push_patch` — these point at arbitrary paths outside the StudioLive
   catch-all); everything else becomes `:item` with a `drillable` flag.
+
+  `scope_prefix` (the `/w/:ws/p/:proj` prefix, `""` on a flat surface)
+  canonicalises `:plugin_link` hrefs at SOURCE via `Paths.plugin_link_href/2`
+  — Structure emits them flat (`/studio/<ds>/…`), so the scoped surface
+  rewrites them here to the `/d/` canonical rather than at render time.
+  The 1-arity form defaults to `""` (flat, unchanged) for legacy callers.
   """
   @spec list_items(map()) :: [map()]
-  def list_items(node) do
+  def list_items(node), do: list_items(node, "")
+
+  @spec list_items(map(), String.t()) :: [map()]
+  def list_items(node, scope_prefix) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
         :divider ->
@@ -678,8 +703,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               title: child.title,
               icon: child.icon,
               # PaneBuilder stashes the destination in `:filter` on the Node;
-              # surface it here under the more descriptive `:href` key.
-              href: child.filter
+              # surface it here under the more descriptive `:href` key,
+              # canonicalised against the current scope at SOURCE.
+              href: Paths.plugin_link_href(scope_prefix, child.filter)
             }
           ]
 

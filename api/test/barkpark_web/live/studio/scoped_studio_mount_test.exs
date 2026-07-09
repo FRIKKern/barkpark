@@ -265,11 +265,13 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
 
   describe "plugin-link hrefs are /d/-canonical on the scoped surface" do
     # Structure emits :plugin_link hrefs in the legacy FLAT shape
-    # ("/studio/<ds>/media" — it has no scope knowledge); StudioLive's
-    # scoped_plugin_href/2 rewrites them at render time so clicks stay in
-    # the CURRENT workspace instead of riding the flat→scoped 302 funnel
-    # (which re-resolves the workspace from the session and can teleport
-    # the user). The flat _plugins admin LV keeps flat hrefs.
+    # ("/studio/<ds>/media" — it has no scope knowledge); PaneBuilder
+    # canonicalises them at SOURCE, threading the scope_prefix into
+    # list_items/2 (via Paths.plugin_link_href/2), so the href is already
+    # /d/-canonical by the time it renders. Clicks stay in the CURRENT
+    # workspace instead of riding the flat→scoped 302 funnel (which
+    # re-resolves the workspace from the session and can teleport the
+    # user). The flat _plugins admin LV (scope_prefix "") keeps flat hrefs.
     setup do
       # Both media schemas → the "Media Library" :plugin_link nests inside
       # the "media-desk" group (Structure.build_media_group/2). The rows
