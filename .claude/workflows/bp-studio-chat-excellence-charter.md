@@ -952,3 +952,23 @@ Gate: 248 tests × 3 seeds; studio-literal-check PASS; warnings-as-errors clean.
 Wave-6 candidates: turn elapsed-time on working cards; activity line in the
 browser tab title; per-model cost hinting in the picker; observed-model change
 system line when a switch lands mid-session.
+
+### Wave 2026-07-09 (wave 6.5 — terminal anatomy, LEAD-BUILT inline)
+
+**D37 — The transcript imitates the Claude Code terminal.** User mandate:
+"Please imitate this in our Chat" (after the ASCII anatomy walk-through).
+Gutter vocabulary: `❯` user prompts (left-aligned, no bubble), `●` assistant
+prose, `● Tool(args)` mono tool rows, `✻` system lines. NEW capability under
+the aesthetic: tool RESULTS are now captured — the CLI reports them as
+user-frame tool_result blocks keyed by tool_use_id (wire-proven with a live
+probe); the Recorder attaches each output to its persisted tool row
+(metadata.output, 4KB cap) and rebroadcasts, ChatLive updates the in-memory
+row, and replay reads it back — so `⎿ first-line-of-output` renders live AND
+on reopen, with multiline outputs collapsed behind details ("+N lines", full
+pre on expand). Turn spinner: evergreen arc + `working… Ns · Stop to
+interrupt` driven by a self-ticking 1s clock that disarms when the turn ends.
+Footer status strip goes mono: `<mode> ⏵ <model> · <duration> · $<cost>`.
+
+Gate: 307 tests × 3 seeds; studio-literal-check PASS; warnings-as-errors
+clean. Unknown tool_use_id results are safe noops (echoed test-fake frames
+never match).

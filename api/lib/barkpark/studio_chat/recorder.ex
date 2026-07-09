@@ -216,6 +216,18 @@ defmodule Barkpark.StudioChat.Recorder do
     end
   end
 
+  # A tool's RESULT arrives as a user-frame tool_result block (wire-proven).
+  # Attach it to the persisted tool row so replay shows the terminal's ⎿ line;
+  # the frame also rebroadcasts so live tabs update their in-memory row.
+  def handle_info({:claude_chat_event, %{"type" => "user"} = ev} = msg, state) do
+    for {tool_use_id, output} <- user_tool_results(ev) do
+      StudioChat.attach_tool_result(state.session_id, tool_use_id, output)
+    end
+
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
   def handle_info({:claude_chat_event, %{"type" => "stream_event"}} = msg, state) do
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :working, line: "writing…"}) |> touch()}
@@ -286,7 +298,11 @@ defmodule Barkpark.StudioChat.Recorder do
           %{
             role: "tool",
             source_markdown: tool_line(name, block["input"]),
-            metadata: %{"tool" => name, "input" => block["input"]}
+            metadata: %{
+              "tool" => name,
+              "input" => block["input"],
+              "tool_use_id" => block["id"]
+            }
           },
           "tool"
         )
@@ -475,6 +491,32 @@ defmodule Barkpark.StudioChat.Recorder do
   defp idle_after_ms do
     Application.get_env(:barkpark, :studio_chat_idle_reap_ms, @idle_after_ms)
   end
+
+  # {tool_use_id, output} pairs off a wire user-frame; [] for anything else
+  # (our own echoed sends through test fakes never match). Output capped so a
+  # huge tool result can't bloat the jsonb row.
+  defp user_tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
+    content
+    |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
+    |> Enum.map(fn b -> {b["tool_use_id"], result_text(b["content"])} end)
+    |> Enum.reject(fn {_id, out} -> out in [nil, ""] end)
+  end
+
+  defp user_tool_results(_), do: []
+
+  defp result_text(content) when is_binary(content), do: String.slice(content, 0, 4_000)
+
+  defp result_text(content) when is_list(content) do
+    content
+    |> Enum.map(fn
+      %{"type" => "text", "text" => t} when is_binary(t) -> t
+      _ -> ""
+    end)
+    |> Enum.join("\n")
+    |> String.slice(0, 4_000)
+  end
+
+  defp result_text(_), do: nil
 
   # Same preview shape ChatLive renders, so live lines and replayed rows agree.
   defp tool_line(name, input) when is_map(input) do

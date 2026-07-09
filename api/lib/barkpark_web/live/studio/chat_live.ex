@@ -102,6 +102,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
          pending_echo_id: nil,
          interrupt_requested: false,
          pending_mode: nil,
+         turn_elapsed_s: 0,
+         turn_clock_armed: false,
          subscribed_topic: nil,
          # Per-tab AskUserQuestion answer state (charter D31/D35): request_id →
          # %{selections: %{qidx => [labels]}, custom: %{qidx => text}}. Chip picks
@@ -252,7 +254,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
             socket = clear_persisted_draft(socket)
 
             {:noreply,
-             assign(socket, status: :thinking, interrupt_requested: false, composer_draft: "")}
+             socket
+             |> start_turn_clock()
+             |> assign(status: :thinking, interrupt_requested: false, composer_draft: "")}
         end
     end
   end
@@ -723,7 +727,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
           end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
-          append_message(acc, :tool, tool_line(name, block["input"]))
+          append_message(acc, :tool, tool_line(name, block["input"]),
+            tool_use_id: block["id"],
+            output: nil
+          )
 
         _block, acc ->
           acc
@@ -882,6 +889,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, append_message(socket, :system, line)}
   end
 
+  # The CLI reports a tool's RESULT as a user-frame tool_result block (wire-
+  # proven). Attach the output to its tool row by tool_use_id — the transcript
+  # then reads like the terminal: `● Bash(…)` with `⎿ output` beneath. The
+  # Recorder persists the same output into the row's metadata for replay.
+  def handle_info({:claude_chat_event, %{"type" => "user"} = ev}, socket) do
+    results = tool_results(ev)
+
+    if results == [] do
+      {:noreply, socket}
+    else
+      messages =
+        Enum.map(socket.assigns.messages, fn m ->
+          case Enum.find(results, fn {id, _out} -> id == m[:tool_use_id] end) do
+            {_id, out} -> Map.put(m, :output, out)
+            nil -> m
+          end
+        end)
+
+      {:noreply, assign(socket, messages: messages)}
+    end
+  end
+
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
   # A real port exit (exit_status frame). Run the shared honest teardown.
@@ -920,7 +949,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
     message = %{id: id, role: :user, text: text, html: nil, images: images}
 
     {:noreply,
-     assign(socket,
+     socket
+     |> start_turn_clock()
+     |> assign(
        messages: socket.assigns.messages ++ [message],
        next_id: id + 1,
        status: :thinking
@@ -955,6 +986,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  def handle_info(:turn_tick, socket) do
+    if turn_active?(socket.assigns.status) do
+      Process.send_after(self(), :turn_tick, 1_000)
+      {:noreply, assign(socket, turn_elapsed_s: socket.assigns.turn_elapsed_s + 1)}
+    else
+      {:noreply, assign(socket, turn_clock_armed: false)}
+    end
+  end
+
   # A Recorder's live-activity ping (wave 5): overlay the sidebar card. On a
   # terminal transition (idle/offline) also re-read the list once — the stored
   # summary/status/pending-count is fresh again and the overlay yields to it.
@@ -982,6 +1022,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
         /* The sidebar's live pulse (wave 5): a busy session breathes — same
            keyframes, stronger floor so the dot stays legible at 6px. */
         .bp-chat-live-dot { animation: bp-skel-pulse 1.2s ease-in-out infinite; opacity: 0.9; }
+        /* Terminal-style turn spinner: a small evergreen arc. */
+        @keyframes bp-chat-spin { to { transform: rotate(360deg); } }
+        .bp-chat-spinner {
+          display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+          border: 2px solid hsl(var(--primary-hsl) / 0.25);
+          border-top-color: var(--primary);
+          animation: bp-chat-spin 0.8s linear infinite;
+        }
         /* Chat bubbles borrow the paper TYPOGRAPHY from .bp-paper-surface —
            NOT the page. The reader class also carries page-scale layout:
            min-height:100% (inside the transcript this stretched the streaming
@@ -1339,14 +1387,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <div :for={message <- @messages} data-role={message.role}>
             <%= case message.role do %>
               <% :user -> %>
-                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
-                  <%!-- Image attachments (charter D25) render inline as data-URIs
-                        (live: from the just-sent bytes; replay: read server-side
-                        from the chat-owned store — never an HTTP route). A file
-                        missing on disk degrades to an honest placeholder. --%>
+                <%!-- Terminal anatomy: the user's prompt wears the ❯ gutter,
+                      left-aligned like the CLI — no chat bubble. --%>
+                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
                   <div
                     :if={user_images(message) != []}
-                    style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 85%;"
+                    style="display: flex; flex-wrap: wrap; gap: 6px; padding-left: 22px;"
                   >
                     <%= for img <- user_images(message) do %>
                       <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
@@ -1360,32 +1406,70 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       />
                     <% end %>
                   </div>
-                  <div
-                    :if={message.text not in [nil, ""]}
-                    class="text-sm"
-                    style="white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-raised, rgba(127,127,127,0.08)); border: 1px solid var(--border-muted); border-radius: 10px; padding: 8px 12px; max-width: 85%;"
-                  >
-                    <%= message.text %>
+                  <div :if={message.text not in [nil, ""]} style="display: flex; gap: 8px;">
+                    <span
+                      style="color: var(--primary); font-family: var(--font-mono); font-weight: 700; flex: none;"
+                      aria-hidden="true"
+                    >
+                      ❯
+                    </span>
+                    <div
+                      class="text-sm"
+                      style="white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 550; padding-top: 1px;"
+                    >
+                      <%= message.text %>
+                    </div>
                   </div>
                 </div>
               <% :assistant -> %>
-                <div
-                  :if={message.html}
-                  class="bp-paper-surface bp-chat-md"
-                  style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
-                >
-                  {Phoenix.HTML.raw(message.html)}
-                </div>
-                <div
-                  :if={message.html == nil}
-                  class="text-sm"
-                  style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
-                >
-                  <%= message.text %>
+                <%!-- Terminal anatomy: assistant prose wears the ● gutter. --%>
+                <div style="display: flex; gap: 8px;">
+                  <span
+                    style="color: var(--primary); font-family: var(--font-mono); flex: none; line-height: 1.6;"
+                    aria-hidden="true"
+                  >
+                    ●
+                  </span>
+                  <div style="flex: 1; min-width: 0;">
+                    <div
+                      :if={message.html}
+                      class="bp-paper-surface bp-chat-md"
+                      style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
+                    >
+                      {Phoenix.HTML.raw(message.html)}
+                    </div>
+                    <div
+                      :if={message.html == nil}
+                      class="text-sm"
+                      style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+                    >
+                      <%= message.text %>
+                    </div>
+                  </div>
                 </div>
               <% :tool -> %>
-                <div class="text-xs text-dim" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
-                  ⚒ <%= message.text %>
+                <div class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                  <span style="color: var(--primary);">●</span>
+                  <span><%= message.text %></span>
+                </div>
+                <%!-- The terminal's ⎿ result line: first line inline; multi-
+                      line outputs expand on click (details/summary). --%>
+                <div
+                  :if={message[:output] not in [nil, ""]}
+                  class="text-xs text-dim"
+                  style="font-family: var(--font-mono); padding-left: 16px; overflow-wrap: anywhere;"
+                >
+                  <%= if tool_output_lines(message.output) > 1 do %>
+                    <details>
+                      <summary style="cursor: pointer; list-style: none;">
+                        ⎿ <%= tool_output_head(message.output) %>
+                        <span style="opacity: 0.7;">… +<%= tool_output_lines(message.output) - 1 %> lines</span>
+                      </summary>
+                      <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;"><%= message.output %></pre>
+                    </details>
+                  <% else %>
+                    ⎿ <%= tool_output_head(message.output) %>
+                  <% end %>
                 </div>
               <% :approval -> %>
                 <div
@@ -1509,8 +1593,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <%= plan_outcome_label(message.approval_status) %> — <%= message.title %>
                 </div>
               <% _ -> %>
-                <div class="text-xs text-dim" style="font-style: italic;">
-                  <%= message.text %>
+                <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+                  <span aria-hidden="true">✻</span> <%= message.text %>
                 </div>
             <% end %>
             </div>
@@ -1541,8 +1625,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <% end %>
           </div>
 
-          <div :if={@streaming == nil and @status == :thinking} class="text-xs text-dim" style="font-style: italic;">
-            thinking…
+          <div
+            :if={@streaming == nil and turn_active?(@status)}
+            class="text-xs text-dim"
+            style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px;"
+          >
+            <span class="bp-chat-spinner" aria-hidden="true"></span>
+            <span>
+              <%= if @status == :interrupting, do: "stopping…", else: "working…" %>
+              <%= if @turn_elapsed_s > 0 do %>
+                <span style="opacity: 0.8;"><%= @turn_elapsed_s %>s</span>
+              <% end %>
+              · Stop to interrupt
+            </span>
           </div>
         </div>
       </div>
@@ -1662,8 +1757,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </button>
           </div>
         </form>
-        <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0;">
-          last turn: <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
+        <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
+          <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </p>
       </div>
       </div>
@@ -2366,6 +2461,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
   end
 
+  # A tool row replays with its captured output so the ⎿ line survives reopen.
+  defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    %{
+      id: seq,
+      role: :tool,
+      text: md,
+      html: nil,
+      output: Map.get(meta || %{}, "output")
+    }
+  end
+
   defp replay_message(m, _live?) do
     role = replay_role(m.role)
 
@@ -2415,7 +2521,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id
-    message = %{id: id, role: role, text: text, html: Keyword.get(opts, :html)}
+    message = Map.merge(%{id: id, role: role, text: text, html: nil}, Map.new(opts))
 
     assign(socket,
       messages: socket.assigns.messages ++ [message],
@@ -2936,6 +3042,43 @@ defmodule BarkparkWeb.Studio.ChatLive do
     _ -> nil
   end
 
+  # Extract {tool_use_id, output_string} pairs from a wire user-frame. The
+  # result content may be a plain string or a block list; anything else (our
+  # own echoed sends through the cat test fake) yields [] and is ignored.
+  defp tool_results(%{"message" => %{"content" => content}}) when is_list(content) do
+    content
+    |> Enum.filter(&(is_map(&1) and &1["type"] == "tool_result" and is_binary(&1["tool_use_id"])))
+    |> Enum.map(fn block -> {block["tool_use_id"], tool_result_text(block["content"])} end)
+    |> Enum.reject(fn {_id, out} -> out in [nil, ""] end)
+  end
+
+  defp tool_results(_), do: []
+
+  defp tool_result_text(content) when is_binary(content), do: content
+
+  defp tool_result_text(content) when is_list(content) do
+    content
+    |> Enum.map(fn
+      %{"type" => "text", "text" => t} when is_binary(t) -> t
+      _ -> ""
+    end)
+    |> Enum.join("\n")
+  end
+
+  defp tool_result_text(_), do: nil
+
+  # The ⎿ line: first non-empty line of the output, hard-capped.
+  defp tool_output_head(out) when is_binary(out) do
+    out
+    |> String.split("\n")
+    |> Enum.map(&String.trim_trailing/1)
+    |> Enum.find("", &(String.trim(&1) != ""))
+    |> String.slice(0, 140)
+  end
+
+  defp tool_output_lines(out) when is_binary(out),
+    do: out |> String.split("\n") |> Enum.count(&(String.trim(&1) != ""))
+
   defp tool_line(name, input) when is_map(input) do
     preview =
       input
@@ -2978,6 +3121,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # states show Stop, never Send (there is no queue; the only in-turn control
   # is to cancel).
   defp turn_active?(status), do: status in [:thinking, :interrupting]
+
+  # The terminal's elapsed counter: one self-tick per second while a turn runs.
+  # Re-arms itself; falls silent (and disarms) the first tick after the turn
+  # ends, so an idle tab costs nothing.
+  defp start_turn_clock(socket) do
+    if socket.assigns[:turn_clock_armed] do
+      assign(socket, turn_elapsed_s: 0)
+    else
+      Process.send_after(self(), :turn_tick, 1_000)
+      assign(socket, turn_elapsed_s: 0, turn_clock_armed: true)
+    end
+  end
 
   defp approval_outcome_label(:allowed), do: "✓ allowed"
   defp approval_outcome_label(:canceled), do: "✗ canceled"

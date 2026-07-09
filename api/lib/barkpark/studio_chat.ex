@@ -391,6 +391,34 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  Attach a tool's output to its persisted tool row (matched by the
+  metadata tool_use_id). `:noop` when no row matches — a result for a tool we
+  never persisted must not raise.
+  """
+  def attach_tool_result(session_id, tool_use_id, output)
+      when is_binary(session_id) and is_binary(tool_use_id) and is_binary(output) do
+    row =
+      Repo.one(
+        from(m in Message,
+          where:
+            m.session_id == ^session_id and m.role == "tool" and
+              fragment("?->>'tool_use_id' = ?", m.metadata, ^tool_use_id),
+          limit: 1
+        )
+      )
+
+    case row do
+      nil ->
+        :noop
+
+      %Message{} = m ->
+        m
+        |> Ecto.Changeset.change(metadata: Map.put(m.metadata || %{}, "output", output))
+        |> Repo.update()
+    end
+  end
+
+  @doc """
   Persist the user's picked model alias (nil = CLI default). Choice is intent
   (rides the next spawn as `--model`); the `model` column stays the observed
   answering model off the result frame.
