@@ -5,7 +5,7 @@ The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
 
 - `bp task ready` — list available work
 - `bp task next <worker>` — atomically claim the next ready task; claim FIRST — the claim returns the brief and an epoch
-- `bp task show <id>` — task detail (carries children + child_count)
+- `bp task get <id>` — task detail (carries children + child_count)
 - `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.
 - `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)
 - `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events

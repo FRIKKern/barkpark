@@ -51,12 +51,15 @@ with epoch-CAS, never touching a shell. Register it one of two ways.
 ```bash
 claude mcp add --scope project --transport stdio \
   --env BARKPARK_API_URL=https://guerrilla.barkpark.cloud \
-  --env BARKPARK_API_TOKEN=$BARKPARK_API_TOKEN \
+  --env 'BARKPARK_API_TOKEN=${BARKPARK_API_TOKEN}' \
   barkpark -- bp mcp serve
 ```
 
 The `--env` pairs come **before** the server name, and the `--` separator is
 required — everything after it is the server's own command line (`bp mcp serve`).
+Keep the single quotes on the token pair: `--scope project` writes the committed
+`.mcp.json`, so the stored value must stay the `${…}` placeholder (expanded from
+your shell when the server starts) — never your literal token.
 
 **B — committed `.mcp.json` (shared with the repo):**
 
