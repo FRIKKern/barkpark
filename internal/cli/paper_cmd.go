@@ -216,6 +216,7 @@ func runPaperView(out *writer, g globals, args []string) int {
 		RefResolver:   paperRefResolver(client, ctx.Dataset, perspective),
 		TaskResolver:  paperTaskResolver(client, ctx.Dataset, perspective, raws),
 		ValueResolver: paperValueResolver(client, ctx.Dataset, perspective, blocksRaw),
+		ImageResolver: paperImageResolver(ctx.Server, ctx.Token),
 	}
 	rendered := pdrender.DefaultRegistry(theme).RenderDoc(blocks, rctx)
 
@@ -1017,4 +1018,46 @@ func usagePaperView(out *writer, toStdout bool) {
 	p("                             read view (default published; papers are public)")
 	p("  -o json                    emit the raw paper document (default: rendered ANSI)")
 	p("  -s, --server <name|url>    target a saved server or URL")
+}
+
+// paperImageResolver is the image-bytes seam (pdrender-terminal-images): given
+// an image block's src it fetches the encoded bytes so the renderer can paint
+// a half-block mosaic on TrueColor terminals. A relative src (the /media/…
+// shape papers store) resolves against the configured server; absolute
+// http(s) URLs fetch as-is. Misses return nil — the renderer degrades to its
+// labeled box, never errors. Memoised per render (a figure-wrapped image and
+// its standalone twin share one fetch); responses over the mosaic byte cap
+// are dropped here so a hostile paper can't balloon the process.
+func paperImageResolver(server, token string) func(src string) []byte {
+	cache := map[string][]byte{}
+
+	return func(src string) []byte {
+		if cached, ok := cache[src]; ok {
+			return cached
+		}
+		cache[src] = nil // negative-cache a miss up front
+
+		u := src
+		switch {
+		case strings.HasPrefix(src, "http://"), strings.HasPrefix(src, "https://"):
+			// absolute — fetch as-is
+		case strings.HasPrefix(src, "/"):
+			u = strings.TrimRight(server, "/") + src
+		default:
+			return nil // data:, protocol-relative, or junk — box degrade
+		}
+
+		headers := map[string]string{}
+		if token != "" && !strings.HasPrefix(src, "http") {
+			// Only the configured server gets the bearer token — never a
+			// third-party absolute URL from document content.
+			headers["Authorization"] = "Bearer " + token
+		}
+		status, body, err := doRequest("GET", u, headers, nil)
+		if err != nil || status < 200 || status >= 300 || len(body) == 0 || len(body) > 16<<20 {
+			return nil
+		}
+		cache[src] = body
+		return body
+	}
 }

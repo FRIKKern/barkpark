@@ -245,6 +245,21 @@ func (imageRenderer) Render(b Block, ctx RenderCtx) []string {
 	src := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "src")))
 	alt := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "alt")))
 
+	// The real picture, when the terminal + caller allow it: a TrueColor
+	// profile and a wired ImageResolver paint a half-block mosaic
+	// (imagemosaic.go); every miss below falls through to the honest box.
+	if src != "" && ctx.ImageResolver != nil && ctx.Profile == TrueColor {
+		if raw := ctx.ImageResolver(src); raw != nil {
+			if lines, ok := renderImageMosaic(raw, alt, src, ctx); ok {
+				w := clampWidth(ctx.Width)
+				for i := range lines {
+					lines[i] = padRight(lines[i], w)
+				}
+				return lines
+			}
+		}
+	}
+
 	desc := alt
 	if desc == "" {
 		desc = src

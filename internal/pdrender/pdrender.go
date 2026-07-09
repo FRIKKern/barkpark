@@ -124,6 +124,15 @@ type RenderCtx struct {
 	// resolver-returned string passes through sanitizeText before display.
 	ValueResolver func(target, field string) string
 
+	// ImageResolver is the image-bytes seam (pdrender-terminal-images): given
+	// an image block's `src` (relative /media path or absolute URL), it returns
+	// the raw encoded bytes, or nil for a miss. Nil field / nil return → the
+	// labeled "🖼 …" box degrade. The renderer stays pure (no HTTP) — the caller
+	// wires the fetch (bp paper view wires an apiclient-backed fetcher), the
+	// ValueResolver convention. Only consulted under a TrueColor profile; the
+	// decoded picture renders as a scroll-safe half-block mosaic (imagemosaic.go).
+	ImageResolver func(src string) []byte
+
 	// V2AsJSON, when true, renders the four v2 nested field blocks
 	// (composite/arrayOf/codelist/localizedText) as a raw JSON dump instead of
 	// the flat labelled summary. It DEFAULTS to false — the flat summary is
