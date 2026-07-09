@@ -53,8 +53,9 @@ defmodule Barkpark.Plugins.Quiz do
 
   # The three children the branch hardwired into application.ex, moved here so a
   # disabled/absent quiz plugin supervises nothing. Order matters: the Registry
-  # and RoomSupervisor must exist before the Bridge (which drives rooms), and all
-  # three come up after core PubSub (a static host child, always earlier).
+  # and RoomSupervisor must exist before the Bridge (which drives rooms). NOTE:
+  # application.ex splices plugin workers BEFORE the host Phoenix.PubSub child,
+  # so the Bridge defers its PubSub subscribe (see bridge.ex init/1).
   @impl Barkpark.Plugin
   def register_workers(_ctx) do
     [
