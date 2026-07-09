@@ -240,6 +240,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     id
   end
 
+  # A stored session whose last message is a proposed-plan row (charter D34),
+  # in whatever terminal/pending state a crash or a resolve left behind. Reopen
+  # must re-render the card from `metadata.input.plan`, never a bare system line.
+  defp seed_session_with_plan(request_id, plan, status) do
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+    {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "make a plan"})
+
+    {:ok, _} =
+      StudioChat.append_message(id, %{
+        role: "plan",
+        source_markdown: plan,
+        metadata: %{
+          "request_id" => request_id,
+          "tool_name" => "ExitPlanMode",
+          "input" => %{"plan" => plan},
+          "approval_status" => status
+        }
+      })
+
+    id
+  end
+
   describe "gate" do
     test "disabled → mount redirects even for an admin", %{conn: conn} do
       Application.put_env(:barkpark, :claude_chat, enabled: false)
@@ -1752,6 +1775,182 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
       assert approval.metadata["approval_status"] == "canceled"
+    end
+  end
+
+  describe "the proposed-plan card (ExitPlanMode, charter D34)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    # The plan markdown used across the live-card tests — a real heading + list
+    # so the title helper and the paper-engine body both have something to chew.
+    @plan_md "# Migrate the widgets\n\nSteps:\n\n1. Inventory the widgets\n2. Port each one\n3. Delete the shim"
+
+    defp plan_ask(request_id, plan) do
+      {:claude_chat_permission,
+       %{
+         request_id: request_id,
+         tool_name: "ExitPlanMode",
+         input: %{"plan" => plan},
+         title: nil,
+         decision_reason: nil
+       }}
+    end
+
+    defp drive_plan(view, request_id, plan \\ @plan_md) do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "plan it"})
+      send(view.pid, plan_ask(request_id, plan))
+      render(view)
+    end
+
+    test "an ExitPlanMode ask renders a proposed-plan card, not the Allow/Deny line",
+         %{view: view} do
+      html = drive_plan(view, "plan-1")
+
+      # a first-class plan card — title from the first heading, the full plan
+      # through the paper engine, Approve / Keep planning
+      assert html =~ "proposed plan"
+      assert html =~ "Migrate the widgets"
+      assert html =~ "Inventory the widgets"
+      assert html =~ ~s(phx-click="plan-approve")
+      assert html =~ ~s(phx-click="plan-keep")
+      assert html =~ "Approve plan"
+      assert html =~ "Keep planning"
+
+      # NEVER the generic tool-approval card
+      refute html =~ "Allow ExitPlanMode?"
+    end
+
+    test "the title falls back to 'Proposed plan' when the plan has no heading",
+         %{view: view} do
+      html = drive_plan(view, "plan-noh", "Just some prose, no heading at all.")
+      assert html =~ "Proposed plan"
+      assert html =~ "Just some prose, no heading at all."
+    end
+
+    test "Approve resolves the card to '✓ plan approved' and drops the buttons",
+         %{view: view} do
+      # a silent session so no echo loop races the resolve; the card flip is the
+      # synchronous truth of this click (the {:allow, input} seam lands via S1).
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-ok", @plan_md))
+      render(view)
+
+      html = render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-ok])))
+      assert html =~ "✓ plan approved"
+      refute html =~ "Approve plan"
+      refute html =~ "Keep planning"
+    end
+
+    test "Keep planning resolves the card to '✗ kept planning'", %{view: view} do
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-keep", @plan_md))
+      render(view)
+
+      html = render_click(element(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-keep])))
+      assert html =~ "✗ kept planning"
+      refute html =~ "Approve plan"
+    end
+
+    test "the preview is clamped and the toggle expands it per tab", %{view: view} do
+      html = drive_plan(view, "plan-exp")
+      # collapsed by default: the clamp class ON THE BODY (space-joined, distinct
+      # from the CSS rule `.bp-chat-plan-body.is-collapsed`) + the affordance
+      assert html =~ ~s(bp-chat-plan-body is-collapsed)
+      assert html =~ "Show full plan"
+
+      # find the plan message id to target the toggle
+      plan = Enum.find(lv_assigns(view).messages, &(&1.role == :plan))
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-toggle][phx-value-id="#{plan.id}"])))
+
+      # expanded: the clamp class is off the body and the label inverts
+      refute html =~ ~s(bp-chat-plan-body is-collapsed)
+      assert html =~ "Show less"
+      # per-tab socket state, never persisted to the store
+      assert MapSet.member?(lv_assigns(view).plan_expanded, plan.id)
+    end
+
+    # ── the mode flip is OBSERVED, never assumed (charter D34) ───────────────
+    #
+    # Approving a plan makes the CLI flip its own permission mode; the flip is
+    # visible ONLY on the next system/init permissionMode. The result frame's
+    # permission_mode is null, so asserting there would be vacuous-green.
+
+    test "a system/init reporting a new permissionMode flips the mode + persists it",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      assert StudioChat.get_session(sid).mode == "plan"
+
+      # the CLI flipped plan → default inside ExitPlanMode; we learn it here
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "default"}}
+      )
+
+      html = render(view)
+      # the selector adopts the observed mode…
+      assert html =~ "ask to act"
+      assert lv_assigns(view).mode == "default"
+      # …and it is PERSISTED, so a reopen and the next --resume carry it
+      assert StudioChat.get_session(sid).mode == "default"
+    end
+
+    test "an init echoing the SAME mode does not churn the selector or the store",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "plan"}}
+      )
+
+      render(view)
+      assert lv_assigns(view).mode == "plan"
+      assert StudioChat.get_session(sid).mode == "plan"
+    end
+  end
+
+  describe "proposed-plan replay (reopen from the store, charter D34)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "a resolved plan row reopens as its terminal card, re-rendered from input.plan",
+         %{conn: conn} do
+      sid = seed_session_with_plan("plan-done", "# Approved plan\n\nDo the thing.", "allowed")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      assert html =~ "✓ plan approved"
+      assert html =~ "Approved plan"
+      # display-only reopen — no live card no one can answer
+      refute has_element?(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-done]))
+      assert session_pid(view) == nil
+    end
+
+    test "a dangling pending plan row reopens as ✗ canceled, never a live card",
+         %{conn: conn} do
+      sid = seed_session_with_plan("plan-hang", "# Half-made plan\n\nStep one.", "pending")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # pending + no live owner → the honest terminal state, not a dead button
+      # and not a bare :system fallback line
+      assert html =~ "✗ canceled"
+      assert html =~ "Half-made plan"
+      refute has_element?(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-hang]))
+      refute has_element?(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-hang]))
     end
   end
 

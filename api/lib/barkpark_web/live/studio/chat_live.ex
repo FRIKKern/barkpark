@@ -41,6 +41,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
   @default_interrupt_timeout_ms 8_000
 
+  # The exact deny message a "Keep planning" click sends back to the model
+  # (charter D34, proven on the real binary: the model re-plans and the next
+  # system/init stays in plan mode).
+  @keep_planning_message "The user wants to keep planning — continue in plan mode."
+
   # Mount no longer spawns (the eager-spawn contract is inverted, charter D8/D14):
   # mount lays out the chrome + loads the sidebar session list; `handle_params/3`
   # is the single source of truth for WHICH session is on screen. A subprocess is
@@ -64,6 +69,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          show_archived: false,
          renaming_session: nil,
          open_menu_session: nil,
+         # Per-tab expand state for proposed-plan cards (charter D34): the set of
+         # plan message ids the viewer has expanded. Socket-local, never
+         # broadcast, reset on every session load — clones the open_menu_session
+         # kebab pattern.
+         plan_expanded: MapSet.new(),
          mode: "plan",
          model_choice: "default",
          status: :new,
@@ -291,6 +301,35 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, resolve_permission(socket, request_id, {:deny, "The user declined this action."})}
   end
 
+  # ── proposed-plan card (charter D34) ─────────────────────────────────────
+
+  # Approve the plan: answer the ExitPlanMode ask with `{:allow, echoed input}`.
+  # The echoed input is REQUIRED — a bare `{"behavior":"allow"}` fails
+  # ExitPlanMode on the real binary (ZodError, mode stays plan). We send NO
+  # mode follow-up; the CLI flips its own mode and we OBSERVE it on the next
+  # init (see observe_permission_mode/2).
+  def handle_event("plan-approve", %{"rid" => request_id}, socket) do
+    {:noreply, resolve_plan(socket, request_id, :allow)}
+  end
+
+  # Keep planning: deny with the exact re-plan instruction (charter D34).
+  def handle_event("plan-keep", %{"rid" => request_id}, socket) do
+    {:noreply, resolve_plan(socket, request_id, :keep)}
+  end
+
+  # Expand/collapse the clamped plan preview — per-tab socket state, never
+  # broadcast (a co-viewer's expand is their own). Toggles the plan message id
+  # in the `plan_expanded` set.
+  def handle_event("plan-toggle", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+    set = socket.assigns.plan_expanded
+
+    next =
+      if MapSet.member?(set, id), do: MapSet.delete(set, id), else: MapSet.put(set, id)
+
+    {:noreply, assign(socket, plan_expanded: next)}
+  end
+
   # ── sidebar as a managed resource list (wave 2) ──────────────────────────
 
   # Toggle the per-row kebab menu (idempotent open/close). `phx-click-away` on
@@ -454,14 +493,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info({:claude_chat_event, %{"type" => "system", "subtype" => "init"} = ev}, socket) do
+    observed = ev["permissionMode"] || ev["permission_mode"]
+
     init = %{
       model: ev["model"],
       session_id: ev["session_id"],
-      permission_mode: ev["permissionMode"] || ev["permission_mode"]
+      permission_mode: observed
     }
 
     status = if socket.assigns.status == :starting, do: :ready, else: socket.assigns.status
-    {:noreply, assign(socket, init: init, status: status)}
+
+    {:noreply,
+     socket
+     |> assign(init: init, status: status)
+     |> observe_permission_mode(observed)}
   end
 
   def handle_info(
@@ -598,6 +643,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # them so they never fall to the noisy catch-all.
   def handle_info({:claude_chat_control, _kind, _request_id, _response}, socket),
     do: {:noreply, socket}
+
+  # ExitPlanMode is not a generic tool approval — it is the agent proposing a
+  # plan and asking to act on it (charter D34; EVERY plan-mode session hits it).
+  # Render it as a first-class proposed-plan card (the full plan through the
+  # paper engine, clamped, Approve / Keep planning), NEVER the Allow/Deny line.
+  # Placed before the generic clause so the plan ask never falls through.
+  def handle_info({:claude_chat_permission, %{tool_name: "ExitPlanMode"} = ask}, socket) do
+    id = socket.assigns.next_id
+    message = build_plan_message(id, ask.request_id, ask.input || %{}, :pending)
+
+    {:noreply,
+     socket
+     |> assign(messages: socket.assigns.messages ++ [message], next_id: id + 1)
+     |> refresh_sessions()}
+  end
 
   def handle_info({:claude_chat_permission, ask}, socket) do
     id = socket.assigns.next_id
@@ -798,6 +858,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
           width: 100%; box-sizing: border-box; font: inherit;
           background: var(--bg); color: var(--text);
           border: 1px solid var(--primary); border-radius: 6px; padding: 6px 8px;
+        }
+        /* Proposed-plan card (charter D34): evergreen-accented, the full plan
+           rendered through the paper engine, clamped to ~8 lines until expanded.
+           The collapsed body fades into the page background via a token gradient
+           — NEVER pre-truncate the markdown (an unbalanced fence would degrade
+           the whole doc), only the RENDERED height. */
+        .bp-chat-plan {
+          border: 1px solid var(--border-muted);
+          border-left: 3px solid var(--primary);
+          border-radius: 8px; padding: 12px 14px;
+        }
+        .bp-chat-plan-body { position: relative; overflow: hidden; }
+        .bp-chat-plan-body.is-collapsed { max-height: 12.5em; }
+        .bp-chat-plan-body.is-collapsed::after {
+          content: ""; position: absolute; left: 0; right: 0; bottom: 0;
+          height: 3.5em; pointer-events: none;
+          background: linear-gradient(to bottom, transparent, var(--bg));
         }
       </style>
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
@@ -1160,6 +1237,84 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   style="font-family: var(--font-mono); overflow-wrap: anywhere;"
                 >
                   <%= approval_outcome_label(message.approval_status) %> — <%= message.tool_name %>
+                </div>
+              <% :plan -> %>
+                <div
+                  :if={message.approval_status == :pending}
+                  class="bp-chat-plan"
+                  data-plan={message.request_id}
+                >
+                  <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+                    <span
+                      class="text-xs text-dim"
+                      style="text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;"
+                    >
+                      proposed plan
+                    </span>
+                    <span class="text-xs text-dim" style="margin-left: auto;">plan ready</span>
+                  </div>
+                  <div
+                    class="text-sm"
+                    style="font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere;"
+                  >
+                    <%= message.title %>
+                  </div>
+                  <div class={[
+                    "bp-chat-plan-body",
+                    !MapSet.member?(@plan_expanded, message.id) && "is-collapsed"
+                  ]}>
+                    <div
+                      :if={String.trim(to_string(message.plan_markdown)) != ""}
+                      class="bp-paper-surface bp-chat-md"
+                      style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
+                    >
+                      {Phoenix.HTML.raw(message.html || "")}
+                    </div>
+                    <div
+                      :if={String.trim(to_string(message.plan_markdown)) == ""}
+                      class="text-xs text-dim"
+                      style="font-style: italic;"
+                    >
+                      (the plan has no text)
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn text-xs"
+                    phx-click="plan-toggle"
+                    phx-value-id={message.id}
+                    aria-expanded={to_string(MapSet.member?(@plan_expanded, message.id))}
+                    style="margin-top: 6px; padding: 2px 9px;"
+                  >
+                    <%= if MapSet.member?(@plan_expanded, message.id),
+                      do: "Show less",
+                      else: "Show full plan" %>
+                  </button>
+                  <div style="display: flex; gap: 8px; margin-top: 10px;">
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      phx-click="plan-approve"
+                      phx-value-rid={message.request_id}
+                    >
+                      Approve plan
+                    </button>
+                    <button
+                      type="button"
+                      class="btn"
+                      phx-click="plan-keep"
+                      phx-value-rid={message.request_id}
+                    >
+                      Keep planning
+                    </button>
+                  </div>
+                </div>
+                <div
+                  :if={message.approval_status != :pending}
+                  class="text-xs text-dim"
+                  style="overflow-wrap: anywhere;"
+                >
+                  <%= plan_outcome_label(message.approval_status) %> — <%= message.title %>
                 </div>
               <% _ -> %>
                 <div class="text-xs text-dim" style="font-style: italic;">
@@ -1580,6 +1735,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Any half-open sidebar affordance is stale after a navigation.
       renaming_session: nil,
       open_menu_session: nil,
+      # Plan-card expand state is per-tab and per-session (charter D34) — a reopen
+      # starts every replayed plan collapsed.
+      plan_expanded: MapSet.new(),
       # A reopened session starts with a clean composer (charter D24): any draft
       # or in-flight echo belonged to the session we navigated away from.
       composer_draft: "",
@@ -1631,6 +1789,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       title_kicked: false,
       renaming_session: nil,
       open_menu_session: nil,
+      plan_expanded: MapSet.new(),
       composer_draft: "",
       pending_echo_id: nil
     )
@@ -1698,6 +1857,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
       _ -> socket.assigns.mode
     end
   end
+
+  # Adopt the mode the CLI reports on `system/init` (charter D34). Approving a
+  # plan makes the CLI flip its OWN permission mode (plan → default) inside the
+  # ExitPlanMode tool — we send NO `set_permission_mode` follow-up, and the flip
+  # is invisible on the terminal `result` frame (its `permission_mode` is null;
+  # asserting there is vacuous-green). The ONLY honest signal is the NEXT turn's
+  # init `permissionMode`. When it differs from the mode we hold, adopt it and
+  # persist via `set_mode/2` so a reopen and the next lazy `--resume` spawn both
+  # carry the post-plan mode. Skipped while a user-initiated switch is in flight
+  # (its ack owns the mode, charter D17/D23) and for any unknown/echoed-same
+  # value, so a routine init never churns the selector.
+  defp observe_permission_mode(socket, mode)
+       when is_binary(mode) and mode in ~w(plan default acceptEdits) do
+    if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
+      if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
+      assign(socket, mode: mode)
+    else
+      socket
+    end
+  end
+
+  defp observe_permission_mode(socket, _mode), do: socket
 
   # Persist a mode switch onto the store row (charter D17) — no-op with no store
   # session yet (a brand-new chat before its first send has no row to write).
@@ -1881,6 +2062,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
+  # A proposed-plan row (charter D34) re-renders the card from metadata — the
+  # plan markdown is `input.plan` (already persisted in the ask metadata; the
+  # source_markdown is the fallback). `live?` decides a still-"pending" plan's
+  # fate exactly like an approval: answerable under a live owner (D22), else the
+  # honest terminal state, canceled (never a dead Approve button, never a bare
+  # :system line).
+  defp replay_message(%{role: "plan", seq: seq, source_markdown: md, metadata: meta}, live?) do
+    meta = meta || %{}
+    input = Map.get(meta, "input") || %{}
+
+    # input.plan is the source of truth; fall back to the stored source_markdown
+    # so an older/thinner row still renders something honest.
+    input =
+      if is_binary(input["plan"]),
+        do: input,
+        else: Map.put(input, "plan", md || "")
+
+    build_plan_message(
+      seq,
+      Map.get(meta, "request_id"),
+      input,
+      replay_approval_status(Map.get(meta, "approval_status"), live?)
+    )
+  end
+
   # A user row rebuilds its image attachments (charter D25) from the metadata
   # pointers, read SERVER-SIDE from the chat-owned store and inlined as data-URIs
   # — no HTTP route ever (D6). A file missing on disk degrades to an honest
@@ -1973,6 +2179,101 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       # Persist the decision (D11) and drop the pending count so the sidebar
       # "needs you" pill clears on the next sidebar refresh.
+      if store_id = socket.assigns[:store_session_id],
+        do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
+
+      socket |> assign(messages: messages) |> refresh_sessions()
+    else
+      socket
+    end
+  end
+
+  # ── proposed-plan card (charter D34) ─────────────────────────────────────
+
+  # Build the transcript message for a proposed plan. `input` is the raw
+  # ExitPlanMode input (`%{"plan" => markdown, …}`); it is kept whole in
+  # `plan_input` so Approve can echo it back verbatim (a bare allow fails the
+  # tool). The body is the FULL plan through the paper engine — never truncated;
+  # only its RENDERED height is clamped in CSS.
+  defp build_plan_message(id, request_id, input, status) do
+    plan = plan_markdown(input)
+
+    %{
+      id: id,
+      role: :plan,
+      request_id: request_id,
+      tool_name: "ExitPlanMode",
+      plan_input: input,
+      plan_markdown: plan,
+      title: plan_title(plan),
+      html: render_paper_html(plan),
+      approval_status: status
+    }
+  end
+
+  defp plan_markdown(%{"plan" => plan}) when is_binary(plan), do: plan
+  defp plan_markdown(_), do: ""
+
+  # The card title: the first heading's text (charter D34), off the same
+  # FromMarkdown blocks the body renders through. Fallback "Proposed plan" when
+  # the plan opens with prose, an empty heading, or no markdown at all.
+  defp plan_title(markdown) when is_binary(markdown) do
+    markdown
+    |> FromMarkdown.blocks()
+    |> Enum.find_value("Proposed plan", fn
+      %{"type" => "heading", "text" => t} when is_binary(t) ->
+        case String.trim(t) do
+          "" -> nil
+          trimmed -> trimmed
+        end
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp plan_title(_), do: "Proposed plan"
+
+  defp plan_outcome_label(:allowed), do: "✓ plan approved"
+  defp plan_outcome_label(:canceled), do: "✗ canceled"
+  defp plan_outcome_label(_), do: "✗ kept planning"
+
+  # Resolve a pending plan card. Approve echoes the ORIGINAL input as
+  # updatedInput ({:allow, input} — a bare allow fails ExitPlanMode on the real
+  # binary); Keep planning denies with the exact re-plan instruction (charter
+  # D34). Both flip the card to its terminal state and persist the outcome;
+  # neither sends a mode follow-up (the CLI owns the flip, observed on the next
+  # init). Guarded to the still-pending plan under a live session, so a stale
+  # double-click or a display-only reopen is a no-op.
+  defp resolve_plan(socket, request_id, verb) do
+    socket =
+      case socket.assigns[:store_session_id] do
+        nil -> socket
+        sid -> assign(socket, activity: Map.delete(socket.assigns.activity, sid))
+      end
+
+    pending =
+      Enum.find(socket.assigns.messages, fn m ->
+        m.role == :plan and m[:request_id] == request_id and m.approval_status == :pending
+      end)
+
+    if pending && socket.assigns.session do
+      {decision, status} =
+        case verb do
+          :allow -> {{:allow, pending.plan_input || %{}}, :allowed}
+          :keep -> {{:deny, @keep_planning_message}, :denied}
+        end
+
+      ClaudeChat.respond_permission(socket.assigns.session, request_id, decision)
+
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{role: :plan, request_id: ^request_id} = m -> %{m | approval_status: status}
+          m -> m
+        end)
+
+      # Persist the terminal outcome (widened to the plan role by S1's store
+      # plumbing) and drop the "needs you" count on the next sidebar refresh.
       if store_id = socket.assigns[:store_session_id],
         do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
 
