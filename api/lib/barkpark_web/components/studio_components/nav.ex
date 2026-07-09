@@ -275,8 +275,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   @doc """
   Studio top-level tab navigation. Seeds the registry resolver chain
-  with the host's built-in tabs (`default_top_menu_entries/1`,
-  derived from `BarkparkWeb.Studio.Nav.tabs/1`) as `:baseline` and
+  with the host's built-in tabs — the canonical nav model
+  `default_top_menu_entries/3` (the single source of truth for the
+  built-in Structure / Media / API tabs plus the admin-gated
+  tmux / chat / Style extras) — as `:baseline` and
   passes `%{dataset, current_path}` as `:ctx`. Plugins that override
   `resolve_top_menu_entries/2` see the host tabs in `prev` and may
   drop, reorder, or amend them symmetric with how they treat
@@ -294,7 +296,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   `Barkpark.ApiTester.Endpoints.all/1`.
 
   The `:nav_section` assign is preserved for backwards compatibility
-  but no longer drives active-state — `default_top_menu_entries/1`'s
+  but no longer drives active-state — `default_top_menu_entries/3`'s
   `:active_when` rules cover the same routes.
 
   Caller wraps with `:if={assigns[:dataset]}` — the component itself
@@ -352,22 +354,29 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     """
   end
 
-  # Host's built-in top-menu tabs in the resolver-compatible shape.
-  # Threaded as `:baseline` through `Registry.collect_top_menu_entries/1`
-  # so plugins can see, reorder, or drop host tabs (Q4 in the plan).
-  #
-  # `:active_when` is set explicitly per tab so the post-resolution
-  # render loop can highlight the active tab uniformly via
-  # `plugin_tab_active?/2`:
-  #
-  #   * Structure: regex matching the Studio base path and any sub-route
-  #     *except* `/media` and `/api-tester` (those are owned by the
-  #     other two built-ins).
-  #   * Media / API: exact path prefix.
-  #
-  # Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs
-  # (which default to 100 via `normalize_top_menu_entry/1`).
-  defp default_top_menu_entries(dataset, scope_prefix, admin?) when is_binary(dataset) do
+  @doc """
+  The canonical Studio nav model: the host's built-in top-menu tabs in
+  the resolver-compatible shape. Returns the ordered `Structure` (10) /
+  `Media` (20) / `API` (30) built-ins plus the admin-gated `tmux` (40),
+  `chat` (45), and `Style` (50) extras. Threaded as `:baseline` through
+  `Registry.collect_top_menu_entries/1` so plugins can see, reorder, or
+  drop host tabs (Q4 in the plan). This is the ONE place built-in tab
+  identity, order, path, and highlight rules are defined — there is no
+  separate tab source.
+
+  `:active_when` is set explicitly per tab so the post-resolution render
+  loop can highlight the active tab uniformly via `plugin_tab_active?/2`:
+
+    * Structure: regex matching the Studio base path and any sub-route
+      *except* `/media` and `/api-tester` (those are owned by the other
+      two built-ins).
+    * Media / API / extras: exact path prefix, boundary-matched.
+
+  Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs (which
+  default to 100 via `normalize_top_menu_entry/1`).
+  """
+  # @canonical capability:studio-nav-model aka:nav-tabs,top-menu,studio-tabs doc:docs/cards/studio.md
+  def default_top_menu_entries(dataset, scope_prefix, admin?) when is_binary(dataset) do
     ds = URI.encode(dataset)
 
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
@@ -467,7 +476,12 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # Decide whether a plugin tab is active. Rule:
   #
   #   * explicit `:active_when` always wins
-  #     - string  → `String.starts_with?(current_path, active_when)`
+  #     - string  → boundary match: active iff `current_path == prefix`
+  #       OR `current_path` starts with `prefix <> "/"`. This keeps deep
+  #       links live (e.g. `/studio/chat/:session_id` highlights `chat`)
+  #       while refusing sibling over-match (`/studio/media-library` must
+  #       NOT light up the `/studio/media` tab, which a bare
+  #       `String.starts_with?` would have wrongly done).
   #     - regex   → `Regex.match?(active_when, current_path)`
   #   * absent → exact match on `tab.path`
   #
@@ -482,7 +496,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   def plugin_tab_active?(%{active_when: prefix}, current_path)
       when is_binary(prefix) and is_binary(current_path),
-      do: String.starts_with?(current_path, prefix)
+      do: current_path == prefix or String.starts_with?(current_path, prefix <> "/")
 
   def plugin_tab_active?(%{path: path}, current_path)
       when is_binary(path) and is_binary(current_path),
