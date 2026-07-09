@@ -97,12 +97,17 @@ diagram-node.js:205-224), and the verbatim chips `tasks`/`task-board`/`roadmap`/
 
 **B. GATED editable node-views** (each has a dedicated source-level edit⇄reader
 parity assertion). NO wave-2 slice. `divider` (S1, `__divider_parity.test.mjs`,
-14 parity refs), `callout` (S2-S3, `__callout_parity.test.mjs`, 22 refs), `code`
-(S9, `__code_interior.test.mjs`, 10 refs).
+14 parity refs; + W1.1 value-lockstep `view_edit_parity_test.exs` §8 binding the
+figures.ex inline decls to the edit CSS), `callout` (S2-S3,
+`__callout_parity.test.mjs`, 22 refs), `code` (S9, `__code_interior.test.mjs`,
+10 refs) — and, landed THIS wave: `section` (W1.3 `__section_parity.test.mjs` +
+the rewritten Elixir §6/§6b tripwire), `table` (W1.2 `__table_parity.test.mjs`).
 
 **C. PROSE** (paragraph/heading/list/eyebrow/byline/ingress/pullquote + fields):
 bare semantic tags, styled by the shared surface CSS; locked by
-`view_edit_parity_test.exs` (element-rule byte-compare). NO wave-2 slice.
+`view_edit_parity_test.exs` (element-rule byte-compare) + W1.2
+`__role_parity.test.mjs` (the 4 role node-views provably emit the reader's
+`<p class="bp-role-*">`). NO wave-2 slice.
 
 **D. UNGATED DIVERGENCE** — post-07-07 structural node-views wrap reader-shaped
 inner DOM in `bp-canvas-*` chrome with a **round-trip-only** test (`run-convert`
@@ -114,12 +119,12 @@ tags + classes). The two `LIVE BUG` rows also have a filed parity bug task.
 | # | Slice | Reader emits (file:line) | Edit node-view emits (file:line) | Divergence / why ungated |
 |---|---|---|---|---|
 | S10 | **card-slot-parity** `LIVE BUG` | `Components.card_html/2` — bare `<h_>`/`<p>`/`<img>`/`<a>` under `<div class="bp-card[ --tone]">`, "no bp-card__ chrome" (components.ex:328,349-364) | `bp-canvas-card bp-card` with children wrapped in `bp-card__t`/`__d`/`__media`/`__action` (card-node.js:157-161,236) | Edit mirrors the LEGACY `cards` fleet chrome (`Components.cards_html`, components.ex:308-310), NOT the reader `card` widget. Shared CSS `.bp-card h3` vs `.bp-card__t` will not cross-apply → wrong look. `__cards.test.mjs` is round-trip only. |
-| S11 | **section-grid-parity** | `bp-section__grid` (`--bp-tracks`, `--bp-grid-gap`) with `bp-section__cell` per child (compose.ex ~967) | `bp-canvas-section` with `bp-section__title` + `bp-section__body` — NO `bp-section__grid`/`__cell`, no track vars (section-node.js:249-266) | Reader lays children on a CSS grid; edit stacks them in a plain body. `canvas_reader_parity_gate` §6 is a SELF-DECLARED WEAK textual proxy ("NOT render parity"). |
+| S11 | ~~section-grid-parity~~ **CLOSED by W1.3** | `bp-section__grid` (`--bp-tracks`, `--bp-grid-gap`) with `bp-section__cell` per child (compose.ex ~1415-1433) | grid mode DOES swap the body to the shared `bp-section__grid` + track vars (section-node.js:358-359 — the audit's original "plain body" claim was wrong; only the per-child `bp-section__cell` WRAPPER is absent, its `min-width:0` now mirrored onto the item) | W1.3 `__section_parity.test.mjs` locks title/body/grid-class/min-width + reconcile-or-justify for all 3 micro-divergences; Elixir §6/§6b pin the wiring. Residual (documented, not gated): the cell's `> :first-child { margin-top:0 }`. |
 | S12 | **note-island-parity** | `bp-note` › `bp-note__k` (span) + `bp-note__d` (`<b>` lead + body) | `bp-canvas-note` › `bp-canvas-note__k`/`__lead`/`__body` inputs — its OWN class family, never the reader's `bp-note*` (note-node.js:119-134) | Two separate CSS producers hand-matched for one look; no assertion the island resembles `bp-note`. `__note.test.mjs` round-trip only. |
 | S13 | **stage-island-parity** | `bp-pnode[ bp-pnode--src]` › `bp-pnode__k`/`__t`/`__d` (`Components.pipeline_html`) | `bp-canvas-stage[ --src]` with inputs (stage-node.js:143-197) | DESIGN-1 mandates `bp-canvas-stage` (§7 asserts only the NEGATIVE — no `bp-pnode` leak); nothing asserts the POSITIVE look-parity to `bp-pnode`. |
 | S14 | **columns-parity-assertion** | `<div class="bp-cols" style="--bp-cols:N">` › `bp-cols__c` (walk/compose) | `renderHTML` `class:"bp-cols"` (columns-node.js:115-121), `bp-cols__c` (:150), non-first-class child → `bp-cols__atom` (:250) | Reuses reader classes (parity by construction) but `__columns.test.mjs` has 0 reader-parity refs — a reader `bp-cols` restructure or a node drift ships silently. |
 | S15 | **terminal-parity-assertion** | `bp-term` › `bp-term__bar`(`__dots`/`__title`/`__live`) + `bp-term__body` + `bp-term__foot` | `bp-term bp-canvas-term` › `bp-term__bar`/`__title`(input)/`__live` (terminal-node.js:178-205) | Reuses reader classes; `__terminal.test.mjs` is round-trip only (1 ref). Verify `__body`/`__foot` structural coverage. |
-| S16 | **table-parity-assertion** | `<table class="bp-table">` › `thead`/`tbody` › `bp-table__th`/`__td` (span cells) | `bp-canvas-table` wrapper + `table.bp-table` + col/row rails (table-node.js:243,270-285) | Reuses reader classes; `__table.test.mjs` round-trip only. |
+| S16 | ~~table-parity-assertion~~ **CLOSED by W1.2** | `<table role="presentation" class="bp-table">` › `thead`/`tbody` › `bp-table__th`/`__td` (walk.ex:908-952) | `bp-canvas-table` wrapper + `table.bp-table` + col/row rails (table-node.js:243,270-285) | W1.2 `__table_parity.test.mjs` freezes the shared `.bp-table*` bindings + justifies the thead-drop and the `bp-canvas-table__*` rails as edit-only islands. Residual (flagged, a11y-only): edit `<table>` omits the reader's `role="presentation"`. |
 | S17 | **action-preview-parity** | `<a class="bp-button[ bp-button--primary]">` | `bp-canvas-action` with a LIVE `bp-button` preview + edit islands (action-node.js:14-15,187-206) | Preview reuses reader classes but no test pins the preview to the reader button emitter. |
 
 **Filed bugs** (under `paper-edit-parity-endgame`): S10 card-slot mismatch
@@ -127,6 +132,6 @@ tags + classes). The two `LIVE BUG` rows also have a filed parity bug task.
 an unresolved task-detail returns `""` while sibling widgets render
 `bp-tasks--empty` (components.ex:80-83,106 vs :39) (`parity2-bug-taskdetail-empty-state`).
 
-Integration: S10-S13 are self-contained (card/section/note/stage node-views —
-no shared partition). S14-S17 add assertions only (no node-view edit) → can batch.
-Prefer LIVE-BUG slices (S10, then S11) first.
+Integration: S10/S12/S13 are self-contained (card/note/stage node-views — no
+shared partition). S14/S15/S17 add assertions only (no node-view edit) → can
+batch. S11/S16 CLOSED this wave (W1.3/W1.2). Take the LIVE-BUG slice S10 first.
