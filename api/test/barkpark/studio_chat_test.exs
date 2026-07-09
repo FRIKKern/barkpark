@@ -1354,16 +1354,16 @@ defmodule Barkpark.StudioChatTest do
       assert Enum.map(phases, & &1.title) |> hd() == "Design"
 
       assert s.entry_status == :completed
-      assert s.phases_total == 7
-      assert s.phases_done == 7
-      assert s.phases_skipped == 0
-      assert s.current_index == nil
+      assert s.phase_total == 7
+      assert s.phases_run == 7
+      assert s.skipped == 0
+      assert s.active == nil
       assert s.agents_total == 29
-      assert s.agents_running == 0
-      assert s.agents_done == 29
-      assert s.agents_failed == 0
+      assert s.running == 0
+      assert s.done == 29
+      assert s.failed == 0
       # verbatim token truth summed from the real done nodes
-      assert s.tokens_total == 2_137_873
+      assert s.tokens == 2_137_873
     end
 
     test "phase 1 groups its four design agents by phaseIndex, model family Opus" do
@@ -1371,7 +1371,7 @@ defmodule Barkpark.StudioChatTest do
       %{phases: [design | _]} = StudioChat.workflow_journey(entry)
 
       assert design.title == "Design"
-      assert design.agent_count == 4
+      assert design.total == 4
       assert design.model == "Opus"
 
       assert Enum.map(design.agents, & &1["label"]) ==
@@ -1399,14 +1399,13 @@ defmodule Barkpark.StudioChatTest do
       assert Enum.all?(3..7, &(by_index[&1] == :unreached))
 
       assert s.entry_status == :interrupted
-      assert s.current_index == 2
-      assert s.current_title == "Explore"
-      assert s.phases_done == 1
+      assert s.active == %{index: 2, title: "Explore"}
+      assert s.phases_run == 1
       assert s.agents_total == 5
       # the 4 explorers are still `progress` (non-terminal) — running, not done
-      assert s.agents_running == 4
-      assert s.agents_done == 1
-      assert s.agents_failed == 0
+      assert s.running == 4
+      assert s.done == 1
+      assert s.failed == 0
     end
   end
 
@@ -1426,8 +1425,8 @@ defmodule Barkpark.StudioChatTest do
       %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
       assert Enum.map(phases, & &1.status) == [:done, :done, :skipped]
       # honest "2 of 3 phases · 1 skipped", never a fake 3/3
-      assert s.phases_done == 2
-      assert s.phases_skipped == 1
+      assert s.phases_run == 2
+      assert s.skipped == 1
     end
 
     test "an `error` agent renders failed — never counted as done, phase still settles" do
@@ -1457,9 +1456,9 @@ defmodule Barkpark.StudioChatTest do
       # both agents are terminal, so the phase settles :done…
       assert judge.status == :done
       # …but the errored agent is a FAILURE terminal, not a success
-      assert s.agents_done == 1
-      assert s.agents_failed == 1
-      assert s.agents_running == 0
+      assert s.done == 1
+      assert s.failed == 1
+      assert s.running == 0
       assert StudioChat.workflow_node_terminal?(%{"state" => "error"})
     end
 
@@ -1493,10 +1492,9 @@ defmodule Barkpark.StudioChatTest do
 
       %{phases: phases, summary: s} = StudioChat.workflow_journey(entry)
       assert Enum.map(phases, & &1.status) == [:done, :active, :future]
-      assert s.current_index == 2
-      assert s.current_title == "Build"
-      assert s.agents_running == 1
-      assert s.agents_done == 2
+      assert s.active == %{index: 2, title: "Build"}
+      assert s.running == 1
+      assert s.done == 2
     end
   end
 
