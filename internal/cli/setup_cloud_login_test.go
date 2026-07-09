@@ -286,7 +286,7 @@ func TestFleetTargetCanonicalizesScheme(t *testing.T) {
 		{"http://a.example.com", "", "http://a.example.com"},                // scheme preserved
 		{"", "b.example.com", "https://b.example.com"},                      // host promoted
 		{"", "203.0.113.7", "https://203.0.113.7"},                          // ip host promoted
-		{"  ", "  ", ""},                                                     // all blank
+		{"  ", "  ", ""}, // all blank
 	}
 	for _, c := range cases {
 		if got := fleetTarget(c.url, c.host); got != c.want {
