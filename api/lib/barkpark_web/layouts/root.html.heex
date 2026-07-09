@@ -4637,6 +4637,15 @@
         docs / the tmux console; without it the hook never registers → black
         terminal.) --%>
   <script src="/assets/bp-tmux-terminal.js"></script>
+  <%!-- Mermaid engine for `diagram` blocks in Studio surfaces (Claude chat
+        transcript). `defer` per Golden Rule #4 (never blocking in <head>);
+        startOnLoad:false — the PaperMermaid hook runs it manually so it works
+        with LiveView-patched DOM. Same CDN pin as the Bulldocs reader. --%>
+  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <%!-- Hook + evergreen theming for the engine above. Non-defer so
+        window.BarkparkPaperMermaid exists before the LiveSocket Hooks
+        registration below. --%>
+  <script src="/assets/bp-paper-mermaid.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -4668,6 +4677,9 @@
     // xterm.js on first mount. Guarded so a missing global never breaks the
     // Hooks map / LiveSocket. (Re-added after a stale-branch merge dropped it.)
     if (window.BarkparkTmuxTerminal) Hooks.TmuxTerminal = window.BarkparkTmuxTerminal;
+    // PaperMermaid — renders `diagram` blocks in the Studio Claude chat
+    // (defined in /assets/bp-paper-mermaid.js, loaded non-defer above).
+    if (window.BarkparkPaperMermaid) Hooks.PaperMermaid = window.BarkparkPaperMermaid;
 
     Hooks.PresenceIdentity = {
       mounted() {

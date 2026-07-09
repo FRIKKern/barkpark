@@ -41,6 +41,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           dataset: default_dataset(),
           current_path: "/studio/chat",
           session: nil,
+          mode: "plan",
           status: :starting,
           init: nil,
           messages: [],
@@ -83,6 +84,33 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # Switching permission mode restarts the subprocess (the CLI fixes its mode
+  # at spawn). The transcript survives in the LiveView; the model's context
+  # does not — an honest system line says so.
+  def handle_event("set-mode", %{"mode" => mode}, socket) do
+    mode = ClaudeChat.normalize_mode(mode)
+
+    if mode == socket.assigns.mode do
+      {:noreply, socket}
+    else
+      if session = socket.assigns.session, do: ClaudeChat.close(session)
+
+      {:noreply,
+       socket
+       |> assign(mode: mode, session: nil, streaming: nil)
+       |> append_message(:system, "Permission mode → #{mode}. New session started.")
+       |> start_session()}
+    end
+  end
+
+  def handle_event("approve", %{"rid" => request_id}, socket) do
+    {:noreply, resolve_permission(socket, request_id, :allow)}
+  end
+
+  def handle_event("deny", %{"rid" => request_id}, socket) do
+    {:noreply, resolve_permission(socket, request_id, {:deny, "The user declined this action."})}
+  end
+
   # Stale/unknown client events must never crash the chat — mirror the other
   # admin LVs' tolerant catch-all.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
@@ -110,7 +138,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          }},
         socket
       ) do
-    {:noreply, assign(socket, streaming: (socket.assigns.streaming || "") <> text)}
+    {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
   end
 
   def handle_info(
@@ -147,6 +175,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     last_result = %{duration_ms: ev["duration_ms"], cost_usd: ev["total_cost_usd"]}
     {:noreply, assign(socket, status: :ready, streaming: nil, last_result: last_result)}
+  end
+
+  def handle_info({:claude_chat_permission, ask}, socket) do
+    id = socket.assigns.next_id
+
+    message = %{
+      id: id,
+      role: :approval,
+      text: ask.title || tool_line(ask.tool_name, ask.input),
+      html: nil,
+      request_id: ask.request_id,
+      tool_name: ask.tool_name,
+      approval_status: :pending
+    }
+
+    {:noreply,
+     assign(socket,
+       messages: socket.assigns.messages ++ [message],
+       next_id: id + 1
+     )}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
@@ -186,8 +234,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <.icon name="message-circle" size={16} /> chat
         </span>
         <span :if={@init} class="text-xs text-dim" style="font-family: var(--font-mono);">
-          <%= @init.model %> · plan mode
+          <%= @init.model %>
         </span>
+        <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
+          <select
+            name="mode"
+            class="text-xs"
+            style="background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 6px; padding: 2px 6px;"
+          >
+            <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
+              <%= mode_label(m) %>
+            </option>
+          </select>
+        </form>
         <span class="text-xs text-dim" style="margin-left: auto;">
           <%= status_label(@status) %> — Claude on this host, admins only.
         </span>
@@ -203,7 +262,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             read this host's files, but cannot edit or execute anything.
           </p>
 
-          <div :for={message <- @messages} data-role={message.role}>
+          <div
+            id="chat-messages"
+            phx-hook="PaperMermaid"
+            style="display: flex; flex-direction: column; gap: 10px;"
+          >
+            <div :for={message <- @messages} data-role={message.role}>
             <%= case message.role do %>
               <% :user -> %>
                 <div style="display: flex; justify-content: flex-end;">
@@ -230,15 +294,63 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <div class="text-xs text-dim" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
                   ⚒ <%= message.text %>
                 </div>
+              <% :approval -> %>
+                <div
+                  :if={message.approval_status == :pending}
+                  data-approval={message.request_id}
+                  style="border: 1px solid var(--border-muted); border-left: 3px solid var(--accent, #2f6b4f); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
+                >
+                  <div style="flex: 1; min-width: 0;">
+                    <div class="text-sm" style="font-weight: 600;">
+                      Allow <%= message.tool_name %>?
+                    </div>
+                    <div class="text-xs text-dim" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                      <%= message.text %>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    phx-click="approve"
+                    phx-value-rid={message.request_id}
+                  >
+                    Allow
+                  </button>
+                  <button
+                    type="button"
+                    class="btn"
+                    phx-click="deny"
+                    phx-value-rid={message.request_id}
+                  >
+                    Deny
+                  </button>
+                </div>
+                <div
+                  :if={message.approval_status != :pending}
+                  class="text-xs text-dim"
+                  style="font-family: var(--font-mono); overflow-wrap: anywhere;"
+                >
+                  <%= if message.approval_status == :allowed, do: "✓ allowed", else: "✗ denied" %> — <%= message.tool_name %>
+                </div>
               <% _ -> %>
                 <div class="text-xs text-dim" style="font-style: italic;">
                   <%= message.text %>
                 </div>
             <% end %>
+            </div>
           </div>
 
-          <div :if={@streaming} class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0; opacity: 0.85;">
-            <%= @streaming %><span class="text-dim">▌</span>
+          <div :if={@streaming} style="opacity: 0.92;">
+            <div
+              :if={@streaming.stable_html}
+              class="bp-paper-surface bp-chat-md"
+              style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
+            >
+              {Phoenix.HTML.raw(@streaming.stable_html)}
+            </div>
+            <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">
+              <%= streaming_tail(@streaming) %><span class="text-dim">▌</span>
+            </div>
           </div>
 
           <div :if={@streaming == nil and @status == :thinking} class="text-xs text-dim" style="font-style: italic;">
@@ -272,7 +384,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # ── internals ──────────────────────────────────────────────────────────
 
   defp start_session(socket) do
-    case ClaudeChat.start_session(%{sink: self()}) do
+    case ClaudeChat.start_session(%{sink: self(), mode: socket.assigns.mode}) do
       {:ok, session} ->
         Process.monitor(session)
         # Ready as soon as the subprocess is up. The CLI emits its init event
@@ -295,6 +407,78 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: socket.assigns.messages ++ [message],
       next_id: id + 1
     )
+  end
+
+  defp resolve_permission(socket, request_id, decision) do
+    pending? =
+      Enum.any?(
+        socket.assigns.messages,
+        &(&1.role == :approval and &1[:request_id] == request_id and
+            &1.approval_status == :pending)
+      )
+
+    if pending? and socket.assigns.session do
+      ClaudeChat.respond_permission(socket.assigns.session, request_id, decision)
+
+      status = if decision == :allow, do: :allowed, else: :denied
+
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{role: :approval, request_id: ^request_id} = m -> %{m | approval_status: status}
+          m -> m
+        end)
+
+      assign(socket, messages: messages)
+    else
+      socket
+    end
+  end
+
+  # ── progressive streaming render ────────────────────────────────────────
+  # Blocks render the moment they complete, not when the whole message ends:
+  # the accumulated stream is split at the last block boundary ("\n\n") whose
+  # prefix has BALANCED code fences (never split inside a streaming ```mermaid
+  # or ```portabledoc fence — a half fence would render as a broken block).
+  # The stable prefix renders through the paper engine once per boundary
+  # advance; only the still-forming tail re-renders as plain text per delta.
+
+  defp advance_streaming(nil, delta),
+    do: advance_streaming(%{text: "", stable_html: nil, stable_len: 0}, delta)
+
+  defp advance_streaming(state, delta) do
+    text = state.text <> delta
+    state = %{state | text: text}
+    boundary = stable_boundary(text)
+
+    if boundary > state.stable_len do
+      prefix = binary_part(text, 0, boundary)
+      %{state | stable_len: boundary, stable_html: render_paper_html(prefix)}
+    else
+      state
+    end
+  end
+
+  defp streaming_tail(%{text: text, stable_len: stable_len}) do
+    binary_part(text, stable_len, byte_size(text) - stable_len)
+  end
+
+  defp stable_boundary(text) do
+    case :binary.matches(text, "\n\n") do
+      [] ->
+        0
+
+      matches ->
+        matches
+        |> Enum.reverse()
+        |> Enum.find_value(0, fn {pos, len} ->
+          boundary = pos + len
+          if balanced_fences?(binary_part(text, 0, boundary)), do: boundary, else: nil
+        end)
+    end
+  end
+
+  defp balanced_fences?(prefix) do
+    rem(length(:binary.matches(prefix, "```")), 2) == 0
   end
 
   # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
@@ -321,6 +505,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp tool_line(name, _input), do: name
+
+  defp mode_label("plan"), do: "plan (read-only)"
+  defp mode_label("default"), do: "ask to act"
+  defp mode_label("acceptEdits"), do: "auto-accept edits"
+  defp mode_label(other), do: other
 
   defp status_label(:starting), do: "starting"
   defp status_label(:ready), do: "ready"
