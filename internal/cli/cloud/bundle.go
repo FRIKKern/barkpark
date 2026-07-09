@@ -370,13 +370,28 @@ func OpenObject(ctx context.Context, store BundleStore, prefix, name string) (io
 	return rc, nil
 }
 
-// OpenSecrets fetches secrets.enc and decrypts it with BARKPARK_BUNDLE_KEK,
-// returning the identity map. A wrong key fails GCM authentication — the bytes
-// never decode to a plausible-but-wrong plaintext.
+// OpenSecrets fetches secrets.enc and decrypts it with BARKPARK_BUNDLE_KEK (read
+// from the environment), returning the identity map. A wrong key fails GCM
+// authentication — the bytes never decode to a plausible-but-wrong plaintext.
 func OpenSecrets(ctx context.Context, store BundleStore, prefix string) (map[string]string, error) {
 	kek, err := bundleKEK()
 	if err != nil {
 		return nil, err
+	}
+	return OpenSecretsWithKEK(ctx, store, prefix, kek)
+}
+
+// OpenSecretsWithKEK fetches secrets.enc at prefix and decrypts it with the
+// CARRIED kek — the resurrect-drain unseal (charter S14f, Decision 46), distinct
+// from OpenSecrets which reads BARKPARK_BUNDLE_KEK from the environment. A
+// resurrect CARRIES its archive-time KEK (routed in via the claim, never minted at
+// restore time) so the box keeps its prior identity; passing the kek EXPLICITLY —
+// rather than re-reading the env — keeps that "the carried key was used" guarantee
+// testable (a wrong env key can never masquerade as the archive's). A wrong key
+// fails the GCM tag; the bytes never decode to a plausible-but-wrong plaintext.
+func OpenSecretsWithKEK(ctx context.Context, store BundleStore, prefix, kek string) (map[string]string, error) {
+	if strings.TrimSpace(kek) == "" {
+		return nil, fmt.Errorf("cloud: OpenSecretsWithKEK requires a non-empty carried KEK")
 	}
 	rc, err := store.Get(ctx, prefix+bundleSecretsName)
 	if err != nil {
