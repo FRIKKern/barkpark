@@ -361,6 +361,112 @@ ever touches a live cloud: Azure and Hetzner APIs are faked/recorded in tests.
     semantics, contradicts the fake's all-capable-reference doctrine, deads
     five fake methods, and ripples the fixture byte-copy across surfaces.
 
+30. **Vitals ride the EXISTING agent beat; the metrics window is the durable
+    `agent_events` table — NOT a new ETS ring, NOT a new ingest route.**
+    Exploration disproved "the beat ingest is new": an authenticated on-box →
+    CP push channel is code-complete end to end — the Go agent's 60s loop
+    POSTs a Report to `POST /v1/agent/report` (per-instance agent bearer
+    token, `Auth.require_agent`), and the handler already lands the FULL
+    payload append-only as a `type:"health"` AgentEvent
+    (`Registry.record_event`, router.ex:549) — any new Report field persists
+    with ZERO route change. So S12a's carrier = three new Report fields
+    (`cpu_percent`, `mem_used_percent`, `load1`; -1 sentinel = not-wired, the
+    DiskProbe idiom) behind injectable probes (Linux /proc readers; fail-soft
+    -1 elsewhere — a partial box still phones home). The window: the
+    tentative "ETS ring unless precedent says table" resolved to TABLE —
+    `/telemetry` already reads a rolling 100-event window of `agent_events`
+    (compound-indexed, append-only), the CP is single-node blue/green with a
+    fresh BEAM on every ~daily deploy (an ETS ring = empty charts after every
+    flip, ~30 min to refill), and vitals riding the one-per-60s beat add ZERO
+    new rows. Data cadence is the 60s beat; any "4s poll" is REFRESH cadence
+    only. Pre-existing gap, not worsened: `agent_events` has no pruner —
+    retention is a filed follow-up, never this wave's scope.
+31. **One metrics envelope; the CP computes, consumers only render (conduit
+    doctrine, third time).** New pure `BarkparkCloud.Metrics` (sibling of
+    Telemetry/Usage — those stay untouched) reduces the health-event window
+    to series; route `GET /v1/barkparks/:id/metrics?points=N` (require_user,
+    team-scoped via resolve-or-404 no-leak, sibling of telemetry/usage;
+    points clamped default 30 cap 200). Envelope, pinned verbatim in BOTH
+    consumer briefs: `{ok, collected_at, instance:{id,host,provider},
+    beat:{last_seen_at, age_seconds, status: live|stale|absent}, points,
+    series:{cpu|mem|disk|load: [{at, value|null}] oldest→newest},
+    service_health:{pass,total,failing:[]}}`. `stale` reuses
+    `Registry.health_stale_after_seconds()` (180s — the CP-wide degraded
+    definition the StalenessWorker enforces; NEVER a new threshold); `absent`
+    = no health event yet. Honesty: value is null when that vital was absent
+    in that beat (disk -1 → null; nil-not-zero, the Telemetry doctrine) —
+    consumers render "waiting for first beat"/"last seen Xm ago", never
+    zeros dressed as data.
+32. **Consumers: Metrics = a 5th INSTANCE_TAB + the domain-checklist poll
+    idiom; `bp cloud instance top` is ONE-SHOT.** SPA: "metrics" joins
+    INSTANCE_TABS (registered only once the route is live — the 1694
+    discipline), mount modeled on mountUsageTab, refresh via the
+    loadInstanceDomains 4s seq-guarded self-limiting poll; charts are
+    GREENFIELD (zero chart code exists in the SPA) — a hand-rolled pure
+    string-returning SVG sparkline helper + a pure `metricsSeries(payload)`
+    reducer, both exported via `__bpTestHook` and node-pinned; colors read
+    the S4 role vars/`.bp-inst--*` tokens, no new hex. Go: `cloudclient.
+    Metrics` + `bp cloud instance top <name>` copy the DomainStatus/
+    `runCloudDomainStatus` template 1:1 (`-o json` = CP bytes verbatim);
+    terminal rendering adapts the envelope into pdrender `stat-grid`/`chart`
+    Blocks via an Attrs adapter (there is NO gauge block — "gauge" =
+    stat/statBar); ONE-SHOT only — no `--watch` this wave (zero
+    ticker/watch precedent in any cloud command; net-new machinery, filed
+    follow-on), which also matches the 60s data cadence.
+33. **The beat goes LIVE via provisioning (S12c) — mint + install, offline-
+    gated.** Today the agent never runs on a provisioned box
+    (`mint_agent_token` is test-only, `bp agent install` is render-only, no
+    barkpark-agent.service exists) — without this slice the wave's pillar is
+    dark in prod. Fix at the two existing seams: the CP mints the
+    per-instance agent token at provision-claim time and threads it into
+    `claim_json` (the decrypted-env-at-claim precedent, router.ex:6411);
+    the Go configure step writes `/etc/barkpark/agent.token` (0600) +
+    installs/enables a NEW `deploy/systemd/barkpark-agent.service`
+    (`--control-url` + `--token-file`; the binary is already built on-box by
+    freshen). instance-deploy.sh keeps the unit installed on self-update.
+    The hetzner claim-payload refute-test updates INTENTIONALLY (the D23
+    move — old bytes lacked the token). `bp agent install` stays
+    render-only; adopted-box/existing-fleet install is a documented manual
+    path + go-live note, not this slice. All gates offline (fake runner,
+    ExUnit claim assert).
+34. **S10-activation = the REGISTRY fold only; the provider seam is not
+    touched.** Exploration corrected two premises: (a) `bp barkparks` cloud
+    is NOT a renderHzTable caller — it has a bespoke golden-pinned renderer;
+    activation = MIGRATE it to renderHzTable with PROVIDER + STATUS columns
+    (goldens updated intentionally). (b) The direction's "one mapping table
+    from {hcloud states, Azure power states, registry lifecycle}" is
+    aspirational — neither provider's List() fetches a power state
+    (cloud.Server has no status field), so the ONLY leg that can flow today
+    is registry lifecycle. The map is ONE new Go function
+    (`registryLifecycleToken(b cloudclient.Barkpark) → 7-token key`), a
+    faithful port of app.js `lifecyclePillState` (:674-682 +
+    instanceLifecycle booleans), in internal/cli next to its consumer — NOT
+    in semrole (token vocab only), NOT via `attentionStatus` (a different
+    8-label vocabulary, D32-fixture-pinned — touching it reds the gate).
+    `cloudclient.Barkpark` gains the `provider` field (CP already emits it,
+    Decision 9). `bp cloud instance list` gains a PROVIDER column for free
+    (the `kind` param). Scoped OUT: a neutral STATUS on the seam list (a
+    CloudProvider-interface change — both providers + fake; S8-adjacent);
+    the `bp cloud hetzner server list` escape hatch stays raw + byte-
+    identical (charter contract).
+35. **Domain-status followups, resolved.** (a) The cross-surface fixture is
+    ExUnit-GENERATED, not hand-committed — THREE hand-authored envelope
+    samples exist today (Go test, node test, real server) and they already
+    DISAGREE on labels/evidence/remediation-null; the generator folds
+    canonical fake-seam cases (all-serving, mid-issuance, serving-failed)
+    through the real `DomainStatus.check/2`, freezes `checked_at` +
+    instance id, writes ONE cloud/-rooted committed file all three test
+    runtimes read (fmt-display-parity pattern) — Go+node inline literals
+    are replaced and their label asserts move to the real server strings.
+    (b) Failed-serving keeps polling, NARROWLY: only `role==="failed" &&
+    stage==="serving"` is non-terminal (an app restart heals HTTPS-down;
+    NXDOMAIN stays terminal-by-trailing-pending as today). Go behavior
+    UNCHANGED — `bp cloud domain status` stays one-shot and serving-failed
+    stays exit-nonzero (a not-yet-serving box is not live); only help copy
+    gains the "recoverable — re-run after restart" story. (c) Rail width via
+    a SCOPED grid modifier on the instance workspace only — the 260px
+    `.detail-grid` is shared with site-deploys, which must not widen.
+
 ## Roadmap
 
 Integration order. Sizes: small / medium / large. Wave assignment in brackets.
@@ -456,7 +562,11 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
   catalog tiers declared-but-unrouted), audit cross-check in the attention
   queue. NOT wave 3.
 - **S12 · Metrics: agent vitals beat + Metrics tab + `bp cloud instance top`**
-  [large] — Decision 13.
+  [W5, split] — Decisions 13, 30–33. S12a = Report vitals fields + probes +
+  `BarkparkCloud.Metrics` + `GET /v1/barkparks/:id/metrics` (medium). S12b =
+  the two consumers: SPA Metrics tab + `bp cloud instance top` (large, solo
+  app.js owner). S12c = agent enablement: token minted at claim + token file +
+  barkpark-agent.service installed by configure (medium).
 - **S13 · Domains/TLS checklist** [W4, split] — Vercel-grade per-domain
   checklist (DNS found → points here → TLS issued → serving), same on both
   providers. S13a = CP prober + `GET /v1/barkparks/:id/domain-status` +
@@ -835,3 +945,163 @@ design). No ledger fixes were needed this wave.
   hold state across invocations (S14 gives them a substrate).
 - Deploy note (S13a): the prober runs in-process on the CP — no migration, no
   worker change; the route is live the moment cloud/ deploys.
+
+### Wave 2026-07-09h — The fleet gets a pulse (W5: S12a/b/c, S10-activation, domain followups) — PLANNED
+
+Waves 1–4 fully MERGED (#1629–#1633, #1661–#1664, #1714–#1720, #1736–#1740,
+charter sync #1745). Monitoring is the wish's last dark pillar. Decisions
+30–35 ratified this wave. Exploration corrections folded in:
+
+- **"Fake the beat ingest as if it's new" was WRONG** — the push channel is
+  code-complete end to end (60s agent loop → `POST /v1/agent/report`,
+  per-instance agent token, full payload landed as an append-only "health"
+  AgentEvent). Vitals are a Report payload extension; ingest/auth work ≈ zero
+  (Decision 30).
+- **The window-store precedent says TABLE, not ETS ring** — `/telemetry`
+  already reads a rolling agent_events window; the CP is single-node
+  blue/green with ~daily fresh-BEAM deploys (a ring = empty charts after
+  every flip). Vitals ride the existing beat: zero new rows (Decision 30).
+- **The beat is DARK in prod** — the agent is never installed on provisioned
+  boxes (mint_agent_token test-only, `bp agent install` render-only, no
+  systemd unit). New slice S12c makes it real at the existing seams
+  (claim_json token threading + configure-step install), offline-gated
+  (Decision 33).
+- **The SPA has ZERO chart code** (two static icon SVGs only) and the cloud
+  CLI has ZERO watch/ticker precedent — sparkline is greenfield-pure-helper
+  work; `top` ships one-shot, `--watch` is a filed follow-on (Decision 32).
+  pdrender has NO gauge block — stat/stat-grid/chart are the vocabulary.
+- **S10-activation had two wrong premises** — the registry fleet table is
+  bespoke (not renderHzTable) and no provider List() fetches a power state;
+  activation = migrate the registry table + port lifecyclePillState to Go +
+  PROVIDER column on the seam list; neutral STATUS on the seam list is
+  scoped OUT (Decision 34).
+- **The domain-status envelope has THREE drifting hand samples** (Go, node,
+  real server disagree on labels/evidence/null-remediation) — the committed
+  fixture must be ExUnit-generated from the real prober, replacing both
+  inline sample sets (Decision 35).
+
+Slices/tasks (children of azure-hetzner-hosting-epic):
+azh-w5-s12a-vitals-beat-metrics-route (medium, P0, Go agent + Elixir CP),
+azh-w5-s12b-metrics-consumers (large, P1, Go CLI + THE app.js slice — solo
+owner of all app.js regions except the 3-line domainStages fold),
+azh-w5-s12c-agent-enablement (medium, P1, Elixir claim + Go worker + deploy/),
+azh-w5-s10-activation-fleet-vocab (medium, P2, Go CLI),
+azh-w5-domain-status-followups (medium, P2, ADOPTED + repointed to D35).
+All five build in parallel — S12b builds against the Decision 31 envelope
+(pinned in both tasks); integration order S12a → S12b (tab registers only
+when the route is live), S12c independent, S10-activation independent,
+followups' app.js touch (domainStages terminal fold ~3985) is
+region-disjoint from S12b — integrate S12b first, expect auto-merge. Shared
+file internal/cloudclient/client.go: S12b adds Metrics (DomainStatus region),
+S10 adds one Barkpark field — disjoint regions. Non-negotiables carried: mix
+format/gofmt every commit; ALL gates offline (fake reports, deterministic
+clock, no live boxes); FULL cloud suite at integration for cloud/ slices;
+hetzner-visible behavior changes need refute-tests; api/ AuditWebhooksTest +
+StudioLiveSheetPresenceTest reds on an untouched api/ tree are rerun-worthy;
+app.js work stays in the node:vm __bpTestHook harness — do not grow the
+browser-mount zone. NOT this wave: S14 portable archives (own dedicated wave
+next), S8 hetzner-native, S11c infra tab, azh-w3-pricing-live-join-verify
+(network-gated), agent_events retention pruner (filed follow-up), `--watch`
+on `top` (filed follow-on).
+
+Ledger: all five wave tasks FILED + PUBLISHED under azure-hetzner-hosting-epic
+(2026-07-09): azh-w5-s12a-vitals-beat-metrics-route (P0),
+azh-w5-s12b-metrics-consumers (P1), azh-w5-s12c-agent-enablement (P1),
+azh-w5-s10-activation-fleet-vocab (P2), azh-w5-domain-status-followups
+(P2, adopted — description + criteria repointed to Decision 35, rail-width
+promoted to a criterion, S14-gated resurrect item stays out). Each carries
+the pinned Decision-31 envelope / file anchors / offline gates in its brief
+and a lead-closed "PR merged" criterion. Read-back verified: published, not
+drafts, parented, criteria unmet.
+
+### Wave 2026-07-09i — The fleet gets a pulse (W5) — BUILT + REVIEWED
+
+All five slices green and reviewer-passed. Whole-wave integration PROVEN on a
+scratch merge of all five final branches in order (zero conflicts; Go
+build/vet/test whole-tree fresh, gofmt clean, node harness 274/0, FULL cloud
+suite 1619/0). Integrate S12a → S12b → followups (shared app.js, regions
+disjoint — auto-merge proven), S12c and S10-activation any order:
+
+- **S12a · vitals beat + metrics route** — merge
+  `loop-epic/w5-s12a-vitals-ride-the-agent-beat-cpu-m-0` (CLEAN — no reviewer
+  changes). Report gains cpu_percent/mem_used_percent/load1 behind injectable
+  probes (-1 sentinel, independently fail-soft, real-0≠sentinel proven);
+  dep-free /proc readers wired in cmd/barkpark-agent/main.go; pure/total
+  BarkparkCloud.Metrics folds the agent_events health window into the pinned
+  D31 envelope (nil-not-zero; stale keyed off health_stale_after_seconds —
+  AgentEvent timestamps verified utc_datetime_usec so the stale fold really
+  fires); GET /v1/barkparks/:id/metrics require_user + no-leak 404, points
+  clamped 30/200. 14+7 ExUnit; route tests cover 401/404-no-leak/clamp/absent.
+  Integrator note: main.go is also touched by S12c — scratch merge proved
+  clean.
+- **S12b · both consumers** — merge
+  `loop-epic/w5-s12b-metrics-rendered-on-both-surface-1` (CLEAN) AFTER S12a.
+  The builder's route-path guess matches S12a exactly
+  (/v1/barkparks/:id/metrics?points=N) — the flagged risk is void. SPA: 5th
+  INSTANCE_TAB, pure metricsSeries + gap-honest sparklineSvg (a null breaks
+  the stroke; api() never rejects, so the 4s poll always lands in an honest
+  error state with Retry, never a dead spinner). Go: cloudclient.Metrics (Raw
+  bytes verbatim) + one-shot `bp cloud instance top` via pdrender
+  stat-grid+chart; no --watch pinned by test. Metric-card colors are
+  IDENTITY-by-role-var (disk always warn-tinted regardless of value) —
+  S15-grade polish candidate, not a defect.
+- **followups · domain-status (D35)** — merge
+  `loop-epic/domain-status-checklist-follow-ups-exuni-4` (CLEAN) AFTER S12b
+  (shared app.js; auto-merge proven on the scratch merge). ExUnit-GENERATED
+  cross-surface fixture (sorted-key OrderedObject → byte-stable across boots;
+  drift-gated; Go test + node harness now read the ONE file, label asserts
+  moved to the real server strings); failed-serving keeps polling NARROWLY
+  (failed&&serving only, narrowness refute added); scoped
+  .detail-grid--instance 340px rail (site-deploys grid byte-identical).
+  Closes W4's carried fixture + poll-on-failed-serving + rail-width
+  follow-ups in one slice.
+- **S12c · agent enablement (D33)** — merge
+  `loop-epic/w5-s12c-the-beat-goes-live-agent-token-m-2` (CLEAN). claim_json
+  mints a per-instance "report" token (plaintext-once, fail-open) for BOTH
+  providers; configure gains a NON-FATAL agentInstallStep (builds
+  barkpark-agent on-box, token file 0600, EnvironmentFile-driven committed
+  unit; injection-guarded — token alphabet verified base64url ⊂
+  secretValueAlphabet, URLs shape-validated before shell interpolation);
+  instance-deploy.sh refreshes the agent on self-update (armed boxes only).
+  Reviewer verified POST /v1/agent/report already exists on main — the
+  builder's "agent 404s until S12a" fear is MOOT (beats land today; S12a only
+  adds the read route). REAL DEPLOY CAVEATS for the lead: (1) provisioning
+  now runs `go build` on-box (seconds; degrades loudly if Go is missing);
+  (2) systemd ${VAR} EnvironmentFile expansion is standard but smoke-test the
+  first real provision; (3) every re-claim mints a fresh token row (no
+  pruner — file with the agent_events retention follow-up).
+- **S10-activation · fleet vocab (D34)** — merge
+  `loop-epic/w5-s10-activation-fleet-rows-finally-spe-3-r` (REVIEWER FIX; this
+  -r branch also carries the wave-log charter sync). registryLifecycleToken
+  verified a VERBATIM port of lifecyclePillState/instanceLifecycle (same
+  ladder, same precedence, JS-mirrored test); cloudclient.Barkpark.Provider
+  (CP emits it — verified in barkpark_json); fleet table migrated to
+  renderHzTable w/ PROVIDER+STATUS, tint-only color proven. Reviewer fix:
+  fleet cells now ride hzCell like every other renderHzTable call site — a
+  raw ESC in a CP-supplied name/url no longer reaches the terminal
+  (protective test added) and empty PROVIDER/STATUS cells render the house
+  em-dash, not a bare gap (golden regenerated).
+
+**Ledger:** all five tasks claimed (epoch 1), in_progress, criteria stamped
+with honest evidence, "PR merged" left open — the LEAD closes it + lifecycle
+on merge. Prior-wave tasks untouched (azh-w3-pricing-live-join-verify
+correctly still open backlog). No ledger fixes were needed.
+
+**Carried / next wave:**
+- With W5 merged, ALL FIVE wish pillars (provision/deploy/domains/lifecycle/
+  monitoring) are first-class on both providers from both surfaces. The bold
+  differentiator remains: **S14 portable archives** (archive → object-storage
+  bundle → resurrect on the OTHER provider) — take it as its own dedicated
+  wave, as planned. It also unlocks the parked azure adopt/resurrect facets
+  (D20) and the fake-resurrect round-trip test.
+- After S14: S8 hetzner-native cutover, S11c infra tab, S15 styleguide
+  completeness (fold in: raw-vocab STATUS capitalization polish + the
+  metric-card role-color identity question), S16 hetzner journey polish.
+- Small follow-ups to file: token-row + agent_events retention pruner (S12c
+  mints per re-claim, rows accumulate); `--watch` on `top` (filed follow-on);
+  one live smoke after merge — barkpark-agent.service on a freshly
+  provisioned box (systemd env expansion + go-build-on-box) and the Metrics
+  tab against a real beat.
+- Deploy note: S12c changes provisioning (Go worker) + claim (CP) — both ride
+  one merge like the D23 pin fix; agents on EXISTING boxes appear only after
+  their next self-update or the manual install recipe in the go-live doc.
