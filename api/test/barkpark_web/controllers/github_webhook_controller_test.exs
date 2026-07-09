@@ -23,7 +23,11 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
   }
 
   setup do
-    on_exit(fn -> Application.delete_env(:barkpark, :github_webhook_intake_fun) end)
+    on_exit(fn ->
+      Application.delete_env(:barkpark, :github_webhook_intake_fun)
+      Application.delete_env(:barkpark, :github_webhook_inbound_fun)
+    end)
+
     :ok
   end
 
@@ -34,6 +38,17 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
 
     Application.put_env(:barkpark, :github_webhook_intake_fun, fn payload, opts ->
       send(test, {:intake_called, payload, opts})
+      result
+    end)
+  end
+
+  # Inject a stub InboundEvents handler (the D14 detach path) mirroring the
+  # Intake seam. Records its call so a test can assert which handler ran.
+  defp stub_inbound(result) do
+    test = self()
+
+    Application.put_env(:barkpark, :github_webhook_inbound_fun, fn payload, opts ->
+      send(test, {:inbound_called, payload, opts})
       result
     end)
   end
@@ -92,13 +107,16 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
       assert_received {:intake_called, _payload, _opts}
     end
 
-    test "non-opened action (:ignored) answers 202 no-op" do
+    test "a non-opened, non-inbound action (edited → :ignored) answers 202 via Intake" do
+      # `edited` is NOT one of the D14 inbound actions (deleted/transferred/
+      # closed), so it still routes to Intake, which ignores it.
       stub_intake(:ignored)
 
-      conn = deliver("issues", Map.put(@issue_opened, "action", "closed"))
+      conn = deliver("issues", Map.put(@issue_opened, "action", "edited"))
 
       assert %{"ok" => true, "ignored" => "action"} = json_response(conn, 202)
       assert_received {:intake_called, _payload, _opts}
+      refute_received {:inbound_called, _payload, _opts}
     end
 
     test "a genuine intake failure ({:error, _}) answers 5xx so GitHub redelivers" do
@@ -140,6 +158,104 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
 
       assert %{"ok" => true, "refused" => true} = json_response(conn, 202)
       assert_received {:intake_called, _payload, _opts}
+    end
+  end
+
+  describe "inbound-event dispatch (D14) → InboundEvents, not Intake" do
+    for action <- ["deleted", "transferred", "closed"] do
+      @action action
+
+      test "#{@action} routes to InboundEvents (not Intake) and a detach answers 200" do
+        stub_inbound({:ok, :detached, "gh-42"})
+        # If dispatch wrongly hit Intake, this stub would run and the assertion
+        # below (inbound_called) would fail — the routing is the thing under test.
+        stub_intake({:ok, :should_not_run})
+
+        conn = deliver("issues", Map.put(@issue_opened, "action", @action))
+
+        assert %{"ok" => true, "detached" => true} = json_response(conn, 200)
+        assert_received {:inbound_called, _payload, opts}
+        assert Keyword.get(opts, :dataset) == "production"
+        refute_received {:intake_called, _payload, _opts}
+      end
+    end
+
+    test "a :dropped inbound outcome (bot close echo) answers 200 — no retry-storm" do
+      stub_inbound(:dropped)
+
+      conn = deliver("issues", Map.put(@issue_opened, "action", "closed"))
+
+      assert %{"ok" => true, "dropped" => true} = json_response(conn, 200)
+      assert_received {:inbound_called, _payload, _opts}
+    end
+
+    test "an :ignored inbound outcome (missing/non-intake) answers 202 no-op" do
+      stub_inbound(:ignored)
+
+      conn = deliver("issues", Map.put(@issue_opened, "action", "deleted"))
+
+      assert %{"ok" => true, "ignored" => "action"} = json_response(conn, 202)
+      assert_received {:inbound_called, _payload, _opts}
+    end
+
+    test "a genuine inbound failure ({:error, _}) answers 5xx so GitHub redelivers" do
+      stub_inbound({:error, :db_unavailable})
+
+      conn = deliver("issues", Map.put(@issue_opened, "action", "transferred"))
+
+      assert %{"error" => %{"code" => "inbound_failed"}} = json_response(conn, 500)
+      assert_received {:inbound_called, _payload, _opts}
+    end
+
+    test "opened still routes to Intake, never InboundEvents" do
+      stub_intake({:ok, :born, %{"_id" => "gh-42"}})
+      stub_inbound({:ok, :detached, "gh-42"})
+
+      conn = deliver("issues", @issue_opened)
+
+      assert %{"ok" => true, "ingested" => true} = json_response(conn, 200)
+      assert_received {:intake_called, _payload, _opts}
+      refute_received {:inbound_called, _payload, _opts}
+    end
+  end
+
+  describe "intake workspace threading (D15)" do
+    @intake_ws_env "BARKPARK_GITHUB_INTAKE_WORKSPACE_ID"
+
+    setup do
+      prev = System.get_env(@intake_ws_env)
+      System.delete_env(@intake_ws_env)
+
+      on_exit(fn ->
+        if prev,
+          do: System.put_env(@intake_ws_env, prev),
+          else: System.delete_env(@intake_ws_env)
+      end)
+
+      :ok
+    end
+
+    test "env-configured workspace threads as :workspace_id into BOTH handlers' opts" do
+      System.put_env(@intake_ws_env, "ws-uuid-42")
+
+      stub_intake({:ok, :born, %{"_id" => "gh-1"}})
+      deliver("issues", @issue_opened)
+      assert_received {:intake_called, _payload, intake_opts}
+      assert Keyword.get(intake_opts, :workspace_id) == "ws-uuid-42"
+
+      stub_inbound(:ignored)
+      deliver("issues", Map.put(@issue_opened, "action", "deleted"))
+      assert_received {:inbound_called, _payload, inbound_opts}
+      assert Keyword.get(inbound_opts, :workspace_id) == "ws-uuid-42"
+    end
+
+    test "absent env var adds NO :workspace_id key — opts are byte-identical to before D15" do
+      stub_intake({:ok, :born, %{"_id" => "gh-1"}})
+      deliver("issues", @issue_opened)
+
+      assert_received {:intake_called, _payload, opts}
+      refute Keyword.has_key?(opts, :workspace_id)
+      assert opts == [dataset: "production"]
     end
   end
 

@@ -178,6 +178,35 @@ defmodule Barkpark.Plugins.Github.SettingsTest do
     end
   end
 
+  describe "intake_workspace_id/0" do
+    @intake_env "BARKPARK_GITHUB_INTAKE_WORKSPACE_ID"
+
+    setup do
+      prev = System.get_env(@intake_env)
+      System.delete_env(@intake_env)
+
+      on_exit(fn ->
+        if prev, do: System.put_env(@intake_env, prev), else: System.delete_env(@intake_env)
+      end)
+
+      :ok
+    end
+
+    test "nil when the env var is unset" do
+      assert GH.intake_workspace_id() == nil
+    end
+
+    test "nil when the env var is blank (whitespace)" do
+      System.put_env(@intake_env, "   ")
+      assert GH.intake_workspace_id() == nil
+    end
+
+    test "returns the raw value (a workspace binary_id) when set" do
+      System.put_env(@intake_env, "ws-uuid-1234")
+      assert GH.intake_workspace_id() == "ws-uuid-1234"
+    end
+  end
+
   describe "webhook_secret_cached/0" do
     setup do
       GH.reset_webhook_secret_cache()
