@@ -459,13 +459,26 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view_b) =~ "cross-tab hello"
     end
 
-    test "init event surfaces the model in the header", %{view: view} do
+    test "init event surfaces the observed model beside the footer picker", %{view: view} do
+      # The observed-model fact moved with the model picker into the composer
+      # footer cockpit (charter D44); the standalone header span is gone.
       send(
         view.pid,
         {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "opus-x"}}
       )
 
       assert render(view) =~ "opus-x"
+    end
+
+    test "the attach label's `for` reaches the rendered live_file_input by id", %{view: view} do
+      # Charter D44: the image-attach button is a <label for={upload.ref}> and
+      # relies on live_file_input rendering id={ref}. That id is LiveView's own
+      # convention, not our markup — this guard fails loudly if an LV upgrade
+      # changes it (a silently dead attach button otherwise).
+      html = render(view)
+      assert [_, ref] = Regex.run(~r/<label[^>]*\bfor="([^"]+)"/, html)
+      assert html =~ ~s(id="#{ref}")
+      assert has_element?(view, ~s(input[type=file][id="#{ref}"]))
     end
 
     test "text deltas stream into an in-progress bubble", %{view: view} do
@@ -813,11 +826,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       html = render(view)
       # 64000 / 200000 = 32% — the arc length IS the ratio (geometry encodes it).
-      assert html =~ "stroke-dasharray"
-      assert html =~ "32%"
+      # The composer-footer ring is :sm, so the 9px % label is hidden (charter
+      # D44) and the arc dasharray carries the proof: 0.32 × 97.39 = 31.16.
+      assert html =~ ~s(stroke-dasharray="31.16 97.39")
       # 32% is below 70% → the ok token, never warn/danger.
       assert html =~ "var(--ok)"
       assert html =~ "Context: 64000 / 200000 tokens"
+      # Cost renders from the D37 strip below the footer (the :sm ring passes
+      # show_cost=false to avoid double-rendering it).
       assert html =~ "$0.0500"
     end
 
@@ -830,7 +846,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       html = render_patch(view, "/studio/chat/#{id}")
 
-      assert html =~ "93%"
+      # 185000 / 200000 = 93% — the :sm footer ring hides the % label (charter
+      # D44), so the honest title + the danger ramp carry the last-known headroom.
+      assert html =~ "Context: 185000 / 200000 tokens"
       assert html =~ "var(--danger)"
     end
 
@@ -1240,13 +1258,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "while a turn runs, Stop replaces Send (attribute-level, not disabled)", %{view: view} do
       # render_submit bypasses the disabled attribute, so assert on the button
       # IDENTITY, not on disabled: the submit button is GONE, Stop is present.
-      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      refute has_element?(view, ~s(button[phx-click=stop_turn]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
 
-      assert has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
-      refute has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      assert has_element?(view, ~s(button[phx-click=stop_turn]))
+      refute has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
     # ── mid-turn sends queue honestly instead of dropping (charter D43) ──────
@@ -1381,7 +1399,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "Interrupted"
       refute html =~ "ended with an error"
       assert html =~ "ready"
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
     test "an aborted_streaming result reads as interrupted even without a prior Stop",
@@ -1562,10 +1580,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
 
-      # a near-full window pre-compaction: 180k / 200k = 90%
+      # a near-full window pre-compaction: 180k / 200k = 90%. The :sm footer ring
+      # hides the % label (charter D44), so the arc dasharray is the proof:
+      # 0.9 × 97.39 = 87.65.
       send_frame(store_id(view), {:claude_chat_event, big_result(180_000)})
       html = render(view)
-      assert html =~ "90%"
+      assert html =~ ~s(stroke-dasharray="87.65 97.39")
 
       # the CLI compacts…
       send(
@@ -1584,8 +1604,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # this refute would fail — the guard.
       send_frame(store_id(view), {:claude_chat_event, big_result(40_000)})
       html = render(view)
-      assert html =~ "20%"
-      refute html =~ "90%"
+      # 40k / 200k = 20% → 0.2 × 97.39 = 19.48; the pre-compaction 90% arc is gone.
+      assert html =~ ~s(stroke-dasharray="19.48 97.39")
+      refute html =~ ~s(stroke-dasharray="87.65 97.39")
     end
 
     # ── Stopping… cannot wedge (scc-w2, D18) ──────────────────────────────
@@ -1604,8 +1625,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "offline"
       assert html =~ "force-closed"
       # the composer is usable again — Stop is gone, Send is back
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
-      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
+      refute has_element?(view, ~s(button[phx-click=stop_turn]))
     end
 
     test "a result arriving before the timeout makes the timer a no-op", %{view: view} do
@@ -1677,7 +1698,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "ended unexpectedly"
       # the pending approval is force-canceled, never a dead button
       assert html =~ "✗ canceled"
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
     test "an unknown stale event does not crash the LiveView", %{view: view} do
@@ -2987,6 +3008,239 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "agent drill-down (charter D46)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "a running spawn shows the breathing progress line + step count and stays expanded",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Audit the recorder"))
+      send_frame(sid, task_started("toolu_spawn", "task_1"))
+      send_frame(sid, task_progress("toolu_spawn", "reading recorder.ex"))
+      send_frame(sid, agent_child("toolu_spawn", "toolu_child", "grep -rn task_started"))
+
+      html = render(view)
+      # the breathing running line carries the LATEST progress description
+      assert html =~ "Running: reading recorder.ex"
+      assert html =~ ~s(data-agent-running="toolu_spawn")
+      # a running agent is expanded by default → its child trace is nested in the
+      # transcript (data-parent is transcript-only; the sidebar activity line is
+      # NOT the drill-down, so we assert the nested row directly)
+      assert html =~ ~s(data-parent="toolu_spawn")
+      assert html =~ "grep -rn task_started"
+      # the header names the agent and counts its steps
+      assert html =~ "Agent(explore — Audit the recorder)"
+      assert html =~ "1 step"
+    end
+
+    test "a completed agent collapses to its ⎿ report and hides the child trace by default",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Summarize the tree"))
+      send_frame(sid, task_started("toolu_spawn", "task_1"))
+      send_frame(sid, agent_child("toolu_spawn", "toolu_child", "hidden-child-command"))
+      # the subagent's report attaches to the spawn row via the existing machinery
+      send_frame(sid, tool_result_frame("toolu_spawn", "the audit is complete"))
+      send_frame(sid, task_notification("toolu_spawn", "completed"))
+
+      html = render(view)
+      # collapsed → the report shows, the nested child trace does NOT, no spinner
+      assert html =~ "the audit is complete"
+      refute html =~ ~s(data-parent="toolu_spawn")
+      refute html =~ "data-agent-running"
+    end
+
+    test "a manual toggle wins over the running-open default", %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Long job"))
+      send_frame(sid, task_started("toolu_spawn", "task_1"))
+      send_frame(sid, agent_child("toolu_spawn", "toolu_child", "child-visible-here"))
+
+      # default (running) is expanded — the nested child shows in the transcript
+      assert render(view) =~ ~s(data-parent="toolu_spawn")
+
+      # collapse it manually while it is still running
+      render_click(element(view, ~s([phx-click="agent-toggle"][phx-value-id="toolu_spawn"])))
+      html = render(view)
+      refute html =~ ~s(data-parent="toolu_spawn")
+      # …and the running line still breathes even while collapsed
+      assert html =~ ~s(data-agent-running="toolu_spawn")
+    end
+
+    test "a stale agent-toggle (no matching spawn row) is a safe no-op", %{view: view} do
+      # A click can land after the session switched away and the messages reset —
+      # the handler must drop it, never crash the LiveView on a missing row.
+      render_click(view, "agent-toggle", %{"id" => "toolu_gone"})
+      assert Process.alive?(view.pid)
+    end
+
+    test "task_updated resolves the block by task_id (collapses when patched terminal)",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Patched job"))
+      send_frame(sid, task_started("toolu_spawn", "task_9"))
+      send_frame(sid, agent_child("toolu_spawn", "toolu_child", "patch-child-command"))
+      assert render(view) =~ ~s(data-parent="toolu_spawn")
+
+      # task_updated carries NO tool_use_id — it resolves via the task_id the row
+      # learned from task_started
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "task_updated",
+           "task_id" => "task_9",
+           "patch" => %{"status" => "completed", "end_time" => 123}
+         }}
+      )
+
+      html = render(view)
+      refute html =~ ~s(data-parent="toolu_spawn")
+      refute html =~ "data-agent-running"
+    end
+
+    test "two parallel spawns with interleaved children attribute each child to the right block",
+         %{view: view, sid: sid} do
+      # both spawns launch, then their children INTERLEAVE in seq order — grouping
+      # must be by parent-id match, never by consecutive position
+      send_frame(sid, spawn_frame("toolu_a", "Task", "Agent A"))
+      send_frame(sid, spawn_frame("toolu_b", "Task", "Agent B"))
+      send_frame(sid, agent_child("toolu_a", "toolu_a1", "child-of-A"))
+      send_frame(sid, agent_child("toolu_b", "toolu_b1", "child-of-B"))
+      send_frame(sid, agent_child("toolu_a", "toolu_a2", "second-child-of-A"))
+
+      html = render(view)
+      # each child is nested under its OWN spawn (data-parent match), all visible
+      assert html =~ ~s(data-parent="toolu_a")
+      assert html =~ ~s(data-parent="toolu_b")
+      assert html =~ "child-of-A"
+      assert html =~ "child-of-B"
+      assert html =~ "second-child-of-A"
+      # Agent A owns 2 steps, Agent B owns 1 — proves interleave didn't misattribute
+      assert html =~ "2 steps"
+      assert html =~ "1 step"
+    end
+
+    test "a manual expand wins even across the running→completed transition",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Transition job"))
+      send_frame(sid, task_started("toolu_spawn", "task_1"))
+      send_frame(sid, agent_child("toolu_spawn", "toolu_child", "transition-child"))
+
+      # collapse manually while running, then let it complete — the OVERRIDE (open?
+      # no: collapsed) must survive the terminal default flip. Re-expand and prove
+      # the manual choice sticks past completion.
+      render_click(element(view, ~s([phx-click="agent-toggle"][phx-value-id="toolu_spawn"])))
+      send_frame(sid, task_notification("toolu_spawn", "completed"))
+      # a completed block defaults collapsed; our override says collapsed too — flip
+      # it open manually and confirm it STAYS open despite the terminal default
+      render_click(element(view, ~s([phx-click="agent-toggle"][phx-value-id="toolu_spawn"])))
+      html = render(view)
+      assert html =~ ~s(data-parent="toolu_spawn")
+      refute html =~ "data-agent-running"
+    end
+
+    test "the value-equality guard makes an identical repeated frame a no-op (no reassign)",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Idempotent job"))
+      send_frame(sid, task_started("toolu_spawn", "task_1"))
+      send_frame(sid, task_progress("toolu_spawn", "same line"))
+      render(view)
+
+      before = :sys.get_state(view.pid).socket.assigns.messages
+      # an identical progress frame carries no new information
+      send_frame(sid, task_progress("toolu_spawn", "same line"))
+      render(view)
+      after_msgs = :sys.get_state(view.pid).socket.assigns.messages
+
+      # value equality → the messages list is returned UNCHANGED (same term)
+      assert before == after_msgs
+    end
+
+    test "an orphan child (no matching spawn in this transcript) still renders indented",
+         %{view: view, sid: sid} do
+      # a child frame whose parent spawn never appeared — it must NOT vanish
+      send_frame(sid, agent_child("toolu_ghost", "toolu_orphan", "orphan-work-line"))
+
+      html = render(view)
+      assert html =~ "orphan-work-line"
+      assert html =~ ~s(data-parent="toolu_ghost")
+      assert html =~ "border-left: 2px solid var(--primary)"
+    end
+
+    test "replay hydrates the last task line for a mid-run reopen", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Task — Persisted run",
+          metadata: %{
+            "tool" => "Task",
+            "tool_use_id" => "toolu_spawn",
+            "input" => %{
+              "description" => "Persisted run",
+              "prompt" => "x",
+              "subagent_type" => "explore"
+            },
+            "task_id" => "task_1",
+            "task_status" => "running",
+            "task_progress" => "still reading files"
+          }
+        })
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Bash — replayed-child-line",
+          metadata: %{
+            "tool" => "Bash",
+            "tool_use_id" => "toolu_child",
+            "parent_tool_use_id" => "toolu_spawn",
+            "input" => %{"command" => "irrelevant"}
+          }
+        })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+      # honest last-persisted running line + the nested child (running → expanded)
+      assert html =~ "Running: still reading files"
+      assert html =~ "replayed-child-line"
+      assert html =~ ~s(data-parent="toolu_spawn")
+    end
+
+    test "replay of an interrupted agent shows its report, no spinner", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Task — Aborted run",
+          metadata: %{
+            "tool" => "Task",
+            "tool_use_id" => "toolu_spawn",
+            "input" => %{
+              "description" => "Aborted run",
+              "prompt" => "x",
+              "subagent_type" => "explore"
+            },
+            "task_id" => "task_1",
+            "task_status" => "interrupted"
+          }
+        })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+      assert html =~ "Aborted run"
+      refute html =~ "data-agent-running"
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -3606,6 +3860,73 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
                "subagent_type" => "explore"
              }
            }
+         ]
+       }
+     }}
+  end
+
+  # Task-lifecycle frames (charter D45/D46) driving an agent drill-down block.
+  # task_started/task_progress/task_notification carry tool_use_id; task_updated
+  # is task_id-only (tested inline above).
+  defp task_started(tool_use_id, task_id) do
+    {:claude_chat_event,
+     %{
+       "type" => "system",
+       "subtype" => "task_started",
+       "tool_use_id" => tool_use_id,
+       "task_id" => task_id
+     }}
+  end
+
+  defp task_progress(tool_use_id, description) do
+    {:claude_chat_event,
+     %{
+       "type" => "system",
+       "subtype" => "task_progress",
+       "tool_use_id" => tool_use_id,
+       "description" => description
+     }}
+  end
+
+  defp task_notification(tool_use_id, status) do
+    {:claude_chat_event,
+     %{
+       "type" => "system",
+       "subtype" => "task_notification",
+       "tool_use_id" => tool_use_id,
+       "status" => status,
+       "summary" => "done"
+     }}
+  end
+
+  # A sub-agent's own frame: a top-level parent_tool_use_id plus a nested Bash
+  # tool_use so the child row carries a recognizable command line.
+  defp agent_child(parent_id, child_id, command) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "parent_tool_use_id" => parent_id,
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => child_id,
+             "name" => "Bash",
+             "input" => %{"command" => command}
+           }
+         ]
+       }
+     }}
+  end
+
+  # A tool_result frame attaching a subagent report to its spawn row.
+  defp tool_result_frame(tool_use_id, content) do
+    {:claude_chat_event,
+     %{
+       "type" => "user",
+       "message" => %{
+         "content" => [
+           %{"type" => "tool_result", "tool_use_id" => tool_use_id, "content" => content}
          ]
        }
      }}

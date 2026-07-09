@@ -555,6 +555,103 @@ quality."
   Interrupt-with-queued-frames interplay (`still_queued` in the interrupt
   ack) is out of scope this wave.
 
+### Wave-8 decisions (2026-07-09, decided from explorer ground truth — composer cockpit + agent drill-down)
+
+- **D44 — Composer cockpit is LAYOUT ONLY; the input stays an `<input>`; the
+  phx-change forms survive the move.** The brief's "textarea on top" is CUT by
+  evidence: D24 tests pin `input#chat-composer[value=...]` (chat_live_test
+  3334/3350/3379) and the hook's Enter-to-submit rides the single-line input —
+  a textarea is a separate future decision, not a restyle rider. Header slims
+  to title + status label (+ admin note); the header's STANDALONE
+  observed-model span (chat_live.ex ~1467) is DELETED — it duplicates the
+  picker-adjacent span (~1499), which moves WITH the picker as the dim mono
+  fact suffix (intent beside fact, D30). The footer row lives INSIDE
+  form#chat-composer-form as a new flex child under the input: left cluster =
+  the mode `<form phx-change="set-mode">` and model `<form
+  phx-change="set-model">` KEPT as form wrappers (10+ test selectors target
+  `form[phx-change=...]`) with the selects restyled borderless (transparent
+  bg, no border, token-colored text, hover affordance only — all `var(--…)`);
+  right cluster = mini context ring, attach icon button, Send/Stop (semantics
+  untouched: same phx-submit/phx-click on the same form).
+  `context_ring` gains `size` (`:md` default 30px | `:sm` ~16px — geometry is
+  viewBox-relative so only pixel width/height change; the 9px % label HIDES at
+  :sm) and `show_cost` (`:sm` in the footer passes false — the ring's built-in
+  trailing cost span would double-render against the D37 strip). Attach button
+  = `<label for={@uploads.attachments.ref}>` styled as an icon button (image
+  icon exists, icons.ex:24) — live_file_input hardcodes `id={@upload.ref}`
+  (LV 1.1.28), so label-for opens the native dialog with ZERO hook change;
+  the hidden input, attachment strip, paste/drop hook, and upload errors stay.
+  Placeholder: only the idle/ready clause of `composer_placeholder/1` becomes
+  the teaching copy "Plan, build… / for commands" — never advertise
+  @-mentions; degraded-state clauses keep their honest text. The D37 cost
+  strip + D42 hint line relocate as ONE quiet mono line directly below the
+  footer row: hint UNCONDITIONAL (test-pinned), cost segment still
+  `:if @last_result.cost_usd` (the fresh-mount ⏵ refute must keep passing).
+  IMMOVABLE client contract: form#chat-composer-form as hook root,
+  input#chat-composer, ul#chat-slash-menu with `phx-update="ignore"` (#1831),
+  data-commands. No mic, ever. Header-select test assertions MOVE to the
+  composer footer — updated, never deleted.
+- **D45 — Task lifecycle lands in the Recorder: merge-stamp the spawn row,
+  session-lifetime correlation, notification-driven completion, teardown
+  flip.** The four `system/task_*` frames already reach the Recorder and are
+  already rebroadcast verbatim by the catch-all (recorder.ex:276-279); what's
+  new is persistence + consumers. NEW `StudioChat.merge_tool_metadata/3`
+  (sibling of update_tool_input — which REPLACES metadata.input and would
+  clobber the spawn's `{description,prompt,subagent_type}`; never reuse it):
+  find by tool_use_id, `Map.merge` into metadata, `:noop` on no match. Stamp
+  keys on the SPAWN row: `task_id`, `task_status`
+  ("running" on task_started; terminal from notification/updated),
+  `task_progress` (latest "Running …" description — the wire field is
+  `description`, not `line`). Correlation: task_started/task_progress/
+  task_notification all carry tool_use_id directly; ONLY task_updated is
+  task_id-only — hold `task_index :: %{task_id => %{tool_use_id, last_line}}`
+  in Recorder state as SESSION-LIFETIME state, never inside the per-turn
+  system/init reset (recorder.ex:229-233) — a background agent outliving its
+  turn must still resolve. Completion is driven primarily off
+  task_notification (tool_use_id + status + summary aboard); task_updated
+  resolves via the map when possible and drops harmlessly otherwise.
+  Persist COARSELY, broadcast every frame: status transitions always persist;
+  task_progress persists only when the line differs from the map's last_line
+  (wave-5 change-only discipline — never a row-per-progress, never a
+  per-frame Repo.update on an unchanged line). Teardown ships IN THE SAME
+  SLICE: new `StudioChat.interrupt_running_tasks/1` modeled exactly on
+  cancel_pending_approvals (transaction, rows where
+  `metadata->>'task_status'='running'` → `"interrupted"`), called from
+  `session_exited/1` alongside cancel_pending_approvals — a crashed or
+  idle-reaped session must never replay a live spinner. task_progress does
+  NOT feed the sidebar (a child's assistant tool_use frames already drive
+  publish_activity); the fine progress line is transcript-only.
+- **D46 — Agent drill-down: render-time buckets keyed by parent_tool_use_id;
+  per-tab expand override; value-equality-guarded live merge.** Grouping is
+  by ID MATCH, never consecutive position (children of parallel spawns
+  interleave in seq order — charter D40 + the multi-block reducer prove it):
+  at render, bucket rows whose `parent_tool_use_id` equals a top-level spawn
+  row's `tool_use_id` under that spawn; everything else stays top-level in
+  seq order. ORPHAN children (parent id present, no matching spawn in this
+  transcript) fall back to today's flat indented row — never vanish. One
+  nesting level (deeper is wire-unproven); a child that is itself a spawn
+  renders as a plain spawn row inside its parent's bucket. The agent block:
+  collapsed header `● Agent(subagent_type — description)`; while
+  `task_status == "running"` a breathing live progress line ("Running: …",
+  token-colored, CSS animation) + child count; completed = collapses to the
+  agent's ⎿ report (metadata.output — already attached by the w6.5 machinery,
+  role "tool" spawn row must stay role "tool" or attach_tool_result noops).
+  Expand state is a per-tab override map `agent_expanded :: %{tool_use_id =>
+  bool}` (plan-card precedent, never broadcast): default open while running,
+  collapsed when terminal; a manual toggle ALWAYS wins over the default.
+  ChatLive gets task_* handle_info clauses ABOVE the noop catch-all
+  (chat_live.ex:1055): merge task_id/task_status/task_progress into the
+  in-memory row matched by tool_use_id (task_updated matches by task_id — the
+  row carries it from live task_started or replay hydration) with a
+  VALUE-EQUALITY guard: identical status+progress ⇒ return the socket
+  unchanged (messages are a flat :for comprehension; every reassign is an
+  O(n) server render per tab — the guard converts hot progress into
+  render-on-change). Replay: the role-"tool" replay_message clause
+  additionally reads task_id/task_status/task_progress from metadata — a
+  reopened mid-run session shows the honest last-persisted line, an
+  interrupted one shows "interrupted" (D45 teardown), never a fake spinner.
+  All chrome via emitted tokens; studio-literal-check passes.
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -747,6 +844,35 @@ footer region, and the send-gate region (chat_live.ex:232 + the D24 two-phase
 path) — disjoint from S1–S4. Builders build against main in isolated
 worktrees; the lead integrates in order and resolves recorder.ex overlaps.
 
+## Wave 8 plan (decided 2026-07-09) — "cockpit and crew"
+
+Waves 1–7 built the terminal's soul; wave 8 makes the composer the single
+place you drive from and turns agent spawns into living, inspectable crew.
+Three slices. Integration order **S2 → S3 → S1** (S1 is region-disjoint and
+can land in parallel; S3 builds against S2's metadata-key contract —
+`task_id`/`task_status`/`task_progress` — with fixtures, no merge dependency
+for building).
+
+| # | Slice (bp task) | Owns | Migration |
+|---|---|---|---|
+| S1 | `scc-w8-composer` | header slim + composer footer row (borderless mode/model + fact suffix, mini ring, attach label-button, Send/Stop) + `context_ring` size/show_cost variants + teaching placeholder + cost/hint relocation + test migration (D44) | none |
+| S2 | `scc-w8-agent-lifecycle` | Recorder task_* clauses + session-lifetime task_index + `merge_tool_metadata/3` + coarse persist + `interrupt_running_tasks/1` in session_exited (D45) | none |
+| S3 | `scc-w8-agent-block` | render-time bucket grouping + expandable agent block (running/completed states) + per-tab agent_expanded + ChatLive task_* handle_info merges + replay hydration (D46) | none |
+
+Region contract (chat_live.ex is hot — THREE-way split): **S1 owns** the
+header row (~1463-1512), the composer form region (~1843-1973),
+`composer_placeholder/1`, and the `context_ring` component — it does NOT
+touch the :tool branch, handle_info clauses, or replay. **S2 owns**
+recorder.ex + studio_chat.ex ONLY (no chat_live.ex at all). **S3 owns** the
+transcript comprehension + :tool template branch, chat_tool_renderer.ex, the
+new task_* handle_info clauses above the catch-all (~1055), the role-"tool"
+replay_message clause (~2718-2728), and the agent_expanded assign. The
+immovable client contract (D44) binds S1; the replay-parity law (persisted
+row IS the truth) binds S2/S3. Two hotfixes landed mid-wave and are LAW at
+integration: #1831 (`phx-update="ignore"` on #chat-slash-menu) and #1844
+(pre-wrap tight text nodes + tool-row hanging indent) — their regression
+tests must stay green untouched.
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
@@ -756,6 +882,98 @@ worktrees; the lead integrates in order and resolves recorder.ex overlaps.
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+- **2026-07-09 wave 8 DECIDED** (post-merge of waves 1–7 + hotfixes #1831
+  #1844): three slices filed as scc-w8-composer / scc-w8-agent-lifecycle /
+  scc-w8-agent-block under epic `studio-claude-chat` (D44–D46 above).
+  Explorer corrections folded in, wire capture verified
+  (scratchpad/wirecap/wire_task.ndjson, real foreground Agent spawn):
+  (1) "textarea on top" CUT — the composer input stays `<input type=text>`
+  (D24 value-selector tests + hook Enter semantics pin it); (2) TWO
+  observed-model spans exist — the header one is deleted, the
+  picker-adjacent one moves as the fact suffix; (3) context_ring has a
+  built-in cost span that would double-render in the footer — `show_cost`
+  variant suppresses it; (4) the task frames already reach the Recorder AND
+  are already rebroadcast verbatim (catch-all) — the build is persistence +
+  consumers, not wire plumbing; (5) update_tool_input REPLACES
+  metadata.input and would clobber the spawn's input — a merge sibling is
+  required; (6) only task_updated lacks tool_use_id — correlation map is
+  session-lifetime (NEVER under the per-turn init reset; background agents
+  outlive turns), completion drives primarily off task_notification;
+  (7) stale-running teardown (interrupt_running_tasks in session_exited)
+  ships WITH the lifecycle slice or crashed sessions replay fake spinners;
+  (8) grouping must key on parent_tool_use_id ID MATCH — parallel spawns'
+  children interleave in seq order, consecutive chunking misattributes.
+
+### Wave 2026-07-09 (wave 8 BUILT + REVIEWED — cockpit and crew)
+
+All three slices built green and reviewed at the Kinsta/Vercel bar; nothing
+stalled. The branches are INDEPENDENT (no chain); the reviewer dry-ran the
+full three-way merge onto current origin/main (#1849 included) — clean in
+S1 → S2 → S3 order — and ran the combined suite on the integrated state:
+**225 tests 0 failures** (recorder 46 + chat_live 179),
+`mix compile --warnings-as-errors` clean, studio-literal-check PASS. Merge
+the **`-r` branches** (`…-composer-cockpit-…-0-r`, `…-agent-lifecycle-…-1-r`,
+`…-agent-drill-down-…-2-r`); plan order S2 → S3 → S1 works, but any order is
+conflict-free. This charter copy rides the agent-lifecycle `-r` branch — the
+wave-8 Decide content was still uncommitted in the main checkout; merging
+commits it.
+
+- **Landed**: composer cockpit (S1/D44) — slim header (title + status),
+  borderless mode/model selects in the composer footer with the dim-mono
+  observed-model fact suffix, `:sm` context ring (pct-label tests migrated
+  to arc-dasharray geometry proofs), image-attach `<label>` button, Send/Stop
+  right cluster, teaching placeholder ("Plan, build… / for commands"), hint
+  line unconditional, cost single-rendered (show_cost=false on the footer
+  ring). Agent lifecycle persisted (S2/D45) — `merge_tool_metadata/3`
+  merge-not-clobber seam, four Recorder task_* clauses above the catch-all
+  with verbatim rebroadcast, SESSION-LIFETIME task_index (proven across a
+  turn boundary), coarse progress persist (SENTINEL-poison proof),
+  `interrupt_running_tasks/1` teardown flip on every death path. Agent
+  drill-down (S3/D46) — ID-match bucket grouping (parallel-spawn interleave
+  test), expandable agent block with breathing "Running: …" line + step
+  count, per-tab `agent_expanded` override (toggle wins across the
+  running→completed transition), value-equality-guarded live merges, replay
+  hydration incl. interrupted-shows-no-spinner.
+- **ONE ratified deviation from D44**: the footer row is a SIBLING of
+  `form#chat-composer-form`, NOT a child — nested `<form>`s are invalid HTML
+  (the parser drops the inner mode/model forms; the builder proved it with a
+  failing run, and D44 also demands the form wrappers survive — the two
+  demands are jointly unsatisfiable as written). Send re-associates via
+  `form="chat-composer-form"`; visually identical, submit/interrupt semantics
+  unchanged. Treat the sibling + form-attribute shape as the amended D44.
+- **Reviewer fixes (on the -r branches)**: S1 — aria-label on the icon-only
+  Send button + a guard test pinning `label[for]` == the id LiveView renders
+  on live_file_input (the flagged LV-convention blind spot: an LV upgrade
+  changing the id now fails a test instead of shipping a dead attach
+  button). S2 — new refute test that task_* frames never publish to the
+  activity topic (criterion 5 was code-verified only) + `mix format` over
+  the new test block. S3 — fixed a REAL crash: a stale `agent-toggle`
+  (session switched under an in-flight click) found no spawn row and raised
+  ArgumentError on `not nil`, killing the LiveView; guarded no-op +
+  regression test.
+- **Accepted edges (documented, not bugs)**: a late task_progress after a
+  terminal status would flip a LIVE block back to running (ordered stream
+  makes it theoretical; store-side unaffected); S3's live task_notification
+  defaults a missing status to "completed" while S2 persists only binary
+  statuses (off-contract frame either way); the ⎿ report markup is
+  duplicated between message_body's :tool branch and agent_block
+  (extraction candidate, not blocking).
+- **Ledger**: the builders' leases expired at 17:11 and lifecycle reverted
+  to `open` (a lie to `bp task ready` — a fresh builder could re-claim
+  finished work); the reviewer re-claimed all three as `epic-reviewer-w8`
+  (epoch 3) to restore `in_progress`. On merge the lead closes criterion
+  "PR merged" on scc-w8-composer (idx 8), scc-w8-agent-lifecycle (idx 7),
+  scc-w8-agent-block (idx 7) — re-claim for a fresh epoch if lapsed.
+- **Next wave**: the WISH is now fully covered (composer consolidation +
+  agent drill-down both shipped, live + replay). Take: (1) a real-browser
+  drive of the cockpit — label-for native picker, borderless hover
+  affordance, and the drill-down under a real spawning session (code-correct
+  + test-covered, never visually confirmed); (2) a two-tab task_*
+  convergence test through a REAL Recorder (both suites use identical
+  fixture shapes but no integrated wiring test exists); (3) extract the
+  shared ⎿ report component; (4) a textarea/auto-grow composer as its own
+  decision (D44 cut it deliberately, not forever).
 
 ### Wave 2026-07-09 (wave 7 BUILT + REVIEWED — the transcript IS the terminal)
 

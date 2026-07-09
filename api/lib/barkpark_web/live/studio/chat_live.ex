@@ -87,6 +87,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # broadcast, reset on every session load — clones the open_menu_session
          # kebab pattern.
          plan_expanded: MapSet.new(),
+         # Per-tab expand override for agent drill-down blocks (charter D46):
+         # `%{spawn tool_use_id => bool}`. Default is open while the sub-agent
+         # runs and collapsed once terminal; a manual toggle always wins. Never
+         # broadcast (a co-viewer's expand is their own), reset on session load.
+         agent_expanded: %{},
          mode: "plan",
          model_choice: "default",
          status: :new,
@@ -402,6 +407,24 @@ defmodule BarkparkWeb.Studio.ChatLive do
       if MapSet.member?(set, id), do: MapSet.delete(set, id), else: MapSet.put(set, id)
 
     {:noreply, assign(socket, plan_expanded: next)}
+  end
+
+  # Expand/collapse an agent drill-down block (charter D46). Per-tab override map
+  # keyed by the spawn's tool_use_id, never broadcast (a co-viewer's expand is
+  # their own). The toggle flips the EFFECTIVE current state (override if set,
+  # else the running/terminal default) so a manual choice always wins.
+  def handle_event("agent-toggle", %{"id" => id}, socket) do
+    agent = Enum.find(socket.assigns.messages, &(&1[:spawn?] == true and &1[:tool_use_id] == id))
+
+    # A stale toggle (the session switched under an in-flight click) finds no
+    # spawn row — drop it instead of crashing the LiveView on `not nil`.
+    if agent do
+      current = agent_open?(socket.assigns.agent_expanded, agent)
+      next = Map.put(socket.assigns.agent_expanded, id, not current)
+      {:noreply, assign(socket, agent_expanded: next)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
@@ -1052,6 +1075,73 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # ── Task lifecycle → agent drill-down merge (charter D45/D46) ────────────────
+  #
+  # The four `system/task_*` frames drive an agent block's live state. Each
+  # merges into the in-memory spawn row it belongs to (by tool_use_id — only
+  # task_updated is task_id-only, and the row carries task_id from a prior
+  # task_started or replay hydration). A VALUE-EQUALITY guard makes an unchanged
+  # status+progress a no-op: `@messages` is a flat comprehension, so every
+  # reassign is an O(n) server render per tab — the guard turns hot progress into
+  # render-on-change. Co-viewers converge off the Recorder's verbatim
+  # rebroadcast. These clauses MUST precede the `{:claude_chat_event, _event}`
+  # catch-all below.
+
+  # A sub-agent started: light the block as running and stamp its task_id so a
+  # later task_updated (task_id-only) can still find the row.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_started"} = ev},
+        socket
+      ) do
+    merge_task_row(
+      socket,
+      by_tool_use_id(ev["tool_use_id"]),
+      drop_nil(%{task_id: ev["task_id"], task_status: "running"})
+    )
+  end
+
+  # A progress heartbeat: the latest "Running: …" line. The wire field is
+  # `description` (never `line`). Keeps the block running so the breathing line
+  # shows even if task_started was missed.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_progress"} = ev},
+        socket
+      ) do
+    merge_task_row(
+      socket,
+      by_tool_use_id(ev["tool_use_id"]),
+      drop_nil(%{task_progress: ev["description"], task_status: "running"})
+    )
+  end
+
+  # Completion notification (tool_use_id aboard): flip to the terminal status so
+  # the block collapses to its ⎿ report and the spinner stops.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_notification"} = ev},
+        socket
+      ) do
+    merge_task_row(
+      socket,
+      by_tool_use_id(ev["tool_use_id"]),
+      %{task_status: ev["status"] || "completed"}
+    )
+  end
+
+  # task_updated is task_id-only, carrying a status patch. Resolve by task_id
+  # (the row learned it from task_started/replay); drop harmlessly with no patch.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_updated"} = ev},
+        socket
+      ) do
+    case get_in(ev, ["patch", "status"]) do
+      status when is_binary(status) ->
+        merge_task_row(socket, by_task_id(ev["task_id"]), %{task_status: status})
+
+      _ ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
   # A real port exit (exit_status frame). Run the shared honest teardown.
@@ -1153,6 +1243,357 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # ── transcript row + agent drill-down (charter D46) ─────────────────────────
+
+  # One transcript row's body — the per-role case, shared by top-level rows and
+  # the nested children of an agent block. Extracted so a child renders
+  # byte-identically to a top-level row; the wrapping <div> (data-role/
+  # data-parent/trace gutter) stays at the call site.
+  attr :message, :map, required: true
+  attr :plan_expanded, :any, required: true
+  attr :question_forms, :map, required: true
+
+  defp message_body(assigns) do
+    ~H"""
+    <%= case @message.role do %>
+      <% :user -> %>
+        <%!-- Terminal anatomy: the user's prompt wears the ❯ gutter,
+              left-aligned like the CLI — no chat bubble. --%>
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+          <div
+            :if={user_images(@message) != []}
+            style="display: flex; flex-wrap: wrap; gap: 6px; padding-left: 22px;"
+          >
+            <%= for img <- user_images(@message) do %>
+              <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
+                attachment missing
+              </div>
+              <img
+                :if={img[:data_uri]}
+                src={img.data_uri}
+                alt="attachment"
+                style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border-muted);"
+              />
+            <% end %>
+          </div>
+          <div :if={@message.text not in [nil, ""]} style="display: flex; gap: 8px;">
+            <span
+              style="color: var(--primary); font-family: var(--font-mono); font-weight: 700; flex: none;"
+              aria-hidden="true"
+            >
+              ❯
+            </span>
+            <div
+              class="text-sm"
+              style="white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 550; padding-top: 1px;"
+            >{@message.text}</div>
+          </div>
+          <%!-- Queue-honest badge (charter D43): a mid-turn send lands
+                immediately and is dispatched right away — the binary runs
+                it as the next turn. The badge is LIVE-ONLY; it clears when
+                that turn's system/init fires, and replay never shows it. --%>
+          <div
+            :if={@message[:queued]}
+            class="text-xs text-dim"
+            style="font-family: var(--font-mono); padding-left: 22px;"
+          >
+            ⧗ queued
+          </div>
+        </div>
+      <% :assistant -> %>
+        <%!-- Terminal anatomy: assistant prose wears the ● gutter. --%>
+        <div style="display: flex; gap: 8px;">
+          <span
+            style="color: var(--primary); font-family: var(--font-mono); flex: none; line-height: 1.6;"
+            aria-hidden="true"
+          >
+            ●
+          </span>
+          <div style="flex: 1; min-width: 0;">
+            <div
+              :if={@message.html}
+              class="bp-paper-surface bp-chat-md"
+              style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
+            >
+              {Phoenix.HTML.raw(@message.html)}
+            </div>
+            <div
+              :if={@message.html == nil}
+              class="text-sm"
+              style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+            >{@message.text}</div>
+          </div>
+        </div>
+      <% :tool -> %>
+        <%!-- A Task/agent spawn (charter D40) gets a headline row: the
+              ● gutter plus the sub-agent's description; the frames it
+              emits interleave below, indented under it. A plain tool row
+              keeps the terse mono line. --%>
+        <%!-- Hanging indent: glyph and text are flex columns, so a
+              wrapped line continues under the TEXT, never under the ●. --%>
+        <div :if={@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
+          <span style="color: var(--primary); flex: none;">●</span>
+          <span style="min-width: 0; overflow-wrap: anywhere;">
+            <span style="font-weight: 650;">{@message[:spawn_label] || @message.text}</span>
+            <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+          </span>
+        </div>
+        <div :if={!@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
+          <span style="color: var(--primary); flex: none;">●</span>
+          <span style="min-width: 0; overflow-wrap: anywhere;">{@message.text}</span>
+        </div>
+        <%!-- D38: a file-mutating tool call renders as a real colored
+              diff (dispatch on input SHAPE, not tool name) beneath the
+              ● header; a non-diff shape renders nothing here and keeps
+              the generic ⎿ row below. --%>
+        <ChatToolRenderer.tool_diff
+          :if={ChatToolRenderer.diff?(@message[:input])}
+          input={@message.input}
+        />
+        <%!-- The terminal's ⎿ result line: first line inline; multi-
+              line outputs expand on click (details/summary). --%>
+        <div
+          :if={@message[:output] not in [nil, ""]}
+          class="text-xs text-dim"
+          style="font-family: var(--font-mono); padding-left: 16px; overflow-wrap: anywhere;"
+        >
+          <%= if tool_output_lines(@message.output) > 1 do %>
+            <details>
+              <summary style="cursor: pointer; list-style: none;">
+                ⎿ <%= tool_output_head(@message.output) %>
+                <span style="opacity: 0.7;">… +<%= tool_output_lines(@message.output) - 1 %> lines</span>
+              </summary>
+              <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;"><%= @message.output %></pre>
+            </details>
+          <% else %>
+            ⎿ <%= tool_output_head(@message.output) %>
+          <% end %>
+        </div>
+      <% :todo -> %>
+        <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
+              Recorder collapsed + the reducer superseded, so it renders
+              the turn's LATEST todo state whether live or replayed. --%>
+        <ChatToolRenderer.todo_card todos={@message.todos} />
+      <% :approval -> %>
+        <div
+          :if={@message.approval_status == :pending}
+          data-approval={@message.request_id}
+          style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
+        >
+          <div style="flex: 1; min-width: 0;">
+            <div class="text-sm" style="font-weight: 600;">
+              Allow <%= @message.tool_name %>?
+            </div>
+            <div class="text-xs text-dim" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+              <%= @message.text %>
+            </div>
+          </div>
+          <button
+            type="button"
+            class="btn btn-primary"
+            phx-click="approve"
+            phx-value-rid={@message.request_id}
+          >
+            Allow
+          </button>
+          <button
+            type="button"
+            class="btn"
+            phx-click="deny"
+            phx-value-rid={@message.request_id}
+          >
+            Deny
+          </button>
+        </div>
+        <div
+          :if={@message.approval_status != :pending}
+          class="text-xs text-dim"
+          style="font-family: var(--font-mono); overflow-wrap: anywhere;"
+        >
+          <%= approval_outcome_label(@message.approval_status) %> — <%= @message.tool_name %>
+        </div>
+      <% :question -> %>
+        <.question_card
+          message={@message}
+          form={question_form_for(@question_forms, @message.request_id)}
+        />
+      <% :plan -> %>
+        <div
+          :if={@message.approval_status == :pending}
+          class="bp-chat-plan"
+          data-plan={@message.request_id}
+        >
+          <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
+            <span
+              class="text-xs text-dim"
+              style="text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;"
+            >
+              proposed plan
+            </span>
+            <span class="text-xs text-dim" style="margin-left: auto;">plan ready</span>
+          </div>
+          <div
+            class="text-sm"
+            style="font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere;"
+          >
+            <%= @message.title %>
+          </div>
+          <div class={[
+            "bp-chat-plan-body",
+            !MapSet.member?(@plan_expanded, @message.id) && "is-collapsed"
+          ]}>
+            <div
+              :if={String.trim(to_string(@message.plan_markdown)) != ""}
+              class="bp-paper-surface bp-chat-md"
+              style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
+            >
+              {Phoenix.HTML.raw(@message.html || "")}
+            </div>
+            <div
+              :if={String.trim(to_string(@message.plan_markdown)) == ""}
+              class="text-xs text-dim"
+              style="font-style: italic;"
+            >
+              (the plan has no text)
+            </div>
+          </div>
+          <button
+            type="button"
+            class="btn text-xs"
+            phx-click="plan-toggle"
+            phx-value-id={@message.id}
+            aria-expanded={to_string(MapSet.member?(@plan_expanded, @message.id))}
+            style="margin-top: 6px; padding: 2px 9px;"
+          >
+            <%= if MapSet.member?(@plan_expanded, @message.id),
+              do: "Show less",
+              else: "Show full plan" %>
+          </button>
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button
+              type="button"
+              class="btn btn-primary"
+              phx-click="plan-approve"
+              phx-value-rid={@message.request_id}
+            >
+              Approve plan
+            </button>
+            <button
+              type="button"
+              class="btn"
+              phx-click="plan-keep"
+              phx-value-rid={@message.request_id}
+            >
+              Keep planning
+            </button>
+          </div>
+        </div>
+        <div
+          :if={@message.approval_status != :pending}
+          class="text-xs text-dim"
+          style="overflow-wrap: anywhere;"
+        >
+          <%= plan_outcome_label(@message.approval_status) %> — <%= @message.title %>
+        </div>
+      <% :thinking -> %>
+        <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
+              ever — only "thought for ~N tokens". Same shape live and on
+              replay. --%>
+        <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+          <span aria-hidden="true">✻</span> <%= @message.text %>
+        </div>
+      <% _ -> %>
+        <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+          <span aria-hidden="true">✻</span> <%= @message.text %>
+        </div>
+    <% end %>
+    """
+  end
+
+  # An agent drill-down block (charter D46): the ● Agent(type — description)
+  # header, a breathing "Running: …" line + step count while the sub-agent runs,
+  # the child tool trace nested inside when expanded, and the agent's ⎿ report
+  # (the parent tool_result) once it finishes. Expand state is per-tab.
+  attr :agent, :map, required: true
+  attr :kids, :list, required: true
+  attr :expanded, :boolean, required: true
+  attr :plan_expanded, :any, required: true
+  attr :question_forms, :map, required: true
+
+  defp agent_block(assigns) do
+    ~H"""
+    <div data-role="agent" data-agent={@agent[:tool_use_id]} style="font-family: var(--font-mono);">
+      <div class="text-xs" style="display: flex; gap: 6px; align-items: baseline;">
+        <span style="color: var(--primary); flex: none;">●</span>
+        <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
+          <span style="font-weight: 650;">Agent(<%= agent_headline(@agent) %>)</span>
+          <span :if={@kids != []} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            · <%= length(@kids) %> <%= if length(@kids) == 1, do: "step", else: "steps" %>
+          </span>
+        </span>
+        <button
+          :if={@kids != []}
+          type="button"
+          class="btn text-xs"
+          phx-click="agent-toggle"
+          phx-value-id={@agent[:tool_use_id]}
+          aria-expanded={to_string(@expanded)}
+          style="flex: none; padding: 1px 8px; opacity: 0.8;"
+        >
+          <%= if @expanded, do: "collapse", else: "expand" %>
+        </button>
+      </div>
+
+      <%!-- Live progress while the sub-agent runs (charter D46): the latest
+            "Running: …" line breathes in the primary tone. It only shows while
+            task_status is "running"; a terminal agent shows no spinner. --%>
+      <div
+        :if={agent_running?(@agent)}
+        class="text-xs bp-chat-agent-run"
+        data-agent-running={@agent[:tool_use_id]}
+        style="font-family: var(--font-mono); color: var(--primary); padding-left: 16px; overflow-wrap: anywhere;"
+      >
+        Running: <%= @agent[:task_progress] || "…" %>
+      </div>
+
+      <%!-- The nested child trace, one level (charter D46): each child renders
+            byte-identically to a top-level row, indented under the spawn with
+            the connecting evergreen gutter. --%>
+      <div :if={@expanded and @kids != []}>
+        <div
+          :for={kid <- @kids}
+          data-role={kid.role}
+          data-parent={kid[:parent_tool_use_id]}
+          style={trace_child_style()}
+        >
+          <.message_body message={kid} plan_expanded={@plan_expanded} question_forms={@question_forms} />
+        </div>
+      </div>
+
+      <%!-- The agent's ⎿ report — the parent tool_result (subagent summary +
+            usage) attached to the spawn row by the existing machinery. This is
+            what a completed block collapses TO. --%>
+      <div
+        :if={@agent[:output] not in [nil, ""]}
+        class="text-xs text-dim"
+        style="font-family: var(--font-mono); padding-left: 16px; overflow-wrap: anywhere;"
+      >
+        <%= if tool_output_lines(@agent.output) > 1 do %>
+          <details>
+            <summary style="cursor: pointer; list-style: none;">
+              ⎿ <%= tool_output_head(@agent.output) %>
+              <span style="opacity: 0.7;">… +<%= tool_output_lines(@agent.output) - 1 %> lines</span>
+            </summary>
+            <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;"><%= @agent.output %></pre>
+          </details>
+        <% else %>
+          ⎿ <%= tool_output_head(@agent.output) %>
+        <% end %>
+      </div>
+    </div>
+    """
+  end
 
   @impl true
   def render(assigns) do
@@ -1258,6 +1699,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
           height: 3.5em; pointer-events: none;
           background: linear-gradient(to bottom, transparent, var(--bg));
         }
+        /* Agent drill-down (charter D46): a running sub-agent's live line breathes
+           in the primary tone, reusing the skeleton pulse keyframes — a live
+           signal that collapses to a still report on completion. */
+        .bp-chat-agent-run { animation: bp-skel-pulse 1.4s ease-in-out infinite; }
       </style>
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
@@ -1466,52 +1911,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       </aside>
 
       <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+      <%!-- Slim header (charter D44): title + one honest status label. The mode
+            select, model picker + observed-model fact, context ring, and Send/Stop
+            all moved into the composer footer cockpit below — where you type. --%>
       <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border-muted); flex: none;">
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
         </span>
-        <span :if={@init} class="text-xs text-dim" style="font-family: var(--font-mono);">
-          <%= @init.model %>
-        </span>
-        <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
-          <select
-            name="mode"
-            class="text-xs"
-            style="background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 6px; padding: 2px 6px;"
-          >
-            <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
-              <%= mode_label(m) %>
-            </option>
-          </select>
-        </form>
-        <%!-- Model picker (wave 5): choose the brain. The choice is intent —
-              it rides the next spawn as `--model` and steers a live session
-              via the set_model control frame; the dim mono suffix is FACT
-              (the answering model observed off the last init/result). --%>
-        <form phx-change="set-model" style="display: inline-flex; align-items: center; gap: 6px;">
-          <select
-            name="model"
-            class="text-xs"
-            aria-label="Model"
-            style="background: var(--bg); color: inherit; border: 1px solid hsl(var(--primary-hsl) / 0.35); border-radius: 6px; padding: 2px 6px; font-weight: 600;"
-          >
-            <option value="default" selected={@model_choice == "default"}>
-              model: default
-            </option>
-            <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
-              <%= model_label(m) %>
-            </option>
-          </select>
-          <span
-            :if={@init && @init.model}
-            class="text-xs text-dim"
-            style="font-family: var(--font-mono);"
-            title="The answering model, as reported by the CLI"
-          >
-            <%= @init.model %>
-          </span>
-        </form>
-        <.context_ring ring={@ring} />
         <span class="text-xs text-dim" style="margin-left: auto;">
           <%= status_label(@status) %> — Claude on this host, admins only.
         </span>
@@ -1532,265 +1938,35 @@ defmodule BarkparkWeb.Studio.ChatLive do
             phx-hook="PaperMermaid"
             style="display: flex; flex-direction: column; gap: 10px;"
           >
-            <div
-              :for={message <- @messages}
-              data-role={message.role}
-              data-parent={message[:parent_tool_use_id]}
-              style={message[:parent_tool_use_id] && trace_child_style()}
-            >
-            <%= case message.role do %>
-              <% :user -> %>
-                <%!-- Terminal anatomy: the user's prompt wears the ❯ gutter,
-                      left-aligned like the CLI — no chat bubble. --%>
-                <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;">
+            <%!-- Charter D46: bucket child rows under their top-level spawn as an
+                  expandable agent block; every other row (and orphan children)
+                  stays a flat top-level row in seq order. A nested :for over the
+                  grouped list diffs cleanly and leaves #chat-messages + the
+                  PaperMermaid hook untouched. --%>
+            <%= for item <- group_agent_rows(@messages) do %>
+              <%= case item do %>
+                <% {:row, message} -> %>
                   <div
-                    :if={user_images(message) != []}
-                    style="display: flex; flex-wrap: wrap; gap: 6px; padding-left: 22px;"
+                    data-role={message.role}
+                    data-parent={message[:parent_tool_use_id]}
+                    style={message[:parent_tool_use_id] && trace_child_style()}
                   >
-                    <%= for img <- user_images(message) do %>
-                      <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
-                        attachment missing
-                      </div>
-                      <img
-                        :if={img[:data_uri]}
-                        src={img.data_uri}
-                        alt="attachment"
-                        style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border-muted);"
-                      />
-                    <% end %>
+                    <.message_body
+                      message={message}
+                      plan_expanded={@plan_expanded}
+                      question_forms={@question_forms}
+                    />
                   </div>
-                  <div :if={message.text not in [nil, ""]} style="display: flex; gap: 8px;">
-                    <span
-                      style="color: var(--primary); font-family: var(--font-mono); font-weight: 700; flex: none;"
-                      aria-hidden="true"
-                    >
-                      ❯
-                    </span>
-                    <div
-                      class="text-sm"
-                      style="white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 550; padding-top: 1px;"
-                    >{message.text}</div>
-                  </div>
-                  <%!-- Queue-honest badge (charter D43): a mid-turn send lands
-                        immediately and is dispatched right away — the binary runs
-                        it as the next turn. The badge is LIVE-ONLY; it clears when
-                        that turn's system/init fires, and replay never shows it. --%>
-                  <div
-                    :if={message[:queued]}
-                    class="text-xs text-dim"
-                    style="font-family: var(--font-mono); padding-left: 22px;"
-                  >
-                    ⧗ queued
-                  </div>
-                </div>
-              <% :assistant -> %>
-                <%!-- Terminal anatomy: assistant prose wears the ● gutter. --%>
-                <div style="display: flex; gap: 8px;">
-                  <span
-                    style="color: var(--primary); font-family: var(--font-mono); flex: none; line-height: 1.6;"
-                    aria-hidden="true"
-                  >
-                    ●
-                  </span>
-                  <div style="flex: 1; min-width: 0;">
-                    <div
-                      :if={message.html}
-                      class="bp-paper-surface bp-chat-md"
-                      style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
-                    >
-                      {Phoenix.HTML.raw(message.html)}
-                    </div>
-                    <div
-                      :if={message.html == nil}
-                      class="text-sm"
-                      style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
-                    >{message.text}</div>
-                  </div>
-                </div>
-              <% :tool -> %>
-                <%!-- A Task/agent spawn (charter D40) gets a headline row: the
-                      ● gutter plus the sub-agent's description; the frames it
-                      emits interleave below, indented under it. A plain tool row
-                      keeps the terse mono line. --%>
-                <%!-- Hanging indent: glyph and text are flex columns, so a
-                      wrapped line continues under the TEXT, never under the ●. --%>
-                <div :if={message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
-                  <span style="color: var(--primary); flex: none;">●</span>
-                  <span style="min-width: 0; overflow-wrap: anywhere;">
-                    <span style="font-weight: 650;">{message[:spawn_label] || message.text}</span>
-                    <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
-                  </span>
-                </div>
-                <div :if={!message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
-                  <span style="color: var(--primary); flex: none;">●</span>
-                  <span style="min-width: 0; overflow-wrap: anywhere;">{message.text}</span>
-                </div>
-                <%!-- D38: a file-mutating tool call renders as a real colored
-                      diff (dispatch on input SHAPE, not tool name) beneath the
-                      ● header; a non-diff shape renders nothing here and keeps
-                      the generic ⎿ row below. --%>
-                <ChatToolRenderer.tool_diff
-                  :if={ChatToolRenderer.diff?(message[:input])}
-                  input={message.input}
-                />
-                <%!-- The terminal's ⎿ result line: first line inline; multi-
-                      line outputs expand on click (details/summary). --%>
-                <div
-                  :if={message[:output] not in [nil, ""]}
-                  class="text-xs text-dim"
-                  style="font-family: var(--font-mono); padding-left: 16px; overflow-wrap: anywhere;"
-                >
-                  <%= if tool_output_lines(message.output) > 1 do %>
-                    <details>
-                      <summary style="cursor: pointer; list-style: none;">
-                        ⎿ <%= tool_output_head(message.output) %>
-                        <span style="opacity: 0.7;">… +<%= tool_output_lines(message.output) - 1 %> lines</span>
-                      </summary>
-                      <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;"><%= message.output %></pre>
-                    </details>
-                  <% else %>
-                    ⎿ <%= tool_output_head(message.output) %>
-                  <% end %>
-                </div>
-              <% :todo -> %>
-                <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
-                      Recorder collapsed + the reducer superseded, so it renders
-                      the turn's LATEST todo state whether live or replayed. --%>
-                <ChatToolRenderer.todo_card todos={message.todos} />
-              <% :approval -> %>
-                <div
-                  :if={message.approval_status == :pending}
-                  data-approval={message.request_id}
-                  style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
-                >
-                  <div style="flex: 1; min-width: 0;">
-                    <div class="text-sm" style="font-weight: 600;">
-                      Allow <%= message.tool_name %>?
-                    </div>
-                    <div class="text-xs text-dim" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
-                      <%= message.text %>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    class="btn btn-primary"
-                    phx-click="approve"
-                    phx-value-rid={message.request_id}
-                  >
-                    Allow
-                  </button>
-                  <button
-                    type="button"
-                    class="btn"
-                    phx-click="deny"
-                    phx-value-rid={message.request_id}
-                  >
-                    Deny
-                  </button>
-                </div>
-                <div
-                  :if={message.approval_status != :pending}
-                  class="text-xs text-dim"
-                  style="font-family: var(--font-mono); overflow-wrap: anywhere;"
-                >
-                  <%= approval_outcome_label(message.approval_status) %> — <%= message.tool_name %>
-                </div>
-              <% :question -> %>
-                <.question_card
-                  message={message}
-                  form={question_form_for(@question_forms, message.request_id)}
-                />
-              <% :plan -> %>
-                <div
-                  :if={message.approval_status == :pending}
-                  class="bp-chat-plan"
-                  data-plan={message.request_id}
-                >
-                  <div style="display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px;">
-                    <span
-                      class="text-xs text-dim"
-                      style="text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;"
-                    >
-                      proposed plan
-                    </span>
-                    <span class="text-xs text-dim" style="margin-left: auto;">plan ready</span>
-                  </div>
-                  <div
-                    class="text-sm"
-                    style="font-weight: 600; margin-bottom: 8px; overflow-wrap: anywhere;"
-                  >
-                    <%= message.title %>
-                  </div>
-                  <div class={[
-                    "bp-chat-plan-body",
-                    !MapSet.member?(@plan_expanded, message.id) && "is-collapsed"
-                  ]}>
-                    <div
-                      :if={String.trim(to_string(message.plan_markdown)) != ""}
-                      class="bp-paper-surface bp-chat-md"
-                      style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
-                    >
-                      {Phoenix.HTML.raw(message.html || "")}
-                    </div>
-                    <div
-                      :if={String.trim(to_string(message.plan_markdown)) == ""}
-                      class="text-xs text-dim"
-                      style="font-style: italic;"
-                    >
-                      (the plan has no text)
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    class="btn text-xs"
-                    phx-click="plan-toggle"
-                    phx-value-id={message.id}
-                    aria-expanded={to_string(MapSet.member?(@plan_expanded, message.id))}
-                    style="margin-top: 6px; padding: 2px 9px;"
-                  >
-                    <%= if MapSet.member?(@plan_expanded, message.id),
-                      do: "Show less",
-                      else: "Show full plan" %>
-                  </button>
-                  <div style="display: flex; gap: 8px; margin-top: 10px;">
-                    <button
-                      type="button"
-                      class="btn btn-primary"
-                      phx-click="plan-approve"
-                      phx-value-rid={message.request_id}
-                    >
-                      Approve plan
-                    </button>
-                    <button
-                      type="button"
-                      class="btn"
-                      phx-click="plan-keep"
-                      phx-value-rid={message.request_id}
-                    >
-                      Keep planning
-                    </button>
-                  </div>
-                </div>
-                <div
-                  :if={message.approval_status != :pending}
-                  class="text-xs text-dim"
-                  style="overflow-wrap: anywhere;"
-                >
-                  <%= plan_outcome_label(message.approval_status) %> — <%= message.title %>
-                </div>
-              <% :thinking -> %>
-                <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
-                      ever — only "thought for ~N tokens". Same shape live and on
-                      replay. --%>
-                <div class="text-xs text-dim" style="font-family: var(--font-mono);">
-                  <span aria-hidden="true">✻</span> <%= message.text %>
-                </div>
-              <% _ -> %>
-                <div class="text-xs text-dim" style="font-family: var(--font-mono);">
-                  <span aria-hidden="true">✻</span> <%= message.text %>
-                </div>
+                <% {:agent, agent, kids} -> %>
+                  <.agent_block
+                    agent={agent}
+                    kids={kids}
+                    expanded={agent_open?(@agent_expanded, agent)}
+                    plan_expanded={@plan_expanded}
+                    question_forms={@question_forms}
+                  />
+              <% end %>
             <% end %>
-            </div>
           </div>
 
           <%!-- The LIVE thinking pulse (charter D41): a ✻ counter that breathes
@@ -1947,26 +2123,99 @@ defmodule BarkparkWeb.Studio.ChatLive do
               >
               </ul>
             </div>
-            <%!-- While a turn runs the primary button becomes Stop (interrupt),
-                  but pressing ↵ still submits: a mid-turn send is queued honestly
-                  (charter D43) — dispatched immediately, run as the next turn. --%>
-            <button
-              :if={turn_active?(@status)}
-              type="button"
-              class="btn"
-              phx-click="stop_turn"
-              disabled={@status == :interrupting}
-              aria-label="Stop the current turn"
-              style="display: inline-flex; align-items: center; gap: 6px;"
-            >
-              <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
-              <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
-            </button>
-            <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
-              <.icon name="send" size={14} />
-            </button>
           </div>
+
         </form>
+
+        <%!-- Composer cockpit footer (charter D44): the mode + model controls
+              live borderless on the left (KEEP the phx-change form wrappers —
+              the test selectors target them), the mini context ring + image
+              attach + Send/Stop cluster on the right. It reads as one composer
+              block but is a SIBLING of the form, never a child — nested <form>s
+              are invalid HTML (the parser drops them, breaking the selectors).
+              Send re-associates to the composer via `form="chat-composer-form"`;
+              the attach <label>'s `for` reaches the hidden input by id. --%>
+        <div style="display: flex; align-items: center; gap: 10px; max-width: 860px; margin: 8px auto 0;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
+                <select
+                  name="mode"
+                  class="text-xs text-dim"
+                  style="background: transparent; color: inherit; border: none; border-radius: 6px; padding: 2px 4px; cursor: pointer;"
+                >
+                  <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
+                    <%= mode_label(m) %>
+                  </option>
+                </select>
+              </form>
+              <%!-- Model picker (wave 5): the choice is intent — it rides the next
+                    spawn as `--model` and steers a live session via the set_model
+                    control frame; the dim mono suffix is FACT (the answering model
+                    observed off the last init/result), sitting beside its intent. --%>
+              <form phx-change="set-model" style="display: inline-flex; align-items: center; gap: 6px;">
+                <select
+                  name="model"
+                  class="text-xs"
+                  aria-label="Model"
+                  style="background: transparent; color: var(--primary); border: none; border-radius: 6px; padding: 2px 4px; font-weight: 600; cursor: pointer;"
+                >
+                  <option value="default" selected={@model_choice == "default"}>
+                    model: default
+                  </option>
+                  <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
+                    <%= model_label(m) %>
+                  </option>
+                </select>
+                <span
+                  :if={@init && @init.model}
+                  class="text-xs text-dim"
+                  style="font-family: var(--font-mono);"
+                  title="The answering model, as reported by the CLI"
+                >
+                  <%= @init.model %>
+                </span>
+              </form>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+              <.context_ring ring={@ring} size={:sm} show_cost={false} />
+              <%!-- Attach an image (charter D44/D25): a <label> for the hidden
+                    live_file_input (whose id is the upload ref) opens the native
+                    picker with ZERO hook change. The strip / paste-drop are below. --%>
+              <label
+                for={@uploads.attachments.ref}
+                class="btn"
+                aria-label="Attach an image"
+                title="Attach an image"
+                style="display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; cursor: pointer;"
+              >
+                <.icon name="image" size={16} />
+              </label>
+              <%!-- While a turn runs the primary button becomes Stop (interrupt),
+                    but pressing ↵ still submits: a mid-turn send is queued honestly
+                    (charter D43) — dispatched immediately, run as the next turn. --%>
+              <button
+                :if={turn_active?(@status)}
+                type="button"
+                class="btn"
+                phx-click="stop_turn"
+                disabled={@status == :interrupting}
+                aria-label="Stop the current turn"
+                style="display: inline-flex; align-items: center; gap: 6px;"
+              >
+                <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
+                <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
+              </button>
+              <button
+                :if={not turn_active?(@status)}
+                type="submit"
+                form="chat-composer-form"
+                class="btn btn-primary"
+                aria-label="Send message"
+              >
+                <.icon name="send" size={14} />
+              </button>
+            </div>
+        </div>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
           <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </p>
@@ -2279,6 +2528,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Plan-card expand state is per-tab and per-session (charter D34) — a reopen
       # starts every replayed plan collapsed.
       plan_expanded: MapSet.new(),
+      # Agent drill-down overrides reset on reopen (charter D46): a replayed
+      # terminal agent starts collapsed to its report, a mid-run one open.
+      agent_expanded: %{},
       # The reopened session's own sticky draft is restored above (charter D36c);
       # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil,
@@ -2352,6 +2604,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       renaming_session: nil,
       open_menu_session: nil,
       plan_expanded: MapSet.new(),
+      agent_expanded: %{},
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
@@ -2730,7 +2983,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       tool_use_id: Map.get(meta, "tool_use_id"),
       parent_tool_use_id: Map.get(meta, "parent_tool_use_id"),
       spawn?: spawn?(name, input),
-      spawn_label: spawn_label(name, input)
+      spawn_label: spawn_label(name, input),
+      # Agent drill-down hydration (charter D46): a reopened spawn row carries its
+      # last-persisted task state — a mid-run agent shows the honest last line, an
+      # interrupted one shows "interrupted" (D45 teardown), never a fake spinner.
+      task_id: Map.get(meta, "task_id"),
+      task_status: Map.get(meta, "task_status"),
+      task_progress: Map.get(meta, "task_progress")
     }
   end
 
@@ -3450,6 +3709,114 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp trace_child_style,
     do: "margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--primary);"
 
+  # ── agent drill-down grouping + state (charter D46) ─────────────────────────
+
+  # Bucket the flat message list into render items: a top-level spawn row plus
+  # every row whose parent_tool_use_id matches its tool_use_id becomes one
+  # `{:agent, spawn, [children]}`; everything else (including ORPHAN children
+  # whose parent isn't a top-level spawn in this transcript) stays a top-level
+  # `{:row, message}`, never vanishing. Grouping is by ID MATCH in seq order —
+  # children of parallel spawns interleave, so this is never consecutive
+  # chunking. One nesting level: a child that is itself a spawn renders as a
+  # plain spawn row inside its parent's bucket (message_body's :tool branch).
+  defp group_agent_rows(messages) do
+    spawns =
+      for m <- messages,
+          m.role == :tool,
+          m[:spawn?],
+          is_nil(m[:parent_tool_use_id]),
+          is_binary(m[:tool_use_id]),
+          into: %{},
+          do: {m[:tool_use_id], true}
+
+    children =
+      Enum.reduce(messages, %{}, fn m, acc ->
+        pid = m[:parent_tool_use_id]
+
+        if is_binary(pid) and Map.has_key?(spawns, pid) do
+          Map.update(acc, pid, [m], &(&1 ++ [m]))
+        else
+          acc
+        end
+      end)
+
+    consumed =
+      children |> Map.values() |> List.flatten() |> MapSet.new(& &1.id)
+
+    Enum.flat_map(messages, fn m ->
+      cond do
+        m.role == :tool and m[:spawn?] and is_nil(m[:parent_tool_use_id]) and
+            is_binary(m[:tool_use_id]) ->
+          [{:agent, m, Map.get(children, m[:tool_use_id], [])}]
+
+        MapSet.member?(consumed, m.id) ->
+          []
+
+        true ->
+          [{:row, m}]
+      end
+    end)
+  end
+
+  # The effective expand state of an agent block: a manual per-tab override wins;
+  # otherwise the default is open while running (or status-unknown) and collapsed
+  # once terminal (charter D46).
+  defp agent_open?(overrides, agent) do
+    case Map.fetch(overrides, agent[:tool_use_id]) do
+      {:ok, v} -> v
+      :error -> default_agent_open?(agent)
+    end
+  end
+
+  defp default_agent_open?(agent), do: agent[:task_status] in [nil, "running"]
+
+  # A sub-agent is running only while its task_status says so — a terminal (or
+  # interrupted, D45) block shows its report, never a spinner.
+  defp agent_running?(agent), do: agent[:task_status] == "running"
+
+  # The agent block headline: "type — description" (charter D46 shape), falling
+  # back to whichever of description/type/spawn_label is present so a thinner
+  # spawn frame still reads honestly.
+  defp agent_headline(agent) do
+    input = agent[:input] || %{}
+    type = input["subagent_type"]
+    desc = input["description"]
+
+    cond do
+      is_binary(type) and type != "" and is_binary(desc) and desc != "" -> "#{type} — #{desc}"
+      is_binary(desc) and desc != "" -> desc
+      is_binary(type) and type != "" -> type
+      true -> agent[:spawn_label] || agent[:text] || "agent"
+    end
+  end
+
+  # Merge task-lifecycle keys into the ONE in-memory row the matcher selects,
+  # with a value-equality guard: if status+progress are unchanged, return the
+  # socket untouched so a no-op frame costs no server render (charter D46).
+  defp merge_task_row(socket, matcher, updates) do
+    {messages, changed?} =
+      Enum.map_reduce(socket.assigns.messages, false, fn m, changed ->
+        if matcher.(m) do
+          merged = Map.merge(m, updates)
+
+          if task_signature(merged) == task_signature(m),
+            do: {m, changed},
+            else: {merged, true}
+        else
+          {m, changed}
+        end
+      end)
+
+    if changed?, do: {:noreply, assign(socket, messages: messages)}, else: {:noreply, socket}
+  end
+
+  defp task_signature(m), do: {m[:task_status], m[:task_progress]}
+
+  defp by_tool_use_id(id), do: fn m -> is_binary(id) and m[:tool_use_id] == id end
+  defp by_task_id(id), do: fn m -> is_binary(id) and m[:task_id] == id end
+
+  defp drop_nil(map), do: :maps.filter(fn _k, v -> not is_nil(v) end, map)
+
   defp model_label("haiku"), do: "Haiku — fastest"
   defp model_label("sonnet"), do: "Sonnet — balanced"
   defp model_label("opus"), do: "Opus — powerful"
@@ -3496,12 +3863,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp approval_outcome_label(:canceled), do: "✗ canceled"
   defp approval_outcome_label(_), do: "✗ denied"
 
-  defp composer_placeholder(:new), do: "Message Claude to begin… (/ for commands)"
+  # The idle/ready clause teaches the composer's verbs (charter D44) — never a
+  # mic, never @-mentions. Degraded states keep their honest, specific copy.
+  defp composer_placeholder(:new), do: "Plan, build… / for commands"
   defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"
   defp composer_placeholder(:offline), do: "Send a message to resume this session…"
   defp composer_placeholder(:thinking), do: "Claude is working — press Stop to interrupt…"
   defp composer_placeholder(:interrupting), do: "Stopping…"
-  defp composer_placeholder(_), do: "Message Claude… (/ for commands)"
+  defp composer_placeholder(_), do: "Plan, build… / for commands"
 
   # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
 
@@ -3677,14 +4046,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp format_cost(_), do: "$0.0000"
 
   attr :ring, :map, required: true
+  attr :size, :atom, default: :md
+  attr :show_cost, :boolean, default: true
 
   defp context_ring(assigns) do
-    assigns = assign(assigns, :geo, ring_geometry(assigns.ring))
+    # Geometry is viewBox-relative (0 0 36 36) so the arc math is size-agnostic —
+    # only the pixel width/height and the 9px % label change between :md and :sm
+    # (charter D44: the miniature footer ring drops the label, keeping just the arc).
+    assigns =
+      assigns
+      |> assign(:geo, ring_geometry(assigns.ring))
+      |> assign(:px, if(assigns.size == :sm, do: 16, else: 30))
+      |> assign(:show_pct, assigns.size != :sm)
 
     ~H"""
     <div style="display: inline-flex; align-items: center; gap: 8px;" title={ring_title(@ring)}>
       <div style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
-        <svg width="30" height="30" viewBox="0 0 36 36" style="display: block;" aria-hidden="true">
+        <svg width={@px} height={@px} viewBox="0 0 36 36" style="display: block;" aria-hidden="true">
           <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--primary-soft)" stroke-width="3.5" />
           <circle
             :if={@geo.known}
@@ -3700,6 +4078,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           />
         </svg>
         <span
+          :if={@show_pct}
           class="text-dim"
           style="position: absolute; font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums;"
         >
@@ -3707,6 +4086,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </span>
       </div>
       <span
+        :if={@show_cost}
         class="text-xs text-dim"
         style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;"
       >
