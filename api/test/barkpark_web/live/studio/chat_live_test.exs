@@ -2482,6 +2482,34 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert StudioChat.get_session(sid).mode == "plan"
     end
 
+    test "a fail-closed echo (disarmed bypass spawning plan) is quiet and keeps the stored bypass",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+
+      # persist bypass through the only legal road — the arm ceremony (D48)
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      render_click(element(view, ~s(button[phx-click=arm-bypass])))
+      assert StudioChat.get_session(sid).mode == "bypassPermissions"
+
+      # A DISARMED bypass session spawns fail-closed (charter D48b/D55) and its
+      # init echoes OUR normalized "plan" — that is not a CLI-side flip. It must
+      # neither narrate a lie ("after plan approval") nor adopt/persist "plan",
+      # which would silently erase the bypass row the re-arm affordance keys on.
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "plan"}}
+      )
+
+      html = render(view)
+      refute html =~ "Permission mode is now"
+      refute html =~ "unrecognized permission mode"
+      assert lv_assigns(view).mode == "bypassPermissions"
+      assert StudioChat.get_session(sid).mode == "bypassPermissions"
+    end
+
     test "an init echoing the SAME mode does not churn the selector or the store",
          %{view: view} do
       spawn_silent_session(view)

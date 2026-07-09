@@ -3071,23 +3071,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # an echoed frame is an untrusted string and must never arm dangerous bypass.
   defp observe_permission_mode(socket, mode)
        when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
-    if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
-      if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
+    cond do
+      mode == socket.assigns.mode or not is_nil(socket.assigns[:pending_mode]) ->
+        socket
 
-      # No silent escalation (charter D52, wave-10 real-binary verdict): the CLI
-      # flips its OWN permission mode plan → default inside ExitPlanMode (PROVEN
-      # v2.1.205 — the post-plan init reports `"default"`), a mode the user never
-      # picked. A user-initiated switch surfaces its own "Permission mode → …"
-      # line (via set-mode); this CLI-initiated adoption was previously SILENT.
-      # Surface it too, so the transcript never quietly changes what the agent is
-      # allowed to do. `pending_mode` guards this off during a user switch (its
-      # ack owns the mode, D17/D23), so this line only ever narrates a genuine
-      # CLI-side flip.
-      socket
-      |> assign(mode: mode)
-      |> append_message(:system, "Permission mode is now #{mode_label(mode)} after plan approval.")
-    else
-      socket
+      # A DISARMED bypassPermissions session deliberately spawns fail-closed
+      # (charter D48b/D55): build_args normalizes the mode, so the init frame
+      # echoing that normalized mode is OUR OWN fail-close, not a CLI-side flip.
+      # Stay quiet and — critically — do NOT adopt/persist it: the stored
+      # bypassPermissions row is what keeps the re-arm affordance alive on the
+      # next reopen (D55's honest disarmed panel).
+      mode == ClaudeChat.normalize_mode(socket.assigns.mode) ->
+        socket
+
+      true ->
+        if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
+
+        # No silent escalation (charter D52, wave-10 real-binary verdict): the CLI
+        # flips its OWN permission mode plan → default inside ExitPlanMode (PROVEN
+        # v2.1.205 — the post-plan init reports `"default"`), a mode the user never
+        # picked. A user-initiated switch surfaces its own "Permission mode → …"
+        # line (via set-mode); this CLI-initiated adoption was previously SILENT.
+        # Surface it too, so the transcript never quietly changes what the agent is
+        # allowed to do. `pending_mode` guards this off during a user switch (its
+        # ack owns the mode, D17/D23), so this line only ever narrates a genuine
+        # CLI-side flip.
+        socket
+        |> assign(mode: mode)
+        |> append_message(:system, observed_mode_line(socket.assigns.mode, mode))
     end
   end
 
@@ -3109,6 +3120,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp observe_permission_mode(socket, _mode), do: socket
+
+  # The proven ExitPlanMode signature (plan → default, charter D52) gets the
+  # specific story; any other CLI-side divergence is narrated without inventing
+  # a cause — "after plan approval" on a flip that wasn't one would be a lie.
+  defp observed_mode_line("plan", "default"),
+    do: "Permission mode is now #{mode_label("default")} after plan approval."
+
+  defp observed_mode_line(_from, mode),
+    do: "Permission mode is now #{mode_label(mode)} (reported by the agent)."
 
   # Persist a mode switch onto the store row (charter D17) — no-op with no store
   # session yet (a brand-new chat before its first send has no row to write).

@@ -194,7 +194,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
       # No vacuous pass: the probe exists to VERIFY a live workflow's wire shape,
       # so a run where the tool never launched is a probe failure, not a skip.
       if wf_lists == [] do
-        dump_frames("probe_workflow_shape", %{workflow_progress: wf_lists, background_tasks: bg_lists})
+        dump_frames("probe_workflow_shape", %{
+          workflow_progress: wf_lists,
+          background_tasks: bg_lists
+        })
 
         flunk("""
         No workflow_progress frames were captured — the Workflow tool never
@@ -223,12 +226,17 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
 
           case node["type"] do
             "workflow_phase" ->
-              assert is_integer(node["index"]), "phase node missing integer index: #{inspect(node)}"
+              assert is_integer(node["index"]),
+                     "phase node missing integer index: #{inspect(node)}"
+
               assert is_binary(node["title"]), "phase node missing title: #{inspect(node)}"
 
             "workflow_agent" ->
               assert is_binary(node["label"]), "agent node missing label: #{inspect(node)}"
-              assert is_integer(node["phaseIndex"]), "agent node missing phaseIndex: #{inspect(node)}"
+
+              assert is_integer(node["phaseIndex"]),
+                     "agent node missing phaseIndex: #{inspect(node)}"
+
               assert is_binary(node["model"]), "agent node missing model: #{inspect(node)}"
 
               assert node["state"] in @known_agent_states,
@@ -249,7 +257,8 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
       # background_tasks_changed snapshots (if any) are ALSO flat: a `tasks` list
       # of {task_id, task_type, description} rows (charter D47).
       for tasks <- bg_lists do
-        assert is_list(tasks), "background_tasks_changed.tasks must be a flat list: #{inspect(tasks)}"
+        assert is_list(tasks),
+               "background_tasks_changed.tasks must be a flat list: #{inspect(tasks)}"
 
         for t <- tasks do
           assert is_binary(t["task_id"]), "task row missing task_id: #{inspect(t)}"
@@ -369,6 +378,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
       # startup crash. (If --effort were rejected the process would exit before any
       # result — run_turn would flunk on the exit branch.)
       assert result["type"] == "result"
+
       refute result["is_error"] == true,
              "the --effort spawn errored: #{inspect(result)}"
     end
@@ -397,8 +407,14 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
       {:claude_chat_event, _other} ->
         await_result(timeout, acc)
 
+      # Both exit shapes: the 2-tuple (pre-D54) and the 3-tuple carrying the
+      # stderr tail (charter D54) — whichever the merged Session emits, a death
+      # here is a specific flunk, never a silent timeout.
       {:claude_chat_exit, status} ->
         flunk("session exited (status #{status}) before a result frame")
+
+      {:claude_chat_exit, status, stderr} ->
+        flunk("session exited (status #{status}) before a result frame#{stderr_note(stderr)}")
     after
       timeout -> flunk("no result frame within #{timeout}ms")
     end
@@ -450,6 +466,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
 
         {:claude_chat_exit, _status} ->
           {Enum.reverse(wf), Enum.reverse(bg)}
+
+        {:claude_chat_exit, _status, _stderr} ->
+          {Enum.reverse(wf), Enum.reverse(bg)}
       after
         remaining -> {Enum.reverse(wf), Enum.reverse(bg)}
       end
@@ -477,6 +496,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
           collect_trailing(deadline, wf, bg)
 
         {:claude_chat_exit, _status} ->
+          {Enum.reverse(wf), Enum.reverse(bg)}
+
+        {:claude_chat_exit, _status, _stderr} ->
           {Enum.reverse(wf), Enum.reverse(bg)}
       after
         remaining -> {Enum.reverse(wf), Enum.reverse(bg)}
@@ -513,6 +535,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
 
         {:claude_chat_exit, status} ->
           flunk("session exited (status #{status}) before an ExitPlanMode ask")
+
+        {:claude_chat_exit, status, stderr} ->
+          flunk(
+            "session exited (status #{status}) before an ExitPlanMode ask#{stderr_note(stderr)}"
+          )
       after
         remaining -> flunk("no ExitPlanMode ask within #{remaining}ms")
       end
@@ -544,6 +571,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
 
         {:claude_chat_exit, status} ->
           flunk("session exited (status #{status}) before the post-approval result")
+
+        {:claude_chat_exit, status, stderr} ->
+          flunk(
+            "session exited (status #{status}) before the post-approval result#{stderr_note(stderr)}"
+          )
       after
         remaining -> flunk("no post-approval result within #{remaining}ms")
       end
@@ -575,6 +607,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
 
         {:claude_chat_exit, status} ->
           flunk("session exited (status #{status}) before a post-plan init frame")
+
+        {:claude_chat_exit, status, stderr} ->
+          flunk(
+            "session exited (status #{status}) before a post-plan init frame#{stderr_note(stderr)}"
+          )
       after
         remaining -> flunk("no post-plan init within #{remaining}ms")
       end
@@ -582,6 +619,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
   end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
+
+  # The D54 3-tuple exit carries a bounded stderr tail — fold it into the flunk
+  # so a real-lane death diagnoses itself.
+  defp stderr_note(stderr) when is_binary(stderr) and stderr != "", do: " — stderr: #{stderr}"
+  defp stderr_note(_), do: ""
 
   # The collectors auto-approve permission asks, which needs the live session pid.
   # Each probe stashes its one session under `:probe_session` right after spawn.

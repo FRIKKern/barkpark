@@ -838,11 +838,16 @@ regression tests (opt-in `:real_binary` lane, per-probe tags), not one-off notes
   pinned to `"default"`. **No-silent-escalation law:** the CLI flips its OWN mode
   to `"default"` — a mode the user never picked — so `observe_permission_mode`
   still adopts+persists it (the guard already admits `default`), but the adoption
-  MUST surface a visible system line ("Permission mode is now ask (legacy) after
-  plan approval."); it was previously silent. A permissionMode OUTSIDE the
-  six-value guard is NEVER silently adopted — surface it as a system line
-  ("unrecognized permission mode (…)"), leave the stored mode alone, never widen
-  the guard to admit an untrusted string.
+  MUST surface a visible system line; it was previously silent. Copy is honest
+  about cause (reviewer refinement): the proven plan→default signature reads
+  "Permission mode is now ask (legacy) after plan approval."; any OTHER in-guard
+  divergence reads "… (reported by the agent)." — never inventing a plan
+  approval that didn't happen. An init echoing `normalize_mode(held)` (the
+  fail-closed spawn of a disarmed bypass session, D55) is OUR OWN doing — quiet
+  no-op, never adopted/persisted. A permissionMode OUTSIDE the six-value guard
+  is NEVER silently adopted — surface it as a system line ("unrecognized
+  permission mode (…)"), leave the stored mode alone, never widen the guard to
+  admit an untrusted string.
   (c) **spawn flags RATIFIED** (`:probe_spawn_flags`, D53) — see D53.
 - **D53 — Spawn-flag ratification is help/parse only; NEVER a live armed bypass.**
   `claude --help` (v2.1.205) enumerates BOTH `--allow-dangerously-skip-permissions`
@@ -862,27 +867,64 @@ regression tests (opt-in `:real_binary` lane, per-probe tags), not one-off notes
   "haiku"` (threaded to `--model` via `model_args`), sub-agents inherit haiku, and
   prompts force the target wire event deterministically (a verbatim Workflow
   script; "propose, do not act" for ExitPlanMode) so the whole lane stays under
-  the ~$0.43/run ceiling. Ride-alongs the wave-9 reviewers flagged but this wave
-  did NOT build (deliberate, documented): re-arm-on-reopen bypass semantics (a
-  reopened armed session re-arms with no re-ceremony — persisted mode IS the
-  arming record; product question, not a probe) and the foreground-task rail
-  "completed" flip ambiguity (a `background_tasks_changed` snapshot flips
-  rail entries that only ever arrived via `task_progress`) — both remain open for
-  a future wave with real foreground-workflow wire capture.
+  the ~$0.43/run ceiling. The two wave-9 ride-alongs were NOT probed live but were
+  both RESOLVED by sibling slices this wave (reviewer reconciliation — the S2
+  builder wrote this section before the sibling slices were visible):
+  re-arm-on-reopen bypass semantics became product law D55 (S4: arming is a live
+  per-lifetime act, reopen disarms), and the foreground/background rail
+  "completed" flip ambiguity was closed by S1's provenance gate (origin-stamped
+  background entries; the committed foreground capture proves a foreground task
+  emits NO rail frames at all).
+- **D54 — Honest dead spawns: capture claude's stderr; a pre-init death never
+  invites a doomed resume (S3).** The Port dropped the child's stderr, so a
+  rejected argv (nonzero exit, ZERO ndjson frames, reason on stderr) surfaced as
+  "session ended — send a message to resume it" and the resume re-died blind.
+  Fix: spawn via `/bin/sh -c 'exec "$0" "$@" 2>>file'` — exec replaces the shell
+  with claude (Port close/signals intact, stdout pristine ndjson); only fd 2 goes
+  to a bounded per-session tmp file, removed on every teardown. On exit_status
+  the Session tails it (~20 lines / 8KB) and the exit message becomes
+  `{:claude_chat_exit, status, stderr_tail}` (crash/idle-reap paths carry nil).
+  ChatLive gates on the `init` assign: nonzero exit BEFORE any init ⇒ "Claude
+  failed to start (exit N): reason" with NO resume invite; a death after init
+  keeps the invite and appends the reason. build_args untouched (all flags
+  ratified per D53) — the bug is latent, shipped as robustness with
+  fake-subprocess proofs + the real-binary e2e proving stdout unbroken.
+- **D55 — Bypass arming is a LIVE act, not a persisted licence (S4, Option A).**
+  A socket-local `bypass_live_armed` token: false at mount, in
+  load_stored_session and reset_to_new_chat; true ONLY in the type-"bypass"
+  ceremony success branch (dropped on any non-bypass steer). spawn_session's
+  danger-flag gate = live token AND persisted `bypass_armed?` — a reopened
+  bypassPermissions session fail-closes to plan (D48b normalize path) until the
+  ceremony re-runs; the persisted mode alone can never silently re-arm. Honest
+  UI: reopening a bypass session auto-opens the arm panel with a "⚠ Bypass
+  disarmed — re-arm to enable" line (--danger tokens); the selector keeps
+  showing bypassPermissions (row mode untouched). Interplay law (reviewer,
+  rides D52): the init frame of a fail-closed spawn echoes OUR normalized mode —
+  `observe_permission_mode` treats `observed == normalize_mode(held)` as a
+  quiet no-op and never adopts/persists it, so the fail-close can't erase the
+  bypass row the re-arm affordance keys on.
 
 ### Wave 10 plan (decided 2026-07-09) — "prove or refute, then fix in the same wave"
 
-One region-disjoint slice set. **S2 (`scc-w10-probe-suite`, this slice)** owns the
-probe suite (`claude_chat_real_binary_test.exs` — three probe describes), the
-post-plan verdict's fix (`observe_permission_mode` system line +
-chat_live_test.exs six-mode test) and the D34/D52 charter amendments. It does NOT
-touch `api/test/fixtures/claude_chat/` (S1), `claude_chat.ex` spawn/Port/exit
-internals (S3), or the arm/bypass/`load_stored_session` regions (S4). Any
-falsified assumption gets its fix in THIS wave with the probe test proving it;
-the workflow-shape and spawn-flag assumptions were CONFIRMED (no manufactured
-fix), so the only shipped fix is the no-silent-escalation system line the
-post-plan verdict demands (charter D52 product law), which is orthogonal to the
-`"default"` value being the one D34 already assumed.
+Four region-disjoint slices (reviewer-reconciled — the original text predated
+sibling-slice visibility). **S1 (`scc-w10-rail-wire-truth`)** commits the three
+real v2.1.205 captures verbatim as `api/test/fixtures/claude_chat/*.ndjson` and
+fixes the two rail mis-folds the wire exposed: terminal-set running semantics
+(real agent states are ONLY start/done — the old positive running-set matched
+nothing, live agents never breathed) and the provenance-gated vanish→completed
+flip (D47 shared fold), with always-on fixture-fed tests. **S2
+(`scc-w10-probe-suite`)** owns the probe suite (`claude_chat_real_binary_test.exs`
+— three probe describes), the post-plan verdict's fix (`observe_permission_mode`
+system line + chat_live_test.exs six-mode test) and the D34/D52 charter
+amendments; it does NOT touch the fixtures dir (S1), `claude_chat.ex`
+spawn/Port/exit internals (S3), or the arm/bypass/`load_stored_session` regions
+(S4). **S3 (`scc-w10-dead-spawn-honesty`)** ships D54. **S4
+(`scc-w10-rearm-reopen`)** ships D55. Any falsified assumption gets its fix in
+THIS wave with the probe test proving it; the workflow-shape and spawn-flag
+assumptions were CONFIRMED (no manufactured fix), so S2's only shipped fix is
+the no-silent-escalation system line the post-plan verdict demands (charter D52
+product law), which is orthogonal to the `"default"` value being the one D34
+already assumed.
 
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
@@ -1150,6 +1192,72 @@ reconciles the recorder.ex and studio_chat.ex touch points.
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+### Wave 2026-07-09 (wave 10 BUILT + REVIEWED — the real-binary probe wave)
+
+**All four slices green; every wave-9 wire assumption now has a verdict.**
+LANDED: **S1 rail wire truth** (`scc-w10-rail-wire-truth`, branch
+`loop-epic/w10-s1-rail-wire-truth-committed-real-fi-0`) — the three real
+v2.1.205 captures committed VERBATIM (byte-compared against the probe sources)
+as `api/test/fixtures/claude_chat/{workflow_progress,background_tasks,foreground_task}.ndjson`,
+plus the two rail fixes the wire demanded: terminal-set running semantics
+(real agent states are ONLY `start`/`done` — the old positive running-set
+matched nothing, so live agents NEVER breathed) and the provenance-gated
+vanish→completed flip (background-origin entries only; an unrelated snapshot
+can no longer falsely complete a running workflow). Always-on fixture-fed
+tests make the wire contract a permanent regression suite. **S2 probe suite**
+(`scc-w10-probe-suite`, reviewer branch
+`loop-epic/w10-s2-real-binary-probe-suite-workflow--1-r`) — three permanent
+opt-in probes under `:real_binary`: flat-list workflow shape CONFIRMED,
+post-plan permissionMode `"default"` CONFIRMED live (D34 stands, six-mode test
+pinned), spawn flags RATIFIED (`--help` vs code allowlists + one real
+`--effort low` spawn; never a live armed bypass, D53). Ships the D52
+no-silent-escalation line in `observe_permission_mode`. **S3 honest dead
+spawns** (`scc-w10-dead-spawn-honesty`,
+`loop-epic/w10-s3-honest-dead-spawns-capture-claude-2`) — D54: stderr captured
+via the `/bin/sh -c 'exec … 2>>file'` wrapper, exit message is now
+`{:claude_chat_exit, status, stderr_tail}`, pre-init death says "failed to
+start: <reason>" with NO doomed resume invite; real-binary e2e proved stdout
+pristine. **S4 re-arm on reopen** (`scc-w10-rearm-reopen`,
+`loop-epic/w10-s4-bypass-arming-is-a-live-act-reope-3`) — D55: socket-local
+`bypass_live_armed` token; a reopened bypass session fail-closes to plan until
+the ceremony re-runs; honest auto-opened "Bypass disarmed — re-arm to enable"
+panel.
+
+REVIEWER (this entry): all four gates re-run green in the review worktree
+(S1 five-file suite 453/0 on seeds 37/74/111; S2 real lane 5/0 in 45s —
+post-plan probe re-confirmed `"default"` live — plus 449/0; S3 452/0 ×3 seeds
++ real e2e resume 1/0 through the stderr wrapper; S4 453/0 + literal-check).
+Fixes applied on `-r` branches: (1) S2 `observe_permission_mode` — honest
+copy split ("after plan approval" ONLY for the proven plan→default signature;
+generic "(reported by the agent)" otherwise) and a normalize-echo guard: the
+init of a fail-closed disarmed-bypass spawn (D55) echoes OUR normalized mode
+and must be a quiet no-op, never adopted — without this, the first send after
+a bypass reopen erased the persisted bypass row and mislabeled it "after plan
+approval" (S2×S4 interplay, unit-tested). (2) S2 probe drivers now match BOTH
+exit-tuple shapes so S3's 3-tuple merge can't degrade flunks to timeouts;
+probe file formatted. (3) S4 disarmed panel gated on `not live?` — reopening
+a session whose (possibly armed) runtime is STILL LIVE no longer shows a false
+"disarmed" banner; the token still drops, so the next respawn stays
+fail-closed (unit-tested). Charter reconciled: D54/D55 written in (the S2
+builder authored wave-10 sections before sibling slices were visible), D56's
+"remain open" ride-along claim corrected — both ride-alongs were resolved this
+wave (S4 product law; S1 provenance gate + the foreground capture proving
+foreground tasks emit no rail frames).
+
+NEXT WAVE should take: (1) integration is S1 → S2-r → S3 → S4-r; after S3
+merges, grep `api/` for any remaining 2-tuple `{:claude_chat_exit,` receives
+(review left none, but hotfixes move fast). (2) The mode selector still shows
+`bypassPermissions` while a fail-closed session actually RUNS plan — D55
+accepted this; a future wave could surface "running as plan (disarmed)" in
+the selector/status line. (3) The rail's terminal set includes speculative
+states (failed/error/canceled…) the binary has never emitted — harmless, but
+the probe's @known_agent_states is the tripwire; keep them in sync if a new
+state appears. (4) Recorder-level mixed workflow+background integration test
+(S1 flagged: pure-fold coverage transfers by construction, but a dedicated
+Recorder test would pin the seam). (5) The composer/agents surface is now
+probe-backed end-to-end — the next quality vein is likely the wave-9 leftover
+QA matrix ride-alongs or user-visible polish, not more wire archaeology.
 
 - **2026-07-09 wave 9 CRASH RECOVERY** (host crash ~18:20 killed all four
   epic-builder processes; the bp ledger survived intact): this is a
