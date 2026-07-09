@@ -101,8 +101,10 @@ The `env` block is the whole instance override. `bp`'s environment layer sits
 **above** the `~/.config/barkpark/` config file, so `BARKPARK_API_URL` +
 `BARKPARK_API_TOKEN` in the stanza aim this server at any Barkpark — a hosted
 instance, a teammate's, or `http://localhost:4000` — no matter what `bp setup`
-saved. A server whose Tasks plugin is disabled simply exposes no task tools; it
-still starts cleanly.
+saved. A server whose Tasks plugin is disabled fails fast at startup with a
+clear `manifest has no task.<verb> verb` error on stderr — better than coming up
+healthy-looking with zero tools. Point the stanza at a Barkpark with Tasks
+enabled.
 
 ### The tools
 
