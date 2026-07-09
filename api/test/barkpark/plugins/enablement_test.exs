@@ -195,6 +195,22 @@ defmodule Barkpark.Plugins.EnablementTest do
     end
   end
 
+  describe "for_plugin/2" do
+    test "returns the full entry for a known plugin" do
+      eff = %{"onixedit" => %{enabled: false, placement: :plugins}}
+      assert Enablement.for_plugin(eff, "onixedit") == %{enabled: false, placement: :plugins}
+    end
+
+    test "unknown plugin falls back to enabled + :plugins" do
+      assert Enablement.for_plugin(%{}, "nope") == %{enabled: true, placement: :plugins}
+    end
+
+    test "malformed entry falls back to the unknown default" do
+      assert Enablement.for_plugin(%{"x" => %{enabled: "yes"}}, "x") ==
+               %{enabled: true, placement: :plugins}
+    end
+  end
+
   # ── Tenancy accessors ──────────────────────────────────────────────────────
 
   describe "Tenancy plugin-settings accessors" do

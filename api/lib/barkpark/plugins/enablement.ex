@@ -86,6 +86,25 @@ defmodule Barkpark.Plugins.Enablement do
     end
   end
 
+  @doc """
+  Look up one plugin's full `%{enabled, placement}` entry in an already-
+  resolved `effective/1` map, falling back to the unknown-plugin default
+  (`enabled: true, placement: :plugins`) when the map does not carry it.
+
+  Convenience over `enabled?/2` + `placement/2` for callers that need both
+  (the tiered-tree builder resolves each plugin's tier from this entry).
+  """
+  @spec for_plugin(%{optional(String.t()) => entry()}, String.t()) :: entry()
+  def for_plugin(effective, plugin_name) when is_map(effective) and is_binary(plugin_name) do
+    case Map.get(effective, plugin_name) do
+      %{enabled: e, placement: p} when is_boolean(e) and p in @placements ->
+        %{enabled: e, placement: p}
+
+      _ ->
+        @unknown
+    end
+  end
+
   # ── Declaration defaults ──────────────────────────────────────────────────
 
   # Build the baseline map from every REGISTERED plugin's compile-time
