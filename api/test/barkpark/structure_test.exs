@@ -487,12 +487,13 @@ defmodule Barkpark.StructureTest do
 
       # The ownership reject keeps a disabled plugin's private type OUT of the
       # host Settings singleton group — no masquerade, no census theft.
+      # seed_legacy/1 always seeds host private singletons, so the Settings
+      # group MUST exist — a nil here would make the leak refute vacuous.
       settings = settings_node(tree)
+      assert %Node{} = settings, "host private singletons must produce a Settings group"
 
-      if settings do
-        refute "ticket" in Enum.map(settings.items, & &1.type_name),
-               "a plugin-owned private type must not surface as a Settings singleton"
-      end
+      refute "ticket" in Enum.map(settings.items, & &1.type_name),
+             "a plugin-owned private type must not surface as a Settings singleton"
 
       rest = rest_node(tree)
       assert %Node{} = rest
@@ -526,13 +527,14 @@ defmodule Barkpark.StructureTest do
              end),
              "an enabled :main plugin's type lives top-level in MAIN"
 
-      # …and NOT also under Settings.
+      # …and NOT also under Settings. seed_legacy/1 always seeds host private
+      # singletons, so the Settings group MUST exist — a nil here would make
+      # the double-list refute vacuous.
       settings = settings_node(tree)
+      assert %Node{} = settings, "host private singletons must produce a Settings group"
 
-      if settings do
-        refute "sheet" in Enum.map(settings.items, & &1.type_name),
-               "a plugin-owned private type must not double-list under Settings"
-      end
+      refute "sheet" in Enum.map(settings.items, & &1.type_name),
+             "a plugin-owned private type must not double-list under Settings"
     end
 
     test "an orphaned doc type (no schema) still surfaces in …Rest as a plain node" do
