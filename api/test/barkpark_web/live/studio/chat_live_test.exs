@@ -765,6 +765,197 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "✗ denied"
     end
 
+    # ── AskUserQuestion answer form + ExitPlanMode plan card (charter D31/D32) ─
+
+    defp ask_question(view, rid, questions) do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: rid,
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => questions},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+    end
+
+    test "an AskUserQuestion ask renders an answer FORM, not an Allow/Deny card",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "help me choose"})
+
+      ask_question(view, "q-1", [
+        %{
+          "question" => "Which pet?",
+          "header" => "Pets",
+          "multiSelect" => false,
+          "options" => [
+            %{"label" => "Cat", "description" => "aloof"},
+            %{"label" => "Dog", "description" => "loyal"}
+          ]
+        }
+      ])
+
+      html = render(view)
+      assert html =~ "The agent is asking you"
+      assert html =~ "Which pet?"
+      assert html =~ "Cat"
+      assert html =~ "Dog"
+      assert html =~ ~s(data-question="q-1")
+      assert html =~ ~s(phx-click="question-submit")
+      assert html =~ ~s(phx-click="question-toggle")
+      # a question is NOT a bare approval card
+      refute html =~ "Allow AskUserQuestion?"
+    end
+
+    test "selecting a chip and submitting resolves the question as answered",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-2", [
+        %{
+          "question" => "Which pet?",
+          "multiSelect" => false,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-2"])))
+
+      assert html =~ "✓ answered"
+      refute html =~ "The agent is asking you"
+    end
+
+    test "a multiSelect question accumulates chips (toggle, not replace)", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose many"})
+
+      ask_question(view, "q-3", [
+        %{
+          "question" => "Which pets?",
+          "multiSelect" => true,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      # both chips selected — a multiSelect adds rather than replaces
+      render_click(
+        element(view, ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"]))
+      )
+
+      html =
+        render_click(
+          element(view, ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Dog"]))
+        )
+
+      # both chips read as pressed (accumulated selection, not a single winner)
+      assert html =~ ~s(phx-value-label="Cat" aria-pressed="true") or
+               html =~ ~s(aria-pressed="true")
+
+      html = render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-3"])))
+      assert html =~ "✓ answered"
+    end
+
+    test "a custom free-text answer resolves the question", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-4", [%{"question" => "Anything?", "options" => []}])
+      render(view)
+
+      render_hook(view, "question-custom", %{"rid" => "q-4", "qi" => "0", "value" => "surprise me"})
+      html = render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-4"])))
+
+      assert html =~ "✓ answered"
+    end
+
+    test "dismissing the questions denies honestly", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-5", [%{"question" => "X", "options" => [%{"label" => "A"}]}])
+      render(view)
+
+      html = render_click(element(view, ~s(button[phx-click=question-dismiss][phx-value-rid="q-5"])))
+      assert html =~ "✗ dismissed"
+      refute html =~ "The agent is asking you"
+    end
+
+    test "an ExitPlanMode ask renders a proposed-plan card; Approve resolves it",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "plan it"})
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "p-1",
+           tool_name: "ExitPlanMode",
+           input: %{"plan" => "# Ship it\n- step one"},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Plan ready for review"
+      assert html =~ "step one"
+      assert html =~ ~s(data-plan="p-1")
+      # the minimal fallback still routes through the real allow/deny path
+      assert html =~ ~s(phx-click="approve")
+      assert html =~ "Keep planning"
+
+      html = render_click(element(view, ~s(button[phx-click=approve][phx-value-rid="p-1"])))
+      assert html =~ "✓ plan approved"
+    end
+
+    # Charter D35 — a resolution BROADCASTS so a co-viewing tab's open form
+    # converges instead of lingering answerable after the ask is already handled.
+    test "resolving a question converges a co-viewing tab", %{view: view, conn: conn} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+      sid = store_id(view)
+
+      {:ok, view_b, _html} = live(conn, "/studio/chat/#{sid}")
+
+      send_frame(
+        sid,
+        {:claude_chat_permission,
+         %{
+           request_id: "q-9",
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => [%{"question" => "Pick", "options" => [%{"label" => "A"}]}]},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      # both tabs render the open form
+      assert render(view) =~ "The agent is asking you"
+      assert render(view_b) =~ "The agent is asking you"
+
+      # answer on tab A
+      render_click(
+        element(view, ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="A"]))
+      )
+
+      render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-9"])))
+
+      # tab B converges: the form is gone, the terminal line is shown
+      html_b = render(view_b)
+      assert html_b =~ "✓ answered"
+      refute html_b =~ "The agent is asking you"
+    end
+
     test "switching mode steers the LIVE session in place (no respawn, no teardown)",
          %{view: view} do
       # spawn is lazy now — establish a live subprocess, then finish the turn

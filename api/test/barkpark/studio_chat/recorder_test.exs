@@ -125,6 +125,46 @@ defmodule Barkpark.StudioChat.RecorderTest do
     assert row.metadata["request_id"] == "req-1"
   end
 
+  test "the store is the router: AskUserQuestion persists a 'question' row (D31)",
+       %{sid: sid, recorder: recorder} do
+    frame(
+      recorder,
+      {:claude_chat_permission,
+       %{
+         request_id: "q-1",
+         tool_name: "AskUserQuestion",
+         input: %{"questions" => [%{"question" => "Pick"}]},
+         title: nil,
+         decision_reason: nil
+       }}
+    )
+
+    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "q-1"))
+    assert row.role == "question"
+    assert row.metadata["approval_status"] == "pending"
+    # a question STILL raises the one "needs you" counter (widened role set)
+    assert StudioChat.get_session(sid).pending_approvals == 1
+  end
+
+  test "the store is the router: ExitPlanMode persists a 'plan' row (D31)",
+       %{sid: sid, recorder: recorder} do
+    frame(
+      recorder,
+      {:claude_chat_permission,
+       %{
+         request_id: "p-1",
+         tool_name: "ExitPlanMode",
+         input: %{"plan" => "# Plan\n- step"},
+         title: nil,
+         decision_reason: nil
+       }}
+    )
+
+    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "p-1"))
+    assert row.role == "plan"
+    assert StudioChat.get_session(sid).pending_approvals == 1
+  end
+
   test "every frame rebroadcasts to PubSub subscribers", %{sid: sid, recorder: recorder} do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
 
@@ -240,6 +280,37 @@ defmodule Barkpark.StudioChat.RecorderTest do
       )
 
       assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "waiting: Write"}}
+    end
+
+    test "the needs-you line reads by role: 'asking you' / 'plan ready' (D35)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{
+           request_id: "q",
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => []},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "asking you"}}
+
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{
+           request_id: "p",
+           tool_name: "ExitPlanMode",
+           input: %{"plan" => "x"},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "plan ready"}}
     end
 
     test "an exit publishes offline", %{sid: sid, recorder: recorder} do

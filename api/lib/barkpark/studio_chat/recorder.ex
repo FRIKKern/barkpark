@@ -166,7 +166,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
     {:noreply,
      state
-     |> publish_activity(%{state: :needs_you, line: "waiting: #{ask.tool_name}"})
+     |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
      |> touch()}
   end
 
@@ -234,11 +234,12 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp persist_approval_ask(session_id, ask) do
     text = ask.title || tool_line(ask.tool_name, ask.input)
+    role = permission_role(ask.tool_name)
 
     persist(
       session_id,
       %{
-        role: "approval",
+        role: role,
         source_markdown: text,
         metadata: %{
           "request_id" => ask.request_id,
@@ -247,9 +248,24 @@ defmodule Barkpark.StudioChat.Recorder do
           "approval_status" => "pending"
         }
       },
-      "approval"
+      role
     )
   end
+
+  # The store is the router (charter D31): the same wire ask becomes one of
+  # three roles by its tool_name, each rendered as a distinct surface
+  # downstream. Message.role is a free string — no migration. All three count
+  # as "the agent needs you" (the widened needs-you role set in StudioChat).
+  defp permission_role("AskUserQuestion"), do: "question"
+  defp permission_role("ExitPlanMode"), do: "plan"
+  defp permission_role(_), do: "approval"
+
+  # The live-activity line the sidebar shows while an ask is pending (charter
+  # D35). A question is asking you something; a proposed plan is ready to
+  # review; any other tool is waiting on an approval named by its tool.
+  defp needs_you_line("AskUserQuestion"), do: "asking you"
+  defp needs_you_line("ExitPlanMode"), do: "plan ready"
+  defp needs_you_line(tool_name), do: "waiting: #{tool_name}"
 
   defp record_result(session_id, ev) do
     StudioChat.record_result_metrics(session_id, %{

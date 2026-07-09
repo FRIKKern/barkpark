@@ -74,11 +74,17 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   end
 
   describe "permission modes" do
-    test "plan mode has no permission bridge; asking modes add stdio prompt tool" do
+    test "the stdio permission bridge ships in ALL modes, plan included (charter D33)" do
       {_exe, plan_args} = with_default_command(fn -> ClaudeChat.command("plan") end)
       {_exe, ask_args} = with_default_command(fn -> ClaudeChat.command("default") end)
 
-      refute "--permission-prompt-tool" in plan_args
+      # Plan mode is the product default and every plan session hits
+      # ExitPlanMode — without the flag that ask never reaches Barkpark, so the
+      # proposed-plan card could never render.
+      assert Enum.chunk_every(plan_args, 2, 1)
+             |> Enum.member?(["--permission-prompt-tool", "stdio"])
+
+      assert Enum.chunk_every(plan_args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
 
       assert Enum.chunk_every(ask_args, 2, 1)
              |> Enum.member?(["--permission-prompt-tool", "stdio"])
@@ -145,6 +151,15 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--session-id", @uuid])
     end
 
+    # Charter D33 — proved through the PURE seam (never `:command`, which bypasses
+    # build_args): plan mode carries the stdio bridge exactly like the asking
+    # modes, so ExitPlanMode asks reach Barkpark and the plan card can render.
+    test "plan mode carries --permission-prompt-tool stdio (D33)" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-prompt-tool", "stdio"])
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
+    end
+
     test "command/2 threads session_opts through the default args" do
       {_exe, args} =
         with_default_command(fn -> ClaudeChat.command("plan", %{session_id: @uuid}) end)
@@ -172,19 +187,73 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                      2_000
     end
 
-    test "respond_permission writes an allow control_response (loopback via cat)" do
+    test "a bare allow with no tracked ask echoes an empty updatedInput (charter D32)" do
       put_chat_config(command: {"cat", []})
 
       {:ok, session} = ClaudeChat.start_session(%{sink: self()})
       ClaudeChat.respond_permission(session, "req-9", :allow)
 
+      # Even a bare allow ALWAYS carries updatedInput — a `{"behavior":"allow"}`
+      # with no updatedInput FAILS ExitPlanMode on the real binary (D32). With
+      # no ask tracked for this id the echo is the empty map.
       assert_receive {:claude_chat_event,
                       %{
                         "type" => "control_response",
                         "response" => %{
                           "subtype" => "success",
                           "request_id" => "req-9",
-                          "response" => %{"behavior" => "allow"}
+                          "response" => %{"behavior" => "allow", "updatedInput" => %{}}
+                        }
+                      }},
+                     2_000
+    end
+
+    test "a plain allow echoes the ORIGINAL tracked ask input as updatedInput (D32)" do
+      # The script emits a can_use_tool ask (so the Session tracks its input by
+      # request_id), then `cat` loops the control_response back to us.
+      script = ~s(printf '%s\n' '#{@can_use_tool}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert_receive {:claude_chat_permission, %{request_id: "req-1"}}, 2_000
+
+      # A PLAIN :allow — the caller never round-trips the input; the Session
+      # echoes the tracked ask input verbatim.
+      ClaudeChat.respond_permission(session, "req-1", :allow)
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "control_response",
+                        "response" => %{
+                          "request_id" => "req-1",
+                          "response" => %{
+                            "behavior" => "allow",
+                            "updatedInput" => %{"file_path" => "/tmp/x"}
+                          }
+                        }
+                      }},
+                     2_000
+    end
+
+    test "an {:allow, updated} carries the CALLER's updatedInput (question answers, D32)" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+
+      answered = %{
+        "questions" => [%{"question" => "Pick a pet"}],
+        "answers" => %{"Pick a pet" => "Cat, Dog"}
+      }
+
+      ClaudeChat.respond_permission(session, "req-9", {:allow, answered})
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "response" => %{
+                          "response" => %{
+                            "behavior" => "allow",
+                            "updatedInput" => ^answered
+                          }
                         }
                       }},
                      2_000
