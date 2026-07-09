@@ -875,20 +875,34 @@ defmodule Barkpark.StudioChat do
 
   def workflow_node_terminal?(_), do: false
 
-  # A FAILURE terminal (✕) — terminal but never a success. Kept private; the
-  # summary counts (agents_done vs agents_failed) are the public surface.
-  defp workflow_node_failed?(%{"state" => s}), do: workflow_node_failed?(s)
-  defp workflow_node_failed?(s) when is_binary(s), do: String.downcase(s) in @workflow_node_failed
-  defp workflow_node_failed?(_), do: false
+  @doc """
+  True when a workflow-agent node (or a bare state string) reached a FAILURE
+  terminal (✕) — terminal but never a success (charter D58). Public alongside
+  `workflow_node_terminal?/1` so the rail's per-agent glyphs and the journey
+  counts read the SAME failure set — one owner, no drift.
+  """
+  @spec workflow_node_failed?(any()) :: boolean()
+  def workflow_node_failed?(%{"state" => s}), do: workflow_node_failed?(s)
+
+  def workflow_node_failed?(s) when is_binary(s),
+    do: String.downcase(s) in @workflow_node_failed
+
+  def workflow_node_failed?(_), do: false
 
   @doc """
   Derive the phase JOURNEY of a rail entry (charter D57–D59) — pure, render-time.
 
   Input is a rail entry: `%{"workflow" => flat_node_list, "status" => ...}` (the
   exact shape the Recorder persists). Returns
-  `%{phases: [phase, …], summary: map}` where each `phase` is
-  `%{index, title, status, agents, agent_count, tokens, model}` and `status` is
-  one of the four-state truth table (D58):
+  `%{phases: [phase, …], summary: map}` — the wave-11 PINNED contract:
+
+      phase   = %{index, title, status, agents, running, done, failed, total,
+                  tokens, model}
+      summary = %{phase_total, phases_run, skipped, active: %{index, title} | nil,
+                  agents_total, running, done, failed, tokens, entry_status}
+
+  (`model` and `entry_status` are additive extras.) `status` is one of the
+  four-state truth table (D58):
 
     * `:done`       — has agents, all terminal, and it is behind the frontier (a
                       later phase has agents) or the whole cycle completed.
@@ -942,7 +956,11 @@ defmodule Barkpark.StudioChat do
           title: p["title"],
           status: phase_status(agents, idx, frontier, kind),
           agents: agents,
-          agent_count: length(agents),
+          running: Enum.count(agents, &(not workflow_node_terminal?(&1))),
+          done:
+            Enum.count(agents, &(workflow_node_terminal?(&1) and not workflow_node_failed?(&1))),
+          failed: Enum.count(agents, &workflow_node_failed?/1),
+          total: length(agents),
           tokens: sum_node_tokens(agents),
           model: phase_model(agents)
         }
@@ -994,8 +1012,10 @@ defmodule Barkpark.StudioChat do
   end
 
   # The entry-row aggregates (D57) — every number here settles on a state flip;
-  # none is a live counter. `current_*` is the active/interrupted phase (the m in
+  # none is a live counter. `active` is the active/interrupted phase (the m in
   # "m/n"); nil on a completed cycle, which collapses to "k of n phases" instead.
+  # Key names are the wave-11 PINNED contract (charter) — S2's markup consumes
+  # them verbatim; renaming any of them breaks the render.
   defp journey_summary(phases, kind) do
     all_agents = Enum.flat_map(phases, & &1.agents)
 
@@ -1004,33 +1024,31 @@ defmodule Barkpark.StudioChat do
 
     %{
       entry_status: kind,
-      phases_total: length(phases),
-      phases_done: Enum.count(phases, &(&1.status == :done)),
-      phases_skipped: Enum.count(phases, &(&1.status == :skipped)),
-      current_index: current && current.index,
-      current_title: current && current.title,
+      phase_total: length(phases),
+      phases_run: Enum.count(phases, &(&1.status == :done)),
+      skipped: Enum.count(phases, &(&1.status == :skipped)),
+      active: current && %{index: current.index, title: current.title},
       agents_total: length(all_agents),
-      agents_running: Enum.count(all_agents, &(not workflow_node_terminal?(&1))),
-      agents_done:
+      running: Enum.count(all_agents, &(not workflow_node_terminal?(&1))),
+      done:
         Enum.count(all_agents, &(workflow_node_terminal?(&1) and not workflow_node_failed?(&1))),
-      agents_failed: Enum.count(all_agents, &workflow_node_failed?/1),
-      tokens_total: sum_node_tokens(all_agents)
+      failed: Enum.count(all_agents, &workflow_node_failed?/1),
+      tokens: sum_node_tokens(all_agents)
     }
   end
 
   defp empty_journey_summary do
     %{
       entry_status: :live,
-      phases_total: 0,
-      phases_done: 0,
-      phases_skipped: 0,
-      current_index: nil,
-      current_title: nil,
+      phase_total: 0,
+      phases_run: 0,
+      skipped: 0,
+      active: nil,
       agents_total: 0,
-      agents_running: 0,
-      agents_done: 0,
-      agents_failed: 0,
-      tokens_total: 0
+      running: 0,
+      done: 0,
+      failed: 0,
+      tokens: 0
     }
   end
 
