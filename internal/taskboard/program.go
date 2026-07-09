@@ -399,16 +399,6 @@ func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleKey is the navigation-shell dispatcher (charter D29): two navigation
-// domains, one entry point keyed on the stack-top frame kind. The BOARD frame
-// (level 0) keeps its native grammar unchanged; a pushed reading frame
-// (FrameTask/FramePaper) navigates its []Stop. `esc`/`backspace` always ascend
-// (pop, no-op at root) and `q`/ctrl+c always quit, whatever the frame.
-//
-// Two cross-cutting rules run first: every keypress clears the action strip (it
-// is transient — "cleared on the next keypress"), and every key EXCEPT a
-// repeated x disarms the close guard (a second consecutive x is the only thing
-// that confirms a close; anything else cancels it).
 // setHoverTarget is the whole flicker discipline for the mouse hover tint
 // (charter D95, the never-flickers law). It stores the ttm-s1-resolved pointer
 // target (a selectable row's Ref, "" when the pointer is over nothing
@@ -426,6 +416,16 @@ func setHoverTarget(st UIState, target string) (UIState, bool) {
 	return st, true
 }
 
+// handleKey is the navigation-shell dispatcher (charter D29): two navigation
+// domains, one entry point keyed on the stack-top frame kind. The BOARD frame
+// (level 0) keeps its native grammar unchanged; a pushed reading frame
+// (FrameTask/FramePaper) navigates its []Stop. `esc`/`backspace` always ascend
+// (pop, no-op at root) and `q`/ctrl+c always quit, whatever the frame.
+//
+// Two cross-cutting rules run first: every keypress clears the action strip (it
+// is transient — "cleared on the next keypress"), and every key EXCEPT a
+// repeated x disarms the close guard (a second consecutive x is the only thing
+// that confirms a close; anything else cancels it).
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key != "x" {
