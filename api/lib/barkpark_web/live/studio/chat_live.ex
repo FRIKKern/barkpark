@@ -26,6 +26,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   use BarkparkWeb, :live_view
 
+  alias Barkpark.PortableDoc.FromMarkdown
+  alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Studio.ClaudeChat
 
   @impl true
@@ -119,7 +121,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     socket =
       Enum.reduce(blocks, socket, fn
         %{"type" => "text", "text" => text}, acc when is_binary(text) ->
-          if String.trim(text) == "", do: acc, else: append_message(acc, :assistant, text)
+          if String.trim(text) == "" do
+            acc
+          else
+            append_message(acc, :assistant, text, html: render_paper_html(text))
+          end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
           append_message(acc, :tool, tool_line(name, block["input"]))
@@ -206,7 +212,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   </div>
                 </div>
               <% :assistant -> %>
-                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">
+                <div
+                  :if={message.html}
+                  class="bp-paper-surface bp-chat-md"
+                  style="overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;"
+                >
+                  {Phoenix.HTML.raw(message.html)}
+                </div>
+                <div
+                  :if={message.html == nil}
+                  class="text-sm"
+                  style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+                >
                   <%= message.text %>
                 </div>
               <% :tool -> %>
@@ -270,13 +287,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp append_message(socket, role, text) do
+  defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id
+    message = %{id: id, role: role, text: text, html: Keyword.get(opts, :html)}
 
     assign(socket,
-      messages: socket.assigns.messages ++ [%{id: id, role: role, text: text}],
+      messages: socket.assigns.messages ++ [message],
       next_id: id + 1
     )
+  end
+
+  # Assistant markdown -> PortableDoc blocks -> the SAME article renderer the
+  # paper reader uses. The renderer escapes all text at walk time, so the
+  # fragment is safe to embed with raw/1. Fail-soft: any crash means the
+  # message falls back to its plain-text form (html: nil).
+  defp render_paper_html(markdown) do
+    markdown
+    |> FromMarkdown.blocks()
+    |> Render.render_blocks(%{style: :article})
+  rescue
+    _ -> nil
   end
 
   defp tool_line(name, input) when is_map(input) do

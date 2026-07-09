@@ -50,6 +50,9 @@ defmodule Barkpark.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
+      # GFM markdown -> AST for chat replies rendered as PortableDoc blocks
+      # (Barkpark.PortableDoc.FromMarkdown). Parser only, no HTML transform.
+      {:earmark_parser, "~> 1.4"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:corsica, "~> 2.1"},

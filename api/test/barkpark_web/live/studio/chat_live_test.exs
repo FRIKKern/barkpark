@@ -138,6 +138,48 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "▌"
     end
 
+    test "assistant markdown renders through the paper engine", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "text",
+                 "text" =>
+                   "## Findings\n\nSome **bold** truth.\n\n```portabledoc\n[{\"type\":\"callout\",\"tone\":\"success\",\"content\":[{\"type\":\"text\",\"value\":\"native block\"}]}]\n```"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "bp-paper-surface"
+      assert html =~ "Findings"
+      assert html =~ "native block"
+      # markdown syntax must not leak through as literal text
+      refute html =~ "**bold**"
+      refute html =~ "## Findings"
+    end
+
+    test "model HTML in a reply is escaped, never executed", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [%{"type" => "text", "text" => "hi <script>alert(1)</script>"}]
+           }
+         }}
+      )
+
+      refute render(view) =~ "<script>alert(1)"
+    end
+
     test "tool_use blocks render as dim activity lines", %{view: view} do
       send(
         view.pid,
