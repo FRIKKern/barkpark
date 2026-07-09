@@ -523,17 +523,26 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     end
   end
 
-  # ── doc-row items + list_preview ───────────────────────────────────────────
+  # ── doc-row items: preview manifest → list_preview ──────────────────────────
   #
   # Shared row builder for BOTH document-list branches
-  # (`:document_type_list` and `:plugin_document_list`). When the schema
-  # declares `list_preview` — `%{"badge" => <spec>, "meta" => <spec>}`,
-  # each spec a content-field name string or `%{"field" => f, "prefix"
-  # => p}` — the named content values ride along on each row map as
-  # `:badge` / `:meta` strings. No declaration → both keys are `nil` and
-  # the row renders exactly as before (post/page/paper back-compat lock).
-  # Generic by construction: any schema (host seed, plugin, ad-hoc) can
-  # declare it; PaneBuilder never branches on the document type.
+  # (`:document_type_list` and `:plugin_document_list`). Two row sources,
+  # in priority order (Preview Contract D17):
+  #
+  #   1. Manifest-first for BLOCK docs. A paper/sheet/form write stamps an
+  #      OG-shaped manifest at `content["preview"]` (Projection.project/4).
+  #      When present, the row's `:meta` is the manifest description — a
+  #      one-line summary the row never had — and `:badge` stays nil
+  #      (the sparse share manifest carries no badge vocabulary).
+  #   2. list_preview for FIELDFUL docs. task/ticket never enter
+  #      Projection.project (no blocks → no manifest, writer.ex:576-594), so
+  #      they keep the schema-declared `list_preview` — `%{"badge" => <spec>,
+  #      "meta" => <spec>}`, each spec a content-field name string or
+  #      `%{"field" => f, "prefix" => p}` — surfaced as `:badge`/`:meta`.
+  #
+  # No manifest AND no declaration → both keys `nil`, the row renders exactly
+  # as before (post/page back-compat lock). Generic by construction: PaneBuilder
+  # never branches on the document type; the manifest's presence is the switch.
 
   defp doc_items(docs, schema) do
     preview = schema_list_preview(schema)
@@ -541,16 +550,47 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
 
-      %{
+      row = %{
         type: :doc,
         id: pub_id,
         title: doc.title || "Untitled",
         is_draft: Content.draft?(doc.doc_id),
-        status: doc.status,
-        badge: preview_value(doc, Map.get(preview, "badge")),
-        meta: preview_value(doc, Map.get(preview, "meta"))
+        status: doc.status
       }
+
+      Map.merge(row, row_preview(doc, preview))
     end)
+  end
+
+  # Manifest-first, list_preview otherwise. A stamped `content["preview"]`
+  # (block docs) wins; a manifest-less doc (task/ticket + any classic doc)
+  # falls through to the schema's `list_preview` declaration — the shipped
+  # task lifecycle badge + P-prefixed priority meta stay byte-identical.
+  defp row_preview(doc, list_preview) do
+    case manifest_description(doc) do
+      desc when is_binary(desc) -> %{badge: nil, meta: desc}
+      nil -> list_preview_row(doc, list_preview)
+    end
+  end
+
+  defp list_preview_row(doc, list_preview) do
+    %{
+      badge: preview_value(doc, Map.get(list_preview, "badge")),
+      meta: preview_value(doc, Map.get(list_preview, "meta"))
+    }
+  end
+
+  # The OG description off a doc's write-time preview manifest, or nil when the
+  # doc carries no manifest (task/ticket/classic docs) or an empty description.
+  # The manifest is `content["preview"]`, a string-keyed map (Barkpark.Preview).
+  defp manifest_description(doc) do
+    with %{} = content <- Map.get(doc, :content),
+         %{"description" => desc} when is_binary(desc) <- Map.get(content, "preview"),
+         trimmed when trimmed != "" <- String.trim(desc) do
+      trimmed
+    else
+      _ -> nil
+    end
   end
 
   defp schema_list_preview(nil), do: %{}

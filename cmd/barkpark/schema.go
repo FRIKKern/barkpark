@@ -1,6 +1,11 @@
 package main
 
-import "github.com/FRIKKern/barkpark/internal/apiclient"
+import (
+	"encoding/json"
+	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
+)
 
 // The schema model types now live in the framework-free apiclient package.
 // These aliases keep the existing TUI code (tui.go, structure.go, selector.go)
@@ -66,4 +71,38 @@ func previewValue(doc Doc, spec *apiclient.PreviewSpec) string {
 		return ""
 	}
 	return spec.Prefix + v
+}
+
+// rowMeta resolves the dimmed meta suffix for a doc-list row (Preview Contract
+// D17). list_preview WINS: when the schema declares a meta spec — the FIELDFUL
+// task/ticket path — its scalar value renders unchanged, so those rows never
+// regress. Only when NO list_preview meta is declared does the row fall back to
+// the write-time preview manifest's OG description (the BLOCK docs — paper /
+// sheet / form — which carry no list_preview spec but DO gain a stamped
+// content["preview"], hoisted onto the envelope top level as Extra["preview"]).
+// Spec-less AND manifest-less docs → "" (the pre-manifest render, unchanged).
+func rowMeta(doc Doc, preview apiclient.ListPreview) string {
+	if preview.Meta != nil {
+		return previewValue(doc, preview.Meta)
+	}
+	return manifestDescription(doc)
+}
+
+// manifestDescription pulls the OG description out of the write-time preview
+// manifest. Unlike the scalar list_preview fields, the manifest is a JSON
+// OBJECT the envelope hoists to Extra["preview"] (Barkpark.Preview.project).
+// "" when absent, unparseable, or blank — the row then renders without a meta
+// suffix, byte-identical to a manifest-less doc.
+func manifestDescription(doc Doc) string {
+	raw, ok := doc.Extra["preview"]
+	if !ok {
+		return ""
+	}
+	var m struct {
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Description)
 }

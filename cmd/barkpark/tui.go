@@ -462,7 +462,7 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 			Subtitle: timeAgo(docs[i].UpdatedAt),
 			Doc:      &docs[i],
 			Badge:    previewValue(docs[i], preview.Badge),
-			Meta:     previewValue(docs[i], preview.Meta),
+			Meta:     rowMeta(docs[i], preview),
 		})
 	}
 	return Pane{Node: node, Items: items, IsDocList: true}
