@@ -704,6 +704,63 @@ defmodule Barkpark.StudioChatTest do
       assert 0 == StudioChat.cancel_pending_approvals(s.id)
       assert reload(s.id).pending_approvals == 0
     end
+
+    # Charter D31 — the needs-you role set (approval | question | plan) is ONE
+    # counter. Every seam that gates on a pending ask must treat all three
+    # identically, or the sidebar pill / cancel / resolve lie for questions.
+    defp ask_role(session, request_id, role) do
+      {:ok, m} =
+        StudioChat.append_message(session, %{
+          role: role,
+          source_markdown: "ask #{request_id}",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => role,
+            "input" => %{},
+            "approval_status" => "pending"
+          }
+        })
+
+      m
+    end
+
+    test "question and plan asks BOTH raise the one pending counter (D31)" do
+      s = new_session()
+      ask_role(s, "q-1", "question")
+      ask_role(s, "p-1", "plan")
+      ask_role(s, "a-1", "approval")
+
+      assert reload(s.id).pending_approvals == 3
+    end
+
+    test "a question ask resolves + decrements exactly like an approval (D31)" do
+      s = new_session()
+      ask_role(s, "q-1", "question")
+      assert reload(s.id).pending_approvals == 1
+
+      assert {:ok, m} = StudioChat.update_approval_status(s.id, "q-1", "allowed")
+      assert m.metadata["approval_status"] == "allowed"
+      assert reload(s.id).pending_approvals == 0
+    end
+
+    test "cancel_pending_approvals cancels question AND plan rows too (D31)" do
+      s = new_session()
+      ask_role(s, "q-1", "question")
+      ask_role(s, "p-1", "plan")
+      ask_role(s, "a-1", "approval")
+      assert reload(s.id).pending_approvals == 3
+
+      assert 3 == StudioChat.cancel_pending_approvals(s.id)
+      assert reload(s.id).pending_approvals == 0
+
+      statuses =
+        StudioChat.list_messages(s.id)
+        |> Enum.filter(&(&1.role in ~w(approval question plan)))
+        |> Enum.map(& &1.metadata["approval_status"])
+        |> Enum.uniq()
+
+      assert statuses == ["canceled"]
+    end
   end
 
   describe "set_draft/2 — sticky composer draft (charter D36c)" do
