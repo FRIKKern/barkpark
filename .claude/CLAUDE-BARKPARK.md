@@ -1,7 +1,4 @@
----
-description: Task tracking goes through Barkpark (bp CLI)
-alwaysApply: true
----
+# Barkpark tasks (bp CLI)
 
 All task tracking uses Barkpark — never markdown TODO lists, never a TODO tool.
 The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
@@ -15,11 +12,11 @@ The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
 - `bp capabilities -o json` — the whole API manifest when unsure
 
 Conventions:
-- Worker id: `cursor-<your-name-or-branch>` — pick one and keep it for claim/close symmetry.
+- Worker id: `claude-<your-name-or-branch>` — pick one and keep it for claim/close symmetry.
 - `lifecycle_status` is the done-signal (`open` → `done`), not the claim record.
 - Closing can mark acceptance criteria in the same atomic write:
   `--set 'criteria:=[{"index":0,"met":true,"evidence":"..."}]'`
 - Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.
 - If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.
 
-MCP-native surface? Skip the shell: `bp mcp serve` exposes these verbs as first-class MCP tools — see `docs/setup/CURSOR.md`.
+MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `docs/setup/CLAUDE-CODE.md`.
