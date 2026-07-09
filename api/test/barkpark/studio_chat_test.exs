@@ -326,6 +326,71 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "record_result_metrics/2 — per-turn context snapshot (charter D19)" do
+    test "last_context_tokens is SET (not summed) from the latest frame" do
+      s = new_session()
+
+      {:ok, s1} =
+        StudioChat.record_result_metrics(s.id, %{
+          "usage" => %{
+            "input_tokens" => 100,
+            "output_tokens" => 20,
+            "cache_read_input_tokens" => 5000,
+            "cache_creation_input_tokens" => 300
+          }
+        })
+
+      # 100 + 5000 + 300 + 20 = 5420 (input + cache_read + cache_creation + output)
+      assert s1.last_context_tokens == 5420
+
+      # A SECOND turn REPLACES the snapshot — it never accumulates like the totals do.
+      {:ok, s2} =
+        StudioChat.record_result_metrics(s.id, %{
+          "usage" => %{"input_tokens" => 10, "output_tokens" => 2}
+        })
+
+      assert s2.last_context_tokens == 12
+      # …while the lifetime input totals still sum across both turns.
+      assert s2.input_tokens == 110
+    end
+
+    test "context_window is captured from the frame when present" do
+      s = new_session()
+
+      {:ok, s1} =
+        StudioChat.record_result_metrics(s.id, %{input_tokens: 1, context_window: 200_000})
+
+      assert s1.context_window == 200_000
+    end
+
+    test "a frame WITHOUT a window never clobbers a known one to unknown" do
+      s = new_session()
+      {:ok, _} = StudioChat.record_result_metrics(s.id, %{input_tokens: 1, context_window: 200_000})
+
+      # Next turn's frame carries no window (e.g. a stripped/partial result) —
+      # the last-known window must survive so the ring stays honest.
+      {:ok, s2} = StudioChat.record_result_metrics(s.id, %{input_tokens: 2})
+      assert s2.context_window == 200_000
+    end
+
+    test "a zero / garbage window is ignored (never invents an arc)" do
+      s = new_session()
+      {:ok, s1} = StudioChat.record_result_metrics(s.id, %{input_tokens: 1, context_window: 0})
+      assert is_nil(s1.context_window)
+
+      {:ok, s2} =
+        StudioChat.record_result_metrics(s.id, %{input_tokens: 1, context_window: "nope"})
+
+      assert is_nil(s2.context_window)
+    end
+
+    test "a fresh session with no result has nil snapshot columns" do
+      s = new_session()
+      assert is_nil(s.last_context_tokens)
+      assert is_nil(s.context_window)
+    end
+  end
+
   describe "list_sessions/0 — sidebar" do
     test "returns sessions most-recently-active first" do
       old = new_session()

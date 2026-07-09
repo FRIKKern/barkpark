@@ -501,6 +501,59 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "1.5s"
     end
 
+    # ── context-headroom ring (charter D19) ─────────────────────────────────
+
+    test "the header ring is hollow (honest unknown) before any result", %{view: view} do
+      # A fresh mount has no context snapshot — no fake arc, an em-dash, and a
+      # title that names the unknown.
+      html = render(view)
+      assert html =~ "Context window unknown until the first result"
+      refute html =~ "stroke-dasharray"
+    end
+
+    test "a result frame fills the ring geometry-first + shows cost", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "success",
+           "total_cost_usd" => 0.05,
+           "usage" => %{
+             "input_tokens" => 60_000,
+             "output_tokens" => 4_000,
+             "cache_read_input_tokens" => 0,
+             "cache_creation_input_tokens" => 0
+           },
+           "modelUsage" => %{"claude-opus-4" => %{"contextWindow" => 200_000}}
+         }}
+      )
+
+      html = render(view)
+      # 64000 / 200000 = 32% — the arc length IS the ratio (geometry encodes it).
+      assert html =~ "stroke-dasharray"
+      assert html =~ "32%"
+      # 32% is below 70% → the ok token, never warn/danger.
+      assert html =~ "var(--ok)"
+      assert html =~ "Context: 64000 / 200000 tokens"
+      assert html =~ "$0.0500"
+    end
+
+    test "reopening a stored session shows its last-known headroom", %{view: view} do
+      id = seed_session("resumed chat")
+
+      # A near-full window (185k / 200k = 93%) — the danger ramp.
+      {:ok, _} =
+        StudioChat.record_result_metrics(id, %{input_tokens: 185_000, context_window: 200_000})
+
+      html = render_patch(view, "/studio/chat/#{id}")
+
+      assert html =~ "93%"
+      assert html =~ "var(--danger)"
+    end
+
     test "an error result surfaces a system line", %{view: view} do
       send(
         view.pid,

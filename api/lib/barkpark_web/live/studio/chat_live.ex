@@ -71,6 +71,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          interrupt_requested: false,
          mode_switch_from: nil,
          last_result: nil,
+         ring: blank_ring(),
          title_source: "default",
          title_kicked: false
        )}
@@ -371,7 +372,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           append_message(socket, :system, "The turn ended with an error (#{ev["subtype"]}).")
       end
 
-    record_result(socket, ev)
+    socket = record_result(socket, ev)
     last_result = %{duration_ms: ev["duration_ms"], cost_usd: ev["total_cost_usd"]}
 
     {:noreply,
@@ -756,6 +757,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </option>
           </select>
         </form>
+        <.context_ring ring={@ring} />
         <span class="text-xs text-dim" style="margin-left: auto;">
           <%= status_label(@status) %> — Claude on this host, admins only.
         </span>
@@ -1076,6 +1078,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       interrupt_requested: false,
       mode_switch_from: nil,
       last_result: nil,
+      # Reopen must show the last-known headroom (charter D19) — read the snapshot
+      # off the stored row; nil window renders hollow, never a fake arc.
+      ring: ring_from_session(session),
       # Title state follows the STORED session: a titled (ai/human) session
       # never re-kicks; a still-default one may kick on its next good turn.
       title_source: session.title_source || "default",
@@ -1105,6 +1110,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       interrupt_requested: false,
       mode_switch_from: nil,
       last_result: nil,
+      ring: blank_ring(),
       title_source: "default",
       title_kicked: false,
       renaming_session: nil,
@@ -1207,19 +1213,33 @@ defmodule BarkparkWeb.Studio.ChatLive do
     :ok
   end
 
+  # Record the turn's usage AND capture the per-turn context snapshot for the
+  # header ring (charter D19). The lifetime totals stay summed; last_context_tokens
+  # / context_window are SET from THIS frame (input + both cache reads + output,
+  # and the answering model's contextWindow — never a hardcoded window map). The
+  # returned session drives the ring assign so the header updates on every result.
   defp record_result(socket, ev) do
     if store_id = socket.assigns.store_session_id do
-      StudioChat.record_result_metrics(store_id, %{
-        input_tokens: get_in(ev, ["usage", "input_tokens"]),
-        output_tokens: get_in(ev, ["usage", "output_tokens"]),
-        total_cost_usd: ev["total_cost_usd"],
-        model: result_model(ev)
-      })
+      result =
+        StudioChat.record_result_metrics(store_id, %{
+          input_tokens: get_in(ev, ["usage", "input_tokens"]),
+          output_tokens: get_in(ev, ["usage", "output_tokens"]),
+          cache_read_input_tokens: get_in(ev, ["usage", "cache_read_input_tokens"]),
+          cache_creation_input_tokens: get_in(ev, ["usage", "cache_creation_input_tokens"]),
+          total_cost_usd: ev["total_cost_usd"],
+          model: result_model(ev),
+          context_window: result_context_window(ev)
+        })
 
       StudioChat.update_status(store_id, "active")
-    end
 
-    :ok
+      case result do
+        {:ok, session} -> assign(socket, ring: ring_from_session(session))
+        _ -> socket
+      end
+    else
+      socket
+    end
   end
 
   defp result_model(%{"modelUsage" => usage}) when is_map(usage) do
@@ -1227,6 +1247,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp result_model(_), do: nil
+
+  # The context window for the answering model, read off the frame's modelUsage
+  # (never a hardcoded model→window map — that goes stale silently). nil when the
+  # frame doesn't carry it → the store keeps the last-known window, ring stays honest.
+  defp result_context_window(%{"modelUsage" => usage} = ev) when is_map(usage) do
+    case usage[result_model(ev)] do
+      %{"contextWindow" => cw} when is_integer(cw) and cw > 0 -> cw
+      _ -> nil
+    end
+  end
+
+  defp result_context_window(_), do: nil
 
   # Rebuild the transcript message list from the persisted store. Assistant
   # markdown re-renders through the SAME paper engine used live, so the improving
@@ -1500,6 +1532,101 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp session_stamp(%{last_active_at: t}) when not is_nil(t), do: age_label(t)
   defp session_stamp(%{inserted_at: t}), do: age_label(t)
   defp session_stamp(_), do: nil
+
+  # ── header context-headroom ring (charter D19) ──────────────────────────
+  #
+  # A from-scratch inline-SVG arc (no ring prior art in Studio). The arc length
+  # IS last_context_tokens / context_window — geometry encodes the datum, colour
+  # only reinforces it. Honest unknown: a nil window (pre-migration session, no
+  # result yet) draws the track alone + an em-dash, NEVER a fake full/empty arc.
+
+  # Circumference of the r=15.5 arc, evaluated at compile time. The progress
+  # circle's stroke-dasharray is "<arc> <circ>" — arc = fraction × circ.
+  @ring_circ 2 * :math.pi() * 15.5
+
+  # A ring datum carried in assigns: the CURRENT-turn snapshot, not the summed
+  # totals (which cannot express window occupancy). `cost` is the lifetime total.
+  defp blank_ring, do: %{context_tokens: nil, context_window: nil, cost: 0.0}
+
+  defp ring_from_session(session) do
+    %{
+      context_tokens: session.last_context_tokens,
+      context_window: session.context_window,
+      cost: session.total_cost_usd || 0.0
+    }
+  end
+
+  # Known only when BOTH the used-tokens and a positive window are present.
+  defp ring_geometry(%{context_tokens: used, context_window: window})
+       when is_integer(used) and used >= 0 and is_integer(window) and window > 0 do
+    frac = min(used / window, 1.0)
+    %{known: true, frac: frac, pct: round(frac * 100)}
+  end
+
+  defp ring_geometry(_), do: %{known: false, frac: 0.0, pct: nil}
+
+  # Token ramp (charter D19): ok < 70% · warn 70–90% · danger ≥ 90%. All tokens.
+  defp ring_color(frac) when frac >= 0.9, do: "var(--danger)"
+  defp ring_color(frac) when frac >= 0.7, do: "var(--warn)"
+  defp ring_color(_), do: "var(--ok)"
+
+  defp ring_dash(frac) do
+    arc = frac * @ring_circ
+    "#{Float.round(arc, 2)} #{Float.round(@ring_circ, 2)}"
+  end
+
+  defp ring_title(%{context_tokens: used, context_window: window})
+       when is_integer(used) and is_integer(window) and window > 0 do
+    "Context: #{used} / #{window} tokens"
+  end
+
+  defp ring_title(_), do: "Context window unknown until the first result"
+
+  defp format_cost(cost) when is_number(cost) and cost > 0 do
+    "$" <> :erlang.float_to_binary(cost / 1, decimals: 4)
+  end
+
+  defp format_cost(_), do: "$0.0000"
+
+  attr :ring, :map, required: true
+
+  defp context_ring(assigns) do
+    assigns = assign(assigns, :geo, ring_geometry(assigns.ring))
+
+    ~H"""
+    <div style="display: inline-flex; align-items: center; gap: 8px;" title={ring_title(@ring)}>
+      <div style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
+        <svg width="30" height="30" viewBox="0 0 36 36" style="display: block;" aria-hidden="true">
+          <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--primary-soft)" stroke-width="3.5" />
+          <circle
+            :if={@geo.known}
+            cx="18"
+            cy="18"
+            r="15.5"
+            fill="none"
+            stroke={ring_color(@geo.frac)}
+            stroke-width="3.5"
+            stroke-linecap="round"
+            stroke-dasharray={ring_dash(@geo.frac)}
+            transform="rotate(-90 18 18)"
+          />
+        </svg>
+        <span
+          class="text-dim"
+          style="position: absolute; font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums;"
+        >
+          <%= if @geo.known, do: "#{@geo.pct}%", else: "—" %>
+        </span>
+      </div>
+      <span
+        class="text-xs text-dim"
+        style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;"
+      >
+        <%= format_cost(@ring.cost) %>
+      </span>
+    </div>
+    """
+  end
 
   defp format_duration(ms) when is_integer(ms) and ms >= 1000,
     do: "#{Float.round(ms / 1000, 1)}s"
