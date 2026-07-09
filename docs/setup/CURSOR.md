@@ -103,14 +103,14 @@ The `env` block is the whole instance override. `bp`'s environment layer sits
 **above** the `~/.config/barkpark/` config file, so `BARKPARK_API_URL` +
 `BARKPARK_API_TOKEN` in the stanza aim this server at any Barkpark — a hosted
 instance, a teammate's, or `http://localhost:4000` — no matter what `bp setup`
-saved. A server whose Tasks plugin is disabled fails fast at startup with a
-clear `manifest has no task.<verb> verb` error on stderr — better than coming up
-healthy-looking with zero tools. Point the stanza at a Barkpark with Tasks
-enabled.
+saved. A server whose Tasks plugin is disabled fails fast at startup (under the
+default `--tools tasks`) with a clear `manifest has no task.<verb> verb` error
+on stderr — better than coming up healthy-looking with zero tools. Point the
+stanza at a Barkpark with Tasks enabled.
 
 ### The tools
 
-Five curated task tools ship by default (`--tools tasks`), each carrying the
+Six curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description:
 
 - **`task_ready`** — list ready (unblocked) tasks in priority order.
@@ -120,6 +120,8 @@ claim-first contract in its own description:
 - **`task_close`** — close a claimed task with the claim epoch (epoch-CAS); mark
   acceptance criteria met with evidence in the same atomic write.
 - **`task_create`** — file new work (injects `kind` + `lifecycle_status`).
+- **`task_prime`** — one-call rehydration for a resuming agent: in-progress
+  claims (with close-ready epochs), ready head, recent events, counts.
 
 ### `--tools all` (expert only)
 

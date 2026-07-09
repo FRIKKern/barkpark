@@ -11,7 +11,7 @@ package cli
 // read — no re-fetch loop.
 //
 // Every tool also carries an MCP behaviour annotation (readOnlyHint /
-// destructiveHint) hand-set to match what it actually does: the four reads
+// destructiveHint) hand-set to match what it actually does: the three reads
 // (task_ready, task_show, task_prime) are ReadOnlyHint:true; the three writers
 // (task_next, task_close, task_create) are ReadOnlyHint:false + DestructiveHint
 // so a client can prompt before a mutating call.
@@ -43,7 +43,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close,task_prime doc:docs/cards/cli.md
 // registerTaskTools registers the curated six task tools on srv, hand-mapping
 // each onto its manifest task verb (task_create has no manifest verb — the live
 // manifest declares no task.create, so it is built directly from the mutate
@@ -53,6 +52,8 @@ import (
 // runMCPServe report a missing-verb failure cleanly (nothing half-registered),
 // and it is why a tasks-less manifest under --tools all fails this function fast
 // rather than serving a broken tool.
+//
+// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close,task_prime doc:docs/cards/cli.md
 func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
 	tree := m.Tree()
 

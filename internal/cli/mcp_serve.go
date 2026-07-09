@@ -69,10 +69,9 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		Version: cliVersion,
 	}, nil)
 
-	// The curated six task tools are ALWAYS registered (under --tools tasks) —
-	// they are the point of this server. --tools all additionally exposes every
-	// other bp capability as a
-	// generic tool via the bridge (bridge slice owns registerBridgeTools).
+	// The curated six task tools are the point of this server and register under
+	// both toolsets. --tools all additionally exposes every other bp capability
+	// as a generic tool via the bridge (bridge slice owns registerBridgeTools).
 	// Headless liveness (charter decision 5): tool handlers ride the guard-free
 	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a
 	// stdin-reading confirm prompt would hang a server whose stdin is the
@@ -166,9 +165,9 @@ func printMCPServeHelp(out *writer) {
 
 flags:
   --tools tasks|all   Which tools to expose. "tasks" (default) is the curated
-                      five — task_ready, task_next, task_show, task_close,
-                      task_create. "all" additionally bridges every other bp
-                      capability into a generic tool.
+                      six — task_ready, task_next, task_show, task_close,
+                      task_create, task_prime. "all" additionally bridges every
+                      other bp capability into a generic tool.
 
 The server resolves its target Barkpark the same way every other bp command
 does (-s / --token / BARKPARK_* env / saved config). Register it in Cursor via
