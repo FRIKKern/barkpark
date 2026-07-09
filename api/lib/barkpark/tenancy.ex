@@ -150,6 +150,82 @@ defmodule Barkpark.Tenancy do
     end
   end
 
+  # ── Workspace theme (ts-w4e) ──────────────────────────────────────────────
+  #
+  # A workspace's THEME IDENTITY is one orthogonal switch of the theme system
+  # (the other is light/dark mode, owned entirely client-side). It persists in
+  # the `settings` jsonb bag under `"theme"` and is resolved server-side so the
+  # reader / Studio / email stamp it with no flash and no client round-trip.
+  #
+  # `@known_themes` is the allowlist the compiler can emit today. It is
+  # deliberately a small in-code list rather than a runtime read of
+  # `design/themes/*.json`: the validation must never depend on shipped asset
+  # files being present, and a workspace pinned to a theme that was later
+  # removed must degrade to the default, not 500. Wave 5 (`ts-w5-alt-themes`)
+  # extends this list as each new theme ships its one file.
+  @known_themes ~w(evergreen)
+  @default_theme "evergreen"
+
+  @doc "The theme ids the compiler knows (the picker's option list)."
+  @spec known_themes() :: [String.t()]
+  def known_themes, do: @known_themes
+
+  @doc "The baked-in default theme id — the `:root` palette every surface ships."
+  @spec default_theme() :: String.t()
+  def default_theme, do: @default_theme
+
+  @doc """
+  Resolve a workspace's theme id from its `settings` bag.
+
+  Returns the stored `settings["theme"]` when it is a KNOWN theme id, else the
+  default (`"evergreen"`). Guards a `nil` workspace and a workspace whose
+  `settings` is nil/not-a-map (a legacy row read before the column backfilled)
+  → the default. A workspace with no theme set therefore renders exactly as it
+  did before this feature existed.
+  """
+  @spec workspace_theme(Workspace.t() | nil) :: String.t()
+  def workspace_theme(%Workspace{settings: settings}) when is_map(settings) do
+    case settings["theme"] do
+      theme when theme in @known_themes -> theme
+      _ -> @default_theme
+    end
+  end
+
+  def workspace_theme(_), do: @default_theme
+
+  @doc """
+  Persist a workspace's theme id into its `settings` bag.
+
+  Accepts a `%Workspace{}` struct or a workspace id binary. Rejects an unknown
+  theme id with `{:error, :unknown_theme}` (the picker only offers known ids;
+  this is the server-side gate against a forged value). Merges into the existing
+  `settings` map so unrelated preferences are preserved. A missing/malformed id
+  returns `{:error, :not_found}` without touching the DB.
+  """
+  @spec set_workspace_theme(Workspace.t() | binary(), String.t()) ::
+          {:ok, Workspace.t()} | {:error, :unknown_theme | :not_found | Ecto.Changeset.t()}
+  def set_workspace_theme(_workspace, theme) when theme not in @known_themes,
+    do: {:error, :unknown_theme}
+
+  def set_workspace_theme(%Workspace{} = workspace, theme) when is_binary(theme) do
+    settings = Map.put(workspace.settings || %{}, "theme", theme)
+
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      settings: settings
+    })
+    |> Repo.update()
+  end
+
+  def set_workspace_theme(id, theme) when is_binary(id) and is_binary(theme) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> set_workspace_theme(workspace, theme)
+    end
+  end
+
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil
   def get_project_by_id(nil), do: nil

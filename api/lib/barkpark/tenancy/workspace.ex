@@ -39,6 +39,12 @@ defmodule Barkpark.Tenancy.Workspace do
     field :slug, :string
     field :name, :string
 
+    # Per-workspace preferences bag (ts-w4e). Additive jsonb, defaults to `%{}`.
+    # The theme system reads `settings["theme"]` via `Tenancy.workspace_theme/1`
+    # (validated against the known theme ids, evergreen fallback). Absent/unknown
+    # → the baked-in default, so a workspace with no settings renders unchanged.
+    field :settings, :map, default: %{}
+
     # Thin Organization tier (era-w1-org): nullable, additive, not read by any
     # authorization path — a workspace joins an org when SSO/SCIM is configured.
     belongs_to :organization, Barkpark.Tenancy.Organization
@@ -55,7 +61,7 @@ defmodule Barkpark.Tenancy.Workspace do
 
   def changeset(workspace, attrs) do
     workspace
-    |> cast(attrs, [:slug, :name, :organization_id])
+    |> cast(attrs, [:slug, :name, :organization_id, :settings])
     |> validate_required([:slug, :name])
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_length(:name, min: 1, max: 255)

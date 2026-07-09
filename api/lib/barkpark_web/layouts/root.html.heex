@@ -1,5 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<%!-- data-bp-theme (ts-w4e) — the server-resolved workspace THEME IDENTITY,
+      stamped here so the theme skin paints on the FIRST byte (no flash). It is
+      orthogonal to the data-theme (light/dark) pre-paint script below and is
+      NOT a color literal — it lives OUTSIDE the GENERATED tokens marker, so the
+      Part-E exemption ledger is unaffected. Omitted entirely for the default
+      (evergreen) theme, so a default page is byte-identical to before. --%>
+<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -4829,6 +4835,29 @@
         if (this._prev) document.documentElement.dataset.theme = this._prev;
         else delete document.documentElement.dataset.theme;
       }
+    };
+
+    // BpThemeMirror — mirrors the server-resolved workspace THEME IDENTITY
+    // (ts-w4e) onto <html data-bp-theme>, so the theme picker on
+    // /studio/settings previews instantly with no reload. Same mirror pattern
+    // as EditorFocus/SgTheme: the LiveView renders a hidden element carrying
+    // data-bp-theme={@bp_theme}; picking a theme flips the assign, this hook
+    // re-applies on every update. The DEFAULT theme (evergreen) clears the
+    // attribute — evergreen is the :root palette, so absence IS evergreen. This
+    // is ORTHOGONAL to data-theme (light/dark), which it never touches. The
+    // server stamps data-bp-theme in the root layout on the next full load, so
+    // this hook only bridges the no-reload preview gap.
+    Hooks.BpThemeMirror = {
+      _apply() {
+        var theme = this.el.dataset.bpTheme;
+        if (theme && theme !== "evergreen") {
+          document.documentElement.dataset.bpTheme = theme;
+        } else {
+          delete document.documentElement.dataset.bpTheme;
+        }
+      },
+      mounted() { this._apply(); },
+      updated() { this._apply(); }
     };
 
     // Server-pushed file-download trigger. A LiveView pushes a
