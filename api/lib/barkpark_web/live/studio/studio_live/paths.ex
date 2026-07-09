@@ -55,6 +55,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   which re-resolves the workspace from the session. ONE owner for the flat
   grammar too.
   """
+  # The canonical Workspace Settings address — PROJECT-level (no dataset
+  # segment; SettingsLive binds the WORKSPACE, #1936). A dataset-ful form
+  # does not exist as a route: the :scoped_studio /*path catch-all would
+  # swallow it into the desk.
+  def settings_path(ws_slug, proj_slug), do: "/w/#{ws_slug}/p/#{proj_slug}/studio/settings"
+
   def flat_root(dataset), do: "/studio/#{dataset}"
 
   @doc """

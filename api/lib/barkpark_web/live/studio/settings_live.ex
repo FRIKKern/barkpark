@@ -111,9 +111,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # unseeded so the flat route can degrade to an in-place render.
   defp scoped_settings_path(socket) do
     with %{slug: ws_slug} when is_binary(ws_slug) <- socket.assigns[:current_workspace],
-         %{slug: proj_slug} when is_binary(proj_slug) <- socket.assigns[:current_project],
-         dataset when is_binary(dataset) <- socket.assigns[:dataset] do
-      {:ok, "/w/#{ws_slug}/p/#{proj_slug}/d/#{dataset}/studio/settings"}
+         %{slug: proj_slug} when is_binary(proj_slug) <- socket.assigns[:current_project] do
+      {:ok, BarkparkWeb.Studio.StudioLive.Paths.settings_path(ws_slug, proj_slug)}
     else
       _ -> :error
     end
