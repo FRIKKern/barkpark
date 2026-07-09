@@ -11,11 +11,11 @@ Every target below wires the same `bp mcp serve` tool catalog (curated task tool
 |---|---|---|
 | Cursor (desktop) | `.cursor/rules` + `.cursor/mcp.json` | [CURSOR.md](CURSOR.md) |
 | Cursor Cloud | `.cursor/environment.json` + Secrets | [CURSOR-CLOUD.md](CURSOR-CLOUD.md) |
-| Claude Code | `CLAUDE.md` + `.mcp.json` | `docs/setup/CLAUDE-CODE.md` |
-| Codex CLI / Desktop | `AGENTS.md` + `~/.codex/config.toml` | `docs/setup/CODEX.md` |
-| ChatGPT · Claude.ai | Custom GPT Actions · remote MCP | `docs/setup/REMOTE.md` |
-
-`CURSOR.md` and `CURSOR-CLOUD.md` are live links — the other three are code spans until their PRs land; open them by path.
+| Claude Code | `CLAUDE.md` + `.mcp.json` | [CLAUDE-CODE.md](CLAUDE-CODE.md) |
+| Codex CLI / Desktop | `AGENTS.md` + `~/.codex/config.toml` | [CODEX.md](CODEX.md) |
+| Windsurf (Cascade) | `~/.codeium/mcp_config.json` (merge the key) | [WINDSURF.md](WINDSURF.md) |
+| Gemini CLI | `.gemini/settings.json` (merge the key) | [GEMINI-CLI.md](GEMINI-CLI.md) |
+| ChatGPT · Claude.ai | Custom GPT Actions · remote MCP | [REMOTE.md](REMOTE.md) |
 
 ## AUTH
 
