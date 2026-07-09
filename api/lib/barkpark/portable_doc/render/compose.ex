@@ -47,6 +47,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # prose/link/button/table/callout colour) IS fully theme-threaded at all depths;
   # nested EMAIL data-viz theming is a filed follow-on (article data-viz is
   # CSS-themed regardless).
+  #
+  # The FLEET email variants (terminal / columns / status-legend — Render.PanelsEmail,
+  # and the task / cards families in Render.FleetEmail / Render.CardsEmail) are
+  # evergreen-nested by the SAME design (charter D8): a terminal / column composes
+  # its children through `render_children/2` (style-only), so a task-list nested in
+  # a terminal gets its email variant at evergreen while the panel's OWN chrome is
+  # theme-threaded. This is a ratified accepted tradeoff, NOT a filed follow-on —
+  # no bp task exists for nested panel theming (the email envelope renders evergreen;
+  # "dark" in a mail client is the client's transform of these bytes, not a re-render).
   @doc false
   def compose_block(%{"type" => "field-color"} = b, style, theme) when style != :article,
     do: compose_field_color(b, theme)
@@ -74,6 +83,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do: %{
       "kind" => "_raw",
       "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b, theme)
+    }
+
+  # Fleet PANEL email variants (slice w4c). A TOP-LEVEL terminal / columns /
+  # status-legend routes here (render_block/2 → compose_block/3) so its chrome
+  # is theme-threaded; the CONTAINER children are still composed at evergreen via
+  # `render_children/2` (charter D1/D8 — see the SCOPE note above).
+  def compose_block(%{"type" => "terminal"} = b, style, theme) when style != :article do
+    body = b |> container_children() |> render_children(style)
+
+    %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.PanelsEmail.terminal_email_html(b, body, theme)
+    }
+  end
+
+  def compose_block(%{"type" => "columns"} = b, style, theme) when style != :article do
+    %{"kind" => "_raw", "html" => columns_email_html(b, style, theme)}
+  end
+
+  def compose_block(%{"type" => "status-legend"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.PanelsEmail.status_legend_email_html(b, theme)
     }
 
   def compose_block(b, style, _theme), do: compose_block(b, style)
@@ -863,10 +895,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping
   # any child blocks, with an optional keybind `footer`. Reusable frame; put a
   # task-list inside it and you get the `bp tasks` board look in a paper.
-  def compose_block(%{"type" => "terminal"} = b, style) do
+  #
+  # :article rides the classed `bp-term` markup (paper-surface.css owns the light
+  # look). Every other style takes the inline-styled email variant (PanelsEmail) —
+  # the classed chrome is invisible in a stylesheet-less mail client, arriving as
+  # unstyled child text. The children are composed at THIS call site (render_blocks
+  # threads style only — evergreen-nested, charter D1/D8).
+  def compose_block(%{"type" => "terminal"} = b, :article) do
     title = b |> Map.get("title", "") |> stringish() |> Util.escape_html()
     footer = b |> Map.get("footer", "") |> stringish()
-    body = b |> container_children() |> render_blocks(style)
+    body = b |> container_children() |> render_blocks(:article)
 
     live =
       if Map.get(b, "live") in [true, "true", "live"],
@@ -884,9 +922,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => html}
   end
 
+  def compose_block(%{"type" => "terminal"} = b, style) do
+    body = b |> container_children() |> render_children(style)
+
+    %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.PanelsEmail.terminal_email_html(b, body)
+    }
+  end
+
   # Columns — a responsive multi-column layout. `columns` is a list of columns,
   # each a list of blocks; stacks to one column on narrow viewports.
-  def compose_block(%{"type" => "columns"} = b, style) do
+  #
+  # :article rides the CSS-grid `bp-cols` markup; email takes the fixed table
+  # variant (one td per column, equal widths, no reflow — charter D5). Column
+  # children compose at this call site (evergreen-nested).
+  def compose_block(%{"type" => "columns"} = b, :article) do
     cols = Map.get(b, "columns") || []
     n = max(length(List.wrap(cols)), 1)
 
@@ -894,15 +945,23 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       cols
       |> List.wrap()
       |> Enum.map(fn col ->
-        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), style)}</div>|
+        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), :article)}</div>|
       end)
       |> Enum.join("")
 
     %{"kind" => "_raw", "html" => ~s|<div class="bp-cols" style="--bp-cols:#{n}">#{inner}</div>|}
   end
 
-  def compose_block(%{"type" => "status-legend"} = b, _style) do
+  def compose_block(%{"type" => "columns"} = b, style) do
+    %{"kind" => "_raw", "html" => columns_email_html(b, style, @default_theme)}
+  end
+
+  def compose_block(%{"type" => "status-legend"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.status_legend_html(b)}
+  end
+
+  def compose_block(%{"type" => "status-legend"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.PanelsEmail.status_legend_email_html(b)}
   end
 
   # ── data-viz slate (stat / stats / heatmap / chart) ─────────────────────────
@@ -1157,6 +1216,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   def render_children(blocks, style \\ :email)
   def render_children(blocks, style) when is_list(blocks), do: render_blocks(blocks, style)
   def render_children(_, _), do: ""
+
+  # columns email variant — composes each column's children at the call site
+  # (evergreen-nested, style-only) then hands the list of ready column fragments
+  # to PanelsEmail. `theme` themes nothing today (columns have no chrome colour),
+  # carried for signature symmetry with terminal / status-legend.
+  defp columns_email_html(b, style, theme) do
+    cols_html =
+      b
+      |> Map.get("columns")
+      |> List.wrap()
+      |> Enum.map(fn col -> render_children(List.wrap(col), style) end)
+
+    Barkpark.PortableDoc.Render.PanelsEmail.columns_email_html(cols_html, theme)
+  end
 
   # ── section layout engine (step 2) ─────────────────────────────────────────
   #
