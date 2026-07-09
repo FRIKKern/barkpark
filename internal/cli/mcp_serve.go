@@ -72,12 +72,18 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 	// The curated five task tools are ALWAYS registered — they are the point of
 	// this server. --tools all additionally exposes every other bp capability as a
 	// generic tool via the bridge (bridge slice owns registerBridgeTools).
-	if err := registerTaskTools(srv, ctx, m); err != nil {
+	// Headless liveness (charter decision 5): tool handlers ride the guard-free
+	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a
+	// stdin-reading confirm prompt would hang a server whose stdin is the
+	// protocol pipe.
+	g.yes = true
+
+	if err := registerTaskTools(srv, g, ctx, m); err != nil {
 		out.userErr("mcp serve: register task tools: %v", err)
 		return exitGeneric
 	}
 	if toolset == "all" {
-		if err := registerBridgeTools(srv, ctx, m); err != nil {
+		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
 			out.userErr("mcp serve: register bridge tools: %v", err)
 			return exitGeneric
 		}

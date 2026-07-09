@@ -31,7 +31,7 @@ const mcpTestManifest = `{
     {"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
     {"id":"task.get","noun":"task","verb":"get","summary":"get","http":{"method":"GET","path_template":"/v1/tasks/:doc_id"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
     {"id":"task.next","noun":"task","verb":"next","summary":"next","http":{"method":"POST","path_template":"/v1/tasks/claim"},"auth_tier":"read","args":[{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
-    {"id":"task.close","noun":"task","verb":"close","summary":"close","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/close"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}
+    {"id":"task.close","noun":"task","verb":"close","summary":"close","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/close"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"},{"name":"lifecycle_status","required":false,"type":"string","summary":"s"},{"name":"reason","required":false,"type":"string","summary":"r"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"extra close-body fields"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}
   ]
 }`
 
@@ -57,6 +57,10 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	defer restore()
 
 	// A stand-in Barkpark API. Routes by path so one server backs every tool call.
+	// closeBody captures what the task_close handler actually POSTed, so the
+	// test can prove the MCP→tail→seam translation placed every field in the
+	// request body exactly as `bp task close … --set criteria:=[…]` would.
+	var closeBody []byte
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		switch {
 		case req.URL.Path == "/v1/tasks/ready":
@@ -67,6 +71,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 			// Empty queue: 200 with ok:false — a valid outcome, not an error.
 			io.WriteString(rw, `{"ok":false,"reason":"no_ready"}`)
 		case strings.HasSuffix(req.URL.Path, "/close"):
+			closeBody, _ = io.ReadAll(req.Body)
 			// A stale-epoch conflict: HTTP 409 must surface as IsError.
 			rw.WriteHeader(http.StatusConflict)
 			io.WriteString(rw, `{"error":{"code":"doc_changed_since_claim"}}`)
@@ -84,7 +89,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	ctx := manifest.Context{Server: ts.URL, Token: "tok"}
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: "barkpark-tasks", Version: "test"}, nil)
-	if err := registerTaskTools(srv, ctx, m); err != nil {
+	if err := registerTaskTools(srv, globals{yes: true}, ctx, m); err != nil {
 		t.Fatalf("registerTaskTools: %v", err)
 	}
 
@@ -149,11 +154,13 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 		t.Fatalf("task_next content = %q, want no_ready", mcpContentText(res))
 	}
 
-	// task_close hitting a 409: HTTP >= 400 must set IsError.
+	// task_close hitting a 409: HTTP >= 400 must set IsError. Criteria ride the
+	// same call so the captured body proves the whole tail→seam translation.
 	res, err = cs.CallTool(bg, &mcp.CallToolParams{
 		Name: "task_close",
 		Arguments: map[string]any{
 			"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 1,
+			"criteria": []any{map[string]any{"index": 0, "met": true, "evidence": "test"}},
 		},
 	})
 	if err != nil {
@@ -164,6 +171,23 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 	if !strings.Contains(mcpContentText(res), "doc_changed_since_claim") {
 		t.Fatalf("task_close content = %q, want the 409 envelope", mcpContentText(res))
+	}
+	// The POSTed close body must carry every field the CLI form would: worker_id
+	// + observed_epoch (server-coerced string, like the CLI) as bound positionals,
+	// the defaulted lifecycle_status, and the criteria array TYPED via --set :=.
+	var sent map[string]any
+	if err := json.Unmarshal(closeBody, &sent); err != nil {
+		t.Fatalf("close body did not parse: %v (%q)", err, closeBody)
+	}
+	if sent["worker_id"] != "cursor-test" || sent["observed_epoch"] != "1" || sent["lifecycle_status"] != "done" {
+		t.Fatalf("close body fields wrong: %q", closeBody)
+	}
+	crit, ok := sent["criteria"].([]any)
+	if !ok || len(crit) != 1 {
+		t.Fatalf("close body criteria not a typed 1-element array: %q", closeBody)
+	}
+	if c0, _ := crit[0].(map[string]any); c0 == nil || c0["met"] != true || c0["evidence"] != "test" {
+		t.Fatalf("close body criteria[0] wrong: %q", closeBody)
 	}
 
 	// task_close with a missing epoch: an arg error before any request.
@@ -251,7 +275,7 @@ func TestRegisterTaskToolsMissingVerb(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "x", Version: "0"}, nil)
-	if err := registerTaskTools(srv, manifest.Context{Server: "http://x"}, m); err == nil {
+	if err := registerTaskTools(srv, globals{}, manifest.Context{Server: "http://x"}, m); err == nil {
 		t.Fatal("expected error for manifest missing task.ready")
 	}
 }

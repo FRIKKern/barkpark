@@ -7,15 +7,18 @@ package cli
 // lapse) so an MCP model drives the queue the way a human following the card
 // would.
 //
-// The handlers ride the seam (mcpInvoke): they translate MCP tool arguments into
-// the manifest command's path args + typed body fields, run the SAME machinery a
-// `bp task …` invocation would (BuildURL → buildBody → authHeaders → doRequest),
-// and return the raw response JSON as MCP result content. Two hard rules:
+// The handlers ride the dispatch seam (execManifestCommand, run.go): each one
+// translates its MCP tool arguments into the manifest command's positional+flag
+// tail — exactly what a human would type after `bp task <verb>` — and the seam
+// runs the SAME machinery a CLI invocation would (splitArgs → bindArgs →
+// BuildURL → applyQuery → buildBody → authHeaders → doRequest), returning the
+// raw status + body. task_create rides sendTaskMutations
+// (tasks_create_cmd.go), the raw send half of `bp task create`. Two hard rules:
 //
-//   - yes is FORCED (the prod write-guard is bypassed): confirmProdWrite reads
-//     stdin, and an MCP server has no interactive stdin — the pipe is the
-//     protocol — so a guard prompt would hang the server. mcpInvoke calls
-//     doRequest directly, never runCommand, so no guard runs.
+//   - The prod write-guard never runs: confirmProdWrite reads stdin, and an MCP
+//     server has no interactive stdin — the pipe is the protocol — so a guard
+//     prompt would hang the server. execManifestCommand carries no guards (they
+//     live in runCommand), and runMCPServe forces g.yes as belt-and-braces.
 //   - NOTHING is written to os.Stdout. The result is the response body as text;
 //     an HTTP status >= 400 sets IsError so the client sees a tool failure with
 //     the server's error envelope as the message.
@@ -24,11 +27,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
-	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -39,7 +40,7 @@ import (
 // manifest declares no task.create, so it is built directly from the mutate
 // contract). It returns an error only if a required manifest verb is missing —
 // the server must not come up advertising a tool it cannot back.
-func registerTaskTools(srv *mcp.Server, ctx manifest.Context, m *manifest.Manifest) error {
+func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
 	tree := m.Tree()
 
 	ready, ok := tree.Lookup("task", "ready")
@@ -84,11 +85,15 @@ func registerTaskTools(srv *mcp.Server, ctx manifest.Context, m *manifest.Manife
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
 		}
-		q := url.Values{}
+		// limit rides the pagination globals (task.ready is paginated), exactly
+		// like `bp task ready --limit N` — applyQuery turns g.limitSet into the
+		// query param regardless of whether the manifest declares a limit flag.
+		gq := g
 		if in.Limit != nil {
-			q.Set("limit", strconv.Itoa(*in.Limit))
+			gq.limit = *in.Limit
+			gq.limitSet = true
 		}
-		return mcpRun(mcpInvoke(ctx, m, readyCmd, nil, nil, q)), nil
+		return mcpRun(execManifestCommand(gq, ctx, m, readyCmd, nil)), nil
 	})
 
 	// task_next — atomically claim the NEXT ready task. Claim-first: the claim IS
@@ -125,11 +130,13 @@ func registerTaskTools(srv *mcp.Server, ctx manifest.Context, m *manifest.Manife
 		if strings.TrimSpace(in.WorkerID) == "" {
 			return mcpArgError(fmt.Errorf("worker_id is required")), nil
 		}
-		set := []string{"worker_id=" + in.WorkerID}
+		// task.next declares worker_id (+ optional phase_id) as positionals; both
+		// resolve to the POST body via ArgLocation inference, same as the CLI.
+		tail := []string{in.WorkerID}
 		if in.PhaseID != "" {
-			set = append(set, "phase_id="+in.PhaseID)
+			tail = append(tail, in.PhaseID)
 		}
-		return mcpRun(mcpInvoke(ctx, m, nextCmd, nil, set, nil)), nil
+		return mcpRun(execManifestCommand(g, ctx, m, nextCmd, tail)), nil
 	})
 
 	// task_show — full detail for one task id (children + child_count).
@@ -159,7 +166,7 @@ func registerTaskTools(srv *mcp.Server, ctx manifest.Context, m *manifest.Manife
 		if strings.TrimSpace(in.DocID) == "" {
 			return mcpArgError(fmt.Errorf("doc_id is required")), nil
 		}
-		return mcpRun(mcpInvoke(ctx, m, showCmd, map[string]string{"doc_id": in.DocID}, nil, nil)), nil
+		return mcpRun(execManifestCommand(g, ctx, m, showCmd, []string{in.DocID})), nil
 	})
 
 	// task_close — complete a claimed task under epoch-CAS, optionally flipping
@@ -234,25 +241,22 @@ func registerTaskTools(srv *mcp.Server, ctx manifest.Context, m *manifest.Manife
 		if status == "" {
 			status = "done"
 		}
-		// worker_id/lifecycle_status/reason ride as strings; observed_epoch and
-		// criteria ride TYPED (:=) so the server sees a number / JSON array, not a
-		// stringified value its validators would reject.
-		set := []string{
-			"worker_id=" + in.WorkerID,
-			"observed_epoch:=" + strconv.Itoa(*in.ObservedEpoch),
-			"lifecycle_status=" + status,
-		}
+		// Positionals mirror `bp task close <id> <worker> <epoch> <status> [reason]`
+		// (observed_epoch rides as a string the server coerces via fetch_int, same
+		// as the CLI); criteria ride TYPED via the manifest's repeatable --set flag
+		// (criteria:=[…]) so the server sees a JSON array in the same atomic write.
+		tail := []string{in.DocID, in.WorkerID, strconv.Itoa(*in.ObservedEpoch), status}
 		if in.Reason != "" {
-			set = append(set, "reason="+in.Reason)
+			tail = append(tail, in.Reason)
 		}
 		if len(in.Criteria) > 0 {
 			arr, err := json.Marshal(in.Criteria)
 			if err != nil {
 				return mcpArgError(fmt.Errorf("criteria: %w", err)), nil
 			}
-			set = append(set, "criteria:="+string(arr))
+			tail = append(tail, "--set", "criteria:="+string(arr))
 		}
-		return mcpRun(mcpInvoke(ctx, m, cc, map[string]string{"doc_id": in.DocID}, set, nil)), nil
+		return mcpRun(execManifestCommand(g, ctx, m, cc, tail)), nil
 	})
 
 	// task_create — file a new task. No manifest verb exists (the live manifest
@@ -340,57 +344,9 @@ func registerTaskTools(srv *mcp.Server, ctx manifest.Context, m *manifest.Manife
 	return nil
 }
 
-// mcpInvoke is the seam: it executes one manifest command programmatically and
-// returns the raw HTTP status + response bytes, with the prod write-guard forced
-// OFF (an MCP server has no interactive stdin). It reuses the CLI's own
-// machinery — m.BuildURL fills path placeholders, buildBody assembles the JSON
-// body from the same --set convention, authHeaders attaches the tier credential,
-// doRequest sends — so an MCP tool call is byte-for-byte the request the
-// equivalent `bp task …` command would make. It NEVER renders or maps to an exit
-// code; the caller wraps the result for MCP.
-//
-// argMap carries path/body arg values (only path placeholders matter here — the
-// task tools pass every body field through setPairs so integers/arrays stay
-// typed). setPairs are `key=value` / `key:=json` tokens merged into the body
-// exactly as buildBody handles them. query carries read query-string params.
-func mcpInvoke(ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, argMap map[string]string, setPairs []string, query url.Values) (int, []byte, error) {
-	if argMap == nil {
-		argMap = map[string]string{}
-	}
-	rawURL, err := m.BuildURL(cmd, ctx, argMap)
-	if err != nil {
-		return 0, nil, err
-	}
-	if len(query) > 0 {
-		sep := "?"
-		if strings.Contains(rawURL, "?") {
-			sep = "&"
-		}
-		rawURL = rawURL + sep + query.Encode()
-	}
-
-	var flags map[string][]string
-	if len(setPairs) > 0 {
-		flags = map[string][]string{"set": setPairs}
-	}
-	body, stream, contentType, err := buildBody(cmd, flags, argMap)
-	if err != nil {
-		return 0, nil, err
-	}
-	// The task tools never upload a stream; guard the invariant explicitly.
-	if stream != nil {
-		return 0, nil, fmt.Errorf("mcp: streaming body not supported for %s %s", cmd.Noun, cmd.Verb)
-	}
-
-	headers := authHeaders(cmd, ctx)
-	if contentType != "" {
-		headers["Content-Type"] = contentType
-	}
-	return doRequest(cmd.HTTP.Method, rawURL, headers, body)
-}
-
 // mcpTaskCreate files a new task via the mutate contract (there is no task.create
-// manifest verb), mirroring runTaskCreate but returning an MCP result instead of
+// manifest verb), riding sendTaskMutations — the same raw send half `bp task
+// create` uses (tasks_create_cmd.go) — but returning an MCP result instead of
 // writing a receipt to stdout. It creates the draft, optionally publishes it, and
 // returns a compact JSON receipt {id, draft, status} as tool content. Any failure
 // sets IsError with a message that still names the created id (so a
@@ -400,30 +356,31 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	for k, v := range body {
 		createOp[k] = v
 	}
-	client := apiclient.New(apiclient.Config{
-		BaseURL:   ctx.Server,
-		Token:     ctx.Token,
-		Workspace: ctx.Workspace,
-		Project:   ctx.Project,
-		Dataset:   ctx.Dataset,
-	})
-	results, err := client.MutateResults([]map[string]any{{"create": createOp}})
+	status, respBody, err := sendTaskMutations(ctx, []map[string]any{{"create": createOp}})
 	if err != nil {
 		return mcpTextError(fmt.Sprintf("task_create: %v", err))
 	}
-	if len(results) == 0 || results[0].ID == "" {
+	if status < 200 || status >= 300 {
+		return mcpTextError(fmt.Sprintf("task_create: %s", mutateErrorMessage(status, respBody)))
+	}
+	draftID, ok := firstMutationID(respBody)
+	if !ok || draftID == "" {
 		return mcpTextError("task_create: server returned no id")
 	}
-	draftID := results[0].ID
 	bareID := strings.TrimPrefix(draftID, "drafts.")
-	status := "draft"
+	docStatus := "draft"
 	if publish {
-		if err := client.Publish("task", bareID); err != nil {
-			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v", bareID, err))
+		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
+		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
+		if pErr != nil {
+			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v", bareID, pErr))
 		}
-		status = "published"
+		if pStatus < 200 || pStatus >= 300 {
+			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %s", bareID, mutateErrorMessage(pStatus, pBody)))
+		}
+		docStatus = "published"
 	}
-	receipt, _ := json.Marshal(map[string]any{"id": bareID, "draft": draftID, "status": status})
+	receipt, _ := json.Marshal(map[string]any{"id": bareID, "draft": draftID, "status": docStatus})
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(receipt)}}}
 }
 
