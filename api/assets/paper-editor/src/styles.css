@@ -86,6 +86,7 @@
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
   --tok-reading-body-size: 18px;
@@ -138,6 +139,7 @@
   --paper-accent-soft: rgba(70, 179, 148, 0.16);
   --paper-chrome-bg: #131d19;
   --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-reading-accent: #d98a6a;
   --ok-hsl: 142 52% 52%;
   --warn-hsl: 38 94% 56%;
   --danger-hsl: 0 82% 66%;
@@ -166,6 +168,7 @@
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
   --danger-hsl: 0 68% 42%;
@@ -193,6 +196,7 @@
   --paper-accent-soft: rgba(70, 179, 148, 0.16);
   --paper-chrome-bg: #131d19;
   --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-reading-accent: #d98a6a;
   --ok-hsl: 142 52% 52%;
   --warn-hsl: 38 94% 56%;
   --danger-hsl: 0 82% 66%;
@@ -220,6 +224,7 @@
   --paper-accent-soft: rgba(195, 78, 19, 0.10);
   --paper-chrome-bg: #fef9f7;
   --paper-chrome-border: rgba(41, 29, 25, 0.12);
+  --paper-reading-accent: #bf321d;
   --ok-hsl: 138.34 50.65% 34.78%;
   --warn-hsl: 40.11 100% 29.89%;
   --danger-hsl: 3.67 50.42% 48.54%;
@@ -247,6 +252,7 @@
   --paper-accent-soft: rgba(247, 153, 59, 0.16);
   --paper-chrome-bg: #18120d;
   --paper-chrome-border: rgba(228, 221, 216, 0.13);
+  --paper-reading-accent: #f5855c;
   --ok-hsl: 134.02 37.1% 56.89%;
   --warn-hsl: 37.47 67.56% 50.7%;
   --danger-hsl: 5.31 83.22% 69.77%;
@@ -274,6 +280,7 @@
   --paper-accent-soft: rgba(47, 86, 177, 0.10);
   --paper-chrome-bg: #f8fafe;
   --paper-chrome-border: rgba(28, 32, 42, 0.12);
+  --paper-reading-accent: #0f8299;
   --ok-hsl: 137.23 45.13% 35.85%;
   --warn-hsl: 40.11 100% 29.89%;
   --danger-hsl: 4.05 47.78% 48.54%;
@@ -301,6 +308,7 @@
   --paper-accent-soft: rgba(104, 162, 232, 0.16);
   --paper-chrome-bg: #0f1319;
   --paper-chrome-border: rgba(218, 223, 229, 0.13);
+  --paper-reading-accent: #53d6ea;
   --ok-hsl: 132.78 31.44% 58.66%;
   --warn-hsl: 35.93 57.77% 55.07%;
   --danger-hsl: 5.83 69.33% 69.33%;
