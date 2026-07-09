@@ -992,6 +992,30 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :api)
   end
 
+  # ── Scoped mirror of the token-gated plugin bucket (`auth: :token`) ────────
+  # github-bridge Wave 8 / D15. The tenancy-aware sibling of the flat
+  # `scope "/v1/plugins" … plugin_routes(scope: :token)` mount above: the SAME
+  # token-gated plugin controller routes (github.adopt / github.status), but
+  # under the `/w/:ws/p/:proj` path-based tenant prefix so a scoped `bp github
+  # adopt` / `bp github status` participates in the hard tenant boundary.
+  #
+  # Pipeline `[:scoped_api, :require_token]` mirrors the flat `[:api,
+  # :require_token]`, swapping `:api` (AssignDefaultScope) for `:scoped_api`
+  # (OptionalToken → ResolveWorkspace → ResolveProject). ResolveWorkspace's
+  # membership gate enforces tenant isolation — a caller who is not a member of
+  # the URL workspace is 403'd BEFORE any controller runs — so no raw
+  # workspace/project param can bypass membership. `:require_token` (NOT
+  # `:scoped_admin`) keeps the OPERATOR tier: a valid bearer, never the admin
+  # role — identical trust to the flat `:token` bucket. The controllers then
+  # read the resolved `current_workspace`/`current_project` assigns via
+  # `ScopeHelpers.scope_opts/1`. Same no-alias rationale as the flat bucket —
+  # plugin route specs fully-qualify their controllers.
+  scope "/w/:workspace_slug/p/:project_slug/v1/plugins" do
+    pipe_through([:scoped_api, :require_token])
+
+    plugin_routes(scope: :token)
+  end
+
   # ── Scoped plugins-admin LV — dataset-scoped, admin-gated (sdl-w1-admin-canonical) ─
   # PluginsLive / PluginSettingsLive move under the canonical `/w/:ws/p/:proj/
   # d/:dataset/studio/_plugins[...]` grammar. Auth stays the flat semantics

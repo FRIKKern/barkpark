@@ -14,9 +14,11 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   ## Dedup
 
   `record/1` collapses repeats: an already-OPEN conflict for the same
-  `{repo, issue, kind}` is UPDATED in place (its `detail` refreshed, its
-  `updated_at` bumped) rather than piling a second row. A human editing an
-  issue five times is ONE open `out_of_band_edit`, never five. A row only
+  `{repo, issue, kind}` is UPDATED in place (its `detail` MERGED — never
+  overwritten — and its `updated_at` bumped) rather than piling a second row. A
+  human editing an issue five times is ONE open `out_of_band_edit`, never five;
+  and two independent sources touching that one row (a drift fingerprint plus a
+  later GraphQL projection note) both survive on its `detail`. A row only
   re-opens as a fresh record once the prior one is `resolve/1`-d.
   """
 
@@ -110,9 +112,21 @@ defmodule Barkpark.Plugins.Github.Conflicts do
     |> Repo.insert()
   end
 
+  # Merge the incoming detail INTO the recorded one rather than overwriting it.
+  # The same open `{repo, issue, kind}` row can be refreshed from independent
+  # sources — e.g. an `out_of_band_edit` first recorded with the observed
+  # title/state fingerprint, then re-touched by a Projects-v2 GraphQL projection
+  # error carrying a `source: "graphql"` note. Overwriting would clobber the
+  # human-drift detail with the last writer's payload, hiding half the story
+  # from the operator reading the quarantine. Map.merge keeps both; a colliding
+  # key takes the newest value (last write wins per-key, not per-map). A nil
+  # incoming detail is treated as an empty map so it never nulls the accumulated
+  # detail.
   defp refresh(existing, attrs) do
+    merged = Map.merge(existing.detail || %{}, Map.get(attrs, :detail) || %{})
+
     existing
-    |> Conflict.changeset(%{detail: Map.get(attrs, :detail, %{})})
+    |> Conflict.changeset(%{detail: merged})
     |> Repo.update()
   end
 
