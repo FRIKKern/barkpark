@@ -154,6 +154,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     id
   end
 
+  # A stored session whose LAST message is an approval left "pending" — the shape
+  # a crash or a tab-close leaves behind. Reopen must render it as the honest
+  # terminal state (canceled), never a live card no one can resolve.
+  defp seed_session_with_pending_approval(request_id) do
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+    {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "do a thing"})
+
+    {:ok, _} =
+      StudioChat.append_message(id, %{
+        role: "approval",
+        source_markdown: "Allow Bash?",
+        metadata: %{
+          "request_id" => request_id,
+          "tool_name" => "Bash",
+          "input" => %{"command" => "ls"},
+          "approval_status" => "pending"
+        }
+      })
+
+    id
+  end
+
   describe "gate" do
     test "disabled → mount redirects even for an admin", %{conn: conn} do
       Application.put_env(:barkpark, :claude_chat, enabled: false)
@@ -880,6 +903,87 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       await(fn -> StudioChat.get_session(sid).title_source == "ai" end)
       assert StudioChat.get_session(sid).title == "Refactor the auth layer"
       assert render(view) =~ "Refactor the auth layer"
+    end
+  end
+
+  describe "approvals that survive (persistence + reopen, scc-w2)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "an ask persists a pending row and raises the 'needs you' sidebar pill", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "req-live",
+           tool_name: "Write",
+           input: %{"file_path" => "/opt/x"},
+           title: "Claude wants to write /opt/x",
+           decision_reason: nil
+         }}
+      )
+
+      html = render(view)
+      # the sidebar elevates this session with the warn-toned pending pill…
+      assert html =~ "badge-chat-approval"
+      assert html =~ "needs you"
+      # …and it is PERSISTED, not just in-memory (survives a crash / reopen)
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "approval"))
+      assert [%{metadata: %{"approval_status" => "pending", "request_id" => "req-live"}}] = rows
+    end
+
+    test "resolving an ask clears the persisted pending count and the pill", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{request_id: "req-live", tool_name: "Write", input: %{}, title: nil, decision_reason: nil}}
+      )
+
+      render(view)
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      html = render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=req-live])))
+      assert html =~ "✓ allowed"
+      # the store agrees with the screen: the terminal state is persisted…
+      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert approval.metadata["approval_status"] == "allowed"
+      # …and the pending count dropped, so the sidebar pill is no longer "needs you"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+      refute html =~ "needs you"
+    end
+
+    test "reopening a session with a dangling pending approval renders ✗ canceled and persists it",
+         %{conn: conn} do
+      sid = seed_session_with_pending_approval("req-dangling")
+      # the seeded ask really is pending in the store before reopen
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # NO live card no one can resolve — the honest terminal state instead…
+      assert html =~ "✗ canceled"
+      refute has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-dangling]))
+      refute has_element?(view, ~s(button[phx-click=deny][phx-value-rid=req-dangling]))
+      # …and reopen was DISPLAY-only (no spawn — the vacuous-green trap)
+      assert session_pid(view) == nil
+
+      # the flip is PERSISTED: reopening again cannot revive the dead card
+      assert StudioChat.get_session(sid).pending_approvals == 0
+
+      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert approval.metadata["approval_status"] == "canceled"
     end
   end
 

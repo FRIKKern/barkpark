@@ -331,6 +331,102 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "approvals — persisted lifecycle + denormalised pending count" do
+    defp ask(session, request_id) do
+      {:ok, m} =
+        StudioChat.append_message(session, %{
+          role: "approval",
+          source_markdown: "Allow Write /opt/x?",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "Write",
+            "input" => %{"file_path" => "/opt/x"},
+            "approval_status" => "pending"
+          }
+        })
+
+      m
+    end
+
+    defp reload(id), do: StudioChat.get_session(id)
+
+    test "appending an approval bumps pending_approvals; the sidebar carries it" do
+      s = new_session()
+      assert reload(s.id).pending_approvals == 0
+
+      ask(s, "req-1")
+      ask(s, "req-2")
+
+      assert reload(s.id).pending_approvals == 2
+      row = StudioChat.list_sessions() |> Enum.find(&(&1.id == s.id))
+      assert row.pending_approvals == 2
+    end
+
+    test "resolving flips the row's metadata and decrements the pending count" do
+      s = new_session()
+      ask(s, "req-1")
+      ask(s, "req-2")
+
+      assert {:ok, m} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      assert m.metadata["approval_status"] == "allowed"
+      assert reload(s.id).pending_approvals == 1
+
+      assert {:ok, _} = StudioChat.update_approval_status(s.id, "req-2", "denied")
+      assert reload(s.id).pending_approvals == 0
+    end
+
+    test "resolving a resolved approval again does NOT underflow the counter" do
+      s = new_session()
+      ask(s, "req-1")
+      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      assert reload(s.id).pending_approvals == 0
+
+      # a duplicate/racy resolve must never drive the count negative
+      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "denied")
+      assert reload(s.id).pending_approvals == 0
+    end
+
+    test "an unknown request_id is a clean not_found (never a crash)" do
+      s = new_session()
+      assert {:error, :not_found} = StudioChat.update_approval_status(s.id, "nope", "allowed")
+    end
+
+    test "an unknown terminal status is rejected without touching the row" do
+      s = new_session()
+      ask(s, "req-1")
+      assert {:error, :bad_status} = StudioChat.update_approval_status(s.id, "req-1", "maybe")
+      # untouched — still pending, still counted
+      assert reload(s.id).pending_approvals == 1
+    end
+
+    test "cancel_pending_approvals flips every pending row to canceled and zeroes the count" do
+      s = new_session()
+      ask(s, "req-1")
+      ask(s, "req-2")
+      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      # one already resolved, one still pending
+      assert reload(s.id).pending_approvals == 1
+
+      assert 1 == StudioChat.cancel_pending_approvals(s.id)
+      assert reload(s.id).pending_approvals == 0
+
+      statuses =
+        StudioChat.list_messages(s.id)
+        |> Enum.filter(&(&1.role == "approval"))
+        |> Enum.map(& &1.metadata["approval_status"])
+        |> Enum.sort()
+
+      # the resolved one is untouched; only the dangling one becomes canceled
+      assert statuses == ["allowed", "canceled"]
+    end
+
+    test "cancel_pending_approvals on a session with none is a harmless zero" do
+      s = new_session()
+      assert 0 == StudioChat.cancel_pending_approvals(s.id)
+      assert reload(s.id).pending_approvals == 0
+    end
+  end
+
   describe "schema wiring" do
     test "known statuses and title sources are enumerable" do
       assert "working" in Session.statuses()

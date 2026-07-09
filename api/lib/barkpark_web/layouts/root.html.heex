@@ -383,9 +383,12 @@
     .badge-public { background: var(--ok-soft); color: var(--success); }
     .badge-private { background: var(--warn-soft); color: var(--warning); }
     .badge-active { background: var(--primary-soft); color: var(--primary); }
-    /* Studio Claude chat — session lifecycle pills (studio-claude-chat w1).
+    /* Studio Claude chat — session lifecycle pills (studio-claude-chat w1/w2).
        Tokenized so the sidebar honors the same evergreen palette as the rest
-       of Studio; priority read is Working > idle(active) > offline(exited). */
+       of Studio; precedence is PendingApproval > Working > idle > offline. The
+       approval pill is FILLED warn (not soft) so the one row that needs the
+       admin right now reads loudest (slice scc-w2-approvals). */
+    .badge-chat-approval { background: var(--warn); color: var(--warn-fg); }
     .badge-chat-working { background: var(--primary-soft); color: var(--primary); }
     .badge-chat-idle { background: var(--ok-soft); color: var(--success); }
     .badge-chat-offline { background: var(--warn-soft); color: var(--warning); }

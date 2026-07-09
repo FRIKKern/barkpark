@@ -39,6 +39,10 @@ defmodule Barkpark.StudioChat.Session do
 
     field :summary, :string
     field :message_count, :integer, default: 0
+    # Denormalised count of approvals still awaiting a decision — the sidebar
+    # reads it to raise a "needs you" pill (charter D14, slice scc-w2-approvals).
+    # Bumped +1 on ask, −1 on resolve, zeroed on cancel-all. Never < 0.
+    field :pending_approvals, :integer, default: 0
     field :input_tokens, :integer, default: 0
     field :output_tokens, :integer, default: 0
     field :total_cost_usd, :float, default: 0.0
