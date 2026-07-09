@@ -100,3 +100,21 @@ does not. Our store owns display; the CLI owns model memory.
 
 Wave-6 recommended cut: #1 + #2 (agent-asks/human-answers surfaces), #3+#4 as
 one composer slice. Wave-7: #6 diff panel (bold), #7+#8 polish, #9 steering.
+
+## Wave-9 ground truth: Workflows-pane data sources (lead probe 2026-07-09)
+
+Goal: a Studio "/workflows" pane tailing the host's run files. What's ACTUALLY on disk
+under ~/.claude/projects/<proj>/<session>/subagents/workflows/wf_*/:
+- `journal.jsonl` — ONLY {type:started, key, agentId} + {type:result, ...} per agent
+  (it exists for resume caching). NO phases, NO labels, NO progress events.
+- `agent-<id>.jsonl` — the agent's full transcript, GROWS LIVE while it works →
+  live activity = tail the file: last assistant tool_use (name+input), message
+  count, token usage from entries. This is the live signal.
+- `agent-<id>.meta.json` — {agentType, spawnDepth} only.
+- Phase titles / agent labels / narrator log() lines live in the HARNESS process,
+  not on disk — a web pane can render runs + per-agent live activity + results,
+  but NOT the phase grouping unless it infers from prompts (first line of the
+  agent transcript carries the prompt, which our epic-cycle prompts prefix with
+  role words like "You are an EXPLORER…"). Design for that honestly: group by
+  inferred role or flat list, never fake phase boxes.
+- Run liveness: dir mtime / any agent file written in the last N seconds.
