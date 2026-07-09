@@ -2883,6 +2883,43 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert run(cells)["A3"] == %{"f" => "=SUM(A1:A2)", "t" => "n", "v" => 5}
     end
 
+    test "depth-2 chained spill converges — a spill whose SOURCE is itself spilled" do
+      # E1 reads C1:C3, C1 reads A1:A3, A1 is a literal array. Spill visibility
+      # propagates one level per recompute phase, so a single extra phase (the
+      # pre-fixpoint engine) leaves E reading a stale, not-yet-spilled C. The
+      # N-phase fixpoint (charter D3) must re-topo until the spill map is stable,
+      # so E finally reads the materialised C region.
+      #   A1:A3 = [2,3,1]  →  C1:C3 = SORT(asc) = [1,2,3]  →  E1:E3 = SORT(desc) = [3,2,1]
+      out =
+        run(%{
+          "A1" => %{"f" => "={2;3;1}"},
+          "C1" => %{"f" => "=SORT(A1:A3)"},
+          "E1" => %{"f" => "=SORT(C1:C3, -1)"}
+        })
+
+      assert [out["A1"]["v"], out["A2"]["v"], out["A3"]["v"]] == [2, 3, 1]
+      assert [out["C1"]["v"], out["C2"]["v"], out["C3"]["v"]] == [1, 2, 3]
+      assert [out["E1"]["v"], out["E2"]["v"], out["E3"]["v"]] == [3, 2, 1]
+    end
+
+    test "depth-3 chained spill still converges within the phase cap" do
+      # A → C → E → G, three spill hops. Each SORT preserves order for an already
+      # ascending source, so the whole chain settles on [1,2,3]. Proves the
+      # fixpoint drives more than the single depth-2 hop and terminates well
+      # inside the hard cap.
+      out =
+        run(%{
+          "A1" => %{"f" => "={1;2;3}"},
+          "C1" => %{"f" => "=SORT(A1:A3)"},
+          "E1" => %{"f" => "=SORT(C1:C3)"},
+          "G1" => %{"f" => "=SORT(E1:E3)"}
+        })
+
+      assert [out["C1"]["v"], out["C2"]["v"], out["C3"]["v"]] == [1, 2, 3]
+      assert [out["E1"]["v"], out["E2"]["v"], out["E3"]["v"]] == [1, 2, 3]
+      assert [out["G1"]["v"], out["G2"]["v"], out["G3"]["v"]] == [1, 2, 3]
+    end
+
     test "REGRESSION LOCK — a scalar/bounded doc recomputes byte-identically, no spill markers" do
       # The wave's critical regression lock (charter): a document with NO
       # top-level array result produces the exact same cells map the pre-spill
@@ -2956,6 +2993,37 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         |> get_in(["tabs", Access.at(1), "cells"])
 
       assert s2["A1"]["v"] == 20
+    end
+
+    test "cross-tab depth-2 chained spill converges through the unified path" do
+      # The unified twin of the fast-path depth-2 test: the spill chain crosses
+      # tabs, so it MUST ride recompute_unified. Sheet1!A1 spills, Sheet2!C1 sorts
+      # Sheet1's spilled region, Sheet1!E1 sorts Sheet2's spilled region — two
+      # spill hops across the tab boundary. The unified fixpoint must re-topo
+      # until every tab's spill map is stable, or E reads a stale C.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Sheet1",
+            "cells" => %{
+              "A1" => %{"f" => "={2;3;1}"},
+              "E1" => %{"f" => "=SORT(Sheet2!C1:C3, -1)"}
+            }
+          },
+          %{
+            "name" => "Sheet2",
+            "cells" => %{"C1" => %{"f" => "=SORT(Sheet1!A1:A3)"}}
+          }
+        ]
+      }
+
+      out = Engine.recompute(content)
+      s1 = get_in(out, ["tabs", Access.at(0), "cells"])
+      s2 = get_in(out, ["tabs", Access.at(1), "cells"])
+
+      assert [s1["A1"]["v"], s1["A2"]["v"], s1["A3"]["v"]] == [2, 3, 1]
+      assert [s2["C1"]["v"], s2["C2"]["v"], s2["C3"]["v"]] == [1, 2, 3]
+      assert [s1["E1"]["v"], s1["E2"]["v"], s1["E3"]["v"]] == [3, 2, 1]
     end
   end
 
