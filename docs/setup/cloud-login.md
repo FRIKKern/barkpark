@@ -13,15 +13,16 @@ Run bare `bp login` (or pick **Barkpark Cloud** in the first-run wizard) on an
 interactive terminal and `bp` starts a device-link handshake. It prints a box:
 
 ```
-  Log in to Barkpark Cloud
+  ╭───────────────────────────────────────────────╮
+  │ Log in to Barkpark Cloud                      │
+  │                                               │
+  │ Visit  https://barkpark.cloud/activate        │
+  │ Enter code  WXYZ-2345                         │
+  ╰───────────────────────────────────────────────╯
+  Or log in with email:  bp login --email you@example.com
 
-    ┌──────────────────────────────────────────────┐
-    │  Open   https://barkpark.cloud/activate        │
-    │  Code   WXYZ-2345                              │
-    └──────────────────────────────────────────────┘
-
-  Opening your browser… (or copy the URL to any device)
-  Waiting for approval…
+  Press Enter to open your browser (or copy the URL above)…
+  Waiting for you to approve in the browser…
 ```
 
 `bp` tries to open your browser at `https://barkpark.cloud/activate`. Approve
@@ -39,7 +40,7 @@ Once you approve, the CLI's poll returns the session token and stores it at
 The final success envelope is unchanged from the password path:
 
 ```json
-{ "ok": true, "cloud_url": "https://barkpark.cloud", "team_id": "…" }
+{ "ok": true, "cloud_url": "https://api.barkpark.cloud", "team_id": "…" }
 ```
 
 All device-flow chrome (the box, spinner, "opening your browser" line) goes to
@@ -84,7 +85,7 @@ bp login --device        # always use the browser link flow
 ```
 
 `--url <base>` overrides the control-plane URL (defaults to the saved
-`CloudURL`, else the baked-in `https://barkpark.cloud`).
+`CloudURL`, else the baked-in `https://api.barkpark.cloud`).
 
 ## Security notes
 
