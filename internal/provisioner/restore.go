@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
@@ -122,12 +123,25 @@ func provisionRestore(ctx context.Context, seams Seams, job JobSpec) (string, st
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: restore step report %s/%s for job %s failed (non-fatal): %v\n", step, status, job.JobID, err)
 		}
 	}
-	// failStep narrates a failed step and returns the error — the worker's fail path
-	// releases the job for retry. No box teardown here: a partially-restored box is torn
-	// down by the driver's own create cleanup on the failing call, mirroring the
-	// provision chain's nil-teardown-on-failure contract.
-	failStep := func(step string, err error) (string, string, *BootstrapOutputs, Teardown, error) {
+	// failStep narrates a failed step, TEARS DOWN the half-restored box when one
+	// exists (ip != ""), and returns the error — the worker's fail path releases the
+	// job for retry. CreateHost cleans up its own in-call failures (ip is "" then),
+	// but a box that fails a LATER step (freshen/secure/configure/content/verify) is
+	// a live BILLED box with no orphan label — SweepOrphans would never find it, so
+	// it must die here, mirroring ProvisionOneShot's any-failure-after-create
+	// teardown. The teardown runs on a FRESH bounded context (the cleanupHost
+	// precedent) so a step that failed by ctx timeout still gets its cleanup.
+	failStep := func(step, ip string, err error) (string, string, *BootstrapOutputs, Teardown, error) {
 		report(step, "failed", err.Error())
+		if ip != "" {
+			tdCtx, cancel := context.WithTimeout(context.Background(), restoreTeardownTimeout)
+			defer cancel()
+			if terr := restoreTearDown(tdCtx, driver, kind, job.Credentials, fqdn, ip); terr != nil {
+				console.logf("teardown of half-restored box %s (%s) failed: %v — reclaim manually or via the orphan sweep", ip, fqdn, terr)
+			} else {
+				console.logf("half-restored box %s torn down (no orphan billed)", ip)
+			}
+		}
 		return "", "", nil, nil, fmt.Errorf("resurrect %s (%s): %w", fqdn, step, err)
 	}
 
@@ -135,32 +149,32 @@ func provisionRestore(ctx context.Context, seams Seams, job JobSpec) (string, st
 	report("create", "started", "cold create on "+kind+" (resurrect never warm-assigns)")
 	ip, err := driver.CreateHost(ctx, job)
 	if err != nil {
-		return failStep("create", err)
+		return failStep("create", "", err)
 	}
 	report("create", "done", ip)
 
 	// ── 2. freshen — provider base image / from-scratch base install ──
 	report("freshen", "started", cloud.FreshenPlan(kind))
 	if err := driver.Freshen(ctx, job, ip); err != nil {
-		return failStep("freshen", err)
+		return failStep("freshen", ip, err)
 	}
 	report("freshen", "done", "")
 
 	// ── 3. secure — repoint the fqdn A-record at the fresh box ──
 	report("secure", "started", "repoint "+fqdn+" → "+ip)
 	if err := driver.RepointDNS(ctx, fqdn, ip); err != nil {
-		return failStep("secure", err)
+		return failStep("secure", ip, err)
 	}
 	report("secure", "done", "")
 
 	// ── 4. configure — install SEALED identity (KEK carried, not minted) + agent ──
 	report("configure", "started", "install sealed identity (KEK carried, not minted); empty-DB seed skipped")
 	if err := driver.InstallSecrets(ctx, *ref, ip); err != nil {
-		return failStep("configure", err)
+		return failStep("configure", ip, err)
 	}
 	if strings.TrimSpace(job.AgentToken) != "" {
 		if err := driver.InstallAgent(ctx, job.AgentToken, ip); err != nil {
-			return failStep("configure", err)
+			return failStep("configure", ip, err)
 		}
 	}
 	report("configure", "done", "")
@@ -168,14 +182,14 @@ func provisionRestore(ctx context.Context, seams Seams, job JobSpec) (string, st
 	// ── 5. content — the RESTORE phase: drop → create → pg_restore → media → migrate ──
 	report("content", "started", "restore db "+ref.Manifest.DBName+" (drop→create→pg_restore→migrate); template bootstrap suppressed")
 	if err := driver.RestoreData(ctx, *ref, ip); err != nil {
-		return failStep("content", err)
+		return failStep("content", ip, err)
 	}
 	report("content", "done", "")
 
 	// ── 6. verify — the golden-path gate against the restored fqdn ──
 	report("verify", "started", "")
 	if err := driver.Verify(ctx, fqdn); err != nil {
-		return failStep("verify", err)
+		return failStep("verify", ip, err)
 	}
 	report("verify", "done", "")
 
@@ -187,23 +201,29 @@ func provisionRestore(ctx context.Context, seams Seams, job JobSpec) (string, st
 	// the box is live but unknown to the control plane — hand back a teardown so it can
 	// be reclaimed. The identity is restored (adminToken ""), so nothing is minted here.
 	teardown := func(tdCtx context.Context) error {
-		return restoreTearDown(tdCtx, driver, kind, fqdn, ip)
+		return restoreTearDown(tdCtx, driver, kind, job.Credentials, fqdn, ip)
 	}
 	return ip, "", nil, teardown, nil
 }
 
-// restoreTeardowner is the OPTIONAL cleanup facet a RestoreDriver may satisfy so an
-// orphaned restored box (succeed-report-failed edge) can be reclaimed. A driver that
-// does not implement it leaves the box for the orphan sweep.
+// restoreTeardownTimeout bounds the fresh teardown context failStep uses so a
+// stuck delete cannot wedge the drain (the cloud.cleanupTimeout value).
+const restoreTeardownTimeout = 2 * time.Minute
+
+// restoreTeardowner is the OPTIONAL cleanup facet a RestoreDriver may satisfy so a
+// half-restored or orphaned restored box can be reclaimed. creds are the claim's
+// decrypted per-kind credentials — a cross-provider (azure) teardown needs them to
+// resolve its provider; the hetzner path ignores them. A driver that does not
+// implement the facet leaves the box for manual reclaim.
 type restoreTeardowner interface {
-	TearDown(ctx context.Context, kind, fqdn, ip string) error
+	TearDown(ctx context.Context, kind string, creds map[string]string, fqdn, ip string) error
 }
 
 // restoreTearDown dispatches to the driver's optional TearDown, else no-ops — so the
 // RestoreDriver interface stays minimal (cleanup is an add-on, not a required method).
-func restoreTearDown(ctx context.Context, d RestoreDriver, kind, fqdn, ip string) error {
+func restoreTearDown(ctx context.Context, d RestoreDriver, kind string, creds map[string]string, fqdn, ip string) error {
 	if td, ok := d.(restoreTeardowner); ok {
-		return td.TearDown(ctx, kind, fqdn, ip)
+		return td.TearDown(ctx, kind, creds, fqdn, ip)
 	}
 	return nil
 }

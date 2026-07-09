@@ -95,6 +95,13 @@ const (
 	attachDomainFailPathFmt    = "/v1/internal/attach-domain-jobs/%s/fail"
 )
 
+// resurrectClaimPath is the portable-archive restore queue's claim endpoint
+// (charter S14f). It is kind-filtered server-side so a resurrect job is never
+// handed to a provision worker. The succeed/fail/step/console TRANSITIONS reuse
+// the provision-jobs endpoints (a resurrect rides the same job machine, S14c), so
+// RunOnceResurrect reports through the existing succeed/fail machinery.
+const resurrectClaimPath = "/v1/internal/resurrect-jobs/claim"
+
 // AttachDomainSpec is one claimed attach-domain job as the control plane hands
 // it back — the EXACT JSON the Elixir attach-domain claim endpoint returns on
 // 200 (a 204 means no pending job). ip is the box the instance lives on (the
@@ -271,6 +278,13 @@ type Worker struct {
 	// env/Caddy config) for a claimed attach-domain job. nil → the worker skips
 	// the attach-domain queue. Injected like Provision/Deprovision.
 	AttachDomain AttachDomainFunc
+	// Resurrect resolves the object store + KEK a portable-restore job needs, from
+	// WORKER ENV (never the claim JSON — charter S14f/D43). The resurrect drain
+	// calls it to TRANSLATE a claim's string bundle_ref into a full *BundleRef
+	// (manifest read from the store, KEK injected here) before handing the job to
+	// Provision. nil → the worker skips the resurrect queue (like Deprovision/
+	// AttachDomain). A missing-env error fails the JOB honestly; the drain survives.
+	Resurrect ResurrectDepsFunc
 	// ProvisionTimeout bounds a single Provision call. Zero means
 	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
 	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
@@ -1189,6 +1203,169 @@ func (w *Worker) succeedAttachDomainWithRetry(ctx context.Context, jobID, claimT
 
 func (w *Worker) failAttachDomainWithRetry(ctx context.Context, jobID, claimToken, errMsg string) error {
 	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failAttachDomain(ctx, jobID, claimToken, errMsg) })
+}
+
+func (w *Worker) RunResurrect(ctx context.Context) error {
+	return w.RunResurrectWith(ctx, nil)
+}
+
+// RunResurrectWith is the 4th drain loop (charter S14f) — the portable-archive
+// RESTORE queue, run in its own goroutine like Deprovision/AttachDomain. It claims
+// resurrect jobs from resurrectClaimPath, TRANSLATES each claim's string bundle_ref
+// into a full *BundleRef (store + KEK from worker env), and runs it through the
+// SAME Provision seam (which routes a BundleRef-carrying job to the restore chain).
+func (w *Worker) RunResurrectWith(ctx context.Context, onCycle func(claimed bool, err error)) error {
+	interval := w.Interval
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		claimed, err := w.RunOnceResurrect(ctx)
+		if onCycle != nil {
+			onCycle(claimed, err)
+		}
+
+		if !claimed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
+}
+
+// RunOnceResurrect claims one resurrect job, translates its bundle_ref, restores
+// the box, and reports succeed/fail. It mirrors RunOnce's ORPHAN-TEARDOWN branch,
+// NOT deprovision's simpler one (D45): a resurrected box is a live, BILLED box, so
+// a dropped succeed-report must tear it down rather than orphan a paying instance.
+// It does NOT participate in the graceful-shutdown claim-release coordination
+// (setInflight) — that is the primary provision loop's exclusive mechanism; this
+// concurrent loop follows the deprovision/attach pattern (a resurrect that outruns
+// shutdown is recovered by the control-plane stale-claim reaper).
+//
+// TRANSLATE is where a resurrect can honestly fail before any box exists: a missing
+// bundle env (D43) or a torn/foreign bundle fails the JOB (reported to /fail, the
+// drain survives), never the worker.
+func (w *Worker) RunOnceResurrect(ctx context.Context) (claimed bool, err error) {
+	if w.Resurrect == nil {
+		return false, nil // the resurrect queue is not wired.
+	}
+	if w.Provision == nil {
+		return false, fmt.Errorf("provisioner: a Provision func must be injected for resurrect")
+	}
+
+	spec, ok, err := w.claimResurrect(ctx)
+	if err != nil {
+		return false, fmt.Errorf("resurrect claim: %w", err)
+	}
+	if !ok {
+		return false, nil // 204 — nothing pending.
+	}
+
+	// TRANSLATE (D43): resolve the store + KEK from WORKER ENV and read the bundle
+	// manifest, building the full *BundleRef the restore chain needs. A missing var
+	// (or a torn/foreign bundle) is an honest JOB failure — report /fail so the
+	// control plane records it, then move on (the drain survives).
+	deps, derr := w.Resurrect()
+	if derr != nil {
+		return w.finishResurrect(ctx, spec.JobID, spec.ClaimToken, fmt.Errorf("resurrect bundle store not configured: %w", derr))
+	}
+	job, terr := translateResurrect(ctx, spec, deps)
+	if terr != nil {
+		return w.finishResurrect(ctx, spec.JobID, spec.ClaimToken, terr)
+	}
+
+	// Bound the restore like a provision so one hung step fails the job instead of
+	// pinning this loop forever.
+	pto := w.ProvisionTimeout
+	if pto <= 0 {
+		pto = DefaultProvisionTimeout
+	}
+	provCtx, cancel := context.WithTimeout(ctx, pto)
+	ip, _, _, teardown, provErr := w.Provision(provCtx, job)
+	cancel()
+
+	if provErr != nil {
+		// The restore chain already tore down any half-built box (teardown nil on
+		// failure). Report so the control plane records it and the row stays
+		// provisioning for a later retry.
+		return w.finishResurrect(ctx, spec.JobID, spec.ClaimToken, provErr)
+	}
+
+	// Restore SUCCEEDED: a paid box is live but the control plane does not yet know
+	// (its succeed POST is the only signal). Retry transient report failures; on a
+	// report that never lands, tear the box down so no BILLED box is orphaned — the
+	// RunOnce money-edge, applied to a resurrect (D45). adminToken/boot are empty on
+	// a restore (identity is RESTORED, never minted; no template bootstrap).
+	if rerr := w.succeedWithRetry(ctx, spec.JobID, spec.ClaimToken, ip, "", nil); rerr != nil {
+		if teardown != nil {
+			if cerr := teardown(ctx); cerr != nil {
+				return false, fmt.Errorf("report resurrect succeed for job %s failed (%v) AND orphan teardown failed: %w", spec.JobID, rerr, cerr)
+			}
+		}
+		return false, fmt.Errorf("report resurrect succeed for job %s (box torn down to avoid an orphan, job left for retry): %w", spec.JobID, rerr)
+	}
+	return true, nil
+}
+
+// finishResurrect reports a resurrect FAILURE (translate error or a failed restore)
+// through the shared transient-retry fail path — reusing the provision-jobs /fail
+// endpoint (a resurrect rides the same job machine, S14c). A report that never
+// lands leaves the job un-consumed (claimed=false) for the reaper; a landed report
+// is a cleanly-handled cycle (claimed=true).
+func (w *Worker) finishResurrect(ctx context.Context, jobID, claimToken string, jobErr error) (bool, error) {
+	if rerr := w.failWithRetry(ctx, jobID, claimToken, jobErr.Error()); rerr != nil {
+		return false, fmt.Errorf("report resurrect fail for job %s (job error %v): %w", jobID, jobErr, rerr)
+	}
+	return true, nil
+}
+
+// claimResurrect POSTs the resurrect claim endpoint. A 200 decodes into a
+// resurrectClaimSpec (the provision claim fields PLUS bundle_ref as a STRING — D43);
+// a 204 is the empty-queue signal. Any other status is an error.
+func (w *Worker) claimResurrect(ctx context.Context) (resurrectClaimSpec, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url(resurrectClaimPath), nil)
+	if err != nil {
+		return resurrectClaimSpec{}, false, err
+	}
+	w.authorize(req)
+
+	resp, err := w.httpClient().Do(req)
+	if err != nil {
+		return resurrectClaimSpec{}, false, err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return resurrectClaimSpec{}, false, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return resurrectClaimSpec{}, false, fmt.Errorf("POST %s: status %d: %s", resurrectClaimPath, resp.StatusCode, truncate(string(data), 200))
+	}
+
+	var spec resurrectClaimSpec
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &spec); err != nil {
+			return resurrectClaimSpec{}, false, fmt.Errorf("decode resurrect claim response: %w", err)
+		}
+	}
+	if strings.TrimSpace(spec.JobID) == "" {
+		return resurrectClaimSpec{}, false, fmt.Errorf("resurrect claim response missing job_id: %s", truncate(string(data), 200))
+	}
+	if strings.TrimSpace(spec.BundleRef) == "" {
+		return resurrectClaimSpec{}, false, fmt.Errorf("resurrect claim response missing bundle_ref: %s", truncate(string(data), 200))
+	}
+	return spec, true, nil
 }
 
 // truncate caps s at n runes for error messages.

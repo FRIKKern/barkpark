@@ -31,11 +31,25 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// StdinStepRunner is the OPTIONAL capability a per-host runner advertises when it
+// can stream a reader into a remote script's STDIN — the resurrect restore
+// (charter S14f) needs it to pipe a bundle's db.dump + media tarball into the
+// on-box pg_restore/tar, the import-feed pattern lifted from the transfer command.
+// The production *SSHStepRunner satisfies it; the ordinary Run keeps its
+// `</dev/null` stdin for every non-feed step (so an inner stdin-reading command
+// can never swallow the rest of the script). Tests inject a recorder that captures
+// the fed script + stdin bytes so the round-trip proves offline.
+type StdinStepRunner interface {
+	RunFeed(ctx context.Context, title, script string, stdin io.Reader) (string, error)
+}
 
 // defaultSSHUser is the login used for provisioning when SSHStepRunner.User is
 // empty — fresh Hetzner Ubuntu images land with a root key, and every setup step
@@ -186,6 +200,56 @@ func sshStepArgv(user, host, key, cmd string) []string {
 	}
 }
 
+// sshFeedArgv is sshStepArgv's stdin-KEEPING twin: it runs the base64-decoded
+// script the SAME way (temp file + `bash -l`) but WITHOUT the `</dev/null`
+// redirect, so the ssh connection's real stdin flows into the remote script — the
+// resurrect restore pipes the bundle tar into `tar -xzf -` this way. The
+// arg-splitting hazard is still dodged (single base64 token). PURE (no exec) so a
+// test asserts the argv without invoking ssh.
+func sshFeedArgv(user, host, key, cmd string) []string {
+	if strings.TrimSpace(user) == "" {
+		user = defaultSSHUser
+	}
+	b64 := base64.StdEncoding.EncodeToString([]byte(cmd))
+	// No `</dev/null` here: the script READS stdin (the fed bundle bytes).
+	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; bash -l "$b"; rc=$?; rm -f "$b"; exit $rc`
+	return []string{
+		"ssh",
+		"-i", key,
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "BatchMode=yes",
+		"-o", "ConnectTimeout=20",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=4",
+		user + "@" + host,
+		remote,
+	}
+}
+
+// RunFeed runs script ON r.Host over SSH with stdin streamed from r — the
+// StdinStepRunner capability the resurrect restore uses to pipe the bundle's
+// db.dump + media tarball into the on-box restore pipeline. It shells out
+// DIRECTLY (not through r.Exec, whose signature carries no stdin), mirroring the
+// transfer command's instSSHFeed: combined output rides back in the error on
+// failure and is returned on success so a caller can look for a sentinel line. No
+// per-step secret redaction — the restore script carries no secrets (the sealed
+// identity is installed by InstallSecrets, a separate `</dev/null` step).
+func (r *SSHStepRunner) RunFeed(ctx context.Context, title, script string, stdin io.Reader) (string, error) {
+	key := r.Key
+	if strings.TrimSpace(key) == "" {
+		key = sshKeyPath()
+	}
+	argv := sshFeedArgv(r.User, r.Host, key, script)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdin = stdin
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), fmt.Errorf("ssh feed %q on %s: %w: %s", title, r.Host, err, strings.TrimSpace(string(out)))
+	}
+	return string(out), nil
+}
+
 // run dispatches the ssh argv via the injected Exec, falling back to runCapture
 // (live ssh) when nil — the CloudDNS.run idiom.
 func (r *SSHStepRunner) run(ctx context.Context, name string, args ...string) (string, error) {
@@ -281,4 +345,5 @@ func (r *SSHStepRunner) WaitReady(ctx context.Context, timeout time.Duration) er
 var (
 	_ StepRunner        = (*SSHStepRunner)(nil)
 	_ hostCommandRunner = (*SSHStepRunner)(nil)
+	_ StdinStepRunner   = (*SSHStepRunner)(nil)
 )

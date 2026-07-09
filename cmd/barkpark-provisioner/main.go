@@ -233,11 +233,38 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: warm pool ENABLED (target size %d)\n", poolSize)
 	}
 
+	// Resurrect drain (charter S14f): the portable-archive RESTORE queue. The bundle
+	// store creds + KEK come from WORKER ENV (never the claim JSON, D43); a missing
+	// var fails each resurrect job HONESTLY — translate errors before any box is
+	// created — so the worker still provisions. seams.Restore wires the real driver
+	// (a cold create + pg_restore over the box runner); it must be set on `seams`
+	// BEFORE DefaultProvision(seams) captures the struct below.
+	bundleDeps, bundleErr := provisioner.ResolveBundleEnv()
+	if bundleErr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: resurrect drain DEGRADED — %v; resurrect jobs will fail honestly until the bundle env is set (the worker still provisions)\n", bundleErr)
+	} else {
+		fmt.Fprintln(os.Stderr, "barkpark-provisioner: resurrect drain ENABLED (bundle store configured)")
+	}
+	seams.Restore = &provisioner.CloudRestoreDriver{
+		Exec: &cloud.RestoreExecutor{
+			Provider:   provider,
+			DNS:        dns,
+			RunnerFor:  seams.RunnerFor,
+			Store:      bundleDeps.Store, // nil when the env is missing — never reached (translate fails first)
+			Mail:       seams.Mail,
+			ControlURL: *controlURL,
+		},
+	}
+
 	w := &provisioner.Worker{
 		ControlURL: *controlURL,
 		Token:      tok,
 		Interval:   *interval,
 		Provision:  provisioner.DefaultProvision(seams),
+		// The resurrect drain: translate a claim's string bundle_ref (store creds +
+		// KEK from WORKER ENV) and restore the box through Provision. Runs in its own
+		// goroutine below, like deprovision/attach-domain.
+		Resurrect: provisioner.DefaultResurrectDeps,
 		// The Remove drain: delete the real Hetzner box + DNS for a deprovision
 		// job (idempotent). Runs in its own goroutine below.
 		Deprovision: provisioner.DefaultDeprovision(seams),
@@ -311,7 +338,18 @@ func run(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain) every %s\n", *controlURL, interval.String())
+	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain + resurrect) every %s\n", *controlURL, interval.String())
+
+	go func() {
+		_ = w.RunResurrectWith(ctx, func(claimed bool, err error) {
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: resurrect cycle error: %v\n", err)
+			case claimed:
+				fmt.Fprintln(os.Stderr, "barkpark-provisioner: resurrected a box")
+			}
+		})
+	}()
 
 	go func() {
 		_ = w.RunDeprovisionWith(ctx, func(claimed bool, err error) {
