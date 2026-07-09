@@ -35,9 +35,11 @@ defmodule Barkpark.Plugins.Github do
       resolves a live handler when `github` is whitelisted.
     * `cli_commands/0` → merge-safe delegate to `Github.CLI` (the `github adopt`
       and `github status` operator verbs the `/v1/capabilities` manifest exposes).
-    * `resolve_doc_actions/2` + `action_handlers/0` → the Studio "Adopt from
-      GitHub" button, surfaced only for a `task` with
-      `content.github.state == "intake"`, dispatching `Github.Adopt.adopt/3`.
+    * `resolve_doc_actions/2` + `action_handlers/0` + `resolve_action_handlers/2`
+      → the Studio "Adopt from GitHub" button, surfaced only for a `task` with
+      `content.github.state == "intake"` (read struct/atom/string-key safe via
+      `Barkpark.Plugins.ContentProbe`), dispatching `Github.Adopt.adopt/3` with
+      the dispatching session's tenancy scope threaded in as opts.
     * `register_schemas/1` → `[]` (the `use` default). GitHub adds NO task
       schema (decision D3): the bookkeeping field `github:{repo,issue,synced_rev}`
       rides the task's plain CONTENT via `Content.*`, never a declared
@@ -269,12 +271,41 @@ defmodule Barkpark.Plugins.Github do
   """
   @impl Barkpark.Plugin
   def action_handlers do
-    %{
-      "github_adopt" => fn doc_id, dataset, _mode ->
-        Barkpark.Plugins.Github.Adopt.adopt(doc_id, dataset, [])
-      end
-    }
+    %{"github_adopt" => build_adopt_handler([])}
   end
+
+  @doc """
+  Resolver form of `action_handlers/0` — threads the dispatching Studio
+  session's tenancy scope into the adopt call (the onixedit
+  `resolve_action_handlers/2` precedent).
+
+  The plugin `action_handler` contract is fixed arity-3 `(doc_id, dataset,
+  mode)`, so the dispatching StudioLive can't pass the tenancy scope as a 4th
+  positional arg. Instead the resolver reads `ctx.scope` (the session's
+  `[workspace_id: ..., project_id: ...]`, set by `ScopeHelpers.scope_opts/1`)
+  and CLOSES OVER it, passing it as the `opts` `Adopt.adopt/3` already threads
+  into `load_task`/`get_document` and the published-twin capture — no
+  Adopt service change needed.
+
+  Empty scope (back-compat, and the test/cached-snapshot path) falls back to
+  the bare arity-3 handler with `[]` opts, exactly `action_handlers/0`. The
+  `mode` positional is always discarded — adoption has no dry-run/real split.
+  """
+  @impl Barkpark.Plugin
+  def resolve_action_handlers(prev, ctx) do
+    Map.put(prev, "github_adopt", build_adopt_handler(scope_from_ctx(ctx)))
+  end
+
+  # Build the arity-3 action handler, closing over the tenancy `opts` (empty or
+  # a `[workspace_id:, project_id:]` keyword list). `mode` is discarded.
+  defp build_adopt_handler(opts) when is_list(opts) do
+    fn doc_id, dataset, _mode ->
+      Barkpark.Plugins.Github.Adopt.adopt(doc_id, dataset, opts)
+    end
+  end
+
+  defp scope_from_ctx(%{scope: scope}) when is_list(scope), do: scope
+  defp scope_from_ctx(_), do: []
 
   @doc """
   Append an "Adopt from GitHub" doc action to the Studio editor header, but ONLY
@@ -317,16 +348,15 @@ defmodule Barkpark.Plugins.Github do
   end
 
   # `content.github.state` lives under the doc's `content` map. The doc may
-  # arrive as a `%Document{}` struct (atom-keyed `:content`) or a plain map
-  # (string-keyed `"content"`). Read every shape; adoptable only when the state
-  # reads exactly `"intake"` on a `task`.
+  # arrive as a `%Document{}` struct (atom `:content` field), a plain map with
+  # an atom `:content`, or a plain map with a string `"content"` key.
+  # `ContentProbe.content_get/2` reads every shape WITHOUT raising — a bare
+  # `get_in(doc, ["content", ...])` against a real `%Document{}` struct raises
+  # `Document does not implement the Access behaviour`, which the Registry
+  # rescue masked as log spam while silently dropping the button. Adoptable only
+  # when the state reads exactly `"intake"` on a `task`.
   defp adoptable_intake?(%{doc_type: "task", doc: %{} = doc}) do
-    state =
-      get_in(doc, [Access.key(:content, %{}), "github", "state"]) ||
-        get_in(doc, ["content", "github", "state"]) ||
-        get_in(doc, [Access.key(:content, %{}), :github, :state])
-
-    state == "intake"
+    Barkpark.Plugins.ContentProbe.content_get(doc, ["github", "state"]) == "intake"
   end
 
   defp adoptable_intake?(_), do: false

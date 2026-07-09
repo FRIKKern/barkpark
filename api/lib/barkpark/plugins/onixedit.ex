@@ -283,17 +283,21 @@ defmodule Barkpark.Plugins.OnixEdit do
     end
   end
 
-  # `bp_export_status` lives under the doc's `content` map. The doc may
-  # arrive as a `%Document{}` struct (atom-keyed `:content`) or as a
-  # plain map (string-keyed `"content"`). Read both shapes; if neither
-  # holds an in-flight state, leave the action list untouched.
+  # `bp_export_status` lives under the doc's `content` map. The doc may arrive
+  # as a `%Document{}` struct (atom `:content` field), a plain map with an atom
+  # `:content`, or a plain map with a string `"content"` key.
+  # `ContentProbe.content_get/2` reads every shape WITHOUT raising — a bare
+  # `get_in(doc, ["content", ...])` against a real `%Document{}` struct raises
+  # `Document does not implement the Access behaviour` (masked as Registry log
+  # spam). If neither shape holds an in-flight state, leave the action list
+  # untouched.
   defp hide_publish_action?(%{doc_type: "book", doc: %{} = doc}) do
-    state =
-      get_in(doc, [Access.key(:content, %{}), "bp_export_status", "state"]) ||
-        get_in(doc, ["content", "bp_export_status", "state"]) ||
-        get_in(doc, [Access.key(:content, %{}), :bp_export_status, :state])
-
-    state in ["queued", "staging", "staged", "polling"]
+    Barkpark.Plugins.ContentProbe.content_get(doc, ["bp_export_status", "state"]) in [
+      "queued",
+      "staging",
+      "staged",
+      "polling"
+    ]
   end
 
   defp hide_publish_action?(_), do: false
