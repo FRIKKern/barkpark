@@ -1416,6 +1416,152 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "reopen of a live session adopts it (registry-aware, charter D22)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    # Drive a tab to a LIVE session (fresh send spawns the registered `cat`
+    # process) that carries one PERSISTED pending approval — the exact shape a
+    # second tab must NOT trample.
+    defp start_live_session_with_pending(conn, request_id) do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view)
+      owner = session_pid(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: request_id,
+           tool_name: "Bash",
+           input: %{"command" => "ls"},
+           title: "Allow Bash?",
+           decision_reason: nil
+         }}
+      )
+
+      render(view)
+      {view, sid, owner}
+    end
+
+    test "a second tab ADOPTS the running process — it does not spawn a second writer",
+         %{conn: conn} do
+      {_viewA, sid, owner} = start_live_session_with_pending(conn, "req-adopt")
+      assert is_pid(owner) and Process.alive?(owner)
+
+      {:ok, viewB, _html} = live(conn, "/studio/chat/#{sid}")
+
+      # tab B took over the SAME process (no `claude --resume` second writer),
+      # so the CLI transcript keeps a single owner.
+      assert session_pid(viewB) == owner
+    end
+
+    test "the old tab is detached (honest banner, composer frozen) when the new tab adopts",
+         %{conn: conn} do
+      {viewA, sid, _owner} = start_live_session_with_pending(conn, "req-detach")
+
+      {:ok, _viewB, _html} = live(conn, "/studio/chat/#{sid}")
+
+      await(fn -> lv_assigns(viewA)[:detached] == true end)
+      assert lv_assigns(viewA)[:status] == :detached
+      # the take-over banner replaces the composer (no second-writer path)
+      render(viewA)
+      assert has_element?(viewA, "button[phx-click=take_over]")
+      refute has_element?(viewA, "form[phx-submit=send]")
+    end
+
+    test "the store never lies on reopen-of-live: the pending approval stays pending and answerable",
+         %{conn: conn} do
+      {_viewA, sid, _owner} = start_live_session_with_pending(conn, "req-answer")
+
+      # the ask really is pending in the store before the second tab opens
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      {:ok, viewB, html} = live(conn, "/studio/chat/#{sid}")
+
+      # NOT cancelled — the live owner can still resolve it, so the card replays
+      # as an answerable approval (never the ✗ canceled terminal state)
+      refute html =~ "✗ canceled"
+      assert has_element?(viewB, ~s(button[phx-click=approve][phx-value-rid=req-answer]))
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert row.metadata["approval_status"] == "pending"
+
+      # …and answering THROUGH the adopted pid resolves it end-to-end
+      render_click(element(viewB, ~s(button[phx-click=approve][phx-value-rid=req-answer])))
+
+      approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+      assert approval.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "reopen of a session with NO live owner still cancel-persists its dangling approval",
+         %{conn: conn} do
+      # seeded row, never spawned → the registry holds no owner for this id
+      sid = seed_session_with_pending_approval("req-dead")
+      assert [] = Registry.lookup(Barkpark.StudioChat.SessionRegistry, sid)
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # display-only (no spawn) AND the dangling ask is honestly canceled
+      assert session_pid(view) == nil
+      assert html =~ "✗ canceled"
+      refute has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-dead]))
+      assert StudioChat.get_session(sid).pending_approvals == 0
+    end
+
+    test "re-navigating to the session you already own does not re-adopt or self-detach",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      sid = store_id(view)
+      owner = session_pid(view)
+      assert is_pid(owner)
+      # a fresh send is mid-turn — the live state we must NOT clobber
+      assert lv_assigns(view)[:status] == :thinking
+
+      # patch to our OWN url again: handle_params' store_session_id == sid
+      # short-circuit keeps the live pid untouched — no load_stored_session, so
+      # no adopt, no self-detach, no replay that would drop the live turn.
+      render_patch(view, "/studio/chat/#{sid}")
+
+      assert session_pid(view) == owner
+      assert lv_assigns(view)[:status] == :thinking
+      refute lv_assigns(view)[:detached]
+    end
+
+    test "a send after the live owner died never holds a dead session pid (no phantom, not stuck)",
+         %{conn: conn} do
+      {view, sid, owner} = start_live_session_with_pending(conn, "req-gone")
+
+      # the owner dies; our DOWN handler tears the tab down to an honest offline
+      Process.exit(owner, :kill)
+      await(fn -> lv_assigns(view)[:status] == :offline end)
+      before = StudioChat.get_session(sid).message_count
+
+      # sending again lazy-resumes: the registry reaped the dead entry, so
+      # start_session heals to a FRESH process that really receives the message —
+      # the adopt-a-corpse guard means the LiveView NEVER holds a dead session
+      # pid, so no user turn is echoed against the void.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "still there?"})
+
+      # invariant across BOTH honest branches (registry heals to a fresh resume,
+      # or the guard refuses a dead incumbent): the LiveView NEVER holds a dead
+      # session pid, and it never shows :thinking without a live session — so a
+      # user turn is never echoed against the void.
+      sp = session_pid(view)
+      refute is_pid(sp) and not Process.alive?(sp)
+      refute lv_assigns(view)[:status] == :thinking and not (is_pid(sp) and Process.alive?(sp))
+      # at most one NEW user row (the real resend) — never a phantom double-write
+      assert StudioChat.get_session(sid).message_count in [before, before + 1]
+    end
+  end
+
   describe "resume flag end-to-end (argv-echo :binary fake, D9)" do
     setup %{conn: conn} do
       marker = enable_argv_echo_chat()

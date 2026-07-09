@@ -1120,11 +1120,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Another tab already owns this session's process (charter D20). Adopt it
       # as the sole sink instead of spawning a second `claude --resume` writer —
       # the other tab gets the detached banner. Single writer, no torn transcript.
+      #
+      # Harden the adopt (charter D22): the incumbent was alive when the registry
+      # handed it back, but it can die in the sliver before we take it over. If it
+      # has, adopting a corpse casts into the void and an immediate DOWN fires,
+      # yet the send path would still persist + echo a user turn the model never
+      # received. Re-check liveness: only a still-alive owner becomes our session
+      # pid. A dead one yields an honest system line and NO live pid — the send
+      # handler's nil-session branch then skips the phantom persist/echo, and the
+      # next send lazy-resumes once the registry has reaped the stale entry.
       {:error, {:already_started, other}} when is_pid(other) ->
-        ClaudeChat.adopt_sink(other, self())
-        Process.monitor(other)
-        StudioChat.update_status(store_id, "working")
-        socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
+        if Process.alive?(other) do
+          ClaudeChat.adopt_sink(other, self())
+          Process.monitor(other)
+          StudioChat.update_status(store_id, "working")
+          socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
+        else
+          socket
+          |> append_message(:system, "That chat's process just ended — send again to resume it.")
+          |> assign(session: nil, status: :offline)
+        end
 
       {:error, reason} ->
         socket
@@ -1133,25 +1148,47 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Replay a remembered session INSTANTLY from our own store — no subprocess is
-  # started (D8: reopen is display-only until the next send lazy-resumes). Any
-  # subprocess from the previously-viewed session is torn down so we never leak.
+  # Replay a remembered session from our own store. Registry-aware (charter D22):
+  # if ANOTHER tab is live-driving this exact session, ADOPT its running process
+  # instead of cancelling the approvals it can still resolve — the reopened tab
+  # becomes the sole sink, the replayed pending cards stay answerable through the
+  # adopted pid, and the old tab gets the honest detached banner. Only a session
+  # with NO live owner is truly dead; there (and only there) we cancel-persist
+  # its dangling approvals and go display-only until the next send lazy-resumes.
+  # Any subprocess from the previously-viewed session is torn down so we never leak.
   defp load_stored_session(socket, session) do
     if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
 
-    # Reopen has no live control channel, so any approval left "pending" is dead:
-    # persist the cancellation BEFORE replay so the store agrees with what the
-    # screen shows (canceled) and the sidebar pending pill drops (D11).
-    StudioChat.cancel_pending_approvals(session.id)
+    {session_pid, status, live?} =
+      case live_owner(session.id) do
+        nil ->
+          # No live control channel: a still-"pending" approval can never be
+          # answered, so persist its cancellation BEFORE replay — the store then
+          # agrees with the canceled cards on screen and the sidebar "needs you"
+          # pill drops (D11). Replay is display-only (status :resumable).
+          StudioChat.cancel_pending_approvals(session.id)
+          {nil, :resumable, false}
 
-    messages = replay_messages(session.id)
+        owner ->
+          # Live elsewhere: take over as the single writer (charter D20/D22).
+          # adopt_sink transfers FUTURE frames only — a mid-turn reopen shows a
+          # brief gap until the next port frame (accepted gap: the Session never
+          # snapshots streaming/turn state). The old tab receives
+          # {:claude_chat_detached} and freezes behind its take-over banner.
+          ClaudeChat.adopt_sink(owner, self())
+          Process.monitor(owner)
+          StudioChat.update_status(session.id, "working")
+          {owner, :ready, true}
+      end
+
+    messages = replay_messages(session.id, live?)
 
     assign(socket,
-      session: nil,
+      session: session_pid,
       store_session_id: session.id,
       session_id: session.id,
       mode: session.mode || "plan",
-      status: :resumable,
+      status: status,
       init: replay_init(session),
       messages: messages,
       # Strictly past every replayed id (seqs are 1-based), so a live append
@@ -1173,6 +1210,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
       renaming_session: nil,
       open_menu_session: nil
     )
+    # Both branches mutate the stored row (cancel-persist, or mark "working" on
+    # adopt), so re-read the sidebar list once — the pending pill and the working
+    # pill both stay honest on reopen.
+    |> refresh_sessions()
+  end
+
+  # The live process currently driving this session, or nil. Charter D22: the
+  # LiveView consults the single-writer registry BEFORE any store write so a
+  # reopen of a session another tab is actively driving ADOPTS it rather than
+  # cancelling approvals its live owner can still resolve. A registry entry that
+  # points at an already-dead pid (reaped asynchronously) is treated as no owner.
+  defp live_owner(session_id) do
+    case Registry.lookup(Barkpark.StudioChat.SessionRegistry, session_id) do
+      [{pid, _} | _] when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
+      _ -> nil
+    end
   end
 
   # The new-chat empty state: no store row, no subprocess. A previously-viewed
@@ -1416,18 +1469,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Rebuild the transcript message list from the persisted store. Assistant
   # markdown re-renders through the SAME paper engine used live, so the improving
   # renderer wins on every reopen (D7).
-  defp replay_messages(session_id) do
+  defp replay_messages(session_id, live?) do
     session_id
     |> StudioChat.list_messages()
-    |> Enum.map(&replay_message/1)
+    |> Enum.map(&replay_message(&1, live?))
   end
 
   # An approval row rebuilds its card from metadata (request_id + tool_name +
-  # lifecycle). A dangling "pending" approval can NEVER be resolved on reopen —
-  # there is no live control channel — so it renders as the honest terminal
-  # state, canceled (the persisted flip is done separately in load_stored_session
-  # so the store agrees with the screen).
-  defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}) do
+  # lifecycle). `live?` decides the fate of a still-"pending" row: on a display-
+  # only reopen (no live owner) it can NEVER be resolved, so it renders as the
+  # honest terminal state, canceled (the persisted flip already ran in
+  # load_stored_session so the store agrees with the screen). On a reopen that
+  # ADOPTED a live owner (charter D22) the ask stays answerable — the card keeps
+  # its :pending status and resolve_permission holds the adopted pid.
+  defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}, live?) do
     meta = meta || %{}
 
     %{
@@ -1437,11 +1492,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       html: nil,
       request_id: Map.get(meta, "request_id"),
       tool_name: Map.get(meta, "tool_name"),
-      approval_status: replay_approval_status(Map.get(meta, "approval_status"))
+      approval_status: replay_approval_status(Map.get(meta, "approval_status"), live?)
     }
   end
 
-  defp replay_message(m) do
+  defp replay_message(m, _live?) do
     role = replay_role(m.role)
 
     html =
@@ -1452,11 +1507,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: m.seq, role: role, text: m.source_markdown, html: html}
   end
 
-  defp replay_approval_status("allowed"), do: :allowed
-  defp replay_approval_status("denied"), do: :denied
-  # pending (dangling) OR an unknown value → canceled: an unresolvable ask is
-  # never shown as a live card on reopen.
-  defp replay_approval_status(_), do: :canceled
+  defp replay_approval_status("allowed", _live?), do: :allowed
+  defp replay_approval_status("denied", _live?), do: :denied
+  # pending under a live owner stays answerable (D22); pending with no owner, or
+  # any unknown value, degrades to canceled — never a dead card no one can click.
+  defp replay_approval_status("pending", true), do: :pending
+  defp replay_approval_status(_, _live?), do: :canceled
 
   # A stored role must never make a session unopenable: map the known roles and
   # degrade anything else (a future wave's vocabulary) to a system line.
