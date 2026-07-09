@@ -29,6 +29,16 @@ on:
       # status vocabulary single-source — the manifest + its drift gate.
       - "design/status-manifest.json"
       - "scripts/status-manifest-check.sh"
+      # preview-contract cross-surface parity tripwire — the fixture mirrors, the
+      # structural gate, and the preview emitters every surface consumes.
+      - "scripts/preview-parity-check.sh"
+      - "api/test/support/fixtures/preview-parity.json"
+      - "web/__tests__/fixtures/preview-parity.json"
+      - "cmd/barkpark/testdata/preview-parity.json"
+      - "web/app/(finder)/d/[type]/[slug]/page.tsx"
+      - "web/lib/preview-metadata.ts"
+      - "web/lib/get-document.ts"
+      - "api/lib/barkpark_web/components/share_meta.ex"
       # unified-aesthetic design tokens — the source, the emitter/gate, and every
       # generated per-surface artifact (W1.2). Any drift trips design/check.mjs.
       - "design/tokens.json"
@@ -86,6 +96,16 @@ on:
       # status vocabulary single-source — the manifest + its drift gate.
       - "design/status-manifest.json"
       - "scripts/status-manifest-check.sh"
+      # preview-contract cross-surface parity tripwire — the fixture mirrors, the
+      # structural gate, and the preview emitters every surface consumes.
+      - "scripts/preview-parity-check.sh"
+      - "api/test/support/fixtures/preview-parity.json"
+      - "web/__tests__/fixtures/preview-parity.json"
+      - "cmd/barkpark/testdata/preview-parity.json"
+      - "web/app/(finder)/d/[type]/[slug]/page.tsx"
+      - "web/lib/preview-metadata.ts"
+      - "web/lib/get-document.ts"
+      - "api/lib/barkpark_web/components/share_meta.ex"
       # unified-aesthetic design tokens — the source, the emitter/gate, and every
       # generated per-surface artifact (W1.2). Any drift trips design/check.mjs.
       - "design/tokens.json"
@@ -154,6 +174,17 @@ jobs:
       # gate fails if any surface hand-drifts a tone or a glyph role away from it.
       - name: Status manifest drift gate (blocking)
         run: bash scripts/status-manifest-check.sh
+
+      # Preview-contract cross-surface parity tripwire (preview-contract W4,
+      # charter D20 Layer 2). Field parity is proven by the golden-fixture tests
+      # (api/web/Go, one shared mirror); this structural gate guards the
+      # invariants a fixture can't see: the web finder never resurrects the
+      # per-type excerpt fork (docDescription/paperExcerpt), the detail fetch
+      # carries no fields= projection that would strip `preview` off the wire
+      # (D22), and D10 stays executable law — grep -ri oembed over the source
+      # tree is ZERO, anywhere, ever.
+      - name: Preview parity + D10 no-oEmbed gate (blocking)
+        run: bash scripts/preview-parity-check.sh
 
       # Unified-aesthetic design-token drift gate (unified-aesthetic W1.2).
       # design/tokens.json is the ONE source of the Barkpark design language; the
