@@ -288,7 +288,11 @@ defmodule Barkpark.PreviewTest do
       do: Preview.project(%{}, [para(nodes)], %{})["description"]
 
     test "a strong span's text is included, not dropped" do
-      assert desc([text_node("before "), mark("strong", [text_node("bold")]), text_node(" after")]) ==
+      assert desc([
+               text_node("before "),
+               mark("strong", [text_node("bold")]),
+               text_node(" after")
+             ]) ==
                "before bold after"
     end
 
@@ -298,13 +302,19 @@ defmodule Barkpark.PreviewTest do
     end
 
     test "code carried as children recurses" do
-      assert desc([text_node("call "), mark("code", [text_node("project/3")]), text_node(" here")]) ==
+      assert desc([
+               text_node("call "),
+               mark("code", [text_node("project/3")]),
+               text_node(" here")
+             ]) ==
                "call project/3 here"
     end
 
     test "code carried as a value leaf still reads (both shapes exist)" do
       code_value = %{"type" => "code", "value" => "compose_inline"}
-      assert desc([text_node("run "), code_value, text_node(" once")]) == "run compose_inline once"
+
+      assert desc([text_node("run "), code_value, text_node(" once")]) ==
+               "run compose_inline once"
     end
 
     test "nested strong > em recurses through both marks" do
@@ -408,7 +418,9 @@ defmodule Barkpark.PreviewTest do
     test "ticket: the legacy key/state fields no longer populate the ext" do
       # A doc carrying only the old (non-existent-in-prod) field names yields an
       # empty ext — proof we read key_name/status, not key/state.
-      ext = Preview.project(%{"key" => "X", "state" => "Y"}, [], %{doc_type: "ticket"})["extensions"]
+      ext =
+        Preview.project(%{"key" => "X", "state" => "Y"}, [], %{doc_type: "ticket"})["extensions"]
+
       assert ext == %{}
     end
 
