@@ -9036,7 +9036,7 @@
         "Enter the code shown in your terminal to approve <b>bp</b> signing in on this account.") +
       '<form id="activate-form" novalidate>' +
         '<div class="field"><label class="label" for="activate-code">Code</label>' +
-          '<input class="form-input" id="activate-code" type="text" inputmode="latin" autocomplete="off" ' +
+          '<input class="form-input" id="activate-code" type="text" inputmode="text" autocomplete="off" ' +
           'autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" ' +
           'style="font-family:var(--mono);letter-spacing:0.12em" value="' + esc(normalizeUserCode(prefill || "")) + '" /></div>' +
         '<p class="form-error" id="activate-error" role="alert" hidden></p>' +
