@@ -3049,6 +3049,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-agent-running="toolu_spawn")
     end
 
+    test "a stale agent-toggle (no matching spawn row) is a safe no-op", %{view: view} do
+      # A click can land after the session switched away and the messages reset —
+      # the handler must drop it, never crash the LiveView on a missing row.
+      render_click(view, "agent-toggle", %{"id" => "toolu_gone"})
+      assert Process.alive?(view.pid)
+    end
+
     test "task_updated resolves the block by task_id (collapses when patched terminal)",
          %{view: view, sid: sid} do
       send_frame(sid, spawn_frame("toolu_spawn", "Task", "Patched job"))

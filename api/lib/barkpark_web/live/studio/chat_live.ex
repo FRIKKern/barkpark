@@ -415,9 +415,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # else the running/terminal default) so a manual choice always wins.
   def handle_event("agent-toggle", %{"id" => id}, socket) do
     agent = Enum.find(socket.assigns.messages, &(&1[:spawn?] == true and &1[:tool_use_id] == id))
-    current = agent && agent_open?(socket.assigns.agent_expanded, agent)
-    next = Map.put(socket.assigns.agent_expanded, id, not current)
-    {:noreply, assign(socket, agent_expanded: next)}
+
+    # A stale toggle (the session switched under an in-flight click) finds no
+    # spawn row — drop it instead of crashing the LiveView on `not nil`.
+    if agent do
+      current = agent_open?(socket.assigns.agent_expanded, agent)
+      next = Map.put(socket.assigns.agent_expanded, id, not current)
+      {:noreply, assign(socket, agent_expanded: next)}
+    else
+      {:noreply, socket}
+    end
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
