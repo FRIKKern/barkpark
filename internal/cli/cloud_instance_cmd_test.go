@@ -176,8 +176,24 @@ func TestProviderForAzureConstructsOffline(t *testing.T) {
 	if _, ok := p.(cloud.Cataloger); ok {
 		t.Error("azure provider must NOT claim Cataloger yet (catalog=false)")
 	}
-	if _, ok := p.(cloud.InstanceLifecycler); ok {
-		t.Error("azure provider must NOT claim InstanceLifecycler yet (lifecycle=false)")
+	// Azure implements NONE of the lifecycle FACET interfaces on the provider
+	// struct — its decommission + audit are CLI-level (registered via the dispatch
+	// table), and it has no archive/resurrect/adopt at all (Decision 20). So a
+	// direct type-assert for every facet interface must fail.
+	if _, ok := p.(cloud.Archiver); ok {
+		t.Error("azure provider must NOT implement Archiver (archive=false)")
+	}
+	if _, ok := p.(cloud.Resurrector); ok {
+		t.Error("azure provider must NOT implement Resurrector (resurrect=false)")
+	}
+	if _, ok := p.(cloud.Decommissioner); ok {
+		t.Error("azure Decommission is CLI-level, not a provider method — must NOT implement Decommissioner")
+	}
+	if _, ok := p.(cloud.Adopter); ok {
+		t.Error("azure provider must NOT implement Adopter (adopt=false)")
+	}
+	if _, ok := p.(cloud.Auditor); ok {
+		t.Error("azure Audit is CLI-level, not a provider method — must NOT implement Auditor")
 	}
 }
 
@@ -197,7 +213,7 @@ func TestAzureFixtureParityInCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCapabilities: %v", err)
 	}
-	actual := cloud.DetectCapabilities(p)
+	actual := cloud.DetectCapabilities(cloud.ProviderAzure, p)
 	if actual != fixture[cloud.ProviderAzure].Capabilities {
 		t.Errorf("azure fixture drift:\n  fixture: %+v\n  actual:  %+v", fixture[cloud.ProviderAzure].Capabilities, actual)
 	}
