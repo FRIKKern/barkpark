@@ -9,8 +9,8 @@
     },
     {
       "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
-      "count": 176,
-      "note": "Paper reader layout (no GENERATED marker — whole file scanned): 147 hex + 29 literal rgb/rgba. The post-capture remainder — mail-client popup traffic-light dots (#ff5f56/#ffbd2e/#27c93f), popup panel (#0b0e13/#232a35), TUI-preview surface (#05070a), and reader chrome not yet on tokens. Out of scope for studio-literal-check.sh; frozen here."
+      "count": 137,
+      "note": "Paper reader layout, outside the GENERATED marker ts-w1 added: 112 hex + 25 literal rgb/rgba. The post-capture remainder — mail-client popup traffic-light dots (#ff5f56/#ffbd2e/#27c93f), popup panel (#0b0e13/#232a35), TUI-preview surface (#05070a), and reader chrome not yet on tokens. Out of scope for studio-literal-check.sh; frozen here. Baseline measured POST ts-w1 capture (this slice lands LAST, after the reader skin + --mail-* moved into the marker); on the pre-capture tree the same rule counts 176."
     },
     {
       "path": "cloud/priv/static/app.css",
