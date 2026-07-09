@@ -13,9 +13,11 @@ Every target below wires the same `bp mcp serve` tool catalog (curated task tool
 | Cursor Cloud | `.cursor/environment.json` + Secrets | [CURSOR-CLOUD.md](CURSOR-CLOUD.md) |
 | Claude Code | `CLAUDE.md` + `.mcp.json` | `docs/setup/CLAUDE-CODE.md` |
 | Codex CLI / Desktop | `AGENTS.md` + `~/.codex/config.toml` | `docs/setup/CODEX.md` |
+| Windsurf (Cascade) | `~/.codeium/mcp_config.json` (merge the key) | `docs/setup/WINDSURF.md` |
+| Gemini CLI | `.gemini/settings.json` (merge the key) | `docs/setup/GEMINI-CLI.md` |
 | ChatGPT · Claude.ai | Custom GPT Actions · remote MCP | `docs/setup/REMOTE.md` |
 
-`CURSOR.md` and `CURSOR-CLOUD.md` are live links — the other three are code spans until their PRs land; open them by path.
+`CURSOR.md` and `CURSOR-CLOUD.md` are live links — the rest are code spans until their PRs land; open them by path.
 
 ## AUTH
 

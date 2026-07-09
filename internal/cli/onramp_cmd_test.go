@@ -151,6 +151,88 @@ func TestOnrampCursorCloudGolden(t *testing.T) {
 	}
 }
 
+// TestOnrampWindsurfGolden asserts the Windsurf emission is byte-compatible with
+// the stanza docs/setup/WINDSURF.md:50-61 publishes, in Cursor's shared ${env:VAR}
+// dialect, at the user-global ~/.codeium/mcp_config.json, with merge guidance.
+func TestOnrampWindsurfGolden(t *testing.T) {
+	out, _, code := onrampRun(t, globals{server: guerrilla}, "windsurf")
+	if code != exitOK {
+		t.Fatalf("windsurf exit = %d, want %d", code, exitOK)
+	}
+	// VERBATIM copy of docs/setup/WINDSURF.md:50-61 — the byte-parity lock
+	// (charter decision 16: doc block == verb output, kept identical by hand).
+	wantStanza := `{
+  "mcpServers": {
+    "barkpark": {
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${env:BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}`
+	if !strings.Contains(out, wantStanza) {
+		t.Errorf("windsurf output missing the exact WINDSURF.md stanza.\n--- got ---\n%s", out)
+	}
+	for _, want := range []string{
+		"~/.codeium/mcp_config.json",
+		"MERGE", // merge-the-key guidance, not a whole-file clobber
+		"docs/setup/AGENT-ONRAMPS.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("windsurf output missing %q", want)
+		}
+	}
+	// Windsurf speaks Cursor's ${env:…} dialect — the Codex env_vars form must
+	// never leak in (dialects never mix, decision 9).
+	if strings.Contains(out, "env_vars") {
+		t.Errorf("windsurf output leaked the Codex env_vars dialect")
+	}
+}
+
+// TestOnrampGeminiCliGolden asserts the Gemini CLI emission is byte-compatible
+// with the stanza docs/setup/GEMINI-CLI.md:51-62 publishes, in Gemini's own
+// ${VAR} dialect, at .gemini/settings.json, with global + merge guidance.
+func TestOnrampGeminiCliGolden(t *testing.T) {
+	out, _, code := onrampRun(t, globals{server: guerrilla}, "gemini-cli")
+	if code != exitOK {
+		t.Fatalf("gemini-cli exit = %d, want %d", code, exitOK)
+	}
+	// VERBATIM copy of docs/setup/GEMINI-CLI.md:51-62 — the byte-parity lock.
+	wantStanza := `{
+  "mcpServers": {
+    "barkpark": {
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}`
+	if !strings.Contains(out, wantStanza) {
+		t.Errorf("gemini-cli output missing the exact GEMINI-CLI.md stanza.\n--- got ---\n%s", out)
+	}
+	// Gemini expands ${VAR}; the Cursor-only ${env:…} form must NOT appear —
+	// dialects never mix even though the braced value matches Claude Code's.
+	if strings.Contains(out, "${env:BARKPARK_API_TOKEN}") {
+		t.Errorf("gemini-cli output leaked the Cursor ${env:…} dialect")
+	}
+	for _, want := range []string{
+		".gemini/settings.json",
+		"~/.gemini/settings.json", // global alternative called out
+		"MERGE",                   // merge-the-key guidance
+		"gemini mcp list",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gemini-cli output missing %q", want)
+		}
+	}
+}
+
 // TestOnrampRejectRemote proves chatgpt/claude-ai are rejected (exit 2) with a
 // pointer to REMOTE.md and no config block.
 func TestOnrampRejectRemote(t *testing.T) {
@@ -174,7 +256,7 @@ func TestOnrampUnknownTarget(t *testing.T) {
 	if code != exitUsage {
 		t.Errorf("unknown target exit = %d, want %d", code, exitUsage)
 	}
-	for _, want := range []string{"cursor", "claude-code", "codex", "cursor-cloud"} {
+	for _, want := range []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("unknown-target error must list valid target %q, got: %q", want, errOut)
 		}

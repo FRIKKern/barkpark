@@ -8,7 +8,12 @@ package cli
 // is deliberately NOT defined here — a stray `--write` is a usage error, not a
 // silently-ignored flag.
 //
-// Targets: cursor | claude-code | codex | cursor-cloud. chatgpt / claude-ai are
+// Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli.
+// windsurf and gemini-cli both reuse mcpJSONStanza verbatim (charter decision 7)
+// — zero new mechanism — differing only in destination path and env dialect, and
+// both print codex-style MERGE-the-mcpServers-key guidance (their files are
+// user-global / whole-CLI-config, never a Barkpark-only file to clobber).
+// chatgpt / claude-ai are
 // REMOTE-agent onramps (Custom GPT Actions on /v1/openapi.json; remote MCP over
 // OAuth) — they have no local config block to print and are rejected with a
 // pointer to docs/setup/REMOTE.md.
@@ -39,6 +44,15 @@ const onrampInstallLine = "curl -fsSL https://raw.githubusercontent.com/FRIKKern
 const (
 	cursorTokenRef     = "${env:BARKPARK_API_TOKEN}" // Cursor dialect
 	claudeCodeTokenRef = "${BARKPARK_API_TOKEN}"     // Claude Code dialect
+	// geminiTokenRef is Gemini CLI's dialect. Gemini CLI expands $VAR and ${VAR}
+	// environment references inside settings.json values, so the braced form reads
+	// the token from the shell and keeps the secret out of the committed file —
+	// cited: github.com/google-gemini/gemini-cli docs/tools/mcp-server.md
+	// ("environment variables ... using $VAR or ${VAR} syntax"). Its VALUE coincides
+	// with claudeCodeTokenRef, but it stays its OWN named constant — dialects are
+	// per-tool and never shared across tools even when they happen to match
+	// (charter decision 9).
+	geminiTokenRef = "${BARKPARK_API_TOKEN}" // Gemini CLI dialect
 )
 
 // onrampFile is one config file a target needs: where it belongs + its content.
@@ -58,7 +72,7 @@ type onrampSpec struct {
 
 // onrampLocalTargets is the ordered set of targets the verb prints config for.
 func onrampLocalTargets() []string {
-	return []string{"cursor", "claude-code", "codex", "cursor-cloud"}
+	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli"}
 }
 
 // onrampServer resolves the URL to bake into the env block: --server wins, else
@@ -189,6 +203,31 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 			},
 			Verify: "open the Cursor Cloud agent — the barkpark task tools appear in its tool list once the environment builds",
 		}, true
+	case "windsurf":
+		// Windsurf (Cascade) reads the same `mcpServers` shape Cursor does and the
+		// same ${env:VAR} dialect — verbatim mcpJSONStanza reuse (charter decision
+		// 7). Its config is the USER-GLOBAL ~/.codeium/mcp_config.json, so the human
+		// print carries a merge-the-key note, never a whole-file label.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				{Path: "~/.codeium/mcp_config.json", Content: mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))},
+			},
+			Verify: "click Refresh in Windsurf's MCP settings (or reload the window) — the barkpark task tools appear in Cascade's tool list",
+		}, true
+	case "gemini-cli":
+		// Gemini CLI reads the same `mcpServers` shape and expands ${VAR} inside
+		// settings.json values (geminiTokenRef) — verbatim mcpJSONStanza reuse. The
+		// project-local .gemini/settings.json is the default target; ~/.gemini/
+		// settings.json is the global alternative. Either file holds the WHOLE CLI
+		// config, so the human print carries a merge-the-key note.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				{Path: ".gemini/settings.json", Content: mcpJSONStanza(server, onrampTokenValue(geminiTokenRef, token))},
+			},
+			Verify: "gemini mcp list  (or /mcp inside the Gemini CLI) — barkpark appears with its tools",
+		}, true
 	}
 	return onrampSpec{}, false
 }
@@ -283,6 +322,15 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 	case "cursor-cloud":
 		out.outf("# Set BARKPARK_API_URL and BARKPARK_API_TOKEN in Cursor's Secrets UI — never commit them.")
 		out.outf("# ${env:BARKPARK_API_TOKEN} in .cursor/mcp.json reads the secret at runtime (Cursor dialect).")
+	case "windsurf":
+		out.outf("# ~/.codeium/mcp_config.json is USER-GLOBAL and may already hold other servers:")
+		out.outf("# MERGE the \"barkpark\" entry into the existing \"mcpServers\" object — don't overwrite the file.")
+		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${env:BARKPARK_API_TOKEN} reads it (Windsurf shares Cursor's dialect).")
+	case "gemini-cli":
+		out.outf("# Global alternative: ~/.gemini/settings.json (project .gemini/settings.json wins for that repo).")
+		out.outf("# settings.json holds your WHOLE Gemini CLI config — MERGE the \"barkpark\" entry into any")
+		out.outf("# existing \"mcpServers\" object rather than replacing the file.")
+		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${BARKPARK_API_TOKEN} is expanded by Gemini CLI (its dialect).")
 	}
 
 	out.outf("")
@@ -294,7 +342,7 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 
 // printOnrampHelp is the usage/help screen for `bp onramp`.
 func printOnrampHelp(out *writer) {
-	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud> [--server URL] [--token TOKEN]")
+	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli> [--server URL] [--token TOKEN]")
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
 	out.outf("block(s), where they belong, and how to verify. PRINT-ONLY in v1: nothing is")
@@ -305,6 +353,8 @@ func printOnrampHelp(out *writer) {
 	out.outf("  claude-code   .mcp.json stanza (${BARKPARK_API_TOKEN}) + `claude mcp add` one-liner")
 	out.outf("  codex         ~/.codex/config.toml [mcp_servers.barkpark] (env_vars token forwarding)")
 	out.outf("  cursor-cloud  .cursor/environment.json install + Secrets UI note + the cursor stanza")
+	out.outf("  windsurf      ~/.codeium/mcp_config.json stanza (${env:BARKPARK_API_TOKEN}) + merge note")
+	out.outf("  gemini-cli    .gemini/settings.json stanza (${BARKPARK_API_TOKEN}) + global/merge note")
 	out.outf("")
 	out.outf("chatgpt / claude-ai are remote-agent onramps (no local config) — see docs/setup/REMOTE.md")
 	out.outf("")
