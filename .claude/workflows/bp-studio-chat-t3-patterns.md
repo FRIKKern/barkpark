@@ -165,3 +165,102 @@ tree from the latest workflow_progress), co-viewing via the existing PubSub.
 Headless gotcha: dynamic workflows hit a "Review dynamic workflow before
 running" permission ask — our approval card already handles it (proven by the
 user actually running one from the chat).
+
+## Workflow + subagent VIEW (mined 2026-07-09)
+
+Source-verified: fresh shallow clone of github.com/pingdotgg/t3code @ f61fa949
+(2026-07-09). Headline: **t3code has NO workflow/subagent tree view.** Zero hits
+repo-wide for `workflow_progress` and `background_tasks_changed`; those frames
+fall into `handleSystemMessage`'s default branch → a runtime.warning row
+(ClaudeAdapter.ts:2758-2763). No agents rail, no phase boxes, no per-agent
+token counts. Our rail is AHEAD on orchestration viz — what t3 wins on is
+timeline hygiene: fold-on-settle, show-last-only, and zero-commit timers.
+
+### How subagents actually render (flat, uncorrelated)
+1. **One generic row per Task spawn.** Any tool whose name contains
+   agent/task/subagent classifies as `collab_agent_tool_call`
+   (apps/server/src/provider/Layers/ClaudeAdapter.ts:600-612), titled
+   "Subagent task" (ClaudeAdapter.ts:869-870), hammer icon
+   (apps/web/src/components/chat/MessagesTimeline.tsx:1875-1877), rendered by
+   the same `SimpleWorkEntryRow` as every other tool: icon + heading + truncated
+   preview + chevron expand + ✓/✗ glyph (MessagesTimeline.tsx:1900-2056).
+2. **Label recipe** (ClaudeAdapter.ts:840-852): prefer
+   `subagent_type: description`, fallback prompt slice ≤200 chars, never raw
+   JSON. Expanded body = prompt/detail in a `max-h-64` scrollable `<pre>`
+   (MessagesTimeline.tsx:2050).
+3. **No child correlation.** `parent_tool_use_id` appears exactly 3× in the
+   adapter and never in the view: nulled on synthesized user messages (:916),
+   listed as a noise key (:1274), and used ONLY to drop subagent
+   `message_delta` token usage (:2080). Child tool calls are not nested,
+   grouped, or attributed — subagent stream activity lands flat in the same
+   work log (content_block_start at :2248 has no parent filter).
+4. **Orphan subagent output** (assistant frames arriving with no active turn)
+   auto-starts a *synthetic turn* so it still displays instead of being lost
+   (ClaudeAdapter.ts:2466-2507).
+5. **task_started/task_progress/task_notification** map to task.started /
+   task.progress / task.completed events (ClaudeAdapter.ts:2668-2718) but the
+   `workflow_progress` payload (the phase/agent tree) is DISCARDED — only
+   task-level summary + usage survive. In the work log: task.started is
+   filtered out (apps/web/src/session-logic.ts:634), task.progress renders as
+   a "Reasoning update" row with tone=thinking → bot icon
+   (ProviderRuntimeIngestion.ts:469-488, session-logic.ts:685-717).
+   `tool_progress` (elapsed-seconds per tool) is mapped to a runtime event
+   (ClaudeAdapter.ts:2793-2806) then dropped — ingestion has no case for it.
+
+### Progressive disclosure (their real craft)
+6. **Show-last-only while running**: `MAX_VISIBLE_WORK_LOG_ENTRIES = 1`
+   (MessagesTimeline.logic.ts:12) — one live work row; everything older folds
+   behind "+N previous tool calls" (logic.ts:443-475, tsx:1149-1188).
+7. **Fold-on-settle**: once a turn is no longer streaming, ALL its work rows
+   collapse behind the terminal assistant message with a one-line header
+   "Worked for 3m 12s" / "You stopped after 42s" for interrupts
+   (deriveTurnFolds, logic.ts — label construction right before
+   `foldsByAnchorEntryId.set`). Duration measured from the USER message
+   boundary, not the first output (comment at the TurnGroup type).
+8. **Settle-gated glyphs**: while running, an empty tool result shows a
+   neutral "–"; when the turn settles, neutral flips to ✓ (tsx:1940-1944 —
+   `turnSettled` gate). Failure = red ✗ with "Failed" tooltip.
+
+### Re-render hygiene
+9. **Identity-stable rows**: rows are re-derived every frame but each row
+   reuses the previous object if a per-variant shallow compare passes
+   (`computeStableMessagesTimelineRows` + `isRowUnchanged`,
+   logic.ts:538-600) so memoized row components skip. List is virtualized
+   (LegendList, tsx:474).
+10. **Self-ticking timers outside React**: "Working for Xs" mutates its own
+    `textContent` on a 1s interval — zero React commits while streaming
+    (tsx:1077-1102). Same trick documented for row sections that subscribe to
+    the UI store directly so a toggle re-renders one row, not the list
+    (tsx:1104-1147, 1190-1236).
+11. **Lifecycle collapse**: started/updated/completed activities for the same
+    toolCallId merge into ONE row updated in place
+    (session-logic.ts:759-781, deriveToolLifecycleCollapseKey :849).
+12. **The only persistent rail is the PLAN**: PlanSidebar renders TodoWrite /
+    TaskCreate-Update-List state as steps with ✓ / spinning LoaderIcon /
+    pending circle (PlanSidebar.tsx:36-47, step tint :216-226; state folded in
+    ClaudeAdapter.ts:667-800). Agents get no panel.
+
+### Deltas worth stealing (ranked for OUR rail)
+1. **Fold-on-settle**: when a workflow/turn completes, collapse the rail's
+   expanded tree into one line — "Worked for 3m 12s · 7 agents · 142k tokens"
+   — click to re-expand. We stay default-expanded forever; t3 proves the
+   post-completion collapse is what keeps long threads readable.
+2. **Show-active-only while running**: fold completed agents behind
+   "+N done" and keep only live agents visibly breathing (their
+   MAX_VISIBLE=1 is the aggressive version; ours can be per-state).
+3. **Self-ticking elapsed timers client-side**: per-agent "12s" labels via a
+   JS hook mutating textContent — never server ticks, zero LiveView patches
+   per second.
+4. **Settle-gated glyph semantics**: neutral "–" while running, flips to ✓
+   only when the run settles — composes exactly with our provenance-gated
+   completion flips.
+5. **Interrupt vocabulary**: "You stopped after 42s" as a first-class fold
+   label — name the interruption instead of graying it out.
+6. **Subagent row label recipe**: `subagent_type: description` (fallback:
+   prompt ≤200 chars), never raw JSON; expanded detail clamped to a
+   scrollable max-height block so expand never explodes the timeline.
+7. **Lifecycle collapse discipline**: one row per agent/tool identity updated
+   in place, never appended rows per progress event (we do this for the rail;
+   apply it to any chat-inline echo of task.progress too).
+NOT worth stealing: their subagent model itself — flat, uncorrelated,
+phase-blind. On workflow viz we have no competitor here.
