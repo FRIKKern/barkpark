@@ -1,6 +1,20 @@
 defmodule BarkparkWeb.Studio.SettingsLive do
   @moduledoc """
-  Generic encrypted-JSON editor for plugin settings.
+  **Workspace Settings** — the admin control panel for one workspace.
+
+  Three stacked sections, most-reached first:
+
+    1. **Workspace theme** — the persisted theme identity (`render_theme_section/1`).
+    2. **Plugins** — per-workspace enable/disable + Desk-Structure placement for
+       every installed plugin (`render_plugins_section/1`). Reads effective state
+       via `Barkpark.Plugins.Enablement.effective/1`; persists into
+       `workspaces.settings["plugins"]` via `Tenancy.set_workspace_plugin_settings/2`
+       (charter studio-structure-polish, Decisions 2/4/10). Disabling is
+       non-destructive — the plugin's doc types move to the `…Rest` folder, never
+       deleted.
+    3. **Plugin credentials** — the encrypted-JSON credential editor (below).
+
+  ## Plugin credentials (encrypted-JSON editor)
 
   Admin types a `plugin_name`, loads the (masked) values, edits them, saves
   them back. A reveal-on-click control re-fetches the unmasked value and
@@ -24,17 +38,24 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   require Logger
 
+  alias Barkpark.Plugins.Enablement
   alias Barkpark.Plugins.Registry, as: PluginsRegistry
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
   alias Barkpark.Tenancy
+
+  @placement_labels [
+    {"main", "Main structure"},
+    {"plugins", "Plugins folder"},
+    {"top_menu", "Top menu only"}
+  ]
 
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
      |> assign(
-       page_title: "Plugin Settings",
+       page_title: "Workspace Settings",
        plugin_name: "",
        settings_json: "",
        settings_fields: [],
@@ -43,10 +64,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
        masked: true,
        loaded?: false,
        error: nil,
+       placement_labels: @placement_labels,
        # Workspace theme picker (ts-w4e). `current_workspace` + `bp_theme` are
        # resolved by the StudioChrome on_mount hook (nil on an unseeded tenancy).
        known_themes: Tenancy.known_themes()
-     )}
+     )
+     |> assign_plugin_rows()}
   end
 
   @impl true
@@ -192,6 +215,37 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
+  # ── Per-workspace plugin surfacing (studio-structure-polish D2/D4/D10) ──
+  #
+  # An admin flips an installed plugin on/off for THIS workspace, or moves it
+  # between the MAIN Desk Structure / the Plugins folder / the top menu. State
+  # persists into `workspaces.settings["plugins"]` (merged, so the theme key is
+  # preserved) and is re-read through `Enablement.effective/1` so the row always
+  # reflects the merged declaration-default + override truth. Disabling never
+  # deletes: the doc types move to the …Rest folder.
+  def handle_event("toggle_plugin", %{"plugin" => name}, socket) do
+    case current_row(socket, name) do
+      %{enabled: enabled} ->
+        put_plugin_override(socket, name, %{"enabled" => not enabled},
+          flash:
+            if(enabled,
+              do: "Disabled #{display_name(name)} for this workspace.",
+              else: "Enabled #{display_name(name)} for this workspace."
+            )
+        )
+
+      nil ->
+        {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+    end
+  end
+
+  def handle_event("set_plugin_placement", %{"plugin" => name, "placement" => placement}, socket)
+      when placement in ["main", "plugins", "top_menu"] do
+    put_plugin_override(socket, name, %{"placement" => placement},
+      flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
+    )
+  end
+
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
   # the session. Keep LAST among handle_event/3 clauses.
   def handle_event(event, _params, socket) do
@@ -203,13 +257,14 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   def render(assigns) do
     ~H"""
     <div class="settings-live" style="max-width: 720px; margin: 2rem auto; font-family: ui-sans-serif, system-ui;">
-      {render_theme_section(assigns)}
-
-      <h1>Plugin Settings</h1>
-
-      <p style="color: var(--fg-muted);">
-        Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
-        to fetch unmasked (audited).
+      <h1 style="margin-bottom:.25rem;">Workspace Settings</h1>
+      <p style="color: var(--fg-muted); margin-top:0;">
+        Theme, plugins and credentials for
+        <%= if @current_workspace do %>
+          <strong>{@current_workspace.name}</strong>.
+        <% else %>
+          this workspace.
+        <% end %>
       </p>
 
       <%= if msg = Phoenix.Flash.get(@flash, :info) do %>
@@ -219,34 +274,51 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <div role="alert" style="background:var(--destructive-bg); color:var(--destructive); padding:.5rem; margin:.5rem 0;">{msg}</div>
       <% end %>
 
-      <form phx-change="update_name" phx-submit="load" style="margin-bottom:1rem;">
-        <label>
-          Plugin name
-          <input
-            type="text"
-            name="plugin_name"
-            value={@plugin_name}
-            placeholder="e.g. onixedit, bokbasen"
-            autocomplete="off"
-            required
-          />
-        </label>
-        <button type="submit">Load</button>
-      </form>
+      {render_theme_section(assigns)}
 
-      <%= if @settings_fields == [] do %>
-        {render_generic_form(assigns)}
-      <% else %>
-        {render_typed_form(assigns)}
-      <% end %>
+      {render_plugins_section(assigns)}
 
-      <%= if @error do %>
-        <p role="alert" style="color:var(--destructive);">{@error}</p>
-      <% end %>
+      <section
+        aria-labelledby="credentials-heading"
+        style="border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin-bottom:2rem;"
+      >
+        <h2 id="credentials-heading" style="margin-top:0;">Plugin credentials</h2>
 
-      <p style="margin-top:1rem; color:var(--fg-muted); font-size:.9em;">
-        Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
-      </p>
+        <p style="color: var(--fg-muted);">
+          Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
+          to fetch unmasked (audited). Credentials are global to the installation,
+          not per-workspace.
+        </p>
+
+        <form phx-change="update_name" phx-submit="load" style="margin-bottom:1rem;">
+          <label>
+            Plugin name
+            <input
+              type="text"
+              name="plugin_name"
+              value={@plugin_name}
+              placeholder="e.g. onixedit, bokbasen"
+              autocomplete="off"
+              required
+            />
+          </label>
+          <button type="submit">Load</button>
+        </form>
+
+        <%= if @settings_fields == [] do %>
+          {render_generic_form(assigns)}
+        <% else %>
+          {render_typed_form(assigns)}
+        <% end %>
+
+        <%= if @error do %>
+          <p role="alert" style="color:var(--destructive);">{@error}</p>
+        <% end %>
+
+        <p style="margin-top:1rem; color:var(--fg-muted); font-size:.9em;">
+          Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
+        </p>
+      </section>
     </div>
     """
   end
@@ -304,6 +376,98 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
           No workspace in scope to theme.
         </p>
+      <% end %>
+    </section>
+    """
+  end
+
+  # ── Plugins section (studio-structure-polish D2/D4/D10) ─────────────────
+  #
+  # Every INSTALLED plugin (the boot registry set) with a per-workspace enabled
+  # toggle, a Desk-Structure placement select, and a "default" badge when the
+  # workspace holds no override for it (surfacing the declaration default). All
+  # state flows through `Enablement.effective/1` + `Tenancy.set_workspace_plugin_settings/2`.
+  defp render_plugins_section(assigns) do
+    ~H"""
+    <section
+      aria-labelledby="plugins-heading"
+      style="border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin-bottom:2rem;"
+    >
+      <h2 id="plugins-heading" style="margin-top:0;">Plugins</h2>
+
+      <%= cond do %>
+        <% is_nil(@current_workspace) -> %>
+          <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
+            No workspace in scope to configure.
+          </p>
+        <% @plugin_rows == [] -> %>
+          <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
+            No plugins are installed on this server.
+          </p>
+        <% true -> %>
+          <p style="color: var(--fg-muted);">
+            Turn a plugin off to keep this workspace clean, or move where it lands
+            in the Desk Structure. Disabling never deletes content — its document
+            types move to the <strong>…Rest</strong> folder, still fully readable.
+          </p>
+
+          <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:.5rem;">
+            <%= for row <- @plugin_rows do %>
+              <li
+                data-plugin={row.name}
+                data-enabled={to_string(row.enabled)}
+                data-placement={to_string(row.placement)}
+                data-has-override={to_string(row.has_override)}
+                style="border:1px solid var(--border); border-radius:6px; padding:.75rem 1rem; display:flex; flex-wrap:wrap; align-items:center; gap:.75rem;"
+              >
+                <div style="flex:1 1 12rem; min-width:12rem;">
+                  <div style="display:flex; align-items:center; gap:.5rem;">
+                    <strong>{row.display}</strong>
+                    <%= unless row.has_override do %>
+                      <span
+                        title={default_badge_title(row)}
+                        style="font-size:.72em; text-transform:uppercase; letter-spacing:.04em; border:1px solid var(--border); color:var(--fg-muted); border-radius:999px; padding:.05rem .5rem;"
+                      >
+                        default
+                      </span>
+                    <% end %>
+                  </div>
+                  <small style="color:var(--fg-muted);">
+                    {row.name} · {default_badge_title(row)}
+                  </small>
+                </div>
+
+                <label style="display:inline-flex; align-items:center; gap:.4rem;">
+                  <input
+                    type="checkbox"
+                    checked={row.enabled}
+                    phx-click="toggle_plugin"
+                    phx-value-plugin={row.name}
+                  />
+                  <span style={enabled_span_style(row.enabled)}>
+                    {if row.enabled, do: "Enabled", else: "Disabled"}
+                  </span>
+                </label>
+
+                <form phx-change="set_plugin_placement" style="margin:0;">
+                  <input type="hidden" name="plugin" value={row.name} />
+                  <label style="display:inline-flex; align-items:center; gap:.4rem; color:var(--fg-muted); font-size:.9em;">
+                    Placement
+                    <select name="placement" disabled={not row.enabled}>
+                      <%= for {value, label} <- @placement_labels do %>
+                        <option value={value} selected={to_string(row.placement) == value}>{label}</option>
+                      <% end %>
+                    </select>
+                  </label>
+                </form>
+              </li>
+            <% end %>
+          </ul>
+
+          <p style="color: var(--fg-muted); font-size:.9em; margin-bottom:0;">
+            Installed plugins always keep their schemas, routes and background jobs
+            registered — these controls decide only what THIS workspace surfaces.
+          </p>
       <% end %>
     </section>
     """
@@ -467,6 +631,104 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     />
     """
   end
+
+  # ── Plugin surfacing helpers (D2/D4/D10) ───────────────────────────────
+
+  # Recompute the rendered plugin rows from the current workspace's effective
+  # enablement. Called on mount and after every persist so the UI reflects the
+  # merged declaration-default + override truth (never a stale optimistic view).
+  defp assign_plugin_rows(socket) do
+    assign(socket, :plugin_rows, load_plugin_rows(socket.assigns[:current_workspace]))
+  end
+
+  defp load_plugin_rows(nil), do: []
+
+  defp load_plugin_rows(%{id: ws_id} = workspace) do
+    effective = Enablement.effective(ws_id)
+    # Per the Decision-4 contract, `effective(nil)` resolves to the pure
+    # declaration defaults (no workspace override) — that is the "default badge"
+    # source, read through the contract interface only.
+    defaults = Enablement.effective(nil)
+    overrides = Tenancy.workspace_plugin_settings(workspace)
+
+    PluginsRegistry.all()
+    |> Enum.map(fn %{name: name} ->
+      eff = Map.get(effective, name, %{enabled: true, placement: :plugins})
+      default = Map.get(defaults, name, %{enabled: true, placement: :plugins})
+
+      %{
+        name: name,
+        display: display_name(name),
+        enabled: eff.enabled,
+        placement: eff.placement,
+        has_override: Map.has_key?(overrides, name),
+        default_enabled: default.enabled,
+        default_placement: default.placement
+      }
+    end)
+    |> Enum.sort_by(& &1.display)
+  end
+
+  defp load_plugin_rows(_), do: []
+
+  defp current_row(socket, name) do
+    Enum.find(socket.assigns[:plugin_rows] || [], &(&1.name == name))
+  end
+
+  # Merge a partial override (`%{"enabled" => bool}` or `%{"placement" => str}`)
+  # into `settings["plugins"][name]`, preserving any dimension the admin has not
+  # touched — the rest of the entry (and the theme key) resolves from declaration
+  # defaults on read. Follows the set_workspace_theme persist/re-assign pattern.
+  defp put_plugin_override(socket, name, changes, opts) do
+    case socket.assigns[:current_workspace] do
+      %{id: ws_id} = ws ->
+        plugins = Tenancy.workspace_plugin_settings(ws)
+        entry = Map.merge(Map.get(plugins, name, %{}), changes)
+        updated = Map.put(plugins, name, entry)
+
+        case Tenancy.set_workspace_plugin_settings(ws_id, updated) do
+          {:ok, workspace} ->
+            {:noreply,
+             socket
+             |> assign(:current_workspace, workspace)
+             |> assign_plugin_rows()
+             |> put_flash(:info, Keyword.fetch!(opts, :flash))}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Could not save plugin settings.")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No workspace in scope to configure.")}
+    end
+  end
+
+  # A plugin's registry key is the display key too; humanize it for the label
+  # (registry manifests carry no separate title today).
+  defp display_name(name) when is_binary(name) do
+    name
+    |> String.split(~r/[_\-]/, trim: true)
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp display_name(name), do: to_string(name)
+
+  defp placement_label(value) do
+    case List.keyfind(@placement_labels, value, 0) do
+      {_, label} -> label
+      _ -> value
+    end
+  end
+
+  # The "default" badge microcopy — what the plugin's own declaration says when
+  # the workspace holds no override.
+  defp default_badge_title(%{default_enabled: enabled, default_placement: placement}) do
+    on_off = if enabled, do: "on", else: "off"
+    "#{on_off} by default · #{placement_label(to_string(placement))}"
+  end
+
+  defp enabled_span_style(true), do: "color:var(--success); font-size:.9em;"
+  defp enabled_span_style(false), do: "color:var(--fg-muted); font-size:.9em;"
 
   # ── Load paths ─────────────────────────────────────────────────────────
 
