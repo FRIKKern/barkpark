@@ -773,6 +773,71 @@ OUTBOUND-only, inbound is intake/bookkeeping-only, `mutation_events.source` stay
 no field is ever bidirectional, claims/epochs/fencing/rail_rev never leave Barkpark, Conflicts.record
 stays DB-only, plugin off by default.
 
+
+
+### Wave 2026-07-09 — Wave 8 BUILT + REVIEWED (4/4 code slices green; live proof HALTED honestly)
+
+S1-S4 all came back green, survived adversarial review, and PROVEN COHERENT TOGETHER: a throwaway
+integration branch merged all four `-r` branches onto `origin/main` (`ba893d5e`) with zero conflicts —
+combined github suite **436/0**, full `test/barkpark_web/` swath **3023/0** (router changed in s4),
+`--warnings-as-errors` clean. Reviewer branches (the ones to MERGE): `loop-epic/{studio-adopt-surface-
+fixed-struct-safe-c-0-r, pre-adoption-mirror-gate-mirrorjob-cance-1-r, inbound-event-breadth-deleted-
+transferre-2-r, adopt-tenancy-at-the-http-cli-edge-test--3-r}`. Any merge order works (file-disjointness held).
+
+**Landed (on `-r` branches, pending integration):**
+1. **S1 Studio adopt surface** — new shared `Barkpark.Plugins.ContentProbe.content_get/2` (never raises
+   on struct/atom-key/string-key doc shapes, never mints atoms); `github.ex adoptable_intake?/1` +
+   `onixedit.ex hide_publish_action?/1` rewired, both raising 3-rung ladders deleted (the live
+   "Document does not implement Access" defect is dead — protective tests call `resolve_doc_actions/2`
+   DIRECTLY, no Registry rescue); `github.ex resolve_action_handlers/2` threads `ctx.scope` into
+   `Adopt.adopt/3` per the onixedit precedent (verified against the real `dispatch_action` ctx). Gate 55/0.
+   Repo-grepped the anti-pattern: the two remaining `get_in(doc, ["content"…])` sites (bulldocs.ex,
+   tasks board_live.ex) pattern-match plain maps first — safe, no further cleanup owed.
+2. **S2 pre-adoption mirror gate (D13)** — `intake?/1` + ONE `{:cancel, :intake}` cond branch after
+   `detached?`, before relink/synced/converge; keyed on the state STRING only. Intake+edit → cancel
+   under `Bypass.down` (zero HTTP); PROTECTIVE twin: adopted-no-synced_rev still converges (the
+   consent-moment first push stays live — GET+PATCH fire, synced_rev+fingerprint stamped). Gate 38/0.
+3. **S3 inbound event breadth (D14)** — new `Github.InboundEvents.handle/2` (bookkeeping-only sibling;
+   bot-drop FIRST via now-public `Intake.bot_sender?/1`); deleted/transferred → detach+record
+   (`detail.reason` discriminator), human-closed intake → detach `closed_by_author`, adopted close /
+   missing task → `:ignored`; NO lifecycle write, no new conflict kind, source stays EXACTLY `"github"`
+   (asserted on every mutation row). Controller routes the 3 actions with an explicit 2xx/5xx clause per
+   tag + a `:github_webhook_inbound_fun` seam; `Settings.intake_workspace_id/0` (D15 env var) threads
+   `:workspace_id` into ingest_opts, absent → byte-identical. Gate 54/0.
+4. **S4 adopt tenancy at the edge + test-debt trio (D15)** — adopt controller passes
+   `ScopeHelpers.scope_opts(conn)`; `:token` plugin bucket mounted under the `/w/:ws/p/:proj` scoped
+   mirror on `[:scoped_api, :require_token]` (membership 403s before any controller); `scoped_prefix`
+   on `github.adopt`+`github.status` (matches the capabilities.ex:528 literal exactly); the carried
+   FULL-STACK signed-body ConnCase (raw string body through endpoint→CacheBodyReader→HMAC plug→real
+   Intake; tampered → 401 + zero tasks); `Conflicts.refresh` merges detail (drift + graphql notes both
+   survive one row); `Health.snapshot` gains `db_ok` (SELECT 1 under `safe/2` — tells "quiet" from
+   "blind"). Elixir gate 46/0; Go build/vet/test green.
+
+**Reviewer fixes (on the `-r` branches):** S3 +1 commit — protective controller tests proving the D15
+workspace threading END-TO-END (env set → `:workspace_id` reaches BOTH handlers' opts; env absent →
+NO key, the byte-identical claim now enforced; nothing had asserted it). S4 +1 commit — `mix format`
+on health.ex + conflicts_test.exs (was drifted). S1/S2 needed nothing.
+
+**Stalled — S5 live proof, HALTED for exactly the right reason.** The builder verified the precondition
+(s1-s4 merged + deployed) was UNMET and refused to run: deployed main has NO intake gate in MirrorJob,
+so script step 3 would have PATCHed the outsider's live public issue — the precise D13 violation s2
+exists to prevent. Zero probe issues opened, zero criteria flipped, no code changed. Task left claimed
++ in_progress with the halt reason now stamped in `notes` (reviewer). This is the distrust-vacuous-green
+posture working.
+
+**Notes for the lead / next wave:**
+- Merge the four `-r` branches in any order; Elixir Test gate before each merge; then close each task's
+  merge-gated criterion ("PR merged to main…") and the lifecycle — builders left them honestly open.
+- S4's gate string sets `CC` only for `go build`; `go vet`/`go test` need `CC=/usr/bin/clang` EXPORTED
+  locally (the `cc` alias shadows clang). CI exports it globally — env quirk, not a defect.
+- S1's scope-threading proof reads the closure env via `:erlang.fun_info(handler, :env)` — OTP-internal;
+  fine on the pinned toolchain, revisit if an OTP bump breaks it.
+- After s1-s4 merge + guerrilla auto-deploy: re-dispatch **github-bridge-w8-s5** (the one-issue human
+  journey: born-dark → pre-adopt edit leaves the issue untouched → adopt → consent-moment first mirror
+  → clean close, evidence stamped + wave-log entry). That is the whole remaining wave.
+- Still open from the reconciliation: the human OPEN QUESTION on public-backlog exposure (420 internal
+  issues on a public repo) — confirm intent or cut a scoping slice.
+
 ## Wave 8 CUT — the inbound journey, proven and hardened (2026-07-09, architect pass)
 
 **Wish increment:** an outsider opens an issue on public FRIKKern/barkpark and every subsequent

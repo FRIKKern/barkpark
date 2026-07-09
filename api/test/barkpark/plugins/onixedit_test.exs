@@ -1,6 +1,7 @@
 defmodule Barkpark.Plugins.OnixEditTest do
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.Document
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.OnixEdit
 
@@ -170,6 +171,49 @@ defmodule Barkpark.Plugins.OnixEditTest do
       # gone; this callback is the only way Auth gets started.
       assert OnixEdit.register_workers(%{phase: :boot}) ==
                [Barkpark.Plugins.OnixEdit.Bokbasen.Auth]
+    end
+  end
+
+  describe "resolve_doc_actions/2 (struct-safe hide_publish gate)" do
+    @publish_action %{"name" => "publish_to_bokbasen", "label" => "Publish to Bokbasen"}
+
+    # The twin of the github raise: hide_publish_action?/1 ran the identical
+    # `get_in(doc, ["content", ...])` ladder, which raises `Document does not
+    # implement the Access behaviour` on any real %Document{} book lacking a
+    # bp_export_status key. Called DIRECTLY (no Registry rescue) so a regression
+    # re-raises into the test.
+
+    test "real %Document{} book WITHOUT bp_export_status keeps the publish action (no raise)" do
+      doc = %Document{type: "book", content: %{"title" => "x"}}
+      ctx = %{doc_type: "book", doc: doc}
+
+      assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == [@publish_action]
+    end
+
+    test "real %Document{} book with default empty content keeps the publish action" do
+      ctx = %{doc_type: "book", doc: %Document{type: "book"}}
+      assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == [@publish_action]
+    end
+
+    test "real %Document{} book with an in-flight export state hides the publish action" do
+      doc = %Document{type: "book", content: %{"bp_export_status" => %{"state" => "staging"}}}
+      ctx = %{doc_type: "book", doc: doc}
+
+      assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == []
+    end
+
+    test "string-keyed plain-map book with in-flight state hides the publish action" do
+      ctx = %{
+        doc_type: "book",
+        doc: %{"content" => %{"bp_export_status" => %{"state" => "polling"}}}
+      }
+
+      assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == []
+    end
+
+    test "non-book doc is left untouched" do
+      ctx = %{doc_type: "post", doc: %Document{type: "post"}}
+      assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == [@publish_action]
     end
   end
 

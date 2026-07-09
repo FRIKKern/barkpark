@@ -41,7 +41,17 @@ defmodule BarkparkWeb.GithubAdoptController do
   def adopt(conn, %{"id" => id} = params) do
     dataset = Map.get(params, "dataset", "production")
 
-    case adopt_fun().(id, dataset, []) do
+    # Thread the resolved tenant scope (D15). On the scoped
+    # `/w/:ws/p/:proj/v1/plugins/github/adopt/:id` mirror the ResolveWorkspace /
+    # ResolveProject plugs have set `current_workspace` / `current_project`, so
+    # `scope_opts/1` carries the real `workspace_id`/`project_id` into the Adopt
+    # service (already scope-clean). On the flat back-compat mount the assigns
+    # are absent and `scope_opts/1` yields the seeded-Default scope (nil-safe) —
+    # today's behavior. The Adopt service NEVER reads tenancy from a request
+    # param; scope arrives only through these server-authoritative assigns.
+    opts = BarkparkWeb.ScopeHelpers.scope_opts(conn)
+
+    case adopt_fun().(id, dataset, opts) do
       {:ok, _doc} ->
         json(conn, %{ok: true, task: id, state: "adopted"})
 

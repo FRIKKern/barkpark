@@ -13,18 +13,29 @@ defmodule BarkparkWeb.GithubWebhookController do
   re-verification. Signature is the only auth (server-to-server callback, no
   bearer token, no CORS).
 
-  ## Dispatch (event-gate, D6)
+  ## Dispatch (event-gate, D6 + D14)
 
   A single action, `receive/2`, branches on the `X-GitHub-Event` header:
 
-    * `"issues"` → hand the parsed payload to
-      `Barkpark.Plugins.Github.Intake.ingest/2` (dataset threaded from
-      `Settings.datasets/0`). Intake enforces the SECOND gate: it acts only on
-      `action == "opened"`, drops `[bot]`-sender deliveries (D4 cut #1), and
-      births a deterministic `gh-<num>` task through the `Tasks.Dedup` seam.
-      The controller/Intake action-gate pair is the joint enforcement of D6.
+    * `"issues"` → split by `action`:
+      * `deleted` / `transferred` / `closed` → hand to
+        `Barkpark.Plugins.Github.InboundEvents.handle/2` (Wave 8, D14 — inbound
+        breadth as VISIBLE detach bookkeeping). Deleted/transferred detaches a
+        `gh-<num>` intake task; a self-`closed` intake detaches with reason
+        `closed_by_author`; a bot-sender close, an adopted-task close, or a
+        missing task is a deliberate 2xx no-op.
+      * anything else (`opened`, `edited`, …) → hand to
+        `Barkpark.Plugins.Github.Intake.ingest/2`. Intake enforces its own gate:
+        it acts only on `action == "opened"`, drops `[bot]`-sender deliveries
+        (D4 cut #1), and births a deterministic `gh-<num>` task through the
+        `Tasks.Dedup` seam.
     * `"ping"` → `200 {ok: true}`. GitHub's install handshake; nothing to do.
     * anything else → `202` no-op (accepted, ignored).
+
+  Both `issues` handlers receive the SAME `ingest_opts/0` — dataset from
+  `Settings.datasets/0` plus an optional `:workspace_id` from
+  `Settings.intake_workspace_id/0` (D15; absent → today's default-workspace
+  behavior byte-identical, no `:workspace_id` key threaded).
 
   ## Why always 2xx on an unactionable delivery
 
@@ -58,6 +69,9 @@ defmodule BarkparkWeb.GithubWebhookController do
   branches on `X-GitHub-Event` and always answers 2xx unless intake genuinely
   fails. See the moduledoc for the dispatch contract.
   """
+  # Actions D14 routes to the InboundEvents bookkeeping handler instead of Intake.
+  @inbound_actions ["deleted", "transferred", "closed"]
+
   def receive(conn, params) do
     case github_event(conn) do
       "issues" -> handle_issues(conn, params)
@@ -66,10 +80,54 @@ defmodule BarkparkWeb.GithubWebhookController do
     end
   end
 
-  # `issues` event → the intake service owns action-gating (opened-only) and the
+  # `issues` event → split by action (D14). deleted/transferred/closed are
+  # bookkeeping detaches (InboundEvents); everything else is the birth path
+  # (Intake). Both share `ingest_opts/0` so tenant scope threads identically.
+  defp handle_issues(conn, params) do
+    if Map.get(params, "action") in @inbound_actions do
+      handle_inbound(conn, params)
+    else
+      handle_intake(conn, params)
+    end
+  end
+
+  # deleted/transferred/closed → the InboundEvents handler owns bot-drop +
+  # gh-<num> lookup + the detach bookkeeping. EVERY outcome tag gets an explicit
+  # 2xx clause — the case is closed, so a new tag with no clause would
+  # CaseClauseError → 500 → GitHub retry-storm. Only a genuine ledger-write
+  # failure ({:error, _}) is 5xx (retryable, idempotent via gh-<num>).
+  defp handle_inbound(conn, params) do
+    case inbound_fun().(params, ingest_opts()) do
+      {:ok, :detached, _doc_id} ->
+        # The gh-<num> intake task was detached + a visible conflict recorded.
+        json(conn, %{ok: true, detached: true})
+
+      :dropped ->
+        # D4 cut #1 — the App's own `[bot]` close echo. Never a detach; 2xx.
+        json(conn, %{ok: true, dropped: true})
+
+      :ignored ->
+        # No gh-<num> task, a non-intake close, or a non-inbound action.
+        # Accepted, deliberate no-op.
+        conn |> put_status(:accepted) |> json(%{ok: true, ignored: "action"})
+
+      {:error, reason} ->
+        # The link state flip failed for a genuine reason. 5xx invites GitHub to
+        # redeliver; the deterministic gh-<num> + Conflicts dedup keep it idempotent.
+        Logger.error(
+          "github webhook: inbound event failed for issue ##{issue_number(params)}: #{inspect(reason)}"
+        )
+
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{error: %{code: "inbound_failed", message: "could not process delivery"}})
+    end
+  end
+
+  # opened/edited/… → the intake service owns action-gating (opened-only) and the
   # bot-drop. Map its result to an HONEST status: born/dropped/ignored are all
   # 2xx (verified + handled), a real error is 5xx (retryable, idempotent).
-  defp handle_issues(conn, params) do
+  defp handle_intake(conn, params) do
     case intake_fun().(params, ingest_opts()) do
       # Intake reports `{:ok, :born, doc}` on a fresh birth and `{:ok, :exists,
       # doc}` on an idempotent re-delivery — both are 2xx handled deliveries.
@@ -133,11 +191,18 @@ defmodule BarkparkWeb.GithubWebhookController do
   end
 
   # Thread the target dataset explicitly (Intake defaults to the first
-  # configured dataset, but the controller owns the choice). Env-only read —
-  # no DB, no audit row — so it's cheap per delivery.
+  # configured dataset, but the controller owns the choice) plus the optional
+  # intake workspace (D15). Env-only reads — no DB, no audit row — so cheap per
+  # delivery. When no workspace is configured, NO `:workspace_id` key is added:
+  # the ingest opts are byte-identical to today's default-workspace behavior.
   defp ingest_opts do
     dataset = List.first(Settings.datasets()) || "production"
-    [dataset: dataset]
+    base = [dataset: dataset]
+
+    case Settings.intake_workspace_id() do
+      nil -> base
+      workspace_id -> Keyword.put(base, :workspace_id, workspace_id)
+    end
   end
 
   # Intake seam: overridable in test via app env, else the real module. The
@@ -151,5 +216,16 @@ defmodule BarkparkWeb.GithubWebhookController do
   defp default_ingest(payload, opts) do
     mod = Module.concat(Barkpark.Plugins.Github, Intake)
     mod.ingest(payload, opts)
+  end
+
+  # InboundEvents seam, mirroring `intake_fun/0`: overridable in test via app env
+  # (`:github_webhook_inbound_fun`), else the real module resolved dynamically.
+  defp inbound_fun do
+    Application.get_env(:barkpark, :github_webhook_inbound_fun) || (&default_inbound/2)
+  end
+
+  defp default_inbound(payload, opts) do
+    mod = Module.concat(Barkpark.Plugins.Github, InboundEvents)
+    mod.handle(payload, opts)
   end
 end

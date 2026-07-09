@@ -129,6 +129,17 @@ defmodule Barkpark.Plugins.Github.HealthTest do
       restore_config(nil)
       assert is_map(Health.snapshot(foo: :bar))
     end
+
+    test "db_ok is true against a live DB (the snapshot liveness bit)" do
+      restore_config(nil)
+
+      # The one field that separates a genuinely healthy zero-snapshot from the
+      # all-zeros a dead DB would silently produce. In the test sandbox the DB is
+      # up, so the `SELECT 1` round-trip succeeds → true. A DB outage would raise
+      # inside `safe/2` and degrade this to false while the rest of the snapshot
+      # still totals (never a raise to the caller).
+      assert Health.snapshot().db_ok == true
+    end
   end
 
   # --- active / repo header --------------------------------------------------

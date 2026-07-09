@@ -8,6 +8,7 @@ defmodule Barkpark.Plugins.GithubAdoptWiringTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.Document
   alias Barkpark.Plugins.Github
 
   describe "register_routes/1" do
@@ -115,6 +116,71 @@ defmodule Barkpark.Plugins.GithubAdoptWiringTest do
       assert Github.resolve_doc_actions([%{"name" => "x"}], %{doc_type: "task"}) == [
                %{"name" => "x"}
              ]
+    end
+
+    # ── the live raise this slice kills ──────────────────────────────────────
+    # Studio hands `ctx.doc` a REAL `%Document{}` Ecto struct, not a plain map.
+    # The old middle rung `get_in(doc, ["content", "github", "state"])` raised
+    # `Document does not implement the Access behaviour` on any task lacking a
+    # github key. The Registry rescue masked it as log spam and silently dropped
+    # the button. These tests call resolve_doc_actions/2 DIRECTLY (no Registry
+    # rescue), so a regression re-raises straight into the test.
+
+    test "real %Document{} task WITHOUT a github key returns prev unchanged (no raise)" do
+      doc = %Document{type: "task", content: %{"lifecycle_status" => "open"}}
+      ctx = %{doc_type: "task", doc: doc}
+      prev = [%{"name" => "delete-doc"}]
+
+      assert Github.resolve_doc_actions(prev, ctx) == prev
+    end
+
+    test "real %Document{} task with default empty content returns prev unchanged (no raise)" do
+      ctx = %{doc_type: "task", doc: %Document{type: "task"}}
+      assert Github.resolve_doc_actions([], ctx) == []
+    end
+
+    test "real %Document{} intake task STILL gets the adopt button" do
+      doc = %Document{type: "task", content: %{"github" => %{"state" => "intake"}}}
+      ctx = %{doc_type: "task", doc: doc}
+
+      assert Github.resolve_doc_actions([], ctx) == [@adopt_action]
+    end
+  end
+
+  describe "resolve_action_handlers/2 (scope threading — barkpark-zdvi precedent)" do
+    # The adopt handler must close over the dispatching session's tenancy scope
+    # so `Adopt.adopt/3` reads/writes only THIS workspace/project's task. We
+    # prove the scope threads into the captured `opts` via the closure's env —
+    # a DB-free proof that the keyword list reaches the adopt call.
+
+    defp captured_opts(handler) do
+      {:env, env} = :erlang.fun_info(handler, :env)
+      Enum.find(env, &Keyword.keyword?/1)
+    end
+
+    test "registers a 3-arity github_adopt handler and preserves prev entries" do
+      prev = %{"other" => fn _, _, _ -> :ok end}
+      handlers = Github.resolve_action_handlers(prev, %{})
+
+      assert is_function(handlers["github_adopt"], 3)
+      assert handlers["other"] == prev["other"]
+    end
+
+    test "threads the ctx scope into the adopt handler's captured opts" do
+      scope = [workspace_id: "ws-1", project_id: "proj-1"]
+      handlers = Github.resolve_action_handlers(%{}, %{scope: scope})
+
+      assert captured_opts(handlers["github_adopt"]) == scope
+    end
+
+    test "empty scope falls back to [] opts (back-compat / cached-snapshot path)" do
+      handlers = Github.resolve_action_handlers(%{}, %{})
+      assert captured_opts(handlers["github_adopt"]) == []
+    end
+
+    test "non-list scope in ctx is treated as empty" do
+      handlers = Github.resolve_action_handlers(%{}, %{scope: "junk"})
+      assert captured_opts(handlers["github_adopt"]) == []
     end
   end
 end
