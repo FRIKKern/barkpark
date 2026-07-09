@@ -2168,12 +2168,12 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  def mint_studio_link(_, _), do: {:error, :not_live}
+
   defp public_base(%Barkpark{custom_host: ch}) when is_binary(ch) and ch != "",
     do: "https://" <> ch
 
   defp public_base(%Barkpark{url: url}), do: String.trim_trailing(url, "/")
-
-  def mint_studio_link(_, _), do: {:error, :not_live}
 
   # Transport seam — swappable in tests via
   # `config :barkpark_cloud, :studio_link_http_client, FakeClient` (same shape as
