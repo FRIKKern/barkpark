@@ -142,7 +142,13 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
     %{route: "/studio/chat/:session_id", disposition: :skip_env_gated, gated: :chat},
 
     # ── representative plugin routes (mounted behind :plugin_routes tag) ──
-    %{route: "/admin/projects", disposition: :plugin, plugin: "tasks", url: "/admin/projects", active: "Projects"},
+    %{
+      route: "/admin/projects",
+      disposition: :plugin,
+      plugin: "tasks",
+      url: "/admin/projects",
+      active: "Projects"
+    },
     %{
       route: "/admin/onixedit/bokbasen",
       disposition: :plugin,
@@ -159,11 +165,20 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
     %{route: "/admin/github", disposition: :reflect_only},
     # scoped /w/:ws/p/:proj mirrors of the plugin routes
     %{route: "/w/:workspace_slug/p/:project_slug/studio/tickets", disposition: :reflect_only},
-    %{route: "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping", disposition: :reflect_only},
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping",
+      disposition: :reflect_only
+    },
     %{route: "/w/:workspace_slug/p/:project_slug/admin/projects", disposition: :reflect_only},
     %{route: "/w/:workspace_slug/p/:project_slug/admin/pulse", disposition: :reflect_only},
-    %{route: "/w/:workspace_slug/p/:project_slug/admin/onixedit/bokbasen", disposition: :reflect_only},
-    %{route: "/w/:workspace_slug/p/:project_slug/admin/onixedit/staleness", disposition: :reflect_only},
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/admin/onixedit/bokbasen",
+      disposition: :reflect_only
+    },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/admin/onixedit/staleness",
+      disposition: :reflect_only
+    },
     %{route: "/w/:workspace_slug/p/:project_slug/admin/github", disposition: :reflect_only}
   ]
 
@@ -292,7 +307,8 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
 
       # Both representative plugin tabs must be present in the shared nav.
       for label <- ["Projects", "Bokbasen"] do
-        assert label in reference, "expected #{label} tab in the plugin-enabled nav: #{inspect(reference)}"
+        assert label in reference,
+               "expected #{label} tab in the plugin-enabled nav: #{inspect(reference)}"
       end
 
       for {row, nav} <- rest do
