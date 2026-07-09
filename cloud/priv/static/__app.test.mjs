@@ -3110,6 +3110,131 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   assert.ok(!plain.includes("Pending invitations"));
 });
 
+// ── Wave 3 (OC16/OC18): Overview fleet usage strip ──────────────────────────
+// Pure model + render helpers only (the DOM mount loadFleetUsageStrip is browser-
+// verified). These pin the four honest states — fresh / stale / no-sample /
+// over-quota — and prove the team bar reuses the C10 renderer + recovery action.
+
+const fleetIso = (secsAgo) => new Date(Date.now() - secsAgo * 1000).toISOString();
+// A summary envelope with all four states: an over-quota team headline, a fresh
+// row, an hours-stale row, and a no-sample row. Mirrors OC16 { team, instances }.
+const fleetSummaryFixture = () => ({
+  team: { instances: { value: 12, quota: 10, warn_at: 8, source: "control-plane.barkparks", measured_at: null } },
+  instances: [
+    {
+      id: "inst-fresh", name: "Acme Prod", slug: "acme-prod", host: "acme.barkpark.cloud",
+      measured_at: fleetIso(20),
+      meters: {
+        documents: { value: 412, measured_at: fleetIso(20) },
+        db_size: { value: 1048576, measured_at: fleetIso(20) },
+        disk: { value: 37, measured_at: fleetIso(20) },
+        seats: { value: 4, measured_at: fleetIso(20) },
+      },
+    },
+    {
+      id: "inst-stale", name: "Analytics", slug: "analytics", host: "an.barkpark.cloud",
+      measured_at: fleetIso(3 * 3600),
+      meters: {
+        documents: { value: 88, measured_at: fleetIso(3 * 3600) },
+        db_size: { value: "unmetered" },
+        disk: { value: "unmetered" },
+        seats: { value: 2, measured_at: fleetIso(3 * 3600) },
+      },
+    },
+    {
+      id: "inst-nosample", name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
+      measured_at: null,
+      meters: { documents: { value: "unmetered" }, db_size: { value: "unmetered" }, disk: { value: "unmetered" }, seats: { value: "unmetered" } },
+    },
+  ],
+});
+
+test("W3 fleet strip: helpers exported + headline subset is exactly DOCS·DB·DISK·SEATS", () => {
+  for (const name of ["fleetStripModel", "fleetStripWorst", "fleetStripCellHtml", "fleetStripHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats"]);
+  // The subset keys must all be real meters in the shared vocabulary (no drift).
+  const known = new Set(hooks.usageMeters.map((m) => m.key));
+  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k), k + " must be a real usage meter");
+});
+
+test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shared spec", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const fresh = model.rows.find((r) => r.id === "inst-fresh");
+  assert.equal(fresh.noSample, false);
+  assert.match(fresh.asOf, /just now|s ago|m ago/); // a recent sample reads fresh
+  const byKey = Object.fromEntries(fresh.cells.map((c) => [c.key, c]));
+  assert.equal(byKey.documents.value, "412");   // count
+  assert.equal(byKey.db_size.value, "1.0 MB");  // bytes (base-1024, shared fmt)
+  assert.equal(byKey.disk.value, "37%");        // percent
+  assert.equal(byKey.seats.value, "4");
+  for (const c of fresh.cells) assert.equal(c.unmetered, false);
+});
+
+test("W3 fleet strip: an hours-stale row keeps its OWN older 'as of', never fake-fresh", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const stale = model.rows.find((r) => r.id === "inst-stale");
+  assert.equal(stale.noSample, false);
+  assert.match(stale.asOf, /h ago/); // hours old — the stamp tells the truth
+  // A meter with no measurement is a compact em-dash, not a fake zero.
+  const byKey = Object.fromEntries(stale.cells.map((c) => [c.key, c]));
+  assert.equal(byKey.db_size.value, "—");
+  assert.equal(byKey.db_size.unmetered, true);
+  assert.equal(byKey.documents.value, "88");
+});
+
+test("W3 fleet strip: a null measured_at is the honest no-sample cell (no stamp, no values)", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const none = model.rows.find((r) => r.id === "inst-nosample");
+  assert.equal(none.noSample, true);
+  assert.equal(none.asOf, null);
+  assert.equal(none.worstState, null); // no sample → nothing to accent
+  const html = hooks.fleetStripCellHtml(none);
+  assert.match(html, /No sample yet/);
+  assert.ok(!html.includes("as of"), "a no-sample cell must not fake a freshness stamp");
+  assert.ok(!html.includes("fleet-usage-cell-metrics"), "a no-sample cell shows no values");
+  // Still a live drill-down to the instance's own Usage tab.
+  assert.match(html, /href="#instance\/inst-nosample\/usage"/);
+});
+
+test("W3 fleet strip: the team headline over-quota carries the tone + Manage-plan recovery (D25)", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  assert.equal(model.teamState, "over"); // value 12 >= quota 10, inclusive
+  const html = hooks.fleetStripHtml(model);
+  assert.match(html, /usage-bar--over/);
+  // Exactly ONE recovery action, routing to a real Settings billing view.
+  assert.match(html, /<a class="usage-bar-action" href="#settings\/billing">Manage plan<\/a>/);
+  assert.equal((html.match(/usage-bar-action/g) || []).length, 1);
+  assert.ok(hooks.settingsViews.includes("billing"), "Manage plan must land on a real view");
+});
+
+test("W3 fleet strip: cells deep-link into the instance Usage tab", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const html = hooks.fleetStripHtml(model);
+  assert.match(html, /href="#instance\/inst-fresh\/usage"/);
+  assert.match(html, /href="#instance\/inst-stale\/usage"/);
+  assert.match(html, /aria-label="Fleet usage"/);
+});
+
+test("W3 fleet strip: worst-state fold picks the worst headline quota tone, null when none", () => {
+  // No headline meter carries a ceiling → nothing to accent.
+  assert.equal(hooks.fleetStripWorst({ documents: { value: 5 }, seats: { value: 2 } }), null);
+  // A headline meter over its ceiling folds the row to "over".
+  assert.equal(hooks.fleetStripWorst({ documents: { value: 20, quota: 10, warn_at: 8 }, seats: { value: 2 } }), "over");
+  // warn beats ok.
+  assert.equal(hooks.fleetStripWorst({ seats: { value: 8, quota: 10, warn_at: 8 }, documents: { value: 3, quota: 100, warn_at: 90 } }), "warn");
+});
+
+test("W3 fleet strip: an absent / empty summary yields an empty, bar-less model", () => {
+  const empty = hooks.fleetStripModel(undefined);
+  assert.equal(empty.rows.length, 0); // sandbox-prototype array — compare by length
+  assert.equal(empty.teamMeter, null);
+  assert.equal(empty.teamState, null);
+  const noTeam = hooks.fleetStripModel({ instances: [] });
+  assert.equal(hooks.fleetStripHtml(noTeam).includes("usage-bar"), false);
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // S7 — Azure card + verified connect + priced provider-neutral launch catalog
 // (epic azure-hetzner hosting parity). The pure seam; the DOM mount is live.
@@ -4089,4 +4214,159 @@ test("activateExpiryText renders a humane countdown and fails closed", () => {
   assert.equal(hooks.activateExpiryText("2026-07-09T11:59:00Z", now), "expired"); // past
   assert.equal(hooks.activateExpiryText(null, now), ""); // absent
   assert.equal(hooks.activateExpiryText("not-a-date", now), ""); // unparseable → ""
+});
+
+// ── Cmd+K command palette (wave 3) ──────────────────────────────────────────
+// The palette DOM mount + Cmd/Ctrl+K keydown are browser-verified; these pin the
+// pure helpers: fuzzy subsequence match, filter/rank, the selection reducer, and
+// the registry builder (static nav + actions + instances + sites).
+
+test("the command-palette pure helpers are exported", () => {
+  for (const name of ["paletteFuzzy", "paletteFilter", "paletteMoveIndex",
+    "paletteNavItems", "paletteActionItems", "paletteInstanceItems",
+    "paletteSiteItems", "paletteRegistry"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("paletteFuzzy is a case-insensitive, order-preserving subsequence match", () => {
+  assert.equal(hooks.paletteFuzzy("ov", "Overview Go to"), true);
+  assert.equal(hooks.paletteFuzzy("OVW", "Overview Go to"), true); // gaps allowed, any case
+  assert.equal(hooks.paletteFuzzy("wover", "Overview"), false); // out of order
+  assert.equal(hooks.paletteFuzzy("", "anything"), true); // empty passes everything
+  assert.equal(hooks.paletteFuzzy("x", ""), false);
+  assert.equal(hooks.paletteFuzzy(null, "Fleet"), true); // nullish query → pass, never throws
+  assert.equal(hooks.paletteFuzzy("fleet", null), false); // nullish hay → no match, never throws
+});
+
+test("paletteFilter: empty query returns the registry order-preserving", () => {
+  const items = [
+    { label: "Overview", group: "Go to" },
+    { label: "Fleet", group: "Go to" },
+    { label: "Sites", group: "Go to" },
+  ];
+  const out = hooks.paletteFilter(items, "");
+  assert.deepEqual(out.map((i) => i.label), ["Overview", "Fleet", "Sites"]);
+  assert.notEqual(out, items); // a copy, not the original array
+});
+
+test("paletteFilter ranks a substring hit above a mere subsequence", () => {
+  const items = [
+    { label: "Track of keys", group: "Actions" }, // "tok": t..o..k subsequence, NO "tok" substring
+    { label: "Manage tokens", group: "Settings" }, // "tok" is a contiguous substring (tokens)
+  ];
+  const out = hooks.paletteFilter(items, "tok");
+  assert.equal(out.length, 2);
+  assert.equal(out[0].label, "Manage tokens"); // substring wins over subsequence
+});
+
+test("paletteFilter keeps registry order for equal-quality matches", () => {
+  const items = [
+    { label: "Fleet", group: "Go to" },
+    { label: "Fleet · healthy", group: "Go to" },
+  ];
+  // "fleet" is a prefix substring (idx 0) in both → tie broken by registry order.
+  const out = hooks.paletteFilter(items, "fleet");
+  assert.deepEqual([...out.map((i) => i.label)], ["Fleet", "Fleet · healthy"]);
+});
+
+test("paletteFilter drops non-matches and never throws on missing fields", () => {
+  const items = [{ label: "Overview" }, {}, { group: "Sites" }];
+  assert.deepEqual([...hooks.paletteFilter(items, "ovv").map((i) => i.label)], ["Overview"]);
+  assert.deepEqual([...hooks.paletteFilter(null, "x")], []);
+});
+
+test("paletteMoveIndex wraps on up/down and snaps on home/end", () => {
+  assert.equal(hooks.paletteMoveIndex(0, 3, "down"), 1);
+  assert.equal(hooks.paletteMoveIndex(2, 3, "down"), 0); // wrap forward
+  assert.equal(hooks.paletteMoveIndex(0, 3, "up"), 2); // wrap backward
+  assert.equal(hooks.paletteMoveIndex(1, 3, "home"), 0);
+  assert.equal(hooks.paletteMoveIndex(1, 3, "end"), 2);
+});
+
+test("paletteMoveIndex clamps out-of-range and handles an empty list", () => {
+  assert.equal(hooks.paletteMoveIndex(9, 3, null), 0); // out-of-range → first
+  assert.equal(hooks.paletteMoveIndex(-4, 3, null), 0);
+  assert.equal(hooks.paletteMoveIndex(0, 0, "down"), -1); // nothing selectable
+  assert.equal(hooks.paletteMoveIndex(2, 5, "nudge"), 2); // unknown dir → clamp
+});
+
+test("paletteNavItems carries the frozen IA, the three Fleet lenses, and every Settings view", () => {
+  const nav = hooks.paletteNavItems();
+  const byId = Object.fromEntries(nav.map((n) => [n.id, n]));
+  for (const id of ["nav-overview", "nav-fleet", "nav-fleet-attention",
+    "nav-fleet-inflight", "nav-fleet-healthy", "nav-sites", "nav-activity"]) {
+    assert.ok(byId[id], id + " must be a nav row");
+  }
+  // One Settings row per registered Settings view (no dead shells, no extras).
+  const settings = nav.filter((n) => n.group === "Settings").map((n) => n.id).sort();
+  assert.deepEqual(settings, hooks.settingsViews.map((v) => "nav-settings-" + v).sort());
+  // Every nav row is kind:'nav' with a runnable run().
+  for (const n of nav) {
+    assert.equal(n.kind, "nav");
+    assert.equal(typeof n.run, "function");
+  }
+});
+
+test("paletteActionItems are safe actions only, each with a run()", () => {
+  const acts = hooks.paletteActionItems();
+  assert.deepEqual([...acts.map((a) => a.id).sort()], ["act-account", "act-launch", "act-theme"]);
+  for (const a of acts) {
+    assert.equal(a.group, "Actions");
+    assert.equal(a.kind, "action");
+    assert.equal(typeof a.run, "function");
+  }
+});
+
+test("paletteInstanceItems map name + status hint + drill-in run", () => {
+  const rows = hooks.paletteInstanceItems([
+    { id: "bp-1", name: "guerrilla", host: "guerrilla.example.com", version: "1.2.0" },
+    { id: "bp-2", host: null, provision_status: "failed" }, // no name → falls back to id
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].label, "guerrilla");
+  assert.equal(rows[0].group, "Instances");
+  assert.equal(rows[0].kind, "nav");
+  assert.equal(typeof rows[0].hint, "string"); // statusOf(...).label, never blank/throwing
+  assert.ok(rows[0].hint.length > 0);
+  assert.equal(rows[1].label, "bp-2"); // id fallback
+  assert.equal(hooks.paletteInstanceItems(null).length, 0); // nullish → empty
+});
+
+test("paletteSiteItems map primary domain + framework hint + drill-in run", () => {
+  const rows = hooks.paletteSiteItems([
+    { id: "s1", domains: ["shop.example.com"], framework: "nextjs" },
+    { id: "s2", slug: "blog" }, // no domains → slug fallback, "site" hint
+  ]);
+  assert.equal(rows[0].label, "shop.example.com");
+  assert.equal(rows[0].hint, "nextjs");
+  assert.equal(rows[0].group, "Sites");
+  assert.equal(rows[0].kind, "nav");
+  assert.equal(rows[1].label, "blog");
+  assert.equal(rows[1].hint, "site");
+  assert.equal(hooks.paletteSiteItems(null).length, 0);
+});
+
+test("paletteRegistry orders static nav + actions first, then instances, then sites", () => {
+  const reg = hooks.paletteRegistry({
+    instances: [{ id: "bp-1", name: "guerrilla", host: "h" }],
+    sites: [{ id: "s1", domains: ["a.example.com"] }],
+  });
+  const staticCount = hooks.paletteNavItems().length + hooks.paletteActionItems().length;
+  assert.equal(reg[staticCount].group, "Instances"); // instances immediately after the static block
+  assert.equal(reg[reg.length - 1].group, "Sites"); // sites last
+  // Every registry row has the full shape.
+  for (const it of reg) {
+    assert.equal(typeof it.id, "string");
+    assert.equal(typeof it.label, "string");
+    assert.equal(typeof it.run, "function");
+    assert.ok(it.kind === "nav" || it.kind === "action");
+  }
+});
+
+test("paletteRegistry with no data is the static slate — the instant-open guarantee", () => {
+  const reg = hooks.paletteRegistry();
+  const staticCount = hooks.paletteNavItems().length + hooks.paletteActionItems().length;
+  assert.equal(reg.length, staticCount); // nav + actions only, no instance/site rows
+  assert.ok(!reg.some((i) => i.group === "Instances" || i.group === "Sites"));
 });
