@@ -3144,7 +3144,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         err(:num)
       else
         {c, r} = ctx.self
-        lo + trunc(rand_unit(ctx.seed, ctx.tab, c, r) * (hi - lo + 1))
+        # min-clamp: for astronomically wide ranges (span near 2^53) the float
+        # product `v * (hi - lo + 1)` can round UP to the span itself, which
+        # would emit hi + 1 — clamp so the inclusive contract always holds.
+        min(lo + trunc(rand_unit(ctx.seed, ctx.tab, c, r) * (hi - lo + 1)), hi)
       end
     else
       {:error, _} = e -> e
