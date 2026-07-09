@@ -102,7 +102,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   """
   @spec build_args(String.t(), map()) :: [String.t()]
   def build_args(mode, session_opts \\ %{}) do
-    default_args(mode) ++ session_args(session_opts)
+    default_args(mode) ++ session_args(session_opts) ++ model_args(session_opts)
   end
 
   # Resume wins over a fresh pin: --resume and --session-id are mutually
@@ -110,6 +110,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   defp session_args(%{session_id: id, resume: true}) when is_binary(id), do: ["--resume", id]
   defp session_args(%{session_id: id}) when is_binary(id), do: ["--session-id", id]
   defp session_args(_), do: []
+
+  # A chosen model rides the spawn (`--model <alias>`); absent/default = the
+  # CLI's own setting. Allowlisted aliases only — never a raw user string.
+  defp model_args(%{model: m}) when is_binary(m) and m != "", do: ["--model", m]
+  defp model_args(_), do: []
+
+  @models ~w(haiku sonnet opus fable)
+
+  @doc "Model aliases the picker may choose (the CLI accepts these)."
+  @spec models() :: [String.t()]
+  def models, do: @models
+
+  @doc ~S"""
+  Clamp a picker value to an allowlisted model alias, or nil for the CLI
+  default. Fail-closed: an unknown string never reaches the argv.
+  """
+  @spec normalize_model(term()) :: String.t() | nil
+  def normalize_model(m) when m in @models, do: m
+  def normalize_model(_), do: nil
 
   @doc "Permission modes the chat may run in. `plan` is read-only; the others ask."
   @spec modes() :: [String.t()]

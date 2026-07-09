@@ -481,6 +481,16 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-skel="diagram")
     end
 
+    test "chat bubbles neutralize the paper PAGE rules (skeleton stays inline)", %{view: view} do
+      html = render(view)
+      # regression: .bp-paper-surface is the reader PAGE class — its
+      # min-height:100% stretched the streaming block viewport-tall and pushed
+      # the skeleton to the bottom of the screen. The chat must pin the
+      # neutralizer with higher specificity.
+      assert html =~ ".bp-paper-surface.bp-chat-md"
+      assert html =~ "min-height: 0;"
+    end
+
     test "skeleton shapes use the primary fill, never the invisible border tone", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("```mermaid\ngraph")})
       html = render(view)
@@ -1742,6 +1752,126 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       approval = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
       assert approval.metadata["approval_status"] == "canceled"
+    end
+  end
+
+  describe "model picker (wave 5)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view}
+    end
+
+    test "the picker renders every allowlisted alias + default", %{view: view} do
+      html = render(view)
+      assert html =~ "model: default"
+      assert html =~ "Haiku — fastest"
+      assert html =~ "Opus — powerful"
+      assert html =~ "Fable — frontier"
+    end
+
+    test "picking a model persists the choice and confirms honestly", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      sid = store_id(view)
+
+      html = render_change(element(view, ~s(form[phx-change=set-model])), %{"model" => "opus"})
+
+      assert html =~ "Model → Opus — powerful."
+      assert StudioChat.get_session(sid).model_choice == "opus"
+    end
+
+    test "an unknown model value fail-closes to the CLI default", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      sid = store_id(view)
+
+      html =
+        render_change(element(view, ~s(form[phx-change=set-model])), %{"model" => "evil-model"})
+
+      assert html =~ "Model → the CLI default."
+      assert StudioChat.get_session(sid).model_choice == nil
+    end
+
+    test "a stored choice reloads with the session", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      sid = store_id(view)
+      render_change(element(view, ~s(form[phx-change=set-model])), %{"model" => "sonnet"})
+
+      # navigate away and back — the picker follows the stored intent
+      render_patch(view, "/studio/chat")
+      assert render(view) =~ "model: default"
+      render_patch(view, "/studio/chat/#{sid}")
+      html = render(view)
+      assert html =~ ~s(value="sonnet" selected)
+    end
+  end
+
+  describe "living sidebar cards (wave 5)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    # A SECOND session works in the background while the tab views the first:
+    # its card must show the live pill + the concrete tool line — the sidebar
+    # is a window into every running agent, not a stale list.
+    test "a background session's card shows working + its current tool line", %{conn: conn} do
+      {:ok, view, _} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "mine"})
+      # a second, BACKGROUND session with its own runtime
+      other = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: other, mode: "plan", title: "Background job"})
+
+      {:ok, _rec} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: other, mode: "plan", resume: false})
+
+      render(view)
+
+      send_frame(
+        other,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "mix test"}}
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ ~s(data-test-id="chat-activity-#{other}")
+      assert html =~ "mix test"
+      # the working pill pulses (live dot present)
+      assert html =~ "bp-chat-live-dot"
+    end
+
+    test "the live line yields to the stored summary when the turn completes", %{conn: conn} do
+      {:ok, view, _} = live(conn, "/studio/chat")
+      other = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: other, mode: "plan", title: "Background job"})
+
+      {:ok, _rec} =
+        Barkpark.StudioChat.Recorder.ensure(%{session_id: other, mode: "plan", resume: false})
+
+      send_frame(
+        other,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "The final answer."}]}
+         }}
+      )
+
+      assert render(view) =~ ~s(data-test-id="chat-activity-#{other}")
+
+      send_frame(other, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      html = render(view)
+      # overlay gone; the stored summary (owned by the store row) shows instead
+      refute html =~ ~s(data-test-id="chat-activity-#{other}")
+      assert html =~ "The final answer."
     end
   end
 

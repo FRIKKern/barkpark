@@ -65,6 +65,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          renaming_session: nil,
          open_menu_session: nil,
          mode: "plan",
+         model_choice: "default",
          status: :new,
          init: nil,
          messages: [],
@@ -80,11 +81,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          interrupt_requested: false,
          pending_mode: nil,
          subscribed_topic: nil,
+         # Live sidebar overlay (wave 5): session_id → %{state, line}, fed by
+         # every Recorder's activity broadcasts. Renders over the stored row.
+         activity: %{},
          last_result: nil,
          ring: blank_ring(),
          title_source: "default",
          title_kicked: false
        )
+       |> subscribe_activity()
        |> allow_upload(:attachments,
          # Charter D25: paste/drop images ride the SAME user turn as base64
          # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
@@ -258,6 +263,24 @@ defmodule BarkparkWeb.Studio.ChatLive do
         persist_mode(socket, mode)
         {:noreply, assign(socket, mode: mode, pending_mode: nil)}
     end
+  end
+
+  # Pick the brain (wave 5). The choice persists on the session row (intent)
+  # and steers a LIVE session in place via the set_model control frame — the
+  # CLI's ack for set_model can be an empty success (charter D12 vacuous-green
+  # trap), so we do not pend/revert on it: the next init/result frame reports
+  # the answering model as fact, rendered beside the picker.
+  def handle_event("set-model", %{"model" => raw}, socket) do
+    choice = ClaudeChat.normalize_model(raw)
+    label = if choice, do: model_label(choice), else: "the CLI default"
+
+    if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
+    if session = socket.assigns[:session], do: ClaudeChat.set_model(session, choice || "default")
+
+    {:noreply,
+     socket
+     |> assign(model_choice: choice || "default")
+     |> append_message(:system, "Model → #{label}.")}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -685,6 +708,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # A Recorder's live-activity ping (wave 5): overlay the sidebar card. On a
+  # terminal transition (idle/offline) also re-read the list once — the stored
+  # summary/status/pending-count is fresh again and the overlay yields to it.
+  def handle_info({:chat_activity, sid, activity}, socket) do
+    overlay =
+      if activity.state in [:idle, :offline],
+        do: Map.delete(socket.assigns.activity, sid),
+        else: Map.put(socket.assigns.activity, sid, activity)
+
+    # Always re-read the list: a session that just became active may not be in
+    # the sidebar yet (created by another tab), and a terminal transition needs
+    # the fresh stored summary/status. Activity events are change-only, so this
+    # stays cheap.
+    {:noreply, socket |> assign(activity: overlay) |> refresh_sessions()}
+  end
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
@@ -693,6 +732,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
     <div style="flex: 1; display: flex; flex-direction: row; min-height: 0; background: var(--bg);">
       <style>
         @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.22; } 50% { opacity: 0.55; } }
+        /* The sidebar's live pulse (wave 5): a busy session breathes — same
+           keyframes, stronger floor so the dot stays legible at 6px. */
+        .bp-chat-live-dot { animation: bp-skel-pulse 1.2s ease-in-out infinite; opacity: 0.9; }
+        /* Chat bubbles borrow the paper TYPOGRAPHY from .bp-paper-surface —
+           NOT the page. The reader class also carries page-scale layout:
+           min-height:100% (inside the transcript this stretched the streaming
+           block viewport-tall, shoving the forming-component skeleton to the
+           bottom of the screen), a 720px centered measure, and 56px page
+           padding. Neutralize the page, keep the type. */
+        .bp-paper-surface.bp-chat-md {
+          min-height: 0;
+          max-width: none;
+          margin: 0;
+          padding: 2px 0;
+          background: transparent;
+        }
         /* Primary (evergreen) fill, NOT --border-muted: the dark theme's border
            tone is an 11%-lightness gray on a dark bg — the shapes rendered
            invisible. Primary reads in both schemes; the pulse keeps it a ghost. */
@@ -824,9 +879,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 </form>
               <% else %>
                 <.link patch={"/studio/chat/#{s.id}"} class="bp-chat-session-link">
-                  <% {pill_class, pill_text} = session_pill(s) %>
+                  <% act = @activity[s.id] %>
+                  <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
-                    <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
+                    <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px; display: inline-flex; align-items: center; gap: 4px;">
+                      <span
+                        :if={act && act.state == :working}
+                        class="bp-chat-live-dot"
+                        style="width: 6px; height: 6px; border-radius: 50%; background: currentColor;"
+                      >
+                      </span>
                       <%= pill_text %>
                     </span>
                     <span class="text-xs text-dim" style="margin-left: auto;">
@@ -839,8 +901,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   >
                     <%= s.title %>
                   </div>
+                  <%!-- While the agent works, the card shows WHAT it is doing
+                        right now (the live tool line from the Recorder) in the
+                        evergreen; at rest it shows the stored summary. --%>
                   <div
-                    :if={s.summary}
+                    :if={act && act.line}
+                    class="text-xs"
+                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--primary); font-family: var(--font-mono);"
+                    data-test-id={"chat-activity-#{s.id}"}
+                  >
+                    ▸ <%= act.line %>
+                  </div>
+                  <div
+                    :if={s.summary && !(act && act.line)}
                     class="text-xs text-dim"
                     style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                   >
@@ -950,6 +1023,33 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <%= mode_label(m) %>
             </option>
           </select>
+        </form>
+        <%!-- Model picker (wave 5): choose the brain. The choice is intent —
+              it rides the next spawn as `--model` and steers a live session
+              via the set_model control frame; the dim mono suffix is FACT
+              (the answering model observed off the last init/result). --%>
+        <form phx-change="set-model" style="display: inline-flex; align-items: center; gap: 6px;">
+          <select
+            name="model"
+            class="text-xs"
+            aria-label="Model"
+            style="background: var(--bg); color: inherit; border: 1px solid hsl(var(--primary-hsl) / 0.35); border-radius: 6px; padding: 2px 6px; font-weight: 600;"
+          >
+            <option value="default" selected={@model_choice == "default"}>
+              model: default
+            </option>
+            <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
+              <%= model_label(m) %>
+            </option>
+          </select>
+          <span
+            :if={@init && @init.model}
+            class="text-xs text-dim"
+            style="font-family: var(--font-mono);"
+            title="The answering model, as reported by the CLI"
+          >
+            <%= @init.model %>
+          </span>
         </form>
         <.context_ring ring={@ring} />
         <span class="text-xs text-dim" style="margin-left: auto;">
@@ -1340,7 +1440,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # session that isn't there.
   defp spawn_session(socket, store_id, resume?) do
     with {:ok, recorder} <-
-           Recorder.ensure(%{session_id: store_id, mode: socket.assigns.mode, resume: resume?}),
+           Recorder.ensure(%{
+             session_id: store_id,
+             mode: socket.assigns.mode,
+             resume: resume?,
+             model: ClaudeChat.normalize_model(socket.assigns[:model_choice])
+           }),
          {:ok, session} <- Recorder.session_pid(recorder) do
       StudioChat.update_status(store_id, "working")
       # Ready as soon as the subprocess is up. The CLI emits its init event
@@ -1374,6 +1479,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
         if connected?(socket), do: Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
         assign(socket, subscribed_topic: topic)
     end
+  end
+
+  # The global activity feed (wave 5) — one subscription per tab, at mount.
+  defp subscribe_activity(socket) do
+    if connected?(socket),
+      do: Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+    socket
   end
 
   defp unsubscribe_session(socket) do
@@ -1446,6 +1559,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       store_session_id: session.id,
       session_id: session.id,
       mode: session.mode || "plan",
+      model_choice: session.model_choice || "default",
       status: status,
       init: replay_init(session),
       messages: messages,
@@ -1503,6 +1617,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       store_session_id: nil,
       session_id: nil,
       mode: "plan",
+      model_choice: "default",
       status: :new,
       init: nil,
       messages: [],
@@ -1832,6 +1947,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp resolve_permission(socket, request_id, decision) do
+    socket =
+      case socket.assigns[:store_session_id] do
+        nil -> socket
+        sid -> assign(socket, activity: Map.delete(socket.assigns.activity, sid))
+      end
+
     pending? =
       Enum.any?(
         socket.assigns.messages,
@@ -1998,6 +2119,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp tool_line(name, _input), do: name
 
+  defp model_label("haiku"), do: "Haiku — fastest"
+  defp model_label("sonnet"), do: "Sonnet — balanced"
+  defp model_label("opus"), do: "Opus — powerful"
+  defp model_label("fable"), do: "Fable — frontier"
+  defp model_label(m), do: m
+
   defp mode_label("plan"), do: "plan (read-only)"
   defp mode_label("default"), do: "ask to act"
   defp mode_label("acceptEdits"), do: "auto-accept edits"
@@ -2039,6 +2166,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # > Exited > Idle. A session with a persisted pending approval outranks every
   # status — it is the one row that needs the admin RIGHT NOW, so it wears the
   # warn-toned "needs you" pill even mid-turn.
+  # The live overlay wins over the stored row (wave 5): a Recorder that says
+  # "working" right now beats a store status that flips only on frame writes.
+  defp session_pill(_s, %{state: :working}), do: {"badge-chat-working", "working"}
+  defp session_pill(_s, %{state: :needs_you}), do: {"badge-chat-approval", "needs you"}
+  defp session_pill(_s, %{state: :offline}), do: {"badge-chat-offline", "offline"}
+  defp session_pill(s, _act), do: session_pill(s)
+
   defp session_pill(%{pending_approvals: n}) when is_integer(n) and n > 0,
     do: {"badge-chat-approval", "needs you"}
 

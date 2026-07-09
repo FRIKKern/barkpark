@@ -36,6 +36,7 @@ defmodule Barkpark.StudioChat.Session do
     field :cwd, :string
     field :mode, :string
     field :model, :string
+    field :model_choice, :string
     field :status, :string, default: "active"
 
     field :last_active_at, :utc_datetime_usec

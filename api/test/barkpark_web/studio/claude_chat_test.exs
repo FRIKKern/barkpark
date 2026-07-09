@@ -727,4 +727,30 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       true -> Process.sleep(20) && wait_for_file(file, tries - 1)
     end
   end
+
+  describe "build_args/2 model choice (wave 5)" do
+    test "a chosen model rides the spawn as --model" do
+      args = ClaudeChat.build_args("plan", %{session_id: "u-1", model: "opus"})
+      assert ["--model", "opus"] == Enum.slice(args, Enum.find_index(args, &(&1 == "--model")), 2)
+      assert "--session-id" in args
+    end
+
+    test "a resume carries the model too" do
+      args = ClaudeChat.build_args("plan", %{session_id: "u-1", resume: true, model: "sonnet"})
+      assert "--resume" in args
+      assert "--model" in args
+    end
+
+    test "absent or nil model emits NO --model flag" do
+      refute "--model" in ClaudeChat.build_args("plan", %{session_id: "u-1"})
+      refute "--model" in ClaudeChat.build_args("plan", %{session_id: "u-1", model: nil})
+    end
+
+    test "normalize_model fail-closes unknown strings to nil (never raw argv)" do
+      assert ClaudeChat.normalize_model("opus") == "opus"
+      assert ClaudeChat.normalize_model("fable") == "fable"
+      assert ClaudeChat.normalize_model("gpt-4; rm -rf /") == nil
+      assert ClaudeChat.normalize_model(nil) == nil
+    end
+  end
 end

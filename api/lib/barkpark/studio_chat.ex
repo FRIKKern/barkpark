@@ -298,7 +298,11 @@ defmodule Barkpark.StudioChat do
     # An appended approval row is an ask — always pending at creation — so it
     # raises the denormalised pending counter. The −1 lands when it resolves
     # (`update_approval_status/3`) or is force-canceled (`cancel_pending_approvals/1`).
-    inc = if role == "approval", do: [message_count: 1, pending_approvals: 1], else: [message_count: 1]
+    inc =
+      if role == "approval",
+        do: [message_count: 1, pending_approvals: 1],
+        else: [message_count: 1]
+
     updates = [inc: inc, set: [last_active_at: now, updated_at: now]]
 
     updates =
@@ -369,6 +373,21 @@ defmodule Barkpark.StudioChat do
       session
       |> Ecto.Changeset.change(mode: mode, last_active_at: DateTime.utc_now())
       |> Ecto.Changeset.validate_inclusion(:mode, Session.modes())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Persist the user's picked model alias (nil = CLI default). Choice is intent
+  (rides the next spawn as `--model`); the `model` column stays the observed
+  answering model off the result frame.
+  """
+  def set_model_choice(session_id, choice) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(model_choice: choice, last_active_at: DateTime.utc_now())
       |> Repo.update()
     else
       nil -> {:error, :not_found}
@@ -579,10 +598,18 @@ defmodule Barkpark.StudioChat do
 
     input = num(Map.get(frame, :input_tokens, Map.get(usage, :input_tokens, 0)))
     output = num(Map.get(frame, :output_tokens, Map.get(usage, :output_tokens, 0)))
-    cache_read = num(Map.get(usage, :cache_read_input_tokens, Map.get(frame, :cache_read_input_tokens, 0)))
+
+    cache_read =
+      num(Map.get(usage, :cache_read_input_tokens, Map.get(frame, :cache_read_input_tokens, 0)))
 
     cache_creation =
-      num(Map.get(usage, :cache_creation_input_tokens, Map.get(frame, :cache_creation_input_tokens, 0)))
+      num(
+        Map.get(
+          usage,
+          :cache_creation_input_tokens,
+          Map.get(frame, :cache_creation_input_tokens, 0)
+        )
+      )
 
     cost = fnum(Map.get(frame, :total_cost_usd, Map.get(usage, :total_cost_usd, 0)))
 

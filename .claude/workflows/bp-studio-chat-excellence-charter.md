@@ -715,3 +715,36 @@ tab-driven (move the D18 timer into the Recorder); (4) sidebar "working" pill
 while fully detached only updates on result frames; (5) subscribe-then-read
 replay window can double-render a message that persists in the gap (rare,
 cosmetic, converges on reopen).
+
+### Wave 2026-07-09 (wave 5 — living sidebar cards + model picker, LEAD-BUILT inline)
+
+**D29 — The sidebar is a live window into every running agent.** User mandate:
+"We want to see them working, what they are working on." Every Recorder derives
+an activity off its frames — init → working "thinking…", stream deltas →
+"writing…" (change-only: 100 deltas = 1 event), assistant tool_use → the
+concrete tool line ("Bash — mix test"), permission → needs_you "waiting:
+<tool>", result → idle, exit → offline — and broadcasts it on the GLOBAL topic
+`studio_chat:activity`. Every chat tab subscribes once at mount and overlays
+the map on the stored rows: working pill with a breathing dot + the live tool
+line in evergreen mono replaces the stale summary; on idle/offline the overlay
+yields to the fresh store row (always refresh_sessions on activity — events
+are change-only, so cheap). Recorder also persists status "working" on init so
+COLD sidebar loads agree. resolve_permission drops its own overlay entry (the
+Recorder can't see the user's click; the next frame republishes truth).
+
+**D30 — Model choice is intent; observed model is fact.** User mandate: "choose
+our model in a premium way — I feel stuck on Haiku." `model_choice` column
+(nil = CLI default) — distinct from `model` (the answering model off the
+result frame). Picker (default/haiku/sonnet/opus/fable, allowlist-normalized,
+fail-closed) in the header: persists via set_model_choice, steers a LIVE
+session via the set_model control frame (no pend/revert — its ack can be an
+empty success, D12 trap; the next init/result reports fact, rendered dim-mono
+beside the picker), rides the next spawn as `--model <alias>` (fresh AND
+resume). REAL-BINARY PROBE: this host's CLI default is claude-fable-5;
+`--model opus` → claude-opus-4-8 — the picker delivers real switches and the
+fact-readout ends the "what am I talking to?" guessing.
+
+Gate: 248 tests × 3 seeds; studio-literal-check PASS; warnings-as-errors clean.
+Wave-6 candidates: turn elapsed-time on working cards; activity line in the
+browser tab title; per-model cost hinting in the picker; observed-model change
+system line when a switch lands mid-session.
