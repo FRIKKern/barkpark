@@ -961,7 +961,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "status-legend"} = b, _style) do
-    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.PanelsEmail.status_legend_email_html(b)}
+    %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.PanelsEmail.status_legend_email_html(b)
+    }
   end
 
   # ── data-viz slate (stat / stats / heatmap / chart) ─────────────────────────

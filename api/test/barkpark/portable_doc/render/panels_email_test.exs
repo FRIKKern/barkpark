@@ -111,7 +111,10 @@ defmodule Barkpark.PortableDoc.Render.PanelsEmailTest do
   test "compose routes columns to grid article markup, inline email otherwise" do
     block = %{
       "type" => "columns",
-      "columns" => [[%{"type" => "paragraph", "content" => "a"}], [%{"type" => "paragraph", "content" => "b"}]]
+      "columns" => [
+        [%{"type" => "paragraph", "content" => "a"}],
+        [%{"type" => "paragraph", "content" => "b"}]
+      ]
     }
 
     %{"kind" => "_raw", "html" => article} = Compose.compose_block(block, :article)
