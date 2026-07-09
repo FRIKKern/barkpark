@@ -185,12 +185,11 @@ defmodule BarkparkCloud.FailureCopyTest do
   # ── capability_gap_reason/2 — the honest-degradation copy for a FALSE
   # capability, server-owned so the SPA + CLI read one reason (charter D8/D16).
 
-  test "azure lifecycle gap names archive/decommission/resurrect/adopt specifically" do
-    reason = FailureCopy.capability_gap_reason("azure", "lifecycle")
-    assert reason =~ "Archive"
-    assert reason =~ "resurrect"
-    assert reason =~ "adopt"
-    assert reason =~ "Azure"
+  test "azure archive/resurrect/adopt gaps are each named specifically (S9 facet split)" do
+    assert FailureCopy.capability_gap_reason("azure", "archive") =~ "Azure has no archive"
+    assert FailureCopy.capability_gap_reason("azure", "archive") =~ "unrecoverable"
+    assert FailureCopy.capability_gap_reason("azure", "resurrect") =~ "archive"
+    assert FailureCopy.capability_gap_reason("azure", "adopt") =~ "clone-swap"
   end
 
   test "hetzner pause gap explains a stopped Hetzner box still bills → archive instead" do
@@ -198,10 +197,6 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert reason =~ "Hetzner"
     assert reason =~ "bill"
     assert reason =~ "Archive"
-  end
-
-  test "hetzner lifecycle gap points at the bp cloud hetzner escape hatch" do
-    assert FailureCopy.capability_gap_reason("hetzner", "lifecycle") =~ "bp cloud hetzner"
   end
 
   test "catalog gap is generic across kinds and names the fixed-defaults fallback" do
@@ -217,7 +212,8 @@ defmodule BarkparkCloud.FailureCopyTest do
     # made-up one to prove the terminal default clause covers a key added later
     # (S9's facet split) with zero FailureCopy change.
     for kind <- ["hetzner", "azure", "fake", "brand-new-provider"],
-        capability <- ~w(core catalog lifecycle pause labels some_future_facet) do
+        capability <-
+          ~w(core catalog archive resurrect decommission adopt audit pause labels some_future_facet) do
       reason = FailureCopy.capability_gap_reason(kind, capability)
 
       assert is_binary(reason) and reason != "",

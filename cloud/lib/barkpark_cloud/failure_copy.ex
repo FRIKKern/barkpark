@@ -198,17 +198,21 @@ defmodule BarkparkCloud.FailureCopy do
   """
   @spec capability_gap_reason(String.t(), String.t()) :: String.t()
 
-  # Azure lifecycle: archive/decommission/resurrect/adopt aren't wired to Azure
-  # yet (no warm pool, no snapshot tooling there — portable archives are the
-  # planned path). Named specifically so the console can say WHY, not just "no".
-  def capability_gap_reason("azure", "lifecycle") do
-    "Archive, decommission, resurrect and adopt aren't available on Azure yet — they're coming as Azure hosting matures."
+  # Azure lifecycle facets (S9 split the old all-or-nothing lifecycle bool into
+  # archive/resurrect/decommission/adopt/audit). Azure honours decommission +
+  # audit; the three it lacks are named specifically so the console can say WHY,
+  # not just "no". Azure has no snapshot substrate — portable archives (charter
+  # Decision 12) are the planned path.
+  def capability_gap_reason("azure", "archive") do
+    "Azure has no archive yet — there's no snapshot substrate there. Portable archives will bring it; until then an Azure decommission is unrecoverable."
   end
 
-  # Hetzner lifecycle: the verbs exist on `bp cloud hetzner` today but aren't
-  # lifted to the neutral seam/console yet (S9).
-  def capability_gap_reason("hetzner", "lifecycle") do
-    "Archive, decommission, resurrect and adopt aren't wired into the console for Hetzner yet — run them from bp cloud hetzner for now."
+  def capability_gap_reason("azure", "resurrect") do
+    "Resurrect rebuilds a box from its archive, and Azure has no archives yet — portable archives will bring both."
+  end
+
+  def capability_gap_reason("azure", "adopt") do
+    "Adopt is a snapshot-based clone-swap on Hetzner; Azure has no equivalent yet, so the same verb would quietly mean something different."
   end
 
   # Hetzner pause: a stopped Hetzner server still bills for its resources, so we
