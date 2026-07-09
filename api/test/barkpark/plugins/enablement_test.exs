@@ -95,7 +95,9 @@ defmodule Barkpark.Plugins.EnablementTest do
             Barkpark.Plugins.Github
           ] do
         assert mod.default_enabled?() == false, "#{inspect(mod)} should be off by default"
-        assert mod.structure_placement() == :plugins, "#{inspect(mod)} should place under :plugins"
+
+        assert mod.structure_placement() == :plugins,
+               "#{inspect(mod)} should place under :plugins"
       end
     end
   end
@@ -260,7 +262,10 @@ defmodule Barkpark.Plugins.EnablementTest do
       ws = create_workspace!()
 
       labels =
-        Registry.collect_desk_items(baseline: [], ctx: %{dataset: "production", workspace_id: ws.id})
+        Registry.collect_desk_items(
+          baseline: [],
+          ctx: %{dataset: "production", workspace_id: ws.id}
+        )
         |> Enum.map(& &1.label)
 
       assert "Main link" in labels
@@ -275,7 +280,10 @@ defmodule Barkpark.Plugins.EnablementTest do
       {:ok, _} = Tenancy.set_workspace_plugin_settings(ws.id, %{off => %{"enabled" => true}})
 
       labels =
-        Registry.collect_desk_items(baseline: [], ctx: %{dataset: "production", workspace_id: ws.id})
+        Registry.collect_desk_items(
+          baseline: [],
+          ctx: %{dataset: "production", workspace_id: ws.id}
+        )
         |> Enum.map(& &1.label)
 
       assert "Off link" in labels
