@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -287,6 +288,51 @@ func TestDeviceLoginTimeoutExitsAuth(t *testing.T) {
 	}
 }
 
+// TestLoginCloudDeviceJSONEnvelopeNoAutoConnect: driving the FULL `bp login`
+// device path with -o json emits a single clean {ok,cloud_url,team_id} envelope
+// AND fires no auto-register — finishLoginConnect runs after the envelope but is
+// frozen on the machine path (the device-branch gate cannot lean on a json
+// early-return). Complements TestDeviceLoginFlowJSONEnvelopeCleanStdout, which
+// exercises the helper directly; this proves the command wiring.
+func TestLoginCloudDeviceJSONEnvelopeNoAutoConnect(t *testing.T) {
+	withTempConfigHome(t)
+	withInstantDevicePolls(t, 10)
+	forceDeviceTTY(t, true) // zero creds + both-TTY → device path engages
+	stubBrowserOpener(t)
+	t.Setenv("BARKPARK_PASSWORD", "")
+
+	var barkparksHits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/device/start":
+			_, _ = io.WriteString(w, `{"device_code":"d","user_code":"AAAA-BBBB","verification_uri":"http://x/device","interval":1,"expires_in":900}`)
+		case "/v1/auth/device/poll":
+			_, _ = io.WriteString(w, `{"token":"sess-json","team_id":"team-json"}`)
+		case "/v1/barkparks":
+			barkparksHits++
+			_, _ = io.WriteString(w, `{"barkparks":[{"id":"bp-1","name":"solo","url":"https://x"}]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+		return runLoginCloud(out, []string{"--url", srv.URL})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	var env map[string]any
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("stdout is not a single clean JSON envelope: %v\n%s", err, stdout)
+	}
+	if env["ok"] != true || env["cloud_url"] != srv.URL || env["team_id"] != "team-json" {
+		t.Fatalf("envelope = %v", env)
+	}
+	if barkparksHits != 0 {
+		t.Fatalf("the -o json path must NOT auto-register; /v1/barkparks hit %d times", barkparksHits)
+	}
+}
+
 // TestLoginGatingTable is the CORE backward-compat proof: only a
 // zero-credential + both-TTY (or --device) invocation takes the device path;
 // every credential input, and any non-TTY, takes the password path verbatim
@@ -319,9 +365,13 @@ func TestLoginGatingTable(t *testing.T) {
 			// Record the FIRST /v1/auth/* route the plane sees — the device path
 			// opens with device/start, the password path with login, so the first
 			// auth hit is the unambiguous discriminator (device also hits poll after).
+			// barkparksHits counts the auto-register fleet call: every case here runs
+			// with a NON-tty writer (buffer), so the W2 auto-register tail must stay
+			// frozen — a hit would mean the headless contract leaked.
 			var firstAuthPath string
+			var barkparksHits int
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if firstAuthPath == "" {
+				if firstAuthPath == "" && strings.HasPrefix(r.URL.Path, "/v1/auth/") {
 					firstAuthPath = r.URL.Path
 				}
 				switch r.URL.Path {
@@ -331,6 +381,9 @@ func TestLoginGatingTable(t *testing.T) {
 					_, _ = io.WriteString(w, `{"token":"sess-dev","team_id":"team-dev"}`)
 				case "/v1/auth/login":
 					_, _ = io.WriteString(w, `{"token":"pw","team_id":"team-pw"}`)
+				case "/v1/barkparks":
+					barkparksHits++
+					_, _ = io.WriteString(w, `{"barkparks":[]}`)
 				}
 			}))
 			t.Cleanup(srv.Close)
@@ -352,6 +405,9 @@ func TestLoginGatingTable(t *testing.T) {
 			}
 			if firstAuthPath != tc.wantPath {
 				t.Fatalf("routed to %q, want %q", firstAuthPath, tc.wantPath)
+			}
+			if barkparksHits != 0 {
+				t.Fatalf("non-tty login must NOT auto-register; /v1/barkparks hit %d times", barkparksHits)
 			}
 		})
 	}

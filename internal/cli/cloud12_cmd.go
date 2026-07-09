@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
@@ -94,6 +95,12 @@ func runLoginCloud(out *writer, args []string) int {
 			}
 			return useError(out, "failed", derr.Error(), exitGeneric)
 		}
+		// AUTO-REGISTER (bp-login-ux W2): resolve the fleet and, on a single
+		// barkpark, connect bp to it — landing the user in a working surface, not
+		// at a hint. runDeviceLoginFlow already emitted the {ok,cloud_url,team_id}
+		// envelope, so there is NO json early-return here to lean on;
+		// finishLoginConnect gates itself strictly to the human TTY path.
+		finishLoginConnect(out, cfg)
 		return exitOK
 	}
 
@@ -137,6 +144,8 @@ func runLoginCloud(out *writer, args []string) int {
 		"cloud_url": base,
 		"team_id":   resp.TeamID,
 	}) {
+		// Headless / -o json: the envelope is byte-identical to before — NO
+		// auto-connect side effects on the machine path.
 		return exitOK
 	}
 
@@ -144,8 +153,170 @@ func runLoginCloud(out *writer, args []string) int {
 	if resp.TeamID != "" {
 		out.outf("  team: %s", resp.TeamID)
 	}
-	out.outf("  run 'bp barkparks' to see your fleet")
+	// AUTO-REGISTER (bp-login-ux W2): replaces the former dead-end
+	// "run 'bp barkparks'" hint — resolve the fleet and connect on a single
+	// barkpark (gated to the human TTY path inside finishLoginConnect).
+	finishLoginConnect(out, cfg)
 	return exitOK
+}
+
+// finishLoginConnect is the shared AUTO-REGISTER tail both `bp login` paths run
+// after the session is stored (bp-login-ux W2): it resolves the logged-in user's
+// fleet and, when there is exactly ONE barkpark (the overwhelmingly common case),
+// fetches its admin credentials and connects bp to it — landing the user in a
+// working surface instead of at a "run bp barkparks" hint.
+//
+// It is gated STRICTLY to the human terminal path (out.isTTY && !out.machineOut()):
+//   - the headless / -o json contract is frozen — the {ok,cloud_url,team_id}
+//     envelope is byte-identical and NO auto-connect side effect fires. The device
+//     branch calls this AFTER runDeviceLoginFlow already emitted its envelope, so
+//     the gate here (not a json early-return) is what protects the machine path.
+//
+// Every outcome is a complete, non-dead-end success — the exit code is never
+// changed (the caller returns exitOK regardless). A fleet error after a good
+// login is a stderr warning. Zero barkparks → launch/deploy guidance. One →
+// auto-connect + announce (with a steal-guard, below). Many → an interactive pick
+// when both streams are a TTY, else the fleet printed with a one-line connect
+// command.
+func finishLoginConnect(out *writer, cfg *Config) {
+	// A human terminal only. Never auto-connect on the headless / machine path.
+	if !out.isTTY || out.machineOut() {
+		return
+	}
+
+	client := cfg.CloudClient()
+	list, err := client.ListBarkparks(cloudCtx())
+	if err != nil {
+		// Logged in IS success; a fleet lookup blip is a warning, not a failure.
+		out.errf("logged in, but couldn't reach your fleet (%v) — try `bp barkparks`.", err)
+		return
+	}
+
+	switch len(list) {
+	case 0:
+		out.outf("")
+		out.outf("You're logged in — you don't have any Barkparks yet.")
+		out.outf("  launch one:    bp launch hetzner --name <name>")
+		out.outf("  fully-managed: bp go-live --name <name>")
+	case 1:
+		finishSingleBarkpark(out, client, list[0])
+	default:
+		finishMultiBarkpark(out, client, list)
+	}
+}
+
+// finishSingleBarkpark auto-connects the one-barkpark fleet: it fetches the
+// barkpark's admin credentials and delegates to the unchanged connect path, then
+// announces "Connected to <name> — <url>" before the connect summary.
+//
+// STEAL-GUARD (decision 17): if bp is already pointed at a DIFFERENT active saved
+// server, we do NOT silently re-point it — we report the barkpark and how to
+// connect, leaving the active server untouched (exit 0). When the active server IS
+// this barkpark, it's a reconnect: we fall through and re-save with a FRESH admin
+// token (GetCredentials always mints/returns the current one).
+func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) {
+	target := fleetTarget(only.URL, only.Host)
+
+	if active, ok := activeSavedServer(); ok && strings.TrimSpace(active.Server) != "" {
+		if normalizeServerURL(active.Server) != normalizeServerURL(target) {
+			out.outf("")
+			out.outf("You're logged in. Your Barkpark: %s  %s", only.Name, orDash(target))
+			out.outf("bp is currently connected to %s — leaving that as is.", active.Server)
+			out.outf("Connect to %s any time with:  bp setup --target cloud", only.Name)
+			return
+		}
+		// Same server → a reconnect: fall through to fetch a fresh token + re-save.
+	}
+
+	creds, gerr := client.GetCredentials(cloudCtx(), only.ID)
+	if gerr != nil {
+		if strings.Contains(gerr.Error(), "no_admin_token") {
+			// No stored admin token (an older / ip-only provision): fall back to the
+			// manual-paste path — never a dead end.
+			out.outf("")
+			out.outf("%q has no stored admin token (an older or ip-only provision).", only.Name)
+			out.outf("Connect by pasting an admin token:  bp setup --target cloud")
+			return
+		}
+		out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
+		return
+	}
+
+	connectTarget := fleetTarget(creds.URL, creds.Host)
+	if connectTarget == "" {
+		out.errf("logged in — %q has no URL to connect to yet (still provisioning?). Try `bp barkparks`.", only.Name)
+		return
+	}
+
+	out.outf("")
+	out.outf("Connected to %s — %s", only.Name, connectTarget)
+	connectToBarkpark(out, connectTarget, creds.AdminToken, only.Name)
+}
+
+// finishMultiBarkpark handles a fleet with more than one barkpark. On a genuine
+// both-streams terminal it reuses the wizard's cloudFleetPick (numbered list →
+// pick → credentials → connect). When stdin is NOT a terminal (a rare
+// `bp login < /dev/null` at a tty) it never prompts: it prints the fleet with a
+// one-line connect command.
+func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclient.Barkpark) {
+	if deviceTTYCheck() { // both stdin AND stdout are a real terminal
+		res, err := cloudFleetPick(out, client, os.Stdin)
+		if err != nil {
+			out.errf("logged in, but couldn't pick a Barkpark (%v) — try `bp setup --target cloud`.", err)
+			return
+		}
+		if res.LoggedInOnly || strings.TrimSpace(res.Server) == "" {
+			// cloudFleetPick already printed the actionable guidance (skip / no token).
+			return
+		}
+		out.outf("")
+		out.outf("Connected to %s — %s", res.Name, res.Server)
+		connectToBarkpark(out, res.Server, res.Token, res.Name)
+		return
+	}
+
+	out.outf("")
+	out.outf("You're logged in. Your Barkparks:")
+	for _, b := range list {
+		out.outf("  %s  %s", b.Name, orDash(fleetTarget(b.URL, b.Host)))
+	}
+	out.outf("")
+	out.outf("Connect to one with:  bp setup --target cloud")
+}
+
+// connectToBarkpark delegates to the UNCHANGED setup connect path (TargetConnect
+// over configStoreAdapter) so the server is probed, the admin token is persisted,
+// bp is defaulted here, and the same premium connect summary prints — exactly like
+// the wizard's cloud target. We never hand-roll RememberServer. A connect failure
+// after a good login is a warning, not a failure (the user stays logged in).
+func connectToBarkpark(out *writer, server, token, name string) {
+	plan := setup.SetupPlan{
+		Target: setup.TargetConnect,
+		Server: server,
+		Token:  token,
+		Name:   strings.TrimSpace(name),
+	}
+	opts := setup.Options{
+		Out:          out.stdout,
+		Store:        configStoreAdapter{},
+		KnownServers: loadKnownServers(),
+	}
+	if err := setup.Execute(plan, opts); err != nil {
+		out.errf("logged in, but connecting to %s failed: %v", server, err)
+		out.errf("  you can retry with:  bp setup --target cloud")
+		return
+	}
+	out.outf("")
+	out.outf("  run 'bp' to open your desk")
+}
+
+// orDash renders an empty string as the house em-dash so a provisioning barkpark
+// with no URL/host yet reads honestly rather than as a bare gap.
+func orDash(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "—"
+	}
+	return s
 }
 
 // runSignupCloud is the `bp signup` built-in — the registration sibling of
