@@ -255,11 +255,15 @@ defmodule BarkparkWeb.Admin.PluginsLive do
   # ── scoped path builders (sdl-w1-admin-canonical) ───────────────────
   # This LV now mounts under `/w/:ws/p/:proj/d/:dataset/studio/_plugins`, so
   # its own links carry the scope prefix (assigned by StudioChrome from the
-  # URL params). A plain-string builder rather than `~p` — the prefix is
-  # dynamic, so verified-route sigils can't statically anchor it (the epic's
-  # `Paths` builder consolidates this in sdl-w1-builder).
-  defp plugin_settings_path(scope_prefix, dataset, name),
-    do: "#{scope_prefix}/d/#{dataset}/studio/_plugins/#{name}/settings"
+  # URL params). Built via `Paths` — the single owner of the Studio URL
+  # grammar (`~p` can't anchor a dynamic prefix).
+  defp plugin_settings_path(scope_prefix, dataset, name) do
+    BarkparkWeb.Studio.StudioLive.Paths.studio_path(
+      scope_prefix,
+      ["_plugins", name, "settings"],
+      dataset
+    )
+  end
 
   # ── data loaders ────────────────────────────────────────────────────
 
