@@ -54,6 +54,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
          store_session_id: nil,
          session_id: nil,
          sessions: StudioChat.list_sessions(),
+         show_archived: false,
+         renaming_session: nil,
+         open_menu_session: nil,
          mode: "plan",
          status: :new,
          init: nil,
@@ -191,6 +194,72 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_event("deny", %{"rid" => request_id}, socket) do
     {:noreply, resolve_permission(socket, request_id, {:deny, "The user declined this action."})}
+  end
+
+  # ── sidebar as a managed resource list (wave 2) ──────────────────────────
+
+  # Toggle the per-row kebab menu (idempotent open/close). `phx-click-away` on
+  # the open menu closes it; opening a different row's menu replaces the target.
+  def handle_event("session-menu-toggle", %{"id" => id}, socket) do
+    next = if socket.assigns.open_menu_session == id, do: nil, else: id
+    {:noreply, assign(socket, open_menu_session: next)}
+  end
+
+  def handle_event("session-menu-close", _params, socket) do
+    {:noreply, assign(socket, open_menu_session: nil)}
+  end
+
+  # Inline rename triad (cloned from the sheet-tab rename, sheet_grid.ex) with
+  # ONE divergence: blur COMMITS (a click-away while editing keeps your edit).
+  def handle_event("session-rename-start", %{"id" => id}, socket) do
+    {:noreply, assign(socket, renaming_session: id, open_menu_session: nil)}
+  end
+
+  # Commit path shared by Enter (form submit → `title`) and blur (→ `value`).
+  # A blank/whitespace title cancels rather than erroring through the required
+  # validation — an empty rename is a no-op, never a wipe.
+  def handle_event("session-rename", %{"id" => id} = params, socket) do
+    title = (params["title"] || params["value"] || "") |> String.trim()
+    socket = assign(socket, renaming_session: nil)
+
+    socket =
+      if title == "" do
+        socket
+      else
+        # rename/2 pins title_source: "human" — a human name is never
+        # overwritten by the AI titler (charter D13).
+        StudioChat.rename(id, title)
+        refresh_sessions(socket)
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("session-rename-cancel", _params, socket) do
+    {:noreply, assign(socket, renaming_session: nil)}
+  end
+
+  def handle_event("session-archive", %{"id" => id}, socket) do
+    StudioChat.archive_session(id)
+    {:noreply, after_lifecycle_mutation(socket, id)}
+  end
+
+  # Unarchive keeps an on-screen session on screen (store_session_id unchanged);
+  # it only leaves the archived shelf, so a refresh is enough — no push_patch.
+  def handle_event("session-unarchive", %{"id" => id}, socket) do
+    StudioChat.unarchive_session(id)
+    {:noreply, socket |> assign(open_menu_session: nil) |> refresh_sessions()}
+  end
+
+  def handle_event("session-delete", %{"id" => id}, socket) do
+    StudioChat.delete_session(id)
+    {:noreply, after_lifecycle_mutation(socket, id)}
+  end
+
+  # Flip the active ⇄ archived shelf. refresh_sessions reads the new flag.
+  def handle_event("toggle-archived", _params, socket) do
+    show = not (socket.assigns.show_archived == true)
+    {:noreply, socket |> assign(show_archived: show, open_menu_session: nil) |> refresh_sessions()}
   end
 
   # Stale/unknown client events must never crash the chat — mirror the other
@@ -380,8 +449,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
           background: var(--primary);
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
-        .bp-chat-session { display: block; }
-        .bp-chat-session:hover { background: hsl(var(--primary-hsl) / 0.08) !important; }
+        .bp-chat-session-row { position: relative; border-radius: 8px; }
+        /* !important beats the inline `background` the active/inactive row style
+           sets, so an inactive row still lights on hover. */
+        .bp-chat-session-row:hover { background: hsl(var(--primary-hsl) / 0.08) !important; }
+        .bp-chat-session-link { display: block; text-decoration: none; }
+        /* Kebab: a quiet affordance — revealed on row hover, keyboard focus, or
+           while its own menu is open, so a resting sidebar stays calm. */
+        .bp-chat-kebab {
+          position: absolute; top: 6px; right: 6px;
+          width: 22px; height: 22px; line-height: 1; font-size: 15px;
+          display: inline-flex; align-items: center; justify-content: center;
+          background: transparent; border: none; border-radius: 6px; cursor: pointer;
+          opacity: 0; transition: opacity 0.12s ease;
+        }
+        .bp-chat-session-row:hover .bp-chat-kebab,
+        .bp-chat-kebab:focus,
+        .bp-chat-kebab[aria-expanded="true"] { opacity: 1; }
+        .bp-chat-kebab:hover { background: hsl(var(--primary-hsl) / 0.14); }
+        .bp-chat-menu {
+          position: absolute; top: 30px; right: 6px; z-index: 20;
+          min-width: 132px; padding: 4px;
+          display: flex; flex-direction: column; gap: 1px;
+          background: var(--bg); border: 1px solid var(--border-muted);
+          border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+        }
+        .bp-chat-menuitem {
+          text-align: left; padding: 6px 9px; font-size: 0.8125rem;
+          background: transparent; color: var(--text); border: none;
+          border-radius: 5px; cursor: pointer;
+        }
+        .bp-chat-menuitem:hover { background: hsl(var(--primary-hsl) / 0.12); }
+        .bp-chat-menuitem-danger { color: var(--danger); }
+        .bp-chat-menuitem-danger:hover { background: hsl(var(--danger-hsl) / 0.12); }
+        .bp-chat-rename-input {
+          width: 100%; box-sizing: border-box; font: inherit;
+          background: var(--bg); color: var(--text);
+          border: 1px solid var(--primary); border-radius: 6px; padding: 6px 8px;
+        }
       </style>
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
@@ -399,9 +504,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
         <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 6px;">
           <div
-            :if={@sessions == []}
+            :if={@sessions == [] and @show_archived}
             class="text-xs text-dim"
             style="padding: 14px 10px; line-height: 1.55;"
+            data-test-id="chat-archived-empty"
+          >
+            <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
+              No archived chats
+            </div>
+            <p style="margin: 0;">
+              Archived chats rest here. Archive one from its <span aria-hidden="true">⋯</span>
+              menu to tuck it away without deleting it — it stays fully resumable.
+            </p>
+          </div>
+
+          <div
+            :if={@sessions == [] and not @show_archived}
+            class="text-xs text-dim"
+            style="padding: 14px 10px; line-height: 1.55;"
+            data-test-id="chat-empty"
           >
             <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
               No chats yet
@@ -418,36 +539,139 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
           <nav :if={@sessions != []} style="display: flex; flex-direction: column; gap: 2px;">
             <% active_id = @session_id %>
-            <.link
+            <div
               :for={s <- @sessions}
-              patch={"/studio/chat/#{s.id}"}
-              class="bp-chat-session"
+              class="bp-chat-session-row"
               style={session_row_style(s.id == active_id)}
+              data-test-id="chat-session-row"
             >
-              <% {pill_class, pill_text} = session_pill(s.status) %>
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
-                  <%= pill_text %>
-                </span>
-                <span class="text-xs text-dim" style="margin-left: auto;">
-                  <%= session_stamp(s) %>
-                </span>
-              </div>
-              <div
-                class="text-sm"
-                style="font-weight: 600; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-              >
-                <%= s.title %>
-              </div>
-              <div
-                :if={s.summary}
-                class="text-xs text-dim"
-                style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-              >
-                <%= s.summary %>
-              </div>
-            </.link>
+              <%= if @renaming_session == s.id do %>
+                <%!-- Inline rename (sheet-tab triad) — blur COMMITS (divergence);
+                      Enter submits, Escape cancels. The commit path accepts both
+                      the form's `title` and blur's `value`. --%>
+                <form phx-submit="session-rename" phx-value-id={s.id} style="display: block;">
+                  <input
+                    name="title"
+                    type="text"
+                    value={s.title}
+                    class="bp-chat-rename-input"
+                    autocomplete="off"
+                    autofocus
+                    aria-label={"Rename #{s.title}"}
+                    phx-blur="session-rename"
+                    phx-value-id={s.id}
+                    phx-keydown="session-rename-cancel"
+                    phx-key="Escape"
+                    data-test-id={"chat-session-rename-input-#{s.id}"}
+                  />
+                </form>
+              <% else %>
+                <.link patch={"/studio/chat/#{s.id}"} class="bp-chat-session-link">
+                  <% {pill_class, pill_text} = session_pill(s.status) %>
+                  <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
+                    <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
+                      <%= pill_text %>
+                    </span>
+                    <span class="text-xs text-dim" style="margin-left: auto;">
+                      <%= session_stamp(s) %>
+                    </span>
+                  </div>
+                  <div
+                    class="text-sm"
+                    style="font-weight: 600; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  >
+                    <%= s.title %>
+                  </div>
+                  <div
+                    :if={s.summary}
+                    class="text-xs text-dim"
+                    style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                  >
+                    <%= s.summary %>
+                  </div>
+                </.link>
+
+                <button
+                  type="button"
+                  class="bp-chat-kebab text-dim"
+                  phx-click="session-menu-toggle"
+                  phx-value-id={s.id}
+                  aria-haspopup="menu"
+                  aria-expanded={to_string(@open_menu_session == s.id)}
+                  aria-label={"Actions for #{s.title}"}
+                  data-test-id={"chat-session-menu-#{s.id}"}
+                >
+                  ⋯
+                </button>
+
+                <div
+                  :if={@open_menu_session == s.id}
+                  class="bp-chat-menu"
+                  role="menu"
+                  aria-label={"Actions for #{s.title}"}
+                  phx-click-away="session-menu-close"
+                  data-test-id={"chat-session-menu-list-#{s.id}"}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem"
+                    phx-click="session-rename-start"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-rename-#{s.id}"}
+                  >
+                    Rename
+                  </button>
+                  <button
+                    :if={@show_archived}
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem"
+                    phx-click="session-unarchive"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-unarchive-#{s.id}"}
+                  >
+                    Unarchive
+                  </button>
+                  <button
+                    :if={not @show_archived}
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem"
+                    phx-click="session-archive"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-archive-#{s.id}"}
+                  >
+                    Archive
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="bp-chat-menuitem bp-chat-menuitem-danger"
+                    phx-click="session-delete"
+                    phx-value-id={s.id}
+                    data-test-id={"chat-session-delete-#{s.id}"}
+                  >
+                    Delete
+                  </button>
+                </div>
+              <% end %>
+            </div>
           </nav>
+        </div>
+
+        <div style="flex: none; border-top: 1px solid var(--border-muted); padding: 6px 10px;">
+          <button
+            type="button"
+            class="text-xs text-dim"
+            phx-click="toggle-archived"
+            aria-pressed={to_string(@show_archived)}
+            data-test-id="chat-archived-toggle"
+            style="display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; cursor: pointer; padding: 4px 6px;"
+          >
+            <.icon name={if @show_archived, do: "arrow-left", else: "archive"} size={12} />
+            <%= if @show_archived, do: "Back to active chats", else: "Show archived" %>
+          </button>
         </div>
       </aside>
 
@@ -792,7 +1016,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Title state follows the STORED session: a titled (ai/human) session
       # never re-kicks; a still-default one may kick on its next good turn.
       title_source: session.title_source || "default",
-      title_kicked: false
+      title_kicked: false,
+      # Any half-open sidebar affordance is stale after a navigation.
+      renaming_session: nil,
+      open_menu_session: nil
     )
   end
 
@@ -815,11 +1042,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
       interrupt_requested: false,
       last_result: nil,
       title_source: "default",
-      title_kicked: false
+      title_kicked: false,
+      renaming_session: nil,
+      open_menu_session: nil
     )
   end
 
-  defp refresh_sessions(socket), do: assign(socket, sessions: StudioChat.list_sessions())
+  defp refresh_sessions(socket) do
+    assign(socket, sessions: StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true))
+  end
+
+  # A row-level archive/delete. Always refresh the sidebar; when the mutated row
+  # is the ON-SCREEN session, push_patch to /studio/chat so `handle_params/3`
+  # (the single source of truth) re-resets to the clean new-chat state — a
+  # background row leaves the open session untouched. The refreshed session list
+  # survives the patch (reset_to_new_chat never re-lists), so the deleted row is
+  # gone from the sidebar too.
+  defp after_lifecycle_mutation(socket, id) do
+    socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
+
+    if socket.assigns.store_session_id == id do
+      push_patch(socket, to: "/studio/chat")
+    else
+      socket
+    end
+  end
 
   # ── persistence (D7 — source markdown, on completion only) ──────────────
 

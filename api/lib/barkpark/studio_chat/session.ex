@@ -37,6 +37,10 @@ defmodule Barkpark.StudioChat.Session do
 
     field :last_active_at, :utc_datetime_usec
 
+    # Archive shelf (wave 2): nil = active side of the sidebar, a timestamp =
+    # archived. Orthogonal to `status` (liveness) BY DESIGN — see the migration.
+    field :archived_at, :utc_datetime_usec
+
     field :summary, :string
     field :message_count, :integer, default: 0
     field :input_tokens, :integer, default: 0

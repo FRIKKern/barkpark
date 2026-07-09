@@ -77,14 +77,28 @@ defmodule Barkpark.StudioChat do
     end
   end
 
+  # A managed sidebar never renders an unbounded list — the recency-desc order
+  # keeps live work on top, so 50 is a generous fold with no pagination chrome.
+  @sidebar_cap 50
+
   @doc """
-  List sessions for the sidebar, most-recently-active first. Selects only the
-  sidebar fields (no message scan).
+  List sessions for the sidebar, most-recently-active first, capped at
+  #{@sidebar_cap}. Selects only the sidebar fields (no message scan).
+
+  Options:
+
+    * `:archived` — `false` (default) lists the active side of the shelf
+      (`archived_at IS NULL`, the partial-indexed hot path); `true` lists the
+      archived shelf (`archived_at IS NOT NULL`).
   """
-  @spec list_sessions() :: [Session.t()]
-  def list_sessions do
+  @spec list_sessions(keyword()) :: [Session.t()]
+  def list_sessions(opts \\ []) do
+    archived? = Keyword.get(opts, :archived, false)
+
     Session
+    |> archived_filter(archived?)
     |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(^@sidebar_cap)
     |> select([s], %Session{
       id: s.id,
       title: s.title,
@@ -96,11 +110,15 @@ defmodule Barkpark.StudioChat do
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
       last_active_at: s.last_active_at,
+      archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
     })
     |> Repo.all()
   end
+
+  defp archived_filter(query, true), do: where(query, [s], not is_nil(s.archived_at))
+  defp archived_filter(query, false), do: where(query, [s], is_nil(s.archived_at))
 
   @doc """
   List a session's messages in `seq` order.
@@ -111,6 +129,50 @@ defmodule Barkpark.StudioChat do
     |> where([m], m.session_id == ^session_id)
     |> order_by([m], asc: m.seq)
     |> Repo.all()
+  end
+
+  # ---------------------------------------------------------------------------
+  # lifecycle: archive + delete (wave 2 — the sidebar as a managed resource list)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Permanently delete a session and its messages. The `chat_messages` FK is
+  `on_delete: :delete_all`, so one `Repo.delete` cascades — no manual cleanup.
+  UUID-guarded: a missing/non-UUID id is a clean `:noop`, never a crash.
+  """
+  @spec delete_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
+  def delete_session(id) do
+    case get_session(id) do
+      nil -> :noop
+      session -> Repo.delete(session)
+    end
+  end
+
+  @doc """
+  Archive a session — stamp `archived_at` so it drops off the active sidebar and
+  onto the archived shelf. Orthogonal to `status`: a working/exited session can
+  be archived without touching its liveness. `:noop` if the session is gone.
+  """
+  @spec archive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
+  def archive_session(id), do: set_archived_at(id, DateTime.utc_now())
+
+  @doc """
+  Unarchive a session — clear `archived_at` so it returns to the active sidebar.
+  `:noop` if the session is gone.
+  """
+  @spec unarchive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
+  def unarchive_session(id), do: set_archived_at(id, nil)
+
+  defp set_archived_at(id, value) do
+    case get_session(id) do
+      nil ->
+        :noop
+
+      session ->
+        session
+        |> Ecto.Changeset.change(archived_at: value)
+        |> Repo.update()
+    end
   end
 
   # ---------------------------------------------------------------------------

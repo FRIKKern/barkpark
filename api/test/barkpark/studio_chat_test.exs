@@ -331,6 +331,82 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "lifecycle — delete + archive (wave 2)" do
+    test "delete_session removes the row and cascades its messages" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "one"})
+      {:ok, _} = StudioChat.append_message(s, %{role: "assistant", source_markdown: "two"})
+      assert length(StudioChat.list_messages(s.id)) == 2
+
+      assert {:ok, %Session{}} = StudioChat.delete_session(s.id)
+      assert StudioChat.get_session(s.id) == nil
+      # on_delete: :delete_all cascaded — no orphaned messages
+      assert StudioChat.list_messages(s.id) == []
+    end
+
+    test "delete/archive/unarchive on a missing or non-UUID id are honest no-ops" do
+      assert :noop = StudioChat.delete_session(Ecto.UUID.generate())
+      assert :noop = StudioChat.delete_session("not-a-uuid")
+      assert :noop = StudioChat.archive_session(Ecto.UUID.generate())
+      assert :noop = StudioChat.unarchive_session("nope")
+    end
+
+    test "archive stamps archived_at; unarchive clears it — status is untouched" do
+      s = new_session()
+      {:ok, _} = StudioChat.update_status(s.id, "working")
+
+      {:ok, archived} = StudioChat.archive_session(s.id)
+      assert archived.archived_at != nil
+      # archive is orthogonal to liveness: status survives
+      assert archived.status == "working"
+
+      {:ok, unarchived} = StudioChat.unarchive_session(s.id)
+      assert unarchived.archived_at == nil
+      assert unarchived.status == "working"
+    end
+  end
+
+  describe "list_sessions/1 — archived filter + cap (wave 2)" do
+    test "the default list excludes archived; archived: true lists only the shelf" do
+      live = new_session()
+      shelved = new_session()
+      {:ok, _} = StudioChat.archive_session(shelved.id)
+
+      default_ids = StudioChat.list_sessions() |> Enum.map(& &1.id)
+      assert live.id in default_ids
+      refute shelved.id in default_ids
+
+      archived_ids = StudioChat.list_sessions(archived: true) |> Enum.map(& &1.id)
+      assert shelved.id in archived_ids
+      refute live.id in archived_ids
+    end
+
+    test "the active list is capped at 50, recency-desc keeping the freshest on top" do
+      # 55 sessions, staggered last_active_at so the order is deterministic
+      for i <- 1..55 do
+        id = Ecto.UUID.generate()
+
+        {:ok, _} =
+          StudioChat.create_session(%{
+            id: id,
+            last_active_at: DateTime.add(~U[2026-07-01 00:00:00.000000Z], i, :minute)
+          })
+      end
+
+      rows = StudioChat.list_sessions()
+      assert length(rows) == 50
+      # recency-desc: the freshest (minute 55) leads; the 6 oldest fall off
+      assert hd(rows).last_active_at == DateTime.add(~U[2026-07-01 00:00:00.000000Z], 55, :minute)
+    end
+
+    test "the sidebar projection carries archived_at" do
+      s = new_session()
+      {:ok, _} = StudioChat.archive_session(s.id)
+      row = StudioChat.list_sessions(archived: true) |> Enum.find(&(&1.id == s.id))
+      assert row.archived_at != nil
+    end
+  end
+
   describe "schema wiring" do
     test "known statuses and title sources are enumerable" do
       assert "working" in Session.statuses()

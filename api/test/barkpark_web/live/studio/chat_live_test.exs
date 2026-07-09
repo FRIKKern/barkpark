@@ -883,6 +883,189 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "the sidebar as a managed resource list (rename/archive/delete, wave 2)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "each row carries a kebab menu (role=menu, menuitems) with Rename/Archive/Delete",
+         %{conn: conn} do
+      sid = seed_session("Managed chat")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      # the menu is closed until the kebab is toggled
+      refute has_element?(view, ~s([data-test-id="chat-session-menu-list-#{sid}"]))
+
+      html = render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      assert html =~ ~s(role="menu")
+      assert has_element?(view, ~s([data-test-id="chat-session-rename-#{sid}"][role="menuitem"]))
+      assert has_element?(view, ~s([data-test-id="chat-session-archive-#{sid}"][role="menuitem"]))
+      assert has_element?(view, ~s([data-test-id="chat-session-delete-#{sid}"][role="menuitem"]))
+    end
+
+    test "inline rename commits via submit, persists title_source human, and survives the AI titler",
+         %{conn: conn} do
+      sid = seed_session("Original")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+      # the inline editor is now open on this row
+      assert has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+
+      render_submit(element(view, "form[phx-submit=session-rename]"), %{"title" => "My renamed chat"})
+
+      s = StudioChat.get_session(sid)
+      assert s.title == "My renamed chat"
+      # rename/2 pins human — the AI titler must not clobber it (charter D13)
+      assert s.title_source == "human"
+      assert :noop = StudioChat.maybe_set_ai_title(sid, "AI would pick this")
+      assert StudioChat.get_session(sid).title == "My renamed chat"
+      # the sidebar reflects the new title, editor closed
+      html = render(view)
+      assert html =~ "My renamed chat"
+      refute has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+    end
+
+    test "blur COMMITS the rename (the sheet-tab divergence)", %{conn: conn} do
+      sid = seed_session("Before blur")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+
+      render_blur(element(view, ~s([data-test-id="chat-session-rename-input-#{sid}"])), %{
+        "value" => "Committed by blur"
+      })
+
+      assert StudioChat.get_session(sid).title == "Committed by blur"
+    end
+
+    test "a blank rename is a no-op, never a wipe", %{conn: conn} do
+      sid = seed_session("Keep me")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+      render_submit(element(view, "form[phx-submit=session-rename]"), %{"title" => "   "})
+
+      assert StudioChat.get_session(sid).title == "Keep me"
+    end
+
+    test "Escape cancels the rename without touching the title", %{conn: conn} do
+      sid = seed_session("Unchanged")
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-rename-#{sid}"])))
+      assert has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+
+      render_keydown(element(view, ~s([data-test-id="chat-session-rename-input-#{sid}"])), %{
+        "key" => "Escape"
+      })
+
+      refute has_element?(view, ~s([data-test-id="chat-session-rename-input-#{sid}"]))
+      assert StudioChat.get_session(sid).title == "Unchanged"
+    end
+
+    test "deleting the ON-SCREEN session push_patches to /studio/chat and lands on new-chat",
+         %{conn: conn} do
+      sid = seed_session("Open + doomed")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      assert store_id(view) == sid
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-delete-#{sid}"])))
+
+      assert_patched(view, "/studio/chat")
+      # the single source of truth reset to the clean new-chat state
+      assert store_id(view) == nil
+      assert session_pid(view) == nil
+      # gone from the DB and from the sidebar
+      assert StudioChat.get_session(sid) == nil
+      refute render(view) =~ "Open + doomed"
+    end
+
+    test "archiving the ON-SCREEN session push_patches to /studio/chat", %{conn: conn} do
+      sid = seed_session("Open + archived")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-archive-#{sid}"])))
+
+      assert_patched(view, "/studio/chat")
+      assert store_id(view) == nil
+      # archived, not deleted — the row leaves the active sidebar but survives
+      assert StudioChat.get_session(sid).archived_at != nil
+      refute render(view) =~ "Open + archived"
+    end
+
+    test "deleting a BACKGROUND session leaves the open session untouched", %{conn: conn} do
+      open = seed_session("Stays open")
+      victim = seed_session("Background victim")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{open}")
+      assert store_id(view) == open
+
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{victim}"])))
+      render_click(element(view, ~s([data-test-id="chat-session-delete-#{victim}"])))
+
+      # no navigation — the open session is intact
+      assert store_id(view) == open
+      assert StudioChat.get_session(victim) == nil
+      html = render(view)
+      refute html =~ "Background victim"
+      assert html =~ "Stays open"
+    end
+
+    test "the Show-archived toggle reveals the archived shelf and its unarchive action",
+         %{conn: conn} do
+      _active = seed_session("Active one")
+      shelved = seed_session("Shelved one")
+      StudioChat.archive_session(shelved)
+
+      {:ok, view, html} = live(conn, "/studio/chat")
+      # the active list shows only the non-archived session
+      assert html =~ "Active one"
+      refute html =~ "Shelved one"
+
+      html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
+      # now the shelf is shown: archived session visible, active hidden
+      assert html =~ "Shelved one"
+      refute html =~ "Active one"
+
+      # its menu offers Unarchive (not Archive)
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{shelved}"])))
+      assert has_element?(view, ~s([data-test-id="chat-session-unarchive-#{shelved}"]))
+      refute has_element?(view, ~s([data-test-id="chat-session-archive-#{shelved}"]))
+
+      render_click(element(view, ~s([data-test-id="chat-session-unarchive-#{shelved}"])))
+      assert StudioChat.get_session(shelved).archived_at == nil
+    end
+
+    test "an archived session opened by URL still replays and offers unarchive", %{conn: conn} do
+      sid = seed_session_with_history()
+      StudioChat.archive_session(sid)
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+      # archived is not deleted — the history replays and the session loads
+      assert store_id(view) == sid
+      assert html =~ "prev question"
+
+      # the sidebar defaults to the active shelf (the open archived row isn't in it),
+      # but flipping to the archived shelf surfaces it with an Unarchive action
+      render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
+      render_click(element(view, ~s([data-test-id="chat-session-menu-#{sid}"])))
+      assert has_element?(view, ~s([data-test-id="chat-session-unarchive-#{sid}"]))
+    end
+
+    test "the empty archived shelf teaches instead of showing nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render_click(element(view, ~s([data-test-id="chat-archived-toggle"])))
+      assert html =~ "No archived chats"
+    end
+  end
+
   describe "resume flag end-to-end (argv-echo :binary fake, D9)" do
     setup %{conn: conn} do
       marker = enable_argv_echo_chat()
