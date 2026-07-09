@@ -569,7 +569,8 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       |> Path.expand(__DIR__)
       |> File.read!()
 
-    assert byte_size(src) > 0, "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
+    assert byte_size(src) > 0,
+           "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
 
     refute String.contains?(src, "bp-pnode"),
            "stage-node.js emits the reader `bp-pnode` cell class — DESIGN 1 forbids it (use bp-canvas-stage)"
