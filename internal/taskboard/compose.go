@@ -128,7 +128,7 @@ func composeAt(m Model, width, height int) string {
 			return Render(m.board, m.ui, width, height, now)
 		}
 		crumb := Breadcrumb(m.stack, width)
-		footer := readingFooter(width)
+		footer := readingFooter(m.ui, width)
 		avail := height - 2 // breadcrumb + footer
 		if avail < 1 {
 			avail = 1
@@ -248,11 +248,22 @@ func crumbSeg(f Frame) string {
 
 // readingFooter is the pushed frames' one hint line (charter D18: one line per
 // frame kind). It teaches the reading grammar: move between stops, descend,
-// ascend, free-scroll prose.
-func readingFooter(width int) string {
+// ascend, free-scroll prose. It OMITS the c/x/o act verbs (they follow the reader
+// as keys, not clickable footer targets — charter D96); it only gains the
+// mouse-mode etiquette footnote, and only when the width allows. Like the
+// board footer, the footnote yields first: it compresses to the short M-toggle
+// form, then sheds entirely; the nav word "move" drops before either form, and
+// a footnote is appended only when the whole line still fits.
+func readingFooter(st UIState, width int) string {
 	hint := "jk move · enter open · esc back · space scroll"
 	if disp(hint) > width {
 		hint = "jk · enter open · esc back · space scroll"
+	}
+	for _, tail := range []string{footerEtiquette(st.MouseReleased), footerEtiquetteShort(st.MouseReleased)} {
+		if disp(hint)+disp(footerSep)+disp(tail) <= width {
+			hint += footerSep + tail
+			break
+		}
 	}
 	return dimStyle.Render(truncate(hint, width))
 }
