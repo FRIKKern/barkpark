@@ -230,9 +230,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     ~H"""
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg);">
       <style>
-        @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.75; } }
+        @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.22; } 50% { opacity: 0.55; } }
+        /* Accent fill, NOT --border-muted: the dark theme's border tone is an
+           11%-lightness gray on a dark bg — the shapes rendered invisible. The
+           accent reads in both schemes; the pulse opacity keeps it a ghost. */
         .bp-chat-skel .bp-skel-shape {
-          background: var(--border-muted);
+          background: var(--accent, #2f6b4f);
           border-radius: 4px;
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
@@ -414,7 +417,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     <div
       class="bp-chat-skel"
       data-skel={@kind}
-      style="border: 1px dashed var(--border-muted); border-radius: 8px; padding: 10px 12px; margin: 6px 0;"
+      style="border: 1px dashed color-mix(in srgb, var(--accent, #2f6b4f) 45%, transparent); border-radius: 8px; padding: 10px 12px; margin: 6px 0;"
     >
       <div
         class="text-xs text-dim"
