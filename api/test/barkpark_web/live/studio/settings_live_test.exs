@@ -37,7 +37,10 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     test "renders form for admin token", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, _view, html} = live(conn, "/studio/settings")
-      assert html =~ "Plugin Settings"
+      # Reframed page: "Workspace Settings" with credentials demoted to a
+      # labelled sub-section (still carrying the "Plugin name" input).
+      assert html =~ "Workspace Settings"
+      assert html =~ "Plugin credentials"
       assert html =~ "Plugin name"
     end
 
@@ -356,6 +359,114 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # the untouched masked id stays at the stored value
       assert stored["client_id"] == "longclientidvalue"
     end
+  end
+
+  describe "plugins section (studio-structure-polish D2/D4/D10)" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, "/studio/settings")
+      {:ok, view: view, html: html}
+    end
+
+    test "lists installed plugins, each row carrying a default badge when no override exists",
+         %{html: html} do
+      assert html =~ ">Plugins<"
+
+      installed = Barkpark.Plugins.Registry.all()
+      assert installed != []
+
+      name = pick_plugin()
+      # The plugin's row is present, marked as having NO workspace override, so a
+      # 'default' badge renders (surfacing the declaration default).
+      assert html =~ ~s(data-plugin="#{name}")
+      assert html =~ ~s(data-has-override="false")
+      # The badge chip itself + the declaration-default microcopy ("… by default").
+      assert html =~ "by default"
+
+      # Honest, non-destructive microcopy near the toggles.
+      assert html =~ "…Rest"
+    end
+
+    test "toggling a plugin persists into settings[\"plugins\"] and preserves the theme key",
+         %{view: view} do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      assert ws
+
+      # Seed a theme so we can prove the persist MERGES rather than clobbers.
+      {:ok, _} = Barkpark.Tenancy.set_workspace_theme(ws.id, "evergreen")
+
+      name = pick_plugin()
+
+      render_click(view, "toggle_plugin", %{"plugin" => name})
+
+      fresh = Barkpark.Tenancy.get_workspace_by_id(ws.id)
+      plugins = Barkpark.Tenancy.workspace_plugin_settings(fresh)
+
+      assert Map.has_key?(plugins, name)
+      assert is_boolean(plugins[name]["enabled"])
+      # The theme key survives the plugins write (merge, not replace).
+      assert fresh.settings["theme"] == "evergreen"
+    end
+
+    test "a workspace override wins over the declaration default and drops the badge",
+         %{conn: conn} do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      name = pick_plugin()
+
+      # Force the plugin OFF via the accessor, independent of its declaration
+      # default, THEN mount fresh so the row reflects the persisted override.
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{name => %{"enabled" => false}})
+
+      effective = Barkpark.Plugins.Enablement.effective(ws.id)
+      assert effective[name].enabled == false
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, "/studio/settings")
+
+      # The row now advertises an override (no 'default' badge) and Disabled state.
+      # Placement is left to whatever the declaration default resolves to.
+      assert Regex.match?(
+               ~r/data-plugin="#{Regex.escape(name)}" data-enabled="false" data-placement="[a-z_]+" data-has-override="true"/,
+               html
+             )
+    end
+
+    test "placement change persists to settings[\"plugins\"] and re-resolves via Enablement",
+         %{view: view} do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      name = pick_plugin()
+
+      render_change(view, "set_plugin_placement", %{"plugin" => name, "placement" => "main"})
+
+      fresh = Barkpark.Tenancy.get_workspace_by_id(ws.id)
+      plugins = Barkpark.Tenancy.workspace_plugin_settings(fresh)
+      assert plugins[name]["placement"] == "main"
+
+      effective = Barkpark.Plugins.Enablement.effective(ws.id)
+      assert effective[name].placement == :main
+    end
+
+    test "a forged placement is ignored (unknown value never persists)", %{view: view} do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      name = pick_plugin()
+
+      render_change(view, "set_plugin_placement", %{
+        "plugin" => name,
+        "placement" => "forged-9000"
+      })
+
+      fresh = Barkpark.Tenancy.get_workspace_by_id(ws.id)
+      plugins = Barkpark.Tenancy.workspace_plugin_settings(fresh)
+      refute get_in(plugins, [name, "placement"]) == "forged-9000"
+    end
+  end
+
+  defp pick_plugin do
+    Barkpark.Plugins.Registry.all()
+    |> Enum.map(& &1.name)
+    |> Enum.sort()
+    |> List.first()
   end
 
   defp audited?(plugin, action) do

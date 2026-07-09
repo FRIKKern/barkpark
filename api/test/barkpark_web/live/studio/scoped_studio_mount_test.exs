@@ -246,8 +246,16 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       html = render(view)
 
       if html =~ ~s{phx-click="select"} do
+        # ssp-w1 tiering: the first pane may open with plugin links + a divider
+        # BEFORE the first selectable node, so tag-order :first-of-type no
+        # longer matches. Pull the first select target's id out of the render
+        # and click that element specifically.
+        [_, node_id] =
+          Regex.run(~r/id="([^"]+)"[^>]*phx-click="select"[^>]*phx-value-pane="0"/, html) ||
+            Regex.run(~r/phx-click="select"[^>]*phx-value-pane="0"[^>]*id="([^"]+)"/, html)
+
         view
-        |> element(~s{[phx-click="select"][phx-value-pane="0"]:first-of-type})
+        |> element("#" <> node_id)
         |> render_click()
 
         assert assert_patch(view) =~ "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/"
@@ -479,11 +487,12 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       assert html =~ "pane-layout"
     end
 
-    test "OBSERVABLE NARROWING — the admitted sub-scoped grantee sees EXACTLY the grant's rows", %{
-      conn: conn,
-      ws_a: ws_a,
-      proj_a: proj_a
-    } do
+    test "OBSERVABLE NARROWING — the admitted sub-scoped grantee sees EXACTLY the grant's rows",
+         %{
+           conn: conn,
+           ws_a: ws_a,
+           proj_a: proj_a
+         } do
       # The row-identity test #1398 deferred as unobservable-while-ws-wide is now
       # MANDATORY: the desk is sub-scoped AND the grant is sub-scoped, so
       # `scope_to_grants` is load-bearing. Grant = (proj_A, dataset, type post).
@@ -493,9 +502,15 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       proj_other = create_project!(ws_a, "scoped-pa-narrow-other")
 
       {:ok, doc_in} = create_document_in!(ws_a, proj_a, "post", %{"title" => "in"}, @dataset)
-      {:ok, _out_type} = create_document_in!(ws_a, proj_a, "note", %{"title" => "wrong-type"}, @dataset)
-      {:ok, _out_ds} = create_document_in!(ws_a, proj_a, "post", %{"title" => "wrong-ds"}, "other")
-      {:ok, _out_proj} = create_document_in!(ws_a, proj_other, "post", %{"title" => "wrong-proj"}, @dataset)
+
+      {:ok, _out_type} =
+        create_document_in!(ws_a, proj_a, "note", %{"title" => "wrong-type"}, @dataset)
+
+      {:ok, _out_ds} =
+        create_document_in!(ws_a, proj_a, "post", %{"title" => "wrong-ds"}, "other")
+
+      {:ok, _out_proj} =
+        create_document_in!(ws_a, proj_other, "post", %{"title" => "wrong-proj"}, @dataset)
 
       bind_grant!(ws_a, user, %{
         project_id: proj_a.id,
