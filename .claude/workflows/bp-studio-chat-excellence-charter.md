@@ -406,7 +406,16 @@ quality."
   via `set_mode/2` whenever it differs from the stored mode, so reopen and the
   next lazy spawn carry the post-plan mode. Keep planning = `{:deny, "The user
   wants to keep planning — continue in plan mode."}` (proven: model re-plans,
-  next init still plan).
+  next init still plan). **WAVE-10 VERDICT (2026-07-09, real binary v2.1.205,
+  probe `:probe_postplan_mode`): the post-plan init `permissionMode` is
+  `"default"` — the assumption is PROVEN, not assumed.** Approving a plan through
+  the real `respond_permission` seam with the bare `{:allow, input}` the Approve
+  button sends, then a next turn, reports `permissionMode: "default"` on the
+  fresh `system/init`. The six-mode unit test
+  (chat_live_test.exs "…flips the mode + persists it + narrates it") is pinned to
+  this measured value. Per D52's no-silent-escalation law the adoption now also
+  surfaces a visible "Permission mode is now ask (legacy) after plan approval."
+  system line (it was previously silent).
 - **D35 — Resolutions BROADCAST; answer-in-progress stays per-tab.**
   `resolve_permission` today mutates only the resolving tab (no PubSub) — a
   co-viewing tab's card stays pending until reopen, and for questions that
@@ -797,6 +806,83 @@ quality."
   without a render crash), streaming delta chrome (stretch only). Bugs
   found are filed as fixes in the owning slice's region or tiny standalone
   commits — never template rewrites inside this slice.
+
+### Wave-10 decisions (2026-07-09, the REAL-BINARY PROBE WAVE — prove wave-9's wire assumptions)
+
+Wave 9 shipped three wire assumptions built-to-spec but unproven against a real
+`claude` binary. Both wave-9 reviewers made proving them the precondition for any
+further building on this surface. The probes live in
+`api/test/barkpark_web/studio/claude_chat_real_binary_test.exs` as PERMANENT
+regression tests (opt-in `:real_binary` lane, per-probe tags), not one-off notes.
+
+- **D52 — The three wave-9 wire assumptions, PROVEN on v2.1.205 (probe suite).**
+  Each probe asserts wire SHAPE, never model prose; every probe session is
+  haiku-pinned (D56); nothing writes fixtures (probes assert in-memory, dump raw
+  frames to a scratch path on failure).
+  (a) **workflow_progress is FLAT — CONFIRMED** (`:probe_workflow_shape`). A real
+  `Workflow`-tool spawn (two phases, haiku sub-agents) emits `system/task_progress`
+  frames whose `workflow_progress` is a FLAT list of `{"type":"workflow_phase",
+  index,title}` and `{"type":"workflow_agent", label,phaseIndex,model,state,…}`
+  nodes with NO `children` nesting; observed agent `state`s are `start`/`done`.
+  `background_tasks_changed` carries a flat `tasks` list of
+  `{task_id,task_type,description}`. The wave-9 agents rail (D47), built to the
+  t3-patterns flat spec, is VINDICATED — no fix. The probe is the tripwire: a
+  future binary emitting a `children` tree reds it (else the rail would silently
+  render no agents and the change-only guard would miss them).
+  (b) **post-plan permissionMode is `"default"` — CONFIRMED** (`:probe_postplan_mode`,
+  the deciding probe). Plan→approve through the real `respond_permission` seam
+  with the bare `{:allow, input}` the Approve button sends (no `updatedPermissions`)
+  → next turn → the fresh `system/init` reports `permissionMode: "default"`,
+  asserted as a RAW STRING (never the terminal result frame — its `permission_mode`
+  is null, vacuous green). The D34 assumption HOLDS; the six-mode unit test stays
+  pinned to `"default"`. **No-silent-escalation law:** the CLI flips its OWN mode
+  to `"default"` — a mode the user never picked — so `observe_permission_mode`
+  still adopts+persists it (the guard already admits `default`), but the adoption
+  MUST surface a visible system line ("Permission mode is now ask (legacy) after
+  plan approval."); it was previously silent. A permissionMode OUTSIDE the
+  six-value guard is NEVER silently adopted — surface it as a system line
+  ("unrecognized permission mode (…)"), leave the stored mode alone, never widen
+  the guard to admit an untrusted string.
+  (c) **spawn flags RATIFIED** (`:probe_spawn_flags`, D53) — see D53.
+- **D53 — Spawn-flag ratification is help/parse only; NEVER a live armed bypass.**
+  `claude --help` (v2.1.205) enumerates BOTH `--allow-dangerously-skip-permissions`
+  and `--dangerously-skip-permissions` (two distinct flags — `build_args` uses the
+  `allow` variant deliberately), `--effort` with tiers exactly
+  `low medium high xhigh max` (= `@efforts`), and `--permission-mode` choices
+  exactly `acceptEdits auto bypassPermissions manual dontAsk plan` (= `@modes`).
+  The probe asserts the help enumeration against the code allowlists
+  (`ClaudeChat.efforts/0`, `ClaudeChat.modes/0`) so a code↔binary drift reds, plus
+  ONE real `--effort low` haiku spawn reaching a result frame (the flag is
+  accepted end-to-end). HARD RULE: the suite NEVER performs a live armed-bypass
+  spawn — that would grant real filesystem bypass on the host; argv acceptance is
+  proven via `--help` + the effort spawn only, never a `bypassPermissions` +
+  `--allow-dangerously-skip-permissions` run.
+- **D56 — Cost law: haiku-pin every probe session; forced-trigger prompts; assert
+  shape.** Every `start_session` in the probe suite pins `session_opts.model =
+  "haiku"` (threaded to `--model` via `model_args`), sub-agents inherit haiku, and
+  prompts force the target wire event deterministically (a verbatim Workflow
+  script; "propose, do not act" for ExitPlanMode) so the whole lane stays under
+  the ~$0.43/run ceiling. Ride-alongs the wave-9 reviewers flagged but this wave
+  did NOT build (deliberate, documented): re-arm-on-reopen bypass semantics (a
+  reopened armed session re-arms with no re-ceremony — persisted mode IS the
+  arming record; product question, not a probe) and the foreground-task rail
+  "completed" flip ambiguity (a `background_tasks_changed` snapshot flips
+  rail entries that only ever arrived via `task_progress`) — both remain open for
+  a future wave with real foreground-workflow wire capture.
+
+### Wave 10 plan (decided 2026-07-09) — "prove or refute, then fix in the same wave"
+
+One region-disjoint slice set. **S2 (`scc-w10-probe-suite`, this slice)** owns the
+probe suite (`claude_chat_real_binary_test.exs` — three probe describes), the
+post-plan verdict's fix (`observe_permission_mode` system line +
+chat_live_test.exs six-mode test) and the D34/D52 charter amendments. It does NOT
+touch `api/test/fixtures/claude_chat/` (S1), `claude_chat.ex` spawn/Port/exit
+internals (S3), or the arm/bypass/`load_stored_session` regions (S4). Any
+falsified assumption gets its fix in THIS wave with the probe test proving it;
+the workflow-shape and spawn-flag assumptions were CONFIRMED (no manufactured
+fix), so the only shipped fix is the no-silent-escalation system line the
+post-plan verdict demands (charter D52 product law), which is orthogonal to the
+`"default"` value being the one D34 already assumed.
 
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 

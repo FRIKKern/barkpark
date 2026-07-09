@@ -3073,7 +3073,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
        when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
     if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
       if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
-      assign(socket, mode: mode)
+
+      # No silent escalation (charter D52, wave-10 real-binary verdict): the CLI
+      # flips its OWN permission mode plan → default inside ExitPlanMode (PROVEN
+      # v2.1.205 — the post-plan init reports `"default"`), a mode the user never
+      # picked. A user-initiated switch surfaces its own "Permission mode → …"
+      # line (via set-mode); this CLI-initiated adoption was previously SILENT.
+      # Surface it too, so the transcript never quietly changes what the agent is
+      # allowed to do. `pending_mode` guards this off during a user switch (its
+      # ack owns the mode, D17/D23), so this line only ever narrates a genuine
+      # CLI-side flip.
+      socket
+      |> assign(mode: mode)
+      |> append_message(:system, "Permission mode is now #{mode_label(mode)} after plan approval.")
+    else
+      socket
+    end
+  end
+
+  # A permissionMode OUTSIDE the six-value guard (a future/unknown CLI mode) is
+  # NOT silently adopted (charter D52): the stored mode is left ALONE (never
+  # widen the guard to admit an untrusted string), but the divergence is surfaced
+  # honestly so the transcript does not hide it. Falls through for a nil observed
+  # value (an init frame with no permissionMode — a routine turn boundary).
+  defp observe_permission_mode(socket, mode) when is_binary(mode) and mode != "" do
+    if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
+      append_message(
+        socket,
+        :system,
+        "The agent reports an unrecognized permission mode (#{mode}); keeping #{mode_label(socket.assigns.mode)}."
+      )
     else
       socket
     end

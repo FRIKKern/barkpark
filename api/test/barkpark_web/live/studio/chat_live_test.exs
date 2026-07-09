@@ -2424,19 +2424,24 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert MapSet.member?(lv_assigns(view).plan_expanded, plan.id)
     end
 
-    # ── the mode flip is OBSERVED, never assumed (charter D34) ───────────────
+    # ── the mode flip is OBSERVED, never assumed (charter D34/D52) ───────────
     #
     # Approving a plan makes the CLI flip its own permission mode; the flip is
     # visible ONLY on the next system/init permissionMode. The result frame's
     # permission_mode is null, so asserting there would be vacuous-green.
+    #
+    # WAVE-10 REAL-BINARY VERDICT (charter D52, probe :probe_postplan_mode,
+    # v2.1.205): the post-plan init reports `"default"` — the D34 assumption is
+    # PROVEN, not assumed. This test is now pinned to that measured value.
 
-    test "a system/init reporting a new permissionMode flips the mode + persists it",
+    test "a system/init reporting a new permissionMode flips the mode + persists it + narrates it",
          %{view: view} do
       spawn_silent_session(view)
       sid = store_id(view)
       assert StudioChat.get_session(sid).mode == "plan"
 
       # the CLI flipped plan → default inside ExitPlanMode; we learn it here
+      # (the real-binary-proven value, charter D52)
       send(
         view.pid,
         {:claude_chat_event,
@@ -2451,6 +2456,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert lv_assigns(view).mode == "default"
       # …and it is PERSISTED, so a reopen and the next --resume carry it
       assert StudioChat.get_session(sid).mode == "default"
+      # NO SILENT ESCALATION (charter D52): the CLI-initiated flip to a mode the
+      # user never picked surfaces as a visible system line.
+      assert html =~ "Permission mode is now ask (legacy) after plan approval"
+    end
+
+    test "an unrecognized init permissionMode is surfaced but NEVER adopted (charter D52)",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      assert StudioChat.get_session(sid).mode == "plan"
+
+      # A future/unknown CLI mode outside the six-value guard: never widen the
+      # guard to admit an untrusted string — keep the stored mode, but say so.
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "yolo"}}
+      )
+
+      html = render(view)
+      assert html =~ "unrecognized permission mode (yolo)"
+      # the stored + in-memory mode is LEFT ALONE
+      assert lv_assigns(view).mode == "plan"
+      assert StudioChat.get_session(sid).mode == "plan"
     end
 
     test "an init echoing the SAME mode does not churn the selector or the store",
