@@ -29,6 +29,7 @@ const mcpTestManifest = `{
   "nouns": [{"name": "task", "summary": "tasks"}],
   "commands": [
     {"id":"task.ready","noun":"task","verb":"ready","summary":"ready","http":{"method":"GET","path_template":"/v1/tasks/ready"},"auth_tier":"read","args":[],"flags":[],"writes":false,"batch":false,"paginated":true,"dry_run":false,"default_output":"table"},
+    {"id":"task.prime","noun":"task","verb":"prime","summary":"prime","http":{"method":"GET","path_template":"/v1/tasks/prime"},"auth_tier":"read","args":[],"flags":[{"name":"worker","type":"string","summary":"w"},{"name":"limit","type":"int","summary":"l"}],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"json"},
     {"id":"task.get","noun":"task","verb":"get","summary":"get","http":{"method":"GET","path_template":"/v1/tasks/:doc_id"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
     {"id":"task.next","noun":"task","verb":"next","summary":"next","http":{"method":"POST","path_template":"/v1/tasks/claim"},"auth_tier":"read","args":[{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
     {"id":"task.close","noun":"task","verb":"close","summary":"close","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/close"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"},{"name":"lifecycle_status","required":false,"type":"string","summary":"s"},{"name":"reason","required":false,"type":"string","summary":"r"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"extra close-body fields"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}
@@ -39,7 +40,7 @@ const mcpTestManifest = `{
 // would — initialize handshake, tools/list, tools/call — over an in-memory
 // transport (the SDK's StdioTransport hardcodes os.Stdout, so a stdio test would
 // fight the real stdout; NewInMemoryTransports is the SDK's own test seam). It
-// asserts the curated five tools are advertised, that a call returns the backing
+// asserts the curated six tools are advertised, that a call returns the backing
 // HTTP response as content, that the empty-queue 200 is NOT flagged an error,
 // that an HTTP >= 400 IS, and that bp's server code writes ZERO bytes to
 // os.Stdout (the invariant that keeps a real stdio session's protocol stream
@@ -61,8 +62,14 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	// test can prove the MCP→tail→seam translation placed every field in the
 	// request body exactly as `bp task close … --set criteria:=[…]` would.
 	var closeBody []byte
+	var primeQuery string
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		switch {
+		case req.URL.Path == "/v1/tasks/prime":
+			// Capture the query so the test can prove worker/limit rode as query
+			// params (task.prime declares them as flags → query via inference).
+			primeQuery = req.URL.RawQuery
+			io.WriteString(rw, `{"result":{"primed":true}}`)
 		case req.URL.Path == "/v1/tasks/ready":
 			io.WriteString(rw, `{"result":{"tasks":[{"doc_id":"t1"}]}}`)
 		case req.URL.Path == "/v1/tasks/t1":
@@ -109,7 +116,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 	defer cs.Close()
 
-	// tools/list — exactly the curated five, by name.
+	// tools/list — exactly the curated six, by name.
 	lt, err := cs.ListTools(bg, nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
@@ -119,9 +126,47 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"task_close", "task_create", "task_next", "task_ready", "task_show"}
+	want := []string{"task_close", "task_create", "task_next", "task_prime", "task_ready", "task_show"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
+	}
+
+	// Annotations must be honest: the three reads carry readOnlyHint:true and no
+	// destructiveHint; the three writers carry readOnlyHint:false + destructiveHint:true.
+	byName := map[string]*mcp.Tool{}
+	for _, tool := range lt.Tools {
+		byName[tool.Name] = tool
+	}
+	for _, name := range []string{"task_ready", "task_show", "task_prime"} {
+		a := byName[name].Annotations
+		if a == nil || a.ReadOnlyHint != true || a.DestructiveHint != nil {
+			t.Errorf("%s annotations = %+v, want ReadOnlyHint:true, no DestructiveHint", name, a)
+		}
+	}
+	for _, name := range []string{"task_next", "task_close", "task_create"} {
+		a := byName[name].Annotations
+		if a == nil || a.ReadOnlyHint != false || a.DestructiveHint == nil || *a.DestructiveHint != true {
+			t.Errorf("%s annotations = %+v, want ReadOnlyHint:false + DestructiveHint:true", name, a)
+		}
+	}
+
+	// task_prime — the rehydration read rides task.prime with worker/limit on the
+	// query; the backing response comes straight back as content, no error.
+	res0, err := cs.CallTool(bg, &mcp.CallToolParams{
+		Name:      "task_prime",
+		Arguments: map[string]any{"worker_id": "cursor-test", "limit": 5},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_prime: %v", err)
+	}
+	if res0.IsError {
+		t.Fatalf("task_prime unexpectedly IsError: %s", mcpContentText(res0))
+	}
+	if !strings.Contains(mcpContentText(res0), `"primed":true`) {
+		t.Fatalf("task_prime content = %q, want the prime body", mcpContentText(res0))
+	}
+	if !strings.Contains(primeQuery, "worker=cursor-test") || !strings.Contains(primeQuery, "limit=5") {
+		t.Fatalf("task_prime query = %q, want worker+limit as query params", primeQuery)
 	}
 
 	// tools/call task_show — the backing response body rides back as content.
@@ -277,6 +322,44 @@ func TestRegisterTaskToolsMissingVerb(t *testing.T) {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "x", Version: "0"}, nil)
 	if err := registerTaskTools(srv, globals{}, manifest.Context{Server: "http://x"}, m); err == nil {
 		t.Fatal("expected error for manifest missing task.ready")
+	}
+}
+
+// TestTasksLessManifestGracefulUnderAll proves the --tools all graceful path: a
+// manifest with NO task verbs makes registerTaskTools fail fast (so the default
+// --tools tasks correctly refuses to start), but the bridge still serves whatever
+// the manifest DOES carry — so runMCPServe warns and continues bridge-only rather
+// than dying. The bridge is registered over a real in-memory MCP session and its
+// tool is confirmed present.
+func TestTasksLessManifestGracefulUnderAll(t *testing.T) {
+	const tasksLess = `{
+      "manifest_version":"1",
+      "server":{"name":"t","version":"0","base_url":"http://x"},
+      "auth_tier":"admin","generated_at":"n","etag":"e",
+      "nouns":[{"name":"doc","summary":"documents"}],
+      "commands":[{"id":"doc.get","noun":"doc","verb":"get","summary":"fetch a document","http":{"method":"GET","path_template":"/v1/data/query/:dataset/:doc_id"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"}]
+    }`
+	m, err := manifest.Parse([]byte(tasksLess))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	// The curated tools cannot register — this is what makes --tools tasks fail
+	// fast, and what runMCPServe tolerates (warns + continues) only under --tools all.
+	srv := mcp.NewServer(&mcp.Implementation{Name: "x", Version: "0"}, nil)
+	if err := registerTaskTools(srv, globals{}, manifest.Context{Server: "http://x"}, m); err == nil {
+		t.Fatal("expected registerTaskTools to fail on a tasks-less manifest")
+	}
+
+	// The bridge still exposes the manifest's own verbs — bridge-only service.
+	cs := newBridgeSession(t, globals{}, manifest.Context{Server: "http://x"}, m)
+	tools := listAllTools(t, cs)
+	if _, ok := tools["bp_doc_get"]; !ok {
+		t.Fatalf("bridge should serve bp_doc_get on a tasks-less manifest; have %v", toolNames(tools))
+	}
+	// And it read-annotates the non-writing verb.
+	if a := tools["bp_doc_get"].Annotations; a == nil || a.ReadOnlyHint != true {
+		t.Errorf("bp_doc_get annotations = %+v, want ReadOnlyHint:true", tools["bp_doc_get"].Annotations)
 	}
 }
 
