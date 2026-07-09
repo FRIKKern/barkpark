@@ -474,6 +474,81 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view) =~ "Hello!"
     end
 
+    # charter D41 — the wire carries no thinking text, so the pulse is a live
+    # counter off `system/thinking_tokens` (cumulative `estimated_tokens`).
+    test "thinking_tokens frames render a live ✻ pulse with the cumulative count",
+         %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(64)})
+      send(view.pid, {:claude_chat_event, thinking_tokens(210)})
+      html = render(view)
+      assert html =~ "thinking…"
+      # the cumulative high-water mark, not a per-frame count
+      assert html =~ "~210 tokens"
+    end
+
+    test "the pulse settles into a durable 'thought for ~N tokens' line when prose begins",
+         %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(128)})
+      assert render(view) =~ "thinking…"
+
+      # the first text delta is the moment thinking gives way to prose
+      send(view.pid, {:claude_chat_event, stream_delta("Here")})
+      html = render(view)
+      refute html =~ "thinking…"
+      assert html =~ "thought for ~128 tokens"
+    end
+
+    # Forward-compat (charter D41): today `delta.thinking` is always "" so the
+    # counter shows; if a future CLI ever populates it, the handler appends the
+    # text and shows it in place of the counter.
+    test "a non-empty thinking_delta renders the text in place of the counter", %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(20)})
+      assert render(view) =~ "~20 tokens"
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "stream_event",
+           "event" => %{
+             "type" => "content_block_delta",
+             "delta" => %{"type" => "thinking_delta", "thinking" => "weighing the options"}
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "weighing the options"
+      refute html =~ "~20 tokens"
+    end
+
+    test "a bout that never counted leaves no pulse and no durable row", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("no prior thought")})
+      html = render(view)
+      refute html =~ "thinking…"
+      refute html =~ "thought for"
+    end
+
+    test "a stored thinking row replays as a dim ✻ thought line", %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "thinking",
+          source_markdown: "thought for ~90 tokens",
+          metadata: %{"tokens" => 90}
+        })
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{role: "assistant", source_markdown: "the answer"})
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+      assert html =~ "thought for ~90 tokens"
+      assert html =~ "the answer"
+    end
+
     test "completed blocks render as components BEFORE the message finishes", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("## Findings\n")})
       send(view.pid, {:claude_chat_event, stream_delta("\nstill typing")})
@@ -2532,6 +2607,357 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "TodoWrite living checklist card (charter D39)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "two TodoWrites in one turn render ONE card, updated in place", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        todo_frame("tu1", [
+          %{
+            "content" => "read charter",
+            "status" => "in_progress",
+            "activeForm" => "reading the charter"
+          },
+          %{"content" => "write code", "status" => "pending"}
+        ])
+      )
+
+      html = render(view)
+      assert todo_card_count(html) == 1
+      assert html =~ "read charter"
+      # in_progress glyph + its activeForm live line
+      assert html =~ "◐"
+      assert html =~ "reading the charter"
+
+      # A FRESH tool_use id (as the real binary emits) — the collapse must
+      # supersede the existing card, never append a second one.
+      send_frame(
+        sid,
+        todo_frame("tu2", [
+          %{"content" => "read charter", "status" => "completed"},
+          %{
+            "content" => "write code",
+            "status" => "in_progress",
+            "activeForm" => "writing the code"
+          }
+        ])
+      )
+
+      html = render(view)
+      assert todo_card_count(html) == 1
+      assert html =~ "☒"
+      assert html =~ "writing the code"
+      refute html =~ "reading the charter"
+
+      # The store collapsed to a single todo row too (Recorder-owned, D39).
+      todos = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      assert length(todos) == 1
+    end
+
+    test "reopen replays exactly ONE final-state checklist card", %{conn: conn, sid: sid} do
+      send_frame(sid, todo_frame("tu1", [%{"content" => "step one", "status" => "pending"}]))
+      send_frame(sid, todo_frame("tu2", [%{"content" => "step one", "status" => "completed"}]))
+
+      {:ok, _view2, html} = live(conn, "/studio/chat/#{sid}")
+      assert todo_card_count(html) == 1
+      assert html =~ "step one"
+      assert html =~ "☒"
+    end
+
+    test "no TodoWrite ⇒ no checklist card renders", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "just prose"}]}
+         }}
+      )
+
+      refute render(view) =~ "Update todos"
+    end
+  end
+
+  # ── D38: Edit/Write tool calls render as real colored diffs ─────────────────
+  #
+  # Dispatch is on input SHAPE, never tool name (host-binary-dependent). The full
+  # input is threaded through BOTH render paths (live append + replay) and the
+  # persisted store, so a reopened session reproduces the identical diff.
+  describe "tool diffs (D38)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp send_tool_use(sid, name, input) do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "id" => "toolu_x", "name" => name, "input" => input}
+             ]
+           }
+         }}
+      )
+    end
+
+    test "an Edit-shaped input renders a line diff with +/− token rows", %{view: view, sid: sid} do
+      send_tool_use(sid, "Edit", %{
+        "file_path" => "/app/x.ex",
+        "old_string" => "alpha\nbeta\ngamma",
+        "new_string" => "alpha\nBETA\ngamma",
+        "replace_all" => false
+      })
+
+      html = render(view)
+      # removed old line + added new line, each with its role-color token pair
+      assert html =~ "var(--danger-soft)"
+      assert html =~ "var(--ok-soft)"
+      assert html =~ "beta"
+      assert html =~ "BETA"
+      # unchanged context survives
+      assert html =~ "alpha"
+      # the ● header shows only the path — the diff below carries the content,
+      # so the old preview ("old_string: …") would duplicate it
+      assert html =~ "Edit — /app/x.ex"
+      refute html =~ "old_string:"
+      refute html =~ "new_string:"
+    end
+
+    test "dispatch is on SHAPE, not tool name — a renamed Edit tool still diffs",
+         %{view: view, sid: sid} do
+      # The cmux fork renames tools; an Edit-shaped input under ANY name diffs.
+      send_tool_use(sid, "CustomFileEditor", %{
+        "file_path" => "/app/y.ex",
+        "old_string" => "was here",
+        "new_string" => "now here"
+      })
+
+      html = render(view)
+      assert html =~ "var(--ok-soft)"
+      assert html =~ "now here"
+      assert html =~ "was here"
+    end
+
+    test "a Write-shaped input renders an all-added diff", %{view: view, sid: sid} do
+      send_tool_use(sid, "Write", %{
+        "file_path" => "/app/new.ex",
+        "content" => "line one\nline two\nline three"
+      })
+
+      html = render(view)
+      assert html =~ "var(--ok-soft)"
+      refute html =~ "var(--danger-soft)"
+      assert html =~ "line one"
+      assert html =~ "line two"
+    end
+
+    test "a MultiEdit-shaped input renders stacked hunks defensively",
+         %{view: view, sid: sid} do
+      send_tool_use(sid, "MultiEdit", %{
+        "file_path" => "/app/z.ex",
+        "edits" => [
+          %{"old_string" => "first old", "new_string" => "first new"},
+          %{"old_string" => "second old", "new_string" => "second new"}
+        ]
+      })
+
+      html = render(view)
+      assert html =~ "first old"
+      assert html =~ "first new"
+      assert html =~ "second old"
+      assert html =~ "second new"
+    end
+
+    test "an unknown shape falls back to the generic row, no diff", %{view: view, sid: sid} do
+      send_tool_use(sid, "Bash", %{"command" => "ls -la"})
+
+      html = render(view)
+      assert html =~ "Bash"
+      refute html =~ "var(--ok-soft)"
+    end
+
+    test "a >100-line Write collapses to ~20 lines with an accurate overflow count",
+         %{view: view, sid: sid} do
+      content = 1..120 |> Enum.map(&"row #{&1}") |> Enum.join("\n")
+      send_tool_use(sid, "Write", %{"file_path" => "/app/big.ex", "content" => content})
+
+      html = render(view)
+      assert html =~ "<details>"
+      # first ~20 lines visible in the collapsed summary
+      assert html =~ "row 1"
+      assert html =~ "row 20"
+      # honest overflow: 120 total − 20 shown = 100 more
+      assert html =~ "+100 more lines"
+    end
+
+    test "the diff engine is TextDiff — no second diff engine in api/lib" do
+      # Guard against a copy-pasted Myers/LCS. TextDiff.diff_lines/2 is the ONE
+      # engine; only its own definition may mention myers_difference.
+      hits =
+        "lib"
+        |> Path.join("**/*.ex")
+        |> Path.wildcard()
+        |> Enum.filter(&(File.read!(&1) =~ "myers_difference"))
+
+      assert hits == [], "unexpected diff engine(s): #{inspect(hits)}"
+    end
+
+    test "replay parity: a reopened session with a persisted Edit row shows the same diff",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "Edit — file_path: /app/r.ex",
+          metadata: %{
+            "tool" => "Edit",
+            "tool_use_id" => "toolu_r",
+            "input" => %{
+              "file_path" => "/app/r.ex",
+              "old_string" => "stored old",
+              "new_string" => "stored new"
+            }
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      # display-only reopen reproduces the identical colored diff from the store
+      assert html =~ "var(--ok-soft)"
+      assert html =~ "var(--danger-soft)"
+      assert html =~ "stored old"
+      assert html =~ "stored new"
+    end
+  end
+
+  describe "nested agent traces (charter D40)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "spawn dispatch is name- AND shape-tolerant: Task, Agent, and a shaped tool all show the description",
+         %{view: view, sid: sid} do
+      # name Task
+      send_frame(sid, spawn_frame("toolu_t", "Task", "Task-named work"))
+      # name Agent
+      send_frame(sid, spawn_frame("toolu_a", "Agent", "Agent-named work"))
+      # shape only, under an arbitrary tool name
+      send_frame(sid, spawn_frame("toolu_s", "Dispatch", "Shape-only work"))
+
+      html = render(view)
+      assert html =~ "Task-named work"
+      assert html =~ "Agent-named work"
+      assert html =~ "Shape-only work"
+    end
+
+    test "interleaved child frames render indented under the spawn row (data-parent)",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Audit the recorder"))
+
+      # a frame emitted by the sub-agent — top-level parent_tool_use_id set
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "reading the file"},
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_child",
+                 "name" => "Bash",
+                 "input" => %{"command" => "grep -rn parent_tool_use_id"}
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      # the spawn headline, the indented child rows, and their connecting gutter
+      assert html =~ "Audit the recorder"
+      assert html =~ ~s(data-parent="toolu_spawn")
+      assert html =~ "reading the file"
+      assert html =~ "grep -rn parent_tool_use_id"
+      assert html =~ "border-left: 2px solid var(--primary)"
+    end
+
+    test "reopening replays the nested trace from the store", %{conn: conn, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Persisted spawn"))
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_child",
+                 "name" => "Read",
+                 "input" => %{"file_path" => "/x"}
+               }
+             ]
+           }
+         }}
+      )
+
+      {:ok, _view2, html} = live(conn, "/studio/chat/#{sid}")
+      assert html =~ "Persisted spawn"
+      assert html =~ ~s(data-parent="toolu_spawn")
+    end
+
+    test "the parent tool_result (subagent summary) still attaches to the spawn row",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_spawn", "Task", "Summarize"))
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_spawn",
+                 "content" => "the subagent finished"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "⎿"
+      assert html =~ "the subagent finished"
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -3100,5 +3526,55 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         "delta" => %{"type" => "text_delta", "text" => text}
       }
     }
+  end
+
+  # A TodoWrite-shaped assistant frame (charter D39) with a FRESH tool_use id.
+  defp todo_frame(id, todos) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => "TodoWrite",
+             "input" => %{"todos" => todos}
+           }
+         ]
+       }
+     }}
+  end
+
+  # How many living-checklist cards a rendered transcript carries.
+  defp todo_card_count(html), do: length(String.split(html, "Update todos")) - 1
+
+  # A Task/agent spawn frame (charter D40): a single tool_use carrying the
+  # sub-agent input shape, so both name- and shape-tolerant dispatch light up.
+  defp spawn_frame(id, name, description) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => name,
+             "input" => %{
+               "description" => description,
+               "prompt" => "do the thing",
+               "subagent_type" => "explore"
+             }
+           }
+         ]
+       }
+     }}
+  end
+
+  # A cumulative thinking-token frame (charter D41): the wire's monotonic
+  # `estimated_tokens`, no thinking text ever.
+  defp thinking_tokens(n) do
+    %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}
   end
 end

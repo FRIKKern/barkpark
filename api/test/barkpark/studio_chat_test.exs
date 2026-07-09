@@ -229,6 +229,49 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "update_tool_input/3 — living-checklist collapse (charter D39)" do
+    test "replaces metadata.input on the row matched by tool_use_id" do
+      s = new_session()
+
+      {:ok, _} =
+        StudioChat.append_message(s, %{
+          role: "todo",
+          source_markdown: "Update todos",
+          metadata: %{"tool_use_id" => "tu_1", "input" => %{"todos" => [%{"a" => 1}]}}
+        })
+
+      new_input = %{"todos" => [%{"content" => "x", "status" => "completed"}]}
+      assert {:ok, _} = StudioChat.update_tool_input(s.id, "tu_1", new_input)
+
+      row = StudioChat.list_messages(s.id) |> Enum.find(&(&1.role == "todo"))
+      assert row.metadata["input"] == new_input
+    end
+
+    test "an unknown tool_use_id is a safe :noop" do
+      s = new_session()
+      assert :noop = StudioChat.update_tool_input(s.id, "ghost", %{"todos" => []})
+    end
+  end
+
+  describe "todo_shaped?/1 — shape dispatch (charter D39)" do
+    test "true for a non-empty todos list of content+status maps (modern + legacy)" do
+      assert StudioChat.todo_shaped?(%{
+               "todos" => [%{"content" => "a", "status" => "pending", "activeForm" => "doing a"}]
+             })
+
+      assert StudioChat.todo_shaped?(%{
+               "todos" => [%{"content" => "a", "status" => "completed", "priority" => "high", "id" => "1"}]
+             })
+    end
+
+    test "false for empty list, missing keys, or a non-todo tool input" do
+      refute StudioChat.todo_shaped?(%{"todos" => []})
+      refute StudioChat.todo_shaped?(%{"todos" => [%{"content" => "a"}]})
+      refute StudioChat.todo_shaped?(%{"command" => "ls"})
+      refute StudioChat.todo_shaped?(nil)
+    end
+  end
+
   describe "status lifecycle" do
     test "update_status transitions and mark_exited sets exited" do
       s = new_session()
