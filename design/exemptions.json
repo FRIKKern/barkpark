@@ -1,0 +1,26 @@
+{
+  "_rule": "Frozen baseline of hand-stamped color literals that the theme compiler did NOT emit. design/check.mjs Part E re-counts each file and FAILS on ANY drift from `count` — growth (a new literal) OR shrink (a literal was tokenized). A ratchet: every change to a file's literal count MUST update its baseline in THIS SAME DIFF. The ledger only shrinks over time; it can never silently grow. Counting rule lives next to the implementation in design/check.mjs Part E (LEDGER_LITERAL regex + stripLedgerNoise): a color literal is `#hex` (3-8 digits) or an rgb()/rgba()/hsl()/hsla() whose first argument is NOT var() — `hsl(var(--x))` is compiler-driven token consumption, not a hand-stamp, so it is excluded (this is what lets a literal→var conversion register as a shrink). Marker regions (BEGIN/END GENERATED: tokens) and comments (CSS /* */, HTML <!-- -->, HEEx <%!-- --%> and <%# %>) are blanked before counting, so the emitted block and e.g. the `#940` PR-ref in app.css never count.",
+  "_note": "The per-file `count` splits as {hex + literal-rgb/rgba + literal-hsl}. These are the surfaces still holding hand-stamped color the theme-system compiler has not yet reached; as tokenization lands, LOWER the number here in the same diff.",
+  "entries": [
+    {
+      "path": "api/lib/barkpark_web/layouts/root.html.heex",
+      "count": 219,
+      "note": "Studio root layout, outside the single GENERATED block: 144 hex + 75 literal rgb/rgba. The paper-surface + Sheets-grid + --st- status families (incl. the --st- status dupes ~L976-986 and attr-selector couplings) live under their own token systems / follow-ups; the studio-literal-check.sh gate allowlists them, this ledger merely freezes the raw count so none can grow silently."
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+      "count": 137,
+      "note": "Paper reader layout, outside the GENERATED marker ts-w1 added: 112 hex + 25 literal rgb/rgba. The post-capture remainder — mail-client popup traffic-light dots (#ff5f56/#ffbd2e/#27c93f), popup panel (#0b0e13/#232a35), TUI-preview surface (#05070a), and reader chrome not yet on tokens. Out of scope for studio-literal-check.sh; frozen here. Baseline measured POST ts-w1 capture (this slice lands LAST, after the reader skin + --mail-* moved into the marker); on the pre-capture tree the same rule counts 176."
+    },
+    {
+      "path": "cloud/priv/static/app.css",
+      "count": 57,
+      "note": "Cloud SPA, outside the single GENERATED block: 14 hex + 8 literal rgb/rgba + 35 literal hsl. Provider brand marks + mask geometry + overlay/shadow tints — exempt-by-design but previously untracked by every gate, now tripwired. The `#940` PR-ref in the /* Pre-claim queued state */ comment is excluded by comment-stripping."
+    },
+    {
+      "path": "internal/cli/setup/assets/deploy.sh",
+      "count": 4,
+      "note": "The bare-server holding page (inline <style> in a heredoc): background #0f1115, text #e7e9ee, spinner track #2a2f3a, spinner head #6ea8fe. A self-contained pre-boot page with no token pipeline — previously blind to every gate."
+    }
+  ]
+}
