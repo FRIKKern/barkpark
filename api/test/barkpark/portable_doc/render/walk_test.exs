@@ -14,7 +14,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
   describe "render_body/3 — PdHr" do
     test "emits hr with default thickness 1 and palette rule colour" do
       html = Walk.render_body(%{"kind" => "PdHr"}, @width, @email)
-      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
+      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
     end
 
     test "respects explicit thickness" do
@@ -55,11 +55,11 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute html =~ "nil"
     end
 
-    test "@email chip pins the 2px 6px / 0.95em palette" do
+    test "@email chip pins the 1px 5px / 0.88em rounded palette" do
       html = Walk.render_body(%{"kind" => "PdInlineCode", "value" => "x"}, @width, @email)
-      assert html =~ "padding:2px 6px"
-      assert html =~ "font-size:0.95em"
-      refute html =~ "border-radius"
+      assert html =~ "padding:1px 5px"
+      assert html =~ "font-size:0.88em"
+      assert html =~ "border-radius:4px"
     end
 
     test "@article chip is a BARE <code> — the .bp-paper-surface code rule owns the chip" do
