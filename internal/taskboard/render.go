@@ -50,7 +50,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 
 	bottom := bottomChrome(b, st, width, now)
 
-	spineLines, cursorLine := flattenSpine(b, st, width, now)
+	spineLines, _, cursorLine := flattenSpine(b, st, width, now)
 
 	avail := height - len(identityTop) - len(bottom)
 	if avail < 1 {
@@ -101,7 +101,7 @@ func SpineTopFor(b Board, st UIState, width, height int, now time.Time) int {
 	if height < 8 {
 		height = 8
 	}
-	lines, cursorLine := flattenSpine(b, st, width, now)
+	lines, _, cursorLine := flattenSpine(b, st, width, now)
 	avail := height - len(renderIdentityTop(st, width, now)) - len(bottomChrome(b, st, width, now))
 	if avail < 1 {
 		avail = 1
@@ -434,44 +434,62 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 // then orphans). Separators, "+K more" folds and phase sub-bands are
 // Selectable:false and never touch the cursor. Any divergence is impossible:
 // visibleRows filters the SAME producer to its Selectable set.
-func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
+func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, targets []LineTarget, cursorLine int) {
 	cursorLine = -1
 	selIdx := 0
-	emit := func(s string) { lines = append(lines, s) }
-	markSel := func() bool {
-		selected := selIdx == st.Cursor
+	// emit records ONE painted line together with its mouse hit-target, so the
+	// hit map (HitMapFor) is built from the SAME closures as the paint and can
+	// never drift (charter D42 — one producer, two consumers). Recording is
+	// PER-EMIT, not per-row: a spineTask that grows to multiple lines (NOW cards,
+	// future multi-line rows) tags EACH of its lines with the row's cursor index.
+	emit := func(s string, tgt LineTarget) {
+		lines = append(lines, s)
+		targets = append(targets, tgt)
+	}
+	// markSel advances the selectable-row index and reports both whether this row
+	// is the cursor row (for the ▎ marker) and the index itself (for the target's
+	// CursorIndex). It stamps cursorLine at the row's FIRST line — the same line
+	// SpineTopFor slides into view.
+	markSel := func() (selected bool, idx int) {
+		idx = selIdx
+		selected = selIdx == st.Cursor
 		if selected {
 			cursorLine = len(lines)
 		}
 		selIdx++
-		return selected
+		return selected, idx
 	}
 	for _, sr := range spineRows(b, st) {
 		switch sr.Kind {
 		case spineSep:
-			emit("")
+			emit("", noneTarget)
 		case spineEpicHeader, spineClusterHeader, spineOrphanHeader:
-			selected := markSel()
-			emit(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width))
+			selected, idx := markSel()
+			emit(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width),
+				LineTarget{Kind: LineSpineRow, CursorIndex: idx})
 		case spinePhaseBand:
 			// A named phase band (W10-A): the SAME dotted-leader grammar as a
 			// section header, indented one level under its epic, display-only (no
 			// selection marker — the cursor never lands on a band).
-			emit(renderSectionHeaderIndent(sr.hdr.title, sr.hdr.code, false, false, childIndent, sr.hdr.counts, width))
+			emit(renderSectionHeaderIndent(sr.hdr.title, sr.hdr.code, false, false, childIndent, sr.hdr.counts, width),
+				noneTarget)
 		case spineTask:
-			selected := markSel()
+			selected, idx := markSel()
+			tgt := LineTarget{Kind: LineSpineRow, CursorIndex: idx}
 			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, sr.Guide, width, st.Frame, now) {
-				emit(ln)
+				emit(ln, tgt)
 			}
 		case spineMore:
-			emit(moreLine(sr.more, sr.Depth, width, markSel()))
+			selected, idx := markSel()
+			emit(moreLine(sr.more, sr.Depth, width, selected),
+				LineTarget{Kind: LineSpineRow, CursorIndex: idx})
 		case spineDeadEpic:
-			emit(deadEpicLine(sr.hdr.title, width))
+			emit(deadEpicLine(sr.hdr.title, width), noneTarget)
 		case spineEmpty:
-			emit(dimStyle.Render(truncate(sr.text, width)))
+			emit(dimStyle.Render(truncate(sr.text, width)), noneTarget)
 		}
 	}
-	return lines, cursorLine
+	return lines, targets, cursorLine
 }
 
 // deadEpicLine is a cancelled-root epic's tombstone (charter W10-B): one dim

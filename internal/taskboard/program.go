@@ -299,6 +299,8 @@ func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case changeMsg:
 		return m.handleChange(msg)
 	case pulseMsg:
@@ -539,6 +541,112 @@ func (m Model) handleReadingKey(key string) (tea.Model, tea.Cmd) {
 		}
 		return m.openTask(t)
 	}
+	return m, nil
+}
+
+// ── Mouse (charter wave-16, D89–D93) ─────────────────────────────────────────
+//
+// One entry point mirroring handleKey: the compose-level hit map (ComposeHitMap)
+// resolves a click's Y to a LineTarget so NO coordinate math lives here. Wheel
+// rides the keyboard motions verbatim (#1878's 1-line spine slide on the board,
+// free-scroll in a reading frame), a left press selects then activates, and a
+// press on a scroll affordance is one wheel step. Motion (hover) is ttm-s3 and
+// ignored; wide two-pane is ttm-s5 and no-ops. A terminal without mouse reporting
+// simply never reaches here — the keyboard flow is untouched.
+
+// handleMouse is the mouse reducer. It ignores hover motion (ttm-s3) and no-ops
+// in wide two-pane mode (ttm-s5); every other event is non-x input, so — exactly
+// like handleKey — it clears the transient action strip and disarms the close
+// guard before acting.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.wide {
+		return m, nil
+	}
+	if msg.Action == tea.MouseActionMotion {
+		return m, nil // hover is ttm-s3
+	}
+	m.pendingClose = ""
+	m.ui.Strip = ActionStrip{}
+
+	switch {
+	case msg.Button == tea.MouseButtonWheelUp:
+		return m.mouseWheel(-1)
+	case msg.Button == tea.MouseButtonWheelDown:
+		return m.mouseWheel(1)
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		return m.mouseLeftPress(msg.Y)
+	}
+	return m, nil
+}
+
+// mouseWheel is one wheel notch: on the board it steps the cursor (moveCursor),
+// which rides SpineTopFor/slideTop for the #1878 1-line slide (a scroll-only
+// wheel is impossible — Update force-syncs SpineScroll every message); in a
+// reading frame it free-scrolls the prose one line WITHOUT moving the stop
+// cursor. This is the SAME state a j/k keypress (board) or a space/u/d
+// free-scroll (reading) reaches, so wheel and keyboard never disagree.
+func (m Model) mouseWheel(delta int) (tea.Model, tea.Cmd) {
+	if m.topFrame().Kind == FrameBoard {
+		(&m).moveCursor(delta)
+		return m, nil
+	}
+	(&m).freeScroll(delta)
+	return m, nil
+}
+
+// mouseLeftPress resolves a click's Y through the compose-level hit map and acts:
+// a scroll affordance = one wheel step; a spine row = select-then-activate. An out
+// -of-range Y or a chrome/none line is an honest no-op.
+func (m Model) mouseLeftPress(y int) (tea.Model, tea.Cmd) {
+	hits := m.ComposeHitMap()
+	if y < 0 || y >= len(hits) {
+		return m, nil
+	}
+	switch tgt := hits[y]; tgt.Kind {
+	case LineScrollUp:
+		return m.mouseWheel(-1)
+	case LineScrollDown:
+		return m.mouseWheel(1)
+	case LineSpineRow:
+		if m.topFrame().Kind == FrameBoard {
+			return m.boardClickSelect(tgt.CursorIndex)
+		}
+		return m.readingClickSelect(tgt.CursorIndex)
+	}
+	return m, nil
+}
+
+// boardClickSelect is a left press on a board spine row: select it, or — if it is
+// ALREADY the cursor row — activate it (activateBoard: descend a task, fold/unfold
+// a section header). A double-click is two presses, so the second press lands on
+// the now-selected row and activates for free.
+func (m Model) boardClickSelect(idx int) (tea.Model, tea.Cmd) {
+	rows := m.visibleRows()
+	if idx < 0 || idx >= len(rows) {
+		return m, nil
+	}
+	if m.ui.Cursor == idx {
+		return m.activateBoard(), nil
+	}
+	m.ui.Cursor = idx
+	return m, nil
+}
+
+// readingClickSelect is a left press on a reading-frame rail stop: select it, or
+// — if it is ALREADY the cursor stop — descend onto it (the same as enter). The
+// stop index comes from the hit map (built at the paint width), and the stop
+// count is width-independent, so it is a valid cursor for setTopCursor.
+func (m Model) readingClickSelect(idx int) (tea.Model, tea.Cmd) {
+	if len(m.stack) == 0 {
+		return m, nil
+	}
+	if idx < 0 || idx >= m.frameStopCount() {
+		return m, nil
+	}
+	if m.topFrame().Cursor == idx {
+		return m.descend()
+	}
+	(&m).setTopCursor(idx)
 	return m, nil
 }
 
@@ -1302,7 +1410,13 @@ func Run(cfg Config) error {
 		Server:   serverHost(cfg.BaseURL),
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// WithMouseAllMotion (not cell-motion): all-motion is what hover (ttm-s3)
+	// will need, and this slice already reports motion so a later slice needs no
+	// program-option change. Terminals without mouse reporting simply never send
+	// a MouseMsg — the keyboard grammar is untouched and nothing is lost (charter
+	// D93: mouse degrades honestly). Shift-click still falls through to the
+	// terminal's own text selection on most emulators.
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	wireLive(p, client, cfg.Token)
 
 	_, err := p.Run()
