@@ -973,6 +973,33 @@ defmodule Barkpark.StudioChat do
     end
   end
 
+  @doc """
+  Merge a patch into a needs-you row's metadata, keyed by `request_id` (charter
+  D49 — the plan-paper stamp seam). Reuses `find_approval/2` (already inclusive
+  of the `"plan"` role) + `Map.merge` + `Repo.update`, so the row's existing
+  metadata (request_id, tool_name, input, approval_status, …) is preserved and
+  only the patched keys are added/overwritten.
+
+  Exists because neither prior seam fits a plan row: `merge_tool_metadata/3`
+  keys on `tool_use_id` (which plan rows lack), and `update_approval_status/3`
+  writes only `approval_status` (and rejects non-terminal writes). `:noop` when
+  no row matches — a stamp for a request_id we never persisted must not raise.
+  """
+  @spec merge_approval_metadata(String.t(), String.t(), map()) ::
+          {:ok, Message.t()} | {:error, term()} | :noop
+  def merge_approval_metadata(session_id, request_id, patch)
+      when is_binary(session_id) and is_binary(request_id) and is_map(patch) do
+    case find_approval(session_id, request_id) do
+      nil ->
+        :noop
+
+      %Message{} = m ->
+        m
+        |> Ecto.Changeset.change(metadata: Map.merge(m.metadata || %{}, patch))
+        |> Repo.update()
+    end
+  end
+
   # The needs-you message (approval | question | plan) for a request_id (unique
   # per ask). Newest wins if a request_id were ever reused; never raises on 0/N
   # rows.

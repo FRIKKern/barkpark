@@ -17,7 +17,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
+  alias Barkpark.Content
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.PlanPapers
   alias BarkparkWeb.Studio.ClaudeChat
 
   @admin_token "chat-admin-test-token"
@@ -2499,6 +2501,165 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "Half-made plan"
       refute has_element?(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-hang]))
       refute has_element?(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-hang]))
+    end
+  end
+
+  describe "plans as papers (charter D49)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    # reuses the module-level plan_ask/2 helper from the proposed-plan describe
+    @d49_plan_md "# Ship the migration\n\nSteps:\n\n1. Inventory\n2. Port\n3. Delete the shim"
+
+    test "approving a plan publishes a real published Paper and the card links to it",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      send(view.pid, plan_ask("plan-pub", @d49_plan_md))
+      render(view)
+
+      # the approve is synchronous — the card flips immediately, never waiting on
+      # the async projection
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-pub])))
+
+      assert html =~ "✓ plan approved"
+
+      slug = PlanPapers.slug_for(sid, "plan-pub")
+
+      # the fire-and-forget Task publishes a real, PUBLISHED paper at the
+      # deterministic slug (shared-mode sandbox lets the Task reach the DB)
+      await(fn ->
+        case Content.get_paper(slug, "production") do
+          %{status: "published", type: "paper"} -> true
+          _ -> false
+        end
+      end)
+
+      # …and the {:plan_paper} broadcast converges back onto this tab: the plan
+      # card grows its "→ published as Paper" link pointing at /papers/:slug
+      await(fn -> render(view) =~ "published as Paper" end)
+      assert render(view) =~ ~s(href="/papers/#{slug}")
+    end
+
+    test "the {:plan_paper} broadcast stamps the link on a co-viewing tab (converge)",
+         %{view: view} do
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-conv", @d49_plan_md))
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-conv])))
+
+      assert html =~ "✓ plan approved"
+
+      # a co-viewing tab (or this one) receives the projection outcome over the
+      # session topic — the handler stamps the row deterministically, no async
+      send(
+        view.pid,
+        {:plan_paper, "plan-conv",
+         %{paper_id: "chat-plan-xyz", paper_url: "/papers/chat-plan-xyz"}}
+      )
+
+      html = render(view)
+      assert html =~ "published as Paper"
+      assert html =~ ~s(href="/papers/chat-plan-xyz")
+    end
+
+    test "keep planning creates NO paper — a rejected plan stays chat ephemera",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      send(view.pid, plan_ask("plan-keep2", @d49_plan_md))
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-keep2])))
+
+      assert html =~ "✗ kept planning"
+
+      # give any (wrongly-scheduled) async work a chance to land, then prove none did
+      Process.sleep(60)
+      assert Content.get_paper(PlanPapers.slug_for(sid, "plan-keep2"), "production") == nil
+      refute render(view) =~ "published as Paper"
+    end
+
+    test "an ordinary tool approval creates NO paper (only :plan projects)",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "appr-1",
+           tool_name: "Write",
+           input: %{"file_path" => "/opt/x"},
+           title: "Claude wants to write /opt/x",
+           decision_reason: nil
+         }}
+      )
+
+      render(view)
+      render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=appr-1])))
+
+      Process.sleep(60)
+      assert Content.get_paper(PlanPapers.slug_for(sid, "appr-1"), "production") == nil
+      refute render(view) =~ "published as Paper"
+    end
+
+    test "a publish failure renders an honest system line and leaves the plan approved",
+         %{view: view} do
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-fail", @d49_plan_md))
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-fail])))
+
+      # the approve already succeeded on the wire — the card is approved
+      assert html =~ "✓ plan approved"
+
+      # the projection failed; the failure is honest, not silent, and never a lie
+      send(view.pid, {:plan_paper_failed, "plan-fail"})
+      html = render(view)
+      assert html =~ "Couldn&#39;t publish the approved plan as a Paper"
+      # the plan STAYS approved — no link, but the approval is untouched
+      assert html =~ "✓ plan approved"
+      refute html =~ "published as Paper"
+    end
+
+    test "the Paper link survives reopen — replayed from persisted metadata",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+      {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "make a plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "plan",
+          source_markdown: "# Reopened plan\n\nStep one.",
+          metadata: %{
+            "request_id" => "plan-replay",
+            "tool_name" => "ExitPlanMode",
+            "input" => %{"plan" => "# Reopened plan\n\nStep one."},
+            "approval_status" => "allowed",
+            "paper_id" => "chat-plan-reopen",
+            "paper_url" => "/papers/chat-plan-reopen"
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "✓ plan approved"
+      assert html =~ "Reopened plan"
+      # the link is threaded from persisted metadata — durable across reopen
+      assert html =~ "published as Paper"
+      assert html =~ ~s(href="/papers/chat-plan-reopen")
     end
   end
 

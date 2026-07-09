@@ -34,6 +34,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
@@ -1324,6 +1325,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> refresh_sessions()}
   end
 
+  # D49: an approved plan's Paper landed — stamp the in-memory plan row so its
+  # "→ published as Paper" link appears in EVERY co-viewing tab at once (the
+  # approver's own tab is subscribed too, so it converges here, not inline). The
+  # metadata was already persisted by the publishing Task, so replay is durable.
+  def handle_info({:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}, socket) do
+    messages = stamp_plan_paper(socket.assigns.messages, request_id, paper_id, paper_url)
+    {:noreply, assign(socket, messages: messages)}
+  end
+
+  # D49 failure honesty: the approve already succeeded on the wire; only the Paper
+  # projection failed. Render a live-only honest system line — never a lie, never a
+  # crash, and the plan stays approved.
+  def handle_info({:plan_paper_failed, _request_id}, socket) do
+    {:noreply,
+     append_message(
+       socket,
+       :system,
+       "Couldn't publish the approved plan as a Paper — the plan is still approved."
+     )}
+  end
+
   # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
   # the DOWN that follows our own force-close). Only act while WE still own that
   # pid — after a teardown set `session: nil`, the double-fire DOWN finds no
@@ -1615,6 +1637,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
           style="overflow-wrap: anywhere;"
         >
           <%= plan_outcome_label(@message.approval_status) %> — <%= @message.title %>
+          <a
+            :if={@message[:paper_url]}
+            href={@message.paper_url}
+            target="_blank"
+            rel="noopener"
+            style="margin-left: 6px; text-decoration: none; color: var(--accent);"
+          >
+            → published as Paper
+          </a>
         </div>
       <% :thinking -> %>
         <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
@@ -3275,7 +3306,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       seq,
       Map.get(meta, "request_id"),
       input,
-      replay_approval_status(Map.get(meta, "approval_status"), live?)
+      replay_approval_status(Map.get(meta, "approval_status"), live?),
+      meta
     )
   end
 
@@ -3512,6 +3544,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       broadcast_resolution(socket, request_id, status)
 
+      # D49: an APPROVED ExitPlanMode plan grows up into a real published Paper.
+      # Fire-and-forget so the approve (already on the wire above) never blocks or
+      # fails on a publish error; the result converges every co-viewing tab via
+      # the session topic. Deny/keep-planning and ordinary approvals never touch
+      # Papers — the gate is role :plan AND an allow decision.
+      maybe_publish_plan(socket, request_id, decision)
+
       socket
       |> assign(messages: messages)
       |> clear_question_form(request_id)
@@ -3521,12 +3560,95 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # Project an approved plan into a Paper (charter D49). Gated on the matched
+  # row being a :plan card AND an allow decision; only then does a fire-and-forget
+  # Task publish + stamp + broadcast. The Task NEVER touches the socket — it talks
+  # to the session topic every tab (this one included) is subscribed to. A tab
+  # with no store session or no topic (a brand-new chat) has nothing to project.
+  defp maybe_publish_plan(socket, request_id, decision) do
+    with true <- plan_allow?(decision),
+         %{role: :plan} = m <- find_message_by_rid(socket, request_id),
+         sid when is_binary(sid) <- socket.assigns[:store_session_id],
+         topic when is_binary(topic) <- socket.assigns[:subscribed_topic] do
+      markdown = to_string(m[:plan_markdown] || "")
+
+      # Fire-and-forget under Barkpark.TaskSupervisor (same pattern as the AI
+      # title, D13) — supervised, `$callers`-scoped so the sandbox connection is
+      # inherited under test, and drained on test exit. The Task never touches
+      # the socket; it talks to the session topic.
+      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+        publish_plan_paper(sid, request_id, markdown, topic)
+      end)
+    end
+
+    :ok
+  end
+
+  defp plan_allow?(:allow), do: true
+  defp plan_allow?({:allow, _}), do: true
+  defp plan_allow?(_), do: false
+
+  # The fire-and-forget body: publish the Paper, stamp its id/url onto the plan
+  # row's metadata (replay-durable, D49), and broadcast the outcome to the session
+  # topic so all tabs converge. A publish failure is honest, not silent, and never
+  # re-raises — the approve already succeeded.
+  defp publish_plan_paper(session_id, request_id, markdown, topic) do
+    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
+    # invariant) must degrade to the SAME honest failure broadcast as an
+    # `{:error, _}` return — a crashed fire-and-forget Task is silent, and the
+    # promised "couldn't publish" line would never appear. Scoped to the publish
+    # call only: a raise AFTER a successful publish must not lie "couldn't
+    # publish" about a Paper that exists.
+    result =
+      try do
+        PlanPapers.publish(session_id, request_id, markdown)
+      rescue
+        e -> {:error, e}
+      catch
+        kind, reason -> {:error, {kind, reason}}
+      end
+
+    case result do
+      {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
+        StudioChat.merge_approval_metadata(session_id, request_id, %{
+          "paper_id" => paper_id,
+          "paper_url" => paper_url
+        })
+
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          topic,
+          {:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}
+        )
+
+      {:error, _reason} ->
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          topic,
+          {:plan_paper_failed, request_id}
+        )
+    end
+  end
+
   # Flip every card matching a request_id to a terminal status (idempotent over
   # already-terminal rows — the guard only rewrites the matched request_id).
   defp flip_card(messages, request_id, status) do
     Enum.map(messages, fn
       %{role: role, request_id: ^request_id} = m when role in @needs_you_roles ->
         %{m | approval_status: status}
+
+      m ->
+        m
+    end)
+  end
+
+  # Stamp a plan row's Paper id/url in memory (charter D49) so its "→ published
+  # as Paper" link renders. Idempotent and request_id-scoped; leaves every other
+  # row untouched.
+  defp stamp_plan_paper(messages, request_id, paper_id, paper_url) do
+    Enum.map(messages, fn
+      %{role: :plan, request_id: ^request_id} = m ->
+        %{m | paper_id: paper_id, paper_url: paper_url}
 
       m ->
         m
@@ -3819,7 +3941,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `plan_input` so Approve can echo it back verbatim (a bare allow fails the
   # tool). The body is the FULL plan through the paper engine — never truncated;
   # only its RENDERED height is clamped in CSS.
-  defp build_plan_message(id, request_id, input, status) do
+  # `paper` carries a prior projection (charter D49) — the persisted metadata on
+  # replay, `%{}` for a fresh live ask. Its keys stay nil until an approve lands a
+  # Paper, so the "→ published as Paper" link only ever shows once one exists.
+  defp build_plan_message(id, request_id, input, status, paper \\ %{}) do
     plan = plan_markdown(input)
 
     %{
@@ -3831,7 +3956,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       plan_markdown: plan,
       title: plan_title(plan),
       html: render_paper_html(plan),
-      approval_status: status
+      approval_status: status,
+      paper_id: paper["paper_id"],
+      paper_url: paper["paper_url"]
     }
   end
 
