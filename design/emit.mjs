@@ -97,7 +97,12 @@ export function loadThemes() {
     .map((f) => {
       const spec = JSON.parse(readFileSync(join(THEMES_DIR, f), "utf8"));
       return { name: spec.name || f.replace(/\.json$/, ""), spec };
-    });
+    })
+    // Default theme FIRST, rest in dir order: every generated enumeration
+    // (Go Themes(), Elixir @themes → Tenancy.known_themes → the Studio picker,
+    // CSS theme blocks, the showroom) leads with the built-in skin regardless
+    // of how theme FILENAMES alphabetize (e.g. ember.json < evergreen.json).
+    .sort((a, b) => (b.name === DEFAULT_THEME ? 1 : 0) - (a.name === DEFAULT_THEME ? 1 : 0));
 }
 
 // Overlay derive(spec) onto a deep clone of tokens.color → a full tokens-shaped
