@@ -681,10 +681,18 @@ defmodule Barkpark.StudioChat do
   @doc """
   Fold a `background_tasks_changed` SNAPSHOT into the rail (charter D47). The
   frame is a task_id-keyed list with NO tool_use_id: (a) upsert a live "running"
-  row for every listed task; (b) any task_id that VANISHED from the snapshot
-  flips to `"completed"` UNLESS already terminal (a `"interrupted"` is never
-  resurrected). Entries are NEVER deleted (replay shows the last-known rail),
-  only capped. PURE — the Recorder and ChatLive fold identically off this.
+  row for every listed task, STAMPED `"origin" => "background"`; (b) any
+  BACKGROUND-origin task_id that VANISHED from the snapshot flips to
+  `"completed"` UNLESS already terminal (a `"interrupted"` is never resurrected).
+  Entries are NEVER deleted (replay shows the last-known rail), only capped.
+
+  PROVENANCE GATE (wave-10 real-binary truth): workflow-origin entries (added by
+  `rail_capture_progress`) and foreground-task entries NEVER appear in ANY
+  `background_tasks_changed` snapshot — proven zero such frames in the workflow
+  and foreground captures. So the vanish→completed flip touches ONLY
+  background-origin entries; an unrelated background snapshot can no longer
+  falsely complete a still-running workflow. PURE — the Recorder and ChatLive
+  fold identically off this ONE function (D47 shared-fold law).
   """
   @spec rail_apply_background(map(), map()) :: map()
   def rail_apply_background(rail, ev) when is_map(rail) and is_map(ev) do
@@ -702,6 +710,7 @@ defmodule Barkpark.StudioChat do
                 "task_type" => task["task_type"],
                 "description" => task["description"]
               })
+              |> Map.put("origin", "background")
               |> Map.put("status", "running")
 
             Map.put(rail, tid, entry)
@@ -713,14 +722,21 @@ defmodule Barkpark.StudioChat do
 
     rail
     |> Map.new(fn {tid, entry} ->
-      if MapSet.member?(live_ids, tid) or rail_terminal?(entry),
-        do: {tid, entry},
-        else: {tid, Map.put(entry, "status", "completed")}
+      if rail_background_origin?(entry) and not MapSet.member?(live_ids, tid) and
+           not rail_terminal?(entry),
+         do: {tid, Map.put(entry, "status", "completed")},
+         else: {tid, entry}
     end)
     |> cap_rail()
   end
 
   def rail_apply_background(rail, _ev), do: rail
+
+  # A rail entry only earns the vanish→completed flip when a
+  # `background_tasks_changed` snapshot is its provenance — workflow and
+  # foreground entries never ride that frame, so their absence is not a signal.
+  defp rail_background_origin?(%{"origin" => "background"}), do: true
+  defp rail_background_origin?(_), do: false
 
   @doc """
   Capture a `task_progress` frame's `workflow_progress` phase→agent tree and
