@@ -265,7 +265,7 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
             <span aria-hidden="true" style={todo_glyph_style(todo.status)}>
               <%= todo_glyph(todo.status) %>
             </span>
-            <span style={todo_text_style(todo.status)}><%= todo.content %></span>
+            <span style={todo_text_style(todo.status)} data-gutter-text><%= todo.content %></span>
           </div>
           <div
             :if={todo.status == :in_progress and todo.active_form}
