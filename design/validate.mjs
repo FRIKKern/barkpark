@@ -48,7 +48,7 @@ ok(tokens.meta && typeof tokens.meta.note === "string" && tokens.meta.note.lengt
 
 // --- color roles -----------------------------------------------------------
 const color = tokens.color || {};
-for (const role of ["primary", "primary-hover", "primary-fg", "bg", "surface", "muted-surface", "text", "muted-text", "border", "ring", "accent"]) {
+for (const role of ["primary", "primary-hover", "primary-fg", "bg", "surface", "muted-surface", "text", "muted-text", "border", "ring", "accent", "reading-accent"]) {
   hslPair(color[role], `color.${role}`);
 }
 
@@ -129,6 +129,115 @@ const hslList = (arr, where, len) => {
   if (Array.isArray(arr)) arr.forEach((h, i) => ok(HSL.test(h), `${where}[${i}] must be HSL channels 'H S% L%', got ${JSON.stringify(h)}`));
 };
 hslList((color.matchQuality || {}).spectrum, "color.matchQuality.spectrum", 7);
+
+// --- paper reading-surface skin (color.paper): hex OR rgba() values ---------
+// surface = {light,dark} per role; reader.light / reader.dark = flat theme maps
+// (the reader diverges on --paper-rule + re-skins ink-faint/chrome-* on dark).
+const HEX_OR_RGBA = /^(#[0-9a-fA-F]{6}|rgba?\([0-9]{1,3},\s*[0-9]{1,3},\s*[0-9]{1,3}(,\s*[0-9.]+)?\))$/;
+const paper = color.paper || {};
+const psurf = paper.surface || {};
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"]) {
+  const o = psurf[role];
+  ok(o && typeof o === "object", `color.paper.surface.${role} is required`);
+  if (o) {
+    ok(HEX_OR_RGBA.test(o.light || ""), `color.paper.surface.${role}.light must be #rrggbb or rgba(), got ${JSON.stringify(o.light)}`);
+    ok(HEX_OR_RGBA.test(o.dark || ""), `color.paper.surface.${role}.dark must be #rrggbb or rgba(), got ${JSON.stringify(o.dark)}`);
+  }
+}
+const preadLight = (paper.reader || {}).light || {};
+ok((paper.reader || {}).light && typeof (paper.reader || {}).light === "object", "color.paper.reader.light is required");
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft"]) {
+  ok(HEX_OR_RGBA.test(preadLight[role] || ""), `color.paper.reader.light.${role} must be #rrggbb or rgba(), got ${JSON.stringify(preadLight[role])}`);
+}
+const preadDark = (paper.reader || {}).dark || {};
+ok((paper.reader || {}).dark && typeof (paper.reader || {}).dark === "object", "color.paper.reader.dark is required");
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "chrome-bg", "chrome-border"]) {
+  ok(HEX_OR_RGBA.test(preadDark[role] || ""), `color.paper.reader.dark.${role} must be #rrggbb or rgba(), got ${JSON.stringify(preadDark[role])}`);
+}
+
+// --- mail-client popup chrome (color.mailChrome): 6 hex pairs ----------------
+const mailChrome = color.mailChrome || {};
+for (const role of ["paper", "bar", "rule", "ink", "soft", "accent"]) {
+  const o = mailChrome[role];
+  ok(o && typeof o === "object", `color.mailChrome.${role} is required`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.mailChrome.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.mailChrome.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+
+// --- paper email skin (color.paperEmail): 8 single light-only hex ------------
+// The email surface has no dark mode — one hex per role, not a {light,dark} pair.
+const paperEmail = color.paperEmail || {};
+for (const role of ["brand", "brand-text", "rule", "page-bg", "paper", "text", "muted", "code-bg"]) {
+  ok(HEX.test(paperEmail[role] || ""), `color.paperEmail.${role} must be #rrggbb, got ${JSON.stringify(paperEmail[role])}`);
+}
+
+// --- paper callout tones (color.paperCallout): light+dark, 5 {bg,fg} hex pairs -
+const paperCallout = color.paperCallout || {};
+for (const theme of ["light", "dark"]) {
+  const tset = paperCallout[theme] || {};
+  ok(paperCallout[theme] && typeof paperCallout[theme] === "object", `color.paperCallout.${theme} is required`);
+  for (const tone of ["success", "warning", "danger", "info", "neutral"]) {
+    const o = tset[tone];
+    ok(o && typeof o === "object", `color.paperCallout.${theme}.${tone} is required`);
+    if (o) {
+      ok(HEX.test(o.bg || ""), `color.paperCallout.${theme}.${tone}.bg must be #rrggbb, got ${JSON.stringify(o.bg)}`);
+      ok(HEX.test(o.fg || ""), `color.paperCallout.${theme}.${tone}.fg must be #rrggbb, got ${JSON.stringify(o.fg)}`);
+    }
+  }
+}
+
+// --- provider identity marks (color.provider): hex pairs --------------------
+const provider = color.provider || {};
+for (const role of ["hetzner", "azure"]) {
+  const o = provider[role];
+  ok(o && typeof o === "object", `color.provider.${role} is required`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.provider.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.provider.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+
+// --- auth button fills (color.authButton): HSL channels OR var(--role) -------
+const authButton = color.authButton || {};
+for (const role of ["bg", "fg", "bgHover"]) {
+  const o = authButton[role];
+  ok(o && typeof o === "object", `color.authButton.${role} is required`);
+  if (o) {
+    ok(HSL_OR_VAR.test(o.light || ""), `color.authButton.${role}.light must be HSL channels or var(--role), got ${JSON.stringify(o.light)}`);
+    ok(HSL_OR_VAR.test(o.dark || ""), `color.authButton.${role}.dark must be HSL channels or var(--role), got ${JSON.stringify(o.dark)}`);
+  }
+}
+
+// --- status page chrome (color.statusChrome): 5 hex pairs -------------------
+const statusChrome = color.statusChrome || {};
+for (const role of ["bg", "fg", "muted", "card", "line"]) {
+  const o = statusChrome[role];
+  ok(o && typeof o === "object", `color.statusChrome.${role} is required`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.statusChrome.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.statusChrome.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+
+// --- status page health tones (color.statusHealth): 5 single hex ------------
+const statusHealth = color.statusHealth || {};
+for (const role of ["operational", "degraded", "partial_outage", "major_outage", "unknown"]) {
+  ok(HEX.test(statusHealth[role] || ""), `color.statusHealth.${role} must be #rrggbb, got ${JSON.stringify(statusHealth[role])}`);
+}
+
+// --- error page palette (color.errorPage): 3 single fixed-dark hex ----------
+// Intentionally NON-theme-aware (a stark always-dark error card) — one hex each.
+const errorPage = color.errorPage || {};
+for (const role of ["bg", "fg", "muted"]) {
+  ok(HEX.test(errorPage[role] || ""), `color.errorPage.${role} must be #rrggbb, got ${JSON.stringify(errorPage[role])}`);
+}
+
+// --- sheets reader info-blue (color.readerInfo): single hex pair ------------
+const readerInfo = color.readerInfo || {};
+ok(HEX.test(readerInfo.light || ""), `color.readerInfo.light must be #rrggbb, got ${JSON.stringify(readerInfo.light)}`);
+ok(HEX.test(readerInfo.dark || ""), `color.readerInfo.dark must be #rrggbb, got ${JSON.stringify(readerInfo.dark)}`);
 
 // --- font ------------------------------------------------------------------
 const font = tokens.font || {};
@@ -211,4 +320,5 @@ console.log("OK: design/tokens.json is well-formed and complete.");
 console.log("  color roles: 10 base + 4 status (ok/warn/danger/info), light+dark");
 console.log(`  lifecycle states: ${REQUIRED_LIFE.length} reconciled 1:1 with internal/semrole + taskboard`);
 console.log("  fonts: chrome (self-hosted Inter) / mono / reading; type: chrome + reading scales");
+console.log("  paper/email/callout/mailChrome/provider/authButton/statusChrome/statusHealth/errorPage/readerInfo: shape-gated");
 process.exit(0);
