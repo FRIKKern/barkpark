@@ -51,7 +51,9 @@ defmodule BarkparkCloud.AzureClientTest do
       assert length(sizes) == 3
 
       assert {:error, :unauthorized} =
-               FakeClient.list_catalog(blob(%{"client_secret" => FakeClient.unauthorized_secret()}))
+               FakeClient.list_catalog(
+                 blob(%{"client_secret" => FakeClient.unauthorized_secret()})
+               )
     end
   end
 
