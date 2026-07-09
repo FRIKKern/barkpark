@@ -1,13 +1,13 @@
 export const meta = {
   name: 'bp-epic-cycle',
-  description: 'Task-obsessed epic-team loop: 5 Fable strategists (bold, first-cycle only) → 1 architect decides, owns the charter AND files bp tasks for every slice → 1 Fable reviewer perfects the task setup → builders claim their bp task, build in worktrees, gate + commit → 1 Fable reviewer reviews everything (code + task ledger) and fixes obvious issues → 1 direction agent. The USER WISH is the focus; the bp task ledger is the spine — every phase reads and writes it.',
+  description: 'Task-obsessed epic-team loop, every non-build phase on Fable: 5 Fable strategists (bold, first-cycle only) → 1 Fable architect decides, owns the charter AND files bp tasks for every slice → 1 Fable reviewer perfects the task setup → builders (opus) claim their bp task, build in worktrees, gate + commit → 1 Fable reviewer reviews everything (code + task ledger) and fixes obvious issues → 1 Fable direction agent. The USER WISH is the focus; the bp task ledger is the spine — every phase reads and writes it.',
   phases: [
     { title: 'Strategize', detail: '5 Fable strategists, holistic + bold (skipped once the charter exists)', model: 'fable' },
-    { title: 'Decide', detail: '1 architect: makes the important choices, writes/updates the epic charter, cuts this wave of slices, files + publishes a bp task per slice' },
+    { title: 'Decide', detail: '1 Fable architect: makes the important choices, writes/updates the epic charter, cuts this wave of slices, files + publishes a bp task per slice', model: 'fable' },
     { title: 'Task Review', detail: '1 Fable reviewer: audits the epic/wave task setup against the authoring rubric, FIXES defects directly via bp, go/no-go per slice', model: 'fable' },
     { title: 'Build', detail: 'up to 5 builders, worktree-isolated: CLAIM the bp task first, build, gate, honest self-review, commit, stamp evidence into the task' },
     { title: 'Review', detail: '1 Fable reviewer: reviews EVERY green slice (code) + the task ledger, fixes obvious issues in place, re-gates', model: 'fable' },
-    { title: 'Direction', detail: 'honest wave assessment + charter wave-log update + task-ledger reconciliation report' },
+    { title: 'Direction', detail: 'honest wave assessment + charter wave-log update + task-ledger reconciliation report', model: 'fable' },
   ],
 }
 
@@ -25,9 +25,11 @@ if (!A.wish) throw new Error('epic-cycle requires an explicit args.wish')
 const WISH = A.wish
 const CHARTER_PATH = A.charter_path || '.claude/workflows/bp-cloud-epic-charter.md'
 const EPIC_TASK_ID = A.epic_task_id || null
+// Every non-build phase runs on Fable by design (lead mandate 2026-07-09);
+// builders stay opus. Overrides exist only as a fallback for Fable exhaustion.
 const STRAT_MODEL = A.strategist_model || 'fable'
-const JUDGE_MODEL = A.judge_model || 'opus'   // architect + direction; reviewer is Fable by design
-const REVIEW_MODEL = A.review_model || 'fable' // fall back to 'opus' only on Fable exhaustion
+const JUDGE_MODEL = A.judge_model || 'fable'   // architect + direction
+const REVIEW_MODEL = A.review_model || 'fable' // task review + wave review
 const CHARTER_EXISTS = !!A.charter_exists
 const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS WAVE:\n${A.lead_notes}` : ''
 
