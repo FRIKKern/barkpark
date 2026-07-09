@@ -36,6 +36,18 @@ defmodule BarkparkWeb.Endpoint do
     websocket: true,
     longpoll: false
 
+  # Hyperquiz player socket — ANONYMOUS (no token; players join a room by PIN
+  # with a nickname, Kahoot-style). Carries QuizChannel on "quiz:room:<pin>".
+  # THE one irreducible core edit for the quiz plugin: Phoenix `socket/3` is a
+  # compile-time macro with no plugin callback, so — like the Pulse socket above
+  # — the plugin hand-adds its socket here. Inherits the endpoint-level
+  # check_origin allowlist (NO per-socket override — Past-Mistake-#11). The
+  # QuizChannel/QuizSocket carry the routes/workers via the plugin; a disabled
+  # quiz plugin leaves this socket dormant with no reachable channel.
+  socket "/quiz", BarkparkWeb.QuizSocket,
+    websocket: true,
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
