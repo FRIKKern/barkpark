@@ -12,7 +12,7 @@ ONE COMMAND, ANY AGENT. An AI agent on any major surface — Claude Code, Codex 
 2. **The auth core teaches the missing cloud link**: `bp login` → `bp barkparks -o json` → `bp instance credentials <id>` → `bp setup --target connect`. The CloudToken is control-plane only and never authenticates content writes (cloud12_cmd.go:1036-1111); CLOUD-QUICKSTART.md stops short of this and the hub must not.
 3. **Unattended happy paths = fresh local (`bp setup --target local --yes`), connect-with-token, non-2FA cloud login.** Provisioning a NEW hosted instance is human-gated (Stripe Checkout browser step) and 2FA accounts can't complete `bp login` non-interactively — docs say so plainly instead of pretending.
 4. **ChatGPT's premium path is Custom GPT Actions on the public `/v1/openapi.json` + scoped bearer token** — ships today with zero code (openapi.ex 3.1 + bearerAuth; `/v1/openapi.json` public on `:api_unlimited`). Actions ≠ MCP; this is stronger than "paste HTTP calls". Caveats baked in: needs a publicly reachable hosted instance; spec bodies are deliberately loose (additionalProperties).
-5. **Claude.ai gets honesty, not vaporware**: remote-MCP-only (Streamable HTTP + OAuth 2.1/PKCE), which stdio `bp mcp serve` cannot satisfy and bp-mcp-serve-epic will NOT build. Manual path today = direct HTTP API with a scoped token. The remote MCP endpoint is filed as a NET-NEW backlog task (`ao-backlog-remote-mcp`), explicitly not a bp-mcp-serve follow-on.
+5. **Claude.ai gets honesty, not vaporware**: remote-MCP-only (Streamable HTTP + OAuth 2.1/PKCE), which stdio `bp mcp serve` cannot satisfy. Manual path today = direct HTTP API with a scoped token. The remote MCP endpoint (originally filed as `ao-backlog-remote-mcp`) is now superseded by `ve-w2-remote-mcp-bearer` under `viable-everywhere-epic`, which builds it Go-side.
 6. **`bp onramp <target>` ships PRINT-FIRST in wave 1** (exactly the cmux_install.go precedent: print the blocks + where they go, never write). `--write` with safe JSON merge (Cursor, Claude Code) is wave 2; Codex TOML write (no TOML dep in repo) is wave 3. The verb rejects `chatgpt`/`claude-ai` with a pointer to REMOTE.md.
 7. **Codex secrets ride `env_vars = ["BARKPARK_API_TOKEN"]` (shell-forward whitelist), never `${VAR}` in TOML values** — value-level expansion is undocumented in Codex and would ship a literal string. Static `env` table carries only the non-secret URL.
 8. **Claude Code's teach-layer is a curl-able snippet `.claude/CLAUDE-BARKPARK.md`** — byte-for-byte-parallel to `.cursor/rules/barkpark-tasks.mdc` (same claim-first contract, no YAML front-matter). No skill/plugin in wave 1; a plugin is heavier and out of scope. Location is outside `docs/` so no G1 header is required, and the filename dodges the §4 CLAUDE.md/AGENTS.md surface scan.
@@ -42,7 +42,7 @@ ONE COMMAND, ANY AGENT. An AI agent on any major surface — Claude Code, Codex 
 - Spike: `claude mcp add` / `codex mcp add` shell-out as an alternate write path (host-tool presence not guaranteed — option, not plan).
 
 ### Backlog
-- `ao-backlog-remote-mcp`: hosted remote MCP endpoint (Phoenix-side Streamable HTTP, bearer for ChatGPT MCP + OAuth 2.1/PKCE for Claude.ai). NET-NEW capability, epic-sized — not a bp-mcp-serve-epic follow-on.
+- `ao-backlog-remote-mcp`: hosted remote MCP endpoint (Go-side Streamable HTTP, bearer for ChatGPT MCP + OAuth 2.1/PKCE for Claude.ai). NET-NEW capability, epic-sized — CANCELLED/superseded by `ve-w2-remote-mcp-bearer` under `viable-everywhere-epic`.
 
 ## Wave log
 
