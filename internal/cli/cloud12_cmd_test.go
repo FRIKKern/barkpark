@@ -706,6 +706,53 @@ func TestLaunchPostsBody(t *testing.T) {
 	}
 }
 
+// TestLaunchAzurePassesThrough: `bp launch azure --name shop` passes the provider
+// positional through OPAQUELY — the control plane resolves the Team's connected
+// azure provider. S5 does NOT special-case azure in the CLI; this pins that the
+// existing pass-through already carries it (only the body's provider changes).
+func TestLaunchAzurePassesThrough(t *testing.T) {
+	withTempConfigHome(t)
+
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"barkpark":{"id":"bp-az","name":"shop","host":"shop.example.com","mode":"byo","health_status":"unknown","agent_status":"offline","team_id":"team-1"}}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runLaunch(out, []string{"azure", "--name", "shop"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if gotPath != "/v1/launch" {
+		t.Fatalf("hit %q, want /v1/launch", gotPath)
+	}
+	if gotBody["provider"] != "azure" || gotBody["name"] != "shop" {
+		t.Fatalf("launch body = %v (provider must be the opaque azure positional)", gotBody)
+	}
+}
+
+// TestParseLaunchArgsProviderIsOpaque: the launch arg parser treats the provider
+// positional as an opaque string — azure is accepted exactly like hetzner, with
+// no CLI-side allowlist to update per provider.
+func TestParseLaunchArgsProviderIsOpaque(t *testing.T) {
+	provider, name, err := parseLaunchArgs([]string{"azure", "--name", "shop"})
+	if err != nil {
+		t.Fatalf("parseLaunchArgs: %v", err)
+	}
+	if provider != "azure" || name != "shop" {
+		t.Fatalf("parseLaunchArgs = (%q,%q), want (azure,shop)", provider, name)
+	}
+}
+
 // TestAuthedCommandsRequireLogin: with NO cloud token, the authed commands fail
 // with exit 3 and tell the user to run `bp login`. They must NOT hit the network.
 func TestAuthedCommandsRequireLogin(t *testing.T) {

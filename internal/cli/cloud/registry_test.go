@@ -41,17 +41,22 @@ func TestRegistryUnknownProviderErrors(t *testing.T) {
 	}
 }
 
-// TestRegistryAzureNotRegisteredYet asserts azure is a DECLARED-but-unregistered
-// slug (S5 wires it): it is not in RegisteredProviders and resolving it errors.
-// This is the tripwire that flips green the moment the azure package self-registers.
-func TestRegistryAzureNotRegisteredYet(t *testing.T) {
+// TestRegistryAzureUnregisteredInThisPackage asserts azure is NOT registered in
+// the cloud package's OWN test binary. That is not a regression — azure lives in
+// internal/cli/cloud/azure, which imports THIS package to implement the seam, so
+// this package can never import it back (an import cycle). Azure self-registers
+// via its own init() when its package is linked into a binary — the `bp` CLI
+// links it (proven by the cli-package wiring test), but the cloud test binary
+// does not, so azure stays absent here. This keeps the seam a fork-free
+// implementation point rather than a hard-wired switch.
+func TestRegistryAzureUnregisteredInThisPackage(t *testing.T) {
 	for _, s := range RegisteredProviders() {
 		if s == ProviderAzure {
-			t.Fatalf("azure is registered — this slice must NOT wire it (that is S5); RegisteredProviders=%v", RegisteredProviders())
+			t.Fatalf("azure is registered in the cloud test binary — it must self-register only where its package is imported (the cli binary); RegisteredProviders=%v", RegisteredProviders())
 		}
 	}
 	if _, err := ProviderFor(ProviderAzure, nil); err == nil {
-		t.Errorf("ProviderFor(azure): want an unregistered error until S5, got nil")
+		t.Errorf("ProviderFor(azure) in the cloud package: want an unregistered error (azure package not linked here), got nil")
 	}
 }
 
@@ -82,29 +87,53 @@ func TestCapabilityFixtureParity(t *testing.T) {
 				t.Fatalf("ProviderFor(%q): %v", slug, err)
 			}
 			actual := DetectCapabilities(p)
-			if actual != claimed {
+			// Compare ONLY the embedded Capabilities — Tier is go-to-market metadata
+			// the seam does not (and cannot) satisfy through an interface.
+			if actual != claimed.Capabilities {
 				t.Errorf("capability drift for %q:\n  fixture claims: %+v\n  Go satisfies:   %+v\n"+
 					"a claim the impl does not satisfy, or a capability the impl has but the fixture omits, both fail here",
-					slug, claimed, actual)
+					slug, claimed.Capabilities, actual)
 			}
 		})
 	}
 }
 
-// TestFixtureAzurePlaceholderAllFalse asserts the azure row is the honest
-// all-false placeholder S2/S5 will flip — so the SPA/CLI render azure as
-// "planned", not as a provider with phantom abilities.
-func TestFixtureAzurePlaceholderAllFalse(t *testing.T) {
+// TestFixtureAzureRowHonest asserts the azure fixture row is the HONEST S5 shape:
+// core + labels + pause on (AzureProvider implements the core seam, the label
+// cluster, and the Pauser interface), catalog + lifecycle still off (no Cataloger
+// / InstanceLifecycler on AzureProvider yet — those are later slices). The live
+// azure-vs-fixture parity is proven in the cli package where the azure package is
+// linked; here we only pin the committed claim so a drift in the JSON is caught.
+func TestFixtureAzureRowHonest(t *testing.T) {
 	fixture, err := LoadCapabilities()
 	if err != nil {
 		t.Fatalf("LoadCapabilities: %v", err)
 	}
 	az, ok := fixture[ProviderAzure]
 	if !ok {
-		t.Fatal("fixture is missing the azure placeholder row")
+		t.Fatal("fixture is missing the azure row")
 	}
-	if (az != Capabilities{}) {
-		t.Errorf("azure placeholder must be all-false until S2/S5 flip it; got %+v", az)
+	want := Capabilities{Core: true, Labels: true, Pause: true}
+	if az.Capabilities != want {
+		t.Errorf("azure fixture row drifted:\n  got:  %+v\n  want: %+v\n(core/labels/pause on; catalog/lifecycle off)", az.Capabilities, want)
+	}
+	if az.Tier != "" {
+		t.Errorf("azure is a shippable provider, not dev-tier; got tier=%q", az.Tier)
+	}
+}
+
+// TestFixtureFakeIsDevTier asserts the fake row carries tier=dev — the signal
+// `bp cloud providers` uses to hide it from the default operator matrix.
+func TestFixtureFakeIsDevTier(t *testing.T) {
+	fixture, err := LoadCapabilities()
+	if err != nil {
+		t.Fatalf("LoadCapabilities: %v", err)
+	}
+	if fixture[ProviderFake].Tier != "dev" {
+		t.Errorf("fake must be tier=dev so the default matrix hides it; got %q", fixture[ProviderFake].Tier)
+	}
+	if fixture[ProviderHetzner].Tier != "" {
+		t.Errorf("hetzner is a shippable provider, not dev-tier; got %q", fixture[ProviderHetzner].Tier)
 	}
 }
 

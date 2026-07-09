@@ -34,7 +34,7 @@ func TestStatusRoleMapping(t *testing.T) {
 		// "behind" is info, not warn — the decision-32 fixture pins its tone
 		// ("update available" is news, not an alarm);
 		// TestAttentionVocabularyMatchesFixture cross-checks the committed file.
-		"behind":   "info",
+		"behind": "info",
 		// "inactive" is the webhook list's manually-switched-off state (the data
 		// model's own word for active:false) — attention-worthy, not a fault;
 		// "suspended" stays reserved for the system-imposed instance state.

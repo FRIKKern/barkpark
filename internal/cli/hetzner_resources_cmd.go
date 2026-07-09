@@ -569,6 +569,7 @@ func printCloudHelp(out *writer) {
 USAGE
   bp cloud status                       triage your fleet (ranked, bucketed)
   bp cloud providers                    the capability matrix for every provider
+  bp cloud instance <verb>              provider-neutral fleet control (any provider)
   bp cloud open <target>                open a dashboard deep link
   bp cloud verify <instance>            re-run the golden-path probe suite
   bp cloud <provider> <resource> <verb> drive a provider's API directly
@@ -590,7 +591,10 @@ FLEET (control plane — needs 'bp login')
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   providers registered + planned providers and the capabilities each honours
             today — the honest matrix, no network call (bp cloud providers -h)
+  instance  provider-neutral create · ip · delete · list · label through the
+            seam: --provider hetzner|azure|fake     (bp cloud instance -h)
   hetzner   Hetzner Cloud (servers, ssh keys, images, …) — bp cloud hetzner -h
+  azure     Azure ARM directly (service-principal creds) — bp cloud azure -h
 
 Unlike 'bp launch' (which provisions THROUGH the Barkpark control plane), the
 provider commands talk to the provider's own API directly.`

@@ -9,8 +9,10 @@
 // (*Template).Validate() — so the future provisioner imports exactly two things.
 //
 // The spec doc + JSON Schema live next to the templates:
-//   templates/MANIFEST.md
-//   templates/barkpark.template.schema.json
+//
+//	templates/MANIFEST.md
+//	templates/barkpark.template.schema.json
+//
 // The struct json tags mirror the JSON Schema field names exactly.
 package template
 
