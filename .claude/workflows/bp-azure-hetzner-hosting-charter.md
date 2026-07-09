@@ -186,6 +186,90 @@ ever touches a live cloud: Azure and Hetzner APIs are faked/recorded in tests.
     bug on the Hetzner path today, fixed for both kinds by S7. Remediation copy
     stays server-owned in `FailureCopy.connect_remediation`; never duplicated in
     JS.
+20. **The single `Capabilities.Lifecycle` bool splits into five facet bools —
+    `archive`, `resurrect`, `decommission`, `adopt`, `audit`** (core/catalog/
+    pause/labels unchanged) in the Go struct AND `providers_capabilities.json`.
+    Ratified claims: hetzner all five true; azure `decommission` + `audit` true,
+    `archive`/`resurrect`/`adopt` false; fake all true (tier:dev). An Azure
+    "adopt" facet is REJECTED this wave: Hetzner adopt is a clone-swap that
+    REQUIRES a snapshot (hetzner_instance_cmd.go:1064); a register-only Azure
+    adopt would silently mean something different under the same verb — revisit
+    when portable archives (S14) give both providers one archive substrate.
+    Azure decommission is decommission-WITHOUT-archive: the typed-confirm
+    carries an explicit "no archive exists — this is unrecoverable" warning.
+    Azure audit is tri-surface minus archives (compute residue via the RG list +
+    DNS + registry are all reachable; the archive residue check is skipped with
+    an honest printed note). `TestFixtureAzureRowHonest` (registry_test.go:116)
+    is updated in the SAME PR or it red-lines.
+21. **Neutral lifecycle lands at the DISPATCH layer — verb guts are NOT ported
+    into the seam.** The ~1500 lines of Hetzner lifecycle CLI functions stay
+    byte-untouched; `bp cloud instance archive|resurrect|decommission|adopt|
+    audit|pause|resume` dispatches per kind: hetzner → the EXISTING free
+    functions (same flags threaded); azure → new CLI-level decommission/audit
+    composed from AzureProvider + the same DNS/registry helpers the hetzner
+    verbs use (the barkpark.cloud zone and cpFleet registry are provider-
+    neutral by Decision 10/17); unsupported combos → `degradeUnsupported` with
+    a reason. Facet DETECTION is two-source: per-facet seam interfaces
+    (`InstanceLifecycler` splits into `Archiver`/`Resurrector`/`Decommissioner`/
+    `Adopter`/`Auditor`; FakeProvider regroups) OR a `cloud.RegisterLifecycleVerbs
+    (kind, verbs)` registration populated in the cli package FROM the dispatch
+    table itself — so a fixture claim can only be satisfied by a real dispatch
+    entry or a real interface impl; the parity test bites on the merged truth.
+    Rationale: `HcloudProvider` is a zero-value shell-out struct holding no DNS
+    token / worker token / progress writer (provider.go:547), and the verbs need
+    a second hcloud DNS client + cpFleet + `out *writer` — forcing them behind
+    the seam interface is a 1500-line high-risk migration for zero user-visible
+    gain (that extraction is S8 territory). `bp cloud hetzner instance` survives
+    as the escape hatch, refute-tested byte-identical.
+22. **The capability conduit is a committed duplicate + byte-drift gate — NOT
+    "one file by construction" (impossible: the CLI must embed its copy for
+    offline use, and cloud/'s Docker build context cannot reach the repo
+    root).** The Go fixture is CANONICAL (it alone is gated against real
+    implementation truth); `cloud/priv/static/__fixtures__/providers_capabilities
+    .json` is the derived byte-copy shipped in the image; an ExUnit contract
+    test Path.expands to the Go fixture and asserts byte equality — the proven
+    event_types.json / fmt-display-parity pattern. `GET /v1/providers/
+    capabilities` (require_user) serves `{providers: {<kind>: {tier,
+    capabilities, gaps}}}`: bools passed through GENERICALLY from the fixture
+    copy (no hardcoded key list, so the facet split lands without a conduit
+    change), `gaps` = a server-owned reason for EVERY false capability via new
+    `FailureCopy.capability_gap_reason/2` (Decision 19 extended: JS never
+    invents reasons — the module carries a default clause so no false
+    capability is reason-less). The CLI keeps its embedded copy (offline
+    contract, cloud_providers_cmd.go:8-10). SPA presentation (console URL,
+    blurb, credential field specs) STAYS SPA-side — the conduit carries
+    capabilities/tier/gaps only. NOTE: registry.go:133-135 / provider.go:99-100
+    claim Elixir+SPA already read this fixture — false until this lands; fix
+    the comments with the conduit.
+23. **Warm-pool pin honesty is a TWO-STACK fix.** Go alone cannot distinguish
+    "user pinned cax11" from "CP default-stamped cax11": the CP stamps
+    nbg1/cax11 onto every unpinned hetzner claim (router.ex claim_region/
+    claim_server_type + registry.ex @default_region/@default_server_type) while
+    the pool's real spec is env-derived (warmBaseSpec → DefaultSpec: nbg1/cx23
+    unless BARKPARK_SERVER_TYPE/LOCATION override) — a naive Go-side compare
+    would skip warm for EVERY unpinned launch. Fix: (a) CP stops default-
+    filling hetzner claims — region/server_type ride the user's pin or null,
+    exactly the azure reviewer-fix pattern from wave 2; (b) Go `tryWarmAssign`
+    skips warm when the job spec is non-empty AND differs from
+    `warmBaseSpec(ctx)`'s region/server_type (empty = pool-compatible → fast
+    path untouched); (c) the hetzner one-shot fills empty region/type from
+    FreshSpec so the resilience ladder never leads with an empty create. The S6
+    "hetzner claim payload byte-identical" refute-test is updated as an
+    INTENTIONAL improvement — the old bytes encoded the lie.
+24. **Pricing goes serve-stale-while-refreshing, demand-triggered — never a
+    timer.** Fresh cache → serve; ABSENT cache → synchronous fetch in the
+    caller (unchanged — nothing to serve, and it preserves the first-ever-
+    failure nil-degrade tests); STALE → serve the stale row IMMEDIATELY and
+    hand ONE refresh to the Pricing GenServer (an in-flight guard in GenServer
+    state coalesces concurrent stale reads — no thundering herd). The process-
+    dictionary fake transport is invisible to the GenServer, so it is reworked
+    into a cross-process collaborator (named public ETS queue) — the REAL cost
+    of the slice, bounded to one test file + one support module (its only
+    consumers). Exactly one test pins the old synchronous-refetch-on-TTL
+    contract (azure_pricing_test.exs:125-138); it rewrites to serve-stale
+    (stale value now, fresh value on the next read after a deterministic
+    GenServer flush). The live armSkuName==slug join verification SPLITS OUT
+    into its own network-gated task — it is never an offline gate.
 
 ## Roadmap
 
@@ -256,15 +340,30 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
 **Depth (Wave 3+):**
 - **S8 · Hetzner native cutover** [large] — seam → hcloud-go, env-gated,
   equivalence golden test (Decision 11). Needs S1.
-- **S9 · Lifecycle verbs neutral + SPA lifecycle actions** [medium] — lift
-  archive/decommission/resurrect/adopt/eject/audit to `bp cloud instance`
-  through the seam; SPA instance-workspace action row with typed-confirm modal +
-  optimistic pill transitions.
+- **S9 · Lifecycle verbs neutral (CLI)** [W3, large] — facet capability split
+  (Decision 20) + dispatch-layer neutral verbs (Decision 21): `bp cloud
+  instance archive|resurrect|decommission|adopt|audit|pause|resume`, hetzner
+  guts byte-untouched + refute-tested, azure decommission-without-archive +
+  minus-archives audit, fixture facets + parity + providers matrix columns.
+  The SPA half moved into S11b (the action row consumes the conduit).
 - **S10 · CLI chrome parity** [medium] — one table formatter for both providers
   (provider glyph + lifecycle glyph from emitted Go tokens), golden-render tests.
-- **S11 · Console fleet + Infra tab** [large] — mixed-provider fleet, per-provider
-  infra panel from the neutral overview, audit cross-check surfaced in the
-  attention queue with fix-it hints, lifecycle modals.
+- **S11a · Capability conduit** [W3, medium] — Decision 22: committed priv
+  fixture copy + byte-drift ExUnit gate + `GET /v1/providers/capabilities`
+  (tier + generic capability bools + FailureCopy gap reasons).
+- **S11b · Console fleet + lifecycle action row** [W3, medium] — fleet rows
+  show region/server_type (live from barkpark_json); lifecycle pill rendered
+  through the S4 `instanceLifecycle` tokens (client-derived states mapped);
+  instance-workspace lifecycle action row driven by the conduit: decommission
+  is LIVE (existing deprovision path upgraded to the typed-confirm destroy
+  modal), provider-supported-but-console-unwired verbs render an honest
+  `bp cloud instance <verb> <name>` CLI affordance, unsupported verbs render
+  disabled with the SERVER-OWNED gap reason. Pure model helpers hooked via
+  `__bpTestHook`.
+- **S11c · Infra tab** [large, later] — per-provider infra panel from the
+  neutral overview, the :mutate/:destroy raw-resource allowlist routes (the
+  catalog tiers declared-but-unrouted), audit cross-check in the attention
+  queue. NOT wave 3.
 - **S12 · Metrics: agent vitals beat + Metrics tab + `bp cloud instance top`**
   [large] — Decision 13.
 - **S13 · Domains/TLS checklist panel** [medium] — Vercel-grade per-domain
@@ -406,3 +505,109 @@ not-done; the LEAD closes the "PR merged" criterion + lifecycle on merge.
   neutral), S11 (console fleet/infra tab consuming barkpark_json's new
   provider/region/server_type), and the S16 warm-pool-pin fix. S8 (hetzner
   native) and S14 (portable archives) stay behind those.
+
+### Wave 2026-07-09d — Operate the fleet (W3: S9, S11a, S11b, warm-pool pin, pricing) — PLANNED
+
+Waves 1+2 fully MERGED (#1629–#1633, #1661–#1664); post-integration wired smoke
+passed (azure factory resolves in the real binary). Decisions 20–24 ratified
+this wave. Exploration corrections folded in:
+
+- **"Lift the hetzner lifecycle verbs to the seam" was WRONG as stated.** The
+  verbs are ~1500 lines of free CLI functions on raw hcloud-go + a DNS client +
+  cpFleet; the seam's only lifecycle implementer is FakeProvider, and
+  HcloudProvider is a credential-less shell-out struct. Neutrality lands at the
+  dispatch layer (Decision 21); the seam-guts extraction is S8 territory.
+- **"Reuse the /v1/hetzner action allowlist behind neutral routes" conflated two
+  surfaces.** The allowlist is RAW hcloud resources (read tier only routed);
+  the lifecycle verbs' only server routes are worker-token-internal. The SPA
+  action row therefore drives ONLY what the CP can already execute (the
+  deprovision queue = decommission); everything else is an honest CLI
+  affordance or a reasoned gap — no new user-authed lifecycle routes this wave.
+- **The "CP-served conduit reading the same fixture" did not exist** (code
+  comments claiming it were false). Decision 22 builds it as committed
+  duplicate + byte-drift gate; conduit passes bools through generically so the
+  S9 facet split and the conduit build in parallel.
+- **The warm-pool pin is TWO-STACK** (Decision 23): the CP default-stamps
+  nbg1/cax11 onto unpinned hetzner claims while the pool truth is env-derived
+  nbg1/cx23 — a Go-only guard would skip warm for every unpinned launch.
+- **Pricing serve-stale forces a fake-transport rework** (Decision 24): the
+  process-dictionary fake is invisible to the GenServer; live join verification
+  split to a network-gated backlog task (azh-w3-pricing-live-join-verify).
+
+Slices/tasks (children of azure-hetzner-hosting-epic): azh-w3-s9-neutral-
+lifecycle-cli (large), azh-w3-s11-capability-conduit (medium), azh-w3-s11-fleet-
+lifecycle-row (medium), azh-w3-warm-pool-pin (medium, adopted + repointed to
+Decision 23), azh-w3-pricing-fetch-hardening (medium, adopted + narrowed to the
+offline half). Integration order: S9 → conduit (refresh the priv byte-copy from
+the just-merged Go fixture — the drift gate forces it) → fleet row; warm-pool
+pin and pricing are independent. Non-negotiables carried: mix format/gofmt
+before every commit; all gates offline; FULL cloud suite at integration for
+cloud/ slices; hetzner refute-tests; api/ AuditWebhooksTest red on an untouched
+api/ tree = rerun. NOT this wave: S8, S11c infra tab, S12 metrics, S14 portable
+archives.
+
+### Wave 2026-07-09e — Operate the fleet (W3) — BUILT + REVIEWED
+
+Four of five slices green and reviewer-passed. Integration order S9 → S11a →
+(S11b when re-greened); warm-pool pin + pricing independent:
+
+- **S9 · neutral lifecycle CLI** — merge
+  `loop-epic/s9-bp-cloud-instance-lifecycle-verbs-fac-0-r`. Facet split
+  (archive/resurrect/decommission/adopt/audit) in struct + fixture;
+  `DetectCapabilities(kind, p)` two-source (interface OR RegisterLifecycleVerbs
+  — cli dispatch table + cloud-package hetzner baseline, pinned equal by test);
+  `bp cloud instance <verb> --provider …` with hetzner byte-identical
+  (refute-tested) and azure CLI-level decommission (typed-confirm UNRECOVERABLE
+  banner, VM+DNS+registry-detach+residue-verify) + audit (archives skipped w/
+  honest note); providers matrix grew the 5 facet columns. Reviewer fix: the
+  fake-provider degrade the test comment claimed is now actually asserted.
+  KNOWN INCOHERENCE (small, dev-tier only): the fixture claims fake
+  archive/resurrect/adopt=true via the facet interfaces, but the neutral CLI
+  has no dispatch entry for fake, so those verbs degrade — a generic
+  interface-driven executor would close it; fine to ship as-is.
+- **S11a · capability conduit** — merge
+  `loop-epic/s11a-capability-conduit-cp-serves-provid-1-r` AFTER S9 (the -r
+  branch already has S9-r merged in). GET /v1/providers/capabilities
+  (require_user) serves {tier, capabilities (generic bool passthrough), gaps
+  (FailureCopy.capability_gap_reason/2 — no false capability reason-less)};
+  priv byte-copy + byte-drift ExUnit gate. Reviewer fixes: priv fixture
+  REFRESHED to the post-S9 facet bytes (criterion 4 done); FailureCopy grew
+  specific azure archive/resurrect/adopt facet copy (the actual false keys
+  post-S9 — the aggregated "lifecycle" clauses were dead post-split, removed).
+  FULL cloud suite 1571/0 on the integrated -r branch.
+- **Warm-pool pin (D23)** — merge
+  `loop-epic/warm-pool-honors-a-pinned-hetzner-region-3` (no reviewer changes —
+  clean). CP claims emit pin-or-nil for every provider; Go tryWarmAssign
+  pin-guard vs warmBaseSpec env truth (never hardcoded); hetzner one-shot fills
+  empties from FreshSpec. DEPLOY NOTE: Elixir + Go deploy from the same merge —
+  an old Go worker + new CP would one-shot with an empty spec on unpinned
+  launches (window is one deploy; both stacks ride the one PR).
+- **Pricing serve-stale (D24)** — merge
+  `loop-epic/azure-retail-prices-serve-stale-while-re-4-r`. Stale → serve +
+  ONE coalesced background refresh (GenServer in-flight guard + cache
+  re-check); absent → synchronous (nil-degrade preserved); fake transport now
+  a cross-process named-ETS collaborator. Reviewer fix: the coalescing test
+  had a real race (a fast refresh could land between the two stale reads and
+  flake the assertion) — de-raced with :sys.suspend/resume.
+- **S11b · console lifecycle row — STALLED, not merged.** Built + 14 new
+  pure-helper tests pass, but its gate is red on ONE PRE-EXISTING failure
+  (`__app.test.mjs` test 212, stale styleguide_tokens.txt golden — reviewer
+  REPRODUCED it on untouched origin/main). Ledger records the stall honestly.
+  Re-green by fixing the stale golden (S4/coherence-owned) on main first, then
+  re-run the S11b gate on `loop-epic/s11b-console-operates-the-instance-condu-2`.
+
+**Ledger:** all five W3 tasks in_progress, claimed (epoch 1), evidence stamped;
+reviewer stamped S11a criterion 4 (post-S9 refresh) done on the -r branch. The
+LEAD closes each "PR merged" criterion + lifecycle on merge.
+
+**Carried / next wave:**
+- Fix the stale `styleguide_tokens.txt` golden on main (blocks S11b's gate),
+  then land S11b — the console side of "operate the fleet" is the wave's only
+  gap.
+- Azure audit keys on the barkpark-fqdn tag but AzureProvider.Create stamps
+  only barkpark-managed — real azure boxes will flag `unlabeled-vm` until
+  create stamps the fqdn tag (small follow-up; file with S11b's re-green).
+- azh-w3-pricing-live-join-verify (network-gated armSkuName==slug live check)
+  stays open backlog.
+- After this wave merges: S10 CLI chrome parity, S13 domains/TLS checklist,
+  S12 metrics, S14 portable archives (the bold bet), S8 hetzner native cutover.

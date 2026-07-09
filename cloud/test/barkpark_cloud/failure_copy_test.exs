@@ -181,4 +181,47 @@ defmodule BarkparkCloud.FailureCopyTest do
     # Unknown kind falls back to a provider-agnostic connect-first line.
     assert FailureCopy.provider_not_connected_remediation("gcp") =~ "Providers"
   end
+
+  # ── capability_gap_reason/2 — the honest-degradation copy for a FALSE
+  # capability, server-owned so the SPA + CLI read one reason (charter D8/D16).
+
+  test "azure archive/resurrect/adopt gaps are each named specifically (S9 facet split)" do
+    assert FailureCopy.capability_gap_reason("azure", "archive") =~ "Azure has no archive"
+    assert FailureCopy.capability_gap_reason("azure", "archive") =~ "unrecoverable"
+    assert FailureCopy.capability_gap_reason("azure", "resurrect") =~ "archive"
+    assert FailureCopy.capability_gap_reason("azure", "adopt") =~ "clone-swap"
+  end
+
+  test "hetzner pause gap explains a stopped Hetzner box still bills → archive instead" do
+    reason = FailureCopy.capability_gap_reason("hetzner", "pause")
+    assert reason =~ "Hetzner"
+    assert reason =~ "bill"
+    assert reason =~ "Archive"
+  end
+
+  test "catalog gap is generic across kinds and names the fixed-defaults fallback" do
+    for kind <- ["hetzner", "azure", "gcp"] do
+      reason = FailureCopy.capability_gap_reason(kind, "catalog")
+      assert reason =~ "catalog"
+      assert reason =~ "fixed defaults"
+    end
+  end
+
+  test "every capability key resolves to non-empty copy — no false capability is reason-less" do
+    # The union of capability keys any provider row could carry today, plus a
+    # made-up one to prove the terminal default clause covers a key added later
+    # (S9's facet split) with zero FailureCopy change.
+    for kind <- ["hetzner", "azure", "fake", "brand-new-provider"],
+        capability <-
+          ~w(core catalog archive resurrect decommission adopt audit pause labels some_future_facet) do
+      reason = FailureCopy.capability_gap_reason(kind, capability)
+
+      assert is_binary(reason) and reason != "",
+             "no gap reason for #{kind}/#{capability}"
+    end
+  end
+
+  test "the terminal default clause interpolates an unknown capability name" do
+    assert FailureCopy.capability_gap_reason("gcp", "snapshots") =~ "snapshots"
+  end
 end

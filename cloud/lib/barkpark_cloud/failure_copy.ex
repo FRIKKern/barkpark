@@ -183,4 +183,70 @@ defmodule BarkparkCloud.FailureCopy do
   def provider_not_connected_remediation(_kind) do
     "Connect this provider under Barkpark Cloud → Providers first, then launch again."
   end
+
+  @doc """
+  The server-owned reason a provider LACKS a capability — the honest-degradation
+  copy the fleet/console and CLI render next to a disabled action so a missing
+  capability is visible WITH a reason, never a dead button or fake parity (the
+  wish's "degrade visibly with a reason"; charter Decision 8/16). Keyed on
+  `(kind, capability)`; the terminal default clause GUARANTEES every false
+  capability in `providers_capabilities.json` has a reason — no gap can reach a
+  surface reason-less, even for a capability key added later (S9's facet split).
+
+  Ownership lives HERE, not in the SPA or CLI, so both surfaces read one copy
+  through the `GET /v1/providers/capabilities` conduit and can never drift.
+  """
+  @spec capability_gap_reason(String.t(), String.t()) :: String.t()
+
+  # Azure lifecycle facets (S9 split the old all-or-nothing lifecycle bool into
+  # archive/resurrect/decommission/adopt/audit). Azure honours decommission +
+  # audit; the three it lacks are named specifically so the console can say WHY,
+  # not just "no". Azure has no snapshot substrate — portable archives (charter
+  # Decision 12) are the planned path.
+  def capability_gap_reason("azure", "archive") do
+    "Azure has no archive yet — there's no snapshot substrate there. Portable archives will bring it; until then an Azure decommission is unrecoverable."
+  end
+
+  def capability_gap_reason("azure", "resurrect") do
+    "Resurrect rebuilds a box from its archive, and Azure has no archives yet — portable archives will bring both."
+  end
+
+  def capability_gap_reason("azure", "adopt") do
+    "Adopt is a snapshot-based clone-swap on Hetzner; Azure has no equivalent yet, so the same verb would quietly mean something different."
+  end
+
+  # Hetzner pause: a stopped Hetzner server still bills for its resources, so we
+  # don't offer a pause that lies about cost — archive releases it instead.
+  def capability_gap_reason("hetzner", "pause") do
+    "Hetzner boxes can't be paused — a stopped server still bills. Archive it to stop paying and resurrect it later."
+  end
+
+  # Catalog: the provider doesn't publish a normalized size-and-region catalog
+  # here, so provisioning falls back to fixed defaults (generic across kinds).
+  def capability_gap_reason(_kind, "catalog") do
+    "This provider doesn't publish a size-and-region catalog here yet, so provisioning uses fixed defaults."
+  end
+
+  # Generic per-capability fallbacks — reached by any (kind, capability) pair
+  # not named above, so a new provider or a newly-false capability still degrades
+  # with human copy.
+  def capability_gap_reason(_kind, "lifecycle") do
+    "Lifecycle actions (archive, decommission, resurrect, adopt) aren't available on this provider yet."
+  end
+
+  def capability_gap_reason(_kind, "pause") do
+    "Pausing isn't available on this provider yet."
+  end
+
+  def capability_gap_reason(_kind, "labels") do
+    "Labels aren't available on this provider yet."
+  end
+
+  def capability_gap_reason(_kind, "core") do
+    "Core provisioning isn't available on this provider yet."
+  end
+
+  def capability_gap_reason(_kind, capability) when is_binary(capability) do
+    "The #{capability} capability isn't available on this provider yet."
+  end
 end
