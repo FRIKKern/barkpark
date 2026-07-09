@@ -344,7 +344,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
             )
 
           Process.monitor(sink)
-          {:ok, %{port: port, sink: sink, buffer: ""}}
+          {:ok, %{port: port, sink: sink, buffer: "", pending_controls: %{}}}
       end
     rescue
       e ->
@@ -389,8 +389,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     # Outbound control_request (interrupt / set_permission_mode / set_model).
-    # The CLI answers with a control_response echoing this request_id, which
-    # flows to the sink through the fallback dispatch clause below.
+    # The CLI answers with a control_response echoing this request_id. We map
+    # request_id → kind here so the inbound ack dispatches as a TYPED
+    # {:claude_chat_control, kind, response} (charter D17) — otherwise the ack
+    # falls through to the generic sink event and the ChatLive catch-all eats it.
     def handle_cast({:control_request, request_id, request}, state) do
       line =
         Jason.encode!(%{
@@ -400,6 +402,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
+
+      state =
+        case control_kind(request) do
+          nil -> state
+          kind -> put_in(state.pending_controls[request_id], kind)
+        end
+
       {:noreply, state}
     end
 
@@ -408,8 +417,9 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     @impl true
     def handle_info({port, {:data, chunk}}, %{port: port} = state) do
       {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
-      Enum.each(events, &dispatch_event(&1, state))
-      {:noreply, %{state | buffer: rest}}
+      # Thread state so a control_response ack can prune its pending entry.
+      state = Enum.reduce(events, %{state | buffer: rest}, &dispatch_event/2)
+      {:noreply, state}
     end
 
     def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -437,7 +447,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # Permission asks become a dedicated sink message; any other control
     # request gets an immediate error response so the CLI never hangs waiting
     # on a capability this bridge doesn't implement. Everything else flows
-    # through as a plain chat event.
+    # through as a plain chat event. Each clause RETURNS the (possibly updated)
+    # state — the data handler reduces over events threading it.
     defp dispatch_event(
            %{
              "type" => "control_request",
@@ -457,6 +468,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
            decision_reason: Map.get(request, "decision_reason")
          }}
       )
+
+      state
     end
 
     defp dispatch_event(
@@ -474,9 +487,49 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
+      state
     end
 
-    defp dispatch_event(event, state), do: send(state.sink, {:claude_chat_event, event})
+    # The CLI's ack for one of OUR control_requests (interrupt / set_mode /
+    # set_model). Match it by the request_id we minted and dispatch a TYPED
+    # {:claude_chat_control, kind, response} (charter D17) so ChatLive can assert
+    # the echoed mode instead of trusting a bare subtype:success (D12). An
+    # untracked control_response (not one we sent) flows through as a plain event
+    # — the previous behavior for any ack the LiveView doesn't correlate.
+    defp dispatch_event(%{"type" => "control_response", "response" => response} = event, state)
+         when is_map(response) do
+      case pop_pending(state, Map.get(response, "request_id")) do
+        {nil, state} ->
+          send(state.sink, {:claude_chat_event, event})
+          state
+
+        {kind, state} ->
+          send(state.sink, {:claude_chat_control, kind, Map.get(response, "response") || %{}})
+          state
+      end
+    end
+
+    defp dispatch_event(event, state) do
+      send(state.sink, {:claude_chat_event, event})
+      state
+    end
+
+    # Classify an outbound control_request by its subtype so the inbound ack can
+    # be typed. Anything else (or a malformed request) is left untracked.
+    defp control_kind(%{"subtype" => "interrupt"}), do: :interrupt
+    defp control_kind(%{"subtype" => "set_permission_mode"}), do: :set_mode
+    defp control_kind(%{"subtype" => "set_model"}), do: :set_model
+    defp control_kind(_), do: nil
+
+    # Pull a pending control's kind by request_id (nil if untracked/absent).
+    defp pop_pending(state, request_id) when is_binary(request_id) do
+      case Map.pop(state.pending_controls, request_id) do
+        {nil, _} -> {nil, state}
+        {kind, rest} -> {kind, %{state | pending_controls: rest}}
+      end
+    end
+
+    defp pop_pending(state, _), do: {nil, state}
 
     defp safe_command(port, data) when is_port(port) do
       Port.command(port, data)

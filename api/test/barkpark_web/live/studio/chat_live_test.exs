@@ -711,6 +711,137 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "offline"
     end
 
+    # ── control acks: the UI never lies about a mode switch (scc-w2, D17) ──
+
+    test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      # the CLI echoes back exactly the mode we asked for → confirmed
+      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "default"}})
+
+      html = render(view)
+      assert html =~ "ask to act"
+      refute html =~ "Couldn't switch permission mode"
+    end
+
+    test "an empty mode echo reverts the optimistic selector + posts an honest line",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      # optimistic switch to acceptEdits…
+      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      assert html =~ "auto-accept edits"
+
+      # …but the CLI's ack carries an EMPTY response (the silent-no-op trap, D12):
+      # we must NOT trust subtype:success, so the switch reverts to plan.
+      send(view.pid, {:claude_chat_control, :set_mode, %{}})
+      html = render(view)
+      assert html =~ "switch permission mode"
+      assert html =~ "plan (read-only)"
+    end
+
+    test "a mismatched mode echo reverts to the prior mode", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      # the CLI reports a DIFFERENT mode than we asked → the switch did not take
+      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "plan"}})
+
+      html = render(view)
+      assert html =~ "switch permission mode"
+      assert html =~ "plan (read-only)"
+    end
+
+    # ── Stopping… cannot wedge (scc-w2, D18) ──────────────────────────────
+
+    test "a wedged interrupt times out, force-closes, and frees the composer", %{view: view} do
+      Application.put_env(:barkpark, :studio_chat_interrupt_timeout_ms, 60)
+      on_exit(fn -> Application.delete_env(:barkpark, :studio_chat_interrupt_timeout_ms) end)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      render_click(element(view, ~s(button[phx-click=stop_turn])))
+      assert render(view) =~ "stopping"
+
+      # NO terminal result arrives — the CLI wedged. The timeout must fire.
+      Process.sleep(180)
+      html = render(view)
+      assert html =~ "offline"
+      assert html =~ "force-closed"
+      # the composer is usable again — Stop is gone, Send is back
+      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
+    end
+
+    test "a result arriving before the timeout makes the timer a no-op", %{view: view} do
+      Application.put_env(:barkpark, :studio_chat_interrupt_timeout_ms, 60)
+      on_exit(fn -> Application.delete_env(:barkpark, :studio_chat_interrupt_timeout_ms) end)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      render_click(element(view, ~s(button[phx-click=stop_turn])))
+
+      # the interrupt result lands FIRST → back to ready
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "error_during_execution",
+           "terminal_reason" => "aborted_streaming"
+         }}
+      )
+
+      assert render(view) =~ "ready"
+
+      # let the (now stale) timer fire — it must NOT flip offline
+      Process.sleep(180)
+      html = render(view)
+      refute html =~ "offline"
+      assert html =~ "ready"
+    end
+
+    # ── extracted teardown is idempotent (scc-w2, D18) ────────────────────
+
+    test "a close-then-DOWN double fire does not duplicate the offline system line",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      pid = session_pid(view)
+
+      send(view.pid, {:claude_chat_exit, 2})
+      # the DOWN that follows the process death — teardown already ran, so this
+      # must find no matching session pid and no-op (never a second system line)
+      send(view.pid, {:DOWN, make_ref(), :process, pid, :normal})
+
+      html = render(view)
+      count = html |> String.split("Send a message to resume it") |> length() |> Kernel.-(1)
+      assert count == 1
+      assert html =~ "offline"
+    end
+
+    test "a bare process DOWN (no exit frame) runs the honest teardown", %{view: view} do
+      # a live turn with a pending approval, then a crash surfacing ONLY as DOWN
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+      pid = session_pid(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{request_id: "req-down", tool_name: "Bash", input: %{}, title: nil, decision_reason: nil}}
+      )
+
+      send(view.pid, {:DOWN, make_ref(), :process, pid, :killed})
+      html = render(view)
+
+      assert html =~ "offline"
+      assert html =~ "ended unexpectedly"
+      # the pending approval is force-canceled, never a dead button
+      assert html =~ "✗ canceled"
+      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+    end
+
     test "an unknown stale event does not crash the LiveView", %{view: view} do
       render_hook(view, "totally-unknown-event", %{})
       send(view.pid, {:claude_chat_event, %{"type" => "mystery"}})
@@ -857,6 +988,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert store_id(view) == nil
       assert session_pid(view) == nil
       assert html =~ "No chats yet"
+    end
+
+    test "switching mode on a reopened (no-live) session persists so reopen shows it",
+         %{conn: conn} do
+      sid = seed_session("Modey")
+      assert StudioChat.get_session(sid).mode == "plan"
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      # reopen did NOT spawn — this is the no-live-session set-mode branch
+      assert session_pid(view) == nil
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+
+      # the store row carries the switch (not its stale creation mode)…
+      assert StudioChat.get_session(sid).mode == "acceptEdits"
+
+      # …so a fresh reopen shows it in the selector + drives the next spawn's mode
+      {:ok, view2, _html2} = live(conn, "/studio/chat/#{sid}")
+      assert lv_assigns(view2)[:mode] == "acceptEdits"
     end
 
     test "the first successful turn kicks an async AI title that lands in the sidebar",
