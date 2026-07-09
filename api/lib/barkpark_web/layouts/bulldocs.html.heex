@@ -35,6 +35,28 @@
            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .bp-paper-shell { max-width: 820px; margin: 0 auto; padding: 32px 24px 96px; }
 
+    <%!-- Source Serif 4 — self-hosted variable woff2 (Roman + Italic in
+          priv/static/fonts/, served at /fonts/ by Plug.Static). The reader's
+          serif prose stack (`font.reading`) names "Source Serif 4" as its
+          web-safe fallback, but the reader head shipped ZERO @font-face — so
+          off-macOS (no Iowan Old Style / Palatino) it fell through to bare
+          `serif` instead of the intended face. These declarations self-host it
+          on the reader exactly as root.html.heex does for Studio (S9). They do
+          NOT change the stack order: on macOS Iowan still wins; this only makes
+          the already-named fallback real. Source Serif 4, SIL OFL 1.1 — see
+          fonts/SourceSerif4-OFL.txt. Hand-authored — OUTSIDE the GENERATED
+          marker below (nothing here fans from tokens.json). --%>
+    @font-face {
+      font-family: 'Source Serif 4';
+      src: url('/fonts/SourceSerif4Variable-Roman.woff2') format('woff2');
+      font-weight: 200 900; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Source Serif 4';
+      src: url('/fonts/SourceSerif4Variable-Italic.woff2') format('woff2');
+      font-weight: 200 900; font-style: italic; font-display: swap;
+    }
+
     <%!-- The ONE canonical paper-surface source (paper-surface.css via
           Barkpark.PortableDoc.Render.Stylesheet) — the SAME bytes Studio embeds.
           It provides the `--paper-*`/`--bp-*` tokens + `.bp-paper-surface`
@@ -81,6 +103,7 @@
          block below MUST re-skin it — otherwise dark-mode link borders resolve
          to this light rgba and vanish against the dark page. */
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
     }
     body:has(.bp-paper-article) {
       background: var(--paper-bg-deep);
@@ -100,6 +123,7 @@
            block in paper-surface.css) — without it links keep the light-theme
            rgba(162,57,37,0.10) border, invisible on the dark page. */
         --paper-accent-soft: rgba(70, 179, 148, 0.16);
+        --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
         /* Callout TONE tokens + faint ink + chrome — the SAME reason as the
            --paper-* above: paper-surface.css keys their DARK values on
            `html[data-theme="dark"]`, which the reader NEVER stamps, so an
@@ -145,6 +169,7 @@
       --paper-rule: #dde7e2;
       --paper-accent: #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
+      --paper-reading-accent: #a23925;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="evergreen"] body:has(.bp-paper-article),
@@ -156,6 +181,7 @@
         --paper-rule: rgba(231, 237, 233, 0.13);
         --paper-accent: #45b394;
         --paper-accent-soft: rgba(70, 179, 148, 0.16);
+        --paper-reading-accent: #d98a6a;
         --paper-ink-faint: #6c7a74;
         --paper-chrome-bg: #131d19;
         --paper-chrome-border: rgba(231, 237, 233, 0.13);
@@ -185,6 +211,7 @@
       --paper-rule: #e2dcda;
       --paper-accent: #c34e13;
       --paper-accent-soft: rgba(195, 78, 19, 0.10);
+      --paper-reading-accent: #bf321d;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="ember"] body:has(.bp-paper-article),
@@ -196,6 +223,7 @@
         --paper-rule: rgba(228, 221, 216, 0.13);
         --paper-accent: #f7993b;
         --paper-accent-soft: rgba(247, 153, 59, 0.16);
+        --paper-reading-accent: #f5855c;
         --paper-ink-faint: #716b67;
         --paper-chrome-bg: #18120d;
         --paper-chrome-border: rgba(228, 221, 216, 0.13);
@@ -225,6 +253,7 @@
       --paper-rule: #dbdee2;
       --paper-accent: #2f56b1;
       --paper-accent-soft: rgba(47, 86, 177, 0.10);
+      --paper-reading-accent: #0f8299;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="fjord"] body:has(.bp-paper-article),
@@ -236,6 +265,7 @@
         --paper-rule: rgba(218, 223, 229, 0.13);
         --paper-accent: #68a2e8;
         --paper-accent-soft: rgba(104, 162, 232, 0.16);
+        --paper-reading-accent: #53d6ea;
         --paper-ink-faint: #686d72;
         --paper-chrome-bg: #0f1319;
         --paper-chrome-border: rgba(218, 223, 229, 0.13);

@@ -55,8 +55,9 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface, .bp-paper-body {
   /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
      actually renders in the macOS system serif (Iowan Old Style). We mirror
-     that rendered face here; self-hosted Source Serif 4 stays in the stack as
-     a cross-platform fallback (still @font-face'd above). */
+     that rendered face here; Source Serif 4 stays in the stack as a
+     cross-platform fallback. It is NOT self-hosted (@font-face'd) yet — that is
+     S9's flag-gated work; until then it resolves only where the OS has the face. */
   --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
   --paper-font-mono: ui-monospace, Menlo, monospace;
   /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
@@ -200,7 +201,7 @@ html[data-theme="dark"] .bp-paper-body {
 }
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
-  border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft);
+  border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft);
   line-height: 1.5; font-size: 1.2rem;
 }
 
@@ -320,6 +321,7 @@ html[data-theme="light"] .bp-paper-body {
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
 }
 html[data-theme="dark"] .bp-paper-surface,
 html[data-theme="dark"] .bp-paper-body {
@@ -334,6 +336,7 @@ html[data-theme="dark"] .bp-paper-body {
   --paper-accent-soft: rgba(70, 179, 148, 0.16);
   --paper-chrome-bg: #131d19;
   --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-reading-accent: #d98a6a;
 }
 .bp-paper-surface, .bp-paper-body {
   --paper-bg: #f6faf9;
@@ -347,6 +350,7 @@ html[data-theme="dark"] .bp-paper-body {
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
 }
 .bp-paper-surface, .bp-paper-body {
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
@@ -414,6 +418,7 @@ html[data-bp-theme="evergreen"] .bp-paper-surface, html[data-bp-theme="evergreen
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-reading-accent: #a23925;
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -431,6 +436,7 @@ html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-
   --paper-accent-soft: rgba(70, 179, 148, 0.16);
   --paper-chrome-bg: #131d19;
   --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-reading-accent: #d98a6a;
   --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
@@ -448,6 +454,7 @@ html[data-bp-theme="ember"] .bp-paper-surface, html[data-bp-theme="ember"] .bp-p
   --paper-accent-soft: rgba(195, 78, 19, 0.10);
   --paper-chrome-bg: #fef9f7;
   --paper-chrome-border: rgba(41, 29, 25, 0.12);
+  --paper-reading-accent: #bf321d;
   --ok-hsl: 138.34 50.65% 34.78%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 3.67 50.42% 48.54%; --info-hsl: 221.2 49.02% 51.79%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -465,6 +472,7 @@ html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
   --paper-accent-soft: rgba(247, 153, 59, 0.16);
   --paper-chrome-bg: #18120d;
   --paper-chrome-border: rgba(228, 221, 216, 0.13);
+  --paper-reading-accent: #f5855c;
   --ok-hsl: 134.02 37.1% 56.89%; --warn-hsl: 37.47 67.56% 50.7%; --danger-hsl: 5.31 83.22% 69.77%; --info-hsl: 220.6 86.84% 72.26%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
@@ -482,6 +490,7 @@ html[data-bp-theme="fjord"] .bp-paper-surface, html[data-bp-theme="fjord"] .bp-p
   --paper-accent-soft: rgba(47, 86, 177, 0.10);
   --paper-chrome-bg: #f8fafe;
   --paper-chrome-border: rgba(28, 32, 42, 0.12);
+  --paper-reading-accent: #0f8299;
   --ok-hsl: 137.23 45.13% 35.85%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.05 47.78% 48.54%; --info-hsl: 221.08 46.09% 51.46%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -499,6 +508,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
   --paper-accent-soft: rgba(104, 162, 232, 0.16);
   --paper-chrome-bg: #0f1319;
   --paper-chrome-border: rgba(218, 223, 229, 0.13);
+  --paper-reading-accent: #53d6ea;
   --ok-hsl: 132.78 31.44% 58.66%; --warn-hsl: 35.93 57.77% 55.07%; --danger-hsl: 5.83 69.33% 69.33%; --info-hsl: 220.37 70.04% 71.14%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);

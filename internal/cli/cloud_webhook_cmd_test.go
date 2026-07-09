@@ -275,8 +275,9 @@ func TestWebhookDeliveriesColoring(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
-	if !strings.Contains(colored, "\x1b[32m") || !strings.Contains(colored, "\x1b[31m") || !strings.Contains(colored, "\x1b[36m") {
-		t.Fatalf("expected green+red+cyan status cells, got:\n%s", colored)
+	// info is BLUE (34) at the basic-16 floor — the deliberate S6 retint (was cyan 36).
+	if !strings.Contains(colored, "\x1b[32m") || !strings.Contains(colored, "\x1b[31m") || !strings.Contains(colored, "\x1b[34m") {
+		t.Fatalf("expected green+red+blue(info) status cells, got:\n%s", colored)
 	}
 	// a pending row's null code/latency shows an em dash, not a blank.
 	if !strings.Contains(stripANSI(colored), "—") {

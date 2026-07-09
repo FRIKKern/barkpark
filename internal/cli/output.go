@@ -11,6 +11,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/pdrender"
+	"github.com/FRIKKern/barkpark/internal/semrole"
+
+	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-isatty"
 )
 
@@ -28,6 +32,14 @@ type writer struct {
 	quiet          bool
 	verbose        bool
 	isTTY          bool
+
+	// colorProfile is the terminal colour capability the status/lifecycle cell
+	// painter degrades against (NoColor→ANSI16→ANSI256→TrueColor), resolved once in
+	// resolveColorProfile. renderer is a lipgloss renderer bound to that profile so
+	// the 256/truecolor rungs downsample deterministically; nil until resolved (and
+	// unused on the pinned ANSI16 floor).
+	colorProfile pdrender.Profile
+	renderer     *lipgloss.Renderer
 }
 
 func newWriter(stdout, stderr io.Writer) *writer {
@@ -63,6 +75,40 @@ func (w *writer) applyGlobals(g globals) {
 	} else {
 		w.output = "json"
 	}
+	w.resolveColorProfile()
+}
+
+// resolveColorProfile picks the terminal colour profile the status/lifecycle cell
+// painter degrades against — truecolor → 256 → 16 → none — REUSING the paper
+// command's termenv machinery (paperResolveProfile/paperTermenvProfile) rather than
+// standing up a second detection switch (charter Decision 3). Precedence: NO_COLOR
+// and --no-color have already forced w.color off upstream and always win; otherwise
+// BP_COLOR is the escape hatch, accepting the SAME alias vocabulary as `bp paper
+// --profile` (truecolor/24bit/rgb, ansi256/256, ansi16/16, none/nocolor/plain,
+// auto); with no BP_COLOR, auto keys off the tty exactly like paper — a tty ⇒ a
+// SAFE ANSI256 (truecolor only when explicitly asked). BP_COLOR=none/plain is a
+// valid off switch too. On any coloured profile it binds a lipgloss renderer to
+// w.stdout at that profile so the 256/truecolor paint downsamples deterministically
+// (termenv owns the 24-bit→256 step and adaptive light/dark selection).
+func (w *writer) resolveColorProfile() {
+	w.colorProfile = pdrender.NoColor
+	if !w.color {
+		return
+	}
+	profile := "auto"
+	if bp := strings.TrimSpace(os.Getenv("BP_COLOR")); bp != "" {
+		profile = bp
+	}
+	p := paperResolveProfile(profile, w.isTTY)
+	if p == pdrender.NoColor {
+		// BP_COLOR=none/plain (or auto over a non-tty) ⇒ colour off entirely.
+		w.color = false
+		return
+	}
+	w.colorProfile = p
+	r := lipgloss.NewRenderer(w.stdout)
+	r.SetColorProfile(paperTermenvProfile(p))
+	w.renderer = r
 }
 
 // resolveOutputForCommand lets a command's manifest default_output take effect
@@ -100,23 +146,61 @@ func noColorEnv() bool {
 	return set
 }
 
-// paintCell wraps an already-padded table cell in the ANSI color of its status
-// role, but ONLY when color is enabled (a tty, not --no-color) AND the bare
-// value maps to a role. The role is derived from bare (the un-padded value) so a
-// cell's trailing alignment spaces never defeat the match; the color wraps the
-// padded string so the column widths — measured on bare strings upstream — are
-// untouched. When color is off it returns padded unchanged, keeping piped and
-// --no-color output byte-for-byte identical to an uncolored build (charter
-// decision 12). It is the one seam table.go and the cloud-status view share.
+// paintCell wraps an already-padded table cell in the semantic colour of its
+// status/lifecycle token, but ONLY when colour is enabled (a tty, not --no-color,
+// not NO_COLOR) AND the bare value resolves to a token. The token is resolved from
+// bare (the un-padded value, so a cell's trailing alignment spaces never defeat the
+// match) through semrole.Color, which owns the Decision-4 precedence: a LIFECYCLE
+// state paints its lifecycle hue FIRST — so `done`/`closed` are TEAL, not ok-green —
+// and any other value routes to its ok/info/warn/danger status tone. The colour
+// wraps the padded string so the column widths — measured on bare strings upstream —
+// are untouched. With colour off it returns padded unchanged, keeping piped and
+// --no-color output byte-for-byte identical to an uncoloured build (Decision 12). It
+// is the one seam table.go and every cloud-status view share.
+//
+// The paint degrades down the resolved colour ladder (w.colorProfile): at
+// TrueColor/ANSI256 the token's adaptive hex renders through the writer's bound
+// lipgloss renderer, so termenv owns light/dark selection and the 24-bit→256
+// downsample; at the ANSI16 floor it emits the PINNED semrole.GenANSI16 SGR for the
+// value's status role (info=blue 34 — the deliberate cross-surface retint) rather
+// than a lossy termenv downsample of the hex. Lifecycle states degrade to their
+// status role at the floor (done→ok→green): 16 colours can't carry the teal hue.
 func (w *writer) paintCell(padded, bare string) string {
 	if !w.color {
 		return padded
 	}
-	code := ansiForRole(statusRole(bare))
-	if code == "" {
+	light, dark, colored := semrole.Color(bare)
+	if !colored {
 		return padded
 	}
-	return code + padded + ansiReset
+	// The ANSI16 floor — and the safe fallback when no higher-profile renderer is
+	// bound — emits the PINNED role-keyed semrole.GenANSI16 codes directly, never a
+	// termenv downsample of the hex. In production a coloured writer always binds a
+	// renderer (resolveColorProfile); a nil renderer means an un-resolved writer, for
+	// which the universally-safe basic-16 rung is the right default.
+	if w.colorProfile == pdrender.ANSI16 || w.renderer == nil {
+		if role := statusRole(bare); role != "" {
+			if code, ok := semrole.GenANSI16[role]; ok {
+				return fmt.Sprintf("\033[%dm%s%s", code, padded, ansiReset)
+			}
+		}
+		return padded
+	}
+	return w.cellStyler().
+		Foreground(lipgloss.AdaptiveColor{Light: light, Dark: dark}).
+		Render(padded)
+}
+
+// cellStyler returns a lipgloss style bound to the writer's resolved colour
+// profile (set in resolveColorProfile). A nil renderer — a writer that never
+// resolved a profile — falls back to the package default so a bare style still
+// renders; tests that exercise the 256/truecolor paint set w.renderer explicitly
+// for byte-determinism.
+func (w *writer) cellStyler() lipgloss.Style {
+	if w.renderer != nil {
+		return w.renderer.NewStyle()
+	}
+	return lipgloss.NewStyle()
 }
 
 // out writes a line to stdout.

@@ -15,14 +15,22 @@ defmodule Barkpark.PortableDoc.Render.Figures do
 
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
+  # The code-block bar is a reading-character cue (its TUI twin is
+  # `Theme.CodeBar`/`ReadingAccent`), so it draws on the article reading accent —
+  # the terracotta `--paper-reading-accent`, tokenized in `TokensGen` and threaded
+  # through the palette (charter D8). Compile-time bound from `Palettes` (same as
+  # `@font_mono`) so the fallback hex stays sourced, never a re-typed literal.
+  @reading_accent Barkpark.PortableDoc.Render.Palettes.article_reading_accent()
+
   # ── article block HTML emission (code / section divider) ───────────────────
 
-  # A single styled `<pre>` code block for article mode: monospace, parchment
-  # `#f1ede2` background, a 3px terracotta `#1e5347` left-border, padding, and
+  # A single styled `<pre>` code block for article mode: monospace, cool
+  # near-white `--paper-bg-deep` ground, a 3px **terracotta** left-border (the
+  # reading accent, `var(--paper-reading-accent, #a23925)`), padding, and
   # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
   # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
   def code_block_html(value) do
-    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #1e5347);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+    ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid #{@reading_accent};color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
       ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
       ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end

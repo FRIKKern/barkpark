@@ -91,15 +91,15 @@ func TestPdrenderTokensGolden(t *testing.T) {
 		name string
 		c    lipgloss.TerminalColor
 	}{
-		{"accent", th.Accent},
-		{"ink", th.Heading[0].GetForeground()}, // pdInk
-		{"body", th.Body.GetForeground()},      // pdBody
-		{"dim", th.Dim.GetForeground()},        // pdDim
-		{"rule", th.Rule.GetForeground()},      // pdRule
-		{"code-fg", th.InlineCode.GetForeground()},
-		{"code-bg", th.InlineCode.GetBackground()},
-		{"terra", th.PullquoteBar.GetForeground()}, // pdTerra
-		{"label", th.FieldLabel.GetForeground()},   // pdLabel
+		{"accent", th.Accent},                      // pal.ChromeAccent
+		{"ink", th.Heading[0].GetForeground()},     // pal.ChromeInk
+		{"body", th.Body.GetForeground()},          // pal.ChromeTextSecondary
+		{"dim", th.Dim.GetForeground()},            // pal.ChromeDim
+		{"rule", th.Rule.GetForeground()},          // pal.Rule
+		{"code-fg", th.InlineCode.GetForeground()}, // pal.CodeFg
+		{"code-bg", th.InlineCode.GetBackground()}, // pal.CodeBg
+		{"terra", th.PullquoteBar.GetForeground()}, // pal.ReadingAccent
+		{"label", th.FieldLabel.GetForeground()},   // pal.ReadingMuted
 	}
 	for _, r := range rows {
 		c := adaptiveOf(t, "role "+r.name, r.c)

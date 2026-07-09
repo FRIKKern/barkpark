@@ -70,6 +70,37 @@ func TestStyleSheetNoColorGolden(t *testing.T) {
 	styleGolden(t, "styleguide_nocolor.txt", renderStyleSheet(styleNoColor))
 }
 
+// TestStyleSheet256Golden and TestStyleSheet16Golden pin the two MIDDLE rungs of
+// the colour ladder so `bp style` freezes one fixture per profile
+// (truecolor/256/16/nocolor). Same unicode-glyph render as the truecolor golden,
+// downsampled by termenv: ANSI256 → 8-bit indexed SGR, ANSI → the basic-16 codes.
+// A drift in the design tokens OR in termenv's downsample moves these goldens.
+func TestStyleSheet256Golden(t *testing.T) {
+	oldProfile := lipgloss.ColorProfile()
+	oldDark := lipgloss.HasDarkBackground()
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	lipgloss.SetHasDarkBackground(true)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(oldProfile)
+		lipgloss.SetHasDarkBackground(oldDark)
+	})
+
+	styleGolden(t, "styleguide_256.txt", renderStyleSheet(styleColor))
+}
+
+func TestStyleSheet16Golden(t *testing.T) {
+	oldProfile := lipgloss.ColorProfile()
+	oldDark := lipgloss.HasDarkBackground()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	lipgloss.SetHasDarkBackground(true)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(oldProfile)
+		lipgloss.SetHasDarkBackground(oldDark)
+	})
+
+	styleGolden(t, "styleguide_16.txt", renderStyleSheet(styleColor))
+}
+
 // TestThemeSlateGolden is the NEW theme-parameterized golden (the existing
 // color/nocolor goldens stay frozen to renderStyleSheet). It pins the per-theme
 // slate render — status / lifecycle / chrome roles painted through the

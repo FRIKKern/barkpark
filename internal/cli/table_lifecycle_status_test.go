@@ -37,11 +37,14 @@ const taskTablePayload = `{"docs":[` +
 	`{"id":"t4","title":"Filed","lifecycle_status":"done"}` +
 	`]}`
 
-// TestTaskTableColorsLifecycleCells: with color ON, a task list's
-// lifecycle_status cells are painted by role — in_progress cyan (info), blocked
-// yellow (warn), done green (ok) — while a neutral "ready" cell stays unpainted.
-// This is the end-to-end proof the #979 delegation lights up the task board's
-// table view.
+// TestTaskTableColorsLifecycleCells: with color ON at the basic-16 floor, a task
+// list's lifecycle_status cells are painted by role — in_progress BLUE (info, the
+// S6 retint from cyan), blocked yellow (warn), done green (the ok floor: the teal
+// lifecycle hue only survives at 256/truecolor, proven by
+// TestPaintCellLifecycleTealTrueColor) — while a neutral "ready" cell stays
+// unpainted. This is the end-to-end proof the delegation lights up the task board's
+// table view down the whole ladder. The writer carries no bound renderer, so
+// paintCell degrades to the pinned semrole.GenANSI16 floor (deterministic).
 func TestTaskTableColorsLifecycleCells(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
@@ -50,17 +53,19 @@ func TestTaskTableColorsLifecycleCells(t *testing.T) {
 	renderTable(w, []byte(taskTablePayload))
 	got := stdout.String()
 
-	if !strings.Contains(got, "\x1b[36m"+"in_progress") {
-		t.Errorf("expected cyan (info) in_progress; got:\n%q", got)
+	if !strings.Contains(got, "\x1b[34m"+"in_progress") {
+		t.Errorf("expected blue (info) in_progress; got:\n%q", got)
 	}
 	if !strings.Contains(got, "\x1b[33m"+"blocked") {
 		t.Errorf("expected yellow (warn) blocked; got:\n%q", got)
 	}
 	if !strings.Contains(got, "\x1b[32m"+"done") {
-		t.Errorf("expected green (ok) done; got:\n%q", got)
+		t.Errorf("expected green (ok floor) done; got:\n%q", got)
 	}
-	// A neutral lifecycle cell must NOT be wrapped in any color span.
-	if strings.Contains(got, "\x1b[36m"+"ready") ||
+	// A neutral lifecycle cell (ready carries a hue but no status role) must NOT be
+	// wrapped in any colour span at the 16 floor.
+	if strings.Contains(got, "\x1b[34m"+"ready") ||
+		strings.Contains(got, "\x1b[36m"+"ready") ||
 		strings.Contains(got, "\x1b[33m"+"ready") ||
 		strings.Contains(got, "\x1b[32m"+"ready") ||
 		strings.Contains(got, "\x1b[31m"+"ready") {
