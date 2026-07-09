@@ -6466,11 +6466,15 @@ defmodule BarkparkCloud.Web.Router do
       claim_token: job.claim_token,
       name: barkpark.name,
       slug: Barkpark.subdomain_from_url(barkpark),
-      # Region/size come from the row (charter Decision 9), falling back to the
-      # warm-pool defaults when a launch didn't pin them — so a Hetzner default row
-      # still emits nbg1/cax11 (the claim payload is byte-identical).
-      region: barkpark.region || Registry.default_region(),
-      server_type: barkpark.server_type || Registry.default_server_type(),
+      # Region/size come from the row (charter Decision 9), with a PROVIDER-AWARE
+      # fallback when a launch didn't pin them: a Hetzner/default row emits the
+      # warm-pool defaults (nbg1/cax11 — the claim payload stays byte-identical),
+      # while a non-Hetzner row emits nil so the worker's provider fills its OWN
+      # platform defaults (azure: eastus/Standard_B1s, env-overridable). Leaking a
+      # Hetzner slug into an azure claim would fail at ARM, in the job, after the
+      # button — the exact failure Decision 17 exists to prevent.
+      region: claim_region(barkpark),
+      server_type: claim_server_type(barkpark),
       # The decrypted team + instance env, merged most-specific-wins. The worker
       # bakes these into the box's runtime env at provision time. Resolved at
       # CLAIM time so a retry / stale-claim re-pick carries rotated values. Sent
@@ -6485,6 +6489,21 @@ defmodule BarkparkCloud.Web.Router do
 
     add_provider_claim_fields(base, barkpark)
   end
+
+  # The claim's region/size with a provider-aware fallback. Only hetzner (and the
+  # legacy nil provider) may inherit the warm-pool defaults; any other provider
+  # emits the pinned value or nil — the Go provider owns its platform defaults.
+  defp claim_region(%Barkpark{provider: provider, region: region})
+       when provider in [nil, "hetzner"],
+       do: region || Registry.default_region()
+
+  defp claim_region(%Barkpark{region: region}), do: region
+
+  defp claim_server_type(%Barkpark{provider: provider, server_type: server_type})
+       when provider in [nil, "hetzner"],
+       do: server_type || Registry.default_server_type()
+
+  defp claim_server_type(%Barkpark{server_type: server_type}), do: server_type
 
   # Fold the provider routing fields into the claim payload (charter Decision 9).
   #

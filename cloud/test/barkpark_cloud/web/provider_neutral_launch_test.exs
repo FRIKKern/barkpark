@@ -214,5 +214,23 @@ defmodule BarkparkCloud.Web.ProviderNeutralLaunchTest do
       # The decrypted 4-tuple mirrors env-at-claim — the single sanctioned crossing.
       assert payload["credentials"] == @azure_creds
     end
+
+    test "an UNPINNED azure claim emits nil region/size — never the Hetzner warm-pool defaults" do
+      {user, team} = user_with_team()
+      subscribe!(team)
+      connect_azure!(team)
+
+      # No region/server_type pinned: `bp launch azure --name shop` sends neither.
+      assert call(:post, "/v1/launch", %{provider: "azure", name: "Az Bare"}, token_for(user)).status ==
+               201
+
+      payload = json_body(claim())
+      assert payload["kind"] == "azure"
+      # A Hetzner slug (nbg1/cax11) in an azure claim would create the resource
+      # group in a nonexistent ARM location — the worker's azure provider must get
+      # nil and fill its own platform defaults instead.
+      assert payload["region"] == nil
+      assert payload["server_type"] == nil
+    end
   end
 end
