@@ -20,9 +20,10 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
 ```
 
-The installer drops `bp` in `~/.local/bin`. If `bp: command not found`, that
-directory isn't on your `PATH` — add it (`export PATH="$HOME/.local/bin:$PATH"`)
-and restart Codex so the child shell inherits it.
+The installer drops `bp` in `/usr/local/bin`, falling back to `~/.local/bin`
+when that isn't writable. If `bp: command not found`, the fallback directory
+isn't on your `PATH` — add it (`export PATH="$HOME/.local/bin:$PATH"`) and
+restart Codex so the child shell inherits it.
 
 ## 2. Authenticate
 
@@ -49,7 +50,8 @@ codex mcp add barkpark --env BARKPARK_API_URL=https://guerrilla.barkpark.cloud -
 ```
 
 The `--` separates Codex's own flags from the command Codex will run. This
-writes the stanza below into `~/.codex/config.toml` for you.
+writes the core of the stanza below (`command`/`args`/`env`) into
+`~/.codex/config.toml`; add `env_vars` and the timeouts by hand.
 
 ### Or hand-edit `~/.codex/config.toml`
 
@@ -75,9 +77,9 @@ Two keys carry the environment, and the difference is the whole security story:
 
 > **Never write `${BARKPARK_API_TOKEN}` inside a TOML value.** Codex does not
 > document value-level variable expansion in `config.toml`, and an
-> unexpanded `${VAR}` ships as the literal 11-character string — `bp`
-> authenticates with garbage and every call 401s. Secrets travel through
-> `env_vars`, never through `env` interpolation.
+> unexpanded `${VAR}` ships as that literal string — `bp` authenticates with
+> garbage and every call 401s. Secrets travel through `env_vars`, never
+> through `env` interpolation.
 
 `startup_timeout_sec` (default 10) and `tool_timeout_sec` (default 60) are
 raised here so a cold `bp` binary and a slow first manifest fetch don't trip the
@@ -114,9 +116,11 @@ CLI (or the `barkpark` MCP tools) talk to the server in `~/.config/barkpark/`.
 - `bp task ready` — list available work.
 - `bp task next <worker>` — atomically CLAIM the next ready task; claim FIRST —
   the claim returns the brief and an epoch you need to close.
-- `bp task show <id>` — task detail (carries children + child_count).
+- `bp task get <id>` — task detail (carries children + child_count).
 - `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim.
   If it lapsed, re-claim the same task for a fresh epoch, then close.
+- `bp task create ...` — file new work (older binaries lack this verb; fall
+  back to `bp doc create task`).
 - Stamp acceptance criteria in the same atomic write:
   `--set 'criteria:=[{"index":0,"met":true,"evidence":"..."}]'`.
 - Worker id: `codex-<your-name-or-branch>` — pick one, keep it for claim/close
