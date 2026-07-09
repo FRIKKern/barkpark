@@ -80,11 +80,11 @@ func TestPaintCellANSI16Floor(t *testing.T) {
 	var so, se bytes.Buffer
 	w := coloredWriter(&so, &se, pdrender.ANSI16, true)
 	cases := map[string]string{
-		"live":     "\033[32m", // ok → green
-		"failed":   "\033[31m", // danger → red
+		"live":      "\033[32m", // ok → green
+		"failed":    "\033[31m", // danger → red
 		"suspended": "\033[33m", // warn → yellow
-		"building": "\033[34m", // info → BLUE (was cyan 36 before the retint)
-		"done":     "\033[32m", // lifecycle teal degrades to ok/green at the 16 floor
+		"building":  "\033[34m", // info → BLUE (was cyan 36 before the retint)
+		"done":      "\033[32m", // lifecycle teal degrades to ok/green at the 16 floor
 	}
 	for token, want := range cases {
 		got := w.paintCell(token, token)
