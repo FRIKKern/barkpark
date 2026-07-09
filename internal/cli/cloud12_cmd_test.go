@@ -135,6 +135,58 @@ func TestFinishLoginConnectSingleAutoConnects(t *testing.T) {
 	}
 }
 
+// TestFinishLoginConnectDeskOfferWiredAfterAutoConnect: on a genuine both-streams
+// terminal a successful single-barkpark auto-connect ends with the Enter-to-desk
+// offer — a bare Enter propagates the ExitOpenDesk sentinel out of
+// finishLoginConnect (main() turns it into runTUI in-process), and typing n
+// declines to a plain exitOK with the reminder. This is the decision-23 wiring
+// proof: offerOpenDesk is not a dead seam.
+func TestFinishLoginConnectDeskOfferWiredAfterAutoConnect(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin string
+		want  int
+	}{
+		{"bare Enter opens the desk", "\n", ExitOpenDesk},
+		{"n stays put", "n\n", exitOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+			forceDeviceTTY(t, true) // both streams a terminal → the offer fires
+
+			var hits fleetHits
+			srv := newFleetControlPlane(t, &hits, func(self string) string {
+				return `{"barkparks":[{"id":"bp-1","name":"my-park","url":"` + self + `"}]}`
+			}, "admin-secret")
+
+			cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
+			if err := SaveConfig(cfg); err != nil {
+				t.Fatalf("SaveConfig: %v", err)
+			}
+
+			var stdout, stderr bytes.Buffer
+			out := ttyWriter(&stdout, &stderr)
+
+			var code int
+			withStdin(t, tc.stdin, func() { code = finishLoginConnect(out, cfg) })
+
+			if code != tc.want {
+				t.Fatalf("finishLoginConnect = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, tc.want, stdout.String(), stderr.String())
+			}
+			if hits.credentials == 0 {
+				t.Fatal("the auto-connect must have run before the offer")
+			}
+			if !bytes.Contains(stderr.Bytes(), []byte("open the desk")) {
+				t.Fatalf("the desk offer should have prompted on stderr:\n%s", stderr.String())
+			}
+			if tc.want == exitOK && !bytes.Contains(stdout.Bytes(), []byte("Run 'bp'")) {
+				t.Fatalf("declining should leave the 'Run bp' reminder:\n%s", stdout.String())
+			}
+		})
+	}
+}
+
 // TestFinishLoginConnectStealGuardLeavesActiveServer: with bp already connected to
 // a DIFFERENT saved server, a single-barkpark fleet does NOT silently re-point bp
 // — it reports and leaves c.Server untouched, never fetching credentials.
