@@ -75,3 +75,58 @@ Slices land as `loop-epic/parity-<slice>` branches. Integrate in the order above
 share index.js + paper_editor.ex partition + convert.js → source-union + REBUILD
 the bundle once). Full suite (baseline ~7400/0) + mirror-check + status-manifest +
 the extended parity gates. Lead browser-verifies each on localhost:4000 before PR.
+
+## Wave 2 candidates — the pass-2 divergence audit (W1.4, 2026-07-09)
+
+Method: dual-rendered the 91-block `portabledoc-showcase` (50 distinct block
+types). READER via the standalone harness `cd api && mix run --no-start
+scripts/pass2_audit_harness.exs` (calls `Render.render_block(block, %{style:
+:article})` — the SAME call the canvas paint makes — never `mix phx.server`);
+EDIT at spec/source level (node-view `renderHTML` / `dom.className`, node-views
+can't mount headless). Every block type classified into four buckets:
+
+**A. SERVER-PAINTED-BY-CONSTRUCTION** (reader HTML painted into the canvas or
+carried verbatim — parity by construction, gated). NO wave-2 slice.
+`figure` (child rides `bpChild` verbatim → `data-bp-fleet-body` paint hole,
+figure-node.js:156-174), `task-list` (rows are the ONE server producer via
+TaskResolver → `data-bp-fleet-body`, task-list-node.js:196-215), `diagram`
+(edit island edits source, reader renders the figure — fleet §1,
+diagram-node.js:205-224), and the verbatim chips `tasks`/`task-board`/`roadmap`/
+`task-detail`/`cards`/`notes`/`pipeline`/`status-legend`/`form`/`asciicast`/
+`sheet`/`embed`. Gate: `canvas_reader_parity_gate_test.exs` §1/§3/§4.
+
+**B. GATED editable node-views** (each has a dedicated source-level edit⇄reader
+parity assertion). NO wave-2 slice. `divider` (S1, `__divider_parity.test.mjs`,
+14 parity refs), `callout` (S2-S3, `__callout_parity.test.mjs`, 22 refs), `code`
+(S9, `__code_interior.test.mjs`, 10 refs).
+
+**C. PROSE** (paragraph/heading/list/eyebrow/byline/ingress/pullquote + fields):
+bare semantic tags, styled by the shared surface CSS; locked by
+`view_edit_parity_test.exs` (element-rule byte-compare). NO wave-2 slice.
+
+**D. UNGATED DIVERGENCE** — post-07-07 structural node-views wrap reader-shaped
+inner DOM in `bp-canvas-*` chrome with a **round-trip-only** test (`run-convert`
+diff, ZERO reader-parity refs) and **no** structural edit⇄reader assertion. These
+are the wave-2 slices — each adds a `__<block>_parity.test.mjs` in the S1/S2/S9
+mould (assert the node-view `renderHTML`/`dom` source matches the reader emitter's
+tags + classes). The two `LIVE BUG` rows also have a filed parity bug task.
+
+| # | Slice | Reader emits (file:line) | Edit node-view emits (file:line) | Divergence / why ungated |
+|---|---|---|---|---|
+| S10 | **card-slot-parity** `LIVE BUG` | `Components.card_html/2` — bare `<h_>`/`<p>`/`<img>`/`<a>` under `<div class="bp-card[ --tone]">`, "no bp-card__ chrome" (components.ex:328,349-364) | `bp-canvas-card bp-card` with children wrapped in `bp-card__t`/`__d`/`__media`/`__action` (card-node.js:157-161,236) | Edit mirrors the LEGACY `cards` fleet chrome (`Components.cards_html`, components.ex:308-310), NOT the reader `card` widget. Shared CSS `.bp-card h3` vs `.bp-card__t` will not cross-apply → wrong look. `__cards.test.mjs` is round-trip only. |
+| S11 | **section-grid-parity** | `bp-section__grid` (`--bp-tracks`, `--bp-grid-gap`) with `bp-section__cell` per child (compose.ex ~967) | `bp-canvas-section` with `bp-section__title` + `bp-section__body` — NO `bp-section__grid`/`__cell`, no track vars (section-node.js:249-266) | Reader lays children on a CSS grid; edit stacks them in a plain body. `canvas_reader_parity_gate` §6 is a SELF-DECLARED WEAK textual proxy ("NOT render parity"). |
+| S12 | **note-island-parity** | `bp-note` › `bp-note__k` (span) + `bp-note__d` (`<b>` lead + body) | `bp-canvas-note` › `bp-canvas-note__k`/`__lead`/`__body` inputs — its OWN class family, never the reader's `bp-note*` (note-node.js:119-134) | Two separate CSS producers hand-matched for one look; no assertion the island resembles `bp-note`. `__note.test.mjs` round-trip only. |
+| S13 | **stage-island-parity** | `bp-pnode[ bp-pnode--src]` › `bp-pnode__k`/`__t`/`__d` (`Components.pipeline_html`) | `bp-canvas-stage[ --src]` with inputs (stage-node.js:143-197) | DESIGN-1 mandates `bp-canvas-stage` (§7 asserts only the NEGATIVE — no `bp-pnode` leak); nothing asserts the POSITIVE look-parity to `bp-pnode`. |
+| S14 | **columns-parity-assertion** | `<div class="bp-cols" style="--bp-cols:N">` › `bp-cols__c` (walk/compose) | `renderHTML` `class:"bp-cols"` (columns-node.js:115-121), `bp-cols__c` (:150), non-first-class child → `bp-cols__atom` (:250) | Reuses reader classes (parity by construction) but `__columns.test.mjs` has 0 reader-parity refs — a reader `bp-cols` restructure or a node drift ships silently. |
+| S15 | **terminal-parity-assertion** | `bp-term` › `bp-term__bar`(`__dots`/`__title`/`__live`) + `bp-term__body` + `bp-term__foot` | `bp-term bp-canvas-term` › `bp-term__bar`/`__title`(input)/`__live` (terminal-node.js:178-205) | Reuses reader classes; `__terminal.test.mjs` is round-trip only (1 ref). Verify `__body`/`__foot` structural coverage. |
+| S16 | **table-parity-assertion** | `<table class="bp-table">` › `thead`/`tbody` › `bp-table__th`/`__td` (span cells) | `bp-canvas-table` wrapper + `table.bp-table` + col/row rails (table-node.js:243,270-285) | Reuses reader classes; `__table.test.mjs` round-trip only. |
+| S17 | **action-preview-parity** | `<a class="bp-button[ bp-button--primary]">` | `bp-canvas-action` with a LIVE `bp-button` preview + edit islands (action-node.js:14-15,187-206) | Preview reuses reader classes but no test pins the preview to the reader button emitter. |
+
+**Filed bugs** (under `paper-edit-parity-endgame`): S10 card-slot mismatch
+(`parity2-bug-card-slot-chrome`); the `task-detail` reader has NO empty-state —
+an unresolved task-detail returns `""` while sibling widgets render
+`bp-tasks--empty` (components.ex:80-83,106 vs :39) (`parity2-bug-taskdetail-empty-state`).
+
+Integration: S10-S13 are self-contained (card/section/note/stage node-views —
+no shared partition). S14-S17 add assertions only (no node-view edit) → can batch.
+Prefer LIVE-BUG slices (S10, then S11) first.
