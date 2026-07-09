@@ -51,6 +51,9 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 		Runner:      git,
 		Checkout:    "/opt/barkpark",
 		DiskProbe:   func() (int, error) { return 42, nil },
+		CPUProbe:    func() (int, error) { return 73, nil },
+		MemProbe:    func() (int, error) { return 61, nil },
+		LoadProbe:   func() (float64, error) { return 1.25, nil },
 		PGSizeProbe: func() (int64, error) { return 1234567, nil },
 		BackupProbe: func() (bool, string, error) { return true, "last backup 2h ago", nil },
 
@@ -74,6 +77,15 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	}
 	if r.DiskUsedPercent != 42 {
 		t.Errorf("DiskUsedPercent = %d, want 42", r.DiskUsedPercent)
+	}
+	if r.CPUUsedPercent != 73 {
+		t.Errorf("CPUUsedPercent = %d, want 73", r.CPUUsedPercent)
+	}
+	if r.MemUsedPercent != 61 {
+		t.Errorf("MemUsedPercent = %d, want 61", r.MemUsedPercent)
+	}
+	if r.Load1 != 1.25 {
+		t.Errorf("Load1 = %v, want 1.25", r.Load1)
 	}
 	if r.PGSizeBytes != 1234567 {
 		t.Errorf("PGSizeBytes = %d, want 1234567", r.PGSizeBytes)
@@ -108,6 +120,15 @@ func TestGatherReportHonestUnknowns(t *testing.T) {
 	if r.DiskUsedPercent != -1 {
 		t.Errorf("DiskUsedPercent = %d, want -1 (no probe)", r.DiskUsedPercent)
 	}
+	if r.CPUUsedPercent != -1 {
+		t.Errorf("CPUUsedPercent = %d, want -1 (no probe)", r.CPUUsedPercent)
+	}
+	if r.MemUsedPercent != -1 {
+		t.Errorf("MemUsedPercent = %d, want -1 (no probe)", r.MemUsedPercent)
+	}
+	if r.Load1 != -1 {
+		t.Errorf("Load1 = %v, want -1 (no probe)", r.Load1)
+	}
 	if r.PGSizeBytes != -1 {
 		t.Errorf("PGSizeBytes = %d, want -1 (no probe)", r.PGSizeBytes)
 	}
@@ -129,6 +150,34 @@ func TestGatherReportHealthGateDown(t *testing.T) {
 	})
 	if r.HealthStatus != "down" {
 		t.Errorf("HealthStatus = %q, want down", r.HealthStatus)
+	}
+}
+
+// TestGatherReportVitalsFailSoft proves each vital probe is INDEPENDENTLY
+// fail-soft: a CPU probe that errors leaves CPUUsedPercent at the -1 sentinel
+// while a wired memory/load probe still lands its reading. A partial box phones
+// home whatever it can prove.
+func TestGatherReportVitalsFailSoft(t *testing.T) {
+	r := gatherReport(ReportConfig{
+		CPUProbe:  func() (int, error) { return 0, errors.New("no /proc/stat") },
+		MemProbe:  func() (int, error) { return 55, nil },
+		LoadProbe: func() (float64, error) { return 0.5, nil },
+	})
+
+	if r.CPUUsedPercent != -1 {
+		t.Errorf("CPUUsedPercent = %d, want -1 (probe errored)", r.CPUUsedPercent)
+	}
+	if r.MemUsedPercent != 55 {
+		t.Errorf("MemUsedPercent = %d, want 55 (probe ok)", r.MemUsedPercent)
+	}
+	if r.Load1 != 0.5 {
+		t.Errorf("Load1 = %v, want 0.5 (probe ok)", r.Load1)
+	}
+	// A zero-CPU reading is real data, not the sentinel: a probe returning 0
+	// must land 0, distinct from -1.
+	r2 := gatherReport(ReportConfig{CPUProbe: func() (int, error) { return 0, nil }})
+	if r2.CPUUsedPercent != 0 {
+		t.Errorf("CPUUsedPercent = %d, want 0 (idle is real, not the -1 sentinel)", r2.CPUUsedPercent)
 	}
 }
 

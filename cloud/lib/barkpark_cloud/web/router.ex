@@ -41,6 +41,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
+      GET     /v1/barkparks/:id/metrics user  a window of health beats as cpu/mem/disk/load series (team-scoped)
       GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
@@ -120,6 +121,7 @@ defmodule BarkparkCloud.Web.Router do
     Events,
     FailureCopy,
     GitHub,
+    Metrics,
     Notifications,
     OAuth,
     Registry,
@@ -4658,6 +4660,50 @@ defmodule BarkparkCloud.Web.Router do
               end
 
             json(conn, 200, %{telemetry: telemetry})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/metrics?points=N → 200 {ok, collected_at, instance,
+  # beat, points, series, service_health} | 404. The time-series companion to
+  # /telemetry (which serves the single latest beat): it folds a WINDOW of the
+  # instance's health beats — the vitals the agent now rides on its 60s beat
+  # (cpu/mem/disk/load) — into oldest-to-newest series the console's Metrics tab
+  # (S12b) and `bp cloud instance top` render. Pure OBSERVABILITY over data the
+  # agent ALREADY captures: no new ingest route, no new store — the durable
+  # `agent_events` table IS the window (a per-60s beat adds no rows beyond the
+  # health event that already lands; an ETS ring would empty on every blue/green
+  # deploy). `BarkparkCloud.Metrics.build/3` is the pure, total shaper.
+  #
+  # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
+  # telemetry / usage / domain-status routes (wrong-team / absent / malformed id
+  # are indistinguishable). `points` is clamped (default 30, cap 200) via the
+  # shared parse_limit idiom. TOTAL over a sick/silent box: an instance that has
+  # never phoned home a beat is a normal 200 with beat.status "absent" and empty
+  # series, never a 500. beat.status live|stale|absent keys off
+  # Registry.health_stale_after_seconds() — the CP-wide degraded threshold,
+  # never a new constant.
+  get "/v1/barkparks/:id/metrics" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        conn = fetch_query_params(conn)
+        points = parse_limit(conn.query_params["points"], 30, 200)
+
+        case resolve_team_barkpark(conn.assigns.current_team, conn.path_params["id"]) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          %Barkpark{} = bp ->
+            events = Registry.recent_events(bp, points)
+            json(conn, 200, Metrics.build(bp, events, points: points))
         end
     end
   end
