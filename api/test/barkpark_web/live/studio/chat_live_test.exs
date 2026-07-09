@@ -590,7 +590,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # nudge recency so the ordering is deterministic
       StudioChat.update_status(older, "active")
       Process.sleep(5)
-      newer = seed_session("Newer chat", status: "working")
+      _newer = seed_session("Newer chat", status: "working")
 
       {:ok, _view, html} = live(conn, "/studio/chat")
 

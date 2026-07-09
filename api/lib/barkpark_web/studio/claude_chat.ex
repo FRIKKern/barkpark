@@ -66,11 +66,18 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   @doc """
   The subprocess command as `{executable, args}`. Defaults to the Claude CLI
-  in streaming print mode, threading the session flags built by `build_args/2`.
-  Overridable via config: a `:command` override is verbatim (Port-plumbing
-  tests only — it BYPASSES `build_args`, so flag assertions through it are
-  vacuous, D9); a `:binary` override keeps `build_args` (the argv-echo seam
-  that proves `--session-id`/`--resume` end-to-end).
+  in streaming print mode, plan permission mode. Overridable via config
+  (tests inject a trivial command so they don't require `claude`).
+
+  `session_opts` threads session identity onto the real argv through the pure
+  `build_args/2` seam (`%{session_id: uuid}` ⇒ `--session-id`,
+  `%{session_id: uuid, resume: true}` ⇒ `--resume`).
+
+  VACUOUS-GREEN LAW: the `:command` config override returns its tuple
+  **verbatim**, bypassing `build_args/2` entirely — never assert session/mode
+  flags through a `:command` fake. Assert flags either against `build_args/2`
+  directly, or end-to-end through a `:binary` override (which keeps
+  `build_args/2`).
   """
   @spec command(String.t(), map()) :: {String.t(), [String.t()]}
   def command(mode \\ @default_mode, session_opts \\ %{}) do
@@ -79,6 +86,30 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       _ -> {binary(), build_args(mode, session_opts)}
     end
   end
+
+  @doc """
+  Pure assembly of the CLI argv for a given `mode` and `session_opts`. This is
+  the single seam where session identity reaches the real process — kept pure
+  and public so flag behavior is unit-testable without spawning a Port.
+
+  Session flags (charter D8/D9), appended after the base args:
+
+    * fresh session — `%{session_id: uuid}` ⇒ `["--session-id", uuid]`
+      (we mint the uuid, so persistence needs no wire-protocol id scraping)
+    * resume — `%{session_id: uuid, resume: true}` ⇒ `["--resume", uuid]`,
+      and NEVER `--session-id` (the two are mutually exclusive on the binary)
+    * absent — no `session_id` ⇒ neither flag (back-compat with w1–w2c)
+  """
+  @spec build_args(String.t(), map()) :: [String.t()]
+  def build_args(mode, session_opts \\ %{}) do
+    default_args(mode) ++ session_args(session_opts)
+  end
+
+  # Resume wins over a fresh pin: --resume and --session-id are mutually
+  # exclusive, so a resume never also emits --session-id.
+  defp session_args(%{session_id: id, resume: true}) when is_binary(id), do: ["--resume", id]
+  defp session_args(%{session_id: id}) when is_binary(id), do: ["--session-id", id]
+  defp session_args(_), do: []
 
   @doc "Permission modes the chat may run in. `plan` is read-only; the others ask."
   @spec modes() :: [String.t()]
@@ -89,23 +120,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def normalize_mode(mode) when mode in @modes, do: mode
   def normalize_mode(_), do: @default_mode
 
-  @doc """
-  Pure/public flag assembly (charter D9, the vacuous-green law). The session
-  seam lives here so it can be unit-tested directly and threaded end-to-end via
-  an argv-echo `:binary` fake — never asserted through the `:command` override.
-
-    * fresh session  ⇒ `--session-id <uuid>` (we mint the id, D2)
-    * resumed session ⇒ `--resume <uuid>` and NOT `--session-id`
-
-  `session_opts` keys: `:session_id` (binary) and `:resume` (boolean).
-  """
-  @spec build_args(String.t(), map()) :: [String.t()]
-  def build_args(mode, session_opts \\ %{}) do
-    base_args(mode) ++ session_args(session_opts) ++ permission_prompt_args(mode)
-  end
-
-  defp base_args(mode) do
-    [
+  defp default_args(mode) do
+    base = [
       "--print",
       "--verbose",
       "--input-format",
@@ -118,21 +134,14 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       "--append-system-prompt",
       render_appendix()
     ]
+
+    # Outside plan mode the CLI must route permission asks to us instead of
+    # auto-denying: `--permission-prompt-tool stdio` makes it emit
+    # `control_request` (subtype `can_use_tool`) NDJSON events, which the
+    # Session forwards as `{:claude_chat_permission, …}` and answers via
+    # `respond_permission/3` — the Agent SDK's canUseTool bridge, spoken raw.
+    if mode == "plan", do: base, else: base ++ ["--permission-prompt-tool", "stdio"]
   end
-
-  # Resume takes precedence: a session we are reopening must carry `--resume`,
-  # never `--session-id` (the CLI mints/rehydrates from its own transcript).
-  defp session_args(%{resume: true, session_id: id}) when is_binary(id), do: ["--resume", id]
-  defp session_args(%{session_id: id}) when is_binary(id) and id != "", do: ["--session-id", id]
-  defp session_args(_), do: []
-
-  # Outside plan mode the CLI must route permission asks to us instead of
-  # auto-denying: `--permission-prompt-tool stdio` makes it emit
-  # `control_request` (subtype `can_use_tool`) NDJSON events, which the
-  # Session forwards as `{:claude_chat_permission, …}` and answers via
-  # `respond_permission/3` — the Agent SDK's canUseTool bridge, spoken raw.
-  defp permission_prompt_args("plan"), do: []
-  defp permission_prompt_args(_), do: ["--permission-prompt-tool", "stdio"]
 
   # Replies render through Barkpark's paper engine (FromMarkdown -> blocks ->
   # Render). Teach the model the two upgrade fences and the native block
@@ -175,12 +184,15 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
+
+  `:session_opts` (charter D8) pins or resumes a session: `%{session_id: uuid}`
+  starts a fresh pinned session, `%{session_id: uuid, resume: true}` resumes an
+  existing one. Absent ⇒ an anonymous one-shot session (w1–w2c behavior).
   """
   @spec start_session(%{
           :sink => pid(),
           optional(:mode) => String.t(),
-          optional(:session_id) => String.t() | nil,
-          optional(:resume) => boolean()
+          optional(:session_opts) => map()
         }) :: {:ok, pid()} | {:error, term()}
   def start_session(%{sink: sink} = opts) when is_pid(sink) do
     cond do
@@ -191,8 +203,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         __MODULE__.Session.start(%{
           sink: sink,
           mode: normalize_mode(opts[:mode]),
-          session_id: opts[:session_id],
-          resume: opts[:resume] == true
+          session_opts: Map.get(opts, :session_opts, %{})
         })
     end
   end
@@ -212,6 +223,55 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec send_message(pid(), String.t()) :: :ok
   def send_message(session, text) when is_pid(session) and is_binary(text) do
     GenServer.cast(session, {:send_user_message, text})
+  end
+
+  @doc """
+  Interrupt the running turn (charter D10). Writes a `control_request` frame
+  with subtype `interrupt` on stdin — proven on the raw wire 2026-07-09: the
+  CLI acks with a `control_response` (subtype `success`), aborts the turn, and
+  the session SURVIVES (the terminal `result` carries
+  `terminal_reason: "aborted_streaming"`, which the LiveView discriminates from
+  a real error). Returns the minted `request_id` so the caller can match the
+  ack (forwarded to the sink as a `{:claude_chat_event, control_response}`).
+  """
+  @spec interrupt(pid()) :: {:ok, String.t()}
+  def interrupt(session) when is_pid(session) do
+    control_request(session, %{"subtype" => "interrupt"})
+  end
+
+  @doc """
+  Switch the permission mode of a live session in place (charter D12),
+  replacing the context-destroying respawn. The wire key MUST be `mode`: the
+  real binary treats the plausible-looking `permission_mode` key as a silent
+  no-op (returns success with an EMPTY response). Returns the minted
+  `request_id`; the LiveView must confirm the echoed `response.mode` before
+  trusting the switch (subtype `success` alone is a vacuous-green trap).
+  """
+  @spec set_permission_mode(pid(), String.t()) :: {:ok, String.t()}
+  def set_permission_mode(session, mode) when is_pid(session) and is_binary(mode) do
+    control_request(session, %{"subtype" => "set_permission_mode", "mode" => mode})
+  end
+
+  @doc """
+  Switch the model of a live session in place. Returns the minted `request_id`;
+  the caller should verify the next `result` frame's `modelUsage` key actually
+  changed before trusting the switch (the CLI acks `success` regardless).
+  """
+  @spec set_model(pid(), String.t()) :: {:ok, String.t()}
+  def set_model(session, model) when is_pid(session) and is_binary(model) do
+    control_request(session, %{"subtype" => "set_model", "model" => model})
+  end
+
+  # Mint a request_id and cast an outbound control_request frame. The id lets
+  # the caller correlate the CLI's control_response ack (forwarded to the sink).
+  defp control_request(session, request) when is_map(request) do
+    request_id = mint_request_id()
+    GenServer.cast(session, {:control_request, request_id, request})
+    {:ok, request_id}
+  end
+
+  defp mint_request_id do
+    "bp-req-" <> (8 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower))
   end
 
   @doc "Terminate the session subprocess."
@@ -269,8 +329,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def init(%{sink: sink} = opts) do
-      session_opts = %{session_id: Map.get(opts, :session_id), resume: Map.get(opts, :resume) == true}
-      {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"), session_opts)
+      {exe, args} =
+        ClaudeChat.command(Map.get(opts, :mode, "plan"), Map.get(opts, :session_opts, %{}))
 
       case System.find_executable(exe) do
         nil ->
@@ -322,6 +382,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
             "request_id" => request_id,
             "response" => payload
           }
+        }) <> "\n"
+
+      safe_command(state.port, line)
+      {:noreply, state}
+    end
+
+    # Outbound control_request (interrupt / set_permission_mode / set_model).
+    # The CLI answers with a control_response echoing this request_id, which
+    # flows to the sink through the fallback dispatch clause below.
+    def handle_cast({:control_request, request_id, request}, state) do
+      line =
+        Jason.encode!(%{
+          "type" => "control_request",
+          "request_id" => request_id,
+          "request" => request
         }) <> "\n"
 
       safe_command(state.port, line)

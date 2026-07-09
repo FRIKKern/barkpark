@@ -103,6 +103,53 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # The session-identity seam (charter D8/D9). build_args/2 is pure and public
+  # precisely so flag behavior is asserted WITHOUT spawning a Port and WITHOUT
+  # routing through the `:command` override (which returns its tuple verbatim,
+  # bypassing build_args — a vacuous-green trap for any flag assertion).
+  describe "build_args/2 (pure session-args seam)" do
+    @uuid "3f9a1c2e-0b7d-4a11-9c33-77e6a2b4d501"
+
+    test "a fresh session pins --session-id and never --resume" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--session-id", @uuid])
+      refute "--resume" in args
+    end
+
+    test "resume uses --resume and refuses --session-id (mutually exclusive)" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid, resume: true})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--resume", @uuid])
+      refute "--session-id" in args
+    end
+
+    test "resume: false pins a fresh --session-id (not a resume)" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid, resume: false})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--session-id", @uuid])
+      refute "--resume" in args
+    end
+
+    test "absent session_opts adds neither flag (back-compat)" do
+      args = ClaudeChat.build_args("plan", %{})
+      refute "--session-id" in args
+      refute "--resume" in args
+    end
+
+    test "session args are appended onto the mode's base args" do
+      args = ClaudeChat.build_args("default", %{session_id: @uuid})
+      # the base permission args survive the append
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "default"])
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-prompt-tool", "stdio"])
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--session-id", @uuid])
+    end
+
+    test "command/2 threads session_opts through the default args" do
+      {_exe, args} =
+        with_default_command(fn -> ClaudeChat.command("plan", %{session_id: @uuid}) end)
+
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--session-id", @uuid])
+    end
+  end
+
   describe "permission bridge (control protocol)" do
     @can_use_tool ~s({"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/tmp/x"},"title":"Claude wants to write /tmp/x"}})
 
@@ -230,6 +277,183 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       send(sink, :stop)
 
       assert_receive {:DOWN, ^ref, :process, ^session, _reason}, 2_000
+    end
+  end
+
+  # End-to-end proof that session identity reaches the REAL spawned process
+  # argv. Uses the `:binary` override (NOT `:command`): `:binary` only swaps the
+  # executable and KEEPS build_args, so the argv the process receives is the
+  # true one. A `:command` override would return its tuple verbatim and prove
+  # nothing (vacuous-green law, charter D9). The fake binary echoes its argv to
+  # a file so we read back exactly what the OS handed the process.
+  describe "spawned argv (end-to-end :binary override)" do
+    test "a fresh session's real argv carries --session-id and never --resume" do
+      argv_file = capture_path("argv")
+      put_chat_config(binary: argv_echo_binary(argv_file))
+      uuid = "11111111-2222-3333-4444-555555555555"
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      argv = read_lines(argv_file)
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--session-id", uuid])
+      refute "--resume" in argv
+
+      ClaudeChat.close(session)
+    end
+
+    test "a resume's real argv carries --resume and never --session-id" do
+      argv_file = capture_path("argv")
+      put_chat_config(binary: argv_echo_binary(argv_file))
+      uuid = "66666666-7777-8888-9999-000000000000"
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, resume: true}
+        })
+
+      argv = read_lines(argv_file)
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--resume", uuid])
+      refute "--session-id" in argv
+
+      ClaudeChat.close(session)
+    end
+  end
+
+  # Outbound control frames (charter D10/D12), wire-proven against the real
+  # binary 2026-07-09. These tests capture the EXACT bytes we write to stdin (a
+  # `head -n 1` fake drains the first frame to a file). They prove the frame is
+  # WRITTEN CORRECTLY — NOT that `--print` honors it: the real-binary harness
+  # proved honoring (interrupt → ack + result terminal_reason
+  # "aborted_streaming" + session survives; set_permission_mode → response
+  # echoes {"mode": …}). Loopback-via-`cat` would NOT work here: our own
+  # dispatch auto-answers any inbound control_request, mangling the echo — so we
+  # capture the raw stdin bytes instead.
+  describe "outbound control frames (write path)" do
+    test "interrupt/1 writes a control_request with subtype 'interrupt'" do
+      file = capture_path("frame")
+      put_chat_config(command: frame_capture_command(file))
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, request_id} = ClaudeChat.interrupt(session)
+
+      frame = read_frame(file)
+      assert frame["type"] == "control_request"
+      assert frame["request"]["subtype"] == "interrupt"
+      assert frame["request_id"] == request_id
+
+      ClaudeChat.close(session)
+    end
+
+    test "set_permission_mode/2 writes subtype 'set_permission_mode' with the literal key 'mode'" do
+      file = capture_path("frame")
+      put_chat_config(command: frame_capture_command(file))
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, request_id} = ClaudeChat.set_permission_mode(session, "acceptEdits")
+
+      frame = read_frame(file)
+      assert frame["request"]["subtype"] == "set_permission_mode"
+      # The real binary silently no-ops the alt key 'permission_mode'; assert
+      # the literal 'mode' key is what we wrote, and nothing else.
+      assert Map.fetch(frame["request"], "mode") == {:ok, "acceptEdits"}
+      refute Map.has_key?(frame["request"], "permission_mode")
+      assert frame["request_id"] == request_id
+
+      ClaudeChat.close(session)
+    end
+
+    test "set_model/2 writes subtype 'set_model' with the model" do
+      file = capture_path("frame")
+      put_chat_config(command: frame_capture_command(file))
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, request_id} = ClaudeChat.set_model(session, "claude-sonnet-4-5")
+
+      frame = read_frame(file)
+      assert frame["request"]["subtype"] == "set_model"
+      assert frame["request"]["model"] == "claude-sonnet-4-5"
+      assert frame["request_id"] == request_id
+
+      ClaudeChat.close(session)
+    end
+
+    test "each control frame mints a distinct request_id" do
+      file = capture_path("frame")
+      put_chat_config(command: frame_capture_command(file))
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, id1} = ClaudeChat.interrupt(session)
+      {:ok, id2} = ClaudeChat.interrupt(session)
+
+      assert id1 != id2
+      ClaudeChat.close(session)
+    end
+
+    test "inbound control_response acks reach the sink as chat events" do
+      # A control_response the CLI would send to ack our control_request. It is
+      # NOT a control_request, so it flows through the fallback dispatch to the
+      # sink — this is how the LiveView matches acks by request_id.
+      ack =
+        ~s({"type":"control_response","response":{"subtype":"success","request_id":"bp-req-abc","response":{"mode":"acceptEdits"}}})
+
+      script = ~s(printf '%s\\n' '#{ack}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "control_response",
+                        "response" => %{
+                          "subtype" => "success",
+                          "request_id" => "bp-req-abc",
+                          "response" => %{"mode" => "acceptEdits"}
+                        }
+                      }},
+                     2_000
+    end
+  end
+
+  # --- capture helpers (argv echo + stdin frame capture) --------------------
+
+  defp capture_path(kind) do
+    file =
+      Path.join(
+        System.tmp_dir!(),
+        "claude_chat_#{kind}_#{System.unique_integer([:positive])}"
+      )
+
+    on_exit(fn -> File.rm_rf(file) end)
+    file
+  end
+
+  # A chmod +x fake `claude` binary that echoes its argv (one arg per line) to
+  # `argv_file`, then `cat`s to keep stdin open so the Port stays alive.
+  defp argv_echo_binary(argv_file) do
+    path =
+      Path.join(System.tmp_dir!(), "claude_echo_#{System.unique_integer([:positive])}.sh")
+
+    File.write!(path, "#!/bin/sh\nprintf '%s\\n' \"$@\" > '#{argv_file}'\ncat\n")
+    File.chmod!(path, 0o755)
+    on_exit(fn -> File.rm_rf(path) end)
+    path
+  end
+
+  # `head -n 1` drains exactly the first written frame to a file (flushing on
+  # exit), then `cat` keeps the Port alive.
+  defp frame_capture_command(file), do: {"sh", ["-c", "head -n 1 > '#{file}'; cat"]}
+
+  defp read_lines(file), do: file |> wait_for_file() |> String.split("\n", trim: true)
+
+  defp read_frame(file), do: file |> wait_for_file() |> String.trim() |> Jason.decode!()
+
+  defp wait_for_file(file, tries \\ 150) do
+    cond do
+      File.exists?(file) and File.read!(file) != "" -> File.read!(file)
+      tries <= 0 -> flunk("capture file never written: #{file}")
+      true -> Process.sleep(20) && wait_for_file(file, tries - 1)
     end
   end
 end

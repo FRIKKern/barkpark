@@ -143,7 +143,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply,
          socket
          |> assign(mode: mode, session: nil, streaming: nil)
-         |> append_message(:system, "Permission mode → #{mode}. The session will resume under the new mode on your next message.")}
+         |> append_message(
+           :system,
+           "Permission mode → #{mode}. The session will resume under the new mode on your next message."
+         )}
 
       true ->
         {:noreply, assign(socket, mode: mode)}
@@ -631,12 +634,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case ClaudeChat.start_session(%{
            sink: self(),
            mode: socket.assigns.mode,
-           session_id: store_id,
-           resume: resume?
+           session_opts: %{session_id: store_id, resume: resume?}
          }) do
       {:ok, session} ->
         Process.monitor(session)
-        StudioChat.update_status(store_id, :working)
+        StudioChat.update_status(store_id, "working")
         # Ready as soon as the subprocess is up. The CLI emits its init event
         # only when the FIRST turn starts — gating the composer on init would
         # deadlock the tab (nothing sent → no init → composer never enables).
@@ -665,7 +667,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       status: :resumable,
       init: replay_init(session),
       messages: messages,
-      next_id: length(messages),
+      # Strictly past every replayed id (seqs are 1-based), so a live append
+      # never collides with a replayed message's id.
+      next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
       streaming: nil,
       last_result: nil
     )
@@ -734,7 +738,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         model: result_model(ev)
       })
 
-      StudioChat.update_status(store_id, :active)
+      StudioChat.update_status(store_id, "active")
     end
 
     :ok
@@ -753,15 +757,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
     session_id
     |> StudioChat.list_messages()
     |> Enum.map(fn m ->
-      role = String.to_existing_atom(m.role)
+      role = replay_role(m.role)
 
       html =
-        if role == :assistant and String.trim(m.source_markdown) != "",
-          do: render_paper_html(m.source_markdown)
+        if role == :assistant and is_binary(m.source_markdown) and
+             String.trim(m.source_markdown) != "",
+           do: render_paper_html(m.source_markdown)
 
       %{id: m.seq, role: role, text: m.source_markdown, html: html}
     end)
   end
+
+  # A stored role must never make a session unopenable: map the known roles and
+  # degrade anything else (a future wave's vocabulary) to a system line.
+  defp replay_role("user"), do: :user
+  defp replay_role("assistant"), do: :assistant
+  defp replay_role("tool"), do: :tool
+  defp replay_role(_), do: :system
 
   defp replay_init(%{model: model}) when is_binary(model),
     do: %{model: model, session_id: nil, permission_mode: nil}

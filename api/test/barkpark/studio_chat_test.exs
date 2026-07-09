@@ -1,168 +1,350 @@
 defmodule Barkpark.StudioChatTest do
   @moduledoc """
-  The Studio Claude chat session index + display-history context (epic
-  studio-claude-chat, wave 1, charter D6/D7/D8). No HTTP route touches these
-  tables — this is the whole persistence contract, exercised directly.
+  Studio Claude chat session-store spine (epic studio-claude-chat, charter
+  D6-D8/D13), proved NON-VACUOUSLY:
+
+    * the minted UUID IS the PK (autogenerate off) and a non-UUID read is a
+      clean `nil`, never a crash;
+    * `seq` is monotonic PER session and independent across interleaved sessions
+      (the concrete failure the UNIQUE index guards);
+    * append bumps the denormalised sidebar fields in one shot;
+    * the rename ⇄ AI-title clobber guard holds BOTH ways (human always wins,
+      the SQL WHERE decides the race);
+    * metrics accumulate model-agnostically across turns.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.{Message, Session}
 
   defp new_session(attrs \\ %{}) do
-    id = Ecto.UUID.generate()
-    {:ok, s} = StudioChat.create_session(Map.merge(%{id: id, cwd: "/tmp", mode: "plan"}, attrs))
-    s
+    id = Map.get(attrs, :id, Ecto.UUID.generate())
+    {:ok, session} = StudioChat.create_session(Map.put(attrs, :id, id))
+    session
   end
 
   describe "create_session/1 + get_session/1" do
-    test "mints a row keyed by the caller-provided uuid with sane defaults" do
-      s = new_session()
-      assert s.title == "New chat"
-      assert s.title_source == "default"
-      assert s.status == "active"
-      assert s.message_count == 0
-      assert s.last_active_at
+    test "the caller-minted UUID is the PK (autogenerate false) and round-trips" do
+      id = Ecto.UUID.generate()
+      {:ok, session} = StudioChat.create_session(%{id: id, cwd: "/tmp/x", mode: "default"})
 
-      got = StudioChat.get_session(s.id)
-      assert got.id == s.id
+      assert session.id == id
+      assert session.title == "New chat"
+      assert session.title_source == "default"
+      assert session.status == "active"
+      assert session.message_count == 0
+      assert session.total_cost_usd == 0.0
+      assert session.last_active_at != nil
+
+      assert StudioChat.get_session(id).id == id
     end
 
-    test "get_session/1 is nil for an unknown id and for a non-uuid string" do
-      refute StudioChat.get_session(Ecto.UUID.generate())
-      refute StudioChat.get_session("not-a-uuid")
-      refute StudioChat.get_session(nil)
-    end
-  end
-
-  describe "append_message/2" do
-    test "assigns monotonic seq and bumps message_count + summary + last_active_at" do
-      s = new_session()
-      before = s.last_active_at
-
-      {:ok, m0} = StudioChat.append_message(s.id, %{role: "user", source_markdown: "first prompt"})
-      {:ok, m1} = StudioChat.append_message(s.id, %{role: "assistant", source_markdown: "the reply"})
-
-      assert m0.seq == 0
-      assert m1.seq == 1
-
-      reloaded = StudioChat.get_session(s.id)
-      assert reloaded.message_count == 2
-      assert reloaded.summary == "the reply"
-      assert DateTime.compare(reloaded.last_active_at, before) in [:gt, :eq]
+    test "id is required — no server-side autogenerate" do
+      assert {:error, changeset} = StudioChat.create_session(%{cwd: "/tmp"})
+      assert %{id: _} = errors_on(changeset)
     end
 
-    test "a tool message bumps the count but never owns the summary" do
-      s = new_session()
-      {:ok, _} = StudioChat.append_message(s.id, %{role: "user", source_markdown: "do the thing"})
-
-      {:ok, _} =
-        StudioChat.append_message(s.id, %{
-          role: "tool",
-          source_markdown: "Read — file_path: /etc/hosts",
-          metadata: %{"tool" => "Read"}
-        })
-
-      reloaded = StudioChat.get_session(s.id)
-      assert reloaded.message_count == 2
-      # the last USER/assistant text stays the summary, not the tool line
-      assert reloaded.summary == "do the thing"
+    test "a non-UUID or missing id reads as nil, never a 500" do
+      assert StudioChat.get_session("not-a-uuid") == nil
+      assert StudioChat.get_session(nil) == nil
+      assert StudioChat.get_session(Ecto.UUID.generate()) == nil
     end
 
-    test "summary is a single clipped line" do
-      s = new_session()
-      long = String.duplicate("x", 400)
-      {:ok, _} = StudioChat.append_message(s.id, %{role: "user", source_markdown: long <> "\nsecond"})
+    test "an invalid status is rejected" do
+      assert {:error, changeset} =
+               StudioChat.create_session(%{id: Ecto.UUID.generate(), status: "banana"})
 
-      summary = StudioChat.get_session(s.id).summary
-      assert String.length(summary) <= 140
-      refute summary =~ "second"
+      assert %{status: _} = errors_on(changeset)
     end
   end
 
-  describe "list_sessions/0 recency" do
-    test "orders most-recent activity first" do
+  describe "append_message/2 — seq allocation" do
+    test "seq is monotonic 1,2,3 within a session" do
+      s = new_session()
+
+      {:ok, m1} = StudioChat.append_message(s, %{role: "user", source_markdown: "hi"})
+      {:ok, m2} = StudioChat.append_message(s, %{role: "assistant", source_markdown: "yo"})
+      {:ok, m3} = StudioChat.append_message(s.id, %{role: "user", source_markdown: "more"})
+
+      assert [m1.seq, m2.seq, m3.seq] == [1, 2, 3]
+    end
+
+    test "seq is independent across interleaved sessions" do
       a = new_session()
       b = new_session()
-      # b becomes the most recently active
-      {:ok, _} = StudioChat.append_message(a.id, %{role: "user", source_markdown: "a"})
-      {:ok, _} = StudioChat.append_message(b.id, %{role: "user", source_markdown: "b"})
 
-      ids = StudioChat.list_sessions() |> Enum.map(& &1.id)
-      assert Enum.take(ids, 2) == [b.id, a.id]
+      {:ok, a1} = StudioChat.append_message(a, %{role: "user", source_markdown: "a1"})
+      {:ok, b1} = StudioChat.append_message(b, %{role: "user", source_markdown: "b1"})
+      {:ok, a2} = StudioChat.append_message(a, %{role: "user", source_markdown: "a2"})
+      {:ok, b2} = StudioChat.append_message(b, %{role: "user", source_markdown: "b2"})
+      {:ok, a3} = StudioChat.append_message(a, %{role: "user", source_markdown: "a3"})
+
+      assert [a1.seq, a2.seq, a3.seq] == [1, 2, 3]
+      assert [b1.seq, b2.seq] == [1, 2]
+
+      assert Enum.map(StudioChat.list_messages(a.id), & &1.seq) == [1, 2, 3]
+      assert Enum.map(StudioChat.list_messages(b.id), & &1.seq) == [1, 2]
+    end
+
+    test "a duplicate explicit seq cannot collide — seq is always reallocated" do
+      s = new_session()
+      {:ok, m1} = StudioChat.append_message(s, %{role: "user", seq: 99, source_markdown: "x"})
+      {:ok, m2} = StudioChat.append_message(s, %{role: "user", seq: 99, source_markdown: "y"})
+      # caller-supplied seq is ignored; allocator wins
+      assert [m1.seq, m2.seq] == [1, 2]
+    end
+
+    test "string-keyed attrs are accepted (JSON-frame ergonomics)" do
+      s = new_session()
+
+      {:ok, m} =
+        StudioChat.append_message(s, %{
+          "role" => "assistant",
+          "source_markdown" => "**hello**",
+          "metadata" => %{"tool" => "bash"}
+        })
+
+      assert m.role == "assistant"
+      assert m.source_markdown == "**hello**"
+      assert m.metadata == %{"tool" => "bash"}
+    end
+
+    test "metadata defaults to an empty map and markdown may be nil" do
+      s = new_session()
+      {:ok, m} = StudioChat.append_message(s, %{role: "system"})
+      assert m.metadata == %{}
+      assert m.source_markdown == nil
     end
   end
 
-  describe "list_messages/1" do
-    test "returns messages in seq order" do
+  describe "append_message/2 — denormalised bumps" do
+    test "message_count, summary, and last_active_at track the latest message" do
       s = new_session()
-      {:ok, _} = StudioChat.append_message(s.id, %{role: "user", source_markdown: "one"})
-      {:ok, _} = StudioChat.append_message(s.id, %{role: "assistant", source_markdown: "two"})
+      t0 = s.last_active_at
 
-      assert StudioChat.list_messages(s.id) |> Enum.map(& &1.source_markdown) == ["one", "two"]
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "first message"})
+      s1 = StudioChat.get_session(s.id)
+      assert s1.message_count == 1
+      assert s1.summary == "first message"
+      assert DateTime.compare(s1.last_active_at, t0) in [:gt, :eq]
+
+      {:ok, _} =
+        StudioChat.append_message(s, %{
+          role: "assistant",
+          source_markdown: "second   message\nwrapped"
+        })
+
+      s2 = StudioChat.get_session(s.id)
+      assert s2.message_count == 2
+      # whitespace collapsed for the sidebar preview
+      assert s2.summary == "second message wrapped"
+    end
+
+    test "a long summary is truncated with an ellipsis" do
+      s = new_session()
+      long = String.duplicate("x", 500)
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: long})
+      summary = StudioChat.get_session(s.id).summary
+      assert String.length(summary) == 140
+      assert String.ends_with?(summary, "…")
+    end
+
+    test "a nil/blank markdown message does not clobber an existing summary" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "keep me"})
+      {:ok, _} = StudioChat.append_message(s, %{role: "system", source_markdown: nil})
+      s2 = StudioChat.get_session(s.id)
+      assert s2.summary == "keep me"
+      assert s2.message_count == 2
+    end
+
+    test "tool ephemera bump activity but never own the summary" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "keep me"})
+
+      {:ok, _} =
+        StudioChat.append_message(s, %{role: "tool", source_markdown: "→ bash: ls -la"})
+
+      s2 = StudioChat.get_session(s.id)
+      assert s2.summary == "keep me"
+      assert s2.message_count == 2
+    end
+
+    test "leading markdown furniture is stripped from the preview" do
+      s = new_session()
+
+      {:ok, _} =
+        StudioChat.append_message(s, %{
+          role: "assistant",
+          source_markdown: "## Findings\n\nThe auth layer is sound."
+        })
+
+      assert StudioChat.get_session(s.id).summary == "Findings The auth layer is sound."
     end
   end
 
-  describe "status" do
-    test "update_status/2 and mark_exited/1 move the lifecycle" do
+  describe "status lifecycle" do
+    test "update_status transitions and mark_exited sets exited" do
       s = new_session()
-      StudioChat.update_status(s.id, :working)
-      assert StudioChat.get_session(s.id).status == "working"
+      {:ok, working} = StudioChat.update_status(s.id, "working")
+      assert working.status == "working"
 
-      StudioChat.mark_exited(s.id)
+      {:ok, exited} = StudioChat.mark_exited(s.id)
+      assert exited.status == "exited"
       assert StudioChat.get_session(s.id).status == "exited"
     end
-  end
 
-  describe "titles (clobber guard, D13)" do
-    test "maybe_set_ai_title/2 lands only while the title is still default" do
+    test "an invalid status is rejected" do
       s = new_session()
-      StudioChat.maybe_set_ai_title(s.id, "Trace a request through Studio")
-
-      titled = StudioChat.get_session(s.id)
-      assert titled.title == "Trace a request through Studio"
-      assert titled.title_source == "ai"
-
-      # a second AI title cannot clobber the first (title_source is no longer default)
-      StudioChat.maybe_set_ai_title(s.id, "Some other title")
-      assert StudioChat.get_session(s.id).title == "Trace a request through Studio"
+      assert {:error, changeset} = StudioChat.update_status(s.id, "nope")
+      assert %{status: _} = errors_on(changeset)
     end
 
-    test "a human rename always wins and is never overwritten by AI" do
-      s = new_session()
-      StudioChat.rename(s.id, "My careful name")
-      assert StudioChat.get_session(s.id).title_source == "human"
-
-      StudioChat.maybe_set_ai_title(s.id, "AI wants this")
-      assert StudioChat.get_session(s.id).title == "My careful name"
+    test "status ops on a missing session are honest" do
+      assert {:error, :not_found} = StudioChat.update_status(Ecto.UUID.generate(), "working")
+      assert :noop = StudioChat.mark_exited(Ecto.UUID.generate())
     end
   end
 
-  describe "record_result_metrics/2" do
-    test "folds usage + cost into the session totals" do
+  describe "titles — clobber guard (charter D13)" do
+    test "AI title lands on a default title, then a human rename overrides it" do
       s = new_session()
+      assert s.title_source == "default"
 
-      StudioChat.record_result_metrics(s.id, %{
-        input_tokens: 120,
-        output_tokens: 45,
-        total_cost_usd: 0.0123,
-        model: "claude-opus"
-      })
+      {:ok, ai} = StudioChat.maybe_set_ai_title(s.id, "Refactor the auth layer")
+      assert ai.title == "Refactor the auth layer"
+      assert ai.title_source == "ai"
 
-      StudioChat.record_result_metrics(s.id, %{input_tokens: 30, output_tokens: 10, total_cost_usd: 0.002})
+      # A late AI title cannot clobber a landed AI title either.
+      assert :noop = StudioChat.maybe_set_ai_title(s.id, "Something else")
 
-      reloaded = StudioChat.get_session(s.id)
-      assert reloaded.input_tokens == 150
-      assert reloaded.output_tokens == 55
-      assert_in_delta reloaded.total_cost_usd, 0.0143, 0.00001
-      assert reloaded.model == "claude-opus"
+      {:ok, renamed} = StudioChat.rename(s.id, "My auth work")
+      assert renamed.title == "My auth work"
+      assert renamed.title_source == "human"
     end
 
-    test "tolerates missing usage fields" do
+    test "a human rename FIRST wins — a later AI title is a no-op" do
       s = new_session()
-      StudioChat.record_result_metrics(s.id, %{total_cost_usd: nil})
-      reloaded = StudioChat.get_session(s.id)
-      assert reloaded.input_tokens == 0
-      assert reloaded.total_cost_usd == 0.0
+      {:ok, renamed} = StudioChat.rename(s.id, "Human chosen")
+      assert renamed.title_source == "human"
+
+      assert :noop = StudioChat.maybe_set_ai_title(s.id, "AI would have chosen this")
+
+      after_ = StudioChat.get_session(s.id)
+      assert after_.title == "Human chosen"
+      assert after_.title_source == "human"
+    end
+
+    test "a blank AI title is refused and never touches the row" do
+      s = new_session()
+      assert {:error, :blank} = StudioChat.maybe_set_ai_title(s.id, "   ")
+      assert {:error, :blank} = StudioChat.maybe_set_ai_title(s.id, "")
+      assert StudioChat.get_session(s.id).title_source == "default"
+    end
+
+    test "AI title trims surrounding whitespace" do
+      s = new_session()
+      {:ok, ai} = StudioChat.maybe_set_ai_title(s.id, "  Tidy title  ")
+      assert ai.title == "Tidy title"
+    end
+
+    test "an AI title against a missing session is a no-op" do
+      assert :noop = StudioChat.maybe_set_ai_title(Ecto.UUID.generate(), "orphan")
+    end
+  end
+
+  describe "record_result_metrics/2 — accumulation" do
+    test "token + cost totals accumulate across turns, model-agnostic" do
+      s = new_session()
+
+      {:ok, _} =
+        StudioChat.record_result_metrics(s.id, %{
+          "usage" => %{"input_tokens" => 100, "output_tokens" => 20},
+          "total_cost_usd" => 0.01
+        })
+
+      {:ok, s2} =
+        StudioChat.record_result_metrics(s.id, %{
+          input_tokens: 50,
+          output_tokens: 10,
+          total_cost_usd: 0.02
+        })
+
+      assert s2.input_tokens == 150
+      assert s2.output_tokens == 30
+      assert_in_delta s2.total_cost_usd, 0.03, 1.0e-9
+    end
+
+    test "absent keys count as zero without crashing" do
+      s = new_session()
+      {:ok, s2} = StudioChat.record_result_metrics(s.id, %{"total_cost_usd" => 0.005})
+      assert s2.input_tokens == 0
+      assert s2.output_tokens == 0
+      assert_in_delta s2.total_cost_usd, 0.005, 1.0e-9
+    end
+
+    test "metrics against a missing session are honest" do
+      assert {:error, :not_found} =
+               StudioChat.record_result_metrics(Ecto.UUID.generate(), %{input_tokens: 1})
+    end
+
+    test "the answering model is tracked when the frame carries one" do
+      s = new_session()
+
+      {:ok, s2} =
+        StudioChat.record_result_metrics(s.id, %{input_tokens: 1, model: "claude-opus-4"})
+
+      assert s2.model == "claude-opus-4"
+
+      # absent/blank model leaves the last one in place
+      {:ok, s3} = StudioChat.record_result_metrics(s.id, %{input_tokens: 1})
+      assert s3.model == "claude-opus-4"
+    end
+  end
+
+  describe "list_sessions/0 — sidebar" do
+    test "returns sessions most-recently-active first" do
+      old = new_session()
+      # force old to be older
+      {:ok, _} =
+        StudioChat.update_status(old.id, "active")
+
+      Process.sleep(2)
+      recent = new_session()
+      {:ok, _} = StudioChat.append_message(recent, %{role: "user", source_markdown: "ping"})
+
+      # The sandbox isolates this test's data, so the full order is deterministic.
+      ids = StudioChat.list_sessions() |> Enum.map(& &1.id)
+      assert ids == [recent.id, old.id]
+    end
+
+    test "carries the denormalised fields the sidebar renders" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "hello world"})
+      {:ok, _} = StudioChat.maybe_set_ai_title(s.id, "A titled chat")
+
+      row = StudioChat.list_sessions() |> Enum.find(&(&1.id == s.id))
+      assert row.title == "A titled chat"
+      assert row.title_source == "ai"
+      assert row.summary == "hello world"
+      assert row.message_count == 1
+    end
+  end
+
+  describe "schema wiring" do
+    test "known statuses and title sources are enumerable" do
+      assert "working" in Session.statuses()
+      assert "human" in Session.title_sources()
+    end
+
+    test "messages preload in seq order via the association" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "one"})
+      {:ok, _} = StudioChat.append_message(s, %{role: "assistant", source_markdown: "two"})
+
+      loaded = StudioChat.get_session_with_messages(s.id)
+      assert Enum.map(loaded.messages, & &1.role) == ["user", "assistant"]
+      assert %Message{} = hd(loaded.messages)
     end
   end
 end
