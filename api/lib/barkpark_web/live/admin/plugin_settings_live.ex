@@ -471,11 +471,10 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   # Scoped path back to the plugins list. This LV now mounts only under
   # `/w/:ws/p/:proj/d/:dataset/studio/_plugins/...`, so `scope_prefix` (assigned
   # by StudioChrome from the URL params) is always the `/w/:ws/p/:proj` prefix.
-  # A plain-string builder rather than `~p` — the prefix is dynamic, so
-  # verified-route sigils can't statically anchor it (consolidated by
-  # sdl-w1-builder's `Paths`).
+  # Built via `Paths` — the single owner of the Studio URL grammar (`~p` can't
+  # anchor a dynamic prefix).
   defp plugins_path(scope_prefix, dataset),
-    do: "#{scope_prefix}/d/#{dataset}/studio/_plugins"
+    do: BarkparkWeb.Studio.StudioLive.Paths.studio_path(scope_prefix, ["_plugins"], dataset)
 
   defp resolve_schema(module) do
     cond do

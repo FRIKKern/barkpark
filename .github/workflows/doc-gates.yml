@@ -55,6 +55,9 @@ on:
       - "api/lib/barkpark_web/**/*.ex"
       - "api/lib/barkpark_web/**/*.heex"
       - "scripts/studio-literal-check.sh"
+      # Studio link/path gate — every Studio destination has ONE canonical path
+      # built through Paths; a hand-built scope/dataset URL literal reds this.
+      - "scripts/studio-link-lint.sh"
       # Web literal-color gate — the web/ demo must consume emitted tokens.
       - "web/**"
       - "scripts/web-literal-check.sh"
@@ -112,6 +115,9 @@ on:
       - "api/lib/barkpark_web/**/*.ex"
       - "api/lib/barkpark_web/**/*.heex"
       - "scripts/studio-literal-check.sh"
+      # Studio link/path gate — every Studio destination has ONE canonical path
+      # built through Paths; a hand-built scope/dataset URL literal reds this.
+      - "scripts/studio-link-lint.sh"
       # Web literal-color gate — the web/ demo must consume emitted tokens.
       - "web/**"
       - "scripts/web-literal-check.sh"
@@ -183,6 +189,22 @@ jobs:
       # per-line resisters). See scripts/studio-literal-check.sh for the full list.
       - name: Studio literal-color gate (blocking)
         run: bash scripts/studio-literal-check.sh
+
+      # Studio link/path gate (bp-studio-deep-link W1). Every Studio destination
+      # has ONE canonical path, built through BarkparkWeb.Studio.StudioLive.Paths.
+      # A hand-built, interpolated scope/dataset Studio URL literal anywhere in
+      # api/lib/barkpark_web outside Paths + the reviewed whitelist reds this —
+      # that literal is how the deep-vs-shallow path drift (different breadcrumbs
+      # / back-nav / scope per arrival) crept in. See scripts/studio-link-lint.sh.
+      - name: Studio link/path gate (blocking)
+        run: bash scripts/studio-link-lint.sh
+
+      # Tripwire (mirrors the Go literal self-test): prove the link gate actually
+      # REDs on a planted hand-built href — a temp-dir self-test that asserts the
+      # scanner exits non-zero naming the file:line, then asserts a clean file
+      # (static singleton + ~p verified route) passes. Plants nothing in the tree.
+      - name: Studio link/path gate self-test (tripwire)
+        run: bash scripts/studio-link-lint.sh --selftest
 
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
       # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
