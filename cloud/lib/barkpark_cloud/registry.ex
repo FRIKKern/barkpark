@@ -373,6 +373,28 @@ defmodule BarkparkCloud.Registry do
   def get_barkpark(_), do: nil
 
   @doc """
+  azh-w6 (S14c): the team's existing Barkpark with this exact `name`, or nil —
+  the resurrect live-twin guard. Because Remove (deprovision) DELETES the
+  registry row, a still-present row named the same as an archive you're trying to
+  resurrect means a LIVE twin is running: resurrecting would stand up (and bill)
+  a second box under the same identity, so the router 422s instead. Team-scoped —
+  never crosses teams. Newest first so a (defensive) duplicate resolves
+  deterministically.
+  """
+  @spec get_barkpark_by_name(Team.t() | binary(), binary()) :: Barkpark.t() | nil
+  def get_barkpark_by_name(team, name) when is_binary(name) do
+    tid = team_id(team)
+
+    Barkpark
+    |> where([b], b.team_id == ^tid and b.name == ^name)
+    |> order_by([b], desc: b.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  def get_barkpark_by_name(_team, _name), do: nil
+
+  @doc """
   usage-limits-quotas: the live count of a Team's registered instances — the
   quota numerator `Billing.barkpark_limit_reached?/1` compares against the plan
   ceiling. A cheap `SELECT count(*) WHERE team_id = $1` — no denormalised counter,
@@ -764,6 +786,37 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  azh-w6 (S14c): enqueue a `pending` RESURRECT job for `barkpark` — the
+  portable-archive restore path. `bundle_ref` names the object-storage archive
+  the Go worker pulls + rehydrates onto the fresh box; it rides the job (not the
+  barkpark row) and is threaded into the worker's resurrect claim payload.
+
+  Same one-active-per-kind guard as provision/deprovision: an ACTIVE
+  (pending/claimed) resurrect job already in flight for this barkpark returns
+  `{:error, :already_resurrecting}` rather than enqueuing a second restore (the
+  partial unique index is the atomic race backstop, as elsewhere).
+  """
+  @spec enqueue_resurrect_job(Barkpark.t() | binary(), String.t()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_resurrecting | Ecto.Changeset.t()}
+  def enqueue_resurrect_job(barkpark, bundle_ref) when is_binary(bundle_ref) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "resurrect") do
+      {:error, :already_resurrecting}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{
+        barkpark_id: bp_id,
+        kind: "resurrect",
+        status: "pending",
+        bundle_ref: bundle_ref
+      })
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_resurrecting)
+    end
+  end
+
   # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
   # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
   # path) passes through unchanged — only the money-path collision is rewritten.
@@ -891,6 +944,16 @@ defmodule BarkparkCloud.Registry do
   @spec claim_next_attach_domain_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_attach_domain_job(claim_token) when is_binary(claim_token),
     do: claim_next_job(claim_token, "attach_domain")
+
+  @doc """
+  azh-w6 (S14c): atomically claim the next claimable RESURRECT job — the
+  portable-archive restore worker's pull. Same machinery as `claim_next_job/2`,
+  filtered to `kind: "resurrect"` (so a resurrect job is never handed to a
+  provision worker and vice-versa).
+  """
+  @spec claim_next_resurrect_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_resurrect_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "resurrect")
 
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt

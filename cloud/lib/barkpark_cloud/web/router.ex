@@ -3030,6 +3030,16 @@ defmodule BarkparkCloud.Web.Router do
   post("/v1/launch", do: go_live(conn))
   post("/v1/go-live", do: go_live(conn))
 
+  # azh-w6 (S14c) — POST /v1/resurrect {name, provider, bundle_ref, region?,
+  # server_type?}: the portable-archive restore. Recreate a torn-down instance
+  # from an object-storage bundle onto a FRESH box (Remove/deprovision DELETES the
+  # registry row, so resurrect stands up a new row rather than reviving a soft-
+  # deleted one). Creates the barkpark row NIL-HONEST (provider/region/size ride
+  # the request or stay NULL — D23) and enqueues a `resurrect` job carrying the
+  # bundle_ref. → 202 {ok, id, job_id}. The actual pull + rehydrate is the Go
+  # worker's resurrect drain (S14 portable archives).
+  post("/v1/resurrect", do: resurrect(conn))
+
   ## Internal routes (worker-token auth) — the Go warm-pool provisioner's queue.
   ## NEVER user/agent-reachable: require_worker matches the shared WORKER_TOKEN
   ## only, 401 otherwise.
@@ -3381,6 +3391,30 @@ defmodule BarkparkCloud.Web.Router do
 
         {:error, _} ->
           json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  ## Internal resurrect queue (worker-token auth) — the portable-archive restore
+  ## drain (azh-w6/S14c). Reuses the provision-jobs succeed/fail/step/console
+  ## routes (they operate by job id, kind-agnostically) — only the CLAIM is
+  ## kind-filtered so a resurrect job is never handed to a provision worker.
+
+  # POST /v1/internal/resurrect-jobs/claim → claim the oldest pending resurrect
+  # job (FOR UPDATE SKIP LOCKED). 200 with the provision claim payload PLUS
+  # `bundle_ref` (the archive to restore from), or 204 when none is pending.
+  post "/v1/internal/resurrect-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_resurrect_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          json(conn, 200, resurrect_claim_json(job, barkpark))
       end
     end
   end
@@ -5265,6 +5299,128 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  ## resurrect handler (POST /v1/resurrect) — azh-w6 (S14c)
+
+  # Restore a torn-down instance from a portable-archive bundle. Team-scoped +
+  # admin-gated (a resurrect stands up — and bills — a real box). The gate order
+  # mirrors go_live's 4xx-at-the-button doctrine: reject everything cheap BEFORE
+  # any row/job exists so a bad request never strands a half-built instance.
+  #
+  #   * no team / not admin        → 422 no_team / 403 forbidden
+  #   * blank name / bundle_ref    → 422 name_required / bundle_ref_required
+  #   * unknown provider           → 422 invalid_provider
+  #   * azure w/o a verified row    → 422 provider_not_connected + remediation (D17)
+  #   * a LIVE box already named X  → 422 live_twin (resurrect would double it)
+  #
+  # On success: a FRESH barkpark row (provider/region/size nil-honest — D23) + a
+  # pending `resurrect` job carrying the bundle_ref → 202 {ok, id, job_id}.
+  defp resurrect(conn) do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns[:current_team]) ->
+        json(conn, 422, %{error: "no_team"})
+
+      not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+        json(conn, 403, %{error: "forbidden"})
+
+      # A resurrect stands up — and bills — a real box, so it honors the SAME
+      # entitlement gate as launch (an active subscription, or the one auto-started
+      # free trial). Restoring your own archive is still a billed instance; letting
+      # a lapsed team resurrect around the 402 would be a billing hole.
+      not entitled_or_trial_started?(conn.assigns.current_team) ->
+        json(conn, 402, %{
+          error: "no_active_subscription",
+          checkout_path: "/v1/billing/checkout"
+        })
+
+      not present_param?(conn.body_params["name"]) ->
+        json(conn, 422, %{error: "name_required"})
+
+      not present_param?(conn.body_params["bundle_ref"]) ->
+        json(conn, 422, %{error: "bundle_ref_required"})
+
+      launch_provider(conn.body_params["provider"]) == :error ->
+        json(conn, 422, %{
+          error: "invalid_provider",
+          known_providers: BarkparkCloud.Registry.Provider.kinds()
+        })
+
+      launch_provider(conn.body_params["provider"]) == "azure" and
+          is_nil(provider_of_kind(conn.assigns.current_team, "azure")) ->
+        json(conn, 422, %{
+          error: "provider_not_connected",
+          provider: "azure",
+          remediation: FailureCopy.provider_not_connected_remediation("azure")
+        })
+
+      not is_nil(
+        Registry.get_barkpark_by_name(conn.assigns.current_team, conn.body_params["name"])
+      ) ->
+        json(conn, 422, %{error: "live_twin", name: conn.body_params["name"]})
+
+      true ->
+        team = conn.assigns.current_team
+        name = conn.body_params["name"]
+        bundle_ref = String.trim(conn.body_params["bundle_ref"])
+        slug = slugify(name)
+        # provider validated above (:error already 422'd) → a known slug or the
+        # hetzner default; region/size ride through nil-honest (D23).
+        provider = launch_provider(conn.body_params["provider"])
+        region = string_param_or_nil(conn.body_params["region"])
+        server_type = string_param_or_nil(conn.body_params["server_type"])
+
+        case Registry.register_managed_barkpark(team, name, slug,
+               provider: provider,
+               region: region,
+               server_type: server_type
+             ) do
+          {:ok, barkpark} ->
+            case Registry.enqueue_resurrect_job(barkpark, bundle_ref) do
+              {:ok, job} ->
+                # Live-push the new restoring row to any open dashboard tab.
+                push_event(team.id, "fleet")
+                json(conn, 202, %{ok: true, id: barkpark.id, job_id: job.id})
+
+              # A resurrect is USELESS without its job (the worker pulls the
+              # bundle), so — unlike go_live's best-effort enqueue — an enqueue
+              # failure is surfaced honestly rather than a lying 202. Rare (a DB
+              # blip; the fresh row can't already hold an active resurrect job).
+              # Roll back the just-created row so it neither bills nor blocks a
+              # name re-resurrect via the live-twin guard.
+              {:error, reason} ->
+                Logger.error(
+                  "resurrect: failed to enqueue resurrect job for barkpark #{barkpark.id}: " <>
+                    inspect(reason)
+                )
+
+                Registry.delete_barkpark(barkpark)
+                json(conn, 500, %{error: "enqueue_failed"})
+            end
+
+          # The quota backstop fired in register_barkpark/2 — surface as 403 (never
+          # a 500), mirroring go_live.
+          {:error, :limit_reached} ->
+            json(conn, 403, %{
+              error: "limit_reached",
+              limit: Billing.barkpark_limit(team),
+              upgrade_path: "/v1/billing/checkout"
+            })
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        end
+    end
+  end
+
+  # A request param is "present" when it is a non-blank binary (a whitespace-only
+  # name/bundle_ref is as absent as nil).
+  defp present_param?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present_param?(_), do: false
+
   ## register handler (POST /v1/auth/register)
 
   # The transactional signup: register the user, create a team (the given
@@ -6665,6 +6821,16 @@ defmodule BarkparkCloud.Web.Router do
     base
     |> put_agent_token(barkpark)
     |> add_provider_claim_fields(barkpark)
+  end
+
+  # azh-w6 (S14c): the resurrect worker's claim payload = the FULL provision claim
+  # (agent token minted at claim, azure creds decrypted, region/size nil-honest —
+  # all unchanged) PLUS `bundle_ref`, the object-storage archive to pull +
+  # rehydrate onto the fresh box. Reusing claim_json keeps the provision claim
+  # bytes untouched (the `bundle_ref` key is additive and only present here).
+  defp resurrect_claim_json(job, barkpark) do
+    claim_json(job, barkpark)
+    |> Map.put(:bundle_ref, job.bundle_ref)
   end
 
   # Charter Decision 33 — the monitoring beat goes live. Mint a per-instance agent
