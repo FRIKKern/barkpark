@@ -105,6 +105,45 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       "html" => Barkpark.PortableDoc.Render.FleetEmail.roadmap_email_html(b, theme)
     }
 
+  # Cards / notes / pipeline fleet (charter w4b) — the classed Components.*_html
+  # emit `bp-*` markup that arrives as unstyled text in a stylesheet-less client;
+  # every non-:article style takes the inline-styled CardsEmail variants instead.
+  def compose_block(%{"type" => "cards"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.CardsEmail.cards_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "card"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.CardsEmail.card_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "notes"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.CardsEmail.notes_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "note"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.CardsEmail.note_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "pipeline"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.CardsEmail.pipeline_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "stage"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.CardsEmail.stage_email_html(b, theme)
+    }
+
   def compose_block(b, style, _theme), do: compose_block(b, style)
 
   @doc false
@@ -874,12 +913,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.FleetEmail.roadmap_email_html(b)}
   end
 
-  def compose_block(%{"type" => "notes"} = b, _style) do
+  def compose_block(%{"type" => "notes"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.notes_html(b)}
   end
 
-  def compose_block(%{"type" => "cards"} = b, _style) do
+  def compose_block(%{"type" => "notes"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.CardsEmail.notes_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "cards"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.cards_html(b)}
+  end
+
+  def compose_block(%{"type" => "cards"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.CardsEmail.cards_email_html(b)}
   end
 
   # STEP-4 CARD WIDGET — a NEW slots-native block: ONE card (media/title/body/action
@@ -888,8 +935,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # slots into the legacy per-card chrome (bp-card/__t/__d + tone), byte-aligning to
   # ONE legacy `cards` item — so a section-of-cards renders == a legacy cards grid at
   # item granularity. ADDITIVE: the legacy `cards` clause above is UNTOUCHED.
-  def compose_block(%{"type" => "card"} = b, _style) do
+  def compose_block(%{"type" => "card"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.card_html(b)}
+  end
+
+  def compose_block(%{"type" => "card"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.CardsEmail.card_email_html(b)}
   end
 
   # The notes-grid split — a NEW singular `note` :widget: ONE annotated item
@@ -898,12 +949,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # grid/section owns the wrapper). `note_item_html/1` is the SAME per-item
   # expression `notes_html/1` maps over, so a note byte-aligns to a `notes` row by
   # construction. ADDITIVE: the legacy `notes` clause above is UNTOUCHED.
-  def compose_block(%{"type" => "note"} = b, _style) do
+  def compose_block(%{"type" => "note"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.note_item_html(b)}
   end
 
-  def compose_block(%{"type" => "pipeline"} = b, _style) do
+  def compose_block(%{"type" => "note"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.CardsEmail.note_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "pipeline"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
+  end
+
+  def compose_block(%{"type" => "pipeline"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.CardsEmail.pipeline_email_html(b)}
   end
 
   # STAGE WIDGET — a NEW block: the editable per-node twin of ONE legacy `pipeline`
@@ -911,8 +970,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # IDENTICAL pnode cell one pipeline node emits, so a `section` of stages renders ==
   # a legacy pipeline flow at cell granularity. ADDITIVE: the legacy `pipeline` clause
   # above + `pipeline_html/1` are UNTOUCHED (byte-for-byte).
-  def compose_block(%{"type" => "stage"} = b, _style) do
+  def compose_block(%{"type" => "stage"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.stage_html(b)}
+  end
+
+  def compose_block(%{"type" => "stage"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.CardsEmail.stage_email_html(b)}
   end
 
   # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping
