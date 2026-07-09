@@ -64,6 +64,38 @@ defmodule Barkpark.Media.ImageBackend.VixTest do
   end
 
   # ---------------------------------------------------------------------------
+  # render/4 — exact-crop (:crop) vs fit (A4 — the og share-card geometry)
+  # ---------------------------------------------------------------------------
+
+  # The og share-card preset is an EXACT crop, not an aspect-preserving fit.
+  # These prove the `:crop` option threads through the real libvips backend so a
+  # portrait source is upscaled-and-cropped to a constant 1200×630 card (the
+  # only geometry the preview manifest can safely hardcode).
+
+  @og_spec %{max_width: 1200, max_height: 630, format: "jpg", quality: 85}
+
+  test "a portrait source with crop: :attention yields EXACTLY 1200x630" do
+    src = write_tmp_png(400, 800)
+    dest = tmp_path("og_crop.jpg")
+
+    assert :ok = Vix.render(src, dest, Map.put(@og_spec, :crop, :attention), nil)
+
+    {:ok, out} = Image.open(dest)
+    assert {Image.width(out), Image.height(out)} == {1200, 630}
+  end
+
+  test "the SAME portrait source WITHOUT crop fits aspect-preserving (not 1200x630)" do
+    src = write_tmp_png(400, 800)
+    dest = tmp_path("og_fit.jpg")
+
+    assert :ok = Vix.render(src, dest, @og_spec, nil)
+
+    {:ok, out} = Image.open(dest)
+    # A 400×800 portrait fit into a 1200×630 box is height-bound → 315×630.
+    assert {Image.width(out), Image.height(out)} == {315, 630}
+  end
+
+  # ---------------------------------------------------------------------------
   # render/4 — error path
   # ---------------------------------------------------------------------------
 
@@ -83,6 +115,13 @@ defmodule Barkpark.Media.ImageBackend.VixTest do
     path = tmp_path("src_#{width}x#{height}_#{System.unique_integer([:positive])}.jpg")
     img = Image.new!(width, height, color: [120, 160, 200])
     {:ok, _} = Image.write(img, path, suffix: ".jpg", quality: 90)
+    path
+  end
+
+  defp write_tmp_png(width, height) do
+    path = tmp_path("src_#{width}x#{height}_#{System.unique_integer([:positive])}.png")
+    img = Image.new!(width, height, color: [30, 82, 67])
+    {:ok, _} = Image.write(img, path, suffix: ".png")
     path
   end
 

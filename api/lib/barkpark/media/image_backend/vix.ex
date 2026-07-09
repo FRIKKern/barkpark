@@ -17,12 +17,20 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   @impl true
   def render(src, dest, spec, watermark) do
     with {:ok, image} <- Image.open(src),
-         {:ok, thumb} <- Image.thumbnail(image, spec.max_width, height: spec.max_height),
+         {:ok, thumb} <- Image.thumbnail(image, spec.max_width, thumbnail_opts(spec)),
          {:ok, stamped} <- maybe_watermark(thumb, watermark),
          :ok <- write_image(stamped, dest, spec) do
       :ok
     end
   end
+
+  # Aspect-preserving fit by default; an exact-fill crop when the spec asks for
+  # one (`crop: :attention` → cover-and-centre-crop to exactly WxH). `Image 0.67`
+  # `thumbnail/3` takes `:crop` alongside `:height`.
+  defp thumbnail_opts(%{crop: crop} = spec) when not is_nil(crop),
+    do: [height: spec.max_height, crop: crop]
+
+  defp thumbnail_opts(spec), do: [height: spec.max_height]
 
   defp maybe_watermark(image, profile) when profile in [nil, "", "none"], do: {:ok, image}
 

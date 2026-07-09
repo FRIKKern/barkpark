@@ -21,6 +21,21 @@ defmodule Barkpark.Media.RenditionsTest do
     def available?, do: true
   end
 
+  # Stub backend that records the spec it was handed (in the test process, keyed
+  # by preset) so a test can assert the og preset flows an exact-crop spec.
+  defmodule SpyBackend do
+    @behaviour Barkpark.Media.ImageBackend
+    @impl true
+    def render(_src, dest, spec, _watermark) do
+      send(self(), {:rendered, spec})
+      File.write!(dest, "rendition")
+      :ok
+    end
+
+    @impl true
+    def available?, do: true
+  end
+
   # Stub backend that reproduces the libvips/ARM failure the gate must avoid
   # ever reaching for non-raster mimes.
   defmodule FailBackend do
@@ -116,6 +131,34 @@ defmodule Barkpark.Media.RenditionsTest do
       # A raster image that truly fails DOES surface the warning — that path is
       # legitimate; the fix is only that non-raster mimes never reach it.
       assert log =~ "Failed to find load"
+    end
+  end
+
+  describe "the og preset is a fixed 1200x630 exact crop" do
+    test "og flows an exact-crop spec (1200x630, crop: :attention) to the backend" do
+      Application.put_env(:barkpark, :image_backend, SpyBackend)
+      png = file("image/png", "png")
+
+      assert {:ok, _rel} = Renditions.ensure(png, "og")
+
+      assert_received {:rendered, spec}
+      assert spec.max_width == 1200
+      assert spec.max_height == 630
+      assert spec.format == "jpg"
+      assert spec.quality == 85
+      # The crop key is what turns the max-fit box into an exact-fill crop, so the
+      # og rendition is a constant 1200x630 whatever the source aspect (D4).
+      assert spec.crop == :attention
+    end
+
+    test "a FIT preset (thumb) carries NO crop key — only og is an exact crop" do
+      Application.put_env(:barkpark, :image_backend, SpyBackend)
+      png = file("image/png", "png")
+
+      assert {:ok, _rel} = Renditions.ensure(png, "thumb")
+
+      assert_received {:rendered, spec}
+      refute Map.has_key?(spec, :crop)
     end
   end
 end

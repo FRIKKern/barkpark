@@ -14,12 +14,18 @@ defmodule Barkpark.Media.ImageBackend do
     2. OS default: ImageMagick on Windows, Vix elsewhere
   """
 
-  @typedoc "A rendition spec: bounding box + output format + quality."
+  @typedoc """
+  A rendition spec: bounding box + output format + quality, plus an optional
+  `:crop`. Without `:crop` the resize is aspect-preserving FIT (fits inside the
+  box). With `:crop` (e.g. `:attention`) it is an exact-fill CROP — the output is
+  exactly `max_width`×`max_height`, the source scaled to cover and centre-cropped.
+  """
   @type spec :: %{
           required(:max_width) => pos_integer(),
           required(:max_height) => pos_integer(),
           required(:format) => String.t(),
-          required(:quality) => pos_integer()
+          required(:quality) => pos_integer(),
+          optional(:crop) => atom()
         }
 
   @typedoc "Watermark profile, already normalized: nil means none."
