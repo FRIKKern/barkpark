@@ -568,6 +568,7 @@ func printCloudHelp(out *writer) {
 
 USAGE
   bp cloud status                       triage your fleet (ranked, bucketed)
+  bp cloud providers                    the capability matrix for every provider
   bp cloud open <target>                open a dashboard deep link
   bp cloud verify <instance>            re-run the golden-path probe suite
   bp cloud <provider> <resource> <verb> drive a provider's API directly
@@ -587,6 +588,8 @@ FLEET (control plane — needs 'bp login')
             panel in the terminal                       (bp cloud members -h)
 
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
+  providers registered + planned providers and the capabilities each honours
+            today — the honest matrix, no network call (bp cloud providers -h)
   hetzner   Hetzner Cloud (servers, ssh keys, images, …) — bp cloud hetzner -h
 
 Unlike 'bp launch' (which provisions THROUGH the Barkpark control plane), the
