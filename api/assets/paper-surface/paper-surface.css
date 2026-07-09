@@ -201,7 +201,7 @@ html[data-theme="dark"] .bp-paper-body {
 }
 .bp-paper-surface .bp-role-pullquote {
   display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
-  border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft);
+  border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft);
   line-height: 1.5; font-size: 1.2rem;
 }
 
