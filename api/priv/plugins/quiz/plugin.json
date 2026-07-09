@@ -1,0 +1,8 @@
+{
+  "plugin_name": "quiz",
+  "version": "0.1.0",
+  "description": "Hyperquiz — a live-quiz game running on Barkpark itself. A projector shows the spectacle (/quiz/host/:pin — question, choices, a swarm of live cursors or an O(1) heatmap cloud), phones are the input (/quiz/play/:pin — tap a choice, stream a cursor at ~30Hz), and Studio is the authoring desk: the host live-edits a quiz mid-game and every connected screen updates in under a second. Server-authoritative realtime (per-room GenServer, binary cursor codec, fixed 2,048-byte heatmap payload), anonymous server-minted player identity, honest states, no fake realtime. Quizzes are first-class private `quiz` documents authored in the generic Studio editor.",
+  "capabilities": ["routes", "workers", "schemas", "node"],
+  "module": "Barkpark.Plugins.Quiz",
+  "nouns": ["quiz"]
+}
