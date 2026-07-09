@@ -48,22 +48,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	// descend to the bottom status chrome (D83). It is one line, always.
 	identityTop := renderIdentityTop(st, width, now)
 
-	// FIXED BOTTOM CHROME (always rendered, never sheddable): the relocated header
-	// block (momentum line + progress bar + optional "showing N of M" note, charter
-	// D83), then the ticker rule + last event, an optional action strip, and the
-	// footer hint. These are STATUS readouts — never sheddable, exactly as the header
-	// block was never sheddable up top.
-	var chrome []string
-	chrome = append(chrome, renderStatusFooter(b, st, width)...)
-	chrome = append(chrome, renderTicker(b.Events, width, now)...)
-	// The action strip sits directly above the footer, and only when there is
-	// something to say — an empty strip costs no line.
-	if strip := renderActionStrip(st.Strip, width); strip != "" {
-		chrome = append(chrome, strip)
-	}
-	chrome = append(chrome, renderFooter(width))
-
-	bottom := chrome
+	bottom := bottomChrome(b, st, width, now)
 
 	spineLines, cursorLine := flattenSpine(b, st, width, now)
 
@@ -71,7 +56,8 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	if avail < 1 {
 		avail = 1
 	}
-	spine := windowSpine(spineLines, cursorLine, avail, width)
+	top := slideTop(st.SpineScroll, cursorLine, avail, len(spineLines))
+	spine := windowSpine(spineLines, top, avail, width)
 	for len(spine) < avail {
 		spine = append(spine, "")
 	}
@@ -81,6 +67,95 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	all = append(all, spine...)
 	all = append(all, bottom...)
 	return strings.Join(all, "\n")
+}
+
+// bottomChrome is the FIXED bottom status block (always rendered, never
+// sheddable): the relocated header block (momentum line + progress bar +
+// optional "showing N of M" note, charter D83), then the ticker rule + last
+// event, an optional action strip, and the footer hint. Shared by Render and
+// SpineTopFor so the shell's persisted scroll is computed against exactly the
+// viewport Render paints.
+func bottomChrome(b Board, st UIState, width int, now time.Time) []string {
+	var chrome []string
+	chrome = append(chrome, renderStatusFooter(b, st, width)...)
+	chrome = append(chrome, renderTicker(b.Events, width, now)...)
+	// The action strip sits directly above the footer, and only when there is
+	// something to say — an empty strip costs no line.
+	if strip := renderActionStrip(st.Strip, width); strip != "" {
+		chrome = append(chrome, strip)
+	}
+	chrome = append(chrome, renderFooter(width))
+	return chrome
+}
+
+// SpineTopFor reports the spine viewport top Render will paint for this state
+// at this geometry: the minimal slide from st.SpineScroll that keeps the
+// cursor line in view. The shell persists the result back into
+// UIState.SpineScroll after every update (Amendment 8 — scroll 1:1, never a
+// re-centering jump), and Render recomputes the same value at paint time, so
+// the two agree and Render stays pure.
+func SpineTopFor(b Board, st UIState, width, height int, now time.Time) int {
+	if width < 20 {
+		width = 20
+	}
+	if height < 8 {
+		height = 8
+	}
+	lines, cursorLine := flattenSpine(b, st, width, now)
+	avail := height - len(renderIdentityTop(st, width, now)) - len(bottomChrome(b, st, width, now))
+	if avail < 1 {
+		avail = 1
+	}
+	return slideTop(st.SpineScroll, cursorLine, avail, len(lines))
+}
+
+// slideTop slides a remembered viewport top the MINIMUM needed to keep the
+// cursor line visible (Amendment 8): while the cursor walks inside the window
+// the top does not move at all — the list holds still — and at an edge it
+// follows 1:1 with the cursor's line movement. A one-line margin keeps the
+// cursor clear of the ↑/↓ "more" affordances that overwrite a scrolled
+// window's first/last line (collapsed in pathologically short viewports). A
+// cursorLine of -1 (no cursor in this body) just clamps the remembered top.
+func slideTop(prev, cursorLine, avail, n int) int {
+	if avail <= 0 || n <= avail {
+		return 0
+	}
+	maxTop := n - avail
+	top := prev
+	if top < 0 {
+		top = 0
+	}
+	if top > maxTop {
+		top = maxTop
+	}
+	if cursorLine < 0 {
+		return top
+	}
+	margin := 1
+	if avail < 4 {
+		margin = 0
+	}
+	lo := top
+	if top > 0 {
+		lo = top + margin
+	}
+	hi := top + avail - 1
+	if top < maxTop {
+		hi = top + avail - 1 - margin
+	}
+	switch {
+	case cursorLine < lo:
+		top = cursorLine - margin
+		if top < 0 {
+			top = 0
+		}
+	case cursorLine > hi:
+		top = cursorLine + margin - (avail - 1)
+		if top > maxTop {
+			top = maxTop
+		}
+	}
+	return top
 }
 
 // ── Header (split: identity pinned top, momentum+progress relocated bottom) ───
@@ -492,19 +567,16 @@ func renderActionStrip(s ActionStrip, width int) string {
 	return stripStyle(s.Role).Render(msg)
 }
 
-// windowSpine clips the spine to `avail` lines, keeping the cursor line in
-// view, and marks any hidden overflow with dim ↑/↓ "N more" affordances.
-func windowSpine(lines []string, cursorLine, avail, width int) []string {
+// windowSpine clips the spine to `avail` lines from the slideTop-chosen top,
+// marking any hidden overflow with dim ↑/↓ "N more" affordances.
+func windowSpine(lines []string, top, avail, width int) []string {
 	if avail <= 0 {
 		return nil
 	}
 	if len(lines) <= avail {
 		return lines
 	}
-	start := 0
-	if cursorLine >= 0 {
-		start = cursorLine - avail/2
-	}
+	start := top
 	if start < 0 {
 		start = 0
 	}
