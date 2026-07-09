@@ -75,6 +75,8 @@ func runCloudInstance(out *writer, g globals, args []string) int {
 		return runCloudInstanceLifecycle(out, g, verb, rest)
 	case "pause", "resume":
 		return runCloudInstancePause(out, verb, rest)
+	case "top":
+		return runCloudInstanceTop(out, g, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown instance command %q (run `bp cloud instance -h` for usage)", verb), exitUsage)
 	}
@@ -540,6 +542,7 @@ USAGE
   bp cloud instance audit        [--provider …]
   bp cloud instance pause        <name> [--provider …]
   bp cloud instance resume       <name> [--provider …]
+  bp cloud instance top          <name> [--points <n>] [-o json|yaml]
 
 WHAT IT DOES
   Resolves --provider (default hetzner) through the provider seam and runs the
@@ -558,7 +561,12 @@ WHAT IT DOES
   keeps the hetzner-only eject/export/import escape hatches.
 
   PAUSE/RESUME stop/start a box without deleting it (azure deallocate/start);
-  hetzner does not honour pause and degrades with a reason.`
+  hetzner does not honour pause and degrades with a reason.
+
+  TOP is a one-shot vitals snapshot (CPU/memory/disk/load + service health) read
+  from the on-box agent's beat window through the control plane — the same truth
+  on every provider and on adopted/self-hosted boxes. Needs 'bp login'; -o json
+  emits the control plane's envelope verbatim.`
 	out.outf("%s", help)
 }
 

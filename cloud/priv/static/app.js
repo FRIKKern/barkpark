@@ -1698,7 +1698,7 @@
   // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
   // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
   // suffix degrades to overview rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage"];
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage", "metrics"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
@@ -2297,6 +2297,8 @@
         mountTimelineTab(panel, bp); // C8: the merged events+audit incident home
       } else if (tab === "usage") {
         mountUsageTab(panel, bp); // C10: the instance usage meters (C9 /usage endpoint)
+      } else if (tab === "metrics") {
+        mountMetricsTab(panel, bp); // S12: the on-box agent vitals beat (Metrics endpoint)
       } else if (showReady) {
         // The ready fold owns the timeline slot — wire its Open Studio + dismiss.
         var rs = $("#inst-ready-studio");
@@ -2357,7 +2359,7 @@
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
     tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage" };
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage", metrics: "Metrics" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
       INSTANCE_TABS.map(function (t) {
         var on = t === tab;
@@ -8056,6 +8058,267 @@
     });
   }
 
+  // ── Metrics tab (S12: the on-box agent vitals beat) ─────────────────────────
+  // The Metrics tab renders the monitoring truth the on-box agent reports (charter
+  // Decision 13/32): CPU / memory / disk / load sparklines over a rolling window +
+  // a service-health rollup. Consumers NEVER compute — the control plane rolls the
+  // window and hands this surface a ready envelope:
+  //
+  //   {ok, collected_at, instance:{id,host,provider},
+  //    beat:{last_seen_at, age_seconds, status: live|stale|absent},
+  //    points, series:{cpu|mem|disk|load: [{at, value|null}] oldest-to-newest},
+  //    service_health:{pass, total, failing:[]}}
+  //
+  // The pure fold (metricsSeries) + the SVG sparkline string helper (sparklineSvg)
+  // are the node-pinned surface; the DOM mount + 4s poll are browser-verified.
+
+  // The four vitals we plot, in render order. `role` is a status-role name whose
+  // colour reads through the S4 role vars (.metric--<role> in app.css → var(--…));
+  // NO new hex is introduced. `unit` shapes the headline value; a percent metric
+  // rounds to a whole number, load carries no unit.
+  var METRIC_SPECS = [
+    { key: "cpu", label: "CPU", unit: "%", role: "info" },
+    { key: "mem", label: "Memory", unit: "%", role: "ok" },
+    { key: "disk", label: "Disk", unit: "%", role: "warn" },
+    { key: "load", label: "Load", unit: "", role: "info" },
+  ];
+
+  // Pure: an honest human age from the beat's age_seconds. Deterministic (no
+  // Date.now dependency — the server already computed the age at collection), so
+  // the reducer is node-pinnable. A negative/absent/garbage age → "".
+  function metricsAgeText(ageSeconds) {
+    if (typeof ageSeconds !== "number" || !isFinite(ageSeconds) || ageSeconds < 0) return "";
+    var s = Math.floor(ageSeconds);
+    if (s < 60) return s + "s ago";
+    var m = Math.floor(s / 60);
+    if (m < 60) return m + "m ago";
+    var h = Math.floor(m / 60);
+    if (h < 24) return h + "h ago";
+    return Math.floor(h / 24) + "d ago";
+  }
+
+  // Pure: the render-ready model for the whole Metrics tab. TOTAL over any
+  // payload (null / garbage never throws — the tab must degrade, never
+  // white-screen). The beat status drives the honest state: `absent` (no beat
+  // ever) → the "waiting for first beat" panel, NEVER a zeroed chart; `stale`
+  // (beat gone quiet) → the last-known series flagged "last seen Xm ago"; `live`
+  // → the normal read. Each metric carries its points with nulls PRESERVED (a
+  // dropped/missing sample is a gap, not a zero) plus `current` = the latest
+  // non-null value (null when the whole series is holes).
+  function metricsSeries(payload) {
+    payload = payload || {};
+    var beat = payload.beat || {};
+    var status = (beat.status === "live" || beat.status === "stale" || beat.status === "absent")
+      ? beat.status : "absent";
+    var inst = payload.instance || {};
+    var health = payload.service_health || {};
+    var series = payload.series || {};
+    var metrics = METRIC_SPECS.map(function (spec) {
+      var raw = Array.isArray(series[spec.key]) ? series[spec.key] : [];
+      var points = raw.map(function (p) {
+        p = p || {};
+        var v = (typeof p.value === "number" && isFinite(p.value)) ? p.value : null;
+        return { at: typeof p.at === "string" ? p.at : "", value: v };
+      });
+      var values = points.map(function (p) { return p.value; });
+      var current = null;
+      for (var i = values.length - 1; i >= 0; i--) {
+        if (values[i] !== null) { current = values[i]; break; }
+      }
+      return {
+        key: spec.key, label: spec.label, unit: spec.unit, role: spec.role,
+        points: points, values: values, current: current,
+        hasData: values.some(function (v) { return v !== null; }),
+      };
+    });
+    var failing = Array.isArray(health.failing)
+      ? health.failing.filter(function (x) { return typeof x === "string"; })
+      : [];
+    return {
+      ok: !!payload.ok,
+      status: status,
+      absent: status === "absent",
+      stale: status === "stale",
+      live: status === "live",
+      host: typeof inst.host === "string" ? inst.host : "",
+      provider: typeof inst.provider === "string" ? inst.provider : "",
+      ageSeconds: typeof beat.age_seconds === "number" ? beat.age_seconds : null,
+      lastSeenAt: typeof beat.last_seen_at === "string" ? beat.last_seen_at : null,
+      lastSeenText: metricsAgeText(beat.age_seconds),
+      metrics: metrics,
+      health: {
+        pass: typeof health.pass === "number" ? health.pass : null,
+        total: typeof health.total === "number" ? health.total : null,
+        failing: failing,
+      },
+    };
+  }
+
+  // Pure: a self-contained inline SVG sparkline STRING from a values array (each
+  // entry a number OR null). Normalised to the series' own min..max, so the shape
+  // reads regardless of the absolute scale. GAPS, NOT ZEROS: a null breaks the
+  // stroke — the line is drawn as one polyline per contiguous run of real values
+  // (an isolated island renders a dot), so a missing sample never draws a point at
+  // the baseline. Colour is `currentColor` (inherited from the metric's role
+  // class) — the helper introduces no colour of its own. Empty / all-null → an
+  // empty chart frame (never a fabricated flat line). A flat series draws along
+  // the mid-line (the divide-by-zero guard), never at y=0.
+  function sparklineSvg(values, opts) {
+    opts = opts || {};
+    var w = typeof opts.width === "number" ? opts.width : 160;
+    var h = typeof opts.height === "number" ? opts.height : 36;
+    var pad = 3;
+    var vals = Array.isArray(values) ? values : [];
+    var nums = [];
+    for (var k = 0; k < vals.length; k++) {
+      if (typeof vals[k] === "number" && isFinite(vals[k])) nums.push(vals[k]);
+    }
+    var frame = '<svg class="spark" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h +
+      '" preserveAspectRatio="none" role="img" aria-hidden="true">';
+    if (nums.length === 0) return frame + "</svg>"; // nothing real to draw
+    var min = Math.min.apply(null, nums), max = Math.max.apply(null, nums);
+    var span = max - min;
+    var innerW = w - pad * 2, innerH = h - pad * 2;
+    var n = vals.length;
+    function rnd(x) { return Math.round(x * 10) / 10; }
+    function px(i) { return rnd(n <= 1 ? pad + innerW / 2 : pad + (i / (n - 1)) * innerW); }
+    function py(v) { return rnd(span <= 0 ? pad + innerH / 2 : pad + innerH - ((v - min) / span) * innerH); }
+    // Split into contiguous runs of real values; a null closes the current run.
+    var runs = [], cur = [];
+    for (var i = 0; i < n; i++) {
+      var v = vals[i];
+      if (typeof v === "number" && isFinite(v)) {
+        cur.push({ x: px(i), y: py(v) });
+      } else if (cur.length) {
+        runs.push(cur); cur = [];
+      }
+    }
+    if (cur.length) runs.push(cur);
+    var body = runs.map(function (run) {
+      if (run.length === 1) {
+        return '<circle cx="' + run[0].x + '" cy="' + run[0].y + '" r="1.5" fill="currentColor"/>';
+      }
+      var pts = run.map(function (p) { return p.x + "," + p.y; }).join(" ");
+      return '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.5" ' +
+        'stroke-linejoin="round" stroke-linecap="round"/>';
+    }).join("");
+    return frame + body + "</svg>";
+  }
+
+  // Pure: the headline value string for one metric card. A holes-only series → the
+  // honest em-dash (never a fake 0); a percent rounds to a whole number, load
+  // keeps two decimals.
+  function metricsValueText(m) {
+    if (!m || m.current === null || typeof m.current !== "number") return "—";
+    if (m.unit === "%") return Math.round(m.current) + "%";
+    var r = Math.round(m.current * 100) / 100;
+    return String(r) + (m.unit ? " " + m.unit : "");
+  }
+
+  // Pure: one metric card — headline value + label + the role-tinted sparkline.
+  function metricsCardHtml(m) {
+    var spark = sparklineSvg(m.values, { width: 180, height: 40 });
+    return '<div class="metric-card metric--' + esc(m.role) + '">' +
+      '<div class="metric-head"><span class="metric-label">' + esc(m.label) + "</span>" +
+      '<span class="metric-value">' + esc(metricsValueText(m)) + "</span></div>" +
+      '<div class="metric-spark">' + spark + "</div></div>";
+  }
+
+  // Pure: the service-health rollup line. Absent counts → hidden (never "0/0").
+  function metricsHealthHtml(health) {
+    health = health || {};
+    if (typeof health.pass !== "number" || typeof health.total !== "number" || health.total <= 0) return "";
+    var failing = Array.isArray(health.failing) ? health.failing : [];
+    var tone = failing.length ? "warn" : "up";
+    var line = badge("Health " + health.pass + "/" + health.total, tone);
+    var detail = failing.length
+      ? '<span class="token-meta dim">failing: ' + esc(failing.join(", ")) + "</span>"
+      : "";
+    return '<div class="metrics-health fleet-row"><div class="fleet-main">' +
+      '<div class="fleet-name">Service health</div>' + detail + "</div>" +
+      '<div class="fleet-badges">' + line + "</div></div>";
+  }
+
+  // Pure: the freshness / stale banner above the grid.
+  function metricsHeadHtml(model) {
+    if (model.stale) {
+      return '<div class="metrics-stale" role="status">Agent offline — showing the last known readings' +
+        (model.lastSeenText ? " (last seen " + esc(model.lastSeenText) + ")" : "") + ".</div>";
+    }
+    return '<div class="metrics-fresh token-meta dim">Live' +
+      (model.lastSeenText ? " · last beat " + esc(model.lastSeenText) : "") + "</div>";
+  }
+
+  // Pure: the whole tab body from a metricsSeries model. `absent` (no beat ever)
+  // shows the honest waiting panel — NEVER a zeroed chart.
+  function metricsPanelHtml(model) {
+    if (!model || model.absent) {
+      return '<div class="empty-state"><h2>Waiting for the first beat</h2>' +
+        "<p>This instance hasn't reported vitals yet. The on-box agent checks in about once a " +
+        "minute — metrics appear here as soon as the first beat lands.</p></div>";
+    }
+    var grid = model.metrics.map(metricsCardHtml).join("");
+    return metricsHeadHtml(model) +
+      '<div class="metrics-grid">' + grid + "</div>" +
+      metricsHealthHtml(model.health);
+  }
+
+  // The loading skeleton — the first metrics fetch can lag a cold roll-up, so the
+  // tab shows this rather than a blank panel.
+  function metricsTabShellHtml() {
+    return '<div class="fleet-body metrics-body" aria-live="polite"><div class="loading">Loading metrics&hellip;</div></div>';
+  }
+
+  // Pure: honest human copy for a failed /metrics fetch — never a dead spinner.
+  function metricsFailureCopy(status) {
+    if (status === 404) return "This instance isn't in your team, or has been removed.";
+    return "We couldn't load metrics for this instance — it may be starting up. Retry in a moment.";
+  }
+
+  function metricsErrorHtml(status) {
+    return '<div class="empty-state"><h2>Couldn\'t load metrics</h2><p>' +
+      esc(metricsFailureCopy(status)) +
+      '</p><p><button class="btn btn-primary btn-sm" data-metrics-retry type="button">Retry</button></p></div>';
+  }
+
+  // How many points to request — 30 samples × the ~60s beat ≈ a 30-minute window.
+  var METRICS_POINTS = 30;
+
+  // Which mount owns the Metrics tab + its poll right now. A newer mount (tab
+  // switch, instance nav) bumps the seq, invalidating older in-flight GETs and any
+  // pending poll re-arm — the loadInstanceDomains idiom (a self-limiting setTimeout
+  // chain, not a fixed interval), but here the poll never terminates: monitoring is
+  // continuous, so it re-arms every 4s while the tab stays mounted. 4s is the
+  // REFRESH cadence; the DATA cadence is the 60s beat (the CP rolls the window).
+  var metricsSeq = 0;
+  var metricsPollTimer = null;
+  function mountMetricsTab(panel, bp) {
+    if (!panel) return;
+    panel.innerHTML = metricsTabShellHtml();
+    var seq = ++metricsSeq;
+    clearTimeout(metricsPollTimer);
+    function tick() {
+      api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/metrics?points=" + METRICS_POINTS).then(function (r) {
+        if (seq !== metricsSeq) return; // a newer mount owns the tab
+        var box = panel.querySelector(".metrics-body");
+        if (!box || box.isConnected === false) return; // navigated away mid-flight
+        if (!r.ok || !r.data) {
+          box.innerHTML = metricsErrorHtml(r.status);
+          var retry = box.querySelector("[data-metrics-retry]");
+          if (retry) retry.addEventListener("click", function () { mountMetricsTab(panel, bp); });
+          return; // a hard error stops the poll until the operator retries
+        }
+        box.innerHTML = metricsPanelHtml(metricsSeries(r.data));
+        clearTimeout(metricsPollTimer);
+        metricsPollTimer = setTimeout(function () {
+          if (seq !== metricsSeq) return;
+          tick();
+        }, 4000);
+      });
+    }
+    tick();
+  }
+
   // ── Members panel (Settings view) ───────────────────────────────────────────
   var ROLE_LABELS = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -8766,6 +9029,14 @@
       domainStages: domainStages, domainStageRows: domainStageRows,
       domainChecklistHtml: domainChecklistHtml, domainRungChip: domainRungChip,
       domainKindChip: domainKindChip,
+      // S12 (azure-hetzner hosting): the Metrics tab. Only the pure fold
+      // (metricsSeries) + the string-returning SVG sparkline (sparklineSvg) + the
+      // render helpers are node-pinned; the DOM mount (mountMetricsTab) + 4s poll
+      // are browser-verified.
+      metricsSeries: metricsSeries, sparklineSvg: sparklineSvg,
+      metricsAgeText: metricsAgeText, metricsValueText: metricsValueText,
+      metricsPanelHtml: metricsPanelHtml, metricsCardHtml: metricsCardHtml,
+      metricsHealthHtml: metricsHealthHtml, metricsKeys: METRIC_SPECS.map(function (s) { return s.key; }),
       // Liveness chip (OC6): topbar SSE health dot + honest "as of" freshness.
       // Pure state helpers + the DOM seams (fake-DOM smoke drives the mount/paint,
       // the same way mountInstanceTimeline is exercised — real browser is live).

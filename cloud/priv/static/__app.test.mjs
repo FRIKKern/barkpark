@@ -1204,8 +1204,9 @@ test("C6: the tab codec + webhook builders + mount seam are exported", () => {
     "mountWebhooksTab"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  // C8 registered the Timeline tab between Overview and Webhooks; C10 appended Usage.
-  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage"]);
+  // C8 registered the Timeline tab between Overview and Webhooks; C10 appended
+  // Usage; S12 (azure-hetzner hosting) appended Metrics.
+  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage", "metrics"]);
 });
 
 // ── parseHash tab codec (D49/D14): #instance/<id>/<tab>, legacy hash → overview ─
@@ -3553,4 +3554,155 @@ test("S13: domainKindChip maps the two known kinds and passes an unknown through
   assert.equal(hooks.domainKindChip("custom"), "custom");
   assert.equal(hooks.domainKindChip(""), "");
   assert.equal(hooks.domainKindChip("byo"), "byo");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S12 (azure-hetzner hosting): the Metrics tab — metricsSeries fold + the
+// string-returning SVG sparkline. Consumers NEVER compute; they render the
+// pinned S12a envelope verbatim.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const METRICS_LIVE = {
+  ok: true,
+  collected_at: "2026-07-09T12:00:00Z",
+  instance: { id: "bp_1", host: "prod.barkpark.cloud", provider: "hetzner" },
+  beat: { last_seen_at: "2026-07-09T11:59:30Z", age_seconds: 30, status: "live" },
+  points: 4,
+  series: {
+    cpu: [{ at: "t0", value: 12 }, { at: "t1", value: 44 }, { at: "t2", value: 30 }, { at: "t3", value: 55 }],
+    mem: [{ at: "t0", value: 60 }, { at: "t1", value: 62 }, { at: "t2", value: 61 }, { at: "t3", value: 63 }],
+    disk: [{ at: "t0", value: 40 }, { at: "t1", value: 40 }, { at: "t2", value: 41 }, { at: "t3", value: 41 }],
+    load: [{ at: "t0", value: 0.5 }, { at: "t1", value: 1.2 }, { at: "t2", value: 0.8 }, { at: "t3", value: 1.1 }],
+  },
+  service_health: { pass: 3, total: 3, failing: [] },
+};
+
+test("S12: metricsSeries folds a live envelope — status, current, host/provider, health", () => {
+  const m = hooks.metricsSeries(METRICS_LIVE);
+  assert.equal(m.status, "live");
+  assert.equal(m.live, true);
+  assert.equal(m.absent, false);
+  assert.equal(m.stale, false);
+  assert.equal(m.host, "prod.barkpark.cloud");
+  assert.equal(m.provider, "hetzner");
+  assert.deepEqual([...m.metrics.map((x) => x.key)], [...hooks.metricsKeys]);
+  const cpu = m.metrics.find((x) => x.key === "cpu");
+  assert.equal(cpu.current, 55); // latest non-null value
+  assert.equal(cpu.hasData, true);
+  assert.deepEqual([...cpu.values], [12, 44, 30, 55]);
+  assert.equal(m.health.pass, 3);
+  assert.equal(m.health.total, 3);
+  assert.deepEqual([...m.health.failing], []);
+  assert.equal(hooks.metricsValueText(cpu), "55%");
+  const load = m.metrics.find((x) => x.key === "load");
+  assert.equal(hooks.metricsValueText(load), "1.1"); // no unit, two-decimal max
+});
+
+test("S12: metricsSeries — absent beat yields the honest waiting state (never a zeroed chart)", () => {
+  const m = hooks.metricsSeries({ ok: true, beat: { status: "absent" }, series: {} });
+  assert.equal(m.absent, true);
+  const html = hooks.metricsPanelHtml(m);
+  assert.match(html, /Waiting for the first beat/);
+  // No chart is drawn in the absent state.
+  assert.ok(html.indexOf("metrics-grid") === -1);
+  assert.ok(html.indexOf("<svg") === -1);
+});
+
+test("S12: metricsSeries — stale beat flags the last-known series with 'last seen Xm ago'", () => {
+  const stale = { ...METRICS_LIVE, beat: { last_seen_at: "t", age_seconds: 180, status: "stale" } };
+  const m = hooks.metricsSeries(stale);
+  assert.equal(m.stale, true);
+  assert.equal(m.lastSeenText, "3m ago"); // 180s → 3m
+  const html = hooks.metricsPanelHtml(m);
+  assert.match(html, /Agent offline/);
+  assert.match(html, /last seen 3m ago/);
+  // The last-known series is STILL rendered (a stale read shows history, not blank).
+  assert.match(html, /metrics-grid/);
+  assert.match(html, /<svg/);
+});
+
+test("S12: metricsAgeText — honest human ages, garbage → ''", () => {
+  assert.equal(hooks.metricsAgeText(0), "0s ago");
+  assert.equal(hooks.metricsAgeText(45), "45s ago");
+  assert.equal(hooks.metricsAgeText(90), "1m ago");
+  assert.equal(hooks.metricsAgeText(3600), "1h ago");
+  assert.equal(hooks.metricsAgeText(90000), "1d ago");
+  for (const bad of [null, undefined, NaN, -5, "x"]) assert.equal(hooks.metricsAgeText(bad), "");
+});
+
+test("S12: metricsSeries preserves null points as gaps (a null never becomes 0) + current skips trailing nulls", () => {
+  const holey = {
+    ok: true, beat: { status: "live", age_seconds: 10 },
+    series: { cpu: [{ at: "t0", value: 10 }, { at: "t1", value: null }, { at: "t2", value: 20 }, { at: "t3", value: null }] },
+  };
+  const m = hooks.metricsSeries(holey);
+  const cpu = m.metrics.find((x) => x.key === "cpu");
+  // The null is preserved as null in the values array — NOT coerced to 0.
+  assert.deepEqual([...cpu.values], [10, null, 20, null]);
+  // current is the latest REAL value, skipping the trailing null.
+  assert.equal(cpu.current, 20);
+});
+
+test("S12: metricsSeries is TOTAL — a null/garbage payload never throws", () => {
+  for (const bad of [null, undefined, {}, { series: null }, { beat: 7, series: { cpu: [null, {}, { value: "x" }] } }]) {
+    const m = hooks.metricsSeries(bad);
+    assert.equal(typeof m.status, "string");
+    assert.equal(Array.isArray(m.metrics), true);
+    assert.equal(m.metrics.length, hooks.metricsKeys.length);
+    // A garbage / absent beat degrades to the absent state, never a crash.
+    assert.equal(["live", "stale", "absent"].includes(m.status), true);
+  }
+  // A bogus cpu series (non-numeric samples) → all-null values, hasData false.
+  const m = hooks.metricsSeries({ beat: { status: "live" }, series: { cpu: [{ value: "x" }, null] } });
+  const cpu = m.metrics.find((x) => x.key === "cpu");
+  assert.deepEqual([...cpu.values], [null, null]);
+  assert.equal(cpu.hasData, false);
+  assert.equal(cpu.current, null);
+  assert.equal(hooks.metricsValueText(cpu), "—"); // holes-only → em-dash, never a fake 0
+});
+
+test("S12: sparklineSvg draws a NULL as a gap, not a point at the baseline", () => {
+  // [10, null, 20]: two isolated islands → two dots, ZERO connecting polyline, and
+  // exactly two plotted points (the non-null count) — the null draws nothing.
+  const svg = hooks.sparklineSvg([10, null, 20], { width: 100, height: 40 });
+  assert.match(svg, /^<svg[\s\S]*<\/svg>$/);
+  assert.equal((svg.match(/<circle/g) || []).length, 2);
+  assert.equal((svg.match(/<polyline/g) || []).length, 0);
+  assert.ok(svg.indexOf("NaN") === -1, "no NaN coordinates leak");
+
+  // [10,20,null,30,40]: two runs → two polylines, four total plotted points.
+  const svg2 = hooks.sparklineSvg([10, 20, null, 30, 40], { width: 100, height: 40 });
+  const polys = svg2.match(/points="([^"]*)"/g) || [];
+  assert.equal(polys.length, 2); // one polyline per contiguous run (the null is the gap)
+  const pairs = polys.reduce((acc, p) => acc + p.replace(/points="|"/g, "").trim().split(/\s+/).length, 0);
+  assert.equal(pairs, 4); // exactly the four real samples — the null contributes none
+});
+
+test("S12: sparklineSvg — empty / all-null → an empty frame (never a fabricated line)", () => {
+  for (const vals of [[], [null, null], null, undefined, ["x", NaN]]) {
+    const svg = hooks.sparklineSvg(vals, {});
+    assert.match(svg, /^<svg[\s\S]*<\/svg>$/);
+    assert.ok(svg.indexOf("<polyline") === -1);
+    assert.ok(svg.indexOf("<circle") === -1);
+  }
+});
+
+test("S12: sparklineSvg — a flat series draws along the mid-line, never at y=0 (no divide-by-zero)", () => {
+  const h = 40, pad = 3;
+  const svg = hooks.sparklineSvg([50, 50, 50, 50], { width: 100, height: h });
+  const poly = (svg.match(/points="([^"]*)"/) || [])[1];
+  assert.ok(poly, "a flat series still draws a stroke");
+  const ys = poly.trim().split(/\s+/).map((p) => Number(p.split(",")[1]));
+  const mid = pad + (h - pad * 2) / 2;
+  for (const y of ys) assert.equal(y, mid); // mid-line baseline, not the y=0 top edge
+});
+
+test("S12: metricsHealthHtml — failing checks surface; absent counts hide (never 0/0)", () => {
+  assert.equal(hooks.metricsHealthHtml({}), "");
+  assert.equal(hooks.metricsHealthHtml({ pass: 0, total: 0, failing: [] }), "");
+  const ok = hooks.metricsHealthHtml({ pass: 3, total: 3, failing: [] });
+  assert.match(ok, /Health 3\/3/);
+  const bad = hooks.metricsHealthHtml({ pass: 2, total: 3, failing: ["disk", "http"] });
+  assert.match(bad, /Health 2\/3/);
+  assert.match(bad, /failing: disk, http/);
 });
