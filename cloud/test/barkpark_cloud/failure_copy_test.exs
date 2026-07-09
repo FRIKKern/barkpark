@@ -171,4 +171,14 @@ defmodule BarkparkCloud.FailureCopyTest do
     # Unknown kind falls back to a provider-agnostic, actionable line.
     assert FailureCopy.connect_remediation("gcp") =~ "verify"
   end
+
+  # ── provider_not_connected_remediation/1 — the launch-time "connect first" copy.
+
+  test "provider_not_connected_remediation points azure launches at Providers → connect" do
+    azure = FailureCopy.provider_not_connected_remediation("azure")
+    assert azure =~ "Providers"
+    assert azure =~ "Azure"
+    # Unknown kind falls back to a provider-agnostic connect-first line.
+    assert FailureCopy.provider_not_connected_remediation("gcp") =~ "Providers"
+  end
 end

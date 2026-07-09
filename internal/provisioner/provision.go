@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/bootstrap"
@@ -19,6 +20,15 @@ const Zone = "barkpark.cloud"
 // AppPort is the local port Phoenix listens on, on each provisioned host (the
 // same 4000 the warm-pool Caddy steps front with TLS).
 const AppPort = 4000
+
+// envAzureSSHPubKey is the env var carrying the SSH public key the worker installs
+// on every Azure VM so it can SSH in and run the configure chain (a VM created
+// without it is unreachable). It MIRRORS azure.EnvSSHPublicKey — duplicated as a
+// literal on purpose so ProvisionWith's kind-routing (and its offline fake-provider
+// tests) never import the Azure SDK. The prereq is enforced BEFORE any box is
+// created (S2 carry) so the failure lands as an honest job error, not a billed,
+// login-dead orphan.
+const envAzureSSHPubKey = "BARKPARK_AZURE_SSH_PUBKEY"
 
 // Seams bundles the cloud-package injectables a Provision needs. In production
 // main() fills it with the REAL Hetzner provider/DNS + a green-by-real-gate; in
@@ -233,14 +243,56 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		return "", "", nil, nil, fmt.Errorf("provisioner: a CloudProvider must be set")
 	}
 
+	// Provider routing (charter Decision 9). An empty kind means the pre-provider-
+	// neutral control plane (or a Hetzner claim, whose payload omits the key), so
+	// it MUST route Hetzner — the existing warm-pool path stays byte-for-byte
+	// unchanged (zero prod regression). A non-Hetzner kind (azure) is an honest
+	// pool-size-zero cold create: the provider is resolved through the registry
+	// from the job's decrypted credentials, and the warm pool is forced OFF (no
+	// warm boxes exist off Hetzner).
+	kind := job.Kind
+	if kind == "" {
+		kind = cloud.ProviderHetzner
+	}
+
 	base := cloud.ServerSpec{
 		Region:     job.Region,
 		ServerType: job.ServerType,
+	}
+
+	if kind == cloud.ProviderHetzner {
 		// Image resolves DYNAMICALLY (snapshot-management): the newest baked
 		// `role=warm-image` snapshot when one exists, else the env-pinned
 		// BARKPARK_SERVER_IMAGE fallback — a one-shot go-live boots the same
 		// fresh bake the pool does.
-		Image: cloud.FreshSpec(ctx, cloud.ProviderHetzner).Image,
+		base.Image = cloud.FreshSpec(ctx, cloud.ProviderHetzner).Image
+	} else {
+		// Azure prereq (S2 carry): the SSH public key the worker installs on every
+		// VM MUST be configured, else the created box is unreachable. Fail HERE,
+		// before any resource exists, with copy that names the exact fix — never a
+		// billed, login-dead orphan discovered mid-provision.
+		if kind == cloud.ProviderAzure && strings.TrimSpace(os.Getenv(envAzureSSHPubKey)) == "" {
+			return "", "", nil, nil, fmt.Errorf(
+				"azure provisioning needs an SSH public key: set %s on the provisioner (the key installed on each VM so the worker can configure it) — no box was created",
+				envAzureSSHPubKey)
+		}
+		// Resolve the provider through the registry from the job's per-kind creds.
+		// A typo / unregistered kind fails loud here (before any box), never silent.
+		provider, perr := cloud.ProviderFor(kind, job.Credentials)
+		if perr != nil {
+			return "", "", nil, nil, perr
+		}
+		seams.Provider = provider
+		// Pool-size-zero: no warm pool off Hetzner, so ALWAYS one-shot cold create.
+		// Force both knobs so a worker configured with a Hetzner warm pool can't
+		// accidentally hand an azure job a Hetzner warm box (acquireHost gates on
+		// WarmPoolSize > 0 AND a non-nil WarmClient).
+		seams.WarmPoolSize = 0
+		seams.WarmClient = nil
+		// Provider-aware image: FreshSpec's warm-snapshot resolution is Hetzner-only,
+		// so a non-Hetzner kind gets DefaultSpec's image (empty for azure → the
+		// provider fills its own platform default). Never a Hetzner snapshot id.
+		base.Image = cloud.FreshSpec(ctx, kind).Image
 	}
 
 	// The instance label is the slug when present (DNS-safe), else the name.

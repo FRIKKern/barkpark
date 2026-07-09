@@ -66,6 +66,11 @@ defmodule BarkparkCloud.Registry.Barkpark do
   @health_statuses ~w(unknown up down)
   @agent_statuses ~w(online offline)
 
+  # The cloud providers a managed instance can be provisioned into (charter
+  # Decision 9). Mirrors `Registry.Provider.kinds/0` — the connected-account kinds
+  # — so a box's provider is always one we can actually host on.
+  @providers ~w(hetzner azure)
+
   # The instance's self-update verdict states (isu-6), plus our own "unknown"
   # fallback for pre-feature instances (404) and failed/unreachable checks.
   @update_states ~w(unknown current behind disabled)
@@ -89,6 +94,17 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :url, :string
     field :host, :string
     field :mode, :string, default: "managed"
+
+    # Provider-neutral hosting (charter Decision 9). `provider` is the cloud slug
+    # the box lives on (`hetzner` | `azure`), defaulting to hetzner so a legacy row
+    # and a provider-less launch are Hetzner by construction. `region` /
+    # `server_type` pin the launch placement + size; NULL → the warm-pool defaults
+    # the claim payload falls back to (`Registry.default_region/0` /
+    # `default_server_type/0`). `provider` is surfaced in barkpark JSON (the SPA
+    # fleet provider-chip); it never doubles as a status axis.
+    field :provider, :string, default: "hetzner"
+    field :region, :string
+    field :server_type, :string
     field :health_status, :string, default: "unknown"
     field :version, :string
     field :git_commit, :string
@@ -182,6 +198,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def health_statuses, do: @health_statuses
   def agent_statuses, do: @agent_statuses
   def update_states, do: @update_states
+  def providers, do: @providers
 
   @doc "The public zone managed Barkparks live under (`barkpark.cloud`)."
   @spec base_domain() :: String.t()
@@ -355,16 +372,22 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :agent_status,
       :last_seen_at,
       :template,
+      :provider,
+      :region,
+      :server_type,
       :team_id
     ])
     |> validate_required([:name, :slug, :team_id])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:template, max: 255)
     |> validate_length(:slug, min: 1, max: 63)
+    |> validate_length(:region, max: 255)
+    |> validate_length(:server_type, max: 255)
     |> validate_format(:slug, @slug_format,
       message: "must be lowercase alphanumeric with hyphens"
     )
     |> validate_inclusion(:mode, @modes)
+    |> validate_inclusion(:provider, @providers)
     |> validate_inclusion(:health_status, @health_statuses)
     |> validate_inclusion(:agent_status, @agent_statuses)
     |> assoc_constraint(:team)

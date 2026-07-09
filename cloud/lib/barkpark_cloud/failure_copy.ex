@@ -166,4 +166,21 @@ defmodule BarkparkCloud.FailureCopy do
   def connect_remediation(_kind) do
     "We couldn't verify those credentials with the provider. Double-check them and try again."
   end
+
+  @doc """
+  The per-kind remediation copy `POST /v1/launch` returns when a launch names a
+  provider the team hasn't connected yet (provider-neutral hosting, charter
+  Decision 4/9). Azure PROVISIONS from the team's connected service-principal, so a
+  launch without one is a dead end unless we point the user at Providers → connect
+  first — failing at the button, never mid-provision. Falls back to a
+  provider-agnostic line for an unknown kind.
+  """
+  @spec provider_not_connected_remediation(String.t()) :: String.t()
+  def provider_not_connected_remediation("azure") do
+    "Connect your Azure account first. In Barkpark Cloud → Providers → Azure, add your service-principal details (tenant, client, secret, subscription) — we verify them before saving — then launch again."
+  end
+
+  def provider_not_connected_remediation(_kind) do
+    "Connect this provider under Barkpark Cloud → Providers first, then launch again."
+  end
 end

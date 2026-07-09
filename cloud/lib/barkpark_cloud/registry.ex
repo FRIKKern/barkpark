@@ -261,6 +261,17 @@ defmodule BarkparkCloud.Registry do
         _ -> attrs
       end
 
+    # Provider-neutral launch config (charter Decision 9). `provider` is folded in
+    # only when given (the schema default is hetzner, so a provider-less caller —
+    # e.g. the adopt/self-host paths — stays Hetzner). `region`/`server_type` are
+    # folded in only when a non-blank value was pinned, so a bare launch leaves
+    # them NULL and the claim payload falls back to the warm-pool defaults.
+    attrs =
+      attrs
+      |> maybe_put_launch_opt(:provider, Keyword.get(opts, :provider))
+      |> maybe_put_launch_opt(:region, Keyword.get(opts, :region))
+      |> maybe_put_launch_opt(:server_type, Keyword.get(opts, :server_type))
+
     case register_barkpark(team, Map.put(attrs, :url, candidate)) do
       {:ok, barkpark} ->
         {:ok, barkpark}
@@ -288,6 +299,51 @@ defmodule BarkparkCloud.Registry do
       {:url, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
       _ -> false
     end)
+  end
+
+  # Fold a launch-config value into the register attrs only when it is a non-blank
+  # binary — a nil/blank opt leaves the column to its schema default / NULL (the
+  # claim payload's warm-pool fallback), so a bare launch is byte-identical to the
+  # pre-provider-neutral behavior.
+  defp maybe_put_launch_opt(attrs, key, value) do
+    case value do
+      v when is_binary(v) and v != "" -> Map.put(attrs, key, v)
+      _ -> attrs
+    end
+  end
+
+  @doc """
+  The decrypted 4-field Azure service-principal credentials for a barkpark's team,
+  or `nil` when there is no connected Azure provider row for the team or the stored
+  ciphertext won't decrypt/decode (fail-closed — the worker then resolves an
+  incomplete-credentials provider and the job fails with an honest error, never a
+  crash).
+
+  Mirrors `resolved_env_for_barkpark/1`: resolved at CLAIM time so a ROTATED
+  credential is always the one handed to the worker, and it is the single
+  sanctioned plaintext crossing — sent ONLY over the worker-token internal channel
+  (TLS in prod), never serialized to a user surface. Newest connected Azure
+  provider wins (mirrors the router's `provider_of_kind/2`).
+  """
+  @spec resolved_azure_credentials_for_barkpark(Barkpark.t()) :: map() | nil
+  def resolved_azure_credentials_for_barkpark(%Barkpark{team_id: tid}) do
+    Provider
+    |> where([p], p.team_id == ^tid and p.kind == "azure")
+    |> order_by([p], desc: p.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      %Provider{encrypted_token: ciphertext} ->
+        with {:ok, json} <- Vault.decrypt(ciphertext),
+             {:ok, creds} when is_map(creds) <- Jason.decode(json) do
+          creds
+        else
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   @doc "List a Team's Barkparks, newest first. Scoped — never crosses teams."
