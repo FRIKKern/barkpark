@@ -614,4 +614,98 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
              "a forged-scope theme write must not change the bound workspace's theme"
     end
   end
+
+  describe "typeless-enable feedback hint (studio-structure-polish D19)" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "an enabled plugin whose owned types are UNREGISTERED shows the 'no content types' truth",
+         %{conn: conn} do
+      # Remove the (globally-registered) `paper` schema for this test's scope, so
+      # bulldocs — enabled by declaration default, owner of the `paper` type —
+      # owns a type registered NOWHERE in this workspace. Enabling it surfaced
+      # nothing, and the row says so honestly (the common Default-stamp case).
+      unregister_type!("paper")
+
+      {:ok, view, _html} = live(conn, scoped_settings_path())
+
+      assert has_element?(view, ~s([data-plugin-hint="bulldocs"]))
+
+      hint = view |> element(~s([data-plugin-hint="bulldocs"])) |> render()
+      assert hint =~ "Enabled — no content types in this workspace yet"
+      refute hint =~ "types registered, no documents yet"
+    end
+
+    test "an enabled plugin whose owned types are REGISTERED but document-less shows the softer truth",
+         %{conn: conn} do
+      # Ambient test DB: `paper` is registered globally with NO documents (empty
+      # census), so bulldocs' hint softens: types exist, docs don't — explicitly
+      # NOT the harder 'no content types' message.
+      {:ok, view, _html} = live(conn, scoped_settings_path())
+
+      hint = view |> element(~s([data-plugin-hint="bulldocs"])) |> render()
+      assert hint =~ "Enabled — types registered, no documents yet"
+      refute hint =~ "no content types in this workspace yet"
+    end
+
+    test "NO hint once a document of an owned type exists (enabling it surfaced content)",
+         %{conn: conn} do
+      # `paper` is already registered; give it a document and the census is no
+      # longer empty → bulldocs surfaced content, so no hint at all.
+      insert_type_doc!("paper")
+
+      {:ok, view, _html} = live(conn, scoped_settings_path())
+
+      refute has_element?(view, ~s([data-plugin-hint="bulldocs"]))
+    end
+
+    test "a DISABLED plugin never shows a hint", %{conn: conn} do
+      # onixedit is OFF by declaration default and owns the `book` type; a
+      # disabled plugin's silence is expected, so no hint even though `book`
+      # is registered-and-docless (the truth-2 predicate for an ENABLED plugin).
+      {:ok, view, _html} = live(conn, scoped_settings_path())
+
+      refute has_element?(view, ~s([data-plugin-hint="onixedit"]))
+    end
+  end
+
+  # The canonical scoped Settings address for the seeded Default workspace.
+  # main's route is PROJECT-level (no dataset segment, #1936).
+  defp scoped_settings_path do
+    ws = Barkpark.Tenancy.get_default_workspace()
+    proj = Barkpark.Tenancy.get_default_project()
+    "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+  end
+
+  defp unregister_type!(name) do
+    Repo.delete_all(from(s in Barkpark.Content.SchemaDefinition, where: s.name == ^name))
+  end
+
+  defp insert_type_doc!(type) do
+    Repo.insert!(%Barkpark.Content.Document{
+      doc_id: "#{type}-1",
+      type: type,
+      dataset: "production",
+      status: "published",
+      title: "#{type} 1",
+      rev: "rev-#{type}-1",
+      content: %{}
+    })
+  end
+
+  defp pick_plugin do
+    Barkpark.Plugins.Registry.all()
+    |> Enum.map(& &1.name)
+    |> Enum.sort()
+    |> List.first()
+  end
+
+  defp audited?(plugin, action) do
+    Repo.exists?(
+      from a in SettingsAudit,
+        where: a.plugin_name == ^plugin and a.action == ^action
+    )
+  end
 end

@@ -38,10 +38,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   require Logger
 
+  alias Barkpark.Content
+  alias Barkpark.Content.Analytics
   alias Barkpark.Plugins.Enablement
   alias Barkpark.Plugins.Registry, as: PluginsRegistry
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
+  alias Barkpark.Structure
   alias Barkpark.Tenancy
 
   @placement_labels [
@@ -574,6 +577,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                     </select>
                   </label>
                 </form>
+
+                <%= if row[:hint] do %>
+                  <p
+                    data-plugin-hint={row.name}
+                    role="note"
+                    style="flex-basis:100%; margin:.15rem 0 0; color:var(--fg-muted); font-size:.82em; display:flex; align-items:center; gap:.4rem;"
+                  >
+                    <span aria-hidden="true">ⓘ</span>
+                    {row.hint}
+                  </p>
+                <% end %>
               </li>
             <% end %>
           </ul>
@@ -752,18 +766,33 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # enablement. Called on mount and after every persist so the UI reflects the
   # merged declaration-default + override truth (never a stale optimistic view).
   defp assign_plugin_rows(socket) do
-    assign(socket, :plugin_rows, load_plugin_rows(socket.assigns[:current_workspace]))
+    assign(
+      socket,
+      :plugin_rows,
+      load_plugin_rows(socket.assigns[:dataset], socket.assigns[:current_workspace])
+    )
   end
 
-  defp load_plugin_rows(nil), do: []
+  defp load_plugin_rows(_dataset, nil), do: []
 
-  defp load_plugin_rows(%{id: ws_id} = workspace) do
+  defp load_plugin_rows(dataset, %{id: ws_id} = workspace) do
     effective = Enablement.effective(ws_id)
     # Per the Decision-4 contract, `effective(nil)` resolves to the pure
     # declaration defaults (no workspace override) — that is the "default badge"
     # source, read through the contract interface only.
     defaults = Enablement.effective(nil)
     overrides = Tenancy.workspace_plugin_settings(workspace)
+
+    # Inputs for the honest typeless-enable hint (charter Decision 19), read
+    # ONCE per rebuild so a per-row helper stays a pure lookup:
+    #   * the harvested plugin ownership map (one source of truth — Structure);
+    #   * the schema names registered in THIS workspace's scope — the EXACT
+    #     `Structure.build` scope (`include_global: true` + `workspace_id`);
+    #   * a `type => total docs` census in the same tree-mirroring scope
+    #     (drafts included), so "no documents yet" is honest about the database.
+    owned_map = Structure.owned_schema_types_map()
+    registered = registered_type_set(dataset, ws_id)
+    census = type_doc_totals(dataset, ws_id)
 
     PluginsRegistry.all()
     |> Enum.map(fn %{name: name} ->
@@ -777,13 +806,61 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         placement: eff.placement,
         has_override: Map.has_key?(overrides, name),
         default_enabled: default.enabled,
-        default_placement: default.placement
+        default_placement: default.placement,
+        hint: plugin_enable_hint(eff.enabled, Map.get(owned_map, name, []), registered, census)
       }
     end)
     |> Enum.sort_by(& &1.display)
   end
 
-  defp load_plugin_rows(_), do: []
+  defp load_plugin_rows(_dataset, _), do: []
+
+  # Schema names registered in this workspace's desk scope — the EXACT scope
+  # `Structure.build/2` uses (structure.ex:83-85): shared nil-workspace globals
+  # PLUS the workspace's own, NOT narrowed by project.
+  defp registered_type_set(dataset, ws_id) do
+    dataset
+    |> Content.list_schemas(include_global: true, workspace_id: ws_id)
+    |> MapSet.new(& &1.name)
+  end
+
+  # `type => total document count` in the same tree-mirroring scope as the …Rest
+  # census (`Analytics.type_census/2`): workspace + globals, project NOT narrowed,
+  # drafts counted. A missing key means zero docs of that type.
+  defp type_doc_totals(dataset, ws_id) do
+    dataset
+    |> Analytics.type_census(workspace_id: ws_id)
+    |> Map.new(&{&1.type, &1.total})
+  end
+
+  # Honest inline feedback for an ENABLED plugin whose enablement may have
+  # changed nothing visible in THIS workspace (charter Decision 19). Two distinct
+  # truths; `nil` for every other case (disabled, owns no schema types, or
+  # content already present — where enabling genuinely surfaced something):
+  #
+  #   1. plugin owns schema types but NONE are registered in this workspace's
+  #      scope — the common case, its schemas are Default-stamped at boot;
+  #   2. its owned types ARE registered here but every one is document-less.
+  #
+  # A plugin owning no schema types (pure desk-item/top-menu) gets NO hint —
+  # enabling it can still surface desk items or a top-menu tab.
+  defp plugin_enable_hint(false, _owned, _registered, _census), do: nil
+  defp plugin_enable_hint(true, [], _registered, _census), do: nil
+
+  defp plugin_enable_hint(true, owned, registered, census) do
+    registered_owned = Enum.filter(owned, &MapSet.member?(registered, &1))
+
+    cond do
+      registered_owned == [] ->
+        "Enabled — no content types in this workspace yet"
+
+      Enum.all?(registered_owned, &(Map.get(census, &1, 0) == 0)) ->
+        "Enabled — types registered, no documents yet"
+
+      true ->
+        nil
+    end
+  end
 
   defp current_row(socket, name) do
     Enum.find(socket.assigns[:plugin_rows] || [], &(&1.name == name))

@@ -330,6 +330,19 @@ defmodule Barkpark.Structure do
     |> Enum.flat_map(fn {name, _decl} -> Map.get(owned_map, name, []) end)
   end
 
+  @doc """
+  Public view of the harvested `plugin_name => [owned type names]` ownership map
+  (charter Decision 19).
+
+  A thin wrapper over the private `plugin_owned_type_map/0` — the SAME harvest the
+  tiered desk uses (Decisions 11/12), NOT a replica — so a consumer outside the
+  desk build (e.g. Workspace Settings' honest typeless-enable hint) reads plugin
+  ownership through one source of truth. Keeps the harvest's `ensure_loaded`/rescue
+  guard: one malformed plugin degrades to "owns nothing", never crashes the caller.
+  """
+  @spec owned_schema_types_map() :: %{optional(String.t()) => [String.t()]}
+  def owned_schema_types_map, do: plugin_owned_type_map()
+
   # ── Harvested plugin-schema ownership (charter Decisions 11/12) ──────────
   #
   # ONE `plugin_name => [owned type names]` map, built per desk build from every
