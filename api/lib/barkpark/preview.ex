@@ -39,8 +39,8 @@ defmodule Barkpark.Preview do
     * **title** — `content["title"]` → the `role: "title"` block's text → an
       injected row title (`opts.title`) → `nil`.
     * **description** — an explicit excerpt field (`excerpt`/`description`/
-      `summary`) → the first free body paragraph's plain text → `nil`; truncated
-      to ~110 chars on a word boundary with an ellipsis (D11).
+      `summary`) → the first free ingress-or-paragraph block's plain text (A6)
+      → `nil`; truncated to ~110 chars on a word boundary with an ellipsis (D11).
     * **image alt** — the featured block's `alt` → the document title.
 
   A media `src` (`/media/files/<path>`) resolves through the injected resolver
@@ -170,9 +170,12 @@ defmodule Barkpark.Preview do
       blank_to_nil(Map.get(content, "summary"))
   end
 
+  # "First body paragraph" = the first free block of type ingress OR paragraph
+  # in document order (A6): live papers commonly open eyebrow → heading →
+  # ingress, and the ingress IS the lead prose.
   defp first_paragraph_text(blocks) do
     Enum.find_value(blocks, fn block ->
-      if free?(block) and match?(%{"type" => "paragraph"}, block) do
+      if free?(block) and match?(%{"type" => t} when t in ["ingress", "paragraph"], block) do
         blank_to_nil(paragraph_text(block))
       end
     end)
@@ -272,7 +275,8 @@ defmodule Barkpark.Preview do
 
   defp extensions("paper", content) do
     compact(%{
-      "published_time" => first_string(content, ["published_time", "publishedAt", "published_at"]),
+      "published_time" =>
+        first_string(content, ["published_time", "publishedAt", "published_at"]),
       "authors" => string_list(content, ["authors", "author"]),
       "tags" => string_list(content, ["tags"]),
       "section" => first_string(content, ["section"])

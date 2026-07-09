@@ -145,15 +145,17 @@ defmodule Barkpark.PortableDoc.Projection do
     # so its coverage + no-drift profile are identical to body's. Pure: the ONE
     # media lookup a rich image needs is an injected closure in
     # `render_opts[:preview]` (callers that hold Repo + scope build it via
-    # `Barkpark.Preview.media_resolver/1`); with no such key the manifest degrades
-    # to a valid, media-less card. `Render.render_blocks/2` ignores the extra key.
-    Map.put(projected, "preview", Preview.project(projected, blocks, preview_opts(render_opts)))
-  end
-
-  defp preview_opts(render_opts) do
+    # `Barkpark.Preview.media_resolver/1`). GATED on that key: projection callers
+    # that don't opt in (sheets/forms/proposals scaffolds, doctrine backfill)
+    # must NOT stamp — a resolver-less re-save would overwrite a rich card AND
+    # shadow the reader's read-time fallback, which only recomputes when
+    # content["preview"] is absent. `Render.render_blocks/2` ignores the key.
     case Map.get(render_opts, :preview) do
-      opts when is_map(opts) -> opts
-      _ -> %{}
+      opts when is_map(opts) ->
+        Map.put(projected, "preview", Preview.project(projected, blocks, opts))
+
+      _ ->
+        projected
     end
   end
 

@@ -14,7 +14,12 @@ defmodule Barkpark.PreviewTest do
   # never reach it (project/3 only calls it for media paths).
   defp og_resolver do
     fn "/media/files/" <> _ = _src ->
-      %{"url" => "/media/renditions/mf-1/og", "width" => 1200, "height" => 630, "type" => "image/jpeg"}
+      %{
+        "url" => "/media/renditions/mf-1/og",
+        "width" => 1200,
+        "height" => 630,
+        "type" => "image/jpeg"
+      }
     end
   end
 
@@ -22,8 +27,11 @@ defmodule Barkpark.PreviewTest do
     Map.merge(%{media_resolver: og_resolver(), url: "/papers/hello", doc_type: "paper"}, extra)
   end
 
-  defp title_block(text), do: %{"id" => "t", "type" => "heading", "level" => 1, "role" => "title", "text" => text}
-  defp paragraph(text), do: %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+  defp title_block(text),
+    do: %{"id" => "t", "type" => "heading", "level" => 1, "role" => "title", "text" => text}
+
+  defp paragraph(text),
+    do: %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
 
   defp image_block(attrs),
     do: Map.merge(%{"id" => "img", "type" => "image"}, attrs)
@@ -108,7 +116,12 @@ defmodule Barkpark.PreviewTest do
     test "featured is preferred even when it appears AFTER a plain image" do
       blocks = [
         image_block(%{"id" => "plain", "src" => "/media/files/a/plain.png", "alt" => "Plain"}),
-        image_block(%{"id" => "feat", "role" => "featured", "src" => "/media/files/a/feat.png", "alt" => "Feat"})
+        image_block(%{
+          "id" => "feat",
+          "role" => "featured",
+          "src" => "/media/files/a/feat.png",
+          "alt" => "Feat"
+        })
       ]
 
       assert Preview.project(%{}, blocks, paper_opts())["image"]["alt"] == "Feat"
@@ -124,12 +137,18 @@ defmodule Barkpark.PreviewTest do
     end
 
     test "no image blocks → image is nil (emitters show the branded default)" do
-      assert Preview.project(%{}, [title_block("T"), paragraph("body")], paper_opts())["image"] == nil
+      assert Preview.project(%{}, [title_block("T"), paragraph("body")], paper_opts())["image"] ==
+               nil
     end
 
     test "a field-bound image block is NOT body art (skipped)" do
       blocks = [
-        %{"id" => "fi", "type" => "image", "fieldName" => "featuredImage", "src" => "/media/files/a/x.png"}
+        %{
+          "id" => "fi",
+          "type" => "image",
+          "fieldName" => "featuredImage",
+          "src" => "/media/files/a/x.png"
+        }
       ]
 
       assert Preview.project(%{}, blocks, paper_opts())["image"] == nil
@@ -139,7 +158,12 @@ defmodule Barkpark.PreviewTest do
   describe "image — external + degraded" do
     test "an external http(s) src passes through raw with the block's own dims" do
       blocks = [
-        image_block(%{"src" => "https://cdn.example.com/x.png", "alt" => "Ext", "width" => 800, "height" => 400})
+        image_block(%{
+          "src" => "https://cdn.example.com/x.png",
+          "alt" => "Ext",
+          "width" => 800,
+          "height" => 400
+        })
       ]
 
       m = Preview.project(%{}, blocks, paper_opts())
@@ -173,19 +197,35 @@ defmodule Barkpark.PreviewTest do
 
   describe "image alt — block alt → doc title" do
     test "the featured block's alt wins" do
-      blocks = [image_block(%{"role" => "featured", "src" => "/media/files/a/h.png", "alt" => "Block Alt"})]
-      assert Preview.project(%{"title" => "Doc Title"}, blocks, paper_opts())["image"]["alt"] == "Block Alt"
+      blocks = [
+        image_block(%{
+          "role" => "featured",
+          "src" => "/media/files/a/h.png",
+          "alt" => "Block Alt"
+        })
+      ]
+
+      assert Preview.project(%{"title" => "Doc Title"}, blocks, paper_opts())["image"]["alt"] ==
+               "Block Alt"
     end
 
     test "falls back to the document title when the block has no alt" do
       blocks = [image_block(%{"role" => "featured", "src" => "/media/files/a/h.png"})]
-      assert Preview.project(%{"title" => "Doc Title"}, blocks, paper_opts())["image"]["alt"] == "Doc Title"
+
+      assert Preview.project(%{"title" => "Doc Title"}, blocks, paper_opts())["image"]["alt"] ==
+               "Doc Title"
     end
   end
 
   describe "description — excerpt → first paragraph → nil, ~110 word-boundary + ellipsis" do
     test "an explicit excerpt field wins over body paragraphs" do
-      m = Preview.project(%{"excerpt" => "The hand-written summary."}, [paragraph("Body prose here.")], %{})
+      m =
+        Preview.project(
+          %{"excerpt" => "The hand-written summary."},
+          [paragraph("Body prose here.")],
+          %{}
+        )
+
       assert m["description"] == "The hand-written summary."
     end
 
@@ -197,6 +237,17 @@ defmodule Barkpark.PreviewTest do
     test "falls back to the first FREE body paragraph's plain text" do
       blocks = [title_block("T"), paragraph("First real paragraph."), paragraph("Second.")]
       assert Preview.project(%{}, blocks, %{})["description"] == "First real paragraph."
+    end
+
+    test "an INGRESS lead counts as the first paragraph (A6 — eyebrow→heading→ingress openers)" do
+      ingress = %{
+        "id" => "i",
+        "type" => "ingress",
+        "content" => [%{"type" => "text", "value" => "The standfirst lead."}]
+      }
+
+      blocks = [title_block("T"), ingress, paragraph("Later prose.")]
+      assert Preview.project(%{}, blocks, %{})["description"] == "The standfirst lead."
     end
 
     test "nil when there is no excerpt and no paragraph" do
@@ -249,18 +300,32 @@ defmodule Barkpark.PreviewTest do
     end
 
     test "task: status / assignee / done_ratio" do
-      content = %{"lifecycle_status" => "in_progress", "assignee" => "worker-1", "done_ratio" => 0.5}
+      content = %{
+        "lifecycle_status" => "in_progress",
+        "assignee" => "worker-1",
+        "done_ratio" => 0.5
+      }
+
       ext = Preview.project(content, [], %{doc_type: "task"})["extensions"]
       assert ext == %{"status" => "in_progress", "assignee" => "worker-1", "done_ratio" => 0.5}
     end
 
     test "sheet: tab_count from tabs/sheets list" do
-      assert Preview.project(%{"tabs" => [1, 2, 3]}, [], %{doc_type: "sheet"})["extensions"] == %{"tab_count" => 3}
-      assert Preview.project(%{"sheets" => [1]}, [], %{doc_type: "sheet"})["extensions"] == %{"tab_count" => 1}
+      assert Preview.project(%{"tabs" => [1, 2, 3]}, [], %{doc_type: "sheet"})["extensions"] == %{
+               "tab_count" => 3
+             }
+
+      assert Preview.project(%{"sheets" => [1]}, [], %{doc_type: "sheet"})["extensions"] == %{
+               "tab_count" => 1
+             }
     end
 
     test "ticket: key / state" do
-      ext = Preview.project(%{"key" => "SUP-42", "state" => "open"}, [], %{doc_type: "ticket"})["extensions"]
+      ext =
+        Preview.project(%{"key" => "SUP-42", "state" => "open"}, [], %{doc_type: "ticket"})[
+          "extensions"
+        ]
+
       assert ext == %{"key" => "SUP-42", "state" => "open"}
     end
 
@@ -277,7 +342,11 @@ defmodule Barkpark.PreviewTest do
 
   describe "degradation invariant — a core-only manifest with NO opts is valid" do
     test "project/2 (default opts) returns a valid, media-less card" do
-      blocks = [title_block("Just A Title"), paragraph("Some prose that becomes the description.")]
+      blocks = [
+        title_block("Just A Title"),
+        paragraph("Some prose that becomes the description.")
+      ]
+
       m = Preview.project(%{}, blocks)
 
       assert m["title"] == "Just A Title"
@@ -290,6 +359,7 @@ defmodule Barkpark.PreviewTest do
 
     test "is pure — calling twice on the same input yields identical bytes" do
       blocks = [title_block("T"), paragraph("Body.")]
+
       assert Preview.project(%{"title" => "T"}, blocks, paper_opts()) ==
                Preview.project(%{"title" => "T"}, blocks, paper_opts())
     end
