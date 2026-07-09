@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
+  alias BarkparkWeb.Studio.ReturnTo
 
   # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
   # helpers shared by the live render and the store-replay path.
@@ -67,7 +68,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # reopen — reopening replays OUR persisted history instantly and resumes the
   # CLI's memory on the next send via `--resume`.
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     if ClaudeChat.enabled?() do
       {:ok,
        socket
@@ -78,6 +79,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # current_path is owned by StudioChrome's :handle_params hook, which
          # also keeps it fresh across the /studio/chat/:session_id patches
          # (this static string used to freeze the active tab on reopen).
+         # Truthful return path (charter D5): a scoped surface links here with
+         # `?return_to=<its canonical path>`; we sanitize it (open-redirect
+         # guard) and thread it through every self-`push_patch` so a back/exit
+         # affordance can land the admin back in the SAME scope instead of the
+         # `/studio` session funnel. nil when arrived at flat/directly.
+         return_to: ReturnTo.sanitize(params["return_to"]),
          session: nil,
          store_session_id: nil,
          session_id: nil,
@@ -173,17 +180,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
          max_file_size: 3_000_000
        )}
     else
+      # Disabled here — bounce back to where the admin came from when we have a
+      # validated return path (charter D5), else the `/studio` funnel. Prefers
+      # the truthful scope over the session-resolving redirect.
       {:ok,
        socket
        |> put_flash(:error, "Claude chat is not enabled on this instance.")
-       |> redirect(to: "/studio")}
+       |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end
 
   # Single source of truth for the on-screen session. Fires on the initial mount
   # AND on every `push_patch` (sidebar click, new-chat, first-send self-patch).
   @impl true
-  def handle_params(%{"session_id" => sid}, _uri, socket) do
+  def handle_params(%{"session_id" => sid} = params, _uri, socket) do
+    socket = put_return_to(socket, params)
+
     cond do
       # A `push_patch` to the session we already own (e.g. right after a fresh
       # send minted + patched to its own uuid) — keep the live state untouched.
@@ -212,8 +224,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  def handle_params(_params, _uri, socket) do
-    {:noreply, socket |> capture_draft() |> reset_to_new_chat()}
+  def handle_params(params, _uri, socket) do
+    {:noreply, socket |> put_return_to(params) |> capture_draft() |> reset_to_new_chat()}
+  end
+
+  # Ingest a `return_to` param from the wire (charter D5). Only OVERWRITE the
+  # standing value when the incoming param sanitizes to a valid canonical Studio
+  # path — a self-`push_patch` that carries it forward keeps it, and a patch that
+  # somehow drops it never clobbers the one captured on mount.
+  defp put_return_to(socket, params) do
+    case ReturnTo.sanitize(params["return_to"]) do
+      nil -> socket
+      rt -> assign(socket, return_to: rt)
+    end
   end
 
   # Persist the leaving session's composer draft (charter D36c). No-op on the
@@ -1867,7 +1890,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <.icon name="message-circle" size={15} /> chats
           </span>
           <.link
-            patch="/studio/chat"
+            patch={ReturnTo.with_return_to("/studio/chat", @return_to)}
             class="btn btn-primary text-xs"
             style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
           >
@@ -1940,7 +1963,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   />
                 </form>
               <% else %>
-                <.link patch={"/studio/chat/#{s.id}"} class="bp-chat-session-link">
+                <.link patch={ReturnTo.with_return_to("/studio/chat/#{s.id}", @return_to)} class="bp-chat-session-link">
                   <% act = @activity[s.id] %>
                   <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
@@ -2690,7 +2713,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           {:ok, _} ->
             socket
             |> assign(store_session_id: id, session_id: id, status: :working)
-            |> push_patch(to: "/studio/chat/#{id}")
+            |> push_patch(to: chat_patch_to("/studio/chat/#{id}", socket))
             |> spawn_session(id, false)
 
           {:error, reason} ->
@@ -3001,10 +3024,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
     socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
 
     if socket.assigns.store_session_id == id do
-      push_patch(socket, to: "/studio/chat")
+      push_patch(socket, to: chat_patch_to("/studio/chat", socket))
     else
       socket
     end
+  end
+
+  # Carry the validated `return_to` across a self-`push_patch` (charter D5), so
+  # the flat chat surface never loses the scope it should return to as the user
+  # opens/closes sessions inside it.
+  defp chat_patch_to(path, socket) do
+    ReturnTo.with_return_to(path, socket.assigns[:return_to])
   end
 
   # ONE idempotent honest teardown for a dead/wedged subprocess (charter D18),

@@ -301,7 +301,7 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       prefix = "/w/#{ws_a.slug}/p/#{proj_a.slug}"
 
       # The pane row specifically (not the top-nav Media tab, which is
-      # already scoped via default_top_menu_entries/2).
+      # already scoped via default_top_menu_entries/4).
       assert has_element?(
                view,
                ~s{#plugin-link-media-library[href="#{prefix}/d/#{@dataset}/studio/media"]}
