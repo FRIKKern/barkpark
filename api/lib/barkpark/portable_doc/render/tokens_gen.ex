@@ -29,4 +29,21 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   def reading_font, do: @reading_font
   def reading_heading_weight, do: 600
   def reading_body_size, do: 18
+
+  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).
+  def email_brand, do: "#1e5347"
+  def email_brand_text, do: "#ffffff"
+  def email_rule, do: "#dde7e2"
+  def email_page_bg, do: "#eaf1ee"
+  def email_paper, do: "#ffffff"
+  def email_text, do: "#15211d"
+  def email_muted, do: "#55635e"
+  def email_code_bg, do: "#eaf1ee"
+
+  # Callout tone tints — verbatim {bg, fg} pairs (util.ex tone_palette/1).
+  def callout(:success), do: %{bg: "#e7f2ec", fg: "#1e6b52"}
+  def callout(:warning), do: %{bg: "#f7f0df", fg: "#8a6420"}
+  def callout(:danger), do: %{bg: "#f7e9e6", fg: "#a63a2e"}
+  def callout(:info), do: %{bg: "#e9eff7", fg: "#2d5e8f"}
+  def callout(:neutral), do: %{bg: "#edf0ee", fg: "#4a544f"}
 end

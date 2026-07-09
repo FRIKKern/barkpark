@@ -34,6 +34,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  alias Barkpark.PortableDoc.Render.TokensGen
 
   # ── stat ─────────────────────────────────────────────────────────────────────
 
@@ -359,11 +360,25 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # bgcolor cells (intensity mixed into the accent IN ELIXIR), and the chart as
   # an honest per-series summary box — never a broken picture.
 
-  @email_ink "#15211d"
-  @email_muted "#55635e"
-  @email_accent "#1e5347"
-  @email_ground "#eaf1ee"
-  @email_border "#dde7e2"
+  # Email-safe palette — sourced VERBATIM from design/tokens.json paperEmail via
+  # TokensGen (theme-system Wave 1 CAPTURE), the same captured hex the email
+  # palette and article var() fallbacks draw on. Single source, zero re-typing.
+  @email_ink TokensGen.email_text()
+  @email_muted TokensGen.email_muted()
+  @email_accent TokensGen.email_brand()
+  @email_ground TokensGen.email_page_bg()
+  @email_border TokensGen.email_rule()
+  @email_paper TokensGen.email_paper()
+
+  # RGB tuples for the heatmap accent-over-ground mix, DERIVED at compile time
+  # from the same captured accent/ground hex above — never a re-stamped literal.
+  # The anonymous parser lives in a module attribute so it is a compile-time
+  # constant (module-local functions aren't callable during compilation).
+  @hex_to_rgb fn "#" <> <<r::binary-2, g::binary-2, b::binary-2>> ->
+    {String.to_integer(r, 16), String.to_integer(g, 16), String.to_integer(b, 16)}
+  end
+  @email_accent_rgb @hex_to_rgb.(@email_accent)
+  @email_ground_rgb @hex_to_rgb.(@email_ground)
 
   @doc "Email-safe stat cell: inline-styled value/bar/label, no SVG."
   def stat_email_html(block) when is_map(block) do
@@ -471,7 +486,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             end) <> "</tr>"
         end)
 
-      ~s|<div style="display:inline-block;background:#ffffff;border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+      ~s|<div style="display:inline-block;background:#{@email_paper};border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
         ~s|<table cellspacing="3" cellpadding="0" style="border-collapse:separate">| <>
         head <> body <> "</table></div>"
     end
@@ -532,8 +547,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # accent mixed over the ground at intensity t, computed here because email
   # has no color-mix() — the same read the stylesheet gives the reader.
   defp mix_hex(t) do
-    {ar, ag, ab} = {0x1E, 0x53, 0x47}
-    {gr, gg, gb} = {0xEA, 0xF1, 0xEE}
+    {ar, ag, ab} = @email_accent_rgb
+    {gr, gg, gb} = @email_ground_rgb
     mix = fn a, g -> round(a * t + g * (1 - t)) end
 
     "#" <>

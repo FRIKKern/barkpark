@@ -17,18 +17,22 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
   attributes.
   """
 
+  alias Barkpark.PortableDoc.Render.TokensGen
+
   # Font names are wrapped in single quotes inside CSS so the surrounding
   # double-quoted style attribute stays valid HTML. (Embedding `"SF Pro Text"`
   # directly would terminate the attribute at the first `"`.)
   @font_body "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
   @font_mono "ui-monospace,Menlo,monospace"
-  # Evergreen profile (design/tokens.json primary: 163 46% 22%) — the same
-  # brand the reader, Studio, TUI and web carry. The email surface was the last
-  # holdout on stock indigo/Tailwind grays.
-  @brand "#1e5347"
-  @brand_text "#ffffff"
-  @rule "#dde7e2"
-  @page_bg "#eaf1ee"
+  # Evergreen profile — the same brand the reader, Studio, TUI and web carry.
+  # Sourced VERBATIM from design/tokens.json paperEmail via TokensGen (theme-
+  # system Wave 1 CAPTURE). NOTE: these deliberately DIVERGE from TokensGen's
+  # HSL-derived brand/rule (#1e5243/#e4e4e7) — email bytes ship to mail clients,
+  # so the drifted slots would retint the byte-locked golden; w3 reconciles.
+  @brand TokensGen.email_brand()
+  @brand_text TokensGen.email_brand_text()
+  @rule TokensGen.email_rule()
+  @page_bg TokensGen.email_page_bg()
 
   @default_width 600
 
@@ -55,13 +59,13 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       font_heading: @font_body,
       width: @default_width,
       bg: @page_bg,
-      paper: "#ffffff",
-      text: "#15211d",
-      muted: "#55635e",
+      paper: TokensGen.email_paper(),
+      text: TokensGen.email_text(),
+      muted: TokensGen.email_muted(),
       rule: @rule,
       accent: @brand,
       link_color: @brand,
-      code_bg: "#eaf1ee"
+      code_bg: TokensGen.email_code_bg()
     }
   end
 
@@ -91,14 +95,18 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       font_heading:
         "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
       width: 680,
-      bg: "var(--paper-bg-deep, #eaf1ee)",
-      paper: "var(--paper-bg, #ffffff)",
-      text: "var(--paper-ink, #15211d)",
-      muted: "var(--paper-ink-soft, #55635e)",
-      rule: "var(--paper-rule, #dde7e2)",
-      accent: "var(--paper-accent, #1e5347)",
-      link_color: "var(--paper-accent, #1e5347)",
-      code_bg: "var(--paper-bg-deep, #eaf1ee)"
+      # The `var(--paper-*, <fallback>)` fallbacks ship as HTML bytes when the
+      # render lands outside a `.bp-paper-surface` context (paper.html.heex, an
+      # email backend), so they MUST come from the same captured paperEmail hex
+      # as the email palette above — never a re-typed literal.
+      bg: "var(--paper-bg-deep, #{TokensGen.email_page_bg()})",
+      paper: "var(--paper-bg, #{TokensGen.email_paper()})",
+      text: "var(--paper-ink, #{TokensGen.email_text()})",
+      muted: "var(--paper-ink-soft, #{TokensGen.email_muted()})",
+      rule: "var(--paper-rule, #{TokensGen.email_rule()})",
+      accent: "var(--paper-accent, #{TokensGen.email_brand()})",
+      link_color: "var(--paper-accent, #{TokensGen.email_brand()})",
+      code_bg: "var(--paper-bg-deep, #{TokensGen.email_code_bg()})"
     }
   end
 
