@@ -38,7 +38,7 @@ const onrampInstallLine = "curl -fsSL https://raw.githubusercontent.com/FRIKKern
 // placeholder (secret stays in the shell); --token bakes a literal in its place.
 const (
 	cursorTokenRef     = "${env:BARKPARK_API_TOKEN}" // Cursor dialect
-	claudeCodeTokenRef = "${BARKPARK_API_TOKEN}"      // Claude Code dialect
+	claudeCodeTokenRef = "${BARKPARK_API_TOKEN}"     // Claude Code dialect
 )
 
 // onrampFile is one config file a target needs: where it belongs + its content.
@@ -105,17 +105,42 @@ func mcpJSONStanza(server, tokenValue string) string {
 }`, server, tokenValue)
 }
 
+// claudeCodeMcpJSONStanza renders the committed `.mcp.json` server block in
+// Claude Code's shape — identical to the Cursor stanza plus the explicit
+// `"type": "stdio"` discriminator docs/setup/CLAUDE-CODE.md publishes (decision
+// 14: the doc block IS what the verb prints, and the two docs differ on exactly
+// this key).
+func claudeCodeMcpJSONStanza(server, tokenValue string) string {
+	return fmt.Sprintf(`{
+  "mcpServers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": %q,
+        "BARKPARK_API_TOKEN": %q
+      }
+    }
+  }
+}`, server, tokenValue)
+}
+
 // codexTOMLBlock renders the `~/.codex/config.toml` [mcp_servers.barkpark] block.
 // The static env table carries ONLY the non-secret URL; the token rides
 // env_vars = ["BARKPARK_API_TOKEN"] (shell-forward whitelist). There is no ${…}
 // anywhere — Codex does not expand it inside a TOML value, so a placeholder would
-// ship as a literal string (charter decision 7).
+// ship as a literal string (charter decision 7). The raised timeouts (defaults
+// 10/60) match docs/setup/CODEX.md — a cold bp binary + first manifest fetch
+// must not trip the launcher.
 func codexTOMLBlock(server string) string {
 	return fmt.Sprintf(`[mcp_servers.barkpark]
 command = "bp"
 args = ["mcp", "serve"]
 env = { BARKPARK_API_URL = %q }
-env_vars = ["BARKPARK_API_TOKEN"]`, server)
+env_vars = ["BARKPARK_API_TOKEN"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120`, server)
 }
 
 // cursorCloudEnvironmentJSON renders the `.cursor/environment.json` install step
@@ -143,7 +168,7 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: ".mcp.json", Content: mcpJSONStanza(server, onrampTokenValue(claudeCodeTokenRef, token))},
+				{Path: ".mcp.json", Content: claudeCodeMcpJSONStanza(server, onrampTokenValue(claudeCodeTokenRef, token))},
 			},
 			Verify: "claude mcp list",
 		}, true
@@ -246,8 +271,10 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${env:BARKPARK_API_TOKEN} reads it (Cursor dialect).")
 	case "claude-code":
 		out.outf("# Or register it in one line (Claude Code writes .mcp.json for you):")
-		out.outf("#   claude mcp add barkpark --env BARKPARK_API_URL=%s --env BARKPARK_API_TOKEN=${BARKPARK_API_TOKEN} -- bp mcp serve", server)
-		out.outf("# ${BARKPARK_API_TOKEN} is the Claude Code dialect — set it in your shell.")
+		out.outf("#   claude mcp add --scope project --transport stdio --env BARKPARK_API_URL=%s --env 'BARKPARK_API_TOKEN=${BARKPARK_API_TOKEN}' barkpark -- bp mcp serve", server)
+		out.outf("# ${BARKPARK_API_TOKEN} is the Claude Code dialect — set it in your shell. Keep the")
+		out.outf("# single quotes: --scope project writes the COMMITTED .mcp.json, and they stop your")
+		out.outf("# shell expanding the placeholder into a literal token.")
 	case "codex":
 		out.outf("# Or register it in one line:")
 		out.outf("#   codex mcp add barkpark --env BARKPARK_API_URL=%s -- bp mcp serve", server)

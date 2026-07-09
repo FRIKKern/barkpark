@@ -60,8 +60,23 @@ func TestOnrampClaudeCodeGolden(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("claude-code exit = %d, want %d", code, exitOK)
 	}
-	if !strings.Contains(out, `"BARKPARK_API_TOKEN": "${BARKPARK_API_TOKEN}"`) {
-		t.Errorf("claude-code output missing the ${BARKPARK_API_TOKEN} dialect line.\n%s", out)
+	// The exact stanza docs/setup/CLAUDE-CODE.md publishes — including the
+	// explicit "type": "stdio" discriminator (decision 14: doc == verb).
+	wantStanza := `{
+  "mcpServers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}`
+	if !strings.Contains(out, wantStanza) {
+		t.Errorf("claude-code output missing the exact CLAUDE-CODE.md stanza.\n--- got ---\n%s", out)
 	}
 	// The Cursor dialect must NOT appear — dialects never mix (decision 9).
 	if strings.Contains(out, "${env:BARKPARK_API_TOKEN}") {
@@ -69,7 +84,7 @@ func TestOnrampClaudeCodeGolden(t *testing.T) {
 	}
 	for _, want := range []string{
 		".mcp.json",
-		"claude mcp add barkpark --env BARKPARK_API_URL=https://guerrilla.barkpark.cloud --env BARKPARK_API_TOKEN=${BARKPARK_API_TOKEN} -- bp mcp serve",
+		"claude mcp add --scope project --transport stdio --env BARKPARK_API_URL=https://guerrilla.barkpark.cloud --env 'BARKPARK_API_TOKEN=${BARKPARK_API_TOKEN}' barkpark -- bp mcp serve",
 		"claude mcp list",
 	} {
 		if !strings.Contains(out, want) {
@@ -89,7 +104,9 @@ func TestOnrampCodexGolden(t *testing.T) {
 command = "bp"
 args = ["mcp", "serve"]
 env = { BARKPARK_API_URL = "https://guerrilla.barkpark.cloud" }
-env_vars = ["BARKPARK_API_TOKEN"]`
+env_vars = ["BARKPARK_API_TOKEN"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120`
 	if !strings.Contains(out, wantBlock) {
 		t.Errorf("codex output missing the exact config.toml block.\n--- got ---\n%s", out)
 	}
