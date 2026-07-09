@@ -4,8 +4,8 @@
   "entries": [
     {
       "path": "api/lib/barkpark_web/layouts/root.html.heex",
-      "count": 219,
-      "note": "Studio root layout, outside the single GENERATED block: 144 hex + 75 literal rgb/rgba. The paper-surface + Sheets-grid + --st- status families (incl. the --st- status dupes ~L976-986 and attr-selector couplings) live under their own token systems / follow-ups; the studio-literal-check.sh gate allowlists them, this ledger merely freezes the raw count so none can grow silently."
+      "count": 165,
+      "note": "Studio root layout, outside the single GENERATED block: 126 hex + 39 literal rgb/rgba. Ratcheted 219 → 165 by ssp-w1-theme-root-sweep: all generic Studio-chrome elevation shadows / modal scrims / neutral hovers moved onto single-source HSL-triplet tokens (--bp-shadow-hsl / --bp-scrim-hsl / --bp-neutral-hsl, consumed as hsl(var(--…) / a)), the stale --primary-muted blue selection tints repointed to the emitted --primary-soft, and every dead `var(--ring|--accent, #3b82f6)` hex fallback dropped (the shared token is always emitted). The REMAINING 165 are the paper-surface + Sheets-grid + --st- status families (the --sheet-ref-* categorical palette, --paper-* value defs, sheet selection/find/notice/err hues, --st- status dupes ~L976-986 + attr-selector couplings): they live under their own token systems inside the studio-literal-check.sh skip-begin/end region (L2598-4631) and are genuinely exempt this wave. This ledger freezes the raw count so none can grow silently."
     },
     {
       "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
