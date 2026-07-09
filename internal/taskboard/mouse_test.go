@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/semrole"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -319,11 +320,17 @@ func TestMouseHoverTintsAndClears(t *testing.T) {
 	m := mouseModel(activeOrphans(readyTask("r1")))
 	gl := 1
 	inner := m.width - gl - 3
-	_, spans := buildBoardFooter(inner, false)
+	segs, spans := buildBoardFooter(inner, false)
 	var cx int
 	for _, s := range spans {
 		if s.verb == 'c' {
 			cx = gl + s.start
+		}
+	}
+	var cText string
+	for _, s := range segs {
+		if s.verb == 'c' {
+			cText = s.text
 		}
 	}
 
@@ -339,6 +346,20 @@ func TestMouseHoverTintsAndClears(t *testing.T) {
 	}
 	if ansi.Strip(styled) != ansi.Strip(plain) {
 		t.Errorf("hover changed the visible TEXT (should only tint):\n hovered=%q\n plain  =%q", ansi.Strip(styled), ansi.Strip(plain))
+	}
+
+	// The tint is pinned to the D94 verb-affordance TOKEN: chrome-selection-bg
+	// behind title ink — never a foreground token repurposed as a background
+	// (chrome-text-secondary under chrome-ink is ~1.8:1, illegible). Building the
+	// expectation from the semrole token (not from verbHoverStyle) keeps this a
+	// real pin: re-pointing the style off the token reds this line.
+	selBg, ok := semrole.ChromeColorFor(DefaultTheme, "chrome-selection-bg")
+	if !ok {
+		t.Fatal("semrole lost the chrome-selection-bg role")
+	}
+	want := lipgloss.NewStyle().Foreground(titleColor).Background(selBg).Render(cText)
+	if !strings.Contains(styled, want) {
+		t.Errorf("hovered verb is not painted title-ink-on-chrome-selection-bg (charter D94):\n want token %q\n in footer  %q", want, styled)
 	}
 
 	// Motion off the verbs clears the hover.
