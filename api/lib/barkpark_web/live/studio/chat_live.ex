@@ -229,6 +229,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def render(assigns) do
     ~H"""
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg);">
+      <style>
+        @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.75; } }
+        .bp-chat-skel .bp-skel-shape {
+          background: var(--border-muted);
+          border-radius: 4px;
+          animation: bp-skel-pulse 1.2s ease-in-out infinite;
+        }
+        .bp-chat-skel .bp-skel-dot {
+          width: 7px; height: 7px; border-radius: 50%;
+          background: var(--accent, #2f6b4f);
+          animation: bp-skel-pulse 1.2s ease-in-out infinite;
+        }
+      </style>
       <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border-muted); flex: none;">
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
@@ -348,9 +361,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
             >
               {Phoenix.HTML.raw(@streaming.stable_html)}
             </div>
-            <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">
-              <%= streaming_tail(@streaming) %><span class="text-dim">▌</span>
-            </div>
+            <%= case classify_tail(streaming_tail(@streaming)) do %>
+              <% {:text, tail} -> %>
+                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">
+                  <%= tail %><span class="text-dim">▌</span>
+                </div>
+              <% {:component, kind, prose} -> %>
+                <div
+                  :if={String.trim(prose) != ""}
+                  class="text-sm"
+                  style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+                >
+                  <%= prose %>
+                </div>
+                <.skeleton kind={kind} />
+            <% end %>
           </div>
 
           <div :if={@streaming == nil and @status == :thinking} class="text-xs text-dim" style="font-style: italic;">
@@ -377,6 +402,60 @@ defmodule BarkparkWeb.Studio.ChatLive do
           last turn: <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </p>
       </div>
+    </div>
+    """
+  end
+
+  # A dedicated shimmering placeholder per forming component — the reader sees
+  # WHAT is coming (a chart, a diagram, a table…) instead of raw source noise.
+  # Pure CSS (the pulse keyframes ride the transcript <style> in render/1).
+  defp skeleton(assigns) do
+    ~H"""
+    <div
+      class="bp-chat-skel"
+      data-skel={@kind}
+      style="border: 1px dashed var(--border-muted); border-radius: 8px; padding: 10px 12px; margin: 6px 0;"
+    >
+      <div
+        class="text-xs text-dim"
+        style="font-family: var(--font-mono); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"
+      >
+        <span class="bp-skel-dot"></span> rendering <%= skeleton_label(@kind) %>…
+      </div>
+      <%= case @kind do %>
+        <% "chart" -> %>
+          <div style="display: flex; align-items: flex-end; gap: 6px; height: 64px;">
+            <div :for={h <- [40, 62, 30, 52, 44, 58]} class="bp-skel-shape" style={"width: 22px; height: #{h}px;"}></div>
+          </div>
+        <% "stats" -> %>
+          <div style="display: flex; gap: 8px;">
+            <div :for={_i <- 1..3} class="bp-skel-shape" style="flex: 1; height: 52px;"></div>
+          </div>
+        <% "table" -> %>
+          <div style="display: flex; flex-direction: column; gap: 5px;">
+            <div :for={_r <- 1..3} style="display: flex; gap: 5px;">
+              <div :for={_c <- 1..3} class="bp-skel-shape" style="flex: 1; height: 14px;"></div>
+            </div>
+          </div>
+        <% "diagram" -> %>
+          <div style="display: flex; align-items: center; gap: 10px; height: 56px;">
+            <div class="bp-skel-shape" style="width: 88px; height: 34px;"></div>
+            <div class="bp-skel-shape" style="flex: 1; height: 2px;"></div>
+            <div class="bp-skel-shape" style="width: 88px; height: 34px;"></div>
+          </div>
+        <% "callout" -> %>
+          <div style="display: flex; gap: 8px;">
+            <div class="bp-skel-shape" style="width: 3px; align-self: stretch;"></div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 6px;">
+              <div class="bp-skel-shape" style="height: 12px; width: 40%;"></div>
+              <div class="bp-skel-shape" style="height: 12px; width: 85%;"></div>
+            </div>
+          </div>
+        <% _ -> %>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div :for={w <- [70, 90, 55]} class="bp-skel-shape" style={"height: 12px; width: #{w}%;"}></div>
+          </div>
+      <% end %>
     </div>
     """
   end
@@ -461,6 +540,71 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp streaming_tail(%{text: text, stable_len: stable_len}) do
     binary_part(text, stable_len, byte_size(text) - stable_len)
   end
+
+  # ── forming-component classification (streaming skeletons) ──────────────
+  # The tail after the last balanced-fence boundary is a SINGLE forming block
+  # (a "\n\n" with balanced fences would have advanced the boundary), so a
+  # cheap look at how it starts tells us what component is being built. The
+  # raw source of a forming component reads as noise — render a dedicated
+  # skeleton in the component's shape instead; prose keeps streaming as text.
+  #
+  # Returns `{:text, tail}` or `{:component, kind, prose_before_component}`.
+  defp classify_tail(tail) do
+    fence_count = length(:binary.matches(tail, "```"))
+
+    cond do
+      rem(fence_count, 2) == 1 ->
+        {pos, _} = List.last(:binary.matches(tail, "```"))
+        prose = binary_part(tail, 0, pos)
+        fence = binary_part(tail, pos, byte_size(tail) - pos)
+        {:component, fence_kind(fence), prose}
+
+      forming_table?(tail) ->
+        {:component, "table", ""}
+
+      String.starts_with?(String.trim_leading(tail), ">") ->
+        {:component, "callout", ""}
+
+      true ->
+        {:text, tail}
+    end
+  end
+
+  defp fence_kind("```" <> rest) do
+    case rest |> String.split("\n", parts: 2) |> hd() |> String.trim() do
+      "mermaid" -> "diagram"
+      "portabledoc" -> portabledoc_kind(rest)
+      _ -> "code"
+    end
+  end
+
+  defp fence_kind(_), do: "code"
+
+  # Sniff the first "type" in the (partial) JSON to pick the skeleton shape.
+  defp portabledoc_kind(fence_rest) do
+    case Regex.run(~r/"type"\s*:\s*"([\w-]+)"/, fence_rest) do
+      [_, "chart"] -> "chart"
+      [_, "heatmap"] -> "chart"
+      [_, t] when t in ["stat", "stats"] -> "stats"
+      [_, "table"] -> "table"
+      [_, "callout"] -> "callout"
+      [_, "divider"] -> "code"
+      [_, _other] -> "block"
+      _ -> "block"
+    end
+  end
+
+  defp forming_table?(tail) do
+    tail |> String.trim_leading() |> String.starts_with?("|")
+  end
+
+  defp skeleton_label("diagram"), do: "diagram"
+  defp skeleton_label("chart"), do: "chart"
+  defp skeleton_label("stats"), do: "stats"
+  defp skeleton_label("table"), do: "table"
+  defp skeleton_label("callout"), do: "callout"
+  defp skeleton_label("code"), do: "code"
+  defp skeleton_label(_), do: "block"
 
   defp stable_boundary(text) do
     case :binary.matches(text, "\n\n") do

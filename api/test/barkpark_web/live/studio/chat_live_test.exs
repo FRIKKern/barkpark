@@ -156,17 +156,80 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "▌"
     end
 
-    test "an unclosed fence is never half-rendered mid-stream", %{view: view} do
+    test "an unclosed fence shows a skeleton, never half-rendered source", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("```mermaid\ngraph TD\n")})
       send(view.pid, {:claude_chat_event, stream_delta("\n\nA-->B")})
 
       html = render(view)
-      # the boundary must not advance into the open fence: no diagram figure yet,
-      # the raw fence text remains visible as the plain tail
-      refute html =~
-               "bp-paper-surface bp-chat-md\" style=\"overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;\">\n<figure"
+      # boundary must not advance into the open fence — and the forming
+      # diagram shows as its dedicated skeleton, not raw source noise
+      assert html =~ ~s(data-skel="diagram")
+      assert html =~ "rendering diagram"
+      refute html =~ "graph TD"
+    end
 
-      assert html =~ "```mermaid"
+    test "each forming component gets its dedicated skeleton", %{view: view} do
+      checks = [
+        {~s(```portabledoc\n[{"type":"chart","kind":"bars"), "chart"},
+        {~s(```portabledoc\n[{"type":"stats","items":[), "stats"},
+        {~s(```portabledoc\n[{"type":"callout","tone"), "callout"},
+        {~s(```elixir\nIO.puts), "code"},
+        {"| Name | N |\n| --- |", "table"},
+        {"> important note about", "callout"}
+      ]
+
+      for {tail, kind} <- checks do
+        # reset the stream between probes via a completed message
+        send(
+          view.pid,
+          {:claude_chat_event,
+           %{
+             "type" => "assistant",
+             "message" => %{"content" => [%{"type" => "text", "text" => "."}]}
+           }}
+        )
+
+        send(view.pid, {:claude_chat_event, stream_delta(tail)})
+        html = render(view)
+        assert html =~ ~s(data-skel="#{kind}"), "expected #{kind} skeleton for #{inspect(tail)}"
+      end
+    end
+
+    test "prose before a forming component still streams as text", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event, stream_delta("Here is the diagram:\n```mermaid\ngraph")}
+      )
+
+      html = render(view)
+      assert html =~ "Here is the diagram:"
+      assert html =~ ~s(data-skel="diagram")
+    end
+
+    test "the skeleton yields to the real component when the block completes", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event, stream_delta(~s(```portabledoc\n[{"type":"divider"}]))}
+      )
+
+      assert render(view) =~ "data-skel"
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => ~s(```portabledoc\n[{"type":"divider"}]\n```)}
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      refute html =~ "data-skel"
+      assert html =~ "bp-paper-surface"
     end
 
     test "the complete assistant message supersedes the streamed preview", %{view: view} do
