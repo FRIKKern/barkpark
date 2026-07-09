@@ -291,6 +291,32 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       assert p1.badge == nil
     end
 
+    test "a declared list_preview meta spec WINS over a stamped manifest" do
+      # Defensive cross-surface pin, mirror of the Go TUI's
+      # TestRowMetaListPreviewWinsWhenBothPresent: a doc carrying BOTH a
+      # schema list_preview meta spec and a manifest keeps the declared
+      # spec — fieldful task/ticket rows never regress to the sparse OG
+      # description. No such doc exists today (fieldful docs never enter
+      # Projection.project); this pins the priority so the two surfaces
+      # can never silently diverge.
+      dataset = "pb_preview_lp_wins"
+      insert_task_schema!(dataset)
+
+      create_task!(dataset, "t9", %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "priority" => 1,
+        "preview" => %{"description" => "should not win"}
+      })
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["task"])
+      task_pane = List.last(panes)
+
+      t9 = Enum.find(task_pane.items, &(&1.id == "t9"))
+      assert t9.meta == "P1"
+      assert t9.badge == "open"
+    end
+
     test "a manifest with a blank description falls through to a blank row" do
       dataset = "pb_preview_blank_desc"
       seed_basic(dataset)

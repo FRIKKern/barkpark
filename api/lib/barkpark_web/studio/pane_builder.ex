@@ -539,26 +539,29 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     end
   end
 
-  # ── doc-row items: preview manifest → list_preview ──────────────────────────
+  # ── doc-row items: list_preview → preview manifest ──────────────────────────
   #
   # Shared row builder for BOTH document-list branches
-  # (`:document_type_list` and `:plugin_document_list`). Two row sources,
-  # in priority order (Preview Contract D17):
+  # (`:document_type_list` and `:plugin_document_list`). Two row sources
+  # (Preview Contract D17); a DECLARED `list_preview` always wins:
   #
-  #   1. Manifest-first for BLOCK docs. A paper/sheet/form write stamps an
-  #      OG-shaped manifest at `content["preview"]` (Projection.project/4).
-  #      When present, the row's `:meta` is the manifest description — a
-  #      one-line summary the row never had — and `:badge` stays nil
-  #      (the sparse share manifest carries no badge vocabulary).
-  #   2. list_preview for FIELDFUL docs. task/ticket never enter
-  #      Projection.project (no blocks → no manifest, writer.ex:576-594), so
+  #   1. list_preview for FIELDFUL docs. task/ticket never enter
+  #      Projection.project (no blocks → no manifest, writer.ex:576-594);
   #      they keep the schema-declared `list_preview` — `%{"badge" => <spec>,
   #      "meta" => <spec>}`, each spec a content-field name string or
   #      `%{"field" => f, "prefix" => p}` — surfaced as `:badge`/`:meta`.
+  #      The declared spec wins even if such a doc somehow gained a manifest,
+  #      so fieldful rows can never regress to the sparse OG description
+  #      (mirrors the Go TUI's `rowMeta`, per-key).
+  #   2. Manifest for BLOCK docs. A paper/sheet/form write stamps an OG-shaped
+  #      manifest at `content["preview"]` (Projection.project/4). When no meta
+  #      spec is declared, the row's `:meta` is the manifest description — a
+  #      one-line summary the row never had. `:badge` stays declaration-only
+  #      (the sparse share manifest carries no badge vocabulary).
   #
   # No manifest AND no declaration → both keys `nil`, the row renders exactly
   # as before (post/page back-compat lock). Generic by construction: PaneBuilder
-  # never branches on the document type; the manifest's presence is the switch.
+  # never branches on the document type; the declaration/manifest is the switch.
 
   defp doc_items(docs, schema) do
     preview = schema_list_preview(schema)
@@ -566,35 +569,24 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
 
-      row = %{
+      %{
         type: :doc,
         id: pub_id,
         title: doc.title || "Untitled",
         is_draft: Content.draft?(doc.doc_id),
-        status: doc.status
+        status: doc.status,
+        badge: preview_value(doc, Map.get(preview, "badge")),
+        meta: row_meta(doc, Map.get(preview, "meta"))
       }
-
-      Map.merge(row, row_preview(doc, preview))
     end)
   end
 
-  # Manifest-first, list_preview otherwise. A stamped `content["preview"]`
-  # (block docs) wins; a manifest-less doc (task/ticket + any classic doc)
-  # falls through to the schema's `list_preview` declaration — the shipped
-  # task lifecycle badge + P-prefixed priority meta stay byte-identical.
-  defp row_preview(doc, list_preview) do
-    case manifest_description(doc) do
-      desc when is_binary(desc) -> %{badge: nil, meta: desc}
-      nil -> list_preview_row(doc, list_preview)
-    end
-  end
-
-  defp list_preview_row(doc, list_preview) do
-    %{
-      badge: preview_value(doc, Map.get(list_preview, "badge")),
-      meta: preview_value(doc, Map.get(list_preview, "meta"))
-    }
-  end
+  # A declared list_preview meta spec WINS; only spec-less docs (block docs —
+  # paper/sheet/form — declare none) read the write-time manifest description.
+  # Identical priority to the Go TUI's `rowMeta` (listpreview_render_test.go
+  # pins it there; pane_builder_test.exs pins it here).
+  defp row_meta(doc, nil), do: manifest_description(doc)
+  defp row_meta(doc, spec), do: preview_value(doc, spec)
 
   # The OG description off a doc's write-time preview manifest, or nil when the
   # doc carries no manifest (task/ticket/classic docs) or an empty description.
