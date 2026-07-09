@@ -132,9 +132,16 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
   test "article headings emit bare <hN> with no inline style" do
     for level <- [1, 2, 3] do
-      html = Render.render_block(%{"type" => "heading", "level" => level, "text" => "X"}, %{style: :article})
-      assert html =~ ~r/^<h#{level}>/, "heading level #{level} must open a bare <h#{level}>, got: #{html}"
-      refute html =~ ~r/<h#{level}[^>]*\sstyle=/, "heading level #{level} must carry NO inline style, got: #{html}"
+      html =
+        Render.render_block(%{"type" => "heading", "level" => level, "text" => "X"}, %{
+          style: :article
+        })
+
+      assert html =~ ~r/^<h#{level}>/,
+             "heading level #{level} must open a bare <h#{level}>, got: #{html}"
+
+      refute html =~ ~r/<h#{level}[^>]*\sstyle=/,
+             "heading level #{level} must carry NO inline style, got: #{html}"
     end
   end
 
@@ -194,7 +201,9 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     for element <- @parity_elements do
       view_decls = declarations_for(view, "bp-paper-surface", element)
       edit_decls = declarations_for(edit, "bp-paper-editor-body", element)
-      shared = MapSet.intersection(MapSet.new(Map.keys(view_decls)), MapSet.new(Map.keys(edit_decls)))
+
+      shared =
+        MapSet.intersection(MapSet.new(Map.keys(view_decls)), MapSet.new(Map.keys(edit_decls)))
 
       assert MapSet.size(shared) > 0,
              "no shared property found for <#{element}> — a selector rename likely broke the parity parser"
@@ -326,7 +335,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
       bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element)
 
       shared =
-        MapSet.intersection(MapSet.new(Map.keys(studio_decls)), MapSet.new(Map.keys(bundle_decls)))
+        MapSet.intersection(
+          MapSet.new(Map.keys(studio_decls)),
+          MapSet.new(Map.keys(bundle_decls))
+        )
 
       assert MapSet.size(shared) > 0,
              "no shared property found for <#{element}> — a selector rename likely broke the mirror parser"
@@ -554,7 +566,10 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
     mismatches =
       for {selector, reader_decls} <- pairs,
-          css <- [{"Studio", divider_css_decls(studio, selector)}, {"Bundle", divider_css_decls(bundle, selector)}],
+          css <- [
+            {"Studio", divider_css_decls(studio, selector)},
+            {"Bundle", divider_css_decls(bundle, selector)}
+          ],
           {label, css_decls} = css,
           {prop, value} <- Enum.to_list(reader_decls),
           Map.get(css_decls, prop) != value do
