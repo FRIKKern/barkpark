@@ -697,14 +697,16 @@
   }
 
   // Normalized monthly-price formatter (Decision 6 — real price on BOTH clouds).
-  // A number renders as "$N/mo"; azure is framed "from ~$N/mo compute" (its
-  // catalog is a floor, VM-only). A nil price is an HONEST "Price unavailable"
-  // (azure prod carries no SKU price yet — never a fabricated $0). Currency is
-  // the control plane's single billing currency (USD).
-  function formatMonthlyPrice(price, kind) {
+  // A number renders as "<sym>N/mo"; azure is framed "from ~$N/mo compute" (its
+  // catalog is a floor, VM-only). A nil price is an HONEST "Price unavailable" —
+  // never a fabricated $0. `currency` is the catalog payload's own code
+  // (Decision 15: "EUR" hetzner / "USD" azure) so a EUR price is never dressed
+  // as dollars; absent (pre-currency server) it defaults to "$".
+  function formatMonthlyPrice(price, kind, currency) {
     if (typeof price !== "number" || !isFinite(price) || price < 0) return "Price unavailable";
+    var sym = currency === "EUR" ? "€" : "$";
     var n = price >= 10 ? String(Math.round(price)) : (Math.round(price * 100) / 100).toString();
-    return kind === "azure" ? "from ~$" + n + "/mo compute" : "$" + n + "/mo";
+    return kind === "azure" ? "from ~" + sym + n + "/mo compute" : sym + n + "/mo";
   }
 
   // Map an api() catalog response to a render state. The catalog needs a
@@ -4798,7 +4800,7 @@
           '<span class="size-opt-name">' + esc(t.slug) + "</span>" +
           '<span class="size-opt-spec dim">' + esc(serverTypeLabel(t)) + "</span>" +
         "</span>" +
-        '<span class="size-opt-price">' + esc(formatMonthlyPrice(t.monthly_price, kind)) + "</span>" +
+        '<span class="size-opt-price">' + esc(formatMonthlyPrice(t.monthly_price, kind, catalog && catalog.currency)) + "</span>" +
       "</label>";
     }).join("");
   }
@@ -4820,8 +4822,15 @@
           '<div class="size-list">' + sizes + "</div></div>";
     }
     if (vs.state === "no_provider") {
+      // Provider-honest copy (Decision 17): managed Hetzner launches on the
+      // PLATFORM account, so the hetzner tab may promise the managed fallback.
+      // Azure is BYO-only — a launch without a connected row 422s at the button —
+      // so its copy must say connect-first, never promise a managed instance.
+      var lead = kind === "azure"
+        ? "Azure instances provision into your own subscription — connect your Azure account to launch here."
+        : "Connect a " + name + " account to provision here. Until then we launch a fully-managed instance for you.";
       return '<div class="launch-catalog-empty">' +
-        '<p class="dim">Connect a ' + name + " account to provision here. Until then we launch a fully-managed instance for you.</p>" +
+        '<p class="dim">' + lead + "</p>" +
         '<button class="btn btn-ghost btn-sm launch-connect-provider" type="button" data-kind="' + esc(kind) + '">Connect ' + name + "</button></div>";
     }
     if (vs.state === "unavailable") {
@@ -4945,7 +4954,11 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = launchCta(opts); }
-      toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
+      // Decision 19, launch edition: a 422 like provider_not_connected carries
+      // server-owned remediation copy naming the exact fix (connect the provider
+      // first) — friendly() provably drops it, so surface it directly.
+      var copy = remediationCopy(r.data);
+      toast({ kind: "error", title: "Couldn't launch", body: copy || friendly(r.data, "Please try again.") });
     });
   }
 

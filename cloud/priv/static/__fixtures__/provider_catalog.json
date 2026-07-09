@@ -1,5 +1,6 @@
 {
   "hetzner": {
+    "currency": "EUR",
     "regions": [
       { "slug": "fsn1", "name": "Falkenstein" },
       { "slug": "hel1", "name": "Helsinki" }
@@ -10,6 +11,7 @@
     ]
   },
   "azure": {
+    "currency": "USD",
     "regions": [
       { "slug": "eastus", "name": "East US" },
       { "slug": "westeurope", "name": "West Europe" }

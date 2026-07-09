@@ -3086,14 +3086,18 @@ test("S7: remediationCopy extracts server copy that friendly() provably drops", 
 });
 
 // ── formatMonthlyPrice: real price both clouds, honest nil, azure framing ───
-test("S7: formatMonthlyPrice renders $/mo, azure 'from ~$X/mo compute', honest nil", () => {
+test("S7: formatMonthlyPrice renders the catalog's currency, azure 'from ~' framing, honest nil", () => {
+  // The payload's currency wins (Decision 15: EUR hetzner / USD azure) — a EUR
+  // price is never dressed as dollars.
+  assert.equal(hooks.formatMonthlyPrice(3.79, "hetzner", "EUR"), "€3.79/mo");
+  assert.equal(hooks.formatMonthlyPrice(70.08, "azure", "USD"), "from ~$70/mo compute");
+  assert.equal(hooks.formatMonthlyPrice(4, "hetzner", "EUR"), "€4/mo");
+  // Absent currency (a pre-currency server) defaults to "$".
   assert.equal(hooks.formatMonthlyPrice(3.79, "hetzner"), "$3.79/mo");
-  assert.equal(hooks.formatMonthlyPrice(70.08, "azure"), "from ~$70/mo compute");
-  assert.equal(hooks.formatMonthlyPrice(4, "hetzner"), "$4/mo");
   // A nil/absent/negative price is NEVER a fabricated $0.
-  assert.equal(hooks.formatMonthlyPrice(null, "azure"), "Price unavailable");
-  assert.equal(hooks.formatMonthlyPrice(undefined, "hetzner"), "Price unavailable");
-  assert.equal(hooks.formatMonthlyPrice(-1, "hetzner"), "Price unavailable");
+  assert.equal(hooks.formatMonthlyPrice(null, "azure", "USD"), "Price unavailable");
+  assert.equal(hooks.formatMonthlyPrice(undefined, "hetzner", "EUR"), "Price unavailable");
+  assert.equal(hooks.formatMonthlyPrice(-1, "hetzner", "EUR"), "Price unavailable");
 });
 
 // ── catalogViewState: honest states from the api() response ─────────────────
@@ -3147,7 +3151,9 @@ test("S7: catalogPanelHtml renders the priced ready state for both clouds", () =
     { region: "fsn1", server_type: "cx11" }, "grp-h",
   );
   assert.match(hz, /Falkenstein/);
-  assert.match(hz, /\$3\.79\/mo/);
+  // Hetzner prices are EUR (the fixture's currency) — never dressed as dollars.
+  assert.match(hz, /€3\.79\/mo/);
+  assert.ok(!hz.includes("$3.79"), "a EUR price must not render with a $ symbol");
   assert.match(hz, /value="cx11" checked/);
   const az = hooks.catalogPanelHtml(
     { state: "ready", catalog: catalogFixture.azure }, "azure",
@@ -3163,6 +3169,12 @@ test("S7: catalogPanelHtml renders honest non-ready states with an action", () =
   const noProv = hooks.catalogPanelHtml({ state: "no_provider" }, "azure", null, "g");
   assert.match(noProv, /Connect Microsoft Azure/);
   assert.match(noProv, /launch-connect-provider/);
+  // Azure is BYO-only (Decision 17): a launch without a connected row 422s at
+  // the button, so the azure panel must NOT promise a managed fallback…
+  assert.ok(!noProv.includes("fully-managed"), "azure no_provider copy must not promise a managed launch");
+  // …while managed Hetzner (platform account) honestly may.
+  const noProvHz = hooks.catalogPanelHtml({ state: "no_provider" }, "hetzner", null, "g");
+  assert.match(noProvHz, /fully-managed/);
   const unavail = hooks.catalogPanelHtml({ state: "unavailable" }, "hetzner", null, "g");
   assert.match(unavail, /unavailable/);
   const err = hooks.catalogPanelHtml({ state: "error" }, "hetzner", null, "g");
