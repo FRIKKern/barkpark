@@ -197,6 +197,17 @@ if config_env() == :prod do
   config :barkpark_cloud, BarkparkCloud.Azure.Pricing,
     http_client: &BarkparkCloud.Billing.HttpClient.request/1
 
+  # portable-archives (S14/D39): wire the S3 read conduit's credentials + bucket
+  # in prod from env. The location defaults to fsn1 (Hetzner Object Storage). The
+  # transport defaults to the module's own verified-TLS :httpc client — no new
+  # dep. Blank creds ⇒ the store fails closed (:not_configured) and GET
+  # /v1/archives degrades honestly. See BarkparkCloud.ArchiveStore.
+  config :barkpark_cloud, BarkparkCloud.ArchiveStore,
+    access_key: System.get_env("HETZNER_S3_ACCESS_KEY"),
+    secret_key: System.get_env("HETZNER_S3_SECRET_KEY"),
+    bucket: System.get_env("BARKPARK_BUNDLE_BUCKET"),
+    location: System.get_env("BARKPARK_BUNDLE_LOCATION") || "fsn1"
+
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,

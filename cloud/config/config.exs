@@ -141,6 +141,19 @@ config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: true, port: 4100
 # a per-process fake.
 config :barkpark_cloud, BarkparkCloud.Azure.Pricing, http_client: nil
 
+# portable-archives (S14/D39): the read conduit into Hetzner Object Storage for
+# archived-instance bundles. Default is UNCONFIGURED (blank creds) → the store
+# fails closed with {:error, :not_configured} and GET /v1/archives degrades
+# honestly, so dev/test boot with the archives panel showing an honest
+# unconfigured state. prod (runtime.exs) wires HETZNER_S3_ACCESS_KEY /
+# HETZNER_S3_SECRET_KEY / BARKPARK_BUNDLE_BUCKET; tests inject a fake transport
+# via :archive_store_http_client. See BarkparkCloud.ArchiveStore.
+config :barkpark_cloud, BarkparkCloud.ArchiveStore,
+  access_key: nil,
+  secret_key: nil,
+  bucket: nil,
+  location: "fsn1"
+
 # oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
 # on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban
 # setup (api/config/config.exs:81-118), trimmed to what the control plane needs

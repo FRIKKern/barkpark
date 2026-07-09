@@ -209,6 +209,16 @@
           </header>
 
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
+
+          <!-- S14 portable archives: a team's archived-instance bundles, read
+               straight from object storage. The console shows each bundle + a
+               copy-paste `bp cloud instance resurrect` affordance (it does not
+               execute resurrect this wave). loadArchives() fills #archives-body. -->
+          <section class="archives-panel" aria-labelledby="archives-heading">
+            <h2 id="archives-heading" class="archives-title">Archives</h2>
+            <p class="dim archives-sub">Portable bundles you can resurrect on Hetzner or Azure.</p>
+            <div id="archives-body" class="archives-body" aria-live="polite"></div>
+          </section>
         </section>
 
         <!-- LAUNCH is no longer a view (A4/D66) — it is the launchFlow() component,

@@ -115,6 +115,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.{
     Accounts,
+    ArchiveStore,
     Azure,
     Billing,
     DomainStatus,
@@ -1022,6 +1023,41 @@ defmodule BarkparkCloud.Web.Router do
       json(conn, 200, %{
         barkparks: Enum.map(barkparks, &barkpark_json(&1, pmap[&1.id], dmap[&1.id]))
       })
+    end
+  end
+
+  # GET /v1/archives → 200 {ok:true, archives:[...]} — the team's portable
+  # archive bundles, read straight from object storage (charter S14 / D39). The
+  # bundle manifest IS the index: there is NO archives table. Strictly
+  # team-scoped by the `archives/<team_id>/` key prefix (derived from the
+  # authenticated team, never client input), so another team's bundles can
+  # NEVER be served. Newest-first. Each row is {fqdn, slug, source_provider,
+  # created_at, bundle_ref, spec:{region, server_type}} — enough for the console
+  # to render the row + a `bp cloud instance resurrect <slug> --provider <kind>`
+  # affordance (the console does not execute resurrect this wave).
+  #
+  # Honest degrade (D39): an unconfigured or unreachable store returns
+  # {ok:false, error} at 502 — NEVER a fabricated empty-success, which would
+  # tell an operator their archives vanished when the store is merely down. No
+  # team → a true empty (a team with no bundles is indistinguishable, correctly).
+  get "/v1/archives" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 200, %{ok: true, archives: []})
+
+      true ->
+        case ArchiveStore.list_archives(conn.assigns.current_team.id) do
+          {:ok, archives} ->
+            json(conn, 200, %{ok: true, archives: archives})
+
+          {:error, reason} ->
+            json(conn, 502, %{ok: false, error: archive_store_error(reason)})
+        end
     end
   end
 
@@ -4809,6 +4845,15 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp parse_limit(_, default, _max), do: default
+
+  # User-facing message for a GET /v1/archives degrade (S14). Server-owned copy
+  # (JS never invents a reason) — an unconfigured deployment reads distinctly
+  # from a transient store outage so the operator knows whether to wait or ask.
+  defp archive_store_error(:not_configured),
+    do: "Archive storage isn't configured for this deployment."
+
+  defp archive_store_error(_other),
+    do: "Couldn't reach the archive store. It may be temporarily unavailable — try again shortly."
 
   ## usage-meter helpers (GET /v1/barkparks/:id/usage — charter decision D48)
 
