@@ -61,6 +61,7 @@ const sandbox = {
   sessionStorage: storage,
   navigator: {},
   URL: URL, // studioLoginHost() parses instance origins with the WHATWG URL API
+  URLSearchParams: URLSearchParams, // activateCodeFromSearch() reads ?code= prefill
   fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
   EventSource: function () { return { addEventListener: noop, close: noop }; },
   setTimeout: noop,
@@ -3940,4 +3941,72 @@ test("azh-w7: resurrectModalHtml — the slug is HTML-escaped (no markup injecti
   const html = hooks.resurrectModalHtml({ slug: '<img src=x>', bundleRef: "ref" }, "hetzner");
   assert.ok(html.indexOf("<img src=x>") === -1);
   assert.match(html, /&lt;img/);
+});
+
+// ── bp-login-ux W1: /activate device-login approve-page pure helpers ────────
+// The browser half of `bp login`'s copy-link flow. These are the parse/decode
+// helpers that turn a pasted/deep-linked code into the wire user_code and fold
+// the frozen (charter D10) inspect/approve responses into view states — the
+// layer where a malformed ?code= or a stray character would otherwise reach the
+// POST body or throw inside render(). Rendering + fetch flows are browser-live.
+
+test("the /activate helpers are exported", () => {
+  for (const name of ["normalizeUserCode", "userCodeComplete", "activateCodeFromSearch",
+    "activateInspectState", "activateExpiryText"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.equal(hooks.activateAlphabet, "23456789ABCDEFGHJKMNPQRSTVWXYZ");
+});
+
+test("normalizeUserCode uppercases, drops separators, and renders XXXX-XXXX", () => {
+  assert.equal(hooks.normalizeUserCode("abcd-2345"), "ABCD-2345");
+  assert.equal(hooks.normalizeUserCode("abcd2345"), "ABCD-2345"); // inserts the dash
+  assert.equal(hooks.normalizeUserCode("ab cd 23 45"), "ABCD-2345"); // strips spaces
+  assert.equal(hooks.normalizeUserCode("AB-CD-23-45"), "ABCD-2345"); // strips extra dashes
+});
+
+test("normalizeUserCode drops ambiguous chars (no 0/1/I/L/O/U) and caps at 8", () => {
+  // 0,1,O,I,L,U are outside the alphabet → stripped, not mapped.
+  assert.equal(hooks.normalizeUserCode("O0I1LU"), ""); // every char rejected
+  assert.equal(hooks.normalizeUserCode("ABCD2345EXTRA"), "ABCD-2345"); // caps at 8 valid chars
+  assert.equal(hooks.normalizeUserCode(null), ""); // nullish → empty, never throws
+});
+
+test("normalizeUserCode keeps a live dash only past 4 chars (natural typing)", () => {
+  assert.equal(hooks.normalizeUserCode("ab"), "AB"); // no premature dash
+  assert.equal(hooks.normalizeUserCode("abcd"), "ABCD");
+  assert.equal(hooks.normalizeUserCode("abcd2"), "ABCD-2");
+});
+
+test("userCodeComplete is true only for exactly 8 alphabet chars", () => {
+  assert.equal(hooks.userCodeComplete("ABCD-2345"), true);
+  assert.equal(hooks.userCodeComplete("abcd2345"), true); // normalized first
+  assert.equal(hooks.userCodeComplete("ABCD-234"), false); // 7 chars
+  assert.equal(hooks.userCodeComplete(""), false);
+  assert.equal(hooks.userCodeComplete("OOOO-1111"), false); // all rejected chars
+});
+
+test("activateCodeFromSearch pulls + normalizes the ?code= prefill", () => {
+  assert.equal(hooks.activateCodeFromSearch("?code=abcd2345"), "ABCD-2345");
+  assert.equal(hooks.activateCodeFromSearch("?code=ABCD-2345&x=1"), "ABCD-2345");
+  assert.equal(hooks.activateCodeFromSearch("?other=1"), ""); // no code param
+  assert.equal(hooks.activateCodeFromSearch(""), ""); // empty search
+  assert.equal(hooks.activateCodeFromSearch(null), ""); // nullish never throws
+});
+
+test("activateInspectState folds the frozen D10 responses into view states", () => {
+  assert.equal(hooks.activateInspectState(200, { client_name: "bp on host" }), "confirm");
+  assert.equal(hooks.activateInspectState(404, { error: "expired_or_invalid" }), "gone");
+  assert.equal(hooks.activateInspectState(500, {}), "error"); // retryable
+  assert.equal(hooks.activateInspectState(200, null), "error"); // 200 without a body
+  assert.equal(hooks.activateInspectState(429, {}), "error"); // unexpected → retryable
+});
+
+test("activateExpiryText renders a humane countdown and fails closed", () => {
+  const now = Date.parse("2026-07-09T12:00:00Z");
+  assert.equal(hooks.activateExpiryText("2026-07-09T12:09:30Z", now), "expires in 9m 30s");
+  assert.equal(hooks.activateExpiryText("2026-07-09T12:00:45Z", now), "expires in 45s");
+  assert.equal(hooks.activateExpiryText("2026-07-09T11:59:00Z", now), "expired"); // past
+  assert.equal(hooks.activateExpiryText(null, now), ""); // absent
+  assert.equal(hooks.activateExpiryText("not-a-date", now), ""); // unparseable → ""
 });

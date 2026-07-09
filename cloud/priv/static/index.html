@@ -386,6 +386,37 @@
       </footer>
     </main>
 
+    <!-- ===================== /activate DEVICE LOGIN (bp-login-ux W1) =========
+         A REAL path (GET /activate, served by the router as the SPA shell) — the
+         browser half of `bp login`'s copy-link device flow. app.js takes over
+         rendering when location.pathname === "/activate": it reads an optional
+         ?code= prefill (scrubbed after), inspects the request against
+         POST /v1/auth/device/inspect, and shows an EXPLICIT Approve / Deny.
+         Logged-out visitors are parked + bannered on the standard login card
+         and resume here on the first authed render (invitation precedent). -->
+    <main id="activate-screen" class="new-screen activate-screen" hidden>
+      <header class="new-topbar">
+        <a class="wordmark" href="/">
+          <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
+          <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+        </a>
+        <button class="btn btn-ghost btn-sm" id="activate-theme-toggle" type="button" aria-label="Switch to dark theme">
+          <span id="activate-theme-label">Dark</span>
+        </button>
+      </header>
+      <div class="new-center">
+        <div id="activate-body" class="new-body" aria-live="polite">
+          <div class="loading">Loading&hellip;</div>
+        </div>
+      </div>
+      <footer class="appfoot">
+        <span class="appfoot-brand">Barkpark Cloud &middot; <i>secure device sign-in</i></span>
+        <nav class="appfoot-links" aria-label="Footer">
+          <a href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener">Docs</a><a href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener">Help</a>
+        </nav>
+      </footer>
+    </main>
+
     <!-- ===================== PRIMITIVES ===================== -->
     <!-- Toast stack — transient feedback, bottom-left (Forge pattern). -->
     <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
