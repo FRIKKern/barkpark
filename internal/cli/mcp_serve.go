@@ -101,6 +101,13 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		}
 	}
 
+	// Published papers as read-only MCP resources — independent of --tools (the
+	// 40-tool Cursor cap is about TOOLS, not resources). Wholly best-effort: it
+	// registers the read template and enumerates the published papers for
+	// resources/list, warning to stderr and degrading to template-only on any
+	// failure (unreachable API, missing doc verbs) — never fatal to startup.
+	registerPaperResources(out, srv, g, ctx, m)
+
 	// Announce readiness on stderr (never stdout — that pipe is the protocol).
 	out.errf("bp mcp serve: %s tools over stdio (server %s) — Ctrl-C to stop", toolset, ctx.Server)
 
@@ -168,6 +175,9 @@ flags:
                       six — task_ready, task_next, task_show, task_close,
                       task_create, task_prime. "all" additionally bridges every
                       other bp capability into a generic tool.
+
+Published papers are also exposed as read-only MCP resources
+(barkpark://papers/<id>), independent of --tools.
 
 The server resolves its target Barkpark the same way every other bp command
 does (-s / --token / BARKPARK_* env / saved config). Register it in Cursor via
