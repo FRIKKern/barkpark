@@ -175,6 +175,81 @@ defmodule Barkpark.StudioChat.RecorderTest do
     assert Recorder.whereis(other) == nil
   end
 
+  describe "live activity feed (wave 5)" do
+    setup %{sid: sid} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+      %{sid: sid}
+    end
+
+    test "a turn start (init) says working + persists the status",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: "thinking…"}}
+      assert StudioChat.get_session(sid).status == "working"
+    end
+
+    test "a tool_use names the concrete action; a result goes idle",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "name" => "Bash", "input" => %{"command" => "mix test"}}
+             ]
+           }
+         }}
+      )
+
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: line}}
+      assert line =~ "Bash"
+      assert line =~ "mix test"
+
+      frame(recorder, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      assert_receive {:chat_activity, ^sid, %{state: :idle, line: nil}}
+    end
+
+    test "a hundred stream deltas collapse into ONE writing event",
+         %{sid: sid, recorder: recorder} do
+      for _ <- 1..100 do
+        frame(
+          recorder,
+          {:claude_chat_event,
+           %{
+             "type" => "stream_event",
+             "event" => %{
+               "type" => "content_block_delta",
+               "delta" => %{"type" => "text_delta", "text" => "x"}
+             }
+           }}
+        )
+      end
+
+      assert_receive {:chat_activity, ^sid, %{state: :working, line: "writing…"}}
+      refute_receive {:chat_activity, ^sid, _}, 100
+    end
+
+    test "a permission ask flips the feed to needs_you", %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{request_id: "r", tool_name: "Write", input: %{}, title: nil, decision_reason: nil}}
+      )
+
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "waiting: Write"}}
+    end
+
+    test "an exit publishes offline", %{sid: sid, recorder: recorder} do
+      ref = Process.monitor(recorder)
+      send(recorder, {:claude_chat_exit, 0})
+      assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
+      assert_receive {:chat_activity, ^sid, %{state: :offline}}
+    end
+  end
+
   test "the runtime survives a viewer's death — the whole point",
        %{sid: sid, recorder: recorder} do
     # a "tab": subscribes, then dies

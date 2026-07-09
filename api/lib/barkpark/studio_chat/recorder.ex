@@ -70,6 +70,16 @@ defmodule Barkpark.StudioChat.Recorder do
   @spec topic(String.t()) :: String.t()
   def topic(session_id), do: "studio_chat:#{session_id}"
 
+  @doc """
+  The GLOBAL live-activity topic (wave 5). Every Recorder broadcasts
+  `{:chat_activity, session_id, %{state: :working | :needs_you | :idle |
+  :offline, line: String.t() | nil}}` here whenever its derived activity
+  CHANGES — the sidebar renders what each session is doing right now (the
+  current tool line, writing/thinking) without polling the store.
+  """
+  @spec activity_topic() :: String.t()
+  def activity_topic, do: "studio_chat:activity"
+
   def start_link(%{session_id: id} = opts) do
     GenServer.start_link(__MODULE__, opts, name: {:via, Registry, {@registry, id}})
   end
@@ -82,7 +92,11 @@ defmodule Barkpark.StudioChat.Recorder do
 
   @impl true
   def init(%{session_id: id} = opts) do
-    session_opts = %{session_id: id, resume: Map.get(opts, :resume, false)}
+    session_opts = %{
+      session_id: id,
+      resume: Map.get(opts, :resume, false),
+      model: Map.get(opts, :model)
+    }
 
     case ClaudeChat.start_session(%{
            sink: self(),
@@ -91,14 +105,14 @@ defmodule Barkpark.StudioChat.Recorder do
          }) do
       {:ok, session} ->
         Process.monitor(session)
-        {:ok, %{session_id: id, session: session, timer: arm_idle(nil)}}
+        {:ok, %{session_id: id, session: session, timer: arm_idle(nil), activity: nil}}
 
       {:error, {:already_started, session}} ->
         # A Session survived its Recorder (recorder crash). Re-adopt it as our
         # sink so its frames flow again instead of casting into a dead pid.
         ClaudeChat.adopt_sink(session, self())
         Process.monitor(session)
-        {:ok, %{session_id: id, session: session, timer: arm_idle(nil)}}
+        {:ok, %{session_id: id, session: session, timer: arm_idle(nil), activity: nil}}
 
       {:error, reason} ->
         {:stop, {:shutdown, reason}}
@@ -112,15 +126,33 @@ defmodule Barkpark.StudioChat.Recorder do
 
   @impl true
   def handle_info({:claude_chat_event, %{"type" => "assistant"} = ev} = msg, state) do
-    persist_assistant_blocks(state.session_id, get_in(ev, ["message", "content"]))
+    blocks = get_in(ev, ["message", "content"])
+    persist_assistant_blocks(state.session_id, blocks)
     broadcast(state, msg)
-    {:noreply, touch(state)}
+    {:noreply, state |> publish_activity(assistant_activity(blocks, state.activity)) |> touch()}
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev} = msg, state) do
     record_result(state.session_id, ev)
     broadcast(state, msg)
-    {:noreply, touch(state)}
+    {:noreply, state |> publish_activity(%{state: :idle, line: nil}) |> touch()}
+  end
+
+  # A turn is starting (the CLI emits init per TURN): the session is working.
+  # Persist the status too so a COLD sidebar load (no live overlay yet) reads
+  # the same truth off the store.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "init"}} = msg,
+        state
+      ) do
+    StudioChat.update_status(state.session_id, "working")
+    broadcast(state, msg)
+    {:noreply, state |> publish_activity(%{state: :working, line: "thinking…"}) |> touch()}
+  end
+
+  def handle_info({:claude_chat_event, %{"type" => "stream_event"}} = msg, state) do
+    broadcast(state, msg)
+    {:noreply, state |> publish_activity(%{state: :working, line: "writing…"}) |> touch()}
   end
 
   def handle_info({:claude_chat_event, _ev} = msg, state) do
@@ -131,7 +163,11 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:claude_chat_permission, ask} = msg, state) do
     persist_approval_ask(state.session_id, ask)
     broadcast(state, msg)
-    {:noreply, touch(state)}
+
+    {:noreply,
+     state
+     |> publish_activity(%{state: :needs_you, line: "waiting: #{ask.tool_name}"})
+     |> touch()}
   end
 
   def handle_info({:claude_chat_control, _kind, _rid, _resp} = msg, state) do
@@ -142,6 +178,7 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:claude_chat_exit, _status} = msg, state) do
     session_exited(state.session_id)
     broadcast(state, msg)
+    publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end
 
@@ -150,6 +187,7 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:DOWN, _ref, :process, session, _reason}, %{session: session} = state) do
     session_exited(state.session_id)
     broadcast(state, {:claude_chat_exit, :crashed})
+    publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end
 
@@ -161,6 +199,7 @@ defmodule Barkpark.StudioChat.Recorder do
     if pid = state.session, do: ClaudeChat.close(pid)
     session_exited(state.session_id)
     broadcast(state, {:claude_chat_exit, :idle_reaped})
+    publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end
 
@@ -238,6 +277,45 @@ defmodule Barkpark.StudioChat.Recorder do
 
       _ ->
         :ok
+    end
+  end
+
+  # ── live activity (wave 5): what this session is doing right now ───────────
+
+  # The most informative line wins: the LAST tool_use in the frame names the
+  # concrete action ("Bash — mix test"); a text-only frame means prose is
+  # being written. Keeps the previous activity when the frame adds nothing.
+  defp assistant_activity(blocks, previous) when is_list(blocks) do
+    tool =
+      blocks
+      |> Enum.reverse()
+      |> Enum.find_value(fn
+        %{"type" => "tool_use", "name" => name} = b -> tool_line(name, b["input"])
+        _ -> nil
+      end)
+
+    cond do
+      tool -> %{state: :working, line: tool}
+      Enum.any?(blocks, &(&1["type"] == "text")) -> %{state: :working, line: "writing…"}
+      true -> previous
+    end
+  end
+
+  defp assistant_activity(_blocks, previous), do: previous
+
+  # Broadcast on CHANGE only — a hundred stream deltas collapse into one
+  # "writing…" event, so the sidebar never gets spammed.
+  defp publish_activity(state, activity) do
+    if activity != state.activity and activity != nil do
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        activity_topic(),
+        {:chat_activity, state.session_id, activity}
+      )
+
+      %{state | activity: activity}
+    else
+      state
     end
   end
 
