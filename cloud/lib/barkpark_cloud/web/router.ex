@@ -1886,6 +1886,34 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted, do: conn, else: providers_overview(conn, conn.params["kind"])
   end
 
+  # GET /v1/providers/capabilities → 200
+  #   {providers: {<kind>: {tier, capabilities, gaps}}}
+  #
+  # The CP-SERVED capability/tier conduit (charter Decision 16, folded into S11):
+  # the SPA and the `bp` CLI read ONE server-owned contract instead of each
+  # parsing the committed `providers_capabilities.json` and each inventing its
+  # own gap copy — the drift that "honest degradation" needs designed out. For
+  # every provider kind we emit:
+  #
+  #   * tier         — "dev" for fixture/dev-only providers (the SPA filters
+  #                    them), "prod" by default; read from the fixture, never
+  #                    hardcoded here.
+  #   * capabilities — the fixture's capability bools passed through
+  #                    GENERICALLY (every boolean key, no hardcoded list) so
+  #                    S9's lifecycle facet split flows through with ZERO
+  #                    conduit change.
+  #   * gaps         — a server-owned reason for EVERY false capability
+  #                    (FailureCopy.capability_gap_reason/2), so no disabled
+  #                    action is ever reason-less.
+  #
+  # Any signed-in user may read it — it's a static cross-surface contract, not
+  # team-scoped estate data. Dev-tier rows are included; hiding them is the
+  # reading surface's call (the SPA filters, `bp cloud providers` uses --all).
+  get "/v1/providers/capabilities" do
+    conn = Auth.require_user(conn, [])
+    if conn.halted, do: conn, else: json(conn, 200, providers_capabilities_payload())
+  end
+
   ## Hetzner control-plane proxy (epic charter decision 3) — the dashboard's
   ## server-side path into the customer's Hetzner account. The vault-stored
   ## provider token is decrypted HERE and only ever travels control-plane →
@@ -5697,6 +5725,49 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp hetzner_token_ok?(_), do: false
+
+  # The CP's committed copy of the cross-surface capabilities fixture,
+  # byte-identical to internal/cli/cloud/providers_capabilities.json (the
+  # providers_capabilities_contract_test gates the two are the same bytes). Read
+  # ONCE at compile time — it's a static contract, not runtime data — and
+  # @external_resource recompiles the router when the fixture changes.
+  @providers_capabilities_fixture Path.expand(
+                                    "../../../priv/static/__fixtures__/providers_capabilities.json",
+                                    __DIR__
+                                  )
+  @external_resource @providers_capabilities_fixture
+  @providers_capabilities @providers_capabilities_fixture |> File.read!() |> Jason.decode!()
+
+  # Build the GET /v1/providers/capabilities body from the committed fixture.
+  # For each kind: split the tier (fixture value or the "prod" default) from the
+  # capability bools (every boolean key, generically — no hardcoded list), then
+  # attach a server-owned gap reason for every FALSE capability so no disabled
+  # action is reason-less.
+  defp providers_capabilities_payload do
+    providers =
+      Map.new(@providers_capabilities, fn {kind, row} ->
+        {tier, capabilities} = split_provider_tier(row)
+
+        gaps =
+          for {capability, false} <- capabilities, into: %{} do
+            {capability, FailureCopy.capability_gap_reason(kind, capability)}
+          end
+
+        {kind, %{tier: tier, capabilities: capabilities, gaps: gaps}}
+      end)
+
+    %{providers: providers}
+  end
+
+  # tier reads from the fixture row ("dev" for the fake provider); every row
+  # without an explicit tier defaults to "prod". capabilities are the row's
+  # boolean-valued keys ONLY, so a future non-bool metadata key never leaks in
+  # as a capability.
+  defp split_provider_tier(row) do
+    tier = Map.get(row, "tier", "prod")
+    capabilities = for {key, value} <- row, is_boolean(value), into: %{}, do: {key, value}
+    {tier, capabilities}
+  end
 
   # GET /v1/providers/:kind/catalog handler.
   defp providers_catalog(conn, kind) do
