@@ -76,6 +76,17 @@ defmodule BarkparkCloud.DomainStatusTest do
     end
   end
 
+  # An inet6-family DNS fake (AAAA-only estates).
+  defp dns_map_inet6(map) do
+    fn charlist, family ->
+      case {Map.get(map, to_string(charlist)), family} do
+        {nil, _} -> {:ok, []}
+        {list, :inet6} -> {:ok, list}
+        {_list, :inet} -> {:ok, []}
+      end
+    end
+  end
+
   defp tls_const(value), do: fn _host, _port -> value end
   defp http_const(value), do: fn _url -> value end
 
@@ -408,6 +419,106 @@ defmodule BarkparkCloud.DomainStatusTest do
       serving = stage(platform(result), "serving")
       assert serving.status == "failed"
       assert serving.evidence =~ "connection refused"
+    end
+
+    test "a redirecting root (302) is serving OK — live instances redirect to login",
+         %{bp: bp, base: base} do
+      # Proven on prod: a HEALTHY instance's root returns 302. The Verify
+      # doctrine (< 500 proves the DNS→TLS→routing→app chain) applies; a strict
+      # 2xx would red-line every live box.
+      result =
+        DomainStatus.check(bp,
+          dns: base[:dns],
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 302})
+        )
+
+      serving = stage(platform(result), "serving")
+      assert serving.status == "ok"
+      assert serving.evidence =~ "302"
+    end
+  end
+
+  # ── points_here: address canonicalization ──
+
+  describe "DomainStatus.check/2 — IPv6 host canonicalization" do
+    test "a non-canonical stored IPv6 host still matches the resolver's canonical form" do
+      {_u, team} = user_with_team()
+      # Stored with leading zeros / uppercase — NOT :inet.ntoa's canonical form.
+      bp = live_barkpark(team, %{host: "2001:0DB8:0000:0000:0000:0000:0000:0001"})
+      fqdn = Barkpark.provisioning_fqdn(bp)
+
+      result =
+        DomainStatus.check(bp,
+          dns: dns_map_inet6(%{fqdn => [{0x2001, 0x0DB8, 0, 0, 0, 0, 0, 1}]}),
+          tls: tls_const({:ok, valid_cert()}),
+          http: http_const({:ok, 200})
+        )
+
+      assert stage(platform(result), "points_here").status == "ok"
+    end
+  end
+
+  # ── the REAL TLS dialer, against a loopback :ssl server (no network) ──
+
+  describe "TlsDialer.probe/2 — real handshake + DER decode over loopback" do
+    test "obtains and decodes the served certificate (validity window, issuer CN, not self-signed)" do
+      # A generated CA→peer chain (:public_key.pkix_test_data) served by a
+      # loopback :ssl listener — this exercises the REAL greenfield primitives
+      # (ssl.connect, peercert, the ASN.1 UTCTime/rdnSequence decode) that the
+      # seam fakes above deliberately bypass. Loopback only; nothing leaves the
+      # box.
+      # Explicit RSA keys: the generator's default key type can't satisfy a
+      # TLS 1.3 signature-algorithm negotiation (handshake_failure
+      # unable_to_supply_acceptable_cert).
+      key = {:key, {:rsa, 2048, 65_537}}
+
+      conf =
+        :public_key.pkix_test_data(%{
+          server_chain: %{root: [key], intermediates: [], peer: [key]},
+          client_chain: %{root: [key], intermediates: [], peer: [key]}
+        })
+
+      {:ok, listen} = :ssl.listen(0, [active: false, ip: {127, 0, 0, 1}] ++ conf[:server_config])
+      {:ok, {_addr, port}} = :ssl.sockname(listen)
+
+      server =
+        Task.async(fn ->
+          with {:ok, tsock} <- :ssl.transport_accept(listen, 5_000),
+               {:ok, sock} <- :ssl.handshake(tsock, 5_000) do
+            # Hold the socket until the probe has read the peer cert.
+            receive do
+              :done -> :ssl.close(sock)
+            after
+              5_000 -> :ssl.close(sock)
+            end
+          end
+        end)
+
+      result = BarkparkCloud.DomainStatus.TlsDialer.probe("127.0.0.1", port)
+      send(server.pid, :done)
+      Task.await(server)
+      :ssl.close(listen)
+
+      assert {:ok, cert} = result
+      assert %DateTime{} = cert.not_before
+      assert %DateTime{} = cert.not_after
+      # The generated cert is currently valid — the decoded window must agree.
+      now = DateTime.utc_now()
+      assert DateTime.compare(cert.not_before, now) == :lt
+      assert DateTime.compare(now, cert.not_after) == :lt
+      # Issuer CN decoded from the rdnSequence (never the "unknown" fallback);
+      # peer is CA-signed, so issuer != subject.
+      assert is_binary(cert.issuer) and cert.issuer not in ["", "unknown"]
+      refute cert.self_signed?
+    end
+
+    test "a connection-refused port is {:error, _}, never a raise" do
+      {:ok, listen} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+      {:ok, port} = :inet.port(listen)
+      :gen_tcp.close(listen)
+
+      assert {:error, _} = BarkparkCloud.DomainStatus.TlsDialer.probe("127.0.0.1", port)
     end
   end
 

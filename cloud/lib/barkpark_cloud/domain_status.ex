@@ -32,8 +32,11 @@ defmodule BarkparkCloud.DomainStatus do
        (`:ssl.connect` + `:ssl.peercert` + a dep-free `:public_key` validity /
        issuer decode). No cert / a temporary self-signed cert is `pending` (it's
        still being issued); an expired / not-yet-valid cert is `failed`.
-    4. `serving`     — a fully verified-TLS `:httpc` GET returns 2xx. Independent
-       of `tls`: a valid cert with the app down is `tls: ok, serving: failed`.
+    4. `serving`     — a fully verified-TLS `:httpc` GET returns < 500 (the
+       `Verify` doctrine: a 302/401/404 proves the DNS→TLS→routing→app chain —
+       a healthy instance root REDIRECTS, so requiring 2xx would red-line every
+       live box). Independent of `tls`: a valid cert with the app down is
+       `tls: ok, serving: failed`.
 
   A stage DOWNSTREAM of a non-ok stage is `pending` (skipped, not probed) — the
   chain stops at the first blocker so the operator reads top-down to the cause.
@@ -231,14 +234,16 @@ defmodule BarkparkCloud.DomainStatus do
     end
   end
 
-  # The instance's address set: a literal IP host is itself the target; a
-  # hostname host is resolved (so a CNAME-style box still compares honestly).
+  # The instance's address set: a literal IP host is itself the target
+  # (round-tripped through parse+ntoa so a non-canonical stored IPv6 like
+  # "2001:0db8::1" still matches the resolver's canonical form); a hostname host
+  # is resolved (so a CNAME-style box still compares honestly).
   defp expected_addrs(%Barkpark{host: host}, _seams) when not is_binary(host) or host == "",
     do: []
 
   defp expected_addrs(%Barkpark{host: host}, seams) do
     case :inet.parse_address(to_charlist(host)) do
-      {:ok, _addr} -> [host]
+      {:ok, addr} -> [ip_to_string(addr)]
       {:error, _} -> resolve_all(host, seams.dns)
     end
   end
@@ -309,12 +314,16 @@ defmodule BarkparkCloud.DomainStatus do
     end
   end
 
-  # serving: a fully verified-TLS GET must return 2xx. Independent of tls.
+  # serving: a fully verified-TLS GET must return < 500. This is the Verify
+  # doctrine (`< 500` proves the whole request→TLS→routing→app chain): a live
+  # instance's root REDIRECTS (302 → login/studio, proven on prod), so a strict
+  # 2xx here would mark every healthy box serving:failed. 5xx = the domain and
+  # cert work but the app behind them is broken.
   defp probe_serving(host, kind, seams) do
     url = "https://" <> host
 
     case safe_call(fn -> seams.http.(url) end) do
-      {:ok, status} when is_integer(status) and status >= 200 and status < 300 ->
+      {:ok, status} when is_integer(status) and status >= 200 and status < 500 ->
         {:ok, build_stage(:serving, @serving_label, :ok, "HTTPS GET #{url} → #{status}.", kind)}
 
       {:ok, status} when is_integer(status) ->
