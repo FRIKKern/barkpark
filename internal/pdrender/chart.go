@@ -401,18 +401,11 @@ func chartSwatch(i int, colors []lipgloss.Color, trueColor bool, ctx RenderCtx) 
 	return ctx.Theme.Body.Render(sample)
 }
 
-// chartPalette is the per-series colour cycle (used only under TrueColor). Blue,
-// pink, green, amber, violet, cyan — a legible categorical set.
-var chartPalette = []lipgloss.Color{
-	lipgloss.Color("#60a5fa"),
-	lipgloss.Color("#f472b6"),
-	lipgloss.Color("#4ade80"),
-	lipgloss.Color("#fbbf24"),
-	lipgloss.Color("#a78bfa"),
-	lipgloss.Color("#22d3ee"),
-}
-
-func chartSeriesColor(i int) lipgloss.Color { return chartPalette[i%len(chartPalette)] }
+// chartSeriesColor is the per-series colour cycle (used only under TrueColor):
+// blue, pink, green, amber, violet, cyan — a legible categorical set sourced from
+// the generated GenChartSeries palette (design/tokens.json color.pdrenderChart),
+// cycled by series index.
+func chartSeriesColor(i int) lipgloss.Color { return GenChartSeries[i%len(GenChartSeries)] }
 
 // ── small helpers ────────────────────────────────────────────────────────────
 

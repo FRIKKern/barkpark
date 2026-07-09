@@ -3,6 +3,7 @@ package pdrender
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -204,12 +205,26 @@ func heatTrueColor(intensity float64) lipgloss.Color {
 	if intensity > 1 {
 		intensity = 1
 	}
-	lr, lg, lb := 13.0, 17.0, 23.0  // #0d1117 near-black base
-	hr, hg, hb := 57.0, 211.0, 83.0 // #39d353 vivid green peak
-	r := int(math.Round(lr + intensity*(hr-lr)))
-	g := int(math.Round(lg + intensity*(hg-lg)))
-	bl := int(math.Round(lb + intensity*(hb-lb)))
+	r := int(math.Round(heatRampLoR + intensity*(heatRampHiR-heatRampLoR)))
+	g := int(math.Round(heatRampLoG + intensity*(heatRampHiG-heatRampLoG)))
+	bl := int(math.Round(heatRampLoB + intensity*(heatRampHiB-heatRampLoB)))
 	return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, bl))
+}
+
+// heatRamp{Lo,Hi}{R,G,B} are the parsed RGB channels of the generated gradient
+// endpoints (GenHeatmapBase #0d1117 near-black base → GenHeatmapPeak #39d353 vivid
+// green peak, design/tokens.json color.pdrenderHeatmap). Parsed once at init so
+// heatTrueColor interpolates without re-parsing per cell; byte-identical to the
+// former inline 13,17,23 / 57,211,83 literals.
+var (
+	heatRampLoR, heatRampLoG, heatRampLoB = heatHexRGB(GenHeatmapBase)
+	heatRampHiR, heatRampHiG, heatRampHiB = heatHexRGB(GenHeatmapPeak)
+)
+
+// heatHexRGB parses a "#rrggbb" string into float RGB channels (0–255).
+func heatHexRGB(hex string) (r, g, b float64) {
+	n, _ := strconv.ParseUint(strings.TrimPrefix(hex, "#"), 16, 32)
+	return float64(n >> 16 & 0xff), float64(n >> 8 & 0xff), float64(n & 0xff)
 }
 
 // heatUseTrueColor is the AUTO-DEGRADE gate: truecolor cells are emitted ONLY when
