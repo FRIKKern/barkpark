@@ -87,7 +87,13 @@ defmodule BarkparkCloud.DeviceAuth do
   with `{:error, changeset}`.
   """
   @spec start(map()) ::
-          {:ok, %{device_code: String.t(), user_code: String.t(), interval: pos_integer(), expires_in: pos_integer()}}
+          {:ok,
+           %{
+             device_code: String.t(),
+             user_code: String.t(),
+             interval: pos_integer(),
+             expires_in: pos_integer()
+           }}
           | {:error, Ecto.Changeset.t()}
   def start(attrs \\ %{}), do: do_start(attrs, @max_insert_attempts)
 

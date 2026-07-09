@@ -414,23 +414,34 @@ defmodule BarkparkCloud.Web.Router do
   ## POST /v1/auth/device/inspect {user_code} (require_user)
   ##   → 200 {client_name, ip_address, user_agent, expires_at} — for the confirm screen
   ##   → 404 {error: "expired_or_invalid"}
+  ##   → 429 {error: "rate_limited"} — shares the approve:<user_id> budget: inspect
+  ##     answers "is this user_code valid?", so an unmetered inspect would be the
+  ##     brute-force oracle the approve limit exists to close (charter decision 7)
   post "/v1/auth/device/inspect" do
     conn = Auth.require_user(conn, [])
 
     if conn.halted do
       conn
     else
-      case DeviceAuth.inspect(conn.body_params["user_code"] || "") do
-        {:ok, row} ->
-          json(conn, 200, %{
-            client_name: row.client_name,
-            ip_address: row.ip_address,
-            user_agent: row.user_agent,
-            expires_at: row.expires_at
-          })
+      user = conn.assigns.current_user
 
-        {:error, :expired_or_invalid} ->
-          json(conn, 404, %{error: "expired_or_invalid"})
+      case DeviceAuthRateLimiter.check("approve:" <> user.id) do
+        {:error, :rate_limited} ->
+          json(conn, 429, %{error: "rate_limited"})
+
+        :ok ->
+          case DeviceAuth.inspect(conn.body_params["user_code"] || "") do
+            {:ok, row} ->
+              json(conn, 200, %{
+                client_name: row.client_name,
+                ip_address: row.ip_address,
+                user_agent: row.user_agent,
+                expires_at: row.expires_at
+              })
+
+            {:error, :expired_or_invalid} ->
+              json(conn, 404, %{error: "expired_or_invalid"})
+          end
       end
     end
   end

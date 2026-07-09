@@ -58,7 +58,11 @@ defmodule BarkparkCloud.DeviceAuthTest do
   describe "start/1" do
     test "mints two distinct codes, a XXXX-XXXX user_code, and a pending row" do
       assert {:ok, %{device_code: dc, user_code: uc, interval: 5, expires_in: 600}} =
-               DeviceAuth.start(%{client_name: "bp on laptop", ip_address: "1.2.3.4", user_agent: "bp/1"})
+               DeviceAuth.start(%{
+                 client_name: "bp on laptop",
+                 ip_address: "1.2.3.4",
+                 user_agent: "bp/1"
+               })
 
       assert is_binary(dc) and byte_size(dc) > 20
       assert uc =~ ~r/^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}-[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}$/
@@ -341,6 +345,22 @@ defmodule BarkparkCloud.DeviceAuthTest do
       conn = call(:post, "/v1/auth/device/poll", %{device_code: "made-up"})
       assert conn.status == 404
       assert jbody(conn) == %{"error" => "expired_or_invalid"}
+    end
+  end
+
+  describe "HTTP: inspect shares the approve budget (no unmetered user_code oracle)" do
+    test "the 11th inspect in a window is 429 rate_limited" do
+      user = user_fixture()
+      {:ok, session} = Accounts.create_user_session_token(user)
+      {:ok, %{user_code: uc}} = DeviceAuth.start(%{})
+
+      for _ <- 1..10 do
+        assert call(:post, "/v1/auth/device/inspect", %{user_code: uc}, session).status == 200
+      end
+
+      throttled = call(:post, "/v1/auth/device/inspect", %{user_code: uc}, session)
+      assert throttled.status == 429
+      assert jbody(throttled) == %{"error" => "rate_limited"}
     end
   end
 
