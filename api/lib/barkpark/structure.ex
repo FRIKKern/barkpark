@@ -100,7 +100,24 @@ defmodule Barkpark.Structure do
   # one nested Plugins node, one trailing …Rest node. See the moduledoc.
   defp build_desk_items(schemas, dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
-    enablement = Enablement.effective(workspace_id)
+
+    # `gating: :none` — RESOLUTION mode (PaneBuilder): enablement tiering is a
+    # DISPLAY concern; nav-path resolution must see every type the database
+    # holds, or a top-menu surface (Media) / disabled plugin's deep link could
+    # never open its panes. Everything resolves as enabled; :top_menu
+    # placements fold into MAIN so they are findable in the tree walk.
+    enablement =
+      case Keyword.get(opts, :gating, :enabled) do
+        :none ->
+          Enablement.effective(workspace_id)
+          |> Map.new(fn {k, v} ->
+            placement = if v.placement in [:main, :plugins], do: v.placement, else: :main
+            {k, %{v | enabled: true, placement: placement}}
+          end)
+
+        _ ->
+          Enablement.effective(workspace_id)
+      end
 
     # ── MAIN host groups: always top-level, in charter order ──
     host_main = [
@@ -120,9 +137,14 @@ defmodule Barkpark.Structure do
       place_host_group(build_media_group(schemas, dataset), enablement, "media")
 
     # ── Plugin desk items, attributed per plugin and split by placement ──
+    collect_opts =
+      if Keyword.get(opts, :gating, :enabled) == :none,
+        do: Keyword.delete(opts, :workspace_id),
+        else: opts
+
     {plugin_main, plugin_plugins} =
       dataset
-      |> safe_collect_attributed(opts)
+      |> safe_collect_attributed(collect_opts)
       |> split_attributed(enablement, schemas, dataset, opts)
 
     # ── MAIN tier (flat, top-level) ──

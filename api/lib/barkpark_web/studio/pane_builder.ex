@@ -40,7 +40,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   @spec build(String.t(), [String.t()], keyword()) :: {[map()], map() | nil}
   def build(dataset, nav_path, opts) do
-    structure = Structure.build(dataset, scope(opts))
+    # gating: :none — the tree here is a nav-path RESOLUTION index, not the
+    # displayed desk; enablement tiering must never make an existing type's
+    # panes unreachable (top-menu Media, a disabled plugin's deep link).
+    structure = Structure.build(dataset, [gating: :none] ++ scope(opts))
 
     root_pane = %{
       title: structure.title,

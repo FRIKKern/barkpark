@@ -198,22 +198,42 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       :ok
     end
 
-    test "HTML contains the Bokbasen top-menu tab", %{conn: conn} = ctx do
+    test "the Bokbasen top-menu tab follows workspace enablement (off by default)",
+         %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
+        # ssp-w1: onixedit declares default_enabled? false — its contributions
+        # only surface for a workspace that enables it. Both directions pinned.
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+        refute html =~ "Bokbasen",
+               "onixedit is off-by-default — the Bokbasen tab must not surface unrequested"
+
+        {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+        {:ok, _} =
+          Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+            "onixedit" => %{"enabled" => true}
+          })
+
         {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
         assert html =~ "Bokbasen",
-               "expected Bokbasen top-menu tab in /studio/production HTML"
+               "expected the Bokbasen top-menu tab once the workspace enables onixedit"
       end
     end
 
-    test "HTML contains the Pending submissions desk link", %{conn: conn} = ctx do
-      if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+    test "the Plugins tier is absent from the desk while nothing is enabled" do
+      # ssp-w1 tiering: no :plugins-placement plugin is enabled by default, so
+      # the initial desk HTML must not render an empty Plugins tier node. The
+      # ENABLED direction (node present, plugin group nested inside) is pinned
+      # at the tree level in structure_test.exs ("enabling a :plugins-placement
+      # plugin surfaces a Plugins node holding its group"); the enablement→
+      # Studio-HTML path is pinned end-to-end by the Bokbasen top-menu test
+      # above.
+      {:ok, _view, html} = live(build_conn(), scoped_studio("/d/production/studio"))
 
-        assert html =~ "Pending submissions",
-               "expected OnixEdit desk_items contribution (Pending submissions) in HTML"
-      end
+      refute html =~ ~s(pane-item-label">Plugins</span>),
+             "no :plugins-placement plugin is enabled by default — the tier node must not render empty"
     end
 
     test "HTML contains the nav-plugin-entry marker", %{conn: conn} = ctx do
