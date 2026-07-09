@@ -107,11 +107,15 @@ func runCloudInstanceLifecycle(out *writer, g globals, verb string, args []strin
 	}
 	verbs, known := lifecycleDispatch[kind]
 	if !known {
-		// A registered provider with no lifecycle dispatch (e.g. the in-memory
-		// fake) degrades; a genuinely unknown slug is a usage error naming the
-		// known providers.
+		// A registered provider with no per-kind CLI dispatch (the in-memory fake)
+		// is executed GENERICALLY: resolve it through the seam and drive the verb's
+		// optional facet interface (Archiver/Resurrector/Decommissioner/Adopter/
+		// Auditor), degrading ONLY when the provider genuinely lacks the facet. This
+		// makes the capability fixture's fake facet claims truthfully executable
+		// instead of a parity-gate lie (Decision 29). A genuinely unknown slug is a
+		// usage error naming the known providers.
 		if providerKnown(kind) {
-			return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+			return runNeutralFacet(out, kind, verb, rest)
 		}
 		return useError(out, "usage", fmt.Sprintf("unknown provider %q (known: %s)", kind, strings.Join(cloud.RegisteredProviders(), ", ")), exitUsage)
 	}
@@ -120,6 +124,127 @@ func runCloudInstanceLifecycle(out *writer, g globals, verb string, args []strin
 		return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
 	}
 	return handler(out, g, rest)
+}
+
+// facetArgSpec returns how many positional arguments a neutral facet verb takes
+// and a usage hint for them (audit takes none; adopt takes fqdn + team; the rest
+// take a single fqdn|name). It mirrors the facet interface signatures at
+// provider.go:274-297.
+func facetArgSpec(verb string) (count int, hint string) {
+	switch verb {
+	case cloud.VerbAudit:
+		return 0, ""
+	case cloud.VerbAdopt:
+		return 2, "<fqdn> <team>"
+	default: // archive / resurrect / decommission
+		return 1, "<fqdn|name>"
+	}
+}
+
+// runNeutralFacet executes a lifecycle verb GENERICALLY through the seam's optional
+// facet interfaces, for a registered provider that has no per-kind CLI dispatch
+// entry (the in-memory fake today). It is modelled on runCloudInstancePause:
+// resolveCloudProvider (env credentials) → type-assert the verb's facet interface →
+// call it → emit a structured receipt, degrading honestly ONLY when the assert
+// fails. Escape-hatch flag creds are not offered here — the fake needs none and
+// hetzner/azure never route through this branch (they sit in lifecycleDispatch).
+func runNeutralFacet(out *writer, kind, verb string, rest []string) int {
+	count, hint := facetArgSpec(verb)
+	usage := strings.TrimSpace("bp cloud instance "+verb+" "+hint) + " --provider " + kind
+	a, err := parseHzArgs(rest, nil, nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if len(a.pos) != count {
+		return useError(out, "usage", fmt.Sprintf("want exactly %d argument(s) (usage: %s)", count, usage), exitUsage)
+	}
+	p, code, ok := resolveCloudProvider(out, kind)
+	if !ok {
+		return code
+	}
+	ctx := cloudInstanceCtx()
+	report := map[string]any{"ok": true, "provider": kind, "action": verb}
+	var line string
+	switch verb {
+	case cloud.VerbArchive:
+		impl, isImpl := p.(cloud.Archiver)
+		if !isImpl {
+			return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+		}
+		arch, e := impl.Archive(ctx, a.pos[0])
+		if e != nil {
+			return facetFailed(out, kind, verb, e)
+		}
+		report["archive"] = map[string]any{"id": arch.ID, "fqdn": arch.FQDN, "provider": arch.Provider}
+		line = fmt.Sprintf("✓ archived %s on %s → %s", a.pos[0], kind, arch.ID)
+	case cloud.VerbResurrect:
+		impl, isImpl := p.(cloud.Resurrector)
+		if !isImpl {
+			return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+		}
+		s, e := impl.Resurrect(ctx, a.pos[0])
+		if e != nil {
+			return facetFailed(out, kind, verb, e)
+		}
+		report["instance"] = instanceRow(s)
+		line = fmt.Sprintf("✓ resurrected %s on %s", s.Name, kind)
+	case cloud.VerbDecommission:
+		impl, isImpl := p.(cloud.Decommissioner)
+		if !isImpl {
+			return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+		}
+		if e := impl.Decommission(ctx, a.pos[0]); e != nil {
+			return facetFailed(out, kind, verb, e)
+		}
+		report["instance"] = map[string]any{"name": a.pos[0]}
+		line = fmt.Sprintf("✓ decommissioned %s on %s", a.pos[0], kind)
+	case cloud.VerbAdopt:
+		impl, isImpl := p.(cloud.Adopter)
+		if !isImpl {
+			return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+		}
+		if e := impl.Adopt(ctx, a.pos[0], a.pos[1]); e != nil {
+			return facetFailed(out, kind, verb, e)
+		}
+		report["instance"] = map[string]any{"name": a.pos[0], "team": a.pos[1]}
+		line = fmt.Sprintf("✓ adopted %s into %s on %s", a.pos[0], a.pos[1], kind)
+	case cloud.VerbAudit:
+		impl, isImpl := p.(cloud.Auditor)
+		if !isImpl {
+			return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+		}
+		rep, e := impl.Audit(ctx)
+		if e != nil {
+			return facetFailed(out, kind, verb, e)
+		}
+		report["checked"] = rep.Checked
+		report["issues"] = rep.Issues
+		report["ok"] = len(rep.Issues) == 0
+		if len(rep.Issues) > 0 {
+			line = fmt.Sprintf("✗ audit found %d issue(s) on %s", len(rep.Issues), kind)
+		} else {
+			line = fmt.Sprintf("✓ audit clean — %d instance(s) checked on %s", rep.Checked, kind)
+		}
+	default:
+		return degradeUnsupported(out, kind, verb, lifecycleWhat(verb))
+	}
+	clean, _ := report["ok"].(bool)
+	if out.emitStructured(report) {
+		if !clean {
+			return exitGeneric
+		}
+		return exitOK
+	}
+	out.outf("%s", line)
+	if !clean {
+		return exitGeneric
+	}
+	return exitOK
+}
+
+// facetFailed renders a neutral-facet call failure through the shared envelope.
+func facetFailed(out *writer, kind, verb string, err error) int {
+	return useError(out, "failed", fmt.Sprintf("%s: %s: %s", kind, verb, err.Error()), exitGeneric)
 }
 
 // splitProviderFlag pulls --provider (or --provider=<kind>) out of a tail and

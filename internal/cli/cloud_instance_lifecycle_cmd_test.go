@@ -441,11 +441,11 @@ func TestAzureAuditExemptsWarmBox(t *testing.T) {
 
 // ── honest degradation ───────────────────────────────────────────────────────
 
-// TestNeutralLifecycleDegrades: azure archive (a facet azure lacks) and fake
-// archive (no CLI dispatch) both degrade with a printed reason; an unknown
-// provider is a usage error. None builds a provider or touches the network.
+// TestNeutralLifecycleDegrades: azure archive (a facet azure lacks) and a
+// genuinely facet-less provider both degrade with a printed reason; an unknown
+// provider is a usage error. None of the degrade paths touch the network.
 func TestNeutralLifecycleDegrades(t *testing.T) {
-	// azure lacks the archive facet.
+	// azure lacks the archive facet (dispatch entry has only decommission+audit).
 	_, stderr, code := runInstanceCapture(t, "table", "archive", "--provider", "azure", "web-1")
 	if code != exitGeneric {
 		t.Fatalf("azure archive should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
@@ -455,15 +455,18 @@ func TestNeutralLifecycleDegrades(t *testing.T) {
 			t.Errorf("azure archive degrade missing %q:\n%s", want, stderr)
 		}
 	}
-	// fake has the facet INTERFACES but no CLI dispatch entry, so the neutral
-	// verb degrades (its capability row stays honest for the seam; the CLI-level
-	// wiring is deliberately hetzner+azure only).
-	_, stderr, code = runInstanceCapture(t, "table", "archive", "--provider", "fake", "web-1")
+	// A registered provider that satisfies ONLY cloud.CloudProvider (no facet
+	// interface, no dispatch entry) degrades honestly through the generic facet
+	// executor — the assert fails, so there is no fake-parity button.
+	cloud.Register("s9facetless", func(map[string]string) (cloud.CloudProvider, error) {
+		return coreOnlyProvider{}, nil
+	})
+	_, stderr, code = runInstanceCapture(t, "table", "archive", "--provider", "s9facetless", "web-1")
 	if code != exitGeneric {
-		t.Fatalf("fake archive should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
+		t.Fatalf("facet-less archive should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
 	}
 	if !strings.Contains(stderr, "does not support") {
-		t.Errorf("fake archive degrade missing the honest reason:\n%s", stderr)
+		t.Errorf("facet-less archive degrade missing the honest reason:\n%s", stderr)
 	}
 	// unknown provider → usage.
 	_, stderr, code = runInstanceCapture(t, "table", "audit", "--provider", "gcp")
@@ -472,6 +475,68 @@ func TestNeutralLifecycleDegrades(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "gcp") {
 		t.Errorf("unknown-provider error should name the bad kind:\n%s", stderr)
+	}
+}
+
+// TestNeutralFakeFacetsExecute proves the generic facet executor actually RUNS the
+// fake provider's facet interfaces instead of degrading — closing the parity-gate
+// lie (Decision 29). archive returns a synthetic receipt, adopt validates its
+// inputs, decommission of a seeded box succeeds while an unknown box is a
+// not-found error, and audit reports a clean cross-check. Zero network.
+func TestNeutralFakeFacetsExecute(t *testing.T) {
+	// archive → synthetic receipt carrying the fake archive id.
+	stdout, stderr, code := runInstanceCapture(t, "json", "archive", "--provider", "fake", "web-1")
+	if code != exitOK {
+		t.Fatalf("fake archive should succeed, got exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	var arch map[string]any
+	if err := json.Unmarshal([]byte(stdout), &arch); err != nil {
+		t.Fatalf("archive report not JSON: %v: %s", err, stdout)
+	}
+	if arch["ok"] != true {
+		t.Errorf("archive report.ok=%v", arch["ok"])
+	}
+	if a, _ := arch["archive"].(map[string]any); a == nil || !strings.Contains(a["id"].(string), "fake-archive-web-1") {
+		t.Errorf("archive receipt missing the synthetic id: %v", arch["archive"])
+	}
+
+	// adopt validates its two inputs and succeeds.
+	stdout, stderr, code = runInstanceCapture(t, "json", "adopt", "--provider", "fake", "box.barkpark.cloud", "acme")
+	if code != exitOK {
+		t.Fatalf("fake adopt should succeed, got exit %d\n%s\n%s", code, stdout, stderr)
+	}
+
+	// decommission needs a live box: seed one under a test slug, tear it down,
+	// then prove an unknown target is a not-found FAILURE (not a silent success).
+	shared := cloud.NewFakeProvider()
+	if _, err := shared.Create(context.Background(), cloud.ServerSpec{Name: "web-9"}); err != nil {
+		t.Fatalf("seed box: %v", err)
+	}
+	cloud.Register("s9decomm", func(map[string]string) (cloud.CloudProvider, error) { return shared, nil })
+
+	stdout, stderr, code = runInstanceCapture(t, "json", "decommission", "--provider", "s9decomm", "web-9")
+	if code != exitOK {
+		t.Fatalf("fake decommission of a live box should succeed, got exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runInstanceCapture(t, "json", "decommission", "--provider", "s9decomm", "ghost")
+	if code != exitGeneric {
+		t.Fatalf("fake decommission of an unknown box should fail with exit %d, got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "not found") {
+		t.Errorf("unknown-box decommission should surface a not-found error:\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+
+	// audit cross-checks the fleet with a clean result.
+	stdout, stderr, code = runInstanceCapture(t, "json", "audit", "--provider", "fake")
+	if code != exitOK {
+		t.Fatalf("fake audit should succeed, got exit %d\n%s\n%s", code, stdout, stderr)
+	}
+	var au map[string]any
+	if err := json.Unmarshal([]byte(stdout), &au); err != nil {
+		t.Fatalf("audit report not JSON: %v: %s", err, stdout)
+	}
+	if au["ok"] != true {
+		t.Errorf("clean fake audit should report ok; got %v", au)
 	}
 }
 
