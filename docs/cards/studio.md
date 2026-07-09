@@ -1,23 +1,24 @@
 <!-- doc-tier: agent | canonical-for: studio-ui | budget: 500tok -->
 # Studio (LiveView)
 
-One LiveView — `StudioLive` — manages the multi-pane Studio at `/w/:ws/p/:proj/d/:dataset/studio` (flat `/studio/*` and legacy `/w/:ws/p/:proj/studio/:dataset` both 302 there; `BarkparkWeb.LiveScope` resolves + re-authorizes scope from URL params on every patch). Delegates to ~25 files under studio_live/; handlers in studio_live/handlers/<domain>.ex, shared helpers in studio_live/shared.ex, components in studio_live/components.ex.
+`StudioLive` runs the multi-pane Studio at `/w/:ws/p/:proj/d/:dataset/studio` (flat `/studio/*` + legacy 302 there; `LiveScope` re-auths scope from URL each patch).
 
-Layout gotchas:
-- `pane_builder.ex` lives at `lib/barkpark_web/studio/` — NOT `live/studio/`. Same dir: `presence_state.ex`, `nav.ex`, `dataset_switcher.ex`, `workspace_switcher.ex`.
-- Panes update via PubSub; who-is-editing presence via `PresenceState`.
-- Router mounts: StudioLive rides `live_session :scoped_studio` at `/w/:ws/p/:proj/d/:dataset/studio`; `live_session :admin_studio` mounts SettingsLive at `/studio/settings`; plugin LiveViews mount via `plugin_routes/1` in their own live_sessions. live_session names MUST be unique router-wide.
-- `bp-*` Web Components (overflow menu etc.) → docs/studio/web-components.md.
-- Styling is the inline `<style>` in root.html.heex using `--bg`/`--fg`/`--border` vars. No CSS files — for plugins too (see docs/cards/plugins.md).
-- User-facing flows (ONIX-import SSH procedure, tab-not-in-URL decision) → docs/studio/user-guide.md.
+## Nav shell — one contract, every route
+- **Model**: ONE source — `@canonical capability:studio-nav-model` in `components/studio_components/nav.ex`: baseline tabs + `Registry.collect_top_menu_entries`, order-then-label. `Studio.Nav` is DELETED — never reintroduce.
+- **Gating = two axes**. admin: `StudioChrome.shares_admin?` (token OR account admin), set by the shared `on_mount` per studio live_session. plugin: `Enablement.effective(workspace_id)` — `nil` ws → declaration DEFAULTS (never show-all); flat admin routes attribute the Default ws via `default_scope_fallback`.
+- **Active state**: `current_path` set ONLY by the StudioChrome `:handle_params` hook (normalized, fresh) — LiveViews never hand-set it. ONE active entry per page; binary `active_when` = boundary-match (equal, or prefix + `/`).
+- **nav_section demoted**: feeds only the api-tester topbar + DatasetSwitcher suffix — never visibility/active-state.
+- **Exceptions**: swatch iframe cell (bare layout, no chrome); public readers `/papers`+`/sheets` (not Studio); Tickets inbox (controller route, outside the shell; wave-2).
+- **Fence**: `test/barkpark_web/studio/nav_parity_sweep_test.exs` — new studio-layout routes join its mount table.
 
-## Sheet grid
-
-`type:"sheet"` docs open as the grid editor (`editor_view: :sheet` → `SheetGrid` LiveComponent), not the field form. Edits are session ops (`Sheets.Session.apply_ops/3`); StudioLive forwards `{:sheets_op, …}` via `send_update/3` — own + remote edits ride one path, never applied locally by the component. Presence cursors/selections paint on an overlay layer (never inside the cell comprehension). Cmd/Ctrl+Z / +Shift+Z send per-user undo/redo ops. Render bound: used range, hard cap 500 rows.
+## Layout
+- Chrome/switchers live at `lib/barkpark_web/studio/`, NOT `live/studio/`; panes update via PubSub.
+- Router: StudioLive → `:scoped_studio`; SettingsLive → `:admin_studio` (`/studio/settings`); plugins → `plugin_routes/1`. live_session names MUST be router-wide unique.
+- Styling: inline `<style>` in root.html.heex (`--bg`/`--fg`/`--border`), no CSS files. Web Components → docs/studio/web-components.md; flows → docs/studio/user-guide.md.
+- `type:"sheet"` docs open the `SheetGrid` LiveComponent (session ops; cap 500 rows).
 
 ## Code anchors
-- api/lib/barkpark_web/live/studio/studio_live.ex — section-index header comment; `# ──` banners
-- api/lib/barkpark_web/live/studio/sheet_grid.ex — defmodule BarkparkWeb.Studio.SheetGrid
-- api/lib/barkpark_web/studio/pane_builder.ex — def build
-- api/lib/barkpark_web/studio/presence_state.ex — def list
-- api/lib/barkpark_web/router.ex — live_session :scoped_studio (StudioLive) / live_session :admin_studio (SettingsLive)
+- api/lib/barkpark_web/components/studio_components/nav.ex — def studio_tabs; @canonical capability:studio-nav-model
+- api/lib/barkpark_web/studio_chrome.ex — def on_mount (shares_admin?, current_path hook)
+- api/lib/barkpark/plugins/enablement.ex — def effective
+- api/lib/barkpark/plugins/registry.ex — def collect_top_menu_entries
