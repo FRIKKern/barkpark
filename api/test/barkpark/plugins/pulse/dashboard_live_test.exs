@@ -66,15 +66,41 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
     assert Enum.any?(items, &(&1[:type] == :link and &1[:path] == "/admin/pulse"))
   end
 
-  test "the Lightning Storm link actually survives into the built desk tree" do
-    tree = Barkpark.Structure.build("pulse_desk_probe")
+  test "the Lightning Storm link survives into the desk tree under Plugins when enabled" do
+    # pulse is OFF by default (ssp-w1 tiered desk): unscoped legacy builds
+    # carry no pulse link; a workspace that enables pulse gets it under the
+    # collapsed Plugins tier node, never the MAIN tier.
+    ws = Barkpark.TenancyFixtures.create_workspace!()
+
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+        "pulse" => %{"enabled" => true}
+      })
+
+    tree = Barkpark.Structure.build("pulse_desk_probe", workspace_id: ws.id)
+
+    plugins_node = Enum.find(tree.items, &(&1.id == "plugins"))
+    assert plugins_node, "an enabled :plugins plugin must surface the Plugins tier node"
 
     node =
-      Enum.find(tree.items, fn n ->
-        n.type == :plugin_link and n.filter == "/admin/pulse"
-      end)
+      plugins_node.items
+      |> Enum.flat_map(fn group -> [group | group.items || []] end)
+      |> Enum.find(fn n -> n.type == :plugin_link and n.filter == "/admin/pulse" end)
 
     assert %Barkpark.Structure.Node{title: "Lightning Storm"} = node,
-           "the /admin/pulse link must appear in the desk regardless of schema"
+           "the /admin/pulse link must appear under Plugins when pulse is enabled"
+  end
+
+  test "the Lightning Storm link is ABSENT from the desk by default (off-by-default)" do
+    tree = Barkpark.Structure.build("pulse_desk_probe")
+
+    flat = flatten_nodes(tree.items)
+
+    refute Enum.any?(flat, fn n -> n.type == :plugin_link and n.filter == "/admin/pulse" end),
+           "pulse declares default_enabled? false — its link must not surface unrequested"
+  end
+
+  defp flatten_nodes(items) do
+    Enum.flat_map(items || [], fn n -> [n | flatten_nodes(n.items)] end)
   end
 end
