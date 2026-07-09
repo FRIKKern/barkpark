@@ -647,39 +647,6 @@ const rgbaFrom = (hex, alphaStr) => {
   return `rgba(${r}, ${g}, ${b}, ${alphaStr})`;
 };
 
-// ── the FROZEN neutral STRUCTURE ─────────────────────────────────────────────
-// The neutral spine and the CLI zinc-chrome ramp are SHARED structure, not
-// per-theme skin (paw: "frozen structure + thin swappable skin"; charter D14v:
-// "the ladder is imposed on future themes"). A theme swaps {bg,ink,accent};
-// these rungs stay, re-hued toward the theme's neutral hue. For evergreen the
-// neutral hue is 240 and the chroma is ~0, so the ladder resolves to shadcn
-// zinc — the exact bytes shipped today. Theme N+1 passes its own neutral
-// hue/chroma; these are the compiler's default neutral palette, NOT overrides
-// (an all-overrides compiler is vacuous — D13).
-const NEUTRAL_HSL = {
-  // role → { light, dark } HSL channels (the CSS neutral rungs)
-  "surface":        { light: null,             dark: "240 10% 5.5%" }, // light = bg passthrough
-  "muted-surface":  { light: "240 4.8% 95.9%", dark: "240 3.7% 12%" },
-  "muted-text":     { light: "240 3.8% 46.1%", dark: "240 5% 64.9%" },
-  "border":         { light: "240 5.9% 90%",   dark: "240 3.7% 15.9%" },
-  "studio-bg-accent":    { light: "240 4.8% 92%", dark: "240 3.7% 13%" },
-  "studio-border-muted": { light: null,           dark: "240 3.7% 11%" }, // light = var(--border)
-  "studio-fg-dim":       { light: "240 4% 65%",   dark: "240 5% 45%" },
-  "studio-fg-accent":    { light: "240 5.9% 10%", dark: null },           // dark = var(--text)
-};
-// CLI zinc-chrome hex ramp — achromatic (r≈g≈b, faint cool tint) so it can NOT
-// share the hue-240 CSS rungs above; it is its own structural gray ramp keyed
-// to the theme's neutral identity. Evergreen → shadcn zinc hexes verbatim.
-const ZINC_CHROME = {
-  "chrome-dim":            { light: "#a1a1aa", dark: "#52525b" },
-  "chrome-ink":            { light: "#18181b", dark: "#e4e4e7" },
-  "chrome-text-secondary": { light: "#3f3f46", dark: "#a1a1aa" },
-  "chrome-field-border":   { light: "#d4d4d8", dark: "#3f3f46" },
-  "chrome-toolbar-bg":     { light: "#fafafa", dark: "#0a0a0a" },
-  "chrome-cursor-bg":      { light: "#f4f4f5", dark: "#18181b" },
-  "code-bg":               { light: "#f4f4f5", dark: "#27272a" },
-};
-
 // ── per-mode formula constants (fit-first, D14) ──────────────────────────────
 // hover is a per-mode lightness step (darken in light, lighten in dark). The
 // shipped evergreen hover bytes fit a clean HSL-L step exactly; Part I's OKLCH
@@ -695,6 +662,108 @@ const PAPER_ALPHA = {
   "accent-soft":   { light: "0.10", dark: "0.16" },
 };
 
+// ── skin-responsive perceptual formula helpers (ts-w5a — full derive) ─────────
+// These PROMOTE Part I's deriveSpine capabilities into derive()'s per-slot
+// formulas so a BARE {bg,ink,accent}×2 skin (no overrides) resolves EVERY one of
+// the 156 slots — no frozen zinc "silent inherit". The frozen NEUTRAL_HSL /
+// ZINC_CHROME ladders are GONE: the neutral + chrome rungs are now re-hued toward
+// the theme accent (a warm theme gets warm neutrals, a cool theme cool ones).
+// Evergreen's hand-tuned shadcn-zinc bytes DRIFT from these formulas, so evergreen
+// PINS them (a characterization freeze — overrides win, Part F byte gate stays
+// green); a fresh theme re-skins natively. Output is in tokens.json string forms.
+const oklchHsl = (L, C, h) => toHslTriplet(oklchToSrgb(L, C, h)); // → "H S% L%"
+const oklchHex = (L, C, h) => toHex(oklchToSrgb(L, C, h));        // → "#rrggbb"
+const accentHueOf = (skin, mode) => srgbToOklch(skin[mode].accent).h;
+
+// Neutral CSS rungs — {L,C} targets re-hued toward the accent, chroma ramping up
+// the ladder (D14ii). L targets approximate the shadcn-zinc rung lightnesses
+// evergreen ships (which evergreen then pins byte-exact). The frozen ladder was
+// hue-BLIND — that hue-blindness is exactly the silent inherit this replaces.
+const NEUTRAL_II = {
+  "muted-surface": { light: { L: 0.966, C: 0.005 }, dark: { L: 0.162, C: 0.006 } },
+  "border":        { light: { L: 0.906, C: 0.007 }, dark: { L: 0.191, C: 0.006 } },
+  "muted-text":    { light: { L: 0.520, C: 0.010 }, dark: { L: 0.686, C: 0.012 } },
+  "surface":       {                                 dark: { L: 0.095, C: 0.010 } },
+};
+const STUDIO_II = {
+  "bg-accent":    { light: { L: 0.936, C: 0.006 }, dark: { L: 0.166, C: 0.006 } },
+  "fg-dim":       { light: { L: 0.672, C: 0.008 }, dark: { L: 0.470, C: 0.010 } },
+  "fg-accent":    { light: { L: 0.220, C: 0.014 }                                },
+  "border-muted": {                                 dark: { L: 0.156, C: 0.006 } },
+};
+const neutralII = (skin, mode, spec) => oklchHsl(spec.L, spec.C, accentHueOf(skin, mode));
+
+// CLI chrome gray ramp — the theme ink mixed over the theme bg in gamma sRGB
+// (the frozen zinc hexes evergreen pins; a fresh theme's chrome carries its tint).
+// Percent = how much ink; higher → darker in light, lighter in dark.
+const CHROME_II = {
+  "chrome-ink":            { light: 92, dark: 90 },
+  "chrome-text-secondary": { light: 75, dark: 63 },
+  "chrome-dim":            { light: 38, dark: 38 },
+  "chrome-field-border":   { light: 18, dark: 65 },
+  "chrome-toolbar-bg":     { light: 2,  dark: 4  },
+  "chrome-cursor-bg":      { light: 5,  dark: 10 },
+};
+const chromeII = (skin, mode, pct) => toHex(mixSrgb(skin[mode].ink, skin[mode].bg, pct));
+
+// Paper reading-surface bases — hue-tinted near-white / near-ink from the skin.
+// The whole paper.reader / mailChrome / paperEmail cascade resolves off these.
+const PAPER_BASE_II = {
+  "bg":        { light: { L: 0.985, C: 0.006 }, dark: { L: 0.140, C: 0.012 } },
+  "bg-deep":   { light: { L: 0.948, C: 0.010 }, dark: { L: 0.186, C: 0.014 } },
+  "ink":       { light: { L: 0.245, C: 0.020 }, dark: { L: 0.902, C: 0.010 } },
+  "ink-soft":  { light: { L: 0.440, C: 0.016 }, dark: { L: 0.702, C: 0.012 } },
+  "ink-faint": { light: { L: 0.585, C: 0.012 }, dark: { L: 0.532, C: 0.010 } },
+};
+
+// Status roles — OKLCH hue-lock + chroma dial + AA lightness-walk (D15). Each
+// status.<role>.<mode> is a SINGLE readable tone (the shipped tokens shape),
+// walked to clear AA 4.5 on the mode ground; a residual miss is REPORTED into
+// the derive misses list (D15) — never silently shipped.
+function statusII(role, skin, mode, misses) {
+  const h = STATUS_HUE[role];
+  const sat = satOf(srgbToOklch(skin[mode].accent).C);
+  const C = STATUS_CMAX[role] * sat;
+  const ground = mode === "light" ? "0 0% 100%" : skin.dark.bg;
+  const startL = mode === "light" ? 0.55 : 0.72;
+  const w = aaWalk(startL, C, h, ground, {
+    target: 4.5, step: mode === "light" ? -0.02 : 0.02, maxL: 0.97,
+  });
+  if (!w.hit) misses.push({ slot: `status.${role}.${mode}`, got: w.contrast, want: 4.5 });
+  return toHslTriplet(w.rgb);
+}
+
+// Paper callout tones — TINTED from the status ramp: a pale tinted panel (bg) and
+// an AA-clearing ink (fg) at the role's locked hue; neutral rides the accent hue
+// at near-zero chroma (a gray callout). Output hex (tokens shape).
+const CALLOUT_HUE = { success: 150, warning: 75, danger: 27, info: 264 };
+function calloutII(mode, role, sub, skin, misses) {
+  const neutral = role === "neutral";
+  const h = neutral ? accentHueOf(skin, mode) : CALLOUT_HUE[role];
+  const sat = satOf(srgbToOklch(skin[mode].accent).C);
+  const baseC = neutral ? 0.006 : 0.13 * sat;
+  const bgL = mode === "light" ? 0.951 : 0.155;
+  const bg = oklchToSrgb(bgL, baseC * (mode === "light" ? 0.35 : 0.6), h);
+  if (sub === "bg") return toHex(bg);
+  const w = aaWalk(
+    mode === "light" ? 0.45 : 0.8, baseC * (mode === "light" ? 0.9 : 0.7), h, bg,
+    { target: 4.5, step: mode === "light" ? -0.02 : 0.02 },
+  );
+  if (!w.hit) misses.push({ slot: `paperCallout.${mode}.${role}.${sub}`, got: w.contrast, want: 4.5 });
+  return toHex(w.rgb);
+}
+
+// Warm-shift an HSL triplet (hue rotate + optional sat bump) — the decorative /
+// reading accents are a warmer sibling hue of the brand seed.
+function shiftHsl(hslStr, dh, ds = 0) {
+  const p = hslParse(hslStr);
+  return hslFormat({
+    h: (((p.h + dh) % 360) + 360) % 360,
+    s: Math.min(100, Math.max(0, p.s + ds)),
+    l: p.l,
+  });
+}
+
 // ── the derivation map: slot → (ctx) => value ────────────────────────────────
 // Every slot is EITHER here (native) OR in the theme's overrides (pinned). A
 // slot in neither resolves to undefined — Part F reds that as an uncovered slot.
@@ -708,37 +777,53 @@ function buildFormulas() {
   M((m) => [`primary-hover.${m}`, (c) => {
     const p = hslParse(c.skin[m].accent); return hslFormat({ ...p, l: p.l + HOVER_HSL_STEP[m] });
   }]);
-  F["primary-fg.light"] = (c) => onAccentFor(c.skin.light.accent); // → warm-white on the dark-green fill
+  // primary foreground — the contrast-aware on-accent FLIP, BOTH modes (D16):
+  // warm-white on a deep fill, near-ink on a light fill (evergreen's amber-free
+  // brand → warm-white light; a mid-L dark accent → near-ink dark).
+  M((m) => [`primary-fg.${m}`, (c) => onAccentFor(c.skin[m].accent)]);
   M((m) => [`bg.${m}`, (c) => c.skin[m].bg]);
   M((m) => [`text.${m}`, (c) => c.skin[m].ink]);
-  F["surface.light"] = (c) => c.skin.light.bg; // paper-flat white
-  F["surface.dark"] = () => NEUTRAL_HSL["surface"].dark;
-  F["ring.dark"] = (c) => c.skin.dark.accent; // ring dark == brand dark
+  F["surface.light"] = (c) => c.skin.light.bg; // paper-flat page bg
+  F["surface.dark"] = (c) => neutralII(c.skin, "dark", NEUTRAL_II["surface"].dark);
+  // ring — a mid-L brand tone (light) / the brand dark accent (dark).
+  F["ring.light"] = (c) => { const p = hslParse(c.skin.light.accent); return hslFormat({ ...p, l: Math.min(62, p.l + 8) }); };
+  F["ring.dark"] = (c) => c.skin.dark.accent;
 
-  // — CSS neutral rungs (frozen structure) —
+  // — decorative + reading accents (sibling hues of the brand seed) —
+  // accent = the brand seed by default (a theme MAY pin a second hue, as evergreen
+  // pins amber); reading-accent = a warmer sibling (hue rotated toward red).
+  M((m) => [`accent.${m}`, (c) => c.skin[m].accent]);
+  M((m) => [`reading-accent.${m}`, (c) => shiftHsl(c.skin[m].accent, -40, 14)]);
+
+  // — code frame: bg from the chrome ramp; fg tracks the reading accent —
+  M((m) => [`code.bg.${m}`, (c) => chromeII(c.skin, m, m === "light" ? 4 : 10)]);
+  M((m) => [`code.fg.${m}`, (c) => toHex(parseColor(c.resolve(`reading-accent.${m}`)))]);
+
+  // — CSS neutral rungs: hue-tinted ladder re-hued toward the accent (D14ii) —
   for (const role of ["muted-surface", "muted-text", "border"])
-    M((m) => [`${role}.${m}`, () => NEUTRAL_HSL[role][m]]);
-  F["studioChrome.bg-accent.light"] = () => NEUTRAL_HSL["studio-bg-accent"].light;
-  F["studioChrome.bg-accent.dark"] = () => NEUTRAL_HSL["studio-bg-accent"].dark;
+    M((m) => [`${role}.${m}`, (c) => neutralII(c.skin, m, NEUTRAL_II[role][m])]);
+  F["studioChrome.bg-accent.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["bg-accent"].light);
+  F["studioChrome.bg-accent.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["bg-accent"].dark);
   F["studioChrome.border-muted.light"] = () => "var(--border)";
-  F["studioChrome.border-muted.dark"] = () => NEUTRAL_HSL["studio-border-muted"].dark;
-  F["studioChrome.fg-dim.light"] = () => NEUTRAL_HSL["studio-fg-dim"].light;
-  F["studioChrome.fg-dim.dark"] = () => NEUTRAL_HSL["studio-fg-dim"].dark;
-  F["studioChrome.fg-accent.light"] = () => NEUTRAL_HSL["studio-fg-accent"].light;
+  F["studioChrome.border-muted.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["border-muted"].dark);
+  F["studioChrome.fg-dim.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["fg-dim"].light);
+  F["studioChrome.fg-dim.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["fg-dim"].dark);
+  F["studioChrome.fg-accent.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["fg-accent"].light);
   F["studioChrome.fg-accent.dark"] = () => "var(--text)";
 
-  // — onStatus: the shipped design stamps warm-white on EVERY status chip (the
-  // status fills are picked to carry white text). The two fills that don't clear
-  // AA 4.5 on white — warn light + info light — are the charter's known warn/info
-  // AA follow-up, kept white here on purpose; danger-fg.light's asymmetric 98% is
-  // the one pinned residual. The on-accent FLIP itself (contrast-aware near-ink
-  // vs white, D16) is exercised on the brand: primary-fg.light. —
+  // — onStatus: warm-white on every status chip; the two fills that don't clear
+  // AA 4.5 on white (warn/info light) are the charter's known warn/info AA
+  // follow-up; danger-fg.light's asymmetric 98% is the one pinned residual. —
   for (const role of ["ok", "warn", "danger", "info"])
     M((m) => [`onStatus.${role}-fg.${m}`, () => WARM_WHITE]);
 
-  // — CLI chrome: zinc ramp (structure) + 5 structural var() aliases —
-  for (const role of ["chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"])
-    M((m) => [`cliChrome.${role}.${m}`, () => ZINC_CHROME[role][m]]);
+  // — status roles: OKLCH hue-lock + chroma dial + AA-walk (D15) —
+  for (const role of ["ok", "warn", "danger", "info"])
+    M((m) => [`status.${role}.${m}`, (c) => statusII(role, c.skin, m, c.misses)]);
+
+  // — CLI chrome: skin-tinted gray ramp + 5 structural var() aliases —
+  for (const role of Object.keys(CHROME_II))
+    M((m) => [`cliChrome.${role}.${m}`, (c) => chromeII(c.skin, m, CHROME_II[role][m])]);
   F["cliChrome.chrome-border"] = () => "var(--border)";
   F["cliChrome.chrome-border-active"] = () => "var(--info)";
   F["cliChrome.chrome-label"] = () => "var(--muted-text)";
@@ -761,14 +846,17 @@ function buildFormulas() {
     return rgbToHex(acc.map((v, i) => v * 0.1 + bg[i] * 0.9)); // color-mix(in srgb, primary 10%, bg)
   }]);
 
-  // — code frame: bg from the zinc ramp (fg is bespoke rose, pinned) —
-  F["code.bg.light"] = () => ZINC_CHROME["code-bg"].light;
-  F["code.bg.dark"] = () => ZINC_CHROME["code-bg"].dark;
+  // — cliCalloutNeutral: the neutral peer of the status family = the muted-text
+  // tone (hue-tinted neutral), serialized as hex for the pdrender WASM reader. —
+  M((m) => [`cliCalloutNeutral.${m}`, (c) => hslToHex(c.resolve(`muted-text.${m}`))]);
 
-  // — paper.surface: derived hairlines/tints/chrome from the pinned paper bases —
+  // — paper.surface: hue-tinted bases from the skin, then hairlines/tints/chrome —
+  for (const role of Object.keys(PAPER_BASE_II))
+    M((m) => [`paper.surface.${role}.${m}`, (c) => oklchHex(PAPER_BASE_II[role][m].L, PAPER_BASE_II[role][m].C, accentHueOf(c.skin, m))]);
+  M((m) => [`paper.surface.accent.${m}`, (c) => hslToHex(c.skin[m].accent)]);
   for (const role of ["rule", "edit-hover", "chrome-border"])
     M((m) => [`paper.surface.${role}.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.ink.${m}`), PAPER_ALPHA[role][m])]);
-  F["paper.surface.accent-soft.light"] = (c) => rgbaFrom(c.resolve("paper.surface.accent.light"), PAPER_ALPHA["accent-soft"].light);
+  M((m) => [`paper.surface.accent-soft.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.accent.${m}`), PAPER_ALPHA["accent-soft"][m])]);
   F["paper.surface.chrome-bg.light"] = (c) => c.resolve("paper.surface.bg.light");    // chrome bg == page bg (light)
   F["paper.surface.chrome-bg.dark"] = (c) => c.resolve("paper.surface.bg-deep.dark"); // chrome bg == deep bg (dark)
 
@@ -780,8 +868,13 @@ function buildFormulas() {
   for (const m of modes)
     for (const [rk, sk] of Object.entries(readerMap[m]))
       F[`paper.reader.${m}.${rk}`] = ((mm, s) => (c) => c.resolve(`paper.surface.${s}.${mm}`))(m, sk);
+  // reader hairline DIVERGES from the surface rule (charter D4): light is a SOLID
+  // tint (ink mixed over the page), dark a slightly heavier alpha than surface's.
+  F["paper.reader.light.rule"] = (c) => toHex(mixSrgb(c.resolve("paper.surface.ink.light"), c.resolve("paper.surface.bg.light"), 13));
+  F["paper.reader.dark.rule"] = (c) => rgbaFrom(c.resolve("paper.surface.ink.dark"), "0.13");
 
-  // — mailChrome: ⊂ paper.surface mapping (paper.light + rule.dark pinned residuals) —
+  // — mailChrome: ⊂ paper.surface mapping. paper.light = the (near-white) page bg;
+  // rule.dark = a solid hairline (paper ink mixed 20% over the dark page). —
   const mailMap = {
     "bar.light": "paper.surface.bg.light", "bar.dark": "paper.surface.bg.dark",
     "paper.dark": "paper.surface.bg-deep.dark",
@@ -792,6 +885,8 @@ function buildFormulas() {
   };
   for (const [slot, src] of Object.entries(mailMap))
     F[`mailChrome.${slot}`] = ((s) => (c) => c.resolve(s))(src);
+  F["mailChrome.paper.light"] = (c) => hslToHex(c.skin.light.bg);
+  F["mailChrome.rule.dark"] = (c) => toHex(mixSrgb(c.resolve("paper.surface.ink.dark"), c.resolve("paper.surface.bg.dark"), 20));
 
   // — paperEmail: light-only skin, ⊂ paper.surface / reader —
   const emailMap = {
@@ -802,6 +897,13 @@ function buildFormulas() {
   };
   for (const [slot, src] of Object.entries(emailMap))
     F[`paperEmail.${slot}`] = src == null ? () => "#ffffff" : ((s) => (c) => c.resolve(s))(src);
+
+  // — paperCallout: 5 role tones × {bg,fg} × 2 modes, TINTED from the status ramp —
+  for (const mode of modes)
+    for (const role of ["success", "warning", "danger", "info", "neutral"])
+      for (const sub of ["bg", "fg"])
+        F[`paperCallout.${mode}.${role}.${sub}`] =
+          ((mm, rr, ss) => (c) => calloutII(mm, rr, ss, c.skin, c.misses))(mode, role, sub);
 
   return F;
 }
@@ -863,12 +965,21 @@ export function derive(theme) {
     memo.set(slot, v);
     return v;
   }
-  const ctx = { skin, resolve };
+  // `misses` collects every AA-walk residual that could NOT clear its target (D15)
+  // — a formula that walks (status, paperCallout) pushes here rather than silently
+  // shipping a failing colour. Part F asserts a committed theme's misses are all
+  // declared in its `_aaExceptions`; the bare-skin tests assert the reporting path.
+  const misses = [];
+  const ctx = { skin, resolve, misses };
   const values = {};
   for (const slot of SLOTS) values[slot] = resolve(slot);
   const pinned = SLOTS.filter((s) => Object.prototype.hasOwnProperty.call(O, s));
   const native = SLOTS.filter((s) => !Object.prototype.hasOwnProperty.call(O, s));
-  return { values, native, pinned, slots: SLOTS };
+  // A slot that is neither pinned nor covered by a formula (undefined value) is an
+  // UNRESOLVED hole — for a bare {bg,ink,accent} skin this must be empty (every
+  // slot has a real formula; the compiler is not vacuous). check.mjs gates it.
+  const unresolved = SLOTS.filter((s) => values[s] === undefined);
+  return { values, native, pinned, unresolved, misses, slots: SLOTS };
 }
 
 export default derive;

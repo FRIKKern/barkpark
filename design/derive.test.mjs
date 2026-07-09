@@ -418,3 +418,118 @@ test("seam: non-color top-level families pass through by the top-level spread", 
     assert.equal(tokens[k], rawTokens[k], `non-color family ${k} was not passed through by reference`);
   }
 });
+
+// ── ts-w5a: derive() covers all 156 slots from a BARE skin + skin-responsiveness
+//    The headline of the compiler-completion slice: a theme is {bg,ink,accent}×2
+//    and NOTHING else — every one of the 156 SLOTS resolves from a real formula,
+//    the neutral/chrome/status/paper families re-skin with the theme, and any
+//    AA-walk residual is REPORTED (never silently shipped). ──────────────────────
+const EVERGREEN_THEME = JSON.parse(
+  readFileSync(new URL("./themes/evergreen.json", import.meta.url), "utf8"),
+);
+// helper: parse either a "H S% L%" triplet or a #hex through the exported OKLCH.
+const oklchOf = (v) => srgbToOklch(String(v).startsWith("#") ? v : `hsl(${v})`);
+
+test("ts-w5a: a BARE {bg,ink,accent}×2 skin resolves ALL 156 slots (no unresolved)", () => {
+  // strip the overrides — the compiler alone must cover every slot (non-vacuous).
+  const bare = derive({ ...EVERGREEN_THEME, overrides: {}, _overrideReasons: {} });
+  assert.equal(bare.unresolved.length, 0, `bare skin left ${bare.unresolved.length} slots unresolved: ${bare.unresolved.slice(0, 8).join(", ")}`);
+  assert.equal(bare.pinned.length, 0, "a bare skin has zero pins");
+  assert.equal(bare.native.length, SLOTS.length, "every slot is native for a bare skin");
+  for (const slot of SLOTS) assert.notEqual(bare.values[slot], undefined, `slot ${slot} unresolved on a bare skin`);
+});
+
+test("ts-w5a: derive(evergreen) is complete AND byte-frozen at 82 pins (the ratchet)", () => {
+  const r = derive(EVERGREEN_THEME);
+  assert.equal(r.unresolved.length, 0, "evergreen leaves no slot unresolved");
+  assert.equal(r.pinned.length, 82, "evergreen override count is frozen at 82 (56 legacy + 26 zinc characterization freezes)");
+  // byte identity is what the seam guard rides on — spot-check across formats.
+  assert.equal(r.values["primary.light"], "163 46% 22%");           // HSL native
+  assert.equal(r.values["border.light"], "240 5.9% 90%");           // HSL pinned (zinc freeze)
+  assert.equal(r.values["cliChrome.chrome-ink.dark"], "#e4e4e7");   // hex pinned (zinc freeze)
+  assert.equal(r.values["cliChrome.chrome-toolbar-bg.light"], "#fafafa"); // hex NATIVE (formula hits it)
+  assert.equal(r.values["studioChrome.border-muted.light"], "var(--border)"); // var passthrough
+});
+
+test("ts-w5a: warm (H30) vs cool (H220) skins re-skin the neutral + chrome ladders", () => {
+  const skin = (h, hd) => ({
+    name: "x",
+    modes: {
+      light: { bg: `${h} 20% 99%`, ink: `${h} 15% 10%`, accent: `${h} 70% 45%` },
+      dark: { bg: `${h} 15% 8%`, ink: `${h} 10% 92%`, accent: `${hd} 60% 62%` },
+    },
+  });
+  const warm = derive(skin(30, 33)), cool = derive(skin(220, 220));
+  // neutral rung hue rides the accent — a warm theme's border is warm, a cool cool.
+  const wh = oklchOf(warm.values["border.light"]).h, ch = oklchOf(cool.values["border.light"]).h;
+  assert.ok(Math.abs(((wh - ch + 540) % 360) - 180) > 30, `neutral border hue did not re-skin (warm ${wh.toFixed(0)} vs cool ${ch.toFixed(0)})`);
+  // chrome ramp carries the skin tint too (not frozen zinc for a non-evergreen skin).
+  assert.notEqual(warm.values["cliChrome.chrome-dim.light"], cool.values["cliChrome.chrome-dim.light"]);
+  // paper reading ground re-hues as well.
+  assert.notEqual(warm.values["paper.surface.bg.light"], cool.values["paper.surface.bg.light"]);
+});
+
+test("ts-w5a: status chroma DIALS to the accent — vivid seed → more saturated status", () => {
+  const mk = (h, sat) => ({
+    name: "x",
+    modes: {
+      light: { bg: "0 0% 100%", ink: "0 0% 6%", accent: `${h} ${sat}% 45%` },
+      dark: { bg: "240 10% 6%", ink: "0 0% 92%", accent: `${h} ${sat}% 62%` },
+    },
+  });
+  const vivid = derive(mk(20, 95)), muted = derive(mk(210, 12));
+  const cv = oklchOf(vivid.values["status.ok.light"]).C, cm = oklchOf(muted.values["status.ok.light"]).C;
+  assert.ok(cv > cm, `vivid status chroma ${cv.toFixed(4)} should exceed muted ${cm.toFixed(4)}`);
+  // but the status HUE stays locked to the semantic target regardless of accent.
+  for (const [role, hue] of [["ok", 150], ["danger", 27]]) {
+    const h = oklchOf(vivid.values[`status.${role}.light`]).h;
+    assert.ok(Math.abs(((h - hue + 540) % 360) - 180) < 4, `status ${role} hue ${h.toFixed(0)} drifted from ${hue}`);
+  }
+});
+
+test("ts-w5a: a pathological ground surfaces AA misses in result.misses (D15 — never silent)", () => {
+  // A mid-gray dark ground: saturated status tones walking UP toward it can't clear
+  // AA 4.5. The walk is bound-terminated (frick), so derive must REPORT the residual.
+  const patho = derive({
+    name: "patho",
+    modes: {
+      light: { bg: "0 0% 100%", ink: "0 0% 5%", accent: "60 90% 55%" },
+      dark: { bg: "0 0% 48%", ink: "0 0% 90%", accent: "60 90% 60%" },
+    },
+  });
+  assert.ok(patho.misses.length > 0, "expected reported AA misses on a mid-gray ground");
+  for (const m of patho.misses) {
+    assert.equal(typeof m.slot, "string");
+    assert.ok(m.got < m.want, `${m.slot} reported as a miss but got ${m.got} ≥ want ${m.want}`);
+    assert.ok(patho.values[m.slot] !== undefined, "a reported miss still ships a (best-effort) colour");
+  }
+});
+
+test("ts-w5a: evergreen ships ZERO AA misses — its _aaExceptions:[] is complete", () => {
+  // evergreen pins every status/callout tone, so no native AA-walking formula runs;
+  // its declared _aaExceptions (empty) must therefore cover every reported miss.
+  const r = derive(EVERGREEN_THEME);
+  const declared = new Set((EVERGREEN_THEME._aaExceptions || []).map((e) => e.slot));
+  const undeclared = r.misses.filter((m) => !declared.has(m.slot));
+  assert.equal(undeclared.length, 0, `undeclared AA misses: ${undeclared.map((m) => m.slot).join(", ")}`);
+  assert.equal(r.misses.length, 0, "evergreen (fully pinned status/callout) reports no misses");
+});
+
+test("ts-w5a: overrides still win over the new formulas (characterization freeze)", () => {
+  // The zinc rungs now HAVE skin-responsive formulas, but evergreen's pin must win —
+  // this is exactly what keeps the byte gate green while the compiler gains reach.
+  const noPin = derive({ ...EVERGREEN_THEME, overrides: {}, _overrideReasons: {} });
+  const pinned = derive(EVERGREEN_THEME);
+  assert.notEqual(noPin.values["border.light"], pinned.values["border.light"], "formula and pin must differ (else the pin is redundant)");
+  assert.equal(pinned.values["border.light"], "240 5.9% 90%", "the pin wins for evergreen");
+});
+
+test("ts-w5a: on-accent flip is exercised on BOTH primary-fg modes (D16)", () => {
+  // light deep-green fill → warm-white; a mid-L dark accent → near-ink (the FLIP).
+  const bare = derive({ ...EVERGREEN_THEME, overrides: {}, _overrideReasons: {} });
+  assert.equal(bare.values["primary-fg.light"], "0 0% 100%", "deep fill → warm-white");
+  // evergreen's dark accent is a mid-L green — the near-ink branch of the flip.
+  const darkFg = bare.values["primary-fg.dark"];
+  assert.ok(contrast(`hsl(${darkFg})`, "160 42% 62%") >= contrast("0 0% 100%", "160 42% 62%"),
+    "dark on-accent picked the higher-contrast foreground (the flip)");
+});
