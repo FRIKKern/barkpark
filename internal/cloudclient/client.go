@@ -271,6 +271,131 @@ func (c *Client) Register(ctx context.Context, email, password, team string) (Lo
 	return out, nil
 }
 
+// DeviceStartResp is the body of a successful POST /v1/auth/device/start — the
+// opening leg of the copy-a-link browser login (RFC 8628 device-authorization,
+// charter decision 10). The control plane mints a single-use, short-TTL code
+// pair: DeviceCode is the OPAQUE secret the CLI polls with (never shown to the
+// user); UserCode is the short human code the user types on the approve page
+// (formatted XXXX-XXXX server-side). VerificationURI is the bare approve page;
+// VerificationURIComplete embeds the code so opening it prefills the form.
+// Interval is the minimum poll spacing in seconds; ExpiresIn is the code's TTL.
+// No token rides here — that only arrives once the user approves (DevicePoll).
+type DeviceStartResp struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete"`
+	Interval                int    `json:"interval"`
+	ExpiresIn               int    `json:"expires_in"`
+}
+
+// DevicePollStatus discriminates a device-poll response's NON-error outcome: the
+// user has not acted yet (Pending), the CLI is polling too fast and must back off
+// (SlowDown), or the user approved and a token is present (Approved). A terminal
+// refusal (denied / expired / unauthorized) is NOT a status — it surfaces as a Go
+// error from DevicePoll so the caller stops the loop.
+type DevicePollStatus int
+
+const (
+	DevicePollPending  DevicePollStatus = iota // authorization_pending — keep waiting
+	DevicePollSlowDown                         // slow_down — widen the interval
+	DevicePollApproved                         // approved — Login carries the token
+)
+
+// DevicePollResult is one device-poll outcome. On DevicePollApproved, Login
+// carries the SAME {token, team_id} envelope a password Login returns, so the
+// caller stores it identically. On Pending/SlowDown, Login is the zero value.
+type DevicePollResult struct {
+	Status DevicePollStatus
+	Login  LoginResp
+}
+
+// DeviceStart opens a device-authorization session via POST /v1/auth/device/start
+// (charter decision 10). It is UNauthed — there is no token yet — mirroring
+// Login. clientName is a human label for the pending grant ("bp on <hostname>")
+// shown on the approve page; it is sent only when non-empty. A 200 decodes the
+// code pair + poll interval the caller renders and polls with; a non-2xx surfaces
+// the control plane's honest error verbatim (e.g. a 429 rate-limit).
+func (c *Client) DeviceStart(ctx context.Context, clientName string) (DeviceStartResp, error) {
+	req := map[string]string{}
+	if clientName != "" {
+		req["client_name"] = clientName
+	}
+	status, body, err := c.do(ctx, "POST", "/v1/auth/device/start", false, req)
+	if err != nil {
+		return DeviceStartResp{}, err
+	}
+	if !ok(status) {
+		return DeviceStartResp{}, cloudError(status, body)
+	}
+	var out DeviceStartResp
+	if err := json.Unmarshal(body, &out); err != nil {
+		return DeviceStartResp{}, fmt.Errorf("decode device start response: %w", err)
+	}
+	return out, nil
+}
+
+// DevicePoll asks the control plane whether the device grant has been approved
+// via POST /v1/auth/device/poll (charter decision 10). It is UNauthed like
+// DeviceStart — the deviceCode IS the credential. The control plane's outcomes
+// (frozen in the charter; implemented by /v1/auth/device/poll) map as:
+//
+//	200 {status:"pending"}                  → DevicePollPending  (keep waiting)
+//	200 {token, team_id}                    → DevicePollApproved (store it)
+//	429 {"error":"slow_down"}               → DevicePollSlowDown (back off)
+//	404 {"error":"expired_or_invalid"}      → a Go error via cloudError
+//	                                           (denied / expired / replayed —
+//	                                           the caller stops the loop)
+//
+// The RFC-8628 spellings (a 4xx {"error":"authorization_pending"}) are tolerated
+// as aliases so the client also speaks to a stock device-auth server. Pending and
+// slow_down are the EXPECTED steady-state of a poll loop, so they are
+// deliberately NOT errors — the caller acts on the status. A terminal refusal is
+// an error carrying the control plane's code so the CLI can classify it.
+func (c *Client) DevicePoll(ctx context.Context, deviceCode string) (DevicePollResult, error) {
+	status, body, err := c.do(ctx, "POST", "/v1/auth/device/poll", false, map[string]string{
+		"device_code": deviceCode,
+	})
+	if err != nil {
+		return DevicePollResult{}, err
+	}
+	if ok(status) {
+		// A 200 is either the pending steady-state ({status:"pending"}) or the
+		// approval ({token, team_id}) — discriminate BEFORE trusting a token, so
+		// a pending body can never masquerade as an approval with an empty token.
+		var out struct {
+			Status string `json:"status"`
+			Token  string `json:"token"`
+			TeamID string `json:"team_id"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return DevicePollResult{}, fmt.Errorf("decode device poll response: %w", err)
+		}
+		if out.Status == "pending" {
+			return DevicePollResult{Status: DevicePollPending}, nil
+		}
+		if out.Token == "" {
+			return DevicePollResult{}, fmt.Errorf("device poll: 200 response carried neither a pending status nor a token")
+		}
+		return DevicePollResult{Status: DevicePollApproved, Login: LoginResp{Token: out.Token, TeamID: out.TeamID}}, nil
+	}
+	// A non-2xx is either an expected polling state (RFC-spelled pending, or the
+	// 429 slow_down) or a terminal refusal. Discriminate on the error code.
+	var env struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &env) == nil {
+		switch env.Error {
+		case "authorization_pending":
+			return DevicePollResult{Status: DevicePollPending}, nil
+		case "slow_down":
+			return DevicePollResult{Status: DevicePollSlowDown}, nil
+		}
+	}
+	// expired_or_invalid, access_denied, expired_token, or anything unrecognised → stop.
+	return DevicePollResult{}, cloudError(status, body)
+}
+
 // CreateCheckout starts a subscription checkout for plan via
 // POST /v1/billing/checkout (Bearer). The control plane resolves the plan's
 // price id and opens a hosted checkout session bound to the AUTHED user's team —

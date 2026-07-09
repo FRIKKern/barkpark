@@ -62,7 +62,7 @@ func runLoginCloud(out *writer, args []string) int {
 		}
 	}
 
-	email, password, url, perr := parseLoginArgs(args)
+	email, password, url, device, perr := parseLoginArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
@@ -80,6 +80,21 @@ func runLoginCloud(out *writer, args []string) int {
 	}
 	if base == "" {
 		base = cloudclient.DefaultBaseURL
+	}
+
+	// Copy-a-link browser login (charter decision 10): the friendly default when
+	// the user gave no credential and there is a human at a terminal to approve in
+	// a browser — or when forced with --device. Every other combination (any
+	// credential input, a piped/CI run) falls through to the password path
+	// VERBATIM below, so `bp login --email x` and BARKPARK_PASSWORD are unchanged.
+	if deviceRequested(device, email, password) {
+		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName()); derr != nil {
+			if asDeviceAuthError(derr) {
+				return useError(out, "auth", derr.Error(), exitAuth)
+			}
+			return useError(out, "failed", derr.Error(), exitGeneric)
+		}
+		return exitOK
 	}
 
 	// Email: flag wins, else prompt on a TTY. No silent default — an empty email is
@@ -710,6 +725,7 @@ const (
 	flagPasswd  = "--password"
 	flagPass    = "--pass"
 	flagURL     = "--url"
+	flagDevice  = "--device"
 	flagTeam    = "--team"
 	flagEmailEq = flagEmail + "="
 	flagUserEq  = flagUser + "="
@@ -719,10 +735,11 @@ const (
 	flagTeamEq  = flagTeam + "="
 )
 
-// parseLoginArgs splits `bp login` flags: --email/--user, --password/--pass, --url.
-// Each accepts both `--flag value` and `--flag=value`. Any positional or unknown
-// flag is a usage error.
-func parseLoginArgs(args []string) (email, password, url string, err error) {
+// parseLoginArgs splits `bp login` flags: --email/--user, --password/--pass,
+// --url, and the bare boolean --device (force the browser device-link flow).
+// Each value-flag accepts both `--flag value` and `--flag=value`. Any positional
+// or unknown flag is a usage error.
+func parseLoginArgs(args []string) (email, password, url string, device bool, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
@@ -742,14 +759,19 @@ func parseLoginArgs(args []string) (email, password, url string, err error) {
 			url, i, err = nextFlagValue(args, i)
 		case strings.HasPrefix(a, flagURLEq):
 			url = a[len(flagURLEq):]
+		case a == flagDevice:
+			// Bare boolean — no value consumed. Forces the browser device-link
+			// flow even when a credential or non-tty would otherwise route to the
+			// password path.
+			device = true
 		default:
-			return "", "", "", fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--url <url>])", a)
+			return "", "", "", false, fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--url <url>])", a)
 		}
 		if err != nil {
-			return "", "", "", err
+			return "", "", "", false, err
 		}
 	}
-	return email, password, url, nil
+	return email, password, url, device, nil
 }
 
 // parseSignupArgs splits `bp signup` flags: --email/--user, --password/--pass,
@@ -911,16 +933,20 @@ func printLoginHelp(out *writer) {
 	const help = `bp login — authenticate to Barkpark Cloud (the control plane).
 
 USAGE
-  bp login [--email <addr>] [--password <pw>] [--url <url>]
+  bp login [--email <addr>] [--password <pw>] [--device] [--url <url>]
 
 WHAT IT DOES
-  exchanges your email + password for a session token via the control plane and
-  stores it (0600) so 'bp barkparks', 'bp launch', and 'bp go-live' work. The
-  email/password are prompted when omitted; the password is never echoed and can
-  also come from the BARKPARK_PASSWORD env var.
+  On a terminal with no credentials given, opens a copy-a-link BROWSER login: it
+  prints a short verification URL + code (and tries to open your browser), you
+  approve in your barkpark.cloud session, and the token lands here — no password
+  typed. Pass any credential (--email/--password or BARKPARK_PASSWORD) and it
+  falls back to email + password, prompting for whatever you omit (password never
+  echoed) — the path headless/CI use. Either way the session token is stored
+  (0600) so 'bp barkparks', 'bp launch', and 'bp go-live' work.
 
 FLAGS
-  --email <addr>    your account email (prompted when omitted)
+  --device          force the browser device-link flow (even with a credential)
+  --email <addr>    your account email (prompted when omitted) — password path
   --password <pw>   your password (prompted, not echoed; or BARKPARK_PASSWORD)
   --url <url>       control-plane URL (default https://api.barkpark.cloud)
   -o json           emit one machine-readable JSON object on stdout`
