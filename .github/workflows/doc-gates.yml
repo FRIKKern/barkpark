@@ -36,6 +36,12 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # theme-system compiler (Wave 2 D17) — the zero-dep OKLCH derive core, its
+      # unit tests, and the per-theme spec files. Without these globs Part F is a
+      # script nobody runs (doc-gates has no broad **/*.mjs / **/*.json trigger).
+      - "design/derive.mjs"
+      - "design/derive.test.mjs"
+      - "design/themes/**"
       - "cloud/priv/static/app.css"
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
@@ -83,6 +89,12 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # theme-system compiler (Wave 2 D17) — the zero-dep OKLCH derive core, its
+      # unit tests, and the per-theme spec files. Without these globs Part F is a
+      # script nobody runs (doc-gates has no broad **/*.mjs / **/*.json trigger).
+      - "design/derive.mjs"
+      - "design/derive.test.mjs"
+      - "design/themes/**"
       - "cloud/priv/static/app.css"
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
@@ -146,6 +158,10 @@ jobs:
         run: |
           node design/validate.mjs
           node design/check.mjs
+          # theme-system Wave 2 (D17): the zero-dep OKLCH compiler core's unit
+          # tests. Runs here so a change to design/derive.mjs re-proves the colour
+          # math / serializer byte-formats / AA-walk + on-accent contracts.
+          node design/derive.test.mjs
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
