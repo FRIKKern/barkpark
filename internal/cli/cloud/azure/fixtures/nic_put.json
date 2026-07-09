@@ -1,0 +1,20 @@
+{
+  "status": 200,
+  "body": {
+    "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Network/networkInterfaces/acme-1-nic",
+    "name": "acme-1-nic",
+    "location": "eastus",
+    "properties": {
+      "provisioningState": "Succeeded",
+      "ipConfigurations": [
+        {
+          "name": "ipconfig1",
+          "properties": {
+            "privateIPAddress": "10.0.0.4",
+            "provisioningState": "Succeeded"
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "status": 200,
+  "body": {
+    "token_endpoint": "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/oauth2/v2.0/token",
+    "issuer": "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/v2.0",
+    "authorization_endpoint": "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222/oauth2/v2.0/authorize"
+  }
+}

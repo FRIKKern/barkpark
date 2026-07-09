@@ -1,0 +1,10 @@
+{
+  "status": 200,
+  "body": {
+    "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Compute/virtualMachines/acme-1",
+    "name": "acme-1",
+    "location": "eastus",
+    "tags": { "barkpark-managed": "true" },
+    "properties": { "provisioningState": "Succeeded" }
+  }
+}

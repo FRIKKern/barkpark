@@ -1,0 +1,7 @@
+{
+  "status": 202,
+  "headers": {
+    "Azure-AsyncOperation": "https://management.azure.com/subscriptions/33333333-3333-3333-3333-333333333333/providers/Microsoft.Compute/locations/eastus/operations/op-abc123?api-version=2024-03-01"
+  },
+  "body": {}
+}
