@@ -51,3 +51,87 @@ A grant = {scope slice, principal, expiry} that is **indistinguishable from no g
 **Parked:** grantor-own ("grants I minted") panel filter — needs a new grantor_id query path; file under a future UX vein only if users ask. Grant history view (expired/revoked rows) — needs a non-active query, same story.
 
 ## Wave log
+
+### Wave 2026-07-10 — the endgame wave (reviewed)
+
+*(Adopted from the stranded #2145 retro — sole copy was commit 48a18f85 on the local-only
+branch `loop-epic/airdrop-grants-wave1-review-log`; folded here per the leak-seal charter's
+D11, with the test count corrected to the authoritative full-battery number.)*
+
+**All five slices built green and reviewed; integration-proven.** The reviewer scratch-merged all
+five onto origin/main (including the mid-wave `#2138` scope-chip landing): zero conflicts,
+`mix compile --warnings-as-errors` clean, **6,348 Elixir tests 0 failures** (full `test/barkpark`
+battery per the #2145 PR body — the retro as originally drafted cited the reviewer's 1,982-test
+partial run), Go `internal/cli` green. The wave merged as PR #2145 (602eb4a3, 2026-07-10T08:50Z).
+The PR body's "judged A- / ship" is the **PR author's own self-description** — zero GitHub review
+objects exist on that PR; it is not an external grade.
+
+1. **ag-liveview-read-liveness** — the ONE confirmed leak is CLOSED. Tick + `{:airdrop_revoked}`
+   broadcast rebuild `caller_context`, re-derive caps, re-run admission (dead grant = dead desk,
+   redirect /login); `covers_workspace_read?` re-applies expiry on the struct (revoke asymmetry
+   documented). RED-before/GREEN-after proven for all three DENY tests. The strategize-phase
+   **write-side suspicion was FALSIFIED**: writes were already gated per event (the #1504 Caps
+   gate re-derives on every :write/:admin event) — the real leak was reads on a live socket.
+   Reviewer fixed one `mix format` violation → final branch
+   `loop-epic/liveview-read-liveness-expired-revoked-g-0-r`.
+2. **ag-deny-matrix-gaps** — shared `test/support/access_fixtures.ex` (4-way drift hazard gone);
+   show/federated/flat-expired+revoked cells filled with deny + positive controls. Found TWO REAL
+   LEAKS empirically: **search** (grant_scoped dropped in `QueryPipeline.retriever_opts`,
+   reviewer-verified in code) and **backlinks** (`reverse_referencers`' `resolve_doc`/`docs_by_id`
+   never grant-narrow). Both committed as `@tag :skip` executable repros; fix tasks
+   `ag-search-grant-leak` + `ag-backlinks-grant-leak` filed (reviewer added acceptance criteria +
+   published them). The criterion-3 reframe ("expired ⇒ back-compat, not zero rows" on the flat
+   route) is CORRECT — grants narrow, never gate, and "expired = byte-identical to no grant" is
+   proven literally.
+3. **ag-plugin-pane-grantee-audit** — VERDICT: NO LEAK. The pane path reads all plugin content
+   through the type-agnostic `Content.Query.base_query → maybe_scope_to_grants` seam
+   (file:line trace in the test moduledoc); a mutation-probed rendered-desk guard pins it.
+4. **ag-studio-access-panel-countdown** — `access_panel/1` beside `airdrop_sheet` on the kit;
+   "Your access" + membership-gated workspace grants with one-click revoke; `ExpiryCountdown`
+   client hook; zero new query paths; both deny layers tested (Caps :write gate AND server
+   grantor-or-admin refusal).
+5. **ag-access-mcp-parity-proof** — Go guard (no `access.*` in `bridgeShadowedIDs` + the six
+   `bp_access_*` tools generate over a live MCP session) + guerrilla `--tools all` evidence +
+   the curated-default caveat comment. Go-only, merges on the Go gate.
+
+**Ledger:** five wave tasks in_progress with honest evidence, merge-gated criteria open for the
+lead; `ag-manifest-mcp-bridge` closed with #1790 evidence; leak tasks published with criteria.
+
+**Handoff taken by the leak-seal wave:** fix the two leaks, un-skip the repro tests as the
+red-before proof, then close the epic anchor `airdrop-grants`. (Executed — see the next entry.)
+
+### Wave 2026-07-10 — leak-seal + epic close (EPIC COMPLETE)
+
+Decision record: `.claude/workflows/bp-airdrop-grants-leakseal-charter.md` (D1–D21).
+
+- **ONE seal PR, not two.** Both leaks — search (D1+D2+D3: `grant_scoped` through
+  `QueryPipeline.retriever_opts`, the single public wrapper `Content.Scope.maybe_scope_to_grants/2`,
+  the `DocumentsRetriever` base-query seal, the Indx grant-narrowed total) and backlinks
+  (D4+D5: opts-conditional narrowing inside the shared Graph helpers `resolve_doc/3`,
+  `scope_query/2`, `scoped_docs_query/1`) — merged together as the single integration
+  **PR #2177** (`integrate/airdrop-seal`, squash **989a9c75**, 2026-07-10T14:54:45Z). There
+  were never two seal PRs; the PR body cites only `Task: ag-search-grant-leak` (the backlinks
+  slug was folded in without its own `Task:` line).
+- **Crown evidence (first-hand at merged HEAD):**
+  `CC=/usr/bin/clang mix test test/barkpark_web/controllers/grant_search_deny_test.exs
+  test/barkpark_web/controllers/grant_single_doc_deny_test.exs` → **8 tests, 0 failures**
+  (seeds 823631 and 402530; denial cases + positive controls, all 8 named via `--trace`).
+  The `@tag :skip` repros from the endgame wave were un-skipped in the same PR with
+  non-vacuous RED-before proof on pre-fix code.
+- **CI honesty (D15):** #2177's required `Test (Elixir 1.18.1 / OTP 27.0)` check concluded
+  **FAILURE** — 9,599 tests, 10 failures, ALL pre-existing Studio ChatLiveTest reds identical
+  on the base commit (repaired post-merge by #2192 ecff8270 on main; tracked closed as
+  task-085b24d019427644). The PR body's "7084/0" claim is false. This merge is NOT recorded
+  as "gate green" anywhere.
+- **Deploy:** run **29101630245** green → live on guerrilla.
+- **Live-smoke impossibility (D14):** a live guerrilla grantee-denial smoke was proven
+  IMPOSSIBLE with disposable resources — flat `/v1/data` routes hardwire the seeded Default
+  workspace (`assign_default_scope.ex:23`) and `POST /v1/access/claim` requires a
+  confirmed-email account (`claim_flow.ex:56/74`) — and was never executed. The first-hand
+  deny suite above is the proof of record.
+- **Epic closed.** Anchor `airdrop-grants` carries the full honest evidence trail (15
+  enforcement PRs #1303 #1339 #1353 #1372 #1398 #1431 #1432 #1434 #1442 #1451 #1491 #1504
+  #1521 #1527 #1538; endgame #2145; seal #2177) as published acceptance_criteria. The one
+  residual is filed standalone (D12): `ag-broadcast-revoked-residual` — `broadcast_revoked/1`
+  no-ops for unbound grantees; explicitly NOT a confirmed leak (zero blast radius today),
+  priority 3, no parent. Nothing else remains on this epic.
