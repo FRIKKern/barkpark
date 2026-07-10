@@ -1803,9 +1803,11 @@ defmodule BarkparkCloud.Web.Router do
 
             case Registry.trigger_self_update(bp, force: force?) do
               # PIN HONESTY (isu-w5.2): a pinned box is frozen; an unforced Update
-              # click is a 409 (not a silent no-op). `force: true` overrides.
+              # click is a 409 (not a silent no-op). `force: true` overrides. The
+              # body names the pin so the console can say WHICH release holds the
+              # box (S3 reads error.pinned_release for its conflict modal).
               {:error, :pinned} ->
-                json(conn, 409, %{error: %{code: "pinned"}})
+                json(conn, 409, %{error: %{code: "pinned", pinned_release: bp.pinned_release}})
 
               {:ok, 202, _body} ->
                 # Refresh the row's cached status once the run has had time to

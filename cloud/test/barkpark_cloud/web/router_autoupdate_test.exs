@@ -180,6 +180,9 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
 
     assert conn.status == 409
     assert json_body(conn)["error"]["code"] == "pinned"
+    # the body NAMES the pin — the console conflict modal shows which release
+    # holds the box (S3 reads error.pinned_release)
+    assert json_body(conn)["error"]["pinned_release"] == "v0.2.24"
   end
 
   # ── isu-w5.2: fleet-wide kill switch (platform-operator gated) ─────────────
