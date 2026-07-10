@@ -217,6 +217,12 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
   # ── data loaders ─────────────────────────────────────────────────────
 
+  # global-read: FLAT-POSTURE admin console — this LiveView is admin/ops-gated
+  # (auth: :ops, see @moduledoc) and mounts with NO workspace threaded through, so
+  # it deliberately reads every `book` in the single `production` dataset by the
+  # dataset STRING, unscoped by workspace. It is NOT a tenant-scoped read that
+  # forgot its scope; it is an operator's cross-workspace ONIX drift console.
+  # Scoping it to nil would fail CLOSED (barkpark-s6t1) and blank the console.
   defp load_books do
     Document
     |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
@@ -224,6 +230,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     |> Repo.all()
   end
 
+  # global-read: FLAT-POSTURE admin console (see load_books/0) — single-row twin
+  # of the unscoped list read; narrowed by doc_id + type + dataset, not workspace.
   defp fetch_doc(doc_id) do
     case Repo.get_by(Document, doc_id: doc_id, type: @type_default, dataset: @dataset_default) do
       nil -> {:error, :not_found}
