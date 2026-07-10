@@ -69,7 +69,7 @@ A task with **no authored `area:`** can still contribute a surface, derived
 
 `area:` is a coarse surface bucket; `files:` is the exact answer. A task declares
 the files it will touch as `files:<repo-relative-path>` labels — **one path per
-label** (labels are single tokens, so a space-separated list is not allowed):
+label** (labels are single tokens; no space-separated lists):
 
 ```
 files:internal/taskboard/frontier.go   # one exact file
@@ -91,6 +91,12 @@ files:internal/cli/                    # a whole directory subtree (trailing /)
 **directory containment** (one path ends `/` and the other lives under it). The
 shared path is named in the frontier's displaced reason (`files internal/cli/x.go`).
 
+**Server-fence caveat (D2).** Dir-prefix containment is **client-side** (the frontier).
+The server's claim-time resource fence — `--frontier` claims carry `files:` as
+`resources` — matches **exact strings only**: a `files:internal/cli/` claim does *not*
+fence against a held `files:internal/cli/a.go`. Normalize paths so identical surfaces
+produce identical strings.
+
 **The abstain rule** — file truth is authoritative *only when BOTH tasks declare
 it*:
 
@@ -100,8 +106,8 @@ it*:
 | files disjoint | — | **cleared** — overrides an `area:` overlap AND the neighborhood proxy |
 | declared | **undeclared** | **abstain** — fall through to `area:`/neighborhood, unchanged |
 
-Undeclared is never silently safe: a task that names no files stays as unproven as
-its `area:` and neighborhood signals make it. A pick that declares files and is
+Undeclared is never silently safe — a task naming no files stays as unproven as its
+`area:`/neighborhood signals make it. A pick that declares files and is
 path-disjoint from every co-admitted pick earns the strongest risk tag,
 `file-isolated` (counted "proven"). Claims already **in flight** that share a
 declared file (or authored `area:`) surface as an `OVERLAP` section on

@@ -54,6 +54,7 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
     bp doc publish task <slug> --yes        # tasks MUST be published — gates and boards read the published ledger only
 - Fields are FLAT top-level in content. priority 0=highest..4. parent_id is a slug. Typed values use key:=json.
 - Acceptance criteria to the authoring rubric: concrete, evidence-bearing, one per real proof obligation — {criterion, met, evidence}.
+- DECIDE phases: author \`files:\` labels on each wave slice — the exact paths it will touch (one repo-relative path per label; trailing \`/\` = directory prefix; no globs). This feeds the dispatch frontier's file-truth collision check so slices with disjoint file sets dispatch in parallel. Grammar + semantics: docs/contracts/dispatch-areas.md.
 - Claim BEFORE working: \`bp task claim <task-id> <worker>\` — the claim epoch is at doc.claim.epoch in the JSON response.
 - Stamp progress INTO the task as you work (close-time criteria flip): \`bp task close <task-id> <worker> <epoch> done "reason" --set 'criteria:=[{"index":N,"met":true,"evidence":"..."}]'\`.
   Builders do NOT close merge-gated criteria ("PR merged") — the LEAD closes those on merge. A builder whose work is done but unmerged leaves lifecycle in_progress with evidence stamped.
