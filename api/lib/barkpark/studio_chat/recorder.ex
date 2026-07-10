@@ -112,7 +112,12 @@ defmodule Barkpark.StudioChat.Recorder do
       resume: Map.get(opts, :resume, false),
       model: Map.get(opts, :model),
       effort: Map.get(opts, :effort),
-      bypass_armed: Map.get(opts, :bypass_armed, false)
+      bypass_armed: Map.get(opts, :bypass_armed, false),
+      # The chat admin's principal (charter D63): the Session mints its
+      # loopback `bp mcp serve` credential from this — never exceeding the
+      # human's rights. Absent ⇒ the spawn simply has no hands (fail-closed;
+      # the chat itself is unchanged).
+      minter: Map.get(opts, :minter)
     }
 
     case ClaudeChat.start_session(%{
@@ -371,13 +376,25 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   def handle_info({:claude_chat_permission, ask} = msg, state) do
-    persist_approval_ask(state.session_id, ask)
-    broadcast(state, msg)
+    if ClaudeChat.mcp_auto_approved?(ask.tool_name) do
+      # D65: a READ-ONLY loopback tool auto-approves at this single D31
+      # ask-routing seam — in EVERY mode, plan included. Answered wire-side
+      # (the Session echoes its tracked original input as `updatedInput`,
+      # D32) and NEVER persisted or broadcast as an ask: no pending row, no
+      # needs-you flip, no card — live and replay agree the question was
+      # never the human's. Mutating loopback tools (task_next claims,
+      # doc_create writes, …) fall through to the honest card below.
+      if pid = state.session, do: ClaudeChat.respond_permission(pid, ask.request_id, :allow)
+      {:noreply, touch(state)}
+    else
+      persist_approval_ask(state.session_id, ask)
+      broadcast(state, msg)
 
-    {:noreply,
-     state
-     |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
-     |> touch()}
+      {:noreply,
+       state
+       |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
+       |> touch()}
+    end
   end
 
   def handle_info({:claude_chat_control, _kind, _rid, _resp} = msg, state) do
@@ -454,14 +471,13 @@ defmodule Barkpark.StudioChat.Recorder do
               role: "tool",
               source_markdown: tool_line(name, input),
               metadata:
-                Map.merge(
-                  %{
-                    "tool" => name,
-                    "input" => input,
-                    "tool_use_id" => block["id"]
-                  },
-                  parent
-                )
+                %{
+                  "tool" => name,
+                  "input" => input,
+                  "tool_use_id" => block["id"]
+                }
+                |> Map.merge(mcp_meta(name))
+                |> Map.merge(parent)
             },
             "tool"
           )
@@ -475,6 +491,17 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp persist_assistant_blocks(state, _, _), do: state
+
+  # Tag OUR loopback server's tool rows (charter D64) so the chip renderer
+  # (scc-w12-native-chips) can classify persisted rows without re-parsing
+  # names: `"mcp" => true` + the bare tool (`task_ready`, `bp_search_query`).
+  # `%{}` for every other tool, so a non-loopback row's metadata is unchanged.
+  defp mcp_meta(name) do
+    case ClaudeChat.mcp_tool_name(name) do
+      nil -> %{}
+      tool -> %{"mcp" => true, "mcp_tool" => tool}
+    end
+  end
 
   # `%{"parent_tool_use_id" => id}` for a sub-agent frame; `%{}` for a top-level
   # frame (null parent) so the row's metadata is unchanged.

@@ -2903,6 +2903,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
              resume: resume?,
              model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
              effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
+             # The chat admin's principal (charter D63): the Session mints its
+             # loopback bp-mcp credential from this — never exceeding the
+             # human's own rights; absent ⇒ no hands, chat unchanged.
+             minter: socket.assigns[:api_token] || socket.assigns[:current_user],
              # Bypass arming is a LIVE act (charter D55): the dangerous flag
              # rides ONLY when the type-"bypass" ceremony ran THIS lifetime
              # (`bypass_live_armed`) AND the persisted row is bypassPermissions.

@@ -527,6 +527,99 @@ defmodule Barkpark.Auth do
   defp clamp_ttl(ttl) when is_integer(ttl) and ttl > 0, do: min(ttl, @share_token_max_ttl)
   defp clamp_ttl(_), do: @share_token_default_ttl
 
+  # ── scc-w12: Claude-chat loopback session tokens (charter D63) ──────────
+
+  # D63 session-credential TTL policy: this token exists only to give ONE
+  # Studio Claude-chat subprocess hands over Barkpark (`bp mcp serve`), so its
+  # horizon is HOURS, never days — deliberately a NEW constant pair
+  # (`clamp_ttl/1`'s share floor is 7 DAYS; reusing it would leave a crashed
+  # session's credential live for a week). Revocation in the chat Session's
+  # terminate clauses is the primary teardown; this expiry is the crash
+  # backstop.
+  @claude_session_default_ttl 4 * 3600
+  @claude_session_max_ttl 24 * 3600
+  # Curated REAL permissions — the task/doc/search verbs the loopback needs
+  # ride the ordinary `read`/`write` tiers. NEVER `share-edit-*` (opaque share
+  # perms), NEVER `admin`, NEVER caller-supplied.
+  @claude_session_permissions ~w(read write)
+  @claude_session_token_prefix "bpcs_"
+
+  @doc """
+  Mint the SHORT-LIVED ApiToken a Studio Claude-chat session injects into its
+  loopback `bp mcp serve` subprocess (charter D63, scc-w12-mcp-loopback).
+
+  Modeled on `create_share_token/5`'s insert block: `kind` stays `"api"` (so
+  `verify_token/1` accepts it — an `Access.mint/2` grant token is PROVEN
+  rejected there), permissions are the curated
+  `#{inspect(@claude_session_permissions)}` (never `admin`, never
+  `share-edit-*`, never caller-supplied — `opts` deliberately has no
+  `:permissions` key), the label names the session (`claude-session <sid>`),
+  and the row is workspace-scoped with a plain `Repo.insert` — NO membership
+  row, mirroring the share token's deliberately inert posture on
+  membership-gated routes.
+
+  AUTHORIZED UP FRONT: `minter` — the chat admin's `%ApiToken{}` / `%User{}`
+  principal — must pass `Tenancy.Auth.authorize/3` for `:write` on the target
+  workspace, so the minted token can never exceed the human's own rights. A
+  nil, unknown, or under-privileged minter refuses (`{:error, :forbidden}`),
+  fail-closed.
+
+  TTL: `opts[:ttl]` seconds, default #{div(@claude_session_default_ttl, 3600)}h,
+  hard-capped at #{div(@claude_session_max_ttl, 3600)}h. Expiry is the crash
+  backstop; `revoke_token/1` (idempotent) in the Session's terminate clauses
+  is the primary teardown.
+
+  `opts`: `:ttl`, `:workspace_id` (default: the minter token's workspace,
+  then the Default workspace), `:dataset` (default `"production"`). Returns
+  `{:ok, {raw_token, %ApiToken{}}}` — the raw token is written ONLY into the
+  session's temp mcp-config env block, never logged, never recoverable.
+  """
+  @spec create_claude_session_token(term(), binary(), keyword()) ::
+          {:ok, {binary(), ApiToken.t()}} | {:error, term()}
+  def create_claude_session_token(minter, session_id, opts \\ [])
+
+  def create_claude_session_token(minter, session_id, opts) when is_binary(session_id) do
+    ws_id =
+      Keyword.get(opts, :workspace_id) || minter_workspace_id(minter) || default_workspace_id()
+
+    with ws_id when is_binary(ws_id) <- ws_id || {:error, :no_workspace},
+         :ok <- TenancyAuth.authorize(minter, ws_id, :write) do
+      raw =
+        @claude_session_token_prefix <>
+          Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      attrs = %{
+        token_hash: ApiToken.hash_token(raw),
+        label: "claude-session #{session_id}",
+        dataset: Keyword.get(opts, :dataset, "production"),
+        # NON-OVERRIDABLE curated permissions — a caller can never inject
+        # "admin" (or anything else) here.
+        permissions: @claude_session_permissions,
+        workspace_id: ws_id,
+        expires_at: DateTime.add(now, clamp_claude_session_ttl(opts[:ttl]))
+      }
+
+      case %ApiToken{} |> ApiToken.changeset(attrs) |> Repo.insert() do
+        {:ok, token} -> {:ok, {raw, token}}
+        {:error, changeset} -> {:error, changeset}
+      end
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def create_claude_session_token(_minter, _session_id, _opts), do: {:error, :invalid_args}
+
+  defp minter_workspace_id(%ApiToken{workspace_id: ws_id}), do: ws_id
+  defp minter_workspace_id(_), do: nil
+
+  defp clamp_claude_session_ttl(ttl) when is_integer(ttl) and ttl > 0,
+    do: min(ttl, @claude_session_max_ttl)
+
+  defp clamp_claude_session_ttl(_), do: @claude_session_default_ttl
+
   # `token.permissions || []` keeps this total: a nil permissions array (e.g. a
   # NULL DB column) denies (false) instead of raising `ArgumentError` on
   # `permission in nil`. nil permissions → deny, never raise.
