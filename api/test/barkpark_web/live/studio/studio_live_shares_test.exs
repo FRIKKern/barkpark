@@ -130,6 +130,41 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       refute has_element?(view, ~s(input[value="media"][checked]))
       refute has_element?(view, ~s(input[value="papers"][checked]))
     end
+
+    # ── kit markup + param shape (sup-w3-shares-modal-kit) ──────────────────
+    # The surfaces picker is the last naked native control in Studio: it must
+    # ride the bp_checkbox kit (label.form-checkbox) while keeping the exact
+    # surfaces[] form-param semantics the shares-add handler decodes into a list.
+    test "surfaces picker renders bp_checkbox kit markup with surfaces[] params", %{conn: conn} do
+      {:ok, view, _html} = admin_view(conn)
+      view |> element("button[phx-click=shares-open]") |> render_click()
+
+      for surface <- ~w(papers docs media) do
+        # Kit envelope: the input lives inside the tokenized label.form-checkbox,
+        # not a bare <label> — no naked native control remains.
+        assert has_element?(
+                 view,
+                 ~s(label.form-checkbox input[type="checkbox"][name="surfaces[]"][value="#{surface}"])
+               )
+      end
+
+      # Labels come from String.capitalize/1 via the bp_checkbox <span>.
+      panel = render(view)
+      assert panel =~ "Papers"
+      assert panel =~ "Docs"
+      assert panel =~ "Media"
+
+      # Param shape is byte-preserved: name="surfaces[]" is what makes Phoenix
+      # collect the checked boxes into a list the shares-add handler consumes.
+      render_hook(view, "shares-add", %{
+        "scope" => "gyldendal/default/production",
+        "surfaces" => ["papers", "media"]
+      })
+
+      assert Sharing.shared?("gyldendal", "default", "production", :papers)
+      assert Sharing.shared?("gyldendal", "default", "production", :media)
+      refute Sharing.shared?("gyldendal", "default", "production", :docs)
+    end
   end
 
   # ── privilege-escalation guard (the security core) ────────────────────────
