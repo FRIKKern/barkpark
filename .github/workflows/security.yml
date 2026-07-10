@@ -1,0 +1,127 @@
+name: security
+
+# Security static-analysis + dependency-CVE gates for the Elixir app (api/).
+# Filed by task-a41fc4590b2c2eb1 (fix-security-ci) — before this workflow, the
+# board could go green while a newly-introduced raw/2-on-untrusted-input, an
+# unsafe atom conversion, a missing-CSRF pipeline, a hardcoded secret, an
+# SQL-fragment injection, OR a dependency with a published CVE shipped — nothing
+# statically flagged the class Sobelow / mix_audit are built to catch.
+#
+# Jobs:
+#   1. sobelow    — Phoenix-aware static analysis. REGRESSION GATE: the 98
+#                   pre-existing findings on main are captured in
+#                   api/.sobelow-skips (the reviewed baseline), so the job is
+#                   GREEN on the current tree and reds only on a NEW insecure
+#                   pattern. `--exit Low` fails on any non-baselined finding at
+#                   Low confidence or above (so even a low-confidence new raw()
+#                   reds it). Blocking-by-convention (no continue-on-error).
+#   2. mix-audit  — dependency CVE scan over mix.lock. ADVISORY initially
+#                   (continue-on-error: true): the current lock carries 8 real,
+#                   pre-existing CVEs (mint, postgrex, phoenix, decimal, esaml)
+#                   that are fixed by a version bump, NOT by accepting them —
+#                   baselining them would be a vacuous green. Advisory keeps the
+#                   signal HONEST and VISIBLE while the fleet stays unblocked;
+#                   flip to blocking once the deps are bumped (follow-up task).
+#
+# Policy of record: docs/ops/merge-gates.md §Security gates.
+
+on:
+  pull_request:
+    paths:
+      - "api/**"
+      - ".github/workflows/security.yml"
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - ".github/workflows/security.yml"
+
+concurrency:
+  group: security-${{ github.ref }}
+  # Mirror elixir.yml: cancel superseded PR runs, never cancel main.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  sobelow:
+    name: Sobelow static analysis (regression gate, baseline .sobelow-skips)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Track the prod server toolchain, same pin as elixir.yml.
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            api/deps
+            api/_build
+          key: ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-sobelow-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: Install libvips (the app compile Sobelow triggers pulls the vix NIF)
+        run: sudo apt-get update && sudo apt-get install -y libvips-dev
+        working-directory: .
+
+      - name: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)
+        # Green on the current tree (all 98 current findings are baselined in
+        # .sobelow-skips). A newly-introduced insecure pattern is NOT in the
+        # baseline and reds the job. Regenerate the baseline deliberately after a
+        # reviewed cleanup: `cd api && mix sobelow --mark-skip-all` then commit
+        # .sobelow-skips (shrinking it as findings are truly fixed).
+        run: mix sobelow --skip --exit Low
+
+  mix-audit:
+    name: Dependency CVE audit (mix_audit over mix.lock, advisory)
+    # ADVISORY until the 8 pre-existing CVEs in mix.lock are remediated by a
+    # dep bump (follow-up task). The signal stays visible; it does not block the
+    # fleet. Flip to blocking (drop continue-on-error) once the lock is clean.
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ["27.0"]
+        elixir: ["1.18.1"]
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: api/deps
+          key: ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-audit-deps-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: mix deps.audit (scans mix.lock against the advisory DB)
+        run: mix deps.audit
