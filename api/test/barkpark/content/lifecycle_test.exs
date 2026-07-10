@@ -71,11 +71,11 @@ defmodule Barkpark.Content.LifecycleTest do
     draft
   end
 
-  defp paper_draft!(id, content) do
+  defp paper_draft!(id, content, title \\ "P") do
     {:ok, _} =
       Content.create_document(
         "paper",
-        %{"_id" => id, "title" => "P", "content" => content},
+        %{"_id" => id, "title" => title, "content" => content},
         @dataset
       )
 
@@ -87,13 +87,13 @@ defmodule Barkpark.Content.LifecycleTest do
   # when the wall's migration ran: insert the published row directly (the
   # pre-wall world had no gate) and its exemption-ledger row (what the
   # migration's INSERT … SELECT would have seeded).
-  defp legacy_published!(id, content) do
+  defp legacy_published!(id, content, title \\ "Legacy") do
     %Document{}
     |> Document.changeset(%{
       "doc_id" => id,
       "type" => "paper",
       "dataset" => @dataset,
-      "title" => "Legacy",
+      "title" => title,
       "status" => "published",
       "content" => content,
       "rev" => Writer.generate_rev()
@@ -278,6 +278,26 @@ defmodule Barkpark.Content.LifecycleTest do
       assert [%{code: "label_norm", severity: "advisory", message: message}] = Warnings.drain()
       assert message =~ "wall-one"
       assert message =~ "norm is 2–4"
+    end
+
+    test "grandfathered near-twins republish freely — the exemption covers the WHOLE wall, E4 included" do
+      # Two pre-wall docs with IDENTICAL titles (the legacy corpus holds
+      # legitimately similar titles). Post-wall these would 409 each other;
+      # grandfathered, a republish-unchanged must pass (charter D6).
+      legacy_published!("wall-twin-a", %{"body" => "one"}, "Legacy Wall Corpus Paper")
+      legacy_published!("wall-twin-b", %{"body" => "two"}, "Legacy Wall Corpus Paper")
+
+      paper_draft!("wall-twin-b", %{"body" => "two, revised"}, "Legacy Wall Corpus Paper")
+      assert {:ok, _} = Content.publish_document("wall-twin-b", "paper", @dataset)
+
+      # Contrast: a NEW well-labeled doc with the same title is NOT exempt —
+      # the dedup wall refuses it with the incumbent's id.
+      paper_draft!("wall-fresh", @good_labels, "Legacy Wall Corpus Paper")
+
+      assert {:error, {:duplicate_of, payload}} =
+               Content.publish_document("wall-fresh", "paper", @dataset)
+
+      assert payload.duplicate_of in ["wall-twin-a", "wall-twin-b"]
     end
 
     test "a gray-zone near-duplicate publishes with a possible_duplicate warning (E4 advise → warnings channel)" do

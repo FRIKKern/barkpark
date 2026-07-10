@@ -99,9 +99,20 @@ defmodule Barkpark.Content.Lifecycle do
         #      channel and never blocks
         #
         # An error tuple falls straight out of the `with` — nothing below runs.
-        with :ok <- authoring_wall(draft, type, pid, dataset),
+        #
+        # Exemption is read ONCE at wall entry: a grandfathered (pre-wall) doc
+        # passes the WHOLE wall unchanged (D6 — "grandfathered republishes
+        # pass unchanged"), including E4: the legacy corpus contains
+        # legitimately similar-titled documents, and holding their republishes
+        # to the dedup wall would strand them behind each other. The label
+        # gate still CLEARS the exemption when the spine passes (the ratchet),
+        # so a doc that opts into the new world is walled fully from its NEXT
+        # publish on.
+        exempt? = type in @walled_types and Exemptions.member?(pid, dataset)
+
+        with :ok <- authoring_wall(draft, type, pid, dataset, exempt?),
              :ok <- TagRegistry.validate_publish(draft, dataset, opts),
-             :ok <- dedup_wall(draft, type, dataset, opts) do
+             :ok <- dedup_wall(draft, type, dataset, opts, exempt?) do
           # Hook stays BEFORE the transaction. The rev-fenced delete below
           # closes the publish-during-edit TOCTOU: a concurrent write that
           # bumps the draft between the read above and the delete now surfaces
@@ -200,20 +211,21 @@ defmodule Barkpark.Content.Lifecycle do
   #     unchanged; everything else is the fail-closed 422
   #     (`{:error, {:label_spine, details}}`).
   #
-  # Drafts stay free by construction — this runs only on publish.
-  defp authoring_wall(draft, type, pid, dataset) when type in @walled_types do
+  # Drafts stay free by construction — this runs only on publish. `exempt?` is
+  # the grandfathered flag read once at wall entry (see publish_document).
+  defp authoring_wall(draft, type, pid, dataset, exempt?) when type in @walled_types do
     case LabelSpine.validate(draft.content) do
       :ok ->
-        Exemptions.clear(pid, dataset)
+        if exempt?, do: Exemptions.clear(pid, dataset)
         emit_tag_norm_advisory(draft, pid)
         :ok
 
       {:error, {:label_spine, _details}} = error ->
-        if Exemptions.member?(pid, dataset), do: :ok, else: error
+        if exempt?, do: :ok, else: error
     end
   end
 
-  defp authoring_wall(_draft, _type, _pid, _dataset), do: :ok
+  defp authoring_wall(_draft, _type, _pid, _dataset, _exempt?), do: :ok
 
   # Advisory, never blocking (charter D5): a legal tag count (1–12) outside
   # the 2–4 norm rides the mutate success envelope as a warning. Emitted only
@@ -238,7 +250,11 @@ defmodule Barkpark.Content.Lifecycle do
   # the mutate success envelope via the warnings channel (D5), each keeping the
   # severity DedupWall stamped ("warning" — a sharper signal than the tag-count
   # norm's "advisory").
-  defp dedup_wall(draft, type, dataset, opts) when type in @walled_types do
+  # A grandfathered doc (exempt at wall entry) skips E4 entirely — the legacy
+  # corpus predates the dedup rule and holds legitimately similar titles.
+  defp dedup_wall(_draft, _type, _dataset, _opts, true), do: :ok
+
+  defp dedup_wall(draft, type, dataset, opts, _exempt?) when type in @walled_types do
     case DedupWall.check(draft, type, dataset, opts) do
       :ok ->
         :ok
@@ -252,7 +268,7 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
-  defp dedup_wall(_draft, _type, _dataset, _opts), do: :ok
+  defp dedup_wall(_draft, _type, _dataset, _opts, _exempt?), do: :ok
 
   @doc """
   Unpublish: move published doc back to draft, delete published version.
