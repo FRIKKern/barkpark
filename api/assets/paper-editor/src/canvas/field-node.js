@@ -884,7 +884,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
 // it via editor.options.element (the mount .bp-paper-editor-body) → closest(
 // "bp-paper-canvas"). All optional — a missing host or missing attr yields "" so the
 // picker keeps its own defaults (dataset="production", no token → upload disabled).
-function canvasScope(editor) {
+export function canvasScope(editor) {
   const empty = { dataset: "", scopePrefix: "", token: "" };
   try {
     const mount = editor && editor.options && editor.options.element;

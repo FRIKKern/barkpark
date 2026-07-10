@@ -34,6 +34,7 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.PortableDoc.Render.CardsEmail
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.PortableDoc.Render.Compose
   alias Barkpark.PortableDoc.Render.StatusVocab
@@ -234,6 +235,22 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
 
     # the action slot renders as the button element (its label already ordered above).
     assert html =~ ~s|class="bp-button"|, "action button chrome missing"
+
+    # ── EMAIL realization leg (cd-7-card-surface-parity) ─────────────────────
+    # The SAME decoded fixture also drives the inline-styled email twin
+    # (`CardsEmail.card_email_html/1`), which recurses the SAME model-B slots
+    # through the SHARED `Compose.render_children(:email)` seam. This closes the
+    # third parity deliverable: email slot CONTENT now joins the golden gate.
+    # Email HTML is inline-styled + classless — assert the DERIVED plain-text
+    # slot markers in projection ORDER (NOT the `bp-card__*` View classes, which
+    # the email variant strips).
+    email = CardsEmail.card_email_html(input)
+
+    assert_ordered(email, Enum.map(ex["slots"], &card_slot_marker(input, &1)))
+
+    # media fast-path: the image media child renders as a real <img> in email too.
+    if ex["media_fastpath"],
+      do: assert(email =~ "<img", "email media image fast-path (<img>) missing")
   end
 
   test "pipeline: the emitter realizes the projection (container · kind/title/detail · source_role per node)" do

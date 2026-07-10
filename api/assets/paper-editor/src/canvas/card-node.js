@@ -11,8 +11,12 @@
 //                  setNodeMarkup; Enter suppressed; cleared → null round-trips ABSENT).
 //   * media/action slots → PRESENT-ONLY attrs carrying the WHOLE image/action element
 //                  (deep-cloned; the bpColumnAtom/section.cells precedent), painted
-//                  read-only with a light control (round-trip-FAITHFUL now, richer
-//                  editing a fast-follow).
+//                  read-only with the reader class AND edited by REAL controls: the
+//                  media slot by the <bp-media-picker chrome="ghost"> WC (the
+//                  field-node buildPickerNodeView MOUNT PATTERN — value/scope seed,
+//                  bubbling bp-change → attrs.media={type:"image",src}); the action
+//                  slot by a label/href/priority editor (the action-node pattern —
+//                  attrs.action={type:"action",label,href,priority?} PRESENT-ONLY).
 //
 // ── VIEW⇄EDIT PARITY (the callout carve-out) ─────────────────────────────────
 //
@@ -40,6 +44,22 @@
 // headless.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+// The card's media/action slot editors REUSE the field/action node seams:
+//   * canvasScope + coercePickerValue — the exact bp-media-picker MOUNT PATTERN
+//     (seed dataset/scope/token, map the picker's bp-change STRING detail to a src).
+// card-node.js rides ONLY the browser bundle (index.js imports it); run-convert.js —
+// the pure-Node smoke target — never imports this file, so pulling field-node.js in
+// here does NOT drag the WC/DOM path into the headless harness.
+import { canvasScope, coercePickerValue } from "./field-node.js";
+
+// The BINARY priority collapse the reader performs (walk.ex button/2): primary iff
+// =="primary", else secondary. Used for the priority-select display; the WRITE path
+// keeps priority PRESENT-ONLY (a never-set action stays priority-less — nil≡secondary
+// is a zero-op that must NOT materialize a spurious priority:"secondary"). Lifted from
+// action-node.js:normalizePriority.
+function normalizeActionPriority(p) {
+  return p === "primary" ? "primary" : "secondary";
+}
 
 // The TipTap node NAME is `bpCard` (its portable-doc bpType stays "card"); run-convert
 // maps a block.type "card" → this node and back via node.attrs.bpType — the SAME
@@ -155,7 +175,10 @@ export const Card = Node.create({
   // ── the NodeView: reader-shaped card around an editable body contentDOM ───────
   //
   //   <div class="bp-canvas-card bp-card[ bp-card--<tone>]" data-bp-type="card">
-  //     <div class="bp-canvas-card__controls">…light media/action/tone controls…</div>
+  //     <div class="bp-canvas-card__controls">              ← PM-safe chrome (fenced)
+  //       <bp-media-picker chrome="ghost">                  ← the REAL media editor
+  //       <input action-label> <input action-href> <select action-priority>
+  //     </div>
   //     <div class="bp-card__media"><img></div>            ← media chrome (present-only)
   //     <div class="bp-card__t" contenteditable>TITLE</div> ← EDITABLE title island
   //     <div class="bp-card__d">…</div>                     ← contentDOM (editable body)
@@ -171,15 +194,35 @@ export const Card = Node.create({
       dom.setAttribute("data-bp-type", "card");
 
       // ── light edit-only controls (hidden at rest; the section controls precedent).
+      // The whole bar is PM-safe chrome OUTSIDE the contentDOM (body only): it is a
+      // contentEditable=false sibling and every host inside it is covered by BOTH the
+      // stopEvent test and the ignoreMutation .contains chain below, so a keystroke /
+      // WC fetch / select never becomes a PM transaction or a doc mutation.
       const controls = document.createElement("div");
       controls.className = "bp-canvas-card__controls";
       controls.contentEditable = "false";
 
-      const mediaInput = document.createElement("input");
-      mediaInput.type = "text";
-      mediaInput.className = "bp-canvas-card__input";
-      mediaInput.placeholder = "media src";
-      mediaInput.setAttribute("data-test-id", "paper-card-media-src");
+      // MEDIA: the REAL <bp-media-picker chrome="ghost"> WC — the field-node
+      // buildPickerNodeView MOUNT PATTERN, not the function. Seed value (the media
+      // element's src) + dataset/scope-prefix/token via canvasScope, listen for the
+      // bubbling `bp-change` CustomEvent (detail.value is a single asset-ref STRING),
+      // and commit via the SAME writeAttr/setNodeMarkup path the raw input used.
+      const scope = canvasScope(editor);
+      const mediaPicker = document.createElement("bp-media-picker");
+      mediaPicker.className = "bp-canvas-card__media-picker";
+      mediaPicker.setAttribute("chrome", "ghost");
+      mediaPicker.setAttribute("contenteditable", "false");
+      mediaPicker.setAttribute("data-test-id", "paper-card-media-src");
+      // Seed scope EXACTLY like the per-block / field picker: omit an empty attr so the
+      // WC keeps its own defaults (dataset="production", no token → upload disabled).
+      if (scope.dataset) mediaPicker.setAttribute("dataset", scope.dataset);
+      if (scope.scopePrefix) mediaPicker.setAttribute("scope-prefix", scope.scopePrefix);
+      if (scope.token) mediaPicker.setAttribute("data-token", scope.token);
+      {
+        const seedMedia = node.attrs && node.attrs.media;
+        const seedSrc = (seedMedia && seedMedia.src) || "";
+        mediaPicker.setAttribute("value", seedSrc);
+      }
 
       const actionLabelInput = document.createElement("input");
       actionLabelInput.type = "text";
@@ -188,12 +231,33 @@ export const Card = Node.create({
       actionLabelInput.setAttribute("data-test-id", "paper-card-action-label");
 
       const actionHrefInput = document.createElement("input");
-      actionHrefInput.type = "text";
+      actionHrefInput.type = "url";
       actionHrefInput.className = "bp-canvas-card__input";
       actionHrefInput.placeholder = "action href";
       actionHrefInput.setAttribute("data-test-id", "paper-card-action-href");
 
-      controls.append(mediaInput, actionLabelInput, actionHrefInput);
+      // ACTION priority (the action-node.js editor, third control): a BINARY select the
+      // reader collapses. "secondary" on a never-set action is a ZERO-op — the write
+      // path drops the priority key rather than emitting priority:"secondary".
+      const actionPrioritySelect = document.createElement("select");
+      actionPrioritySelect.className = "bp-canvas-card__select";
+      actionPrioritySelect.setAttribute("data-test-id", "paper-card-action-priority");
+      for (const [value, text] of [
+        ["primary", "Primary"],
+        ["secondary", "Secondary"],
+      ]) {
+        const o = document.createElement("option");
+        o.value = value;
+        o.textContent = text;
+        actionPrioritySelect.appendChild(o);
+      }
+
+      controls.append(
+        mediaPicker,
+        actionLabelInput,
+        actionHrefInput,
+        actionPrioritySelect
+      );
 
       // media chrome — a read-only <img> wrapper (present-only).
       const mediaEl = document.createElement("div");
@@ -258,9 +322,11 @@ export const Card = Node.create({
         } else {
           mediaEl.style.display = "none";
         }
-        if (mediaInput.value !== src && document.activeElement !== mediaInput) {
-          mediaInput.value = src;
-        }
+        // Keep the media picker in sync with an EXTERNAL attr change (an echo, an undo)
+        // via its `value` PROPERTY setter (re-renders the preview; does NOT re-fire
+        // bp-change). Only write when it differs so we never yank the picker the user
+        // is mid-interaction with.
+        if (mediaPicker.value !== src) mediaPicker.value = src;
 
         // action chrome (present-only): show the link iff a label or href.
         const action = a.action;
@@ -279,6 +345,13 @@ export const Card = Node.create({
         if (actionHrefInput.value !== href && document.activeElement !== actionHrefInput) {
           actionHrefInput.value = href;
         }
+        // Priority select — collapse the stored (tri-state, present-only) priority to
+        // its binary display; a never-set action shows "secondary" (nil≡secondary).
+        const priority = normalizeActionPriority(action && action.priority);
+        if (actionPrioritySelect.value !== priority && document.activeElement !== actionPrioritySelect) {
+          actionPrioritySelect.value = priority;
+        }
+        actionPrioritySelect.disabled = !editable;
 
         controls.style.display = editor.isEditable ? "" : "none";
       };
@@ -338,9 +411,13 @@ export const Card = Node.create({
       titleEl.addEventListener("blur", onTitleBlur);
       titleEl.addEventListener("keydown", onTitleKeydown);
 
-      // ── media control: set/clear the media element's src (present-only carrier).
-      const onMediaInput = () => {
-        const src = mediaInput.value || "";
+      // ── media control: the picker's bp-change detail is a single asset-ref STRING
+      // (coercePickerValue lifts it identically to the per-block bridge). Map it to the
+      // media element {type:"image",src} — NEVER write the bare value — via the SAME
+      // writeAttr/setNodeMarkup path (card-node.js:349's mapping, preserved). An empty
+      // string is a CLEAR → attrs.media=null → round-trips ABSENT (removal lands).
+      const onMediaChange = (e) => {
+        const src = coercePickerValue(e.detail) || "";
         writeAttr((attrs) => {
           if (src === "") {
             attrs.media = null; // clear → round-trips ABSENT (removal lands)
@@ -351,24 +428,36 @@ export const Card = Node.create({
           return attrs;
         });
       };
-      mediaInput.addEventListener("change", onMediaInput);
+      mediaPicker.addEventListener("bp-change", onMediaChange);
 
-      // ── action controls: set/clear the action element's label/href.
+      // ── action controls: set/clear the action element's label/href/priority.
+      // type:"action" is ALWAYS present (no server normalize net — dropping it renders
+      // nothing in email while tests stay green). priority is PRESENT-ONLY: written
+      // only when "primary"; "secondary" drops the key (nil≡secondary zero-op), so a
+      // never-set action never gains a spurious priority:"secondary".
       const writeAction = () => {
         const label = actionLabelInput.value || "";
         const href = actionHrefInput.value || "";
+        const priority = actionPrioritySelect.value; // "primary" | "secondary"
         writeAttr((attrs) => {
           if (label === "" && href === "") {
             attrs.action = null; // clear → round-trips ABSENT
           } else {
             const prev = attrs.action && typeof attrs.action === "object" ? attrs.action : {};
-            attrs.action = { ...prev, type: "action", label, href };
+            const next = { ...prev, type: "action", label, href };
+            if (priority === "primary") {
+              next.priority = "primary";
+            } else {
+              delete next.priority; // present-only: secondary ≡ nil, never emit it
+            }
+            attrs.action = next;
           }
           return attrs;
         });
       };
       actionLabelInput.addEventListener("change", writeAction);
       actionHrefInput.addEventListener("change", writeAction);
+      actionPrioritySelect.addEventListener("change", writeAction);
 
       paint(node);
 
@@ -388,7 +477,7 @@ export const Card = Node.create({
           if (m.type === "selection") return false; // let PM own selection
           if (m.type === "attributes" && m.target === dom) return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
-          if (controls.contains(m.target)) return true; // controls are attr writes
+          if (controls.contains(m.target)) return true; // controls (inc. the picker WC's own preview DOM) are attr writes
           if (mediaEl.contains(m.target)) return true; // media chrome is attr-painted
           if (actionEl.contains(m.target)) return true; // action chrome is attr-painted
           // Let PM handle mutations inside the editable body (contentDOM); ignore chrome.
@@ -400,9 +489,10 @@ export const Card = Node.create({
           titleEl.removeEventListener("focus", onTitleFocus);
           titleEl.removeEventListener("blur", onTitleBlur);
           titleEl.removeEventListener("keydown", onTitleKeydown);
-          mediaInput.removeEventListener("change", onMediaInput);
+          mediaPicker.removeEventListener("bp-change", onMediaChange);
           actionLabelInput.removeEventListener("change", writeAction);
           actionHrefInput.removeEventListener("change", writeAction);
+          actionPrioritySelect.removeEventListener("change", writeAction);
         },
       };
     };

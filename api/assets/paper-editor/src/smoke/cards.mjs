@@ -23,6 +23,7 @@ import {
   docToBlocks,
   reconcileServerEcho,
 } from "../canvas/run-convert.js";
+import { canvasDefaultBlock } from "../canvas/slash-insert.js";
 
 // A card WIDGET fixture: tone + title + a one-paragraph body slot.
 const CARD = (id = "cw-1") => ({
@@ -40,6 +41,37 @@ const BARE_CARD = (id = "cw-b") => ({
   id,
   type: "card",
   slots: { body: [{ type: "paragraph", content: [{ type: "text", value: "x" }] }] },
+});
+
+// A card with POPULATED media + action slots (the cd-9 full-editing target): the
+// media slot carries a whole {type:"image",src,alt} element, the action slot a whole
+// {type:"action",label,href,priority} element — both PRESENT-ONLY carriers the
+// node-view's bp-media-picker + label/href/priority editor write. The `type` key on
+// each is load-bearing: media without type:"image" degrades to an unknown block, and
+// action without type:"action" silently renders NOTHING in email (no server normalize
+// net) while JS tests stay green — so the round-trip MUST keep both type keys intact.
+const CARD_FULL = (id = "cw-full") => ({
+  id,
+  type: "card",
+  tone: "ok",
+  slots: {
+    title: [{ type: "heading", text: "Full" }],
+    body: [{ type: "paragraph", content: [{ type: "text", value: "b" }] }],
+    media: [{ type: "image", src: "https://ex.test/a.png", alt: "A" }],
+    action: [{ type: "action", label: "Go", href: "https://ex.test", priority: "primary" }],
+  },
+});
+
+// A card whose action has NO priority (the nil≡secondary case): the reader collapses
+// nil→secondary, so a never-set priority must NOT materialize a spurious
+// priority:"secondary" on round-trip.
+const CARD_ACTION_NO_PRIORITY = (id = "cw-np") => ({
+  id,
+  type: "card",
+  slots: {
+    body: [{ type: "paragraph", content: [{ type: "text", value: "x" }] }],
+    action: [{ type: "action", label: "Go", href: "https://ex.test" }],
+  },
 });
 
 // A grid section holding two cards (the model's real proof).
@@ -104,11 +136,129 @@ check("card runToOps: an untouched grid SECTION-OF-CARDS round-trips with ZERO o
   assert.deepEqual(folded[0], SECTION_OF_CARDS(), "the whole grid section survives byte-identical");
 });
 
+// ── THE AUTHORING DEFAULT (cd-8: /card + palette insert) ─────────────────────
+//
+// canvasDefaultBlock("card") is what a slash/palette pick inserts. It must be
+// CONSISTENT with cardNodeToBlock's persisted shape ({type:"card",slots:{title,body}},
+// present-only chrome) and, once persisted (the canonical reconstruction), round-trip
+// at ZERO ops on the next load — or every fresh card would emit a spurious op forever.
+check("card default: canvasDefaultBlock('card') projects to bpCard and reconstructs to the cardNodeToBlock shape", () => {
+  const def = canvasDefaultBlock("card");
+  assert.equal(def.type, "card");
+  assert.equal(def.id, null, "id:null — the new-block signal (runToOps mints)");
+  // Projection: a real bpCard carrying the default title, NO tone/media/action
+  // (present-only chrome — a fresh card must not gain a modifier).
+  const node = runToTiptap([def]).content[0];
+  assert.equal(node.type, "bpCard", "projects to the bpCard node");
+  assert.equal(node.attrs.title, "New card", "default title rides node.attrs");
+  assert.ok(node.attrs.tone == null, "no tone attr (present-only)");
+  assert.ok(node.attrs.media == null, "no media attr");
+  assert.ok(node.attrs.action == null, "no action attr");
+  // Reconstruction (what the server persists on insert): the cardNodeToBlock shape —
+  // the empty inline run normalizes to content:[] (the callout/paragraph precedent).
+  const ops = runToOps([], { type: "doc", content: [node] });
+  assert.equal(ops.length, 1, "one append (the insert)");
+  const { id, ...persisted } = ops[0].block;
+  assert.ok(id != null, "a minted id");
+  assert.deepEqual(
+    persisted,
+    {
+      type: "card",
+      slots: {
+        title: [{ type: "heading", text: "New card" }],
+        body: [{ type: "paragraph", content: [] }],
+      },
+    },
+    "the persisted default card is exactly the cardNodeToBlock slots-native shape",
+  );
+});
+
+check("card default: the PERSISTED default card round-trips at ZERO ops (+ real bpCard)", () => {
+  // The canonical persisted form (the fixed point the insert lands): title slot +
+  // empty-paragraph body slot, with a server id.
+  const persisted = {
+    id: "cw-new",
+    type: "card",
+    slots: {
+      title: [{ type: "heading", text: "New card" }],
+      body: [{ type: "paragraph", content: [] }],
+    },
+  };
+  const blocks = [persisted];
+  const doc = runToTiptap(blocks);
+  // Anti-vacuous: the projection is a REAL bpCard carrying the title.
+  assert.equal(doc.content[0].type, "bpCard");
+  assert.equal(doc.content[0].attrs.title, "New card");
+  assert.equal(runToOps(blocks, doc).length, 0, "an untouched fresh card emits ZERO ops");
+  assert.deepEqual(docToBlocks(doc), blocks, "and docToBlocks returns it byte-identical");
+});
+
 check("card docToBlocks: a card round-trips blocks→node→docToBlocks BYTE-EQUAL", () => {
   const back = docToBlocks(runToTiptap([CARD()]));
   assert.deepEqual(back, [CARD()], "the card round-trips byte-identical (slots preserved)");
   // And a bare card (present-only chrome) round-trips byte-identical too.
   assert.deepEqual(docToBlocks(runToTiptap([BARE_CARD()])), [BARE_CARD()]);
+});
+
+// ── FULLY-POPULATED SLOTS (cd-9: media + action editable, type keys intact) ────
+check("card: a card with POPULATED media+action slots round-trips BYTE-EQUAL (type keys intact)", () => {
+  const doc = runToTiptap([CARD_FULL()]);
+  const node = doc.content[0];
+  // The whole media/action element rides node.attrs VERBATIM, type key kept.
+  assert.equal(node.attrs.media.type, "image", "media element keeps type:'image' (never the bare src value)");
+  assert.equal(node.attrs.media.src, "https://ex.test/a.png");
+  assert.equal(node.attrs.media.alt, "A", "the alt key survives the ...prev spread");
+  assert.equal(node.attrs.action.type, "action", "action element keeps type:'action' (email drop guard)");
+  assert.equal(node.attrs.action.label, "Go");
+  assert.equal(node.attrs.action.href, "https://ex.test");
+  assert.equal(node.attrs.action.priority, "primary", "a set priority persists on attrs.action");
+  // Full blocks→node→blocks round-trip is byte-identical (both type keys intact).
+  assert.deepEqual(docToBlocks(doc), [CARD_FULL()], "media+action slots round-trip byte-identical");
+  // Anti-vacuous: an untouched fully-populated card still emits ZERO ops.
+  assert.equal(runToOps([CARD_FULL()], doc).length, 0, "an untouched full card emits ZERO ops");
+});
+
+check("card runToOps: SETTING media (the picker's asset-ref) → ONE patch{slots.media type:'image',src}", () => {
+  const blocks = [CARD()]; // starts with NO media slot
+  const doc = runToTiptap(blocks);
+  // The bp-media-picker maps its bp-change STRING to {type:"image",src} — never bare.
+  doc.content[0].attrs = { ...doc.content[0].attrs, media: { type: "image", src: "https://ex.test/x.png" } };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1, "exactly one op (not vacuously [])");
+  assert.equal(ops[0].op, "patch-block");
+  assert.equal(ops[0].patch.slots.media[0].type, "image", "the persisted media element carries type:'image'");
+  assert.equal(ops[0].patch.slots.media[0].src, "https://ex.test/x.png");
+  const folded = assertFolds(blocks, doc, ops, "card media set");
+  assert.equal(folded[0].slots.media[0].type, "image");
+  assert.equal(folded[0].slots.media[0].src, "https://ex.test/x.png");
+});
+
+check("card runToOps: SETTING action label/href/priority → ONE patch{slots.action type:'action'} (type never dropped)", () => {
+  const blocks = [CARD()]; // starts with NO action slot
+  const doc = runToTiptap(blocks);
+  doc.content[0].attrs = {
+    ...doc.content[0].attrs,
+    action: { type: "action", label: "Buy", href: "https://ex.test", priority: "primary" },
+  };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].patch.slots.action[0].type, "action", "type:'action' is ALWAYS present (email drop guard)");
+  assert.equal(ops[0].patch.slots.action[0].label, "Buy");
+  assert.equal(ops[0].patch.slots.action[0].href, "https://ex.test");
+  assert.equal(ops[0].patch.slots.action[0].priority, "primary");
+  const folded = assertFolds(blocks, doc, ops, "card action set");
+  assert.equal(folded[0].slots.action[0].type, "action");
+});
+
+check("card: a never-set action priority stays ABSENT on round-trip (nil≡secondary — no spurious priority:'secondary')", () => {
+  const doc = runToTiptap([CARD_ACTION_NO_PRIORITY()]);
+  const node = doc.content[0];
+  assert.equal(node.attrs.action.type, "action");
+  assert.ok(!("priority" in node.attrs.action), "no priority key on a never-set action node");
+  // Byte-identical round-trip: the priority key never materializes.
+  assert.deepEqual(docToBlocks(doc), [CARD_ACTION_NO_PRIORITY()], "priority-less action round-trips byte-identical");
+  // Untouched → ZERO ops (the write path's 'secondary drops the key' keeps it stable).
+  assert.equal(runToOps([CARD_ACTION_NO_PRIORITY()], doc).length, 0, "untouched priority-less action emits ZERO ops");
 });
 
 // ── NON-VACUOUS MUTATION (each edit → EXACTLY ONE patch carrying the change) ──

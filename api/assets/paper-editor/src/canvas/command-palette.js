@@ -30,6 +30,8 @@ import {
   slashTypeToNode,
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
+  CANVAS_COMPOUND_INSERTS,
+  compoundKindToNode,
 } from "./slash-insert.js";
 
 // ── the shared "insert a canvas default node, replacing the caret block" seam ──
@@ -66,6 +68,27 @@ export function insertSlashTypeAtSelection(editor, type, fieldName) {
     node.attrs.fieldName = fieldName;
   }
 
+  return insertNodeAtSelection(editor, node);
+}
+
+// insertCompoundAtSelection(editor, kind) → insert a COMPOUND starter (a pre-composed
+// container+children subtree, e.g. the cards-grid section) at the selection, through
+// the SAME replace/degrade/caret seam the single-node inserts use — so a compound pick
+// honors the top-level-prose guard and lands exactly where a /section would. The whole
+// subtree is ONE node (runToOps emits ONE insert-after carrying the section + its
+// seeded children, minting every id). Returns true iff inserted (unknown kind → false).
+export function insertCompoundAtSelection(editor, kind) {
+  if (!editor) return false;
+  const node = compoundKindToNode(kind);
+  if (!node) return false;
+  return insertNodeAtSelection(editor, node);
+}
+
+// The SHARED node-landing seam: replace the enclosing top-level-prose block with
+// `node`, or degrade to an insert-after when the caret sits somewhere a replace would
+// corrupt. Factored from insertSlashTypeAtSelection (byte-identical behavior) so the
+// single-node AND compound insert paths land nodes through ONE code path.
+function insertNodeAtSelection(editor, node) {
   const { state, view } = editor;
   const $pos = state.selection.$from;
   const newNode = state.schema.nodeFromJSON(node);
@@ -110,9 +133,11 @@ export function insertSlashTypeAtSelection(editor, type, fieldName) {
 // ── the command registry ─────────────────────────────────────────────────────
 //
 // Static array of { id, label, group, hint?, run(editor) }, fuzzy-filtered by the
-// typed query. Three groups mirror the task:
+// typed query. The groups:
 //   Insert    — one per CANVAS_SLASH_TYPES entry; run() inserts the default node
 //               EXACTLY like the slash pick (via insertSlashTypeAtSelection).
+//   Starters  — one per CANVAS_COMPOUND_INSERTS entry; run() inserts a pre-composed
+//               container+children subtree (via insertCompoundAtSelection).
 //   Format    — toggle bold/italic/strike/code + clear formatting, on the selection.
 //   Turn into — set the current block to paragraph / heading 1-3 / bullet / ordered.
 //
@@ -139,6 +164,7 @@ const INSERT_META = {
   terminal: { label: "Terminal", hint: "⌘" },
   table: { label: "Table", hint: "▦" },
   stage: { label: "Stage", hint: "◆" },
+  card: { label: "Card", hint: "▢" },
   "field-string": { label: "String", hint: "T" },
   "field-slug": { label: "Slug", hint: "/" },
   "field-text": { label: "Long text", hint: "¶" },
@@ -166,6 +192,7 @@ const INSERT_ORDER = [
   "terminal",
   "table",
   "stage",
+  "card",
   "field-string",
   "field-slug",
   "field-text",
@@ -226,6 +253,20 @@ export function buildCommandRegistry(editor, opts) {
       // Insert the default node EXACTLY like the slash pick. Honors the same top-
       // level-prose guard (degrades safely inside a callout body / list item).
       run: (ed) => insertSlashTypeAtSelection(ed, type),
+    });
+  }
+
+  // STARTERS — compound inserts: ONE pre-composed subtree per CANVAS_COMPOUND_INSERTS
+  // entry (the grid-of-cards starter). A separate group ON PURPOSE: the Insert group
+  // stays exactly one-command-per-CANVAS_SLASH_TYPES (the count-parity contract the
+  // smoke pins), and a compound is not a typed single-node insert.
+  for (const c of CANVAS_COMPOUND_INSERTS) {
+    cmds.push({
+      id: `compound-${c.kind}`,
+      label: `Insert ${c.label}`,
+      group: "Starters",
+      hint: c.hint,
+      run: (ed) => insertCompoundAtSelection(ed, c.kind),
     });
   }
 

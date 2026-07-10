@@ -205,6 +205,7 @@ import {
   slashTypeToNode,
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
+  CANVAS_COMPOUND_INSERTS,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
 // launcher over editor COMMANDS (NOT a typed "/" trigger). CommandPalette is a THIN
@@ -219,6 +220,7 @@ import {
   CommandPalette,
   buildCommandRegistry,
   insertSlashTypeAtSelection,
+  insertCompoundAtSelection,
 } from "./command-palette.js";
 // P5 MARKDOWN SOURCE-MODE: the merged, PURE, dependency-free blocks⇄markdown
 // converter (../markdown.js). The "source mode" toggle swaps the rich ProseMirror
@@ -375,9 +377,24 @@ function hasOnlyBpKeys(attrs) {
 // field-reference / composite) is filtered the same way at _chooseSlash (a defensive
 // guard: such a pick is a no-op rather than a bad insert). Filtering via this
 // allowlist (NOT by editing SLASH_ITEMS) keeps the per-block menu's items byte-intact.
-const CANVAS_SLASH_ITEMS = SLASH_ITEMS.filter((it) =>
-  CANVAS_SLASH_TYPES.has(it.type),
-);
+// …plus the CANVAS-ONLY compound starters (CANVAS_COMPOUND_INSERTS): each becomes a
+// "Starters" row carrying a `compound` marker _chooseSlash branches on. They are NOT
+// added to SLASH_ITEMS itself — the per-block menu dispatches bp-slash-insert to the
+// SERVER (default_block/2), which has no compound path; the canvas inserts the whole
+// pre-composed subtree client-side (insertCompoundAtSelection). `type` mirrors the
+// kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
+// and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
+const CANVAS_SLASH_ITEMS = [
+  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)),
+  ...CANVAS_COMPOUND_INSERTS.map((c) => ({
+    group: "Starters",
+    type: c.kind,
+    compound: c.kind,
+    label: c.label,
+    hint: c.hint,
+    desc: c.desc,
+  })),
+];
 
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
@@ -1531,6 +1548,13 @@ class BpPaperCanvas extends HTMLElement {
   // base menu, so a non-insertable EXPECTED field never produces a bad insert.
   _chooseSlash(item) {
     this._closeSlash();
+    // A COMPOUND starter row (the Starters group): insert the whole pre-composed
+    // subtree through the shared landing seam — same guard, same caret rules as a
+    // single-node pick, but the carried node is a container + seeded children.
+    if (item && item.compound) {
+      insertCompoundAtSelection(this._editor, item.compound);
+      return;
+    }
     if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
       // Non-insertable (e.g. an EXPECTED field-image/field-reference): leave the
       // "/query" text in place and refocus, exactly like a dismiss.

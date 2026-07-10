@@ -25,7 +25,10 @@ import { runToTiptap } from "./run-convert.js";
 //   * the CTA `action` control-atom (bpAction) + the `figure` caption-atom (bpFigure),
 //   * the 3 CONTAINERS whose node-view mounts a fresh editable body (columns/section/
 //     terminal — each seeds an empty paragraph so the `+`-content node is valid),
-//   * the `table` nested-node tree (bpTable — a headed 1-row default), and
+//   * the `table` nested-node tree (bpTable — a headed 1-row default),
+//   * the 3 WIDGETS (note / stage / card — flat-or-slots-native blocks whose node-view
+//     mounts a minimal valid default; they SKIP blocks.ex default_block/2 on purpose,
+//     the note/stage precedent), and
 //   * the 7 NATIVE field-* types (string/slug/text/boolean/select/datetime/color).
 //
 // EXCLUDED on purpose (these EXIST in SLASH_ITEMS but cannot be DIRECT-inserted):
@@ -52,6 +55,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "terminal",
   "table",
   "stage",
+  "card",
   "field-string",
   "field-slug",
   "field-text",
@@ -83,6 +87,10 @@ export const CANVAS_SLASH_TYPES = new Set([
 //   * terminal → EMPTY body; bpTerminal's node-view seeds an empty paragraph (strips
 //                back to []). No chrome keys (title/footer/live) — absence is the default.
 //   * table    → a HEADED 1-body 2-col grid with empty cells (bpTable's minimal valid tree).
+//   * card     → slots-native: a "New card" title slot + ONE empty-paragraph body slot
+//                (cardNodeToBlock's persisted shape). tone/media/action OMITTED —
+//                present-only chrome; a fresh card must NOT gain a tone (card_html
+//                treats absence as no modifier, matching a legacy cards item).
 //   * field-*  → the per-type {label, value} (+ options for select); value default is
 //                false for boolean, "#000000" for color, "" otherwise.
 // id is null so runToOps mints a fresh id (the new-block signal) — exactly the
@@ -158,6 +166,20 @@ export function canvasDefaultBlock(type) {
       // slot). PRESENT-ONLY so stageBlockToNode → stageNodeToBlock round-trips it byte-
       // identical (zero spurious op on the next load — risk #6).
       return { id: null, type: "stage", title: "New stage" };
+    case "card":
+      // Slots-native (the card WIDGET, run-convert cardNodeToBlock's shape): a title
+      // slot + a body slot. The empty inline text run normalizes to content:[] on the
+      // projection round-trip (the callout/paragraph precedent), so the PERSISTED
+      // insert is the fixed point of project→reconstruct. tone/media/action omitted —
+      // present-only chrome (a fresh card carries no modifier).
+      return {
+        id: null,
+        type: "card",
+        slots: {
+          title: [{ type: "heading", text: "New card" }],
+          body: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
+        },
+      };
     case "field-string":
       return { id: null, type: "field-string", label: "Text", value: "" };
     case "field-slug":
@@ -246,4 +268,56 @@ export const CANVAS_SLASH_TEXTABLE_NODES = new Set([
 // block-local text, which is valid INSIDE a callout body and must keep working.
 export function slashTriggerAllowsParent(depth, parentTypeName) {
   return depth === 1 && (parentTypeName === "paragraph" || parentTypeName === "heading");
+}
+
+// ── compound inserts (STARTERS) ──────────────────────────────────────────────
+//
+// A COMPOUND insert is ONE authoring action that inserts a PRE-COMPOSED subtree —
+// a container plus seeded children — as a SINGLE top-level block. It is deliberately
+// NOT a member of CANVAS_SLASH_TYPES: that set is typed SINGLE-NODE (one type → one
+// default block → one node) and its size is pin-tested against the palette's
+// per-type Insert commands (count parity, smoke/autocomplete-slash.mjs), so a
+// compound rides its OWN registry to keep that contract honest.
+//
+// Shape precedent: canvasDefaultBlock("columns") seeds 2 empty children ([[], []]).
+// A compound GENERALIZES that "N seeded children" default from empty holes to a real
+// subtree — the grid-of-cards starter seeds a 2-track grid section holding 2 default
+// cards, the exact SECTION_OF_CARDS shape smoke/cards.mjs proves round-trips at ZERO
+// ops. Each entry carries its own palette/slash presentation meta so the three
+// surfaces (palette Starters group, canvas slash Starters group, this registry) stay
+// in lockstep from ONE table.
+export const CANVAS_COMPOUND_INSERTS = [
+  {
+    kind: "cards-grid",
+    label: "Grid of cards",
+    hint: "⊞",
+    desc: "2-track grid · 2 cards",
+  },
+];
+
+// compoundInsertBlock(kind) → the single pre-composed top-level BLOCK for a compound
+// insert. id:null throughout (container AND children) — runToOps mints the section id
+// and the nested card ids on insert, seeded from the WHOLE tree (the section-child
+// duplicate_id-abort precedent). Unknown kind → null (defensive; callers no-op).
+export function compoundInsertBlock(kind) {
+  switch (kind) {
+    case "cards-grid":
+      return {
+        id: null,
+        type: "section",
+        layout: { mode: "grid", tracks: 2 },
+        blocks: [canvasDefaultBlock("card"), canvasDefaultBlock("card")],
+      };
+    default:
+      return null;
+  }
+}
+
+// compoundKindToNode(kind) → the TipTap NODE to insert for a compound pick — built
+// via runToTiptap exactly like slashTypeToNode, so the inserted subtree is byte-
+// identical to the projection runToOps/nextNodeToBlock reverse (the same zero-drift
+// guarantee the single-node path enjoys). Unknown kind → null.
+export function compoundKindToNode(kind) {
+  const block = compoundInsertBlock(kind);
+  return block ? runToTiptap([block]).content[0] : null;
 }
