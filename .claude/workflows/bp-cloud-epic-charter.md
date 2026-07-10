@@ -47,15 +47,16 @@ Predecessor `pbp-tui-creative` is CLOSED (done 2026-07-08) — it delivered the 
 | 2 | Heat family v2: GenHeatRamp[4] tokens + quantile bin + simultaneous dual-encode + heatmap-calendar mode + matrix Σ marginals/exact values | `pbp-slate2-heat-family` | large | merged #2089 |
 | 3 | gauge-list block — share/count modes, snapshot-authoritative, ▓/░ meter rows over the task-list wire contract | `pbp-slate2-gauge-list` | medium | merged #2089 |
 | 4 | stat cell denom — dim label / accent value / dim denominator (71/118) | `pbp-slate2-stat-denom` | small | merged #2089 |
-| 5 | heatCell truecolor dual-encode (D13 minimal flavor) + close the doctrine §Known-gap + wire m11 truecolor grid into assertStripComplete | `pbp-slate2-heatcell-dualencode` | small | wave 2 |
-| 6 | chart compact-unit y-ticks (45.5M) + max-2-series enforced (D14/D15; junction slice dropped) — trio sample_m20 | `pbp-slate2-chart-units` | small | wave 2 |
-| 7 | table typed columns `cols:[text\|num\|delta\|spark]` (D16) — trio sample_m21 | `pbp-slate2-table-typed-cols` | medium | wave 2 |
-| 8 | roadmap v2 glyph layer: date rails, month ┊, ▓done/░planned, ┃today, ◆milestones, precedence, distributed-rounding ticks (D17) — owns sample_m6_w*.txt regen; trio sample_m22 | `pbp-slate2-roadmap-v2` | large | wave 2 |
-| 9 | tasks layout:tree from the depth sequence + right-aligned meta grid (D18) — trio sample_m23 | `pbp-slate2-tasks-tree` | medium | wave 2 |
-| 10 | pipeline layout:flow linear v1 — snapshot→mmGraph adapter over mermaidflow (D19) | `pbp-slate2-pipeline-flow` | small | wave 3 (filed) |
-| 11 | WASM reader per-block proof — smoke.mjs enumerates the new blocks | `pbp-slate2-wasm-proof` | small | open — sequenced LAST, after wave-2/3 blocks are on main |
-| 12 | (future, Elixir) `gauge` → `@dataviz_types` + `gauge_shape/1`; resolver emits depth/parent_id/dates for tree+roadmap; epic/root-ancestor agg dim; plural-stats shaper | unfiled | medium | later |
-| 13 | (future) dashboard container + $span; migrate the ~17 duplicated golden read/write blocks onto the shared helper | unfiled | medium | later |
+| 5 | heatCell truecolor dual-encode (D13 minimal flavor) + close the doctrine §Known-gap + wire m11 truecolor grid into assertStripComplete | `pbp-slate2-heatcell-dualencode` | small | merged #2100 |
+| 6 | chart compact-unit y-ticks (45.5M) + max-2-series enforced (D14/D15; junction slice dropped) — trio sample_m20 | `pbp-slate2-chart-units` | small | merged #2100 |
+| 7 | table typed columns `cols:[text\|num\|delta\|spark]` (D16) — trio sample_m21 | `pbp-slate2-table-typed-cols` | medium | merged #2100 |
+| 8 | roadmap v2 glyph layer: date rails, month ┊, ▓done/░planned, ┃today, ◆milestones, precedence, distributed-rounding ticks (D17) — owns sample_m6_w*.txt regen; trio sample_m22 | `pbp-slate2-roadmap-v2` | large | merged #2100 |
+| 9 | tasks layout:tree from the depth sequence + right-aligned meta grid (D18) — trio sample_m23 | `pbp-slate2-tasks-tree` | medium | merged #2100 |
+| 10 | pipeline layout:flow linear v1 — snapshot→mmGraph adapter over mermaidflow (D19) | `pbp-slate2-pipeline-flow` | small | wave 3 built (m24) |
+| 11 | WASM reader per-block proof — smoke.mjs enumerates the new blocks | `pbp-slate2-wasm-proof` | small | open — sequenced LAST; halted honestly in wave 3 (m24-m26 not on main yet) |
+| 12 | (future, Elixir) `gauge` → `@dataviz_types` + `gauge_shape/1`; resolver emits depth/parent_id/dates for tree+roadmap; epic/root-ancestor agg dim; `$span` → live child queries (agg_for_query/2); plural-stats shaper | unfiled | medium | later |
+| 13 | dashboard container + $span-inert (wave 3 built, m25); REMAINING: migrate the ~17 duplicated golden read/write blocks onto a shared helper (m17-m19 strip loops deduped in wave 3; the golden read/write boilerplate is still copy-pasted per milestone) | `pbp-slate2-dashboard` | medium | wave 3 built (m25) |
+| 14 | heat-family closure: 53-week calendar wide-width proof (m26) + m17-m19 strip dedup + @canonical repoint to the doctrine contract | `pbp-slate2-heat-closure` | small | wave 3 built (m26) |
 
 ## Wave log
 
@@ -130,3 +131,75 @@ history (f2df6d76) and condensed in the Wave-1 bullet above.
 (3) the wave-1 hygiene slice (inline strip-equality dedup in m17/m18/m19 tests + heat-family's
 @canonical doc: repoint to the doctrine contract); (4) then the Elixir resolver wave (row 12:
 gauge in @dataviz_types, depth/dates on the row wire) unlocks live data for tree + roadmap v2.
+
+### Wave 3 — 2026-07-10 (composition + live proof, reviewer log)
+
+**Landed (3/3 built slices green, reviewed; scratch merge of all three final branches onto
+origin/main (64f40057, post-#2100) was conflict-free — combined `go build/vet/test
+./internal/pdrender/...` + gofmt + docs-anchors all green).** Merge in integration order
+(lead closes each task's "PR merged" criterion on merge; all three claim epochs = 1):
+
+1. **pbp-slate2-pipeline-flow** → `loop-epic/pipeline-layout-flow-linear-v1-direct-mm-0`
+   (no reviewer changes). D19/D21 verbatim: `layout:{mode:"flow"}` opt-in (flowOptIn mirrors
+   gridOptIn, fires ahead of the legacy ↓ stack) + a 54-line direct mmGraph adapter
+   (pipelineflow.go — one rect mmNode per node, label=title||kind||synthetic-id so a box is
+   never blank, implicit head edge i→i+1, dir=LR) into renderFlowchartAuto. No mermaid text
+   synthesized, no DAG invented. m24 trio: w80 golden carries ─────▶ boxes; w40 proves the
+   honest TD ▼ degrade; strip law proven THROUGH the pipelineRenderer entry point; absent
+   layout byte-identical (parity test). Zero pre-existing goldens moved.
+2. **pbp-slate2-dashboard** → `loop-epic/dashboard-container-block-authored-tabs--1-r`
+   (**merge the -r branch**; carries one reviewer fix + this log). The composition capstone:
+   authored tabs (inactive Dim, active Accent+Bold) over a full-width rail with a heavy ━
+   run under the active tab — geometry carries the selection (TestM25ActiveRailRune pins the
+   literal rune, per the charter's anti-vacuous demand); active tab's children composed via
+   DefaultFlex Measure→Deeper().WithWidth(cellW)→Fits→ArrangeGrid(2); renderer-owned height
+   budget (`rows` default 22) with a dim "… N more rows" marker; $span rides INERT (fixture
+   carries `query:{groupBy:"$span"}`, pdrender never reads it; agg_for_query/2 named as the
+   future Elixir owner). Composition proof: m25 = 2-tab /usage cockpit (chart + heatmap +
+   stat-grid w/denom + gauge-list), w80 golden = 16 rows ≤ 22×80 (TestM25CompositionFitsGolden).
+   ACTIVE-TAB TONE (ratified in-code): ONE tone — Accent+Bold, NOT an inverse/filled chip
+   (the manifest reserves those for pressable affordances); the ━ rail is the strip-safe
+   selection datum. Reviewer fix (5c9393a4): a many-tab labels row could overflow the surface
+   (the rail clamped, the labels did not) — clamped via the house truncateANSI + protective
+   test TestM25ManyTabsClampToWidth, mutation-probed (reds without the fix); sample goldens
+   byte-unchanged. Known, accepted: web reader draws its unknown-block fallback for
+   `dashboard` until an Elixir compose case lands (gauge-list precedent, charter-D12).
+3. **pbp-slate2-heat-closure** → `loop-epic/heat-family-closure-53-week-calendar-pro-2`
+   (no reviewer changes). ZERO renderer code: m26 = 53-week calendar (53 week-cols × 7 rows ×
+   53 month colLabels) proving the wider-than-80 path — w120 renders all 53 weeks (Jan AND Dec
+   in the header, widest line ≥110), w40 drops the oldest weeks (Jan gone, Dec kept);
+   m17/m18/m19 tests deduped onto the shared assertStripComplete (coverage EXPANDED: m18/m19
+   strip parity was w80-only, now all four widths); @canonical heat-quantile-bin doc: repointed
+   to docs/contracts/tui-render-doctrine.md (docs-anchors §8 green); 38-week prose reworded to
+   "80-col budget point, not a ceiling". Every m17-m19 golden byte-file untouched — the passing
+   goldens ARE the byte-equality proof of the test refactor.
+
+**Stalled honestly:** `pbp-slate2-wasm-proof` (epoch 3, in_progress, blocker_note stamped, no
+commit) — the sequenced-last enumeration slice verified #2100 IS merged but m24/m25/m26 fixtures
+are absent from origin/main, so it halted per the wave-1 precedent instead of green-washing a
+partial enumeration. RE-LAUNCH it once this wave merges and deploys.
+
+**Wish item (4) resolved:** the 53-week widening was confirmed cheap and BUILT this wave
+(heatRenderCalendar was already width+data-driven; m26 is pure proof, zero renderer code) —
+nothing to file forward.
+
+**Ledger state:** three built tasks in_progress, epoch 1, evidence stamped, ONLY the merge
+criterion open; wasm-proof in_progress, epoch 3, blocker_note honest, all criteria open;
+wave-1/2 tasks closed done by the lead on their merges. No ledger fixes were needed.
+
+**Debt / wave-4 fodder:**
+- The per-milestone golden read/write boilerplate (renderM17Fixture/renderM24/25/26Fixture +
+  the TestGoldenMN update/compare loop) is now ~10 near-identical copies — the row-13 helper
+  migration is overdue and purely mechanical.
+- The dashboard labels row truncates with … when tabs overflow; a scrolling/priority tab strip
+  is a possible v2 if authored dashboards ever carry many tabs.
+- Still no live-terminal/wasm pixel eyeball of any slate-2 block — exactly wasm-proof's job.
+
+**Wave 4 should take:** (1) re-launch `pbp-slate2-wasm-proof` immediately after this wave
+merges (its fixtures now exist; it is the LAST Go slice and closes D11); (2) the Elixir
+resolver wave (row 12: gauge in @dataviz_types + gauge_shape/1, depth/dates/epic dims on the
+row wire, $span → agg_for_query/2 live child queries) — that turns the m25 cockpit from a
+snapshot demo into a live /usage screen and unlocks live data for tree + roadmap v2; (3) the
+golden-helper dedup (row 13 remainder) as a cheap hygiene rider on whichever slice next touches
+the test files. After wasm-proof + resolver, this epic is at its natural close — judge whether
+a slate-3 exists or the epic task closes.

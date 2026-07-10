@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "type": "dashboard",
+      "active": 0,
+      "rows": 22,
+      "tabs": [
+        {
+          "label": "Overview",
+          "blocks": [
+            {
+              "type": "chart",
+              "title": "Requests",
+              "series": [
+                { "label": "req", "points": [3, 5, 4, 8, 6, 9, 7] },
+                { "label": "err", "points": [1, 2, 1, 3, 2, 4, 2] }
+              ],
+              "axes": { "xLabels": ["Mon", "Sun"] }
+            },
+            {
+              "type": "heatmap",
+              "ramp": "shade",
+              "cells": [
+                [0, 1, 2, 3, 1],
+                [2, 3, 4, 1, 0],
+                [1, 0, 2, 4, 3]
+              ]
+            },
+            {
+              "type": "stats",
+              "items": [
+                { "value": "71", "denom": "118", "label": "Cache hit" },
+                { "value": "1.2M", "label": "Tokens" }
+              ]
+            },
+            {
+              "type": "gauge-list",
+              "title": "By agent",
+              "query": { "groupBy": "$span" },
+              "rows": [
+                { "label": "opus", "value": 42 },
+                { "label": "fable", "value": 31 },
+                { "label": "sonnet", "value": 18 }
+              ]
+            }
+          ]
+        },
+        {
+          "label": "Agents",
+          "blocks": [
+            {
+              "type": "stat",
+              "value": "3",
+              "denom": "5",
+              "label": "Active agents"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
