@@ -3495,12 +3495,15 @@
   }
 
   // The DOM mount: fetch the fleet halt state and paint the banner slot. Silent
-  // on a non-ok read (older CP 404 / non-admin 403) — the slot stays empty.
+  // on a non-ok read (older CP 404 / non-operator 401/403) — the slot stays
+  // empty. noBounce is LOAD-BEARING: the route is platform-operator gated, so a
+  // plain session token 401s — without noBounce that probe would clearSession()
+  // and log the user out on every fleet render.
   function loadFleetRollout(container) {
     var slot = container.querySelector("#fleet-rollout");
     if (!slot) return;
-    api("GET", "/v1/admin/autoupdate").then(function (r) {
-      if (!r.ok || !r.data) return; // older CP / non-admin → hidden
+    api("GET", "/v1/admin/autoupdate", null, { noBounce: true }).then(function (r) {
+      if (!r.ok || !r.data) return; // older CP / non-operator → hidden
       slot.innerHTML = fleetRolloutBannerHtml(r.data);
       var btn = slot.querySelector("[data-fleet-au]");
       if (btn) btn.addEventListener("click", function () { fleetRolloutAction(btn.getAttribute("data-fleet-au"), container); });
@@ -3509,7 +3512,7 @@
 
   function fleetRolloutAction(verb, container) {
     var path = "/v1/admin/autoupdate/" + (verb === "halt" ? "halt" : "resume");
-    api("POST", path, {}).then(function (r) {
+    api("POST", path, {}, { noBounce: true }).then(function (r) {
       if (r.ok) {
         toast({ kind: "success", title: verb === "halt" ? "Rollout halted" : "Rollout resumed" });
         loadFleetRollout(container);
