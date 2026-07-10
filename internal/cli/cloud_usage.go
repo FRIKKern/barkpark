@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -119,12 +120,32 @@ func runCloudUsage(out *writer, g globals, args []string) int {
 	}
 
 	if out.output == "json" || out.output == "yaml" {
+		// The raw path is the /usage envelope BYTES verbatim (D4/OC21): NO second
+		// fetch, no history — scripts depend on this exact shape. The TREND column
+		// is a HUMAN garnish only, so it never touches a machine consumer.
 		emitUsageRaw(out, res)
 		return exitOK
 	}
-	renderUsageResult(out, ref, res)
+
+	// Human path only: augment the meter wall with a TREND sparkline from the
+	// sampler's stored history (OC21, GET /usage/history). Fail-SOFT — an older
+	// control plane without the route (404), a transport error, or a malformed
+	// body simply drops the TREND column, silently: the meters are the truth, the
+	// trend is garnish. Never a hard error, never a raw-path fetch.
+	var history map[string][]cloudclient.UsageHistoryPoint
+	if h, herr := cfg.CloudClient().UsageHistory(cloudCtx(), id, usageHistoryPoints); herr == nil {
+		history = h.Series
+	}
+	renderUsageResult(out, ref, res, history)
 	return exitOK
 }
+
+// usageHistoryPoints is the trend window the per-instance view requests: the last
+// 24 samples (OC21). At the sampler's 4-ticks-an-hour cadence that is ~6 hours of
+// TREND — enough to read a shape, bounded so the sparkline stays one glyph-run
+// wide. A server with fewer stored rows returns what it has (the gap discipline
+// handles a short/holey series).
+const usageHistoryPoints = 24
 
 // fleetHeadlineMeters is the per-instance subset the fleet table paints (a full
 // 9×N grid is unreadably wide): the two inventory counts most operators watch,
@@ -368,12 +389,15 @@ func emitUsageRaw(out *writer, res cloudclient.UsageResult) {
 }
 
 // renderUsageResult prints the human view: a one-line header naming the
-// instance, the meter table (fixed fixture order), and a pending-invitations
-// footnote when the seats meter carries one.
-func renderUsageResult(out *writer, ref string, res cloudclient.UsageResult) {
+// instance, the meter table (fixed fixture order, with a TREND sparkline column
+// when the sampler's history is available), and a pending-invitations footnote
+// when the seats meter carries one. `history` is nil on the fail-soft path (an
+// older control plane / a history read that failed) — the table renders exactly
+// as before, no TREND column.
+func renderUsageResult(out *writer, ref string, res cloudclient.UsageResult, history map[string][]cloudclient.UsageHistoryPoint) {
 	out.outf("Usage for %s", sanitizeCell(ref))
 	out.outf("")
-	renderUsageMeters(out, res.Meters)
+	renderUsageMeters(out, res.Meters, history)
 
 	// The seats meter rides a cheap `pending_invitations` detail — surface it as
 	// a footnote (never a second meter) so the operator sees pending seats without
@@ -389,11 +413,22 @@ func renderUsageResult(out *writer, ref string, res cloudclient.UsageResult) {
 // fraction when present — none in v1) · STATE (painted through the shared
 // statusRole seam: metered → "live"/green, unmetered → neutral/dim, the D12
 // one-vocabulary guarantee) · AS OF (measured_at as "as of …", or "live" for a
-// nil/current read) · SOURCE (always names where the number does/would come
-// from). Widths are measured on BARE strings and painting wraps the padded cell,
-// so piped/--no-color output is byte-identical to an uncolored build.
-func renderUsageMeters(out *writer, meters map[string]cloudclient.UsageMeter) {
-	headers := []string{"METER", "VALUE", "LIMIT", "STATE", "AS OF", "SOURCE"}
+// nil/current read) · TREND (an eighth-block sparkline of the meter's recent
+// history, present ONLY when the sampler's history carried numeric points — OC21)
+// · SOURCE (always names where the number does/would come from). Widths are
+// measured on BARE strings and painting wraps the padded cell, so piped/--no-color
+// output is byte-identical to an uncolored build.
+func renderUsageMeters(out *writer, meters map[string]cloudclient.UsageMeter, history map[string][]cloudclient.UsageHistoryPoint) {
+	// The TREND column rides only when the sampler's history carries at least one
+	// numeric point (OC21): an empty/absent history (the fail-soft path, or a box
+	// the sampler has never captured) drops the column entirely rather than paint a
+	// lonely run of em dashes — the meters are the truth, the trend is garnish.
+	trend := historyHasData(history)
+	headers := []string{"METER", "VALUE", "LIMIT", "STATE", "AS OF"}
+	if trend {
+		headers = append(headers, "TREND")
+	}
+	headers = append(headers, "SOURCE")
 	cells := make([][]string, 0, len(usageMeterOrder))
 	// stateTokens holds each row's bare STATE token so the join loop can paint it
 	// through the shared seam without re-deriving it (it is also the STATE cell's
@@ -402,14 +437,18 @@ func renderUsageMeters(out *writer, meters map[string]cloudclient.UsageMeter) {
 	for _, name := range usageMeterOrder {
 		m, present := meters[name]
 		token := usageStateToken(m, present)
-		cells = append(cells, []string{
+		row := []string{
 			usageMeterLabel(name),
 			usageValueCell(name, m, present),
 			usageLimitCell(m),
 			token,
 			usageAsOfCell(m, present),
-			usageSourceCell(m, present),
-		})
+		}
+		if trend {
+			row = append(row, usageTrendCell(name, history))
+		}
+		row = append(row, usageSourceCell(m, present))
+		cells = append(cells, row)
 		stateTokens = append(stateTokens, token)
 	}
 
@@ -451,6 +490,94 @@ func usageMeterLabel(name string) string {
 		return l
 	}
 	return sanitizeCell(name)
+}
+
+// usageSparkLadder is the eighth-block intensity ladder (the pdrender stat idiom):
+// eight vertical fill levels the operator reads as a shape without any colour, so
+// the TREND column is ANSI-plain (piped/--no-color output byte-identical).
+var usageSparkLadder = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+// sparkRunes maps a numeric series onto the eighth-block ladder, normalised to the
+// series' OWN min..max (each meter's trend reads its own swing, so bytes and
+// percents and counts are all legible in one column). It is a small local twin of
+// pdrender's unexported sparkline, with ONE deliberate divergence: a flat series
+// (or a single point) paints MID-height (▅), not the baseline floor — a steady
+// usage meter reads as a level line, never an empty-looking trough. Callers pass
+// only REAL values (nil gaps already dropped, the metricsBlocks discipline); an
+// empty series returns "" so the caller can paint the honest em-dash cell.
+func sparkRunes(values []float64) string {
+	if len(values) == 0 {
+		return ""
+	}
+	min, max := values[0], values[0]
+	for _, v := range values {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	span := max - min
+	var sb strings.Builder
+	if span <= 0 {
+		// Flat (or single-point) series: a level mid-height row — never a
+		// divide-by-zero, never a misleading empty floor.
+		mid := usageSparkLadder[len(usageSparkLadder)/2] // index 4 → ▅
+		for range values {
+			sb.WriteRune(mid)
+		}
+		return sb.String()
+	}
+	top := float64(len(usageSparkLadder) - 1) // 7
+	for _, v := range values {
+		idx := int(math.Round((v - min) / span * top))
+		if idx < 0 {
+			idx = 0
+		}
+		if idx > len(usageSparkLadder)-1 {
+			idx = len(usageSparkLadder) - 1
+		}
+		sb.WriteRune(usageSparkLadder[idx])
+	}
+	return sb.String()
+}
+
+// numericHistory drops the nil gaps from a meter's history series, returning only
+// the real readings (the metricsBlocks gap discipline — a hole is never a fake
+// zero). The order is preserved so the sparkline reads left-to-right in time.
+func numericHistory(points []cloudclient.UsageHistoryPoint) []float64 {
+	vals := make([]float64, 0, len(points))
+	for _, p := range points {
+		if p.Value != nil {
+			vals = append(vals, *p.Value)
+		}
+	}
+	return vals
+}
+
+// historyHasData reports whether ANY meter in the history carries at least one
+// numeric reading. It gates the whole TREND column: an empty/absent history (the
+// fail-soft path, or a never-sampled box) draws no column at all, rather than a
+// lonely run of em dashes.
+func historyHasData(history map[string][]cloudclient.UsageHistoryPoint) bool {
+	for _, pts := range history {
+		if len(numericHistory(pts)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// usageTrendCell renders one meter's TREND cell: an eighth-block sparkline over
+// its real (nil-dropped) readings, or an honest em dash when that meter has no
+// numeric history (a still-unmetered pipe, or a series that is all gaps).
+func usageTrendCell(name string, history map[string][]cloudclient.UsageHistoryPoint) string {
+	vals := numericHistory(history[name])
+	if len(vals) == 0 {
+		return "—"
+	}
+	return sparkRunes(vals)
 }
 
 // usageStateToken maps a meter onto a statusRole token so the STATE cell colours
@@ -632,7 +759,9 @@ ONE INSTANCE
   never a fake zero. A meter with a snapshot time shows "as of …"; a live read
   shows "live". Quotas ride as a fraction when a plan limit is present, and the
   STATE cell warns "near_limit" / "over_limit" as a metered value nears or
-  crosses that ceiling.
+  crosses that ceiling. When the sampler has stored history a TREND column paints
+  an eighth-block sparkline of each meter's recent readings (an older control
+  plane without it simply omits the column).
 
   <instance> is a fleet name or id (the forms bp cloud status shows); needs
   'bp login'. Instance-sourced counts are "unmetered" until the backend lands

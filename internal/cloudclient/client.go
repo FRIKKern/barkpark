@@ -1400,6 +1400,55 @@ func (c *Client) UsageSummary(ctx context.Context) (UsageSummaryResult, error) {
 	return res, nil
 }
 
+// UsageHistoryPoint is one sample in a meter's history series (wave-4 S1/OC21):
+// an RFC3339 capture time and a NULLABLE value. A nil Value is a GAP the sampler
+// recorded but couldn't measure (the box was down that tick) — dropped from the
+// terminal trend, never a fabricated zero (the metricsBlocks gap discipline).
+type UsageHistoryPoint struct {
+	At    string   `json:"at"`
+	Value *float64 `json:"value"`
+}
+
+// UsageHistoryResult is the parsed usage-history envelope (wave-4 S1/OC21):
+// per-meter time series over the sampler's stored `usage_samples` rows. Series is
+// keyed by meter name (the SAME 9-name vocabulary the /usage envelope carries);
+// a meter absent from the map has no recorded history. Raw is retained for
+// symmetry with the sibling usage results but is NOT re-emitted — the history is
+// a HUMAN garnish, never a machine contract (the raw `-o json` path stays the
+// live /usage envelope, OC21).
+type UsageHistoryResult struct {
+	Raw    []byte
+	Series map[string][]UsageHistoryPoint
+}
+
+// UsageHistory fetches an instance's usage history via
+// GET /v1/barkparks/:id/usage/history?points=<n> (Bearer, team-scoped). It is a
+// PURE read over the sampler's stored rows (OC16/OC21) — never a live fan-out.
+// `points` caps the window (<=0 → the server default). The envelope is
+// `{ok, series:{<meter>:[{at, value|null}]}}`; a 404 (an older control plane
+// without the route) surfaces as *CloudRouteError{Code:"not_found"} so the caller
+// can fail soft and simply drop the trend column.
+func (c *Client) UsageHistory(ctx context.Context, id string, points int) (UsageHistoryResult, error) {
+	path := "/v1/barkparks/" + esc(id) + "/usage/history"
+	if points > 0 {
+		path += fmt.Sprintf("?points=%d", points)
+	}
+	status, body, err := c.do(ctx, "GET", path, true, nil)
+	if err != nil {
+		return UsageHistoryResult{}, err
+	}
+	if !ok(status) {
+		return UsageHistoryResult{}, routeError(status, body)
+	}
+	var env struct {
+		Series map[string][]UsageHistoryPoint `json:"series"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return UsageHistoryResult{}, fmt.Errorf("decode usage history envelope: %w", err)
+	}
+	return UsageHistoryResult{Raw: body, Series: env.Series}, nil
+}
+
 // TeamMember is one seat on a team, as returned by GET /v1/teams/:id/members.
 type TeamMember struct {
 	UserID   string `json:"user_id"`
