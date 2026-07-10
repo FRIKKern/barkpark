@@ -29,6 +29,23 @@ defmodule Barkpark.Content.Mutations do
   the SSE stream when a batch fails partway through.
   """
   def apply_mutations(mutations, dataset, opts \\ []) when is_list(mutations) do
+    # TIMED: the batch-mutate hot path had ZERO telemetry, so "what is p95 of a
+    # mutate?" was unanswerable. `:telemetry.span` emits
+    # `[:barkpark, :content, :mutate, :start | :stop | :exception]` with a
+    # `:duration`; BarkparkWeb.Telemetry subscribes a Prometheus histogram to
+    # `:stop` (p95 via histogram_quantile). `count` tags batch size. The span
+    # reraises on exception exactly as the inner rescue already does.
+    :telemetry.span(
+      [:barkpark, :content, :mutate],
+      %{count: length(mutations), dataset: dataset},
+      fn ->
+        result = do_apply_mutations(mutations, dataset, opts)
+        {result, %{count: length(mutations), dataset: dataset}}
+      end
+    )
+  end
+
+  defp do_apply_mutations(mutations, dataset, opts) do
     # Initialise the deferred-broadcast queue for this process so
     # tap_broadcast/5 knows to queue instead of broadcast immediately.
     Process.put(:barkpark_deferred_broadcasts, [])
