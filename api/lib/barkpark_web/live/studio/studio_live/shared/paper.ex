@@ -126,9 +126,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> assign(paper_halt: nil)
 
           # A constraint veto (pdd-t20) carries a human-readable reason —
-          # surface it so a calmly-rejected batch explains itself.
+          # surface it so a calmly-rejected batch explains itself. Mark the
+          # save failed too, matching the single-op path — a rejected batch
+          # must never leave a stale "Auto-saved" on screen.
           {:error, {:constraint, message, _op}} ->
-            put_flash(socket, :error, constraint_flash(message))
+            socket
+            |> put_flash(:error, constraint_flash(message))
+            |> assign(save_status: "Save failed")
 
           # A lifecycle-hook HALT on the batch path. The batch branch never set
           # save_status on error before — put_paper_halt/2 fixes that so a
