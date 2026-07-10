@@ -115,6 +115,13 @@
             <a href="#" id="reset-back">Back to log in</a>
           </p>
         </div>
+
+        <!-- Two-factor challenge card — shown when POST /v1/auth/login answers
+             two_factor_required for a TOTP-enrolled account. Content (OTP /
+             recovery-code form, honest 401/429 states) is injected by app.js
+             (mountTwoFactorCard); the challenge_token stays in that closure and
+             is never persisted. Hidden until #login-card hands off. -->
+        <div class="auth-card card" id="twofa-card" hidden></div>
       </div>
 
       <footer class="appfoot">
