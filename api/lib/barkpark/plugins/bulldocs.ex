@@ -43,8 +43,9 @@ defmodule Barkpark.Plugins.Bulldocs do
 
   # Compile-time absolute path to this plugin's bundled schema JSON. Matches the
   # source-tree prod deploy model (Barkpark compiles + runs in place under
-  # /opt/barkpark), mirroring how `Barkpark.Plugins.OnixEdit` resolves its
-  # schemas dir.
+  # /opt/barkpark), mirroring how the OnixEdit plugin resolves its schemas dir.
+  # (Named without the module prefix on purpose: the plugins-off regression bar
+  # greps lib/ for cross-plugin module references by full name.)
   @schemas_dir Path.expand("../../../priv/plugins/bulldocs/schemas", __DIR__)
 
   @doc """

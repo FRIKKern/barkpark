@@ -49,7 +49,10 @@ defmodule Barkpark.Content.Errors do
     "webhook_not_found" =>
       "Check the webhook id and :dataset in the URL — the endpoint does not exist in this scope.",
     "event_not_found" =>
-      "Check the event id — GET /v1/webhooks/:dataset/:id/deliveries lists this endpoint's recent event ids."
+      "Check the event id — GET /v1/webhooks/:dataset/:id/deliveries lists this endpoint's recent event ids.",
+    # Authoring-excellence publish wall, E3 gate (charter D3/D5).
+    "unknown_tag" =>
+      "Every tags[].tag must be a registered tag — publish a type:tag document whose _id is the tag name, or switch to one of the registered tags in details.suggestions, then publish again."
   }
 
   def to_envelope(reason), do: to_envelope(reason, nil)
@@ -186,6 +189,23 @@ defmodule Barkpark.Content.Errors do
       status: 409,
       details: Map.take(payload, [:similar, :advise])
     }
+
+  # Authoring-excellence publish wall, E3 gate (TagRegistry.validate_publish):
+  # a publish referenced weighted tags[].tag names with no PUBLISHED type:tag
+  # doc in the dataset scope. 422 with the unknown names and the trgm-nearest
+  # registered tags in `details`, so an authoring agent's retry is one edit
+  # away. NEW top-level code per charter D1 — never reuses the task-scoped
+  # `invalid_task_content` or the plugin `{:halted, _}` shape.
+  defp build({:error, {:unknown_tag, payload}}) when is_map(payload) do
+    unknown = Map.get(payload, :unknown, [])
+
+    %{
+      code: "unknown_tag",
+      message: "publish references unregistered tag(s): " <> Enum.join(unknown, ", "),
+      status: 422,
+      details: Map.take(payload, [:unknown, :suggestions])
+    }
+  end
 
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =
