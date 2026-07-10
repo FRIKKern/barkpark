@@ -158,6 +158,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       scope = [workspace_id: ws.id, project_id: project.id]
       dataset = Content.paper_default_dataset()
 
+      # E3 tag registry: the fixture weighted tags on the task below must
+      # resolve to PUBLISHED type:tag docs in the dataset scope.
+      Barkpark.LabelFixtures.register_tags!(dataset)
+
       for schema_def <- Barkpark.Tasks.schema_definitions(dataset) do
         attrs =
           schema_def

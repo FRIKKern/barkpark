@@ -17,6 +17,10 @@ defmodule BarkparkWeb.ShareLinkTest do
   @junior "share-link-junior"
 
   setup %{conn: conn} do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     {:ok, _} = Auth.create_token(@admin, "sl-admin", @dataset, ["read", "write", "admin"])
     {:ok, _} = Auth.create_token(@junior, "sl-junior", @dataset, ["read", "write"])
 

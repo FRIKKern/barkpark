@@ -123,6 +123,7 @@
                   "schema_unknown",
                   "storage_unavailable",
                   "unauthorized",
+                  "unknown_tag",
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found"

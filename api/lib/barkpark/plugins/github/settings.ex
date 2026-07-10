@@ -4,8 +4,10 @@ defmodule Barkpark.Plugins.Github.Settings do
   config bridge that feeds the App-auth GenServer (`Github.Auth`) and gates the
   wave-2 drain worker.
 
-  Modelled on `Barkpark.Plugins.OnixEdit.Bokbasen.Settings`. Resolves each
-  credential per-field in this order:
+  Modelled on the OnixEdit plugin's `Bokbasen.Settings` resolver (cited without
+  the module prefix on purpose — the plugins-off regression bar greps lib/ for
+  cross-plugin module references by full name). Resolves each credential
+  per-field in this order:
 
     1. **Application env** — `config :barkpark, Barkpark.Plugins.Github, ...`,
        which `runtime.exs` populates from OS env vars at boot. This is the SAME

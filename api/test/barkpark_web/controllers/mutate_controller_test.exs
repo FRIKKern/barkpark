@@ -282,6 +282,10 @@ defmodule BarkparkWeb.MutateControllerTest do
         "test"
       )
 
+      # E3 tag registry: the weighted tags good_labels/1 emits must resolve to
+      # PUBLISHED type:tag docs in this dataset.
+      Barkpark.LabelFixtures.register_tags!("test", for(i <- 1..3, do: "wall-tag-#{i}"))
+
       :ok
     end
 

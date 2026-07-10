@@ -1,0 +1,290 @@
+defmodule Barkpark.Content.TagRegistry do
+  @moduledoc """
+  The controlled tag vocabulary — `type:tag` DOCUMENTS per dataset — and the
+  publish wall's E3 gate over it (authoring-excellence charter D3/D12).
+
+  ## Registry = published tag documents
+
+  A tag is REGISTERED iff a PUBLISHED `type:tag` document whose `doc_id` equals
+  the tag string exists in the dataset scope. Registering a tag = publishing a
+  tag doc — deliberate, audited, per-dataset, writable through every existing
+  document surface. Codelists were rejected as the registry substrate: they are
+  global, boot-seeded, plugin-gated, and have no write surface — all four fail
+  the fresh-install (plugins-off) invariant.
+
+  ## Core schema registration (D12 — fail-LOUD, outside the swallow)
+
+  The `tag` schema is CORE, not plugin-declared: `register!/1` upserts it
+  directly via `Content.upsert_schema/2` and RAISES on failure so boot fails
+  CLOSED — a core type that cannot register is a hard bug, never a
+  logged-and-ignored one. `Barkpark.SchemaBootstrap.init/1` calls it BEFORE its
+  defensive `try/rescue`, so the rescue (which logs and returns `:ignore`) can
+  never swallow a failed registration. It is deliberately NOT routed through
+  `Plugins.Bootstrap.register_all_schemas/0`, whose `Registry.all()` walk is
+  EMPTY under `config :barkpark, :plugins, []`. `upsert_schema/2` is idempotent
+  on `(name, dataset)`, so running it every boot is safe.
+
+  ## E3 gate
+
+  `validate_publish/3` runs in the publish wall chain
+  (`Content.Lifecycle.publish_document/4`): every weighted `tags[].tag` on the
+  draft must resolve to a registered tag, else
+  `{:error, {:unknown_tag, payload}}` — rendered 422 `unknown_tag` — carrying
+  the unknown names plus the trgm-nearest registered tags as per-name
+  suggestions, so a rejected publish costs an authoring agent exactly one
+  retry with a machine-readable fix. Only the WEIGHTED label shape
+  (`[{tag, strength, rationale}]`) is gated here; legacy flat-string tags and
+  untagged documents are the label-spine/exemption gates' business, not E3's.
+
+  ## Legacy import
+
+  `seed_legacy_drafts/2` (driven by `mix barkpark.tags.seed`) imports the
+  distinct legacy flat-string tags as DRAFT tag docs for human/curator
+  promotion. It never publishes: registering the legacy vocabulary is a
+  deliberate act, not a migration side-effect.
+  """
+
+  import Ecto.Query
+
+  require Logger
+
+  alias Barkpark.Content
+  alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Repo
+
+  @tag_type "tag"
+
+  # trgm suggestion tuning: at most 3 candidates per unknown name, and never a
+  # candidate below 0.1 similarity — an unrelated vocabulary must yield an
+  # EMPTY suggestion list, not a misleading one.
+  @suggestion_limit 3
+  @suggestion_floor 0.1
+
+  @doc """
+  The canonical `tag` schema definition — string-keyed so `upsert_schema/2`
+  (which injects the string `"dataset"` key) never produces a mixed-key map.
+
+  Single source of truth: boot registration (`register!/1`) and the
+  plugins-off regression bar (`plugin_free_boot_test.exs` reseeds it as the
+  9th host schema) both read THIS function, so the two can't drift.
+  """
+  @spec schema_attrs() :: map()
+  def schema_attrs do
+    %{
+      "name" => @tag_type,
+      "title" => "Tag",
+      "icon" => "🏷",
+      "visibility" => "public",
+      "fields" => [
+        %{"name" => "title", "title" => "Title", "type" => "string"},
+        %{"name" => "description", "title" => "Description", "type" => "text", "rows" => 2}
+      ]
+    }
+  end
+
+  @doc """
+  Register the core `tag` schema in `dataset` — RAISES on failure (D12).
+
+  Called by `SchemaBootstrap.init/1` OUTSIDE its defensive rescue: a failed
+  core registration must fail the boot closed, not log-and-proceed into a
+  system whose publish wall cannot resolve any tag.
+  """
+  @spec register!(String.t()) :: Barkpark.Content.SchemaDefinition.t()
+  def register!(dataset) when is_binary(dataset), do: register_attrs!(schema_attrs(), dataset)
+
+  @doc """
+  The fail-loud upsert seam behind `register!/1`, parameterized on `attrs` so
+  the raise-on-error contract is directly testable (`register!/1` itself only
+  ever feeds it the canonical `schema_attrs/0`).
+  """
+  @spec register_attrs!(map(), String.t()) :: Barkpark.Content.SchemaDefinition.t()
+  def register_attrs!(attrs, dataset) when is_map(attrs) and is_binary(dataset) do
+    case Content.upsert_schema(attrs, dataset) do
+      {:ok, schema} ->
+        schema
+
+      {:error, reason} ->
+        raise "Barkpark.Content.TagRegistry: core `tag` schema failed to register in " <>
+                "dataset #{inspect(dataset)} — boot fails CLOSED (charter D12): " <>
+                inspect(reason)
+    end
+  end
+
+  @doc """
+  E3 gate: `:ok`, or `{:error, {:unknown_tag, payload}}` when the draft carries
+  weighted `tags` whose names do not all resolve to PUBLISHED `type:tag` docs
+  in the dataset scope.
+
+  `payload` is `%{unknown: [name], suggestions: %{name => [nearest]}}` — the
+  suggestions are trgm-nearest registered tags (`similarity/2`, pg_trgm), best
+  first, empty when nothing registered comes close.
+
+  Deliberately fail-CLOSED: a registry read error propagates (the publish
+  fails) rather than waving unknown tags through — the wall is enforcement,
+  not a guard rail.
+  """
+  @spec validate_publish(Document.t(), String.t(), keyword()) ::
+          :ok | {:error, {:unknown_tag, map()}}
+  def validate_publish(%Document{} = draft, dataset, opts) do
+    case weighted_tag_names(draft.content) do
+      [] ->
+        :ok
+
+      names ->
+        registered = registered_subset(names, dataset, opts)
+
+        case Enum.reject(names, &MapSet.member?(registered, &1)) do
+          [] ->
+            :ok
+
+          unknown ->
+            suggestions =
+              Map.new(unknown, fn name -> {name, nearest_registered(name, dataset, opts)} end)
+
+            {:error, {:unknown_tag, %{unknown: unknown, suggestions: suggestions}}}
+        end
+    end
+  end
+
+  @doc """
+  Import the dataset's legacy DISTINCT flat-string tags as DRAFT tag docs.
+
+  Sweeps every schema type via `Content.search_tags_for_type/5` (which unnests
+  the OLD flat `content.tags` string-array shape — correct for legacy data;
+  weighted entries unnest to JSON-object text and are filtered out), then
+  creates one draft `type:tag` doc per name that has no tag doc yet (draft or
+  published). Never publishes — promotion is a human/curator decision.
+
+  Returns `%{created: [name], skipped: [name]}`.
+  """
+  @spec seed_legacy_drafts(String.t(), keyword()) :: %{
+          created: [String.t()],
+          skipped: [String.t()]
+        }
+  def seed_legacy_drafts(dataset, opts \\ []) when is_binary(dataset) do
+    legacy = legacy_distinct_tags(dataset, opts)
+    existing = existing_tag_doc_names(legacy, dataset, opts)
+
+    {to_create, skipped} = Enum.split_with(legacy, &(not MapSet.member?(existing, &1)))
+
+    created =
+      Enum.filter(to_create, fn name ->
+        attrs = %{
+          "doc_id" => name,
+          "title" => name,
+          "content" => %{
+            "description" =>
+              "Imported from the legacy flat tag vocabulary — review, then publish to register."
+          }
+        }
+
+        # create_document ALWAYS births a draft (`drafts.<name>`, status
+        # coerced) — the "never auto-published" property holds by construction.
+        case Content.create_document(@tag_type, attrs, dataset, opts) do
+          {:ok, _draft} ->
+            true
+
+          {:error, reason} ->
+            Logger.warning(
+              "TagRegistry.seed_legacy_drafts: skipping #{inspect(name)} — #{inspect(reason)}"
+            )
+
+            false
+        end
+      end)
+
+    %{created: created, skipped: skipped}
+  end
+
+  # ── E3 internals ──────────────────────────────────────────────────────────
+
+  # The distinct weighted tag names on a content map: members of a `tags` list
+  # that are maps carrying a binary `"tag"`. Legacy flat strings (and any other
+  # member shape) are NOT collected — shape validity is the label spine's gate,
+  # registration of the weighted vocabulary is this one's.
+  defp weighted_tag_names(content) when is_map(content) do
+    content
+    |> Map.get("tags")
+    |> List.wrap()
+    |> Enum.flat_map(fn
+      %{"tag" => name} when is_binary(name) and name != "" -> [name]
+      _ -> []
+    end)
+    |> Enum.uniq()
+  end
+
+  defp weighted_tag_names(_), do: []
+
+  # Registered = published tag rows whose doc_id is in `names`, read in the
+  # workspace-or-shared-global scope (a workspace publish resolves its own tags
+  # PLUS the shared nil-workspace base vocabulary — same semantics as the
+  # Studio desk's schema catalog read).
+  defp registered_subset(names, dataset, opts) do
+    registered_tags_query(dataset, opts)
+    |> where([d], d.doc_id in ^names)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  defp nearest_registered(name, dataset, opts) do
+    registered_tags_query(dataset, opts)
+    |> where([d], fragment("similarity(?, ?) > ?", d.doc_id, ^name, ^@suggestion_floor))
+    |> order_by([d],
+      desc: fragment("similarity(?, ?)", d.doc_id, ^name),
+      # doc_id tiebreak so equal-similarity candidates order deterministically.
+      asc: d.doc_id
+    )
+    |> limit(@suggestion_limit)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+  end
+
+  defp registered_tags_query(dataset, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.type == @tag_type and d.status == "published")
+    |> where([d], d.dataset == ^dataset)
+    |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
+  end
+
+  # ── legacy seed internals ─────────────────────────────────────────────────
+
+  defp legacy_distinct_tags(dataset, opts) do
+    dataset
+    |> Content.list_schemas(opts)
+    |> Enum.map(& &1.name)
+    |> Enum.flat_map(fn type ->
+      # Blank query = the full distinct vocabulary; the cap only guards a
+      # pathological corpus.
+      Content.search_tags_for_type("", type, dataset, opts, 10_000)
+    end)
+    |> Enum.uniq()
+    # `jsonb_array_elements_text` over a WEIGHTED tags array yields the JSON
+    # text of each object — those are not legacy tag names; drop them.
+    |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "{"))
+    |> Enum.reject(&(String.trim(&1) == ""))
+    |> Enum.sort()
+  end
+
+  # Tag-doc names that already exist as EITHER variant (draft `drafts.<name>`
+  # or published `<name>`) — the seed never overwrites curator work.
+  defp existing_tag_doc_names([], _dataset, _opts), do: MapSet.new()
+
+  defp existing_tag_doc_names(names, dataset, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    both_variants = names ++ Enum.map(names, &Content.draft_id/1)
+
+    Document
+    |> where([d], d.type == @tag_type and d.dataset == ^dataset)
+    |> where([d], d.doc_id in ^both_variants)
+    |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+    |> Enum.map(&Content.published_id/1)
+    |> MapSet.new()
+  end
+end

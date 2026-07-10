@@ -11,6 +11,10 @@ defmodule Barkpark.Content.PaperSearchTest do
   @dataset "paper_search_test"
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     Content.upsert_schema(
       %{"name" => "paper", "title" => "Paper", "visibility" => "public", "fields" => []},
       @dataset
@@ -23,7 +27,12 @@ defmodule Barkpark.Content.PaperSearchTest do
     {:ok, _} =
       Content.create_document(
         "paper",
-        Map.merge(%{"_id" => id, "title" => title}, Barkpark.LabelFixtures.weighted_labels()),
+        Map.merge(
+          %{"_id" => id, "title" => title},
+          # Unique registered tags: this corpus deliberately shares title tokens
+          # ("Match NN" x25) — shared fixture tags would cross the E4 refuse band.
+          Barkpark.LabelFixtures.with_registered_labels(%{}, @dataset)
+        ),
         @dataset
       )
 

@@ -81,6 +81,12 @@ config :barkpark, :allow_private_outbound, true
 # need codelist data seed it explicitly, so skip the boot pass here.
 config :barkpark, run_boot_codelist_seeders: false
 
+# Same sandbox constraint for the core tag-schema registration (charter D12):
+# SchemaBootstrap would upsert the `tag` schema before any test owns a
+# connection. Tests prove the registration path by calling
+# `Content.TagRegistry.register!/1` directly (tag_registry_test.exs).
+config :barkpark, run_boot_core_schema_registration: false
+
 # Pulse (Shared Storm): one channel fixture so the public-surface tests can
 # exercise ingest/feed/caps end-to-end. Prod channels come from
 # BARKPARK_PULSE_CHANNELS (runtime.exs); default everywhere is %{} = closed.

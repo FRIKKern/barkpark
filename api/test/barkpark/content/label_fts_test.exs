@@ -44,6 +44,14 @@ defmodule Barkpark.Content.LabelFtsTest do
   end
 
   test "search_vector indexes the tag lexeme and skips the strength number" do
+    # The publish wall's E3 gate (TagRegistry, ae-w2) requires every weighted
+    # tags[].tag to resolve to a PUBLISHED type:tag doc — register the two
+    # names this fixture publishes, the canonical way.
+    for name <- ["obsidian", "findability"] do
+      {:ok, _} = Content.create_document("tag", %{"doc_id" => name, "title" => name}, @dataset)
+      {:ok, _} = Content.publish_document(name, "tag", @dataset)
+    end
+
     content = %{
       "_id" => "p-weighted",
       "title" => "Weighted Tags Paper",

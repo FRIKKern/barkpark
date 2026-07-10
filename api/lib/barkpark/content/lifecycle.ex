@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Lifecycle do
     Exemptions,
     LabelSpine,
     Sheets,
+    TagRegistry,
     Warnings,
     Writer,
     WriteScope
@@ -86,12 +87,20 @@ defmodule Barkpark.Content.Lifecycle do
         # lives in CORE, immediately BEFORE the before_publish hook fire — the
         # hook chain is plugin-droppable and coerces raising hooks to :ok, so
         # it is the wrong home for a correctness gate (the hook stays for
-        # optional tenant policies). Gates run in charter order: the label
-        # spine (E1/E2 → 422 {:label_spine, details}) and then the E4 dedup
-        # wall (refuse → 409 {:duplicate_of, payload}; the advise band rides
-        # the warnings channel and never blocks). An error tuple falls
-        # straight out of the `with` — nothing below it runs.
+        # optional tenant policies). Gates run in charter order:
+        #
+        #   1. label spine (E1/E2, @walled_types) → 422 {:label_spine, details}
+        #   2. tag registry (E3, self-scoping to the weighted-tag shape): every
+        #      weighted tags[].tag must resolve to a PUBLISHED type:tag doc in
+        #      the dataset scope → 422 {:unknown_tag, …} with trgm-nearest
+        #      suggestions
+        #   3. dedup wall (E4, @walled_types) → refuse is 409
+        #      {:duplicate_of, payload}; the advise band rides the warnings
+        #      channel and never blocks
+        #
+        # An error tuple falls straight out of the `with` — nothing below runs.
         with :ok <- authoring_wall(draft, type, pid, dataset),
+             :ok <- TagRegistry.validate_publish(draft, dataset, opts),
              :ok <- dedup_wall(draft, type, dataset, opts) do
           # Hook stays BEFORE the transaction. The rev-fenced delete below
           # closes the publish-during-edit TOCTOU: a concurrent write that

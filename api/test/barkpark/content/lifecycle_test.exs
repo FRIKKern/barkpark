@@ -52,6 +52,14 @@ defmodule Barkpark.Content.LifecycleTest do
       @dataset
     )
 
+    # E3 tag registry: the hand-rolled weighted tags these wall tests publish
+    # must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset, [
+      "publish-wall",
+      "lifecycle",
+      "solitary-axis"
+    ])
+
     :ok
   end
 

@@ -20,6 +20,10 @@ defmodule Barkpark.Content.EmbedResolveTest do
   @dataset "embed_resolve_test"
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     Content.upsert_schema(
       %{
         "name" => "paper",
@@ -39,7 +43,9 @@ defmodule Barkpark.Content.EmbedResolveTest do
       Content.create_document(
         "paper",
         %{"_id" => id, "title" => title, "blocks" => blocks}
-        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        # Unique registered tags: A/B embed pairs share thin title tokens —
+        # shared fixture tags would cross the E4 refuse band.
+        |> Map.merge(Barkpark.LabelFixtures.with_registered_labels(%{}, @dataset))
         |> Map.merge(attrs),
         @dataset
       )

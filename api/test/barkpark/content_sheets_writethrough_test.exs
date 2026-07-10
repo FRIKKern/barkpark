@@ -24,6 +24,13 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
 
   @dataset "sheets_wt_test"
 
+  setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+    :ok
+  end
+
   defp sheet_content(value) do
     %{
       "locale" => "nb-NO",
