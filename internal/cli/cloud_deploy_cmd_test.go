@@ -94,10 +94,10 @@ func TestResolveDeployRef(t *testing.T) {
 		{"feature-x", "", "feature-x", false},
 		{"", "123", "pull/123/head", false},
 		{"  spaced  ", "", "spaced", false},
-		{"feature-x", "5", "", true},   // mutually exclusive
-		{"", "0", "", true},            // non-positive
-		{"", "-3", "", true},           // non-positive
-		{"", "notnum", "", true},       // non-numeric
+		{"feature-x", "5", "", true}, // mutually exclusive
+		{"", "0", "", true},          // non-positive
+		{"", "-3", "", true},         // non-positive
+		{"", "notnum", "", true},     // non-numeric
 	}
 	for _, c := range cases {
 		got, err := resolveDeployRef(c.branch, c.pr)
