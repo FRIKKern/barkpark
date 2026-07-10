@@ -812,7 +812,7 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
 .bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
-.bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; }
+.bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; width: max-content; }
 .bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.64rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
 
 .bp-paper-surface .bp-heat__c--z,
