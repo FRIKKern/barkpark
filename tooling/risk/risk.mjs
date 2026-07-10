@@ -137,6 +137,15 @@ if (covCacheHit) {
   ({ go: goPct = null, elixir: exPct = null, js: jsPct = null } = priorRpt.coverageTotals || {});
   process.stderr.write("[coverage] reused cache — no code/test change (skipped go/mix suites)\n");
 }
+if (NO_COVERAGE && priorRpt.realCov) {
+  // --no-coverage means "skip the heavy suites", not "forget the last real
+  // measurement": carry the prior go/elixir coverage forward (JS re-ingests
+  // fresh below), so intermediate cheap runs don't degrade Tested to the proxy.
+  for (const [p, c] of Object.entries(priorRpt.realCov)) if (c.source !== "js") realCov[p] = c;
+  Object.assign(fnCov, priorRpt.fnCov || {});
+  ({ go: goPct = null, elixir: exPct = null } = priorRpt.coverageTotals || {});
+  if (Object.keys(realCov).length) process.stderr.write("[coverage] --no-coverage: carried forward prior go/elixir measurements\n");
+}
 if (!NO_COVERAGE && !covCacheHit) {
   // -- Go: `go test -cover ./...` → "ok PKG ... coverage: NN.N% of statements" per package
   if (existsSync(join(ROOT, "go.mod"))) {
