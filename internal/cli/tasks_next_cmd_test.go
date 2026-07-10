@@ -164,6 +164,29 @@ func TestNextFrontierMissingEpochHardFails(t *testing.T) {
 	}
 }
 
+// Deny-path (d): when EVERY pick is lost in EVERY round, the loop stops after
+// frontierClaimRounds bounded rounds and reports an honest "frontier exhausted"
+// — it never spins forever against a hot claim race. The skip-line count pins
+// the bound: 2 picks × frontierClaimRounds rounds, then stop.
+func TestNextFrontierExhaustedAfterBoundedRounds(t *testing.T) {
+	lost := claimReply{status: http.StatusConflict, body: `{"ok":false,"reason":"not_ready"}`}
+	srv := nextFrontierServer(t, map[string]claimReply{"task-a": lost, "task-b": lost}, nil)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runTaskNextFrontierArgs(w, dispatchCtx(srv.URL), []string{"worker-1", "--frontier"})
+	if code == exitOK {
+		t.Fatalf("exit = %d, want non-zero when the frontier is exhausted", code)
+	}
+	if !strings.Contains(se.String(), "frontier exhausted") {
+		t.Errorf("expected an honest frontier-exhausted message, got:\n%s", se.String())
+	}
+	if got, want := strings.Count(so.String(), "skipped"), 2*frontierClaimRounds; got != want {
+		t.Errorf("skip lines = %d, want %d (2 picks × %d bounded rounds — the loop must stop)",
+			got, want, frontierClaimRounds)
+	}
+}
+
 // The `bp task ready` capacity header names the frontier size from the SAME
 // taskboard.Frontier the `frontier` verb reads (two distinct-neighborhood ready
 // tasks → 2 independent). A fetch error would drop the header silently.
