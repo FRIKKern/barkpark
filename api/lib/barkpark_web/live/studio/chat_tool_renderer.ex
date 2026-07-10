@@ -311,7 +311,11 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   # ═══ Task / agent spawns (charter D40) ══════════════════════════════════════
 
-  @spawn_names ~w(Task Agent)
+  # The spawn tool NAMES are host-binary divergence knowledge — sourced from the
+  # ONE capability matrix (charter D66) rather than duplicated as a literal here.
+  # Compile-time read of a pure constructor: byte-identical to the old
+  # `~w(Task Agent)` (the no-tax golden proves the render never moved).
+  @spawn_names Barkpark.StudioChat.Runtime.Capabilities.claude().agent_spawn_names
 
   @doc """
   True when a tool_use is a sub-agent spawn. Tolerant by design: the tool name
@@ -350,4 +354,252 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
   end
 
   def spawn_label(name, _input), do: name || "Task"
+
+  # ═══ MCP result chips (charter D64) ═════════════════════════════════════════
+  #
+  # A DELIBERATE narrow exception to D38's shape-only dispatch: chip
+  # classification keys on OUR tool NAME (the `mcp__barkpark__` prefix) — safe
+  # ONLY because Barkpark controls the loopback server's naming (`bp mcp serve`).
+  # Host tool names stay shape-dispatched (`classify/1` above); this seam never
+  # fires for them, so the D38 law is untouched for anything we don't name.
+  @mcp_prefix "mcp__barkpark__"
+
+  # Summarize law (charter payload law): task_ready shipped 112,838 chars in ONE
+  # block. A chip NEVER dumps a result set — it shows at most this many hits with
+  # an honest "+N more"; the store keeps everything for the generic ⎿ row.
+  @chip_hit_cap 8
+
+  @list_keys ~w(docs hits results)
+
+  @doc """
+  Classify an MCP tool RESULT into a first-class chip, or `nil` (keep the generic
+  `●`/`⎿` row). `tool` is the persisted tool name, `output` the single text
+  block's text (charter D64). Two gates, both required:
+
+    1. `tool` begins with `mcp__barkpark__` — OUR loopback server.
+    2. `output` Jason-decodes to a JSON object. An `is_error` result is a PLAIN
+       string (never JSON) and a payload the recorder truncated mid-object is
+       invalid JSON — both fail the decode and honestly degrade to the generic
+       row. A `{"ok": false}` outcome (e.g. the empty-queue claim) is a real
+       non-result and also yields no chip.
+
+  Kind comes from the decoded payload: a non-empty result LIST
+  (`docs`/`hits`/`results`) is a `:search` chip (inline expandable hits, each
+  deep-linked by its OWN `type`); a single entity is a `:task` or `:paper` chip
+  by its `type`, deep-linking to the board (`/admin/projects?task=`) or the
+  public reader (`/papers/`). Pure + total — the SAME call on the live-append
+  and replayed paths yields identical HTML (the `diff?`/`spawn?` parity
+  precedent).
+  """
+  @spec chip(String.t() | nil, String.t() | nil) :: map() | nil
+  def chip(tool, output) when is_binary(tool) and is_binary(output) do
+    with true <- String.starts_with?(tool, @mcp_prefix),
+         {:ok, payload} when is_map(payload) <- decode_payload(output),
+         false <- payload["ok"] == false do
+      suffix =
+        binary_part(tool, byte_size(@mcp_prefix), byte_size(tool) - byte_size(@mcp_prefix))
+
+      build_chip(suffix, payload)
+    else
+      _ -> nil
+    end
+  end
+
+  def chip(_, _), do: nil
+
+  defp decode_payload(output) do
+    case Jason.decode(output) do
+      {:ok, map} when is_map(map) -> {:ok, map}
+      _ -> :error
+    end
+  end
+
+  # A non-empty result LIST is a search chip; otherwise a single entity chip.
+  defp build_chip(suffix, payload) do
+    case result_list(payload) do
+      [_ | _] = list -> search_chip(list)
+      _ -> entity_chip(payload, suffix)
+    end
+  end
+
+  defp result_list(payload) do
+    Enum.find_value(@list_keys, [], fn k ->
+      case payload[k] do
+        [_ | _] = list -> list
+        _ -> nil
+      end
+    end)
+  end
+
+  # A created/updated/fetched single entity: `{"doc": {…}}` (get/claim), or a
+  # top-level receipt carrying its own id (`{"id", "draft", "status"}` from
+  # task_create). Deep-links to the board for a task, the reader for a paper.
+  defp entity_chip(payload, suffix) do
+    case single_entity(payload) do
+      nil ->
+        nil
+
+      entity ->
+        if paper?(entity, suffix) do
+          %{kind: :paper, label: entity_label(entity), href: paper_href(entity)}
+        else
+          %{kind: :task, label: entity_label(entity), href: task_href(entity)}
+        end
+    end
+  end
+
+  defp single_entity(%{"doc" => doc}) when is_map(doc), do: doc
+  defp single_entity(%{"doc_id" => _} = payload), do: payload
+  defp single_entity(%{"id" => _} = payload), do: payload
+  defp single_entity(_), do: nil
+
+  # `type` on the payload is authoritative; the tool-name suffix is a fallback
+  # hint for a thinner receipt that omits it.
+  defp paper?(entity, suffix) do
+    entity["type"] == "paper" or String.starts_with?(suffix, "paper")
+  end
+
+  defp entity_label(entity) do
+    entity["title"] || entity_id(entity) || "result"
+  end
+
+  defp entity_id(entity) do
+    first_binary([entity["doc_id"], entity["id"], entity["_id"]])
+  end
+
+  defp task_href(entity) do
+    case entity_id(entity) do
+      id when is_binary(id) and id != "" -> "/admin/projects?task=" <> URI.encode_www_form(id)
+      _ -> nil
+    end
+  end
+
+  defp paper_href(entity) do
+    case first_binary([entity["slug"], entity_id(entity)]) do
+      slug when is_binary(slug) and slug != "" -> "/papers/" <> slug
+      _ -> nil
+    end
+  end
+
+  # Summarize a result set to at most @chip_hit_cap hits (payload law). Each hit
+  # deep-links by its OWN type — a task hit peeks the board, a paper hit opens
+  # the reader, anything else is honest inline text (no route exists nor should).
+  defp search_chip(list) do
+    shown =
+      list
+      |> Enum.take(@chip_hit_cap)
+      |> Enum.map(&hit/1)
+      |> Enum.reject(&is_nil/1)
+
+    total = length(list)
+    %{kind: :search, hits: shown, total: total, overflow: max(total - length(shown), 0)}
+  end
+
+  defp hit(h) when is_map(h) do
+    case first_binary([h["title"], entity_id(h)]) do
+      label when is_binary(label) and label != "" ->
+        %{label: label, type: h["type"], href: hit_href(h)}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp hit(_), do: nil
+
+  defp hit_href(%{"type" => "paper"} = h), do: paper_href(h)
+  defp hit_href(%{"type" => "task"} = h), do: task_href(h)
+  defp hit_href(_), do: nil
+
+  defp first_binary(values) do
+    Enum.find(values, fn v -> is_binary(v) and v != "" end)
+  end
+
+  @doc """
+  Render an MCP result chip (charter D64). `@chip` is a `chip/2` map. A task or
+  paper chip is a single deep-link pill; a search chip is an inline expandable
+  hit list, summarized to the first #{@chip_hit_cap} with an honest "+N more".
+  Emitted design tokens only (`var(--…)`), so `studio-literal-check` stays green.
+  """
+  attr :chip, :map, required: true
+
+  def tool_chip(%{chip: %{kind: :search}} = assigns) do
+    ~H"""
+    <div style="margin: 4px 0 0 16px;">
+      <details style="font-family: var(--font-mono); font-size: 12px;">
+        <summary
+          style="cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface);"
+        >
+          <span style="color: var(--primary);">◍</span>
+          <span data-gutter-text><%= @chip.total %> <%= result_word(@chip.total) %></span>
+        </summary>
+        <ul
+          :if={@chip.hits != []}
+          style="list-style: none; margin: 6px 0 0; padding: 0 0 0 12px; display: flex; flex-direction: column; gap: 3px;"
+        >
+          <li :for={hit <- @chip.hits} style="display: flex; gap: 6px; align-items: baseline;">
+            <span style="color: var(--primary); flex: none;">·</span>
+            <a
+              :if={hit.href}
+              href={hit.href}
+              style="color: var(--primary); text-decoration: none; overflow-wrap: anywhere;"
+              data-gutter-text
+            ><%= hit.label %></a>
+            <span
+              :if={is_nil(hit.href)}
+              style="overflow-wrap: anywhere;"
+              data-gutter-text
+            ><%= hit.label %></span>
+            <span :if={hit.type} class="text-dim" style="opacity: 0.6; flex: none;">
+              <%= hit.type %>
+            </span>
+          </li>
+        </ul>
+        <div
+          :if={@chip.overflow > 0}
+          class="text-dim"
+          style="padding: 3px 0 0 12px; opacity: 0.7;"
+        >
+          … +<%= @chip.overflow %> more
+        </div>
+      </details>
+    </div>
+    """
+  end
+
+  def tool_chip(%{chip: %{kind: kind}} = assigns) when kind in [:task, :paper] do
+    ~H"""
+    <a
+      :if={@chip.href}
+      href={@chip.href}
+      style="display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0 16px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface); text-decoration: none; color: inherit; font-family: var(--font-mono); font-size: 12px;"
+    >
+      <span style="color: var(--primary); flex: none;"><%= chip_glyph(@chip.kind) %></span>
+      <span style="overflow-wrap: anywhere;" data-gutter-text><%= @chip.label %></span>
+      <span class="text-dim" style="opacity: 0.6; flex: none;">
+        <%= chip_kind_label(@chip.kind) %> →
+      </span>
+    </a>
+    <div
+      :if={is_nil(@chip.href)}
+      style="display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0 16px; padding: 4px 10px; border: 1px solid var(--border-muted); border-radius: 999px; background: var(--muted-surface); font-family: var(--font-mono); font-size: 12px;"
+    >
+      <span style="color: var(--primary); flex: none;"><%= chip_glyph(@chip.kind) %></span>
+      <span style="overflow-wrap: anywhere;" data-gutter-text><%= @chip.label %></span>
+    </div>
+    """
+  end
+
+  def tool_chip(assigns), do: ~H""
+
+  defp chip_glyph(:task), do: "◈"
+  defp chip_glyph(:paper), do: "❐"
+  defp chip_glyph(_), do: "●"
+
+  defp chip_kind_label(:task), do: "task"
+  defp chip_kind_label(:paper), do: "paper"
+  defp chip_kind_label(_), do: ""
+
+  defp result_word(1), do: "result"
+  defp result_word(_), do: "results"
 end

@@ -26,6 +26,32 @@ defmodule Barkpark.StudioChat do
   `append_message/2` and `record_result_metrics/2` bump the session's sidebar
   fields (`summary`, `message_count`, usage totals, `last_active_at`) in the same
   transaction / atomic UPDATE, so the sidebar renders without scanning messages.
+
+  ## The needs-you strip (wave 12 — sidebar inbox)
+
+  `needs_you_strip/2` derives the sidebar's cross-session inbox from persisted
+  rows (cold-mount correct) plus the transient `studio_chat:activity` overlay
+  (live arrive/leave freshness only). "Away" simply means NOT the currently-open
+  session — there is no presence system. The **event-kind vocabulary** is the
+  strip's contract (S7's email notifications consume these EXACT kinds), in
+  strict priority order:
+
+    * `:pending_approval` — a pending ask row with role `"approval"` (a generic
+      tool wants permission). Store truth: `pending_approvals > 0` + a pending
+      `"approval"` row.
+    * `:awaiting_input` — a pending role `"question"` row (AskUserQuestion —
+      the agent asked YOU something).
+    * `:plan_ready` — a pending role `"plan"` row (ExitPlanMode — a proposed
+      plan awaits approval).
+    * `:working` — a turn is running (live overlay `:working`, or persisted
+      status `"working"` on a cold mount).
+    * `:finished_while_away` — the session settled (persisted status `"active"`
+      or `"exited"`) and `last_active_at > last_visited_at`: something happened
+      after you last looked. Visiting (`mark_visited/1`) clears it.
+
+  The three needs-you kinds map 1:1 onto the `@needs_you_roles` ask roles
+  (charter D31); `:finished_while_away` is the new away axis carried by the
+  `last_visited_at` column. A session in none of these states has no strip entry.
   """
   import Ecto.Query, warn: false
 
@@ -111,6 +137,7 @@ defmodule Barkpark.StudioChat do
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
       last_active_at: s.last_active_at,
+      last_visited_at: s.last_visited_at,
       archived_at: s.archived_at,
       inserted_at: s.inserted_at,
       updated_at: s.updated_at
@@ -1328,6 +1355,188 @@ defmodule Barkpark.StudioChat do
     |> where([s], s.id == ^session_id and s.pending_approvals > 0)
     |> Repo.update_all(inc: [pending_approvals: -1], set: [updated_at: DateTime.utc_now()])
   end
+
+  # ---------------------------------------------------------------------------
+  # the needs-you strip (wave 12 — sidebar inbox; kinds documented in @moduledoc)
+  # ---------------------------------------------------------------------------
+
+  # Strip kinds in STRICT priority order (the moduledoc vocabulary). The order
+  # IS the sort: an approval outranks a question outranks a plan outranks a
+  # running turn outranks an unseen finish.
+  @strip_kinds [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+
+  # Ask role → strip kind (charter D31 roles). Precedence inside one session
+  # with SEVERAL pending asks follows @strip_kinds: approval > question > plan.
+  @role_strip_kinds [
+    {"approval", :pending_approval},
+    {"question", :awaiting_input},
+    {"plan", :plan_ready}
+  ]
+
+  # The persisted statuses that mean "nothing is running": `active` (turn
+  # settled — the Recorder flips it on every result frame) and `exited` (the
+  # process died). `working` deliberately is NOT here — a mid-turn session is
+  # `:working`, never `:finished_while_away`.
+  @settled_statuses ~w(active exited)
+
+  @doc """
+  The strip-kind vocabulary in strict priority order (wave 12; see the
+  moduledoc). S7's notification seam consumes these EXACT atoms.
+  """
+  @spec strip_kinds() :: [atom()]
+  def strip_kinds, do: @strip_kinds
+
+  @doc """
+  Stamp `last_visited_at = now` — the admin just looked at this session (opened
+  it, switched away from it, or watched it settle on screen). Clears the session
+  from the needs-you strip's `:finished_while_away` state. Deliberately does NOT
+  bump `last_active_at` (visiting must not reorder the sidebar — the `set_draft/2`
+  precedent). Returns `{:ok, session}` or `{:error, :not_found}`.
+  """
+  @spec mark_visited(String.t() | nil) :: {:ok, Session.t()} | {:error, :not_found}
+  def mark_visited(session_id) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(last_visited_at: DateTime.utc_now())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  The PENDING ask roles per session, for a list of session ids — the store-truth
+  ingredient the strip's needs-you kinds derive from on a COLD mount (the
+  denormalised `pending_approvals` counter says *that* the agent needs you; the
+  pending rows' roles say *how*). One grouped query:
+  `%{session_id => ["approval" | "question" | "plan", …]}`; a session with no
+  pending ask simply has no key.
+  """
+  @spec pending_ask_roles([String.t()]) :: %{String.t() => [String.t()]}
+  def pending_ask_roles([]), do: %{}
+
+  def pending_ask_roles(session_ids) when is_list(session_ids) do
+    Message
+    |> where([m], m.session_id in ^session_ids and m.role in ^@needs_you_roles)
+    |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+    |> select([m], {m.session_id, m.role})
+    |> Repo.all()
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+  end
+
+  @doc """
+  Derive the needs-you strip (wave 12) — PURE cross-session aggregation over the
+  already-loaded sidebar rows. Returns entries
+  `%{session: %Session{}, kind: strip_kind, line: String.t() | nil}` sorted by
+  kind priority (`strip_kinds/0` order), then recency (most recently active
+  first) within a kind.
+
+  Options:
+
+    * `:current_session_id` — the ON-SCREEN session, excluded ("away" = not the
+      session you are looking at; there is no presence system).
+    * `:pending_roles` — `pending_ask_roles/1`'s map (store truth for the
+      needs-you kinds; cold-mount correct).
+    * `:activity` — the transient `studio_chat:activity` overlay
+      (`%{session_id => %{state: atom, line: String.t() | nil}}`). Live
+      freshness ONLY — with an empty overlay (a cold mount) the derivation is
+      still correct from persisted rows alone.
+  """
+  @spec needs_you_strip([Session.t()], keyword()) ::
+          [%{session: Session.t(), kind: atom(), line: String.t() | nil}]
+  def needs_you_strip(sessions, opts \\ []) when is_list(sessions) do
+    current = Keyword.get(opts, :current_session_id)
+    pending_roles = Keyword.get(opts, :pending_roles, %{})
+    activity = Keyword.get(opts, :activity, %{})
+
+    sessions
+    |> Enum.reject(&(&1.id == current))
+    |> Enum.flat_map(fn s ->
+      act = Map.get(activity, s.id)
+
+      case strip_kind(s, Map.get(pending_roles, s.id, []), act) do
+        nil -> []
+        kind -> [%{session: s, kind: kind, line: activity_line(act)}]
+      end
+    end)
+    |> Enum.sort_by(fn %{kind: kind, session: s} ->
+      {Enum.find_index(@strip_kinds, &(&1 == kind)), -recency_key(s)}
+    end)
+  end
+
+  @doc """
+  One session's strip kind (wave 12) — or nil (no entry). PURE; the per-session
+  half of `needs_you_strip/2`, public so the derivation is unit-testable kind by
+  kind. Precedence: a pending ask (any needs-you role) beats a running turn
+  beats an unseen finish.
+
+  `pending_roles` is this session's pending ask roles (`pending_ask_roles/1`);
+  `activity` is its live overlay entry or nil. The overlay only ADDS liveness
+  (`:working`/`:needs_you` between store writes) — the persisted row alone
+  yields the same kinds on a cold mount.
+  """
+  @spec strip_kind(Session.t(), [String.t()], map() | nil) :: atom() | nil
+  def strip_kind(session, pending_roles, activity) do
+    pending = is_integer(session.pending_approvals) and session.pending_approvals > 0
+
+    cond do
+      pending or activity_state(activity) == :needs_you ->
+        needs_you_kind(pending_roles)
+
+      activity_state(activity) == :working or session.status == "working" ->
+        :working
+
+      finished_while_away?(session) ->
+        :finished_while_away
+
+      true ->
+        nil
+    end
+  end
+
+  @doc """
+  True when a session settled AFTER the admin last looked (wave 12): persisted
+  status is a settled one (`active` — the Recorder flips it on every result
+  frame — or `exited`) AND `last_active_at > last_visited_at`. STRICT
+  comparison + a nil `last_visited_at` reads false: a freshly-created row
+  (stamped visited at birth) and a pre-migration row (never stamped) both stay
+  honestly quiet — the strip never fakes an unseen finish.
+  """
+  @spec finished_while_away?(Session.t()) :: boolean()
+  def finished_while_away?(%Session{
+        status: status,
+        last_active_at: %DateTime{} = active,
+        last_visited_at: %DateTime{} = visited
+      })
+      when status in @settled_statuses,
+      do: DateTime.compare(active, visited) == :gt
+
+  def finished_while_away?(_), do: false
+
+  # Highest-priority kind among this session's pending ask roles. A needs-you
+  # signal with NO known pending row (an overlay :needs_you racing the store
+  # read) degrades to the generic :pending_approval — never dropped.
+  defp needs_you_kind(roles) do
+    Enum.find_value(@role_strip_kinds, :pending_approval, fn {role, kind} ->
+      role in roles && kind
+    end)
+  end
+
+  defp activity_state(%{state: state}), do: state
+  defp activity_state(_), do: nil
+
+  defp activity_line(%{line: line}) when is_binary(line), do: line
+  defp activity_line(_), do: nil
+
+  # Recency for the within-kind sort: microseconds of last_active_at (fallback
+  # inserted_at; 0 when both are absent — sinks to the bottom of its kind).
+  defp recency_key(%Session{last_active_at: %DateTime{} = at}),
+    do: DateTime.to_unix(at, :microsecond)
+
+  defp recency_key(%Session{inserted_at: %DateTime{} = at}),
+    do: DateTime.to_unix(at, :microsecond)
+
+  defp recency_key(_), do: 0
 
   # ---------------------------------------------------------------------------
   # titles (charter D13 — layered, clobber-guarded)

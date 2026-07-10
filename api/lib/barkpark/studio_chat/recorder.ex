@@ -112,7 +112,12 @@ defmodule Barkpark.StudioChat.Recorder do
       resume: Map.get(opts, :resume, false),
       model: Map.get(opts, :model),
       effort: Map.get(opts, :effort),
-      bypass_armed: Map.get(opts, :bypass_armed, false)
+      bypass_armed: Map.get(opts, :bypass_armed, false),
+      # The chat admin's principal (charter D63): the Session mints its
+      # loopback `bp mcp serve` credential from this — never exceeding the
+      # human's rights. Absent ⇒ the spawn simply has no hands (fail-closed;
+      # the chat itself is unchanged).
+      minter: Map.get(opts, :minter)
     }
 
     case ClaudeChat.start_session(%{
@@ -371,13 +376,25 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   def handle_info({:claude_chat_permission, ask} = msg, state) do
-    persist_approval_ask(state.session_id, ask)
-    broadcast(state, msg)
+    if ClaudeChat.mcp_auto_approved?(ask.tool_name) do
+      # D65: a READ-ONLY loopback tool auto-approves at this single D31
+      # ask-routing seam — in EVERY mode, plan included. Answered wire-side
+      # (the Session echoes its tracked original input as `updatedInput`,
+      # D32) and NEVER persisted or broadcast as an ask: no pending row, no
+      # needs-you flip, no card — live and replay agree the question was
+      # never the human's. Mutating loopback tools (task_next claims,
+      # doc_create writes, …) fall through to the honest card below.
+      if pid = state.session, do: ClaudeChat.respond_permission(pid, ask.request_id, :allow)
+      {:noreply, touch(state)}
+    else
+      persist_approval_ask(state.session_id, ask)
+      broadcast(state, msg)
 
-    {:noreply,
-     state
-     |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
-     |> touch()}
+      {:noreply,
+       state
+       |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
+       |> touch()}
+    end
   end
 
   def handle_info({:claude_chat_control, _kind, _rid, _resp} = msg, state) do
@@ -425,14 +442,22 @@ defmodule Barkpark.StudioChat.Recorder do
   # the id back to indent them under the matching spawn row. A top-level frame
   # (null parent) writes the same shape it always did.
   defp persist_assistant_blocks(state, blocks, ev) when is_list(blocks) do
-    parent = parent_meta(ev)
+    # The frame-level metadata every row this frame produces inherits: the
+    # sub-agent parent (D40) AND the wire frame uuid (D70). `parent_agent` alone
+    # decides sub-agent routing (the TodoWrite top-level guard below keys on it);
+    # `frame` adds the uuid on top and is what each row actually stamps, so a
+    # sub-agent row carries BOTH ids. NOTE: never fold frame_uuid into the routing
+    # value — a real top-level TodoWrite frame always carries a uuid, so a merged
+    # value would fail the `== %{}` guard and mis-route the turn's checklist.
+    parent_agent = parent_meta(ev)
+    frame = Map.merge(parent_agent, frame_uuid_meta(ev))
 
     Enum.reduce(blocks, state, fn
       %{"type" => "text", "text" => text}, st when is_binary(text) ->
         if String.trim(text) != "" do
           persist(
             st.session_id,
-            %{role: "assistant", source_markdown: text, metadata: parent},
+            %{role: "assistant", source_markdown: text, metadata: frame},
             "assistant"
           )
         end
@@ -442,7 +467,7 @@ defmodule Barkpark.StudioChat.Recorder do
       %{"type" => "tool_use", "name" => name} = block, st ->
         input = block["input"]
 
-        if StudioChat.todo_shaped?(input) and parent == %{} do
+        if StudioChat.todo_shaped?(input) and parent_agent == %{} do
           # Only a TOP-LEVEL TodoWrite is the turn's living checklist (D39) —
           # a sub-agent's todo list must never hijack the main turn's card, so
           # a child frame's TodoWrite persists as a plain (indented) tool row.
@@ -454,14 +479,13 @@ defmodule Barkpark.StudioChat.Recorder do
               role: "tool",
               source_markdown: tool_line(name, input),
               metadata:
-                Map.merge(
-                  %{
-                    "tool" => name,
-                    "input" => input,
-                    "tool_use_id" => block["id"]
-                  },
-                  parent
-                )
+                %{
+                  "tool" => name,
+                  "input" => input,
+                  "tool_use_id" => block["id"]
+                }
+                |> Map.merge(mcp_meta(name))
+                |> Map.merge(frame)
             },
             "tool"
           )
@@ -476,6 +500,17 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp persist_assistant_blocks(state, _, _), do: state
 
+  # Tag OUR loopback server's tool rows (charter D64) so the chip renderer
+  # (scc-w12-native-chips) can classify persisted rows without re-parsing
+  # names: `"mcp" => true` + the bare tool (`task_ready`, `bp_search_query`).
+  # `%{}` for every other tool, so a non-loopback row's metadata is unchanged.
+  defp mcp_meta(name) do
+    case ClaudeChat.mcp_tool_name(name) do
+      nil -> %{}
+      tool -> %{"mcp" => true, "mcp_tool" => tool}
+    end
+  end
+
   # `%{"parent_tool_use_id" => id}` for a sub-agent frame; `%{}` for a top-level
   # frame (null parent) so the row's metadata is unchanged.
   defp parent_meta(ev) when is_map(ev) do
@@ -486,6 +521,23 @@ defmodule Barkpark.StudioChat.Recorder do
   end
 
   defp parent_meta(_), do: %{}
+
+  # The top-level `uuid` the CLI stamps on EVERY frame (charter D70 — there is
+  # NO `message.uuid`; the wire id is the frame uuid). Capturing it into each
+  # persisted row's `metadata.frame_uuid` (jsonb, no migration) turns our
+  # message log into a uuid-keyed index of the turn's rows — the branch-point
+  # substrate a future fork/rewind UI (wave-13) replays against, with D1 intact
+  # (we never read the CLI's private transcript jsonl). A frame with no uuid
+  # (a synthetic/legacy frame) leaves the row's metadata unchanged, exactly as
+  # `parent_meta` does. Kept a standalone clause, disjoint from the mcp tagging.
+  defp frame_uuid_meta(ev) when is_map(ev) do
+    case ev["uuid"] do
+      uuid when is_binary(uuid) and uuid != "" -> %{"frame_uuid" => uuid}
+      _ -> %{}
+    end
+  end
+
+  defp frame_uuid_meta(_), do: %{}
 
   # TodoWrite collapse (charter D39). The turn's FIRST TodoWrite persists a fresh
   # "todo" row and becomes the turn's canonical checklist; every later TodoWrite

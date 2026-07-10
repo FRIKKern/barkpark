@@ -502,6 +502,93 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # The wire id is a TOP-LEVEL frame uuid (charter D70; there is no message.uuid).
+  # Persisting it into each row's metadata makes our message log the uuid-keyed
+  # branch-point index a wave-13 fork/rewind UI replays against. "Replay
+  # availability" here == the value survives the store round-trip that replay
+  # reads back (`list_messages`), which is exactly the read path replay uses.
+  describe "frame uuid capture (charter D70)" do
+    test "an assistant frame stamps frame_uuid on every row it produces",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "uuid" => "frame-abc-123",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "the answer"},
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_x",
+                 "name" => "Bash",
+                 "input" => %{"command" => "ls"}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+
+      text = Enum.find(rows, &(&1.role == "assistant" and &1.source_markdown == "the answer"))
+      assert text.metadata["frame_uuid"] == "frame-abc-123"
+
+      tool = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_x"))
+      assert tool.metadata["frame_uuid"] == "frame-abc-123"
+    end
+
+    test "frame_uuid and parent_tool_use_id coexist on a sub-agent row",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "uuid" => "frame-child-1",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{"content" => [%{"type" => "text", "text" => "child thinking"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "child thinking"))
+      assert row.metadata["frame_uuid"] == "frame-child-1"
+      assert row.metadata["parent_tool_use_id"] == "toolu_spawn"
+    end
+
+    test "a frame with no uuid leaves metadata unstamped (legacy/synthetic frame)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "no uuid here"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "no uuid here"))
+      refute Map.has_key?(row.metadata, "frame_uuid")
+    end
+
+    test "an empty-string uuid is treated as absent (no stamp)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "uuid" => "",
+           "message" => %{"content" => [%{"type" => "text", "text" => "blank uuid"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "blank uuid"))
+      refute Map.has_key?(row.metadata, "frame_uuid")
+    end
+  end
+
   describe "thinking pulse persistence (charter D41)" do
     defp thinking_tokens(n),
       do:
@@ -1233,5 +1320,112 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
     assert StudioChat.list_messages(sid)
            |> Enum.any?(&(&1.source_markdown == "landed after tab close"))
+  end
+
+  describe "mcp loopback (charter D64/D65 — scc-w12-mcp-loopback)" do
+    test "a loopback tool row is TAGGED in persisted metadata (S5 consumes this)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "tu-mcp-1",
+                 "name" => "mcp__barkpark__task_ready",
+                 "input" => %{}
+               },
+               %{
+                 "type" => "tool_use",
+                 "id" => "tu-plain-1",
+                 "name" => "Bash",
+                 "input" => %{"command" => "ls"}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+
+      mcp_row = Enum.find(rows, &(&1.metadata["tool_use_id"] == "tu-mcp-1"))
+      assert mcp_row.role == "tool"
+      assert mcp_row.metadata["mcp"] == true
+      assert mcp_row.metadata["mcp_tool"] == "task_ready"
+      # the FULL wire name stays in "tool" — S5 dispatches on OUR names (D64)
+      assert mcp_row.metadata["tool"] == "mcp__barkpark__task_ready"
+
+      # a non-loopback row's metadata is byte-unchanged: no mcp keys
+      plain = Enum.find(rows, &(&1.metadata["tool_use_id"] == "tu-plain-1"))
+      refute Map.has_key?(plain.metadata, "mcp")
+      refute Map.has_key?(plain.metadata, "mcp_tool")
+    end
+
+    test "a READ-ONLY loopback ask auto-approves: allow hits the wire; no card, no needs-you",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{
+           request_id: "mcp-r1",
+           tool_name: "mcp__barkpark__task_ready",
+           input: %{},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      # the allow reached the wire: the `cat` fake echoes the Session's
+      # control_response straight back, and the Recorder rebroadcasts it
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "control_response",
+                        "response" => %{
+                          "request_id" => "mcp-r1",
+                          "response" => %{"behavior" => "allow"}
+                        }
+                      }},
+                     2_000
+
+      # never surfaced as an ask: no broadcast card, no pending row, no
+      # needs-you flip — live and replay agree it was never the human's
+      refute_receive {:claude_chat_permission, _}, 100
+      refute_receive {:chat_activity, _, %{state: :needs_you}}, 100
+      assert StudioChat.get_session(sid).pending_approvals == 0
+      assert StudioChat.list_messages(sid) == []
+    end
+
+    test "a MUTATING loopback ask still persists the pending card and flips needs-you",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{
+           request_id: "mcp-w1",
+           tool_name: "mcp__barkpark__bp_doc_create",
+           input: %{"type" => "task"},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      # the honest approval card: broadcast + persisted pending + needs-you
+      assert_receive {:claude_chat_permission, %{request_id: "mcp-w1"}}
+      assert_receive {:chat_activity, _, %{state: :needs_you}}
+      assert StudioChat.get_session(sid).pending_approvals == 1
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "mcp-w1"))
+      assert row.role == "approval"
+      assert row.metadata["approval_status"] == "pending"
+    end
   end
 end

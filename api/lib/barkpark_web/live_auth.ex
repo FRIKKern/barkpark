@@ -33,6 +33,13 @@ defmodule BarkparkWeb.LiveAuth do
   import Phoenix.Component, only: [assign: 3]
 
   alias Barkpark.Auth
+  alias BarkparkWeb.Studio.ReturnTo
+
+  # A chat-session deep link (`/studio/chat/:id`) — the shape the notifier emails
+  # point at (charter D69). ONLY these earn a `return_to` round-trip; the bare
+  # `/studio/chat` new-chat landing (no resource to return to) and every other
+  # admin surface keep the `/studio` funnel, so the gate suite stays byte-stable.
+  @chat_deep_link ~r{^/studio/chat/[^/?#]+$}
 
   def on_mount(:admin, _params, session, socket) do
     authorize(socket, session, ["admin"], "Admin access required")
@@ -141,7 +148,44 @@ defmodule BarkparkWeb.LiveAuth do
         {:halt,
          socket
          |> put_flash(:error, denial_flash)
-         |> redirect(to: "/studio")}
+         |> redirect(to: denial_target(socket, session))}
     end
   end
+
+  # D69 — the email-notification promise. An ANONYMOUS visitor bounced off a chat
+  # deep link (`/studio/chat/:id`, the notifier's link) is sent to `/login` with
+  # a validated `return_to`, so signing in lands them back on that exact session.
+  # Everyone else keeps the `/studio` funnel: an authenticated-but-insufficient
+  # token would only loop through login (it already has a session), and a bare
+  # section landing has no resource to return to. Falls back to `/studio` when
+  # the request path is unavailable (a connected patch has no request URI).
+  defp denial_target(socket, session) do
+    with true <- anonymous?(session),
+         %URI{path: path} = uri when is_binary(path) <- requested_uri(socket),
+         true <- Regex.match?(@chat_deep_link, path),
+         dest when is_binary(dest) <- ReturnTo.sanitize_dest(path <> query_suffix(uri.query)) do
+      ReturnTo.with_return_to("/login", dest)
+    else
+      _ -> "/studio"
+    end
+  end
+
+  defp anonymous?(session) do
+    blank?(session["api_token"]) and blank?(session["user_session"])
+  end
+
+  defp blank?(value), do: not (is_binary(value) and value != "")
+
+  # The path the browser asked for — exposed by `get_connect_info/2` ONLY on the
+  # dead (HTTP) render, which is exactly the cold email-click that must round-trip.
+  # A connected socket's connect_info is the endpoint's session-only map (no
+  # `:uri`), so this returns nil there and the caller funnels to `/studio`.
+  defp requested_uri(socket) do
+    get_connect_info(socket, :uri)
+  rescue
+    _ -> nil
+  end
+
+  defp query_suffix(query) when is_binary(query) and query != "", do: "?" <> query
+  defp query_suffix(_query), do: ""
 end

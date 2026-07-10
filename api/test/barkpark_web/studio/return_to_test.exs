@@ -92,6 +92,35 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
     end
   end
 
+  describe "sanitize_dest/1 (login-return destination — charter D69)" do
+    test "admits the FLAT /studio deep links the notifier links to" do
+      assert ReturnTo.sanitize_dest("/studio/chat/abc-123") == "/studio/chat/abc-123"
+      assert ReturnTo.sanitize_dest("/studio/chat/abc?panel=diff") == "/studio/chat/abc?panel=diff"
+      assert ReturnTo.sanitize_dest("/studio/tmux") == "/studio/tmux"
+      assert ReturnTo.sanitize_dest("/studio") == "/studio"
+    end
+
+    test "still admits the scoped grammar (superset of sanitize/1)" do
+      assert ReturnTo.sanitize_dest(@scoped) == @scoped
+      assert ReturnTo.sanitize_dest("/w/ws/p/proj/d/ds/studio/media") == "/w/ws/p/proj/d/ds/studio/media"
+    end
+
+    test "rejects off-origin, authority tricks, and non-Studio paths" do
+      assert ReturnTo.sanitize_dest("https://evil.com") == nil
+      assert ReturnTo.sanitize_dest("//evil.com") == nil
+      assert ReturnTo.sanitize_dest("//evil.com/studio/chat/x") == nil
+      assert ReturnTo.sanitize_dest("/admin") == nil
+      assert ReturnTo.sanitize_dest("/studioevil") == nil
+      assert ReturnTo.sanitize_dest("") == nil
+      assert ReturnTo.sanitize_dest(nil) == nil
+    end
+
+    test "rejects dot-segment traversal (incl. %2e spellings)" do
+      assert ReturnTo.sanitize_dest("/studio/chat/../../logout") == nil
+      assert ReturnTo.sanitize_dest("/studio/%2e%2e/logout") == nil
+    end
+  end
+
   describe "with_return_to/2" do
     test "appends a www-form-encoded return_to when non-empty" do
       assert ReturnTo.with_return_to("/studio/chat", @scoped) ==

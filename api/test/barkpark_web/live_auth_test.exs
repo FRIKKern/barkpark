@@ -89,4 +89,49 @@ defmodule BarkparkWeb.LiveAuthTest do
       assert {:ok, _view, _html} = live(conn, @settings_path)
     end
   end
+
+  describe "chat deep-link return_to (charter D69 — the email-notification promise)" do
+    test "an anonymous hit on /studio/chat/:id redirects to /login with the path preserved",
+         %{conn: conn} do
+      conn = init_test_session(conn, %{})
+      sid = Ecto.UUID.generate()
+
+      assert {:error, {:redirect, %{to: to}}} = live(conn, "/studio/chat/#{sid}")
+      assert to =~ "/login?return_to="
+
+      %URI{path: "/login", query: query} = URI.parse(to)
+      assert URI.decode_query(query)["return_to"] == "/studio/chat/#{sid}"
+    end
+
+    test "the original query string survives into the return_to", %{conn: conn} do
+      conn = init_test_session(conn, %{})
+      sid = Ecto.UUID.generate()
+
+      assert {:error, {:redirect, %{to: to}}} = live(conn, "/studio/chat/#{sid}?panel=diff")
+
+      assert URI.decode_query(URI.parse(to).query)["return_to"] ==
+               "/studio/chat/#{sid}?panel=diff"
+    end
+
+    test "signing in with the return_to lands back on the exact session", %{conn: conn} do
+      sid = Ecto.UUID.generate()
+
+      conn = post(conn, "/login", %{"token" => @admin_token, "return_to" => "/studio/chat/#{sid}"})
+
+      assert redirected_to(conn) == "/studio/chat/#{sid}"
+    end
+
+    test "the bare /studio/chat new-chat landing keeps the /studio funnel", %{conn: conn} do
+      conn = init_test_session(conn, %{})
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/chat")
+    end
+
+    test "an authenticated-but-insufficient token keeps the /studio funnel (no login loop)",
+         %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @reader_token})
+      sid = Ecto.UUID.generate()
+
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/chat/#{sid}")
+    end
+  end
 end

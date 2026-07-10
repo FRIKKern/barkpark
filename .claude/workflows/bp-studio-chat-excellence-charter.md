@@ -1028,6 +1028,209 @@ already assumed.
   real capture shows it, gate the vanish-flip on "no non-terminal workflow
   agents".)
 
+### Wave-12 decisions (2026-07-10)
+
+- **D63 — Loopback credential: mint an ApiToken, authorize through the grants
+  gate — NEVER Access.mint.** Proven by red/green run: a raw `Access.mint/2`
+  token lives in the `grants` table (`link_token_hash`) and
+  `Auth.verify_token/1` (api_tokens, `kind == "api"` only) rejects it
+  `{:error, :unauthorized}` — built as the original task text said, the
+  loopback fails silently. The mint is a NEW function patterned on
+  `create_share_token/5`'s insert block (auth.ex:437-469): `kind:"api"`,
+  label `"claude-session <sid>"`, curated REAL permissions (never the opaque
+  `share-edit-*` set — those are engineered to deny membership-gated routes,
+  the opposite of what `bp mcp serve` needs; never `admin`; never
+  caller-supplied), workspace-scoped, and a NEW short session TTL constant
+  (minutes–hours; `clamp_ttl/1`'s floor/default is 7 days, so it cannot be
+  reused). Authorization happens UP FRONT via `Tenancy.Auth.authorize/3` —
+  the grants no-escalation philosophy, borrowed as a gate, not as the
+  credential. Revocation rides BOTH `ClaudeChat.Session.terminate/2` clauses
+  (mirror `cleanup_stderr/1`, claude_chat.ex:700-716; `Auth.revoke_token/1`
+  is idempotent). The short TTL is the REQUIRED crash backstop — terminate/2
+  never runs on a brutal VM kill. Injection point: the mcp-config `env`
+  block (`BARKPARK_API_URL`/`BARKPARK_API_TOKEN`, mcp_serve.go:191, tested at
+  mcp_stdio_smoke_test.go:238-239) — without it the child `bp` inherits the
+  HOST's saved guerrilla ADMIN config with zero isolation (proven live).
+
+- **D64 — Loopback wire truth (probed live on 2.1.206).** `--mcp-config
+  <file> --strict-mcp-config` WORKS end-to-end (titles.ex:103 was a false
+  friend — it emits strict ALONE; the pairing was greenfield and is now
+  proven): init frame carries `mcp_servers:[{"name":"barkpark","status":
+  "connected"}]` and ONLY our server. `--tools tasks` advertises the 6
+  curated `mcp__barkpark__task_*`; `--tools all` advertises 108 (incl.
+  `bp_search_query`, `bp_doc_*`) with no degradation. We spawn `--tools all`
+  — the Paper-writing and search legs of the demo need the bridged verbs;
+  the 40-tool ceiling is a Cursor limit, not Claude's (140 total handled
+  fine). Wire shape for chips: `tools/call` returns ONE `{"type":"text"}`
+  block whose `text` is a JSON-encoded STRING → `Jason.decode` it to
+  `{"ok":true,"docs":[...]}`; error results carry `is_error:true` + a plain
+  string. Chips dispatch on OUR tool NAME (`mcp__barkpark__` prefix) — a
+  deliberate, narrow exception to D38's shape-not-name law, safe ONLY
+  because we control the server's naming; host-binary tool names stay
+  shape-dispatched. Payload law: `task_ready` returned 112,838 chars in one
+  block — the chip parser truncates/summarizes and never assumes compact.
+
+- **D65 — Loopback permission policy: reads auto-approve, writes ride the
+  approval cards.** In a bare `-p` run the first MCP tool_use is DENIED
+  ("you haven't granted it yet"); the live chat routes asks through
+  `--permission-prompt-tool stdio` → `can_use_tool` control_requests, so the
+  SEAM exists but the policy did not. Policy: read-only barkpark loopback
+  tools (task_ready/show/prime/get, search, doc reads) auto-approve at the
+  single D31 ask-routing seam in EVERY mode; mutating tools (task_create/
+  close, doc mutate/publish) surface the D31 approval card — that card IS
+  the demo's "pinged me when it needed me" beat, and it keeps plan mode
+  fail-closed for writes. Live-append and replay must agree (one seam).
+
+- **D66 — No-tax golden = SCOPED region byte-lock; NO defp promotion, NO
+  time-freeze.** Probe: the rail region is byte-identical across two fully
+  independent fixture-replay mounts (4867 == 4867 bytes), and the ENTIRE
+  clock/randomness surface of chat_live.ex is two sites — sidebar
+  `session_stamp`/`age_label` (`DateTime.utc_now`, chat_live.ex:4901-4916,
+  rendered at :2033) and one new-session-only `Ecto.UUID.generate` (:2859,
+  never fires under fixture replay). So the capabilities matrix golden
+  scopes to the transcript+rail region (split on `data-role="agents-rail"` /
+  `id="chat-transcript"`, the existing `rail_html/1` pattern at
+  chat_live_test.exs:3580), fed by the frozen fixtures through a mounted
+  view, committed per the email_golden characterisation doctrine (regenerate
+  in the SAME diff, justify in review). The digest's feared prerequisites
+  (promote 6 defp components, freeze the clock) are NOT required for this
+  scope; whole-page goldens stay banned. Add one transcript-POPULATED
+  fixture case so `message_body` is actually in the byte-diff.
+
+- **D67 — Harness reality: per-PR replay is already free; nightly lives on
+  guerrilla; the pin is 2.1.206.** Bare `mix test` on every PR already runs
+  the six-file suite + frozen fixtures (488/0 at seed 37) — the per-PR
+  replay leg needs documentation, not construction. The real-binary suite is
+  GREEN on 2.1.206 (5/0 via `CLAUDE_BIN=$HOME/.local/bin/claude
+  scripts/claude-chat-e2e.sh`), so the pin target is 2.1.206. No version
+  pin/detection exists in code — the harness adds a `claude --version`
+  assertion (refuse, never silent-skip; PATH decoys are real: the cmux
+  wrapper is FIRST on PATH and a stale npm global 2.1.84 exists). Nightly
+  lane = cron on guerrilla (authenticated native install, 2.1.206,
+  `autoUpdates:false` — the only confirmed host; GH-hosted runners have
+  neither binary nor auth). MCP tool_use/tool_result fixtures are NEW files
+  captured on 2.1.206; the wave-10 three stay frozen (D62 law).
+
+- **D68 — "Launched the epic-cycle" is a Skill/Workflow act, NOT MCP.**
+  Proven live: the Workflow tool + `bp-epic-cycle` skill/slash-command are
+  advertised to a claude subprocess from repo cwd (and from `api/`; gone
+  from `/tmp` — project-scoped), `Skill(bp-epic-cycle)` loads, and
+  `Workflow({name})` actually launches — self-aborting only on the missing
+  `args.wish` (the skill's own invoke line omits it). The fix is to TEACH
+  the shape: correct the skill's invoke line + one `render_appendix` hint;
+  no new launch infrastructure. SAFETY CORRECTION: plan mode did NOT gate
+  Skill/Workflow in bare-CLI probes (`permission_denials: []` — falsifies
+  this file's own "plan cannot execute" claim for that tool class).
+  REAL-ARGV VERDICT (probed 2026-07-10 on 2.1.206, wave-12 S3; permanent
+  probe `mix test --only probe_plan_gating`): under the exact chat argv
+  (`--permission-mode plan --permission-prompt-tool stdio`, scripted deny
+  responder, haiku) the Workflow tool_use could NOT be induced to fire —
+  three runs, three MODEL-level refusals: once routed through an
+  `AskUserQuestion` ask that DID reach our stdio seam ("Plan mode is
+  active, which blocks me from calling the Workflow tool"), twice a prose
+  refusal naming the forced-launch prompt an injection ("Plan Mode is
+  active, which means I cannot run non-readonly tools like Workflow"). No
+  `can_use_tool` ask for Workflow itself was ever emitted;
+  `permission_denials` stayed `[]`. VERDICT: the plan-mode gate on
+  Workflow is MODEL-LEVEL COURTESY (system-prompt discipline), not CLI
+  enforcement — the bare-CLI finding stands (the CLI executes Workflow in
+  plan mode when the model does try) and nothing in the chat argv adds
+  enforcement. The fail-closed guard therefore TRANSFERS TO S4
+  (`scc-w12-mcp-loopback`): plan-mode spawns add `--disallowedTools
+  "Workflow"` (bypass/acceptEdits keep it) — prompt discipline one
+  jailbreak away is not a gate.
+
+- **D69 — Cold-click deep links must carry return_to.** Proven live on
+  guerrilla: anonymous `/studio/chat/:id` AND `/admin/projects?task=...`
+  both 302 to bare `/studio` — `LiveAuth.authorize_user/3`
+  (live_auth.ex:134-146) hardcodes the target and discards `_params`;
+  `LiveScope.deny/1` (:393-396) same class toward `/login`. Papers are
+  public and unaffected. A notification email's cold click dead-ends —
+  invisible in dev (dev fallback is always admin), prod-only. Fix: wire
+  `Studio.ReturnTo.with_return_to/sanitize` through both denial redirects,
+  per the two live precedents (resolve_workspace.ex:129,
+  grant_controller.ex:58-59). Ships WITH notify — the email promise is
+  dishonest without it.
+
+- **D70 — The wire id is a TOP-LEVEL frame uuid; fork verdict = floor built,
+  ceiling banked; D26 STAYS CLOSED.** (S8 fork-probe, real binary 2.1.206.)
+
+  **Ground truth (probed 2026-07-10, haiku-pinned, `--max-turns 1` per D56):**
+  - EVERY frame carries a top-level `uuid` — proven across `system/init`,
+    `system/thinking_tokens`, `system/hook_*`, `assistant`, `rate_limit_event`,
+    and `result` (stream-json `--verbose` dump: 23/23 frames had `uuid`, all
+    distinct). **There is NO `message.uuid`** — the earlier task title's premise
+    is wrong; the wire id lives at the frame envelope. NOTE a single logical
+    assistant turn streams as MULTIPLE assistant frames, each with its OWN uuid
+    (2 assistant frames in a one-word reply), so uuid granularity is
+    per-frame, finer than per-turn.
+  - `--resume <id> --fork-session` **MINTS A NEW session id** and **PRESERVES
+    FULL HISTORY**. Codeword proof: turn 1 `--session-id 27494fff…` stored
+    "FJORD-77"; `--resume 27494fff… --fork-session` returned
+    `session_id=c9a45a76…` (≠ original) and `result="FJORD-77"` (full recall).
+    This re-confirms D26's finding on 2.1.206: fork = a full-memory branch, NOT
+    a rewind — it never drops turns and exposes no per-turn truncation flag.
+  - `resumeSessionAt` is **NOT a CLI primitive** (`--help` on 2.1.206 scanned;
+    it is t3-pattern app-level bookkeeping over the app's own message log) — no
+    flag was probed for, none exists.
+
+  **CAPTURE (built this wave):** the Recorder now persists each frame's
+  top-level `uuid` into `chat_messages.metadata["frame_uuid"]` (jsonb, NO
+  migration) for every assistant-frame-derived row (text + tool), merged
+  alongside `parent_meta` so a sub-agent row carries BOTH `frame_uuid` and
+  `parent_tool_use_id` (recorder.ex `frame_uuid_meta/1`, disjoint from the S4
+  mcp tagging). Scope honesty: the Recorder only WRITES assistant-frame rows —
+  the user's typed message row is persisted in chat_live.ex (no wire uuid; we
+  authored it) and a `result` frame updates SESSION metrics, not a message row —
+  so there is no user/result *message row* for the Recorder to stamp; the
+  assistant frame's uuid is the wire id for that turn's rendered rows. This
+  makes our message log a uuid-keyed index of rendered rows — the branch-point
+  substrate a wave-13 UI needs — with D1 intact (we never read the CLI's private
+  transcript jsonl).
+
+  **VERDICT — floor vs ceiling:**
+  - **FLOOR (shippable now, no new CLI primitive): fork-from-head.** `--resume
+    <id> --fork-session` gives a fresh session id whose model memory == the
+    parent's full history. A "Branch from here" affordance on the LATEST turn is
+    real today: spawn a fork, record `parent_session_id` + the parent's last
+    `frame_uuid` as the branch point, list both sessions as siblings.
+  - **CEILING (display-level branch-from-ANY-turn, app-level, non-destructive):**
+    achievable PURELY on our uuid-keyed log WITHOUT a CLI rewind primitive. The
+    CLI fork always carries full memory, so "branch from turn N" is a RENDER
+    contract, not a memory operation: fork-from-head for the live process, then
+    on replay HIDE every row whose `seq` is after the chosen branch point's
+    `frame_uuid`. The model still *remembers* post-branch content (unavoidable
+    without transcript surgery, which D1 forbids), but the USER sees a clean
+    branch. This is exactly t3's `resumeSessionAt` pattern — bookkeeping over our
+    own log, which the `frame_uuid` capture now enables. True memory-rewrite
+    branch-from-turn remains impossible without reading/truncating the CLI's
+    private jsonl (version-fragile, D1 violation) — unchanged from D26.
+
+  **Schema proposal for the wave-13 branch UI** (backlog
+  `task-scc-w13-fork-rewind-ui` consumes this; NOT built this wave):
+  - `chat_sessions`: add nullable `parent_session_id :binary_id` (FK to
+    `chat_sessions.id`, `on_delete: :nilify_all`) + nullable
+    `forked_at_frame_uuid :string`. A root session leaves both null; a fork
+    stamps parent id + the parent `frame_uuid` it branched from. Partial index
+    `ON (parent_session_id) WHERE parent_session_id IS NOT NULL` for the
+    sibling/children lookup. NO `forked_at_turn` integer — the `frame_uuid` is
+    the stable branch key (turn indices renumber on compaction; uuids do not).
+  - Fork op: mint a child session, spawn `--resume <parent_id> --fork-session`
+    (child id = the CLI's newly-minted id, pinned via `--session-id` at spawn so
+    D2 holds), copy the parent's rendered rows up to the branch `frame_uuid` into
+    the child as replayable history, stamp `parent_session_id` +
+    `forked_at_frame_uuid`. The sidebar renders a branch tree; "branch from turn
+    N" = fork + display-hide after N's uuid (the ceiling), "branch" on the head =
+    the floor.
+
+  **D26 disposition: STAYS CLOSED.** No true rewind primitive emerged — fork is
+  full-memory on 2.1.206, exactly as D26 recorded; `resumeSessionAt` is not a
+  CLI flag. What CHANGED is that the display-level ceiling is now cheaply
+  reachable (the `frame_uuid` capture is the missing substrate), so wave-13 can
+  ship branch UX on the floor+ceiling above WITHOUT reopening the
+  transcript-surgery path D26 correctly parked. Checkpoint/rewind-of-MEMORY
+  stays cut; branch-of-VIEW is unlocked.
+
 ### Wave 11 plan (decided 2026-07-10) — "the journey, not the list"
 
 One flagship deliverable: the agents rail renders an epic-cycle run as a phase
@@ -1330,6 +1533,44 @@ branch (S3), NOT the composer footer (S2), NOT the rail (S1). Builders build
 against main in isolated worktrees; the lead integrates S1 → S2 → S3 → S4 and
 reconciles the recorder.ex and studio_chat.ex touch points.
 
+## Wave 12 plan (decided 2026-07-10) — "Claude's hands + the workday"
+
+Epic `task-9f81108b31d1d947`; living Paper `studio-chat-w12-wave-2026-07-10`.
+The 8 pre-filed children were ADOPTED and re-scoped per D63–D70 (the grants
+credential misread and the epic-cycle-launch gap are both folded in — no new
+tasks were needed; scc-w12-mcp-probe absorbed the launch/gating probes since
+verification already answered its original wire questions). Demo sentence
+stands UN-narrowed: the launch leg is Skill/Workflow wiring (D68), carried by
+S3+S4.
+
+| # | Slice (bp task) | Model | Owns |
+|---|---|---|---|
+| S1 | `scc-w12-capabilities` (task-caf31bede8a4351d) | opus | new `api/lib/barkpark/studio_chat/capabilities.ex` + scoped region golden matrix test (D66) + divergence-knowledge centralization (chat_tool_renderer.ex doc/`@spawn_names` sourcing) |
+| S2 | `scc-w12-wire-harness` (task-288c8fc886e7c1f6) | opus | `scripts/claude-chat-e2e.sh` version assertion (D67), nightly guerrilla lane script+doc, real_binary version-pin test, kill-signal doc |
+| S3 | `scc-w12-mcp-probe` (task-ac73705249e97aa6) | fable | NEW MCP wire fixtures (2.1.206) + fixture-fed shape tests, minted-token→`bp mcp serve` end-to-end proof, plan-mode Skill/Workflow gating verdict under real argv (D68), bp-epic-cycle skill invoke-line fix |
+| S4 | `scc-w12-mcp-loopback` (task-80289b3b07b40fe1) | fable | claude_chat.ex (`mcp_args`, session temp mcp-config, terminate teardown, `render_appendix` epic-cycle hint), auth.ex session-token mint (D63), D65 permission policy at the ask seam, Recorder mcp-row tagging |
+| S5 | `scc-w12-native-chips` (task-d76fa14f63626556) | opus | chat_tool_renderer.ex chip classification (D64 name+decode), chat_live.ex `:tool` template chips + replay parity, deep links (`/admin/projects?task=`, `/papers/:slug`, inline search hits) |
+| S6 | `scc-w12-needs-you` (task-ac3604e7bb1d8680) | fable | `last_visited_at` migration, cross-session needs-you aggregation + finished-while-away model in studio_chat.ex, sidebar strip region of chat_live.ex — zero wire work |
+| S7 | `scc-w12-notify` (task-10e78ceef4f5c31e) | opus | `StudioChat.Notifier` (GrantNotifier pattern), opt-out+debounce seam, D69 return_to fix in live_auth.ex/live_scope.ex |
+| S8 | `scc-w12-fork-probe` (task-cad4afb9bfb9985a) | opus | recorder.ex `frame_uuid` capture, `--resume --fork-session` probe, WRITTEN VERDICT + wave-13 schema proposal (D70) — no UI |
+
+Region contract (hot files split): chat_live.ex — S5 owns the `:tool`-role
+template + live/replay tool reducers; S6 owns the sidebar/session-list region
+ONLY; no other slice touches it. chat_tool_renderer.ex — S1 (knowledge/docs)
+then S5 (classify extension): disjoint functions, integrate S1 first.
+recorder.ex — S4 (mcp tagging) then S8 (frame_uuid): disjoint clauses,
+integrate S4 first. claude_chat.ex + auth.ex — S4 exclusively. studio_chat.ex
++ session.ex + migration — S6 exclusively. live_auth.ex/live_scope.ex — S7
+exclusively. Integration order S1→S2→S3→S4→S5→S6→S7→S8; probe-gates-build is
+enforced by spawn order (bp has no dependency edges): S3's gating verdict
+lands before S4 finalizes plan-mode args; S5 builds against S3's committed
+fixtures; S7 consumes S6's model. Cut order if squeezed: S7 first; S2 never.
+
+SMTP readiness is PROVEN (guerrilla's running BEAM has SMTP_* env; relay
+:587 reachable; PHX_HOST/SCHEME correct, no port leak) — notify needs no ops
+prerequisite. Ledger note: `bp task ready` defaults to 50 docs — the w12
+children sit at offsets 53–115; always pass `--limit`/use `bp task get`.
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
@@ -1339,8 +1580,73 @@ reconciles the recorder.ex and studio_chat.ex touch points.
 - Studio chrome: `bash scripts/studio-literal-check.sh` (no color literals)
 - Real-binary E2E harnesses exist in the session scratchpad (not committed) —
   builders may replicate the pattern for new features.
+- **Wire-contract harness (D67): `docs/ops/claude-chat-harness.md`.** Three legs —
+  (1) per-PR fixture replay is ALREADY FREE (bare `mix test` runs the six-file
+  suite + frozen wave-10 fixtures, D62); (2) nightly real-binary smoke via
+  `scripts/claude-chat-nightly.sh` → `scripts/claude-chat-e2e.sh` (cron on
+  guerrilla, the only authenticated+pinned host; GH runners have neither binary
+  nor auth); (0) the version pin lives in ONE place —
+  `scripts/claude-pinned-version.txt` (2.1.206) — asserted by the e2e script AND
+  a cheap first `:real_binary` test, refusing on mismatch (PATH decoys are real).
+  Kill-signal: two breaking wire changes in a quarter → Agent SDK re-score.
 
 ## Wave log
+
+### Wave 2026-07-10 (wave 12 BUILT + REVIEWED — Claude's hands + the workday)
+
+All 8 slices built green and reviewer-fixed; grade A-. Landed: **moat** — S1
+`%Capabilities{}` matrix (anti-drift tests mirror Session.modes /
+ClaudeChat.models+efforts; `@spawn_names` compile-time sourced; no-tax proven
+by revert experiment) + scoped transcript⊕rail golden byte-lock; S2 wire
+harness (pin 2.1.206 in ONE file, e2e refusal proven live, nightly wrapper,
+docs/ops/claude-chat-harness.md, kill-signal = 2 breaking wire changes/quarter
+→ Agent SDK re-score). **Hands** — S3 sanitized 2.1.206 MCP wire fixtures +
+always-on shape tests (10/0), minted-token→`bp mcp serve` e2e probe
+(:probe_mcp_loopback), D68 REAL-ARGV verdict (plan-mode Workflow gate is
+MODEL-level courtesy, NOT CLI enforcement → S4's `--disallowedTools Workflow`
+on plan spawns is CONFIRMED-KEEP, not provisional); S4 loopback (D63 mint
+`create_claude_session_token/3` 4h/24h TTL + revoke in both terminate clauses,
+D64 per-session 0600 mcp-config with env-pinned URL+token, D65 read-only
+auto-approve at the single ask seam); S5 task/paper/search chips (name+decode
+dispatch, ≤8 hits + "+N more", honest degrade to the generic row). **Workday**
+— S6 `last_visited_at` + pure `needs_you_strip/2` (5-kind vocabulary in strict
+priority) + sidebar Inbox strip; S7 Notifier seam (opt-out + per-session
+debounce, channel list data-driven for w13) + D69 return_to on chat deep links
+(open-redirect-guarded `sanitize_dest/1`). S8 fork verdict: NO message.uuid —
+top-level frame uuid captured to `metadata.frame_uuid`; fork-from-head = floor
+shippable now, branch-from-any-turn = display-level ceiling on our uuid-keyed
+log; D26 stays closed.
+
+REVIEWER FIXES (on -r branches; gates re-run green): S1 golden swallowed the
+`#bp-build-version` footer (compile-time git SHA → red on EVERY later commit;
+reproduced) — scope now slices out `studio-footer`, golden regenerated in the
+same diff; S4+S5 argv-echo marker race (read_marker saw half-written argv once
+the argv grew) — fake now writes tmp+rename, atomic; S7 Notifier debounce
+ledger prunes expired stamps. Ledger: S3's builder stamped evidence but never
+flipped met flags (fixed, 4/5), all 8 lifecycles corrected open→in_progress.
+
+INTEGRATION NOTES (lead): merge order S1→S8 with `-r` branches where they
+exist (S1, S4, S5, S7, S8; others unchanged). CHARTER conflicts → take S8-r's
+copy (it is the reconciled union: S3's D63–D69 + wave-12 plan, S8's full D70
+under one header, S2's Gates bullet byte-identical, this wave-log entry).
+recorder.ex S4×S8 conflict in persist_assistant_blocks — resolution:
+`parent_agent = parent_meta(ev); frame = Map.merge(parent_agent,
+frame_uuid_meta(ev))`; text rows stamp `frame`; TodoWrite guard keys on
+`parent_agent == %{}`; tool rows merge base → `mcp_meta(name)` → `frame`; keep
+both helpers. claude_chat_real_binary_test.exs S2×S3 conflict (S2 adds the
+version-pin describe + pinned_version helper; S3 rewrites setup for
+needs_claude:false + adds probes 4/5) — keep both sides, S3's setup wins.
+chat_live_test.exs: S4-r and S5-r carry the IDENTICAL atomic-marker hunk (auto
+-merges). S5's mcp fixtures under test/support/fixtures/studio_chat/mcp/ are
+authored shapes — reconcile against S3's committed wire fixtures
+post-merge (task filed). Merge-gated criteria on all 8 tasks are the lead's.
+
+NEXT WAVE should take: wire S6's strip transitions to S7's Notifier.notify
+(away-detection call site — the seam is deliberately not self-subscribing) +
+runtime.exs recipient env (scc-w12-notify-recipient-wiring); the hands/no-
+hands UI indicator (task-scc-bl-mcp-hands-indicator); chip replay beyond the
+4KB recorder cap (task-5a49dc55626ea80d); guerrilla cron install (S2 doc step);
+then w13 fork/branch UI on D70's schema proposal + notify channels.
 
 ### Wave 2026-07-09 (wave 10 BUILT + REVIEWED — the real-binary probe wave)
 

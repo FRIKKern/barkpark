@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   alias Barkpark.Content
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.PlanPapers
+  alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
 
   @admin_token "chat-admin-test-token"
@@ -100,9 +101,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{suffix}.sh")
     marker = Path.join(System.tmp_dir!(), "bp-argv-marker-#{suffix}.txt")
 
+    # Write-then-RENAME so read_marker/2 (which returns as soon as the file
+    # exists) can never observe a half-written argv. The argv has grown past
+    # one atomic pipe write (mcp flags + the system-prompt appendix), so a
+    # bare `> marker` raced the reader into truncated reads (seen: argv cut
+    # mid-appendix, --resume missing).
     File.write!(path, """
     #!/bin/sh
-    printf '%s\\n' "$@" > #{marker}
+    printf '%s\\n' "$@" > #{marker}.tmp && mv #{marker}.tmp #{marker}
     cat
     """)
 
@@ -3186,6 +3192,225 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # MCP result chips (charter D64). Chip dispatch is a DELIBERATE narrow
+  # exception to D38: it keys on OUR tool NAME (mcp__barkpark__ prefix) plus a
+  # Jason.decode of the single text block. The classifier is consumed identically
+  # by the live-append path (tool_use reducer + tool_result attach) and the
+  # replay path (replay_message) — both thread `tool` + `output`, so the template
+  # calling ChatToolRenderer.chip/2 renders parity-stable HTML.
+  # ─────────────────────────────────────────────────────────────────────────
+  describe "MCP result chip classifier (charter D64, pure)" do
+    test "an mcp__barkpark__ task_create receipt classifies to a task chip with a board deep link" do
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_create", mcp_fixture("task_create.json"))
+
+      assert %{kind: :task, href: "/admin/projects?task=task-9f81108b31d1d947"} = chip
+      assert chip.label == "task-9f81108b31d1d947"
+    end
+
+    test "an mcp__barkpark__ task_show doc classifies to a task chip titled + board-linked" do
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_show", mcp_fixture("task_show.json"))
+
+      assert %{kind: :task, href: "/admin/projects?task=task-d76fa14f63626556"} = chip
+      assert chip.label =~ "native-chips"
+    end
+
+    test "an mcp__barkpark__ paper doc classifies to a paper chip with a reader link" do
+      chip = ChatToolRenderer.chip("mcp__barkpark__doc_get", mcp_fixture("paper_get.json"))
+
+      assert %{kind: :paper, href: "/papers/studio-chat-w12-wave-2026-07-10"} = chip
+      assert chip.label == "Studio Chat — Wave 12 plan"
+    end
+
+    test "a task_ready list classifies to a search chip; each hit deep-links by its own type" do
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_ready", mcp_fixture("task_ready.json"))
+
+      assert %{kind: :search, total: 3, overflow: 0} = chip
+      assert length(chip.hits) == 3
+      first = hd(chip.hits)
+      assert first.label == "Wire the MCP loopback"
+      assert first.type == "task"
+      assert first.href == "/admin/projects?task=task-aaa"
+    end
+
+    test "an is_error result is a plain string — it fails the decode and yields NO chip (generic row)" do
+      assert ChatToolRenderer.chip("mcp__barkpark__task_show", mcp_fixture("error.txt")) == nil
+    end
+
+    test "a {ok:false} outcome (empty-queue claim) is a real non-result — no chip" do
+      assert ChatToolRenderer.chip("mcp__barkpark__task_next", mcp_fixture("no_ready.json")) == nil
+    end
+
+    test "a HOST tool name never triggers a chip — D38 shape dispatch is untouched" do
+      # Same JSON body, but the name lacks the mcp__barkpark__ prefix.
+      assert ChatToolRenderer.chip("Bash", mcp_fixture("task_show.json")) == nil
+      assert ChatToolRenderer.chip("Read", ~s({"ok":true,"doc":{"doc_id":"x"}})) == nil
+    end
+
+    test "a truncated / non-JSON payload degrades honestly to nil (generic row)" do
+      # The recorder caps persisted output at 4k; a payload cut mid-object is
+      # invalid JSON and must never render a half-chip.
+      truncated = String.slice(mcp_fixture("task_ready.json"), 0, 60)
+      assert ChatToolRenderer.chip("mcp__barkpark__task_ready", truncated) == nil
+      assert ChatToolRenderer.chip("mcp__barkpark__task_ready", "not json at all") == nil
+    end
+
+    test "PAYLOAD LAW: a >100KB search result is SUMMARIZED, not dumped" do
+      hits =
+        for i <- 1..700 do
+          %{"doc_id" => "task-#{i}", "title" => "Result number #{i} #{String.duplicate("x", 100)}", "type" => "task"}
+        end
+
+      payload = Jason.encode!(%{"ok" => true, "docs" => hits})
+      assert byte_size(payload) > 100_000
+
+      chip = ChatToolRenderer.chip("mcp__barkpark__task_ready", payload)
+
+      assert %{kind: :search, total: 700} = chip
+      # rendered hits capped; the rest honestly summarized
+      assert length(chip.hits) == 8
+      assert chip.overflow == 692
+    end
+  end
+
+  describe "MCP result chip render (charter D64)" do
+    test "a task chip renders a board deep-link pill with tokens only" do
+      html =
+        render_component(&ChatToolRenderer.tool_chip/1,
+          chip: %{kind: :task, label: "Ship the chip", href: "/admin/projects?task=task-abc"}
+        )
+
+      assert html =~ ~s(href="/admin/projects?task=task-abc")
+      assert html =~ "Ship the chip"
+      assert html =~ "var(--muted-surface)"
+      # tokens only — no copied hex/hsl color literal
+      refute html =~ ~r/#[0-9a-fA-F]{3,6}\b/
+    end
+
+    test "a paper chip renders a reader link" do
+      html =
+        render_component(&ChatToolRenderer.tool_chip/1,
+          chip: %{kind: :paper, label: "Wave 12 plan", href: "/papers/w12"}
+        )
+
+      assert html =~ ~s(href="/papers/w12")
+      assert html =~ "Wave 12 plan"
+    end
+
+    test "a search chip renders an expandable hit list with an honest overflow line" do
+      html =
+        render_component(&ChatToolRenderer.tool_chip/1,
+          chip: %{
+            kind: :search,
+            total: 12,
+            overflow: 2,
+            hits: [
+              %{label: "Alpha task", type: "task", href: "/admin/projects?task=task-1"},
+              %{label: "A paper", type: "paper", href: "/papers/p1"},
+              %{label: "Unlinked doc", type: "note", href: nil}
+            ]
+          }
+        )
+
+      assert html =~ "<details"
+      assert html =~ "12 results"
+      assert html =~ ~s(href="/admin/projects?task=task-1")
+      assert html =~ ~s(href="/papers/p1")
+      # a hit with no route is honest inline text, not a dead link
+      assert html =~ "Unlinked doc"
+      assert html =~ "+2 more"
+    end
+
+    test "a chip with no id renders the pill WITHOUT a link (honest, never a dead href)" do
+      html = render_component(&ChatToolRenderer.tool_chip/1, chip: %{kind: :task, label: "no id", href: nil})
+
+      assert html =~ "no id"
+      refute html =~ "href="
+    end
+  end
+
+  describe "MCP chips in the live transcript (charter D64)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "a task_create result renders a chip and SUPPRESSES the raw JSON blob",
+         %{view: view, sid: sid} do
+      send_tool_use(sid, "mcp__barkpark__task_create", %{"title" => "Ship the chip"})
+      send_frame(sid, tool_result_frame("toolu_x", mcp_fixture("task_create.json")))
+
+      html = render(view)
+      # the chip deep link is present
+      assert html =~ "/admin/projects?task=task-9f81108b31d1d947"
+      # the raw JSON dump is gone — the chip stands in for it (the draft id only
+      # ever appears in the suppressed ⎿ output body)
+      refute html =~ "drafts.task-9f81108b31d1d947"
+    end
+
+    test "a search result renders an expandable hit chip", %{view: view, sid: sid} do
+      send_tool_use(sid, "mcp__barkpark__task_ready", %{})
+      send_frame(sid, tool_result_frame("toolu_x", mcp_fixture("task_ready.json")))
+
+      html = render(view)
+      assert html =~ "3 results"
+      assert html =~ "/admin/projects?task=task-aaa"
+      assert html =~ "Ship native chips"
+    end
+
+    test "an is_error string keeps the generic ⎿ row, no chip", %{view: view, sid: sid} do
+      send_tool_use(sid, "mcp__barkpark__task_show", %{"doc_id" => "task-nope"})
+      send_frame(sid, tool_result_frame("toolu_x", "error: task task-nope not found"))
+
+      html = render(view)
+      assert html =~ "⎿"
+      assert html =~ "not found"
+      refute html =~ "/admin/projects?task="
+    end
+  end
+
+  describe "MCP chip replay parity (charter D64)" do
+    test "a reopened session renders the identical chip HTML the live tab drew",
+         %{conn: conn} do
+      output = mcp_fixture("task_show.json")
+
+      # ── LIVE path: tool_use reducer appends the row, tool_result attaches output
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, live_view, _} = live(conn, "/studio/chat")
+      render_submit(element(live_view, "form[phx-submit=send]"), %{"message" => "go"})
+      sid = store_id(live_view)
+      send_tool_use(sid, "mcp__barkpark__task_show", %{"doc_id" => "task-d76fa14f63626556"})
+      send_frame(sid, tool_result_frame("toolu_x", output))
+      live_chip = chip_fragment(render(live_view))
+
+      # ── REPLAY path: a stored tool row carrying the SAME tool + output metadata
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "tool",
+          source_markdown: "mcp__barkpark__task_show",
+          metadata: %{
+            "tool" => "mcp__barkpark__task_show",
+            "tool_use_id" => "toolu_r",
+            "output" => output
+          }
+        })
+
+      {:ok, _replay_view, replay_html} = live(conn, "/studio/chat/#{id}")
+      replay_chip = chip_fragment(replay_html)
+
+      assert live_chip != ""
+      assert replay_chip == live_chip
+      assert replay_chip =~ "/admin/projects?task=task-d76fa14f63626556"
+    end
+  end
+
   describe "nested agent traces (charter D40)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -5367,6 +5592,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          ]
        }
      }}
+  end
+
+  # An MCP tool-result body committed by scc-w12-mcp-probe (S3). Until S3 lands
+  # in this branch these live under api/test/support/fixtures/studio_chat/mcp/;
+  # the lead reconciles them with S3's canonical fixtures on integration.
+  @mcp_fixtures Path.expand("../../../support/fixtures/studio_chat/mcp", __DIR__)
+  defp mcp_fixture(name) do
+    @mcp_fixtures |> Path.join(name) |> File.read!() |> String.trim_trailing("\n")
+  end
+
+  # Pull JUST the chip's deep-link anchor out of a full transcript render so the
+  # parity assertion compares the chip fragment, not the message-wrapper chrome
+  # (ids differ between a live socket and a replayed one). The `?task=` guard
+  # skips any unrelated nav link to the board.
+  defp chip_fragment(html) do
+    case Regex.run(~r{<a href="/admin/projects\?task=.*?</a>}s, html) do
+      [frag] -> frag
+      _ -> ""
+    end
   end
 
   # A cumulative thinking-token frame (charter D41): the wire's monotonic

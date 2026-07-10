@@ -59,26 +59,69 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
   # error state does not red the probe, while a genuinely NEW token still trips it.
   @known_agent_states ~w(start done queued running error failed cancelled canceled timeout aborted)
 
-  setup do
-    bin = resolve_claude_bin()
+  setup context do
+    # The wave-12 mcp-loopback probe drives the real `bp` binary, not `claude`
+    # — it opts out of the CLAUDE_BIN requirement via `needs_claude: false`.
+    if context[:needs_claude] == false do
+      :ok
+    else
+      bin = resolve_claude_bin()
 
-    prev = Application.get_env(:barkpark, :claude_chat)
-    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+      prev = Application.get_env(:barkpark, :claude_chat)
+      prev_demo = Application.get_env(:barkpark, :public_demo_studio)
 
-    # `:binary` (NOT `:command`) so build_args/2 still assembles the real argv,
-    # including --session-id / --resume / --model / --effort — the seam under proof.
-    Application.put_env(:barkpark, :claude_chat, enabled: true, binary: bin)
-    Application.put_env(:barkpark, :public_demo_studio, false)
+      # `:binary` (NOT `:command`) so build_args/2 still assembles the real argv,
+      # including --session-id / --resume / --model / --effort — the seam under proof.
+      Application.put_env(:barkpark, :claude_chat, enabled: true, binary: bin)
+      Application.put_env(:barkpark, :public_demo_studio, false)
 
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:barkpark, :claude_chat, prev),
-        else: Application.delete_env(:barkpark, :claude_chat)
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
 
-      Application.put_env(:barkpark, :public_demo_studio, prev_demo)
-    end)
+        Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+      end)
 
-    {:ok, bin: bin}
+      {:ok, bin: bin}
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Version pin (charter D67) — the CHEAP first gate. Spends NO API budget: it
+  # only runs `--version`. It asserts the resolved binary IS the pinned CLI so a
+  # real-binary run (nightly OR local) can never prove the wire contract of the
+  # WRONG version. The pin lives in exactly ONE place —
+  # scripts/claude-pinned-version.txt — shared with scripts/claude-chat-e2e.sh
+  # and scripts/claude-chat-nightly.sh. REFUSE on mismatch; never silent-skip
+  # (PATH decoys are real: the cmux wrapper is first on PATH, a stale npm-global
+  # 2.1.84 exists).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "version pin" do
+    test "the resolved binary matches the pinned claude version", %{bin: bin} do
+      pinned = pinned_version()
+
+      {raw, exit_code} = System.cmd(bin, ["--version"], stderr_to_stdout: true)
+      assert exit_code == 0, "`#{bin} --version` exited #{exit_code}: #{raw}"
+
+      actual =
+        case Regex.run(~r/\d+\.\d+\.\d+/, raw) do
+          [v] -> v
+          _ -> flunk("could not parse a semver from `claude --version`: #{inspect(raw)}")
+        end
+
+      assert actual == pinned, """
+      claude version mismatch — refusing to trust this real-binary run.
+
+        pinned (scripts/claude-pinned-version.txt): #{pinned}
+        resolved (#{bin}):                          #{actual}
+
+      A different version can pass green while the frames it emits have quietly
+      changed. Point CLAUDE_BIN at the pinned native install, or bump the pin
+      file deliberately if you are upgrading on purpose.
+      """
+    end
   end
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -389,6 +432,151 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
     end
   end
 
+  # ══════════════════════════════════════════════════════════════════════════
+  # PROBE 4 (wave 12) — minted-token → `bp mcp serve` end-to-end (charter D63)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "mcp loopback minted-token probe" do
+    @describetag :probe_mcp_loopback
+    @describetag needs_claude: false
+
+    test "a minted short-TTL ApiToken injected via the env block bearer-auths bp mcp serve" do
+      # The bp subprocess dials our endpoint over real HTTP — its request
+      # processes are not owned by this test, so the sandbox goes shared.
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+      Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+
+      url = start_local_api()
+      {raw, token} = mint_session_token()
+      bp = resolve_bp_bin()
+      manifest = Path.join(repo_root(), "docs/cli/fixtures/full-manifest.json")
+      assert File.exists?(manifest), "fixture manifest missing: #{manifest}"
+
+      # ── leg 1: the minted token IS the credential — initialize + tools/call ─
+      %{1 => init_resp, 2 => call_resp} = drive_mcp(bp, manifest, url, raw)
+
+      refute init_resp["error"], "initialize failed: #{inspect(init_resp)}"
+      assert get_in(init_resp, ["result", "serverInfo", "name"]) != nil
+
+      refute call_resp["error"], "tools/call errored: #{inspect(call_resp)}"
+      result = call_resp["result"]
+
+      refute result["isError"] == true,
+             "tools/call with the minted token must SUCCEED, got: #{inspect(result)}"
+
+      # D64 wire law end-to-end: one text block, JSON-encoded string payload.
+      assert [%{"type" => "text", "text" => text}] = result["content"]
+      assert {:ok, %{"ok" => true, "docs" => docs}} = Jason.decode(text)
+      assert is_list(docs)
+
+      # The success itself is the isolation proof for the URL leg: the minted
+      # token's hash exists ONLY in this test's sandboxed DB, so the 200 can
+      # only have come from OUR endpoint authenticating OUR token.
+
+      # ── leg 2: nothing is inherited — without the env token, the host's
+      # saved admin config buys ZERO access against this API ─────────────────
+      no_token = drive_mcp(bp, manifest, url, nil)
+
+      refute mcp_call_succeeded?(no_token[2]),
+             "bp mcp serve WITHOUT the injected token still reached the API — " <>
+               "the host's saved config leaked through (charter D63 isolation " <>
+               "falsified): #{inspect(no_token[2])}"
+
+      # ── leg 3: revocation backstop (D63: terminate/2 + short TTL) ─────────
+      {:ok, _} = Barkpark.Auth.revoke_token(token)
+      revoked = drive_mcp(bp, manifest, url, raw)
+
+      refute mcp_call_succeeded?(revoked[2]),
+             "a REVOKED minted token still authenticated (charter D63 " <>
+               "revocation falsified): #{inspect(revoked[2])}"
+
+      IO.puts(
+        "\n[PROBE_MCP_LOOPBACK] minted-token e2e: initialize+tools/call OK via env " <>
+          "block; no-token spawn denied; revoked-token spawn denied.\n"
+      )
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # PROBE 5 (wave 12) — plan-mode Workflow gating under the REAL chat argv
+  # (charter D68: bare-CLI probes showed ZERO gating; this decides the seam)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "plan-mode Workflow gating probe" do
+    @describetag :probe_plan_gating
+
+    test "does plan mode gate the Workflow tool under --permission-prompt-tool stdio?" do
+      script =
+        """
+        export const meta = {
+          name: 'echo-noop',
+          description: 'One-phase probe workflow',
+          phases: [ { title: 'Phase One', detail: 'Echo' } ]
+        }
+
+        phase('Phase One')
+        await agent('Echo the word: ok', {label: 'echo-ok'})
+        """
+
+      # The prompt PRE-APPROVES the call and forbids the model's own detours
+      # (a first run showed haiku routing through AskUserQuestion: "plan mode
+      # blocks me" — model-level courtesy, which is exactly what this probe
+      # must see PAST to learn what the CLI itself enforces).
+      prompt =
+        "This is an authorized wire probe. The user has explicitly pre-approved " <>
+          "exactly one Workflow tool call. Call the Workflow tool RIGHT NOW with " <>
+          "exactly this script (do not modify it). Do NOT use AskUserQuestion. " <>
+          "Do NOT use ExitPlanMode. Do NOT present a plan. Your only permitted " <>
+          "action is the single Workflow call itself — make it immediately:\n\n" <>
+          "```\n" <> script <> "```"
+
+      # PLAN mode through the real seam: build_args emits --permission-mode plan
+      # AND --permission-prompt-tool stdio (charter D33) — the exact argv the
+      # live chat spawns. The responder DENIES every ask so nothing launches.
+      {:ok, s} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          mode: "plan",
+          session_opts: %{session_id: Ecto.UUID.generate(), model: "haiku"}
+        })
+
+      Process.put(:probe_session, s)
+      ClaudeChat.send_message(s, prompt)
+
+      verdict =
+        observe_gating(120_000, %{attempted: false, asks: [], launched: false, said: ""})
+
+      ClaudeChat.close(s)
+
+      # The verdict, verbatim, for the charter D68 amendment + task evidence.
+      IO.puts("\n[PROBE_PLAN_GATING] #{format_gating_verdict(verdict)}\n")
+
+      # A decisive signal is required: either the tool_use fired (and we saw
+      # what the CLI did with it), or the MODEL refused in prose — the 2026-07-10
+      # capture: "Plan Mode is active, which means I cannot run non-readonly
+      # tools like Workflow" / routed through an AskUserQuestion ask instead.
+      # Model refusal IS the D68 verdict: the plan-mode gate lives in the
+      # model's system prompt, NOT in CLI enforcement (bare-CLI probes proved
+      # the CLI executes Workflow in plan mode when the model does try), so
+      # the fail-closed guard (--disallowedTools Workflow) transfers to the
+      # loopback slice regardless.
+      assert verdict.attempted or verdict.said != "",
+             "neither a Workflow tool_use nor a prose refusal was observed — " <>
+               "no verdict possible; re-run (the trigger prompt may have decayed)"
+
+      # What must NEVER happen under a scripted deny responder: an actual
+      # launch after (or without) an ask.
+      refute verdict.launched and not verdict.attempted,
+             "a workflow LAUNCHED without any observed Workflow tool_use"
+
+      if verdict.asks != [] do
+        refute verdict.launched,
+               "the Workflow LAUNCHED even though the seam ask was DENIED — " <>
+                 "the deny leg of the gate is broken"
+      end
+    end
+  end
+
   # ── shared drivers ────────────────────────────────────────────────────────
 
   # Drive one turn: send the user text, then collect assistant text until the
@@ -623,6 +811,250 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
     end
   end
 
+  # ── PROBE 4 drivers (mcp loopback) ─────────────────────────────────────────
+
+  # Serve the REAL BarkparkWeb.Endpoint (it is a Plug) on an ephemeral local
+  # port so the bp subprocess can dial it over actual HTTP. test.exs keeps
+  # `server: false`; this is a probe-scoped listener, torn down with the test.
+  defp start_local_api do
+    {:ok, listen} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port_num} = :inet.port(listen)
+    :ok = :gen_tcp.close(listen)
+
+    start_supervised!(
+      {Bandit, plug: BarkparkWeb.Endpoint, scheme: :http, ip: {127, 0, 0, 1}, port: port_num}
+    )
+
+    "http://127.0.0.1:#{port_num}"
+  end
+
+  # A D63-style session credential, minted through the Auth internals the S4
+  # mint function is patterned on (auth.ex create_share_token insert block):
+  # kind "api" (the ONLY kind Auth.verify_token resolves), curated REAL
+  # permissions (read-only — never admin, never share-edit-*), a short session
+  # TTL (15 min — clamp_ttl's 7-day floor is exactly why S4 needs its own
+  # constant), label carrying the session identity.
+  defp mint_session_token do
+    raw = "bpsess_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token(raw),
+        label: "claude-session #{Ecto.UUID.generate()}",
+        permissions: ["read"],
+        expires_at: DateTime.add(now, 900)
+      })
+      |> Barkpark.Repo.insert()
+
+    {raw, token}
+  end
+
+  # Drive `bp mcp serve --tools tasks` over real process stdio: initialize →
+  # notifications/initialized → tools/call task_ready. The manifest comes from
+  # the committed fixture (the BARKPARK_MANIFEST override seam, load.go) so
+  # initialize never dials the API — ONLY tools/call exercises the credential.
+  # `token: nil` spawns with BARKPARK_API_TOKEN explicitly REMOVED from the
+  # child env (the {name, false} Port form), the not-inherited leg.
+  defp drive_mcp(bp, manifest, url, token) do
+    env =
+      [
+        {~c"BARKPARK_MANIFEST", to_charlist(manifest)},
+        {~c"BARKPARK_API_URL", to_charlist(url)},
+        {~c"BARKPARK_API_TOKEN", if(token, do: to_charlist(token), else: false)}
+      ]
+
+    port =
+      Port.open({:spawn_executable, bp}, [
+        :binary,
+        :exit_status,
+        :hide,
+        args: ["mcp", "serve", "--tools", "tasks"],
+        env: env
+      ])
+
+    session = [
+      ~s({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"bp-loopback-probe","version":"0.0.0"}}}),
+      ~s({"jsonrpc":"2.0","method":"notifications/initialized"}),
+      ~s({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_ready","arguments":{"limit":1}}})
+    ]
+
+    for line <- session, do: Port.command(port, line <> "\n")
+
+    out = collect_port_until_id2(port, "", now_ms() + 30_000)
+
+    # Close stdin/port; the server's read loop ends on EOF.
+    catch_port_close(port)
+
+    out
+    |> String.split("\n", trim: true)
+    |> Enum.flat_map(fn l ->
+      case Jason.decode(l) do
+        {:ok, %{"id" => id} = resp} when is_integer(id) -> [{id, resp}]
+        _ -> []
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp collect_port_until_id2(port, acc, deadline) do
+    if String.contains?(acc, ~s("id":2)) or now_ms() > deadline do
+      acc
+    else
+      receive do
+        {^port, {:data, chunk}} ->
+          collect_port_until_id2(port, acc <> chunk, deadline)
+
+        {^port, {:exit_status, _status}} ->
+          acc
+      after
+        max(deadline - now_ms(), 0) -> acc
+      end
+    end
+  end
+
+  defp catch_port_close(port) do
+    if Port.info(port), do: Port.close(port)
+  catch
+    :error, :badarg -> :ok
+  end
+
+  # A tools/call leg "succeeded" only when it answered with a non-error MCP
+  # result whose payload decodes to ok:true — anything else (JSON-RPC error,
+  # isError:true, no response at all, an auth failure envelope) is a denial.
+  defp mcp_call_succeeded?(nil), do: false
+  defp mcp_call_succeeded?(%{"error" => _}), do: false
+
+  defp mcp_call_succeeded?(%{"result" => result}) do
+    with false <- result["isError"] == true,
+         [%{"type" => "text", "text" => text}] <- result["content"],
+         {:ok, %{"ok" => true}} <- Jason.decode(text) do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp mcp_call_succeeded?(_), do: false
+
+  # Locate the bp binary for the loopback probe: BP_BIN when set, else build it
+  # from source exactly like the Go stdio smoke does (CC=clang — the cc shim on
+  # this host is not a compiler).
+  defp resolve_bp_bin do
+    case System.get_env("BP_BIN") do
+      bin when is_binary(bin) and bin != "" ->
+        if File.exists?(bin), do: bin, else: flunk("BP_BIN=#{bin} does not exist")
+
+      _ ->
+        bin = Path.join(System.tmp_dir!(), "bp-loopback-probe-#{System.system_time(:second)}")
+
+        {out, status} =
+          System.cmd(
+            "go",
+            ["build", "-o", bin, "github.com/FRIKKern/barkpark/cmd/barkpark"],
+            cd: repo_root(),
+            env: [{"CC", "clang"}],
+            stderr_to_stdout: true
+          )
+
+        if status != 0, do: flunk("go build bp failed:\n#{out}")
+        on_exit(fn -> File.rm(bin) end)
+        bin
+    end
+  end
+
+  # Module root (the dir with go.mod), mirroring mcpSmokeRepoRoot.
+  defp repo_root, do: Path.expand("../../../..", __DIR__)
+
+  # ── PROBE 5 drivers (plan-mode gating) ─────────────────────────────────────
+
+  # Pump the session until its terminal result frame (or the deadline),
+  # DENYING every permission ask, and record the three D68 signals: was a
+  # Workflow tool_use attempted, did any ask reach the seam, did anything
+  # actually LAUNCH (task_started / workflow_progress / non-empty bg snapshot).
+  defp observe_gating(budget_ms, state) do
+    deadline = now_ms() + budget_ms
+    observe_gating_loop(deadline, state)
+  end
+
+  defp observe_gating_loop(deadline, state) do
+    remaining = deadline - now_ms()
+
+    if remaining <= 0 do
+      state
+    else
+      receive do
+        {:claude_chat_permission, %{tool_name: tool, request_id: rid}} ->
+          # The scripted DENY responder — nothing may actually launch.
+          ClaudeChat.respond_permission(
+            self_session(),
+            rid,
+            {:deny, "D68 gating probe: scripted deny — do not launch anything"}
+          )
+
+          observe_gating_loop(deadline, %{state | asks: [tool | state.asks]})
+
+        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}}}
+        when is_list(blocks) ->
+          attempted =
+            state.attempted or
+              Enum.any?(blocks, &(&1["type"] == "tool_use" and &1["name"] == "Workflow"))
+
+          said = state.said <> assistant_text(blocks)
+          observe_gating_loop(deadline, %{state | attempted: attempted, said: said})
+
+        {:claude_chat_event, %{"subtype" => "task_started"}} ->
+          observe_gating_loop(deadline, %{state | launched: true})
+
+        {:claude_chat_event, %{"subtype" => "task_progress", "workflow_progress" => wp}}
+        when is_list(wp) ->
+          observe_gating_loop(deadline, %{state | launched: true})
+
+        {:claude_chat_event, %{"subtype" => "background_tasks_changed", "tasks" => [_ | _]}} ->
+          observe_gating_loop(deadline, %{state | launched: true})
+
+        {:claude_chat_event, %{"type" => "result"} = frame} ->
+          Map.put(state, :denials, frame["permission_denials"] || [])
+
+        {:claude_chat_event, _other} ->
+          observe_gating_loop(deadline, state)
+
+        {:claude_chat_exit, status} ->
+          flunk("session exited (status #{status}) before a gating verdict")
+
+        {:claude_chat_exit, status, stderr} ->
+          flunk("session exited (status #{status}) before a gating verdict#{stderr_note(stderr)}")
+      after
+        remaining -> state
+      end
+    end
+  end
+
+  defp format_gating_verdict(v) do
+    outcome =
+      cond do
+        "Workflow" in (v.asks || []) ->
+          "GATED-VIA-SEAM (can_use_tool ask reached us; denied)"
+
+        v.launched ->
+          "UNGATED (Workflow launched with NO seam ask — guard transfers to S4)"
+
+        v.attempted and (v[:denials] || []) != [] ->
+          "DENIED-BY-CLI (no seam ask; CLI denied it)"
+
+        v.attempted ->
+          "ATTEMPTED-NO-OUTCOME (tool_use fired, nothing observable followed)"
+
+        true ->
+          "MODEL-REFUSED (no tool_use; the gate is prompt-level courtesy, not CLI enforcement)"
+      end
+
+    "attempted=#{v.attempted} asks=#{inspect(Enum.reverse(v.asks || []))} " <>
+      "launched=#{v.launched} denials=#{inspect(v[:denials] || [])} " <>
+      "said=#{inspect(String.slice(v.said || "", 0, 300))} → #{outcome}"
+  end
+
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   # The D54 3-tuple exit carries a bounded stderr tail — fold it into the flunk
@@ -633,6 +1065,18 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
   # The collectors auto-approve permission asks, which needs the live session pid.
   # Each probe stashes its one session under `:probe_session` right after spawn.
   defp self_session, do: Process.get(:probe_session) || raise("no :probe_session set")
+
+  # The pinned claude version, read from the ONE source of truth shared with the
+  # shell harness (scripts/claude-pinned-version.txt). Resolved off __DIR__ so it
+  # is independent of the test's cwd (`mix test` runs from api/).
+  defp pinned_version do
+    path = Path.expand("../../../../scripts/claude-pinned-version.txt", __DIR__)
+
+    case File.read(path) do
+      {:ok, contents} -> String.trim(contents)
+      {:error, reason} -> flunk("could not read version pin #{path}: #{inspect(reason)}")
+    end
+  end
 
   # Resolve the real `claude` path from CLAUDE_BIN (set by
   # scripts/claude-chat-e2e.sh). No silent skip: an opt-in run with no binary is
