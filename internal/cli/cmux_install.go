@@ -38,15 +38,23 @@ func runCmuxInstall(out *writer, g globals, args []string) int {
 		printCmuxInstallHelp(out)
 		return exitOK
 	}
-	// --print is the DEFAULT and the only v1 behavior; accept the flag as a no-op
-	// so the documented invocation works. Any other flag is a usage error.
+	// --print is the DEFAULT (shows the blocks, writes nothing); --merge folds the
+	// hooks into ~/.claude/settings.json (the additive writer in
+	// cmux_install_merge.go — this file only dispatches to it; --yes is a global,
+	// already on g.yes). Any other flag is a usage error.
+	merge := false
 	for _, a := range args {
 		switch a {
 		case "--print":
 			// explicit default
+		case "--merge":
+			merge = true
 		default:
-			return usageErrf(out, func() { printCmuxInstallHelp(out) }, "unknown flag %q (install accepts --print)", a)
+			return usageErrf(out, func() { printCmuxInstallHelp(out) }, "unknown flag %q (install accepts --print, --merge, --yes)", a)
 		}
+	}
+	if merge {
+		return runCmuxInstallMerge(out, g)
 	}
 
 	out.outf("# bp cmux install — add these two blocks by hand (nothing is written for you).")
@@ -79,11 +87,16 @@ func hooksBlockValid() bool {
 }
 
 func printCmuxInstallHelp(out *writer) {
-	out.outf("usage: bp cmux install [--print]")
+	out.outf("usage: bp cmux install [--print | --merge [--yes]]")
 	out.outf("")
 	out.outf("Print the Claude Code settings.json hook block (SessionStart/PreToolUse/Stop/")
 	out.outf("SessionEnd → `bp cmux hook <event>`) and the guarded worker-id shell line")
 	out.outf("(`export BARKPARK_WORKER_ID=%s`), with instructions for", taskboard.CmuxSurfaceExport)
 	out.outf("where to paste each. The hooks run ALONGSIDE cmux's own — they ADD, never")
-	out.outf("replace. This NEVER writes ~/.claude/settings.json (print-only in v1).")
+	out.outf("replace.")
+	out.outf("")
+	out.outf("  --print   (default) show the blocks; write nothing")
+	out.outf("  --merge   fold the four hooks into ~/.claude/settings.json — additive,")
+	out.outf("            deduped, foreign hooks untouched; prints a diff and needs --yes")
+	out.outf("            to write (a timestamped backup is made first)")
 }
