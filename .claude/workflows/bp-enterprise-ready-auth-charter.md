@@ -230,3 +230,51 @@ Charter committed to main by THIS wave (D18) — the -31 rollup branch is retire
 enterprise-ready-auth, wave paper enterprise-ready-auth-wave-2026-07-10-w9 linked both ways. Backlog:
 era-bl-mfa-returnto-parity + era-bl-scim-discovery-tests filed; era-scim-conformance-polish repaired + parked.
 Review closes the Paper as the debrief and re-verifies every merge-gated close.
+
+### Wave w9 2026-07-10 — REVIEW complete; all 7 code slices green + merge-ready, zero fixes; merges still owed
+
+Reviewer re-ran every slice gate in an isolated worktree (borrowed warm `_build/test`) and read every diff
+adversarially. **Zero code fixes needed** — the `-r` review branches are byte-identical to the originals, so the
+ORIGINAL branches are final:
+
+- **S1** `era-w8-sso-mfa-binding` — **PR #2361 OPEN, Elixir Test GREEN** (full suite), Prod-compile job still
+  running at review close. 56/0 + router law re-proven (12 live_sessions / 11 `require_org_mfa` hooks,
+  `:scoped_paper_reader` excluded by design). Mint-time refusal on all three SSO controllers + LiveView
+  on_mount defence-in-depth verified fail-closed. **Merge FIRST.**
+- **S2** `era-w8-deprovision-pat-revocation` — **PR #2362 OPEN, ALL CI GREEN** (incl. Prod compile). 51/0.
+  Revoke-before-nilify sequencing verified in the diff; deny-paths real (hard DELETE, soft PATCH,
+  machine-token survivor). Merge after S1.
+- **S3** `era-w8-audit-auth-events` — branch `loop-epic/land-s3-silent-auth-audit-events-merge-r-2` @ a9de9fe3,
+  UNPUSHED, stacked on S1 d91972ea by design. D16 function union verified intact; warnings-as-errors compile
+  + 35/0. Lead: rebase onto main after S1+S2 merge (patch-id drops S1's commit), push, PR, merge.
+- **S4** `era-w8-org-session-policy` — branch @ cb97d21e, UNPUSHED. 41/0; fail-closed pre-touch policy check,
+  strictest-wins, UUID-guarded setter. Watch-item: one extra membership query per `verify_user_session` for
+  ALL users (behavioral zero-tax holds; perf-tax follow-up candidate). Merge after S3.
+- **S5** `era-w8-scim-conformance` — branch @ 5b40a8b1, UNPUSHED. 41/0; ScimResponse module clean (fail-closed
+  If-Match incl. `*`, count clamped 200). Watch-item: PUT /Groups with `members` absent = replace-to-empty
+  (defensible SCIM PUT semantics). Merge after S2/S4 per strict order.
+- **S6** `era-w8-zero-tax-harness` — branch @ bb46292b, UNPUSHED, test-only. 51/0; AC6 golden + malformed-UUID
+  deny-path + solo token-paste no-op all real. Merge after S5.
+- **B7** `era-w8-audit-login-second-factor-fail` — branch @ 0ef6594c, UNPUSHED. 36/0; protective proof accepted
+  (emit removed → ALLOW test reds). Raw `Audit.emit` correct on its base. Rebase after S3 merges, then merge.
+- **S7** `era-w8-epic-rollup` — honestly BLOCKED on its run-LAST precondition (0/7 merged); criteria 0-4 met,
+  5-8 open with the stall note published. Re-run after the merges: flip epic AC2/AC4/AC6, sweep closes, finish
+  worktree cleanup.
+
+**Ledger audit: honest, no lies, no fabrication.** All 7 slice tasks in_progress with only merge-gated criteria
+open; review_note stamped on each with the exact merge recipe. Format CI red on both PRs is PRE-EXISTING
+repo-wide advisory debt (saml_controller_test.exs unformatted on main), not this wave's.
+
+**Cross-slice coherence:** vocabulary consistent (existing audit categories only); the one known conflict (D16)
+resolved and compile-proven; D17 refutation held live. Post-merge cleanup candidate for a later wave: four
+module-local best-effort audit-swallow helpers (accounts/auth_controller/webhooks/session_issuer) could unify.
+
+**Grade: B+** — the code is A-quality (fail-closed everywhere, deny-paths mandatory and real, zero-tax pinned by
+a golden), but this LANDING wave's own purpose — w8 ON MAIN — is still unfinished: 2/7 PRs open, 0/7 merged,
+S3-S6+B7 unpushed. Everything is de-risked to a mechanical merge sequence; the next hands must actually merge.
+
+**Next wave:** (1) execute the merge train S1→S2→S3→S4→S5→S6→B7 (each after Elixir Test green; rebase S3/B7 per
+notes), flipping each merge criterion + closing on fresh claims; (2) re-run era-w8-epic-rollup to flip epic
+AC2/AC4/AC6 + git hygiene; (3) then the anchor's remaining legs are human-gated (era-hg-okta-live-idp,
+era-hg-pen-test, era-hg-dpa-legal-signoff, era-hg-soc2-type2-window) + parked polish
+(era-scim-conformance-polish, era-bl-scim-discovery-tests, era-bl-mfa-returnto-parity).
