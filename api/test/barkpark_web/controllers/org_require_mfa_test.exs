@@ -114,10 +114,21 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
   end
 
   describe "no org requires MFA (the zero-tax contract)" do
-    test "login body has no enrolment key and the surface is open", %{conn: conn} do
-      {_user, login_body} = register_and_login!(conn, "ungoverned@example.com")
+    test "AC6 golden: ungoverned login body is EXACTLY {token, user:{id,email}} and the surface is open",
+         %{conn: conn} do
+      {user, login_body} = register_and_login!(conn, "ungoverned@example.com")
 
+      # The zero-tax golden — a login untouched by any org policy carries the
+      # pre-epic body verbatim: two top-level keys, the user object exactly two
+      # keys. No mfa_enrolment_required, no enrolment/SSO/policy tax bolted on.
+      # (Structural, not golden-HTML: the login PAGE was legitimately rebuilt by
+      # this epic; the JSON contract is what must stay byte-stable.)
+      assert Map.keys(login_body) |> Enum.sort() == ["token", "user"]
+      assert Map.keys(login_body["user"]) |> Enum.sort() == ["email", "id"]
       refute Map.has_key?(login_body, "mfa_enrolment_required")
+      assert is_binary(login_body["token"])
+      assert login_body["user"]["email"] == "ungoverned@example.com"
+      assert login_body["user"]["id"] == user.id
 
       token = login_body["token"]
       assert %{"sessions" => _} = authed(token) |> get("/v1/auth/sessions") |> json_response(200)

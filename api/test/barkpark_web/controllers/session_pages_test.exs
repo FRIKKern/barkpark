@@ -16,12 +16,32 @@ defmodule BarkparkWeb.SessionPagesTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Accounts
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Repo
 
   @password "correct-horse-battery"
 
   defp register!(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
     user
+  end
+
+  # A live api_token whose RAW value a browser would paste into the solo login
+  # form. Only the SHA-256 hash is stored; `kind` defaults to "api" so
+  # `Barkpark.Auth.verify_token/1` accepts it (SessionController.create/2).
+  defp mint_api_token! do
+    raw = "solo-login-" <> Ecto.UUID.generate()
+
+    {:ok, _} =
+      %ApiToken{}
+      |> ApiToken.changeset(%{
+        token_hash: ApiToken.hash_token(raw),
+        label: "solo-login",
+        permissions: ["read"]
+      })
+      |> Repo.insert()
+
+    raw
   end
 
   defp enroll_totp!(user) do
@@ -94,6 +114,34 @@ defmodule BarkparkWeb.SessionPagesTest do
 
       assert html =~ "Log in with Barkpark Cloud"
       assert html =~ "Email or password is incorrect."
+    end
+  end
+
+  describe "solo token-paste login (zero-tax behavioral no-op)" do
+    # The API-token paste path (SessionController.create/2) is byte-identical
+    # pre/post the enterprise-auth epic. This pins the behaviour, not the markup:
+    # a bare valid token still sets the SAME `api_token` session key and lands on
+    # the SAME `/studio` redirect, and the Cloud button stays absent with
+    # BARKPARK_CLOUD_URL unset (mirror of the branded-page no-cloud assertion).
+    test "a valid token sets the api_token session + redirects to /studio; no cloud button",
+         %{conn: conn} do
+      raw = mint_api_token!()
+
+      # BARKPARK_CLOUD_URL unset in test → no Cloud button on the solo page.
+      refute conn |> get("/login") |> html_response(200) =~ "Log in with Barkpark Cloud"
+
+      conn = post(conn, "/login", %{"token" => raw})
+
+      # SAME redirect + SAME session key the unchanged create/2 code path sets.
+      assert redirected_to(conn) == "/studio"
+      assert get_session(conn, "api_token") == raw
+    end
+
+    test "an invalid token re-renders the page and sets NO session (deny path)", %{conn: conn} do
+      conn = post(conn, "/login", %{"token" => "not-a-real-token"})
+
+      assert html_response(conn, 200) =~ "Invalid API token."
+      refute get_session(conn, "api_token")
     end
   end
 
