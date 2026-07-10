@@ -33,6 +33,17 @@ defmodule Barkpark.Search.SurfaceConfig do
   instead of ever persisting a malformed `typo_policy`).
   """
   def changeset(config, attrs) do
-    cast(config, attrs, @castable)
+    config
+    |> cast(attrs, @castable)
+    # Defense in depth (constraints-are-truth): the DB carries a UNIQUE index on
+    # (surface, scope) (search_surface_config_surface_scope_idx). The upsert write
+    # path guards the concurrent-first-write race with ON CONFLICT, but any path
+    # that does a plain `Repo.insert/2` on a duplicate (surface, scope) must get a
+    # clean {:error, changeset} (rendered 422) instead of a raw Ecto.ConstraintError
+    # (a 500). Mapping the constraint here is what turns the raised error into a
+    # changeset error.
+    |> unique_constraint([:surface, :scope],
+      name: :search_surface_config_surface_scope_idx
+    )
   end
 end

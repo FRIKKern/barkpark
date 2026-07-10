@@ -135,9 +135,7 @@ defmodule Barkpark.Search.SurfaceConfigs do
 
     case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do
       nil ->
-        %SurfaceConfig{surface: surface, scope: scope}
-        |> SurfaceConfig.changeset(merged)
-        |> Repo.insert()
+        insert_config(surface, scope, merged)
 
       row ->
         row
@@ -152,6 +150,24 @@ defmodule Barkpark.Search.SurfaceConfigs do
       error ->
         error
     end
+  end
+
+  # Concurrency-safe first-config insert. NAMED FAILURE MODE without on_conflict:
+  # two concurrent PUTs for a (surface, scope) with no row yet both have get_by
+  # return nil, both take this branch; the losing racer's plain `Repo.insert/1`
+  # violates search_surface_config_surface_scope_idx and raises an uncaught
+  # Ecto.ConstraintError → HTTP 500. `on_conflict: {:replace_all_except, …}` +
+  # `conflict_target: [:surface, :scope]` turns that INSERT into an idempotent
+  # ON CONFLICT DO UPDATE, so the loser cleanly upserts instead of crashing.
+  # Mirrors Plugins.Settings.put/3 and Secrets.put/3. `:id` and `:inserted_at`
+  # are excluded so the winner's primary key and creation timestamp survive.
+  defp insert_config(surface, scope, merged) do
+    %SurfaceConfig{surface: surface, scope: scope}
+    |> SurfaceConfig.changeset(merged)
+    |> Repo.insert(
+      on_conflict: {:replace_all_except, [:id, :surface, :scope, :inserted_at]},
+      conflict_target: [:surface, :scope]
+    )
   end
 
   @spec seed_defaults!() :: :ok
@@ -224,6 +240,13 @@ defmodule Barkpark.Search.SurfaceConfigs do
     ensure_cache()
     :ets.info(@cache, :size)
   end
+
+  @doc false
+  # Test seam: run the REAL first-config insert branch (on_conflict + real opts)
+  # directly, so a protective test can reproduce the losing racer deterministically
+  # — its get_by already returned nil, so it hits an existing (surface, scope) row.
+  def __insert_config_for_test__(surface, scope, merged),
+    do: insert_config(surface, scope, merged)
 
   @doc false
   # Test seam: drop all cached entries so a test starts from an empty table.
