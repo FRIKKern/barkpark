@@ -101,6 +101,42 @@ article emitters extended additively, email emitters byte-untouched.
     real) lacked acceptance_criteria arrays — retroactive criteria with PR evidence are
     stamped this wave so the done-ledger is auditable. Why: three real-done-left-unreadable
     incidents today; the ledger is the spine.
+11. **Marginal Σ sums render as NUMBERS on the web in both flag combinations** (the TUI
+    shows pure-shade bars when `values:false` — a 1-char-column constraint the browser
+    lacks). Ratified; code-anchored at data_viz.ex:255-261 + heatmap.go:543. Why: the sums
+    ARE the marginal's point wherever width permits.
+12. **Printed calendar heatmaps clip weeks beyond the page width.** A scroll container
+    can't scroll on paper; `break-inside: avoid` keeps what fits whole. Ratified — standard
+    paged-media tradeoff (charter-prose anchor only; no code comment exists or is needed).
+13. **Paper bodies are written ONLY via `bp bulldocs patch` with `ifRev` in the request
+    BODY.** The CLI `--if-rev` flag is a proven silent no-op (sends a query param; the
+    controller reads body `ifRev`), and generic `bp doc patch`//v1/data/mutate never
+    refreshes the `body_html` cache the reader serves — a "successful" write changes
+    nothing visible. Why: rehearsed end-to-end on a scratch paper against guerrilla
+    (append preserved 3→7 blocks; stale ifRev → 412/exit 6).
+14. **The dogfood gate is article-scoped with positive-presence markers.** Whole-page
+    greps are unpassable by construction (the inline stylesheet's selectors + doc-comment
+    contribute Unsupported=1 / bp-unknown-block=2 on a perfectly clean page); the API form
+    must read `.result.body.html` — the brief's literal `.body.html` is null, a vacuous
+    green. Negatives ==0 (bp-unknown-block, "Unsupported block:"), positives >=1
+    (bp-heat--cal, bp-heat__sum, bp-stat__denom) + a compact-tick token (lowercase k
+    included). Why: both forms proven live, 0/0/0 today, flip on real content only.
+15. **The dogfood chart ships exactly 2 series.** D4's per-surface ceiling stands (TUI 2,
+    web 4); a fidelity exhibit must show the SAME picture on both surfaces, and 3 series
+    would deliberately diverge. `gp-b-web-chart-series-cap` (backlog) enforces/documents
+    the web's OWN ceiling at the code site so audits stop re-deriving D4 as a bug —
+    a verifier did exactly that this wave. Why: nothing at chart_html says the divergence
+    is chosen.
+16. **This file is the gui-premium charter — never `bp-cloud-epic-charter.md`.** That
+    rotating slot currently holds a different live epic (p-quality-gate) mid-edit; the
+    dogfood task's old pointer there was stale and has been corrected. Why: writing there
+    would clobber another epic's memory.
+17. **The anchor's acceptance criteria are seeded BEFORE its first claim.** Seeding after
+    a claim changes the work-field digest and trips `doc_changed_since_claim` — and a
+    same-worker re-claim keeps the digest, so renewal cannot clear a self-inflicted fence.
+    Escape hatch if fenced anyway: fresh-read the published rev + current epoch and pass
+    `--set observed_rev=<rev>` in the same close call. Why: full choreography rehearsed
+    on scratch tasks 2026-07-10; the documented seed-after-claim order 409s.
 
 ## Roadmap
 
@@ -176,3 +212,108 @@ three clauses and close gui-premium. Backlog beyond the close: gp-b-table-typed-
 gp-b-roadmap-v2-render (p2), gp-b-mobile-reading-column (p3 — the 420px page-level
 overflow the review measured comes from the pre-existing `.bp-stats` auto-fit grid, a
 concrete starting point).
+
+### Wave 2026-07-10 — finish wave (Decide): dogfood re-scoped, close choreography set, 2 slices cut
+
+Seven verification probes ran before this Decide; every load-bearing recipe is now
+rehearsed, not theorized. What they established (full detail in the wave Paper
+`gui-premium-wave-2026-07-10`):
+
+- **Write path proven safe** on a scratch paper: `bp bulldocs patch` append preserved all
+  existing blocks and refreshed `body_html` atomically; TWO corrections found by doing —
+  the CLI `--if-rev` flag is a silent no-op (ifRev goes in the BODY, D13) and web
+  paragraphs need `content:[{type:text,value}]`, never `text` (renders an empty `<p>`).
+  Real showcase confirmed rev 3 / 91 blocks, byte-equal blocks↔body.blocks.
+- **Gate re-scoped** (D14): article-region greps are 0/0/0 today and flip only on real
+  content; the task brief's literal whole-page grep and its `.body.html` jq path were both
+  unpassable/vacuous and are now replaced in the task's criteria.
+- **Chart divergence reconciled against D4** (D15): the v3 probe proved the web renders
+  all series uncapped — but D4 already ratified the per-surface ceiling, so the dogfood
+  chart ships 2 series and the backlog task documents/enforces the web's own ceiling of 4
+  instead of "fixing" a ratified decision.
+- **Close choreography rehearsed on scratch tasks** (D17): anchor AC seeded pre-claim
+  (done by this Decide — 3 clauses, met:false), close via targeted claim + immediate
+  criteria index-merge; wrong epoch → `stale_claim`; dotted array-index keys in `set`
+  create silent garbage (found + cleaned a live instance on gp-w4b, whose stale
+  "PR #1910 open" criterion was also fixed to cite merge 05b45064 — 5/5 now).
+- **Deploy liveness confirmed**: #2273 (02cc8e3d) and #2283 (ef89faf1, hollow gate) both
+  HEALTHY on guerrilla. **Residuals named honestly**: main is red on design-check Part E
+  (bulldocs.html.heex 102→103, issue 2275, filed, UNRESOLVED); the reader's inline mermaid
+  engine duplicates bp-paper-mermaid.js (zero drift today) — now tracked as
+  `gp-b-mermaid-reader-asset-dedup` instead of living only in a code comment.
+- **Both-themes procedure proven**: the reader never stamps `data-theme`; chrome-devtools
+  `emulate(colorScheme)` + computed-style/matchMedia assertion is the only real lever
+  (dark rgb(24,18,13)/true, light rgb(244,236,233)/false). Installed `bp` was ~100 commits
+  stale — builders run `make cli-build` and use `./dist/bp` for TUI evidence.
+
+**Wave plan (2 slices, sequenced by blocked_by):**
+- **F1 (medium, fable)** `gp-w5-showcase-dogfood` — re-claim (targeted, same worker
+  string), author section 9 (calendar heatmap; marginals+values heatmap; denom stat;
+  2-series compact-tick chart) via the D13 write path, prove article-scoped gate both
+  forms + both themes + TUI floor. PR-less: the live render is the evidence; builder
+  closes on stamped evidence.
+- **F2 (medium, fable)** `gp-w5-epic-close` — independently re-verify the gates, write the
+  epic-close charter entry (PR trail w1 #1600/#1606 · w2 #1614 · w3 #1660/#1674/#1830 ·
+  w4 #1897/#1910/#1913 · w5 #2273; residuals per above; 5 backlog children open by
+  design), commit+push, then claim gui-premium and close it stamping the 3 seeded clauses.
+- **Backlog filed this wave:** `gp-b-web-chart-series-cap` (p2), `gp-b-mermaid-reader-asset-dedup` (p3).
+
+### Wave 2026-07-10 — epic close
+
+The close condition (§Roadmap) is met and independently verified — this entry is written
+by the F2 close slice (`gp-w5-epic-close`), which re-ran every gate itself rather than
+inheriting F1's evidence.
+
+**Dogfood verified live (trust-but-verify, both forms, all six checks):** F1
+(`gp-w5-showcase-dogfood`, closed done 5/5) authored section 9 "Slate 2 — the fidelity
+pass" into `/papers/portabledoc-showcase` via the D13 write path (ifRev in body, rehearsed
+on a scratch paper; rev 3→4, 91→101 blocks, first id fd-001 intact, blocks == body.blocks).
+F2's own re-run on live guerrilla: Form 1 (page curl, article slice after the last
+`</style>` at line 1799) and Form 2 (`jq -r '.result.body.html'`, 49 720 bytes) both show
+`bp-unknown-block`=0, `Unsupported block:`=0, `bp-heat--cal`=1, `bp-heat__sum`=1,
+`bp-stat__denom`=1, five compact-tick tokens (8M · 20.5M · 33M · 45.5M ×2). Zero
+wrong-shape renders remain — the pre-fix silent plain-grid bug is provably gone (D14 gate
+shape). F1 additionally proved both themes machine-checkably (chrome-devtools emulate:
+dark rgb(24,18,13)/matchMedia true, light flip, sane computed colors on section-9's own
+denom/Σ/tick elements) and the TUI floor (fresh `./dist/bp` at 8270dd5a, 508 lines, zero
+unsupported/unknown/panic/error; calendar + matrix + denom + compact ticks all present).
+No render defect found on any surface — nothing new filed.
+
+**The anchor's three clauses, evidenced (all 10 PRs verified MERGED via `gh` at close):**
+
+- **w1 mermaid** — #1600 (evergreen mermaid theme, both schemes, re-render on flip) +
+  #1606; live showcase's 4 diagrams render premium.
+- **w2 slate parity** — #1614 + #2273 (slate-2 fidelity: heatmap calendar/marginals/values
+  with quantile dual-encode, stat denominators, compact ticks — D2/D6) + the authored
+  section-9 exhibit live on guerrilla, article-scoped gate green both forms, both themes,
+  TUI render clean.
+- **w3 chrome** — #1660/#1674/#1830 (paper-as-email route + mail-client view + prose
+  rhythm) + w4 fleet #1897/#1910/#1913 (14/14 block families as real email components) +
+  #2273 (print stylesheet for the bulldocs reader, honest `.bp-unknown-block` degrade
+  box — D7/D12).
+
+**Honest residuals at close:**
+
+- **design-check Part E is red on main** (issue 2275, OPEN): re-checked at close —
+  `gh run list --branch main --limit 3` shows the latest main push (8270dd5a, run
+  29114194485) failing the "Doc budgets + anchors" job at the "Design-token drift gate
+  (blocking)" step; every main push since #2273 is red on this job (29112942816,
+  29112003495, 29111751326). The bulldocs.html.heex 102→103 color-literal growth is
+  unresolved as of this close; the fix path is in the issue.
+- **Mermaid engine duplication**: `bp-paper-mermaid.js` duplicates the reader's inline
+  mermaid engine (zero drift today) — tracked as `gp-b-mermaid-reader-asset-dedup`, no
+  longer only a code comment.
+- **Five backlog children stay open BY DESIGN** (all verified open under `gui-premium` at
+  close; they do not block it — D9): `gp-b-table-typed-cols` (p2),
+  `gp-b-roadmap-v2-render` (p2), `gp-b-mobile-reading-column` (p3),
+  `gp-b-web-chart-series-cap` (p2, D15), `gp-b-mermaid-reader-asset-dedup` (p3).
+
+**Close mechanics** per D17 (seeded criteria, targeted claim + immediate index-merge close,
+no post-claim work-field patches) and D13–D16 for the write path, gate shape, series count,
+and charter home. Note: this commit also lands the Decide-phase charter update (D11–D17 +
+the Decide wave-log entry above) verbatim — it had been left uncommitted in the shared
+checkout's working copy (the exact failure mode dd399f10 later fixed for the epic-cycle
+tooling), so the decisions this entry references now exist in history.
+
+**gui-premium is closed.** Anchor `gui-premium` → done, 3/3 clauses stamped with the trail
+above; the epic's board truth is the ledger, the exhibit is section 9 live.
