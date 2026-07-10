@@ -442,7 +442,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # set_permission_mode steer for it (unlike the other five modes).
   def handle_event("arm-bypass", _params, socket) do
     if String.trim(socket.assigns[:bypass_confirm] || "") == "bypass" do
-      if sid = socket.assigns[:store_session_id], do: StudioChat.set_mode(sid, "bypassPermissions")
+      if sid = socket.assigns[:store_session_id],
+        do: StudioChat.set_mode(sid, "bypassPermissions")
 
       line =
         if socket.assigns[:session],
@@ -564,7 +565,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_event("rail-toggle", %{"id" => id}, socket) do
     entry = Map.put(Map.get(socket.assigns.rail, id) || %{}, "task_id", id)
     current = rail_open?(socket.assigns.rail_expanded, entry)
-    {:noreply, assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
+
+    {:noreply,
+     assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
@@ -1280,7 +1283,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:claude_chat_event, %{"type" => "system", "subtype" => "task_notification"} = ev},
         socket
       ) do
-    socket = fold_rail(socket, StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], ev["status"]))
+    socket =
+      fold_rail(
+        socket,
+        StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], ev["status"])
+      )
 
     merge_task_row(
       socket,
@@ -1297,7 +1304,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       ) do
     case get_in(ev, ["patch", "status"]) do
       status when is_binary(status) ->
-        socket = fold_rail(socket, StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], status))
+        socket =
+          fold_rail(
+            socket,
+            StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], status)
+          )
+
         merge_task_row(socket, by_task_id(ev["task_id"]), %{task_status: status})
 
       _ ->
@@ -1310,8 +1322,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # rail below the composer — this is the frame the user's Workflow emitted that
   # the catch-all below silently dropped. Value-equality guarded (fold_rail).
   def handle_info(
-        {:claude_chat_event,
-         %{"type" => "system", "subtype" => "background_tasks_changed"} = ev},
+        {:claude_chat_event, %{"type" => "system", "subtype" => "background_tasks_changed"} = ev},
         socket
       ) do
     {:noreply, fold_rail(socket, StudioChat.rail_apply_background(socket.assigns.rail, ev))}
@@ -2250,14 +2261,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </div>
       </div>
 
-      <div style="flex: none; border-top: 1px solid var(--border-muted); padding: 10px 16px;">
+      <div style="flex: none; padding: 8px 16px 12px;">
+        <%!-- One-card composer: input on top, controls row below, ONE rounded
+              border around both. The form and the cockpit stay SIBLINGS inside
+              the card (nested <form>s are invalid HTML — the parser would drop
+              them and break the phx-change selectors); the card div is pure
+              chrome. --%>
+        <div style="max-width: 860px; margin: 0 auto; border: 1px solid var(--border-muted); border-radius: 14px; background: var(--surface);">
         <form
           id="chat-composer-form"
           phx-hook="ChatComposer"
           phx-submit="send"
           phx-change="composer-change"
           data-commands={Jason.encode!(slash_vocab(@commands))}
-          style="display: flex; flex-direction: column; gap: 8px; max-width: 860px; margin: 0 auto;"
+          style="display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 2px;"
         >
           <%!-- The upload the paste/drop hook feeds (charter D25). Kept in the
                 DOM (allow_upload needs it) but visually hidden — files are added
@@ -2335,7 +2352,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 aria-controls="chat-slash-menu"
                 aria-activedescendant=""
                 placeholder={composer_placeholder(@status)}
-                style="width: 100%; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
+                style="width: 100%; background: transparent; color: inherit; border: none; outline: none; padding: 0; font: inherit;"
               />
               <%!-- phx-update="ignore": the combobox hook OWNS this element —
                     every keystroke round-trips (server-bound composer, D24) and
@@ -2363,14 +2380,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
               are invalid HTML (the parser drops them, breaking the selectors).
               Send re-associates to the composer via `form="chat-composer-form"`;
               the attach <label>'s `for` reaches the hidden input by id. --%>
-        <div style="display: flex; align-items: center; gap: 10px; max-width: 860px; margin: 8px auto 0;">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 12px 10px;">
             <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
               <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
                 <select
                   name="mode"
                   class="text-xs text-dim"
                   aria-label="Permission mode"
-                  style="background: transparent; color: inherit; border: none; border-radius: 6px; padding: 2px 4px; cursor: pointer;"
+                  style="background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 999px; padding: 3px 10px; cursor: pointer;"
                 >
                   <%!-- The retired middle mode surfaces ONLY while THIS session still
                         carries it (charter D48) — a legacy row keeps spawning it
@@ -2392,7 +2409,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   name="model"
                   class="text-xs"
                   aria-label="Model"
-                  style="background: transparent; color: var(--primary); border: none; border-radius: 6px; padding: 2px 4px; font-weight: 600; cursor: pointer;"
+                  style="background: transparent; color: var(--text); border: none; padding: 2px 2px; font-weight: 500; cursor: pointer;"
                 >
                   <option value="default" selected={@model_choice == "default"}>
                     model: default
@@ -2411,16 +2428,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 </span>
               </form>
               <%!-- Effort picker (wave 9, charter D48): composed with the model as
-                    one "Fable · high" group — the dim "·" reads them as a pair. It
-                    is intent-only (rides the next spawn as `--effort`); a mid-session
-                    change never steers the running turn (no set_effort control verb). --%>
-              <span class="text-xs text-dim" aria-hidden="true">·</span>
+                    one "Fable high" group — dark model beside dim effort reads as a
+                    pair. It is intent-only (rides the next spawn as `--effort`); a
+                    mid-session change never steers the running turn (no set_effort
+                    control verb). --%>
               <form phx-change="set-effort" style="display: inline-flex; align-items: center;">
                 <select
                   name="effort"
-                  class="text-xs"
+                  class="text-xs text-dim"
                   aria-label="Reasoning effort"
-                  style="background: transparent; color: var(--primary); border: none; border-radius: 6px; padding: 2px 4px; font-weight: 600; cursor: pointer;"
+                  style="background: transparent; border: none; padding: 2px 0; cursor: pointer;"
                 >
                   <option value="default" selected={@effort_choice == "default"}>
                     effort: default
@@ -2432,6 +2449,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
               </form>
             </div>
             <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+              <%!-- The one-word session status (new chat / ready / working /
+                    stopping… / offline) — the honest state affordance the old
+                    header line carried, now a quiet cockpit fact beside the
+                    ring. Tests assert these words render; keep them visible. --%>
+              <span class="text-xs text-dim" style="font-family: var(--font-mono); opacity: 0.8;">
+                <%= status_label(@status) %>
+              </span>
               <.context_ring ring={@ring} size={:sm} show_cost={false} />
               <%!-- Attach an image (charter D44/D25): a <label> for the hidden
                     live_file_input (whose id is the upload ref) opens the native
@@ -2441,13 +2465,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 class="btn"
                 aria-label="Attach an image"
                 title="Attach an image"
-                style="display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; cursor: pointer;"
+                style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; background: transparent; border-radius: 999px; cursor: pointer; color: var(--text-dim);"
               >
                 <.icon name="image" size={16} />
               </label>
               <%!-- While a turn runs the primary button becomes Stop (interrupt),
                     but pressing ↵ still submits: a mid-turn send is queued honestly
                     (charter D43) — dispatched immediately, run as the next turn. --%>
+              <%!-- Icon-only Stop: the "Stopping…" word lives in the composer
+                    placeholder (composer_placeholder(:interrupting)), so the
+                    button stays a quiet square-in-circle like the reference. --%>
               <button
                 :if={turn_active?(@status)}
                 type="button"
@@ -2455,10 +2482,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 phx-click="stop_turn"
                 disabled={@status == :interrupting}
                 aria-label="Stop the current turn"
-                style="display: inline-flex; align-items: center; gap: 6px;"
+                title={if @status == :interrupting, do: "Stopping…", else: "Stop (esc)"}
+                style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border-muted); background: transparent; border-radius: 999px; color: var(--danger);"
               >
-                <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
-                <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
+                <span style="display: inline-block; width: 9px; height: 9px; background: currentColor; border-radius: 2px;"></span>
               </button>
               <button
                 :if={not turn_active?(@status)}
@@ -2466,10 +2493,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 form="chat-composer-form"
                 class="btn btn-primary"
                 aria-label="Send message"
+                style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border-radius: 999px;"
               >
                 <.icon name="send" size={14} />
               </button>
             </div>
+        </div>
         </div>
         <%!-- Bypass ARM panel (charter D48): opened only when the user picks
               bypassPermissions. Loud via --danger tokens, type-the-word-"bypass"
@@ -4723,6 +4752,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # pre-compaction size, so we never invent a number we don't have.
   defp compact_size(pre) when is_integer(pre) and pre > 0, do: " (was ~#{pre} tokens)"
   defp compact_size(_), do: ""
+
+  # The one-word status rendered in the cockpit (beside the context ring) —
+  # the honest session-state affordance; tests assert these exact words.
+  defp status_label(:new), do: "new chat"
+  defp status_label(:resumable), do: "resumable"
+  defp status_label(:starting), do: "starting"
+  defp status_label(:ready), do: "ready"
+  defp status_label(:working), do: "working"
+  defp status_label(:thinking), do: "working"
+  defp status_label(:interrupting), do: "stopping…"
+  defp status_label(:offline), do: "offline"
 
   # A turn is in flight while the model works or while we're aborting it — both
   # states show Stop, never Send (there is no queue; the only in-turn control
