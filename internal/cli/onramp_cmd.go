@@ -8,7 +8,8 @@ package cli
 // is deliberately NOT defined here — a stray `--write` is a usage error, not a
 // silently-ignored flag.
 //
-// Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli.
+// Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli |
+// copilot.
 // windsurf and gemini-cli both reuse mcpJSONStanza verbatim (charter decision 7)
 // — zero new mechanism — differing only in destination path and env dialect, and
 // both print codex-style MERGE-the-mcpServers-key guidance (their files are
@@ -53,6 +54,14 @@ const (
 	// per-tool and never shared across tools even when they happen to match
 	// (charter decision 9).
 	geminiTokenRef = "${BARKPARK_API_TOKEN}" // Gemini CLI dialect
+	// copilotTokenRef is VS Code / GitHub Copilot's dialect. VS Code expands
+	// ${env:VAR} inside `.vscode/mcp.json` values, reading the token from the shell
+	// so the secret never lands in the committed file — cited:
+	// code.visualstudio.com/docs/agents/reference/mcp-configuration (2026-07-10).
+	// Its VALUE coincides with cursorTokenRef, but it stays its OWN named constant
+	// — dialects are per-tool and never shared across tools even when they happen
+	// to match (charter decision 9; geminiTokenRef precedent above).
+	copilotTokenRef = "${env:BARKPARK_API_TOKEN}" // VS Code / Copilot dialect
 )
 
 // onrampFile is one config file a target needs: where it belongs + its content.
@@ -72,7 +81,7 @@ type onrampSpec struct {
 
 // onrampLocalTargets is the ordered set of targets the verb prints config for.
 func onrampLocalTargets() []string {
-	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli"}
+	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot"}
 }
 
 // onrampServer resolves the URL to bake into the env block: --server wins, else
@@ -127,6 +136,34 @@ func mcpJSONStanza(server, tokenValue string) string {
 func claudeCodeMcpJSONStanza(server, tokenValue string) string {
 	return fmt.Sprintf(`{
   "mcpServers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": %q,
+        "BARKPARK_API_TOKEN": %q
+      }
+    }
+  }
+}`, server, tokenValue)
+}
+
+// copilotMcpJSONStanza renders the `.vscode/mcp.json` server block in VS Code /
+// GitHub Copilot's shape. The ONE structural difference from every sibling: the
+// top-level key is `servers`, NOT `mcpServers` — VS Code renamed it during the
+// MCP preview (live-pinned against
+// code.visualstudio.com/docs/agents/reference/mcp-configuration, 2026-07-10).
+// Otherwise it is the Claude Code shape: the explicit `"type": "stdio"`
+// discriminator plus command/args/env, carrying the SAME BARKPARK_API_URL env
+// key every sibling stanza uses (so COPILOT.md's retargeting prose stays
+// consistent). Key ORDER is fixed by a raw template — a map marshal would sort
+// keys and drift from the doc (decision 14). The token stays in the shell via
+// ${env:…}; the `inputs`/promptString alternative is documented in COPILOT.md,
+// never emitted here.
+func copilotMcpJSONStanza(server, tokenValue string) string {
+	return fmt.Sprintf(`{
+  "servers": {
     "barkpark": {
       "type": "stdio",
       "command": "bp",
@@ -227,6 +264,20 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 				{Path: ".gemini/settings.json", Content: mcpJSONStanza(server, onrampTokenValue(geminiTokenRef, token))},
 			},
 			Verify: "gemini mcp list  (or /mcp inside the Gemini CLI) — barkpark appears with its tools",
+		}, true
+	case "copilot":
+		// VS Code / GitHub Copilot reads `.vscode/mcp.json`. The one structural
+		// difference from every sibling is the top-level `servers` key (VS Code
+		// renamed it from mcpServers during the MCP preview — copilotMcpJSONStanza).
+		// It shares Cursor's ${env:VAR} dialect (copilotTokenRef, its own named
+		// constant per decision 9). The file may already hold other servers, so the
+		// human print carries a merge-the-key note rather than a whole-file label.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				{Path: ".vscode/mcp.json", Content: copilotMcpJSONStanza(server, onrampTokenValue(copilotTokenRef, token))},
+			},
+			Verify: `run "MCP: List Servers" from the VS Code Command Palette — barkpark appears; its task tools show in Copilot agent mode's tool picker`,
 		}, true
 	}
 	return onrampSpec{}, false
@@ -331,6 +382,11 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 		out.outf("# settings.json holds your WHOLE Gemini CLI config — MERGE the \"barkpark\" entry into any")
 		out.outf("# existing \"mcpServers\" object rather than replacing the file.")
 		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${BARKPARK_API_TOKEN} is expanded by Gemini CLI (its dialect).")
+	case "copilot":
+		out.outf("# .vscode/mcp.json uses a top-level \"servers\" key — VS Code's MCP shape (siblings nest under mcpServers).")
+		out.outf("# If the file already holds other servers, MERGE the \"barkpark\" entry into \"servers\" — don't overwrite it.")
+		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${env:BARKPARK_API_TOKEN} reads it (VS Code dialect, shared with Cursor).")
+		out.outf("# Prefer a typed prompt over a shell var? Add an \"inputs\" promptString and reference ${input:id} — see docs/setup/COPILOT.md.")
 	}
 
 	out.outf("")
@@ -342,7 +398,7 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 
 // printOnrampHelp is the usage/help screen for `bp onramp`.
 func printOnrampHelp(out *writer) {
-	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli> [--server URL] [--token TOKEN]")
+	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot> [--server URL] [--token TOKEN]")
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
 	out.outf("block(s), where they belong, and how to verify. PRINT-ONLY in v1: nothing is")
@@ -355,6 +411,7 @@ func printOnrampHelp(out *writer) {
 	out.outf("  cursor-cloud  .cursor/environment.json install + Secrets UI note + the cursor stanza")
 	out.outf("  windsurf      ~/.codeium/mcp_config.json stanza (${env:BARKPARK_API_TOKEN}) + merge note")
 	out.outf("  gemini-cli    .gemini/settings.json stanza (${BARKPARK_API_TOKEN}) + global/merge note")
+	out.outf("  copilot       .vscode/mcp.json stanza (top-level `servers`, ${env:BARKPARK_API_TOKEN}) + inputs note")
 	out.outf("")
 	out.outf("chatgpt / claude-ai are remote-agent onramps (no local config) — see docs/setup/REMOTE.md")
 	out.outf("")
