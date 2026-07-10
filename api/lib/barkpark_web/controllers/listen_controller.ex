@@ -7,6 +7,19 @@ defmodule BarkparkWeb.ListenController do
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
 
   def listen(conn, %{"dataset" => dataset} = params) do
+    # Subscriber backpressure — HARD backstop (see the backpressure note above
+    # listen_loop/5). Bound THIS connection process: message_queue_data is
+    # on_heap, so the queued {:document_changed, …} messages count toward the
+    # heap. If a FULLY stalled reader (chunk/2 never returns, so no Elixir code
+    # runs to self-check) grows the mailbox past the ceiling, the BEAM kills
+    # this ONE process instead of OOM-ing the node. A slow client losing its
+    # stream is correct; a node dying is not.
+    Process.flag(:max_heap_size, %{
+      size: sse_max_heap_words(),
+      kill: true,
+      error_logger: true
+    })
+
     since =
       case get_req_header(conn, "last-event-id") do
         [v | _] -> parse_int(v)
@@ -126,7 +139,37 @@ defmodule BarkparkWeb.ListenController do
     }
   end
 
+  # --- Subscriber backpressure (Barkpark scar: unbounded BEAM mailbox) ---
+  #
+  # chunk/2 BLOCKS the connection process on Bandit while a stalled/slow TCP
+  # reader drains. Meanwhile Phoenix.PubSub keeps send/2-ing {:document_changed,
+  # msg} (each carrying a full rendered document) into THIS same process
+  # mailbox. With no consumer-side bound, a high-mutation dataset (bulk import
+  # ~100 events/s) + ONE stalled client grows the mailbox without limit → heap
+  # growth → node OOM. The `after 30_000` keepalive never fires under sustained
+  # load, so it is no guard. Two complementary bounds fix it:
+  #
+  #   1. max_heap_size (kill: true), set in listen/2 — the HARD backstop for a
+  #      fully stalled reader where chunk/2 never returns: the BEAM kills this
+  #      one connection process at the ceiling, node survives.
+  #   2. This message_queue_len check, each loop iteration — the GRACEFUL shed
+  #      for a slow-but-progressing reader: once the backlog crosses the limit
+  #      we emit a final `event: overloaded` and close, well before the heap
+  #      ceiling. The client reconnects and re-syncs the gap via Last-Event-ID
+  #      replay (replay_since/4) — no events are lost, only the stalled socket
+  #      is shed. A slow reader losing its stream is correct; a dead node is not.
   defp listen_loop(conn, dataset, workspace_id, caller_context, scope) do
+    case backpressure_step(conn, sse_mailbox_limit()) do
+      {:shed, conn} ->
+        # Backlog over the limit: shed cleanly rather than grow the heap.
+        conn
+
+      {:cont, conn} ->
+        listen_recv(conn, dataset, workspace_id, caller_context, scope)
+    end
+  end
+
+  defp listen_recv(conn, dataset, workspace_id, caller_context, scope) do
     receive do
       {:document_changed, %{event_id: _eid} = msg} ->
         if forward_event?(msg, workspace_id) do
@@ -162,6 +205,71 @@ defmodule BarkparkWeb.ListenController do
         end
     end
   end
+
+  # One backpressure guard step: if the connection-process backlog is over the
+  # limit, shed the slow consumer (emit a final `event: overloaded`, then
+  # {:shed, conn} so the loop returns and the connection closes); otherwise
+  # {:cont, conn} to keep streaming.
+  #
+  # Public (`@doc false`) so the policy is assertable against a real flooded
+  # process mailbox without a live Bandit socket — the receive loop is otherwise
+  # un-assertable, same testing-seam convention as `format_event/2`,
+  # `forward_event?/2` and `redacted_result/4`.
+  @doc false
+  def backpressure_step(conn, limit) do
+    if should_shed?(mailbox_len(), limit) do
+      {:shed, shed(conn)}
+    else
+      {:cont, conn}
+    end
+  end
+
+  # Pure backpressure decision — extracted so the threshold policy is unit
+  # testable in isolation (no socket, no DB). `queue_len` is the current
+  # message_queue_len; shed strictly ABOVE the limit so a burst that lands
+  # exactly at the limit still streams.
+  @doc false
+  def should_shed?(queue_len, limit)
+      when is_integer(queue_len) and is_integer(limit),
+      do: queue_len > limit
+
+  # The final frame emitted before a slow consumer is shed. A distinct event so
+  # the client can tell backpressure-close from a network drop and immediately
+  # reconnect with Last-Event-ID to re-sync the missed events.
+  @doc false
+  def overloaded_frame,
+    do: "event: overloaded\ndata: {\"type\":\"overloaded\",\"reason\":\"slow_consumer\"}\n\n"
+
+  defp shed(conn) do
+    case chunk(conn, overloaded_frame()) do
+      {:ok, c} -> c
+      _ -> conn
+    end
+  end
+
+  defp mailbox_len do
+    case :erlang.process_info(self(), :message_queue_len) do
+      {:message_queue_len, n} -> n
+      _ -> 0
+    end
+  end
+
+  # Backpressure tunables, overridable via `config :barkpark, ListenController`.
+  # Defaults: shed a slow reader once >500 events back up; hard-kill a fully
+  # stalled connection process at ~80 MB (10M words × 8 B) before it can OOM
+  # the node.
+  @default_mailbox_limit 500
+  @default_max_heap_words 10_000_000
+
+  @doc false
+  def sse_mailbox_limit,
+    do: env(:mailbox_limit, @default_mailbox_limit)
+
+  defp sse_max_heap_words,
+    do: env(:max_heap_words, @default_max_heap_words)
+
+  defp env(key, default),
+    do: Application.get_env(:barkpark, __MODULE__, [])[key] || default
 
   # The field-visibility + row-ACL chokepoint for the SSE stream. `event` is
   # either a live broadcast `msg` or a stored `%MutationEvent{}` — both carry
