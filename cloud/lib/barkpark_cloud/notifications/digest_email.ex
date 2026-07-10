@@ -114,8 +114,11 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   defp header(%{total: total, current: c, behind: b, paused: p, latest: latest}) do
     fleet =
       case total do
-        0 -> "Fleet: 0 instances."
-        _ -> "Fleet: #{total} #{pluralize(total, "instance")} — #{c} current, #{b} behind, #{p} paused."
+        0 ->
+          "Fleet: 0 instances."
+
+        _ ->
+          "Fleet: #{total} #{pluralize(total, "instance")} — #{c} current, #{b} behind, #{p} paused."
       end
 
     """
