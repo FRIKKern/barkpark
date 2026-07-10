@@ -42,7 +42,12 @@ defmodule Barkpark.Plugins.Hooks do
     event
     |> plugins_for()
     |> Enum.reduce_while(:ok, fn hook_fn, _acc ->
-      case safe_invoke(hook_fn, payload) do
+      # TIMED: before_* hooks run SYNCHRONOUSLY on the write's stack (the
+      # sheets before_save gate does a full Engine recompute here), so a slow
+      # one stalls every save. `timed_invoke` emits the same duration event as
+      # the after_* chain and warns past @slow_hook_threshold_ms — answering
+      # "which plugin hook is slowing our writes?" for the before path too.
+      case timed_invoke(event, hook_fn, payload) do
         :ok ->
           {:cont, :ok}
 
@@ -72,24 +77,7 @@ defmodule Barkpark.Plugins.Hooks do
 
     hooks
     |> Task.async_stream(
-      fn hook_fn ->
-        start = System.monotonic_time(:millisecond)
-        _ = safe_invoke(hook_fn, payload)
-        duration = System.monotonic_time(:millisecond) - start
-
-        if duration > @slow_hook_threshold_ms do
-          Logger.warning(
-            "Barkpark.Plugins.Hooks: slow #{event} hook " <>
-              "#{inspect(hook_fn)}: #{duration}ms"
-          )
-        end
-
-        :telemetry.execute(
-          [:barkpark, :hooks, event, :hook],
-          %{duration_ms: duration},
-          %{event: event, hook: hook_fn}
-        )
-      end,
+      fn hook_fn -> timed_invoke(event, hook_fn, payload) end,
       timeout: @hook_timeout_ms,
       max_concurrency: System.schedulers_online(),
       on_timeout: :kill_task,
@@ -153,6 +141,48 @@ defmodule Barkpark.Plugins.Hooks do
         end
     end
   end
+
+  # Invoke a single hook under a monotonic-clock timer, then emit ONE
+  # fixed-name duration event — `[:barkpark, :hooks, :hook, :stop]` — for BOTH
+  # the before_* and after_* chains. Fixed name (not the old dynamic
+  # `[:barkpark, :hooks, <event>, :hook]`) so `Telemetry.Metrics` can subscribe
+  # a single Prometheus histogram to it (a dynamic segment can't be matched by
+  # one metric). The `event`/`module` metadata tags let the histogram answer
+  # "which plugin hook (module) is slow, and at which lifecycle stage?". Returns
+  # the hook's own return value so the before_* chain can still act on :halt.
+  defp timed_invoke(event, hook_fn, payload) do
+    start = System.monotonic_time()
+    result = safe_invoke(hook_fn, payload)
+    duration = System.monotonic_time() - start
+    duration_ms = System.convert_time_unit(duration, :native, :millisecond)
+
+    if duration_ms > @slow_hook_threshold_ms do
+      Logger.warning(
+        "Barkpark.Plugins.Hooks: slow #{event} hook " <>
+          "#{inspect(hook_fn)}: #{duration_ms}ms"
+      )
+    end
+
+    :telemetry.execute(
+      [:barkpark, :hooks, :hook, :stop],
+      %{duration: duration, duration_ms: duration_ms},
+      %{event: event, module: hook_module(hook_fn)}
+    )
+
+    result
+  end
+
+  # Module a captured hook function was defined in — the plugin identity, used
+  # as a bounded telemetry tag ("which PLUGIN's hook is slow"). Anonymous fns
+  # resolve to their defining module too; anything non-function → :unknown.
+  defp hook_module(fun) when is_function(fun) do
+    case Function.info(fun, :module) do
+      {:module, mod} -> mod
+      _ -> :unknown
+    end
+  end
+
+  defp hook_module(_), do: :unknown
 
   defp safe_invoke(hook_fn, payload) do
     hook_fn.(payload)

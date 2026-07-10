@@ -80,6 +80,37 @@ defmodule BarkparkWeb.Telemetry do
       # before latency alone makes it obvious.
       last_value("vm.total_run_queue_lengths.total",
         description: "Total scheduler run-queue length — sustained >0 means the VM is saturated."
+      ),
+      # Q: "what is p95 of a mutate?" — the batch-write hot path
+      # (Content.apply_mutations) had ZERO timing before this. `:telemetry.span`
+      # emits [:barkpark, :content, :mutate, :stop] with :duration; this
+      # histogram makes p95 derivable via histogram_quantile.
+      distribution("barkpark.content.mutate.stop.duration",
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description: "Batch-mutate (apply_mutations) latency — p95 via histogram_quantile."
+      ),
+      # Q: "what is p95 of a publish?" — the publish/lifecycle hot path had ZERO
+      # timing. One span [:barkpark, :content, :lifecycle, :stop] covers all four
+      # ops; the :op tag selects publish (or unpublish/discard_draft/delete).
+      distribution("barkpark.content.lifecycle.stop.duration",
+        tags: [:op],
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "Publish/lifecycle latency — p95 via histogram_quantile; tag :op selects publish."
+      ),
+      # Q: "which plugin hook is slowing our writes?" — before_*/after_* hooks run
+      # on the write path (the sheets before_save gate does a full Engine
+      # recompute). Hooks.timed_invoke/3 emits [:barkpark, :hooks, :hook, :stop];
+      # this histogram was previously emitted to the void (no consumer). Tags
+      # :event (lifecycle stage) + :module (which plugin) pinpoint the culprit.
+      distribution("barkpark.hooks.hook.stop.duration",
+        tags: [:event, :module],
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "Per-plugin-hook duration — p95 via histogram_quantile; tags :event=stage, :module=plugin."
       )
     ]
   end

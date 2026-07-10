@@ -35,6 +35,19 @@ defmodule Barkpark.Content.Lifecycle do
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, Document, DraftId, Sheets, Writer, WriteScope}
 
+  # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
+  # a publish?" was unanswerable. `:telemetry.span` emits
+  # `[:barkpark, :content, :lifecycle, :start | :stop | :exception]` with a
+  # `:duration`; BarkparkWeb.Telemetry subscribes a Prometheus histogram to
+  # `:stop`, tagged by `:op`, so p95-per-operation (publish/unpublish/
+  # discard_draft/delete) is derivable via histogram_quantile. Wraps the whole
+  # op — before-hook, transaction, and after-hook — the true caller-visible cost.
+  defp span_write(op, fun) do
+    :telemetry.span([:barkpark, :content, :lifecycle], %{op: op}, fn ->
+      {fun.(), %{op: op}}
+    end)
+  end
+
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
   If no draft exists, returns error.
@@ -42,7 +55,10 @@ defmodule Barkpark.Content.Lifecycle do
   `opts` accepts `:source` and `:user_id` for lifecycle-hook context.
   Fires `:before_publish` (halt-capable) and `:after_publish` (async).
   """
-  def publish_document(published_doc_id, type, dataset, opts \\ []) do
+  def publish_document(published_doc_id, type, dataset, opts \\ []),
+    do: span_write(:publish, fn -> do_publish_document(published_doc_id, type, dataset, opts) end)
+
+  defp do_publish_document(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)
     pid = DraftId.published_id(published_doc_id)
 
@@ -148,7 +164,11 @@ defmodule Barkpark.Content.Lifecycle do
   `opts` accepts `:source` and `:user_id`. Fires `:before_unpublish`
   (halt-capable) and `:after_unpublish` (async).
   """
-  def unpublish_document(published_doc_id, type, dataset, opts \\ []) do
+  def unpublish_document(published_doc_id, type, dataset, opts \\ []),
+    do:
+      span_write(:unpublish, fn -> do_unpublish_document(published_doc_id, type, dataset, opts) end)
+
+  defp do_unpublish_document(published_doc_id, type, dataset, opts) do
     pid = DraftId.published_id(published_doc_id)
     did = DraftId.draft_id(published_doc_id)
 
@@ -236,7 +256,10 @@ defmodule Barkpark.Content.Lifecycle do
   end
 
   @doc "Discard a draft without publishing. Published version (if any) remains."
-  def discard_draft(published_doc_id, type, dataset, opts \\ []) do
+  def discard_draft(published_doc_id, type, dataset, opts \\ []),
+    do: span_write(:discard_draft, fn -> do_discard_draft(published_doc_id, type, dataset, opts) end)
+
+  defp do_discard_draft(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)
 
     case Content.get_document(did, type, dataset, opts) do
@@ -276,7 +299,10 @@ defmodule Barkpark.Content.Lifecycle do
   `:prev_doc` carry the about-to-be-deleted document (the published row
   if present, otherwise the draft).
   """
-  def delete_document(doc_id, type, dataset, opts \\ []) do
+  def delete_document(doc_id, type, dataset, opts \\ []),
+    do: span_write(:delete, fn -> do_delete_document(doc_id, type, dataset, opts) end)
+
+  defp do_delete_document(doc_id, type, dataset, opts) do
     pid = DraftId.published_id(doc_id)
     did = DraftId.draft_id(doc_id)
 

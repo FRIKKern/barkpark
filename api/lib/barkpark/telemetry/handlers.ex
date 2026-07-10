@@ -6,6 +6,8 @@ defmodule Barkpark.Telemetry.Handlers do
     * `[:barkpark, :oban, :job, :start | :stop | :exception]`
       (re-emitted from Oban's native `[:oban, :job, ...]` events)
     * `[:barkpark, :plugin_settings, :read | :write]`
+    * `[:barkpark, :hooks, :hook, :stop]` (plugin lifecycle-hook duration —
+      previously measured then emitted to the void)
   """
 
   require Logger
@@ -16,7 +18,14 @@ defmodule Barkpark.Telemetry.Handlers do
     [:barkpark, :oban, :job, :exception],
     [:barkpark, :plugin_settings, :read],
     [:barkpark, :plugin_settings, :write],
-    [:barkpark, :search, :intel, :record]
+    [:barkpark, :search, :intel, :record],
+    # Plugin lifecycle-hook duration. `Barkpark.Plugins.Hooks.timed_invoke/3`
+    # measures every before_*/after_* hook then emits this. Before this handler
+    # existed the measurement was computed on the write hot path and emitted to
+    # the VOID (no attach, not in metrics/0) — the audit's "measured then thrown
+    # away". A debug consumer here + the Prometheus histogram in
+    # BarkparkWeb.Telemetry now both consume it.
+    [:barkpark, :hooks, :hook, :stop]
   ]
 
   @oban_events [
@@ -74,6 +83,13 @@ defmodule Barkpark.Telemetry.Handlers do
 
   def handle_event([:barkpark, :plugin_settings, kind], _measurements, metadata, _config) do
     Logger.info("plugin_settings.#{kind} plugin=#{inspect(metadata[:plugin_name])}")
+  end
+
+  def handle_event([:barkpark, :hooks, :hook, :stop], measurements, metadata, _config) do
+    Logger.debug(
+      "hooks.hook event=#{inspect(metadata[:event])} " <>
+        "module=#{inspect(metadata[:module])} duration_ms=#{inspect(measurements[:duration_ms])}"
+    )
   end
 
   def handle_event([:barkpark, :search, :intel, :record], _measurements, metadata, _config) do
