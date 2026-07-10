@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "g18count",
+      "type": "gauge-list",
+      "mode": "count",
+      "groupBy": "worker",
+      "title": "Open tasks by worker",
+      "query": "SELECT worker, count(*) FROM tasks GROUP BY worker",
+      "snapshot": [
+        { "title": "Wire the resolver", "status": "in_progress", "worker": "ada", "priority": "1" },
+        { "title": "Golden harness", "status": "ready", "worker": "ada" },
+        { "title": "Strip-equality test", "status": "done", "worker": "ada" },
+        { "title": "Quantile binning", "status": "in_progress", "worker": "grace" },
+        { "title": "Doc the doctrine", "status": "ready", "worker": "grace" },
+        { "title": "Emit the tokens", "status": "done", "worker": "linus" },
+        { "title": "Unassigned sweep", "status": "ready" }
+      ]
+    },
+    { "id": "g18div", "type": "divider" },
+    {
+      "id": "g18share",
+      "type": "gauge-list",
+      "mode": "share",
+      "title": "Storage by bucket",
+      "rows": [
+        { "label": "media", "value": 71, "note": "images" },
+        { "label": "papers", "value": 32 },
+        { "label": "tasks", "value": 15, "note": "open" }
+      ]
+    }
+  ]
+}
