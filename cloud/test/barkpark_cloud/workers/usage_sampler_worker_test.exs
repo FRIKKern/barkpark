@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     * per-instance isolation: every checkable box gets its own row in one sweep
   """
   use BarkparkCloud.DataCase, async: true
+  use Oban.Testing, repo: BarkparkCloud.Repo
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
   alias BarkparkCloud.Registry.Vault
@@ -81,7 +82,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     from(s in Sample, where: s.barkpark_id == ^bp.id) |> Repo.all()
   end
 
-  defp tick, do: UsageSamplerWorker.perform(%Oban.Job{})
+  defp tick, do: perform_job(UsageSamplerWorker, %{})
 
   test "caches a row with the REAL fanned counts for a healthy instance" do
     team = team_fixture()
