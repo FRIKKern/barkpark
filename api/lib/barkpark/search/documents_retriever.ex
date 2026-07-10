@@ -4,7 +4,12 @@ defmodule Barkpark.Search.DocumentsRetriever do
   @behaviour Barkpark.Search.Retriever
 
   import Ecto.Query
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3, scope_to_owner: 2]
+  import Barkpark.Content.Scope,
+    only: [
+      scope_to_workspace_or_global: 3,
+      scope_to_owner: 2,
+      maybe_scope_to_grants: 2
+    ]
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
@@ -57,6 +62,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # restricts to unowned rows (owner_id IS NULL) only; a no-op solely for
       # non-owner_scoped types (all-unowned), never another owner's rows.
       |> scope_to_owner(Keyword.get(opts, :caller_context))
+      # Grant row-narrowing (airdrop-grants Layer 2). A NO-OP unless the caller
+      # is grant-derived (`opts[:grant_scoped]`, threaded from the pipeline's
+      # retriever_opts). Applied ONCE on `base` — count (below) and facets both
+      # derive from `base`, so this single clause seals results + count + facets
+      # for EVERY consumer of `Content.search_documents` (SearchController,
+      # SearchChannel, federated) at once. Fail-closed via `scope_to_grants`'
+      # `where: false` on an undecidable grant.
+      |> maybe_scope_to_grants(opts)
 
     base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
     base = if type, do: where(base, [d], d.type == ^type), else: base

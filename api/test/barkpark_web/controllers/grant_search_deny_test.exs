@@ -9,16 +9,16 @@ defmodule BarkparkWeb.GrantSearchDenyTest do
   document that matches the SAME query (a different type the grant doesn't
   cover), with an unowned-token positive control that DOES see both.
 
-  ## CONFIRMED LEAK — the deny test is `@tag :skip` (see task `ag-search-grant-leak`)
+  ## SEALED (ag-search-grant-leak)
 
-  Running the deny probe (2026-07-10) proved the search surface does NOT honour
-  the grant: `grant_scoped` is dropped in `QueryPipeline`'s `retriever_opts`
-  (query_pipeline.ex ~99-116) and the Postgres `DocumentsRetriever` never calls
-  `maybe_scope_to_grants`, so a grantee's search returns out-of-scope hits. This
-  is PRODUCT code to fix (out of scope for the test-only `ag-deny-matrix-gaps`),
-  so the deny expectation is committed SKIPPED as an executable reproduction —
-  the positive control (below) stays live and anchors the fixture. Remove the
-  `@tag :skip` when `ag-search-grant-leak` lands.
+  The deny probe (2026-07-10) first proved the search surface did NOT honour the
+  grant: `grant_scoped` was dropped in `QueryPipeline`'s `retriever_opts`
+  (query_pipeline.ex ~99-116) and the Postgres `DocumentsRetriever` never called
+  `maybe_scope_to_grants`, so a grantee's search returned out-of-scope hits.
+  `ag-search-grant-leak` threads `grant_scoped` through `retriever_opts` and
+  applies `Barkpark.Content.Scope.maybe_scope_to_grants/2` once on the retriever
+  base query — the deny below is now LIVE (un-skipped) and green, protecting the
+  fix. The positive control anchors the fixture.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -101,10 +101,9 @@ defmodule BarkparkWeb.GrantSearchDenyTest do
     assert "#{@term} out-of-scope note" in titles
   end
 
-  # SKIPPED: confirmed leak — search bypasses grant Layer-2 narrowing. This is
-  # the executable reproduction; it must go green once ag-search-grant-leak lands.
-  @tag skip:
-         "LEAK ag-search-grant-leak: search does not apply grant narrowing (grant_scoped dropped in QueryPipeline.retriever_opts)"
+  # SEALED by ag-search-grant-leak: QueryPipeline now threads `grant_scoped`
+  # into retriever_opts and the DocumentsRetriever base query applies
+  # `Scope.maybe_scope_to_grants/2`, so a grantee's search is grant-narrowed.
   test "an owned-token grantee sees the in-scope post and NEVER the out-of-scope note",
        %{ws: ws, project: project} do
     user = register_user()
