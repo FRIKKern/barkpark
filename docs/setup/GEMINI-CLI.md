@@ -29,7 +29,7 @@ If `bp: command not found` afterward, add the installer's fallback dir to your
 
 Point `bp` at a Barkpark and get a token — a local admin token for a machine you
 run, or the Barkpark Cloud auth-tunnel login for a hosted instance. Both
-journeys, with the exact commands, live in `docs/setup/AGENT-ONRAMPS.md`. Verify:
+journeys, with the exact commands, live in [Agent Onramps](AGENT-ONRAMPS.md). Verify:
 
 ```bash
 bp task ready     # empty list = connected, no open work
@@ -93,9 +93,10 @@ and close with the claim epoch — the same contract every other onramp teaches.
 
 ## The tools
 
-Five curated task tools ship by default (`--tools tasks`), each carrying the
+Six curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description: `task_ready`, `task_next` (claim +
-epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`.
+epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
+`task_prime` (one-call rehydration for a resuming agent).
 
 `--tools all` (`"args": ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as a tool (`bp_<noun>_<verb>`), auto-derived from the live

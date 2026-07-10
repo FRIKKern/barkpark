@@ -33,7 +33,7 @@ export PATH="$HOME/.local/bin:$PATH"
 `bp` needs a Barkpark to talk to and a token to write with. Both journeys —
 local admin token and Barkpark Cloud auth-tunnel login — live in one place:
 
-See `docs/setup/AGENT-ONRAMPS.md` for AUTH (local + cloud) and the
+See [Agent Onramps](AGENT-ONRAMPS.md) for AUTH (local + cloud) and the
 CREATE-QUICKSTART (schema · doc · task · paper). Quick check once connected:
 
 ```bash
@@ -54,6 +54,8 @@ claude mcp add --scope project --transport stdio \
   --env 'BARKPARK_API_TOKEN=${BARKPARK_API_TOKEN}' \
   barkpark -- bp mcp serve
 ```
+
+<!-- grammar verified 2026-07-10 against `claude mcp add --help` (Claude Code 2.1.206): `claude mcp add [options] <name> <commandOrUrl> [args...]`; options (--scope/--transport/--env) precede the name; `--` separates the server command -->
 
 The `--env` pairs come **before** the server name, and the `--` separator is
 required — everything after it is the server's own command line (`bp mcp serve`).
@@ -130,7 +132,7 @@ is closed on the board — no markdown TODO lists.
 
 ## The tools
 
-Five curated task tools ship by default (`--tools tasks`), each carrying the
+Six curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description:
 
 - **`task_ready`** — list ready (unblocked) tasks in priority order.
@@ -140,6 +142,8 @@ claim-first contract in its own description:
 - **`task_close`** — close a claimed task with the claim epoch (epoch-CAS); mark
   acceptance criteria met with evidence in the same atomic write.
 - **`task_create`** — file new work (injects `kind` + `lifecycle_status`).
+- **`task_prime`** — one-call rehydration for a resuming agent: in-progress
+  claims (with close-ready epochs), ready head, recent events, counts.
 
 ### `--tools all` (expert only)
 

@@ -29,7 +29,7 @@ restart Codex so the child shell inherits it.
 
 Point `bp` at a Barkpark and get a token — local admin token for a machine you
 run, or the Barkpark Cloud auth-tunnel login for a hosted instance. Both
-journeys, with the exact commands, live in `docs/setup/AGENT-ONRAMPS.md`.
+journeys, with the exact commands, live in [Agent Onramps](AGENT-ONRAMPS.md).
 Verify you're connected:
 
 ```bash
@@ -48,6 +48,8 @@ Desktop app (same config file).
 ```bash
 codex mcp add barkpark --env BARKPARK_API_URL=https://guerrilla.barkpark.cloud -- bp mcp serve
 ```
+
+<!-- grammar verified 2026-07-10 against openai/codex codex-rs/cli/src/mcp_cmd.rs: usage `codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)`; --env takes KEY=VALUE (stdio only); the NAME precedes the `--` command -->
 
 The `--` separates Codex's own flags from the command Codex will run. This
 writes the core of the stanza below (`command`/`args`/`env`) into
@@ -133,9 +135,10 @@ Codex expects.
 
 ## The tools
 
-Five curated task tools ship by default (`--tools tasks`), each carrying the
+Six curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description: `task_ready`, `task_next` (claim +
-epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`.
+epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
+`task_prime` (one-call rehydration for a resuming agent).
 
 `--tools all` (`args = ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as a tool (`bp_<noun>_<verb>`), auto-derived from the live
