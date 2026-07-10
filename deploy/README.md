@@ -85,7 +85,7 @@ marker file — the **fail-closed safety boundary**:
 | Channel | `/opt/barkpark/.staging` | Trigger | Ref it deploys |
 |---|---|---|---|
 | guerrilla / prod | **absent** | merge → `deploy.yml` | strict **fast-forward `origin/main`** only |
-| staging | **present** | on-demand only — never a merge job | `DEPLOY_REF` (any branch/PR/sha) from `DEPLOY_REMOTE` (default `origin`), hard reset |
+| staging | **present** | on-demand only — never a merge job | `DEPLOY_REF` (any branch, or a PR as `pull/<n>/head`) from `DEPLOY_REMOTE` (default `origin`), hard reset |
 
 Marker absent, the script refuses any non-ff move — every fleet box can only ever
 advance along `main`, so a random branch can never be pushed to it. Present, it
@@ -123,10 +123,13 @@ wave 2; today reset is manual on the box).
 
 **Adding the staging host** (mirrors *Adding another host*):
 
-1. Trust the deploy key: add `DEPLOY_SSH_KEY`'s public half to the staging box's
-   `root` `authorized_keys` (same Barkpark account key as guerrilla/prod).
-2. Point the verb at it: `BARKPARK_STAGING_HOST` (defaults to
-   `staging.barkpark.cloud`).
+1. Trust the operator key: the verb sshes as `root` with `~/.ssh/barkpark_indx`
+   (override: `BARKPARK_SSH_KEY_FILE`) — add its public half to the staging box's
+   `authorized_keys`. (CI's `DEPLOY_SSH_KEY` is NOT involved — staging never
+   deploys from a merge job.)
+2. Point the verb at it — host resolution, first match wins: `--host <ip>`; the
+   control-plane fleet row by name (needs `bp login`); `BARKPARK_STAGING_HOST`.
+   No default — with none of the three it errors, naming all three paths.
 3. Arm the channel ON THE BOX: `touch /opt/barkpark/.staging`. Without it the box
    stays strict-`main` and every staging deploy is refused — fail-closed by design.
 
