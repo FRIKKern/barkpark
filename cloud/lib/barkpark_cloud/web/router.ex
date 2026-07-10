@@ -148,6 +148,17 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.InstanceApiCatalog
   alias BarkparkCloud.Web.Auth
 
+  # Recover the REAL client IP from X-Forwarded-For BEFORE anything reads
+  # conn.remote_ip (peer_ip/1 → the device-auth `start:<ip>` rate bucket and the
+  # minted-session ip_address). Behind Caddy the raw peer is always the loopback
+  # hop, so without this every remote client shares one global rate bucket and
+  # every session records 127.0.0.1. RemoteIp only rewrites remote_ip when the
+  # ACTUAL peer is a trusted loopback proxy (see :trust_forwarded_ip) — a spoofed
+  # header from a directly-reachable client is ignored, so no remote caller can
+  # forge its bucket. Placed first: it must run before RewriteOn's builders and
+  # before any matcher reads remote_ip.
+  plug(:trust_forwarded_ip)
+
   # Normalize scheme/host/port from the Caddy TLS front's forwarding headers
   # BEFORE any plug (or builder) reads conn.scheme/host/port. The app never
   # terminates TLS itself — it listens plain on :4100/:4101 behind Caddy — so
@@ -156,6 +167,18 @@ defmodule BarkparkCloud.Web.Router do
   # ports are loopback-bound (docker-compose.yml), so these headers can only
   # arrive from the trusted front, never a spoofing external client.
   plug(Plug.RewriteOn, [:x_forwarded_proto, :x_forwarded_host, :x_forwarded_port])
+
+  # Canonicalize the front door: a request that reached the www subdomain of the
+  # dashboard host (www.barkpark.cloud) is permanently redirected to the apex
+  # (barkpark.cloud), preserving BOTH the path and the query string — the
+  # `?code=` device-link payload MUST survive. 308 (not 302) so the method is
+  # preserved and browsers/proxies cache the canonical form. Runs AFTER RewriteOn
+  # so conn.host is the ORIGINAL external host, not the loopback hop. Scoped
+  # STRICTLY to www.<dashboard-host>: localhost / raw-IP health probes (the
+  # blue/green /up gate hits localhost:410x with no X-Forwarded-Host),
+  # api.barkpark.cloud, and any unknown/lookalike host all pass through untouched.
+  # http->https is already Caddy's 308 — not duplicated here.
+  plug(:canonicalize_dashboard_host)
 
   # The dashboard SPA (plain HTML+CSS+JS, no build step) is served straight from
   # priv/static. This runs BEFORE :match so a real asset short-circuits the
@@ -193,6 +216,75 @@ defmodule BarkparkCloud.Web.Router do
 
   @raw_body_paths ["/v1/billing/webhook"]
   @raw_body_path_prefixes ["/v1/webhooks/github/"]
+
+  # RemoteIp resolver options, built once at compile time. Only X-Forwarded-For
+  # is honored (Caddy's forwarding header); `proxies` lists the loopback CIDRs of
+  # our own front so a multi-hop chain resolves to the leftmost real client. The
+  # peer-trust guard lives in :trust_forwarded_ip below — RemoteIp itself does
+  # not inspect the raw peer, so we only invoke it once we've confirmed the peer
+  # is loopback.
+  @remote_ip_opts RemoteIp.init(
+                    headers: ["x-forwarded-for"],
+                    proxies: ["127.0.0.0/8", "::1/128"]
+                  )
+
+  # Rewrite conn.remote_ip to the real client IP from X-Forwarded-For, but ONLY
+  # when the immediate peer is a trusted loopback proxy (the Caddy front, which
+  # is the ONLY thing that can reach the loopback-bound :410x listener in prod).
+  # A request whose actual peer is NOT loopback is left untouched: its
+  # X-Forwarded-For is attacker-controlled and must never move remote_ip, or a
+  # directly-reachable client could forge its rate-limit bucket / session IP.
+  defp trust_forwarded_ip(conn, _opts) do
+    if loopback_peer?(conn.remote_ip) do
+      RemoteIp.call(conn, @remote_ip_opts)
+    else
+      conn
+    end
+  end
+
+  # IPv4 loopback (127.0.0.0/8) or IPv6 loopback (::1). conn.remote_ip is an
+  # :inet address tuple; anything else (nil / malformed) is treated as untrusted.
+  defp loopback_peer?({127, _, _, _}), do: true
+  defp loopback_peer?({0, 0, 0, 0, 0, 0, 0, 1}), do: true
+  defp loopback_peer?(_), do: false
+
+  # Front-door canonicalization: 308 www.<dashboard-host> -> the apex dashboard
+  # origin, carrying the path AND query string through (the device-link `?code=`
+  # is the payload). Scoped to an EXACT match on "www." <> dashboard host, so
+  # localhost / raw-IP probes, api.barkpark.cloud, and lookalike hosts fall
+  # through. 308 keeps the method and is cacheable as permanent.
+  defp canonicalize_dashboard_host(conn, _opts) do
+    base = dashboard_base_url()
+    dashboard_host = URI.parse(base).host
+
+    if is_binary(dashboard_host) and conn.host == "www." <> dashboard_host do
+      conn
+      |> put_resp_header("location", canonical_dashboard_location(conn, base))
+      |> send_resp(308, "")
+      |> halt()
+    else
+      conn
+    end
+  end
+
+  # The canonical dashboard origin (scheme + host, no trailing slash), from
+  # :dashboard_url config — DASHBOARD_URL-overridable, "https://barkpark.cloud"
+  # in every env. Shared with activate_url/1 so there is one source of truth.
+  defp dashboard_base_url do
+    String.trim_trailing(
+      Application.get_env(:barkpark_cloud, :dashboard_url) || "https://barkpark.cloud",
+      "/"
+    )
+  end
+
+  # Rebuild the target URL on the canonical origin, preserving the original path
+  # and (when present) the query string verbatim.
+  defp canonical_dashboard_location(conn, base) do
+    case conn.query_string do
+      "" -> base <> conn.request_path
+      query -> base <> conn.request_path <> "?" <> query
+    end
+  end
 
   @doc """
   A `Plug.Parsers` `:body_reader` that caches the RAW request body on
@@ -8030,11 +8122,7 @@ defmodule BarkparkCloud.Web.Router do
   # barkpark.cloud in EVERY env, so an unconditional swap would point a localhost
   # CLI at barkpark.cloud (a different DB) and break local device login.
   defp activate_url(conn) do
-    dashboard_base =
-      String.trim_trailing(
-        Application.get_env(:barkpark_cloud, :dashboard_url) || "https://barkpark.cloud",
-        "/"
-      )
+    dashboard_base = dashboard_base_url()
 
     if within_dashboard_host?(conn.host, URI.parse(dashboard_base).host) do
       dashboard_base <> "/activate"
