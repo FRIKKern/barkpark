@@ -60,11 +60,11 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 
 | Param | Default | Notes |
 |-------|---------|-------|
-| `perspective` | `published` | `published` \| `drafts` \| `raw`; tokenless callers pinned to `published` |
+| `perspective` | `published` | `published\|drafts\|raw`; tokenless pinned `published` |
 | `limit` | `100` | Integer, min 1, max 1000 |
 | `offset` | `0` | Integer |
-| `fields` | — | Project to named content fields (CSV, e.g. `title,slug`); smaller payloads, system fields always kept |
-| `order` | `_updatedAt:desc` | any field `<field>:asc`\|`:desc`; comma-join secondary sorts (`a:asc,b:desc`) |
+| `fields` | — | CSV content-field projection (`title,slug`); system fields always kept |
+| `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
@@ -142,8 +142,8 @@ A **`bptk_` key IS an identity**: an operator mints one per outsider, who files/
 
 | Persona (auth) | Routes (`/v1` prefix) |
 |---|---|
-| Submitter (`bptk_` bearer) | `POST /tickets` `{subject,body}` · `GET /tickets` · `GET /tickets/:id` (stamps `submitter_seen_at`) · `POST /tickets/:id/messages` `{body}` · `POST /tickets/:id/attachments` · `GET /tickets/:id/attachments/:asset_id` |
-| Operator (normal bearer) | `GET /tickets/inbox` (all; open first, oldest-waiting) · `GET /tickets/inbox/:id[/attachments/:asset_id]` · `POST /tickets/:id/answer` `{body,close?}` (`close:true`→closed) · `POST /tickets/:id/close` |
+| Submitter (`bptk_`) | `POST /tickets` · `GET /tickets[/:id]` (stamps `submitter_seen_at`) · `POST /tickets/:id/{messages,attachments}` · `GET /tickets/:id/attachments/:asset_id` |
+| Operator (bearer) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
 | Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
 
 **Auth.** A `bptk_` key is refused by every non-ticket route — it projects tier `"none"` from `/v1/capabilities`. **Paused** → `403` `key paused` (reversible, thread kept); **revoked** → `401` (indistinguishable from no token); **rotate** = new secret, same identity row (history kept).
@@ -164,21 +164,21 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 | Code | HTTP Status | Meaning |
 |------|-------------|---------|
-| `not_found` | 404 | Document or schema not found, or unknown `:workspace_slug` |
-| `unauthorized` | 401 | Missing or invalid token |
-| `forbidden` | 403 | Token lacks permission, isn't a member of the resolved workspace, or is read-only on a write endpoint |
-| `schema_unknown` | 404 | No schema registered for this type |
-| `precondition_failed` | 412 | `ifRevisionID` didn't match the document's current `_rev`; `details.expected`/`.actual` carry both |
-| `invalid_filter` | 400 | Unknown filter operator (fail-closed; ops in §4) |
-| `conflict` | 409 | Document already exists (on `create`) |
-| `malformed` | 400 | Malformed body or missing `mutations` key |
-| `validation_failed` | 422 | Document failed validation; `details` map contains per-field errors |
-| `internal_error` | 500 | Unexpected server error |
-| `rate_limited` | 429 | Too many requests; retry after the `Retry-After` header value |
+| `not_found` | 404 | Doc/schema/workspace unknown |
+| `unauthorized` | 401 | Missing/invalid token |
+| `forbidden` | 403 | Token lacks permission / not a member / read-only on write |
+| `schema_unknown` | 404 | No schema for type |
+| `precondition_failed` | 412 | `ifRevisionID` mismatch; `details.expected`/`.actual` |
+| `invalid_filter` | 400 | Unknown filter op (fail-closed; §4) |
+| `conflict` | 409 | Already exists (`create`) |
+| `malformed` | 400 | Bad body / missing `mutations` |
+| `validation_failed` | 422 | Validation; per-field `details` |
+| `internal_error` | 500 | Unexpected |
+| `rate_limited` | 429 | Retry after `Retry-After` |
 
-Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer) · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (find-or-create gate; `details.similar`) · `schema_has_documents` 409 · `storage_unavailable` 503 / `unsupported_media_type` 422 / `payload_too_large` 413 (media).
+Additive: `halted` 409 (hook veto) · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (`details.similar`) · `schema_has_documents` 409 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413.
 
-Emitted directly by specific v1 endpoints (also in the OpenAPI `Error.code` enum): papers ingest — `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets ops — `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media share — `share_expired` · access-grant / token / ticket-key — `invalid_grant`/`unprocessable` · step-up auth — `mfa_required`/`mfa_enrolment_required`. The single source is `Content.Errors.known_codes/0`; a contract test asserts every code a public endpoint emits is a member (operational endpoints outside the public v1 content contract — self-update, status incidents, pulse, GitHub webhooks/adopt — are an explicit off-spec exclusion, not part of this enum).
+Endpoint-specific (in the OpenAPI `Error.code` enum): ingest `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · grants/tokens `invalid_grant`/`unprocessable` · step-up `mfa_required`/`mfa_enrolment_required`. Single source `Content.Errors.known_codes/0`, contract-tested; ops endpoints (self-update, incidents, pulse, GitHub webhooks) are off-spec by design.
 
 ## 10. Legacy `/api/*` Routes
 
@@ -186,4 +186,4 @@ Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE
 
 ## 11. Rate Limiting
 
-All `/v1/*` endpoints are rate-limited per token (or IP), separate read/write buckets per dataset. Defaults **300 read** / **60 write** req/min (`config :barkpark, :rate_limits`, or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9). Ticket keys use their own per-key write buckets (§8a).
+Per token (or IP), read/write buckets per dataset: **300r/60w** per min (`config :barkpark, :rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).
