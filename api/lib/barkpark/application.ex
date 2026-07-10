@@ -64,130 +64,15 @@ defmodule Barkpark.Application do
     self_update_children =
       if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
 
-    children =
-      [
-        Barkpark.RateLimiter,
-        BarkparkWeb.Telemetry,
-        # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
-        # (cloud-console W5). Up before the Endpoint so early traffic is counted;
-        # a pure ETS-backed window, no Repo dependency.
-        BarkparkWeb.RequestStats,
-        Barkpark.Repo,
-        Barkpark.Vault,
-        # WI1: plugin registry — must come up before workers/endpoint so any
-        # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
-        Barkpark.Plugins.Registry,
-        # Task barkpark-otv: in-memory run-status tracker the plugin admin LV
-        # reads to surface "last bootstrap" / "last seed" timestamps. Must
-        # come up before the post-boot Task that calls Bootstrap +
-        # codelist seeders so the very first sweep's results land in the
-        # map. Empty-state if absent — never crashes the caller.
-        Barkpark.Plugins.RunStatus,
-        # Phase 3 WI1: cross-field validation kernel — registry of value-
-        # checkers (ETS-backed) and per-schema rule cache. Both must be up
-        # before the endpoint can serve mutate/export traffic.
-        Barkpark.Validation.Registry,
-        Barkpark.Content.Validation.Rules
-        # Plugin-contributed workers fold in BELOW (was: a hardcoded plugin
-        # GenServer child here). Position between host services and Oban so
-        # plugin workers can rely on Repo/Vault/Registry being up, but come
-        # up before the endpoint serves traffic.
-      ] ++
-        plugin_children ++
-        [
-          # Boot-order fix: SchemaBootstrap runs SYNCHRONOUSLY here, after the
-          # Repo + Plugins.Registry GenServer (above) and BEFORE Oban. The
-          # supervisor blocks on its init/1 (which registers every plugin's
-          # schemas) before starting Oban, so Oban can never dequeue a job
-          # against an unregistered schema. No paused queues, no resume loop.
-          Barkpark.SchemaBootstrap,
-          # Indx retriever-seam runtime. Indx is NOT a registered plugin, so it
-          # contributes nothing via collect_workers/1 — its supervised processes
-          # MUST be declared statically here. Order matters: Auth first (the
-          # :indx Oban queue jobs and Recovery's boot login both call
-          # Auth.token/0), then Recovery (re-seats the live-dataset pointer
-          # after a restart), then Oban. Without these, every IndexerWorker job
-          # crashes on a dead Auth process and engine=indx silently falls back
-          # to Postgres recovery.
-          Barkpark.Plugins.Indx.Auth,
-          # Outcome monitor (P4b Hardening A): per-scope ETS counters that
-          # turn "Indx silently degraded" into a queryable signal for
-          # bp doctor and a telemetry event for ops handlers. Started
-          # before Recovery so the recovery pass's outcomes (if any) are
-          # already counted.
-          Barkpark.Plugins.Indx.Monitor,
-          Barkpark.Plugins.Indx.Recovery,
-          {Oban, oban_config},
-          {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
-          {Phoenix.PubSub, name: Barkpark.PubSub},
-          # Sheets M1: per-sheet collaborative sessions — a unique Registry
-          # over {dataset, published-id} keys plus the DynamicSupervisor the
-          # sessions start under (lazily, on first op; restart: :temporary —
-          # a crashed session restarts fresh from the persisted row on the
-          # next op). CORE, plugin-independent (fresh-install invariant):
-          # only the HTTP ops route is plugin wiring. Needs Repo (load /
-          # persist) and PubSub (delta broadcasts) — both above.
-          {Registry, keys: :unique, name: Barkpark.Plugins.Sheets.SessionRegistry},
-          {DynamicSupervisor,
-           name: Barkpark.Plugins.Sheets.SessionSupervisor, strategy: :one_for_one},
-          # /ops idempotency ring (QR-A): owns the public named ETS table
-          # `:sheets_ops_replay` so an exactly-once request_id survives any
-          # single session restart (a 503-retry lands on a FRESH session by
-          # construction). Node-local; a BEAM restart clears it with the
-          # sessions. See Barkpark.Plugins.Sheets.Session.ReplayRing.
-          Barkpark.Plugins.Sheets.Session.ReplayRing,
-          # Studio Claude chat single-writer registry (charter D20). A unique
-          # Registry keyed by the minted session UUID: when a session id is
-          # pinned, `ClaudeChat.Session` registers under it, so a second start
-          # of the same session gets `{:already_started, pid}` and reuses the
-          # running process instead of spawning a second `claude --resume`
-          # writer on the CLI's own transcript.
-          {Registry, keys: :unique, name: Barkpark.StudioChat.SessionRegistry},
-          # Server-owned chat runtime (wave 4, charter D28): one Recorder per
-          # live session is the Session's PERMANENT sink — it persists every
-          # durable outcome and rebroadcasts frames on PubSub, so tabs are
-          # viewers, not owners. Closing every tab no longer kills a running
-          # turn; the Recorder reaps itself after 30 min of frame-silence and
-          # the next send lazy-resumes.
-          {Registry, keys: :unique, name: Barkpark.StudioChat.RecorderRegistry},
-          {DynamicSupervisor,
-           name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
-          # Studio-chat notification seam (wave 12, charter D69): owns the
-          # per-session debounce ledger for needs-you / finished-while-away
-          # mails. An idle GenServer is free; it only decides + delivery runs in
-          # the caller (a session the operator is watching never fires a mail).
-          Barkpark.StudioChat.Notifier,
-          # Start a worker by calling: Barkpark.Worker.start_link(arg)
-          # {Barkpark.Worker, arg},
-          BarkparkWeb.Presence,
-          {Task.Supervisor, name: Barkpark.TaskSupervisor},
-          # Dedicated supervisor for outbound webhook/media deliveries. The
-          # generic TaskSupervisor has max_children: :infinity, so a webhook
-          # storm or a slow endpoint (each child sleeps in-task on retry
-          # backoff + a 10s per-attempt HTTP timeout) accumulates thousands of
-          # long-lived processes → unbounded memory. Deliveries fan out through
-          # Task.Supervisor.async_stream_nolink on THIS supervisor, which
-          # backpressures beyond :webhook_delivery_concurrency (queues, never
-          # drops) instead of the old start_child-per-webhook fan-out.
-          {Task.Supervisor, name: Barkpark.WebhookDeliverySupervisor}
-        ] ++
-        sync_children ++
-        self_update_children ++
-        [
-          # Self-update EXECUTOR (Barkpark.SelfUpdate.Runner). ALWAYS in the
-          # tree — an idle GenServer is free — but every trigger is gated by
-          # its own `enabled` config (fail-closed OFF unless prod sets
-          # BARKPARK_SELF_UPDATE_APPLY=1), so with the defaults it can never
-          # execute anything. Unconditional so the admin endpoint degrades to
-          # a clean "feature_not_configured" instead of a dead-process call.
-          Barkpark.SelfUpdate.Runner,
-          # Start to serve requests, typically the last entry
-          BarkparkWeb.Endpoint
-        ]
+    children = child_specs(plugin_children, oban_config, sync_children, self_update_children)
 
-    # See https://hexdocs.pm/elixir/Supervisor.html
-    # for other strategies and supported options
-    opts = [strategy: :one_for_one, name: Barkpark.Supervisor]
+    # Chapter 64 (layering isolates blast radius). The top supervisor keeps the
+    # OTP-default 3-restarts-in-5s budget — made EXPLICIT here — but that budget
+    # now guards only critical infra (Repo/Oban/PubSub/Endpoint) and the
+    # intermediate supervisors. The volatile plugin + Indx tiers churn under
+    # their OWN budgets (see child_specs/4), so their crash-loops can no longer
+    # breach this shared intensity and take the whole app down.
+    opts = [strategy: :one_for_one, name: Barkpark.Supervisor, max_restarts: 3, max_seconds: 5]
 
     case Supervisor.start_link(children, opts) do
       {:ok, _pid} = ok ->
@@ -223,6 +108,114 @@ defmodule Barkpark.Application do
       other ->
         other
     end
+  end
+
+  @doc """
+  Build the top-level child spec list, tiered for blast-radius isolation.
+
+  Pure and unit-testable (see `application_child_specs_test.exs`): given the
+  collected `plugin_children`, the merged `oban_config`, and the dormant-by-
+  default `sync_children` / `self_update_children`, it returns the ordered list
+  handed to `Supervisor.start_link/2`.
+
+  The genuinely-volatile children are NOT direct children of `Barkpark.Supervisor`
+  anymore — they are wrapped in intermediate supervisors, each in the SAME slot
+  the flat children used to occupy, so global boot ORDER is preserved verbatim:
+
+    * `Barkpark.Plugins.Supervisor` wraps `plugin_children` (was folded in flat).
+    * `Barkpark.Plugins.Indx.Supervisor` wraps Auth/Monitor/Recovery.
+    * `Barkpark.Plugins.Sheets.Supervisor` wraps the sheets session registry/
+      supervisor/replay-ring.
+    * `Barkpark.StudioChat.Supervisor` wraps the studio-chat registries/runtime/
+      notifier.
+
+  Ordering invariants held: Repo before everything that queries it; Registry
+  before plugin workers; SchemaBootstrap after Repo+Registry and BEFORE Oban;
+  Indx (Auth→Recovery) before Oban; PubSub before the Sheets/StudioChat tiers
+  and the Endpoint; Endpoint last.
+  """
+  @spec child_specs(list(), keyword(), list(), list()) :: [Supervisor.child_spec() | {module(), term()} | module()]
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children)
+      when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
+    [
+      Barkpark.RateLimiter,
+      BarkparkWeb.Telemetry,
+      # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
+      # (cloud-console W5). Up before the Endpoint so early traffic is counted;
+      # a pure ETS-backed window, no Repo dependency.
+      BarkparkWeb.RequestStats,
+      Barkpark.Repo,
+      Barkpark.Vault,
+      # WI1: plugin registry — must come up before workers/endpoint so any
+      # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
+      Barkpark.Plugins.Registry,
+      # Task barkpark-otv: in-memory run-status tracker the plugin admin LV
+      # reads to surface "last bootstrap" / "last seed" timestamps. Must
+      # come up before the post-boot Task that calls Bootstrap +
+      # codelist seeders so the very first sweep's results land in the
+      # map. Empty-state if absent — never crashes the caller.
+      Barkpark.Plugins.RunStatus,
+      # Phase 3 WI1: cross-field validation kernel — registry of value-
+      # checkers (ETS-backed) and per-schema rule cache. Both must be up
+      # before the endpoint can serve mutate/export traffic.
+      Barkpark.Validation.Registry,
+      Barkpark.Content.Validation.Rules,
+      # VOLATILE plugin tier (was folded in FLAT here via plugin_children).
+      # Now isolated under its own supervisor + restart budget: a crash-looping
+      # third-party/plugin worker can no longer breach Barkpark.Supervisor's
+      # budget and take Repo/Oban/Endpoint down. Same slot → boot order held
+      # (plugin workers still come up after Repo/Vault/Registry, before Oban).
+      {Barkpark.Plugins.Supervisor, plugin_children},
+      # Boot-order fix: SchemaBootstrap runs SYNCHRONOUSLY here, after the
+      # Repo + Plugins.Registry GenServer (above) and BEFORE Oban. The
+      # supervisor blocks on its init/1 (which registers every plugin's
+      # schemas) before starting Oban, so Oban can never dequeue a job
+      # against an unregistered schema. No paused queues, no resume loop.
+      Barkpark.SchemaBootstrap,
+      # VOLATILE Indx retriever-seam subsystem (was Auth/Monitor/Recovery flat).
+      # Indx is NOT a registered plugin, so these are declared statically. Now
+      # wrapped so an Indx crash-loop degrades (engine=indx falls back to
+      # Postgres) instead of escalating to a whole-app shutdown. Same slot →
+      # still starts after SchemaBootstrap and BEFORE Oban (whose :indx queue
+      # jobs call Auth.token/0); internal order Auth→Monitor→Recovery preserved.
+      Barkpark.Plugins.Indx.Supervisor,
+      {Oban, oban_config},
+      {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
+      {Phoenix.PubSub, name: Barkpark.PubSub},
+      # Sheets M1 collaborative-session subsystem (was SessionRegistry +
+      # SessionSupervisor + ReplayRing flat). CORE, plugin-independent
+      # (fresh-install invariant). Wrapped for domain isolation; positioned
+      # after PubSub (delta broadcasts) + Repo (load/persist), as before.
+      Barkpark.Plugins.Sheets.Supervisor,
+      # Studio Claude-chat runtime subsystem (was the two registries +
+      # RuntimeSupervisor + Notifier flat). Wrapped for domain isolation;
+      # positioned after PubSub (Recorders rebroadcast frames on it), as before.
+      Barkpark.StudioChat.Supervisor,
+      BarkparkWeb.Presence,
+      {Task.Supervisor, name: Barkpark.TaskSupervisor},
+      # Dedicated supervisor for outbound webhook/media deliveries. The
+      # generic TaskSupervisor has max_children: :infinity, so a webhook
+      # storm or a slow endpoint (each child sleeps in-task on retry
+      # backoff + a 10s per-attempt HTTP timeout) accumulates thousands of
+      # long-lived processes → unbounded memory. Deliveries fan out through
+      # Task.Supervisor.async_stream_nolink on THIS supervisor, which
+      # backpressures beyond :webhook_delivery_concurrency (queues, never
+      # drops) instead of the old start_child-per-webhook fan-out.
+      {Task.Supervisor, name: Barkpark.WebhookDeliverySupervisor}
+    ] ++
+      sync_children ++
+      self_update_children ++
+      [
+        # Self-update EXECUTOR (Barkpark.SelfUpdate.Runner). ALWAYS in the
+        # tree — an idle GenServer is free — but every trigger is gated by
+        # its own `enabled` config (fail-closed OFF unless prod sets
+        # BARKPARK_SELF_UPDATE_APPLY=1), so with the defaults it can never
+        # execute anything. Unconditional so the admin endpoint degrades to
+        # a clean "feature_not_configured" instead of a dead-process call.
+        Barkpark.SelfUpdate.Runner,
+        # Start to serve requests, typically the last entry
+        BarkparkWeb.Endpoint
+      ]
   end
 
   # C4-1: fold plugin-contributed Oban Cron entries into the host's Oban
