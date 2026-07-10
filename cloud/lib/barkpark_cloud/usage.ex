@@ -17,7 +17,7 @@ defmodule BarkparkCloud.Usage do
       cpu            ram                           — telemetry machine meters (0-100 %, 100/70/90 ceiling)
       req_per_s      p95_ms                        — telemetry load meters (rate/latency, warn+over, no bar)
       seats          instances                     — control-plane-sourced (team members / fleet count)
-      api_requests   bandwidth                     — FLOW meters, D31-sequenced (see below)
+      api_requests   bandwidth                     — FLOW meters, not yet metered (see below)
 
   Every meter is the SAME shape:
 
@@ -66,7 +66,7 @@ defmodule BarkparkCloud.Usage do
      infinity.
 
   2. **Flow meters (`api_requests`, `bandwidth`) are ALWAYS `"unmetered"`.** Flow
-     metering does not exist yet (D31 sequencing); pretending otherwise with a
+     metering does not exist yet; pretending otherwise with a
      zero would be a lie. They render as a designed "not yet metered" state, not
      a number, regardless of any input.
 
@@ -191,7 +191,7 @@ defmodule BarkparkCloud.Usage do
           telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
         seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
         instances: instances_meter(Map.get(inputs, :instances)),
-        # FLOW meters — always unmetered, whatever anyone passes (D31). req/s is a
+        # FLOW meters — always unmetered, whatever anyone passes. req/s is a
         # RATE, not the billing request count — the flow meters stay dark here.
         api_requests: meter(@unmetered, @src_not_metered, nil),
         bandwidth: meter(@unmetered, @src_not_metered, nil)
