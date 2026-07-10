@@ -1967,10 +1967,14 @@
     .scope-switcher { position: relative; display: inline-flex; align-items: center; margin-left: 6px; height: 30px; }
     /* Compact scope chip (sup-w1): a bordered, subtly-filled switcher control
        — workspace name prominent, project · dataset muted and truncated, a
-       chevron affordance. The full scope rides the native tooltip. */
+       chevron affordance. The full scope rides the native tooltip.
+       Fill = --surface-raised (sup-w1-tokens-aa); until that slice merges the
+       fallback --bg-muted keeps the chip visibly filled. NOTE: --bg-subtle is
+       referenced ~21 other places in this file but defined NOWHERE — do not
+       copy that pattern (it computes to transparent). */
     .scope-title {
       display: inline-flex; align-items: center; gap: 6px; max-width: 300px;
-      background: var(--bg-subtle); border: 1px solid var(--border);
+      background: var(--surface-raised, var(--bg-muted)); border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       padding: 3px 8px; font-family: inherit; cursor: pointer; color: var(--fg);
       transition: border-color 0.12s, background 0.12s;
