@@ -72,16 +72,6 @@ must set BOTH, and must SAVE/RESTORE the global (it is process-wide). Use
 `assertStripComplete`, which owns both knobs. Verified against
 muesli/termenv v0.16.0 `profile.go`.
 
-## Known gap
-
-The truecolor heatmap ramp (`heatCell`, heatmap.go) currently paints a solid `█`
-colored by intensity — a color-ONLY encoding that FAILS the strip law
-(`strip(TrueColor)` loses every intensity distinction). It must be reworked to
-dual-encode (shade-ladder glyph UNDER the truecolor foreground). This is a design
-change to the flagship contribution heatmap (GitHub-solid vs Barkpark-dual-encode)
-pending strategist sign-off — tracked, not silently changed here. Until then the
-strip law is proven on the shade ramp + stat/stats + chart, not the truecolor grid.
-
 ## Code anchors
 - internal/pdrender/golden_profiles_test.go — func assertStripComplete
 - internal/pdrender/pdrender.go — Profile enum (NoColor..TrueColor)

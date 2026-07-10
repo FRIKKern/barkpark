@@ -95,13 +95,12 @@ func assertStripComplete(t *testing.T, name string, render func(width int, p Pro
 // TestStripCompleteProfiles proves the helper on the three existing data-viz
 // families, establishing the baseline the slate-2 blocks will be held to.
 func TestStripCompleteProfiles(t *testing.T) {
-	// (1) heatmap — the sample_m11 SHADE grid. The shade ramp is dual-encoded by
-	// construction (the `·░▒▓█` ladder carries intensity at EVERY profile), so its
-	// stripped render is a complete artifact. NOTE: the fixture's *truecolor* grid
-	// is the tracked doctrine gap (docs/contracts/tui-render-doctrine.md §Known
-	// gap) — heatCell paints a solid █ colored by intensity, a color-ONLY encoding
-	// that fails the strip law — so it is deliberately NOT wired here until it is
-	// reworked to dual-encode.
+	// (1) heatmap — the sample_m11 SHADE grid AND the TRUECOLOR grid. Both dual-encode
+	// by construction: the `·░▒▓█` shade-ladder glyph carries intensity at EVERY
+	// profile, and the truecolor path (heatCell) now layers the ramp colour on top of
+	// the SAME glyph as reinforcement — so stripping the colour leaves the identical
+	// ladder and both grids are complete artifacts (charter-D13: dual-encode the legacy
+	// truecolor grid rather than converge it onto the quantile modes).
 	raw, err := os.ReadFile(filepath.Join("testdata", "sample_m11.json"))
 	if err != nil {
 		t.Fatalf("read sample_m11: %v", err)
@@ -110,19 +109,34 @@ func TestStripCompleteProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode sample_m11: %v", err)
 	}
-	var shade *Block
+	var shade, trueGrid *Block
 	for i := range blocks {
-		if blocks[i].Type == "heatmap" && attrStr(blocks[i].Attrs, "ramp") == "shade" {
-			shade = &blocks[i]
-			break
+		if blocks[i].Type != "heatmap" {
+			continue
+		}
+		switch attrStr(blocks[i].Attrs, "ramp") {
+		case "shade":
+			if shade == nil {
+				shade = &blocks[i]
+			}
+		case "truecolor":
+			if trueGrid == nil {
+				trueGrid = &blocks[i]
+			}
 		}
 	}
 	if shade == nil {
 		t.Fatal("sample_m11: no shade heatmap block found (fixture changed?)")
 	}
+	if trueGrid == nil {
+		t.Fatal("sample_m11: no truecolor heatmap block found (fixture changed?)")
+	}
 	reg := DefaultRegistry(DarkTheme())
 	assertStripComplete(t, "heatmap_shade_sample_m11", func(w int, p Profile) string {
 		return reg.RenderDoc([]Block{*shade}, RenderCtx{Width: w, Theme: DarkTheme(), Profile: p})
+	})
+	assertStripComplete(t, "heatmap_truecolor_sample_m11", func(w int, p Profile) string {
+		return reg.RenderDoc([]Block{*trueGrid}, RenderCtx{Width: w, Theme: DarkTheme(), Profile: p})
 	})
 
 	// (2) stat grid — a big-number cell + a bullet-bar cell with a sparkline. The
