@@ -33,6 +33,8 @@ defmodule Barkpark.Content.Errors do
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
+    "label_spine" =>
+      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "storage_unavailable" =>
@@ -174,6 +176,21 @@ defmodule Barkpark.Content.Errors do
   # consumer. The plugin's reason string becomes the message verbatim.
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
+
+  # The publish wall's label spine (authoring-excellence D5): the document
+  # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
+  # legacy exemption ledger. 422 with the validator's documentation-grade
+  # details (field / rule / fix per violation) verbatim, so the one agent
+  # retry can be exact. A NEW top-level atom — deliberately NOT the
+  # task-scoped invalid_task_content and NOT the plugin {:halted, _} shape
+  # (this is core enforcement, not a plugin veto).
+  defp build({:error, {:label_spine, details}}),
+    do: %{
+      code: "label_spine",
+      message: "document failed the publish wall's label spine",
+      status: 422,
+      details: details
+    }
 
   # Find-or-create gate (task-obsession layer 1): a new task duplicates an
   # existing one. 409 Conflict; the similar-candidate list rides in `details` so

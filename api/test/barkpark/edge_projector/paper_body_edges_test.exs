@@ -81,7 +81,11 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
     {:ok, _} =
       Content.create_document(
         type,
-        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        %{
+          "doc_id" => doc_id,
+          "title" => doc_id,
+          "content" => Barkpark.LabelFixtures.with_labels(content)
+        },
         @dataset,
         scope
       )

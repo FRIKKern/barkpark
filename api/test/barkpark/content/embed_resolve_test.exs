@@ -38,10 +38,9 @@ defmodule Barkpark.Content.EmbedResolveTest do
     {:ok, _} =
       Content.create_document(
         "paper",
-        Map.merge(
-          %{"_id" => id, "title" => title, "blocks" => blocks},
-          attrs
-        ),
+        %{"_id" => id, "title" => title, "blocks" => blocks}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.merge(attrs),
         @dataset
       )
 

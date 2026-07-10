@@ -174,15 +174,16 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           %{
             "doc_id" => @dt_task,
             "title" => "Drive the strategy",
-            "content" => %{
-              "kind" => "task",
-              "lifecycle_status" => "open",
-              "design_doc" => @dt_paper,
-              "acceptance_criteria" => [
-                %{"criterion" => "satisfied claim", "met" => true, "evidence" => "PR #42"},
-                %{"criterion" => "open claim", "met" => false}
-              ]
-            }
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "kind" => "task",
+                "lifecycle_status" => "open",
+                "design_doc" => @dt_paper,
+                "acceptance_criteria" => [
+                  %{"criterion" => "satisfied claim", "met" => true, "evidence" => "PR #42"},
+                  %{"criterion" => "open claim", "met" => false}
+                ]
+              })
           },
           dataset,
           scope

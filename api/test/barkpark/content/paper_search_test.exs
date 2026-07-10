@@ -20,7 +20,13 @@ defmodule Barkpark.Content.PaperSearchTest do
   end
 
   defp paper!(id, title) do
-    {:ok, _} = Content.create_document("paper", %{"_id" => id, "title" => title}, @dataset)
+    {:ok, _} =
+      Content.create_document(
+        "paper",
+        Map.merge(%{"_id" => id, "title" => title}, Barkpark.LabelFixtures.weighted_labels()),
+        @dataset
+      )
+
     {:ok, doc} = Content.publish_document(id, "paper", @dataset)
     doc
   end

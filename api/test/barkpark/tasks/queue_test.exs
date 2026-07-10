@@ -49,10 +49,9 @@ defmodule Barkpark.Tasks.QueueTest do
 
   defp mk_task!(doc_id, scope, dataset, content_extra \\ %{}) do
     content =
-      Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
-        content_extra
-      )
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+      |> Map.merge(content_extra)
 
     {:ok, doc} =
       Content.create_document(

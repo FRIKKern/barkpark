@@ -62,6 +62,12 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
         ]
       })
 
+    # These papers were born PUBLISHED via the upsert_paper bypass (D13 — the
+    # wall's fifth mount is deferred to ae-upsert-paper-wall) and carry no
+    # labels; the explicit draft->publish gate under test rides the exemption
+    # ledger exactly like prod's pre-wall corpus.
+    Barkpark.LabelFixtures.exempt!([slug, source_slug], @dataset)
+
     {slug, source_slug}
   end
 
@@ -260,8 +266,14 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
         Content.upsert_paper(%{
           "slug" => slug,
           "blocks" => [
-            %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
-              "locked" => true, "text" => "T"},
+            %{
+              "id" => "tpl-title",
+              "type" => "heading",
+              "level" => 1,
+              "role" => "title",
+              "locked" => true,
+              "text" => "T"
+            },
             %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
           ]
         })

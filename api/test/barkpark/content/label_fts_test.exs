@@ -47,6 +47,9 @@ defmodule Barkpark.Content.LabelFtsTest do
     content = %{
       "_id" => "p-weighted",
       "title" => "Weighted Tags Paper",
+      # The S2 publish wall also requires a description; the assertions below
+      # stay about the TAG lexemes and the skipped strength integers.
+      "description" => "Proves the search vector indexes tag lexemes only.",
       "tags" => [
         %{"tag" => "obsidian", "strength" => 80, "rationale" => "Central to the workflow here."},
         %{

@@ -43,7 +43,10 @@ defmodule BarkparkWeb.ShareLinkTest do
         %{
           "doc_id" => "demo-paper",
           "title" => "Demo Paper",
-          "content" => %{"body_html" => "<h1>Shared via a direct link</h1>"}
+          "content" =>
+            Barkpark.LabelFixtures.with_labels(%{
+              "body_html" => "<h1>Shared via a direct link</h1>"
+            })
         },
         @dataset,
         scope

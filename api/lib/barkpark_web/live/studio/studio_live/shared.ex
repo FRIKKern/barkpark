@@ -338,11 +338,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         {:error, {:halted, reason}} ->
           {:noreply, put_flash(socket, :error, "#{msg} cancelled: #{reason}")}
 
+        # The publish wall (authoring-excellence D14): a label-spine rejection
+        # must render its field/rule/fix detail, never degrade to the
+        # content-free "Action failed" flash — the rejection is the UI here,
+        # and it has to read like documentation.
+        {:error, {:label_spine, details}} ->
+          {:noreply,
+           put_flash(socket, :error, "Publish blocked: #{format_wall_details(details)}")}
+
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Action failed")}
       end
     else
       {:noreply, socket}
+    end
+  end
+
+  @doc """
+  Render the publish wall's documentation-grade rejection details
+  (`{:label_spine, details}`) into one flash-sized line. The validator emits a
+  violation as a `%{field, rule, fix}` map (or a list of them); anything else
+  is inspected verbatim so a shape drift degrades loudly, not into "Action
+  failed".
+  """
+  def format_wall_details(details) when is_list(details) do
+    details |> Enum.map(&format_wall_details/1) |> Enum.join(" · ")
+  end
+
+  def format_wall_details(%{} = detail) do
+    field = wall_detail(detail, :field)
+    rule = wall_detail(detail, :rule)
+    fix = wall_detail(detail, :fix)
+
+    case {field, rule, fix} do
+      {nil, nil, nil} -> inspect(detail)
+      _ -> Enum.join(Enum.reject([field, rule, fix], &is_nil/1), " — ")
+    end
+  end
+
+  def format_wall_details(other), do: inspect(other)
+
+  defp wall_detail(detail, key) do
+    case detail[key] || detail[to_string(key)] do
+      value when is_binary(value) and value != "" -> value
+      _ -> nil
     end
   end
 
@@ -356,8 +395,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     if type == nil or ids == [] do
       assign(socket, selected_doc_ids: MapSet.new())
     else
-      {ok, halted, err} =
-        Enum.reduce(ids, {0, 0, 0}, fn id, {ok, halted, err} ->
+      # `walled` tracks label-spine rejections separately from plugin halts and
+      # generic failures (authoring-excellence D14): a wall rejection carries a
+      # fix and must say so — "cancelled by plugin rules" would misattribute
+      # it, "failed" would hide it. The first rejection's detail rides the
+      # flash so the author sees a concrete field/rule/fix, not just a count.
+      {ok, halted, err, walled, wall_detail} =
+        Enum.reduce(ids, {0, 0, 0, 0, nil}, fn id, {ok, halted, err, walled, wall_detail} ->
           result =
             case kind do
               :publish -> Content.publish_document(id, type, dataset, opts)
@@ -365,9 +409,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             end
 
           case result do
-            {:ok, _} -> {ok + 1, halted, err}
-            {:error, {:halted, _}} -> {ok, halted + 1, err}
-            _ -> {ok, halted, err + 1}
+            {:ok, _} ->
+              {ok + 1, halted, err, walled, wall_detail}
+
+            {:error, {:halted, _}} ->
+              {ok, halted + 1, err, walled, wall_detail}
+
+            {:error, {:label_spine, details}} ->
+              {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
+
+            _ ->
+              {ok, halted, err + 1, walled, wall_detail}
           end
         end)
 
@@ -375,6 +427,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
       flash =
         cond do
+          walled > 0 ->
+            "#{verb} #{ok} of #{length(ids)}. #{walled} blocked by the publish wall — " <>
+              "#{wall_detail}" <>
+              if(halted > 0, do: " (#{halted} cancelled by plugin rules)", else: "") <>
+              if(err > 0, do: " (#{err} failed)", else: "")
+
           halted > 0 and err == 0 ->
             "#{verb} #{ok} of #{length(ids)}. #{halted} cancelled by plugin rules."
 

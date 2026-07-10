@@ -92,7 +92,10 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content)
+          "content" =>
+            %{"kind" => "task", "lifecycle_status" => "open"}
+            |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+            |> Map.merge(content)
         },
         @dataset,
         scope

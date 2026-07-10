@@ -59,7 +59,10 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
     {:ok, doc} =
       Content.create_document(
         "paper",
-        %{"doc_id" => id, "content" => %{"blocks" => blocks}},
+        %{
+          "doc_id" => id,
+          "content" => Barkpark.LabelFixtures.with_labels(%{"blocks" => blocks})
+        },
         @dataset
       )
 

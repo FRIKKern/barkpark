@@ -132,7 +132,11 @@ defmodule BarkparkWeb.MutateControllerTest do
   # drafts.p1 with {"a" => "draft-only", "b" => 1}. Returns the draft doc.
   defp published_plus_divergent_draft do
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "p1", "title" => "pub", "content" => %{"b" => 0}}, "test")
+      Content.create_document(
+        "post",
+        %{"doc_id" => "p1", "title" => "pub", "content" => %{"b" => 0}},
+        "test"
+      )
 
     {:ok, _} = Content.publish_document("p1", "post", "test")
 
@@ -147,7 +151,9 @@ defmodule BarkparkWeb.MutateControllerTest do
   end
 
   defp patch_body(patch) do
-    Jason.encode!(%{"mutations" => [%{"patch" => Map.merge(%{"id" => "p1", "type" => "post"}, patch)}]})
+    Jason.encode!(%{
+      "mutations" => [%{"patch" => Map.merge(%{"id" => "p1", "type" => "post"}, patch)}]
+    })
   end
 
   describe "patch merge base == write target (draft-first)" do
@@ -169,7 +175,9 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert published.content == %{"b" => 0}
     end
 
-    test "ifRevisionID guards the DRAFT row (the written row), not the published row", %{conn: conn} do
+    test "ifRevisionID guards the DRAFT row (the written row), not the published row", %{
+      conn: conn
+    } do
       draft = published_plus_divergent_draft()
 
       # The guard rev is the DRAFT's rev — with the fix, ensure_rev compares
@@ -177,7 +185,10 @@ defmodule BarkparkWeb.MutateControllerTest do
       resp =
         conn
         |> authed()
-        |> post("/v1/data/mutate/test", patch_body(%{"ifRevisionID" => draft.rev, "set" => %{"x" => 1}}))
+        |> post(
+          "/v1/data/mutate/test",
+          patch_body(%{"ifRevisionID" => draft.rev, "set" => %{"x" => 1}})
+        )
 
       assert resp.status == 200
 
@@ -192,7 +203,10 @@ defmodule BarkparkWeb.MutateControllerTest do
       resp =
         conn
         |> authed()
-        |> post("/v1/data/mutate/test", patch_body(%{"inc" => %{"b" => 5}, "setIfMissing" => %{"c" => "z"}}))
+        |> post(
+          "/v1/data/mutate/test",
+          patch_body(%{"inc" => %{"b" => 5}, "setIfMissing" => %{"c" => "z"}})
+        )
 
       assert resp.status == 200
 
@@ -205,6 +219,122 @@ defmodule BarkparkWeb.MutateControllerTest do
 
       {:ok, published} = Content.get_document("p1", "post", "test")
       assert published.content == %{"b" => 0}
+    end
+  end
+
+  # ── the publish wall over HTTP (authoring-excellence) ───────────────────────
+
+  # A label-spine-compliant content map: non-trivial description + weighted
+  # tags with distinct strengths and ≥20-char rationales.
+  defp good_labels(tag_count) do
+    tags =
+      for i <- 1..tag_count do
+        %{
+          "tag" => "wall-tag-#{i}",
+          "strength" => 100 - i,
+          "rationale" => "Tag ##{i} exists to exercise the publish wall's HTTP contract."
+        }
+      end
+
+    %{
+      "description" => "A deliberately non-trivial description for the HTTP wall tests.",
+      "tags" => tags
+    }
+  end
+
+  defp create_paper(conn, id, content) do
+    conn
+    |> authed()
+    |> post(
+      "/v1/data/mutate/test",
+      Jason.encode!(%{
+        "mutations" => [
+          %{"create" => %{"_id" => id, "_type" => "paper", "title" => "P", "content" => content}}
+        ]
+      })
+    )
+  end
+
+  defp patch_paper(conn, id, fields) do
+    conn
+    |> authed()
+    |> post(
+      "/v1/data/mutate/test",
+      Jason.encode!(%{
+        "mutations" => [%{"patch" => %{"id" => id, "type" => "paper", "set" => fields}}]
+      })
+    )
+  end
+
+  defp publish_paper(conn, id) do
+    conn
+    |> authed()
+    |> post(
+      "/v1/data/mutate/test",
+      Jason.encode!(%{"mutations" => [%{"publish" => %{"id" => id, "type" => "paper"}}]})
+    )
+  end
+
+  describe "publish wall (label spine over HTTP mutate)" do
+    setup do
+      Content.upsert_schema(
+        %{"name" => "paper", "title" => "Paper", "visibility" => "public", "fields" => []},
+        "test"
+      )
+
+      :ok
+    end
+
+    test "unlabeled FIRST publish → 422 label_spine with field/rule/fix + hint; the labeled retry succeeds",
+         %{conn: conn} do
+      assert create_paper(conn, "w1", %{"body" => "no labels yet"}).status == 200
+
+      resp = publish_paper(conn, "w1")
+      assert resp.status == 422
+      error = Jason.decode!(resp.resp_body)["error"]
+
+      # Machine-readable code + documentation-grade details + fix-suggesting
+      # hint — the rejection IS the retry instructions.
+      assert error["code"] == "label_spine"
+      assert is_binary(error["details"]["field"])
+      assert is_binary(error["details"]["rule"])
+      assert is_binary(error["details"]["fix"])
+      assert is_binary(error["hint"]) and error["hint"] != ""
+
+      # The one retry an agent performs: patch the labels in, publish again.
+      assert patch_paper(conn, "w1", good_labels(2)).status == 200
+      retry = publish_paper(conn, "w1")
+      assert retry.status == 200
+
+      {:ok, published} = Content.get_document("w1", "paper", "test")
+      assert published.status == "published"
+    end
+
+    test "a legal tag count OUTSIDE the 2–4 norm rides `warnings` on the 200 envelope, never blocks",
+         %{conn: conn} do
+      assert create_paper(conn, "w-norm", good_labels(1)).status == 200
+
+      resp = publish_paper(conn, "w-norm")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert [warning] = body["warnings"]
+      assert warning["code"] == "label_norm"
+      assert warning["severity"] == "advisory"
+      assert warning["message"] =~ "w-norm"
+
+      # The publish itself went through — advisory never blocks.
+      assert [%{"operation" => "publish"}] = body["results"]
+    end
+
+    test "a tag count INSIDE the 2–4 norm publishes with no warnings key", %{conn: conn} do
+      assert create_paper(conn, "w-quiet", good_labels(3)).status == 200
+
+      resp = publish_paper(conn, "w-quiet")
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      refute Map.has_key?(body, "warnings")
     end
   end
 end

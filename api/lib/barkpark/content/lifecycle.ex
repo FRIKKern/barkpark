@@ -33,7 +33,30 @@ defmodule Barkpark.Content.Lifecycle do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, DraftId, Sheets, Writer, WriteScope}
+
+  alias Barkpark.Content.{
+    Broadcast,
+    Document,
+    DraftId,
+    Exemptions,
+    LabelSpine,
+    Sheets,
+    Warnings,
+    Writer,
+    WriteScope
+  }
+
+  # The publish wall (authoring-excellence D1/D6) enforces the label spine on
+  # Barkpark's own knowledge types — the corpus the epic exists to keep
+  # findable. Deliberately a module attribute, not schema-sniffing: the S4
+  # dedup wall scopes to the same pair ("on publish of paper/task types"), and
+  # widening the wall to a new type must be a reviewed one-line decision, never
+  # an accident of registering a schema. User content types (posts, products,
+  # …) publish exactly as before.
+  @walled_types ~w(paper task)
+
+  # The 2–4 tag-count norm (advisory FROM BIRTH, never promoted — charter D5).
+  @tag_count_norm 2..4
 
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
@@ -58,87 +81,138 @@ defmodule Barkpark.Content.Lifecycle do
           ctx: ctx
         }
 
-        # Hook stays BEFORE the transaction. The rev-fenced delete below closes
-        # the publish-during-edit TOCTOU: a concurrent write that bumps the
-        # draft between the read above and the delete now surfaces a
-        # {:error, {:rev_mismatch, …}} (412) instead of silently destroying the
-        # newer edit while this stale snapshot publishes.
-        case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
+        # The publish wall (authoring-excellence D1): fail-closed label-spine
+        # enforcement lives in CORE, immediately BEFORE the before_publish
+        # hook fire — the hook chain is plugin-droppable and coerces raising
+        # hooks to :ok, so it is the wrong home for a correctness gate (the
+        # hook stays for optional tenant policies). A failed wall returns
+        # {:error, {:label_spine, details}} → 422 via Errors.to_envelope.
+        with :ok <- authoring_wall(draft, type, pid, dataset) do
+          # Hook stays BEFORE the transaction. The rev-fenced delete below
+          # closes the publish-during-edit TOCTOU: a concurrent write that
+          # bumps the draft between the read above and the delete now surfaces
+          # a {:error, {:rev_mismatch, …}} (412) instead of silently
+          # destroying the newer edit while this stale snapshot publishes.
+          case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
+            {:halt, reason} ->
+              {:error, {:halted, reason}}
 
-          :ok ->
-            # Upsert the published version with draft's content. Inherit the
-            # draft's tenancy scope so a publish never drops workspace_id/
-            # project_id on the published row.
-            pub_attrs =
-              %{
-                "doc_id" => pid,
-                "type" => type,
-                "dataset" => dataset,
-                "title" => draft.title,
-                "status" => "published",
-                "content" => draft.content,
-                "rev" => Writer.generate_rev()
-              }
-              |> WriteScope.inherit_scope_attrs(draft)
+            :ok ->
+              # Upsert the published version with draft's content. Inherit the
+              # draft's tenancy scope so a publish never drops workspace_id/
+              # project_id on the published row.
+              pub_attrs =
+                %{
+                  "doc_id" => pid,
+                  "type" => type,
+                  "dataset" => dataset,
+                  "title" => draft.title,
+                  "status" => "published",
+                  "content" => draft.content,
+                  "rev" => Writer.generate_rev()
+                }
+                |> WriteScope.inherit_scope_attrs(draft)
 
-            txn =
-              Repo.transaction(fn ->
-                {pub_result, prev_pub_rev} =
-                  case Content.get_document(pid, type, dataset, opts) do
-                    {:ok, existing} ->
-                      {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+              txn =
+                Repo.transaction(fn ->
+                  {pub_result, prev_pub_rev} =
+                    case Content.get_document(pid, type, dataset, opts) do
+                      {:ok, existing} ->
+                        {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
-                    _ ->
-                      {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-                  end
-
-                case pub_result do
-                  {:error, cs} ->
-                    Repo.rollback(cs)
-
-                  {:ok, published} ->
-                    # Rev-fenced: if a concurrent write bumped the draft since
-                    # the read above, delete nothing and surface a rev_mismatch
-                    # (412) instead of destroying the newer edit. A vanished
-                    # draft resolves to {:error, :not_found} (prior semantics).
-                    case fenced_delete(draft) do
-                      :ok -> {published, prev_pub_rev}
-                      {:error, reason} -> Repo.rollback(reason)
+                      _ ->
+                        {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
                     end
+
+                  case pub_result do
+                    {:error, cs} ->
+                      Repo.rollback(cs)
+
+                    {:ok, published} ->
+                      # Rev-fenced: if a concurrent write bumped the draft since
+                      # the read above, delete nothing and surface a rev_mismatch
+                      # (412) instead of destroying the newer edit. A vanished
+                      # draft resolves to {:error, :not_found} (prior semantics).
+                      case fenced_delete(draft) do
+                        :ok -> {published, prev_pub_rev}
+                        {:error, reason} -> Repo.rollback(reason)
+                      end
+                  end
+                end)
+
+              result =
+                case txn do
+                  {:ok, {published, prev_pub_rev}} ->
+                    Broadcast.tap_broadcast(
+                      {:ok, published},
+                      dataset,
+                      type,
+                      "publish",
+                      prev_pub_rev,
+                      Keyword.get(opts, :source, :api),
+                      Keyword.get(opts, :user_id)
+                    )
+
+                  {:error, reason} ->
+                    {:error, reason}
                 end
-              end)
 
-            result =
-              case txn do
-                {:ok, {published, prev_pub_rev}} ->
-                  Broadcast.tap_broadcast(
-                    {:ok, published},
-                    dataset,
-                    type,
-                    "publish",
-                    prev_pub_rev,
-                    Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
-                  )
+              # Publishing a SHEET refreshes its PUBLISHED embedders with the
+              # now-published content (the draft-save path deliberately skips
+              # them — see Sheets.refresh_sheet_embeds). Publish writes the
+              # published row directly (not through Writer's upsert tap), so
+              # the write-through must be invoked here explicitly.
+              Sheets.tap_sheet_writethrough(result)
 
-                {:error, reason} ->
-                  {:error, reason}
-              end
-
-            # Publishing a SHEET refreshes its PUBLISHED embedders with the
-            # now-published content (the draft-save path deliberately skips
-            # them — see Sheets.refresh_sheet_embeds). Publish writes the
-            # published row directly (not through Writer's upsert tap), so
-            # the write-through must be invoked here explicitly.
-            Sheets.tap_sheet_writethrough(result)
-
-            WriteScope.fire_after(result, :after_publish, payload)
+              WriteScope.fire_after(result, :after_publish, payload)
+          end
         end
 
       {:error, :not_found} ->
         {:error, :not_found}
+    end
+  end
+
+  # ── the publish wall (authoring-excellence) ────────────────────────────────
+  #
+  # Gate semantics (charter D6, amended):
+  #
+  #   * `LabelSpine.validate` PASSES → `Exemptions.clear(pid, dataset)` — the
+  #     ratchet shrink: a doc that has once proven itself well-labeled is held
+  #     to the wall forever after (stripping the tags back off re-hits it) —
+  #     then `:ok`, plus the 2–4 tag-count norm advisory on the warnings
+  #     channel when the count is legal but outside the norm.
+  #   * validate FAILS → grandfathered (`Exemptions.member?`) publishes pass
+  #     unchanged; everything else is the fail-closed 422
+  #     (`{:error, {:label_spine, details}}`).
+  #
+  # Drafts stay free by construction — this runs only on publish.
+  defp authoring_wall(draft, type, pid, dataset) when type in @walled_types do
+    case LabelSpine.validate(draft.content) do
+      :ok ->
+        Exemptions.clear(pid, dataset)
+        emit_tag_norm_advisory(draft, pid)
+        :ok
+
+      {:error, {:label_spine, _details}} = error ->
+        if Exemptions.member?(pid, dataset), do: :ok, else: error
+    end
+  end
+
+  defp authoring_wall(_draft, _type, _pid, _dataset), do: :ok
+
+  # Advisory, never blocking (charter D5): a legal tag count (1–12) outside
+  # the 2–4 norm rides the mutate success envelope as a warning. Emitted only
+  # AFTER a validate pass, so the count is known-legal here.
+  defp emit_tag_norm_advisory(draft, pid) do
+    count = draft.content |> Map.get("tags", []) |> length()
+
+    unless count in @tag_count_norm do
+      Warnings.put(
+        "label_norm",
+        "#{pid}: #{count} tag(s) — the norm is 2–4. " <>
+          "Every extra label dilutes the strong ones; weak entries are pruning candidates."
+      )
     end
   end
 
@@ -376,8 +450,11 @@ defmodule Barkpark.Content.Lifecycle do
 
       {0, _} ->
         case Repo.get(Document, doc.id) do
-          nil -> {:error, :not_found}
-          %Document{rev: current} -> {:error, {:rev_mismatch, %{expected: doc.rev, actual: current}}}
+          nil ->
+            {:error, :not_found}
+
+          %Document{rev: current} ->
+            {:error, {:rev_mismatch, %{expected: doc.rev, actual: current}}}
         end
     end
   end

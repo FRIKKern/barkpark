@@ -44,7 +44,8 @@ defmodule Barkpark.Plugins.Github.LinkTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+          "content" =>
+            Barkpark.LabelFixtures.with_labels(%{"kind" => "task", "lifecycle_status" => "open"})
         },
         @dataset,
         scope

@@ -33,7 +33,9 @@ defmodule Barkpark.Content.WikilinkResolveTest do
     {:ok, _} =
       Content.create_document(
         "paper",
-        Map.merge(%{"_id" => id, "title" => title}, attrs),
+        %{"_id" => id, "title" => title}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.merge(attrs),
         @dataset
       )
 
