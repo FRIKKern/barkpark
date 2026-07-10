@@ -127,6 +127,12 @@ defmodule BarkparkCloud.Usage do
 
   @unmetered "unmetered"
 
+  # The trailing window `history/2` reads — matches the sampler's 14-day
+  # `usage_samples` retention (AgentRetentionWorker prune), so the sparkline is
+  # never asking for rows that were pruned away.
+  @history_window_days 14
+  @history_window_ms @history_window_days * 86_400_000
+
   @doc """
   Compose the full usage envelope from resolved inputs. Total — never raises.
   """
@@ -308,9 +314,12 @@ defmodule BarkparkCloud.Usage do
   """
   @spec summary(Accounts.Team.t()) :: %{team: map(), instances: [map()]}
   def summary(team) do
+    instances = checkable_barkparks(team)
+    latest = latest_samples_by_barkpark(Enum.map(instances, & &1.id))
+
     %{
       team: %{instances: team_instances_meter(team)},
-      instances: team |> checkable_barkparks() |> Enum.map(&instance_summary/1)
+      instances: Enum.map(instances, &instance_summary(&1, latest))
     }
   end
 
@@ -324,22 +333,123 @@ defmodule BarkparkCloud.Usage do
     compose(%{instances: instances_input(team)}).meters.instances
   end
 
-  # The team's checkable instances — the SAME predicate the sampler enumerates
-  # (`Registry.update_checkable_barkparks/0`: host set, not billing-suspended),
-  # scoped to this team so the summary is team-private.
-  defp checkable_barkparks(team) do
-    team
-    |> Registry.list_barkparks()
-    |> Enum.filter(fn bp -> is_binary(bp.host) and bp.host != "" and bp.suspended == false end)
+  # ── Pure usage-meter history (GET /v1/barkparks/:id/usage/history) ────────────
+
+  @doc """
+  One instance's usage-meter history over the trailing 14-day window — a PURE DB
+  read of its cached `usage_samples` rows (ZERO instance HTTP), shaped for
+  sparklines. Mirrors `Metrics.build/3`'s series envelope, but over the usage
+  meters instead of the vitals.
+
+  The window is split into `points` uniform time buckets (default from the
+  route, capped there); each bucket carries the LATEST sample that fell in it. An
+  EMPTY bucket → `value: nil`; a meter that was `"unmetered"` (or absent) in the
+  winning sample → `nil` too — a GAP, never a fake zero (D48/D51). Each point's
+  `at` is the bucket's right edge (RFC3339), so every meter's series shares one
+  uniform, oldest→newest x-axis a client can plot directly.
+
+  A never-sampled instance is a normal result: every point in every series is
+  nil. Total — never raises (a pure query + arithmetic).
+  """
+  @spec history(Barkpark.t(), pos_integer()) :: map()
+  def history(%Barkpark{} = bp, points) when is_integer(points) do
+    points = max(points, 1)
+    now = DateTime.utc_now()
+    now_ms = DateTime.to_unix(now, :millisecond)
+    start_ms = now_ms - @history_window_ms
+    window_start = DateTime.from_unix!(start_ms, :millisecond)
+
+    winners = latest_sample_per_bucket(bp, window_start, start_ms, points)
+    meter_names = Map.keys(compose(%{}).meters)
+
+    %{
+      ok: true,
+      collected_at: DateTime.to_iso8601(now),
+      instance: %{id: bp.id, name: bp.name, slug: bp.slug, host: bp.host},
+      points: points,
+      window_days: @history_window_days,
+      series: history_series(meter_names, winners, start_ms, points)
+    }
   end
 
+  # Bucket every in-window sample by its position in the [start, now] span and
+  # keep the LATEST per bucket. Samples arrive ascending by `measured_at`, so a
+  # later sample simply overwrites an earlier one in the same bucket.
+  defp latest_sample_per_bucket(bp, window_start, start_ms, points) do
+    from(s in Sample,
+      where: s.barkpark_id == ^bp.id and s.measured_at >= ^window_start,
+      order_by: [asc: s.measured_at]
+    )
+    |> Repo.all()
+    |> Enum.reduce(%{}, fn s, acc ->
+      Map.put(acc, bucket_index(s.measured_at, start_ms, points), s)
+    end)
+  end
+
+  # Which of the `points` buckets a sample falls in: floor of its fractional
+  # position across the span, clamped to 0..points-1 (a boundary sample at `now`
+  # lands in the last bucket).
+  defp bucket_index(measured_at, start_ms, points) do
+    ms = DateTime.to_unix(measured_at, :millisecond)
+    idx = div((ms - start_ms) * points, @history_window_ms)
+    idx |> max(0) |> min(points - 1)
+  end
+
+  # One series per meter: `points` points oldest→newest, each `{at, value|nil}`.
+  # `at` is the bucket's right-edge timestamp (uniform x-axis); value comes from
+  # that bucket's winning sample, or nil for an empty bucket / non-numeric meter.
+  defp history_series(meter_names, winners, start_ms, points) do
+    indexed_ats = Enum.with_index(bucket_edges(start_ms, points))
+
+    Map.new(meter_names, fn name ->
+      key = Atom.to_string(name)
+
+      pts =
+        Enum.map(indexed_ats, fn {at, i} ->
+          %{at: at, value: bucket_value(Map.get(winners, i), key)}
+        end)
+
+      {name, pts}
+    end)
+  end
+
+  # The right-edge RFC3339 timestamp of every bucket, oldest→newest. The last
+  # edge is `now` (start + points * span/points).
+  defp bucket_edges(start_ms, points) do
+    Enum.map(1..points, fn i ->
+      (start_ms + div(i * @history_window_ms, points))
+      |> DateTime.from_unix!(:millisecond)
+      |> DateTime.to_iso8601()
+    end)
+  end
+
+  # A bucket's value for one meter: the winning sample's numeric meter value, or
+  # nil (empty bucket, "unmetered", or an absent/non-numeric meter) — a GAP, not
+  # a fake zero. The stored envelope has STRING keys (jsonb round-trip).
+  defp bucket_value(nil, _key), do: nil
+
+  defp bucket_value(%Sample{envelope: envelope}, key) do
+    case get_in(envelope, ["meters", key, "value"]) do
+      n when is_number(n) -> n
+      _ -> nil
+    end
+  end
+
+  # The team's checkable instances — the SAME "live + not billing-suspended"
+  # predicate the sampler sweeps (`Registry.update_checkable_barkparks/0`),
+  # scoped to this team so the summary is team-private. The predicate has ONE
+  # home now (`Registry.checkable_scope/1`); this delegates so the fleet scope
+  # can never drift between the sweep and the summary.
+  defp checkable_barkparks(team), do: Registry.checkable_barkparks(team)
+
   # One instance's summary row: identity + its latest cached meters + the sample
-  # time. No cached row (never sampled) → the honest all-"unmetered" envelope,
-  # measured_at nil.
-  defp instance_summary(bp) do
+  # time, read from the pre-fetched `latest` map (one DISTINCT ON query for the
+  # whole fleet, not a LIMIT 1 per instance — flag a). No cached row (never
+  # sampled) → the honest all-"unmetered" envelope, measured_at nil.
+  defp instance_summary(bp, latest) do
     base = %{id: bp.id, name: bp.name, slug: bp.slug, host: bp.host}
 
-    case latest_sample(bp) do
+    case Map.get(latest, bp.id) do
       %Sample{envelope: %{"meters" => meters}, measured_at: at} ->
         Map.merge(base, %{measured_at: at, meters: meters})
 
@@ -348,15 +458,22 @@ defmodule BarkparkCloud.Usage do
     end
   end
 
-  # The newest sample for an instance, or nil. The composite index makes this an
-  # index range-scan (LIMIT 1) per instance.
-  defp latest_sample(bp) do
+  # The LATEST sample per instance for the whole fleet in ONE query: `DISTINCT ON
+  # (barkpark_id)` with `ORDER BY barkpark_id, measured_at DESC` keeps the newest
+  # row per box. Replaces the old per-instance `LIMIT 1` N+1 (flag a) — the
+  # composite `(barkpark_id, measured_at)` index still backs it. Returns a map
+  # keyed by barkpark_id; an empty id list yields an empty map (no query cost
+  # concern — Ecto renders `IN ()` as a false predicate).
+  defp latest_samples_by_barkpark([]), do: %{}
+
+  defp latest_samples_by_barkpark(ids) do
     from(s in Sample,
-      where: s.barkpark_id == ^bp.id,
-      order_by: [desc: s.measured_at],
-      limit: 1
+      where: s.barkpark_id in ^ids,
+      distinct: s.barkpark_id,
+      order_by: [asc: s.barkpark_id, desc: s.measured_at]
     )
-    |> Repo.one()
+    |> Repo.all()
+    |> Map.new(&{&1.barkpark_id, &1})
   end
 
   # ── control-plane gatherers (return even when the instance is down) ──────────

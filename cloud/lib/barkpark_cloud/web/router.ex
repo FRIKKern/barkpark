@@ -48,6 +48,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       GET     /v1/barkparks/:id/metrics user  a window of health beats as cpu/mem/disk/load series (team-scoped)
       GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
+      GET     /v1/barkparks/:id/usage/history user  usage-meter series over the trailing 14d of samples, for sparklines (team-scoped)
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
@@ -4988,6 +4989,38 @@ defmodule BarkparkCloud.Web.Router do
         case resolve_team_barkpark(team, conn.path_params["id"]) do
           nil -> json(conn, 404, %{error: "not_found"})
           %Barkpark{} = bp -> json(conn, 200, %{usage: Usage.gather(bp)})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/usage/history?points=N → 200 <history envelope> | 404.
+  # User-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
+  # usage / metrics routes (wrong-team / absent / malformed id are
+  # indistinguishable). The Usage sub-tab's sparklines (cloud-console wave 4): a
+  # PURE DB read of the instance's cached `usage_samples` rows over the trailing
+  # 14-day window — ZERO instance HTTP (the ~15s live fan-out would disqualify a
+  # sparkline). `points` uniform buckets (default 56, cap 200) via the shared
+  # parse_limit idiom; each bucket carries the latest sample that fell in it, an
+  # empty bucket → value nil, an "unmetered" meter → nil (a gap, never a fake
+  # zero). A never-sampled instance is a normal 200 with all-nil series.
+  # `BarkparkCloud.Usage.history/2` is the pure, total shaper.
+  get "/v1/barkparks/:id/usage/history" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        conn = fetch_query_params(conn)
+        points = parse_limit(conn.query_params["points"], 56, 200)
+
+        case resolve_team_barkpark(conn.assigns.current_team, conn.path_params["id"]) do
+          nil -> json(conn, 404, %{error: "not_found"})
+          %Barkpark{} = bp -> json(conn, 200, Usage.history(bp, points))
         end
     end
   end
