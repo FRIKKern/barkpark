@@ -775,6 +775,12 @@ const PAIRINGS = [
   { sel: ".scope-title-caret",                     surface: "--surface-raised", kind: "nontext", where: "root.html.heex .scope-title-caret — glyph on .scope-title --surface-raised" },
   { sel: ".scope-title-trail",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-trail — trail text on .scope-title --surface-raised" },
   { sel: ".scope-title-ws",                        surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-ws — workspace name on .scope-title --surface-raised" },
+  // API-tester scenario results (sup-w3): rows ride the Response focus pane
+  // (.pane-column--last → --surface-raised); the category header paints its own
+  // --bg-muted fill. All three escalate fg-dim → --muted-text at the pairing site.
+  { sel: ".scenario-cat-header",                   surface: "--bg-muted",       kind: "text",    where: "root.html.heex .scenario-cat-header — category label paints its own --bg-muted fill" },
+  { sel: ".scenario-endpoint",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scenario-endpoint — endpoint label on the .pane-column--last Response pane" },
+  { sel: ".scenario-duration",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scenario-duration — mono duration on the .pane-column--last Response pane" },
 ];
 
 const AA_THRESH = { text: 4.5, nontext: 3.0 };

@@ -4,6 +4,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
 
   import BarkparkWeb.Studio.ApiTesterLive.Format
   import BarkparkWeb.Studio.ApiTesterLive.Request
+  import BarkparkWeb.StudioComponents.Controls
 
   attr :endpoint, :map, required: true
 
@@ -82,7 +83,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       <%= for p <- @endpoint.path_params do %>
         <div class="api-param-row">
           <label class="api-param-label"><%= p.name %></label>
-          <input type="text" name={p.name} class="form-input" value={Map.get(@form_state, p.name, to_string(p.default))} />
+          <.bp_input name={p.name} value={Map.get(@form_state, p.name, to_string(p.default))} />
         </div>
       <% end %>
 
@@ -90,20 +91,16 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
         <div class="api-param-row">
           <label class="api-param-label"><%= p.name %></label>
           <%= if p.type == :select do %>
-            <select name={p.name} class="form-input">
-              <%= for opt <- p[:options] || [] do %>
-                <option value={opt} selected={opt == Map.get(@form_state, p.name, to_string(p.default))}><%= opt %></option>
-              <% end %>
-            </select>
+            <.bp_select name={p.name} options={p[:options] || []} value={Map.get(@form_state, p.name, to_string(p.default))} />
           <% else %>
-            <input type="text" name={p.name} class="form-input" value={Map.get(@form_state, p.name, to_string(p.default))} />
+            <.bp_input name={p.name} value={Map.get(@form_state, p.name, to_string(p.default))} />
           <% end %>
         </div>
       <% end %>
 
       <%= if @endpoint.method == "POST" do %>
         <div class="api-section" style="margin-top: 16px;">Request body (JSON)</div>
-        <textarea name="_body_text" class="form-input api-body-textarea" spellcheck="false"><%= Map.get(@form_state, "_body_text", "") %></textarea>
+        <.bp_textarea name="_body_text" class="api-body-textarea" spellcheck="false" value={Map.get(@form_state, "_body_text", "")} />
       <% end %>
     </form>
 

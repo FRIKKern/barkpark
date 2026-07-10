@@ -121,6 +121,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     {:noreply, assign(socket, form_state_by_id: new_form_state_by_id)}
   end
 
+  # NOT orphaned: the top-bar Token field in layouts/studio.html.heex (the
+  # `<form phx-change="token-change">` shown while nav_section == :api_tester)
+  # dispatches this so an operator can override the run token inline.
   def handle_event("token-change", %{"token" => token}, socket) do
     {:noreply, assign(socket, token: token)}
   end
@@ -501,19 +504,19 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           <div class="api-col-body">
             <%= if @scenario_results != [] do %>
               <div class="scenario-results">
-                <div style="overflow-y: auto; max-height: calc(100vh - 140px);">
+                <div class="scenario-scroll">
                   <%= for {category, cat_scenarios} <- @scenario_results |> Enum.group_by(& &1.category) |> Enum.sort_by(&elem(&1, 0)) do %>
-                    <div style="padding: 4px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase; color: var(--fg-dim); border-bottom: 1px solid var(--border-muted); background: var(--bg-muted);">
+                    <div class="scenario-cat-header">
                       <%= category %>
                     </div>
                     <%= for sr <- cat_scenarios do %>
-                      <div style={"padding: 6px 12px; border-bottom: 1px solid var(--border-muted); display: flex; justify-content: space-between; align-items: center; font-size: 13px; #{if sr.result.verdict == :fail, do: "background: hsl(var(--danger-hsl) / 0.05);", else: ""}"}>
+                      <div class={["scenario-row", sr.result.verdict == :fail && "scenario-row--fail"]}>
                         <div>
-                          <span style="color: var(--fg-dim);"><%= sr.endpoint_label %></span>
-                          <span style="margin-left: 6px;"><%= sr.label %></span>
+                          <span class="scenario-endpoint"><%= sr.endpoint_label %></span>
+                          <span class="scenario-label"><%= sr.label %></span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                          <span style="font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono);"><%= sr.result.duration_ms %>ms</span>
+                        <div class="scenario-verdict">
+                          <span class="scenario-duration"><%= sr.result.duration_ms %>ms</span>
                           <span class={"badge #{verdict_badge_class(sr.result.verdict)}"}>
                             <%= if sr.result.verdict == :pass, do: "PASS", else: if(sr.result.verdict == :fail, do: "FAIL", else: "ERR") %>
                           </span>
@@ -833,14 +836,14 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   defp schema_browser_card(assigns) do
     ~H"""
-    <details class="api-schema-card" style="margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;">
-      <summary style="display:flex; gap:12px; align-items:center; cursor:pointer;">
+    <details class="api-schema-card">
+      <summary class="api-schema-summary">
         <code><%= @schema.name %></code>
         <span class="text-muted"><%= @schema.title %></span>
         <span class={"badge badge-" <> @schema.visibility}><%= @schema.visibility %></span>
         <span class="text-dim text-xs"><%= length(@schema.fields || []) %> fields</span>
       </summary>
-      <table class="api-table" style="margin-top: 8px;">
+      <table class="api-table api-schema-fields">
         <thead><tr><th>Name</th><th>Type</th><th>Title</th><th>Spec</th></tr></thead>
         <tbody>
           <%= for f <- @schema.fields || [] do %>
@@ -852,7 +855,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                 <%= if f["type"] in ["composite", "arrayOf", "codelist", "localizedText"] do %>
                   <details>
                     <summary class="text-xs text-muted">JSON</summary>
-                    <pre class="api-code-block" style="font-size:11px;"><%= Jason.encode!(f, pretty: true) %></pre>
+                    <pre class="api-code-block api-schema-json"><%= Jason.encode!(f, pretty: true) %></pre>
                   </details>
                 <% else %>
                   <span class="text-dim">—</span>
