@@ -36,12 +36,15 @@ defmodule BarkparkWeb.LiveScope do
   """
 
   import Phoenix.Component, only: [assign: 2, assign: 3]
-  import Phoenix.LiveView, only: [attach_hook: 4, redirect: 2, put_flash: 3]
+
+  import Phoenix.LiveView,
+    only: [attach_hook: 4, redirect: 2, put_flash: 3, get_connect_info: 2]
 
   alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.ReturnTo
 
   def on_mount(:resolve, params, _session, socket) do
     case resolve_and_authorize(socket, params) do
@@ -393,6 +396,28 @@ defmodule BarkparkWeb.LiveScope do
     {:halt,
      socket
      |> put_flash(:error, "Not authorized for that workspace")
-     |> redirect(to: "/login")}
+     |> redirect(to: login_target(socket))}
   end
+
+  # D69 — carry the requested scoped Studio URL as a validated `return_to` so a
+  # dead-render denial round-trips back after sign-in (the same funnel the
+  # anonymous ResolveWorkspace plug already builds, extended to the socket gate).
+  # A connected re-auth denial has no request URI → bare `/login`, unchanged.
+  defp login_target(socket) do
+    with %URI{path: path} = uri when is_binary(path) <- requested_uri(socket),
+         dest when is_binary(dest) <- ReturnTo.sanitize_dest(path <> query_suffix(uri.query)) do
+      ReturnTo.with_return_to("/login", dest)
+    else
+      _ -> "/login"
+    end
+  end
+
+  defp requested_uri(socket) do
+    get_connect_info(socket, :uri)
+  rescue
+    _ -> nil
+  end
+
+  defp query_suffix(query) when is_binary(query) and query != "", do: "?" <> query
+  defp query_suffix(_query), do: ""
 end

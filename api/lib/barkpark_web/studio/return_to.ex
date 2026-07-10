@@ -32,6 +32,11 @@ defmodule BarkparkWeb.Studio.ReturnTo do
   # prefix trick.
   @canonical ~r{^/w/[^/]+/p/[^/]+(?:/d/[^/]+)?/studio(?:[/?].*)?$}
 
+  # A FLAT Studio surface (`/studio/chat/:id`, `/studio/tmux`, …). Anchored the
+  # same way as `@canonical`: after `studio` there must be a `/`, a `?`, or
+  # end-of-string, so `/studioevil` and `//evil.com` never slip through.
+  @flat_studio ~r{^/studio(?:[/?].*)?$}
+
   @doc """
   Append `?return_to=<www-form-encoded>` to `path` when `return_to` is a
   non-empty string; otherwise return `path` unchanged.
@@ -80,5 +85,29 @@ defmodule BarkparkWeb.Studio.ReturnTo do
   """
   def sanitize(value) do
     if valid?(value), do: value, else: nil
+  end
+
+  @doc """
+  Sanitize a LOGIN-RETURN destination — the Studio surface an unauthenticated
+  visitor was bounced off, threaded through `/login?return_to=…` so a cold click
+  round-trips back after sign-in (charter D69, the notifier's deep-link promise).
+
+  Unlike `sanitize/1` — which guards the SCOPED *came-from* path a flat target
+  threads through its own patches — this also admits the FLAT `/studio…` deep
+  links the notifier emails point at (`/studio/chat/:id`). It stays an
+  open-redirect guard: only a relative, same-origin, dot-segment-free Studio path
+  (flat `/studio…` OR the scoped `/w/:ws/p/:proj[/d/:ds]/studio…` grammar)
+  survives; absolute URLs, `//host` authority tricks, `/studioevil` prefix
+  tricks, and `..` traversal all return `nil`.
+  """
+  def sanitize_dest(value) when is_binary(value) do
+    if dest_valid?(value), do: value, else: nil
+  end
+
+  def sanitize_dest(_value), do: nil
+
+  defp dest_valid?(value) do
+    (Regex.match?(@flat_studio, value) or Regex.match?(@canonical, value)) and
+      not dot_segment?(value)
   end
 end
