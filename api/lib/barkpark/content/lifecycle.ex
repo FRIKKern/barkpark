@@ -33,7 +33,7 @@ defmodule Barkpark.Content.Lifecycle do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, DraftId, Sheets, Writer, WriteScope}
+  alias Barkpark.Content.{Broadcast, DedupWall, Document, DraftId, Sheets, Writer, WriteScope}
 
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
@@ -58,83 +58,92 @@ defmodule Barkpark.Content.Lifecycle do
           ctx: ctx
         }
 
+        # Authoring-excellence publish wall (E4 dedup). Fail-closed guard placed
+        # immediately BEFORE the plugin `:before_publish` chain — that chain is
+        # plugin-droppable and coerces raising hooks to `:ok`, the wrong home for
+        # a hard refuse. A publish that near-duplicates an already-published
+        # document surfaces `{:error, {:duplicate_of, …}}` (→ 409). Same-id
+        # republish never trips; a candidate-query hiccup fails open.
+        #
         # Hook stays BEFORE the transaction. The rev-fenced delete below closes
         # the publish-during-edit TOCTOU: a concurrent write that bumps the
         # draft between the read above and the delete now surfaces a
         # {:error, {:rev_mismatch, …}} (412) instead of silently destroying the
         # newer edit while this stale snapshot publishes.
-        case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
+        with :ok <- DedupWall.guard(draft, type, dataset, opts) do
+          case Barkpark.Plugins.Hooks.fire(:before_publish, payload) do
+            {:halt, reason} ->
+              {:error, {:halted, reason}}
 
-          :ok ->
-            # Upsert the published version with draft's content. Inherit the
-            # draft's tenancy scope so a publish never drops workspace_id/
-            # project_id on the published row.
-            pub_attrs =
-              %{
-                "doc_id" => pid,
-                "type" => type,
-                "dataset" => dataset,
-                "title" => draft.title,
-                "status" => "published",
-                "content" => draft.content,
-                "rev" => Writer.generate_rev()
-              }
-              |> WriteScope.inherit_scope_attrs(draft)
+            :ok ->
+              # Upsert the published version with draft's content. Inherit the
+              # draft's tenancy scope so a publish never drops workspace_id/
+              # project_id on the published row.
+              pub_attrs =
+                %{
+                  "doc_id" => pid,
+                  "type" => type,
+                  "dataset" => dataset,
+                  "title" => draft.title,
+                  "status" => "published",
+                  "content" => draft.content,
+                  "rev" => Writer.generate_rev()
+                }
+                |> WriteScope.inherit_scope_attrs(draft)
 
-            txn =
-              Repo.transaction(fn ->
-                {pub_result, prev_pub_rev} =
-                  case Content.get_document(pid, type, dataset, opts) do
-                    {:ok, existing} ->
-                      {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
+              txn =
+                Repo.transaction(fn ->
+                  {pub_result, prev_pub_rev} =
+                    case Content.get_document(pid, type, dataset, opts) do
+                      {:ok, existing} ->
+                        {existing |> Document.changeset(pub_attrs) |> Repo.update(), existing.rev}
 
-                    _ ->
-                      {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
-                  end
-
-                case pub_result do
-                  {:error, cs} ->
-                    Repo.rollback(cs)
-
-                  {:ok, published} ->
-                    # Rev-fenced: if a concurrent write bumped the draft since
-                    # the read above, delete nothing and surface a rev_mismatch
-                    # (412) instead of destroying the newer edit. A vanished
-                    # draft resolves to {:error, :not_found} (prior semantics).
-                    case fenced_delete(draft) do
-                      :ok -> {published, prev_pub_rev}
-                      {:error, reason} -> Repo.rollback(reason)
+                      _ ->
+                        {%Document{} |> Document.changeset(pub_attrs) |> Repo.insert(), nil}
                     end
+
+                  case pub_result do
+                    {:error, cs} ->
+                      Repo.rollback(cs)
+
+                    {:ok, published} ->
+                      # Rev-fenced: if a concurrent write bumped the draft since
+                      # the read above, delete nothing and surface a rev_mismatch
+                      # (412) instead of destroying the newer edit. A vanished
+                      # draft resolves to {:error, :not_found} (prior semantics).
+                      case fenced_delete(draft) do
+                        :ok -> {published, prev_pub_rev}
+                        {:error, reason} -> Repo.rollback(reason)
+                      end
+                  end
+                end)
+
+              result =
+                case txn do
+                  {:ok, {published, prev_pub_rev}} ->
+                    Broadcast.tap_broadcast(
+                      {:ok, published},
+                      dataset,
+                      type,
+                      "publish",
+                      prev_pub_rev,
+                      Keyword.get(opts, :source, :api),
+                      Keyword.get(opts, :user_id)
+                    )
+
+                  {:error, reason} ->
+                    {:error, reason}
                 end
-              end)
 
-            result =
-              case txn do
-                {:ok, {published, prev_pub_rev}} ->
-                  Broadcast.tap_broadcast(
-                    {:ok, published},
-                    dataset,
-                    type,
-                    "publish",
-                    prev_pub_rev,
-                    Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id)
-                  )
+              # Publishing a SHEET refreshes its PUBLISHED embedders with the
+              # now-published content (the draft-save path deliberately skips
+              # them — see Sheets.refresh_sheet_embeds). Publish writes the
+              # published row directly (not through Writer's upsert tap), so
+              # the write-through must be invoked here explicitly.
+              Sheets.tap_sheet_writethrough(result)
 
-                {:error, reason} ->
-                  {:error, reason}
-              end
-
-            # Publishing a SHEET refreshes its PUBLISHED embedders with the
-            # now-published content (the draft-save path deliberately skips
-            # them — see Sheets.refresh_sheet_embeds). Publish writes the
-            # published row directly (not through Writer's upsert tap), so
-            # the write-through must be invoked here explicitly.
-            Sheets.tap_sheet_writethrough(result)
-
-            WriteScope.fire_after(result, :after_publish, payload)
+              WriteScope.fire_after(result, :after_publish, payload)
+          end
         end
 
       {:error, :not_found} ->
@@ -376,8 +385,11 @@ defmodule Barkpark.Content.Lifecycle do
 
       {0, _} ->
         case Repo.get(Document, doc.id) do
-          nil -> {:error, :not_found}
-          %Document{rev: current} -> {:error, {:rev_mismatch, %{expected: doc.rev, actual: current}}}
+          nil ->
+            {:error, :not_found}
+
+          %Document{rev: current} ->
+            {:error, {:rev_mismatch, %{expected: doc.rev, actual: current}}}
         end
     end
   end

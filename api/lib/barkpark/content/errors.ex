@@ -24,6 +24,8 @@ defmodule Barkpark.Content.Errors do
       "Send a well-formed JSON body matching the endpoint's expected shape; check Content-Type: application/json.",
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
+    "duplicate_of" =>
+      "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document, or differentiate this one's title/tags before publishing.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the request with ?force=true to remove the schema and orphan them.",
@@ -185,6 +187,21 @@ defmodule Barkpark.Content.Errors do
       message: Map.get(payload, :message, "task duplicates an existing task"),
       status: 409,
       details: Map.take(payload, [:similar, :advise])
+    }
+
+  # Publish dedup wall (authoring-excellence E4): a publish near-duplicates an
+  # already-published document. 409 Conflict; the incumbent published id rides in
+  # `details.duplicate_of` so the author can claim/extend it, and `details.similar`
+  # lists every near-match with its similarity score. UNLIKE `duplicate_task`
+  # above, this code carries a registered `@hints` entry (so it is a member of
+  # `known_codes/0` and truthful in the served OpenAPI enum) — the drift-guard is
+  # a tautology, so a DELIBERATE membership test pins it (see errors_test.exs).
+  defp build({:error, {:duplicate_of, payload}}) when is_map(payload),
+    do: %{
+      code: "duplicate_of",
+      message: Map.get(payload, :message, "document duplicates an already-published document"),
+      status: 409,
+      details: Map.take(payload, [:duplicate_of, :similar, :advise])
     }
 
   defp build({:error, %Ecto.Changeset{} = cs}) do

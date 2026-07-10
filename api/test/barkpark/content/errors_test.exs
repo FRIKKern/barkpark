@@ -219,4 +219,36 @@ defmodule Barkpark.Content.ErrorsTest do
       Errors.to_envelope({:error, {:not_found, "gadget_not_found", "gadget not found"}})
     end
   end
+
+  # ── Authoring-excellence E4 dedup wall (duplicate_of) ──────────────────────
+  #
+  # DELIBERATE membership test: the OpenAPI drift-guard is a TAUTOLOGY
+  # (known_codes/0 derives from @hints), which is exactly how `duplicate_task`
+  # slipped in with a build clause but no hint — invisible in the served spec
+  # and untested. This pins the new code so it can't repeat that hole.
+  test "duplicate_of IS a registered code (deliberate — not the duplicate_task hole)" do
+    assert MapSet.member?(Errors.known_codes(), "duplicate_of")
+  end
+
+  test "duplicate_of maps to a 409 carrying the incumbent id and a fix-hint" do
+    Logger.metadata(request_id: nil)
+
+    env =
+      Errors.to_envelope(
+        {:error,
+         {:duplicate_of,
+          %{
+            message: "document duplicates an already-published document",
+            duplicate_of: "paper-live",
+            similar: [%{id: "paper-live", similarity: 0.92, shared_tokens: 5}]
+          }}}
+      )
+
+    assert env.code == "duplicate_of"
+    assert env.status == 409
+    assert env.details.duplicate_of == "paper-live"
+    assert [%{id: "paper-live"} | _] = env.details.similar
+    # additive hint like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+  end
 end
