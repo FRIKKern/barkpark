@@ -1,127 +1,141 @@
-# Composition doctrine — close the card loop, dogfood the doctrine (composition-doctrine epic charter)
+# Aesthetic unification — reconcile the ledger with the shipped lockstep (aesthetic-unification epic charter)
 
 > NOTE ON THIS PATH: this filename is the epic-cycle charter slot and has carried earlier
 > epics. Preserved verbatim: **self-update W5** at `bp-self-update-w5-charter.md`,
-> **gui-premium W5** at `bp-gui-premium-w5-charter.md`, and **p-quality-gate (hollow-paper
-> gate)** at `bp-hollow-paper-gate-charter.md` (its wave shipped in #2283 — read the
-> preserved file, not this one). This file is now the memory of the **composition-doctrine**
-> epic (Element·Widget·Section·Layout·Document ladder — card-loop wave).
+> **gui-premium W5** at `bp-gui-premium-w5-charter.md`, **p-quality-gate** at
+> `bp-hollow-paper-gate-charter.md`, and **composition-doctrine** at
+> `bp-composition-doctrine-charter.md`. This file is now the memory of the
+> **aesthetic-unification** epic (reconciliation wave). The epic's ORIGINAL build history
+> lives in `bp-unified-aesthetic-endgame-charter.md` (W1–W3 endgame) — read it for how the
+> lockstep was built; read THIS file for how the epic closes.
 
-Epic anchor: bp task slug **`composition-doctrine`** (published, priority 1, 14 children).
-Plan paper: `/papers/composition-doctrine-plan` on guerrilla. Wave paper:
-`composition-doctrine-wave-2026-07-10`. Server: guerrilla.
+Epic anchor: bp task slug **`aesthetic-unification-epic`** ("Apply the cloud design profile
+to every Barkpark surface", published, priority 1, 55 children). Wave paper:
+`aesthetic-unification-epic-wave-2026-07-11`. Server: guerrilla.
 
 ## Vision
 
-An author types `/card`, gets a card whose four regions (media/title/body/action) are all
-genuinely editable — media via the real picker, action via the real label/href/priority
-editor — drops it into a grid-section-of-cards starter in one action, and the SAME document
-renders faithfully on web reader, editor, TUI, and email, with golden parity proof on every
-leg including email slot content. And the doctrine eats its own dogfood: the
-composition-doctrine-plan paper itself (plus the other real legacy-block papers) runs on
-the new editable widgets, migrated by a dry-run-first, byte-parity-proven mix task — real
-content on the doctrine, not showcases.
+The anchor's four criteria are either stamped met:true with file:line + PR + run-proof
+evidence, or carry a written split with a single named human-gated remainder — and the
+child ledger contains zero fabricated claims, zero superseded wishlist tasks, and exactly
+the honest remainder (visual-audit ratification, brand mark, reading typography) plus a
+small filed backlog. "Every Barkpark surface" is TRUE through one mechanism: the
+tokens.json → derive.mjs → emit.mjs lockstep (17 artifacts, check.mjs Parts A–H), whose
+Part E exemptions ledger is the COMPLETE registry of hand-stamped residue — nothing
+un-gated, nothing silently parallel.
 
 ## Non-negotiable operational facts (builders read FIRST)
 
-- .ex/.exs/.heex changes WAIT for the Elixir Test CI gate before merge. Worktrees from
-  origin/main after `git fetch`. Claim your bp task BEFORE working. PR body carries
+- Tokens ONLY via the 3-file lockstep (design/tokens.json + derive.mjs + emit.mjs).
+  Go/Elixir tokens_gen files stay BYTE-STABLE unless a slice explicitly owns a regen —
+  this wave, NO slice does (preflight proved the web-only slices ripple into
+  web/app/globals.css + web/lib/tokens.gen.ts only).
+- check.mjs must stay green incl. Part F byte-identity + Part H AA; studio-literal-check
+  zero new lit-allows; a NEW color leaf must be registered in derive.mjs
+  PASSTHROUGH_FAMILIES (and derive.test.mjs's hardcoded count bumped) or Part F reds.
+- .ex/.heex changes WAIT for the Elixir Test CI gate before merge. Worktrees from
+  origin/main after `git fetch` (the shared checkout carries foreign in-flight edits —
+  a local check.mjs Part E red on root.html.heex 165→166 is another session's
+  uncommitted edit, not yours). Claim your bp task BEFORE working. PR body carries
   `Task: <id>`. `cc` is a Claude wrapper — always `CC=/usr/bin/clang`.
-- Render-path unification law: reader/editor/email share the compose seam — style-branching
-  inside `Compose.compose_block/2,3` is the sanctioned pattern; a parallel render function
-  anywhere is a fork and is forbidden.
-- Goldens: ONE generator (`mix barkpark.paper_components.gen_golden_parity`), 12 types × 3
-  mirrors (api/test/support/fixtures, web/__tests__/fixtures, internal/pdrender/testdata).
-  Byte-unchanged except owned regens. PROVEN byte-fresh at HEAD this wave (regen → zero diff).
-- The golden gate blocks only at the CI-workflow layer: main has NO GitHub branch
-  protection/rulesets (re-verified 2026-07-10) — a red gate is human-mergeable. Reviewer
-  discipline is the real net until `cd-gov-required-checks` lands.
-- `parity2-bug-card-slot-chrome` (sibling epic paper-edit-parity-endgame) also touches
-  card-node.js — check it is not in flight before building cd-9.
+- doc-gates is a blocking CI STEP, not a GitHub-required check: main has NO branch
+  protection/rulesets (rulesets API `[]`, protection 404, re-proven 2026-07-11).
+  Reviewer discipline is the merge net.
 
 ## Decisions
 
-- **D-W2-1 — cd-7 stays open, scoped to the email golden twin only.** The render impl is
-  merged on both halves (TUI PRs #1302/#1535/#1539; email cards_email.ex via #1904/#1910
-  through the shared seam), but email slot CONTENT has ZERO test coverage (all
-  cards_email_test.exs card cases are slot-less flat maps that card_email_html ignores) and
-  the golden byte gate excludes email entirely — the task's third deliverable (parity twin)
-  is unmet. Close-with-evidence was wrong; a ~10-line email realization leg in
-  component_golden_parity_test.exs is right. No 4th mirror: email output is themed inline
-  bytes, not a portable projection — the twinnable thing is the fixture INPUT.
-- **D-W2-2 — cd-8 is ONE slice (insertion + starter), 3 JS registries, no blocks.ex.**
-  Card insertion is a test-enforced 2-registry lockstep (CANVAS_SLASH_TYPES+canvasDefaultBlock
-  in slash-insert.js; INSERT_META+INSERT_ORDER in command-palette.js; SLASH_ITEMS in
-  slash-menu.js) — "automatic lockstep" is false; smoke/autocomplete-slash.mjs enforces
-  count parity (pinned 22 → bump to 23). Widgets skip blocks.ex (note/stage precedent
-  #1262). The grid-of-cards starter is a NEW compound-insert command (no precedent exists;
-  columns' 2-empty-children default is the shape analog; SECTION_OF_CARDS fixture in
-  smoke/cards.mjs is the proven target shape). Both halves share the same files, so one
-  builder owns them — merged, not sequenced.
-- **D-W2-3 — cd-9 is wiring: mount the WC, keep the shape contract.** Reuse the
-  buildPickerNodeView MOUNT PATTERN (not the function) to put `<bp-media-picker
-  chrome="ghost">` in the card's controls chrome (already fenced: contentEditable=false,
-  stopEvent + ignoreMutation cover it); action editing lifts the bpAction pattern. HARD
-  shape contract: media=`{type:"image",src,alt?}`, action=`{type:"action",href,label,
-  priority?}` present-only. bp-change detail is a STRING — map it, never write the bare
-  value. `type:"action"` has NO server-side normalize net (media does) — dropping it
-  renders nothing in email while tests stay green. Priority is KEPT (compose.ex:357 +
-  walk.ex already render it on both surfaces) but present-only (nil≡secondary zero-op).
-- **D-W2-4 — ct-rollout rescoped to the verified corpus truth.** task-list live-data is
-  ALREADY applied (8/8 real task-lists carry query; zero legacy ones exist). Dedicated
-  nodes for task-detail/board/roadmap are PARKED (they appear ONLY in portabledoc-showcase;
-  zero organic usage — speculative). The real debt: legacy cards/notes/pipeline in exactly
-  4 real papers — composition-doctrine-plan, parity-state, provider-horizon, wave-deck
-  (NOT the digest's 11; portabledoc-showcase is an intentional parity fixture, the wave
-  paper is ephemeral). Build a doctrine_backfill.ex-shaped migration (scan → pure plan →
-  dry-run default → --apply, additive, idempotent, byte-parity-proven per block or skip+
-  report). Crown: composition-doctrine-plan itself migrates.
-- **D-W2-5 — email section-grid becomes a DESIGNED degrade (new slice cd-10).** Verified:
-  a grid section in :email emits web-only classes + inert custom props with no stylesheet
-  in the email document — accidental silent stack, contradicting render.ex's own
-  inline-only Outlook contract. Fix inside the shared seam: style-branch the section clause
-  for :email to inline-safe stacked emission honoring per-cell order; :article bytes stay
-  byte-identical. Also correct the stale compose.ex comments claiming the TUI collapses
-  grid→stack (PR #1410 shipped real TUI grid).
-- **D-W2-6 — cd-5 ledger honesty: split, don't fake.** cd-5's Constraints half shipped
-  (#1244); its Template-generalization half was never built anywhere (template.ex untouched
-  since pre-epic). cd-5 stays done for what it did; the owed half is now the honest open
-  child `cd-5b-template-generalization` (backlog).
-- **D-W2-7 — D1-D3 pins re-verified, zero drift.** Elements-only slots, structured grid,
-  constrained-types-first: all enforced + tested at HEAD. No re-litigation.
-- **D-W2-8 — web section-grid parity and the section golden layout leg are filed, not
-  built.** web/portable-doc.tsx ignores section layout entirely (separate SDK-consumer
-  producer by design), and no section golden exists — real gaps, but off the card-loop
-  critical path. Backlog: cd-11, cd-12.
+- **D1 Reconciliation, not construction.** The 17-artifact lockstep is alive and green
+  (emit --check 17/17; check.mjs A–H incl. F byte-identity + H 162/162 AA; CI runs
+  29128797161 push + 29129285343 PR, and green on d655b753 = current origin/main). The
+  epic's gap was ledger-vs-reality, so this wave stamps evidence, cuts dead scope, and
+  builds only 3 surgical slices.
+- **D2 The wish's four suspected outside-surfaces DISSOLVED with file:line proof.**
+  Email is IN the lockstep (fleet `:email` renderers ← Palettes.email_skin ←
+  TokensGen artifact #11; one documented literal exception panels_email.ex:104-106;
+  tones via governed status-manifest.json). /activate + CP login ride the cloud SPA
+  artifact (router.ex:317-348 → index.html:14 → app.css, emit.mjs:1720). Marketing =
+  web/ (already in lockstep); js/docs is dormant/unwired — scope-cut per
+  docs/decisions/deferred.md:8. PDF/print = tokenized @media print blocks with one
+  frozen literal each (exemptions.json:13); no PDF pipeline exists — scope-cut.
+- **D3 C1 stamps only after Part E becomes the complete residue registry** (slice R1):
+  ledger styles.css / bp-paper-editor.css / paper-surface.css / the bp-graph.js mirror
+  pair with rationale, and teach Part E's LEDGER_MARKER to also blank
+  `GENERATED: paper-surface` and `GENERATED: status-tones` blocks. Why: today 329
+  ledgered vs ~646 un-ledgered literals makes "single source of color" materially false.
+- **D4 Adopt, don't just freeze, the two LIVE ungated surfaces** (slice R3): tokenize
+  inbox_live.ex (48 literals) + board_live.ex (32) and extend studio-literal-check.sh
+  beyond api/lib/barkpark_web to api/lib/barkpark/plugins. Why: live chrome with
+  parallel palettes that NO gate scans is the strongest C1 counterexample; both files
+  have targeted tests (102 green locally) so the change is provable.
+- **D5 bp-graph.js Canvas palette: exempt-with-rationale now, tokenize later** (backlog
+  au-r6). Why: Canvas fillStyle can't consume var() directly (Mermaid-JS-init class);
+  the pair is byte-frozen (5c10b76e) so it cannot drift while exempt.
+- **D6 Graph-canvas + paper-callout web adoption are ONE slice** (au-w3-graph-canvas-token,
+  widened). Why: both edit adjacent emit.mjs functions (webBlock ~551 / webTokensTs ~574)
+  — parallel builders would merge-conflict; and the callout palette must come from
+  color.paperCallout, NEVER color.status (tokens.json:229 forbids the substitution —
+  the digest's status-token idea was wrong). Preflight proved the 4-file shape:
+  tokens.json + emit.mjs + derive.mjs PASSTHROUGH_FAMILIES + derive.test.mjs count bump;
+  web-only byte ripple.
+- **D7 C3 wording law.** Stamp as: "blocking CI step in doc-gates.yml (no
+  continue-on-error), green on HEAD and on PR-event runs, team-enforced per
+  docs/ops/merge-gates.md — main has no GitHub ruleset or branch protection." NEVER
+  "GitHub-required check" (proven false).
+- **D8 C4 splits: generated TRUE / ratified FALSE.** The cross-surface instrument
+  coherence.html is real (#1397/#1718), token-fed, 7 S5 tests green (383/383 harness);
+  per-surface styleguides carry the sg-ratify gate (charter decision 27). But the
+  ratification EVENT never happened — `au-w6-visual-audit` is the single named
+  remainder (human-gated). coherence.html stays UNROUTED by design
+  (verify-via-standalone-harness doctrine; routing would expose the __preview__ subtree).
+- **D9 The W5.B component-block family is CUT** (10 unbuilt comp-* + view-remainder +
+  authoring + gate + comp-styleguide + task-authoring + revamp-tokenize +
+  figures-classes → closed `cancelled` with rationale). Why: composition-doctrine P2
+  (ratified 2026-07-07) kills the read-only/server-painted `_raw` tier these tasks
+  specify; rebuilding them would contradict shipped doctrine. Real content need
+  re-expresses as an editable widget under the composition-doctrine epic — never a
+  resurrection of these task ids. figures.ex is proven token-compliant (var() sourced
+  fallbacks), so its class-refactor task is tree-tidiness and earns nothing.
+- **D10 comp-chart closes on REAL evidence; comp-quote must not be laundered.** chart:
+  compose.ex:1139 → DataViz.chart_html (data_viz.ex:416, server SVG, shipped by #1600);
+  bars+line real, area deferred-with-record. quote: pullquote (compose.ex:262) carries
+  no attribution — closing quote onto it would be a fresh false-done; it is cut with
+  the family.
+- **D11 Fabrication scrub.** The 11 tasks carrying the byte-identical "459 render tests
+  green" summary get it replaced with honest text (comp-chart lacked even a
+  reopen_note); paper-components-view loses "(SHIPPED)"/"DONE."; paper-components-
+  authoring loses its "au-w5-comp-* all DONE" false premise. The 4 done styleguide
+  tasks (#1338/#1439/#1448/#1466 all MERGED) get criteria back-stamped from PR evidence,
+  marked PLAUSIBLE where not re-run.
+- **D12 pdrender-web-tokens splits.** Go half closes NOW on fresh run-proof
+  (build/vet/test -count=1 green; chart.go:421 + heatmap.go:384,674 consume Gen*; zero
+  stray draw-site literals) + PRs #1395/#1691/#1984 — with the "via semrole" wording
+  amended (pdrender may NEVER import semrole; the byte-identical sibling copy is the
+  documented architecture). Web half lives in the widened graph-canvas slice.
+- **D13 Honest remainder after this wave:** au-w6-visual-audit (ratification event,
+  human — unblocked by the paper-components-gate cut), au-w6-brand-mark (needs a
+  human-drawn mark; cloud/priv/static has NO favicon at all), au-w5-reading-typography
+  (spec §7 human gate), plus filed backlog au-r4 (web type ladder — W3.9 closed without
+  wiring TYPE_SCALE/HEADING to emitted --text-*), au-r5 (paperEmail "w3 reconciles"
+  dangling note — divergence #1e5347 vs #1e5243 is deliberate but unowned), au-r6
+  (bp-graph palette tokens via getComputedStyle).
+- **D14 Epic close condition.** Lead stamps C1 after R1+R3 merge, C2+C3 now, C4 as the
+  recorded split; the epic itself closes only when au-w6-visual-audit's human sign-off
+  is recorded (or a human explicitly waives it) — never before.
 
 ## Roadmap
 
-Wave 2 (this wave — 5 slices, integration-ordered):
-1. **cd-7-card-surface-parity** (small, opus) — email golden-twin realization leg in
-   component_golden_parity_test.exs; test-only, .exs waits Elixir Test.
-2. **cd-8-card-authoring** (medium, fable) — /card in slash+palette (3 registries, lockstep
-   test) + grid-of-cards compound-insert starter; JS only.
-3. **cd-9-card-full-editing** (medium, opus) — bp-media-picker + action editor in
-   card-node.js controls, shape contract preserved; JS + smoke.
-4. **cd-10-email-section-grid** (small, opus) — designed email degrade for grid sections +
-   stale-comment fix; .ex waits Elixir Test.
-5. **ct-rollout** (large, fable) — legacy cards/notes/pipeline → widget-composition
-   migration mix task (dry-run first), then lead-gated --apply on guerrilla's 4 real
-   papers; crown = composition-doctrine-plan on the new widgets.
+Wave R (2026-07-11, reconciliation — 3 build slices + lead-executed ledger work):
 
-Backlog (filed, published, not this wave):
-- **cd-5b-template-generalization** (p2) — the general Template capability (save any node
-  at any tier as reusable master, linked/detached) — plan §4 mechanism #3, cd-5's owed half.
-- **cd-11-web-section-grid-parity** (p3) — web portable-doc.tsx renders section
-  layout (grid tracks/span/order) or a designed degrade, with tests; coordinate with
-  p-web-tsx (sibling epic parity-s7-identical).
-- **cd-12-section-golden-layout-leg** (p3) — add a `section` entry + layout projection to
-  gen_golden_parity + realization asserts in all 3 owning test files; makes plan step-6's
-  literal "layout across surfaces" true.
-- **ct-tasknodes-dedicated** (p4) — dedicated editable nodes for task-detail/task-board/
-  roadmap; parked until real corpus demand exists (today: showcase-only).
-- **cd-gov-required-checks** (p3) — GitHub required_status_checks on main for mix-test (at
-  minimum) so the golden/parity gates become mechanically blocking.
+| id | slice | size | model |
+|---|---|---|---|
+| R0 | (lead, this phase) fabrication scrub, W5.B cuts, back-stamps, C2/C3 stamps, backlog filing | — | fable (Decide) |
+| R1 | `au-r1-ledger-extension` — Part E complete-registry + marker fix | S | opus |
+| R2 | `au-w3-graph-canvas-token` — web token adoption: graph-canvas + paper-callout | M | fable |
+| R3 | `au-r3-plugin-liveview-tokens` — tokenize inbox/board LiveViews + scan-root extension | M | fable |
+
+After wave R: lead stamps C1 (post-merge), closes R-slice tasks on merge. Remainder:
+au-w6-visual-audit (human ratification → epic close), au-w6-brand-mark,
+au-w5-reading-typography. Backlog: au-r4-web-type-ladder, au-r5-email-brand-reconcile,
+au-r6-graph-palette-tokens.
 
 ## Wave log
-
