@@ -1550,6 +1550,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
         </div>
       <% :tool -> %>
+        <%!-- D64: an mcp__barkpark__* result (task/paper/search) classifies
+              to a first-class chip. The SAME pure ChatToolRenderer.chip/2 is
+              consumed here for BOTH live-append and replay rows (they thread
+              identical `tool` + `output`), so the chip HTML is parity-stable
+              by construction — the diff?/spawn? precedent. A host tool, an
+              error string, or a truncated/oversized payload returns nil and
+              keeps the generic ⎿ row below. --%>
+        <% mcp_chip = ChatToolRenderer.chip(@message[:tool], @message[:output]) %>
         <%!-- A Task/agent spawn (charter D40) gets a headline row: the
               ● gutter plus the sub-agent's description; the frames it
               emits interleave below, indented under it. A plain tool row
@@ -1575,10 +1583,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           :if={ChatToolRenderer.diff?(@message[:input])}
           input={@message.input}
         />
+        <%!-- A classified MCP result renders as a chip INSTEAD of dumping the
+              raw JSON blob — the store keeps the full output either way. --%>
+        <ChatToolRenderer.tool_chip :if={mcp_chip} chip={mcp_chip} />
         <%!-- The terminal's ⎿ result line: first line inline; multi-
-              line outputs expand on click (details/summary). --%>
+              line outputs expand on click (details/summary). Suppressed when a
+              chip already stands in for the result. --%>
         <div
-          :if={@message[:output] not in [nil, ""]}
+          :if={is_nil(mcp_chip) and @message[:output] not in [nil, ""]}
           class="text-xs text-dim"
           style="font-family: var(--font-mono); padding-left: 16px; overflow-wrap: anywhere;"
         >
