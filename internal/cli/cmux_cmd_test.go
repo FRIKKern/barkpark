@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/FRIKKern/barkpark/internal/taskboard"
@@ -126,17 +127,19 @@ func extractWorkerExport(t *testing.T, out string) string {
 	return rest[:j]
 }
 
-// status shows worker + task + the live claim on a claimed task (design §6).
+// status shows worker + task + the live claim on a claimed task (design §6). The
+// claim's remaining lease is derived from a RECENT ts_iso + the TTL default and
+// marked approximate — no longer keyed on the post-mortem expired_at.
 func TestCmuxStatusShowsClaim(t *testing.T) {
+	recent := time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		env := map[string]any{"result": map[string]any{
 			"_id":              "task-live",
 			"lifecycle_status": "in_progress",
 			"claim": map[string]any{
-				"worker":     "cmux-SRF9",
-				"epoch":      4,
-				"ts_iso":     "2026-07-06T15:12:03Z",
-				"expired_at": "2999-01-01T00:00:00Z",
+				"worker": "cmux-SRF9",
+				"epoch":  4,
+				"ts_iso": recent,
 			},
 		}}
 		_ = json.NewEncoder(w).Encode(env)
@@ -147,6 +150,7 @@ func TestCmuxStatusShowsClaim(t *testing.T) {
 	t.Setenv("CMUX_SURFACE_ID", "SRF9")
 	t.Setenv("CMUX_WORKSPACE_ID", "")
 	t.Setenv("BARKPARK_TASK", "task-live")
+	t.Setenv("BARKPARK_TASK_LEASE_TTL_SECONDS", "") // default 2700s
 
 	ctx := manifest.Context{Server: srv.URL, Token: "t", Workspace: "default", Project: "default", Dataset: "production"}
 	var so, se bytes.Buffer
@@ -155,7 +159,8 @@ func TestCmuxStatusShowsClaim(t *testing.T) {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	out := so.String()
-	for _, want := range []string{"cmux-SRF9", "task-live", "epoch 4", "in_progress", "left)"} {
+	// A 5-min-old claim under a 2700s TTL is live: an approximate "left" countdown.
+	for _, want := range []string{"cmux-SRF9", "task-live", "epoch 4", "in_progress", "left", "approx"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status output missing %q:\n%s", want, out)
 		}
