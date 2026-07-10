@@ -152,6 +152,11 @@ defmodule Barkpark.Application do
           {Registry, keys: :unique, name: Barkpark.StudioChat.RecorderRegistry},
           {DynamicSupervisor,
            name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
+          # Studio-chat notification seam (wave 12, charter D69): owns the
+          # per-session debounce ledger for needs-you / finished-while-away
+          # mails. An idle GenServer is free; it only decides + delivery runs in
+          # the caller (a session the operator is watching never fires a mail).
+          Barkpark.StudioChat.Notifier,
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,
