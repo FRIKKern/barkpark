@@ -129,4 +129,72 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
     assert fresh.autoupdate_paused, "503 → paused"
     refute fresh.autoupdate_triggered_at, "not marked in-flight (it never started)"
   end
+
+  # ── isu-w5.2: fleet kill switch ───────────────────────────────────────────
+  test "halt blocks advance but settle bookkeeping still runs" do
+    in_flight = live_behind(%{autoupdate_triggered_at: DateTime.utc_now()})
+    candidate = live_behind()
+    {:ok, _} = Registry.set_autoupdate_halted(true)
+
+    # settle GET → current (clears the in-flight marker); NO advance POST fires.
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: check_body("current")}}])
+
+    tick()
+
+    refute reload(in_flight).autoupdate_triggered_at, "settle still cleared the in-flight box"
+    refute reload(candidate).autoupdate_triggered_at, "halt blocks advancing a new box"
+    # exactly one call (the settle GET), never a trigger POST while halted.
+    assert length(StudioLinkFakeHttpClient.requests()) == 1
+  end
+
+  # ── isu-w5.2: canary staging gate ─────────────────────────────────────────
+  test "staging gate fails OPEN: prod advances when no staging box exists" do
+    prod = live_behind(%{channel: "prod"})
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 202, body: ~s({"ok":true})}}])
+
+    tick()
+
+    assert reload(prod).autoupdate_triggered_at, "prod advances with no staging box (fail-open)"
+  end
+
+  test "a staging box advances BEFORE any prod box" do
+    staging = live_behind(%{channel: "staging"})
+    prod = live_behind(%{channel: "prod"})
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 202, body: ~s({"ok":true})}}])
+
+    tick()
+
+    assert reload(staging).autoupdate_triggered_at, "staging box advances first"
+    refute reload(prod).autoupdate_triggered_at, "prod waits behind the canary"
+  end
+
+  test "a non-current staging box BLOCKS prod advancement" do
+    # A paused (behind) staging box is not an eligible candidate itself, and it is
+    # not current-on-latest, so the gate stays closed — prod must not advance.
+    _blocking_staging = live_behind(%{channel: "staging", autoupdate_paused: true})
+    prod = live_behind(%{channel: "prod"})
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 202, body: ~s({"ok":true})}}])
+
+    tick()
+
+    refute reload(prod).autoupdate_triggered_at, "staging gate closed → prod blocked"
+    assert StudioLinkFakeHttpClient.requests() == [], "no trigger fired at all"
+  end
+
+  test "prod advances once the staging canary is current on the latest release" do
+    _canary =
+      live_behind(%{
+        channel: "staging",
+        update_state: "current",
+        update_running_release: "v0.3.0",
+        update_latest_release: "v0.3.0"
+      })
+
+    prod = live_behind(%{channel: "prod"})
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 202, body: ~s({"ok":true})}}])
+
+    tick()
+
+    assert reload(prod).autoupdate_triggered_at, "green canary opens the prod gate"
+  end
 end

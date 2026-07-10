@@ -303,6 +303,19 @@ if config_env() == :prod do
     from_address: System.get_env("MAIL_FROM_ADDRESS") || "noreply@barkpark.cloud",
     from_name: System.get_env("MAIL_FROM_NAME") || "Barkpark Cloud"
 
+  # isu-w5: the platform-operator allowlist for the daily fleet digest —
+  # comma-separated emails (e.g. "ops@x.io, admin@x.io"). This is the runtime
+  # override the config.exs default promises: unset/blank keeps `[]`, so the
+  # digest worker stays a LOGGED no-op until an operator opts in. Each entry is
+  # still resolved to a REGISTERED user before it is ever mailed
+  # (Notifications.platform_admin_emails/0) — this var alone can't open a relay.
+  config :barkpark_cloud,
+         :platform_admin_emails,
+         System.get_env("PLATFORM_ADMIN_EMAILS", "")
+         |> String.split(",")
+         |> Enum.map(&String.trim/1)
+         |> Enum.reject(&(&1 == ""))
+
   # OAuth/SSO (oauth-sso): "Continue with GitHub / Google". Creds come from env
   # exactly like Stripe / the registry key — NEVER in code. A provider with empty
   # creds is simply DISABLED (its button hides, its routes 404), so the control

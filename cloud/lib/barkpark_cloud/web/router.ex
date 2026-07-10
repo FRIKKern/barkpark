@@ -1799,7 +1799,16 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            case Registry.trigger_self_update(bp) do
+            force? = conn.body_params["force"] == true
+
+            case Registry.trigger_self_update(bp, force: force?) do
+              # PIN HONESTY (isu-w5.2): a pinned box is frozen; an unforced Update
+              # click is a 409 (not a silent no-op). `force: true` overrides. The
+              # body names the pin so the console can say WHICH release holds the
+              # box (S3 reads error.pinned_release for its conflict modal).
+              {:error, :pinned} ->
+                json(conn, 409, %{error: %{code: "pinned", pinned_release: bp.pinned_release}})
+
               {:ok, 202, _body} ->
                 # Refresh the row's cached status once the run has had time to
                 # land (the run itself takes a minute or two — the sweep would
@@ -1867,13 +1876,17 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # PATCH /v1/barkparks/:id/autoupdate {autoupdate_enabled?, autoupdate_paused?,
-  # pinned_release?} → 200 {ok, autoupdate: {enabled, paused, pinned_release}} —
-  # set the isu-w4 fleet-autoupdate POLICY (the opt-out / pause / pin escape
-  # hatch). Managed instances auto-ride blessed releases by default (opt-out);
-  # this is how a team disables, temporarily pauses, or pins one. Only the three
-  # team-facing policy fields are accepted — Registry.set_autoupdate → the narrow
-  # autoupdate_changeset can touch nothing else (never the in-flight marker,
-  # never identity). PATCH: absent keys are left unchanged (cast ignores them).
+  # pinned_release?} → 200 {ok, autoupdate: {enabled, paused, pinned_release,
+  # channel}} — set the isu-w4 fleet-autoupdate POLICY (the opt-out / pause /
+  # pin escape hatch). Managed instances auto-ride blessed releases by default
+  # (opt-out); this is how a team disables, temporarily pauses, or pins one.
+  # Only the three team-facing policy fields are accepted — Registry.set_autoupdate
+  # → the narrow autoupdate_changeset can touch nothing else (never the in-flight
+  # marker, never identity, and NEVER `channel`: the rollout channel is a
+  # platform-operator lever — a tenant-writable channel would let any team admin
+  # park a behind staging box and close the canary gate for the WHOLE fleet, so
+  # a `channel` key in the body is ignored and only echoed read-only). PATCH:
+  # absent keys are left unchanged (cast ignores them).
   #
   # ADMIN-gated: a policy that governs unattended production deploys is
   # privileged, like self-update above — require_primary_team_admin halts 401 /
@@ -1903,7 +1916,8 @@ defmodule BarkparkCloud.Web.Router do
                   autoupdate: %{
                     enabled: updated.autoupdate_enabled,
                     paused: updated.autoupdate_paused,
-                    pinned_release: updated.pinned_release
+                    pinned_release: updated.pinned_release,
+                    channel: updated.channel
                   }
                 })
 
@@ -1914,6 +1928,81 @@ defmodule BarkparkCloud.Web.Router do
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # ── Fleet-wide autoupdate kill switch (isu-w5.2) ──────────────────────────
+  #
+  # PLATFORM-OPERATOR gated, cross-team by design — the same faceless WORKER
+  # token (`require_worker`) behind the `/v1/internal/*` fleet-ops surface, NOT a
+  # team-scoped admin. Fails CLOSED: an unset/blank/wrong token 401s every route,
+  # so the kill switch can never be flipped by omission.
+  #
+  #   GET  /v1/admin/autoupdate         → 200 {halted: bool}   — current state
+  #   POST /v1/admin/autoupdate/halt    → 200 {halted: true}   — engage
+  #   POST /v1/admin/autoupdate/resume  → 200 {halted: false}  — release
+  #
+  # Halt stops the AutoupdateRolloutWorker from ADVANCING new self-updates fleet-
+  # wide; settle bookkeeping for in-flight boxes continues so state stays honest.
+  get "/v1/admin/autoupdate" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      json(conn, 200, %{halted: Registry.autoupdate_halted?()})
+    end
+  end
+
+  post "/v1/admin/autoupdate/halt" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Registry.set_autoupdate_halted(true)
+      json(conn, 200, %{halted: true})
+    end
+  end
+
+  post "/v1/admin/autoupdate/resume" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      {:ok, _} = Registry.set_autoupdate_halted(false)
+      json(conn, 200, %{halted: false})
+    end
+  end
+
+  # PATCH /v1/admin/barkparks/:id/channel {channel: "prod"|"staging"} → 200
+  # {ok, id, channel} — assign an instance's rollout channel (isu-w5.2).
+  # PLATFORM-OPERATOR gated (`require_worker`), cross-team by design, like the
+  # kill switch above: a staging box IS the fleet-wide canary gate, so channel
+  # assignment is an operator lever — never the tenant autoupdate PATCH, where
+  # channel is echoed read-only. 422 on anything but prod|staging; unknown /
+  # malformed id → 404. Fails CLOSED: unset/blank/wrong token 401s.
+  patch "/v1/admin/barkparks/:id/channel" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.get_barkpark(conn.path_params["id"]) do
+        %Barkpark{} = bp ->
+          case Registry.set_channel(bp, conn.body_params["channel"]) do
+            {:ok, updated} ->
+              push_event(updated.team_id, "fleet")
+              json(conn, 200, %{ok: true, id: updated.id, channel: updated.channel})
+
+            {:error, %Ecto.Changeset{}} ->
+              json(conn, 422, %{error: %{code: "invalid"}})
+          end
+
+        nil ->
+          json(conn, 404, %{error: "not_found"})
+      end
     end
   end
 
@@ -5841,6 +5930,16 @@ defmodule BarkparkCloud.Web.Router do
       update_running_release: bp.update_running_release,
       update_latest_release: bp.update_latest_release,
       update_checked_at: bp.update_checked_at,
+      # isu-w5.2 fleet-autoupdate policy + channel — the console renders the
+      # rollout state (enabled/paused/pinned/channel) per row. EXACT names —
+      # sibling slices S3/S4 read these off the fleet-list JSON. The in-flight
+      # marker rides along so the console's "Updating" badge can outrank a
+      # stale cached verdict while a rollout is actively landing.
+      autoupdate_enabled: bp.autoupdate_enabled,
+      autoupdate_paused: bp.autoupdate_paused,
+      pinned_release: bp.pinned_release,
+      channel: bp.channel,
+      autoupdate_triggered_at: bp.autoupdate_triggered_at,
       # Instance custom domain — the attached platform-zone host (nil until a
       # team attaches one), so the dashboard can render it on the fleet row.
       custom_host: bp.custom_host,

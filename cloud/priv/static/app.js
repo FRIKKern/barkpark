@@ -2572,7 +2572,10 @@
           '. <a href="#fleet">Show all</a>.</p></div>';
         return;
       }
-      body.innerHTML = bar + shown.map(fleetRow).join("");
+      // isu-w5: the fleet-wide rollout banner (Halt/Resume) mounts above the list;
+      // the slot stays empty against an older CP / for a non-admin.
+      body.innerHTML = '<div id="fleet-rollout"></div>' + bar + shown.map(fleetRow).join("");
+      loadFleetRollout(body);
       wireFleetRows(body);
     });
   }
@@ -2944,12 +2947,6 @@
     var health = bp.health_status || "unknown";
     var agent = bp.agent_status || "offline";
 
-    var updateRail = bp.update_state === "behind"
-      ? vRel(bp.update_running_release) + " → " + vRel(bp.update_latest_release) + " available"
-      : bp.update_state === "current"
-        ? "up to date (" + vRel(bp.update_running_release) + ")"
-        : "—";
-
     // A4: the provision→live moment folds the timeline into the ready panel.
     // C3: while provisioning or provision-failed, the timeline is the primary
     // surface — the step ladder, the console, the verbatim failure detail, Retry.
@@ -2974,7 +2971,10 @@
       // detail-grid--instance widens the rail (the domain checklist lives there);
       // the site-deploys grid keeps the bare .detail-grid (byte-identical).
       '<div class="detail-grid detail-grid--instance">' +
-        '<div class="detail-main">' + (hasHost ? "<h2>Sites</h2>" : "") +
+        '<div class="detail-main">' +
+          // isu-w5: the operator update panel is the face of the Overview for a
+          // live box — update truth + policy controls sit above Sites.
+          (hasHost ? updatePanelHtml(bp) + "<h2>Sites</h2>" : "") +
           '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("ID", bp.id) +
@@ -2988,7 +2988,6 @@
           railRow("Health", railValue(cap(health), hasHost)) +
           railRow("Agent", railValue(cap(agent), hasHost)) +
           railRow("Version", bp.version ? "v" + bp.version : "—") +
-          railRow("Update", updateRail) +
           railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
           railRow("Slug", bp.slug || "—") +
           railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
@@ -3002,6 +3001,7 @@
     if (openBtn) openBtn.addEventListener("click", function () { openStudio(bp.id, openBtn); });
     var update = $("#inst-update");
     if (update) update.addEventListener("click", function () { confirmUpdateInstance(bp); });
+    wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     var domain = $("#inst-domain");
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
     var retry = $("#inst-retry");
@@ -3139,32 +3139,51 @@
     $("#update-go").addEventListener("click", function () { updateInstance(bp); });
   }
 
-  function updateInstance(bp, btn) {
-    btn = btn || $("#update-go");
+  // isu-w5: opts.force re-POSTs with {force:true} to OVERRIDE a pin for this one
+  // run. A pin conflict (409) keeps the modal open, names the pin, and offers an
+  // EXPLICIT "Update anyway" — the update button never silently bypasses a pin.
+  function updateInstance(bp, btn, opts) {
+    opts = opts || {};
+    btn = btn || $("#update-go") || $("#update-force");
     if (btn) { btn.disabled = true; btn.textContent = "Updating…"; }
-    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/self-update", {}).then(function (r) {
-      closeModal();
+    var reqBody = opts.force ? forceUpdateBody() : {};
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/self-update", reqBody).then(function (r) {
       if (r.status === 202) {
+        closeModal();
         toast({ kind: "success", title: "Update started", body: "The instance will restart." });
         fleetCache = null;
         loadInstance(bp.id);
         return;
       }
-      if (btn) { btn.disabled = false; btn.textContent = "Update"; }
+      if (btn) { btn.disabled = false; btn.textContent = opts.force ? "Update anyway" : "Update"; }
       // Errors arrive as {error: {code}} — NOT the flat string friendly() reads.
-      var code = r.data && r.data.error && r.data.error.code;
-      if (code === "already_running") {
-        toast({ kind: "info", title: "An update is already running" });
-      } else if (code === "not_enabled") {
-        toast({
-          kind: "error",
-          title: "Self-update is not enabled on this instance",
-          body: "Set BARKPARK_SELF_UPDATE_APPLY=1 on the box to allow one-click updates."
-        });
-      } else {
-        toast({ kind: "error", title: "Couldn't start the update", body: "Please try again in a moment." });
+      var c = updateConflict(r.data);
+      var copy = updateConflictCopy(c);
+      // Pin honesty: a pin conflict on a NON-forced call keeps the operator in a
+      // modal that names the pin and offers the explicit force re-trigger.
+      if (c.kind === "pinned" && !opts.force) {
+        openUpdateConflictModal(bp, c, copy);
+        return;
       }
+      closeModal();
+      toast({ kind: copy.forceLabel ? "info" : "error", title: copy.title, body: copy.body });
     });
+  }
+
+  // The pin-conflict modal (isu-w5 pin honesty): names the freeze and offers an
+  // explicit override. Reused for any conflict copy that carries a forceLabel.
+  function openUpdateConflictModal(bp, c, copy) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">' + esc(copy.title) + "</h2>" +
+      '<p class="modal-sub">' + esc(copy.body) + "</p>" +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        (copy.forceLabel
+          ? '<button class="btn btn-danger" type="button" id="update-force">' + esc(copy.forceLabel) + "</button>"
+          : "") +
+      "</div>"
+    );
+    var f = $("#update-force");
+    if (f) f.addEventListener("click", function () { updateInstance(bp, f, { force: true }); });
   }
 
   // custom-domain: attach a bare barkpark.cloud host to a live instance. The
@@ -3221,6 +3240,285 @@
       // must render as text, never as markup.
       if (errEl) { errEl.hidden = false; errEl.textContent = msg; }
       else toast({ kind: "error", title: "Couldn't attach the domain", body: msg });
+    });
+  }
+
+  // =========================================================== UPDATE PANEL (isu-w5)
+  // The operator's per-instance update-truth surface + the fleet rollout banner.
+  // Every derivation here is PURE and node-pinned via __bpTestHook; the DOM mounts
+  // (policy buttons, the fleet-banner fetch) are browser-verified. The Decision-10
+  // policy fields (autoupdate_enabled/paused, pinned_release, channel) and the
+  // fleet halt state are built by the sibling slice isu-w5-canary-gated-fleet —
+  // this panel CODES AGAINST THOSE NAMES and DEGRADES GRACEFULLY (blank cells,
+  // hidden policy buttons, hidden banner) so it keeps working against an older
+  // control plane that doesn't send them yet.
+
+  // True once the CP serializes the autoupdate policy block. An older CP omits
+  // every policy field → undefined → the policy chip + pin/pause buttons hide.
+  function hasAutoupdatePolicy(bp) {
+    bp = bp || {};
+    return bp.autoupdate_enabled !== undefined ||
+      bp.autoupdate_paused !== undefined ||
+      bp.pinned_release !== undefined ||
+      bp.channel !== undefined;
+  }
+
+  // The ONE update-state badge: current | behind | in-flight | unknown. An
+  // in-flight autoupdate (the trigger marker is set) OUTRANKS the cached verdict
+  // — a rollout is actively landing. Roles reuse the --ok/--info/--warn/--neutral
+  // token contract that statusPill already styles.
+  function updateBadge(bp) {
+    bp = bp || {};
+    if (bp.autoupdate_triggered_at) return { state: "in-flight", role: "info", label: "Updating" };
+    var st = bp.update_state;
+    if (st === "behind") return { state: "behind", role: "info", label: "Update available" };
+    if (st === "current") return { state: "current", role: "ok", label: "Up to date" };
+    return { state: "unknown", role: "neutral", label: "Unknown" };
+  }
+
+  // "Checked 5m ago" / "Never checked" — the last-verified freshness line. Reuses
+  // relTime; an absent/unparsable stamp reads honestly, never a bare "—".
+  function lastCheckedText(iso) {
+    if (!iso) return "Never checked";
+    var rel = relTime(iso);
+    return rel === "—" ? "Never checked" : "Checked " + rel;
+  }
+
+  // A concise, HONEST label of the autoupdate policy. Precedence: a pin is the
+  // hardest freeze (names a version), then a temporary pause, then opt-out
+  // (manual), else auto-riding its channel. Returns null when the CP sends no
+  // policy block (older CP → the chip is hidden entirely). tone maps to a
+  // .badge .dot kind (online|warn|unknown).
+  function autoupdatePolicyLabel(bp) {
+    bp = bp || {};
+    if (!hasAutoupdatePolicy(bp)) return null;
+    if (bp.pinned_release) return { tone: "warn", dot: "warn", text: "Pinned to " + vRel(bp.pinned_release) };
+    if (bp.autoupdate_paused) return { tone: "warn", dot: "warn", text: "Paused" };
+    if (bp.autoupdate_enabled === false) return { tone: "neutral", dot: "unknown", text: "Manual" };
+    var chan = bp.channel ? String(bp.channel) : "";
+    return { tone: "ok", dot: "online", text: chan ? "Auto · " + chan : "Auto" };
+  }
+
+  // Which policy buttons to offer (only when the policy block is present). A pin
+  // and a pause are INDEPENDENT freezes; expose the toggle for each.
+  function autoupdateActions(bp) {
+    bp = bp || {};
+    if (!hasAutoupdatePolicy(bp)) {
+      return { policy: false, showPin: false, showUnpin: false, showPause: false, showResume: false };
+    }
+    var pinned = !!bp.pinned_release;
+    var paused = !!bp.autoupdate_paused;
+    return { policy: true, showPin: !pinned, showUnpin: pinned, showPause: !paused, showResume: paused };
+  }
+
+  // Classify a self-update failure body into an actionable kind. The sibling
+  // slice adds a pin-conflict 409 ({error:{code:"pinned", pinned_release}}) atop
+  // the existing already_running/not_enabled/not_live codes; this reads BOTH
+  // shapes so the UI never silently retries. `pin` is the frozen release, named.
+  function updateConflict(data) {
+    var err = (data && data.error) || {};
+    var code = typeof err === "string" ? err : err.code;
+    var pin = err.pinned_release || err.pinned || (data && data.pinned_release) || null;
+    if (code === "pinned" || (code == null && pin)) return { kind: "pinned", pin: pin };
+    if (code === "already_running") return { kind: "already_running", pin: null };
+    if (code === "not_enabled") return { kind: "not_enabled", pin: null };
+    if (code === "not_live") return { kind: "not_live", pin: null };
+    return { kind: "other", pin: pin, code: code || null };
+  }
+
+  // The honest copy + force affordance for a conflict. ONLY a pin conflict offers
+  // a force re-trigger (forceLabel non-null); it always names the pin and carries
+  // the charter's honest pin caveat. already_running/not_enabled/not_live are
+  // terminal — no force.
+  function updateConflictCopy(c) {
+    c = c || {};
+    if (c.kind === "pinned") {
+      var at = c.pin ? " at " + vRel(c.pin) : "";
+      return {
+        title: "This instance is pinned",
+        body: "Autoupdate is frozen" + at + ". Pinning holds an instance at or above its " +
+          "current version; it does not roll back. Update anyway to override the pin for this one run.",
+        forceLabel: "Update anyway",
+      };
+    }
+    if (c.kind === "already_running") return { title: "An update is already running", body: "Give it a moment to finish.", forceLabel: null };
+    if (c.kind === "not_enabled") return { title: "Self-update is not enabled on this instance", body: "Set BARKPARK_SELF_UPDATE_APPLY=1 on the box to allow one-click updates.", forceLabel: null };
+    if (c.kind === "not_live") return { title: "This instance isn't live yet", body: "Wait until it finishes provisioning.", forceLabel: null };
+    return { title: "Couldn't start the update", body: "Please try again in a moment.", forceLabel: null };
+  }
+
+  // The request body for a forced (pin-overriding) self-update re-trigger.
+  function forceUpdateBody() { return { force: true }; }
+
+  // The per-instance update panel: state badge, running→latest, channel, last
+  // checked, the policy chip, and the policy action buttons. Pure string builder;
+  // buttons carry data-au the wiring reads. Degrades: blank cells + hidden buttons
+  // when the policy block is absent (older CP).
+  function updatePanelHtml(bp) {
+    bp = bp || {};
+    var b = updateBadge(bp);
+    var running = bp.update_running_release
+      ? vRel(bp.update_running_release)
+      : (bp.version ? "v" + String(bp.version).replace(/^v/, "") : "—");
+    var latest = bp.update_latest_release ? vRel(bp.update_latest_release) : "—";
+    var channel = bp.channel ? cap(String(bp.channel)) : "—";
+    var policy = autoupdatePolicyLabel(bp);
+    var acts = autoupdateActions(bp);
+
+    var badgeHtml =
+      '<span class="status-pill status-pill--' + esc(b.role) + ' update-badge" data-update-state="' + esc(b.state) + '">' +
+        '<span class="status-pill-dot" aria-hidden="true"></span>' +
+        '<span class="status-pill-label">' + esc(b.label) + "</span>" +
+      "</span>";
+
+    var rows =
+      railRow("Running", running) +
+      railRow("Latest", latest) +
+      railRow("Channel", channel) +
+      railRowPlain("Last checked", lastCheckedText(bp.update_checked_at)) +
+      (policy ? railRowHtml("Autoupdate", badge(policy.text, policy.dot)) : "");
+
+    var buttons = "";
+    if (acts.policy) {
+      if (acts.showPause) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>';
+      if (acts.showResume) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="resume">Resume autoupdate</button>';
+      if (acts.showPin) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>';
+      if (acts.showUnpin) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="unpin">Unpin</button>';
+    }
+    var actionsHtml = buttons ? '<div class="update-panel-actions">' + buttons + "</div>" : "";
+
+    return '<div class="card update-panel">' +
+      '<div class="update-panel-head"><h2>Updates</h2>' + badgeHtml + "</div>" +
+      '<div class="update-panel-body">' + rows + "</div>" +
+      actionsHtml +
+    "</div>";
+  }
+
+  // The DOM mount for the per-instance policy buttons — the add-listener-if-present
+  // pattern (browser-verified). Each button PATCHes /v1/barkparks/:id/autoupdate
+  // with the ONE field it toggles; a pin prompts for a tag first.
+  function wireUpdatePanel(bp) {
+    var panel = $("#instance-tabpanel .update-panel");
+    if (!panel) return;
+    panel.querySelectorAll("[data-au]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var verb = btn.getAttribute("data-au");
+        if (verb === "pin") return openPinModal(bp);
+        if (verb === "unpin") return patchAutoupdate(bp, { pinned_release: null }, "Unpinned");
+        if (verb === "pause") return patchAutoupdate(bp, { autoupdate_paused: true }, "Autoupdate paused");
+        if (verb === "resume") return patchAutoupdate(bp, { autoupdate_paused: false }, "Autoupdate resumed");
+      });
+    });
+  }
+
+  // The pin prompt — a release tag input with the charter's HONEST pin caveat
+  // ("does not roll back"), mirroring openAttachDomainModal.
+  function openPinModal(bp) {
+    var current = bp.update_running_release || bp.version || "";
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Pin ' + esc(bp.name) + " to a version</h2>" +
+      '<p class="modal-sub">Freeze this instance so autoupdate holds it in place. ' +
+        "Pinning holds an instance at or above its current version &mdash; it does not roll back.</p>" +
+      '<form id="pin-form">' +
+        '<label class="label" for="pin-input">Release tag</label>' +
+        '<input class="form-input" id="pin-input" placeholder="' + esc(current ? String(current) : "v0.4.1") +
+          '" value="' + esc(current ? String(current) : "") + '" autocomplete="off" spellcheck="false">' +
+        '<div id="pin-error" class="form-error" hidden></div>' +
+        '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+          '<button class="btn btn-primary" type="submit" id="pin-go">Pin version</button></div>' +
+      "</form>"
+    );
+    var form = $("#pin-form");
+    if (form) form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var value = (($("#pin-input") || {}).value || "").trim();
+      var errEl = $("#pin-error");
+      if (errEl) errEl.hidden = true;
+      if (!value) {
+        if (errEl) { errEl.hidden = false; errEl.textContent = "Enter a release tag like v0.4.1."; }
+        return;
+      }
+      var btn = $("#pin-go");
+      if (btn) { btn.disabled = true; btn.textContent = "Pinning…"; }
+      patchAutoupdate(bp, { pinned_release: value }, "Pinned to " + vRel(value));
+    });
+  }
+
+  // One PATCH → toast → reload. Absent route / older CP surfaces the friendly
+  // error (api() never rejects). Reuses the fleetCache-bust + loadInstance path.
+  function patchAutoupdate(bp, body, okTitle) {
+    api("PATCH", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/autoupdate", body).then(function (r) {
+      if (r.ok) {
+        closeModal();
+        toast({ kind: "success", title: okTitle, body: bp.name });
+        fleetCache = null;
+        loadInstance(bp.id);
+        return;
+      }
+      var msg = friendly(r.data, "Please try again.");
+      var errEl = $("#pin-error");
+      if (errEl && document.getElementById("pin-error")) { errEl.hidden = false; errEl.textContent = msg; }
+      else toast({ kind: "error", title: "Couldn't update the policy", body: msg });
+      var btn = $("#pin-go");
+      if (btn) { btn.disabled = false; btn.textContent = "Pin version"; }
+    });
+  }
+
+  // ---- Fleet rollout banner (isu-w5) ----------------------------------------
+  // GET /v1/admin/autoupdate reports the fleet-wide halt state; POST halt/resume
+  // toggles it. halted → a warn banner with Resume; rolling → a quiet line with
+  // Halt. Absent route / non-admin → null → nothing renders (degrade).
+  function fleetRolloutBanner(state) {
+    if (!state || typeof state !== "object") return null;
+    if (state.halted) {
+      var why = state.halted_reason || state.reason;
+      return {
+        tone: "warn", halted: true, title: "Fleet autoupdate is halted",
+        body: why ? String(why) : "New releases won't roll out to any instance until you resume.",
+        verb: "resume", actionLabel: "Resume rollout",
+      };
+    }
+    return {
+      tone: "", halted: false, title: "Fleet autoupdate is live",
+      body: "Blessed releases roll out to eligible instances automatically.",
+      verb: "halt", actionLabel: "Halt rollout",
+    };
+  }
+
+  function fleetRolloutBannerHtml(state) {
+    var b = fleetRolloutBanner(state);
+    if (!b) return "";
+    return '<div class="notice' + (b.tone ? " notice-" + esc(b.tone) : "") + '" role="status">' +
+      "<b>" + esc(b.title) + "</b> " + esc(b.body) +
+      '<button class="btn btn-sm" type="button" data-fleet-au="' + esc(b.verb) + '">' + esc(b.actionLabel) + "</button>" +
+    "</div>";
+  }
+
+  // The DOM mount: fetch the fleet halt state and paint the banner slot. Silent
+  // on a non-ok read (older CP 404 / non-operator 401/403) — the slot stays
+  // empty. noBounce is LOAD-BEARING: the route is platform-operator gated, so a
+  // plain session token 401s — without noBounce that probe would clearSession()
+  // and log the user out on every fleet render.
+  function loadFleetRollout(container) {
+    var slot = container.querySelector("#fleet-rollout");
+    if (!slot) return;
+    api("GET", "/v1/admin/autoupdate", null, { noBounce: true }).then(function (r) {
+      if (!r.ok || !r.data) return; // older CP / non-operator → hidden
+      slot.innerHTML = fleetRolloutBannerHtml(r.data);
+      var btn = slot.querySelector("[data-fleet-au]");
+      if (btn) btn.addEventListener("click", function () { fleetRolloutAction(btn.getAttribute("data-fleet-au"), container); });
+    });
+  }
+
+  function fleetRolloutAction(verb, container) {
+    var path = "/v1/admin/autoupdate/" + (verb === "halt" ? "halt" : "resume");
+    api("POST", path, {}, { noBounce: true }).then(function (r) {
+      if (r.ok) {
+        toast({ kind: "success", title: verb === "halt" ? "Rollout halted" : "Rollout resumed" });
+        loadFleetRollout(container);
+      } else {
+        toast({ kind: "error", title: "Couldn't " + verb + " the rollout", body: friendly(r.data, "Please try again.") });
+      }
     });
   }
 
@@ -10440,6 +10738,16 @@
       fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
       lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
       lifecycleOptimistic: lifecycleOptimistic, lifecycleVerbs: LIFECYCLE_VERBS.map(function (v) { return v.verb; }),
+      // isu-w5 console operator update panel: the per-instance update-truth
+      // derivations + the 409 pin-force flow + the fleet rollout banner. All pure
+      // (node-pinned); the DOM mounts (wireUpdatePanel/openPinModal/loadFleetRollout)
+      // are browser-verified. Every helper degrades gracefully against an older CP.
+      hasAutoupdatePolicy: hasAutoupdatePolicy, updateBadge: updateBadge,
+      lastCheckedText: lastCheckedText, autoupdatePolicyLabel: autoupdatePolicyLabel,
+      autoupdateActions: autoupdateActions, updateConflict: updateConflict,
+      updateConflictCopy: updateConflictCopy, forceUpdateBody: forceUpdateBody,
+      updatePanelHtml: updatePanelHtml, fleetRolloutBanner: fleetRolloutBanner,
+      fleetRolloutBannerHtml: fleetRolloutBannerHtml,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,

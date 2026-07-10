@@ -5007,3 +5007,172 @@ test("W3 2FA: the challenge_token is NEVER written to storage (closure-only)", a
     sandbox.fetch = realFetch; sandbox.localStorage = realLocal; sandbox.sessionStorage = realSession;
   }
 });
+
+// ── isu-w5 console operator update panel ────────────────────────────────────
+// The per-instance update-truth derivations + the 409 pin-force flow + the fleet
+// rollout banner. Every helper CODES AGAINST the Decision-10 field names
+// (autoupdate_enabled/paused, pinned_release, channel, update_checked_at, built
+// by the sibling slice) and DEGRADES GRACEFULLY against an older CP that omits
+// them. Fixture rows below pin both the present-fields and absent-fields shapes.
+
+// NOTE: sandbox objects carry the vm realm's Object prototype, so
+// deepStrictEqual fails on equal structure — round-trip through the module-scoped
+// `plain()` helper (defined earlier) to re-home a plain object into this realm.
+
+test("isu-w5: the update-panel helpers are exported through the ONE hook", () => {
+  for (const name of ["hasAutoupdatePolicy", "updateBadge", "lastCheckedText",
+    "autoupdatePolicyLabel", "autoupdateActions", "updateConflict", "updateConflictCopy",
+    "forceUpdateBody", "updatePanelHtml", "fleetRolloutBanner", "fleetRolloutBannerHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("isu-w5: hasAutoupdatePolicy is false for an older-CP row, true once any policy field lands", () => {
+  assert.equal(hooks.hasAutoupdatePolicy({}), false);
+  assert.equal(hooks.hasAutoupdatePolicy({ update_state: "behind" }), false); // legacy update fields ≠ policy
+  assert.equal(hooks.hasAutoupdatePolicy({ autoupdate_enabled: true }), true);
+  assert.equal(hooks.hasAutoupdatePolicy({ autoupdate_paused: false }), true);
+  assert.equal(hooks.hasAutoupdatePolicy({ pinned_release: null }), true); // present-and-null still counts
+  assert.equal(hooks.hasAutoupdatePolicy({ channel: "stable" }), true);
+  assert.equal(hooks.hasAutoupdatePolicy(null), false);
+});
+
+test("isu-w5: updateBadge derives current | behind | in-flight | unknown, in-flight outranks", () => {
+  assert.deepEqual(plain(hooks.updateBadge({ update_state: "current" })), { state: "current", role: "ok", label: "Up to date" });
+  assert.deepEqual(plain(hooks.updateBadge({ update_state: "behind" })), { state: "behind", role: "info", label: "Update available" });
+  assert.deepEqual(plain(hooks.updateBadge({})), { state: "unknown", role: "neutral", label: "Unknown" });
+  assert.deepEqual(plain(hooks.updateBadge({ update_state: "garbage" })), { state: "unknown", role: "neutral", label: "Unknown" });
+  // the trigger marker wins over a stale "behind"
+  assert.deepEqual(
+    plain(hooks.updateBadge({ update_state: "behind", autoupdate_triggered_at: "2026-07-10T00:00:00Z" })),
+    { state: "in-flight", role: "info", label: "Updating" },
+  );
+  assert.equal(hooks.updateBadge(null).state, "unknown");
+});
+
+test("isu-w5: lastCheckedText reads Never checked for absent/unparsable, Checked <rel> otherwise", () => {
+  assert.equal(hooks.lastCheckedText(null), "Never checked");
+  assert.equal(hooks.lastCheckedText(""), "Never checked");
+  assert.equal(hooks.lastCheckedText("not-a-date"), "Never checked");
+  assert.equal(hooks.lastCheckedText(new Date(Date.now() - 5 * 60 * 1000).toISOString()), "Checked 5m ago");
+  assert.equal(hooks.lastCheckedText(new Date().toISOString()), "Checked just now");
+});
+
+test("isu-w5: autoupdatePolicyLabel is null on older CP; pin > pause > manual > auto precedence", () => {
+  assert.equal(hooks.autoupdatePolicyLabel({}), null); // no policy block → hidden chip
+  // auto-riding a channel
+  assert.deepEqual(plain(hooks.autoupdatePolicyLabel({ autoupdate_enabled: true, channel: "canary" })),
+    { tone: "ok", dot: "online", text: "Auto · canary" });
+  assert.deepEqual(plain(hooks.autoupdatePolicyLabel({ autoupdate_enabled: true })),
+    { tone: "ok", dot: "online", text: "Auto" });
+  // manual (opt-out)
+  assert.deepEqual(plain(hooks.autoupdatePolicyLabel({ autoupdate_enabled: false })),
+    { tone: "neutral", dot: "unknown", text: "Manual" });
+  // paused beats manual/auto
+  assert.equal(hooks.autoupdatePolicyLabel({ autoupdate_enabled: true, autoupdate_paused: true }).text, "Paused");
+  // a pin beats a pause and names the version (normalised via vRel)
+  assert.deepEqual(plain(hooks.autoupdatePolicyLabel({ autoupdate_paused: true, pinned_release: "0.4.1" })),
+    { tone: "warn", dot: "warn", text: "Pinned to v0.4.1" });
+});
+
+test("isu-w5: autoupdateActions hides every button on older CP and toggles pin/pause independently", () => {
+  assert.deepEqual(plain(hooks.autoupdateActions({})),
+    { policy: false, showPin: false, showUnpin: false, showPause: false, showResume: false });
+  // enabled, unpinned, unpaused → offer Pin + Pause
+  assert.deepEqual(plain(hooks.autoupdateActions({ autoupdate_enabled: true, autoupdate_paused: false })),
+    { policy: true, showPin: true, showUnpin: false, showPause: true, showResume: false });
+  // pinned + paused → offer Unpin + Resume
+  assert.deepEqual(plain(hooks.autoupdateActions({ pinned_release: "v0.4.1", autoupdate_paused: true })),
+    { policy: true, showPin: false, showUnpin: true, showPause: false, showResume: true });
+});
+
+test("isu-w5: updateConflict classifies pinned / already_running / not_enabled / not_live / other", () => {
+  assert.deepEqual(plain(hooks.updateConflict({ error: { code: "pinned", pinned_release: "v0.4.1" } })),
+    { kind: "pinned", pin: "v0.4.1" });
+  // a pin named without a code still reads as pinned (defensive)
+  assert.deepEqual(plain(hooks.updateConflict({ pinned_release: "v0.4.0" })), { kind: "pinned", pin: "v0.4.0" });
+  assert.deepEqual(plain(hooks.updateConflict({ error: { code: "already_running" } })), { kind: "already_running", pin: null });
+  assert.deepEqual(plain(hooks.updateConflict({ error: { code: "not_enabled" } })), { kind: "not_enabled", pin: null });
+  assert.deepEqual(plain(hooks.updateConflict({ error: { code: "not_live" } })), { kind: "not_live", pin: null });
+  assert.deepEqual(plain(hooks.updateConflict({ error: { code: "instance_error" } })), { kind: "other", pin: null, code: "instance_error" });
+  // a flat string error (some routes emit {error: "not_found"})
+  assert.equal(hooks.updateConflict({ error: "not_found" }).kind, "other");
+  assert.equal(hooks.updateConflict(null).kind, "other");
+});
+
+test("isu-w5: updateConflictCopy offers force ONLY for a pin, names it, carries the honest no-rollback caveat", () => {
+  const pinned = hooks.updateConflictCopy({ kind: "pinned", pin: "v0.4.1" });
+  assert.equal(pinned.forceLabel, "Update anyway");
+  assert.match(pinned.body, /v0\.4\.1/);
+  assert.match(pinned.body, /does not roll back/); // charter honest-pin copy
+  // terminal kinds NEVER offer a force affordance
+  for (const kind of ["already_running", "not_enabled", "not_live", "other"]) {
+    assert.equal(hooks.updateConflictCopy({ kind }).forceLabel, null, kind + " must not offer force");
+  }
+  assert.match(hooks.updateConflictCopy({ kind: "not_enabled" }).body, /BARKPARK_SELF_UPDATE_APPLY=1/);
+});
+
+test("isu-w5: forceUpdateBody is the explicit {force:true} override payload", () => {
+  assert.deepEqual(plain(hooks.forceUpdateBody()), { force: true });
+});
+
+test("isu-w5: updatePanelHtml renders truth cells and degrades (no policy chip/buttons) on older CP", () => {
+  const legacy = hooks.updatePanelHtml({
+    update_state: "behind", update_running_release: "0.4.0", update_latest_release: "v0.4.1", version: "0.4.0",
+  });
+  assert.match(legacy, /Update available/);       // badge
+  assert.match(legacy, /v0\.4\.0/);               // running
+  assert.match(legacy, /v0\.4\.1/);               // latest
+  assert.match(legacy, /Never checked/);          // no update_checked_at
+  assert.match(legacy, /update-panel/);
+  assert.doesNotMatch(legacy, /data-au=/);        // no policy block → no policy buttons
+  assert.doesNotMatch(legacy, /Autoupdate<\/span>/); // no policy chip row
+
+  const modern = hooks.updatePanelHtml({
+    update_state: "current", update_running_release: "v0.4.1", update_latest_release: "v0.4.1",
+    channel: "stable", update_checked_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    autoupdate_enabled: true, autoupdate_paused: false, pinned_release: null,
+  });
+  assert.match(modern, /Up to date/);
+  assert.match(modern, /Stable/);                 // channel, capitalised
+  assert.match(modern, /Checked 1h ago/);
+  assert.match(modern, /Auto · stable/);          // policy chip
+  assert.match(modern, /data-au="pin"/);          // Pin offered (unpinned)
+  assert.match(modern, /data-au="pause"/);        // Pause offered (unpaused)
+  assert.doesNotMatch(modern, /data-au="unpin"/);
+});
+
+test("isu-w5: updatePanelHtml escapes a hostile channel value (no markup injection)", () => {
+  const html = hooks.updatePanelHtml({ autoupdate_enabled: true, channel: '<img src=x onerror=alert(1)>' });
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img/);
+});
+
+test("isu-w5: fleetRolloutBanner — halted → warn+Resume, live → base+Halt, absent → null", () => {
+  assert.equal(hooks.fleetRolloutBanner(null), null);
+  assert.equal(hooks.fleetRolloutBanner("nope"), null);
+  const halted = hooks.fleetRolloutBanner({ halted: true, halted_reason: "bad release 0.5.0" });
+  assert.equal(halted.halted, true);
+  assert.equal(halted.tone, "warn");
+  assert.equal(halted.verb, "resume");
+  assert.match(halted.body, /bad release 0\.5\.0/);
+  const live = hooks.fleetRolloutBanner({ halted: false });
+  assert.equal(live.halted, false);
+  assert.equal(live.verb, "halt");
+  assert.equal(live.tone, "");
+});
+
+test("isu-w5: fleetRolloutBannerHtml emits a wired Halt/Resume button, empty on absent state", () => {
+  assert.equal(hooks.fleetRolloutBannerHtml(null), "");
+  const halted = hooks.fleetRolloutBannerHtml({ halted: true });
+  assert.match(halted, /notice-warn/);
+  assert.match(halted, /data-fleet-au="resume"/);
+  assert.match(halted, /Resume rollout/);
+  const live = hooks.fleetRolloutBannerHtml({ halted: false });
+  assert.match(live, /data-fleet-au="halt"/);
+  assert.match(live, /Halt rollout/);
+  // halted_reason is escaped, never injected as markup
+  const evil = hooks.fleetRolloutBannerHtml({ halted: true, halted_reason: "<b>x</b>" });
+  assert.doesNotMatch(evil, /<b>x<\/b>/);
+  assert.match(evil, /&lt;b&gt;x/);
+});
