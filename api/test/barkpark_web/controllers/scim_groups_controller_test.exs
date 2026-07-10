@@ -7,6 +7,12 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
   alias Barkpark.Tenancy.{Auth, Role, RolePermission}
   import Ecto.Query
 
+  defp create_group(token, name, role) do
+    scim(token)
+    |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => name, "role" => role}))
+    |> json_response(201)
+  end
+
   defp org_with_ws(slug) do
     {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
     {:ok, ws} = Tenancy.create_workspace(%{slug: slug <> "-ws", name: "WS"})
@@ -210,6 +216,149 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
         |> Map.fetch!("id")
 
       assert scim(token) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
+    end
+  end
+
+  # era-w8-scim-conformance — real-IdP (Okta / Azure AD) onboarding breadth.
+
+  describe "Groups filter + paging (RFC 7644 §3.4.2.4)" do
+    test "filter=displayName eq returns only the matching group" do
+      %{token: token} = org_with_ws("gfilter")
+      create_group(token, "Admins", "admin")
+      create_group(token, "Members", "member")
+
+      resp =
+        scim(token)
+        |> get(~s(/scim/v2/Groups?filter=displayName eq "Admins"))
+        |> json_response(200)
+
+      assert resp["totalResults"] == 1
+      assert [%{"displayName" => "Admins"}] = resp["Resources"]
+      assert resp["startIndex"] == 1
+      assert resp["itemsPerPage"] == 1
+    end
+
+    test "count/startIndex page the group list; totalResults is the full count" do
+      %{token: token} = org_with_ws("gpage")
+      create_group(token, "Alphas", "admin")
+      create_group(token, "Betas", "member")
+      create_group(token, "Gammas", "owner")
+
+      page = scim(token) |> get("/scim/v2/Groups?count=2") |> json_response(200)
+      assert page["totalResults"] == 3
+      assert page["itemsPerPage"] == 2
+      # ordered by displayName asc
+      assert Enum.map(page["Resources"], & &1["displayName"]) == ["Alphas", "Betas"]
+    end
+  end
+
+  describe "PUT /scim/v2/Groups/:id — full replace (displayName + members)" do
+    test "renames the group and reconciles membership to exactly the new set" do
+      %{ws: ws, token: token} = org_with_ws("gput")
+      custom_role(ws.id, "reviewer", ["read"])
+      provision(token, "u1@gput.com")
+      provision(token, "u2@gput.com")
+      u1 = Accounts.get_user_by_email("u1@gput.com")
+      u2 = Accounts.get_user_by_email("u2@gput.com")
+
+      gid = create_group(token, "Reviewers", "reviewer") |> Map.fetch!("id")
+
+      # PUT members [u1] → u1 gains reviewer (read-only), u2 untouched (member)
+      body1 =
+        scim(token)
+        |> put(
+          "/scim/v2/Groups/#{gid}",
+          Jason.encode!(%{"displayName" => "Reviewers", "members" => [%{"value" => u1.id}]})
+        )
+        |> json_response(200)
+
+      assert Auth.authorize(u1, ws.id, :write) == {:error, :forbidden}
+      assert Auth.authorize(u2, ws.id, :write) == :ok
+
+      # PUT members [u2] → u1 reverts to member, u2 becomes reviewer; group renamed
+      resp =
+        scim(token)
+        |> put(
+          "/scim/v2/Groups/#{gid}",
+          Jason.encode!(%{"displayName" => "Reviewers 2", "members" => [%{"value" => u2.id}]})
+        )
+        |> json_response(200)
+
+      assert resp["displayName"] == "Reviewers 2"
+      assert Auth.authorize(u1, ws.id, :write) == :ok
+      assert Auth.authorize(u2, ws.id, :write) == {:error, :forbidden}
+      # renamed group is fetchable under the new name filter
+      assert body1["displayName"] == "Reviewers"
+    end
+
+    test "cross-org isolation: org B cannot PUT-replace a group in org A → 404" do
+      %{token: token_a} = org_with_ws("gput-a")
+      %{token: token_b} = org_with_ws("gput-b")
+      gid = create_group(token_a, "AOnly", "member") |> Map.fetch!("id")
+
+      assert scim(token_b)
+             |> put("/scim/v2/Groups/#{gid}", Jason.encode!(%{"displayName" => "Hijacked"}))
+             |> json_response(404)
+
+      # untouched in org A
+      assert %{"displayName" => "AOnly"} =
+               scim(token_a) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
+    end
+  end
+
+  describe "resource meta + ETag concurrency (RFC 7643 §3.1, RFC 7644 §3.14)" do
+    test "a group carries meta.created/lastModified/version + ETag header" do
+      %{token: token} = org_with_ws("gmeta")
+
+      conn =
+        scim(token)
+        |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => "M", "role" => "member"}))
+
+      body = json_response(conn, 201)
+      meta = body["meta"]
+      assert meta["resourceType"] == "Group"
+      assert is_binary(meta["created"])
+      assert String.starts_with?(meta["version"], "W/\"")
+      assert [meta["version"]] == get_resp_header(conn, "etag")
+    end
+
+    test "a stale If-Match on PUT → 412 (optimistic concurrency guard)" do
+      %{token: token} = org_with_ws("gifmatch")
+      gid = create_group(token, "Guarded", "member") |> Map.fetch!("id")
+
+      resp =
+        scim(token)
+        |> put_req_header("if-match", ~s(W/"0"))
+        |> put("/scim/v2/Groups/#{gid}", Jason.encode!(%{"displayName" => "Guarded 2"}))
+        |> json_response(412)
+
+      assert resp["status"] == "412"
+    end
+  end
+
+  describe "error shapes carry scimType (RFC 7644 §3.12)" do
+    test "unknown role → 400 scimType invalidValue" do
+      %{token: token} = org_with_ws("gscimtype")
+
+      resp =
+        scim(token)
+        |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => "X", "role" => "nope"}))
+        |> json_response(400)
+
+      assert resp["scimType"] == "invalidValue"
+    end
+
+    test "renaming a group onto an existing displayName → 409 scimType uniqueness" do
+      %{token: token} = org_with_ws("guniq")
+      create_group(token, "Admins", "admin")
+      gid = create_group(token, "Members", "member") |> Map.fetch!("id")
+
+      resp =
+        scim(token)
+        |> put("/scim/v2/Groups/#{gid}", Jason.encode!(%{"displayName" => "Admins"}))
+        |> json_response(409)
+
+      assert resp["scimType"] == "uniqueness"
     end
   end
 end

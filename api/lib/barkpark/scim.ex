@@ -199,21 +199,61 @@ defmodule Barkpark.Scim do
 
   def get_org_user(_org, _), do: nil
 
-  @doc "Users provisioned into `org` (members of its workspaces). Optional email filter."
-  @spec list_org_users(Organization.t(), String.t() | nil) :: [User.t()]
-  def list_org_users(%Organization{} = org, email_filter \\ nil) do
+  @doc """
+  Users provisioned into `org` (members of its workspaces), paged for SCIM.
+
+  Opts: `:filter` (exact `userName`/email eq), `:start_index` (1-based),
+  `:count` (page size). Returns `{total, page}` — `total` is the FULL match count
+  (independent of the returned page) so the caller can emit a correct
+  `totalResults`; `page` is the sliced, email-ordered list.
+  """
+  @spec list_org_users(Organization.t(), keyword()) :: {non_neg_integer(), [User.t()]}
+  def list_org_users(%Organization{} = org, opts \\ []) do
     ws_ids = workspace_ids(org)
+    filter = Keyword.get(opts, :filter)
 
     base =
       from u in User,
         join: m in Membership,
         on: m.principal_id == u.id and m.principal_type == "user",
-        where: m.workspace_id in ^ws_ids,
-        distinct: true
+        where: m.workspace_id in ^ws_ids
 
-    query = if email_filter, do: from(u in base, where: u.email == ^email_filter), else: base
-    Repo.all(query)
+    base = if filter, do: from(u in base, where: u.email == ^filter), else: base
+
+    # count DISTINCT users (the join can fan out across a user's workspaces)
+    total =
+      base
+      |> select([u], u.id)
+      |> distinct(true)
+      |> subquery()
+      |> then(&Repo.aggregate(&1, :count))
+
+    page =
+      base
+      |> distinct(true)
+      |> order_by([u], asc: u.email)
+      |> paginate(opts)
+      |> Repo.all()
+
+    {total, page}
   end
+
+  # SCIM ListResponse paging: 1-based `start_index` → OFFSET, `count` → LIMIT.
+  defp paginate(query, opts) do
+    query
+    |> maybe_offset(Keyword.get(opts, :start_index))
+    |> maybe_limit(Keyword.get(opts, :count))
+  end
+
+  defp maybe_offset(query, si) when is_integer(si) and si > 1,
+    do: from(x in query, offset: ^(si - 1))
+
+  defp maybe_offset(query, _), do: query
+
+  defp maybe_limit(query, count) when is_integer(count) and count >= 0,
+    do: from(x in query, limit: ^count)
+
+  defp maybe_limit(query, _), do: query
 
   # ── internals ──────────────────────────────────────────────────────────────
 
@@ -318,11 +358,78 @@ defmodule Barkpark.Scim do
 
   def get_org_group(_org, _), do: nil
 
-  @doc "Groups in `org`."
-  @spec list_org_groups(Organization.t()) :: [Group.t()]
-  def list_org_groups(%Organization{id: oid}),
-    do:
-      Repo.all(from g in Group, where: g.organization_id == ^oid, order_by: [asc: g.display_name])
+  @doc """
+  Groups in `org`, paged for SCIM. Opts: `:filter` (exact `displayName` eq),
+  `:start_index`, `:count`. Returns `{total, page}` — `total` is the full match
+  count, `page` the display-name-ordered slice.
+  """
+  @spec list_org_groups(Organization.t(), keyword()) :: {non_neg_integer(), [Group.t()]}
+  def list_org_groups(%Organization{id: oid}, opts \\ []) do
+    filter = Keyword.get(opts, :filter)
+    base = from g in Group, where: g.organization_id == ^oid
+    base = if filter, do: from(g in base, where: g.display_name == ^filter), else: base
+
+    total = Repo.aggregate(base, :count)
+    page = base |> order_by([g], asc: g.display_name) |> paginate(opts) |> Repo.all()
+
+    {total, page}
+  end
+
+  @doc """
+  Full-replace a group's mutable attributes (SCIM `PUT`). Only `displayName` and
+  `externalId` are writable — `role_name` is the group's immutable identity. A
+  rename that collides with another group in the org returns the changeset error
+  (`:display_name` uniqueness) so the controller can answer 409 `uniqueness`.
+  """
+  @spec update_group(Organization.t(), Group.t(), map()) ::
+          {:ok, Group.t()} | {:error, Ecto.Changeset.t()}
+  def update_group(%Organization{}, %Group{} = group, attrs) do
+    group
+    |> Group.changeset(%{
+      organization_id: group.organization_id,
+      role_name: group.role_name,
+      display_name: attrs["displayName"] || group.display_name,
+      external_id: Map.get(attrs, "externalId", group.external_id)
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Reconcile a group's membership to EXACTLY `user_ids` (SCIM `PUT` members
+  full-replace). Users newly present gain the mapped role; users dropped from the
+  set revert to the default `member` role. Non-UUID ids are ignored (an IdP only
+  ever sends resolved resource ids). Every add/remove is audited via
+  `add_group_member`/`remove_group_member`. Returns `{:ok, %{added, removed}}`.
+  """
+  @spec replace_group_members(Organization.t(), Group.t(), [binary()]) ::
+          {:ok, %{added: non_neg_integer(), removed: non_neg_integer()}}
+  def replace_group_members(%Organization{} = org, %Group{} = group, user_ids)
+      when is_list(user_ids) do
+    desired =
+      user_ids |> Enum.map(&Repo.uuid_or_nil/1) |> Enum.reject(&is_nil/1) |> MapSet.new()
+
+    current = current_group_members(org, group)
+    to_add = MapSet.difference(desired, current)
+    to_remove = MapSet.difference(current, desired)
+
+    Enum.each(to_add, &add_group_member(org, group, &1))
+    Enum.each(to_remove, &remove_group_member(org, group, &1))
+
+    {:ok, %{added: MapSet.size(to_add), removed: MapSet.size(to_remove)}}
+  end
+
+  # Users in the org's workspaces currently holding this group's mapped role.
+  defp current_group_members(org, %Group{role_name: role_name}) do
+    ws_ids = workspace_ids(org)
+
+    from(m in Membership,
+      where: m.principal_type == "user" and m.workspace_id in ^ws_ids and m.role == ^role_name,
+      select: m.principal_id,
+      distinct: true
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
 
   @doc """
   Delete `group` from `org`. Tenancy-scoped: the delete is filtered by

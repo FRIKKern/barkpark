@@ -1194,6 +1194,11 @@ defmodule BarkparkWeb.Router do
   scope "/scim/v2", BarkparkWeb do
     pipe_through(:scim)
 
+    # Discovery (RFC 7644 §4) — an IdP probes these before it provisions.
+    get("/ServiceProviderConfig", ScimDiscoveryController, :service_provider_config)
+    get("/ResourceTypes", ScimDiscoveryController, :resource_types)
+    get("/Schemas", ScimDiscoveryController, :schemas)
+
     post("/Users", ScimUsersController, :create)
     get("/Users", ScimUsersController, :index)
     get("/Users/:id", ScimUsersController, :show)
@@ -1204,6 +1209,7 @@ defmodule BarkparkWeb.Router do
     post("/Groups", ScimGroupsController, :create)
     get("/Groups", ScimGroupsController, :index)
     get("/Groups/:id", ScimGroupsController, :show)
+    put("/Groups/:id", ScimGroupsController, :replace)
     patch("/Groups/:id", ScimGroupsController, :update)
     delete("/Groups/:id", ScimGroupsController, :delete)
   end
