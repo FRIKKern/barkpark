@@ -224,6 +224,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket = Shared.ensure_tenancy_scope(socket)
 
+    # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
+    # plug). Logger.metadata is per-process; the connected Studio runs on this
+    # long-lived LiveView process, and handle_params re-runs on every navigation /
+    # scope switch (push_patch), so a mid-session workspace switch re-stamps.
+    BarkparkWeb.Plugs.TenantLogMetadata.stamp(
+      socket.assigns[:current_workspace],
+      socket.assigns[:current_project],
+      dataset
+    )
+
     case Shared.redirect_dataset_leaf(socket, dataset) do
       {:redirect, slug} ->
         {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, slug, desk: desk))}

@@ -24,9 +24,13 @@ config :barkpark, BarkparkWeb.Endpoint,
   live_view: [signing_salt: "MXGKAyTI"]
 
 # Configure Elixir's Logger
+# Tenant scope keys (workspace_id/workspace_slug/project_id/dataset) are stamped
+# by BarkparkWeb.Plugs.TenantLogMetadata (API pipelines) + StudioLive (LiveView)
+# so every log line is tenant-attributable — see that plug's @moduledoc. They
+# MUST be listed here or they resolve but never render.
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  metadata: [:request_id, :workspace_id, :workspace_slug, :project_id, :dataset]
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason

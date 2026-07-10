@@ -28,6 +28,9 @@ defmodule BarkparkWeb.Router do
     # path) infer the seeded Default Workspace/Project so downstream code always
     # has a scope. No-op once a resolver has already set the assigns.
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    # Stamp the resolved tenant scope onto Logger.metadata so every log line is
+    # tenant-attributable (incident blast-radius). Cheap, no DB — see the plug.
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
   # Grant-fold overlay for the FLAT `/v1/data` READ routes (airdrop-grants
@@ -85,6 +88,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.OptionalToken)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
   # Public-share variant of :scoped_api for the scoped READ document routes
@@ -112,6 +116,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
   # Tenancy-aware READ pipeline for the scoped media surface (P3) — the
@@ -143,6 +148,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :media)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
   # P5 scoped-share EDIT pipelines. These serve the SAME scoped write routes to
@@ -167,6 +173,10 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
+    # Stamp scope BEFORE the auth gates so a 403'd cross-tenant WRITE is still
+    # tenant-attributable in the logs (the blast-radius question includes denied
+    # attempts).
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireWritePermission)
     plug(BarkparkWeb.Plugs.Idempotency)
@@ -193,6 +203,7 @@ defmodule BarkparkWeb.Router do
     # branch is CSRF-checked here (bearer callers return before the CSRF check).
     plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
     # Write-gate: a read-only token/session member is denied 403 before the
     # controller. A P5 edit-share token short-circuits via :share_writer (set by
     # RequireShareEditToken above), so scoped uploads still work. Mirrors
@@ -311,6 +322,7 @@ defmodule BarkparkWeb.Router do
     # /w/:ws/p/:project) sets the real scope via the resolvers, and
     # AssignDefaultScope no-ops once an assign is already present.
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
   pipeline :require_token do
@@ -369,6 +381,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
   # Base pipeline for the core user-auth API (/v1/auth/*). Like :api but without
@@ -437,6 +450,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
     # Write-gate: media upload/update/delete are mutations — a read-only token
     # (or read-only session member) must be denied 403 before the controller.
     # RequireBearerOrSessionToken always assigns :api_token on success, so the
