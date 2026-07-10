@@ -90,11 +90,16 @@ Elixir security gates, path-triggered on `api/**`:
 
 9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
    SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
-   `binary_to_term`, directory traversal…). **Regression gate, blocking-by-
-   convention** (no `continue-on-error`). The 98 findings that existed on main
-   at wiring time (21 high / 9 medium / 68 low confidence) are captured in
-   `api/.sobelow-skips` — the **reviewed baseline** — so the job is GREEN on the
-   current tree and reds only on a NEW insecure pattern. Command:
+   `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
+   true`) — Sobelow fingerprints are derived from compiled AST and are NOT
+   stable across Elixir toolchains, so a baseline generated on a dev machine's
+   Elixir does not match CI's 1.18.1/OTP27 and a blocking gate would red the
+   fleet on fingerprint drift rather than real regressions. Findings stay
+   VISIBLE in CI; flip to blocking once the baseline is regenerated **in CI**
+   (matched toolchain) or the 30 real high/medium findings are remediated
+   (task-c9d6d29cc0059d2a). The 98 findings that existed on main at wiring time
+   (21 high / 9 medium / 68 low confidence) are captured in
+   `api/.sobelow-skips` — the **reviewed baseline**. Command:
    `mix sobelow --skip --exit Low` (`--skip` reads the baseline; `--exit Low`
    fails on any non-baselined finding at Low confidence or above, so even a
    low-confidence new `raw()` reds it — proven by planting a
