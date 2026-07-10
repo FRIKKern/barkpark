@@ -691,6 +691,29 @@ func (c *Client) Get(typeName, id string) (Doc, bool) {
 // {"result":{…}} envelope peel + fail-closed (Doc,false)-on-any-error contract
 // as Get.
 func (c *Client) GetPerspective(typeName, id, perspective string) (Doc, bool) {
+	doc, outcome := c.GetPerspectiveResult(typeName, id, perspective)
+	return doc, outcome == DocReadOK
+}
+
+// DocReadOutcome classifies WHY a single-document read succeeded or failed, so a
+// caller (e.g. `bp cmux status`) can tell "no such document" (404) apart from
+// "the server is unreachable" (transport error / 5xx / unreadable body) —
+// GetPerspective's plain bool collapses both into false.
+type DocReadOutcome int
+
+const (
+	DocReadOK          DocReadOutcome = iota // 200 with a decodable document
+	DocReadNotFound                          // 404 — the id names no document
+	DocReadUnreachable                       // transport error, non-200/404, or an unreadable/undecodable body
+)
+
+// GetPerspectiveResult is GetPerspective that additionally reports the read
+// outcome. Same URL, auth, {"result":{…}} envelope-peel and fail-closed
+// contract; the only addition is the DocReadOutcome discriminator (every
+// non-OK outcome still maps to GetPerspective's false, so existing callers are
+// behaviour-identical). 404 → DocReadNotFound; a transport error, any other
+// non-200, an oversized body, or an undecodable body → DocReadUnreachable.
+func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, DocReadOutcome) {
 	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + url.PathEscape(typeName) + "/" + url.PathEscape(id))
 	if perspective != "" {
 		params := url.Values{}
@@ -700,17 +723,20 @@ func (c *Client) GetPerspective(typeName, id, perspective string) (Doc, bool) {
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {
-		return Doc{}, false
+		return Doc{}, DocReadUnreachable
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return Doc{}, DocReadNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
-		return Doc{}, false
+		return Doc{}, DocReadUnreachable
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))
 	if err != nil || int64(len(body)) > maxDocBytes {
-		return Doc{}, false
+		return Doc{}, DocReadUnreachable
 	}
 
 	var wrapped struct {
@@ -723,9 +749,9 @@ func (c *Client) GetPerspective(typeName, id, perspective string) (Doc, bool) {
 
 	var doc Doc
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return Doc{}, false
+		return Doc{}, DocReadUnreachable
 	}
-	return doc, true
+	return doc, DocReadOK
 }
 
 // PaperDoc fetches ONE paper document by slug and returns the raw JSON of the

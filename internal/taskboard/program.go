@@ -844,7 +844,7 @@ func (m Model) claimTask(t Task) (Model, tea.Cmd) {
 		m.setStrip(claimBlockedReason(t), RoleWarn)
 		return m, nil
 	}
-	return m, m.claimCmd(t.DocID, ResolveWorker())
+	return m, m.claimCmd(t.DocID, CmuxWorkerID())
 }
 
 // closeTask is 'x': the double-press close guard. Only a task holding a LIVE
@@ -861,7 +861,7 @@ func (m Model) closeTask(t Task) (Model, tea.Cmd) {
 	}
 	if m.pendingClose == t.DocID {
 		m.pendingClose = ""
-		return m, m.closeCmd(t.DocID, ResolveWorker(), t.Claim.Epoch)
+		return m, m.closeCmd(t.DocID, CmuxWorkerID(), t.Claim.Epoch)
 	}
 	m.pendingClose = t.DocID
 	m.setStrip(fmt.Sprintf("press x again to close '%s'", t.Title), RoleWarn)

@@ -7,6 +7,29 @@ package taskboard
 
 import "os"
 
+// CmuxWorkerPrefix is the ONE worker-id namespace for cmux panes. Tier-2 and
+// tier-3 of CmuxWorkerID prepend it, and the `bp cmux install` shell-line plus
+// its help echoes derive from it too. Keeping every site on this single constant
+// is the whole point of the slice: a prefix rename touches ONE place and both the
+// hook's derivation and the installed shell export move together, so an installed
+// pane can never claim under a worker the hook doesn't recognize.
+const CmuxWorkerPrefix = "cmux-"
+
+// CmuxSurfaceExport is the tier-2 worker id with $CMUX_SURFACE_ID left
+// unexpanded — the value the install shell-line exports and the help text echoes.
+// Deriving it from CmuxWorkerPrefix keeps the PRINTED value equal to what
+// CmuxWorkerID() computes for the same surface id (the tripwire proves it).
+const CmuxSurfaceExport = CmuxWorkerPrefix + "$CMUX_SURFACE_ID"
+
+// CmuxShellLine is the guarded shell-profile line `bp cmux install` prints: it
+// exports the SAME value CmuxWorkerID() derives at tier 2, guarded on
+// CMUX_SURFACE_ID so a non-cmux shell never exports a broken/empty worker id
+// (outside cmux, CmuxWorkerID falls through to tui-<hostname>).
+func CmuxShellLine() string {
+	return "# Barkpark: one worker id per cmux pane, derived from the durable surface id.\n" +
+		`[ -n "$CMUX_SURFACE_ID" ] && export BARKPARK_WORKER_ID="` + CmuxSurfaceExport + `"`
+}
+
 // CmuxWorkerID derives the task-claim worker id for a cmux pane. The PANE owns
 // the task, not the individual agent, so the id is keyed on the durable,
 // pane-unique CMUX_SURFACE_ID — invariant for the pane's life and shared by
@@ -38,10 +61,10 @@ func CmuxWorkerID() string {
 		return v
 	}
 	if s := os.Getenv("CMUX_SURFACE_ID"); s != "" {
-		return "cmux-" + s
+		return CmuxWorkerPrefix + s
 	}
 	if w := os.Getenv("CMUX_WORKSPACE_ID"); w != "" {
-		return "cmux-" + w
+		return CmuxWorkerPrefix + w
 	}
 	return ResolveWorker()
 }

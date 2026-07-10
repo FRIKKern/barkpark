@@ -17,7 +17,9 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -91,7 +93,20 @@ func runCmuxStatus(out *writer, g globals, ctx manifest.Context, args []string) 
 		InCmux:    surface != "",
 	}
 
+	// A dead bridge leaves a last-error breadcrumb; surface it (silent when none).
+	// Read on worker alone so a claim that never landed (task set, claim failed)
+	// still shows its error.
+	if bc, ok := readHookBreadcrumb(worker); ok {
+		st.HasLastError = true
+		st.LastErrorEvent = bc.Event
+		st.LastErrorMsg = bc.Error
+		st.LastErrorTask = bc.Task
+		st.LastErrorUnix = bc.Unix
+	}
+
 	// The lease block is read from the live task doc when this pane owns one.
+	// GetPerspectiveResult disambiguates a genuine 404 (task typo / wrong id)
+	// from an unreachable server — collapsing both would misdiagnose the bridge.
 	if task != "" {
 		client := apiclient.New(apiclient.Config{
 			BaseURL:     ctx.Server,
@@ -102,11 +117,14 @@ func runCmuxStatus(out *writer, g globals, ctx manifest.Context, args []string) 
 			Perspective: "drafts",
 			Timeout:     4 * time.Second,
 		})
-		doc, ok := client.GetPerspective("task", task, "drafts")
-		if !ok {
-			st.ServerUnreachable = true
-		} else {
+		doc, outcome := client.GetPerspectiveResult("task", task, "drafts")
+		switch outcome {
+		case apiclient.DocReadOK:
 			st.hydrateLease(doc)
+		case apiclient.DocReadNotFound:
+			st.TaskNotFound = true
+		default:
+			st.ServerUnreachable = true
 		}
 	}
 
@@ -126,6 +144,7 @@ type cmuxStatus struct {
 	Task              string
 	InCmux            bool
 	ServerUnreachable bool
+	TaskNotFound      bool // 404 on the task read — disambiguated from unreachable
 
 	// Lease block (populated from the task doc when readable).
 	HasClaim     bool
@@ -134,6 +153,13 @@ type cmuxStatus struct {
 	Lifecycle    string
 	ClaimedAtISO string
 	ExpiresISO   string
+
+	// Last swallowed-hook-failure breadcrumb (gated by HasLastError).
+	HasLastError   bool
+	LastErrorEvent string
+	LastErrorMsg   string
+	LastErrorTask  string
+	LastErrorUnix  int64
 }
 
 // hydrateLease reads the claim + lifecycle off the task envelope's flattened
@@ -168,29 +194,68 @@ func renderCmuxStatus(out *writer, st cmuxStatus) int {
 	}
 	if st.Task == "" {
 		out.outf("%-10s%s", "task", "(this pane owns no task — BARKPARK_TASK unset)")
+		renderLastError(out, st)
 		return exitOK
 	}
 	out.outf("%-10s%s", "task", st.Task)
 	switch {
 	case st.ServerUnreachable:
 		out.outf("%-10s%s", "claim", "(server unreachable — cannot read lease)")
+	case st.TaskNotFound:
+		out.outf("%-10s%s", "claim", "(task not found — no document with this id)")
 	case st.HasClaim:
-		expires := dashIfEmpty(st.ExpiresISO)
-		if left, ok := timeLeft(st.ExpiresISO); ok {
-			expires = st.ExpiresISO + " (" + left + " left)"
-		}
-		out.outf("%-10sheld by %s · epoch %d · claimed %s · expires %s",
-			"claim", dashIfEmpty(st.ClaimWorker), st.ClaimEpoch, dashIfEmpty(st.ClaimedAtISO), expires)
+		out.outf("%-10s%s", "claim", st.claimHealth())
 	default:
 		out.outf("%-10s%s", "claim", "(no live claim on this task)")
 	}
 	if st.Lifecycle != "" {
 		out.outf("%-10s%s", "lifecycle", st.Lifecycle)
 	}
+	renderLastError(out, st)
 	return exitOK
 }
 
+// renderLastError prints the last swallowed-hook-failure breadcrumb, silent when
+// none exists — the one line that makes a dead bridge diagnosable.
+func renderLastError(out *writer, st cmuxStatus) {
+	if !st.HasLastError {
+		return
+	}
+	suffix := ""
+	if st.LastErrorUnix > 0 {
+		suffix = " (" + humanAgo(st.LastErrorUnix) + " ago)"
+	}
+	event := st.LastErrorEvent
+	if event == "" {
+		event = "hook"
+	}
+	out.outf("%-10s%s: %s%s", "last-err", event, st.LastErrorMsg, suffix)
+}
+
+// claimHealth renders the live-lease line from claim.ts_iso + the configured
+// lease TTL. Remaining is APPROXIMATE — the client sees neither the server clock
+// nor its exact TTL config, only the documented default (2700s) or the
+// BARKPARK_TASK_LEASE_TTL_SECONDS override — so it is marked with ~ and "approx".
+// The old expired_at-keyed countdown is gone: the sweeper writes expired_at ONLY
+// when it reaps a dead lease, so a live claim never carried one to count down.
+func (st cmuxStatus) claimHealth() string {
+	base := fmt.Sprintf("held by %s · epoch %d", dashIfEmpty(st.ClaimWorker), st.ClaimEpoch)
+	age, ok := ageSince(st.ClaimedAtISO)
+	if !ok {
+		return base + " · claimed —"
+	}
+	ttl := time.Duration(leaseTTLSeconds()) * time.Second
+	remain := (ttl - age).Round(time.Second)
+	if remain > 0 {
+		return fmt.Sprintf("%s · claimed %s ago · ~%s left (approx · ttl %s)",
+			base, age.Round(time.Second), remain, ttl)
+	}
+	return fmt.Sprintf("%s · claimed %s ago · lease likely expired (past ~%s ttl)",
+		base, age.Round(time.Second), ttl)
+}
+
 func emitCmuxStatusJSON(out *writer, st cmuxStatus) int {
+	ttl := leaseTTLSeconds()
 	payload := map[string]any{
 		"ok":                 true,
 		"worker":             st.Worker,
@@ -201,12 +266,32 @@ func emitCmuxStatusJSON(out *writer, st cmuxStatus) int {
 		"panel":              st.Panel,
 		"task":               st.Task,
 		"server_unreachable": st.ServerUnreachable,
+		"task_not_found":     st.TaskNotFound,
 		"has_claim":          st.HasClaim,
 		"claim_worker":       st.ClaimWorker,
 		"claim_epoch":        st.ClaimEpoch,
 		"claimed_at":         st.ClaimedAtISO,
 		"expires_at":         st.ExpiresISO,
 		"lifecycle":          st.Lifecycle,
+		"lease_ttl_seconds":  ttl,
+	}
+	// Honest lease health from ts_iso + the TTL default (approximate; see
+	// claimHealth). Emitted only when the claim timestamp is parseable.
+	if age, ok := ageSince(st.ClaimedAtISO); ok {
+		payload["claimed_age_seconds"] = int(age.Seconds())
+		payload["approx_remaining_seconds"] = ttl - int(age.Seconds())
+	}
+	if st.HasLastError {
+		le := map[string]any{
+			"event": st.LastErrorEvent,
+			"error": st.LastErrorMsg,
+			"task":  st.LastErrorTask,
+			"unix":  st.LastErrorUnix,
+		}
+		if st.LastErrorUnix > 0 {
+			le["age_seconds"] = int(time.Since(time.Unix(st.LastErrorUnix, 0)).Seconds())
+		}
+		payload["last_error"] = le
 	}
 	if out.output == "yaml" {
 		out.renderYAML(payload)
@@ -216,21 +301,43 @@ func emitCmuxStatusJSON(out *writer, st cmuxStatus) int {
 	return exitOK
 }
 
-// timeLeft renders the human "2m41s" remaining until an RFC3339 expiry, false
-// when the timestamp is empty/unparseable or already past.
-func timeLeft(expiresISO string) (string, bool) {
-	if expiresISO == "" {
-		return "", false
+// leaseTTLSeconds is the server lease TTL the client assumes for the approximate
+// remaining-lease display: the BARKPARK_TASK_LEASE_TTL_SECONDS override when set
+// to a positive integer, else the documented server default of 2700s
+// (config.exs :task_lease_ttl_seconds; TtlSweeper @default_ttl_seconds).
+func leaseTTLSeconds() int {
+	if v := strings.TrimSpace(os.Getenv("BARKPARK_TASK_LEASE_TTL_SECONDS")); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
 	}
-	t, err := time.Parse(time.RFC3339, expiresISO)
+	return 2700
+}
+
+// ageSince returns the elapsed time since an RFC3339 timestamp (clamped at 0 for
+// a future stamp), false when empty or unparseable.
+func ageSince(iso string) (time.Duration, bool) {
+	if iso == "" {
+		return 0, false
+	}
+	t, err := time.Parse(time.RFC3339, iso)
 	if err != nil {
-		return "", false
+		return 0, false
 	}
-	d := time.Until(t)
-	if d <= 0 {
-		return "", false
+	d := time.Since(t)
+	if d < 0 {
+		d = 0
 	}
-	return d.Round(time.Second).String(), true
+	return d, true
+}
+
+// humanAgo renders the age of a unix timestamp as "2m41s" (clamped at 0).
+func humanAgo(unix int64) string {
+	d := time.Since(time.Unix(unix, 0))
+	if d < 0 {
+		d = 0
+	}
+	return d.Round(time.Second).String()
 }
 
 func dashIfEmpty(s string) string {
@@ -255,7 +362,7 @@ func printCmuxHelp(out *writer) {
 	out.outf("  install        print the settings.json hook block + worker-id shell line")
 	out.outf("  status         this pane's worker id, owned task, and lease state")
 	out.outf("")
-	out.outf("Worker id is `cmux-$CMUX_SURFACE_ID` (pane-stable), overridable by")
+	out.outf("Worker id is `%s` (pane-stable), overridable by BARKPARK_WORKER_ID.", taskboard.CmuxSurfaceExport)
 	out.outf("BARKPARK_TASK names the task a pane owns. Run `bp cmux install` to wire it up.")
 }
 
