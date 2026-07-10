@@ -51,7 +51,8 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     |> Repo.update!()
   end
 
-  defp set_admins(emails), do: Application.put_env(:barkpark_cloud, :platform_admin_emails, emails)
+  defp set_admins(emails),
+    do: Application.put_env(:barkpark_cloud, :platform_admin_emails, emails)
 
   ## 1. Cron wiring — scheduled daily, unique-guarded, on the maintenance queue
 
@@ -133,16 +134,20 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert body =~
              "- Acme (acme): v1.2.0 -> v1.10.0 | state: behind | pinned=v1.2.0, paused | checked 2026-07-10 05:17 UTC"
 
-    assert body =~ "- Beta (beta): v1.10.0 -> v1.10.0 | state: current | checked 2026-07-10 05:17 UTC"
+    assert body =~
+             "- Beta (beta): v1.10.0 -> v1.10.0 | state: current | checked 2026-07-10 05:17 UTC"
 
     # autoupdate-off flag + a never-checked instance render honestly.
-    assert body =~ "- Gamma (gamma): v1.9.0 -> v1.9.0 | state: behind | autoupdate off | checked never"
+    assert body =~
+             "- Gamma (gamma): v1.9.0 -> v1.9.0 | state: behind | autoupdate off | checked never"
   end
 
   test "an empty fleet renders a clear no-instances digest without crashing" do
     summary = DigestEmail.summary([])
     assert summary.total == 0
-    assert DigestEmail.subject(summary) == "Barkpark fleet digest — 0 current / 0 behind / 0 paused"
+
+    assert DigestEmail.subject(summary) ==
+             "Barkpark fleet digest — 0 current / 0 behind / 0 paused"
 
     body = DigestEmail.body(summary)
     assert body =~ "Fleet: 0 instances."
@@ -185,7 +190,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   test "a configured email with no registered account is dropped, never mailed" do
     admin = user("op-#{System.unique_integer([:positive])}@example.com")
     t = team(admin)
-    _bp = instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "current"})
+
+    _bp =
+      instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "current"})
 
     # Real admin + a ghost address that was never registered.
     set_admins([admin.email, "ghost@example.com"])
@@ -200,7 +207,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   test "zero configured admins is a no-op: no email sent, worker still :ok" do
     admin = user("nobody-#{System.unique_integer([:positive])}@example.com")
     t = team(admin)
-    _bp = instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "behind"})
+
+    _bp =
+      instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{update_state: "behind"})
 
     set_admins([])
 

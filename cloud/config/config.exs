@@ -251,7 +251,8 @@ config :barkpark_cloud, BarkparkCloud.Notifications,
 # operator names the admin account(s) `mix barkpark_cloud.create_admin` minted
 # here; each entry is resolved to a REGISTERED user before it is ever mailed. Empty
 # by default → the digest worker is a logged no-op until an operator opts in.
-# runtime.exs may override from PLATFORM_ADMIN_EMAILS in prod.
+# runtime.exs overrides from PLATFORM_ADMIN_EMAILS (comma-separated) in prod;
+# unset/blank there keeps this honest [] no-op.
 config :barkpark_cloud, :platform_admin_emails, []
 
 # No HTTP-client dep for the SMTP/Local/Test adapters — only a hosted-API adapter
