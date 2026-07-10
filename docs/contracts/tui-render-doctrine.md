@@ -26,8 +26,9 @@ an executable check; every new block is held to it, at the golden widths.
 ## Encoding rules
 
 - **Heat = dual-encode + quantile.** The shade-ladder glyph (`·░▒▓█`) carries the
-  intensity at EVERY profile; a truecolor foreground is layered on top at
-  `Profile==TrueColor` only. Stripping the color still leaves the ladder. Bin by
+  intensity at EVERY profile; the `GenHeatRamp` foreground is layered on top at
+  `Profile>=ANSI256` (lipgloss degrades the hex below TrueColor; NoColor/ANSI16
+  emit the glyph alone). Stripping the color still leaves the ladder. Bin by
   QUANTILE, not linear (one spike otherwise flattens months into a single tone).
   **Max 4 ramp levels** above zero — the eye cannot rank more in a grid.
 - **Zero is the dim MIDDLE DOT `·`, never the lower-one-eighth block `▁`.** A
