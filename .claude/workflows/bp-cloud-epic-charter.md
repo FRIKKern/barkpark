@@ -203,3 +203,108 @@ snapshot demo into a live /usage screen and unlocks live data for tree + roadmap
 golden-helper dedup (row 13 remainder) as a cheap hygiene rider on whichever slice next touches
 the test files. After wasm-proof + resolver, this epic is at its natural close — judge whether
 a slate-3 exists or the epic task closes.
+
+---
+
+# Epic charter — CMUX × Barkpark bridge (epic `cmux-bridge-goal`)
+
+> SLOT NOTE (reviewer, 2026-07-10): the slate-2 charter above is a CLOSED epic's memory
+> (its wave-4 log records "epic complete"). The cmux-bridge decide phase filed and
+> perfected the five slice tasks in the bp ledger (children of `cmux-bridge-goal`) but
+> never rotated a charter document into this slot — the ratified decisions live in the
+> slice-task briefs (e.g. "charter D4: the PANE owns the task"). This section records the
+> wave log so the slot stays the epic-cycle memory; a future wave's strategist should
+> rotate a full charter here (or ratify that the task briefs ARE the charter).
+
+## Wave log
+
+### Wave 2026-07-10 (pane-auto-owns hardening + writer, reviewer log)
+
+**Landed (5/5 slices green, reviewed; scratch merge of all five final branches in
+integration order, then origin/main (4dd25eeb) on top, was conflict-free — combined
+`go build ./... && go vet ./internal/... ./cmd/... && go test` over cli+taskboard+
+apiclient+cmd all green; gofmt clean apart from the two pre-existing byte-stable
+generated files tokens_gen.go / chrome_gen.go).** Merge in this order (the lead closes
+each task's "PR merged" criterion on merge; all five claim epochs = 1):
+
+1. **cb-hook-failsafe** → `loop-epic/complete-the-cardinal-fail-safe-proof-st-0`
+   (no reviewer changes). Test-only; product code provably untouched. The Stop-path
+   failure matrix (fault-injecting newHookMatrixServer: dead server, 409 /claim = no
+   theft, 409 /close = attempted+survived, fresh-rev 500 → plain-close fallback with
+   empty observed_rev, hung server <1s) + PreToolUse dead/hung + oversized-stdin rows;
+   every row asserts exit 0 AND empty stdout with a structural anti-vacuous probe.
+   Source guard TestHookSourceNeverExitsOrWritesStdout bans os.Exit(/fmt.Print/os.Stdout
+   /builtin print* in cmux_hook.go — reviewer re-probed the mutation (os.Exit reds it).
+2. **cb-worker-id-unify** → `loop-epic/one-worker-id-honored-everywhere-the-int-1`
+   (no reviewer changes). The self-fence fix: board claim 'c'/close 'x' (program.go)
+   and the desk TUI workerIdentity() now derive via taskboard.CmuxWorkerID(); after
+   this, ResolveWorker()'s only non-test caller is CmuxWorkerID tier-4 — the unification
+   is total. Protective tests pin the fence-prone combination (CMUX_SURFACE_ID set,
+   BARKPARK_WORKER_ID unset; reviewer re-probed: reverting a site reds them) and
+   regression-pin tui-<hostname> outside cmux. SEMANTIC CHANGE (ratified "the pane owns
+   the task"): a human on the interactive board inside a cmux pane now claims as
+   cmux-<surface>, not tui-<host>.
+3. **cb-shellline-tripwire** → `loop-epic/the-shell-line-can-never-drift-from-cmux-2-r`
+   (**merge the -r branch**; one reviewer fix). One exported source of truth
+   (CmuxWorkerPrefix / CmuxSurfaceExport / CmuxShellLine() in taskboard/cmux.go) feeds
+   tier-2/3, the install shell-line, and the help echoes; the tripwire PARSES the
+   emitted export line and equates it with CmuxWorkerID() — never re-pins the literal.
+   Reviewer fix (828b1f39): the last residual hardcoded `cmux-$CMUX_SURFACE_ID` echo in
+   `bp cmux` help (cmux_cmd.go, an echo site the brief listed) now derives from the
+   constant, and the pre-existing truncated help sentence ("overridable by" dangling
+   into the BARKPARK_TASK line) is repaired. Zero drift literals remain repo-wide.
+4. **cb-hook-breadcrumb** → `loop-epic/a-dead-bridge-is-diagnosable-in-one-comm-3-r`
+   (**merge the -r branch**; carries two reviewer commits + this log). Fail-safe is no
+   longer fail-invisible: every swallowed hook failure drops a lasterr-<sha1(worker)>
+   .json breadcrumb beside the renew stamp (best-effort, panic-guarded, never stdout/
+   exit-code); healthy claim/renew/close CLEARS it, so presence = "the most recent hook
+   action failed". `bp cmux status` surfaces it (text + last_error in -o json), splits
+   task-not-found from server-unreachable via the new apiclient.GetPerspectiveResult
+   (additive; GetPerspective delegates, behaviour-identical), and replaces the
+   post-mortem expired_at countdown with honest ts_iso age + ~remaining from
+   BARKPARK_TASK_LEASE_TTL_SECONDS (default 2700s, marked approximate); the false 300s
+   TTL comments are fixed. Reviewer fix (f77f3012): the top-level recover is armed
+   BEFORE any derivation, so no statement in the hook entrypoint runs unrecovered.
+   Reviewer merge (a1966226): pre-resolved the wave's ONLY textual conflict
+   (cmux_cmd_test.go — slice 3's tripwire tests inserted where this slice rewrote the
+   adjacent status-test comment; both kept) by merging the slice-3 -r branch in, so the
+   lead's integration is conflict-free in the order above. NOTE for the lead: this
+   slice touches internal/apiclient/client.go (outside its FILES list, justified — the
+   status code lives only in apiclient; additive, all apiclient tests green).
+5. **cb-install-merge** → `loop-epic/bp-cmux-install-merge-the-additive-setti-4`
+   (no reviewer changes). `bp cmux install --merge [--yes]`: additive settings.json
+   writer — unknown top-level keys carried as RawMessage, foreign hooks never removed/
+   reordered, dedup by exact command string, LCS line diff + --yes gate, timestamped
+   .bak before overwrite, byte-identical second run reported as a no-op, malformed JSON
+   → print-only fallback exit 0, missing file = first-install create. 8 tests incl.
+   foreign-hook preservation, idempotency, manual-paste dedup, and a HOME-seamed
+   dispatch test (never touches a real ~/.claude). Known, accepted: MarshalIndent
+   normalizes formatting of foreign keys' surroundings on first run (values byte-
+   preserved) and backups use 0o644 rather than mirroring the original mode.
+
+**On merge of cb-hook-breadcrumb the lead also completes `cb-status-verb`:** its open
+criterion 1 (server-unreachable degradation line asserted) is proven by
+TestCmuxStatusServerUnreachable — flip it met with that evidence and close the task.
+
+**Ledger state:** five wave tasks in_progress, epoch 1, evidence stamped, ONLY the
+merge criterion open — honest, no fixes needed. Siblings cb-worker-id /
+cb-hook-entrypoint / cb-install-print / cb-dispatch-verb were evidence-closed by the
+decide phase as shipped-at-HEAD (bridge v1 c34774d5) — verified honest. cb-docs-card
+(0/3) and cb-next-frontier-claim (design-only) untouched, correctly open.
+
+**Debt / next-wave fodder:**
+- NO live-terminal E2E of the full round-trip (real cmux pane: hook claims →
+  board close as the same worker → no 409; install --merge diff against a real
+  ~/.claude/settings.json) — every slice is unit-tested only, all builders flagged it.
+- GetPerspectiveResult reports 401/403 as "server unreachable" — conservative but a
+  wrong-token pane reads as a dead server; a future auth-aware outcome would help.
+- The breadcrumb is current-health only (cleared on recovery) — intermittent failures
+  leave no history beyond BP_CMUX_DEBUG stderr; acknowledged tradeoff.
+- The charter slot rotation for this epic is still owed (see SLOT NOTE).
+
+**Next wave should take:** (1) `cb-docs-card` — the bridge is now feature-complete
+enough to document (CLI card anchors + a short runbook: install --merge, status,
+breadcrumb diagnosis, the pane-owns-the-task semantic); (2) the live-terminal E2E
+witness above, as a criterion-bearing task; (3) judge `cb-next-frontier-claim`
+(design-only, claim-before-spawn dispatch) — adopt or park; then the epic anchor
+`cmux-bridge-goal` is at its natural close.
