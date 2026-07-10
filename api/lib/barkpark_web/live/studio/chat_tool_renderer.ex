@@ -311,7 +311,11 @@ defmodule BarkparkWeb.Studio.ChatToolRenderer do
 
   # ═══ Task / agent spawns (charter D40) ══════════════════════════════════════
 
-  @spawn_names ~w(Task Agent)
+  # The spawn tool NAMES are host-binary divergence knowledge — sourced from the
+  # ONE capability matrix (charter D66) rather than duplicated as a literal here.
+  # Compile-time read of a pure constructor: byte-identical to the old
+  # `~w(Task Agent)` (the no-tax golden proves the render never moved).
+  @spawn_names Barkpark.StudioChat.Runtime.Capabilities.claude().agent_spawn_names
 
   @doc """
   True when a tool_use is a sub-agent spawn. Tolerant by design: the tool name

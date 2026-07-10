@@ -1,0 +1,2 @@
+{"role":"user","source_markdown":"Plan the needs-you inbox strip for the chat workday shell."}
+{"role":"assistant","source_markdown":"## Needs-you inbox\n\nI'll wire a sidebar strip that surfaces the sessions waiting on **you** — pending approvals and open questions — plus a *finished-while-away* lane. Deep links land you on the exact card.\n\n- pending approval → the D31 card\n- open question → the AskUserQuestion form\n- finished while away → the last result"}
