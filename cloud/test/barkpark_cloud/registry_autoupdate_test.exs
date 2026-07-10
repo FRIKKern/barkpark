@@ -134,20 +134,26 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
       assert paused.autoupdate_paused == true
     end
 
-    test "channel defaults to prod and set_autoupdate accepts staging" do
+    test "channel defaults to prod and set_autoupdate IGNORES it (operator lever)" do
       bp = behind_barkpark()
       assert bp.channel == "prod"
 
+      # the team-facing setter can NOT move a box between rollout channels —
+      # a tenant staging box would close the fleet-wide canary gate
       {:ok, updated} = Registry.set_autoupdate(bp, %{channel: "staging"})
-      assert updated.channel == "staging"
+      assert updated.channel == "prod"
     end
 
-    test "set_autoupdate rejects a channel that is not prod|staging (422 upstream)" do
+    test "set_channel/2 (operator) accepts staging, rejects anything else" do
       bp = behind_barkpark()
-      assert {:error, %Ecto.Changeset{} = cs} = Registry.set_autoupdate(bp, %{channel: "canary"})
+
+      {:ok, updated} = Registry.set_channel(bp, "staging")
+      assert updated.channel == "staging"
+
+      assert {:error, %Ecto.Changeset{} = cs} = Registry.set_channel(updated, "canary")
       assert %{channel: _} = errors_on(cs)
-      # the row is untouched
-      assert Registry.get_barkpark(bp.id).channel == "prod"
+      # the row is untouched by the rejected write
+      assert Registry.get_barkpark(bp.id).channel == "staging"
     end
   end
 

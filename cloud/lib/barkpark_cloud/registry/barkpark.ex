@@ -502,21 +502,37 @@ defmodule BarkparkCloud.Registry.Barkpark do
 
   @doc """
   Narrow changeset for the isu-w4 autoupdate POLICY — only the three team-facing
-  policy fields are castable (never the in-flight marker), so setting a policy can
-  never rename a Barkpark, reassign its Team, or spoof an in-flight rollout. A
-  blank `pinned_release` is normalized to nil (unpinned) so "" and NULL can't
-  diverge. `channel` (isu-w5.2) is validated to exactly prod|staging — anything
-  else invalidates the changeset (the route maps that to 422). Written only by
-  `Registry.set_autoupdate/2`.
+  policy fields are castable (never the in-flight marker, never `channel`), so
+  setting a policy can never rename a Barkpark, reassign its Team, spoof an
+  in-flight rollout, or move the box between rollout channels. A blank
+  `pinned_release` is normalized to nil (unpinned) so "" and NULL can't diverge.
+  Written only by `Registry.set_autoupdate/2`.
   """
   def autoupdate_changeset(barkpark, attrs) do
     barkpark
-    |> cast(attrs, [:autoupdate_enabled, :autoupdate_paused, :pinned_release, :channel])
+    |> cast(attrs, [:autoupdate_enabled, :autoupdate_paused, :pinned_release])
     |> update_change(:pinned_release, fn
       v when is_binary(v) -> if String.trim(v) == "", do: nil, else: String.trim(v)
       v -> v
     end)
     |> validate_length(:pinned_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the rollout CHANNEL (isu-w5.2) — a PLATFORM-OPERATOR
+  lever, deliberately NOT part of `autoupdate_changeset/2`. A staging box is
+  the fleet-wide canary: whoever can write `channel` can close
+  `Registry.staging_gate_open?/0` (register a staging box, leave it behind)
+  and brake EVERY prod-channel advancement, or jump the update queue — so the
+  write rides the worker-token surface, same posture as the halt/resume kill
+  switch. `channel` is validated to exactly prod|staging — anything else
+  invalidates the changeset (the route maps that to 422). Written only by
+  `Registry.set_channel/2`; tenants see it read-only in the fleet JSON and
+  the autoupdate PATCH echo.
+  """
+  def channel_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:channel])
     |> validate_inclusion(:channel, @channels)
   end
 

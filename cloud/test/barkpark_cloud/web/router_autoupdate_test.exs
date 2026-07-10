@@ -141,26 +141,77 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     assert conn.status == 401
   end
 
-  # ── isu-w5.2: channel validation on PATCH ─────────────────────────────────
-  test "PATCH accepts channel=staging → 200 and echoes it" do
+  # ── isu-w5.2 (review): channel is an OPERATOR lever — never tenant-writable ─
+  # A tenant-writable channel would let any team admin park a behind staging box
+  # (or pause one) and close the canary gate (staging_gate_open?/0) for the
+  # WHOLE fleet — or jump the update queue ahead of it. The tenant PATCH ignores
+  # the key; the write lives on the worker-token surface tested below.
+  test "tenant PATCH ignores channel — echoed read-only, row untouched" do
     {user, team} = user_with_team()
     bp = barkpark_fixture(team)
     {:ok, token} = Accounts.create_user_session_token(user)
 
     conn = patch_autoupdate(bp.id, token, %{"channel" => "staging"})
+    # 200 per PATCH semantics (uncastable keys are ignored), but the channel
+    # did NOT move — the echo stays honest to the row
     assert conn.status == 200
-    assert json_body(conn)["autoupdate"]["channel"] == "staging"
-    assert Registry.get_barkpark(bp.id).channel == "staging"
+    assert json_body(conn)["autoupdate"]["channel"] == "prod"
+    assert Registry.get_barkpark(bp.id).channel == "prod"
   end
 
-  test "PATCH rejects an unknown channel → 422, row unchanged" do
-    {user, team} = user_with_team()
-    bp = barkpark_fixture(team)
-    {:ok, token} = Accounts.create_user_session_token(user)
+  describe "PATCH /v1/admin/barkparks/:id/channel (operator channel lever)" do
+    test "worker token assigns staging → 200, row updated" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
 
-    conn = patch_autoupdate(bp.id, token, %{"channel" => "canary"})
-    assert conn.status == 422
-    assert Registry.get_barkpark(bp.id).channel == "prod"
+      conn =
+        call(
+          :patch,
+          "/v1/admin/barkparks/#{bp.id}/channel",
+          %{"channel" => "staging"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn) == %{"ok" => true, "id" => bp.id, "channel" => "staging"}
+      assert Registry.get_barkpark(bp.id).channel == "staging"
+    end
+
+    test "rejects an unknown channel → 422, row unchanged" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      conn =
+        call(
+          :patch,
+          "/v1/admin/barkparks/#{bp.id}/channel",
+          %{"channel" => "canary"},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert Registry.get_barkpark(bp.id).channel == "prod"
+    end
+
+    test "fails CLOSED: no token → 401; a team-admin session token → 401" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      path = "/v1/admin/barkparks/#{bp.id}/channel"
+      assert call(:patch, path, %{"channel" => "staging"}, nil).status == 401
+      assert call(:patch, path, %{"channel" => "staging"}, token).status == 401
+      assert Registry.get_barkpark(bp.id).channel == "prod"
+    end
+
+    test "unknown / malformed id → 404" do
+      body = %{"channel" => "staging"}
+      missing = "/v1/admin/barkparks/#{Ecto.UUID.generate()}/channel"
+      assert call(:patch, missing, body, @worker_token).status == 404
+
+      assert call(:patch, "/v1/admin/barkparks/not-a-uuid/channel", body, @worker_token).status ==
+               404
+    end
   end
 
   # ── isu-w5.2: pin honesty on the console Update relay ──────────────────────

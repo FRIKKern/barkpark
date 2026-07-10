@@ -2737,6 +2737,17 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Set an instance's rollout CHANNEL ("prod" | "staging") — a PLATFORM-OPERATOR
+  action (isu-w5.2), never team-facing: a tenant who could self-assign staging
+  (then pause or sit behind) would hold `staging_gate_open?/0` closed and brake
+  every prod-channel advancement fleet-wide. Narrow — can touch nothing else.
+  """
+  @spec set_channel(Barkpark.t(), binary()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def set_channel(%Barkpark{} = bp, channel) do
+    bp |> Barkpark.channel_changeset(%{channel: channel}) |> Repo.update()
+  end
+
+  @doc """
   Contain an instance: pause its autoupdate (e.g. the rollout worker gave up on
   a wave that never settled). Idempotent; never raises on a normal row.
   """

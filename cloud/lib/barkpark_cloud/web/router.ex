@@ -1876,13 +1876,17 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # PATCH /v1/barkparks/:id/autoupdate {autoupdate_enabled?, autoupdate_paused?,
-  # pinned_release?} → 200 {ok, autoupdate: {enabled, paused, pinned_release}} —
-  # set the isu-w4 fleet-autoupdate POLICY (the opt-out / pause / pin escape
-  # hatch). Managed instances auto-ride blessed releases by default (opt-out);
-  # this is how a team disables, temporarily pauses, or pins one. Only the three
-  # team-facing policy fields are accepted — Registry.set_autoupdate → the narrow
-  # autoupdate_changeset can touch nothing else (never the in-flight marker,
-  # never identity). PATCH: absent keys are left unchanged (cast ignores them).
+  # pinned_release?} → 200 {ok, autoupdate: {enabled, paused, pinned_release,
+  # channel}} — set the isu-w4 fleet-autoupdate POLICY (the opt-out / pause /
+  # pin escape hatch). Managed instances auto-ride blessed releases by default
+  # (opt-out); this is how a team disables, temporarily pauses, or pins one.
+  # Only the three team-facing policy fields are accepted — Registry.set_autoupdate
+  # → the narrow autoupdate_changeset can touch nothing else (never the in-flight
+  # marker, never identity, and NEVER `channel`: the rollout channel is a
+  # platform-operator lever — a tenant-writable channel would let any team admin
+  # park a behind staging box and close the canary gate for the WHOLE fleet, so
+  # a `channel` key in the body is ignored and only echoed read-only). PATCH:
+  # absent keys are left unchanged (cast ignores them).
   #
   # ADMIN-gated: a policy that governs unattended production deploys is
   # privileged, like self-update above — require_primary_team_admin halts 401 /
@@ -1969,6 +1973,36 @@ defmodule BarkparkCloud.Web.Router do
     else
       {:ok, _} = Registry.set_autoupdate_halted(false)
       json(conn, 200, %{halted: false})
+    end
+  end
+
+  # PATCH /v1/admin/barkparks/:id/channel {channel: "prod"|"staging"} → 200
+  # {ok, id, channel} — assign an instance's rollout channel (isu-w5.2).
+  # PLATFORM-OPERATOR gated (`require_worker`), cross-team by design, like the
+  # kill switch above: a staging box IS the fleet-wide canary gate, so channel
+  # assignment is an operator lever — never the tenant autoupdate PATCH, where
+  # channel is echoed read-only. 422 on anything but prod|staging; unknown /
+  # malformed id → 404. Fails CLOSED: unset/blank/wrong token 401s.
+  patch "/v1/admin/barkparks/:id/channel" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.get_barkpark(conn.path_params["id"]) do
+        %Barkpark{} = bp ->
+          case Registry.set_channel(bp, conn.body_params["channel"]) do
+            {:ok, updated} ->
+              push_event(updated.team_id, "fleet")
+              json(conn, 200, %{ok: true, id: updated.id, channel: updated.channel})
+
+            {:error, %Ecto.Changeset{}} ->
+              json(conn, 422, %{error: %{code: "invalid"}})
+          end
+
+        nil ->
+          json(conn, 404, %{error: "not_found"})
+      end
     end
   end
 
