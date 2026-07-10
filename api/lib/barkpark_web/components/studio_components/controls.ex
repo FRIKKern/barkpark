@@ -30,6 +30,7 @@ defmodule BarkparkWeb.StudioComponents.Controls do
     * `bp_select/1` — a themed `select.form-input` (no native dropdown chrome).
     * `bp_switch/1` — the `.form-switch` track+thumb over a real checkbox.
     * `bp_checkbox/1` — a `.form-checkbox` labeled checkbox.
+    * `bp_radio/1` — a `.form-radio` labeled radio for one-of-N choices.
   """
   use Phoenix.Component
 
@@ -248,6 +249,38 @@ defmodule BarkparkWeb.StudioComponents.Controls do
         {@rest}
       />
       <span>{@label}</span>
+    </label>
+    """
+  end
+
+  @doc """
+  A tokenized labeled radio (`.form-radio`) — the `bp_checkbox` sibling for
+  one-of-N choices. Give sibling radios the same `name` so the browser groups
+  them; the real `<input type="radio">` keeps form semantics, keyboard arrows
+  and a11y. The label rides the `inner_block` slot so callers write the choice
+  text (or richer markup) inline:
+
+      <.bp_radio name="duration" value="1d" checked>1 day</.bp_radio>
+  """
+  attr :name, :string, default: nil
+  attr :checked, :boolean, default: false
+  attr :id, :string, default: nil
+  attr :value, :string, default: nil
+  attr :rest, :global, include: ~w(form required)
+  slot :inner_block, required: true
+
+  def bp_radio(assigns) do
+    ~H"""
+    <label class="form-radio">
+      <input
+        type="radio"
+        name={@name}
+        id={@id}
+        value={@value}
+        checked={@checked}
+        {@rest}
+      />
+      <span>{render_slot(@inner_block)}</span>
     </label>
     """
   end

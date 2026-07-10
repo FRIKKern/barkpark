@@ -652,6 +652,12 @@
       width: 16px; height: 16px; accent-color: var(--primary);
       border-radius: 4px; cursor: pointer;
     }
+    /* Radio — the .form-checkbox sibling for one-of-N choices. Same 16px accent
+       control; the browser draws the circle, accent-color themes it. */
+    .form-radio { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .form-radio input[type="radio"] {
+      width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer;
+    }
     /* Boolean fields render as a labeled switch (Sanity-style), not a bare
        checkbox. The real checkbox stays in the DOM (form semantics, a11y,
        keyboard toggle) but is visually replaced by the track + thumb; the
