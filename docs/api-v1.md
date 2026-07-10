@@ -166,9 +166,9 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 |------|-------------|---------|
 | `not_found` | 404 | Document or schema not found, or unknown `:workspace_slug` |
 | `unauthorized` | 401 | Missing or invalid token |
-| `forbidden` | 403 | Token lacks permission, isn't a member of the resolved workspace, or is read-only on a write endpoint |
+| `forbidden` | 403 | Token lacks permission / not a member / read-only on write |
 | `schema_unknown` | 404 | No schema registered for this type |
-| `precondition_failed` | 412 | `ifRevisionID` didn't match the document's current `_rev`; `details.expected`/`.actual` carry both |
+| `precondition_failed` | 412 | `ifRevisionID` mismatch; `details.expected`/`.actual` |
 | `invalid_filter` | 400 | Unknown filter operator (fail-closed; ops in §4) |
 | `conflict` | 409 | Document already exists (on `create`) |
 | `malformed` | 400 | Malformed body or missing `mutations` key |
@@ -176,7 +176,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 | `internal_error` | 500 | Unexpected server error |
 | `rate_limited` | 429 | Too many requests; retry after the `Retry-After` header value |
 
-Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer) · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (find-or-create gate; `details.similar`) · `schema_has_documents` 409 · `storage_unavailable` 503 / `unsupported_media_type` 422 / `payload_too_large` 413 (media).
+Additive: `halted` 409 (hook veto) · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (`details.similar`) · `schema_has_documents` 409 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413.
 
 Endpoint-specific (in the OpenAPI `Error.code` enum): ingest `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · grants/tokens `invalid_grant`/`unprocessable` · step-up `mfa_required`/`mfa_enrolment_required`. Single source `Content.Errors.known_codes/0`, contract-tested; ops endpoints (self-update, incidents, pulse, GitHub webhooks) are off-spec by design.
 
