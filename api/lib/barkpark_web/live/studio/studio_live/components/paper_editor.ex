@@ -216,9 +216,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <%!-- Phase-4 S2 (flag ON) — the continuous-canvas render. The free-block
               list was partitioned into maximal contiguous PROSE runs upstream
               (@segments). Each {:run, blocks} becomes ONE <bp-paper-canvas> in a
-              phx-update="ignore" wrapper KEYED BY THE RUN'S FIRST block id (a
-              stable run id), so the canvas survives re-renders in place and a
-              mid-edit re-partition only re-keys the affected run. The run's
+              phx-update="ignore" wrapper KEYED BY THE PAPER'S SLUG + THE RUN'S
+              ORDINAL (stable within a paper, unique across papers), so the
+              canvas survives re-renders in place, a mid-edit re-partition only
+              re-keys the affected run, and a paper→paper jump remounts fresh
+              instead of morphdom reusing the old paper's wrapper. The run's
               blocks ride a data-canvas-blocks attribute the BarkparkPaperCanvas
               hook reads into `el.blocks`. Each {:block, b} (a non-prose run
               boundary) renders via the UNCHANGED per-block widget below
@@ -229,6 +231,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= case item do %>
             <% {:seg, {:run, run_blocks, run_ordinal, locked_tail}} -> %>
               <.canvas_run
+                slug={@slug}
                 run_blocks={run_blocks}
                 run_ordinal={run_ordinal}
                 locked_tail={locked_tail}
@@ -576,15 +579,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   # Phase-4 S2 (flag ON): ONE <bp-paper-canvas> over a maximal prose run. The
-  # phx-update="ignore" wrapper is KEYED BY THE RUN'S ORDINAL (Bug #1a: a STABLE
-  # run id that survives a leading-block change, NOT the mutable first-block id) so
-  # LiveView never re-diffs the canvas's internal DOM (caret/selection preserved)
-  # and a leading-block delete keeps the run at the same ordinal → no remount. The
+  # phx-update="ignore" wrapper is KEYED BY THE PAPER'S SLUG + THE RUN'S ORDINAL
+  # (Bug #1a: the ordinal is a STABLE run id that survives a leading-block change,
+  # NOT the mutable first-block id; Bug #1c: the slug namespaces the id per paper —
+  # a bare ordinal collides across papers, and morphdom's global keyed-node reuse
+  # then TRANSPLANTS the old paper's ignore wrapper into the new paper's editor on
+  # a patch-navigation, leaving the previous paper's canvas on screen) so LiveView
+  # never re-diffs the canvas's internal DOM (caret/selection preserved), a
+  # leading-block delete keeps the run at the same ordinal → no remount, and a
+  # paper→paper jump changes every wrapper id → fresh mount → fresh seed. The
   # run's blocks ride `data-canvas-blocks` (Jason-encoded); the BarkparkPaperCanvas
   # hook reads it into `el.blocks` and forwards the canvas's bp-canvas-ops as a
   # `paper-ops` pushEvent. The <bp-paper-canvas> element + run-convert projector
   # already ship in the bundle (S0+S1) — this only mounts it. The matching echo in
-  # push_canvas_echo keys each run by the SAME ordinal so it routes to this wrapper.
+  # push_canvas_echo keys each run by the SAME slug+ordinal so it routes to this
+  # wrapper.
+  attr(:slug, :string, required: true)
   attr(:run_blocks, :list, required: true)
   attr(:run_ordinal, :integer, required: true)
   # pdd-t2: true when the block DIRECTLY AFTER this run is template-locked (the
@@ -611,7 +621,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:constraints, :string, default: nil)
 
   def canvas_run(assigns) do
-    assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.run_ordinal))
+    assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.slug, assigns.run_ordinal))
 
     ~H"""
     <div
