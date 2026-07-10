@@ -13,20 +13,19 @@ defmodule BarkparkWeb.Plugs.RequirePrincipalUser do
   `RequireUserSession` on the claim/mine routes ONLY — those routes now accept
   an owned token as a user identity, where a plain login gate could not.
   """
-  import Plug.Conn
-
   alias Barkpark.Accounts.User
 
   def init(opts), do: opts
 
   def call(%Plug.Conn{assigns: %{current_user: %User{}}} = conn, _opts), do: conn
 
+  # One shared emitter → the 401 carries request_id (+ hint) for log correlation.
   def call(conn, _opts) do
-    conn
-    |> put_status(401)
-    |> Phoenix.Controller.json(%{
-      error: %{code: "unauthorized", message: "a user identity is required (a login session or an owned token)"}
-    })
-    |> halt()
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      401,
+      "unauthorized",
+      "a user identity is required (a login session or an owned token)"
+    )
   end
 end

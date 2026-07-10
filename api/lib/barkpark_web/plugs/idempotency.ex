@@ -55,12 +55,7 @@ defmodule BarkparkWeb.Plugs.Idempotency do
   end
 
   defp unauthorized(conn) do
-    env = Errors.to_envelope({:error, :unauthorized}, conn)
-
-    conn
-    |> put_status(env.status)
-    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
-    |> halt()
+    BarkparkWeb.ErrorResponse.emit(conn, {:error, :unauthorized})
   end
 
   # A concurrent request already holds a fresh claim on this key. Return 409 so

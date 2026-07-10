@@ -84,10 +84,9 @@ defmodule BarkparkWeb.Plugs.RequireUserSession do
   defp unauthorized(conn),
     do: halt_json(conn, 401, "unauthorized", "a valid login session is required")
 
+  # One shared emitter → the 401/403 carries request_id (+ code-keyed hint) for
+  # log correlation; it was hand-built without request_id before.
   defp halt_json(conn, status, code, message) do
-    conn
-    |> put_status(status)
-    |> Phoenix.Controller.json(%{error: %{code: code, message: message}})
-    |> halt()
+    BarkparkWeb.ErrorResponse.emit_custom(conn, status, code, message)
   end
 end

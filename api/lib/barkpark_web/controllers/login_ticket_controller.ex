@@ -43,10 +43,6 @@ defmodule BarkparkWeb.LoginTicketController do
   end
 
   defp unauthorized(conn) do
-    env = Barkpark.Content.Errors.to_envelope({:error, :unauthorized}, conn)
-
-    conn
-    |> put_status(env.status)
-    |> json(%{error: Map.delete(env, :status)})
+    BarkparkWeb.ErrorResponse.emit(conn, {:error, :unauthorized})
   end
 end

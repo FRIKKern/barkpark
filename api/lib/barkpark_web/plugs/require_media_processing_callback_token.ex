@@ -21,12 +21,13 @@ defmodule BarkparkWeb.Plugs.RequireMediaProcessingCallbackToken do
     end
   end
 
+  # One shared emitter → the 401 carries request_id (+ hint) for log correlation.
   defp reject(conn) do
-    conn
-    |> put_status(:unauthorized)
-    |> Phoenix.Controller.json(%{
-      error: %{code: "unauthorized", message: "invalid media processing callback token"}
-    })
-    |> halt()
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :unauthorized,
+      "unauthorized",
+      "invalid media processing callback token"
+    )
   end
 end

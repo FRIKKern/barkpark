@@ -70,10 +70,14 @@ defmodule BarkparkWeb.Plugs.OptionalUserSession do
     if conn.method in @safe_methods or requested_with?(conn) do
       conn
     else
-      conn
-      |> put_status(403)
-      |> Phoenix.Controller.json(%{error: %{code: "csrf_required", message: "missing x-requested-with header"}})
-      |> halt()
+      # One shared emitter → the 403 carries request_id (+ hint); mirrors
+      # RequireUserSession's csrf_required exactly.
+      BarkparkWeb.ErrorResponse.emit_custom(
+        conn,
+        403,
+        "csrf_required",
+        "missing x-requested-with header"
+      )
     end
   end
 

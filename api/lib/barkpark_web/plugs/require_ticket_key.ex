@@ -34,21 +34,18 @@ defmodule BarkparkWeb.Plugs.RequireTicketKey do
       _ = Barkpark.Auth.touch_last_used(key)
       assign(conn, :ticket_key, key)
     else
+      # One shared emitter → the 403 now carries request_id (+ hint) too; it was
+      # the one hand-built branch that dropped it (the 401 already enveloped).
       {:error, :paused} ->
-        conn
-        |> put_status(:forbidden)
-        |> Phoenix.Controller.json(%{
-          error: %{code: "forbidden", message: "key paused — contact the operator"}
-        })
-        |> halt()
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          :forbidden,
+          "forbidden",
+          "key paused — contact the operator"
+        )
 
       _ ->
-        env = Barkpark.Content.Errors.to_envelope({:error, :unauthorized}, conn)
-
-        conn
-        |> put_status(env.status)
-        |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
-        |> halt()
+        BarkparkWeb.ErrorResponse.emit(conn, {:error, :unauthorized})
     end
   end
 end

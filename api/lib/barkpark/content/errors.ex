@@ -123,6 +123,23 @@ defmodule Barkpark.Content.Errors do
   def to_envelope(reason, conn) do
     reason
     |> build()
+    |> stamp(conn)
+  end
+
+  @doc """
+  Stamp the additive `hint` (code-keyed) and `request_id` onto an ALREADY-built
+  envelope map (`%{code, message, status, ...}`).
+
+  This is the ONE place `request_id` is resolved — from `Logger.metadata()`
+  (populated by `Plug.RequestId` at the endpoint, which runs BEFORE the router)
+  with an `x-request-id` response-header fallback. `to_envelope/2` and the
+  plug/inline emitters in `BarkparkWeb.ErrorResponse` both funnel through here,
+  so no error path (auth plug, parse-body rescue, controller) can silently drop
+  the id an operator greps the logs with.
+  """
+  @spec stamp(map(), Plug.Conn.t() | nil) :: map()
+  def stamp(env, conn) when is_map(env) do
+    env
     |> put_hint()
     |> put_request_id(conn)
   end

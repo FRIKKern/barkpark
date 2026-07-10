@@ -25,7 +25,6 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Content.Errors
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Tickets.Attachments
@@ -265,11 +264,11 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   # Reuse the canonical envelope (code/message/status/hint/request_id) for the
   # reasons Content.Errors already knows; build the ticket-tier-specific ones
   # (413 oversize, 422 mime/count, 400 no-file) inline in the same shape.
-  defp respond_error(conn, :not_found), do: enveloped(conn, {:error, :not_found}, 404)
-  defp respond_error(conn, :unauthorized), do: enveloped(conn, {:error, :unauthorized}, 401)
+  defp respond_error(conn, :not_found), do: enveloped(conn, {:error, :not_found})
+  defp respond_error(conn, :unauthorized), do: enveloped(conn, {:error, :unauthorized})
 
   defp respond_error(conn, :storage_unavailable),
-    do: enveloped(conn, {:error, :storage_unavailable}, 503)
+    do: enveloped(conn, {:error, :storage_unavailable})
 
   defp respond_error(conn, :too_large) do
     custom(conn, 413, "payload_too_large", "attachment exceeds the per-file size limit", %{
@@ -312,34 +311,13 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   end
 
   # Fallback: any unmapped reason is a server-side surprise, not a client 4xx.
-  defp respond_error(conn, _reason), do: enveloped(conn, {:error, :storage_unavailable}, 503)
+  defp respond_error(conn, _reason), do: enveloped(conn, {:error, :storage_unavailable})
 
-  defp enveloped(conn, error, status) do
-    env = Errors.to_envelope(error, conn)
+  # Both route through the ONE shared emitter → code + hint + request_id are
+  # stamped by Content.Errors. `custom/5`'s inline request_id fork (Logger-only,
+  # missing the x-request-id fallback) is retired here.
+  defp enveloped(conn, error), do: BarkparkWeb.ErrorResponse.emit(conn, error)
 
-    conn
-    |> put_status(status)
-    |> json(%{error: Map.delete(env, :status)})
-  end
-
-  defp custom(conn, status, code, message, details) do
-    env =
-      %{code: code, message: message}
-      |> maybe_put_details(details)
-      |> maybe_put_request_id()
-
-    conn
-    |> put_status(status)
-    |> json(%{error: env})
-  end
-
-  defp maybe_put_details(env, details) when details == %{}, do: env
-  defp maybe_put_details(env, details), do: Map.put(env, :details, details)
-
-  defp maybe_put_request_id(env) do
-    case Logger.metadata()[:request_id] do
-      id when is_binary(id) and id != "" -> Map.put(env, :request_id, id)
-      _ -> env
-    end
-  end
+  defp custom(conn, status, code, message, details),
+    do: BarkparkWeb.ErrorResponse.emit_custom(conn, status, code, message, details)
 end

@@ -96,11 +96,6 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
   end
 
   defp halt_with(conn, reason) do
-    env = Barkpark.Content.Errors.to_envelope(reason, conn)
-
-    conn
-    |> put_status(env.status)
-    |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
-    |> halt()
+    BarkparkWeb.ErrorResponse.emit(conn, reason)
   end
 end
