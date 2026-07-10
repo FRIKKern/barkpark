@@ -71,8 +71,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
     dataset = socket.assigns[:dataset] || Map.get(params, "dataset") || @default_dataset
 
     socket =
-      socket
-      |> assign(
+      assign(socket,
         page_title: "Tickets",
         nav_section: :tickets,
         dataset: dataset,
@@ -81,6 +80,9 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         keys: [],
         mint_result: nil,
         data_error: nil,
+        # An empty presenter so the dead render has a valid model without a DB
+        # touch (see the connected? guard below).
+        presenter: empty_model(),
         now: DateTime.utc_now(),
         # DOM-id versions: bumping one replaces the form node wholesale, which
         # is the only reliable way to clear user-typed input after a submit
@@ -88,7 +90,13 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         composer_rev: 0,
         mint_rev: 0
       )
-      |> load_inbox()
+
+    # NAMED COST (doctrine lever #2): the disconnected mount render is DISCARDED
+    # the instant the WebSocket connects and mount re-runs; this page is
+    # admin-gated (no crawler/unfurler), so running the inbox projection
+    # (`fetch_tickets` + `InboxPresenter.build`) on the dead render was pure
+    # waste (2× per open). Load the inbox ONLY on the live mount.
+    socket = if connected?(socket), do: load_inbox(socket), else: socket
 
     {:ok, socket}
   end

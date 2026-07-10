@@ -29,7 +29,21 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     # (?return_to=<canonical path>) survives for a back affordance. Sanitized
     # against open-redirect; nil when arrived at flat/directly.
     socket = assign(socket, return_to: BarkparkWeb.Studio.ReturnTo.sanitize(params["return_to"]))
-    {:ok, load(socket)}
+
+    # NAMED COST (doctrine lever #2): the disconnected mount render is DISCARDED
+    # the moment the WebSocket connects and mount re-runs. `load/1` fans out to
+    # `list_organizations` + per-org status (SSO/SAML/SCIM/member-count) +
+    # `Audit.recent(20)` — a heavy read. This portal is admin-gated (no crawler
+    # consumes the dead HTML), so run `load/1` ONLY on the live mount; the dead
+    # render carries empty placeholders (there is no handle_params here).
+    socket =
+      if connected?(socket) do
+        load(socket)
+      else
+        assign(socket, page_title: "Organization Admin", orgs: [], recent_audit: [], minted: %{})
+      end
+
+    {:ok, socket}
   end
 
   @impl true

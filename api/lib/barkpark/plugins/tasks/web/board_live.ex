@@ -194,15 +194,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
+    connected = connected?(socket)
+
+    if connected do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
       Process.send_after(self(), :refresh, @refresh_ms)
     end
 
+    # NAMED COST (doctrine lever #2, query-count): `Board.snapshot/1` is the
+    # heaviest read of the Studio set (load_task_docs + load_blocker_targets +
+    # a full task-table projection). The disconnected (dead) mount render is
+    # DISCARDED the instant the WebSocket connects and mount re-runs — and this
+    # page is admin-gated, so no crawler/unfurler ever consumes that HTML.
+    # Running the projection there was pure waste (2× per open). Guard it behind
+    # `connected?/1`: paint an empty board skeleton on the dead render (the pure,
+    # DB-free `Board.build([])`), and load the real snapshot ONCE, on connect.
+    board = if connected, do: Board.snapshot(dataset: @dataset), else: Board.build([])
+
     {:ok,
      socket
      |> assign(:dataset, @dataset)
-     |> assign(:board, Board.snapshot(dataset: @dataset))
+     |> assign(:loading, not connected)
+     |> assign(:board, board)
      |> assign(:last_change, nil)
      |> assign(:notice, nil)
      |> assign(:seen, MapSet.new())
@@ -219,13 +232,26 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # and on every chip/selector push_patch.
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply,
-     socket
-     |> assign(:group_by, parse_group(params["group"]))
-     |> assign(:filters, parse_filters(params))
-     |> assign_peek(params["task"])
-     |> assign_expanded(params["expand"])
-     |> assign_view()}
+    socket =
+      socket
+      |> assign(:group_by, parse_group(params["group"]))
+      |> assign(:filters, parse_filters(params))
+
+    # `handle_params` runs on the DISCARDED disconnected render too, and
+    # `assign_peek/2` issues a FRESH per-task doc read (`load_peek`). Skip that
+    # DB touch on the dead render for the same reason as the mount snapshot —
+    # `handle_params` re-runs on connect (with the real board) and loads the
+    # peek/expand for real then. Cheap param parsing above always runs.
+    socket =
+      if connected?(socket) do
+        socket
+        |> assign_peek(params["task"])
+        |> assign_expanded(params["expand"])
+      else
+        socket |> assign(:peek, nil) |> assign(:expanded, nil)
+      end
+
+    {:noreply, assign_view(socket)}
   end
 
   # A task mutation on our dataset stream — the live heartbeat of the board.
@@ -1055,6 +1081,36 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     do: assign(socket, :expanded, expand_id)
 
   defp assign_expanded(socket, _), do: assign(socket, :expanded, nil)
+
+  # Dead-render skeleton (first-paint tradeoff acknowledged, task
+  # task-d8970b41d745e066): the disconnected mount no longer runs
+  # `Board.snapshot/1`, so it has no cards to paint. Rather than flash the empty
+  # "pipeline clear" hero (which would falsely read as "no work"), paint a light,
+  # self-contained loading state; the connected mount (~one RTT later) replaces
+  # it with the real board. CSP-safe, no JS, no external assets.
+  @impl true
+  def render(%{loading: true} = assigns) do
+    ~H"""
+    <style>
+      .bp-loading {
+        flex: 1 1 auto; min-height: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-family: var(--font, 'Inter', -apple-system, sans-serif);
+        color: var(--muted-text);
+      }
+      .bp-loading-inner { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+      .bp-loading-dot {
+        width: 8px; height: 8px; border-radius: 999px; background: var(--primary);
+        animation: bp-loading-pulse 1s ease-in-out infinite;
+      }
+      @keyframes bp-loading-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { .bp-loading-dot { animation: none; opacity: 0.6; } }
+    </style>
+    <div class="bp-page bp-loading" data-test-id="board-loading">
+      <div class="bp-loading-inner"><span class="bp-loading-dot"></span> Loading board…</div>
+    </div>
+    """
+  end
 
   @impl true
   def render(assigns) do

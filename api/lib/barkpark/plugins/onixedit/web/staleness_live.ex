@@ -50,9 +50,20 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    current_issue = current_registry_issue()
-    books = load_books()
-    rows = Enum.map(books, &row_for(&1, current_issue))
+    # NAMED COST (doctrine lever #2): the disconnected mount render is DISCARDED
+    # the moment the WebSocket connects and mount re-runs. Both `load_books/0`
+    # (full `book`-table read) and `current_registry_issue/0` (codelist
+    # aggregate) plus the per-book `row_for/2` classification are DB work. This
+    # console is admin/ops-gated (no crawler consumes the dead HTML), so run the
+    # projection ONLY on the live mount; the dead render carries the default
+    # issue + empty rows (there is no handle_params here).
+    {current_issue, rows} =
+      if connected?(socket) do
+        issue = current_registry_issue()
+        {issue, Enum.map(load_books(), &row_for(&1, issue))}
+      else
+        {@default_current_issue, []}
+      end
 
     {:ok,
      socket
