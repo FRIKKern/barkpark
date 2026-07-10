@@ -33,6 +33,10 @@ defmodule Barkpark.Content.TagSearchTest do
         @dataset
       )
 
+    # LEGACY flat-string tags are the shape under test — these docs represent
+    # pre-wall papers, so they ride the exemption ledger exactly like prod's
+    # migration-seeded corpus (content stays untouched by the label spine).
+    Barkpark.LabelFixtures.exempt!(id, @dataset)
     {:ok, doc} = Content.publish_document(id, "paper", @dataset)
     doc
   end
@@ -98,6 +102,7 @@ defmodule Barkpark.Content.TagSearchTest do
         "tag_search_other"
       )
 
+    Barkpark.LabelFixtures.exempt!("p-there", "tag_search_other")
     {:ok, _} = Content.publish_document("p-there", "paper", "tag_search_other")
 
     assert Content.search_tags("tag", @dataset) == ["scopedtag"]

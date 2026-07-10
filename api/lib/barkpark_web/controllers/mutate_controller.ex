@@ -2,7 +2,7 @@ defmodule BarkparkWeb.MutateController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.Errors
+  alias Barkpark.Content.{Errors, Warnings}
   alias BarkparkWeb.ErrorEnvelope
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
@@ -13,9 +13,23 @@ defmodule BarkparkWeb.MutateController do
     mutations = apply_if_match_header(conn, mutations)
     opts = [source: :api] ++ scope_opts(conn)
 
+    # The advisory channel (authoring-excellence D5): the publish wall queues
+    # non-blocking warnings ([{code, severity, message}]) while the batch
+    # applies; they ride the SUCCESS envelope only. Reset before the batch so
+    # a prior request on a reused test process can never leak entries in.
+    Warnings.reset()
+
     case Content.apply_mutations(mutations, dataset, opts) do
       {:ok, {tx_id, results}} ->
-        json(conn, %{transactionId: tx_id, results: results})
+        body = %{transactionId: tx_id, results: results}
+
+        body =
+          case Warnings.drain() do
+            [] -> body
+            warnings -> Map.put(body, :warnings, warnings)
+          end
+
+        json(conn, body)
 
       {:error, {:halted, reason}} ->
         # Lifecycle-hook veto (per plan §0 Q4): a plugin's before_* hook

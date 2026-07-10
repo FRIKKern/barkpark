@@ -158,10 +158,9 @@ defmodule BarkparkWeb.GraphControllerTest do
 
     defp publish_task_citing!(paper_doc_id, task_doc_id, scope, content_extra) do
       content =
-        Map.merge(
-          %{"kind" => "task", "lifecycle_status" => "open", "design_doc" => paper_doc_id},
-          content_extra
-        )
+        %{"kind" => "task", "lifecycle_status" => "open", "design_doc" => paper_doc_id}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.merge(content_extra)
 
       {:ok, _} =
         Content.create_document(

@@ -99,6 +99,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.SearchTest do
           @dataset
         )
 
+      # Legacy flat-string tags are the shape under test — ride the exemption
+      # ledger like prod's pre-wall corpus.
+      Barkpark.LabelFixtures.exempt!("tag-paper-a", @dataset)
       {:ok, _} = Content.publish_document("tag-paper-a", "paper", @dataset)
 
       {:ok, _} =
@@ -108,6 +111,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.SearchTest do
           @dataset
         )
 
+      Barkpark.LabelFixtures.exempt!("tag-paper-b", @dataset)
       {:ok, _} = Content.publish_document("tag-paper-b", "paper", @dataset)
 
       :ok

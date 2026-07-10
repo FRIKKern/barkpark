@@ -49,7 +49,9 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
     {:ok, _} =
       Content.create_document(
         "paper",
-        Map.merge(%{"_id" => id, "title" => title}, attrs),
+        %{"_id" => id, "title" => title}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.merge(attrs),
         @dataset
       )
 
@@ -58,7 +60,10 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
   end
 
   defp task!(id, title, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+      |> Map.merge(content_extra)
 
     {:ok, doc} =
       Content.create_document(

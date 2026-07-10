@@ -185,9 +185,22 @@ export interface MutateResult {
   document: BarkparkDocument
 }
 
+/**
+ * A non-blocking advisory riding a successful mutate (the publish wall's
+ * warnings channel, authoring-excellence): e.g. the 2–4 tag-count norm.
+ * Advisories never block a write and are never promoted to errors.
+ */
+export interface MutateWarning {
+  code: string
+  severity: 'advisory'
+  message: string
+}
+
 export interface MutateEnvelope {
   transactionId: string
   results: MutateResult[]
+  /** Present only when the batch produced advisories (omitted otherwise). */
+  warnings?: MutateWarning[]
 }
 
 /** Options for `client.uploadAsset()`. */

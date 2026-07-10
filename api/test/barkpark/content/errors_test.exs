@@ -251,4 +251,36 @@ defmodule Barkpark.Content.ErrorsTest do
     # additive hint like every other registered code
     assert is_binary(env.hint) and env.hint != ""
   end
+
+  # The publish wall's label-spine rejection (authoring-excellence D5): a new
+  # top-level atom — deliberately NOT the task-scoped invalid_task_content and
+  # NOT the plugin {:halted, _} shape. The validator's documentation-grade
+  # details (field / rule / fix) ride verbatim so an agent's one retry can be
+  # exact.
+  test "maps {:label_spine, details} to a 422 with the field/rule/fix details verbatim" do
+    Logger.metadata(request_id: nil)
+
+    details = %{
+      field: "tags",
+      rule: "A published document requires a `tags` array.",
+      fix: "Add 1–12 weighted tags: [{tag, strength, rationale}]."
+    }
+
+    env = Errors.to_envelope({:error, {:label_spine, details}})
+    assert env.code == "label_spine"
+    assert env.status == 422
+    assert env.details == details
+    assert is_binary(env.message) and env.message != ""
+    # additive fix-suggesting hint, like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  # DELIBERATE membership test (charter D5, amended): known_codes/0 derives
+  # from @hints, which makes the OpenAPI drift-guard a tautology — a build
+  # clause without an @hints entry is invisible in the served spec and no test
+  # reds (live counter-example: duplicate_task). This assertion is the real
+  # tripwire: drop the @hints entry and this fails.
+  test "label_spine is a registered code (OpenAPI enum + hint table truthful)" do
+    assert MapSet.member?(Errors.known_codes(), "label_spine")
+  end
 end

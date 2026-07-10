@@ -60,7 +60,10 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
   # Create + publish a task doc, return the published %Document{}. `content_extra`
   # is merged into the task content (where `parent_id` / `dependencies` live).
   defp publish_task!(doc_id, scope, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Barkpark.LabelFixtures.with_labels()
+      |> Map.merge(content_extra)
 
     {:ok, _} =
       Content.create_document(
