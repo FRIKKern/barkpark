@@ -3,7 +3,7 @@
 
 How Barkpark isolates data across tenants and scopes every read/write. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope). High blast radius — most content reads route through here.
 
-**This doc owns the model + scoping.** It does **not** restate auth enforcement (plug chain, 404/403 table, token↔workspace binding) — canonical in `docs/auth.md` — or the HTTP URL shapes — canonical in `docs/api-v1.md` §1a.
+**This doc owns the model + scoping.** Auth enforcement and URL shapes are not restated here — see Canonical homes below.
 
 ## The hierarchy
 
@@ -20,8 +20,6 @@ Workspace ──< Project ──< Dataset
 | **Dataset** | under exactly one Project; promotes the legacy `dataset` *string* into a row | per-project | `datasets` |
 | **Membership** | binds a principal (`principal_type` ∈ `api_token · user` since core-auth Phase 1) to a Workspace with a role | one per `(workspace, principal_type, principal_id)` | `workspace_memberships` |
 
-Schemas: `api/lib/barkpark/tenancy/workspace.ex`, `api/lib/barkpark/tenancy/project.ex`, `api/lib/barkpark/tenancy/dataset.ex`, `api/lib/barkpark/tenancy/membership.ex`. Context: `api/lib/barkpark/tenancy.ex`. Auth: `api/lib/barkpark/tenancy/auth.ex`. Scope: `api/lib/barkpark/content/scope.ex`.
-
 Workspace + Project slugs match `^[a-z0-9][a-z0-9-]*$` and exclude reserved prefixes `admin api _plugins studio login media v1 w p`, enforced at the **changeset** layer (`validate_exclusion`), not the router.
 
 ## The context — `Barkpark.Tenancy`
@@ -37,7 +35,7 @@ All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/del
 
 ### Safe delete — NEVER `Repo.delete/1` on a Workspace
 
-Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table FKs are `nilify_all` (not `CASCADE`), so a raw `Repo.delete(workspace)` orphans blobs/CDN cache and skips lifecycle hooks. The context does, in order: (1) walk `media_files` → `Media.delete_file/2` (blob + CDN purge + renditions + `:after_media_delete`); (2) walk `documents` → `Content.delete_document/4` (`:before/:after_delete` hooks); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest (projects, datasets, memberships, revisions, schema_definitions, webhooks, mutation_events, search intel, paper_events). No `delete_project/1` exists yet.
+Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table FKs are `nilify_all` (not `CASCADE`), so a raw `Repo.delete(workspace)` orphans blobs/CDN cache and skips lifecycle hooks. In order: (1) walk `media_files` → `Media.delete_file/2` (blob + CDN purge + renditions + `:after_media_delete`); (2) walk `documents` → `Content.delete_document/4` (`:before/:after_delete` hooks); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest (projects, datasets, memberships, revisions, schema_definitions, webhooks, mutation_events, search intel, paper_events). No `delete_project/1` exists yet.
 
 ## Roles & enforcement
 
@@ -45,7 +43,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises.
 
-→ The request plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`, the `:scoped_api`/`:scoped_admin` pipelines), share-public bypass, anonymous-Default allowance, and the **404/403 outcome table** are canonical in **`docs/auth.md`**; the URL shapes (`/w/:workspace_slug/p/:project_slug`, flat alias, Studio canonical) in **`docs/api-v1.md` §1a**.
+→ Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`, `:scoped_api`/`:scoped_admin`), share-public bypass, anonymous-Default allowance, 404/403 table: **`docs/auth.md`**. URL shapes (`/w/:ws/p/:proj`, flat alias, Studio canonical): **`docs/api-v1.md` §1a**.
 
 ## Data-layer scoping
 
@@ -54,7 +52,7 @@ Canonical scope helpers in `api/lib/barkpark/content/scope.ex`:
 - **`scope_to_workspace/3`** — **fail-closed**: a `nil` workspace_id compiles to `where: false` (zero rows), never a silent all-rows query. Binary id → `WHERE workspace_id = $1` (`AND project_id = $2` when given).
 - **`scope_to_workspace_global/1`** — explicit, greppable cross-tenant opt-in (replaced the old silent nil-passthrough); used by surfaces not yet path-scoped (some Studio LiveViews).
 - **`scope_to_workspace_or_global/3`** — back-compat bridge for flat routes: nil → global, binary → the fail-closed form.
-- **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read — the `Content.Query` sites, the Postgres search `DocumentsRetriever` base query, the Indx hydration read + `count_documents_by_ids/3`, and the `Content.Graph` helpers (backlinks + Studio graph pane) — so no read forgets the gate.
+- **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read (`Content.Query` sites, search `DocumentsRetriever` base query, Indx hydration read + `count_documents_by_ids/3`, `Content.Graph` backlinks + Studio graph pane) — no read forgets the gate.
 
 When `multi_tenant?/0` is true, the content-edge projection path uses strict `scope_to_workspace/3`, not the `_or_global` bridge — preventing cross-tenant `content_edges` in multi-tenant installs.
 
@@ -84,6 +82,6 @@ The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visib
 |---|---|
 | Auth enforcement: token↔workspace binding, plug chain, 404/403 table, write gate | `docs/auth.md` |
 | HTTP API: scoped/flat URL shapes, hierarchy summary | `docs/api-v1.md` §1a |
-| Agent quick-note on tenant-scoping | `api/CLAUDE.md` (orientation only; this doc is the precise reference) |
+| Agent quick-note on tenant-scoping | `api/CLAUDE.md` (orientation only) |
 
-> `docs/decisions/deferred.md` tracks the missing workspace/project delete **verb** (API/CLI exposure). The server-side cascade itself, `Tenancy.delete_workspace/1`, is fully implemented (above).
+> `docs/decisions/deferred.md` tracks the missing workspace/project delete **verb** (API/CLI exposure); the server-side cascade `Tenancy.delete_workspace/1` is implemented (above).

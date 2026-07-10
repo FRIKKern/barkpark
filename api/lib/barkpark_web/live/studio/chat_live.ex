@@ -2267,7 +2267,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               the card (nested <form>s are invalid HTML — the parser would drop
               them and break the phx-change selectors); the card div is pure
               chrome. --%>
-        <div style="max-width: 860px; margin: 0 auto; border: 1px solid var(--border-muted); border-radius: 14px; background: var(--surface);">
+        <div class="bp-composer">
         <form
           id="chat-composer-form"
           phx-hook="ChatComposer"
@@ -2352,7 +2352,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 aria-controls="chat-slash-menu"
                 aria-activedescendant=""
                 placeholder={composer_placeholder(@status)}
-                style="width: 100%; background: transparent; color: inherit; border: none; outline: none; padding: 0; font: inherit;"
+                class="bp-composer-input"
               />
               <%!-- phx-update="ignore": the combobox hook OWNS this element —
                     every keystroke round-trips (server-bound composer, D24) and
@@ -2380,14 +2380,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
               are invalid HTML (the parser drops them, breaking the selectors).
               Send re-associates to the composer via `form="chat-composer-form"`;
               the attach <label>'s `for` reaches the hidden input by id. --%>
-        <div style="display: flex; align-items: center; gap: 10px; padding: 8px 12px 10px;">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 4px 12px 10px;">
             <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
               <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
+                <span class="bp-select bp-select-chip">
                 <select
                   name="mode"
-                  class="text-xs text-dim"
                   aria-label="Permission mode"
-                  style="background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 999px; padding: 3px 10px; cursor: pointer;"
                 >
                   <%!-- The retired middle mode surfaces ONLY while THIS session still
                         carries it (charter D48) — a legacy row keeps spawning it
@@ -2399,25 +2398,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     <%= mode_label(m) %>
                   </option>
                 </select>
+                </span>
               </form>
               <%!-- Model picker (wave 5): the choice is intent — it rides the next
                     spawn as `--model` and steers a live session via the set_model
                     control frame; the dim mono suffix is FACT (the answering model
                     observed off the last init/result), sitting beside its intent. --%>
               <form phx-change="set-model" style="display: inline-flex; align-items: center; gap: 6px;">
+                <span class="bp-select bp-select-strong">
                 <select
                   name="model"
-                  class="text-xs"
                   aria-label="Model"
-                  style="background: transparent; color: var(--text); border: none; padding: 2px 2px; font-weight: 500; cursor: pointer;"
                 >
                   <option value="default" selected={@model_choice == "default"}>
-                    model: default
+                    Model
                   </option>
                   <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
                     <%= model_label(m) %>
                   </option>
                 </select>
+                </span>
                 <span
                   :if={@init && @init.model}
                   class="text-xs text-dim"
@@ -2433,19 +2433,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     mid-session change never steers the running turn (no set_effort
                     control verb). --%>
               <form phx-change="set-effort" style="display: inline-flex; align-items: center;">
+                <span class="bp-select">
                 <select
                   name="effort"
-                  class="text-xs text-dim"
                   aria-label="Reasoning effort"
-                  style="background: transparent; border: none; padding: 2px 0; cursor: pointer;"
                 >
                   <option value="default" selected={@effort_choice == "default"}>
-                    effort: default
+                    Effort
                   </option>
                   <option :for={e <- ClaudeChat.efforts()} value={e} selected={e == @effort_choice}>
                     <%= effort_label(e) %>
                   </option>
                 </select>
+                </span>
               </form>
             </div>
             <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
@@ -2462,10 +2462,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     picker with ZERO hook change. The strip / paste-drop are below. --%>
               <label
                 for={@uploads.attachments.ref}
-                class="btn"
+                class="bp-iconbtn"
                 aria-label="Attach an image"
                 title="Attach an image"
-                style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; background: transparent; border-radius: 999px; cursor: pointer; color: var(--text-dim);"
               >
                 <.icon name="image" size={16} />
               </label>
@@ -2478,12 +2477,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <button
                 :if={turn_active?(@status)}
                 type="button"
-                class="btn"
+                class="bp-iconbtn"
                 phx-click="stop_turn"
                 disabled={@status == :interrupting}
                 aria-label="Stop the current turn"
                 title={if @status == :interrupting, do: "Stopping…", else: "Stop (esc)"}
-                style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border-muted); background: transparent; border-radius: 999px; color: var(--danger);"
+                style="color: var(--danger);"
               >
                 <span style="display: inline-block; width: 9px; height: 9px; background: currentColor; border-radius: 2px;"></span>
               </button>
@@ -2491,9 +2490,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 :if={not turn_active?(@status)}
                 type="submit"
                 form="chat-composer-form"
-                class="btn btn-primary"
+                class="bp-iconbtn bp-iconbtn-primary"
                 aria-label="Send message"
-                style="display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border-radius: 999px;"
               >
                 <.icon name="send" size={14} />
               </button>
@@ -2568,15 +2566,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </button>
           </form>
         </div>
-        <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
-          <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
-        </p>
-        <%!-- Keyboard-first footer hint (charter D42): unconditional so the
-              affordances are visible from the very first mount, before any turn
-              completes — a sibling of the cost strip, never gated on it. --%>
-        <p class="text-xs text-dim" style="max-width: 860px; margin: 4px auto 0; font-family: var(--font-mono); opacity: 0.7;">
-          esc interrupt · / commands · ↵ send
-        </p>
+        <%!-- Cost strip + keyboard hint (charter D42): ONE quiet line under the
+              card — facts left, affordances right. The hint side is
+              unconditional so it shows from the very first mount. --%>
+        <div
+          class="text-xs text-dim"
+          style="max-width: 860px; margin: 5px auto 0; padding: 0 6px; display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11px; opacity: 0.6;"
+        >
+          <span :if={@last_result && @last_result.cost_usd}>
+            <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(
+              @last_result.duration_ms
+            ) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
+          </span>
+          <span style="margin-left: auto;">esc interrupt · / commands · ↵ send</span>
+        </div>
 
         <%!-- Agents rail (charter D47): the Claude-Code-TUI mission-control view,
               directly below the composer. One row per background task; a workflow
@@ -4727,10 +4730,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp model_label("haiku"), do: "Haiku — fastest"
-  defp model_label("sonnet"), do: "Sonnet — balanced"
-  defp model_label("opus"), do: "Opus — powerful"
-  defp model_label("fable"), do: "Fable — frontier"
+  # Short names on purpose: a native <select> sizes itself to its LONGEST
+  # option, so a verbose label ("Sonnet — balanced") would push the cockpit
+  # chevron away from the closed text. One word keeps the row tight.
+  defp model_label("haiku"), do: "Haiku"
+  defp model_label("sonnet"), do: "Sonnet"
+  defp model_label("opus"), do: "Opus"
+  defp model_label("fable"), do: "Fable"
   defp model_label(m), do: m
 
   defp mode_label("plan"), do: "plan (read-only)"
