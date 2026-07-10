@@ -3,8 +3,16 @@ defmodule Barkpark.Plugins.GithubTest do
   Wave-1 skeleton contract for the `github` bridge plugin: the manifest loads,
   the module compiles inert (no routes/workers/schemas yet), and
   `validate_settings/1` is fail-closed on the required GitHub App credentials.
+
+  `async: false` — REQUIRED. The `register_workers/1` tests below flip the
+  PROCESS-GLOBAL `Application.put_env(:barkpark, DrainWorker, enabled: …)` flag —
+  the most genuinely-global of the env keys, a boot supervision gate. There is no
+  SQL sandbox to isolate it (env is VM-wide). `Github.register_workers/1` reads
+  it at runtime (`drain_worker_child/0`), so a concurrent async test touching
+  plugin boot supervision would observe this module's mutation and race its
+  `on_exit` restore — an order-dependent flake. Serial execution is the fix.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Barkpark.Plugins.Github
 
