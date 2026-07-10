@@ -963,7 +963,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       end
     rescue
       e ->
-        Logger.warning("claude chat: mcp setup crashed (#{inspect(e)}) — spawning without loopback")
+        Logger.warning(
+          "claude chat: mcp setup crashed (#{inspect(e)}) — spawning without loopback"
+        )
+
         nil
     end
 
