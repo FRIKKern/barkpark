@@ -123,7 +123,7 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
 
       # The view rendered against the valid scope — the chrome's scope title
       # trail shows "project / dataset" for the honoured leaf.
-      assert html =~ ~r{scope-title-trail">\s*Blog / staging\s*<}
+      assert html =~ ~r{scope-title-trail">\s*Blog · staging\s*<}
     end
 
     test "the project's default ('production') is NOT redirected (no loop, seeded slug owned)", %{
