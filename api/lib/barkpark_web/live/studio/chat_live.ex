@@ -48,6 +48,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
   @default_interrupt_timeout_ms 8_000
 
+  # Per-socket transcript window (efficiency; task-9e21c3f285b3d7d0). A long
+  # multi-hundred-turn agent session appends user/assistant/tool rows for its
+  # whole life; without a bound `@messages` grows the socket heap O(n) and the
+  # grouped-rows recompute over the FULL list makes each turn O(n) = O(n²) total.
+  # We keep only the last `@transcript_window` rows in the socket (and load only
+  # that many on reopen — `StudioChat.list_messages/2`), so heap and per-turn CPU
+  # are bounded by the window, not the session length. The store keeps the full
+  # durable history (replay law, D7); this trims only the in-memory display view.
+  @transcript_window 500
+
   # How long a fully-settled agents rail (every entry terminal) lingers below
   # the composer before it clears — long enough to read the fleet's outcome,
   # short enough that a done fleet stops squatting under the input forever.
@@ -146,6 +156,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
          status: :new,
          init: nil,
          messages: [],
+         # Memoized grouped transcript rows (task-9e21c3f285b3d7d0): the HEEx
+         # renders `@grouped_rows`, recomputed ONCE per append (via
+         # `assign_messages/2`), never per render over the full `@messages`.
+         grouped_rows: [],
          next_id: 0,
          # The in-memory id of THIS turn's TodoWrite living-checklist card
          # (charter D39). The turn's first TodoWrite appends a :todo card and
@@ -957,9 +971,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> assign(
        init: init,
        status: status,
-       todo_card_id: nil,
-       messages: clear_queued_badges(socket.assigns.messages)
+       todo_card_id: nil
      )
+     |> assign_messages(clear_queued_badges(socket.assigns.messages))
      |> observe_permission_mode(observed)}
   end
 
@@ -1218,7 +1232,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     socket =
       socket
-      |> assign(messages: socket.assigns.messages ++ [message], next_id: id + 1)
+      |> put_message(message)
       |> seed_question_form(message)
       |> refresh_sessions()
 
@@ -1266,7 +1280,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           end
         end)
 
-      {:noreply, assign(socket, messages: messages)}
+      {:noreply, assign_messages(socket, messages)}
     end
   end
 
@@ -1429,11 +1443,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply,
      socket
      |> start_turn_clock()
-     |> assign(
-       messages: socket.assigns.messages ++ [message],
-       next_id: id + 1,
-       status: :thinking
-     )}
+     |> put_message(message)
+     |> assign(status: :thinking)}
   end
 
   # Another tab resolved a needs-you card on this session (charter D35). Converge
@@ -1446,7 +1457,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      socket
-     |> assign(messages: messages)
+     |> assign_messages(messages)
      |> clear_question_form(request_id)
      |> refresh_sessions()}
   end
@@ -1457,7 +1468,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # metadata was already persisted by the publishing Task, so replay is durable.
   def handle_info({:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}, socket) do
     messages = stamp_plan_paper(socket.assigns.messages, request_id, paper_id, paper_url)
-    {:noreply, assign(socket, messages: messages)}
+    {:noreply, assign_messages(socket, messages)}
   end
 
   # D49 failure honesty: the approve already succeeded on the wire; only the Paper
@@ -2305,7 +2316,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   stays a flat top-level row in seq order. A nested :for over the
                   grouped list diffs cleanly and leaves #chat-messages + the
                   PaperMermaid hook untouched. --%>
-            <%= for item <- group_agent_rows(@messages) do %>
+            <%= for item <- @grouped_rows do %>
               <%= case item do %>
                 <% {:row, message} -> %>
                   <div
@@ -3103,11 +3114,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp restore_failed_send(socket, text) do
     echo_id = socket.assigns[:pending_echo_id]
 
-    assign(socket,
-      messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
-      composer_draft: text,
-      pending_echo_id: nil
-    )
+    socket
+    |> assign(composer_draft: text, pending_echo_id: nil)
+    |> assign_messages(Enum.reject(socket.assigns.messages, &(&1.id == echo_id)))
   end
 
   # Drop the phase-1 text-only echo WITHOUT restoring the composer — used when a
@@ -3116,10 +3125,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp withdraw_pending_echo(socket) do
     echo_id = socket.assigns[:pending_echo_id]
 
-    assign(socket,
-      messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
-      pending_echo_id: nil
-    )
+    socket
+    |> assign(pending_echo_id: nil)
+    |> assign_messages(Enum.reject(socket.assigns.messages, &(&1.id == echo_id)))
   end
 
   # Replay a remembered session from our own store. Runtime-aware (charter
@@ -3186,6 +3194,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       status: status,
       init: replay_init(session),
       messages: messages,
+      # Grouped rows memoized at load time (task-9e21c3f285b3d7d0) — the template
+      # reads `@grouped_rows`, so reopen does the grouping ONCE, not per render.
+      grouped_rows: group_agent_rows(messages),
       # Sticky draft (charter D36c): restore the unsent words left behind when
       # this session was last switched away from (nil column → clean composer).
       # From the FULL struct — list_sessions omits `draft`.
@@ -3303,6 +3314,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       status: :new,
       init: nil,
       messages: [],
+      grouped_rows: [],
       next_id: 0,
       todo_card_id: nil,
       streaming: nil,
@@ -3404,7 +3416,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         end)
 
       socket
-      |> assign(messages: messages)
+      |> assign_messages(messages)
       |> append_message(:system, message)
       |> assign(
         session: nil,
@@ -3608,7 +3620,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     images = Enum.map(attachments, fn a -> %{data_uri: data_uri(a.media_type, a.bytes)} end)
     id = socket.assigns.next_id
     message = %{id: id, role: :user, text: text, html: nil, images: images}
-    assign(socket, messages: socket.assigns.messages ++ [message], next_id: id + 1)
+    put_message(socket, message)
   end
 
   # The jsonb pointer for a stored attachment — path/media_type/sha256/byte_size
@@ -3664,9 +3676,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Rebuild the transcript message list from the persisted store. Assistant
   # markdown re-renders through the SAME paper engine used live, so the improving
   # renderer wins on every reopen (D7).
+  # Load only the last `@transcript_window` rows (task-9e21c3f285b3d7d0): a huge
+  # session no longer pulls its ENTIRE history into the socket on reopen. The DB
+  # LIMIT caps both the query result and the initial socket heap; the store keeps
+  # the full durable history, so nothing is lost — only the on-screen window is
+  # bounded. `assign_messages/2` keeps it bounded across subsequent live appends.
   defp replay_messages(session_id, live?) do
     session_id
-    |> StudioChat.list_messages()
+    |> StudioChat.list_messages(@transcript_window)
     |> Enum.map(&replay_message(&1, live?))
   end
 
@@ -3858,11 +3875,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id
     message = Map.merge(%{id: id, role: role, text: text, html: nil}, Map.new(opts))
-
-    assign(socket,
-      messages: socket.assigns.messages ++ [message],
-      next_id: id + 1
-    )
+    put_message(socket, message)
   end
 
   # Drop the live-only '⧗ queued' badge (charter D43) when the queued turn starts
@@ -3923,7 +3936,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           m -> m
         end)
 
-      assign(socket, messages: messages)
+      assign_messages(socket, messages)
     else
       id = socket.assigns.next_id
 
@@ -3980,7 +3993,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       maybe_publish_plan(socket, request_id, decision)
 
       socket
-      |> assign(messages: messages)
+      |> assign_messages(messages)
       |> clear_question_form(request_id)
       |> refresh_sessions()
     else
@@ -4614,7 +4627,53 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # children of parallel spawns interleave, so this is never consecutive
   # chunking. One nesting level: a child that is itself a spawn renders as a
   # plain spawn row inside its parent's bucket (message_body's :tool branch).
-  defp group_agent_rows(messages) do
+  # ── transcript window + memoized grouping (task-9e21c3f285b3d7d0) ────────────
+  #
+  # The ONE choke point for writing `@messages`: trim to the last
+  # `@transcript_window` rows and recompute `@grouped_rows` from that bounded
+  # list. Every message write (append, tool-result merge, task-status merge,
+  # card flip) routes through here, so per-socket heap AND the grouping cost are
+  # bounded by the window — not the (unbounded) session length. Because the HEEx
+  # renders `@grouped_rows`, the grouping runs ONCE per write, never per render
+  # over the full transcript.
+  defp assign_messages(socket, messages) do
+    trimmed = trim_transcript(messages)
+    assign(socket, messages: trimmed, grouped_rows: group_agent_rows(trimmed))
+  end
+
+  # Keep only the last `@transcript_window` rows. The drop count is floored at 0
+  # (`Enum.drop/2` with a NEGATIVE count drops from the END — that would delete
+  # the most recent rows of a short session), so a session at or under the window
+  # pays nothing and a long one stays pinned at the window. Public + @doc false
+  # only so the window guard (chat_transcript_window_test.exs) can assert the cap.
+  @doc false
+  def trim_transcript(messages, window \\ @transcript_window)
+
+  def trim_transcript(messages, window) when is_integer(window) and window > 0 do
+    Enum.drop(messages, max(length(messages) - window, 0))
+  end
+
+  def trim_transcript(messages, _window), do: messages
+
+  # Append one new row and advance the id counter, through the window choke
+  # point. Callers set `message.id = socket.assigns.next_id` before calling.
+  defp put_message(socket, message) do
+    socket
+    |> assign(next_id: socket.assigns.next_id + 1)
+    |> assign_messages(socket.assigns.messages ++ [message])
+  end
+
+  # Bucket child tool-rows under their top-level spawn (charter D46). Public and
+  # @doc false ONLY so the efficiency guard (chat_transcript_window_test.exs) can
+  # benchmark it directly — it is not part of the module's API.
+  #
+  # task-9e21c3f285b3d7d0: the child accumulator prepends (`[m | acc]`, O(1)) and
+  # reverses each brood ONCE at the end, instead of the old `acc ++ [m]` which is
+  # O(k) per child = O(k²) to build a brood of k rows. Same ascending order out,
+  # now linear in the brood size. Called ONCE per append (via `assign_messages/2`)
+  # over a bounded window — never per render over the full transcript.
+  @doc false
+  def group_agent_rows(messages) do
     spawns =
       for m <- messages,
           m.role == :tool,
@@ -4625,15 +4684,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
           do: {m[:tool_use_id], true}
 
     children =
-      Enum.reduce(messages, %{}, fn m, acc ->
+      messages
+      |> Enum.reduce(%{}, fn m, acc ->
         pid = m[:parent_tool_use_id]
 
         if is_binary(pid) and Map.has_key?(spawns, pid) do
-          Map.update(acc, pid, [m], &(&1 ++ [m]))
+          Map.update(acc, pid, [m], &[m | &1])
         else
           acc
         end
       end)
+      |> Map.new(fn {pid, rows} -> {pid, Enum.reverse(rows)} end)
 
     consumed =
       children |> Map.values() |> List.flatten() |> MapSet.new(& &1.id)
@@ -4714,7 +4775,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         end
       end)
 
-    if changed?, do: {:noreply, assign(socket, messages: messages)}, else: {:noreply, socket}
+    if changed?, do: {:noreply, assign_messages(socket, messages)}, else: {:noreply, socket}
   end
 
   defp task_signature(m), do: {m[:task_status], m[:task_progress]}
