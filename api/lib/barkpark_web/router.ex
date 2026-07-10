@@ -615,7 +615,11 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     live_session :admin_studio,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       layout: {BarkparkWeb.Layouts, :studio} do
       # `/studio/settings` moved to the workspace-scoped canonical
       # `/w/:ws/p/:proj/studio/settings` (sdl-w1-admin-canonical, charter D4):
@@ -649,7 +653,11 @@ defmodule BarkparkWeb.Router do
     # studio-chrome / status / reader skins are html[data-bp-theme]-anchored, so
     # the cell must own its <html> (SwatchLive stamps data-bp-theme + data-theme).
     live_session :admin_swatch,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       layout: {BarkparkWeb.Layouts, :swatch} do
       live("/styleguide/swatch", SwatchLive)
     end
@@ -713,7 +721,11 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     live_session :plugin_admin,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :admin)
     end
@@ -731,6 +743,7 @@ defmodule BarkparkWeb.Router do
     live_session :plugin_public,
       on_mount: [
         {BarkparkWeb.LiveAuth, :fetch_api_token},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.StudioChrome, :default}
       ],
       layout: {BarkparkWeb.Layouts, :studio} do
@@ -753,7 +766,11 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     live_session :plugin_ops,
-      on_mount: [{BarkparkWeb.LiveAuth, :ops}, {BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :ops},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :ops)
     end
@@ -939,6 +956,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_plugin_admin,
       on_mount: [
         {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.PluginScopeSession, :scope},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -962,6 +980,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_admin_studio,
       on_mount: [
         {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.LiveScope, :resolve},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -976,6 +995,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_plugin_public,
       on_mount: [
         {BarkparkWeb.LiveAuth, :fetch_api_token},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.PluginScopeSession, :scope},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -991,6 +1011,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_plugin_ops,
       on_mount: [
         {BarkparkWeb.LiveAuth, :ops},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.PluginScopeSession, :scope},
         {BarkparkWeb.StudioChrome, :default}
       ],
@@ -1045,7 +1066,11 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     live_session :scoped_admin_studio_dataset,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/_plugins", PluginsLive)
       live("/_plugins/:plugin/settings", PluginSettingsLive)
@@ -1074,6 +1099,7 @@ defmodule BarkparkWeb.Router do
     live_session :scoped_studio,
       on_mount: [
         {BarkparkWeb.LiveAuth, :fetch_api_token},
+        {BarkparkWeb.LiveAuth, :require_org_mfa},
         {BarkparkWeb.LiveScope, :resolve},
         {BarkparkWeb.StudioChrome, :default}
       ],

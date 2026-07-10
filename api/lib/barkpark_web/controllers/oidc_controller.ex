@@ -13,6 +13,7 @@ defmodule BarkparkWeb.OidcController do
   alias Barkpark.Accounts
   alias Barkpark.Sso
   alias Barkpark.Sso.Oidc
+  alias BarkparkWeb.SessionIssuer
 
   def start(conn, %{"org_slug" => slug}) do
     case Oidc.connection_for_org_slug(slug) do
@@ -36,9 +37,11 @@ defmodule BarkparkWeb.OidcController do
 
     cond do
       is_nil(c) ->
+        Sso.record_login_failure("oidc", slug, :no_connection)
         conn |> put_status(404) |> json(%{error: "no OIDC connection for this organization"})
 
       state != get_session(conn, :oidc_state) ->
+        Sso.record_login_failure("oidc", slug, :state_mismatch)
         conn |> put_status(400) |> json(%{error: "state mismatch"})
 
       true ->
@@ -50,28 +53,40 @@ defmodule BarkparkWeb.OidcController do
 
         case Oidc.handle_callback(c, code, opts) do
           {:ok, user, _claims} ->
-            Sso.record_login(user, "oidc", c.organization_id)
-
-            {:ok, token} =
-              Accounts.create_user_session_token(user,
-                ip_address: client_ip(conn),
-                user_agent: user_agent(conn)
-              )
-
-            conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
-
-            # studio-user-login: a browser completing the code flow
-            # (Accept: text/html) lands IN Studio on its new session cookie;
-            # non-HTML callers keep the JSON contract byte-identical.
-            if browser?(conn) do
-              redirect(conn, to: "/studio")
+            # era-w8-sso-mfa-binding: org-require-MFA binds at session-mint
+            # time — a governed factor-less user is refused HERE (audited),
+            # never landed in Studio. Checked AFTER handle_callback's JIT so
+            # a first-ever login into a require_mfa org is governed too.
+            if SessionIssuer.org_mfa_enrolment_blocked?(user) do
+              SessionIssuer.deny_org_mfa_enrolment(conn, user, "oidc", c.organization_id)
             else
-              conn
-              |> put_status(:created)
-              |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+              Sso.record_login(user, "oidc", c.organization_id)
+
+              {:ok, token} =
+                Accounts.create_user_session_token(user,
+                  ip_address: client_ip(conn),
+                  user_agent: user_agent(conn)
+                )
+
+              conn =
+                conn |> configure_session(renew: true) |> put_session("user_session", token)
+
+              # studio-user-login: a browser completing the code flow
+              # (Accept: text/html) lands IN Studio on its new session cookie;
+              # non-HTML callers keep the JSON contract byte-identical.
+              if browser?(conn) do
+                redirect(conn, to: "/studio")
+              else
+                conn
+                |> put_status(:created)
+                |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+              end
             end
 
           {:error, reason} ->
+            # Failed token exchange / claim validation lands on the audit
+            # trail (era-w8) — only successes audited before.
+            Sso.record_login_failure("oidc", slug, reason)
             conn |> put_status(401) |> json(%{error: "oidc_failed", detail: to_string(reason)})
         end
     end
