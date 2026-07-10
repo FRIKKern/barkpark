@@ -51,6 +51,15 @@ import (
 // it; it is the single source of truth the curated registration in mcp_tasks.go
 // must stay in sync with (charter: keep the shadowed-ID set adjacent to curated
 // registration so the two never drift).
+//
+// MCP access parity = `--tools all`. The airdrop-grants `access` verbs
+// (access.grant/ls/show/revoke/claim/mine) are NOT curated and are NOT shadowed
+// here, so the bridge generates bp_access_grant/ls/show/revoke/claim/mine as
+// soon as the manifest carries them — full grant-lifecycle parity over MCP under
+// `bp mcp serve --tools all`. The DEFAULT `--tools tasks` toolset is curated by
+// design (Cursor hard-caps 40 MCP tools), so the default surface omitting the
+// access tools is intentional, not a gap. TestBridgeAccessParity pins both facts
+// so a future shadow-set edit or verb rename reds the guard.
 var bridgeShadowedIDs = map[string]bool{
 	"task.ready": true,
 	"task.next":  true,
