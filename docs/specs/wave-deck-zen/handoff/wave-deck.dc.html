@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#0a0d12;overflow:hidden}
+*{box-sizing:border-box}
+a{color:#6fb7ff;text-decoration:none}a:hover{color:#a3cffb;text-decoration:underline}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#1d2530;border-radius:6px;border:2px solid #0a0d12}
+::-webkit-scrollbar-track{background:transparent}
+@keyframes bkPulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes bkFloat{0%{transform:translate(0,0)}100%{transform:translate(8px,-10px)}}
+</style>
+</helmet>
+<div style="position:fixed;inset:0;display:grid;grid-template-rows:56px 1fr;background:#0a0d12;color:#dde5f0;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13px">
+
+  <div data-screen-label="topbar" style="display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid rgba(255,255,255,.07);background:#0d1118">
+    <div style="display:flex;align-items:center;gap:10px;min-width:0;flex:none">
+      <div style="width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#1c2634,#12181f);border:1px solid rgba(255,255,255,.1);display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#6fb7ff">{{ waveTag }}</div>
+      <div>
+        <div style="font-weight:600;font-size:13px;color:#e8eef7;white-space:nowrap">airdrop-grants · close-out</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678;white-space:nowrap">epic bp#1462 · waves/airdrop-grants-close-out.paper</div>
+      </div>
+    </div>
+    <div style="flex:1;min-width:0;display:flex;justify-content:center">
+      <div title="the wish — verbatim, it never leaves the screen" style="font-family:'Source Serif 4',serif;font-style:italic;font-size:15px;color:#c6d2e2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">“Revoked grants must actually deny — search, API, LiveView — proven red→green, landed on main.”</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px;flex:none">
+      <div style="display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:99px;border:1px solid rgba(255,255,255,.09);background:#10151d">
+        <span style="width:7px;height:7px;border-radius:50%;background:{{ hbCol }};animation:bkPulse 1.6s infinite"></span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:{{ hbCol }};white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis">{{ hb }}</span>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678;white-space:nowrap">clock {{ clock }}</div>
+      <button onClick="{{ onPause }}" style="padding:5px 9px;background:#141a24;border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#9aa5b8;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" style-hover="background:#1a2230">{{ pauseLabel }}</button>
+      <button onClick="{{ onSpeed }}" style="padding:5px 9px;background:#141a24;border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#9aa5b8;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" style-hover="background:#1a2230">{{ spdLabel }}</button>
+      <button onClick="{{ onFinish }}" title="fast-forward to the closed wave" style="padding:5px 9px;background:#141a24;border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#9aa5b8;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" style-hover="background:#1a2230">⏭ end</button>
+      <button onClick="{{ onRestart }}" style="padding:5px 9px;background:#141a24;border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#9aa5b8;font-size:11px;cursor:pointer;font-family:'JetBrains Mono',monospace" style-hover="background:#1a2230">↺ replay</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:236px 1fr 284px;min-height:0">
+
+    <div data-screen-label="loop navigator" style="border-right:1px solid rgba(255,255,255,.07);background:#0c1017;overflow:auto;padding:12px 10px 20px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.18em;color:#5c6678;padding:4px 8px 8px">THE WAVE · 12 SLIDES</div>
+      <sc-for list="{{ navRows }}" as="n" hint-placeholder-count="12">
+        <div onClick="{{ n.go }}" style="display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:8px;cursor:pointer;background:{{ n.bg }};margin-bottom:2px" style-hover="background:#151c27">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;width:16px;flex:none">{{ n.num }}</span>
+          <span style="width:8px;height:8px;border-radius:{{ n.rad }};background:{{ n.dot }};flex:none;animation:{{ n.anim }}"></span>
+          <span style="min-width:0;flex:1">
+            <span style="display:block;font-size:11.5px;color:{{ n.col }};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ n.label }}</span>
+            <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#5c6678;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px">{{ n.meta }}</span>
+          </span>
+        </div>
+      </sc-for>
+      <div style="margin-top:14px;padding:10px;border:1px dashed rgba(255,255,255,.1);border-radius:9px">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;letter-spacing:.14em">DOCTRINE</div>
+        <div style="font-size:10.5px;color:#7d8798;line-height:1.55;margin-top:6px">Not-found is as loud as found. Every aggregate opens to its evidence. The wish never leaves the screen.</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-rows:38px 1fr auto;min-width:0;min-height:0">
+      <div style="display:flex;align-items:center;gap:8px;padding:0 14px;border-bottom:1px solid rgba(255,255,255,.06);background:#0b0f15">
+        <button onClick="{{ onPrev }}" style="padding:3px 11px;background:#141a24;border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#9aa5b8;font-size:13px;cursor:pointer" style-hover="background:#1a2230">‹</button>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">{{ slidePos }}</div>
+        <button onClick="{{ onNext }}" style="padding:3px 11px;background:#141a24;border:1px solid rgba(255,255,255,.1);border-radius:7px;color:#9aa5b8;font-size:13px;cursor:pointer" style-hover="background:#1a2230">›</button>
+        <div style="flex:1"></div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#3f4856;letter-spacing:.12em">SIMULATED WAVE · DESIGN PROTOTYPE</div>
+        <button onClick="{{ onFollow }}" style="padding:4px 11px;background:{{ followBg }};border:1px solid rgba(111,183,255,.25);border-radius:99px;color:{{ followCol }};font-size:10.5px;cursor:pointer;font-family:'JetBrains Mono',monospace" style-hover="filter:brightness(1.2)">◉ follow the wave</button>
+      </div>
+
+      <div style="position:relative;min-height:0;background:radial-gradient(1100px 480px at 50% -10%,rgba(111,183,255,.05),transparent 60%)">
+
+        <sc-if value="{{ s0 }}" hint-placeholder-val="{{ true }}">
+        <section data-screen-label="00 The Loop" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 00 · THE LOOP</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">Where is the wave — and how many minds are on it right now?</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:stretch;margin-top:22px">
+            <sc-for list="{{ loop }}" as="L" hint-placeholder-count="13">
+              <div onClick="{{ L.go }}" style="cursor:pointer;flex:1;min-width:148px;max-width:215px;padding:12px 13px;border-radius:11px;background:{{ L.bg }};border:1px solid {{ L.bd }}" style-hover="border-color:rgba(255,255,255,.28)">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="width:9px;height:9px;flex:none;border-radius:{{ L.rad }};background:{{ L.dot }};animation:{{ L.anim }}"></span>
+                  <span style="font-weight:700;font-size:12.5px;color:{{ L.col }};white-space:nowrap">{{ L.name }}</span>
+                </div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#7d8798;margin-top:7px">{{ L.meta }}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:3px;min-height:11px">{{ L.sub }}</div>
+                <div style="height:3px;border-radius:2px;background:rgba(255,255,255,.07);margin-top:9px;overflow:hidden"><div style="height:100%;width:{{ L.barW }};background:{{ L.barCol }}"></div></div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:{{ L.liveCol }};margin-top:5px;min-height:11px">{{ L.live }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:24px">
+            <div style="padding:13px 18px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:11px"><div style="font-family:'Source Serif 4',serif;font-size:25px;font-weight:600;color:#e8eef7">4</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:2px">thinking phases · 1 Fable each</div></div>
+            <div style="padding:13px 18px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:11px"><div style="font-family:'Source Serif 4',serif;font-size:25px;font-weight:600;color:#e8eef7">5–20</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:2px">survey fleet · Sonnet</div></div>
+            <div style="padding:13px 18px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:11px"><div style="font-family:'Source Serif 4',serif;font-size:25px;font-weight:600;color:#e8eef7">≤15</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:2px">verify fleet · Sonnet/Opus</div></div>
+            <div style="padding:13px 18px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:11px"><div style="font-family:'Source Serif 4',serif;font-size:25px;font-weight:600;color:#e8eef7">≤8</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:2px">build fleet · Fable/Opus</div></div>
+            <div style="padding:13px 18px;background:#0f141c;border:1px solid rgba(232,180,90,.3);border-radius:11px"><div style="font-family:'Source Serif 4',serif;font-size:25px;font-weight:600;color:#e8b45a">5</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:2px">user gates · yours</div></div>
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:20px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">NOW · {{ hb }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8b45a">next gate · {{ nextGate }}</div>
+            <div style="font-size:11px;color:#5c6678;font-style:italic">every ↺ edge is a deliberate, cheap loop — research costs Sonnet-minutes, not Opus-hours.</div>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s1 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="01 The Wave Card" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 01 · THE WAVE CARD</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">The wave at a glance — for someone who just walked in.</div>
+          <div style="max-width:880px;margin-top:34px">
+            <div style="font-family:'Source Serif 4',serif;font-size:42px;line-height:1.2;color:#eef3fa;font-weight:600;text-wrap:pretty">“Revoked grants must actually <em style="color:#ff8a8a">deny</em> — search, API, LiveView — proven red→green, landed on main.”</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#5c6678;margin-top:14px">the wish · verbatim · the focus of every phase</div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:30px;max-width:880px">
+            <div style="padding:12px 14px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:10px"><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;letter-spacing:.12em">EPIC TASK</div><div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#6fb7ff;margin-top:5px">bp#1462</div></div>
+            <div style="padding:12px 14px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:10px"><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;letter-spacing:.12em">WAVE PAPER</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6fb7ff;margin-top:5px">waves/airdrop-grants-close-out.paper</div></div>
+            <div style="padding:12px 14px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:10px"><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;letter-spacing:.12em">CHARTER</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa5b8;margin-top:5px">.claude/charters/airdrop-grants.md</div></div>
+            <div style="padding:12px 14px;background:#0f141c;border:1px solid rgba(255,255,255,.07);border-radius:10px"><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;letter-spacing:.12em">WAVE</div><div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#9aa5b8;margin-top:5px">{{ waveLine }} · July 10, 2026</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:22px">
+            <span style="width:8px;height:8px;border-radius:50%;background:{{ hbCol }};animation:bkPulse 1.6s infinite"></span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:{{ hbCol }}">{{ hb }}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#3f4856">· wave_status heartbeat, stamped by every Fable phase</span>
+          </div>
+          <sc-if value="{{ gradeOn }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:18px;align-items:stretch;margin-top:24px;max-width:760px">
+              <div style="font-family:'Source Serif 4',serif;font-size:50px;font-weight:700;color:#3ecf8e;padding:8px 24px;border:1px solid rgba(62,207,142,.35);border-radius:12px;background:rgba(62,207,142,.07);display:grid;place-items:center;flex:none">B+</div>
+              <div style="font-family:'Source Serif 4',serif;font-size:16.5px;font-style:italic;color:#c6d2e2;line-height:1.55;align-self:center">“Sealed every hole we proved; one slice parked with an honest note; the unreached corners are now the next wave's first questions.”</div>
+            </div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678;margin-top:8px">grade + commentary are one unit — never a bare number.</div>
+          </sc-if>
+          <sc-if value="{{ gradeOff }}" hint-placeholder-val="{{ true }}">
+            <div style="margin-top:24px;padding:14px 18px;border:1px dashed rgba(255,255,255,.12);border-radius:11px;max-width:640px;font-size:12.5px;color:#7d8798;font-style:italic">Wave open — the grade lands at Debrief, and it never travels without its commentary.</div>
+          </sc-if>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s2 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="02 Direction" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 02 · DIRECTION — STRATEGIZE</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">The bet before the evidence — what the strategist thinks the finished experience is.</div>
+          <div style="display:inline-flex;align-items:center;gap:8px;margin-top:22px;padding:5px 12px;border-radius:99px;background:rgba(232,180,90,.1);border:1px solid rgba(232,180,90,.35)">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;color:#e8b45a;letter-spacing:.12em">TENTATIVE</span>
+            <span style="font-size:11px;color:#c9a86a">a bet, not a decision — Decide finalizes after the explore rounds</span>
+          </div>
+          <div style="max-width:840px;margin-top:14px;font-family:'Source Serif 4',serif;font-size:27px;line-height:1.35;color:#e8eef7;text-wrap:pretty">“The close-out is a <strong>seal, not a feature</strong>: one deny choke-point every surface must route through — search, API, LiveView — proven by red→green repros.”</div>
+          <div style="margin-top:30px;max-width:980px">
+            <div style="display:flex;align-items:baseline;gap:12px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;letter-spacing:.14em;color:#9aa5b8">THE SURVEY PLAN — 8 QUESTIONS, EACH WITH ITS WHY</div>
+              <div style="font-size:11px;color:#5c6678;font-style:italic">first place to intervene: a wrong question at minute 5 is the cheapest bug in the whole cycle.</div>
+            </div>
+            <div style="margin-top:10px">
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">01</div><div style="font-size:12.5px;color:#dbe4f0">Where do grants gate access today?</div><div style="font-size:11.5px;color:#7d8798">if the deny path is already central, the seal is a routing fix — not a rewrite.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">02</div><div style="font-size:12.5px;color:#dbe4f0">Every search entry point that returns granted rows</div><div style="font-size:11.5px;color:#7d8798">each unguarded entry is a leak candidate; the count decides the seal design.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">03</div><div style="font-size:12.5px;color:#dbe4f0">Grant schema, revoke path, cache TTL</div><div style="font-size:11.5px;color:#7d8798">if the cache holds revoked grants, TTL is the bug — everything else is noise.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">04</div><div style="font-size:12.5px;color:#dbe4f0">Which LiveViews re-check grants after mount?</div><div style="font-size:11.5px;color:#7d8798">sockets outlive revokes; no re-check means a live leak.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">05</div><div style="font-size:12.5px;color:#dbe4f0">Plug pipeline coverage for /api/v1/*</div><div style="font-size:11.5px;color:#7d8798">one route outside the pipeline voids the whole seal.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">06</div><div style="font-size:12.5px;color:#dbe4f0">Existing deny-path tests + fixtures</div><div style="font-size:11.5px;color:#7d8798">a RED repro today is the cheapest proof we will ever get.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">07</div><div style="font-size:12.5px;color:#dbe4f0">All callers of Auth.revoke_token/1</div><div style="font-size:11.5px;color:#7d8798">every caller is a place the :revoked event must reach.</div></div>
+              <div style="display:grid;grid-template-columns:26px 1fr 1fr;gap:12px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">08</div><div style="font-size:12.5px;color:#dbe4f0">Prior sealing waves + docs</div><div style="font-size:11.5px;color:#7d8798">wave 3 sealed uploads the same way — steal its shape.</div></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:22px;padding:12px 16px;border:1px solid rgba(232,180,90,.25);border-radius:11px;background:rgba(232,180,90,.05);max-width:980px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#e8b45a;letter-spacing:.1em">SOFT GATE</span>
+            <span style="font-size:12px;color:#c9a86a">fly the survey (8 Sonnets) — {{ s2chip }}</span>
+            <span style="font-size:11px;color:#5c6678">· add or strike questions before launch · auto mode skips this pause entirely</span>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s3 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="03 Fleet in Flight" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 03 · FLEET IN FLIGHT — SURVEY, LIVE</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">You see the minds working — and each one is inspectable.</div>
+          <div style="display:flex;align-items:center;gap:14px;margin-top:18px;flex-wrap:wrap">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8eef7">{{ v3line }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678">hover = detail · click = transcript</div>
+          </div>
+          <sc-if value="{{ isSwarm }}" hint-placeholder-val="{{ true }}">
+            <div style="position:relative;height:390px;border:1px solid rgba(255,255,255,.07);border-radius:14px;background-color:#0d1118;background-image:radial-gradient(rgba(255,255,255,.05) 1px,transparent 1px);background-size:26px 26px;margin-top:14px;overflow:hidden">
+              <sc-for list="{{ fleet3 }}" as="a" hint-placeholder-count="8">
+                <div onMouseEnter="{{ a.enter }}" onMouseLeave="{{ a.leave }}" onClick="{{ a.open }}" style="position:absolute;left:{{ a.x }}%;top:{{ a.y }}%;width:{{ a.size }}px;height:{{ a.size }}px;border-radius:50%;background:{{ a.bg }};border:2px solid {{ a.bd }};cursor:pointer;display:grid;place-items:center;animation:bkFloat {{ a.fd }}s ease-in-out {{ a.fdel }}s infinite alternate">
+                  <span style="font-size:11px;color:{{ a.markCol }}">{{ a.mark }}</span>
+                  <span style="position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:5px;font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#7d8798;white-space:nowrap">{{ a.lbl }}</span>
+                </div>
+              </sc-for>
+              <sc-if value="{{ hoverOn }}" hint-placeholder-val="{{ false }}">
+                <div style="position:absolute;left:14px;bottom:14px;width:330px;padding:12px 14px;background:#10161f;border:1px solid rgba(255,255,255,.15);border-radius:11px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="width:7px;height:7px;border-radius:50%;background:{{ hov.stCol }}"></span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8eef7">{{ hov.k }}</span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:{{ hov.mBg }};color:{{ hov.mCol }}">{{ hov.mTxt }}</span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:{{ hov.stCol }}">{{ hov.stTxt }}</span>
+                  </div>
+                  <div style="font-size:11.5px;color:#9aa5b8;margin-top:6px">{{ hov.q }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#7d8798;margin-top:6px">{{ hov.line2 }}</div>
+                </div>
+              </sc-if>
+              <div style="position:absolute;top:10px;right:12px;font-family:'JetBrains Mono',monospace;font-size:9px;color:#3f4856">size = model tier · Fable › Opus › Sonnet</div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ isCards }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px;margin-top:14px">
+              <sc-for list="{{ fleet3 }}" as="a" hint-placeholder-count="8">
+                <div onClick="{{ a.open }}" style="padding:12px 13px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:11px;cursor:pointer" style-hover="border-color:rgba(255,255,255,.25)">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <span style="width:8px;height:8px;border-radius:50%;background:{{ a.dot }};animation:{{ a.anim }};flex:none"></span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.k }}</span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:{{ a.mBg }};color:{{ a.mCol }}">{{ a.mTxt }}</span>
+                  </div>
+                  <div style="font-size:11.5px;color:#9aa5b8;margin-top:7px;min-height:30px">{{ a.q }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#7d8798;margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.line2 }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <sc-if value="{{ isRows }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:14px;border:1px solid rgba(255,255,255,.07);border-radius:12px;overflow:hidden">
+              <sc-for list="{{ fleet3 }}" as="a" hint-placeholder-count="8">
+                <div onClick="{{ a.open }}" style="display:grid;grid-template-columns:14px 190px 60px 1fr;gap:12px;align-items:center;padding:9px 14px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;background:#0e131b" style-hover="background:#131a25">
+                  <span style="width:8px;height:8px;border-radius:50%;background:{{ a.dot }};animation:{{ a.anim }}"></span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.k }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:{{ a.mBg }};color:{{ a.mCol }};text-align:center">{{ a.mTxt }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#7d8798;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ a.line2 }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px">
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:99px;border:1px solid rgba(111,183,255,.25);background:rgba(111,183,255,.06)"><span style="width:6px;height:6px;border-radius:50%;background:#6fb7ff;animation:bkPulse 1.2s infinite"></span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#6fb7ff">stream · live — spawn, tools, tokens</span></div>
+            <div style="display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:99px;border:1px solid rgba(255,255,255,.12);background:#10151d"><span style="width:6px;height:6px;border-radius:50%;background:#3ecf8e"></span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8">bp ledger · poll 2s — heartbeat, stamps, Paper</span></div>
+            <div style="font-size:11px;color:#5c6678;font-style:italic">either feed can die — the deck degrades to the other and says so. A frozen view is never rendered as current.</div>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s4 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="04 The Coverage Map" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 04 · THE COVERAGE MAP — SURVEY RESULTS</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">Not “what did we learn” — what was checked, found, checked and NOT found, and where nobody looked.</div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:18px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8eef7">78 files · 8 surveyors</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px"><span style="color:#3ecf8e">30 found</span><span style="color:#5c6678"> · </span><span style="color:#ff8a8a">12 not found</span><span style="color:#5c6678"> · </span><span style="color:#e8b45a">3 partial</span></div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#ff8a8a">3 repo areas · zero coverage</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">{{ s4chip }}</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(62,207,142,.18);border:1px solid rgba(62,207,142,.3)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#d9f5e8">access/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#7fd4ac;margin-top:2px">21 checked</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(62,207,142,.12);border:1px solid rgba(62,207,142,.22)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#d9f5e8">search/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#7fd4ac;margin-top:2px">13 checked</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(62,207,142,.12);border:1px solid rgba(62,207,142,.22)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#d9f5e8">live/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#7fd4ac;margin-top:2px">15 checked</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(62,207,142,.09);border:1px solid rgba(62,207,142,.18)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#d9f5e8">plugs/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#7fd4ac;margin-top:2px">9 checked</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(62,207,142,.09);border:1px solid rgba(62,207,142,.18)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#d9f5e8">test/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#7fd4ac;margin-top:2px">12 checked</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(255,107,107,.06);border:1px dashed rgba(255,107,107,.45)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">channels/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#ff8a8a;margin-top:2px">0 — unreached</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(255,107,107,.06);border:1px dashed rgba(255,107,107,.45)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">jobs/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#ff8a8a;margin-top:2px">0 — unreached</div></div>
+            <div style="padding:8px 13px;border-radius:9px;background:rgba(255,107,107,.06);border:1px dashed rgba(255,107,107,.45)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">admin/</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#ff8a8a;margin-top:2px">0 — unreached</div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:20px;max-width:1100px">
+            <div style="padding:14px 16px;background:#0f141c;border:1px solid rgba(62,207,142,.2);border-radius:12px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#3ecf8e;font-weight:700">CHECKED &amp; FOUND · 7</div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">lib/barkpark/access/grant_guard.ex</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: the central deny path</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">all HTTP surfaces route here — except search.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">lib/barkpark/access/grant.ex</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: schema + revoke path</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">revoke_token/1 deletes the row and fires :revoked.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">lib/barkpark/search/query.ex</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: grant filter at query build</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">filters by grant — but only for the authed scope.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">lib/barkpark_web/plugs/grant_plug.ex</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: API enforcement</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">present on the :api pipeline.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">test/…/grant_search_deny_test.exs</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: a deny repro</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">exists — and it is RED today.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">lib/barkpark/access/grants_cache.ex</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: cache lifetime</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">TTL 300s, claims purge on :revoked — needs proof.</div></div>
+              <div style="padding:9px 0"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6fb7ff">papers/access-hardening.paper</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: prior art</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:2px">wave 3 sealed uploads the same way.</div></div>
+            </div>
+            <div style="padding:14px 16px;background:rgba(255,107,107,.04);border:1px solid rgba(255,107,107,.3);border-radius:12px">
+              <div style="display:flex;align-items:baseline;gap:8px"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#ff8a8a;font-weight:700">CHECKED &amp; NOT FOUND · 5</div><div style="font-size:10px;color:#c98a8a;font-style:italic">as loud as found — each is a decision-in-waiting</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">lib/barkpark/search/search_index.ex</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: grant filter at index read</div><div style="font-size:11.5px;color:#f2dcdc;margin-top:2px">NO filter — a raw index hit returns revoked rows.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">lib/barkpark_web/live/* handle_params</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: grant re-check on patch</div><div style="font-size:11.5px;color:#f2dcdc;margin-top:2px">no LiveView re-checks after mount. None.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">/api/v1/export pipeline</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: grant_plug on route</div><div style="font-size:11.5px;color:#f2dcdc;margin-top:2px">export is mounted OUTSIDE the :api pipeline.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">test/barkpark_web/live/</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: LiveView deny tests</div><div style="font-size:11.5px;color:#f2dcdc;margin-top:2px">zero deny-path LiveView tests exist.</div></div>
+              <div style="padding:9px 0"><div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#ffb3b3">api/ rate limiter</div><div style="font-size:10.5px;color:#7d8798;margin-top:2px">checked for: throttle on deny storms</div><div style="font-size:11.5px;color:#f2dcdc;margin-top:2px">none exists — filed, not forgotten.</div></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:14px;max-width:1100px">
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(232,180,90,.25);border-radius:12px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#e8b45a;font-weight:700">PARTIAL · 2</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:8px;line-height:1.5">grants_cache TTL semantics — timebox ran out.</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">/api/v1/export pipeline trace — candidates for the verify round.</div>
+            </div>
+            <div style="padding:13px 15px;background:#0f141c;border:1px dashed rgba(255,107,107,.4);border-radius:12px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#ff8a8a;font-weight:700">UNREACHED CORNERS · 3</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:8px;line-height:1.5">channels / websocket auth</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">Oban background jobs</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">admin surfaces (barkpark_admin/)</div>
+            </div>
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:12px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700">OPEN QUESTIONS · 3</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:8px;line-height:1.5">does :revoked reach every node in the cluster?</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">are search index rebuilds grant-aware?</div>
+              <div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">who owns admin surface policy?</div>
+            </div>
+          </div>
+          <div style="margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:10px;color:#5c6678">rule: unlisted = unchecked — the map admits its own blank space. · every cell drills to its file + claim in the Paper.</div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s5 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="05 Gate 1" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 05 · SYNTHESIS &amp; <span style="color:#e8b45a">GATE 1 — ENOUGH GROUND?</span></div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">The wave stops and asks. This is why the deck exists.</div>
+          <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px;margin-top:20px;max-width:1100px">
+            <div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700">NOW ESTABLISHED</div>
+              <div style="font-size:12.5px;color:#dbe4f0;line-height:1.6;margin-top:8px">· The deny path is central (GrantGuard) for HTTP — but search index reads bypass it entirely.</div>
+              <div style="font-size:12.5px;color:#dbe4f0;line-height:1.6;margin-top:6px">· revoke_token/1 deletes the row and fires :revoked; the ETS cache claims to purge on that event.</div>
+              <div style="font-size:12.5px;color:#dbe4f0;line-height:1.6;margin-top:6px">· LiveViews check grants once, at mount; nothing re-checks on patch or after revoke.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#e8b45a;font-weight:700;margin-top:20px">CONTRADICTION — VERBATIM, BOTH SIDES</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:8px">
+                <div style="padding:11px 13px;background:#0f141c;border:1px solid rgba(255,255,255,.1);border-radius:10px"><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#6fb7ff">survey:grant-model</div><div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:13px;color:#dbe4f0;margin-top:5px;line-height:1.5">“grants_cache purges on :revoked — TTL is irrelevant.”</div></div>
+                <div style="padding:11px 13px;background:#0f141c;border:1px solid rgba(255,255,255,.1);border-radius:10px"><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#6fb7ff">survey:search-surfaces</div><div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:13px;color:#dbe4f0;margin-top:5px;line-height:1.5">“stale granted rows served 4 minutes after revoke on search.”</div></div>
+              </div>
+              <div style="font-size:10.5px;color:#5c6678;margin-top:6px;font-style:italic">the verify round settles it — verify:cache-ttl runs the purge as proof.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700;margin-top:20px">COST OF EACH OPTION</div>
+              <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px">
+                <div style="font-size:11.5px;color:#b9c4d4"><span style="color:#6fb7ff;font-family:'JetBrains Mono',monospace">research more ↺</span> — 8 Sonnets ≈ ~4 min each. Cheap by design; the Paper grows, never forks.</div>
+                <div style="font-size:11.5px;color:#b9c4d4"><span style="color:#e8b45a;font-family:'JetBrains Mono',monospace">verify →</span> — 4 Sonnet + 2 Opus; five of six claims get RUN as code, not read.</div>
+                <div style="font-size:11.5px;color:#b9c4d4"><span style="color:#ff8a8a;font-family:'JetBrains Mono',monospace">skip ahead ⏩</span> — decides on unproven: search leak · export bypass · patch re-check. Logged, dated.</div>
+              </div>
+            </div>
+            <div style="padding:14px 16px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:12px">
+              <div style="display:flex;align-items:baseline;gap:8px"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700">PROPOSED VERIFY FLEET · 6</div><div style="font-size:10px;color:#5c6678;font-style:italic">written to the Paper BEFORE it flies</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1">verify:search-seal</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(111,183,255,.14);color:#6fb7ff">Sonnet</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(62,207,142,.14);color:#3ecf8e">RUN</span></div><div style="font-size:11px;color:#7d8798;margin-top:3px">mix test grant_search_deny_test.exs — prove the leak with a red repro.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1">verify:export-bypass</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(240,180,95,.14);color:#f0b45f">Opus</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(62,207,142,.14);color:#3ecf8e">RUN</span></div><div style="font-size:11px;color:#7d8798;margin-top:3px">curl with a revoked token. <em>Why Opus: pipeline reasoning is subtle — a wrong read is a false green.</em></div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1">verify:cache-ttl</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(111,183,255,.14);color:#6fb7ff">Sonnet</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(62,207,142,.14);color:#3ecf8e">RUN</span></div><div style="font-size:11px;color:#7d8798;margin-top:3px">revoke-then-read in iex — settles the contradiction.</div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1">verify:liveview-patch</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(240,180,95,.14);color:#f0b45f">Opus</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(62,207,142,.14);color:#3ecf8e">RUN</span></div><div style="font-size:11px;color:#7d8798;margin-top:3px">LiveViewTest patch repro. <em>Why Opus: lifecycle nuance — mount vs patch vs event.</em></div></div>
+              <div style="padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1">verify:fixture-drift</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(111,183,255,.14);color:#6fb7ff">Sonnet</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(62,207,142,.14);color:#3ecf8e">RUN</span></div><div style="font-size:11px;color:#7d8798;margin-top:3px">mix test test/support — do fixtures auto-grant?</div></div>
+              <div style="padding:9px 0"><div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#e8eef7;flex:1">verify:oban-jobs</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(111,183,255,.14);color:#6fb7ff">Sonnet</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(255,255,255,.08);color:#7d8798">READ</span></div><div style="font-size:11px;color:#7d8798;margin-top:3px">read-only — no runnable proof; its claim will arrive unproven, flagged.</div></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:20px;padding:12px 16px;border:1px solid rgba(232,180,90,.3);border-radius:11px;background:rgba(232,180,90,.06);max-width:1100px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#e8b45a;letter-spacing:.1em">◈ GATE 1</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8d5ae">{{ g1chip }}</span>
+            <span style="font-size:11px;color:#5c6678">· choice + author + note appended to the Paper, dated — the wave's story includes yours.</span>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s6 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="06 Proof Runs" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 06 · PROOF RUNS — VERIFY, LIVE</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">Same fleet view, proof-oriented: which command runs, the live tail, pass/fail as it lands.</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px;margin-top:18px;max-width:1200px">
+            <sc-for list="{{ proofs }}" as="p" hint-placeholder-count="6">
+              <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:12px">
+                <div style="display:flex;gap:8px;align-items:center">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ p.headCol }}">$ {{ p.k }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:{{ p.mBg }};color:{{ p.mCol }}">{{ p.mTxt }}</span>
+                  <span style="flex:1"></span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:{{ p.headCol }};animation:{{ p.anim }}">{{ p.status }}</span>
+                </div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa5b8;background:#0a0e14;border:1px solid rgba(255,255,255,.06);border-radius:7px;padding:8px 10px;margin-top:9px;white-space:pre-wrap;word-break:break-all">{{ p.cmd }}</div>
+                <div style="margin-top:8px;min-height:52px">
+                  <sc-for list="{{ p.lines }}" as="ln" hint-placeholder-count="2">
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;line-height:1.65;color:{{ ln.c }}">{{ ln.l }}</div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ p.vOn }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:8px;display:inline-block;padding:4px 9px;border-radius:6px;background:{{ p.vBg }};color:{{ p.vCol }};font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700">{{ p.vTxt }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:16px;font-size:11px;color:#5c6678;font-style:italic">the decisive output line is the payload — not the pass/fail icon alone. Sonnet/Opus badges carry the choice you made at Gate 1.</div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s7 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="07 Proof Table Gate 2" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 07 · THE PROOF TABLE &amp; <span style="color:#e8b45a">GATE 2 — PROVEN ENOUGH?</span></div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">Every load-bearing claim with the output that earned its verdict. Refuted premises get top billing.</div>
+          <div style="margin-top:16px;font-size:11px;color:#ff8a8a;font-family:'JetBrains Mono',monospace">↓ refuted first — a premise that died here just saved a build slice.</div>
+          <div style="margin-top:8px;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;max-width:1200px">
+            <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 110px;gap:14px;padding:9px 16px;background:#0d1118;border-bottom:1px solid rgba(255,255,255,.07)">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">CLAIM</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">COMMAND</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">DECISIVE EXCERPT — MANDATORY</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">VERDICT</span>
+            </div>
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 110px;gap:14px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.05);background:#0e131b;align-items:center">
+                <span style="font-size:12px;color:#dbe4f0;line-height:1.45">{{ r.claim }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#7d8798;word-break:break-all">{{ r.cmd }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#b9c4d4">{{ r.ex }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:3px 8px;border-radius:6px;background:{{ r.vBg }};color:{{ r.vCol }};text-align:center">{{ r.v }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;max-width:1200px">
+            <div style="padding:12px 15px;background:rgba(232,180,90,.06);border:1px solid rgba(232,180,90,.3);border-radius:11px"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#e8b45a;font-weight:700;letter-spacing:.12em">ARRIVED UNPROVEN — FLAGGED, NOT HIDDEN</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">verify:oban-jobs had no runnable proof. “Jobs appear grant-blind” is a reading, not a fact. Proceeding accepts it unproven — logged.</div></div>
+            <div style="padding:12px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:11px"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa5b8;font-weight:700;letter-spacing:.12em">VERIFIER COVERAGE DELTA</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">the deep round opened 14 files the survey never touched — the export pipeline trace and test/support.</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:18px;padding:12px 16px;border:1px solid rgba(232,180,90,.3);border-radius:11px;background:rgba(232,180,90,.06);max-width:1200px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#e8b45a;letter-spacing:.1em">◈ GATE 2</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8d5ae">{{ g2chip }}</span>
+            <span style="font-size:11px;color:#5c6678">· distrust vacuous green — a pass only counts if the right thing produced it.</span>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s8 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="08 The Plan Gate 3" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 08 · THE PLAN &amp; <span style="color:#e8b45a">GATE 3 — APPROVE THE WAVE</span></div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">Nothing here is hypothetical — every slice IS a published bp task. {{ planChip }}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:18px;max-width:1200px">
+            <div style="flex:1;min-width:280px;padding:11px 14px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:10px"><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#9aa5b8;letter-spacing:.12em">DECISION</span><div style="font-size:12px;color:#dbe4f0;margin-top:5px;line-height:1.5">Seal at the index read, not per-surface — <span style="color:#7d8798">one choke point beats nine patched call sites.</span></div></div>
+            <div style="flex:1;min-width:280px;padding:11px 14px;background:rgba(255,138,138,.05);border:1px solid rgba(255,138,138,.3);border-radius:10px"><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#ff8a8a;letter-spacing:.12em">REVERSAL — VERIFICATION OVERTURNED THE DIRECTION</span><div style="font-size:12px;color:#dbe4f0;margin-top:5px;line-height:1.5"><s style="color:#7d8798">before: “purge the cache on revoke” slice</s> → after: no cache slice. verify:cache-ttl killed the premise (purge already &lt;1ms).</div></div>
+            <div style="flex:1;min-width:280px;padding:11px 14px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:10px"><span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#9aa5b8;letter-spacing:.12em">DECISION</span><div style="font-size:12px;color:#dbe4f0;margin-top:5px;line-height:1.5">Telemetry goes to a Fable — <span style="color:#7d8798">every deny in prod logs; blast radius says senior mind.</span></div></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:16px;max-width:1200px">
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:12px">
+              <div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(111,183,255,.14);color:#6fb7ff">S1</span><a href="#" style="font-family:'JetBrains Mono',monospace;font-size:10px">bp#1471</a><span style="flex:1"></span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#5c6678">search/</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(240,180,95,.14);color:#f0b45f">Opus</span></div>
+              <div style="font-size:13px;font-weight:600;color:#e8eef7;margin-top:8px">Seal search index reads behind GrantGuard</div>
+              <div style="font-size:10.5px;color:#7d8798;font-style:italic;margin-top:4px">Opus: well-specified — the repro already exists.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8;background:#0a0e14;border-radius:6px;padding:6px 9px;margin-top:8px">gate: mix test test/barkpark/access/</div>
+              <div style="font-size:11px;color:#b9c4d4;margin-top:8px;line-height:1.7">○ deny repro green <span style="color:#e8b45a">⛭ merge-gated</span><br>○ index read routes through GrantGuard<br>○ no perf regression &gt;2% <span style="color:#e8b45a">⛭ merge-gated</span></div>
+            </div>
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:12px">
+              <div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(111,183,255,.14);color:#6fb7ff">S2</span><a href="#" style="font-family:'JetBrains Mono',monospace;font-size:10px">bp#1472</a><span style="flex:1"></span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#5c6678">plugs/</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(240,180,95,.14);color:#f0b45f">Opus</span></div>
+              <div style="font-size:13px;font-weight:600;color:#e8eef7;margin-top:8px">Export route into the :api pipeline</div>
+              <div style="font-size:10.5px;color:#7d8798;font-style:italic;margin-top:4px">Opus: proven bypass, mechanical fix, real tests.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8;background:#0a0e14;border-radius:6px;padding:6px 9px;margin-top:8px">gate: mix test test/barkpark_web/api</div>
+              <div style="font-size:11px;color:#b9c4d4;margin-top:8px;line-height:1.7">○ curl repro → 403<br>○ route inside :api pipeline<br>○ export deny test added <span style="color:#e8b45a">⛭ merge-gated</span></div>
+            </div>
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:12px">
+              <div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(111,183,255,.14);color:#6fb7ff">S3</span><a href="#" style="font-family:'JetBrains Mono',monospace;font-size:10px">bp#1473</a><span style="flex:1"></span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#5c6678">live/</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(240,180,95,.14);color:#f0b45f">Opus</span></div>
+              <div style="font-size:13px;font-weight:600;color:#e8eef7;margin-top:8px">LiveViews re-check grant on patch</div>
+              <div style="font-size:10.5px;color:#7d8798;font-style:italic;margin-top:4px">Opus: repro proven; hook pattern is established.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8;background:#0a0e14;border-radius:6px;padding:6px 9px;margin-top:8px">gate: mix test test/barkpark_web/live</div>
+              <div style="font-size:11px;color:#b9c4d4;margin-top:8px;line-height:1.7">○ patch repro green<br>○ shared on_mount hook<br>○ socket drops on revoke <span style="color:#e8b45a">⛭ merge-gated</span></div>
+            </div>
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(180,140,255,.25);border-radius:12px">
+              <div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(111,183,255,.14);color:#6fb7ff">S4</span><a href="#" style="font-family:'JetBrains Mono',monospace;font-size:10px">bp#1474</a><span style="flex:1"></span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#5c6678">access/</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(180,140,255,.16);color:#b48cff">Fable</span></div>
+              <div style="font-size:13px;font-weight:600;color:#e8eef7;margin-top:8px">Broadcast :revoked cluster-wide</div>
+              <div style="font-size:10.5px;color:#7d8798;font-style:italic;margin-top:4px">Fable: distributed purge ordering is subtle — high blast radius.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8;background:#0a0e14;border-radius:6px;padding:6px 9px;margin-top:8px">gate: mix test test/barkpark/access/cluster</div>
+              <div style="font-size:11px;color:#b9c4d4;margin-top:8px;line-height:1.7">○ multi-node purge test green <span style="color:#e8b45a">⛭ merge-gated</span><br>○ event contract documented</div>
+            </div>
+            <div style="padding:13px 15px;background:#0f141c;border:1px solid rgba(180,140,255,.25);border-radius:12px;opacity:{{ s5op }}">
+              <div style="display:flex;gap:8px;align-items:center"><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(111,183,255,.14);color:#6fb7ff">S5</span><a href="#" style="font-family:'JetBrains Mono',monospace;font-size:10px">bp#1475</a><span style="flex:1"></span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#5c6678">telemetry/</span><span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:rgba(180,140,255,.16);color:#b48cff">Fable</span></div>
+              <div style="font-size:13px;font-weight:600;color:#e8eef7;margin-top:8px">Deny-path telemetry + audit log</div>
+              <div style="font-size:10.5px;color:#7d8798;font-style:italic;margin-top:4px">Fable: touches every deny in prod — subtle, wide.</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8;background:#0a0e14;border-radius:6px;padding:6px 9px;margin-top:8px">gate: mix test test/barkpark/telemetry</div>
+              <div style="font-size:11px;color:#b9c4d4;margin-top:8px;line-height:1.7">○ deny emits telemetry<br>○ audit row per deny <span style="color:#e8b45a">⛭ merge-gated</span><br>○ dashboards seeded</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#e8b45a;margin-top:8px;min-height:12px">{{ s5note }}</div>
+            </div>
+            <div style="padding:13px 15px;border:1px dashed rgba(255,255,255,.14);border-radius:12px">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#9aa5b8;letter-spacing:.12em;font-weight:700">BACKLOG SEEDED — THE LEDGER SHOWS THE FUTURE</div>
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#b9c4d4;margin-top:9px;line-height:2"><a href="#">bp#1476</a> channels/websocket grant audit · <span style="color:#ff8a8a">P1</span><br><a href="#">bp#1477</a> Oban job grant-awareness repro · <span style="color:#ff8a8a">P1</span><br><a href="#">bp#1478</a> admin surface policy owner · <span style="color:#e8b45a">P2</span><br><a href="#">bp#1479</a> deny-storm rate limiter · <span style="color:#e8b45a">P2</span></div>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:16px;flex-wrap:wrap;max-width:1200px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#9aa5b8">FLEET PREVIEW · 5 builders about to fly · 3 Opus + 2 Fable · expected file overlap: <span style="color:#3ecf8e">0</span> — slices are worktree-isolated.</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:12px;padding:12px 16px;border:1px solid rgba(232,180,90,.3);border-radius:11px;background:rgba(232,180,90,.06);max-width:1200px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#e8b45a;letter-spacing:.1em">◈ GATE 3</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8d5ae">{{ g3chip }}</span>
+            <span style="font-size:11px;color:#5c6678">· the biggest decision on the deck — trim keeps struck tasks filed and honest.</span>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s9 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="09 The Build Board" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 09 · THE BUILD BOARD — LIVE</div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">The long phase, made watchable — the board moves the moment reality does.</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:12px;margin-top:18px;max-width:1300px">
+            <sc-for list="{{ board }}" as="b" hint-placeholder-count="5">
+              <div style="padding:13px 14px;background:#0f141c;border:1px solid {{ b.bd }};border-radius:12px">
+                <div style="display:flex;gap:8px;align-items:center">
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:rgba(111,183,255,.14);color:#6fb7ff">{{ b.tag }}</span>
+                  <a href="#" style="font-family:'JetBrains Mono',monospace;font-size:9.5px">{{ b.bp }}</a>
+                  <span style="flex:1"></span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:2px 7px;border-radius:5px;background:{{ b.gBg }};color:{{ b.gCol }}">{{ b.gTxt }}</span>
+                </div>
+                <div style="font-size:12.5px;font-weight:600;color:#e8eef7;margin-top:8px">{{ b.title }}</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:{{ b.headCol }};margin-top:4px">{{ b.head }}</div>
+                <div style="margin-top:8px">
+                  <sc-for list="{{ b.crits }}" as="c" hint-placeholder-count="3">
+                    <div style="padding:5px 0;border-bottom:1px solid rgba(255,255,255,.04)">
+                      <div style="display:flex;gap:7px"><span style="color:{{ c.col }};font-size:11px;flex:none">{{ c.mark }}</span><span style="flex:1;font-size:11px;color:#b9c4d4;line-height:1.45">{{ c.t }}</span></div>
+                      <sc-if value="{{ c.evOn }}" hint-placeholder-val="{{ false }}">
+                        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#3ecf8e;padding-left:18px;margin-top:2px">↳ {{ c.ev }}</div>
+                      </sc-if>
+                    </div>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ b.stallOn }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:9px;padding:8px 10px;background:rgba(232,180,90,.08);border:1px solid rgba(232,180,90,.35);border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#e8d5ae;line-height:1.5">{{ b.stallNote }}</div>
+                </sc-if>
+                <sc-if value="{{ b.branchOn }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top:9px;font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#6fb7ff">⎇ {{ b.branch }}</div>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678;letter-spacing:.12em">FLEET ·</span>
+            <sc-for list="{{ strip9 }}" as="a" hint-placeholder-count="5">
+              <div onClick="{{ a.open }}" style="display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:99px;border:1px solid rgba(255,255,255,.1);background:#10151d;cursor:pointer" style-hover="border-color:rgba(255,255,255,.3)">
+                <span style="width:6px;height:6px;border-radius:50%;background:{{ a.dot }};animation:{{ a.anim }}"></span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#c3cddd">{{ a.k }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;background:{{ a.mBg }};color:{{ a.mCol }}">{{ a.m }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:14px;font-size:11px;color:#5c6678;font-style:italic">stall is a first-class state — stamped by the builder the moment it happens, not at post-mortem. Nothing waits for the end of the run.</div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s10 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="10 Verdict Gate 4" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 10 · THE VERDICT &amp; <span style="color:#e8b45a">GATE 4 — LAND IT?</span></div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">The reviewer's honest account, slice by slice — then your call.</div>
+          <sc-if value="{{ reviewWait }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:24px;padding:16px 20px;border:1px dashed rgba(255,255,255,.12);border-radius:12px;max-width:640px;font-size:12.5px;color:#7d8798;font-style:italic">The reviewer hasn't flown yet — this slide fills during Review, slice by slice, from the workflow return and Paper §Debrief.</div>
+          </sc-if>
+          <sc-if value="{{ reviewOn }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:16px;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;max-width:1250px">
+              <div style="display:grid;grid-template-columns:44px 1.1fr 1fr 1.4fr;gap:14px;padding:9px 16px;background:#0d1118;border-bottom:1px solid rgba(255,255,255,.07)">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">SLICE</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">REVIEWER FIXED IN PLACE</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">FINAL BRANCH · GATE RE-RUN</span><span style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.13em;color:#5c6678">HONEST VERDICT — WHAT THE LEAD MUST KNOW</span>
+              </div>
+              <div style="display:grid;grid-template-columns:44px 1.1fr 1fr 1.4fr;gap:14px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.05);background:#0e131b"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#6fb7ff;font-weight:700">S1</span><span style="font-size:11.5px;color:#7d8798">none</span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#b9c4d4">a3f19c2 · <span style="color:#3ecf8e">green</span></span><span style="font-size:11.5px;color:#dbe4f0;line-height:1.5">clean seal; watch p95 on a cold index — within budget.</span></div>
+              <div style="display:grid;grid-template-columns:44px 1.1fr 1fr 1.4fr;gap:14px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.05);background:#0e131b"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#6fb7ff;font-weight:700">S2</span><span style="font-size:11.5px;color:#dbe4f0">moved the deny test out of quarantine</span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#b9c4d4">91be44d<span style="color:#e8b45a">-r</span> · <span style="color:#3ecf8e">green</span></span><span style="font-size:11.5px;color:#dbe4f0;line-height:1.5">merge; the 403 body leaks the grant id — cosmetic, filed <a href="#">bp#1480</a>.</span></div>
+              <div style="display:grid;grid-template-columns:44px 1.1fr 1fr 1.4fr;gap:14px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.05);background:#0e131b"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#6fb7ff;font-weight:700">S3</span><span style="font-size:11.5px;color:#7d8798">none</span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#b9c4d4">c07d21a · <span style="color:#3ecf8e">green</span></span><span style="font-size:11.5px;color:#dbe4f0;line-height:1.5">the hook is right; document the on_mount contract before merge.</span></div>
+              <div style="display:grid;grid-template-columns:44px 1.1fr 1fr 1.4fr;gap:14px;padding:11px 16px;border-bottom:1px solid rgba(255,255,255,.05);background:#0e131b"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#6fb7ff;font-weight:700">S4</span><span style="font-size:11.5px;color:#dbe4f0">added the node-down purge case</span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#b9c4d4">5fa9e03<span style="color:#e8b45a">-r</span> · <span style="color:#3ecf8e">green</span></span><span style="font-size:11.5px;color:#dbe4f0;line-height:1.5">merge with care — the PubSub contract is now load-bearing.</span></div>
+              <div style="display:grid;grid-template-columns:44px 1.1fr 1fr 1.4fr;gap:14px;padding:11px 16px;background:rgba(232,180,90,.05)"><span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#e8b45a;font-weight:700">S5</span><span style="font-size:11.5px;color:#e8d5ae">{{ s5verdict }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#b9c4d4">no branch · <span style="color:#ff8a8a">{{ s5gate }}</span></span><span style="font-size:11.5px;color:#e8d5ae;line-height:1.5">{{ s5verdict2 }}</span></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;max-width:1250px">
+              <div style="padding:12px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:11px"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa5b8;font-weight:700;letter-spacing:.12em">CROSS-SLICE COHERENCE</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">S3's hook and S4's broadcast overlap on socket teardown — resolved, one owner (S3).</div></div>
+              <div style="padding:12px 15px;background:#0f141c;border:1px solid rgba(255,255,255,.08);border-radius:11px"><div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa5b8;font-weight:700;letter-spacing:.12em">LEDGER AUDIT — WERE THE LIVE STAMPS TRUTHFUL?</div><div style="font-size:11.5px;color:#dbe4f0;margin-top:6px;line-height:1.5">yes, with one flag: S2's second criterion flipped 4 minutes before its evidence attached — raised with the builder.</div></div>
+            </div>
+            <sc-if value="{{ gradeOn }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;gap:18px;align-items:stretch;margin-top:18px;max-width:860px">
+                <div style="font-family:'Source Serif 4',serif;font-size:46px;font-weight:700;color:#3ecf8e;padding:8px 22px;border:1px solid rgba(62,207,142,.35);border-radius:12px;background:rgba(62,207,142,.07);display:grid;place-items:center;flex:none">B+</div>
+                <div style="align-self:center"><div style="font-family:'Source Serif 4',serif;font-size:15.5px;font-style:italic;color:#c6d2e2;line-height:1.55">“Sealed every hole we proved; one slice parked with an honest note; the unreached corners are now the next wave's first questions.”</div><div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;margin-top:6px">the commentary EARNS the grade — never a bare letter.</div></div>
+              </div>
+            </sc-if>
+            <div style="margin-top:16px;font-family:'JetBrains Mono',monospace;font-size:10px;color:#9aa5b8;max-width:1250px;line-height:1.8">on Land, the lead closes the merge-gated criteria — <span style="color:#e8b45a">S1</span> deny repro + perf budget · <span style="color:#e8b45a">S2</span> export deny test · <span style="color:#e8b45a">S3</span> socket drop · <span style="color:#e8b45a">S4</span> multi-node purge.</div>
+          </sc-if>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:18px;padding:12px 16px;border:1px solid rgba(232,180,90,.3);border-radius:11px;background:rgba(232,180,90,.06);max-width:1250px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#e8b45a;letter-spacing:.1em">◈ GATE 4</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8d5ae">{{ g4chip }}</span>
+            <span style="font-size:11px;color:#5c6678">· fix rounds go back as bp tasks — the loop stays in the ledger.</span>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ s11 }}" hint-placeholder-val="{{ false }}">
+        <section data-screen-label="11 Debrief Gate 5" style="position:absolute;inset:0;overflow:auto;padding:26px 36px 70px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.16em;color:#5c6678">SLIDE 11 · THE DEBRIEF &amp; <span style="color:#e8b45a">GATE 5 — NEXT WAVE?</span></div>
+          <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:18px;color:#9aa5b8;margin-top:6px">Close the story, open the next. The Paper is complete — direction → coverage → proofs → decisions → outcome.</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:{{ endCol }};margin-top:14px;min-height:13px">{{ endBanner }}</div>
+          <sc-if value="{{ debriefWait }}" hint-placeholder-val="{{ false }}">
+            <div style="margin-top:14px;padding:16px 20px;border:1px dashed rgba(255,255,255,.12);border-radius:12px;max-width:640px;font-size:12.5px;color:#7d8798;font-style:italic">The wave hasn't reached Debrief. The decision log below is already real — every gate answer is appended to the Paper the moment it's made.</div>
+          </sc-if>
+          <sc-if value="{{ debriefOn }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:16px;margin-top:18px;max-width:1150px">
+              <div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700">SHIPPED VS THE WISH — HOLISTIC, NOT A CHECKLIST</div>
+                <div style="font-family:'Source Serif 4',serif;font-size:17px;color:#dbe4f0;line-height:1.65;margin-top:10px;text-wrap:pretty">The wish asked for deny to be real. It now is — on every surface we proved: the search index routes through the guard, export sits inside the pipeline, sockets re-check on patch and drop on revoke, and the purge crosses the cluster. Telemetry is parked with an honest note. Channels, jobs, admin were never checked — named, filed, first in line.</div>
+                <div style="margin-top:18px;padding:14px 16px;background:rgba(111,183,255,.05);border:1px solid rgba(111,183,255,.25);border-radius:12px">
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#6fb7ff;letter-spacing:.12em;font-weight:700">NEXT_WAVE HANDOFF → PRE-FILLED AS WAVE 10'S DRAFT DIRECTION</div>
+                  <div style="font-family:'Source Serif 4',serif;font-style:italic;font-size:14.5px;color:#c6d2e2;line-height:1.6;margin-top:8px">“Take the parked telemetry slice and the three unreached corners; open with the Oban repro that verify:oban-jobs never produced.”</div>
+                </div>
+              </div>
+              <div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700">BACKLOG — OPEN CHILDREN ON THE EPIC</div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#b9c4d4;margin-top:9px;line-height:2.1"><span style="color:#ff8a8a">P1</span> <a href="#">bp#1476</a> channels/websocket grant audit<br><span style="color:#ff8a8a">P1</span> <a href="#">bp#1477</a> Oban job grant-awareness repro<br><span style="color:#e8b45a">P2</span> <a href="#">bp#1478</a> admin surface policy owner<br><span style="color:#e8b45a">P2</span> <a href="#">bp#1479</a> deny-storm rate limiter<br><span style="color:#e8b45a">P2</span> <a href="#">bp#1480</a> 403 body leaks grant id<br><span style="color:#e8b45a">P2</span> <a href="#">bp#1475</a> deny telemetry — parked, in_progress</div>
+              </div>
+            </div>
+          </sc-if>
+          <div style="margin-top:20px;max-width:1150px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.14em;color:#9aa5b8;font-weight:700">DECISION LOG — EVERY GATE ANSWER, DATED, IN THE PAPER</div>
+            <div style="margin-top:8px;padding:12px 16px;background:#0a0e14;border:1px solid rgba(255,255,255,.07);border-radius:11px;min-height:44px">
+              <sc-for list="{{ dlog }}" as="d" hint-placeholder-count="1">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#b9c4d4;line-height:1.9">{{ d.t }}</div>
+              </sc-for>
+              <sc-if value="{{ dlogEmpty }}" hint-placeholder-val="{{ true }}">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#3f4856">no gate decisions yet — they appear here the moment you make them.</div>
+              </sc-if>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:18px;padding:12px 16px;border:1px solid rgba(232,180,90,.3);border-radius:11px;background:rgba(232,180,90,.06);max-width:1150px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#e8b45a;letter-spacing:.1em">◈ GATE 5</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#e8d5ae">{{ g5chip }}</span>
+            <span style="font-size:11px;color:#5c6678">· fire loops the deck to Direction with the handoff as input — one Paper per wave, the charter as the spine.</span>
+          </div>
+        </section>
+        </sc-if>
+
+        <sc-if value="{{ drillOn }}" hint-placeholder-val="{{ false }}">
+        <div data-screen-label="agent drill-down" style="position:absolute;top:10px;right:10px;bottom:10px;width:392px;z-index:40;background:#0d1118;border:1px solid rgba(255,255,255,.16);border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.65);display:flex;flex-direction:column;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:9px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.08)">
+            <span style="width:8px;height:8px;border-radius:50%;background:{{ dDot }};animation:bkPulse 1.4s infinite"></span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#e8eef7;flex:1">{{ dK }}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;background:{{ dMBg }};color:{{ dMCol }}">{{ dM }}</span>
+            <button onClick="{{ onDrillClose }}" style="padding:2px 9px;background:#141a24;border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#9aa5b8;font-size:12px;cursor:pointer" style-hover="background:#1a2230">✕</button>
+          </div>
+          <div style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.06)">
+            <div style="font-size:11.5px;color:#9aa5b8;line-height:1.5">{{ dQ }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678;margin-top:6px">{{ dMeta }}</div>
+          </div>
+          <div style="flex:1;overflow:auto;padding:12px 14px;background:#0a0e14">
+            <sc-for list="{{ dLines }}" as="ln" hint-placeholder-count="4">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;line-height:1.8;color:{{ ln.c }}">{{ ln.l }}</div>
+            </sc-for>
+          </div>
+          <div style="padding:9px 14px;border-top:1px solid rgba(255,255,255,.06);font-size:10px;color:#5c6678;font-style:italic">the drill-down is the trust mechanism — every aggregate opens to its evidence.</div>
+        </div>
+        </sc-if>
+
+      </div>
+
+      <div data-screen-label="composer" style="padding:10px 16px 13px;border-top:1px solid rgba(255,255,255,.07);background:#0d1118">
+        <sc-if value="{{ gateOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;color:#e8b45a;letter-spacing:.1em">◈ {{ gateName }}</span>
+            <span style="font-family:'Source Serif 4',serif;font-style:italic;font-size:14px;color:#c6d2e2">{{ gateQ }}</span>
+            <span style="flex:1"></span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678">default fires in {{ gateRem }}s · gates are optional — auto mode never waits</span>
+          </div>
+          <div style="display:flex;gap:9px;flex-wrap:wrap">
+            <sc-for list="{{ gateOpts }}" as="o" hint-placeholder-count="3">
+              <button onClick="{{ o.pick }}" style="display:flex;align-items:center;gap:10px;padding:9px 13px;background:{{ o.bg }};border:1px solid {{ o.bd }};border-radius:9px;cursor:pointer;text-align:left" style-hover="filter:brightness(1.25)">
+                <sc-if value="{{ o.isDef }}" hint-placeholder-val="{{ false }}">
+                  <span style="position:relative;width:22px;height:22px;flex:none;display:grid;place-items:center">
+                    <svg width="22" height="22" viewBox="0 0 22 22" style="position:absolute;top:0;left:0"><circle cx="11" cy="11" r="9" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="2"></circle><circle cx="11" cy="11" r="9" fill="none" stroke="#e8b45a" stroke-width="2" stroke-dasharray="56.5" stroke-dashoffset="{{ gateDash }}" transform="rotate(-90 11 11)"></circle></svg>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:8px;color:#e8b45a">{{ gateRem }}</span>
+                  </span>
+                </sc-if>
+                <span>
+                  <span style="display:block;font-size:12.5px;font-weight:700;color:{{ o.col }}">{{ o.label }}</span>
+                  <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:9px;color:#7d8798;margin-top:2px">{{ o.sub }}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+          <input value="{{ note }}" onChange="{{ onNote }}" placeholder="add a note — appended to the Paper with your choice, dated" style="width:100%;margin-top:9px;background:#10151d;border:1px solid rgba(255,255,255,.1);border-radius:8px;padding:8px 12px;color:#dbe4f0;font-size:12px;outline:none">
+        </sc-if>
+        <sc-if value="{{ gateClosed }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;gap:10px;align-items:center">
+            <span style="width:8px;height:8px;border-radius:50%;background:{{ hbCol }};animation:bkPulse 1.6s infinite;flex:none"></span>
+            <input value="{{ note }}" onChange="{{ onNote }}" placeholder="wave is flying — gates ask here · notes land in the Paper" style="flex:1;background:#10151d;border:1px solid rgba(255,255,255,.09);border-radius:8px;padding:8px 12px;color:#dbe4f0;font-size:12px;outline:none;opacity:.85">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#5c6678;max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ lastDecision }}</span>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+
+    <div data-screen-label="agents rail" style="border-left:1px solid rgba(255,255,255,.07);background:#0c1017;overflow:auto;padding:12px 10px 20px">
+      <div style="display:flex;align-items:baseline;gap:7px;padding:2px 6px">
+        <span style="font-size:12.5px;font-weight:700;color:#e8eef7">agents</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6fb7ff">· {{ railTotal }}</span>
+        <span style="flex:1"></span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678">{{ railLine }}</span>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#5c6678;padding:3px 6px 0">{{ railTiers }}</div>
+      <sc-for list="{{ railGroups }}" as="g" hint-placeholder-count="4">
+        <div style="margin-top:12px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.14em;color:{{ g.col }};padding:0 6px">{{ g.label }}</div>
+          <sc-for list="{{ g.agents }}" as="a" hint-placeholder-count="3">
+            <div onClick="{{ a.open }}" style="display:flex;align-items:center;gap:8px;padding:6px 7px;border-radius:7px;cursor:pointer;margin-top:2px" style-hover="background:#151c27">
+              <span style="width:7px;height:7px;border-radius:50%;background:{{ a.dot }};animation:{{ a.anim }};flex:none"></span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9.5px;color:#c3cddd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">{{ a.k }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:8px;font-weight:700;padding:1px 5px;border-radius:4px;background:{{ a.mBg }};color:{{ a.mCol }};flex:none">{{ a.m }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:{{ a.rCol }};flex:none;min-width:26px;text-align:right">{{ a.right }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;fleetView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;swarm&quot;,&quot;cards&quot;,&quot;rows&quot;],&quot;default&quot;:&quot;swarm&quot;,&quot;tsType&quot;:&quot;'swarm'|'cards'|'rows'&quot;,&quot;section&quot;:&quot;Fleet&quot;},&quot;gateCountdown&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:10,&quot;max&quot;:120,&quot;step&quot;:5,&quot;unit&quot;:&quot;s&quot;,&quot;default&quot;:45,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gates&quot;},&quot;attended&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gates&quot;}}">
+class Component extends DCLogic {
+  state = { beat:0, el:0, totalT:0, speed:1, paused:false, slide:0, follow:true, gateRem:45, note:'', log:[], hover:null, drill:null, struck:false, ended:null, waveN:9, round2:false };
+
+  BEATS = [
+    {t:'p',id:'strategize',dur:14},{t:'p',id:'survey',dur:26},{t:'p',id:'digest',dur:14},{t:'g',g:1},
+    {t:'p',id:'verify',dur:22},{t:'g',g:2},{t:'p',id:'decide',dur:12},{t:'g',g:3},
+    {t:'p',id:'build',dur:34},{t:'p',id:'review',dur:14},{t:'g',g:4},{t:'p',id:'debrief',dur:8},{t:'g',g:5},{t:'end'}
+  ];
+  S4B = [2,3,4,5,6,7,8,8,9,10,10,11,11,11];
+  PH = {strategize:0,survey:1,digest:2,verify:4,decide:6,build:8,review:9,debrief:11};
+  GB = {1:3,2:5,3:7,4:10,5:12};
+  MC = {F:['#b48cff','rgba(180,140,255,.16)','Fable'],O:['#f0b45f','rgba(240,180,95,.14)','Opus'],S:['#6fb7ff','rgba(111,183,255,.14)','Sonnet']};
+  SC = {queued:'#3f4856',flying:'#6fb7ff',reporting:'#8fd0ff',done:'#3ecf8e',died:'#ff6b6b',stalled:'#e8b45a'};
+
+  GATES = {
+    1:{name:'GATE 1', q:'enough ground?', opts:[
+      {c:'research',label:'Research more ↺',sub:'8 Sonnets ≈ ~4 min each — cheap by design'},
+      {c:'verify',label:'Verify →',sub:'4 Sonnet + 2 Opus, as proposed',def:true},
+      {c:'skip',label:'Skip ahead ⏩',sub:'unproven: search leak · export bypass · patch re-check'}]},
+    2:{name:'GATE 2', q:'proven enough?', opts:[
+      {c:'more',label:'Verify more ↺',sub:'target the unproven — oban-jobs needs a repro'},
+      {c:'proceed',label:'Proceed to Decide →',sub:'5 of 6 settled · oban accepted unproven (logged)',def:true}]},
+    3:{name:'GATE 3', q:'approve the wave?', opts:[
+      {c:'build',label:'Build →',sub:'5 builders · 3 Opus + 2 Fable · overlap 0',def:true},
+      {c:'trim',label:'Trim S5, then build',sub:'task stays filed, unclaimed — honest in the backlog'},
+      {c:'redirect',label:'Redirect ↺',sub:'back to Digest with a note — expensive and rare'}]},
+    4:{name:'GATE 4', q:'land it?', opts:[
+      {c:'land',label:'Land →',sub:'merge 4 branches · close merge-gated criteria',def:true},
+      {c:'fix',label:'Fix round ↺',sub:'named issues go back to Build — as bp tasks'},
+      {c:'park',label:'Park',sub:'branches stay · tasks stay in_progress, notes honest'}]},
+    5:{name:'GATE 5', q:'next wave?', opts:[
+      {c:'fire',label:'Fire next wave ↺',sub:'the handoff seeds wave 10\u2019s draft direction',def:true},
+      {c:'close',label:'Close the epic',sub:'Paper closed · B+ stands with its commentary'}]}
+  };
+
+  fleets(){
+    const survey = [
+      {k:'survey:auth-seams',m:'S',q:'Where do grants gate access today?',sp:1,d:18,files:11,res:'6 found · 2 not found',acts:['rg "GrantGuard" lib/ — 14 hits','read lib/barkpark/access/grant_guard.ex','read lib/barkpark/access/policy.ex','stamp coverage — 6 found · 2 not found']},
+      {k:'survey:search-surfaces',m:'S',q:'Every search entry point that returns granted rows',sp:1.3,d:20,files:13,res:'4 found · 3 not · 1 partial',acts:['rg "Search.run" — 9 call sites','read lib/barkpark/search/query.ex','⚠ no grant filter in search_index.ex','stamp coverage — 4F · 3N · 1P']},
+      {k:'survey:grant-model',m:'S',q:'Grant schema, revoke path, cache TTL',sp:1.6,d:16,files:8,res:'5 found · 1 not found',acts:['read lib/barkpark/access/grant.ex','trace revoke_token/1 → :revoked event','ETS grants_cache — TTL 300s, claims purge on :revoked','stamp coverage — 5 found · 1 not found']},
+      {k:'survey:liveview-mounts',m:'S',q:'Which LiveViews re-check grants after mount?',sp:1.9,d:19,files:15,res:'3 found · 4 not found',acts:['rg "on_mount" lib/barkpark_web — 22 hits','read live/search_live.ex','⚠ no re-check in handle_params anywhere','stamp coverage — 3 found · 4 not found']},
+      {k:'survey:api-plugs',m:'S',q:'Plug pipeline coverage for /api/v1/*',sp:2.2,d:17,files:9,res:'5 found · 2 not · 1 partial',acts:['read router.ex — 4 pipelines','read plugs/grant_plug.ex','⚠ /api/v1/export mount unclear — timeboxed','stamp coverage — 5F · 2N · 1P']},
+      {k:'survey:test-topology',m:'S',q:'Existing deny-path tests + fixtures',sp:2.5,d:15,files:12,res:'4 found · 2 not found',acts:['ls test/barkpark/access — 7 files','read grant_search_deny_test.exs — RED today','⚠ zero LiveView deny tests','stamp coverage — 4 found · 2 not found']},
+      {k:'survey:revoke-paths',m:'S',q:'All callers of Auth.revoke_token/1',sp:2.8,d:18,files:10,res:'6 found · 1 partial',acts:['rg "revoke_token" — 11 callers','read each caller — 6 clean','partial: the admin caller is unclear','stamp coverage — 6 found · 1 partial']},
+      {k:'survey:prior-art',m:'S',q:'Prior sealing waves + docs',sp:3.1,d:20,died:12,files:9,res:'✕ died — 9 files lost',acts:['bp paper list --search seal','read papers/access-hardening.paper','✕ API 529 — died; transcript lost after 9 files']}
+    ];
+    if(this.state.round2){
+      survey.push({k:'survey:oban-jobs',m:'S',q:'Are background jobs grant-aware?',sp:1,d:12,files:11,res:'2 found · 1 not found',acts:['read lib/barkpark/jobs/ — 11 files','jobs query by user_id — grant-blind','stamp coverage — 2 found · 1 not found']});
+      survey.push({k:'survey:channels',m:'S',q:'Do channels check grants on join?',sp:1.4,d:12,files:7,res:'3 found · 1 not found',acts:['read channels/user_socket.ex','join checks the grant — push does not','stamp coverage — 3 found · 1 not found']});
+    }
+    const verify = [
+      {k:'verify:search-seal',m:'S',q:'Is the search leak real? RUN the deny repro.',sp:1,d:14,files:4,cmd:'mix test test/barkpark/access/grant_search_deny_test.exs',out:[{at:3,l:'Compiling 3 files (.ex)',c:'#7d8798'},{at:6,l:'1) test revoked grant denies search rows',c:'#9aa5b8'},{at:9,l:'   expected [] — got [%Row{id: 4412}]',c:'#ff8a8a'},{at:12.5,l:'1 test, 1 failure',c:'#ff8a8a'}],v:'PROVEN',vn:'RED — the leak is REAL'},
+      {k:'verify:export-bypass',m:'O',q:'Does a revoked token still export?',sp:1.3,d:16,files:6,cmd:'curl -s -H "Authorization: Bearer $REVOKED" :4000/api/v1/export | jq ".rows | length"',out:[{at:4,l:'HTTP/1.1 200 OK',c:'#9aa5b8'},{at:8,l:'61',c:'#ff8a8a'},{at:14,l:'61 rows for a REVOKED token',c:'#ff8a8a'}],v:'PROVEN',vn:'bypass confirmed'},
+      {k:'verify:cache-ttl',m:'S',q:'Does the cache hold revoked grants?',sp:1.6,d:12,files:3,cmd:'iex> Grants.revoke!(g); GrantsCache.get(g.id)',out:[{at:3,l:':revoked broadcast received',c:'#7d8798'},{at:6,l:'nil',c:'#3ecf8e'},{at:10,l:'purge confirmed <1ms after revoke',c:'#3ecf8e'}],v:'REFUTED',vn:'cache is NOT the leak — a slice just died'},
+      {k:'verify:liveview-patch',m:'O',q:'Do mounted sockets keep rows after revoke?',sp:2,d:18,files:5,cmd:'mix test test/barkpark_web/live/patch_recheck_repro_test.exs',out:[{at:5,l:'1) test socket re-checks grant on patch',c:'#9aa5b8'},{at:9,l:'mounted socket kept rows after revoke',c:'#ff8a8a'},{at:15,l:'1 test, 1 failure',c:'#ff8a8a'}],v:'PROVEN',vn:'patch never re-checks'},
+      {k:'verify:fixture-drift',m:'S',q:'Do fixtures auto-grant, masking deny paths?',sp:2.3,d:13,files:7,cmd:'mix test test/support/fixtures_test.exs',out:[{at:4,l:'....',c:'#7d8798'},{at:8,l:'4 tests, 0 failures',c:'#3ecf8e'},{at:11,l:'fixtures do NOT auto-grant — honest',c:'#3ecf8e'}],v:'REFUTED',vn:'fixtures are honest'},
+      {k:'verify:oban-jobs',m:'S',q:'Are background jobs grant-blind?',sp:2.6,d:15,files:11,cmd:'(read-only — no runnable proof this round)',out:[{at:4,l:'read lib/barkpark/jobs/ — 11 files',c:'#7d8798'},{at:9,l:'jobs query by user_id — appear grant-blind',c:'#e8b45a'},{at:13,l:'⚠ no repro produced — claim arrives UNPROVEN',c:'#e8b45a'}],v:'UNPROVEN',vn:'flagged, not hidden'}
+    ];
+    let build = [
+      {k:'build:search-seal',m:'O',q:'S1 · seal search index reads behind GrantGuard',sp:.5,d:22,files:9,acts:['claim bp#1471 — worktree wt/search-seal','route the index read through GrantGuard','mix test — 1 test, 0 failures (repro GREEN)','gate green — push bp/w9-search-seal @ a3f19c2']},
+      {k:'build:export-seal',m:'O',q:'S2 · export route into the :api pipeline',sp:.8,d:18,files:6,acts:['claim bp#1472 — worktree wt/export-seal','move the export route inside :api','curl repro → 403','gate green — push bp/w9-export-seal @ 91be44d']},
+      {k:'build:lv-recheck',m:'O',q:'S3 · LiveViews re-check grant on patch',sp:1.1,d:26,files:12,acts:['claim bp#1473 — worktree wt/lv-recheck','shared on_mount hook + handle_params re-check','LiveViewTest patch repro green','gate green — push bp/w9-lv-recheck @ c07d21a']},
+      {k:'build:revoked-pubsub',m:'F',q:'S4 · broadcast :revoked cluster-wide',sp:1.4,d:30,files:8,acts:['claim bp#1474 — worktree wt/revoked-pubsub','PubSub broadcast + per-node purge','multi-node purge test green','gate green — push bp/w9-revoked-pubsub @ 5fa9e03']},
+      {k:'build:deny-telemetry',m:'F',q:'S5 · deny-path telemetry + audit log',sp:1.7,d:80,stall:15,files:5,acts:['claim bp#1475 — worktree wt/deny-telemetry','deny emits [:barkpark, :access, :deny]','✕ gate red: index warm-up flaky under test partition','stamped the stall note — investigating']}
+    ];
+    if(this.state.struck) build = build.filter(a=>a.k!=='build:deny-telemetry');
+    return {
+      strategize:[{k:'strategize:wave',m:'F',q:'direction + the survey plan',sp:.5,d:13,files:6,acts:['read .claude/charters/airdrop-grants.md','bp task get 1462 — wish + wave history','drafting the direction — a seal, not a feature','writing the survey plan — 8 questions, each with a why']}],
+      survey,
+      digest:[{k:'digest:wave',m:'F',q:'fold 8 reports → coverage map + verify plan',sp:.5,d:13,files:9,acts:['reading 8 survey reports','folding coverage[] — 78 files checked','naming the contradiction — purge vs stale rows','writing §Survey digest + §Verify plan']}],
+      verify,
+      decide:[{k:'decide:wave',m:'F',q:'decisions · slice tasks · backlog',sp:.5,d:11,files:7,acts:['reading the proof table','killing the cache slice — premise refuted','publishing slices bp#1471–1475','seeding backlog bp#1476–1479']}],
+      build,
+      review:[{k:'review:wave',m:'F',q:'fix in place · ledger audit · grade',sp:.5,d:13,files:18,acts:['re-running 5 gates','fix: S2 deny test out of quarantine','ledger audit — 1 stamp flagged','writing the verdict + grade']}]
+    };
+  }
+
+  SLICES = [
+    {tag:'S1',title:'Seal search index reads behind GrantGuard',bp:'bp#1471',bk:'build:search-seal',crits:[{t:'deny repro green ⛭',at:8,ev:'1 test, 0 failures'},{t:'index read routes through GrantGuard',at:14,ev:'grant_guard.ex:88'},{t:'no perf regression >2% ⛭',at:20,ev:'p95 +0.7%'}],gateAt:21,doneAt:22,branch:'bp/w9-search-seal @ a3f19c2'},
+    {tag:'S2',title:'Export route into the :api pipeline',bp:'bp#1472',bk:'build:export-seal',crits:[{t:'curl repro → 403',at:7,ev:'HTTP/1.1 403'},{t:'route inside :api pipeline',at:12,ev:'router.ex:61'},{t:'export deny test added ⛭',at:16,ev:'export_deny_test.exs'}],gateAt:17,doneAt:18,branch:'bp/w9-export-seal @ 91be44d'},
+    {tag:'S3',title:'LiveViews re-check grant on patch',bp:'bp#1473',bk:'build:lv-recheck',crits:[{t:'patch repro green',at:10,ev:'1 test, 0 failures'},{t:'shared on_mount hook',at:17,ev:'live/hooks/grant_hook.ex'},{t:'socket drops on revoke ⛭',at:24,ev:'disconnect on :revoked'}],gateAt:25,doneAt:26,branch:'bp/w9-lv-recheck @ c07d21a'},
+    {tag:'S4',title:'Broadcast :revoked cluster-wide',bp:'bp#1474',bk:'build:revoked-pubsub',crits:[{t:'multi-node purge test green ⛭',at:14,ev:'2 nodes, 0 failures'},{t:'event contract documented',at:22,ev:'docs/revoked-event.md'}],gateAt:28,doneAt:30,branch:'bp/w9-revoked-pubsub @ 5fa9e03'},
+    {tag:'S5',title:'Deny-path telemetry + audit log',bp:'bp#1475',bk:'build:deny-telemetry',crits:[{t:'deny emits telemetry',at:9,ev:'telemetry_test green'},{t:'audit row per deny ⛭',at:999},{t:'dashboards seeded',at:999}],stall:15}
+  ];
+
+  componentDidMount(){
+    this.lastTick = performance.now();
+    this.timer = setInterval(()=>this.tick(), 150);
+    this.keyH = (e)=>{
+      if(e.target && (e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')) return;
+      if(e.key==='ArrowRight') this.setState({slide:Math.min(11,this.state.slide+1),follow:false});
+      if(e.key==='ArrowLeft') this.setState({slide:Math.max(0,this.state.slide-1),follow:false});
+    };
+    window.addEventListener('keydown', this.keyH);
+  }
+  componentWillUnmount(){ clearInterval(this.timer); window.removeEventListener('keydown', this.keyH); }
+
+  cdTotal(){ return this.props.gateCountdown ?? 45; }
+
+  tick(){
+    const now=performance.now();
+    const raw=Math.min(0.6,(now-(this.lastTick||now))/1000);
+    this.lastTick=now;
+    const s=this.state; if(s.ended||s.paused) return;
+    const b=this.BEATS[s.beat]; if(!b||b.t==='end') return;
+    const dt=raw*s.speed;
+    if(b.t==='g'){
+      if(this.props.attended===false){ this.answer(b.g, this.defChoice(b.g), '(auto mode — zero-wait pass-through)'); return; }
+      const r=s.gateRem-dt;
+      if(r<=0) this.answer(b.g, this.defChoice(b.g), '(countdown default)');
+      else this.setState({gateRem:r, totalT:s.totalT+dt});
+      return;
+    }
+    const el=s.el+dt;
+    if(el>=b.dur){
+      const i=s.beat+1; const nb=this.BEATS[i];
+      const p={beat:i, el:0, totalT:s.totalT+dt};
+      if(nb&&nb.t==='g') p.gateRem=this.cdTotal();
+      if(nb&&nb.t==='end') p.ended='complete';
+      if(s.follow) p.slide=this.S4B[Math.min(i,this.S4B.length-1)];
+      this.setState(p);
+    } else this.setState({el, totalT:s.totalT+dt});
+  }
+  defChoice(g){ return {1:'verify',2:'proceed',3:'build',4:'land',5:'fire'}[g]; }
+  clockStr(){ const t=Math.round(this.state.totalT*20); return Math.floor(t/60)+':'+String(t%60).padStart(2,'0'); }
+
+  answer(g, choice, autoNote){
+    const s=this.state; const gd=this.GATES[g];
+    const opt=gd.opts.find(o=>o.c===choice)||gd.opts[0];
+    const note=autoNote||s.note||'';
+    const log=s.log.concat([{g, choice:opt.label, at:this.clockStr(), note}]);
+    const p={log, note:''};
+    const jump=(bi)=>{ p.beat=bi; p.el=0; if(s.follow) p.slide=this.S4B[bi]; };
+    const next=()=>{ const i=this.GB[g]+1; const nb=this.BEATS[i]; p.beat=i; p.el=0;
+      if(nb&&nb.t==='g') p.gateRem=this.cdTotal();
+      if(nb&&nb.t==='end') p.ended='complete';
+      if(s.follow) p.slide=this.S4B[Math.min(i,this.S4B.length-1)]; };
+    if(g===1){ if(choice==='research'){ p.round2=true; jump(1); } else if(choice==='skip'){ jump(6); } else next(); }
+    else if(g===2){ if(choice==='more') jump(4); else next(); }
+    else if(g===3){ if(choice==='trim'){ p.struck=true; next(); } else if(choice==='redirect') jump(2); else next(); }
+    else if(g===4){ if(choice==='fix') jump(8); else if(choice==='park'){ p.ended='parked'; } else next(); }
+    else if(g===5){ if(choice==='fire'){ p.waveN=s.waveN+1; p.round2=false; p.struck=false; jump(0); } else p.ended='closed'; }
+    this.setState(p);
+  }
+
+  restart(){ this.setState({beat:0,el:0,totalT:0,speed:this.state.speed,paused:false,slide:0,follow:true,gateRem:this.cdTotal(),note:'',log:[],hover:null,drill:null,struck:false,ended:null,waveN:9,round2:false}); }
+  finish(){
+    const log=this.state.log.slice();
+    [1,2,3,4,5].forEach(g=>{ if(!log.some(e=>e.g===g)){ const opt=this.GATES[g].opts.find(o=>o.def); log.push({g,choice:opt.label,at:this.clockStr(),note:'(fast-forward default)'}); } });
+    this.setState({beat:13,el:0,ended:'complete',log,slide:this.state.follow?11:this.state.slide});
+  }
+
+  phSt(id){ const b=this.PH[id], c=this.state.beat; return b<c?2:(b===c?1:0); }
+
+  agentRT(id,a){
+    const st=this.phSt(id); const el= st===1?this.state.el:(st===2?1e3:0);
+    let s='queued';
+    if(st===0) s='queued';
+    else if(a.stall!=null && el>=a.stall) s='stalled';
+    else if(a.died!=null && el>=a.died) s='died';
+    else if(el>=a.sp+a.d) s='done';
+    else if(el>=a.sp) s=((el-a.sp)/a.d>.85)?'reporting':'flying';
+    const dEff=(a.stall!=null?a.stall+4:(a.died!=null?a.died+4:a.d));
+    const prog=Math.max(0,Math.min(el-a.sp,dEff));
+    const mm=Math.round(prog*20);
+    const elStr=Math.floor(mm/60)+':'+String(mm%60).padStart(2,'0');
+    const n=a.acts?a.acts.length:0;
+    let ai=0;
+    if(s==='done'||s==='died'||s==='stalled') ai=n-1;
+    else ai=Math.max(0,Math.min(n-1,Math.floor((prog/dEff)*n)));
+    return {s, elStr, prog, last:(n?a.acts[ai]:''), ai};
+  }
+
+  mkAgent(ph,a){
+    const rt=this.agentRT(ph,a); const mc=this.MC[a.m];
+    const dot=this.SC[rt.s];
+    const anim=(rt.s==='flying'||rt.s==='reporting')?'bkPulse 1.4s infinite':'none';
+    const right= rt.s==='flying'?rt.elStr : rt.s==='reporting'?rt.elStr : rt.s==='done'?'✓' : rt.s==='died'?'✕' : rt.s==='stalled'?'⚠' : '·';
+    const rCol= rt.s==='done'?'#3ecf8e':rt.s==='died'?'#ff6b6b':rt.s==='stalled'?'#e8b45a':(rt.s==='queued'?'#3f4856':'#6fb7ff');
+    const line2= rt.s==='done'?('done · '+(a.res||'reported')) : rt.s==='died'?'✕ died — API 529, transcript lost' : rt.s==='stalled'?'⚠ stalled — gate red, note stamped' : rt.s==='queued'?'queued':(rt.elStr+' · '+a.files+' files · '+(rt.last||''));
+    return {k:a.k, m:a.m, mBg:mc[1], mCol:mc[0], mTxt:mc[2], dot, anim, right, rCol, line2,
+      st:rt.s, stTxt:rt.s, stCol:dot, elStr:rt.elStr, q:a.q, files:a.files, res:a.res||'',
+      open:()=>this.setState({drill:{ph,k:a.k}}),
+      enter:()=>this.setState({hover:a.k}),
+      leave:()=>this.setState({hover:null})};
+  }
+
+  renderVals(){
+    const S=this.state, F=this.fleets();
+    const beat=this.BEATS[S.beat]||{t:'end'};
+    const gateOpen = beat.t==='g' && !S.ended;
+    const clock=this.clockStr();
+
+    const HB=['strategizing — direction + survey plan','surveying — fleet in flight','digesting — folding reports','HOLDING at Gate 1 — enough ground?','verifying — proofs in flight','HOLDING at Gate 2 — proven enough?','deciding — writing the plan','HOLDING at Gate 3 — approve the wave?',(S.struck?'building 4 slices':'building 5 slices'),'reviewing — fixes + ledger audit','HOLDING at Gate 4 — land it?','debriefing — grading the wave','HOLDING at Gate 5 — next wave?','complete — B+ · Paper closed'];
+    let hb='wave: '+(HB[Math.min(S.beat,13)]||HB[13]);
+    if(S.ended==='complete') hb='wave: complete — B+ · Paper closed';
+    if(S.ended==='parked') hb='wave: parked — branches stay, notes honest';
+    if(S.ended==='closed') hb='epic: closed — B+ stands';
+    const hbCol = gateOpen?'#e8b45a':(S.ended==='parked'?'#e8b45a':(S.ended||S.beat>=13)?'#3ecf8e':'#6fb7ff');
+
+    const NAV=[
+      {n:'00',label:'The Loop',meta:'orientation map',slide:0,beats:[]},
+      {n:'01',label:'The Wave Card',meta:'wish · identity · status',slide:1,beats:[]},
+      {n:'02',label:'Direction',meta:'Strategize · 1 Fable',slide:2,beats:[0]},
+      {n:'03',label:'Fleet in Flight',meta:'Survey · '+(S.round2?'10':'8')+' Sonnet',slide:3,beats:[1]},
+      {n:'04',label:'The Coverage Map',meta:'Digest · 1 Fable',slide:4,beats:[2]},
+      {n:'05',label:'Gate 1 · enough ground?',meta:'synthesis · verify fleet',slide:5,beats:[3],gate:true},
+      {n:'06',label:'Proof Runs',meta:'Verify · 4 Sonnet + 2 Opus',slide:6,beats:[4]},
+      {n:'07',label:'Proof Table · Gate 2',meta:'proven enough?',slide:7,beats:[5],gate:true},
+      {n:'08',label:'The Plan · Gate 3',meta:'Decide · approve the wave',slide:8,beats:[6,7],gate:true},
+      {n:'09',label:'The Build Board',meta:'Build · '+(S.struck?'4':'5')+' builders',slide:9,beats:[8]},
+      {n:'10',label:'Verdict · Gate 4',meta:'Review · land it?',slide:10,beats:[9,10],gate:true},
+      {n:'11',label:'Debrief · Gate 5',meta:'grade · next wave',slide:11,beats:[11,12],gate:true}
+    ];
+    const navRows=NAV.map(nv=>{
+      let st=0;
+      if(nv.beats.length){ if(nv.beats.indexOf(S.beat)>=0) st=1; else if(Math.max.apply(null,nv.beats)<S.beat) st=2; }
+      const isOpen = nv.gate && gateOpen && nv.beats.indexOf(S.beat)>=0;
+      return {num:nv.n,label:nv.label,meta:nv.meta,
+        dot: isOpen?'#e8b45a': st===1?'#6fb7ff': st===2?'#3ecf8e':'#2a3341',
+        anim:(st===1||isOpen)?'bkPulse 1.4s infinite':'none',
+        rad: nv.gate?'2px':'50%',
+        bg: S.slide===nv.slide?'#151d29':'transparent',
+        col: S.slide===nv.slide?'#e8eef7':'#9aa5b8',
+        go:()=>this.setState({slide:nv.slide,follow:false})};
+    });
+
+    const LOOPDEF=[
+      {ph:'strategize',name:'1 · Strategize',meta:'1 Fable',sub:'~5 min',slide:2},
+      {ph:'survey',name:'2 · Survey',meta:(S.round2?'10':'8')+' Sonnet',sub:'~5 min',slide:3},
+      {ph:'digest',name:'3 · Digest',meta:'1 Fable',sub:'~10 min',slide:4},
+      {g:1,name:'GATE 1',meta:'enough ground?',sub:'↺ research · → verify · ⏩ skip',slide:5},
+      {ph:'verify',name:'4 · Verify',meta:'4 Sonnet + 2 Opus',sub:'open-ended',slide:6},
+      {g:2,name:'GATE 2',meta:'proven enough?',sub:'↺ verify more · → proceed',slide:7},
+      {ph:'decide',name:'5 · Decide',meta:'1 Fable',sub:'open-ended',slide:8},
+      {g:3,name:'GATE 3',meta:'approve the wave?',sub:'→ build · ✂ trim · ↺ redirect',slide:8},
+      {ph:'build',name:'6 · Build',meta:(S.struck?'3 Opus + 1 Fable':'3 Opus + 2 Fable'),sub:'open-ended',slide:9},
+      {ph:'review',name:'7 · Review',meta:'1 Fable',sub:'open-ended',slide:10},
+      {g:4,name:'GATE 4',meta:'land it?',sub:'→ land · ↺ fix round · ⏸ park',slide:10},
+      {ph:'debrief',name:'Debrief',meta:'Paper closed · grade',sub:'',slide:11},
+      {g:5,name:'GATE 5',meta:'next wave?',sub:'↺ fire · ⏹ close',slide:11}
+    ];
+    const loop=LOOPDEF.map(L=>{
+      const bi=(L.ph!=null)?this.PH[L.ph]:this.GB[L.g];
+      const st=bi<S.beat?2:(bi===S.beat?1:0);
+      const isG=L.g!=null;
+      const open=isG&&st===1&&gateOpen;
+      const durB=this.BEATS[bi].dur||1;
+      const frac= st===2?1:(st===1&&!isG?Math.min(1,S.el/durB):0);
+      let live='';
+      if(st===1&&!isG){
+        const ags=F[L.ph]||[];
+        let fl=0,dn=0,wr=0;
+        ags.forEach(a=>{ const r=this.agentRT(L.ph,a); if(r.s==='flying'||r.s==='reporting')fl++; else if(r.s==='done')dn++; else if(r.s==='died'||r.s==='stalled')wr++; });
+        live=fl+' flying · '+dn+' done'+(wr?(' · '+wr+' ⚠'):'');
+      }
+      if(open) live='OPEN — waiting on you ↓';
+      if(st===2) live=isG?'passed':'done';
+      return {name:L.name,meta:L.meta||'',sub:L.sub||'',
+        dot: open?'#e8b45a':st===1?'#6fb7ff':st===2?'#3ecf8e':'#2a3341',
+        anim:(st===1)?'bkPulse 1.4s infinite':'none',
+        rad:isG?'2px':'50%',
+        bg: st===1?'#131b26':'#0f141c',
+        bd: open?'rgba(232,180,90,.5)':(st===1?'rgba(111,183,255,.4)':'rgba(255,255,255,.07)'),
+        col: st===1?'#e8eef7':'#b9c4d4',
+        barW: Math.round(frac*100)+'%',
+        barCol: st===2?'#3ecf8e':'#6fb7ff',
+        live, liveCol: open?'#e8b45a':(st===1?'#6fb7ff':'#5c6678'),
+        go:()=>this.setState({slide:L.slide,follow:false})};
+    });
+    let nextGate='—';
+    for(let g=1;g<=5;g++){ if(this.GB[g]>=S.beat){ const W={1:'research more, verify, or skip',2:'verify more or proceed',3:'build, trim, or redirect',4:'land, fix, or park',5:'fire the next wave or close'}; nextGate='GATE '+g+' — '+this.GATES[g].q+' · '+W[g]; break; } }
+
+    const railGroups=[]; let tot=0, fly=0, dn=0, dd=0; const tiers={F:0,O:0,S:0};
+    const PHORDER=['strategize','survey','digest','verify','decide','build','review'];
+    const PHLBL={strategize:'1 · STRATEGIZE',survey:'2 · SURVEY',digest:'3 · DIGEST',verify:'4 · VERIFY',decide:'5 · DECIDE',build:'6 · BUILD',review:'7 · REVIEW'};
+    PHORDER.forEach(ph=>{
+      const ags=(F[ph]||[]).map(a=>this.mkAgent(ph,a));
+      ags.forEach(v=>{ tot++; tiers[v.m]++; if(v.st==='flying'||v.st==='reporting')fly++; if(v.st==='done')dn++; if(v.st==='died')dd++; });
+      const st=this.phSt(ph);
+      railGroups.push({label:PHLBL[ph], col: st===1?'#6fb7ff':(st===2?'#3ecf8e':'#3f4856'), agents:ags});
+    });
+
+    const fleet3=F.survey.map((a,i)=>{
+      const v=this.mkAgent('survey',a);
+      const size=a.m==='F'?44:(a.m==='O'?34:26);
+      return Object.assign(v,{
+        x:8+((i*29)%74), y:14+((i*43)%56), size,
+        bg: v.st==='queued'?'rgba(63,72,86,.25)': v.st==='done'?'rgba(62,207,142,.16)': v.st==='died'?'rgba(255,107,107,.15)': v.st==='stalled'?'rgba(232,180,90,.16)':'rgba(111,183,255,.16)',
+        bd: this.SC[v.st],
+        fd:(3+(i%4)), fdel:(-(i*0.7)),
+        mark: v.st==='died'?'✕':(v.st==='done'?'✓':''),
+        markCol: v.st==='died'?'#ff6b6b':'#3ecf8e',
+        lbl:a.k.split(':')[1]});
+    });
+    let f3f=0,f3d=0,f3x=0; fleet3.forEach(v=>{ if(v.st==='flying'||v.st==='reporting')f3f++; if(v.st==='done')f3d++; if(v.st==='died')f3x++; });
+    const v3line=fleet3.length+' × Sonnet · '+f3f+' flying · '+f3d+' done · '+f3x+' died';
+    const hov=fleet3.find(v=>v.k===S.hover)||fleet3[0]||{};
+    const view=this.props.fleetView??'swarm';
+
+    const sSt=this.phSt('strategize');
+    const s2chip= sSt===0?'not yet reached': sSt===1?'Fable drafting — launches on completion of this slide':'flown — the fleet is history now; its coverage is two slides ahead';
+    const dSt=this.phSt('digest');
+    const s4chip= dSt===0?'surveyors still stamping — the map folds at Digest': dSt===1?'digest folding 8 reports…':'folded → Paper §Survey digest';
+
+    const chip=(g)=>{
+      const e=S.log.slice().reverse().find(x=>x.g===g);
+      if(e) return '✓ decided — '+e.choice+' · you · '+e.at+((e.note&&e.note[0]!=='(')?(' — “'+e.note+'”'):'');
+      if(gateOpen&&beat.g===g) return 'OPEN — answer in the composer below';
+      return this.GB[g]<S.beat?'passed':'not yet reached';
+    };
+
+    const vSt=this.phSt('verify');
+    const proofs=F.verify.map(a=>{
+      const rt=this.agentRT('verify',a); const mc=this.MC[a.m];
+      const el= vSt===1?S.el:(vSt===2?1e3:0);
+      const lines=(a.out||[]).filter(o=>el>=a.sp+o.at).map(o=>({l:o.l,c:o.c}));
+      const running=(rt.s==='flying'||rt.s==='reporting');
+      const done=rt.s==='done';
+      const vmap={PROVEN:['rgba(62,207,142,.14)','#3ecf8e'],REFUTED:['rgba(255,138,138,.14)','#ff8a8a'],UNPROVEN:['rgba(232,180,90,.16)','#e8b45a']};
+      return {k:a.k, mTxt:mc[2], mBg:mc[1], mCol:mc[0], cmd:a.cmd,
+        status: done?'DONE · '+rt.elStr : running?'RUNNING':'QUEUED',
+        headCol: done?'#3ecf8e':(running?'#6fb7ff':'#5c6678'),
+        anim: running?'bkPulse 1.2s infinite':'none',
+        lines, vOn:done, vTxt:a.v+' — '+a.vn, vBg:vmap[a.v][0], vCol:vmap[a.v][1]};
+    });
+
+    const ROWS=[[2,'the grants cache holds revoked grants (TTL bug)'],[4,'test fixtures auto-grant, masking deny paths'],[0,'revoked grants still return rows via search'],[1,'/api/v1/export bypasses the grant plug'],[3,'mounted sockets keep rows after revoke + patch'],[5,'Oban jobs are grant-blind']];
+    const vmap2={PROVEN:['rgba(62,207,142,.14)','#3ecf8e'],REFUTED:['rgba(255,138,138,.14)','#ff8a8a'],UNPROVEN:['rgba(232,180,90,.16)','#e8b45a']};
+    const rows=ROWS.map(pair=>{
+      const a=F.verify[pair[0]]; const rt=this.agentRT('verify',a);
+      const done=rt.s==='done';
+      return {claim:pair[1], cmd:a.cmd,
+        ex: done?a.out[a.out.length-1].l:(rt.s==='queued'?'— queued —':'— running —'),
+        v: done?a.v:'…',
+        vBg: done?vmap2[a.v][0]:'rgba(255,255,255,.05)',
+        vCol: done?vmap2[a.v][1]:'#5c6678'};
+    });
+
+    const dcSt=this.phSt('decide');
+    const planChip= dcSt===0?'(Decide has not flown — this is the shape the plan will take.)': dcSt===1?'(Decide is writing it now — slices publish as they are cut.)':'(Published — open any task in the ledger.)';
+
+    const bSt=this.phSt('build'); const bel= bSt===1?S.el:(bSt===2?1e3:0);
+    const board=this.SLICES.map(sl=>{
+      const struckThis=S.struck&&sl.tag==='S5';
+      const stalled=!struckThis&&sl.stall!=null&&bel>=sl.stall;
+      const doneS=sl.doneAt!=null&&bel>=sl.doneAt;
+      const started=!struckThis&&bel>0.4;
+      const crits=sl.crits.map(c=>{ const d=!struckThis&&bel>=c.at; return {t:c.t, mark:d?'✓':'○', col:d?'#3ecf8e':'#3f4856', ev:c.ev||'', evOn:(d&&!!c.ev)}; });
+      return {tag:sl.tag, title:sl.title, bp:sl.bp,
+        head: struckThis?'✂ struck at Gate 3 — stays filed, unclaimed': started?('claimed · '+sl.bk+' · '+(doneS?'done':(stalled?'in_progress — stalled':'in_progress'))):'open — awaiting claim',
+        headCol: stalled?'#e8b45a':'#5c6678',
+        bd: stalled?'rgba(232,180,90,.55)':(doneS?'rgba(62,207,142,.35)':'rgba(255,255,255,.08)'),
+        crits,
+        gTxt: struckThis?'STRUCK':(!started?'PENDING':(doneS?'GATE GREEN':(stalled?'GATE RED':'GATE RUNNING'))),
+        gBg: struckThis?'rgba(255,255,255,.05)':(doneS?'rgba(62,207,142,.14)':(stalled?'rgba(255,107,107,.15)':(started?'rgba(111,183,255,.13)':'rgba(255,255,255,.05)'))),
+        gCol: struckThis?'#5c6678':(doneS?'#3ecf8e':(stalled?'#ff8a8a':(started?'#6fb7ff':'#5c6678'))),
+        branch: doneS?sl.branch:'', branchOn:doneS,
+        stallOn:stalled, stallNote:'“gate red: index warm-up flaky under test partition — investigating.” — stamped by the builder, live'};
+    });
+    const strip9=F.build.map(a=>this.mkAgent('build',a));
+
+    const rSt=this.phSt('review');
+    const reviewOn=rSt>=1, gradeOn=rSt===2;
+    const s5verdict = S.struck?'— (struck at Gate 3)':'stalled — reviewer left it honest';
+    const s5gate = S.struck?'n/a':'red';
+    const s5verdict2 = S.struck?'struck before build; bp#1475 sits open in the backlog.':'in_progress with the builder\u2019s note verbatim; park or fix — do not fake-close.';
+
+    const dbSt=this.phSt('debrief');
+    const debriefOn=dbSt>=1;
+    const dlog=S.log.map(e=>({t:'GATE '+e.g+' · '+e.choice+' · you · '+e.at+(e.note?(' — '+e.note):'')}));
+    let endBanner='', endCol='#5c6678';
+    if(S.ended==='complete'){ endBanner='● WAVE COMPLETE — Paper closed, grade stands with its commentary.'; endCol='#3ecf8e'; }
+    if(S.ended==='parked'){ endBanner='⏸ PARKED — branches stay, tasks stay in_progress with honest notes; the debrief records why.'; endCol='#e8b45a'; }
+    if(S.ended==='closed'){ endBanner='⏹ EPIC CLOSED — the charter retires; the backlog outlives the wave.'; endCol='#9aa5b8'; }
+    if(S.waveN>9) { endBanner='↺ WAVE '+S.waveN+' FIRED — the handoff seeded its draft direction; the deck looped to Direction.'; endCol='#6fb7ff'; }
+
+    let gate={name:'',q:'',opts:[]};
+    if(gateOpen){
+      const gd=this.GATES[beat.g];
+      gate={name:gd.name, q:gd.q, opts:gd.opts.map(o=>({label:o.label,sub:o.sub,isDef:!!o.def,
+        bg:o.def?'rgba(232,180,90,.13)':'#131a24', bd:o.def?'#e8b45a':'rgba(255,255,255,.12)', col:o.def?'#ffd9a0':'#dbe4f0',
+        pick:()=>this.answer(beat.g,o.c)}))};
+    }
+    const gateRem=Math.max(0,Math.ceil(S.gateRem));
+    const gateDash=56.5*(1-(S.gateRem/this.cdTotal()));
+    const lastE=S.log[S.log.length-1];
+    const lastDecision=lastE?('last: GATE '+lastE.g+' — '+lastE.choice+' · '+lastE.at):'no gate decisions yet';
+
+    return this.finishVals({S,F,beat,gateOpen,clock,hb,hbCol,navRows,loop,nextGate,railGroups,tot,fly,dn,dd,tiers,fleet3,v3line,hov,view,s2chip,s4chip,chip,proofs,rows,planChip,board,strip9,reviewOn,gradeOn,s5verdict,s5gate,s5verdict2,debriefOn,dlog,endBanner,endCol,gate,gateRem,gateDash,lastDecision});
+  }
+
+  finishVals(V){
+    const S=V.S;
+    let dOn=false, dK='',dQ='',dM='S',dMBg='rgba(111,183,255,.14)',dMCol='#6fb7ff',dDot='#5c6678',dMeta='',dLines=[];
+    if(S.drill){
+      const arr=V.F[S.drill.ph]||[];
+      const a=arr.find(x=>x.k===S.drill.k);
+      if(a){
+        dOn=true;
+        const rt=this.agentRT(S.drill.ph,a); const mc=this.MC[a.m];
+        dK=a.k; dQ=a.q; dM=mc[2]; dMBg=mc[1]; dMCol=mc[0]; dDot=this.SC[rt.s];
+        dMeta=rt.s+' · '+rt.elStr+' elapsed · '+a.files+' files touched · '+Math.round(rt.prog*2.3)+'k tok';
+        const upto=(rt.s==='done'||rt.s==='died'||rt.s==='stalled')?(a.acts||[]).length:(rt.ai+1);
+        dLines=(a.acts||[]).slice(0,Math.max(1,upto)).map(l=>({l:'· '+l, c: l.indexOf('✕')===0?'#ff8a8a':(l.indexOf('⚠')===0?'#e8b45a':'#9aa5b8')}));
+        if(rt.s==='flying'||rt.s==='reporting') dLines.push({l:'▌', c:'#6fb7ff'});
+      }
+    }
+    const out={
+      waveTag:'W'+S.waveN, clock:V.clock, hb:V.hb, hbCol:V.hbCol,
+      waveLine:'w'+S.waveN+' (LAND w'+(S.waveN-1)+')',
+      pauseLabel:S.paused?'▶':'⏸', spdLabel:S.speed+'×',
+      onPause:()=>this.setState({paused:!this.state.paused}),
+      onSpeed:()=>this.setState({speed:this.state.speed===1?2:(this.state.speed===2?4:1)}),
+      onRestart:()=>this.restart(), onFinish:()=>this.finish(),
+      follow:S.follow,
+      followBg:S.follow?'rgba(111,183,255,.15)':'#141a24', followCol:S.follow?'#6fb7ff':'#7d8798',
+      onFollow:()=>this.setState({follow:true, slide:this.S4B[Math.min(this.state.beat,this.S4B.length-1)]}),
+      onPrev:()=>this.setState({slide:Math.max(0,this.state.slide-1),follow:false}),
+      onNext:()=>this.setState({slide:Math.min(11,this.state.slide+1),follow:false}),
+      slidePos:String(S.slide).padStart(2,'0')+' / 11',
+      navRows:V.navRows, loop:V.loop, nextGate:V.nextGate,
+      railTotal:V.tot, railLine:V.fly+' flying · '+V.dn+' done · '+V.dd+' died',
+      railTiers:'by tier · '+V.tiers.F+' Fable · '+V.tiers.O+' Opus · '+V.tiers.S+' Sonnet',
+      railGroups:V.railGroups,
+      fleet3:V.fleet3, v3line:V.v3line,
+      isSwarm:V.view==='swarm', isCards:V.view==='cards', isRows:V.view==='rows',
+      hoverOn:!!S.hover, hov:V.hov,
+      s2chip:V.s2chip, s4chip:V.s4chip,
+      g1chip:V.chip(1), g2chip:V.chip(2), g3chip:V.chip(3), g4chip:V.chip(4), g5chip:V.chip(5),
+      proofs:V.proofs, rows:V.rows,
+      planChip:V.planChip, s5op:S.struck?'.38':'1',
+      s5note:S.struck?'✂ struck at Gate 3 — bp#1475 stays filed, unclaimed, honest in the backlog':'',
+      board:V.board, strip9:V.strip9,
+      reviewOn:V.reviewOn, reviewWait:!V.reviewOn, gradeOn:V.gradeOn, gradeOff:!V.gradeOn,
+      s5verdict:V.s5verdict, s5gate:V.s5gate, s5verdict2:V.s5verdict2,
+      debriefOn:V.debriefOn, debriefWait:!V.debriefOn,
+      dlog:V.dlog, dlogEmpty:V.dlog.length===0,
+      endBanner:V.endBanner, endCol:V.endCol,
+      gateOpen:V.gateOpen, gateClosed:!V.gateOpen,
+      gateName:V.gate.name, gateQ:V.gate.q, gateOpts:V.gate.opts,
+      gateRem:V.gateRem, gateDash:V.gateDash,
+      note:S.note, onNote:(e)=>this.setState({note:e.target.value}),
+      lastDecision:V.lastDecision,
+      drillOn:dOn, dK, dQ, dM, dMBg, dMCol, dDot, dMeta, dLines,
+      onDrillClose:()=>this.setState({drill:null})
+    };
+    for(let i=0;i<12;i++) out['s'+i]=(S.slide===i);
+    return out;
+  }
+}
+</script>
+</body>
+</html>

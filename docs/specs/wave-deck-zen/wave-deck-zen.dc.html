@@ -430,7 +430,7 @@ class Component extends DCLogic {
 
   stratReply(shown){
     const S=this.state;
-    const conv=S.conv.concat([{who:'user',text:'YOU — “'+shown+'”'}]);
+    const conv=S.conv.concat([{who:'user',text:'YOU — \u201c'+shown+'\u201d'}]);
     const isQ=/\?\s*$/.test(shown);
     const reply= isQ
       ? 'The deny path is central for HTTP; search index reads bypass it, and a red repro exists. Proposed survey plan below — strike or add while I work.'
@@ -559,7 +559,7 @@ class Component extends DCLogic {
 
     let endTitle='The wave is closed.', endSub='“Sealed every hole we proved; one slice parked with an honest note.”';
     if(S.ended==='parked'){ endTitle='The wave is parked.'; endSub='branches stay. tasks stay in_progress with honest notes. the debrief records why.'; }
-    if(S.ended==='closed'){ endTitle='The epic is closed.'; endSub='“Sealed every hole we proved; one slice parked with an honest note; the unreached corners are now the next wave’s first questions.” — B+'; }
+    if(S.ended==='closed'){ endTitle='The epic is closed.'; endSub='“Sealed every hole we proved; one slice parked with an honest note; the unreached corners are now the next wave\u2019s first questions.” — B+'; }
     const endLog=S.log.length?(S.log.length+' DECISIONS RECORDED'):'';
 
     const dlog=S.log.map(e=>({t:'GATE '+e.g+' — '+e.choice+(e.note?(' — “'+e.note+'”'):'')}));
@@ -584,7 +584,7 @@ class Component extends DCLogic {
       mt:m.who==='sys'?'22px':'26px'}));
     const chipsOn=false;
     const chips=[];
-    const chatPh= S.stage==='auto'?'add a question — enter to file':(S.stage==='open'?'what should this wave do?':'reading…');
+    const chatPh= S.stage==='auto'?'add a question — enter to file':(S.stage==='open'?'what should this wave do?':'reading\u2026');
     const aEl=S.stage==='auto'?(S.totalT-(S.autoAt||S.totalT)):0;
     const autoLine= aEl<2.4?'DRAFTING DIRECTION': aEl<4.8?'WRITING SURVEY PLAN':'STARTING SURVEY';
 
