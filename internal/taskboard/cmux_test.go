@@ -1,6 +1,9 @@
 package taskboard
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestCmuxWorkerID pins the four-tier precedence across the full env matrix,
 // including empty-string guards (an explicitly-blank var must fall through, not
@@ -70,6 +73,29 @@ func TestCmuxWorkerID(t *testing.T) {
 				t.Errorf("CmuxWorkerID() = %q, want prefix %q", got, tc.wantPfx)
 			}
 		})
+	}
+}
+
+// TestCmuxShellLineDerivesFromPrefix pins the source-side invariant: the tier-2
+// worker id, the exported shell template, and CmuxShellLine() all come from the
+// ONE CmuxWorkerPrefix constant. Substituting a surface id into the exported
+// template must yield exactly CmuxWorkerID() for that surface — the same equality
+// the CLI tripwire checks, anchored here so a taskboard-only edit can't slip past.
+func TestCmuxShellLineDerivesFromPrefix(t *testing.T) {
+	if !strings.Contains(CmuxShellLine(), CmuxSurfaceExport) {
+		t.Fatalf("shell line %q does not carry the exported template %q", CmuxShellLine(), CmuxSurfaceExport)
+	}
+	const surface = "SRF_ABC"
+	want := CmuxWorkerPrefix + surface
+
+	t.Setenv("BARKPARK_WORKER_ID", "")
+	t.Setenv("CMUX_WORKSPACE_ID", "")
+	t.Setenv("CMUX_SURFACE_ID", surface)
+	if got := CmuxWorkerID(); got != want {
+		t.Fatalf("CmuxWorkerID()=%q, want %q (tier-2 must derive from CmuxWorkerPrefix)", got, want)
+	}
+	if exported := strings.ReplaceAll(CmuxSurfaceExport, "$CMUX_SURFACE_ID", surface); exported != want {
+		t.Fatalf("shell export %q != worker id %q — the shell-line and hook would drift", exported, want)
 	}
 }
 

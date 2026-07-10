@@ -255,7 +255,7 @@ func printCmuxHelp(out *writer) {
 	out.outf("  install        print the settings.json hook block + worker-id shell line")
 	out.outf("  status         this pane's worker id, owned task, and lease state")
 	out.outf("")
-	out.outf("Worker id is `cmux-$CMUX_SURFACE_ID` (pane-stable), overridable by")
+	out.outf("Worker id is `%s` (pane-stable), overridable by BARKPARK_WORKER_ID.", taskboard.CmuxSurfaceExport)
 	out.outf("BARKPARK_TASK names the task a pane owns. Run `bp cmux install` to wire it up.")
 }
 
