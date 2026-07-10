@@ -1028,6 +1028,87 @@ already assumed.
   real capture shows it, gate the vanish-flip on "no non-terminal workflow
   agents".)
 
+### Wave-12 decisions (2026-07-10)
+
+- **D70 — The wire id is a TOP-LEVEL frame uuid; fork verdict = floor built,
+  ceiling banked; D26 STAYS CLOSED.** (S8 fork-probe, real binary 2.1.206.)
+
+  **Ground truth (probed 2026-07-10, haiku-pinned, `--max-turns 1` per D56):**
+  - EVERY frame carries a top-level `uuid` — proven across `system/init`,
+    `system/thinking_tokens`, `system/hook_*`, `assistant`, `rate_limit_event`,
+    and `result` (stream-json `--verbose` dump: 23/23 frames had `uuid`, all
+    distinct). **There is NO `message.uuid`** — the earlier task title's premise
+    is wrong; the wire id lives at the frame envelope. NOTE a single logical
+    assistant turn streams as MULTIPLE assistant frames, each with its OWN uuid
+    (2 assistant frames in a one-word reply), so uuid granularity is
+    per-frame, finer than per-turn.
+  - `--resume <id> --fork-session` **MINTS A NEW session id** and **PRESERVES
+    FULL HISTORY**. Codeword proof: turn 1 `--session-id 27494fff…` stored
+    "FJORD-77"; `--resume 27494fff… --fork-session` returned
+    `session_id=c9a45a76…` (≠ original) and `result="FJORD-77"` (full recall).
+    This re-confirms D26's finding on 2.1.206: fork = a full-memory branch, NOT
+    a rewind — it never drops turns and exposes no per-turn truncation flag.
+  - `resumeSessionAt` is **NOT a CLI primitive** (`--help` on 2.1.206 scanned;
+    it is t3-pattern app-level bookkeeping over the app's own message log) — no
+    flag was probed for, none exists.
+
+  **CAPTURE (built this wave):** the Recorder now persists each frame's
+  top-level `uuid` into `chat_messages.metadata["frame_uuid"]` (jsonb, NO
+  migration) for every assistant-frame-derived row (text + tool), merged
+  alongside `parent_meta` so a sub-agent row carries BOTH `frame_uuid` and
+  `parent_tool_use_id` (recorder.ex `frame_uuid_meta/1`, disjoint from the S4
+  mcp tagging). Scope honesty: the Recorder only WRITES assistant-frame rows —
+  the user's typed message row is persisted in chat_live.ex (no wire uuid; we
+  authored it) and a `result` frame updates SESSION metrics, not a message row —
+  so there is no user/result *message row* for the Recorder to stamp; the
+  assistant frame's uuid is the wire id for that turn's rendered rows. This
+  makes our message log a uuid-keyed index of rendered rows — the branch-point
+  substrate a wave-13 UI needs — with D1 intact (we never read the CLI's private
+  transcript jsonl).
+
+  **VERDICT — floor vs ceiling:**
+  - **FLOOR (shippable now, no new CLI primitive): fork-from-head.** `--resume
+    <id> --fork-session` gives a fresh session id whose model memory == the
+    parent's full history. A "Branch from here" affordance on the LATEST turn is
+    real today: spawn a fork, record `parent_session_id` + the parent's last
+    `frame_uuid` as the branch point, list both sessions as siblings.
+  - **CEILING (display-level branch-from-ANY-turn, app-level, non-destructive):**
+    achievable PURELY on our uuid-keyed log WITHOUT a CLI rewind primitive. The
+    CLI fork always carries full memory, so "branch from turn N" is a RENDER
+    contract, not a memory operation: fork-from-head for the live process, then
+    on replay HIDE every row whose `seq` is after the chosen branch point's
+    `frame_uuid`. The model still *remembers* post-branch content (unavoidable
+    without transcript surgery, which D1 forbids), but the USER sees a clean
+    branch. This is exactly t3's `resumeSessionAt` pattern — bookkeeping over our
+    own log, which the `frame_uuid` capture now enables. True memory-rewrite
+    branch-from-turn remains impossible without reading/truncating the CLI's
+    private jsonl (version-fragile, D1 violation) — unchanged from D26.
+
+  **Schema proposal for the wave-13 branch UI** (backlog
+  `task-scc-w13-fork-rewind-ui` consumes this; NOT built this wave):
+  - `chat_sessions`: add nullable `parent_session_id :binary_id` (FK to
+    `chat_sessions.id`, `on_delete: :nilify_all`) + nullable
+    `forked_at_frame_uuid :string`. A root session leaves both null; a fork
+    stamps parent id + the parent `frame_uuid` it branched from. Partial index
+    `ON (parent_session_id) WHERE parent_session_id IS NOT NULL` for the
+    sibling/children lookup. NO `forked_at_turn` integer — the `frame_uuid` is
+    the stable branch key (turn indices renumber on compaction; uuids do not).
+  - Fork op: mint a child session, spawn `--resume <parent_id> --fork-session`
+    (child id = the CLI's newly-minted id, pinned via `--session-id` at spawn so
+    D2 holds), copy the parent's rendered rows up to the branch `frame_uuid` into
+    the child as replayable history, stamp `parent_session_id` +
+    `forked_at_frame_uuid`. The sidebar renders a branch tree; "branch from turn
+    N" = fork + display-hide after N's uuid (the ceiling), "branch" on the head =
+    the floor.
+
+  **D26 disposition: STAYS CLOSED.** No true rewind primitive emerged — fork is
+  full-memory on 2.1.206, exactly as D26 recorded; `resumeSessionAt` is not a
+  CLI flag. What CHANGED is that the display-level ceiling is now cheaply
+  reachable (the `frame_uuid` capture is the missing substrate), so wave-13 can
+  ship branch UX on the floor+ceiling above WITHOUT reopening the
+  transcript-surgery path D26 correctly parked. Checkpoint/rewind-of-MEMORY
+  stays cut; branch-of-VIEW is unlocked.
+
 ### Wave 11 plan (decided 2026-07-10) — "the journey, not the list"
 
 One flagship deliverable: the agents rail renders an epic-cycle run as a phase

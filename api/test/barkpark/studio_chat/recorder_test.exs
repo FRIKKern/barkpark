@@ -502,6 +502,93 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # The wire id is a TOP-LEVEL frame uuid (charter D70; there is no message.uuid).
+  # Persisting it into each row's metadata makes our message log the uuid-keyed
+  # branch-point index a wave-13 fork/rewind UI replays against. "Replay
+  # availability" here == the value survives the store round-trip that replay
+  # reads back (`list_messages`), which is exactly the read path replay uses.
+  describe "frame uuid capture (charter D70)" do
+    test "an assistant frame stamps frame_uuid on every row it produces",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "uuid" => "frame-abc-123",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "the answer"},
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_x",
+                 "name" => "Bash",
+                 "input" => %{"command" => "ls"}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+
+      text = Enum.find(rows, &(&1.role == "assistant" and &1.source_markdown == "the answer"))
+      assert text.metadata["frame_uuid"] == "frame-abc-123"
+
+      tool = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_x"))
+      assert tool.metadata["frame_uuid"] == "frame-abc-123"
+    end
+
+    test "frame_uuid and parent_tool_use_id coexist on a sub-agent row",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "uuid" => "frame-child-1",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{"content" => [%{"type" => "text", "text" => "child thinking"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "child thinking"))
+      assert row.metadata["frame_uuid"] == "frame-child-1"
+      assert row.metadata["parent_tool_use_id"] == "toolu_spawn"
+    end
+
+    test "a frame with no uuid leaves metadata unstamped (legacy/synthetic frame)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "no uuid here"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "no uuid here"))
+      refute Map.has_key?(row.metadata, "frame_uuid")
+    end
+
+    test "an empty-string uuid is treated as absent (no stamp)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "uuid" => "",
+           "message" => %{"content" => [%{"type" => "text", "text" => "blank uuid"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "blank uuid"))
+      refute Map.has_key?(row.metadata, "frame_uuid")
+    end
+  end
+
   describe "thinking pulse persistence (charter D41)" do
     defp thinking_tokens(n),
       do:
