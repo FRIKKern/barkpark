@@ -317,3 +317,33 @@ tooling), so the decisions this entry references now exist in history.
 
 **gui-premium is closed.** Anchor `gui-premium` → done, 3/3 clauses stamped with the trail
 above; the epic's board truth is the ledger, the exhibit is section 9 live.
+
+### Wave 2026-07-10 — finish-wave REVIEW: verified, one ledger incident fixed, grade A-
+
+**Landed:** both slices real. F1 `gp-w5-showcase-dogfood` (PR-less, done 5/5) — reviewer
+re-verified everything independently: gate green both forms at occurrence level (grep -o:
+bp-heat--cal=1, bp-heat__sum=11, bp-stat__denom=1, negatives 0/0), all 101 block ids
+diffed (91 originals in order, fd-092..101 after fd-088, epilogue last, zero dupes), both
+themes re-proven in a live browser (dark rgb(24,18,13)/light rgb(244,236,233), denom
+dimmer than value in both, calendar grid at max-content), TUI floor with a fresh dist/bp
+at 66364d67 (508 lines, zero defect strings). F2 `gp-w5-epic-close` — every factual claim
+re-checked: 10/10 trail PRs MERGED via gh, issue 2275 OPEN, doc-gates red on 66364d67 at
+the same pre-existing drift-gate step (run 29116928119 — the docs commit added no new
+red), anchor done 3/3, slice gate green. No code fixes needed on either slice.
+
+**Ledger incident (found + fixed at review):** `gp-w5-epic-close`'s published
+acceptance_criteria were cross-contaminated — the builder's 19:08:38Z read-modify-write
+patch used `era-w8-zero-tax-harness`'s array as its base (concurrent enterprise-auth
+epic; likely shared-/tmp collision). Restored from revision history (seed 18:51:17Z +
+the 19:06:37Z evidence revision), builder's genuine evidence kept at 1,2; era task
+verified intact. Filed `task-11390a3b900c8a09` (p2) for the vector + hardening. Lead
+note: the restore changes the work digest under the live claim — close with
+`--set observed_rev=<fresh rev>` if fenced.
+
+**Also resolved:** the shared checkout's stranded charter working copy (strict prefix of
+66364d67) — discarded safely so the next pull fast-forwards clean.
+
+**Epic CLOSED — no next wave.** Lead tail: merge this reviewer branch, close
+gp-w5-epic-close criterion 3, pick up task-11390a3b900c8a09; backlog (gp-b-* ×5) open by
+design; the one red the epic leaves on main is doc-gates Part E (issue 2275, pre-existing,
+owned outside this epic). Debrief: Paper `gui-premium-wave-2026-07-10` rev 5.
