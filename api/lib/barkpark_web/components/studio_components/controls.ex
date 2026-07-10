@@ -236,7 +236,11 @@ defmodule BarkparkWeb.StudioComponents.Controls do
         {@rest}
       />
       <span class="form-switch-track" aria-hidden="true"></span>
-      <span class="form-switch-state">{if @checked, do: @on_label, else: @off_label}</span>
+      <%!-- Both words ship in the DOM and CSS `:checked` picks the visible one,
+            so the word stays truthful when the switch toggles inside a
+            submit-only form (no LiveView re-render — e.g. plugin settings).
+            aria-hidden: the real checkbox announces state to AT. --%>
+      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">{@off_label}</span><span class="form-switch-state-on">{@on_label}</span></span>
     </label>
     """
   end
