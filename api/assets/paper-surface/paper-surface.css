@@ -799,6 +799,59 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
 .bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
 
+/* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
+   stat denominators (gui-premium w5) ──
+   Quantile bin classes bp-heat__c--b0..b3 (zero/gap = --z) carry TWO channels,
+   the web read of the TUI shade ladder ░▒▓█: the color step (color-mix over
+   the accent — the same idiom as the legacy `--i` ramp, stepped at 22/44/66/88%)
+   AND a non-color channel — a growing ink inner marker on shade cells, the
+   exact value text on `--v` cells — so the datum survives grayscale and print.
+   Calendar heatmaps render EVERY week inside a horizontally scrollable
+   container; the web never width-drops weeks the way the terminal must. */
+.bp-paper-surface .bp-stat__denom { font-size: 1.05rem; font-weight: 500; color: var(--paper-ink-soft); }
+
+.bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
+.bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; }
+.bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.64rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
+
+.bp-paper-surface .bp-heat__c--z,
+.bp-paper-surface .bp-heat__c--b0,
+.bp-paper-surface .bp-heat__c--b1,
+.bp-paper-surface .bp-heat__c--b2,
+.bp-paper-surface .bp-heat__c--b3 { position: relative; }
+.bp-paper-surface .bp-heat__c--z { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--z::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--b0 { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b1 { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b2 { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b3 { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b0::after,
+.bp-paper-surface .bp-heat__c--b1::after,
+.bp-paper-surface .bp-heat__c--b2::after,
+.bp-paper-surface .bp-heat__c--b3::after { content: ""; position: absolute; border-radius: 1px; background: color-mix(in srgb, var(--paper-ink) 42%, transparent); }
+.bp-paper-surface .bp-heat__c--b0::after { inset: 41%; }
+.bp-paper-surface .bp-heat__c--b1::after { inset: 33%; }
+.bp-paper-surface .bp-heat__c--b2::after { inset: 24%; }
+.bp-paper-surface .bp-heat__c--b3::after { inset: 15%; }
+
+/* value cells: the exact number IS the second channel — the bin color moves to
+   an underline strip so ink text keeps full contrast on every theme. These come
+   AFTER the marker rules so the strip geometry wins at equal specificity. */
+.bp-paper-surface .bp-heat__c--v { aspect-ratio: auto; min-height: 0; padding: 3px 7px 6px; font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-style: normal; font-size: 0.7rem; line-height: 1.3; text-align: right; color: var(--paper-ink); background: transparent; border-radius: 4px; }
+.bp-paper-surface .bp-heat__c--v::after { content: ""; position: absolute; inset: auto 15% 0; top: auto; width: auto; height: 3px; margin: 0; border-radius: 2px; }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z::after { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b0::after { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b1::after { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b2::after { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b3::after { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+
+/* Σ marginals: dim mono sums, the grand total emphasized. */
+.bp-paper-surface .bp-heat__sum { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.7rem; line-height: 1.3; color: var(--paper-ink-soft); text-align: right; padding: 3px 7px 6px; }
+.bp-paper-surface .bp-heat__sum--grand { font-weight: 650; color: var(--paper-ink); }
+.bp-paper-surface .bp-heat__cl--sum { text-align: right; padding-right: 7px; }
+
 /* ── form / questionnaire: the premium read (gui-premium w2) ──
    forms.ex emits <fieldset class="bp-form-question bp-form-q--<type>"> cards
    with classed option rows (article mode). The stylesheet owns ALL geometry:

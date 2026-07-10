@@ -48,6 +48,17 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       max = numeric(get(block, "max"))
       spark = block |> get("spark") |> number_list()
 
+      # KPI denominator (slate-2, stat.go §denom): a dim "/<denom>" riding
+      # immediately after the value — the "71/118" read. A DISPLAY string like
+      # `value`, never coerced. Absent/blank → the empty suffix, so a denom-less
+      # stat stays byte-identical to before.
+      denom = block |> get("denom") |> display_string()
+
+      denom_html =
+        if denom == "",
+          do: "",
+          else: ~s|<span class="bp-stat__denom">/#{escape_html(denom)}</span>|
+
       bar =
         if max != nil and max > 0 do
           pct =
@@ -66,7 +77,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
       ~s|<div class="bp-stat">| <>
         bar <>
-        ~s|<div class="bp-stat__v">#{escape_html(value)}</div>| <>
+        ~s|<div class="bp-stat__v">#{escape_html(value)}#{denom_html}</div>| <>
         label_html <> spark_svg(spark) <> "</div>"
     end
   end
@@ -90,6 +101,15 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   @doc """
   Row-major intensity grid. Each cell carries `--i` (0..1) which the stylesheet
   mixes into the accent — the browser read of the TUI shade ramp.
+
+  MODES (slate-2, mirrors heatmap.go's amended contract — calendar + matrix
+  marginals/values are branches of THIS one emitter, never siblings):
+  `mode:"calendar"` draws the GitHub-style day-rows×week-cols contribution
+  calendar; `marginals:true`/`values:true` draw the matrix with Σ sums and/or
+  exact cell values. The new modes bin by QUANTILE (`quantile_bins/1`, the
+  HeatQuantileBins port) and dual-encode — the bin drives both the color step
+  and a non-color channel. With no mode and neither flag the legacy grid below
+  renders byte-identically.
   """
   def heatmap_html(block) when is_map(block) do
     grid =
@@ -99,67 +119,287 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       |> Enum.map(fn row -> row |> as_list() |> Enum.map(&(numeric(&1) || 0.0)) end)
       |> Enum.reject(&(&1 == []))
 
-    if grid == [] do
-      empty("heatmap")
-    else
-      max_val =
-        case numeric(get(block, "max")) do
-          m when is_float(m) and m > 0 -> m
-          _ -> grid |> List.flatten() |> Enum.max(fn -> 1.0 end) |> max(1.0e-9)
-        end
+    cond do
+      grid == [] ->
+        empty("heatmap")
 
-      row_labels = block |> get("rowLabels") |> string_list()
-      col_labels = block |> get("colLabels") |> string_list()
-      cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+      display_string(get(block, "mode")) == "calendar" ->
+        heat_calendar_html(grid, block)
 
-      head =
-        if col_labels == [] do
-          ""
-        else
-          cells =
-            Enum.map_join(0..(cols - 1), "", fn j ->
-              ~s|<span class="bp-heat__cl">#{escape_html(Enum.at(col_labels, j) || "")}</span>|
-            end)
+      get(block, "marginals") == true or get(block, "values") == true ->
+        heat_matrix_extras_html(grid, block)
 
-          corner = if row_labels == [], do: "", else: ~s|<span class="bp-heat__rl"></span>|
-          corner <> cells
-        end
-
-      body =
-        grid
-        |> Enum.with_index()
-        |> Enum.map_join("", fn {row, i} ->
-          label =
-            if row_labels == [] do
-              ""
-            else
-              ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
-            end
-
-          cells =
-            Enum.map_join(0..(cols - 1), "", fn j ->
-              v = Enum.at(row, j) || 0.0
-              i_norm = clamp(v / max_val, 0.0, 1.0)
-              ~s|<i class="bp-heat__c" style="--i:#{fmt3(i_norm)}" title="#{fmt(v)}"></i>|
-            end)
-
-          label <> cells
-        end)
-
-      track = if row_labels == [], do: "", else: "auto "
-
-      ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},minmax(10px,28px))">| <>
-        head <>
-        body <>
-        ~s|</div><div class="bp-heat__legend">less | <>
-        Enum.map_join([0.15, 0.35, 0.55, 0.75, 1.0], "", fn i ->
-          ~s|<i class="bp-heat__c" style="--i:#{fmt3(i)}"></i>|
-        end) <>
-        " more</div></div>"
+      true ->
+        heat_grid_html(grid, block)
     end
   end
 
   def heatmap_html(_), do: empty("heatmap")
+
+  # The legacy value/max intensity grid — the pre-slate-2 emitter body, moved
+  # verbatim so a heatmap with no mode and no matrix flags stays byte-identical.
+  defp heat_grid_html(grid, block) do
+    max_val =
+      case numeric(get(block, "max")) do
+        m when is_float(m) and m > 0 -> m
+        _ -> grid |> List.flatten() |> Enum.max(fn -> 1.0 end) |> max(1.0e-9)
+      end
+
+    row_labels = block |> get("rowLabels") |> string_list()
+    col_labels = block |> get("colLabels") |> string_list()
+    cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+
+    head =
+      if col_labels == [] do
+        ""
+      else
+        cells =
+          Enum.map_join(0..(cols - 1), "", fn j ->
+            ~s|<span class="bp-heat__cl">#{escape_html(Enum.at(col_labels, j) || "")}</span>|
+          end)
+
+        corner = if row_labels == [], do: "", else: ~s|<span class="bp-heat__rl"></span>|
+        corner <> cells
+      end
+
+    body =
+      grid
+      |> Enum.with_index()
+      |> Enum.map_join("", fn {row, i} ->
+        label =
+          if row_labels == [] do
+            ""
+          else
+            ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
+          end
+
+        cells =
+          Enum.map_join(0..(cols - 1), "", fn j ->
+            v = Enum.at(row, j) || 0.0
+            i_norm = clamp(v / max_val, 0.0, 1.0)
+            ~s|<i class="bp-heat__c" style="--i:#{fmt3(i_norm)}" title="#{fmt(v)}"></i>|
+          end)
+
+        label <> cells
+      end)
+
+    track = if row_labels == [], do: "", else: "auto "
+
+    ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},minmax(10px,28px))">| <>
+      head <>
+      body <>
+      ~s|</div><div class="bp-heat__legend">less | <>
+      Enum.map_join([0.15, 0.35, 0.55, 0.75, 1.0], "", fn i ->
+        ~s|<i class="bp-heat__c" style="--i:#{fmt3(i)}"></i>|
+      end) <>
+      " more</div></div>"
+  end
+
+  # ── slate-2 heat modes: quantile dual-encode (calendar + matrix extras) ──────
+
+  # GitHub-style contribution calendar (heatRenderCalendar in heatmap.go):
+  # day-rows × week-cols, quantile dual-encoded. Where the TUI drops the oldest
+  # weeks to fit the terminal, the web renders ALL weeks inside a horizontally
+  # scrollable `.bp-heat__scroll` container — it never width-drops. colLabels
+  # are per-week month labels stamped along the top; rowLabels are day letters
+  # in the gutter.
+  defp heat_calendar_html(grid, block) do
+    bins = quantile_bins(grid)
+    row_labels = block |> get("rowLabels") |> string_list()
+    col_labels = block |> get("colLabels") |> string_list()
+    weeks = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+
+    head =
+      if col_labels == [] do
+        ""
+      else
+        corner = if row_labels == [], do: "", else: ~s|<span class="bp-heat__rl"></span>|
+
+        corner <>
+          Enum.map_join(0..(weeks - 1), "", fn w ->
+            ~s|<span class="bp-heat__ml">#{escape_html(Enum.at(col_labels, w) || "")}</span>|
+          end)
+      end
+
+    body =
+      grid
+      |> Enum.with_index()
+      |> Enum.map_join("", fn {row, i} ->
+        label =
+          if row_labels == [] do
+            ""
+          else
+            ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
+          end
+
+        bin_row = Enum.at(bins, i)
+
+        cells =
+          Enum.map_join(0..(weeks - 1), "", fn w ->
+            # Ragged rows: a missing week reads as a zero cell (bin -1), so the
+            # calendar keeps its shape — the web read of heatmap.go's gap rule.
+            v = Enum.at(row, w) || 0.0
+            bin = Enum.at(bin_row, w) || -1
+            ~s|<i class="bp-heat__c #{bin_class(bin)}" title="#{fmt(v)}"></i>|
+          end)
+
+        label <> cells
+      end)
+
+    track = if row_labels == [], do: "", else: "auto "
+
+    ~s|<div class="bp-heat bp-heat--cal"><div class="bp-heat__scroll"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{weeks},12px)">| <>
+      head <> body <> "</div></div>" <> dual_legend() <> "</div>"
+  end
+
+  # The rows×cols heat matrix with the opt-in Σ marginals and/or exact values
+  # (heatRenderMatrixExtras in heatmap.go). Cells dual-encode through the
+  # quantile bins; with values:true each cell shows its right-aligned number
+  # (the bin still keyed as a class for the color channel). Marginal sums render
+  # as numbers on the web in BOTH flag combinations — the TUI's pure-shade Σ bar
+  # is a 1-char-column constraint the browser doesn't have; the sums ARE the
+  # marginal's point.
+  defp heat_matrix_extras_html(grid, block) do
+    bins = quantile_bins(grid)
+    show_vals = get(block, "values") == true
+    show_marg = get(block, "marginals") == true
+    row_labels = block |> get("rowLabels") |> string_list()
+    col_labels = block |> get("colLabels") |> string_list()
+    cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+
+    # Row / column sums for the marginals; ragged rows contribute 0 (gap rule).
+    row_sums = Enum.map(grid, &Enum.sum/1)
+
+    col_sums =
+      Enum.map(0..(cols - 1), fn j ->
+        grid |> Enum.map(&(Enum.at(&1, j) || 0.0)) |> Enum.sum()
+      end)
+
+    grand = Enum.sum(row_sums)
+
+    # The label gutter exists when there are row labels, or when marginals need
+    # the Σ footer label (mirrors heatmap.go's labelW floor under showMarg).
+    gutter = row_labels != [] or show_marg
+
+    head =
+      if col_labels == [] and not show_marg do
+        ""
+      else
+        corner = if gutter, do: ~s|<span class="bp-heat__rl"></span>|, else: ""
+
+        labels =
+          Enum.map_join(0..(cols - 1), "", fn j ->
+            ~s|<span class="bp-heat__cl">#{escape_html(Enum.at(col_labels, j) || "")}</span>|
+          end)
+
+        sum_head =
+          if show_marg, do: ~s|<span class="bp-heat__cl bp-heat__cl--sum">Σ</span>|, else: ""
+
+        corner <> labels <> sum_head
+      end
+
+    body =
+      grid
+      |> Enum.with_index()
+      |> Enum.map_join("", fn {row, i} ->
+        label =
+          if gutter do
+            ~s|<span class="bp-heat__rl">#{escape_html(Enum.at(row_labels, i) || "")}</span>|
+          else
+            ""
+          end
+
+        bin_row = Enum.at(bins, i)
+
+        cells =
+          Enum.map_join(0..(cols - 1), "", fn j ->
+            v = Enum.at(row, j) || 0.0
+            bin = Enum.at(bin_row, j) || -1
+            matrix_cell(bin, v, show_vals)
+          end)
+
+        row_sum =
+          if show_marg do
+            ~s|<span class="bp-heat__sum">#{fmt(Enum.at(row_sums, i))}</span>|
+          else
+            ""
+          end
+
+        label <> cells <> row_sum
+      end)
+
+    foot =
+      if show_marg do
+        ~s|<span class="bp-heat__rl">Σ</span>| <>
+          Enum.map_join(col_sums, "", fn s -> ~s|<span class="bp-heat__sum">#{fmt(s)}</span>| end) <>
+          ~s|<span class="bp-heat__sum bp-heat__sum--grand">#{fmt(grand)}</span>|
+      else
+        ""
+      end
+
+    track = if gutter, do: "auto ", else: ""
+    cell_track = if show_vals, do: "minmax(28px,auto)", else: "minmax(10px,28px)"
+    sum_track = if show_marg, do: " auto", else: ""
+
+    ~s|<div class="bp-heat bp-heat--mtx"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},#{cell_track})#{sum_track}">| <>
+      head <> body <> foot <> "</div>" <> dual_legend() <> "</div>"
+  end
+
+  # One matrix cell. With values the exact right-aligned number IS the second
+  # channel (the bin class keys the color); without, the bin-keyed marker class
+  # carries the non-color channel like the calendar cells.
+  defp matrix_cell(bin, v, true) do
+    ~s|<i class="bp-heat__c #{bin_class(bin)} bp-heat__c--v" title="#{fmt(v)}">#{fmt(v)}</i>|
+  end
+
+  defp matrix_cell(bin, v, false) do
+    ~s|<i class="bp-heat__c #{bin_class(bin)}" title="#{fmt(v)}"></i>|
+  end
+
+  defp bin_class(-1), do: "bp-heat__c--z"
+  defp bin_class(k) when is_integer(k), do: "bp-heat__c--b#{k |> max(0) |> min(3)}"
+
+  # The low→high key for the dual-encode modes: the four bin swatches.
+  defp dual_legend do
+    ~s|<div class="bp-heat__legend">less | <>
+      Enum.map_join(0..3, "", fn k -> ~s|<i class="bp-heat__c bp-heat__c--b#{k}"></i>| end) <>
+      " more</div>"
+  end
+
+  # The HeatQuantileBins port (heatmap.go:318, @canonical heat-quantile-bin):
+  # every cell binned into 0..3 by QUANTILE over the NONZERO values; zero/gap
+  # cells get -1. Quantile binning is load-bearing — a linear value/max ramp
+  # flattens months of ordinary activity into the floor when one spike owns the
+  # max. Nearest-rank thresholds; a single distinct value → every nonzero cell
+  # bin 0 (a uniform grid is genuinely uniform). This ONE helper owns the bin
+  # for BOTH the color step and the second channel, so they can never disagree.
+  defp quantile_bins(grid) do
+    nz = grid |> List.flatten() |> Enum.filter(&(&1 > 0)) |> Enum.sort()
+    n = length(nz)
+
+    q = fn p ->
+      if n == 0 do
+        0.0
+      else
+        idx = ceil(p * n) - 1
+        Enum.at(nz, idx |> max(0) |> min(n - 1))
+      end
+    end
+
+    {q1, q2, q3} = {q.(0.25), q.(0.50), q.(0.75)}
+
+    Enum.map(grid, fn row ->
+      Enum.map(row, fn v ->
+        cond do
+          v <= 0 -> -1
+          v <= q1 -> 0
+          v <= q2 -> 1
+          v <= q3 -> 2
+          true -> 3
+        end
+      end)
+    end)
+  end
 
   # ── chart ────────────────────────────────────────────────────────────────────
 
@@ -260,7 +500,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       y = y_at(v, min_v, max_v)
 
       ~s|<line class="bp-chart__grid" x1="#{@pad_l}" y1="#{fmt(y)}" x2="#{@vw - @pad_r}" y2="#{fmt(y)}"/>| <>
-        ~s|<text class="bp-chart__tick" x="#{@pad_l - 6}" y="#{fmt(y + 4)}" text-anchor="end">#{tick(v)}</text>|
+        ~s|<text class="bp-chart__tick" x="#{@pad_l - 6}" y="#{fmt(y + 4)}" text-anchor="end">#{tick_compact(v)}</text>|
     end) <>
       ~s|<line class="bp-chart__axis" x1="#{@pad_l}" y1="#{@vh - @pad_b}" x2="#{@vw - @pad_r}" y2="#{@vh - @pad_b}"/>|
   end
@@ -637,5 +877,28 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     if r == Float.round(r),
       do: Integer.to_string(trunc(r)),
       else: :erlang.float_to_binary(r, decimals: 1)
+  end
+
+  # Compact SI-style y-tick once |v| reaches 10000 — 40000→"40k", 45500000→
+  # "45.5M", 2000000000→"2B", one decimal with a trailing ".0" trimmed, sign
+  # carried through the division (formatTickCompact in chart.go). BELOW the
+  # threshold it delegates to tick/1, byte-identical to before — small-value
+  # chart output never moves. Article axis only; the email summary keeps tick/1.
+  defp tick_compact(v) do
+    if abs(v) < 10_000 do
+      tick(v)
+    else
+      {div, suffix} =
+        cond do
+          abs(v) >= 1.0e9 -> {1.0e9, "B"}
+          abs(v) >= 1.0e6 -> {1.0e6, "M"}
+          true -> {1.0e3, "k"}
+        end
+
+      (v / div)
+      |> :erlang.float_to_binary(decimals: 1)
+      |> String.replace_suffix(".0", "")
+      |> Kernel.<>(suffix)
+    end
   end
 end
