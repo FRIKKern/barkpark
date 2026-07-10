@@ -37,33 +37,11 @@ import (
 // honest "frontier exhausted" instead of spinning forever.
 const frontierClaimRounds = 5
 
-// labelFilesPrefix is the task-label namespace declaring a task's file scope
-// (`files:internal/cli/cli.go`). df-file-edge (slice 1) will ship the canonical
-// taskboard.FilesOf reading the SAME labels; until it merges, frontierFilesOf
-// parses them here so this slice builds and its resource-fence deny-path is
-// proven. On rebase after df-file-edge, swap frontierFilesOf → taskboard.FilesOf.
-const labelFilesPrefix = "files:"
-
-// frontierFilesOf resolves the declared file scope of a task from its `files:`
-// labels, returned as a set (mirroring the taskboard.FilesOf contract this
-// slice is written against). A task with no `files:` labels declares no scope —
-// an empty set — so its claim sends no resources and the server fence is inert.
-func frontierFilesOf(t taskboard.Task) map[string]bool {
-	files := map[string]bool{}
-	for _, l := range t.Labels {
-		if !strings.HasPrefix(l, labelFilesPrefix) {
-			continue
-		}
-		f := strings.TrimSpace(strings.TrimPrefix(l, labelFilesPrefix))
-		if f != "" {
-			files[f] = true
-		}
-	}
-	return files
-}
-
 // sortedFiles is the deterministic []string the claim body carries — sorted keys
-// of a file-scope set, so the same task always declares the same resource list.
+// of a file-scope set (taskboard.FilesOf, the df-file-edge parser — the SAME
+// normalization the frontier's interference model reads, so the claim's exact-
+// string server fence can never drift from the frontier's overlap verdict), so
+// the same task always declares the same resource list.
 func sortedFiles(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	for f := range set {
@@ -120,7 +98,7 @@ func runTaskNextFrontier(out *writer, g globals, ctx manifest.Context, worker st
 		}
 
 		for _, p := range picks {
-			resources := sortedFiles(frontierFilesOf(p.Task))
+			resources := sortedFiles(taskboard.FilesOf(p.Task))
 			outcome, err := client.TaskClaimResources(p.Task.DocID, worker, resources)
 			if err != nil {
 				// Transport failure OR a won claim with no fencing epoch (epoch<=0):

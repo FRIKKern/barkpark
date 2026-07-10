@@ -118,7 +118,7 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 		worker, epoch := "", 0
 		if claimFlag && !dryRun {
 			w := dispatchClaimWorkerID(id)
-			resources := sortedFiles(frontierFilesOf(p.Task))
+			resources := sortedFiles(taskboard.FilesOf(p.Task))
 			outcome, err := client.TaskClaimResources(p.Task.DocID, w, resources)
 			if err != nil {
 				// Transport failure or a won claim with no fencing epoch — hard, but
