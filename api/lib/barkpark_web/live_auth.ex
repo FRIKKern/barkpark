@@ -100,15 +100,27 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
+  # Dev token first: the host running Barkpark locally always gets
+  # admin+ops, even if the browser is carrying a stale/insufficient
+  # `session["api_token"]` from earlier manual testing. In non-dev envs
+  # `dev_browser_token_fallback/0` is nil, so this is a no-op there and
+  # the real session token (or the user_session path) decides.
   defp authorize(socket, session, allowed_perms, denial_flash) do
-    raw = session["api_token"] || dev_browser_token_fallback()
+    candidates = Enum.filter([dev_browser_token_fallback(), session["api_token"]], &is_binary/1)
 
-    with token when is_binary(token) <- raw,
-         {:ok, api_token} <- Auth.verify_token(token),
-         true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) do
-      {:cont, assign(socket, :api_token, api_token)}
-    else
-      _ -> authorize_user(socket, session, denial_flash)
+    granted =
+      Enum.find_value(candidates, fn token ->
+        with {:ok, api_token} <- Auth.verify_token(token),
+             true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) do
+          api_token
+        else
+          _ -> nil
+        end
+      end)
+
+    case granted do
+      nil -> authorize_user(socket, session, denial_flash)
+      api_token -> {:cont, assign(socket, :api_token, api_token)}
     end
   end
 
