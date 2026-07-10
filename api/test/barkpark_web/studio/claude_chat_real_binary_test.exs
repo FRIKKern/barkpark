@@ -82,6 +82,43 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
   end
 
   # ══════════════════════════════════════════════════════════════════════════
+  # Version pin (charter D67) — the CHEAP first gate. Spends NO API budget: it
+  # only runs `--version`. It asserts the resolved binary IS the pinned CLI so a
+  # real-binary run (nightly OR local) can never prove the wire contract of the
+  # WRONG version. The pin lives in exactly ONE place —
+  # scripts/claude-pinned-version.txt — shared with scripts/claude-chat-e2e.sh
+  # and scripts/claude-chat-nightly.sh. REFUSE on mismatch; never silent-skip
+  # (PATH decoys are real: the cmux wrapper is first on PATH, a stale npm-global
+  # 2.1.84 exists).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  describe "version pin" do
+    test "the resolved binary matches the pinned claude version", %{bin: bin} do
+      pinned = pinned_version()
+
+      {raw, exit_code} = System.cmd(bin, ["--version"], stderr_to_stdout: true)
+      assert exit_code == 0, "`#{bin} --version` exited #{exit_code}: #{raw}"
+
+      actual =
+        case Regex.run(~r/\d+\.\d+\.\d+/, raw) do
+          [v] -> v
+          _ -> flunk("could not parse a semver from `claude --version`: #{inspect(raw)}")
+        end
+
+      assert actual == pinned, """
+      claude version mismatch — refusing to trust this real-binary run.
+
+        pinned (scripts/claude-pinned-version.txt): #{pinned}
+        resolved (#{bin}):                          #{actual}
+
+      A different version can pass green while the frames it emits have quietly
+      changed. Point CLAUDE_BIN at the pinned native install, or bump the pin
+      file deliberately if you are upgrading on purpose.
+      """
+    end
+  end
+
+  # ══════════════════════════════════════════════════════════════════════════
   # Resume proof (charter D20c) — the original real-binary test.
   # ══════════════════════════════════════════════════════════════════════════
 
@@ -633,6 +670,18 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
   # The collectors auto-approve permission asks, which needs the live session pid.
   # Each probe stashes its one session under `:probe_session` right after spawn.
   defp self_session, do: Process.get(:probe_session) || raise("no :probe_session set")
+
+  # The pinned claude version, read from the ONE source of truth shared with the
+  # shell harness (scripts/claude-pinned-version.txt). Resolved off __DIR__ so it
+  # is independent of the test's cwd (`mix test` runs from api/).
+  defp pinned_version do
+    path = Path.expand("../../../../scripts/claude-pinned-version.txt", __DIR__)
+
+    case File.read(path) do
+      {:ok, contents} -> String.trim(contents)
+      {:error, reason} -> flunk("could not read version pin #{path}: #{inspect(reason)}")
+    end
+  end
 
   # Resolve the real `claude` path from CLAUDE_BIN (set by
   # scripts/claude-chat-e2e.sh). No silent skip: an opt-in run with no binary is
