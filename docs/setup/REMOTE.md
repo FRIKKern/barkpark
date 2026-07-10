@@ -6,7 +6,7 @@ local `bp`. The onramp is different for each, and honest about what ships
 today: **ChatGPT has a real, zero-code path; Claude.ai's connector waits on a
 remote endpoint we haven't shipped yet** (`ve-w2-remote-mcp-bearer`). The
 overview for CLI-capable agents (Claude Code, Codex, Cursor) lives in
-`docs/setup/AGENT-ONRAMPS.md`.
+[Agent Onramps](AGENT-ONRAMPS.md).
 
 Both paths need a **publicly reachable hosted instance** (a local
 `http://localhost:4000` Barkpark can't be reached from OpenAI or Anthropic

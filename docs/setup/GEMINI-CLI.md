@@ -29,7 +29,7 @@ If `bp: command not found` afterward, add the installer's fallback dir to your
 
 Point `bp` at a Barkpark and get a token — a local admin token for a machine you
 run, or the Barkpark Cloud auth-tunnel login for a hosted instance. Both
-journeys, with the exact commands, live in `docs/setup/AGENT-ONRAMPS.md`. Verify:
+journeys, with the exact commands, live in [Agent Onramps](AGENT-ONRAMPS.md). Verify:
 
 ```bash
 bp task ready     # empty list = connected, no open work
