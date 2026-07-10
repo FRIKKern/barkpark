@@ -302,3 +302,186 @@ What wave 3 should take (roadmap ¶ + new findings):
   still reads flat after D16 lands on real pixels.
 - Styleguide gallery still shows class primitives; consider rendering the actual
   kit components (bp_radio/bp_switch) so gallery DOM mirrors component DOM.
+
+### Wave 3 — QA close-out (sup-w3-qa-closeout, 2026-07-10)
+
+The whole-surface QA slice. Runs the epic's exit proofs and stamps the parent
+criteria. **Ordering reality:** this slice was executed while the four wave-3
+build slices (`sup-w3-token-evenness`, `sup-w3-api-tester-kit`,
+`sup-w3-styleguide-kit-dom`, `sup-w3-shares-modal-kit`) were still `in_progress`
+in their own worktrees — none merged, guerrilla still served `f2df6d76` (the
+wave-2 head, #2088). The census/render/Part-H proofs run on post-#2088 `main`
+(what this worktree is cut from per D12); the **authenticated pixel acceptance
+re-shoot is gated on those four merges deploying** and is handed to the human
+gate (crit 4). Wave-3 decide-phase decisions D19–D24 live in the sibling task
+briefs; this log records only what this slice proved.
+
+**Proof 1 — class-aware native-control census (D24a).** Parser (kept at
+`scratchpad/census2.py`, method below) over `live/studio/**`,
+`components/studio_components/**`, `controllers/session_html/**`: finds raw
+`<input|select|textarea>` **inside real `~H"""`/`.heex` template markup only**
+(moduledoc/`@doc` prose and `<%!-- --%>` comments stripped — a tag-presence grep
+false-flags 14 doc/comment mentions) that **lack the `form-*`/`bp-*` themed-class
+family**, keying on class ABSENCE (never tag presence — `bp_select` emits
+`<select class="form-input">`). Result: **48 raw hits, 47 documented exemptions,
+exactly ONE genuinely-bare control** — `modals.ex:140` shares `surfaces[]`
+checkbox, already owned by the in-flight `sup-w3-shares-modal-kit`. Zero
+un-owned naked controls. The exemption register:
+
+| # | Exemption class | Decision | Sites |
+|---|---|---|---|
+| A | Kit substrate + themed-label-wrapped input (label carries `.form-checkbox`/`.form-switch`/`.form-radio`/`.bp-paper-edit-check`; the real input is intentionally class-less behind it) | D6/D14 | `controls.ex` 229/262/294; `styleguide_live.ex` 331/334/342/345/351/356/362; `paper_editor.ex` 1030/1033 |
+| B | Chat NO-GO (immovable client contracts; swept later with the chat epic) | D10 | `chat_live.ex` 2321/2364/2386/2414/2506/4130 |
+| C | Visually-hidden swatch radio (`sr-only`/`display:none` behind custom swatch UI — the browser never paints the control) | D14 | `modals.ex` 736; `sheet_grid.ex` 2771 |
+| D | `type="hidden"` input (no visual control to theme) | — | `session_html` mfa:12,new:22,new:89; `settings_live.ex` 460/553/554/592/624; `sheet_grid.ex` 2715/3057/3318; `paper_editor.ex` 1023/1056/1081/1108/1125/1142/1157/1172 |
+| E | Paper-edit / field VALUE renderer (editor-form model, `bp-paper-edit-*`/`bp-paper-composite`; incl. native `type="color"` and `datetime-local`) | D6/D11/D23 | `paper_field_block.ex` 146; `paper_editor.ex` 1212/1241 |
+| F | Sheet spreadsheet-chrome input (bespoke themed `sheet-*` class, JS-hook-bound cell/name/bar/find/tab-rename — styled, not naked) | D13/sheets skip-region | `sheet_grid.ex` 2503/2514/2836/3058/3437 |
+| G | **Owned-pending** (genuinely bare; the named in-flight slice converts it → zero once merged) | wave-3 | `modals.ex` 140 → `sup-w3-shares-modal-kit` |
+
+**Proof 2 — LiveViewTest render census.** `CC=clang mix test
+test/barkpark_web/live/studio/` → **1193 tests, 0 failures** (studio_live,
+settings, org_admin, api_tester, sheet_grid, media, styleguide, tmux, chat) +
+`plugin_settings/bulldocs/sheets_reader/quiz` harnesses → **83 tests, 0
+failures**. `graph_view` + `swatch_live` carry **no LiveViewTest render harness**
+(canvas/tool surfaces) — recorded as D24d exemptions; no harness built.
+
+**Proof 3 — Part H completeness + one live fix.** Enumerated every epic-touched
+bespoke color rule's fg-tier × surface in `root.html.heex`. All at-risk
+(dim/muted-tier on raised/accent/muted) pairings were already curated EXCEPT one:
+`.bp-secondary-pane-readonly` (editor detail pane, `editor_fields.ex:112`) paints
+`--fg-dim` on its own `--bg-muted` fill = **4.05–4.40 (sub-AA on evergreen
+light+dark, ember/fjord light)** — the identical fg-dim-on-bg-muted defect D15
+caught for `.pane-doc-badge`. Introduced by `dd830aba` (pre-epic), so the gate
+never covered it — the honest legacy residual, now closed: escalated
+`--fg-dim`→`--muted-text` (4.57–6.88, AA everywhere) at the site and added the
+16th Part H pairing (revert → red, verified). **Judgement call rejected:**
+`.org-admin-token` = `--fg` (max text tier) on `--surface-raised` does NOT earn a
+row — it cannot fail AA (>10:1 every theme×mode); Part H curates at-risk
+co-occurrences, not the cartesian product. `node design/check.mjs` → **PASS, 16
+pairings × 3 themes × 2 modes = 96 checks**.
+
+**Proof 4 — authenticated pixel harness (D24e) + human-gate pack.** The
+login-ticket harness is PROVEN end-to-end: admin bearer from
+`~/.config/barkpark/config.json` → `POST /v1/auth/login-tickets` (201, 60s
+ticket) → browser `GET /login/ticket/:t` (302 → session cookie) → `/studio`
+authenticated (200, `pane-layout`/`scope-title`/`studio-shell`; theme driven
+in-session via `documentElement.dataset.theme`/`dataset.bpTheme`). Demonstrator
+captures on the **deployed wave-2 build** (footer `v0.2.25.237 · f2df6d76`):
+desk (evergreen-dark) confirms wave-1/2 chrome live (icons-only bar, scope chip,
+distinct type icons); Papers focus pane (ember-dark) confirms wave-2 desk anatomy
+(row `:meta` subtitle, "Papers 75" count, status dots, ember accent). D20
+elevation baseline **quantified**: ember-dark `--bg` 8% L vs `--surface-raised`
+9.31% L = **1.31% L separation** (panes `rgb(19,15,11)` vs `rgb(28,23,20)`) —
+the near-flat state the unmerged `sup-w3-token-evenness` slice fixes. **The
+acceptance re-shoot (all 6 combos × desk/sheet-popovers/plugin-settings/
+airdrop+shares-modals/org-admin/styleguide/api-tester, verifying elevation READS
+on ember/fjord dark) MUST run after the four siblings merge + guerrilla
+redeploys** — surfaced to the human gate; NOT stamped met.
+
+**Epic exit stamp (parent `studio-ui-premium`).** Crit 1 (waves merged): #2067 +
+#2088 + the four wave-3 PRs on merge. Crit 2 (zero native controls): the census
+above — one owned-pending control, else fully exempt. Crit 3 (AA): Part H is the
+operational definition — every epic-touched fg×surface co-occurrence machine-gated
+(96 checks); honest residual = legacy text the epic never touched is NOT
+machine-covered (this slice closed the one at-risk residual it found,
+`.bp-secondary-pane-readonly`). Crit 4 (user re-verdict): HUMAN GATE — pixel pack
+surfaced, awaiting user verdict.
+
+The banked D4 pane-model amendment (inline nested tree / resizable columns): the
+desk reads premium in pixels (anatomy + chrome + counts + dots all land) — the
+"unfinished dev tool" tell D16 named is gone. Elevation is the one open pixel
+concern, and it is a token-value fix (`sup-w3-token-evenness`), NOT a pane-model
+gap. The amendment decision remains the reviewer's to ratify once elevation lands
+on ember/fjord dark; nothing in the QA pixels argues the pane MODEL is the problem.
+
+### Wave 3 — 2026-07-10 (reviewed; ready for the lead's merge train)
+
+**All five slices built green and reviewed; nothing stalled; ZERO review fixes
+needed** — the first wave where every slice survived adversarial review
+unchanged (D17's pre-named pins and the w2 lessons did their job). Ledger: all
+five tasks published `in_progress`, claims held (epoch 1), every criterion
+stamped with evidence, only the merge-gated criteria open for the lead.
+
+What landed (final branches, in integration order):
+
+1. `sup-w3-token-evenness` — `loop-epic/token-evenness-dark-mode-elevation-reads-0`.
+   `raisedDark(skin, dL, C)` in derive.mjs rebinds ONLY the dark rungs of
+   `--surface-raised` (+0.0695 OKLCH L over the theme's own dark bg) and
+   `--border-subtle` (+0.0445): elevation is now a CONSTANT step on every theme.
+   Evergreen byte-identity holds (Part F 160/160, frozen 82 overrides untouched);
+   only ember/fjord dark bytes moved, and both formerly-INVERTED hairlines
+   (below their 8% bg) now sit above it. Secondary scope (`--bg-accent`/
+   `--border-muted`) dropped with a written reason: they are evergreen PINNED
+   overrides — no fit anchor exists; fixing the ember/fjord selected-row
+   recession needs a deliberate reference-elevation decision (filed as a
+   follow-up candidate below).
+2. `sup-w3-api-tester-kit` — `loop-epic/api-tester-onto-the-controls-kit-inline--1`.
+   Playground onto bp_input/bp_select/bp_textarea (additive `class` +
+   `spellcheck` passthrough on bp_textarea); scenario-results + schema-browser
+   inline styles extracted to root.html.heex classes with all three fg-dim
+   sites escalated to `--muted-text`; 3 new Part H pairings (COUPLING LAW);
+   NEW playground pin test. The brief's "orphaned token-change handler" premise
+   was FALSE — the new render test caught the live top-bar Token field wiring
+   (layouts/studio.html.heex:61) and the handler is kept + pinned.
+3. `sup-w3-styleguide-kit-dom` — `loop-epic/styleguide-gallery-dom-becomes-the-spec--2`.
+   sg-controls renders the real kit components (bp_input/bp_select with prompt
+   AND optgroup/bp_textarea/bp_checkbox/bp_radio/bp_switch on/off/disabled) —
+   gallery DOM IS component DOM (D22); pins rewritten to kit attribute order,
+   :122-125 class pins pass unmodified; btn/card/badge/tabs stay class
+   primitives (no kit component exists). Does NOT depend on slice 2's
+   bp_textarea extension.
+4. `sup-w3-shares-modal-kit` — `loop-epic/shares-modal-surfaces-checkboxes-onto-bp-3`.
+   The last naked native control falls: shares_modal surfaces[] checkboxes →
+   bp_checkbox, name/value/checked byte-preserved; new pin test also re-proves
+   the surfaces[] list param through shares-add. `.shares-surfaces` is already
+   flex, so the w2 stacking lesson needed no CSS.
+5. `sup-w3-qa-closeout` — `loop-epic/whole-surface-qa-close-out-census-authen-4-r`
+   (-r carries only this wave-log entry). Census (48 raw hits → 47 exemptions +
+   1 owned-pending = the shares control, converging to ZERO when slice 4
+   merges), render census 1276 green, Part H completeness sweep found + fixed
+   the one legacy at-risk residual (`.bp-secondary-pane-readonly` fg-dim on
+   bg-muted 4.05–4.40 → muted-text, 16th pairing, revert→red), login-ticket
+   pixel harness proven on guerrilla with the D20 near-flat baseline quantified
+   (ember-dark 1.31% L). Epic criteria stamped; crit 4 = human gate.
+
+**DECISION — the D16-banked pane-model amendment is REJECTED.** This wave was
+the one licensed pane-model discussion; the evidence says no: the QA pixel pass
+on the deployed wave-2 build shows the desk reading premium (pane headers,
+row `:meta` subtitles, filtered counts, status dots, iconed empty states — the
+"unfinished dev tool" tells are gone), and the single remaining pixel defect
+(elevation near-flat on ember/fjord dark) is a token-VALUE bug that slice 1
+fixes, not a pane-model gap. Nested-tree exploration / resizable pane columns
+would be a rebuild of a working Sanity-style drill-down for no evidenced gain.
+D4's fence stays; reopening requires a fresh decide-phase amendment backed by
+post-merge pixel evidence.
+
+Cross-slice verification (reviewer): a scratch integration merge of all five
+final branches in the order above merged CLEAN (both check.mjs PAIRINGS
+additions coexist → 19 pairings × 114 AA checks green; root.html.heex 3-way
+merge clean) and ran `test/barkpark_web/live/studio/` +
+`test/barkpark_web/components/` = **1425 tests, 0 failures**, plus
+studio-literal-check (zero new lit-allows), studio-link-lint, and mix format
+clean on every touched file.
+
+MERGE TRAIN for the lead: token-evenness → api-tester → styleguide → shares →
+qa-closeout-r; the lead closes each task's merge-gated criterion on merge
+(token crit 6, api-tester crit 6, styleguide crit 4, shares crit 4, qa crit 5)
+and stamps the epic parent's crit 0–2 `met` once all five are in. KNOWN BENIGN
+DRIFT: the census register's styleguide_live.ex line refs snapshot post-#2088
+main — slice 3 rewrites those sites onto the kit, so the register's row-A count
+only shrinks (never a new naked control).
+
+What comes after (the epic is at its finish line):
+- POST-MERGE HUMAN GATE: guerrilla auto-deploys on merge — re-shoot the full
+  6-combo pixel pack via the proven login-ticket harness (desk MUST show
+  elevation reading on ember/fjord dark, D20 in pixels; sheet popovers, plugin
+  settings, airdrop + shares modals, org admin, styleguide, api tester) and
+  surface it for the user's re-verdict (epic crit 3).
+- Chat control sweep stays deferred until the studio-chat epic clears (D10);
+  it inherits token fixes automatically. This is the ONLY remaining code vein.
+- Follow-up candidate (small, needs a decide phase): `--bg-accent`/
+  `--border-muted` ember/fjord dark recession — requires a reference-elevation
+  decision that likely retires two evergreen pinned overrides (out of scope
+  for the byte-anchored token slice, documented in its task evidence).
+- session_html login + tmux polish were judged already-themed in the w2 census;
+  nothing owed unless the pixel pack says otherwise.
