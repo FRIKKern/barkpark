@@ -10385,6 +10385,13 @@
       // bp-login-ux W2 — tolerant real-path matcher (trailing-slash safe) + the
       // two predicates it backs, so the harness can pin /activate/ ≡ /activate.
       pathClean: pathClean, isActivateFlow: isActivateFlow, isNewFlow: isNewFlow,
+      // bp-login-ux W3 (decision 40) — the /activate render functions, exported so
+      // __app.test.mjs can DOM-test each state via the fakeDom() swap idiom. The
+      // click-driven approved/denied terminals aren't smokeable (smoke's click() is
+      // inert), so renderActivateResult('approved'|'denied') is called directly.
+      renderActivateEntry: renderActivateEntry, renderActivateConfirm: renderActivateConfirm,
+      renderActivateResult: renderActivateResult, renderActivateError: renderActivateError,
+      renderActivateRateLimited: renderActivateRateLimited,
       failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.

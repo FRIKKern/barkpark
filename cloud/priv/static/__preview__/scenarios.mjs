@@ -935,6 +935,61 @@ export const SCENARIOS = {
       deployments: migratedDeployments,
     },
   },
+  // ── bp-login-ux W3 (decision 40): the /activate device-login approve page ──
+  // Until now every /activate state existed only live behind auth — the 8 PNGs
+  // #2111 committed under docs/evidence/login-ux-w2/ were the ONLY witness. These
+  // scenarios make each PRE-CLICK skeleton locally renderable. pathname
+  // "/activate" unlocks isActivateFlow() (smoke reads scen.pathname); the ?code=
+  // search feeds renderActivateApprove's inspect; the `device` fixture answers
+  // /v1/auth/device/inspect so the state is real, never the catch-all's 200 {}.
+  // The click-driven approved/denied morphs are NOT smokeable (smoke's click() is
+  // inert) — they're DOM-tested in __app.test.mjs.
+  "activate-entry": {
+    label: "Device sign-in — manual code entry (authed, no prefill)",
+    authed: true,
+    pathname: "/activate",
+    data: {},
+  },
+  "activate-confirm": {
+    label: "Device sign-in — confirm which machine is asking (Approve / Deny)",
+    authed: true,
+    pathname: "/activate",
+    search: "?code=ABCD-2345",
+    data: {
+      device: {
+        inspect: {
+          status: 200,
+          body: {
+            client_name: "bp on nimbus.local",
+            ip_address: "203.0.113.7",
+            user_agent: "bp/1.0 (darwin arm64)",
+            expires_at: new Date(Date.now() + 9 * 60000).toISOString(),
+          },
+        },
+      },
+    },
+  },
+  "activate-gone": {
+    label: "Device sign-in — the code expired or was already used (404 → gone)",
+    authed: true,
+    pathname: "/activate",
+    search: "?code=ABCD-2345",
+    data: { device: { inspect: { status: 404, body: { error: "expired_or_invalid" } } } },
+  },
+  "activate-rate-limited": {
+    label: "Device sign-in — too many attempts (429 → paused retry countdown)",
+    authed: true,
+    pathname: "/activate",
+    search: "?code=ABCD-2345",
+    data: { device: { inspect: { status: 429, body: { error: "slow_down" } } } },
+  },
+  "activate-logged-out": {
+    label: "Device sign-in while logged out — the sign-in card banners the parked code",
+    authed: false,
+    pathname: "/activate",
+    search: "?code=ABCD-2345",
+    data: {},
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -967,6 +1022,23 @@ export function route(name, method, path) {
 
   if (p === "/v1/invitations/accept" && method === "POST") {
     return (d.invitation && d.invitation.accept) || { status: 404, body: { error: "invalid_or_expired" } };
+  }
+
+  // bp-login-ux W3 (decision 40): the /activate device-login endpoints. A
+  // scenario carries a `device` fixture; route() answers inspect/approve/deny
+  // from it (mirroring the invitation-stub pattern above). This MUST precede the
+  // benign /v1/ catch-all (which returns 200 {}) — otherwise inspect would fold
+  // to a DEGENERATE "confirm" ("Unknown device") and no scenario could pin the
+  // gone (404) or rate_limited (429) states. inspect 200 body shape =
+  // {client_name, ip_address, user_agent, expires_at} (the confirm-screen fields).
+  if (method === "POST" && p === "/v1/auth/device/inspect") {
+    return (d.device && d.device.inspect) || { status: 404, body: { error: "expired_or_invalid" } };
+  }
+  if (method === "POST" && p === "/v1/auth/device/approve") {
+    return (d.device && d.device.approve) || { status: 200, body: { ok: true } };
+  }
+  if (method === "POST" && p === "/v1/auth/device/deny") {
+    return (d.device && d.device.deny) || { status: 200, body: { ok: true } };
   }
 
   // Promote (rollback/redeploy). Default: 201 with a fresh queued row minted
