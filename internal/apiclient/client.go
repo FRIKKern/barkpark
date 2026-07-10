@@ -872,6 +872,21 @@ type taskEnvelope struct {
 	Reason  string          `json:"reason"`
 	Doc     json.RawMessage `json:"doc"`
 	Notices []TaskNotice    `json:"notices"`
+	// Conflicts rides a 409 resource_conflict envelope: the tasks/workers that
+	// already hold one or more of the file resources this claim declared. The
+	// server's check_resources_free fence populates it; a frontier claimer names
+	// the holder on skip so a builder learns who owns the seam BEFORE merge (it
+	// was silently dropped before df-next-frontier). Empty on every other reason.
+	Conflicts []TaskConflict `json:"conflicts"`
+}
+
+// TaskConflict is one holder in a resource_conflict envelope: the task + worker
+// currently holding some of the file resources a resources-declaring claim
+// requested, and which of them overlap. Surfaced verbatim on skip.
+type TaskConflict struct {
+	Task      string   `json:"task"`
+	Worker    string   `json:"worker"`
+	Resources []string `json:"resources"`
 }
 
 // TaskNotice is one advisory rail-awareness notice a claim/close 2xx envelope
@@ -894,14 +909,36 @@ type TaskNotice struct {
 // builds; tenancy comes from the bearer token. An ok:false envelope surfaces
 // the server's reason string VERBATIM as the error.
 func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnvelope, error) {
-	body, err := json.Marshal(payload)
+	env, status, err := c.taskPostRaw(path, payload)
 	if err != nil {
 		return nil, err
+	}
+	if !env.OK {
+		reason := env.Reason
+		if reason == "" {
+			reason = fmt.Sprintf("task endpoint error %d", status)
+		}
+		return nil, fmt.Errorf("%s", reason)
+	}
+	return env, nil
+}
+
+// taskPostRaw is taskPost's transport core: it POSTs the payload and decodes the
+// envelope REGARDLESS of ok, returning the HTTP status alongside so a caller that
+// needs the ok:false detail (reason + conflicts on a 409) can inspect it instead
+// of collapsing it into an opaque error string. A non-nil error signals a
+// transport/decode failure ONLY — a business rejection (ok:false) rides the
+// returned envelope, never the error. taskPost wraps this for the common
+// reason-as-error contract every other /v1/tasks caller relies on.
+func (c *Client) taskPostRaw(path string, payload map[string]interface{}) (*taskEnvelope, int, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	req, err := http.NewRequest("POST", c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.token != "" {
@@ -910,7 +947,7 @@ func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnv
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
@@ -918,16 +955,9 @@ func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnv
 	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		// Not the envelope (proxy error page, empty body) — fall back to the
 		// HTTP status so the caller still sees something actionable.
-		return nil, fmt.Errorf("task endpoint error %d", resp.StatusCode)
+		return nil, resp.StatusCode, fmt.Errorf("task endpoint error %d", resp.StatusCode)
 	}
-	if !env.OK {
-		reason := env.Reason
-		if reason == "" {
-			reason = fmt.Sprintf("task endpoint error %d", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("%s", reason)
-	}
-	return &env, nil
+	return &env, resp.StatusCode, nil
 }
 
 // TaskClaim claims a task by doc id for workerID via the targeted
@@ -958,6 +988,59 @@ func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, error) {
 		return 0, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
 	return doc.Claim.Epoch, env.Notices, nil
+}
+
+// TaskClaimOutcome is the full result of a resources-declaring claim: on a
+// WON claim OK is true and Epoch carries the fencing token; on a LOST race or a
+// file fence OK is false and Reason names why ("not_ready" / "already_claimed" /
+// "resource_conflict"), with Conflicts naming the holder(s) on a resource
+// conflict. It lets the frontier loop branch on the reason and skip-and-retry
+// instead of aborting on the first opaque error.
+type TaskClaimOutcome struct {
+	OK        bool
+	Reason    string
+	Epoch     int
+	Notices   []TaskNotice
+	Conflicts []TaskConflict
+}
+
+// TaskClaimResources claims docID for workerID and DECLARES the file resources
+// the task will touch, so the server's check_resources_free fence can reject a
+// claim whose files are already held by another worker (409 resource_conflict +
+// holders). resources is the task's sorted file-scope key set. Unlike TaskClaim/
+// TaskClaimN it does NOT collapse a business rejection into an error: a lost race
+// or a file fence rides the returned outcome (OK=false + Reason + Conflicts) so
+// the frontier claim loop can skip to the next non-colliding pick. A non-nil
+// error means a transport/decode failure OR — matching TaskClaimN's fencing
+// discipline — a WON claim (ok:true) that carried no positive epoch, which stays
+// a HARD failure because proceeding with epoch 0 defeats the CAS fencing. An
+// empty resources slice sends no resources key (byte-identical to a bare claim),
+// so the server fence is a no-op — the caller opts into the fence by declaring.
+func (c *Client) TaskClaimResources(docID, workerID string, resources []string) (TaskClaimOutcome, error) {
+	payload := map[string]interface{}{"worker_id": workerID}
+	if len(resources) > 0 {
+		payload["resources"] = resources
+	}
+	env, _, err := c.taskPostRaw("/v1/tasks/"+url.PathEscape(docID)+"/claim", payload)
+	if err != nil {
+		return TaskClaimOutcome{}, err
+	}
+	if !env.OK {
+		reason := env.Reason
+		if reason == "" {
+			reason = "claim_rejected"
+		}
+		return TaskClaimOutcome{OK: false, Reason: reason, Conflicts: env.Conflicts, Notices: env.Notices}, nil
+	}
+	var doc struct {
+		Claim struct {
+			Epoch int `json:"epoch"`
+		} `json:"claim"`
+	}
+	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
+		return TaskClaimOutcome{}, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
+	}
+	return TaskClaimOutcome{OK: true, Epoch: doc.Claim.Epoch, Notices: env.Notices}, nil
 }
 
 // TaskClose closes a claimed task via POST /v1/tasks/:doc_id/close. The server

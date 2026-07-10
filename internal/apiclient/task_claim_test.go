@@ -112,3 +112,118 @@ func TestTaskRelabelSurfacesConflictReason(t *testing.T) {
 		t.Errorf("error = %q, want the verbatim reason %q", err.Error(), "stale_rev")
 	}
 }
+
+// TaskClaimResources declares the task's file scope in the claim body so the
+// server's check_resources_free fence can run. This asserts the outgoing body
+// carries worker_id AND the sorted resources, and that a won claim returns the
+// fencing epoch on the outcome.
+func TestTaskClaimResourcesSendsResourcesBody(t *testing.T) {
+	var gotBody struct {
+		WorkerID  string   `json:"worker_id"`
+		Resources []string `json:"resources"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/claim") {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &gotBody)
+		_, _ = w.Write([]byte(`{"ok":true,"doc":{"claim":{"epoch":3}}}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	res := []string{"internal/cli/cli.go", "internal/cli/cmux_dispatch.go"}
+	outcome, err := c.TaskClaimResources("task-7", "worker-a", res)
+	if err != nil {
+		t.Fatalf("TaskClaimResources: %v", err)
+	}
+	if !outcome.OK || outcome.Epoch != 3 {
+		t.Errorf("outcome = %+v, want OK epoch 3", outcome)
+	}
+	if gotBody.WorkerID != "worker-a" {
+		t.Errorf("worker_id = %q, want worker-a", gotBody.WorkerID)
+	}
+	if len(gotBody.Resources) != 2 || gotBody.Resources[0] != "internal/cli/cli.go" {
+		t.Errorf("resources = %v, want the two declared files", gotBody.Resources)
+	}
+}
+
+// An empty file scope sends NO resources key — byte-identical to a bare claim —
+// so the server fence stays inert unless a task actually declares files.
+func TestTaskClaimResourcesEmptyOmitsResourcesKey(t *testing.T) {
+	var raw []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte(`{"ok":true,"doc":{"claim":{"epoch":1}}}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	if _, err := c.TaskClaimResources("task-7", "worker-a", nil); err != nil {
+		t.Fatalf("TaskClaimResources: %v", err)
+	}
+	if strings.Contains(string(raw), "resources") {
+		t.Errorf("empty scope must not send a resources key; body = %s", raw)
+	}
+}
+
+// A 409 resource_conflict rides an ok:false envelope with a conflicts array. The
+// outcome must surface reason + the named holders WITHOUT collapsing into an
+// error (the frontier loop needs to branch on it and skip to the next pick).
+func TestTaskClaimResourcesDecodesConflicts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"ok":false,"reason":"resource_conflict","conflicts":[{"task":"task-b","worker":"worker-2","resources":["internal/cli/cli.go"]}]}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	outcome, err := c.TaskClaimResources("task-7", "worker-a", []string{"internal/cli/cli.go"})
+	if err != nil {
+		t.Fatalf("resource_conflict must not be an error, got %v", err)
+	}
+	if outcome.OK || outcome.Reason != "resource_conflict" {
+		t.Errorf("outcome = %+v, want ok=false reason=resource_conflict", outcome)
+	}
+	if len(outcome.Conflicts) != 1 || outcome.Conflicts[0].Task != "task-b" || outcome.Conflicts[0].Worker != "worker-2" {
+		t.Errorf("conflicts = %+v, want the named holder task-b/worker-2", outcome.Conflicts)
+	}
+}
+
+// A lost race is reason not_ready on an ok:false envelope — surfaced (not an
+// error) so the frontier loop skips to the next pick.
+func TestTaskClaimResourcesSurfacesNotReady(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"ok":false,"reason":"not_ready"}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	outcome, err := c.TaskClaimResources("task-7", "worker-a", nil)
+	if err != nil {
+		t.Fatalf("not_ready must not be an error, got %v", err)
+	}
+	if outcome.OK || outcome.Reason != "not_ready" {
+		t.Errorf("outcome = %+v, want ok=false reason=not_ready", outcome)
+	}
+}
+
+// A won claim (ok:true) that carries no positive epoch stays a HARD error —
+// proceeding with epoch 0 defeats the CAS fencing (TaskClaimN's discipline).
+func TestTaskClaimResourcesRejectsMissingEpoch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true,"doc":{}}`))
+	}))
+	defer srv.Close()
+
+	c := New(Config{BaseURL: srv.URL, Token: "t", Dataset: "production"})
+	outcome, err := c.TaskClaimResources("task-7", "worker-a", nil)
+	if err == nil {
+		t.Fatalf("expected a hard error for a claim with no fencing epoch, got %+v", outcome)
+	}
+	if outcome.OK {
+		t.Errorf("outcome.OK = true, want false on the epoch failure")
+	}
+}

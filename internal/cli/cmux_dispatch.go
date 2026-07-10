@@ -46,7 +46,12 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 		return exitOK
 	}
 
-	opts, err := parseFrontierFlags(args) // reuse `bp task frontier`'s --max/--proven-only parser
+	claimFlag := hasFlag(args, "--claim")
+	// --claim is a dispatch-local flag, not a frontier knob — strip it before the
+	// frontier parser (which rejects unknowns) so --claim composes with --max /
+	// --proven-only.
+	fargs := stripFlag(args, "--claim")
+	opts, err := parseFrontierFlags(fargs) // reuse `bp task frontier`'s --max/--proven-only parser
 	if err != nil {
 		return usageErrf(out, func() { printCmuxDispatchHelp(out) }, "%v", err)
 	}
@@ -87,7 +92,11 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 	case !cmuxPresent:
 		mode = "dry-run (cmux not on PATH)"
 	}
-	out.outf("DISPATCH · %d pick(s) · %s", len(picks), mode)
+	claimTag := ""
+	if claimFlag {
+		claimTag = " · claim-before-spawn"
+	}
+	out.outf("DISPATCH · %d pick(s) · %s%s", len(picks), mode, claimTag)
 	if cmuxPresent {
 		out.outf("cmux: %s", cmuxPath)
 	}
@@ -97,10 +106,41 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 		return exitOK
 	}
 
-	spawned, failed := 0, 0
+	spawned, failed, skipped := 0, 0, 0
 	for _, p := range picks {
 		id := taskboard.BareID(p.Task.DocID)
+
+		// --claim: win the ledger lease BEFORE spawning, so the pane never races
+		// its own SessionStart claim against a sibling. A pick lost to another
+		// worker (a lost race or a file-scope conflict) is NOT spawned — its holder
+		// is named instead. Claiming is a mutation, so it is suppressed under
+		// dry-run (which spawns nothing anyway).
+		worker, epoch := "", 0
+		if claimFlag && !dryRun {
+			w := dispatchClaimWorkerID(id)
+			resources := sortedFiles(frontierFilesOf(p.Task))
+			outcome, err := client.TaskClaimResources(p.Task.DocID, w, resources)
+			if err != nil {
+				// Transport failure or a won claim with no fencing epoch — hard, but
+				// one bad pick never aborts the batch (design §7).
+				out.userErr("dispatch: claim %s failed: %v", id, err)
+				failed++
+				continue
+			}
+			if !outcome.OK {
+				out.outf("↷ skipped %s (%s)%s", id, outcome.Reason, claimHolderSuffix(outcome.Conflicts))
+				skipped++
+				continue
+			}
+			worker, epoch = w, outcome.Epoch
+		}
+
 		cmd := cmuxCommandText(id, taskPrompt(p))
+		if claimFlag {
+			// Export the observed lease (worker + epoch) into the pane so its
+			// SessionStart hook RENEWS the same lease instead of re-claiming.
+			cmd = cmuxCommandTextClaimed(id, worker, epoch, taskPrompt(p))
+		}
 		plan := cmuxInvocation(id, cwd, cmd)
 
 		if dryRun {
@@ -113,14 +153,42 @@ func runCmuxDispatch(out *writer, g globals, ctx manifest.Context, args []string
 			failed++
 			continue
 		}
-		out.outf("↑ spawned %s", id)
+		if claimFlag {
+			out.outf("↑ spawned %s  worker=%s  epoch=%d", id, worker, epoch)
+		} else {
+			out.outf("↑ spawned %s", id)
+		}
 		spawned++
 	}
 
 	if !dryRun {
-		out.outf("dispatched %d pane(s)%s", spawned, failedSuffix(failed))
+		out.outf("dispatched %d pane(s)%s%s", spawned, failedSuffix(failed), skippedSuffix(skipped))
 	}
 	return exitOK
+}
+
+// dispatchClaimWorkerID is the worker id the lead claims a pick under when
+// pre-claiming for a pane (--claim). It lives in the cmux- namespace and is
+// exported into the pane as BARKPARK_WORKER_ID (tier-1 of CmuxWorkerID), so the
+// pane's SessionStart re-claim RENEWS this exact lease rather than colliding.
+func dispatchClaimWorkerID(bareID string) string {
+	return taskboard.CmuxWorkerPrefix + "dispatch-" + bareID
+}
+
+// claimHolderSuffix names who holds the contested files of a skipped pick.
+func claimHolderSuffix(conflicts []apiclient.TaskConflict) string {
+	h := holderText(conflicts)
+	if h == "" {
+		return ""
+	}
+	return " — held by " + h
+}
+
+func skippedSuffix(skipped int) string {
+	if skipped == 0 {
+		return ""
+	}
+	return " · " + strconv.Itoa(skipped) + " skipped"
 }
 
 func failedSuffix(failed int) string {
@@ -159,6 +227,21 @@ func cmuxCommandText(bareID, prompt string) string {
 	return "BARKPARK_TASK=" + bareID + " claude " + shellSingleQuote(prompt)
 }
 
+// cmuxCommandTextClaimed is cmuxCommandText for a PRE-CLAIMED pick (--claim): it
+// additionally exports the observed lease — BARKPARK_WORKER_ID (tier-1 of
+// CmuxWorkerID, so the pane renews rather than re-claims) and BARKPARK_TASK_EPOCH
+// (the fencing token the close hook echoes back as observed_epoch). Under
+// dry-run the pick was not claimed, so worker is "" / epoch is 0 and only
+// BARKPARK_TASK is exported (the plan honestly shows no lease yet).
+func cmuxCommandTextClaimed(bareID, worker string, epoch int, prompt string) string {
+	if worker == "" {
+		return cmuxCommandText(bareID, prompt)
+	}
+	return "BARKPARK_WORKER_ID=" + worker +
+		" BARKPARK_TASK_EPOCH=" + strconv.Itoa(epoch) +
+		" BARKPARK_TASK=" + bareID + " claude " + shellSingleQuote(prompt)
+}
+
 // cmuxInvocation is the copy-pasteable dry-run line: the exact `cmux
 // new-workspace …` the spawn WOULD run. new-workspace is cmux's real spawn
 // primitive with a command+cwd (confirmed against `cmux new-workspace --help`);
@@ -192,6 +275,9 @@ func printCmuxDispatchHelp(out *writer) {
 	out.outf("flags:")
 	out.outf("  --max N         cap the number of panes spawned (0 / omitted = full frontier)")
 	out.outf("  --proven-only   spawn only the area-proven isolated set (the safe floor)")
+	out.outf("  --claim         claim each pick (declaring its file scope) BEFORE spawning;")
+	out.outf("                  spawn only the winners with the lease (worker+epoch) in env,")
+	out.outf("                  and name the holder of any pick lost to a racing worker")
 	out.outf("  --dry-run       print the launch plan and spawn nothing (mutates nothing)")
 	out.outf("")
 	out.outf("--dry-run is the DEFAULT when cmux is not on $PATH. Panes are Start()ed, never")

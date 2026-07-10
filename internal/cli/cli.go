@@ -171,6 +171,29 @@ func Execute(args []string) int {
 		if verb == "create" {
 			return runTaskCreate(out, g, ctx, tail)
 		}
+		// `bp task next <worker> --frontier` — the frontier-aware atomic claim
+		// (df-next-frontier). Fires ONLY when --frontier is present; a BARE
+		// `bp task next <worker>` falls through untouched to the manifest queue
+		// endpoint (POST /v1/tasks/claim). --frontier computes the non-colliding
+		// ready set and claims the top pick by id via the epoch-CAS claim,
+		// skipping to the next pick on a lost race or a file-scope conflict.
+		if verb == "next" && hasFlag(tail, "--frontier") {
+			worker, fopts, err := parseNextFrontierArgs(tail)
+			if err != nil {
+				return usageErrf(out, func() { printTaskFrontierHelp(out) }, "%v", err)
+			}
+			return runTaskNextFrontier(out, g, ctx, worker, fopts)
+		}
+		// `bp task ready` capacity header — prepend one honest line naming the
+		// dispatch frontier size before the normal manifest ready list renders
+		// ("FRONTIER · N independent · P proven · U unproven"). Human/table output
+		// only: -o json|yaml stays byte-identical (scripts parse it), so the header
+		// is skipped in machine mode. Best-effort — a snapshot fetch error just
+		// drops the header, never blocking the ready list. Then FALL THROUGH to the
+		// manifest dispatch (no return) so `bp task ready` renders exactly as before.
+		if verb == "ready" && !g.help && !out.machineOut() {
+			printReadyFrontierHeader(out, ctx)
+		}
 	case "cmux":
 		// `bp cmux <hook|dispatch|install|status>` — the CMUX × Barkpark bridge
 		// (task-TUI epic, wave 14). A client-side builtin like `bp tasks` / `bp
