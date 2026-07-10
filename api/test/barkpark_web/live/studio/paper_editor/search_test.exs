@@ -45,6 +45,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.SearchTest do
               "type" => "heading",
               "text" => "Wikilink Candidate Paper",
               "level" => 1
+            },
+            # A body block: heading-only papers are hollow and refused by the
+            # p-quality-gate hollow gate; this test is about wikilink search.
+            %{
+              "id" => "p-1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]
             }
           ]
         })

@@ -236,7 +236,12 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
           blocks: [
             %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
               "locked" => true, "text" => "T"},
-            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
+            # A real body block: skeleton-only papers are refused by the
+            # hollow-body quality gate (p-quality-gate); this test targets the
+            # constraint vocabulary veto.
+            %{"id" => "body-p", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]}
           ]
         })
 
@@ -253,8 +258,8 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert resp["error"]["message"] ==
                "at most 1 \"featured\" block allowed, found 2"
 
-      # Calm veto: the paper is untouched (still just title + featured).
-      assert length(pc(Content.get_paper(slug), "blocks")) == 2
+      # Calm veto: the paper is untouched (title + featured + body block).
+      assert length(pc(Content.get_paper(slug), "blocks")) == 3
     end
   end
 

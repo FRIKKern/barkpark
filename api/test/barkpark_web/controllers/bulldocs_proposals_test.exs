@@ -262,7 +262,12 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
           "blocks" => [
             %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
               "locked" => true, "text" => "T"},
-            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
+            # A real body block: skeleton-only papers are refused by the
+            # hollow-body quality gate (p-quality-gate); this test targets the
+            # constraint vocabulary, not the hollow gate.
+            %{"id" => "body-p", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]}
           ]
         })
 

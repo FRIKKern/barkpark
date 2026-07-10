@@ -160,7 +160,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
           "workspace_id" => ws.id,
           "project_id" => project.id,
           "blocks" => [
-            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"}
+            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"},
+            # A body block: heading-only papers are hollow and refused by the
+            # p-quality-gate hollow gate; this test is about backlink tenancy.
+            %{"id" => "p1", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]}
           ]
         })
 
@@ -218,7 +222,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
           "workspace_id" => foreign_ws.id,
           "project_id" => foreign_project.id,
           "blocks" => [
-            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Foreign Linker"}
+            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Foreign Linker"},
+            # A body block: heading-only papers are hollow and refused by the
+            # p-quality-gate hollow gate; this test is about backlink tenancy.
+            %{"id" => "p1", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]}
           ]
         })
 

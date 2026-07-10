@@ -38,6 +38,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   @impl Barkpark.Plugin
   def structure_placement, do: :main
 
+  alias Barkpark.Content.Papers.Hollow
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.PortableDoc.BodyWalk
 
@@ -55,7 +56,14 @@ defmodule Barkpark.Plugins.Bulldocs do
   """
   @impl Barkpark.Plugin
   def lifecycle_hooks do
-    %{before_save: [&validate_paper_template/1]}
+    %{
+      # In-list order is load-bearing and dispatcher-pinned (hooks_test.exs,
+      # charter D7): the template shape gate first, the hollow-body quality
+      # gate second. Hooks never mutate the payload, so the hollow gate always
+      # sees the pristine write.
+      before_save: [&validate_paper_template/1, &reject_hollow_published_save/1],
+      before_publish: [&reject_hollow_paper_publish/1]
+    }
   end
 
   # Doctrine gate (pdd-t3, paper portabledoc-doctrine): a paper that carries
@@ -74,6 +82,59 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   defp validate_paper_template(_payload), do: :ok
+
+  # Quality gate hook #2 (p-quality-gate): a PUBLISHED-surface paper write —
+  # status "published", or a non-`drafts.` doc_id — whose body is hollow
+  # (skeleton-only, `Barkpark.Content.Papers.Hollow`) is vetoed with the
+  # ratified hard-stop copy. DRAFT writes stay free: mutate creates/patches
+  # always land drafts (Writer draft-prefixes + coerces status), so gating
+  # them would brick creation; a hollow draft is stopped at publish time by
+  # the before_publish hook below. Today's Writer paths only emit draft
+  # writes — this seam is the layer-parity backstop for any writer that ever
+  # fires before_save with a published-surface payload.
+  defp reject_hollow_published_save(%{doc: %{"type" => "paper"} = doc}) do
+    if published_surface_write?(doc) and Hollow.hollow?(get_in(doc, ["content", "blocks"])) do
+      {:halt, Hollow.message()}
+    else
+      :ok
+    end
+  end
+
+  defp reject_hollow_published_save(_payload), do: :ok
+
+  defp published_surface_write?(doc) do
+    doc_id = doc["doc_id"] || doc["_id"]
+
+    doc["status"] == "published" or
+      (is_binary(doc_id) and not String.starts_with?(doc_id, "drafts."))
+  end
+
+  # Quality gate hook #3 (p-quality-gate): publishing a hollow draft paper —
+  # the mutate `publish` op / proposals approve flow through
+  # `Content.Lifecycle.publish_document` — is vetoed. The payload doc is the
+  # DRAFT `%Document{}` being promoted (tests may fire plain maps; both
+  # shapes are read). Non-papers and block-less (pre-doctrine) papers pass.
+  defp reject_hollow_paper_publish(%{doc: doc}) when is_map(doc) do
+    if paper_doc?(doc) and Hollow.hollow?(doc_blocks(doc)) do
+      {:halt, Hollow.message()}
+    else
+      :ok
+    end
+  end
+
+  defp reject_hollow_paper_publish(_payload), do: :ok
+
+  defp paper_doc?(%{type: "paper"}), do: true
+  defp paper_doc?(%{"type" => "paper"}), do: true
+  defp paper_doc?(%{"_type" => "paper"}), do: true
+  defp paper_doc?(_), do: false
+
+  defp doc_blocks(doc) do
+    case Map.get(doc, :content) || Map.get(doc, "content") do
+      content when is_map(content) -> Map.get(content, "blocks")
+      _ -> nil
+    end
+  end
 
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
