@@ -15,6 +15,7 @@ Every target below wires the same `bp mcp serve` tool catalog (curated task tool
 | Codex CLI / Desktop | `AGENTS.md` + `~/.codex/config.toml` | [CODEX.md](CODEX.md) |
 | Windsurf (Cascade) | `~/.codeium/mcp_config.json` (merge the key) | [WINDSURF.md](WINDSURF.md) |
 | Gemini CLI | `.gemini/settings.json` (merge the key) | [GEMINI-CLI.md](GEMINI-CLI.md) |
+| Codex · Aider · any AGENTS.md agent | `./AGENTS.md` (marker-managed teach block) | [AGENTS-MD.md](AGENTS-MD.md) |
 | ChatGPT · Claude.ai | Custom GPT Actions · remote MCP | [REMOTE.md](REMOTE.md) |
 
 ## AUTH

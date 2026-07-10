@@ -105,31 +105,41 @@ the secret.
 Codex reads an `AGENTS.md` at the repo root as project instructions (up to
 `project_doc_max_bytes`, default 32768). Drop this block in — it's ~1 KB, far
 under the cap — so the agent knows the claim-first contract before it touches the
-board:
+board. Don't hand-copy it: **`bp onramp agents-md` emits exactly this block**,
+wrapped in `<!-- barkpark:onramp:begin -->` / `<!-- barkpark:onramp:end -->`
+markers so a re-run updates only its own block and never your surrounding
+`AGENTS.md` content:
 
 ```markdown
+<!-- barkpark:onramp:begin -->
 ## Task tracking — Barkpark (bp)
 
-All task tracking goes through Barkpark — never markdown TODO lists. The `bp`
-CLI (or the `barkpark` MCP tools) talk to the server in `~/.config/barkpark/`.
+All task tracking uses Barkpark — never markdown TODO lists, never a TODO tool.
+The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
 
-- `bp task ready` — list available work.
-- `bp task next <worker>` — atomically CLAIM the next ready task; claim FIRST —
-  the claim returns the brief and an epoch you need to close.
-- `bp task get <id>` — task detail (carries children + child_count).
-- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim.
-  If it lapsed, re-claim the same task for a fresh epoch, then close.
-- `bp task create ...` — file new work (older binaries lack this verb; fall
-  back to `bp doc create task`).
-- Stamp acceptance criteria in the same atomic write:
-  `--set 'criteria:=[{"index":0,"met":true,"evidence":"..."}]'`.
-- Worker id: `codex-<your-name-or-branch>` — pick one, keep it for claim/close
-  symmetry. `lifecycle_status` (`open` → `done`) is the done-signal.
-- `bp capabilities -o json` — the whole API manifest when unsure.
+- `bp task ready` — list available work
+- `bp task next <worker>` — atomically claim the next ready task; claim FIRST — the claim returns the brief and an epoch
+- `bp task get <id>` — task detail (carries children + child_count)
+- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.
+- `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)
+- `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events
+- `bp capabilities -o json` — the whole API manifest when unsure
+
+Conventions:
+- Worker id: `<tool>-<your-name-or-branch>` — pick one and keep it for claim/close symmetry.
+- `lifecycle_status` is the done-signal (`open` → `done`), not the claim record.
+- Closing can mark acceptance criteria in the same atomic write:
+  `--set 'criteria:=[{"index":0,"met":true,"evidence":"..."}]'`
+- Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.
+- If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.
+
+MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `docs/setup/AGENT-ONRAMPS.md`.
+<!-- barkpark:onramp:end -->
 ```
 
-This is the same contract as `.cursor/rules/barkpark-tasks.mdc`, in the format
-Codex expects.
+This is the ONE canonical teach text — the same body `.cursor/rules/barkpark-tasks.mdc`
+and `.claude/CLAUDE-BARKPARK.md` carry in each tool's native framing. See
+`docs/setup/AGENTS-MD.md` for the emitter and the merge semantics.
 
 ## The tools
 
