@@ -23,6 +23,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
+  alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{Patch, Projection, Render}
   alias Barkpark.Preview
 
@@ -144,7 +145,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # template shape is enforced here too; the Bulldocs before_save hook covers
     # the mutate path. Same halt shape as a plugin veto so every caller
     # (Studio, ingest, bp) renders it identically.
+    # Quality gate (p-quality-gate): a hollow RESULT — nothing beyond the
+    # enforced title/featured skeleton — is refused, always. Papers publish
+    # in place through this path (ingest/chat/mutate stubs; Studio never
+    # calls it), so there is no birth exemption: a machine POSTing a
+    # title-only stub gets the honest hard stop instead of a hollow
+    # published paper. HTML-only writes (no blocks list) stay exempt.
     with [] <- Papers.Template.validate(blocks),
+         :ok <- reject_hollow_result(blocks),
          {:ok, blocks} <- encrypt_paper_blocks(blocks, dataset) do
       write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs)
     else
@@ -319,6 +327,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # only-when-before-valid guard keeps the legacy corpus untouched (D3).
          {:ok, patched} <-
            Patch.apply_patch(blocks, op, constraints: Papers.Template.paper_declarations()),
+         # Quality-gate RATCHET (p-quality-gate): an op may not hollow OUT a
+         # paper that had real content — papers publish in place, so a
+         # hollowed canvas edit would BE a hollow published paper. A fresh,
+         # still-hollow paper (seeded title + empty tpl-body) stays freely
+         # editable: the ratchet only fires on the non-hollow → hollow edge.
+         :ok <- ratchet_hollow(blocks, patched),
          # Route the op-applied list through the SAME chokepoint before
          # persisting: a NEW op-inserted block carrying no id (clients normally
          # mint ids, but the op payload is not guaranteed to) would otherwise be
@@ -436,6 +450,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- check_paper_if_rev(doc, Keyword.get(opts, :if_rev)),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
          {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
+         # Same quality-gate RATCHET as the single-op path, applied to the
+         # atomic batch RESULT: the whole batch is refused (paper unchanged)
+         # when it would hollow out a non-hollow paper.
+         :ok <- ratchet_hollow(blocks, folded),
          # Same chokepoint as the single-op path: an op-inserted block lacking an
          # id is filled, and any flat-string list item is canonicalized, before
          # persistence. Both additive + idempotent, so a batch of well-formed
@@ -755,6 +773,33 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   # ── Papers — internal ──────────────────────────────────────────────────────
+
+  # Quality gate, whole-write seam (p-quality-gate): a block-bearing upsert
+  # whose RESULT is hollow (skeleton-only, Hollow.hollow?/1) is refused with
+  # the same {:error, {:halted, msg}} shape as a plugin veto, so every caller
+  # (ingest, chat, bp, mutate stubs) renders the honest copy identically.
+  # Non-list blocks (HTML-only / carried-over writes) are exempt.
+  defp reject_hollow_result(blocks) when is_list(blocks) do
+    if Hollow.hollow?(blocks) do
+      {:error, {:halted, Hollow.message()}}
+    else
+      :ok
+    end
+  end
+
+  defp reject_hollow_result(_no_blocks_list), do: :ok
+
+  # Quality gate, op-path RATCHET (p-quality-gate): halt only on the
+  # non-hollow → hollow edge. Fresh hollow papers (seeded title + empty
+  # tpl-body paragraph) stay freely editable; a paper that HAS content can
+  # never be edited back down to the bare skeleton.
+  defp ratchet_hollow(prev_blocks, new_blocks) do
+    if not Hollow.hollow?(prev_blocks) and Hollow.hollow?(new_blocks) do
+      {:error, {:halted, Hollow.ratchet_message()}}
+    else
+      :ok
+    end
+  end
 
   # Resolve which block an op affected (post-apply) plus its top-level position.
   # Identical to the former Barkpark.Papers.locate_affected/2, except the

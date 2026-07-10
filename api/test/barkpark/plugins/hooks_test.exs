@@ -151,6 +151,36 @@ defmodule Barkpark.Plugins.HooksTest do
     end
   end
 
+  defmodule PluginTwoHookList do
+    @moduledoc false
+    # ONE plugin declaring a TWO-function before_save list — the exact shape
+    # Bulldocs takes when the hollow gate rides after validate_paper_template
+    # (p-quality-gate, charter D7). Pins two dispatcher invariants the gate
+    # relies on:
+    #   (a) hooks WITHIN one plugin's list fire in list order;
+    #   (b) a hook's return value never mutates the payload — hook B receives
+    #       the PRISTINE payload even when hook A returns a mutated map
+    #       (v1 §0 Q2: reduce_while ignores non-:ok/:halt returns).
+    def lifecycle_hooks do
+      %{before_save: [&__MODULE__.first/1, &__MODULE__.second/1]}
+    end
+
+    def first(payload) do
+      target = Application.get_env(:barkpark, :hooks_test_target) || self()
+      send(target, {:in_list, :first, payload})
+      # A (malformed) mutation attempt: return the payload with a REWRITTEN
+      # doc. The dispatcher must coerce this to :ok and pass hook B the
+      # ORIGINAL payload, never this map.
+      {:ok, %{payload | doc: %{"_id" => "mutated", "_type" => "hijacked"}}}
+    end
+
+    def second(payload) do
+      target = Application.get_env(:barkpark, :hooks_test_target) || self()
+      send(target, {:in_list, :second, payload})
+      :ok
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────
 
   defp with_plugins(modules, ctx) when is_list(modules) do
@@ -227,6 +257,47 @@ defmodule Barkpark.Plugins.HooksTest do
 
       # B's append/1 sends {:fired, :b} — it must NOT arrive.
       refute_receive {:fired, :b}, 50
+    end
+  end
+
+  # ── Group 2b: in-list composition within ONE plugin (p-quality-gate D7) ──
+
+  describe "before_* two-function list in one plugin" do
+    test "both hooks fire, in list order", ctx do
+      :ok = with_plugins([PluginTwoHookList], ctx)
+      :ok = with_async_target(ctx)
+
+      log =
+        capture_log(fn ->
+          assert Hooks.fire(:before_save, before_payload(:before_save)) == :ok
+        end)
+
+      assert_receive {:in_list, :first, _}, 100
+      assert_receive {:in_list, :second, _}, 100
+      # first's {:ok, mutated} return is the malformed-return class — coerced.
+      assert log =~ "treating as :ok"
+    end
+
+    test "hook B receives the PRISTINE payload after hook A returns a mutated map",
+         ctx do
+      :ok = with_plugins([PluginTwoHookList], ctx)
+      :ok = with_async_target(ctx)
+
+      payload = before_payload(:before_save)
+
+      capture_log(fn ->
+        assert Hooks.fire(:before_save, payload) == :ok
+      end)
+
+      assert_receive {:in_list, :first, first_saw}, 100
+      assert_receive {:in_list, :second, second_saw}, 100
+
+      # Both hooks saw the exact payload the caller fired — hook A's
+      # attempted doc rewrite never reached hook B (no-mutation, §0 Q2).
+      assert first_saw == payload
+      assert second_saw == payload
+      assert second_saw.doc == %{"_id" => "x", "_type" => "post"}
+      refute second_saw.doc["_type"] == "hijacked"
     end
   end
 

@@ -120,7 +120,14 @@ defmodule Barkpark.Content.Papers.TemplateTest do
       # The generic vocabulary has no type axis; the paper rule "the title IS a
       # heading" (derive_title reads its text; the reader renders the <h1>) must
       # survive the re-expression — a raw API replace could otherwise swap it.
-      impostor = %{"id" => "t", "type" => "paragraph", "role" => "title", "locked" => true, "text" => "x"}
+      impostor = %{
+        "id" => "t",
+        "type" => "paragraph",
+        "role" => "title",
+        "locked" => true,
+        "text" => "x"
+      }
+
       msgs = Template.validate([impostor])
       assert Enum.any?(msgs, &(&1 =~ "title" and &1 =~ "heading"))
     end
@@ -160,7 +167,13 @@ defmodule Barkpark.Content.Papers.TemplateTest do
   test "ops: no op may DISPLACE a locked block — inserts into the prefix, moves to head, replace-away" do
     # The locked prefix is title + featured; featured is now constructed here (no
     # longer seeded) so the displacement backstops keep their coverage.
-    featured = %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+    featured = %{
+      "id" => "tpl-featured",
+      "type" => "image",
+      "role" => "featured",
+      "locked" => true
+    }
+
     blocks = Template.template_blocks("t") ++ [featured, %{"id" => "p1", "type" => "paragraph"}]
     new_block = %{"id" => "n1", "type" => "paragraph"}
 
@@ -210,10 +223,22 @@ defmodule Barkpark.Content.Papers.TemplateTest do
 
   # ── end-to-end through upsert_paper + the before_save gate ──────────────
 
-  test "upsert_paper: blank new paper is seeded; title derives; gate blocks a violated save" do
+  test "upsert_paper: new paper is seeded; title derives; gate blocks a violated save" do
     slug = "tpl-#{System.unique_integer([:positive])}"
 
-    {:ok, doc} = Content.upsert_paper(%{slug: slug, blocks: [], title: "Born as a document"})
+    # blocks: [] (a bare hollow stub) is refused by the hollow-body quality
+    # gate (p-quality-gate — see hollow_test.exs), so the template birth is
+    # exercised via the explicit opt-in with a real body block.
+    {:ok, doc} =
+      Content.upsert_paper(%{
+        slug: slug,
+        template: true,
+        blocks: [
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
+        ],
+        title: "Born as a document"
+      })
+
     blocks = doc.content["blocks"]
     assert [%{"role" => "title", "text" => "Born as a document"} | _] = blocks
     assert doc.title == "Born as a document"
@@ -236,7 +261,12 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     slug = "legacy-#{System.unique_integer([:positive])}"
 
     {:ok, doc} =
-      Content.upsert_paper(%{slug: slug, blocks: [%{"type" => "paragraph", "content" => []}]})
+      Content.upsert_paper(%{
+        slug: slug,
+        blocks: [
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "legacy body"}]}
+        ]
+      })
 
     assert [%{"type" => "paragraph"}] = doc.content["blocks"]
     refute Enum.any?(doc.content["blocks"], &Template.locked?/1)
@@ -264,7 +294,19 @@ defmodule Barkpark.Content.Papers.TemplateStyleTest do
 
   test "upsert_paper: a template-born paper renders its title as a real <h1> (rule 3)" do
     slug = "art-#{System.unique_integer([:positive])}"
-    {:ok, doc} = Content.upsert_paper(%{slug: slug, blocks: [], title: "Article born"})
+
+    # template: true + a real body block — a bare blocks: [] stub is refused
+    # by the hollow-body quality gate (p-quality-gate).
+    {:ok, doc} =
+      Content.upsert_paper(%{
+        slug: slug,
+        template: true,
+        blocks: [
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
+        ],
+        title: "Article born"
+      })
+
     assert doc.content["style"] == "article"
     assert doc.content["body_html"] =~ "<h1"
     refute doc.content["body_html"] =~ ~s(font-weight:bold">Article born)
@@ -277,7 +319,13 @@ defmodule Barkpark.Content.Papers.TemplateStyleTest do
     {:ok, _} =
       Content.upsert_paper(%{
         slug: slug,
-        blocks: [%{"id" => "p1", "type" => "paragraph", "content" => []}],
+        blocks: [
+          %{
+            "id" => "p1",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "seed body"}]
+          }
+        ],
         workspace_id: ws.id
       })
 
