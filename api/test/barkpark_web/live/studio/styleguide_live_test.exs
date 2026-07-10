@@ -113,13 +113,25 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
       assert region =~ ~s(class="btn btn-icon")
       assert region =~ "disabled"
 
-      # inputs — text AND select (the themed-chevron variant) AND textarea
-      assert region =~ ~s(type="text" class="form-input")
-      assert region =~ ~s(<select class="form-input")
-      assert region =~ ~s(<textarea class="form-input")
+      # inputs — the Controls kit (bp_input/bp_select/bp_textarea) now renders
+      # these, so the DOM carries the kit's name=/id=/value= attributes. Pinned
+      # in the exact kit attribute order (sup-w3 D22: gallery DOM IS component DOM).
+      assert region =~
+               ~s(type="text" name="sg-text-input" id="sg-text-input" value="Fleet at a glance" class="form-input")
 
-      # toggles — checkbox + the labelled switch (track + on/off state)
+      assert region =~ ~s(<select name="sg-select" id="sg-select" class="form-input")
+
+      assert region =~
+               ~s(<textarea name="sg-textarea" id="sg-textarea" rows="6" class="form-input")
+
+      # bp_select documents BOTH of its non-obvious paths — the prompt affordance
+      # (a disabled, value-less lead option) and a nested <optgroup>.
+      assert region =~ ~s(<option value="" disabled)
+      assert region =~ ~s(<optgroup label="Live">)
+
+      # toggles — checkbox + radio + the labelled switch (track + on/off state)
       assert region =~ ~s(class="form-checkbox")
+      assert region =~ ~s(class="form-radio")
       assert region =~ ~s(class="form-switch")
       assert region =~ ~s(class="form-switch-track")
       assert region =~ "form-switch-state"
