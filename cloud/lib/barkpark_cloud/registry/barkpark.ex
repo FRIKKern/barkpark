@@ -75,6 +75,11 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # fallback for pre-feature instances (404) and failed/unreachable checks.
   @update_states ~w(unknown current behind disabled)
 
+  # The rollout channels (isu-w5.2): "staging" boxes are the canary the rollout
+  # worker advances first; "prod" is the fleet default and only advances once the
+  # staging gate is green.
+  @channels ~w(prod staging)
+
   # The worker-reported host lands here via succeed_job/2 — an IPv4/IPv6 address
   # or a DNS hostname. Permissive enough for all three (and the FakeProvider's
   # 10.0.0.1-style IPs), but rejects oversized junk and control chars: only
@@ -172,6 +177,12 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :pinned_release, :string
     field :autoupdate_triggered_at, :utc_datetime_usec
 
+    # isu-w5.2 rollout CHANNEL — "prod" (fleet default) or "staging" (the canary
+    # boxes the AutoupdateRolloutWorker advances FIRST and health-gates prod
+    # behind). Written through the same narrow `autoupdate_changeset/2`, validated
+    # to exactly prod|staging. Every legacy row defaults "prod".
+    field :channel, :string, default: "prod"
+
     # Zero-paste Vercel handoff (task-4e4a53b101a97051): the platform-deployed
     # project the user claims via vercel.com/claim-deployment. project id + url
     # are display state; the claim code is ENCRYPTED (it grants project
@@ -201,6 +212,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def health_statuses, do: @health_statuses
   def agent_statuses, do: @agent_statuses
   def update_states, do: @update_states
+  def channels, do: @channels
   def providers, do: @providers
 
   @doc "The public zone managed Barkparks live under (`barkpark.cloud`)."
@@ -493,16 +505,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
   policy fields are castable (never the in-flight marker), so setting a policy can
   never rename a Barkpark, reassign its Team, or spoof an in-flight rollout. A
   blank `pinned_release` is normalized to nil (unpinned) so "" and NULL can't
-  diverge. Written only by `Registry.set_autoupdate/2`.
+  diverge. `channel` (isu-w5.2) is validated to exactly prod|staging — anything
+  else invalidates the changeset (the route maps that to 422). Written only by
+  `Registry.set_autoupdate/2`.
   """
   def autoupdate_changeset(barkpark, attrs) do
     barkpark
-    |> cast(attrs, [:autoupdate_enabled, :autoupdate_paused, :pinned_release])
+    |> cast(attrs, [:autoupdate_enabled, :autoupdate_paused, :pinned_release, :channel])
     |> update_change(:pinned_release, fn
       v when is_binary(v) -> if String.trim(v) == "", do: nil, else: String.trim(v)
       v -> v
     end)
     |> validate_length(:pinned_release, max: 255)
+    |> validate_inclusion(:channel, @channels)
   end
 
   @doc """
