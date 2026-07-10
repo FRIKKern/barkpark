@@ -671,6 +671,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       <span class="pane-item-icon"><.icon name={item.icon} size={16} /></span>
                     <% end %>
                     <span class="pane-item-label"><%= item.title %></span>
+                    <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
                   </a>
 
                 <% :doc -> %>
