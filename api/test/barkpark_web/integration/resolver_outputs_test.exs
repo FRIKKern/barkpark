@@ -247,6 +247,30 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       end
     end
 
+    test "a plugin-link row wears the same label + hover-reveal chevron vocabulary as sibling nav rows",
+         %{conn: conn} = ctx do
+      # sup-w4 row-state ladder: the plugin nav row (<a class="pane-item
+      # nav-plugin-entry">) must speak the SAME structure-pane vocabulary as
+      # phx-click sibling rows — a .pane-item-label AND the .pane-item-chevron
+      # drill affordance (hover-revealed via CSS; the span is always in the DOM).
+      # Before this wave the plugin link had no chevron, so Projects/Pending
+      # looked like a dead-end while its siblings advertised drill-through.
+      if skip_unless_loaded(ctx) do
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+        [row] = Regex.run(~r{<a[^>]*nav-plugin-entry.*?</a>}s, html) || [nil]
+        assert row, "expected a nav-plugin-entry <a> row in the rendered desk"
+
+        assert row =~ ~s(class="pane-item nav-plugin-entry"),
+               "plugin link keeps the frozen class pair"
+
+        assert row =~ ~s(class="pane-item-label"), "plugin link carries the shared label span"
+
+        assert row =~ ~s(class="pane-item-chevron"),
+               "plugin link now carries the shared drill chevron"
+      end
+    end
+
     test "HTML contains the top-menu-tab marker", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
         {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
@@ -271,7 +295,10 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
   # (dataset + workspace_id, plus any extras) that surfaces OnixEdit's tab.
   defp onixedit_enabled_ctx(extra) do
     ws = create_workspace!()
-    {:ok, _} = Tenancy.set_workspace_plugin_settings(ws.id, %{@plugin_name => %{"enabled" => true}})
+
+    {:ok, _} =
+      Tenancy.set_workspace_plugin_settings(ws.id, %{@plugin_name => %{"enabled" => true}})
+
     Map.merge(%{dataset: "production", workspace_id: ws.id}, extra)
   end
 

@@ -763,6 +763,13 @@ const PAIRINGS = [
   { sel: ".pane-doc-sub",                          surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-doc-sub — subtitle on the .pane-column--last focus pane" },
   { sel: ".pane-doc-sub",                          surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover row fill" },
   { sel: ".pane-doc-item.selected .pane-doc-sub",  surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected row fill (escalates to --fg)" },
+  // sup-w4 row-state ladder: the doc TITLE now paints the plain --fg-muted tier
+  // (was body --fg, brighter than every nav label) on the same grounds as the
+  // subtitle; the selected title escalates to --fg to clear the --bg-accent fence.
+  { sel: ".pane-doc-title",                        surface: "--surface",        kind: "text",    where: "root.html.heex .pane-doc-title — title plain tier on a non-last .pane-column --bg-card(=surface)" },
+  { sel: ".pane-doc-title",                        surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-doc-title — title plain tier on the .pane-column--last focus pane" },
+  { sel: ".pane-doc-title",                        surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover lifts the title to --fg over the --bg-muted fill (this row proves the plain tier before the lift)" },
+  { sel: ".pane-doc-item.selected .pane-doc-title", surface: "--bg-accent",     kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected title escalates to --fg on the --bg-accent fill" },
   // Pane chrome (headers/counts) — the focus pane ground is --surface-raised.
   { sel: ".pane-section-header",                   surface: "--surface",        kind: "text",    where: "root.html.heex .pane-section-header — section label on a non-last pane" },
   { sel: ".pane-column--last .pane-section-header", surface: "--surface-raised", kind: "text",   where: "root.html.heex .pane-column--last .pane-section-header — escalated on the raised focus pane" },
@@ -771,7 +778,17 @@ const PAIRINGS = [
   { sel: ".pane-item",                             surface: "--surface",        kind: "text",    where: "root.html.heex .pane-item — nav row on .pane-column surface" },
   { sel: ".pane-item",                             surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-item — nav row on the .pane-column--last focus pane" },
   { sel: ".pane-item.selected",                    surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-item.selected — selected-row-on-bg-accent" },
-  { sel: ".pane-item-chevron",                     surface: "--surface",        kind: "nontext", where: "root.html.heex .pane-item-chevron — drill glyph on surface" },
+  // sup-w4: the nav drill chevron is hover-revealed (opacity 0 at rest), so its
+  // REAL visible grounds are the hover fill (--bg-muted) and the selected fill
+  // (--bg-accent) — the old --surface row became a phantom co-occurrence.
+  { sel: ".pane-item-chevron",                     surface: "--bg-muted",       kind: "nontext", where: "root.html.heex .pane-item:hover .pane-item-chevron — revealed glyph on the hover fill" },
+  { sel: ".pane-item-chevron",                     surface: "--bg-accent",      kind: "nontext", where: "root.html.heex .pane-item.selected .pane-item-chevron — revealed glyph on the selected fill" },
+  // sup-w4 row-state ladder: plugin-contributed nav rows (e.g. Projects) now paint
+  // the SAME --fg-muted plain tier as sibling .pane-item rows (was color:inherit →
+  // body --fg, the "Projects outshines its siblings" bug). Gate the fixed color so
+  // a revert to inherit reds here — the pairing was ungated before this wave.
+  { sel: "a.pane-item.nav-plugin-entry",           surface: "--surface",        kind: "text",    where: "root.html.heex a.pane-item.nav-plugin-entry — plugin nav row on .pane-column surface" },
+  { sel: "a.pane-item.nav-plugin-entry",           surface: "--surface-raised", kind: "text",    where: "root.html.heex a.pane-item.nav-plugin-entry — plugin nav row on the .pane-column--last focus pane" },
   // Secondary (detail) pane read-only note — its own --bg-muted fill. Caught by
   // the sup-w3 QA sweep as fg-dim-on-bg-muted (4.05–4.40, sub-AA), the identical
   // D15 defect .pane-doc-badge had; escalated fg-dim→muted-text at the site.
