@@ -298,6 +298,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # instead of silently overwriting the buffer; the button posts
   # "reload-remote-doc", which reloads the doc from the DB.
   attr :doc_conflict, :boolean, default: false
+
+  # ── Server-owned save halt mirror (p-hollow-studio-mirror) ─────────
+  # The verbatim reason string from a `{:error, {:halted, reason}}` write
+  # veto (a plugin lifecycle gate — M1 template violation today, the
+  # hollow-doc quality gate tomorrow). `nil` → banner not rendered. The
+  # editor MIRRORS this server truth; it never authors the copy or owns
+  # the gate (charter D5/D6).
+  attr :paper_halt, :string, default: nil
   attr :presences, :list, default: []
   attr :parent_assigns, :map, default: %{}
   attr :nav_group, :string, default: nil
@@ -402,6 +410,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
           <.cross_violations_banner violations={@cross_violations} />
           <.doc_conflict_banner conflict={@doc_conflict} />
+          <.paper_halt_banner reason={@paper_halt} />
 
           <%= if @show_diff do %>
             <BarkparkWeb.Components.DraftDiff.draft_diff
@@ -741,6 +750,30 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           phx-click="reload-remote-doc"
           data-test-id="doc-conflict-reload"
         >Reload</button>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
+  Server-owned save-halt mirror (p-hollow-studio-mirror). Rendered when a
+  paper write was vetoed by a plugin lifecycle gate — the write seam returns
+  `{:error, {:halted, reason}}` and the paper handler stashes `reason` in the
+  `paper_halt` assign. The banner shows that server reason VERBATIM (M1
+  template violation today, the hollow-doc quality gate tomorrow): the editor
+  mirrors the server truth and never authors its own copy (charter D5/D6).
+  `reason == nil` → nothing renders; the next accepted edit clears the assign.
+  """
+  attr :reason, :string, default: nil
+
+  def paper_halt_banner(assigns) do
+    ~H"""
+    <%= if @reason do %>
+      <div class="bp-violations bp-paper-halt" role="alert" aria-live="assertive"
+           data-test-id="paper-halt-banner">
+        <div class="bp-violations-summary">
+          <span class="bp-violations-error"><%= @reason %></span>
+        </div>
       </div>
     <% end %>
     """

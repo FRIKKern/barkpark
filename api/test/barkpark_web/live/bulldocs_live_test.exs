@@ -112,7 +112,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         Content.upsert_paper(%{
           slug: @bl_source,
           blocks: [
-            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Source Paper"}
+            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Source Paper"},
+            # A body block: heading-only papers are hollow and refused by the
+            # p-quality-gate hollow gate; this test is about edges, not the gate.
+            %{
+              "id" => "p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]
+            }
           ]
         })
 
@@ -233,7 +240,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         Content.upsert_paper(%{
           slug: @ub_user,
           blocks: [
-            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Dependent Paper"}
+            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Dependent Paper"},
+            # A body block: heading-only papers are hollow and refused by the
+            # p-quality-gate hollow gate; this test is about edges, not the gate.
+            %{
+              "id" => "p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]
+            }
           ]
         })
 

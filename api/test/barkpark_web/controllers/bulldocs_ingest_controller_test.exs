@@ -123,6 +123,85 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
     end
   end
 
+  describe "M1 template halt envelope (title-only / locked-block violations)" do
+    defp auth_ingest(conn, payload) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> @token)
+      |> put_req_header("content-type", "application/json")
+      |> post(@path, payload)
+    end
+
+    test "a locked title NOT at index 0 → 409 halted whose message is the verbatim veto",
+         %{conn: conn} do
+      slug = "halt-title-misplaced-#{System.unique_integer([:positive])}"
+
+      # A locked role:"title" block sitting at index 1 (a stray paragraph in
+      # front of it) violates the paper_declarations `{:index, 0}` rule — the
+      # shipped M1 template halt. Before this fix the controller flattened it
+      # into a generic 422 invalid_paper, losing the honest message.
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "stray",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "early"}]
+          },
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "T"
+          }
+        ]
+      }
+
+      conn = auth_ingest(conn, payload)
+
+      resp = json_response(conn, 409)
+      assert resp["error"]["code"] == "halted"
+      # The server copy is surfaced VERBATIM — never rewritten by the emitter.
+      assert resp["error"]["message"] ==
+               ~s(paper template violated: the "title" block must be at block 0, found at 1)
+
+      # Fail closed: nothing was persisted.
+      refute Content.get_paper(slug)
+    end
+
+    test "a valid block paper (locked title at index 0) still saves — positive control",
+         %{conn: conn} do
+      slug = "halt-positive-#{System.unique_integer([:positive])}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "Real Doc"
+          },
+          %{
+            "id" => "body",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Real content."}]
+          }
+        ]
+      }
+
+      conn = auth_ingest(conn, payload)
+
+      resp = json_response(conn, 200)
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      assert Content.get_paper(slug)
+    end
+  end
+
   describe "block-ingest endpoint (POST /:slug/ops)" do
     defp ops_path(slug), do: "#{@path}/#{slug}/ops"
 
@@ -236,7 +315,12 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
           blocks: [
             %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
               "locked" => true, "text" => "T"},
-            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
+            # A real body block: skeleton-only papers are refused by the
+            # hollow-body quality gate (p-quality-gate); this test targets the
+            # constraint vocabulary veto.
+            %{"id" => "body-p", "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]}
           ]
         })
 
@@ -253,8 +337,8 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert resp["error"]["message"] ==
                "at most 1 \"featured\" block allowed, found 2"
 
-      # Calm veto: the paper is untouched (still just title + featured).
-      assert length(pc(Content.get_paper(slug), "blocks")) == 2
+      # Calm veto: the paper is untouched (title + featured + body block).
+      assert length(pc(Content.get_paper(slug), "blocks")) == 3
     end
   end
 

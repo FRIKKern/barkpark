@@ -407,7 +407,8 @@ defmodule BarkparkWeb.Contract.MutateTest do
   end
 
   test "guarded delete by the drafts.-prefixed id still succeeds", %{conn: conn} do
-    {:ok, doc} = Content.create_document("post", %{"_id" => "rm-draftspell", "title" => "v1"}, "test")
+    {:ok, doc} =
+      Content.create_document("post", %{"_id" => "rm-draftspell", "title" => "v1"}, "test")
 
     body = %{
       "mutations" => [
@@ -419,6 +420,147 @@ defmodule BarkparkWeb.Contract.MutateTest do
 
     assert resp.status == 200
     assert {:error, :not_found} = Content.get_document("drafts.rm-draftspell", "post", "test")
+  end
+
+  # ── paper hollow-body quality gate (epic p-quality-gate, charter D2) ──────
+  #
+  # Path A end-to-end: the mutate surface can never produce a hollow PUBLISHED
+  # paper. Drafts stay free (creation must not brick); the hard stop fires at
+  # the publish boundary — and at the before_save seam for any writer that
+  # ever emits a published-surface payload.
+
+  defp hollow_paper_blocks do
+    [
+      %{
+        "id" => "tpl-title",
+        "type" => "heading",
+        "level" => 1,
+        "role" => "title",
+        "locked" => true,
+        "text" => "Hollow stub"
+      },
+      %{"id" => "tpl-body", "type" => "paragraph", "content" => []}
+    ]
+  end
+
+  defp real_paper_blocks do
+    List.update_at(hollow_paper_blocks(), 1, fn body ->
+      Map.put(body, "content", [%{"type" => "text", "value" => "A real body block."}])
+    end)
+  end
+
+  defp create_paper_mutation(id, blocks) do
+    %{
+      "mutations" => [
+        %{
+          "create" => %{
+            "_id" => id,
+            "_type" => "paper",
+            "title" => "Hollow-gate paper",
+            "content" => %{"blocks" => blocks}
+          }
+        }
+      ]
+    }
+  end
+
+  defp publish_paper_mutation(id) do
+    %{"mutations" => [%{"publish" => %{"id" => id, "type" => "paper"}}]}
+  end
+
+  describe "paper hollow-body quality gate" do
+    setup do
+      # Wire the Bulldocs plugin in so Barkpark.Plugins.Hooks fires its
+      # before_save/before_publish gates deterministically (the same pattern
+      # tasks_quality_gate_test.exs uses for the Tasks plugin).
+      prior = Application.get_env(:barkpark, :plugins, [])
+      Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Bulldocs])
+      on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+      :ok
+    end
+
+    test "draft saves stay free: creating a hollow draft paper succeeds", %{conn: conn} do
+      resp = do_mutate(conn, create_paper_mutation("hollow-draft-1", hollow_paper_blocks()))
+
+      assert resp.status == 200
+      assert {:ok, _} = Content.get_document("drafts.hollow-draft-1", "paper", "test")
+    end
+
+    test "publish op on a hollow draft paper → HTTP 409 code halted with the honest copy",
+         %{conn: conn} do
+      assert do_mutate(conn, create_paper_mutation("hollow-pub-1", hollow_paper_blocks())).status ==
+               200
+
+      resp = do_mutate(conn, publish_paper_mutation("hollow-pub-1"))
+
+      assert resp.status == 409
+      parsed = Jason.decode!(resp.resp_body)
+      assert parsed["error"]["code"] == "halted"
+
+      assert parsed["error"]["message"] ==
+               "This paper has a title but no content yet — add at least one body block."
+
+      # Nothing published; the draft is still there to be finished.
+      assert {:error, :not_found} = Content.get_document("hollow-pub-1", "paper", "test")
+      assert {:ok, _} = Content.get_document("drafts.hollow-pub-1", "paper", "test")
+    end
+
+    test "positive control: a real paper draft publishes", %{conn: conn} do
+      assert do_mutate(conn, create_paper_mutation("real-pub-1", real_paper_blocks())).status ==
+               200
+
+      resp = do_mutate(conn, publish_paper_mutation("real-pub-1"))
+
+      assert resp.status == 200
+      assert {:ok, published} = Content.get_document("real-pub-1", "paper", "test")
+      assert published.status == "published"
+    end
+
+    test "a published-surface hollow write is vetoed at the before_save seam → 409 halted" do
+      # Every /v1/data/mutate write is draft-coerced by Content.Writer (the
+      # doc_id is drafts.-prefixed and status "published" → "draft"), so no
+      # HTTP mutate request can carry this payload TODAY — this pins the
+      # layer-parity backstop for any writer that ever fires before_save with
+      # a published-surface paper (published status or a non-drafts doc_id),
+      # through the exact payload shape Writer builds and the exact envelope
+      # every HTTP consumer would receive.
+      payload = %{
+        event: :before_save,
+        doc: %{
+          "doc_id" => "hollow-published-1",
+          "type" => "paper",
+          "status" => "published",
+          "content" => %{"blocks" => hollow_paper_blocks()}
+        },
+        dataset: "test",
+        prev_doc: nil,
+        ctx: %{source: :api, user_id: nil}
+      }
+
+      assert {:halt, msg} = Barkpark.Plugins.Hooks.fire(:before_save, payload)
+      assert msg == "This paper has a title but no content yet — add at least one body block."
+
+      # Writer maps {:halt, msg} → {:error, {:halted, msg}}; the canonical
+      # envelope for that is HTTP 409, code "halted", message verbatim.
+      envelope = Barkpark.Content.Errors.to_envelope({:error, {:halted, msg}})
+      assert envelope.status == 409
+      assert envelope.code == "halted"
+      assert envelope.message == msg
+
+      # The non-drafts doc_id spelling (a publish-in-place write) is vetoed too.
+      in_place =
+        put_in(payload, [:doc, "status"], "draft")
+
+      assert {:halt, _} = Barkpark.Plugins.Hooks.fire(:before_save, in_place)
+
+      # …while the true draft spelling stays free (creation must not brick).
+      draft =
+        payload
+        |> put_in([:doc, "doc_id"], "drafts.hollow-published-1")
+        |> put_in([:doc, "status"], "draft")
+
+      assert Barkpark.Plugins.Hooks.fire(:before_save, draft) == :ok
+    end
   end
 
   test "If-Match HTTP header applies as ifRevisionID for single-doc mutation", %{conn: conn} do
