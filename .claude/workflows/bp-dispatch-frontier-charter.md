@@ -6,8 +6,9 @@
 > the memory of the **dispatch-frontier file-truth** wave.
 
 Epic anchor: bp task slug **`dispatch-frontier-goal`** (UUID 1ab62264-5daa-4adb-b72d-c69819686e47 —
-`bp task get` resolves the SLUG, 404s the UUID). 10 children; 8 df-* done, cmux-bridge-goal is a
-nested sub-goal. Server: guerrilla.
+`bp task get` resolves the SLUG, 404s the UUID). 12 children (v2 added df-file-edge +
+df-lint-files-nudge); cmux-bridge-goal is a nested sub-goal. NOTE: df-exclude-epic-roots-from-hard-conflict
+carries only `area:tui` — enumerate children via parent_id traversal, never label search. Server: guerrilla.
 
 ## Vision
 
@@ -46,7 +47,8 @@ deny-path test that encodes that trio and proves the NEW edge catches it.
   + dir-prefix intersection covers the real collisions; globs risk false confidence. Paths normalized
   (no leading `./`, no trailing whitespace) because the server resource fence is exact-string match —
   dir-prefix entries fence only against identical strings server-side (accepted v1 looseness; the
-  client-side frontier does the prefix logic).
+  client-side frontier does the prefix logic). LIVE-CONFIRMED 2026-07-10: a dir-prefix claim passed the
+  fence against a held file under that dir, exactly as documented.
 - **D3 — file edge is the strongest SURFACE edge: checked after cross-root block edges, before area.**
   Both declare + intersect → hard conflict naming the shared path. Both declare + disjoint → cleared
   (file truth trumps coarse `area:` buckets and the neighborhood proxy) with new risk class
@@ -56,7 +58,8 @@ deny-path test that encodes that trio and proves the NEW edge catches it.
   shared an epic root and would share `area:cli` — either proxy already hard-conflicts them. The fixture
   puts three tasks in DIFFERENT roots with NO area labels so intersecting `files:internal/cli/onramp_cmd.go`
   is the SOLE catcher; a control asserts the trio is co-admitted without the labels. Delete the file
-  edge → the test goes red.
+  edge → the test goes red. (Non-vacuity re-proven at close-out by code trace: without the file edge the
+  cross-root trio falls to the neighborhood proxy and co-admits — frontier_test.go:589-642.)
 - **D5 — slice 2 ADOPTS cb-next-frontier-claim (re-briefed reserved→build); df-next-frontier closed as
   superseded.** Two reserved markers described the same claim-before-spawn vein — one owner. It stays
   parented under cmux-bridge-goal (itself a child of dispatch-frontier-goal): "under 1ab62264" holds
@@ -66,13 +69,16 @@ deny-path test that encodes that trio and proves the NEW edge catches it.
   would force the Elixir gate + openapi regen). `POST /v1/tasks/:doc_id/claim` already exists, is atomic
   (per-doc advisory lock + FOR UPDATE, claim.ex:69-75,139), and already accepts `resources`. A lost race
   returns `not_ready` (NOT `already_claimed`, claim.ex:154-157) — the loop treats it as skip-and-try-next,
-  never task-gone. Epoch<=0 in a claim response is a hard failure (client.go:957-959).
+  never task-gone. Epoch<=0 in a claim response is a hard failure (client.go:987 TaskClaimN,
+  client.go:1040-1041 TaskClaimResources — citation refreshed at close-out; the file grew since D6 was
+  written). LIVE-CONFIRMED 2026-07-10: lost race returned not_ready on guerrilla.
 - **D7 — claims carry declared files as `resources` (Go client change only).** The server fence
   (`check_resources_free`: global `task-resources` advisory lock, jsonb overlap scan, 409
   `resource_conflict` + holders — claim.ex:77-79,194-227) already shipped as the Beads file-claim
   successor; the Go client just never sent resources and drops the `conflicts` holders array
   (client.go:870-875) — both fixed client-side. Query predicts (ready set), claim enforces (in_progress
-  set): complementary, never conflated.
+  set): complementary, never conflated. LIVE-CONFIRMED 2026-07-10: identical-resource claim rejected with
+  resource_conflict naming the holder's doc_id + worker.
 - **D8 — overlap report lives on `bp task frontier` output fed by `board.Now`, NOT `bp cmux status`.**
   cmux status is per-pane (one `BARKPARK_TASK`); `board.Now` is the full in_progress claim set with
   labels already fetched (board.go:329-334) — a pure `ClaimOverlaps` costs zero new requests.
@@ -88,6 +94,43 @@ deny-path test that encodes that trio and proves the NEW edge catches it.
   (df-lint-area-nudge precedent, tasks_lint_cmd.go) grows a files: nudge + measurable files-less count.
   Epic-cycle decide phases author `files:` labels on wave tasks from now on — this wave's own tasks
   carry them (dogfood).
+- **D12 — close-out verdict: CLOSE, plus exactly ONE Go-only fix slice.** Every v2 promise is
+  file:line-verified merged (#2147/710cbe53) and the fence is LIVE-proven on guerrilla. But #2147
+  INTRODUCED a regression: the `bp task ready` FRONTIER header (cli.go:194 → printReadyFrontierHeader,
+  tasks_next_cmd.go:273-293) calls fetchCrossEdges — one sequential ~10s `/v1/graph/:root` call per ready
+  root, no aggregate deadline — stalling the interactive/table path ~231s on today's 30-root board
+  (git-proven: the parent of 710cbe53 had no header; -o json/piped is unaffected via machineOut; only
+  fires when ReadyRootSpan>=2, which is this board's normal state). Per the wish's flip rule (a shipped
+  v2 behavior broken live) this earns the smallest honest fix: the ready header computes capacity WITHOUT
+  the network fan-out (pure Frontier over the snapshot — a capacity number needs no cross-root graph
+  precision); the explicit `bp task frontier` / `next --frontier` fan-out gets a bounded concurrent
+  fan-out + total wall-clock deadline (fetchCrossEdges is already best-effort; dropping under deadline is
+  safe). Deny-path per D4: a blocking fake graph client must NOT stall the header. The frontier verb's own
+  slowness is pre-existing (#1308) — the same fix covers it; no server change (anchor-fenced).
+- **D13 — C3 stamped-as-strengthened, not amended.** The criterion's "area:-aware interference as the
+  design of record" is satisfied and exceeded: docs/contracts/dispatch-areas.md:68-108 is the FILE-aware
+  design of record (strict superset per D3), and all 12 children are verified parented under the goal via
+  parent_id traversal. Evidence cites the doc + frontier.go/overlaps.go anchors + the 12/12 roster.
+  The lead stamps C3 and closes the epic at review once wave-3 slices land.
+- **D14 — ledger hygiene: stamp from close_reason, caveat the decayed one, finish cb-ledger-close.**
+  8 v1-era children are done with 0/N criteria stamped. 7 carry true, checkable close_reason narratives
+  (PRs #1191/e0680fd8, #1308, #1309, #1315, #1348 + named green tests) — earned-but-unstamped drift
+  (the D10 pattern), NOT the 2026-07-08 false-done-fabrication class; the honest fix is copying each
+  close_reason's evidence into the per-criterion evidence fields, no rebuild. df-seed-area-labels has NO
+  close_reason and its seeding has since decayed (0/60 ready leaves carry area:/files: today) — it gets an
+  explicit decay caveat as evidence, never a copy-paste stamp. df-exclude-epic-roots-from-hard-conflict
+  gains the missing proj:dispatch-frontier label. cmux-bridge-goal (criteria:[] — empty array; the server
+  emits criteria_progress:null for that, a quirk automated audits must not skip over) gets its criteria
+  authored+stamped by FINISHING cb-ledger-close, the still-open grandchild whose recorded blockers
+  (cb-live-smoke, cb-docs-card) are stale — both are done and fully stamped.
+- **D15 — the gap register is part of the close (see §Gap register).** Deliberately-not-done work is
+  named with its home; silence is the only forbidden outcome.
+- **D16 — D11's authoring promise gets a home outside this charter.** The promise "decide phases author
+  files: labels" lived only at D11 — invisible to every other epic's decide phase. The epic-cycle
+  workflow's TASKS_BLOCK (.claude/workflows/bp-epic-cycle.workflow.js) grows the files:-label authoring
+  instruction pointing at docs/contracts/dispatch-areas.md; dispatch-areas.md gains the D2
+  exact-match-looseness note (dir-prefix labels fence server-side only against identical strings).
+  Doc-only; lint stays a nudge, never a gate.
 
 ## Roadmap
 
@@ -97,7 +140,7 @@ Shipped before this wave (context, all merged):
   df-exclude-epic-roots-from-hard-conflict (#1348)
 - cmux-bridge-goal wave 1 (#1200, #2134) — `bp cmux dispatch` consumes Frontier; hooks/status/install
 
-This wave (integration-ordered — merge 1 before 2; 3 is independent):
+v2 (SHIPPED — all three slices in one PR #2147 / commit 710cbe53, merged 2026-07-10):
 1. **df-file-edge** (large) — `files:` label convention + exported `taskboard.FilesOf` + file edge in
    `interferes()` + file-proven risk class + `taskboard.ClaimOverlaps` + OVERLAP section in
    `bp task frontier` + dispatch-areas.md contract + onramps deny-path fixture.
@@ -108,16 +151,66 @@ This wave (integration-ordered — merge 1 before 2; 3 is independent):
    `bp cmux dispatch --claim` claim-before-spawn + `bp task ready` FRONTIER header.
    Files: internal/cli/{cli.go,tasks_next_cmd.go(new)+test,cmux_dispatch.go(+test)},
    internal/apiclient/client.go(+task_claim_test.go).
-   Compile-depends on `taskboard.FilesOf` from slice 1 (contract pinned in the brief; rebase after 1 merges).
 3. **df-lint-files-nudge** (small) — `bp task lint` nudges workable leaves missing `files:` labels;
    files-less count in JSON so adoption is measurable.
    Files: internal/cli/tasks_lint_cmd.go(+test).
 
-Later (not this wave): out-of-band files: seeding across live epics (scope.mjs-assisted hygiene);
+Wave 3 (close-out, 2026-07-10 — this wave; slices are parallel, zero file overlap):
+1. **df-v3-ready-header-decouple** (medium, fable) — fix the D12 regression: ready header without
+   network fan-out; bounded+deadlined fetchCrossEdges for the explicit frontier verbs; D4-grade
+   deny-path (a blocking fake graph client must not stall the header).
+   Files: internal/cli/tasks_next_cmd.go(+test), internal/cli/tasks_frontier_cmd.go(+test).
+2. **df-close-ledger-stamp** (small, opus) — D14 in full: stamp 7 v1-era children from close_reason;
+   decay-caveat df-seed-area-labels; label df-exclude-epic-roots-from-hard-conflict; author+stamp
+   cmux-bridge-goal criteria by finishing cb-ledger-close. bp mutations only — no repo files, no PR.
+3. **df-docs-files-doctrine** (small, opus) — D16: TASKS_BLOCK files:-label authoring instruction in
+   bp-epic-cycle.workflow.js + D2 looseness note in docs/contracts/dispatch-areas.md.
+Lead stamps C3 per D13 and closes the epic at review once all three land.
+
+## Gap register (deliberately NOT done — named per D15, with homes)
+
+- **files: adoption is 0/60** on the live ready corpus (bp task lint files_less=60, measured
+  2026-07-10). Seeding across live epics stays "Later" (below); the measurement instrument is
+  `bp task lint` (tasks_lint_cmd.go). D16 wires authoring-time doctrine so NEW wave tasks carry labels.
+- **epic-cycle consuming `bp task next --frontier`** for builder dispatch — the epic-loop layer's job,
+  fenced out by the anchor ("actually orchestrating agents"). Zero frontier references in
+  bp-epic-cycle.workflow.js today; a future wish must name it.
+- **Studio/board overlap surfacing** — anchor-fenced ("Studio UI"); board_live.ex/board.ex carry zero
+  frontier hooks. Home: this register + "Later" below.
+- **`/v1/graph/:id` is pathologically slow on guerrilla** (~10-12s/call — the server-side root cause
+  D12 works around client-side). Server work, anchor-fenced. Filed as standalone published task
+  `graph-endpoint-latency` (deliberately NOT a child — this epic closes; the work is the API's).
+- **Hollow design_doc Paper** — the anchor's design_doc points at the near-empty "dispatch-frontier"
+  Paper; the real content lives in docs/contracts/dispatch-areas.md. Owned by the cloud epic's
+  p-dispatch-frontier-content backlog item — not duplicated here.
+
+Later (unchanged): out-of-band files: seeding across live epics (scope.mjs-assisted hygiene);
 optional board/TUI overlap surfacing; glob semantics only if real briefs demand them; server-side
 resource fence on the queue endpoint only if a consumer materializes (Elixir gate + openapi).
 
-Ledger hygiene done in decide phase: goal C1/C2 evidence stamped (PR #1191); df-next-frontier closed
-as superseded by cb-next-frontier-claim.
+Ledger hygiene done in decide phases: goal C1/C2 evidence stamped (PR #1191); df-next-frontier closed
+as superseded by cb-next-frontier-claim; the D14 children pass is wave-3 slice 2.
 
 ## Wave log
+
+- **v1 (2026-07-06 → 2026-07-08, predates this charter file):** #1191/e0680fd8 (07-06) Frontier model +
+  `bp task frontier` verb — the C1/C2 evidence; #1200 (07-06) cmux bridge wave 1; #1308/9d7b9404 (07-08)
+  cross-root block-edge precision (df-graph-crossdep — origin of the fetchCrossEdges fan-out D12 later
+  bounds); #1309 (07-08) area: vocabulary contract (df-area-vocabulary); #1315 (07-08) `bp task lint`
+  area nudge (df-lint-area-nudge); #1348/5a8d68a2 (07-08) epic roots don't displace their children
+  (df-exclude-epic-roots-from-hard-conflict); df-seed-area-labels closed 07-08 (label hygiene, no code —
+  seeding since decayed, see D14). v1 closed its tasks under the pre-rubric convention: real merged PRs,
+  unstamped criteria — the D14 debt.
+- **v2 (2026-07-10):** decisions D1-D11 ratified; #2134/4e99ae35 closes cmux-bridge wave 1;
+  #2147/710cbe53 ships all three v2 slices (files: truth + file edge + overlap report, --frontier atomic
+  claim + cmux --claim + ready header, lint files nudge) in one integration-ordered PR. C1/C2 stamped at
+  decide time (D10). The wave log was left EMPTY at the time — paid now, at close-out.
+- **wave 3 / close-out (2026-07-10):** two-round verification (12 surveyors + 5 verifiers). LIVE fence
+  proof on guerrilla: identical-resource claim → resource_conflict naming the holder (D7); dir-prefix
+  claim passes exact-match (D2); lost race → not_ready (D6); ClaimOverlaps observed live (overlaps=1).
+  D4 deny-path re-proven non-vacuous by code trace. Regression found and classified: #2147's ready
+  header stalls the interactive path ~231s on a 30-root board (D12) — the one fix slice this wave cuts.
+  Verdict: CLOSE with D12-D16. Slices: df-v3-ready-header-decouple (fable), df-close-ledger-stamp
+  (opus), df-docs-files-doctrine (opus). Backlog filed: graph-endpoint-latency (standalone,
+  server-side). Wave Paper: dispatch-frontier-wave-2026-07-10. C3 stamps as-strengthened per D13; the
+  lead closes the epic at review.
