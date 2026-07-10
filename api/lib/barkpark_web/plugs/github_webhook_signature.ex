@@ -49,12 +49,13 @@ defmodule BarkparkWeb.Plugs.GithubWebhookSignature do
     end
   end
 
+  # One shared emitter → the 401 carries request_id (+ hint) for log correlation.
   defp reject(conn) do
-    conn
-    |> put_status(:unauthorized)
-    |> Phoenix.Controller.json(%{
-      error: %{code: "unauthorized", message: "invalid webhook signature"}
-    })
-    |> halt()
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :unauthorized,
+      "unauthorized",
+      "invalid webhook signature"
+    )
   end
 end

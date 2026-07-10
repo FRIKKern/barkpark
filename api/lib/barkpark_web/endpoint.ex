@@ -148,18 +148,10 @@ defmodule BarkparkWeb.Endpoint do
   end
 
   # Emit a canonical §9 error envelope from parse_body's rescue (it runs before
-  # any controller, so there's no action_fallback here). Stamps the request_id
-  # when Logger metadata carries one, then halts the pipeline.
-  defp parse_error_json(conn, status, err) do
-    err =
-      case Logger.metadata()[:request_id] do
-        id when is_binary(id) and id != "" -> Map.put(err, :request_id, id)
-        _ -> err
-      end
-
-    conn
-    |> Plug.Conn.put_status(status)
-    |> Phoenix.Controller.json(%{error: err})
-    |> Plug.Conn.halt()
+  # any controller, so there's no action_fallback here). Routes through the ONE
+  # shared emitter, which stamps hint + request_id via Content.Errors and halts —
+  # retiring this path's inline copy of the request_id logic.
+  defp parse_error_json(conn, status, %{code: code, message: message}) do
+    BarkparkWeb.ErrorResponse.emit_custom(conn, status, code, message)
   end
 end

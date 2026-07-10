@@ -2,7 +2,7 @@ defmodule BarkparkWeb.SearchController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CallerContext, Envelope, Errors, SearchIntelligence}
+  alias Barkpark.Content.{CallerContext, Envelope, SearchIntelligence}
   alias Barkpark.Search.{SurfaceConfigs, Synonyms}
   alias BarkparkWeb.{AnonPerspective, SearchIntel}
 
@@ -335,23 +335,13 @@ defmodule BarkparkWeb.SearchController do
     error_json(conn, {:error, :malformed}, "missing required parameter: q")
   end
 
-  # Emit a §9 error envelope ({error:{code,message,request_id,...}}) for an
-  # internal error reason, routing through Content.Errors so the code + hint +
+  # Emit a §9 error envelope ({error:{code,message,request_id,...}}) via the ONE
+  # shared emitter, which routes through Content.Errors so code + hint +
   # request_id stay canonical. `message_override` swaps the human message while
   # keeping the canonical code/status (e.g. a resource-specific not_found text).
   defp error_json(conn, reason, message_override \\ nil) do
-    env =
-      reason
-      |> Errors.to_envelope(conn)
-      |> maybe_override_message(message_override)
-
-    conn
-    |> put_status(env.status)
-    |> json(%{error: Map.delete(env, :status)})
+    BarkparkWeb.ErrorResponse.emit(conn, reason, message_override)
   end
-
-  defp maybe_override_message(env, nil), do: env
-  defp maybe_override_message(env, message), do: Map.put(env, :message, message)
 
   # Schemaless changeset that yields the canonical `validation_failed` envelope
   # for the promote endpoint's required from/to fields.
