@@ -3050,6 +3050,91 @@ test("C10/OC7: usageMeterHtml — an unlimited meter renders byte-identically to
   assert.match(unlimited, /<strong>3<\/strong>/); // the value renders exactly as a plain metered meter
 });
 
+// ── Wave 4 (OC19): Usage-tab sparklines — the 14-day history read path ────────
+// The pure surface: normalise the /usage/history envelope, extract one meter's
+// value|null array (null-is-gap preserved), thread it through the display model
+// and markup. The DOM mount (mountUsageTab's parallel fetch + progressive fill)
+// is browser-verified; sparklineSvg itself is pinned in the S12 metrics block.
+
+test("W4/OC19: the sparkline history helpers are exported", () => {
+  for (const name of ["usageHistorySeries", "usageHistoryValues"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+// Sandbox-realm returns (objects/nested arrays) fail deepStrictEqual on prototype
+// identity — JSON round-trip re-creates them in the test realm (see the comment at
+// fleetSummary); flat primitive arrays only need a spread.
+const rerealm = (x) => JSON.parse(JSON.stringify(x));
+
+test("W4/OC19: usageHistorySeries — top-level `series`, defensive wrapper, garbage → {}", () => {
+  const flat = hooks.usageHistorySeries({ ok: true, window_days: 14, series: { documents: [{ at: "t", value: 3 }] } });
+  assert.deepEqual(rerealm(flat), { documents: [{ at: "t", value: 3 }] });
+  // A defensive `usage_history` wrapper is tolerated (backend key drift never blanks the line).
+  const wrapped = hooks.usageHistorySeries({ usage_history: { series: { seats: [{ at: "t", value: 5 }] } } });
+  assert.deepEqual(rerealm(wrapped), { seats: [{ at: "t", value: 5 }] });
+  // Garbage / missing series → an empty map (the grid then draws bar-less, unchanged).
+  assert.deepEqual(rerealm(hooks.usageHistorySeries(null)), {});
+  assert.deepEqual(rerealm(hooks.usageHistorySeries({})), {});
+  assert.deepEqual(rerealm(hooks.usageHistorySeries({ series: 7 })), {});
+});
+
+test("W4/OC19: usageHistoryValues — value|null array, gaps preserved, non-finite → null", () => {
+  const series = {
+    documents: [{ at: "a", value: 10 }, { at: "b", value: null }, { at: "c", value: 12 }],
+    seats: [{ at: "a", value: 4 }, { at: "b" }, { at: "c", value: "unmetered" }],
+  };
+  assert.deepEqual([...hooks.usageHistoryValues(series, "documents")], [10, null, 12]); // a null is a GAP, never a fake 0
+  assert.deepEqual([...hooks.usageHistoryValues(series, "seats")], [4, null, null]);    // missing/non-number → null
+  // A meter absent from the series (or a garbage series) → [] (no spark drawn).
+  assert.deepEqual([...hooks.usageHistoryValues(series, "disk")], []);
+  assert.deepEqual([...hooks.usageHistoryValues(null, "documents")], []);
+});
+
+test("W4/OC19: usageMeterDisplay — spark is the value|null array only when numeric history is present", () => {
+  const rising = hooks.usageMeterDisplay(usageSpec("documents"), { value: 12, measured_at: null }, [8, null, 10, 12]);
+  assert.deepEqual([...rising.spark], [8, null, 10, 12]); // gap survives to sparklineSvg
+  // Absent / all-null / empty history → no spark (honest absence, progressive fill).
+  assert.equal(hooks.usageMeterDisplay(usageSpec("documents"), { value: 12 }, null).spark, null);
+  assert.equal(hooks.usageMeterDisplay(usageSpec("documents"), { value: 12 }, [null, null]).spark, null);
+  assert.equal(hooks.usageMeterDisplay(usageSpec("documents"), { value: 12 }, []).spark, null);
+  // Two-arg callers (the fleet strip) never get a spark — no regression.
+  assert.equal(hooks.usageMeterDisplay(usageSpec("documents"), { value: 12 }).spark, null);
+});
+
+test("W4/OC19: usageMeterHtml — spark markup present iff numeric history, absent otherwise", () => {
+  const withHist = hooks.usageMeterHtml(usageSpec("documents"), { value: 12, measured_at: null }, [8, 10, 12]);
+  assert.match(withHist, /class="usage-spark"/);
+  assert.match(withHist, /<svg class="spark"/);
+  assert.match(withHist, /<polyline/); // a real run draws a polyline (>1 point)
+  // No history → byte-identical to today (no spark chrome at all).
+  const bare = hooks.usageMeterHtml(usageSpec("documents"), { value: 12, measured_at: null });
+  assert.ok(!bare.includes("usage-spark"), "no spark container without history");
+  assert.ok(!bare.includes("<svg"), "no svg without history");
+  // All-null history is honest absence, not an empty frame in a container.
+  const allNull = hooks.usageMeterHtml(usageSpec("documents"), { value: 12 }, [null, null, null]);
+  assert.ok(!allNull.includes("usage-spark"), "all-null series draws no spark");
+});
+
+test("W4/OC19: usageMetersHtml — series threads per-meter; a gappy series still renders every meter", () => {
+  const meters = { documents: { value: 12, measured_at: null }, seats: { value: 5, measured_at: null } };
+  const series = { documents: [{ at: "a", value: 8 }, { at: "b", value: null }, { at: "c", value: 12 }] };
+  const grid = hooks.usageMetersHtml(meters, series);
+  // documents has history → a spark; seats has none → no spark, but still rendered.
+  assert.equal((grid.match(/class="usage-spark"/g) || []).length, 1);
+  assert.match(grid, /<strong>5<\/strong>/); // seats still fully present, bar/spark-less
+  // No series arg → today's bar-less grid, unchanged (progressive fill before history lands).
+  assert.ok(!hooks.usageMetersHtml(meters).includes("usage-spark"), "no sparks until history lands");
+});
+
+test("W4/OC19: usageMeterHtml — an over-limit meter carries the danger tint via its row class", () => {
+  // The .usage-row--over class (already on the row for a quota bar) also tints the
+  // spark danger through currentColor — one tone vocabulary, no new colour.
+  const over = hooks.usageMeterHtml(instSpec(), { value: 12, quota: 10, warn_at: 8 }, [9, 11, 12]);
+  assert.match(over, /class="fleet-row usage-row usage-row--over"/);
+  assert.match(over, /class="usage-spark"/);
+});
+
 test("C10: usageFailureCopy — 404 is a distinct honest line, else a retryable one", () => {
   assert.match(hooks.usageFailureCopy(404), /isn't in your team|has been removed/);
   assert.match(hooks.usageFailureCopy(500), /couldn't load usage|Retry/i);
