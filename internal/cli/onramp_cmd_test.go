@@ -233,6 +233,62 @@ func TestOnrampGeminiCliGolden(t *testing.T) {
 	}
 }
 
+// TestOnrampCopilotGolden asserts the VS Code / GitHub Copilot emission is
+// byte-compatible with the stanza docs/setup/COPILOT.md publishes. The one
+// structural difference from every sibling is the top-level `servers` key (NOT
+// `mcpServers`) — live-pinned against
+// code.visualstudio.com/docs/agents/reference/mcp-configuration (2026-07-10).
+// Copilot shares Cursor's ${env:…} dialect, so the OLD cursor-leak guard
+// (env_vars absent) does not discriminate here; the discriminating leak-guards
+// are structural: contains `servers`, does NOT contain `mcpServers`, contains
+// `"type": "stdio"`.
+func TestOnrampCopilotGolden(t *testing.T) {
+	out, _, code := onrampRun(t, globals{server: guerrilla}, "copilot")
+	if code != exitOK {
+		t.Fatalf("copilot exit = %d, want %d", code, exitOK)
+	}
+	// BYTE-IDENTICAL to the json block docs/setup/COPILOT.md publishes (decision
+	// 14: doc == verb). Top-level `servers` is VS Code's MCP shape.
+	wantStanza := `{
+  "servers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${env:BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}`
+	if !strings.Contains(out, wantStanza) {
+		t.Errorf("copilot output missing the exact COPILOT.md stanza.\n--- got ---\n%s", out)
+	}
+	// The one structural difference: the top-level key is `servers`, never the
+	// sibling `mcpServers` — and the stdio discriminator is present.
+	if !strings.Contains(out, `"servers"`) {
+		t.Errorf("copilot output must use the top-level \"servers\" key")
+	}
+	if strings.Contains(out, `"mcpServers"`) {
+		t.Errorf("copilot output leaked the sibling \"mcpServers\" key — VS Code uses \"servers\"")
+	}
+	if !strings.Contains(out, `"type": "stdio"`) {
+		t.Errorf("copilot output missing the \"type\": \"stdio\" discriminator")
+	}
+	for _, want := range []string{
+		".vscode/mcp.json",
+		"MCP: List Servers",           // the verify step
+		"inputs",                      // the promptString alternative is named
+		"${env:BARKPARK_API_TOKEN}",   // Copilot shares Cursor's dialect
+		"docs/setup/AGENT-ONRAMPS.md", // full-journey pointer
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("copilot output missing %q", want)
+		}
+	}
+}
+
 // TestOnrampRejectRemote proves chatgpt/claude-ai are rejected (exit 2) with a
 // pointer to REMOTE.md and no config block.
 func TestOnrampRejectRemote(t *testing.T) {
@@ -256,7 +312,7 @@ func TestOnrampUnknownTarget(t *testing.T) {
 	if code != exitUsage {
 		t.Errorf("unknown target exit = %d, want %d", code, exitUsage)
 	}
-	for _, want := range []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli"} {
+	for _, want := range []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("unknown-target error must list valid target %q, got: %q", want, errOut)
 		}
