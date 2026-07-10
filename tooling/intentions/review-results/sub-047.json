@@ -1,36 +1,55 @@
 {
-  "subsystem": "js/packages/nextjs",
-  "summary": "Next.js App Router SDK that integrates Barkpark content fetching with Next 15's RSC/client boundary, draft-mode preview, and tag-based cache invalidation. It exports separate server, client, webhook, draft-mode, revalidate, and preload subpaths to keep the react-server module graph clean.",
+  "subsystem": "api/lib/barkpark_web/studio",
   "intentions": [
     {
-      "title": "Preserve Next 15 RSC boundary: no client APIs in the server graph",
+      "title": "Enforce a server-side default-deny capability gate on every Studio LiveView event, independent of UI hiding",
+      "scale": "invariant",
+      "evidence": "caps.ex: attach/1 hooks :handle_event on every StudioLive socket; classify/1 buckets events into :none/:read/:write/:admin/:deny with an explicit default-DENY (unclassified => require admin); derive/1 unions membership (Tenancy.Auth.authorize) and freshly-reloaded active access-grants (Access.list_active_grants_for_grantee) so a mid-session grant expiry is denied immediately; admin is never grant-conferred."
+    },
+    {
+      "title": "Let an embedded Claude Code agent run safely inside Studio as an admin-only chat surface, never exposing host filesystem/exec access to anonymous or public-demo visitors",
       "scale": "epic",
-      "evidence": "server/core.ts explicitly never re-exports BarkparkLive/BarkparkLiveProvider; tsup.config.ts only prepends 'use client' to client.{mjs,cjs} and actions.{mjs,cjs}, not server; server/index.ts imports 'server-only'"
+      "evidence": "claude_chat.ex enabled?/0 requires admin-only :admin_studio live_session, hard-refuses when public_demo_studio is set, and requires the `claude` binary/opt-out flag; plan-mode default (--permission-mode plan); bypassPermissions is excluded from normalize_mode and only reachable via an armed ceremony (bypass_armed: true) per 'charter D48 fail-closed law'."
     },
     {
-      "title": "Tag-based cache invalidation that round-trips with webhook-driven revalidation",
+      "title": "Give the chat agent a first-class two-way control channel (interrupt, live mode/model switching, permission-ask bridging, single-writer session takeover across tabs) instead of a fire-and-forget subprocess",
+      "scale": "feature",
+      "evidence": "ClaudeChat.Session GenServer: control_request/control_response dispatch typed by kind (:interrupt/:set_mode/:set_model/:initialize), respond_permission/3 answering CLI can_use_tool asks with echoed updatedInput, adopt_sink/2 single-writer registry via Barkpark.StudioChat.SessionRegistry so two tabs never double-spawn `claude --resume`, bounded stderr-tail capture for honest exit diagnosis (charter D54)."
+    },
+    {
+      "title": "Teach the embedded agent to answer using Barkpark's own PortableDoc block vocabulary (charts, callouts, stats, tables, mermaid) instead of plain markdown/ASCII",
+      "scale": "feature",
+      "evidence": "claude_chat.ex render_appendix/0 system-prompt appendix documents the ```mermaid and ```portabledoc fences and the native block JSON shapes (callout/chart/stats/table/divider), so replies render through the same paper engine as published papers."
+    },
+    {
+      "title": "Reconstruct the multi-pane Studio desk (nav columns + open editor) purely from a dataset and URL nav-path, so the same tree walk drives every entry point (deep link, drill-down, backlink jump, graph blast-radius)",
       "scale": "epic",
-      "evidence": "server/core.ts builds scoped tag prefixes (bp:ws:<ws>:p:<project>:ds:<dataset>) for force-cache fetches, auto-tags by type and doc id, and explicitly avoids next.tags on no-store (ADR-004) so tags match what the webhook bridge fires"
+      "evidence": "pane_builder.ex build/3 + walk_path/7: reserved 'graph' and 'open' path heads bypass structure lookup for direct doc/graph opens; resolve/4 normalizes stale pre-tiering deep links onto the gated tree or falls back to an ungated Structure.build(gating: :none) tree so a demoted/disabled type's panes 'still open' (#1851 never-unreachable guarantee); one build_editor/6 dispatch table opens papers/sheets/graph/media-explorer/field-form editors identically whether reached via host desk or plugin-contributed list."
     },
     {
-      "title": "Draft-mode preview with server-token auth and auto-reissue",
-      "scale": "small",
-      "evidence": "barkparkFetchInner branches on draftMode().isEnabled: adds perspective=drafts, Authorization Bearer, cache:'no-store', and retries once via cfg.reissuePreviewToken on 401"
+      "title": "Scope every Studio pane read to the tenant workspace/project (and canonicalize plugin-link hrefs) so multi-tenant desks never leak cross-tenant content",
+      "scale": "invariant",
+      "evidence": "pane_builder.ex threads `opts[:scope]` ([workspace_id, project_id]) into every Content.list_documents/get_paper/fetch_doc_with_draft call and `opts[:scope_prefix]` into Paths.plugin_link_href/2 so plugin hrefs canonicalize to the /d/ scoped shape at source rather than at render time."
     },
     {
-      "title": "Multi-workspace/project scoping for multi-tenant deployments",
-      "scale": "small",
-      "evidence": "resolveScopePrefix and resolveTagPrefix in server/core.ts layer server-config workspace/project over the client config, emitting /w/<ws>/p/<project> URL prefixes and matching bp:ws:...:p:... cache tag prefixes"
+      "title": "Keep multi-user collaborative presence honest per-tenant and per-dataset, never mixing avatars across workspaces or same-doc-id docs in different datasets",
+      "scale": "invariant",
+      "evidence": "presence_state.ex topic/1 keys the PubSub topic by workspace_id (fixing an instance-global tenant-boundary bug, 'tsk-url-p0'); on_doc/3 filters by both doc_id AND dataset so a doc_id colliding across datasets doesn't show false co-presence; pick_color/1 derives a deterministic avatar hue from the shared Unified Aesthetic TokensGen palette."
     },
     {
-      "title": "Structured error taxonomy surfaced to Next.js consumers",
-      "scale": "small",
-      "evidence": "decodeAndThrow in server/core.ts maps HTTP status codes to typed BarkparkNotFoundError, BarkparkAuthError, BarkparkRateLimitError, BarkparkNetworkError, BarkparkAPIError from @barkpark/core"
+      "title": "Expose a real admin-gated shell (tmux console) into the Studio host for operational access, under the same three-control safety posture as the chat agent",
+      "scale": "feature",
+      "evidence": "tmux_console.ex enabled?/0: admin-only :admin_studio live_session, public_demo_studio hard-refuse (not overridable by the flag), per-host BARKPARK_TMUX_CONSOLE=0 opt-out, and a swappable PTY backend module invoked via apply/3 for testability — same trust model documented as ClaudeChat."
     },
     {
-      "title": "Correct dual-format (CJS+ESM) build with directive injection",
-      "scale": "small",
-      "evidence": "tsup.config.ts outputs both .cjs and .mjs for all entry points, then post-processes client/actions chunks to prepend 'use client' which esbuild strips, restoring the directive Next 15 requires"
+      "title": "Resolve under-determined ('flat') Studio URLs to the correct workspace/project without ever silently teleporting a user to the wrong tenant",
+      "scale": "invariant",
+      "evidence": "scope_resolver.ex resolve/2: kills the old 'first slug-ordered membership' teleport by preferring the Referer header's /w/:ws/p/:proj prefix (re-verified via Tenancy.Auth.member?/2, never trusted as auth) before falling back to first-membership; callers must always 302 (never 301) since the target is per-token/per-Referer."
+    },
+    {
+      "title": "Emit one generated token module (TokensGen) as the single source of Studio-surface color/lifecycle constants so the Unified Aesthetic manifest, not hand-picked hex, drives presence colors, Sheets conditional-format swatches, and lifecycle glyphs",
+      "scale": "invariant",
+      "evidence": "tokens_gen.ex header 'Code generated by design/emit.mjs from design/tokens.json. DO NOT EDIT'; presence_state.ex and sheet_grid.ex consume presence_palette/0 and sheet_cf_backgrounds/0 from here rather than inlining hex; design/check.mjs gates the lifecycle mirror against Go + CSS + tokens."
     }
   ]
 }

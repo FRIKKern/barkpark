@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark_web/layouts",
+  "intentions": [
+    {
+      "title": "Give every surface (Studio, Papers reader, Sheets reader) a byte-identical multi-theme identity via one generated token manifest",
+      "scale": "epic",
+      "evidence": "bulldocs.html.heex and sheets.html.heex both embed a '/* BEGIN GENERATED: tokens */' block (from design/tokens.json via design/emit.mjs --write) defining evergreen/ember/fjord theme variants keyed off html[data-bp-theme=...], each with light + prefers-color-scheme:dark pairs; the comment states theme identity is orthogonal to light/dark mode and 'a default paper is byte-identical to before this feature'."
+    },
+    {
+      "title": "Ship the Papers reader as three honest, byte-real presentations of the same document — prose article, real Go pdrender terminal (compiled to WASM), and real received-email client — never a CSS imitation",
+      "scale": "feature",
+      "evidence": "bulldocs.html.heex's #bp-terminal renders via lazy-loaded /assets/bp-pdrender.wasm.gz + wasm_exec.js calling window.bpRenderTUI, fetching blocks from /v1/data/query with resolve=tasks; #bp-mailapp iframes the literal /papers/:slug/email response bytes; comments explicitly say 'not a CSS imitation' and 'the same honesty rule as the TUI view'; toggle buttons + localStorage-style mode persistence make the three views mutually exclusive."
+    },
+    {
+      "title": "Give Studio one composable shell (topbar + tabs + presence + admin banners + footer) shared across every pane instead of per-page chrome",
+      "scale": "feature",
+      "evidence": "studio.html.heex composes .studio_shell/.studio_topbar with :brand/:tabs/:actions slots, WorkspaceSwitcher/DatasetSwitcher, studio_update_banner (admin-only, self-update behind check), studio_env_banner (non-prod identity strip), presence_nav, studio_theme_toggle, studio_signout_button, and a pinned studio_footer — one shell for all Studio LiveViews per api/CLAUDE.md's Studio card."
+    },
+    {
+      "title": "Keep public reader surfaces (Bulldocs, Sheets, Hyperquiz) deliberately un-Studio-chromed while staying visually cohesive with Studio through explicit shared-CSS mirrors",
+      "scale": "invariant",
+      "evidence": "sheets.html.heex's .sheet-* grid rules are commented 'COHESION MIRROR: these rules track the root.html.heex Studio .sheet-* block ... Edit BOTH when touching a shared rule'; quiz.html.heex comment states it is 'Deliberately self-contained (no Studio chrome): this is the public player/host page' with its own Kahoot-style palette filed as a documented exception (hq-w2-theme-reskin)."
+    },
+    {
+      "title": "Uphold the golden no-blocking-script-in-head rule and load LiveView/asset JS at the end of <body> across every layout",
+      "scale": "invariant",
+      "evidence": "bulldocs.html.heex, sheets.html.heex, and quiz.html.heex all place <script src=/assets/phoenix.js> / phoenix_live_view.js / bp-wasm-exec.js at the bottom of <body> with comments citing 'the golden rule' / 'never a blocking <head> script'; matches api/CLAUDE.md Golden Rule #4 (Lucide 400KB blocking regression)."
+    },
+    {
+      "title": "Stamp social/preview metadata (og/twitter/JSON-LD) from a document's preview manifest at the top of every public reader's <head>, nil-safe for renders that assign none",
+      "scale": "feature",
+      "evidence": "bulldocs.html.heex and sheets.html.heex both call <BarkparkWeb.ShareMeta.head preview={assigns[:preview]} page_title={...}> immediately after <title> and before the multi-KB style blob, citing 'Slack reads only the first 32 KB' and preview-contract pc-w2; comments state assigns[:preview] is nil-safe so a render path assigning none renders site-default meta without crashing."
+    }
+  ]
+}

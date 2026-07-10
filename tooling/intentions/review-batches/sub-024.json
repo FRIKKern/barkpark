@@ -1,66 +1,96 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/templates/website-starter",
-  "count": 10,
+  "subsystem": "internal/cli/setup",
+  "count": 18,
   "files": [
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/lib/barkpark.ts",
-      "role": "website-starter server fetch helper",
-      "importance": 19,
-      "usefulness": 22
+      "path": "internal/cli/setup/caddy.go",
+      "role": "",
+      "importance": 60
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/barkpark.config.ts.tmpl",
-      "role": "website-starter scaffolder config template",
-      "importance": 18,
-      "usefulness": 4
+      "path": "internal/cli/setup/cloud.go",
+      "role": "",
+      "importance": 45
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/package.json.tmpl",
-      "role": "package.json template for website-starter scaffolded app",
-      "importance": 18,
-      "usefulness": 4
+      "path": "internal/cli/setup/connect.go",
+      "role": "bp setup connect executor",
+      "importance": 61
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/seeds/seed.ts",
-      "role": "website starter seed script",
-      "importance": 11,
-      "usefulness": 3
+      "path": "internal/cli/setup/deploy.go",
+      "role": "bp setup deploy subcommand implementation",
+      "importance": 56
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/next.config.mjs",
-      "role": "scaffold template Next.js config",
-      "importance": 5,
-      "usefulness": 3
+      "path": "internal/cli/setup/healthgate.go",
+      "role": "",
+      "importance": 61
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/author.ts",
-      "role": "scaffold template author schema definition",
-      "importance": 4,
-      "usefulness": 3
+      "path": "internal/cli/setup/local.go",
+      "role": "bp setup local executor",
+      "importance": 59
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/page.ts",
-      "role": "scaffold template marketing page schema definition",
-      "importance": 4,
-      "usefulness": 3
+      "path": "internal/cli/setup/local_unix.go",
+      "role": "platform-specific background process helper (Unix)",
+      "importance": 45
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/post.ts",
-      "role": "starter-template schema fixture",
-      "importance": 4,
-      "usefulness": 2
+      "path": "internal/cli/setup/local_windows.go",
+      "role": "platform-specific background process helper (Windows)",
+      "importance": 45
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/postcss.config.js",
-      "role": "scaffold template PostCSS config",
-      "importance": 3,
-      "usefulness": 2
+      "path": "internal/cli/setup/plan.go",
+      "role": "bp setup dry-run plan data structures",
+      "importance": 54
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/website-starter/tailwind.config.ts",
-      "role": "starter-template Tailwind config",
-      "importance": 3,
-      "usefulness": 2
+      "path": "internal/cli/setup/plugins.go",
+      "role": "plugin discovery for bp setup wizard",
+      "importance": 49
+    },
+    {
+      "path": "internal/cli/setup/provision.go",
+      "role": "cloud provisioning executor",
+      "importance": 54
+    },
+    {
+      "path": "internal/cli/setup/setup.go",
+      "role": "bp setup package core types and Execute entry",
+      "importance": 60
+    },
+    {
+      "path": "internal/cli/setup/steps.go",
+      "role": "setup step runner and plan renderer",
+      "importance": 54
+    },
+    {
+      "path": "internal/cli/setup/token.go",
+      "role": "admin token generator for fresh installs",
+      "importance": 45
+    },
+    {
+      "path": "internal/cli/setup/verify.go",
+      "role": "post-install server health gate",
+      "importance": 45
+    },
+    {
+      "path": "internal/cli/setup/wizard.go",
+      "role": "bp setup interactive TUI wizard",
+      "importance": 62
+    },
+    {
+      "path": "internal/cli/setup/assets/assets.go",
+      "role": "embedded deploy.sh asset for bp CLI",
+      "importance": 26
+    },
+    {
+      "path": "internal/cli/setup/assets/deploy.sh",
+      "role": "Server provisioning script",
+      "importance": 47
     }
   ]
 }

@@ -1,36 +1,61 @@
 {
-  "subsystem": "api/config",
-  "count": 5,
+  "subsystem": "api",
+  "count": 11,
   "files": [
     {
-      "path": "api/config/config.exs",
-      "role": "base Elixir application configuration",
-      "importance": 48,
-      "usefulness": 14
+      "path": "api/.formatter.exs",
+      "role": "Elixir code formatter config",
+      "importance": 1
     },
     {
-      "path": "api/config/runtime.exs",
-      "role": "runtime environment configuration",
-      "importance": 48,
-      "usefulness": 14
+      "path": "api/entrypoint.sh",
+      "role": "Docker/release container entrypoint script",
+      "importance": 4
     },
     {
-      "path": "api/config/prod.exs",
-      "role": "production Elixir config override",
-      "importance": 23,
-      "usefulness": 2
+      "path": "api/mix.exs",
+      "role": "Elixir project manifest and build entrypoint",
+      "importance": 34
     },
     {
-      "path": "api/config/dev.exs",
-      "role": "development environment config",
-      "importance": 20,
-      "usefulness": 3
+      "path": "api/start.sh",
+      "role": "Production Phoenix server entrypoint script",
+      "importance": 15
     },
     {
-      "path": "api/config/test.exs",
-      "role": "test environment config",
-      "importance": 18,
-      "usefulness": 5
+      "path": "api/bench/validation_perf.exs",
+      "role": "Validation engine performance benchmark",
+      "importance": 14
+    },
+    {
+      "path": "api/bench/support/synthetic_doc.ex",
+      "role": "deterministic benchmark document generator",
+      "importance": 9
+    },
+    {
+      "path": "api/lib/barkpark.ex",
+      "role": "top-level application module stub",
+      "importance": 12
+    },
+    {
+      "path": "api/lib/barkpark_web.ex",
+      "role": "Phoenix web module macro factory",
+      "importance": 35
+    },
+    {
+      "path": "api/rel/env.sh.eex",
+      "role": "OTP release runtime environment template",
+      "importance": 4
+    },
+    {
+      "path": "api/scripts/pass2_audit_harness.exs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "api/scripts/prod-postcheck.sh",
+      "role": "post-deploy health check script",
+      "importance": 9
     }
   ]
 }

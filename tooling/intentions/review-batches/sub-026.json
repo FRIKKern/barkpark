@@ -1,60 +1,91 @@
 {
-  "subsystem": "api/lib/barkpark/plugins/onixedit/export",
-  "count": 9,
+  "subsystem": "api/lib/barkpark_web",
+  "count": 17,
   "files": [
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/codelists.ex",
-      "role": "ONIX 3.0 static codelist resolver",
-      "importance": 38,
-      "usefulness": 49
+      "path": "api/lib/barkpark_web/anon_perspective.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/descriptive_detail.ex",
-      "role": "ONIX 3.0 DescriptiveDetail block builder",
-      "importance": 42,
-      "usefulness": 42
+      "path": "api/lib/barkpark_web/endpoint.ex",
+      "role": "Phoenix HTTP entrypoint / plug pipeline",
+      "importance": 82
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/collateral_detail.ex",
-      "role": "ONIX 3.0 CollateralDetail block builder",
-      "importance": 40,
-      "usefulness": 36
+      "path": "api/lib/barkpark_web/error_envelope.ex",
+      "role": "API error envelope serializer (v1/v2)",
+      "importance": 35
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/product_supply.ex",
-      "role": "ONIX 3.0 ProductSupply block builder",
-      "importance": 37,
-      "usefulness": 37
+      "path": "api/lib/barkpark_web/gettext.ex",
+      "role": "i18n backend module",
+      "importance": 49
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/validator.ex",
-      "role": "ONIX 3.0 XSD validation gate via xmllint",
-      "importance": 33,
-      "usefulness": 40
+      "path": "api/lib/barkpark_web/layouts.ex",
+      "role": "layout template embedder",
+      "importance": 58
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/message.ex",
-      "role": "ONIX 3.0 ONIXMessage root wrapper",
-      "importance": 39,
-      "usefulness": 28
+      "path": "api/lib/barkpark_web/live_auth.ex",
+      "role": "LiveView auth on_mount hooks",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/publishing_detail.ex",
-      "role": "ONIX 3.0 PublishingDetail block builder",
-      "importance": 31,
-      "usefulness": 34
+      "path": "api/lib/barkpark_web/live_scope.ex",
+      "role": "LiveView mount hook for scoped-URL tenant resolution and re-auth",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/header.ex",
-      "role": "ONIX 3.0 Header element builder",
-      "importance": 35,
-      "usefulness": 28
+      "path": "api/lib/barkpark_web/param_coercion.ex",
+      "role": "",
+      "importance": 46
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export/status_pill.ex",
-      "role": "Bokbasen export status color/label mapping",
-      "importance": 28,
-      "usefulness": 21
+      "path": "api/lib/barkpark_web/plugin_scope_session.ex",
+      "role": "HTTP-to-LiveView scope bridge for plugin scoped LiveViews",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/presence.ex",
+      "role": "Phoenix Presence module definition",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark_web/request_stats.ex",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark_web/router.ex",
+      "role": "Phoenix HTTP route table + pipeline definitions",
+      "importance": 100
+    },
+    {
+      "path": "api/lib/barkpark_web/search_intel.ex",
+      "role": "search request metadata extractor",
+      "importance": 54
+    },
+    {
+      "path": "api/lib/barkpark_web/session_issuer.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark_web/studio_chrome.ex",
+      "role": "Shared Studio top-bar LiveView hook",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark_web/telemetry.ex",
+      "role": "telemetry supervisor and metrics definitions",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark_web/router/plugins.ex",
+      "role": "compile-time plugin route injection macro",
+      "importance": 43
     }
   ]
 }

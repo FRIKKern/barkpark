@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit/bokbasen",
+  "intentions": [
+    {
+      "title": "Publish ONIX book metadata to Bokbasen's real-world metadata-import API as a durable, resumable async pipeline",
+      "scale": "epic",
+      "evidence": "publish_worker.ex implements a full state machine (pending→staging→staged→polling→accepted/rejected/failed/cannot_cancel/cancelled) driven by an Oban worker that re-enqueues itself via {:snooze, secs} between stage and poll steps, persisting each transition to document.content['bp_export_status']."
+    },
+    {
+      "title": "Never double-submit or lose track of a Bokbasen submission across retries, crashes, or concurrent triggers",
+      "scale": "invariant",
+      "evidence": "Oban unique: [keys: [:document_id], states: [:available, :scheduled, :executing], period: 60] plus idempotency check (submission_id present ⇒ skip stage, resume polling) in publish_worker.ex; Status.write/2 re-fetches from DB before merging so back-to-back writes against a stale in-memory doc don't clobber fields."
+    },
+    {
+      "title": "Give operators and support tooling a single, race-free, tenant-scoped source of truth for export status that survives a field-shape migration",
+      "scale": "feature",
+      "evidence": "status.ex is the sole sanctioned read/write façade for bp_export_status, normalizing legacy string, Phase-7 JSON-string, and Phase-8 native-map shapes; derives signed_off from accepted_at; broadcasts on bokbasen:document:<doc_id> and (via PublishWorker) external_sync:bokbasen:<doc_id> for ExternalSyncPill/AdminLive consumers."
+    },
+    {
+      "title": "Never leak Bokbasen OAuth2 credentials (bearer tokens, client secrets) into logs, error dumps, or test failure output",
+      "scale": "invariant",
+      "evidence": "errors.ex implements custom Inspect for every error struct routing through Barkpark.Redaction to scrub authorization headers and access_token/client_secret/client_id JSON fields; errors_test.exs cited as the no-leak acceptance guarantee."
+    },
+    {
+      "title": "Resolve Bokbasen credentials safely across deployment environments (env-var override in prod, encrypted DB row for self-serve) without ever crashing on missing config",
+      "scale": "feature",
+      "evidence": "settings.ex resolves per-field with env-wins/DB-fallback order via Barkpark.Plugins.Settings, defaults client_role to 'publisher', and get_credentials/0 never raises — callers must call valid?/1 before network ops; auth.ex derives oauth_token_url from api_base when unset."
+    },
+    {
+      "title": "Isolate every Bokbasen network/auth/schema failure mode into a typed, pattern-matchable outcome so the worker's retry/backoff/terminal-failure policy is exact, not string-parsed",
+      "scale": "invariant",
+      "evidence": "client.ex maps HTTP responses to HTTPError/AuthError/SchemaRejectionError/NetworkError/RateLimitError structs with distinct retry semantics (401→one token-refresh retry then AuthError, 429→RateLimitError w/ Retry-After budget, 5xx/transient network→bounded retry loop); publish_worker.ex pattern-matches each struct into {:cancel,...} vs {:snooze,...} vs {:error,...} outcomes with @max_effective_attempts=3 and 2^attempt*15s backoff override."
+    },
+    {
+      "title": "Keep tenant isolation intact for background jobs that outlive the originating request",
+      "scale": "invariant",
+      "evidence": "publish_worker.ex put_scope_args/2 (single write seam across Actions.enqueue_publish, Lifecycle.enqueue, BokbasenLive retry) captures workspace_id/project_id into Oban job args at enqueue time so the worker's later document re-fetch is scoped to the same tenant, preventing two workspaces sharing a 'production' dataset string from acting on each other's book (barkpark-zdvi)."
+    }
+  ]
+}

@@ -1,36 +1,40 @@
 {
-  "subsystem": "docs/snippets",
-  "summary": "Executable, annotated TypeScript/TSX usage snippets covering the full JS SDK surface — CRUD, real-time subscriptions, optimistic mutations, Next.js server components, server actions, and webhook-driven cache revalidation. They serve as both developer documentation and implicit integration contract tests.",
+  "subsystem": "api/lib/barkpark/plugins/sheets",
   "intentions": [
     {
-      "title": "Lower the JS SDK adoption barrier with copy-paste-ready patterns",
+      "title": "Ship a full Excel-compatible spreadsheet document type (type:\"sheet\") with multi-tab sparse cells, A1 addressing, and a formula engine covering 60+ functions with Excel-faithful precedence, error propagation, and cross-tab dependency cycles",
       "scale": "epic",
-      "evidence": "All 8 snippets are self-contained, runnable modules with explicit expected-output comments. 01-create-document.ts, 02-query-with-filters.ts, 03-listen-for-updates.ts, and 05-publish-unpublish.ts cover the core CRUD+realtime loop a new integrator needs first."
+      "evidence": "engine.ex moduledoc documents full grammar (arithmetic, refs, ranges, Tab! qualifiers), unified {tab,col,row} dependency graph for cross-tab #CYCLE! detection, and an extensive function library (SUM/IF/VLOOKUP/HLOOKUP/date funcs/text funcs/etc.); core.ex parse_ref/format_ref A1 helpers; grid bounded at XFD/1,048,576 matching Excel limits"
     },
     {
-      "title": "Document the Next.js App Router integration contract end-to-end",
-      "scale": "epic",
-      "evidence": "06-server-component-fetch.tsx (createBarkparkServer + force-cache + next.tags), 07-server-action-mutate.tsx (defineActions in 'use server'), 04-mutate-optimistic.tsx (useOptimisticDocument in 'use client'), and 08-revalidate-on-webhook.ts together trace the full App Router lifecycle."
+      "title": "Keep the Sheets plugin fully optional — documents still render correctly with the plugin off via a pre-synthesized dense snapshot embedded in the portable-doc block",
+      "scale": "invariant",
+      "evidence": "core.ex moduledoc: 'the snapshot is what keeps documents rendering with the Sheets plugin off (fresh-install invariant)'; Content write-through refreshes snapshot on every mutation; @snapshot_schema_version gates backfill/rehydration; session.ex also states sessions work with the plugin off, only the HTTP ops route is plugin wiring"
     },
     {
-      "title": "Specify the cache-tag invalidation scheme as executable documentation",
-      "scale": "small",
-      "evidence": "06-server-component-fetch.tsx calls out 'bp:ds:production:_all' and 'bp:ds:production:type:post' tags explicitly; 07-server-action-mutate.tsx fans out doc:<id> + type:<type>; 08-revalidate-on-webhook.ts shows revalidateBarkpark() consuming webhook payloads — together they pin the tag naming contract."
+      "title": "Support real-time, low-latency collaborative cell editing via a lazily-started per-sheet GenServer session that serializes ops, debounces persistence, and survives session churn without double-applying retried batches",
+      "scale": "feature",
+      "evidence": "session.ex: DynamicSupervisor + SessionRegistry keyed by {dataset,published-id}, hibernate/idle-stop lifecycle, ≤1000 ops/call cap, debounced persist (2s/25-ops); replay_ring.ex: exactly-once ETS ring outside the session process specifically because a retry can land on a freshly-restarted session"
     },
     {
-      "title": "Demonstrate conflict-aware optimistic UI for collaborative editing",
-      "scale": "small",
-      "evidence": "04-mutate-optimistic.tsx exposes useOptimisticDocument with a BarkparkConflictError banner, covering the optimistic-update → committed-state replace → conflict-resolution flow."
+      "title": "Give users a full spreadsheet grid editor's worth of structural operations (insert/delete rows+cols, merges, freeze panes, tab management, sort) with Excel-correct formula-reference rewriting on every structural change",
+      "scale": "feature",
+      "evidence": "session.ex documents insert_rows/delete_rows/insert_cols/delete_cols, set_frozen, rename/add/delete/move/duplicate_tab, merge_cells/unmerge_cells, sort_range; delegates ref-shift semantics to structure.ex ('dead refs become #REF!', merges shift/clip/drop)"
     },
     {
-      "title": "Show zero-downtime webhook secret rotation",
-      "scale": "small",
-      "evidence": "08-revalidate-on-webhook.ts wires previousSecret alongside secret in createWebhookHandler, explicitly documenting the dual-secret rotation window."
+      "title": "Round-trip spreadsheets losslessly through xlsx import/export, including number formats, conditional formatting, and merged cells, so Barkpark can serve as a real interchange point with Excel/Sheets",
+      "scale": "feature",
+      "evidence": "fmt.ex: two-way numFmtId<->semantic class mapping engineered so canonical export strings classify back to the same class ('fmt survives a sheet → xlsx → sheet round trip exactly'); xlsx_import.ex/xlsx_export.ex; csv.ex/markdown.ex/html.ex additional export formats; export_controller.ex serves .xlsx/.csv/.tsv/.md/.html"
     },
     {
-      "title": "Establish real-time SSE subscription as a first-class SDK primitive",
-      "scale": "small",
-      "evidence": "03-listen-for-updates.ts uses client.listen() as an async iterator with welcome/mutation event discrimination and clean unsubscribe, making the streaming contract explicit."
+      "title": "Provide server-side conditional formatting so every surface (Studio, exports, embeds) renders identical cell styling with zero cross-surface drift",
+      "scale": "feature",
+      "evidence": "cond_format.ex moduledoc: 'evaluated SERVER-SIDE into the snapshot styles map during synthesis... so every surface that honors styles shows the same formatting with zero cross-surface drift (arc-2 decision CF-D1)'; gate-strict write-time validation vs lenient total evaluation at render time so a malformed rule never 500s a snapshot"
+    },
+    {
+      "title": "Never lose or corrupt in-flight edits: bound and document every durability tradeoff (debounce window, replay ring cap/TTL, node-local ETS) rather than pretending sessions are perfectly durable",
+      "scale": "invariant",
+      "evidence": "session.ex: 'On a NON-graceful BEAM death... up to debounce_ms/flush_after_ops worth of acknowledged-but-unpersisted ops are lost by design'; replay_ring.ex: 'Bounds (accepted residuals)' section explicitly documents cap/TTL/node-local/at-least-once gaps as deliberate, not fixed"
     }
   ]
 }

@@ -1,0 +1,31 @@
+{
+  "subsystem": "api/lib/barkpark/crypto",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark/crypto/data_key.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/crypto/data_keys.ex",
+      "role": "",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/crypto/field_cipher.ex",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/crypto/key_provider.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/crypto/local_kek.ex",
+      "role": "",
+      "importance": 35
+    }
+  ]
+}

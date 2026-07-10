@@ -1,46 +1,40 @@
 {
-  "subsystem": "internal/cli/setup",
-  "summary": "The bp setup subsystem is the zero-to-running onboarding engine for the bp CLI: it turns a declarative SetupPlan into a working Barkpark installation via four modes (connect an existing server, bring up a local dev server, deploy over SSH, provision a cloud host), each with a dry-run/confirm gate and an interactive Bubble Tea wizard.",
+  "subsystem": "api/assets/paper-editor/src/canvas",
   "intentions": [
     {
-      "title": "Zero-friction first-run onboarding for every deployment topology",
+      "title": "Prove and ship an Obsidian-style continuous-canvas editor: one ProseMirror document spanning a whole run of prose blocks, replacing per-block editors so cross-block caret movement, multi-block selection, Enter-split and Backspace-merge come free from StarterKit's native block+ doc model",
       "scale": "epic",
-      "evidence": "Four targets (connect/local/deploy/provision) in setup.go + wizard.go cover all operator contexts from 'I already have a server' to 'provision a fresh cloud host'; the wizard walks through target → inputs → profile → plugins → confirm without requiring any prior knowledge"
+      "evidence": "canvas/index.js header comment (Phase-4 S1): '<bp-paper-canvas> mounts ONE TipTap instance over a CONTIGUOUS run of PROSE blocks'; run-convert.js S0 projector runToTiptap/runToOps; staged rollout comments (S1 cross-block editing -> S2/S3 non-prose atoms -> S10 columns/section/terminal containers -> P4 autocomplete -> P5 command palette + source mode)."
     },
     {
-      "title": "Dry-run-first safety model for destructive operations",
+      "title": "Guarantee every non-prose block type in the PortableDoc schema (divider, callout, card, note, stage, code, diagram, field-*, action, sheet, embed, fleet widgets, figure, task-list, table, columns, section, terminal, opaque carry) has a first-class, editable-in-place node-view inside the canvas, so no block kind forces a run split unless truly necessary",
       "scale": "epic",
-      "evidence": "Every executor (local.go, deploy.go) checks opts.DryRun before any mutation, prints the exact commands it WOULD run, and refuses to proceed without opts.Confirm; BuildPlan/Plan.RenderHuman keep JSON and human paths byte-identical so operators see the real intent before committing"
+      "evidence": "canvas/index.js imports and registers ~25 node extensions (Divider, Callout, Card, Note, Stage, Code, Diagram, Field, Action, Sheet, Embed, Fleet, Figure, TaskList, role nodes, BpTable*, Columns/Column/ColumnAtom, Section, Opaque, Terminal/TerminalAtom); run-convert.js's growing CANVAS_ATOM_TYPES/CANVAS_CONTENT_TYPES/CANVAS_ATTR_ATOM_TYPES/CANVAS_FIELD_TYPES/CANVAS_READONLY_ATOM_TYPES/CANVAS_FLEET_TYPES/CANVAS_CONTAINER_TYPES sets, each with a 'KEEP LOCKSTEP with paper_canvas.ex' comment tying client sets to a server partition."
     },
     {
-      "title": "Persist and manage multi-server connection history",
-      "scale": "small",
-      "evidence": "connect.go probes /v1/capabilities to resolve the auth tier, then hands a SavedConfig (with Tier + LastConnected) to the injected ConfigStore; wizard.go's stageServerPick offers a remembered-server pick-list with relative timestamps and active-server star marker"
+      "title": "Every canvas edit must diff losslessly back into the server's existing op vocabulary (patch-block / insert-after / append-block / remove-block / move-block) byte-identically to the per-block editor's convert.js path, never reinventing the diff or drifting from the server's patch.ex contract",
+      "scale": "invariant",
+      "evidence": "run-convert.js imports blockToTiptap/buildPatchBlockOp/tiptapToBlock from ../convert.js verbatim ('an interior edit emitted here is BYTE-IDENTICAL to what the per-block editor emits'); explicit mapping to patch.ex op shapes (patch-block, insert-after, append-block, remove-block, move-block) documented at the top of run-convert.js; normalizeCanvasDoc in index.js exists specifically to close attr-presence/duplicate-id gaps so runToOps never mis-diffs."
     },
     {
-      "title": "Self-sufficient curl-install path (no checkout required)",
-      "scale": "small",
-      "evidence": "local.go's resolveLocalContext walks up from cwd for api/mix.exs; when not found it targets ~/.barkpark/src and prepends a shallow-clone step; deploy.go embeds deploy.sh via go:embed assets so a curl-installed bp binary carries the installer without needing the repo on disk"
+      "title": "Land the canvas as a strictly additive, zero-risk parallel implementation that cannot regress the shipped per-block <bp-paper-editor> — S0 (run-convert.js) 'ships dark' with nothing importing it, and the canvas is a second custom element wired in with one import line",
+      "scale": "invariant",
+      "evidence": "run-convert.js: 'It SHIPS DARK. Nothing imports it... The working per-block <bp-paper-editor> and its committed bundle literally cannot regress because this module is unreachable at runtime.'; index.js: 'ADDITIVE: this is the SECOND custom element in the same bundle... The shipped <bp-paper-editor> behavior is byte-unchanged.'"
     },
     {
-      "title": "Dependency preflight with actionable per-OS install hints",
-      "scale": "small",
-      "evidence": "local.go's localPreflight checks git/docker/mix/postgres/vips, distinguishes required vs warn-only, and emits the exact brew/apt command — explicitly never running package managers itself to avoid sudo/PATH side-effects"
+      "title": "Enforce Barkpark's doctrine template-lock and constraint-vocabulary laws (locked mandated blocks like title/featured-image can never be deleted or moved; cardinality/order constraints can never be violated) live, at the ProseMirror transaction layer, as a real-time client-side backstop to the server's authoritative veto",
+      "scale": "feature",
+      "evidence": "locks.js (pdd-t2): lockedNodeId/lockedIndexMap/transactionVetoesLock pure predicates, 'the FELT half of the server backstop (patch.ex:192-274)'; constraints.js (pdd-t20c) generalizes to cardinality/order; wired into a bpLockVeto Extension's filterTransaction plugin in index.js, exempting only programmatic applies."
     },
     {
-      "title": "Seed content profiles for controlled first-run database state",
-      "scale": "small",
-      "evidence": "setup.go defines ProfileClean/ProfileDemo; clean pre-generates an admin token at execute time (never at plan time), threads it through BARKPARK_SEED_ADMIN_TOKEN redacted in display, and verifies the tier post-connect; wizard.go's stageProfile pre-selects plugins to match the chosen profile"
+      "title": "Port Obsidian-analog authoring affordances into the canvas — [[wikilink and #tag autocomplete, a '/' slash-insert menu, a fuzzy Cmd-P command palette, and a Markdown 'source mode' toggle — each reusing existing per-block editor machinery verbatim rather than reimplementing it",
+      "scale": "feature",
+      "evidence": "index.js P4 section reuses WikilinkMenu/parseOpenWikilink/parseOpenTag from ../wikilink-menu.js and ../wikilink-trigger.js 'verbatim'; P4 S-slash reuses SlashMenu/SLASH_ITEMS from ../slash-menu.js filtered via slash-insert.js's CANVAS_SLASH_TYPES allowlist; P5 command-palette.js is 'a THIN subclass of SlashMenu' with insertSlashTypeAtSelection shared with the slash pick for default_block parity; P5 source mode uses blocksToMarkdown/markdownToBlocks (../markdown.js) + source-realign.js's LCS-based id realignment to keep diffs minimal on exit."
     },
     {
-      "title": "Declarative plugin selection with kill-switch semantics",
-      "scale": "small",
-      "evidence": "wizard.go's selectedPlugins() maps all-checked→nil (register everything), strict subset→that slice, none-checked→empty slice (explicit kill switch); PluginsEnvValue/PluginsSummary propagate this into BARKPARK_PLUGINS env for local, deploy, and provision paths"
-    },
-    {
-      "title": "Config-store injection seam to avoid import cycles",
-      "scale": "small",
-      "evidence": "setup.go's ConfigStore interface is the only persistence surface; setup never imports cli — the cli built-in adapts cli.LoadConfig/SaveConfig onto it, and tests pass an in-memory store; same pattern for WizardFunc and KnownServers"
+      "title": "Keep client-side canvas type/shape enumerations (which block kinds are atoms, content nodes, attr-atoms, field control-atoms, read-only atoms, fleet widgets, containers) in exact lockstep with the server's paper_canvas.ex partition logic, so the client and server never diverge on which blocks join a run vs. split it",
+      "scale": "invariant",
+      "evidence": "Repeated 'KEEP LOCKSTEP with paper_canvas.ex @canvas_*_types' comments across run-convert.js for every type set (CANVAS_CONTENT_TYPES, CANVAS_ATTR_ATOM_TYPES, CANVAS_FIELD_TYPES, CANVAS_READONLY_ATOM_TYPES, CANVAS_FLEET_TYPES, CANVAS_CONTAINER_TYPES, CANVAS_ACTION_TYPES, CANVAS_FIGURE_TYPES, CANVAS_TASK_LIST_NODE_NAME); e.g. task-list's presence-of-query discriminant explicitly mirrors task_resolver.ex:139-159."
     }
   ]
 }

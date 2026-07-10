@@ -1,46 +1,45 @@
 {
-  "subsystem": "api/lib/mix/tasks",
-  "summary": "A suite of Mix operator tasks that automate plugin scaffolding, data lifecycle operations (ONIX import/export, Bokbasen publish/replay, FRT seed/export), token rotation, search quality evaluation, and backfill utilities — the CLI surface for running Barkpark outside the HTTP request cycle.",
+  "subsystem": "scripts",
   "intentions": [
     {
-      "title": "Reduce plugin authorship friction to near-zero",
+      "title": "Guard the doc spine's structural integrity in CI — every routing-table target, INDEX entry, and card Code anchor must resolve to a real file/symbol, doc-tier headers present, canonical-for unique repo-wide",
+      "scale": "invariant",
+      "evidence": "scripts/docs-anchors-check.sh checks 6 blocking invariants (routing-table CLAUDE.md targets resolve, docs/INDEX.md entries resolve, card 'Code anchors' grep to real defs, G1 doc-tier header present, canonical-for uniqueness, _attic ARCHIVED banner) plus WARN-only duplication tripwires; bash 3.2 compatible for CI portability."
+    },
+    {
+      "title": "Enforce hard byte budgets on every doc-spine file so context stays lean — overflow must be resolved by splitting/retiring content, never by raising the cap",
+      "scale": "invariant",
+      "evidence": "scripts/check-doc-budgets.sh check_cap() enforces fixed byte caps (CLAUDE.md 10000, api/CLAUDE.md 6500, docs/api-v1.md 14000, etc.) and fails CI with an explicit 'never raise the cap' remedy message."
+    },
+    {
+      "title": "Keep the paper editor's node-view chrome in lockstep across its Studio-embedded and standalone-bundle mirrors, and generate the paper-surface token layer from one canonical source instead of hand-copying",
+      "scale": "invariant",
+      "evidence": "scripts/paper-editor-mirror-check.sh Part 1/2 diffs .bp-canvas-* classes between root.html.heex and paper-editor/src/styles.css (allowlist for documented one-sided selectors); Part 3 delegates to design/paper-editor-mirror.mjs to byte-compare/regenerate the GENERATED --paper-*/--bp-* token block from paper-surface.css, closing drift bugs referenced as 'cycles 57-58'."
+    },
+    {
+      "title": "De-literalize color across every rendering surface (Go CLI/TUI, Elixir Studio, web) onto the generated design-token system — new inline hex/hsl literals fail CI unless explicitly allowlisted with a lit-allow annotation",
       "scale": "epic",
-      "evidence": "barkpark.plugin.new.ex generates a fully wired plugin skeleton (manifest, entry module, test, schemas dir) that immediately passes Registry discovery and mix test — mirrors the OnixEdit reference layout, no manual registry edit needed. barkpark.gen.plugin.ex is a deprecated shim pointing to the new task."
+      "evidence": "scripts/go-literal-check.sh (unified-aesthetic W4.10, scans cmd/barkpark, internal/cli, taskboard/theme.go, pdrender/theme.go for #hex outside allowlist), scripts/studio-literal-check.sh (W2.6, scans api/lib/barkpark_web for hsl()/#hex outside GENERATED blocks and per-line lit-allow), scripts/web-literal-check.sh (web-scoped twin) — together form the 'unified aesthetic' token-drift gate across all three UI surfaces; each carries a --selftest tripwire proving the gate actually reds on a planted literal."
     },
     {
-      "title": "Make ONIX/Bokbasen publishing operationally recoverable",
-      "scale": "small",
-      "evidence": "bokbasen.replay.ex lets operators re-enqueue a failed Bokbasen publish or dry-run the ONIX 3.0 XML render + XSD gate without touching the live API. bokbasen.list.ex and bokbasen.status.ex expose submission state and per-book detail. onix.import.ex bulk-ingests ONIX XML feeds as draft book documents."
+      "title": "Make the task-status vocabulary (statuses, roles, glyphs, tones) single-sourced from design/status-manifest.json, with every consuming surface (paper-surface CSS tones, glyph classes, Go pdrender's inlined roleGlyph/roleLabel/roleMeaning) generated or byte-checked against it",
+      "scale": "invariant",
+      "evidence": "scripts/status-manifest-check.sh Parts 1-4: generates/byte-compares --st-* tone CSS from manifest tones, checks .bp-g--<role> glyph-class coverage matches manifest roles, and byte-checks Go's gridblocks.go roleGlyph/roleLabel/roleMeaning maps against the manifest (documented exception for the 'progress' spinner glyph in static terminal render)."
     },
     {
-      "title": "Keep public-read credentials rotated automatically",
-      "scale": "small",
-      "evidence": "barkpark.rotate_public_read.ex generates a fresh token weekly (invoked by a systemd timer), writes it 0600 to disk, POSTs it to the Vercel deploy hook, and purges tokens older than 8 days — full credential lifecycle with no manual step."
+      "title": "Guarantee the Open Graph preview contract is enforced structurally — one write-time preview manifest drives every surface's meta tags, no per-type excerpt forks, no field-projection stripping, and oEmbed is permanently banned",
+      "scale": "invariant",
+      "evidence": "scripts/preview-parity-check.sh Part 1 fails if docDescription/paperExcerpt reappear in the web finder detail page (must use metadataFromPreview); Part 2 fails on a `?fields=` projection on the detail fetch (would strip 'preview' off the wire); Part 3 fails if 'oembed' appears anywhere in the source tree, codifying decision D10 as executable law."
     },
     {
-      "title": "Gate search quality regressions in CI",
-      "scale": "small",
-      "evidence": "search.eval.ex runs golden JSONL queries, reports MRR/NDCG@10/zero-hit-rate, and exits non-zero on failure or baseline regression — designed to run in CI as a quality gate."
+      "title": "Let an instance self-update itself in place via a strictly fast-forward git pull + rebuild pipeline that reports true build outcome back to the admin API, never silently wedging after a failed build",
+      "scale": "feature",
+      "evidence": "scripts/self-update.sh: fetch → --ff-only merge to origin/$BARKPARK_UPSTREAM_BRANCH (refuses on diverged local checkout, exit 2) → suppresses the post-merge hook and explicitly invokes scripts/deploy-rebuild.sh or deploy/instance-deploy.sh so a retry always rebuilds and its exit code flows back to Barkpark.SelfUpdate.Runner; repo-local flock serializes against manual git pull/make rebuild."
     },
     {
-      "title": "Serve Barkpark as a CMS backend for non-web clients (game engine)",
-      "scale": "small",
-      "evidence": "frt.export.ex reads published FRT documents and emits a deterministic, byte-stable SHA-256-pinned JSON artifact keyed by type for a Godot game loader. frt.seed.ex writes the dataset. The determinism contract (canonical_iodata, sorted keys, hash over types only) is explicit so CI can assert content stability."
-    },
-    {
-      "title": "Maintain ONIX codelist data integrity over time",
-      "scale": "small",
-      "evidence": "barkpark.codelists.seed.ex populates the EDItEUR codelist registry on first boot; codelists.staleness.ex reports stale entries and triggers revalidation — keeping the ONIX export correct as the codelist standard evolves."
-    },
-    {
-      "title": "Bridge TypeScript SDK and Elixir plugin types automatically",
-      "scale": "small",
-      "evidence": "barkpark.plugin.gen_types.ex regenerates TypeScript types from plugin definitions, keeping the JS SDK in sync with server-side schema changes without manual type authoring."
-    },
-    {
-      "title": "Support backfill and data-migration of CMS documents from the command line",
-      "scale": "small",
-      "evidence": "barkpark.media.backfill.ex backfills mediaAsset documents — a pattern for operating on existing CMS data outside the web lifecycle, enabling schema/model migrations without downtime."
+      "title": "Provide a one-shot scripted golden path to stand up a new Barkpark-backed site and ship it live on Vercel (workspace, schema, seed+publish, scoped read token, Vercel project+env+deploy)",
+      "scale": "feature",
+      "evidence": "scripts/bp-vercel-quick-setup.sh runs all 6 steps (create workspace, apply schema, seed+publish content, provision workspace-scoped public-read token, create/link Vercel project and deploy, print live URL) idempotently — described as the scripted precursor to a future `bp vercel quick-setup` CLI subcommand."
     }
   ]
 }

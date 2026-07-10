@@ -1,36 +1,61 @@
 {
-  "subsystem": "api/lib/barkpark/content/validation",
-  "count": 5,
+  "subsystem": "api/lib/barkpark/plugins/indx",
+  "count": 11,
   "files": [
     {
-      "path": "api/lib/barkpark/content/validation/evaluator.ex",
-      "role": "cross-field validation rule evaluator",
-      "importance": 44,
-      "usefulness": 33
+      "path": "api/lib/barkpark/plugins/indx/auth.ex",
+      "role": "Indx JWT token cache GenServer",
+      "importance": 44
     },
     {
-      "path": "api/lib/barkpark/content/validation/path.ex",
-      "role": "JSON-Pointer path resolver with wildcard support",
-      "importance": 41,
-      "usefulness": 34
+      "path": "api/lib/barkpark/plugins/indx/client.ex",
+      "role": "Indx search engine HTTP client",
+      "importance": 54
     },
     {
-      "path": "api/lib/barkpark/content/validation/ops.ex",
-      "role": "validation op evaluator",
-      "importance": 39,
-      "usefulness": 32
+      "path": "api/lib/barkpark/plugins/indx/errors.ex",
+      "role": "Indx plugin typed error structs with secret redaction",
+      "importance": 55
     },
     {
-      "path": "api/lib/barkpark/content/validation/rule.ex",
-      "role": "compiled validation rule struct",
-      "importance": 37,
-      "usefulness": 29
+      "path": "api/lib/barkpark/plugins/indx/indexer.ex",
+      "role": "Indx blue/green corpus rebuilder",
+      "importance": 55
     },
     {
-      "path": "api/lib/barkpark/content/validation/rules.ex",
-      "role": "Cross-field validation rule compiler and GenServer cache",
-      "importance": 38,
-      "usefulness": 27
+      "path": "api/lib/barkpark/plugins/indx/indexer_worker.ex",
+      "role": "Oban search index rebuild/upsert/delete worker",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/lifecycle.ex",
+      "role": "Indx search index lifecycle hook dispatcher",
+      "importance": 27
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/monitor.ex",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/persistence.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/recovery.ex",
+      "role": "Indx boot-time live-pointer recovery GenServer",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/retriever.ex",
+      "role": "Indx search retriever implementation",
+      "importance": 31
+    },
+    {
+      "path": "api/lib/barkpark/plugins/indx/settings.ex",
+      "role": "Indx plugin settings resolver",
+      "importance": 58
     }
   ]
 }

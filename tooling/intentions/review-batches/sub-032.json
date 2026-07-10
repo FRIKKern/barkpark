@@ -1,48 +1,81 @@
 {
-  "subsystem": "api/lib/barkpark_web/components",
-  "count": 7,
+  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter/app",
+  "count": 15,
   "files": [
     {
-      "path": "api/lib/barkpark_web/components/studio_components.ex",
-      "role": "Shared Studio UI component library",
-      "importance": 52,
-      "usefulness": 64
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/error.tsx",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark_web/components/field_inputs.ex",
-      "role": "Studio editor leaf-field input components",
-      "importance": 43,
-      "usefulness": 58
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/layout.tsx",
+      "role": "blog starter root layout",
+      "importance": 15
     },
     {
-      "path": "api/lib/barkpark_web/components/icons.ex",
-      "role": "Inline SVG icon library",
-      "importance": 28,
-      "usefulness": 47
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/loading.tsx",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark_web/components/confirm_modal.ex",
-      "role": "generic two-stage confirm modal LiveView component",
-      "importance": 31,
-      "usefulness": 16
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/not-found.tsx",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark_web/components/draft_diff.ex",
-      "role": "Studio UI component for draft-vs-published field diff",
-      "importance": 27,
-      "usefulness": 18
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/page.tsx",
+      "role": "blog starter home/post-listing page",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark_web/components/onix_preview.ex",
-      "role": "doc-type-agnostic content preview sidebar component",
-      "importance": 30,
-      "usefulness": 14
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/robots.ts",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark_web/components/external_sync_pill.ex",
-      "role": "UI status pill for external sync integrations",
-      "importance": 24,
-      "usefulness": 14
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/sitemap.ts",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/components/Pagination.tsx",
+      "role": "blog starter pagination component",
+      "importance": 11
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/api/exit-preview/route.ts",
+      "role": "blog starter exit-draft-mode route",
+      "importance": 13
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/api/preview/route.ts",
+      "role": "blog starter enter-draft-mode route",
+      "importance": 13
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/api/barkpark/webhook/route.ts",
+      "role": "blog starter webhook revalidation route",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/authors/[id]/page.tsx",
+      "role": "blog starter author detail page",
+      "importance": 11
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/posts/[slug]/draft-preview.tsx",
+      "role": "blog starter draft-mode post preview client component",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/posts/[slug]/page.tsx",
+      "role": "blog starter post detail page",
+      "importance": 14
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/tags/[slug]/page.tsx",
+      "role": "blog starter tag detail page",
+      "importance": 14
     }
   ]
 }

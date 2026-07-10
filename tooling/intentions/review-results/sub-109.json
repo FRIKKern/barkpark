@@ -1,0 +1,25 @@
+{
+  "subsystem": "js/docs",
+  "intentions": [
+    {
+      "title": "Give the JS SDK monorepo (@barkpark/core, @barkpark/nextjs, @barkpark/react, codegen) a dedicated Fumadocs documentation site instead of relying solely on package READMEs",
+      "scale": "feature",
+      "evidence": "js/docs/source.config.ts defines docs content rooted at content/docs via fumadocs-mdx defineDocs; js/docs/next.config.mjs wraps the Next.js app with createMDX() from fumadocs-mdx/next, making this its own Next.js app under js/ dedicated to docs."
+    },
+    {
+      "title": "Serve SDK docs as MDX with syntax-highlighted code blocks that respect the reader's light/dark theme",
+      "scale": "feature",
+      "evidence": "source.config.ts sets mdxOptions.rehypeCodeOptions.themes to { light: 'github-light', dark: 'github-dark' }, wiring dual-theme code highlighting into every rendered doc page."
+    },
+    {
+      "title": "Keep the docs site's MDX rendering pluggable — consumers of the docs app can override any Fumadocs UI component (callouts, tabs, code blocks, etc.) without forking the renderer",
+      "scale": "invariant",
+      "evidence": "js/docs/mdx-components.tsx's useMDXComponents spreads fumadocs-ui/mdx defaultMdxComponents first, then caller-supplied components, so overrides always win while defaults cover everything else."
+    },
+    {
+      "title": "Route all SDK doc content under a stable /docs base path via a typed content source, decoupling URL structure from the content/docs file layout",
+      "scale": "invariant",
+      "evidence": "js/docs/lib/source.ts builds `source` via fumadocs-core/source's loader({ baseUrl: '/docs', source: createMDXSource(docs, meta) }), consuming the generated docs/meta collections from '@/.source' (fumadocs-mdx codegen) rather than reading the filesystem directly."
+    }
+  ]
+}

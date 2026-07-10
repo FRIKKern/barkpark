@@ -1,31 +1,40 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/templates/website-starter/app",
-  "summary": "Next.js 15 App Router pages and routes that form the website-starter scaffold template — a ready-to-run marketing site (home, posts, about, pricing, contact) wired to Barkpark as its CMS, demonstrating real-time revalidation via webhook and form-to-CMS write via Server Actions.",
+  "subsystem": "js/packages/nextjs/src",
   "intentions": [
     {
-      "title": "Lower adoption friction with a zero-to-running starter",
+      "title": "Give Next.js App Router apps a first-class, idiomatic Barkpark integration (server fetch, actions, draft mode, webhook, revalidate, preload, live-reload) instead of forcing consumers onto the raw core client",
       "scale": "epic",
-      "evidence": "layout.tsx, page.tsx, posts/[slug]/page.tsx, about/page.tsx, pricing/page.tsx together form a complete multi-page site a new user gets via `create-barkpark-app` — no boilerplate to write, just fill in content"
+      "evidence": "Distinct subpath exports client/server/webhook/draft-mode/revalidate/preload/actions (js/CLAUDE.md 'Package map'); each factory (createBarkparkServer, createWebhookHandler, createDraftModeRoutes, createPreloader, defineActions) documents an App Router route.ts/page.tsx drop-in example."
     },
     {
-      "title": "Demonstrate the full Barkpark read path in a real app",
-      "scale": "small",
-      "evidence": "page.tsx calls getDoc + getDocs; posts/[slug]/page.tsx calls getDocBySlug and renders via PortableText — covers single-doc, list, and slug-based fetch patterns"
+      "title": "Keep cache-tag invalidation correct end-to-end across write (Server Actions), read (server fetch), and webhook-driven revalidation by deriving every tag from one shared formatter",
+      "scale": "invariant",
+      "evidence": "tag-prefix.ts's formatTagPrefix is imported by actions/defineActions.ts (fanOutTags), server/core.ts (resolveTagPrefix), and revalidate/index.ts (tagPrefix) — comments explicitly say this keeps write/read/revalidate tags identical; supports both SCOPED bp:ws:*:p:*:ds:* (s7) and LEGACY flat bp:ds:* shapes."
     },
     {
-      "title": "Show CMS-driven write (form → Barkpark document) via Server Actions",
-      "scale": "small",
-      "evidence": "contact/actions.ts uses defineActions + createDoc to persist a contact submission as a `contact` document — demonstrates the write path without a custom API route"
+      "title": "Never drop a webhook-driven revalidation under retry/duplicate delivery — treat webhook mutation as an idempotent, at-least-once operation",
+      "scale": "invariant",
+      "evidence": "webhook/index.ts's settledDeliveries LRU + inFlightDeliveries promise map: a concurrent same-id delivery awaits the in-flight promise rather than assuming duplicate, and a failed onMutation rolls back the reservation so retries re-run instead of being silently swallowed as deduped."
     },
     {
-      "title": "Wire content freshness via Studio → Next.js webhook revalidation",
-      "scale": "small",
-      "evidence": "api/barkpark/webhook/route.ts uses createWebhookHandler + revalidateBarkpark so published edits in Studio invalidate the Next.js cache automatically"
+      "title": "Support authenticated preview/draft editing (Sanity-style draft mode) with signed, time-limited preview URLs and automatic token reissue on expiry",
+      "scale": "feature",
+      "evidence": "draft-mode/index.ts: signDraftModeToken (HMAC over path+expiry, 10-min TTL) + createDraftModeRoutes GET/DELETE handlers with one reissuePreviewToken retry before 401; server/core.ts barkparkFetchInner branches on draftMode().isEnabled to force cache:'no-store' + perspective=drafts + Bearer auth, with its own 401-retry-then-throw."
     },
     {
-      "title": "Support a hosted demo environment without code branching",
-      "scale": "small",
-      "evidence": "hosted-demo-banner.tsx detects barkpark.dev API URL and injects a banner warning that data resets daily — keeps demo UX honest without separate build targets"
+      "title": "Make Server Actions the safe, validated, tag-fanned-out way to mutate Barkpark documents from Next.js — schema-validated writes that automatically invalidate the right caches",
+      "scale": "feature",
+      "evidence": "actions/defineActions.ts: createDoc/patchDoc/publish/unpublish/discardDraft/deleteDoc each parse via an optional Zod-shaped schema then revalidateTag the canonical doc/type tags; useOptimisticDocument.ts layers useOptimistic+useTransition+conflict surfacing (ETag ifMatch, BarkparkConflictError) on top for optimistic UI."
+    },
+    {
+      "title": "Guarantee correctness under Next.js's edge-vs-node and RSC-vs-client runtime boundaries rather than silently breaking at build or request time",
+      "scale": "invariant",
+      "evidence": "client/live.tsx's three-layer detectEdgeRuntime()/assertNotEdge() throws BarkparkEdgeRuntimeError instead of silently failing SSE; server/core.ts deliberately does NOT re-export BarkparkLive to avoid pulling React.createContext into the react-server graph (documented crash: 'is not a function'); comment in core.ts warns cache:'no-store' + next.tags together silently breaks revalidateTag on Next 15.5.15."
+    },
+    {
+      "title": "Eliminate duplicate document fetches within a single request via request-scoped preloading (parallel data fetching pattern)",
+      "scale": "feature",
+      "evidence": "preload/index.ts createPreloader wraps barkparkFetch in a dedup Map + React cache(); extensive doc comment warns against module-scoping the preloader (would leak stale documents cross-request) and mandates binding via React's cache() per request."
     }
   ]
 }

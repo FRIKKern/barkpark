@@ -1,1 +1,40 @@
-{"subsystem":"internal/manifest","summary":"Fetches, caches, and parses the server-emitted capabilities manifest (GET /v1/capabilities), then turns it into a typed command tree, URL builder, and precedence-resolved context that the bp CLI drives off — with zero hardcoded nouns, verbs, or routes.","intentions":[{"title":"Self-describing API: CLI driven entirely by server-emitted manifest","scale":"epic","evidence":"manifest.go package doc states 'hardcodes NO noun, verb, flag, or route'; tree.go builds noun->verb tree purely from Manifest.Nouns+Commands; plugins add commands with zero code change"},{"title":"Zero-downtime extensibility via plugin-contributed commands","scale":"epic","evidence":"Noun.Plugin field in manifest.go; tree.go synthesizes nodes for any command whose noun appears in the manifest, including plugin-owned ones"},{"title":"Offline-friendly CLI via ETag-based manifest caching","scale":"small","evidence":"fetch.go implements If-None-Match / 304 flow; cache.go provides on-disk ETag store keyed by server URL + token salt; 304 path skips re-parse entirely"},{"title":"Deterministic context resolution with clear precedence (flags > env > active > defaults)","scale":"small","evidence":"context.go Resolve() picks first non-empty value per field across four layers; FlagServer/Token/etc constants keep flag-parsing layer in sync"},{"title":"Forward-compatible scoped-prefix routing seam","scale":"small","evidence":"url.go BuildURL respects ctx.ScopedMirror guard; ScopedMirror=false keeps prefix inert today; manifest already ships scoped_prefix hint so no breaking change when server adds mirror"},{"title":"Fail-fast manifest contract enforcement","scale":"small","evidence":"manifest.go Parse uses DisallowUnknownFields + explicit manifest_version check; url.go errors loudly on unresolved path placeholders rather than sending malformed URLs"}]}
+{
+  "subsystem": "api/lib/barkpark/sso",
+  "intentions": [
+    {
+      "title": "Give every organization enterprise-grade SSO: SAML 2.0 and OIDC relying-party login with per-org connections",
+      "scale": "epic",
+      "evidence": "saml.ex implements SP-initiated + IdP-initiated flows via the vetted esaml library (esaml_sp:validate_assertion, never hand-rolled XML-dsig); oidc.ex implements authorization-code+PKCE with RS256 id_token verification against the OP's JWKS. Both keyed per-org via saml_connection.ex / oidc_connection.ex (unique_constraint(:organization_id))."
+    },
+    {
+      "title": "Provision users just-in-time on first SSO login and keep their org role authoritatively synced from IdP group claims",
+      "scale": "feature",
+      "evidence": "oidc.ex handle_callback/3: Barkpark.Sso.resolve_group_role/2 maps id_token groups through admin-configured group_role_mappings (oidc_connection.ex); a resolved role calls jit_provision/3 + set_org_member_role/3 authoritatively (mirrors SCIM group sync per comments), an absent/unmapped groups claim leaves existing roles untouched."
+    },
+    {
+      "title": "Never let a token's group claim name an arbitrary role — mapping targets must resolve to a known built-in or admin-defined Role",
+      "scale": "invariant",
+      "evidence": "oidc.ex create_connection/1 calls validate_mapping_roles/1 -> known_role?/2, checking against Membership.roles() or an existing Role scoped to the org's workspaces, before insert — guards the bypass since authoritative role sync writes via update_all which skips the membership changeset."
+    },
+    {
+      "title": "Support full SAML Single Logout (SP-initiated and IdP-initiated) so a session ends everywhere, not just locally",
+      "scale": "feature",
+      "evidence": "saml.ex: slo_available?/1, sp_logout_redirect_url/4 (SP-initiated, generate_logout_request), consume_logout_request/3 (IdP-initiated, validate_logout_request with idp_signs_logout_requests: true — 'an unsigned logout would let anyone kill sessions'), logout_response_html/2 (auto-submit POST binding back to IdP)."
+    },
+    {
+      "title": "Let organizations auto-route employees to their own SSO by verified email domain, never trusting an unverified claim",
+      "scale": "feature",
+      "evidence": "domains.ex: request_verification/2 issues a DNS TXT token (barkpark-verify=...), verify/1 confirms via Resolver.txt_records/1, route_for_email/1 only returns an org when verified_at is non-nil ('Only a verified domain routes'). domains/resolver.ex swaps :inet_res for a fake resolver in tests."
+    },
+    {
+      "title": "Offer social login (Google, GitHub, Microsoft) that links into the same User identity graph without creating duplicate accounts",
+      "scale": "feature",
+      "evidence": "social.ex unifies three providers under one OAuth2+userinfo flow (@endpoints map); find_or_link/3: existing (provider, external_id) re-logs the same account, otherwise email find-or-creates a User and links a SocialIdentity — 'never a duplicate of an existing email account'."
+    },
+    {
+      "title": "Isolate every outbound IdP/provider HTTP call behind a swappable HTTP module so SSO protocol logic is fully testable against mock IdPs",
+      "scale": "invariant",
+      "evidence": "oidc.ex and social.ex route all token-exchange/userinfo/JWKS calls through Barkpark.Sso.Oidc.HTTP / Barkpark.Sso.Social.HTTP (oidc/http.ex, social/http.ex); moduledoc states 'tests stand in a mock IdP' and 'the protocol logic here is fully covered by tests against a mock OP', with live-IdP quirks called out as the remaining manual step."
+    }
+  ]
+}

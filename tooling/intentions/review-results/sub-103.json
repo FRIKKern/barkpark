@@ -1,0 +1,30 @@
+{
+  "subsystem": "api/assets/sheet-grid",
+  "intentions": [
+    {
+      "title": "Ship an Excel-grade point-mode/formula-intellisense editing experience for Studio sheets, verified without a browser",
+      "scale": "epic",
+      "evidence": "__formula.test.mjs exercises the full caretContext contract (fn/ref/range/whole-col/row classification, string-literal traps, F4 $-cycle, insert/replace/extend matrix, depth-aware argIndex, refColorIndex 8-slot wrap, normalizeFormula upcasing/paren-balancing); __pointing.test.mjs covers colLetters/colIndex base-26 round-trips (incl. Z/AA boundary) and refToPos/posToRef; __hook.test.mjs drives the client hook's event routing (keydown/input bubbling, mousedown drag+resize, grid-scope containment) — all load the SHIPPED bp-sheet-*.js browser IIFEs verbatim inside node:vm so a regression in the committed bundle reds CI, not a stale copy."
+    },
+    {
+      "title": "Guarantee formula-syntax tokenization is lossless and unambiguous under charter amendments (e.g. A2's '(' lookahead for ref-shaped function names)",
+      "scale": "invariant",
+      "evidence": "__formula.test.mjs 'tokenize is lossless' asserts concatenated token text reconstructs the input exactly with correct start/end offsets; the LOG10(/ATAN2( test locks in that a ref-shaped identifier followed by '(' is classified fn (never clobbered by point-mode/signature-help) while the bare identifier without '(' stays a ref."
+    },
+    {
+      "title": "Keep the 8-hue reference-highlight rainbow (--sheet-ref-0..7) accessible and visually distinct from the live presence-avatar palette, in both light and dark themes",
+      "scale": "invariant",
+      "evidence": "__palette.test.mjs parses root.html.heex's shipped hex/hsl tokens (not a pinned copy) and asserts all 8 ref hues clear WCAG 4.5:1 text contrast against --bg per theme, are pairwise distinct, index-lock to their .sheet-refc-N class, are disjoint from the presence palette parsed out of presence_state.ex, and that .sheet-ghost (--fg-muted) stays legible."
+    },
+    {
+      "title": "Route grid-level keyboard/mouse events correctly across the .sheet-editor/.sheet-grid-wrap/.sheet-bar-input DOM topology, including toolbar-vs-grid scoping",
+      "scale": "feature",
+      "evidence": "__hook.test.mjs models bubbling from a grid td up through the ancestor .sheet-editor (so the sibling formula bar is covered, per issue #813) and a contains()-based grid-scope guard (per issue #843) distinguishing real grid/cell targets from toolbar or tab-strip clicks; listeners are modelled as arrays because the drag slice registers a second mousedown handler alongside resize."
+    },
+    {
+      "title": "Fail closed on malformed cell references and coordinates rather than silently returning wrong positions",
+      "scale": "invariant",
+      "evidence": "__pointing.test.mjs asserts refToPos returns null for non-cell refs (whole col/row, ranges, empty, '$B$3', garbage) and colIndex returns NaN (never a numeric 0) for empty/garbage input — both used by pointing/prediction and drag-range logic where a silent wrong number would corrupt cell targeting."
+    }
+  ]
+}

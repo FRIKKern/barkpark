@@ -1,0 +1,26 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/registry",
+  "count": 4,
+  "files": [
+    {
+      "path": "api/lib/barkpark/plugins/registry/boot_collectors.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/registry/discovery.ex",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark/plugins/registry/plugin_callbacks.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/registry/resolver_chain.ex",
+      "role": "",
+      "importance": 47
+    }
+  ]
+}

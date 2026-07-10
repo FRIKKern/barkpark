@@ -1,0 +1,20 @@
+{
+  "subsystem": "packages",
+  "intentions": [
+    {
+      "title": "Ship @barkpark/client as a dual ESM/CJS TypeScript package with generated .d.ts, consumable by both modern bundlers and legacy CJS require()",
+      "scale": "feature",
+      "evidence": "packages/client/tsup.config.ts builds src/index.ts to format:['esm','cjs'] with dts:true and sourcemap:true, matching package.json's exports map (types/import/require) for @barkpark/client"
+    },
+    {
+      "title": "Keep the deprecated v1 JS client's test suite runnable in isolation (node environment, generous 10s/20s timeouts) even though the package is superseded",
+      "scale": "invariant",
+      "evidence": "packages/client/vitest.config.ts sets environment:'node', testTimeout:10_000, hookTimeout:20_000, globals:false; package.json test script is vitest run, still wired into build/test/typecheck scripts despite the package.json description flagging it deprecated/superseded by @barkpark/core"
+    },
+    {
+      "title": "Preserve a clean migration path off the legacy @barkpark/client SDK onto @barkpark/core without breaking existing consumers mid-transition",
+      "scale": "epic",
+      "evidence": "package.json name '@barkpark/client', description '[DEPRECATED] Framework-agnostic TypeScript client for the Barkpark v1 HTTP API — superseded by @barkpark/core', deprecated field set, yet build/test tooling (tsup, vitest) is still fully maintained rather than archived"
+    }
+  ]
+}

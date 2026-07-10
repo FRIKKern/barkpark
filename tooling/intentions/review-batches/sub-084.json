@@ -1,0 +1,31 @@
+{
+  "subsystem": "api/lib/barkpark/audit",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark/audit/chain.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/audit/event.ex",
+      "role": "",
+      "importance": 51
+    },
+    {
+      "path": "api/lib/barkpark/audit/export.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/audit/export_sink.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/audit/export_worker.ex",
+      "role": "",
+      "importance": 14
+    }
+  ]
+}

@@ -1,1 +1,50 @@
-{"subsystem":"js/packages/nextjs/src","summary":"Next.js App Router integration package that bridges Barkpark's headless CMS to Next.js 15 RSC/SSR patterns — providing server-side data fetching with cache-tag management, webhook-driven cache invalidation, draft/preview mode, and SSE live-reload for editors.","intentions":[{"title":"Zero-boilerplate Next.js 15 data fetching with automatic cache tagging","scale":"epic","evidence":"server/core.ts builds URLs, resolves scope prefixes (workspace/project/dataset), and emits structured next.tags (bp:ds:<ds>:type:<t>, :doc:<id>, :_all) so fetch() force-cache entries are invalidatable at document, type, or dataset granularity without callers managing tags manually"},{"title":"Webhook-driven ISR: keep Next.js pages fresh when CMS content changes","scale":"epic","evidence":"webhook/index.ts (HMAC-SHA256 verify + dedup LRU) + revalidate/index.ts (revalidateTag fan-out) form a closed loop: Phoenix fires webhook → handler verifies → revalidateBarkpark calls revalidateTag on canonical tags → Next.js drops stale cache entries"},{"title":"Secure content preview via signed draft-mode tokens","scale":"small","evidence":"draft-mode/index.ts issues signDraftModeToken (HMAC over path+expiry, 10-min TTL) and createDraftModeRoutes (GET enables draftMode, DELETE disables); core.ts branches on draftMode().isEnabled to switch to no-store + perspective=drafts + Bearer token"},{"title":"Live editor experience: SSE-driven page refresh without full reload","scale":"small","evidence":"client/live.tsx mounts BarkparkLive / BarkparkLiveProvider, subscribes via client.listen() SSE, debounces router.refresh() calls; edge-runtime guard (three-layer ADR-005 detector) prevents misuse in CF Workers / Vercel Edge"},{"title":"Backward compatibility across scoped and legacy tag namespaces","scale":"small","evidence":"Both server/core.ts (resolveTagPrefix) and revalidate/index.ts (tagPrefix) emit either scoped bp:ws:<ws>:p:<project>:ds:<dataset> or legacy flat bp:ds:<dataset> tags based on whether workspace+project are present, so old and new deployments interoperate"},{"title":"Secure webhook ingestion hardened against replay and timing attacks","scale":"small","evidence":"webhook/index.ts uses timingSafeEqual for HMAC comparison, enforces ±5-min freshness window, deduplicates by delivery-id via LRU, and supports secret rotation via previousSecret fallback"},{"title":"Clean RSC / client-component boundary enforcement","scale":"small","evidence":"server/core.ts imports 'server-only', explicitly does NOT export BarkparkLive (to avoid React.createContext in the react-server graph), and documents the split; client/live.tsx is 'use client'; separate subpath exports enforce the boundary at the package level"}]}
+{
+  "subsystem": "internal/taskboard",
+  "intentions": [
+    {
+      "title": "Give `bp tasks` a tall, narrow, always-glanceable portrait TUI that organizes the whole task corpus into epics/clusters/orphans with live work always on top",
+      "scale": "epic",
+      "evidence": "program.go doc comment: 'a tall, narrow, always-glanceable live pane organized by epics, active work on top, latest movement first'; board.go BuildBoard is described as 'the ENTIRE zero-config organization policy for the portrait task TUI'; types.go Board struct with Now/Epics/Clusters/Orphans/Next fields; render.go Render draws 'the whole portrait frame for a 60-100col x 100+row pane'"
+    },
+    {
+      "title": "Make BuildBoard a pure, deterministic function of (snapshot, repo, now) so goldens and unit tests never depend on wall-clock or network",
+      "scale": "invariant",
+      "evidence": "board.go: 'It is pure: the same (snapshot, repo, now) always yields the same Board, and it never reads the wall clock'; render.go Render doc: 'It is pure — no I/O, no tea, no network — so goldens are the primary gate'"
+    },
+    {
+      "title": "Never trust event payloads as truth — every SSE/poll signal only marks the board dirty and triggers a full refetch, eliminating drift and ghost rows",
+      "scale": "invariant",
+      "evidence": "live.go: 'The one iron rule (charter decision #4): events NEVER carry truth. An SSE frame only says \"something moved\"; the refetch says WHAT is true. We refetch the whole snapshot and rebuild the board — never apply an event payload incrementally'"
+    },
+    {
+      "title": "Curate a deeply-scored NEXT intent strip (continuity, unblock leverage, well-formedness, zombie discount) instead of a raw priority-sorted ready queue",
+      "scale": "feature",
+      "evidence": "board.go D65 comment + scoreReadyTask/resolveNext: nextContinuityBoost=200, nextLeveragePer=30, nextWellFormedBoost=100, nextZombiePenalty=50; user directive quoted verbatim: 'What is set as \"Next\" must be deeply curated'"
+    },
+    {
+      "title": "Compute an honest dispatch Frontier — the maximum set of ready tasks that can be worked in parallel without blast-radius collisions — shared identically by the TUI's IndependentReady count and the `bp task frontier` CLI verb",
+      "scale": "feature",
+      "evidence": "frontier.go: 'This file is the REAL interference model both the TUI count (Board.IndependentReady) and the CLI verb (`bp task frontier`) read — ONE function, so the two surfaces can never drift'; RiskClass tiers (file-isolated/isolated/neighborhood); CrossEdges cross-root block-edge precision; quoted wish about sending out 50 agents safely"
+    },
+    {
+      "title": "Auto-fold the board to what matters now: active work (NOW-pinned claims) always wins, dormant/finished/cancelled sections collapse to single lines or tombstones, and long-closed tasks never flood the view",
+      "scale": "invariant",
+      "evidence": "board.go Active/Demoted/Workable logic, finishedGraceAfter, doneCueMax=2 folding regardless of age, CancelledFolded folding at any age (charter wave-10 W10-B), staleBandAfter/staleCountAfter thresholds, sortEpics ranking Active desc then repo-mention then LastActivity"
+    },
+    {
+      "title": "Derive relatedness structure (label clusters, twin near-duplicate detection, focus-window neighborhoods) from the corpus itself instead of requiring authored organization",
+      "scale": "feature",
+      "evidence": "board.go deriveClusters/clusterKey (proj:/area:/shared-label fallback), detectTwins/assignTwins via title-token Jaccard (twinThreshold=0.6, suggestThreshold=0.4), computeFocus/sectionFocus focus-window construction (focusParents/focusSiblings/focusChildren, focusWindowMax=12)"
+    },
+    {
+      "title": "Give every cmux pane a single stable, fencing-safe task-claim worker identity so subagents in the same pane share one lease instead of colliding",
+      "scale": "invariant",
+      "evidence": "cmux.go CmuxWorkerID four-tier precedence (BARKPARK_WORKER_ID > cmux-$CMUX_SURFACE_ID > cmux-$CMUX_WORKSPACE_ID > ResolveWorker); doc comment: 'The PANE owns the task, not the individual agent... every subagent's claim renews the pane's ONE lease (re-claim under the same worker = renewal, never a 409)'"
+    },
+    {
+      "title": "Keep the board's semantic color vocabulary (RoleOK/Info/Warn/Danger/Neutral) as state-meaning, never decoration, shared with the CLI's status-role set",
+      "scale": "invariant",
+      "evidence": "theme.go: 'The names mirror PR #979's CLI statusRole set (ok/info/warn/danger) exactly so a later reconciliation slice can extract them to a shared internal package without a rename. Color means STATE here, never decoration — RoleFor is the single mapping point'"
+    }
+  ]
+}

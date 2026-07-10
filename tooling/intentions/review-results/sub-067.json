@@ -1,0 +1,35 @@
+{
+  "subsystem": "js/docs/app",
+  "intentions": [
+    {
+      "title": "Ship a standalone, deployable Barkpark documentation site built on Fumadocs/Next.js App Router",
+      "scale": "feature",
+      "evidence": "layout.tsx wraps the whole app in fumadocs-ui's RootProvider and imports fumadocs-ui/style.css; layout.config.tsx defines shared BaseLayoutProps (nav title 'Barkpark'); (home)/layout.tsx and docs/layout.tsx both consume baseOptions from the single layout.config.tsx so nav/branding stays consistent across the marketing home and the docs section."
+    },
+    {
+      "title": "Drive all docs content from MDX files through one typed source-of-truth (`@/lib/source`) rather than hand-built routes",
+      "scale": "invariant",
+      "evidence": "docs/[[...slug]]/page.tsx is a catch-all page.tsx that resolves `source.getPage(params.slug)`, calls notFound() when missing, and renders `page.data.body` as MDX with fumadocs-ui/mdx defaultMdxComponents; generateStaticParams() calls source.generateParams() and generateMetadata() derives title/description from the same source — one page component serves the entire docs tree."
+    },
+    {
+      "title": "Make the docs site statically pre-rendered and SEO-correct for every doc page",
+      "scale": "invariant",
+      "evidence": "generateStaticParams (source.generateParams()) and generateMetadata (per-page title/description from page.data) in docs/[[...slug]]/page.tsx ensure every MDX doc is built as a static route with correct <title>/description metadata, not client-fetched."
+    },
+    {
+      "title": "Provide full-text search over the documentation corpus via a dedicated API route",
+      "scale": "feature",
+      "evidence": "app/api/search/route.ts wires fumadocs-core's createFromSource(source) directly to a GET handler — the same `source` object that backs page rendering also powers search indexing, so search results stay in sync with published docs without a separate index-build step."
+    },
+    {
+      "title": "Give first-time visitors a minimal, frictionless landing page that funnels straight into the getting-started guide",
+      "scale": "feature",
+      "evidence": "(home)/page.tsx is a bare-bones centered page ('Barkpark docs' + one link) pointing to /docs/getting-started, wrapped by (home)/layout.tsx's HomeLayout — distinct from the docs/layout.tsx DocsLayout used for the actual doc tree, so home and docs get different chrome (marketing shell vs. sidebar+TOC shell)."
+    },
+    {
+      "title": "Keep the docs app config surface tiny and centralized so branding/nav changes happen in one place",
+      "scale": "invariant",
+      "evidence": "All 7 files total ~128 lines; layout.config.tsx (7 lines) is the single BaseLayoutProps export imported by both (home)/layout.tsx and docs/layout.tsx — no duplicated nav/title config across the two layout branches."
+    }
+  ]
+}

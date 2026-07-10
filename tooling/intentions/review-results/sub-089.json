@@ -1,0 +1,45 @@
+{
+  "subsystem": "api/lib/barkpark_web/controllers/session_html",
+  "intentions": [
+    {
+      "title": "Give Studio a full self-hosted auth surface — password, magic link, MFA, and password reset — not just a single login form",
+      "scale": "feature",
+      "evidence": "Five templates (new, magic_request, mfa, reset_request, reset) each own one distinct auth flow, all sharing action targets like ~p\"/login\", ~p\"/login/magic\", ~p\"/login/mfa\", ~p\"/login/reset\", ~p\"/auth/reset/#{@token}\"."
+    },
+    {
+      "title": "Let self-hosted instances federate into Barkpark Cloud login without forcing it",
+      "scale": "feature",
+      "evidence": "new.html.heex conditionally renders a 'Log in with Barkpark Cloud' button (@cloud_login_href, data-cloud-login) above the local email/password form, with a divider labeled 'or sign in with email' — cloud SSO is additive, not a replacement for local auth."
+    },
+    {
+      "title": "Support enterprise SSO (OIDC) discovery without building a picker UI",
+      "scale": "feature",
+      "evidence": "new.html.heex footer text: 'Using enterprise SSO? Open your organization's sign-in link — /v1/auth/oidc/<org>/start — or ask your admin for it.'"
+    },
+    {
+      "title": "Offer raw API-token sign-in as an escape hatch for non-interactive/dev access to Studio",
+      "scale": "feature",
+      "evidence": "new.html.heex embeds a collapsible <details data-token-signin> with a second .form posting to ~p\"/login\" with a token field, separate from the primary account-credential form."
+    },
+    {
+      "title": "Enforce MFA as a second, separate step in the login flow, including a recovery-code fallback path",
+      "scale": "invariant",
+      "evidence": "mfa.html.heex posts a 6-digit code (inputmode=numeric, autocomplete=one-time-code, maxlength=6) to ~p\"/login/mfa\", with a <details> disclosure offering 'Use a recovery code instead' via a separate recovery_code field — MFA is a distinct controller stage, not folded into the primary form."
+    },
+    {
+      "title": "Never leak account existence through password-reset or magic-link email flows",
+      "scale": "invariant",
+      "evidence": "reset_request.html.heex and magic_request.html.heex both use identical non-committal copy after submit: 'If that address has an account, a [password-reset link / sign-in link] is on its way' — same enumeration-safe wording pattern reused across both flows, driven by an @sent boolean toggling the same template between form and confirmation states."
+    },
+    {
+      "title": "Keep a consistent, minimal auth chrome (brand mark, card, flash, password-visibility toggle) across every login-adjacent screen",
+      "scale": "invariant",
+      "evidence": "All five templates wrap content in <.auth_styles />, <div class=\"bp-auth-card\">, <.auth_brand />, and <.auth_flash flash={@flash}/>; new.html.heex and reset.html.heex both ship the identical inline .bp-auth-eye show/hide-password script keyed off data-eye-for, duplicated per-template rather than centralized in JS."
+    },
+    {
+      "title": "Enforce a centrally-defined minimum password length at the reset UI, not hardcoded in markup",
+      "scale": "invariant",
+      "evidence": "reset.html.heex reads minlength={Barkpark.Accounts.User.min_password_length()} and echoes it in help text 'At least {Barkpark.Accounts.User.min_password_length()} characters.' — single source of truth from the Accounts context."
+    }
+  ]
+}

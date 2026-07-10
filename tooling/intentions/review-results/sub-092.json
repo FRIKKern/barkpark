@@ -1,0 +1,40 @@
+{
+  "subsystem": "cloud",
+  "intentions": [
+    {
+      "title": "Run a standalone Barkpark Cloud control-plane app (Plug+Bandit, not Phoenix/LiveView) that exposes Accounts/Registry/Billing over a minimal JSON API for the agent and the Go CLI",
+      "scale": "epic",
+      "evidence": "cloud/mix.exs deps comment for cloud-12a: 'the minimal JSON API that exposes the Accounts/Registry/Billing contexts to the agent (cloud-10) and the Go CLI client (cloud-12b)... deliberately NOT full Phoenix/LiveView'; plug+bandit deps"
+    },
+    {
+      "title": "Ship a self-hosted outbound mail relay (Postfix + OpenDKIM) so the control plane sends authenticated, DKIM-signed mail without depending on a third-party ESP",
+      "scale": "feature",
+      "evidence": "cloud/postfix/entrypoint.sh generates DKIM keypair + KeyTable/SigningTable, configures relaxed/relaxed canonicalization, sets up SASL-gated submission (587) with mandatory STARTTLS, disables the chrooted default smtp listener to fix outbound MX lookups"
+    },
+    {
+      "title": "Bake secretless, DB-untouched release images: `mix release` produces a self-contained OTP release that reads DATABASE_URL etc. only at container boot, never at build time",
+      "scale": "invariant",
+      "evidence": "cloud/mix.exs comment: 'It does NOT touch the DB at build time: runtime.exs reads DATABASE_URL et al. at boot, so the image bakes with no secrets and no Postgres reachable. The container migrates then starts the release'"
+    },
+    {
+      "title": "Keep restart of the mail relay container idempotent — never rotate DKIM keys or invalidate published DNS TXT records on a restart",
+      "scale": "invariant",
+      "evidence": "entrypoint.sh: 'Idempotent: safe to re-run on every container start. Generates the DKIM keypair and a fallback self-signed TLS cert only if they don't already exist on the mounted volumes, so restarts don't rotate keys or invalidate published DNS records.'"
+    },
+    {
+      "title": "Give operators a safe, transactional hand-crank to bootstrap the very first admin account (user+team+owner membership) on a fresh control-plane box before public signup exists",
+      "scale": "feature",
+      "evidence": "cloud/lib/mix/tasks/barkpark_cloud.create_admin.ex: single Repo.transaction wrapping register_user/create_team/add_member, idempotent re-run (email_taken → loud non-zero exit not a crash), slug dedup pre-insert to avoid aborting the transaction on unique violation"
+    },
+    {
+      "title": "Let admins grant a Team a permanent 'forever' comp licence that bypasses Stripe billing entirely, for internal/complimentary accounts",
+      "scale": "feature",
+      "evidence": "cloud/lib/mix/tasks/barkpark_cloud.grant_forever.ex: calls Billing.grant_forever/1 to write/convert an active `forever` subscription with no gateway ids; resolves team by id, slug, or owner email; idempotent no-op if already forever; explicit caveat that a real Stripe sub must be cancelled separately"
+    },
+    {
+      "title": "Share one background-job/cron substrate (Oban) and one dependency-tier philosophy across api/ and cloud/ so both apps reuse the same Postgres-backed mental model with no new infra",
+      "scale": "invariant",
+      "evidence": "cloud/mix.exs: '{:oban, ~> 2.17} ... Same major as api/mix.exs's dep so both apps share one Oban mental model. Postgres-backed — it reuses BarkparkCloud.Repo, so no Redis and no new infra/secret'"
+    }
+  ]
+}

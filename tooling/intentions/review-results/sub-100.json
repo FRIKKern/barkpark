@@ -1,0 +1,40 @@
+{
+  "subsystem": "tooling/lib",
+  "intentions": [
+    {
+      "title": "Compute the four cody composite scores (hotspot, priority, refactorWorth, criticalUntested) from one orthogonal set of roots so no two report generators can silently disagree",
+      "scale": "invariant",
+      "evidence": "scoring.mjs enforces SIGNALS.md's rule that each root (reach, churn, tokens, defs, defectDensity, testScore) is measured once and composites only combine ACROSS roots ('no root reaches a composite twice'); gatherRoots() unions usefulness/file-signals/ergonomics/risk reports into one normalized 0-1 map; composites() does a weighted geometric blend so quality.mjs and combine.mjs both import loadConfig/gatherRoots/composites instead of recomputing."
+    },
+    {
+      "title": "Let scoring weights and cut-points be tuned via a fitted config (tooling/fit/scoring-config.json) without ever depending on a fit run having happened",
+      "scale": "feature",
+      "evidence": "scoring.mjs loadConfig() falls back to DEFAULT_COMPOSITES/DEFAULT_THRESHOLDS baked into the file when the fit config is missing, low-confidence, or sparse; fitted composite forms only 'win' when confidence is OK, defaults backfill missing keys."
+    },
+    {
+      "title": "Kill duplicated magic-number thresholds across the scoring suite by making thresholds.mjs the single source of truth, with each constant's derivation and coupling documented inline",
+      "scale": "invariant",
+      "evidence": "thresholds.mjs comments record exactly which files/formulas each constant was extracted from (FRAGILE_DENSITY was duplicated in risk.mjs+quality.mjs, COLLINEARITY_CUT in fit.mjs logic+self-report, HOTSPOT/PRIORITY_PERCENTILE in scoring.mjs+fit.mjs, UNTESTED_SCORE in risk.mjs+status/report.mjs) — 'change one, forget the others, two reports silently disagree' is the failure mode being closed."
+    },
+    {
+      "title": "Allow scoring formulas and piecewise functions to be authored/tuned through a Barkpark paper without ever executing arbitrary code",
+      "scale": "feature",
+      "evidence": "formula.mjs implements a dependency-free recursive-descent evaluator (ternary/comparison/additive/term/factor) with a fixed function whitelist (max/min/sqrt/abs/log/log2/pow/round/floor/ceil) and no eval/Function — comment says this is 'rung 3 (formulas) and 4 (piecewise function-cells) of cody'; formulaVars() lets a bound expression be validated against permitted variables before use."
+    },
+    {
+      "title": "Turn single-vote agent judgments (file criticality, drift verdicts) into an N-vote consensus with an explicit contested flag instead of silently trusting or averaging one opinion",
+      "scale": "feature",
+      "evidence": "consensus.mjs collectVotes() reads either a flat results/ dir (single vote, back-compatible) or results/vote-*/ subdirs (N independent passes dispatched by the codebase-quality skill orchestrator); numericConsensus() takes the outlier-robust median plus stddev-based agreement, categoricalConsensus() takes plurality with contested when there's no strict majority."
+    },
+    {
+      "title": "Give every tooling/ script one shared, precedence-ordered way to resolve which Barkpark instance (local vs cloud) it talks to, instead of each script hard-coding localhost:4000",
+      "scale": "invariant",
+      "evidence": "barkpark-env.mjs resolveEnv() implements flag > BARKPARK_* env > barkpark.json > baked default, mirrors the Go bp CLI's internal/cli/config.go chain, adds a barkpark.json project layer the CLI lacked, probes /v1/capabilities for reachability, and falls over from a dead local host to a reachable barkpark.json-declared host (preferring cloud) — only when the host was derived, never when explicitly forced by flag/env."
+    },
+    {
+      "title": "Keep secrets out of committed config: barkpark.json declares reachable hosts/datasets but real tokens only ever come from environment variables",
+      "scale": "invariant",
+      "evidence": "barkpark-env.mjs comment: 'barkpark.json is COMMITTED, PUBLIC and SECRET-FREE — it answers where does this repo's Barkpark live, never what's my token'; token resolution is flag > BARKPARK_TOKEN env > DEV default, never read from barkpark.json."
+    }
+  ]
+}

@@ -1,48 +1,76 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter/app",
-  "count": 7,
+  "subsystem": "tooling/concept-map",
+  "count": 14,
   "files": [
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/posts/[slug]/draft-preview.tsx",
-      "role": "blog starter draft-mode post preview client component",
-      "importance": 5,
-      "usefulness": 13
+      "path": "tooling/concept-map/acceptance-p1.mjs",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/posts/[slug]/page.tsx",
-      "role": "blog starter post detail page",
-      "importance": 5,
-      "usefulness": 6
+      "path": "tooling/concept-map/acceptance-p2.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/api/barkpark/webhook/route.ts",
-      "role": "blog starter webhook revalidation route",
-      "importance": 5,
-      "usefulness": 4
+      "path": "tooling/concept-map/acceptance-p3.mjs",
+      "role": "",
+      "importance": 13
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/tags/[slug]/page.tsx",
-      "role": "blog starter tag detail page",
-      "importance": 4,
-      "usefulness": 5
+      "path": "tooling/concept-map/acceptance-p4.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/api/exit-preview/route.ts",
-      "role": "blog starter exit-draft-mode route",
-      "importance": 4,
-      "usefulness": 3
+      "path": "tooling/concept-map/acceptance-p5.mjs",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/api/preview/route.ts",
-      "role": "blog starter enter-draft-mode route",
-      "importance": 4,
-      "usefulness": 3
+      "path": "tooling/concept-map/anatomy.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/authors/[id]/page.tsx",
-      "role": "blog starter author detail page",
-      "importance": 4,
-      "usefulness": 3
+      "path": "tooling/concept-map/boundary.mjs",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "tooling/concept-map/ci-boundary.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/concept-map/concepts.mjs",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "tooling/concept-map/entrypoints.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/concept-map/grade.mjs",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "tooling/concept-map/manifest.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/concept-map/registration.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/concept-map/scaffold.mjs",
+      "role": "",
+      "importance": 1
     }
   ]
 }

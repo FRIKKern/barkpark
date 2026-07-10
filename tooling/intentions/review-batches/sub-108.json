@@ -1,0 +1,26 @@
+{
+  "subsystem": ".",
+  "count": 4,
+  "files": [
+    {
+      "path": "deploy.sh",
+      "role": "server provisioning and deploy script",
+      "importance": 33
+    },
+    {
+      "path": "dev.sh",
+      "role": "local dev environment launcher",
+      "importance": 9
+    },
+    {
+      "path": "run.sh",
+      "role": "local dev launcher script",
+      "importance": 29
+    },
+    {
+      "path": "watch.sh",
+      "role": "Go TUI hot-reload dev script",
+      "importance": 13
+    }
+  ]
+}

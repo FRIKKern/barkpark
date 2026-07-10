@@ -1,102 +1,161 @@
 {
-  "subsystem": "api/lib/barkpark_web",
-  "count": 16,
+  "subsystem": "js/packages/core/src",
+  "count": 31,
   "files": [
     {
-      "path": "api/lib/barkpark_web/router.ex",
-      "role": "Phoenix HTTP route table + pipeline definitions",
-      "importance": 83,
-      "usefulness": 35
+      "path": "js/packages/core/src/analytics.ts",
+      "role": "",
+      "importance": 46
     },
     {
-      "path": "api/lib/barkpark_web/endpoint.ex",
-      "role": "Phoenix HTTP entrypoint / plug pipeline",
-      "importance": 71,
-      "usefulness": 26
+      "path": "js/packages/core/src/auth.ts",
+      "role": "",
+      "importance": 57
     },
     {
-      "path": "api/lib/barkpark_web/router/plugins.ex",
-      "role": "compile-time plugin route injection macro",
-      "importance": 55,
-      "usefulness": 32
+      "path": "js/packages/core/src/backlinks.ts",
+      "role": "",
+      "importance": 51
     },
     {
-      "path": "api/lib/barkpark_web/live_auth.ex",
-      "role": "LiveView auth on_mount hooks",
-      "importance": 54,
-      "usefulness": 28
+      "path": "js/packages/core/src/client.ts",
+      "role": "JS SDK client factory and main method implementations",
+      "importance": 60
     },
     {
-      "path": "api/lib/barkpark_web/live_scope.ex",
-      "role": "LiveView mount hook for scoped-URL tenant resolution and re-auth",
-      "importance": 52,
-      "usefulness": 29
+      "path": "js/packages/core/src/doc.ts",
+      "role": "JS SDK single-document fetch operation",
+      "importance": 59
     },
     {
-      "path": "api/lib/barkpark_web/error_envelope.ex",
-      "role": "API error envelope serializer (v1/v2)",
-      "importance": 44,
-      "usefulness": 31
+      "path": "js/packages/core/src/docs.ts",
+      "role": "JS SDK fluent list-query operation",
+      "importance": 59
     },
     {
-      "path": "api/lib/barkpark_web/studio_chrome.ex",
-      "role": "Shared Studio top-bar LiveView hook",
-      "importance": 44,
-      "usefulness": 30
+      "path": "js/packages/core/src/errors.ts",
+      "role": "JS SDK error class taxonomy",
+      "importance": 58
     },
     {
-      "path": "api/lib/barkpark_web/channels/search_channel.ex",
-      "role": "WebSocket channel for per-keystroke live search",
-      "importance": 44,
-      "usefulness": 23
+      "path": "js/packages/core/src/export.ts",
+      "role": "",
+      "importance": 51
     },
     {
-      "path": "api/lib/barkpark_web/plugin_scope_session.ex",
-      "role": "HTTP-to-LiveView scope bridge for plugin scoped LiveViews",
-      "importance": 46,
-      "usefulness": 20
+      "path": "js/packages/core/src/fetchRaw.ts",
+      "role": "JS SDK escape-hatch raw HTTP fetch",
+      "importance": 56
     },
     {
-      "path": "api/lib/barkpark_web/search_intel.ex",
-      "role": "search request metadata extractor",
-      "importance": 30,
-      "usefulness": 30
+      "path": "js/packages/core/src/filter-builder.ts",
+      "role": "SDK query filter/builder and query-string encoder",
+      "importance": 60
     },
     {
-      "path": "api/lib/barkpark_web/v1/media_search_params.ex",
-      "role": "media search query param parser",
-      "importance": 31,
-      "usefulness": 29
+      "path": "js/packages/core/src/graph.ts",
+      "role": "",
+      "importance": 57
     },
     {
-      "path": "api/lib/barkpark_web/channels/user_socket.ex",
-      "role": "Phoenix WebSocket auth gate for SearchChannel",
-      "importance": 35,
-      "usefulness": 17
+      "path": "js/packages/core/src/handshake.ts",
+      "role": "SDK meta-endpoint cache",
+      "importance": 57
     },
     {
-      "path": "api/lib/barkpark_web/presence.ex",
-      "role": "Phoenix Presence module definition",
-      "importance": 26,
-      "usefulness": 20
+      "path": "js/packages/core/src/history.ts",
+      "role": "",
+      "importance": 57
     },
     {
-      "path": "api/lib/barkpark_web/telemetry.ex",
-      "role": "telemetry supervisor and metrics definitions",
-      "importance": 27,
-      "usefulness": 5
+      "path": "js/packages/core/src/image-url.ts",
+      "role": "",
+      "importance": 58
     },
     {
-      "path": "api/lib/barkpark_web/layouts.ex",
-      "role": "layout template embedder",
-      "importance": 26,
-      "usefulness": 5
+      "path": "js/packages/core/src/index.ts",
+      "role": "JS SDK public API surface / barrel export",
+      "importance": 76
     },
     {
-      "path": "api/lib/barkpark_web/gettext.ex",
-      "role": "i18n backend module",
-      "importance": 13,
-      "usefulness": 2
+      "path": "js/packages/core/src/listen.ts",
+      "role": "SSE live-stream transport",
+      "importance": 59
+    },
+    {
+      "path": "js/packages/core/src/media.ts",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "js/packages/core/src/patch.ts",
+      "role": "Single-document patch builder",
+      "importance": 60
+    },
+    {
+      "path": "js/packages/core/src/publish.ts",
+      "role": "Draft publish/unpublish mutations",
+      "importance": 58
+    },
+    {
+      "path": "js/packages/core/src/retry.ts",
+      "role": "HTTP retry policy engine",
+      "importance": 55
+    },
+    {
+      "path": "js/packages/core/src/schemas.ts",
+      "role": "",
+      "importance": 58
+    },
+    {
+      "path": "js/packages/core/src/scope.ts",
+      "role": "URL scope prefix builder",
+      "importance": 51
+    },
+    {
+      "path": "js/packages/core/src/search.ts",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "js/packages/core/src/tenancy.ts",
+      "role": "Workspace and project enumeration client",
+      "importance": 58
+    },
+    {
+      "path": "js/packages/core/src/transaction.ts",
+      "role": "Atomic multi-mutation transaction builder",
+      "importance": 59
+    },
+    {
+      "path": "js/packages/core/src/transport.ts",
+      "role": "Core HTTP transport layer",
+      "importance": 59
+    },
+    {
+      "path": "js/packages/core/src/types.ts",
+      "role": "JS SDK canonical type definitions",
+      "importance": 60
+    },
+    {
+      "path": "js/packages/core/src/webhook.ts",
+      "role": "",
+      "importance": 56
+    },
+    {
+      "path": "js/packages/core/src/webhooks.ts",
+      "role": "",
+      "importance": 56
+    },
+    {
+      "path": "js/packages/core/src/util/edge-detect.ts",
+      "role": "Edge runtime detector",
+      "importance": 53
+    },
+    {
+      "path": "js/packages/core/src/util/headers.ts",
+      "role": "HTTP header utilities",
+      "importance": 46
     }
   ]
 }

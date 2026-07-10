@@ -1,0 +1,35 @@
+{
+  "subsystem": "templates",
+  "intentions": [
+    {
+      "title": "Let a newcomer stand up a working Barkpark-backed 'place directory' site in one shell command against any dataset",
+      "scale": "feature",
+      "evidence": "templates/place-directory/install.sh is POSIX sh + curl only, driven entirely by BARKPARK_SERVER/BARKPARK_API_TOKEN/BARKPARK_DATASET env vars, and does schema install → seed → smoke test in three named steps."
+    },
+    {
+      "title": "Template installers are safe to re-run without corrupting or duplicating state",
+      "scale": "invariant",
+      "evidence": "Header comment states 'Idempotent: the schema upsert and createOrReplace seeds can be re-run safely'; schema POST is an upsert to /v1/schemas/{dataset}, seed POST uses createOrReplace semantics against /v1/data/mutate/{dataset}."
+    },
+    {
+      "title": "Prove the template actually works end-to-end against the real public read API before declaring success, not just that the writes succeeded",
+      "scale": "invariant",
+      "evidence": "Step 3/3 queries /v1/data/query/{dataset}/place?filter[status]=published and counts _id occurrences — a genuine smoke test of the same public endpoint the frontend consumes, not merely checking HTTP 200 on the seed call."
+    },
+    {
+      "title": "Bridge the gap between draft-vs-published content models so template consumers aren't silently stuck with zero visible content",
+      "scale": "feature",
+      "evidence": "When COUNT=0 the script prints a specific diagnostic: createOrReplace may write DRAFTS (Sanity-style) on some Barkpark versions, and tells the user exactly how to publish via Studio."
+    },
+    {
+      "title": "Hand off a ready-to-run Next.js frontend config at the end of a successful install, closing the loop from empty dataset to a running finder demo",
+      "scale": "feature",
+      "evidence": "On success the script prints NEXT_PUBLIC_FINDER_LANDING=map, NEXT_PUBLIC_BARKPARK_API_URL, BARKPARK_DATASET, LISTINGS_TYPE=place — the exact env vars the web finder needs to point at this seeded server."
+    },
+    {
+      "title": "Grow a library of copy-paste-ready starter templates (place-directory, blog-starter, website-starter) that each demonstrate a full schema+seed+frontend-wiring pattern on top of the Barkpark API",
+      "scale": "epic",
+      "evidence": "templates/ directory holds multiple sibling starters (blog-starter, place-directory, website-starter) plus MANIFEST.md and a barkpark.template.schema.json describing a template manifest contract, indicating a general 'template' product surface, not a one-off script."
+    }
+  ]
+}

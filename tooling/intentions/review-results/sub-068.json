@@ -1,0 +1,30 @@
+{
+  "subsystem": "js",
+  "intentions": [
+    {
+      "title": "Guarantee the JS SDK's edge-reachable code paths never import Node-only APIs, so `@barkpark/core` and the Next.js client/server/webhook subpaths run on Vercel Edge / Cloudflare-style runtimes",
+      "scale": "invariant",
+      "evidence": "js/scripts/check-no-node-imports.sh greps for `node:` imports/requires across packages/core/src and packages/nextjs/src/{client,server,webhook,draft-mode}; js/CLAUDE.md documents this as the ADR-002 edge-contract, notes webhook was ported to Web Crypto (#498) specifically to satisfy it, and that draft-mode is a known, tracked violation kept advisory pending an ADR amendment."
+    },
+    {
+      "title": "Make SDK packages consumable by both legacy CJS `require` and modern ESM/Bundler-resolution consumers without hand-maintained type-declaration files",
+      "scale": "invariant",
+      "evidence": "js/scripts/post-build-dts.mjs runs after tsup emits `.d.ts`/`.d.cts` and duplicates each `.d.ts` to `.d.mts` per spec §2.5/ADR-001 L22, so `import.types` resolves correctly under `moduleResolution: \"Bundler\"`/`\"NodeNext\"` while `.d.cts` continues to serve `require.types`."
+    },
+    {
+      "title": "Keep the JS monorepo's static-analysis bar high without false-positive noise: no unused vars, type-only imports enforced, no swallowed promise rejections",
+      "scale": "invariant",
+      "evidence": "js/eslint.config.js enables @typescript-eslint/no-unused-vars (with `_`-prefix escape hatch), consistent-type-imports, and no-floating-promises as 'error', scoped to **/*.{ts,tsx} with dist/node_modules/.turbo/docs excluded."
+    },
+    {
+      "title": "Let every package's tests exercise real HTTP-client code paths against a fake Barkpark API instead of hand-mocked fetch calls, so tests catch client-contract drift",
+      "scale": "feature",
+      "evidence": "js/test-utils/msw/handlers.ts stubs /v1/meta, /v1/schemas/:dataset, /v1/data/query, /v1/data/doc, and /v1/data/mutate with response shapes matching the real API; js/test-utils/msw/server.ts wires them into an MSW node server; js/test-utils/vitest.setup.ts starts/resets/closes it around the whole suite via beforeAll/afterEach/afterAll, giving every package a shared, consistent mock-API fixture."
+    },
+    {
+      "title": "Reserve a real smoke-test slot for verifying Vercel preview deploys (RSC render, edge-route response, edge-runtime `client.listen()` throw) once the Next.js integration is far enough along",
+      "scale": "feature",
+      "evidence": "js/scripts/vercel-preview-smoke.sh is an explicit stub (exits 0, echoes 'stub (Phase 5)') with a TODO listing the three assertions it must eventually wire — evidence of a planned but not-yet-built CI/CD verification gate for the nextjs package's edge-compat claims."
+    }
+  ]
+}

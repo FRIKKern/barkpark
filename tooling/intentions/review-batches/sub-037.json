@@ -1,42 +1,71 @@
 {
-  "subsystem": "api/lib/barkpark_web/components/fields",
-  "count": 6,
+  "subsystem": "cloud/lib/barkpark_cloud/registry",
+  "count": 13,
   "files": [
     {
-      "path": "api/lib/barkpark_web/components/fields/composite_field.ex",
-      "role": "recursive composite field form component",
-      "importance": 43,
-      "usefulness": 56
+      "path": "cloud/lib/barkpark_cloud/registry/agent_event.ex",
+      "role": "",
+      "importance": 14
     },
     {
-      "path": "api/lib/barkpark_web/components/fields/visibility.ex",
-      "role": "Schema-driven field visibility predicate evaluator",
-      "importance": 38,
-      "usefulness": 54
+      "path": "cloud/lib/barkpark_cloud/registry/agent_token.ex",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark_web/components/fields/array_field.ex",
-      "role": "LiveView HEEx component for arrayOf fields",
-      "importance": 37,
-      "usefulness": 54
+      "path": "cloud/lib/barkpark_cloud/registry/azure_catalog.ex",
+      "role": "",
+      "importance": 11
     },
     {
-      "path": "api/lib/barkpark_web/components/fields/codelist_field.ex",
-      "role": "Studio form component for codelist fields",
-      "importance": 37,
-      "usefulness": 52
+      "path": "cloud/lib/barkpark_cloud/registry/barkpark.ex",
+      "role": "",
+      "importance": 17
     },
     {
-      "path": "api/lib/barkpark_web/components/fields/localized_text_field.ex",
-      "role": "Studio form component for localized text fields",
-      "importance": 37,
-      "usefulness": 51
+      "path": "cloud/lib/barkpark_cloud/registry/deployment.ex",
+      "role": "",
+      "importance": 16
     },
     {
-      "path": "api/lib/barkpark_web/components/fields/tree_codelist_field.ex",
-      "role": "hierarchical codelist picker LiveComponent",
-      "importance": 36,
-      "usefulness": 48
+      "path": "cloud/lib/barkpark_cloud/registry/env_var.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/hetzner_catalog.ex",
+      "role": "",
+      "importance": 16
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/instance_api_catalog.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/provider.ex",
+      "role": "",
+      "importance": 11
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/provision_job.ex",
+      "role": "",
+      "importance": 17
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/site.ex",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/vault.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/registry/warm_server.ex",
+      "role": "",
+      "importance": 11
     }
   ]
 }

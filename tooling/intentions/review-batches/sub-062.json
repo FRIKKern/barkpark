@@ -1,16 +1,41 @@
 {
-  "subsystem": ".claude",
-  "count": 2,
+  "subsystem": "api/lib/barkpark/media/storage",
+  "count": 7,
   "files": [
     {
-      "path": ".claude/hooks/on-pre-tool-use.sh",
+      "path": "api/lib/barkpark/media/storage/access.ex",
       "role": "",
-      "importance": 5
+      "importance": 45
     },
     {
-      "path": ".claude/workflows/view-edit-parity.workflow.js",
+      "path": "api/lib/barkpark/media/storage/checkout.ex",
       "role": "",
-      "importance": 5
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark/media/storage/collections.ex",
+      "role": "",
+      "importance": 38
+    },
+    {
+      "path": "api/lib/barkpark/media/storage/media_file.ex",
+      "role": "",
+      "importance": 60
+    },
+    {
+      "path": "api/lib/barkpark/media/storage/relations.ex",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark/media/storage/share.ex",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark/media/storage/signed_url.ex",
+      "role": "",
+      "importance": 38
     }
   ]
 }

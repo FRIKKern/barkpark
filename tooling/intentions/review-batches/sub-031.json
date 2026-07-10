@@ -1,54 +1,81 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/src",
-  "count": 8,
+  "subsystem": "internal/cli/cloud",
+  "count": 15,
   "files": [
     {
-      "path": "js/packages/create-barkpark-app/src/index.ts",
-      "role": "CLI entrypoint for project scaffolding",
-      "importance": 27,
-      "usefulness": 12
+      "path": "internal/cli/cloud/bundle.go",
+      "role": "",
+      "importance": 58
     },
     {
-      "path": "js/packages/create-barkpark-app/src/scaffold.ts",
-      "role": "Template file copier for scaffolder",
-      "importance": 19,
-      "usefulness": 9
+      "path": "internal/cli/cloud/bundle_store.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "js/packages/create-barkpark-app/src/prompts.ts",
-      "role": "CLI scaffolder interactive prompts",
-      "importance": 17,
-      "usefulness": 8
+      "path": "internal/cli/cloud/dns.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "js/packages/create-barkpark-app/src/constants.ts",
-      "role": "scaffolder constants (version, templates, demo URL)",
-      "importance": 18,
-      "usefulness": 6
+      "path": "internal/cli/cloud/dns_cloud.go",
+      "role": "",
+      "importance": 54
     },
     {
-      "path": "js/packages/create-barkpark-app/src/pm.ts",
-      "role": "Package manager detector",
-      "importance": 13,
-      "usefulness": 8
+      "path": "internal/cli/cloud/fake.go",
+      "role": "",
+      "importance": 61
     },
     {
-      "path": "js/packages/create-barkpark-app/src/hosted.ts",
-      "role": "Hosted demo setup helper",
-      "importance": 14,
-      "usefulness": 6
+      "path": "internal/cli/cloud/freshen.go",
+      "role": "",
+      "importance": 59
     },
     {
-      "path": "js/packages/create-barkpark-app/src/install.ts",
-      "role": "Dependency installer helper",
-      "importance": 12,
-      "usefulness": 5
+      "path": "internal/cli/cloud/provider.go",
+      "role": "",
+      "importance": 62
     },
     {
-      "path": "js/packages/create-barkpark-app/src/post-install.ts",
-      "role": "Post-install instructions printer",
-      "importance": 7,
-      "usefulness": 3
+      "path": "internal/cli/cloud/registry.go",
+      "role": "",
+      "importance": 58
+    },
+    {
+      "path": "internal/cli/cloud/restore_driver.go",
+      "role": "",
+      "importance": 45
+    },
+    {
+      "path": "internal/cli/cloud/sshrunner.go",
+      "role": "",
+      "importance": 56
+    },
+    {
+      "path": "internal/cli/cloud/warmpool.go",
+      "role": "",
+      "importance": 62
+    },
+    {
+      "path": "internal/cli/cloud/warmpool_assign.go",
+      "role": "",
+      "importance": 56
+    },
+    {
+      "path": "internal/cli/cloud/azure/auth.go",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "internal/cli/cloud/azure/factory.go",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "internal/cli/cloud/azure/provider.go",
+      "role": "",
+      "importance": 35
     }
   ]
 }

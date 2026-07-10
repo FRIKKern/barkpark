@@ -1,1 +1,55 @@
-{"subsystem":"js/packages","summary":"Secondary JS SDK packages — React renderers, scaffolder CLI, codegen tooling, and reserved-but-deferred stubs (groq, nextjs-query) — that extend the core Barkpark client into framework-specific developer surfaces. Together they form the consumer-facing JS distribution layer.","intentions":[{"title":"Ship a complete, framework-aware JS SDK for Barkpark consumers","scale":"epic","evidence":"react/tsup.config.ts builds dual CJS+ESM with a server entry and auto-injected 'use client' banner; codegen/tsup.config.ts builds a CLI+library for typed-client generation; create-barkpark-app/tsup.config.ts produces a Node scaffolder — together they cover the full DX lifecycle (scaffold → typed client → render)"},{"title":"Enforce React Server Component boundaries at build time","scale":"small","evidence":"react/tsup.config.ts prependUseClient() only on client bundle entries (index.mjs/cjs) while keeping server.ts directive-free, ensuring Next.js App Router can tree-shake correctly without manual annotation"},{"title":"Reserve roadmap surface without shipping broken code","scale":"small","evidence":"groq/src/index.ts and nextjs-query/src/index.ts both throw eagerly at import time with a roadmap URL — prevents accidental 1.0 shipping against empty packages while holding the npm names for 1.1"},{"title":"Keep bundle size a first-class constraint","scale":"small","evidence":"Both react and codegen configs enable treeshake:true and splitting:true; codegen marks heavy deps (chokidar, cac, zod, prettier) as external; react marks react/react-dom/@barkpark/core external — minimising what ships to end-user bundles"},{"title":"Provide a zero-config project scaffolder","scale":"small","evidence":"create-barkpark-app/tsup.config.ts produces a shebang-bannered ESM-only Node 20 binary with version constant baked in, ready for npx consumption without install"}]}
+{
+  "subsystem": "cmd/barkpark",
+  "intentions": [
+    {
+      "title": "One binary serves both the `bp` CLI and the interactive Miller-columns TUI, routed by argv shape",
+      "scale": "epic",
+      "evidence": "main.go: `len(os.Args) > 1` dispatches to cli.Execute (CLI face); no args launches runTUI() (Sanity-Desk-style TUI). Shared apiclient/DataStore underneath both faces; cli.ExitOpenDesk sentinel lets a login-connect CLI flow hand off straight into the TUI desk."
+    },
+    {
+      "title": "Give the terminal a Sanity Studio Structure Builder-equivalent so the desk tree is declared with the same chainable vocabulary (List/ListItem/DocumentTypeList/Document/Divider)",
+      "scale": "feature",
+      "evidence": "structure.go header explicitly maps S.list()/S.listItem()/S.documentTypeList()/S.documentTypeListItem()/S.document()/S.divider() to Go builders producing a StructureNode tree that panes resolve against."
+    },
+    {
+      "title": "Follow the exact same active-server resolution and perspective as the `bp` CLI so `bp use prod` moves the TUI too",
+      "scale": "invariant",
+      "evidence": "main.go runTUI: cfg := cli.ResolvedAPIConfig() — flags > BARKPARK_* env > saved-config active server > baked defaults; reads BARKPARK_PERSPECTIVE (drafts default); first-run/no-server states are intercepted before any network call (cli.FirstRun(), cli.LoggedInWithoutServer())."
+    },
+    {
+      "title": "Give every draft a pre-publish confidence check: a live draft↔published field diff before shipping or discarding",
+      "scale": "feature",
+      "evidence": "diff.go: `d` on a focused draft editor fetches the published twin (GET /v1/data/doc/…) and diffs against dirty-aware editor state; +/- rows reuse ok/danger status hues by convention (comment forbids minting new diff tokens prematurely); inert with a status message when there's nothing to compare."
+    },
+    {
+      "title": "Surface full document revision history in the terminal, read-only by design — restore stays in Studio/API",
+      "scale": "feature",
+      "evidence": "history.go: `H` opens GET /v1/data/history/<ds>/<type>/<bare-id>; enter on a row opens the diff modal over the list (revision vs current); explicit design note: 'a destructive overwrite earns more ceremony than a terminal modal in v1' — no restore action here."
+    },
+    {
+      "title": "Bring Studio's bulk publish/unpublish workflow (multi-select + batch mutate) to the doc-list pane",
+      "scale": "feature",
+      "evidence": "bulk.go: space marks/unmarks a doc-list row keyed by bare published id (survives draft↔published id flips); ctrl+p/U act on the whole marked set; partial-success semantics (failures counted, first error shown) mirror Studio's E3 bulk-publish behavior."
+    },
+    {
+      "title": "Render Papers/PortableDoc content inside the TUI through the same pdrender registry and theme used elsewhere, read-only, at a comfortable centered measure",
+      "scale": "feature",
+      "evidence": "paper.go: paperColumnWidth caps to maxPaperWidth=100 and centers; barkparkPaperTheme() derives from styles.go palette vars (highlight, dimText, editorLabelStyle) rather than pdrender's private theme copies, so TUI restyling propagates automatically; comment states 'a paper is READ-ONLY in the TUI — edits happen in Studio'."
+    },
+    {
+      "title": "Let users pick reference-field targets via a searchable modal that writes the exact wire format Studio's own reference selector writes",
+      "scale": "feature",
+      "evidence": "refpicker.go: enter on a reference field opens a picker over documents of the field's RefType; stores the bare published id (drafts. stripped) matching Content.published_id; live case-insensitive filter typing; refTitles cache renders id + resolved title."
+    },
+    {
+      "title": "Give the desk a full-text search overlay hitting the same scoped search endpoint Studio and the API expose, without mutating pane/focus state",
+      "scale": "feature",
+      "evidence": "search.go: `/` opens a query prompt, hits GET /w/<ws>/p/<proj>/v1/data/search/<dataset>; results render as a transient modal that drills into a hit's editor by _type; zero hits never open an empty modal."
+    },
+    {
+      "title": "Gracefully degrade the multi-pane Miller-columns layout to single-column on narrow terminals instead of breaking",
+      "scale": "invariant",
+      "evidence": "tui.go constants: minEditorWidth(40)/minEditorUsable(24)/minFrameWidth(16)/minTitleWithBadge(10) drive tiered degradation — drop list columns before shrinking the editor below usable width, drop badges before truncating titles, and fall back to a one-line 'too small' message below minFrameWidth."
+    }
+  ]
+}

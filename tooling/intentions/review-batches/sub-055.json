@@ -1,30 +1,46 @@
 {
-  "subsystem": "packages/client/src",
-  "count": 4,
+  "subsystem": "api/lib/barkpark/plugins/tickets",
+  "count": 8,
   "files": [
     {
-      "path": "packages/client/src/types.ts",
-      "role": "SDK public type contracts",
-      "importance": 32,
-      "usefulness": 18
+      "path": "api/lib/barkpark/plugins/tickets/attachments.ex",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "packages/client/src/index.ts",
-      "role": "JS client SDK public API barrel",
-      "importance": 39,
-      "usefulness": 8
+      "path": "api/lib/barkpark/plugins/tickets/cli.ex",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "packages/client/src/errors.ts",
-      "role": "SDK typed error class",
-      "importance": 21,
-      "usefulness": 16
+      "path": "api/lib/barkpark/plugins/tickets/handoff.ex",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "packages/client/src/client.ts",
-      "role": "deprecated flat-API HTTP client",
-      "importance": 12,
-      "usefulness": 14
+      "path": "api/lib/barkpark/plugins/tickets/inbox_live.ex",
+      "role": "",
+      "importance": 47
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tickets/inbox_presenter.ex",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tickets/keys.ex",
+      "role": "",
+      "importance": 47
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tickets/thread.ex",
+      "role": "",
+      "importance": 46
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tickets/triage.ex",
+      "role": "",
+      "importance": 35
     }
   ]
 }

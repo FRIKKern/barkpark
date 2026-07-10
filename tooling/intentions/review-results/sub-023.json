@@ -1,56 +1,50 @@
 {
   "subsystem": "api/lib/barkpark_web/live/studio",
-  "summary": "The Studio subsystem is the browser-based CMS editing surface — a multi-pane Phoenix LiveView that lets users create, edit, publish, and delete content documents across workspaces, projects, and datasets in real time. It is the primary human interface for content authorship in Barkpark.",
   "intentions": [
     {
-      "title": "Provide a multi-pane, real-time content editing environment",
+      "title": "Give Studio a Notion/Sanity-grade multi-pane CMS shell (Structure → Type → Documents → Editor) that mirrors the TUI's pane drill-down",
       "scale": "epic",
-      "evidence": "studio_live.ex: Structure→Type→Documents→Editor drill-down pane navigation, PubSub subscriptions (doc_updated, document_changed), presence tracking, and autosave/publish/discard-draft flows all serve live collaborative editing"
+      "evidence": "studio_live.ex is the LiveView shell after a god-module decomposition into StudioLive.Handlers.* (Scope, Fields, Media, Refs, History, Delete, Discard, Doc, Shares, ItemShare, Schema, Secondary, Bulk, Paper) with shared state in StudioLive.Shared; moduledoc explicitly says it mirrors the TUI's pane structure."
     },
     {
-      "title": "Surface plugin-declared v2 field types in the editor without breaking legacy v1 fields",
+      "title": "Enforce that every hidden Studio affordance is also server-denied — hidden capability chrome is never trusted as the security boundary",
+      "scale": "invariant",
+      "evidence": "studio_live.ex mount/1 comment 'ag-studio-capability-hide: the LOAD-BEARING server-side deny-gate' — Caps.attach() re-derives caps per event so a forged event for a hidden affordance is denied; access grants and expiry ticks (load_access_grants, schedule_access_expiry, refresh_grant_access) rebuild caller_context from the DB so an expired/revoked grant stops serving rows without requiring reconnect."
+    },
+    {
+      "title": "Ship a full in-browser spreadsheet editor (Sheets M2-M4) with formula engine, per-user undo/redo, live collaborator presence, and a published-only read-only reader, all wired through op-based sync rather than shared client state",
+      "scale": "feature",
+      "evidence": "sheet_grid.ex: every edit becomes a Sheets.Session.apply_ops/3 call; the LiveComponent never applies an op to its own assigns, only forwards session deltas via send_update; read_only hosts get PUBLISHED-ONLY content and Ops.send_ops/2 drops mutations server-side; presence rendered on a dedicated peer_layer to avoid re-rendering the whole grid at ~10fps; undo/redo stamped per-user via 'user' field."
+    },
+    {
+      "title": "Make the Studio's document blast-radius (dependency graph) inspectable via a self-contained, dependency-free force-directed graph renderer",
+      "scale": "feature",
+      "evidence": "graph_view.ex: Cytoscape fully gutted in favor of a hand-rolled vanilla Canvas2D velocity-Verlet force sim in bp-graph.js (ZERO npm/network deps); server derives only topology + root id (derive in update/2 never render/1 to preserve LiveView change tracking); root pinned dead-center with BFS blast-ring banding; phantom nodes for dangling FK targets rendered dashed/muted."
+    },
+    {
+      "title": "Let every composite/array/codelist/localized-text field type in the Papers block editor be edited in-canvas without losing input focus on server echo",
+      "scale": "feature",
+      "evidence": "paper_field_block.ex: nested LiveComponent per composite block type (composite/arrayOf/codelist/localizedText) targeting @myself; local-first value update before sending :paper_op so the server echo is a no-op diff for the touched input (caret preserved); @max_array_index guard (10_000) prevents a crafted bracket-index form key from OOM-ing the BEAM."
+    },
+    {
+      "title": "Turn Studio into a first-class agentic workspace — a persisted, resumable Claude Code chat with mission-control agent rail, plan-as-Papers, and a real host terminal, gated admin-only and off by default on public demos",
       "scale": "epic",
-      "evidence": "plugins/adapter.ex: v2?/1 gate + dispatch to FieldComponents for composite/arrayOf/codelist/localizedText; explicitly preserves v1 fall-through for legacy seed schemas (post, page, author, etc.)"
+      "evidence": "chat_live.ex: sessions are addressable places (StudioChat) resumable via CLI --resume, subprocess spawned lazily on first send never on mount; agents rail (rail/rail_sig/rail_expanded) mirrors Claude-Code-TUI mission control; needs_you_roles (approval/question/plan) gate identically; tmux_live.ex hosts a real PTY (xterm.js + TmuxTerminal hook) surviving reconnects; both ChatLive and TmuxLive gate via ClaudeChat.enabled?/TmuxConsole.enabled? which hard-refuse public-demo hosts."
     },
     {
-      "title": "Show content-graph blast-radius and reference topology for any document",
-      "scale": "small",
-      "evidence": "graph_view.ex: Canvas2D force-sim renderer driven by server-derived node/edge topology; root-pinned BFS blast-ring layout encodes impact rank; unpublish guard in studio_live.ex probes reverse_referencers to block dangling-ref unpublish"
+      "title": "Give organization admins self-serve enterprise-identity control (SSO, SCIM directory sync, member/role visibility, audit log) without engineering involvement",
+      "scale": "feature",
+      "evidence": "org_admin_live.ex: admin-gated portal surfacing OIDC/SAML config, one-click SCIM token minting (plaintext shown once), member counts, and audit log; mint_scim and toggle_require_mfa handlers back onto Barkpark.Scim/Tenancy/Audit."
     },
     {
-      "title": "Enable in-Studio editing of paper (block-document) content without leaving the CMS UI",
-      "scale": "small",
-      "evidence": "paper_field_block.ex: per-composite-block LiveComponent that routes patch-block ops through the canonical paper_op/2 pipeline; studio_live.ex editor_view :paper mode subscribes to per-doc paper topic and applies deltas in place"
+      "title": "Let every plugin author a settings panel (typed form or raw JSON) without the Studio host knowing anything plugin-specific, and keep plugin credentials encrypted with audited reveal",
+      "scale": "invariant",
+      "evidence": "settings_live.ex moduledoc: 'The host knows NOTHING about specific plugins' — typed form rendered generically from Plugins.Registry.collect_settings_schema/1 (labels, input types, :masked, :options, :required); credential values are masked by default and a reveal click records a reveal audit row; disabling a plugin is non-destructive (docs move to …Rest folder, never deleted)."
     },
     {
-      "title": "Support collaborative real-time spreadsheet editing via a sheet grid pane",
-      "scale": "small",
-      "evidence": "sheet_grid.ex: SheetGrid LiveComponent receives {:sheets_op, …} deltas forwarded from studio_live.ex; presence tracked per-sheet for cursor/selection display (Sheets M2/M4)"
-    },
-    {
-      "title": "Hard multi-tenant isolation: scope every read, write, subscription, and presence to the active workspace/project/dataset",
-      "scale": "epic",
-      "evidence": "studio_live.ex: dataset URL-leaf validated against project membership; workspace switch gate (can_reach_workspace?, project-less workspace refused); PubSub topics are workspace-scoped; scope_opts threaded into every Content/Media call; upload stamped with workspace/project to avoid NULL-scope invisible rows"
-    },
-    {
-      "title": "Allow in-Studio creation and switching of workspaces, projects, and datasets",
-      "scale": "small",
-      "evidence": "studio_live.ex toggle-create/create-workspace/create-project/switch-workspace/switch-project/switch-dataset handlers; Tenancy.create_workspace_with_owner/2 + create_project_with_dataset/2; rescope_dataset_for_project cascades URL on every switch"
-    },
-    {
-      "title": "Surface draft-vs-published diff and document history for editorial review",
-      "scale": "small",
-      "evidence": "studio_live.ex toggle-diff handler + published_doc assign (diff_visible flag); show-history handler calls Content.list_revisions and restore-revision; discard-draft flow with modal confirmation"
-    },
-    {
-      "title": "Plugin-owned content preview pane alongside the editor form",
-      "scale": "small",
-      "evidence": "studio_live.ex content_preview_rendered assign set by Plugins.Registry.collect_content_renderer/3; toggle-content-preview event; fresh-install invariant: pane absent when no plugin contributes a renderer"
-    },
-    {
-      "title": "Admin-controlled network sharing and per-document share links (Google-Docs-style)",
-      "scale": "small",
-      "evidence": "studio_live.ex shares_admin? gate; shares-* handlers calling Barkpark.Sharing.*; item_share_open popover minting /s/<token> direct-doc links; admin re-checked in every handler as security boundary, not just UX gate"
+      "title": "Provide an in-Studio interactive API Docs + Playground so developers can explore and exercise the v1 API using their own real token, never an all-permissions god token",
+      "scale": "feature",
+      "evidence": "api_tester_live.ex: three-column endpoint browser/playground/response viewer; dispatch via :httpc server-side against the same running endpoint; comment 'Default the playground token to the CALLER'S OWN raw token ... never the all-perms barkpark-dev-token' to avoid leaking elevated authority into the form."
     }
   ]
 }

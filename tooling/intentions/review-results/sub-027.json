@@ -1,1 +1,50 @@
-{"subsystem":"api/lib/barkpark/plugins/sheets","summary":"The Sheets plugin conversion layer provides bidirectional translation between Barkpark's internal sheet document format and external spreadsheet formats (xlsx, csv, tsv, markdown, HTML), with full round-trip fidelity for values, formulas, number formats, styles, merges, and frozen panes. It exposes HTTP endpoints for import, export, and cell-granular ops, acting as the thin plugin wiring over the core Sheets engine.","intentions":[{"title":"Guarantee lossless xlsx round-trip for structured data","scale":"epic","evidence":"XlsxImport and XlsxExport mirror each other exactly: col_widths use the same px/7 factor, fmt classes are canonical strings that re-classify to themselves (Fmt.ex), date serials use the same epoch, merges/frozen panes/styles all survive the round-trip"},{"title":"Provide a safe, capped import boundary against hostile or oversized xlsx inputs","scale":"small","evidence":"xlsx_import.ex enforces cell_cap across all tabs with early-halt, clips and sanitizes merge ranges against occupied bounds, drops cells beyond Excel grid bounds (XFD/1048576), rescues zip parse exceptions, and filters out unsupported features (charts, pivots, conditional formatting) without erroring"},{"title":"Abstract number-format semantics into a stable six-class vocabulary","scale":"small","evidence":"Fmt.ex defines exactly six semantic classes (fixed, percent, currency, thousands, date, datetime), maps all ECMA-376 builtin numFmtIds plus custom format codes by heuristic pattern, and provides a canonical export format string per class — decoupling the data model from xlsx's hundreds of raw format strings"},{"title":"Enable multiplayer sheet editing via a session-backed ops API","scale":"epic","evidence":"OpsController delegates all cell/structural ops to Sheets.Session.apply_ops/3 which handles validation, recompute, delta broadcast, and debounced persistence; per-user undo/redo identity rides the op payload; errors are per-op (not atomic), with clear 503/retry-after on session unavailability"},{"title":"Serve read-your-writes consistency on exports","scale":"small","evidence":"ExportController calls Session.flush/2 before every read, surfaces 503 flush_failed with retry-after:2 when persist fails rather than serving stale data, and falls back to published document when no draft exists"},{"title":"Support multi-format data egress for downstream consumers","scale":"small","evidence":"ExportController serves xlsx (whole doc), csv/tsv (per-tab with ?tab= param), markdown table, and standalone HTML — covering machine-readable, human-readable, and embeddable formats from a single document"}]}
+{
+  "subsystem": "api/lib/barkpark_web/live/studio/studio_live/handlers",
+  "intentions": [
+    {
+      "title": "Give every Studio editing gesture (block edit, autosave, insert, delete, move, slash-insert, sidebar) a single canonical write path through one ordered DocPatchOp/patch-block op, so the block tree and the persisted paper can never desync",
+      "scale": "invariant",
+      "evidence": "paper.ex funnels every mutation — paper_edit_block, paper_block_autosave, paper_callout_fold, paper_add_block, paper_materialize_slot, paper_slash_insert, paper_delete_block, paper_move_block(_to), paper_unbind_property — through Shared.paper_op/2 or Shared.paper_ops/2; moduledoc states 'Every editing event maps a form/button action to exactly ONE DocPatchOp'."
+    },
+    {
+      "title": "Support a WordPress-style paper metadata sidebar (slug/publish state/backlinks) that is architecturally quarantined from the block-editing pipeline, so sidebar interactions can never corrupt document body content",
+      "scale": "feature",
+      "evidence": "paper.ex t6 section: sidebar_toggle_panel/section/slug_change are 'PURE assign flips — none call Shared.paper_op/2 or the block stream'; comment states persisting sidebar fields rides PaperCanvas.sidebar_meta_op's {:doc_field,…} shape, NEVER the block pipeline (Rule 4/5 doctrine)."
+    },
+    {
+      "title": "Let editors resolve shared/canonical values inline from within a paper (valueref inspect, accept-baseline, edit-through writeback) with server-side, rev-guarded, re-authorized writes — never trusting client-supplied target/field/rev",
+      "scale": "feature",
+      "evidence": "paper.ex valueref_accept_baseline uses Content.accept_valueref_baseline with :if_rev CAS guard; valueref_inspect/valueref_writeback capture target/field/rev server-side in valueref_panel and ValueWriteback.writeback/6 re-derives full authorization — 'a hostile payload cannot smuggle a different target past the inspection.'"
+    },
+    {
+      "title": "Keep template-locked and enforced-slot content (title, featured image, ingress) structurally safe from accidental deletion/reordering while still allowing calm materialization of optional slots and clamped drag-and-drop",
+      "scale": "invariant",
+      "evidence": "paper.ex locked_block_id?, paper_delete_block's lock check ('template-locked block can't be deleted... keep it a calm no-op'), paper_move_block_to's locked_prefix clamp logic, and paper_materialize_slot's ghost-slot materialization gated by non-displacement (pdd-t20c, rule 5: 'never a save error')."
+    },
+    {
+      "title": "Preserve unsaved local edits under concurrent multi-user editing by detecting remote writes, raising a conflict banner instead of silently clobbering the buffer, and skipping redundant reloads on self-write echoes",
+      "scale": "invariant",
+      "evidence": "lifecycle.ex doc_updated/2, paper_block/2, document_changed/2 all guard on `sender == self()` to skip self-echo, and check `editor_dirty` to raise doc_conflict instead of overwriting; fields.ex mark_dirty/reload_remote_doc complete the loop."
+    },
+    {
+      "title": "Enforce delete safety by previewing the true set of inbound referencers (including arrayOf-of-reference edges) before allowing deletion, with an explicit disconnect-then-delete confirmation flow",
+      "scale": "invariant",
+      "evidence": "delete.ex delete_doc uses Content.Graph.reverse_referencers (not the undercounting find_referencing_docs) to populate delete_refs; confirm_delete calls Content.disconnect_references before Content.delete_document and distinguishes {:halted} cancellation from generic failure vs success."
+    },
+    {
+      "title": "Provide grantor-controlled, no-escalation scoped access sharing (airdrop grant links + per-item share links) where the UI only offers capabilities the grantor already holds and the server independently re-verifies every grant",
+      "scale": "feature",
+      "evidence": "airdrop.ex moduledoc: 'This is a UX filter — the security boundary is mint/2's no-escalation gate, which RE-CHECKS every requested capability... even a forged submit is refused by mint'; held_capabilities filters via Tenancy.Auth.authorize; item_share.ex re-checks Caps.admin? on every handler independent of the open-time check."
+    },
+    {
+      "title": "Give every document type (paper, sheet, generic schema) a uniform new/save/autosave/dirty-tracking lifecycle with collision-safe ID minting and array-field editing",
+      "scale": "feature",
+      "evidence": "fields.ex new_document uses Content.create_document with no hand-rolled doc_id (avoiding the historical 1M-value collision bug documented inline), save/autosave/array_op all route through Shared.do_autosave and mark_dirty consistently across field types."
+    },
+    {
+      "title": "Let a single Studio session navigate and rescope across workspace/project/dataset/pane boundaries without losing context, gated by reachability checks on every switch",
+      "scale": "feature",
+      "evidence": "scope.ex switch_workspace/switch_project/switch_dataset all guard with Shared.can_reach_workspace?/project_has_dataset? before rescoping; select/select_desk/expand_pane manipulate nav_path via push_patch, keeping URL as the source of pane state."
+    }
+  ]
+}

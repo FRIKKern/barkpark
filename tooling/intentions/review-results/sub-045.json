@@ -1,46 +1,40 @@
 {
-  "subsystem": "api/lib/barkpark_web/studio",
-  "summary": "Pure UI-layer helpers for the multi-pane LiveView Studio: pane-tree construction from schema structure, multi-tenant scope switching, collaborative presence, and navigation. These modules are extracted from StudioLive to keep it thin and testable.",
+  "subsystem": "api/lib/barkpark/portable_doc",
   "intentions": [
     {
-      "title": "Render a multi-pane Miller-column content browser from schema structure",
+      "title": "Maintain ONE block-tree document model (PortableDoc) that every surface — API, Studio editor, TUI/Go pdrender, email — reads and writes without drift",
       "scale": "epic",
-      "evidence": "pane_builder.ex walk_path/7 recursively walks the Structure tree against the nav URL path, emitting a list of pane maps (root list → sub-list → doc list → editor) that StudioLive renders as Miller columns — mirrors the Go TUI's rebuildPanes() loop."
+      "evidence": "render.ex explicitly ties its Pd-tree walk to the Go twin in internal/pdrender via shared golden fixtures (internal/pdrender/testdata/golden/); patch.ex's six ops are pinned by golden fixtures under api/test/support/fixtures/doc-patch-op/ that double as the cross-surface op contract for CLI/SDK/Studio; render.ex module doc states output must be byte-identical across renderer refactors (v1/v2/v3 body_html_render_version stamping + mix barkpark.rehydrate_body_html)."
     },
     {
-      "title": "Harden multi-tenant isolation in the Studio UI",
+      "title": "Let legacy schema-bound documents (Classic content[fieldName]) and the new free-form block/body model coexist with zero data migration and no drift between them",
       "scale": "epic",
-      "evidence": "pane_builder.ex threads :scope (workspace_id/project_id) into every Content read so the desk shows only the active tenant's documents; presence_state.ex keys PubSub topics per workspace_id to prevent cross-tenant avatar bleed; dataset is stamped on each presence meta to stop same-doc_id co-presence across datasets."
+      "evidence": "projection.ex: bound blocks (carrying fieldName) project into content[fieldName] so existing Classic queries read unchanged; free blocks fold into content['body']; project/3 or project/4 is declared the SOLE writer of those keys ('no-drift guarantee'); synthesis.ex lazily synthesizes a block list in memory for legacy docs with no content['blocks'] yet, with a documented no-rewrite invariant (synthesize -> Projection.project round-trips byte-equal)."
     },
     {
-      "title": "Support specialist editor views (paper, graph, sheet, media) inside the standard pane frame",
-      "scale": "small",
-      "evidence": "pane_builder.ex dispatches on type_name and a reserved 'graph' URL segment to return view: :paper | :graph | :sheet | :media_explorer editor maps, letting StudioLive render the right LiveComponent without branching in the router."
+      "title": "Provide a pure, side-effect-free patch engine (append/insert/patch/replace/remove/move) as the single owner of block-tree mutation semantics",
+      "scale": "invariant",
+      "evidence": "patch.ex module doc: 'apply_patch/2 is pure: it never mutates its input, performs no Repo access, no GenServer, no I/O... never a silent no-op, never a partially-applied result'; defines six ops with structured error tuples (:block_not_found, :type_mismatch, :duplicate_id, :locked_block, :constraint, :invalid_op); enforces template-lock and constraint-vocabulary backstops before mutating."
     },
     {
-      "title": "Expose blast-radius / content-graph exploration from any document",
-      "scale": "small",
-      "evidence": "pane_builder.ex has a dedicated walk_path clause for the 'graph' URL literal that resolves a type-agnostic doc and calls Content.Graph.traverse/2 with direction: :both, depth: 2, returning nodes/edges/root so GraphView can render the dependency ring."
+      "title": "Enforce a composition doctrine — element/widget/section tiers and structural constraint declarations — so document types can pin required layout shape without ad hoc validation code scattered across the app",
+      "scale": "invariant",
+      "evidence": "tiers.ex classifies every renderable block type into :element/:widget/:section with a hard-invariant test that fails if any renderer-producible type is unclassified; constraints.ex implements presence/cardinality/position/relation declarations matched by role-or-type OR tier atom, explicitly kept Content/DB-free ('layering purity'); slots.ex builds the typed-slot model for widgets on top of Tiers.tier_of/1 as the single canonical classifier."
     },
     {
-      "title": "Enable workspace/project/dataset scope switching without page reloads",
-      "scale": "small",
-      "evidence": "workspace_switcher.ex renders a three-column Miller popover (workspace → project → dataset) where column clicks preview children without navigating and only a dataset pick fires scope-open (push_navigate to the canonical /w/:ws/p/:proj/d/:ds/studio URL)."
+      "title": "Support incremental adoption of the slot-native widget model (e.g. callout, card) without breaking byte-identical output for legacy inline-encoded widgets",
+      "scale": "feature",
+      "evidence": "slots.ex documents callout's dual-write compat: legacy {'type':'callout','content':[...]} is normalized to/from a slots.body[0] paragraph so both encodings render the identical PdText, while 'card' is the first genuinely slots-native widget with no legacy inline form and its own flattening contract (card_body_text/1) that the Go/email renderers don't yet support (filed follow-up)."
     },
     {
-      "title": "Surface collaborative presence (co-editors) scoped to the right tenant and document",
-      "scale": "small",
-      "evidence": "presence_state.ex provides topic/1 (workspace-keyed PubSub topic), on_doc/3 (filter by doc_id + dataset), pick_color/1 (deterministic avatar color from user_id), and list/1 (flatten Phoenix.Presence metas) — all pure helpers consumed by StudioLive's track/subscribe calls."
+      "title": "Give authored papers live, always-current views of external task data (bp tasks) without persisting resolved snapshots into the document's saved source of truth",
+      "scale": "feature",
+      "evidence": "task_resolver.ex resolve/2 replaces a block's `query` with a fetched `snapshot`/`task`/aggregate for read-time rendering via an injected fetch function (no direct DB dependency), while preview/2 is a separate, non-mutating channel specifically so the Studio editor's continuous-save diff never persists stale resolved rows (doctrine D5/D3 byte-stability); also resolves dataviz aggregates (chart/heatmap/stat) via an optional agg_fetch, degrading gracefully offline."
     },
     {
-      "title": "Provide schema-driven list previews (badge/meta) in document list panes",
-      "scale": "small",
-      "evidence": "pane_builder.ex doc_items/2 reads list_preview from the schema (badge + meta specs, field name or {field, prefix} map) and annotates each row map — generic across all schema types with graceful nil-fallback."
-    },
-    {
-      "title": "Keep StudioLive thin by extracting pure data modules",
-      "scale": "small",
-      "evidence": "pane_builder.ex and presence_state.ex module docs explicitly state they carry no socket/PubSub/Presence calls and were extracted from StudioLive in Task #11 WI3 for testability."
+      "title": "Render one authoritative HTML representation of a document across radically different delivery contexts (email HTML, standalone article export, embedded fragment) from a single walker, honoring theming, wikilinks, embeds, live valuerefs, and encrypted-field redaction",
+      "scale": "feature",
+      "evidence": "render.ex render_html/2 threads :style (:email vs :article), :theme (palette_for/2), :wikilinks, :embeds, and :values maps into the walk, all opt-in and byte-identical when absent; document/2 wraps :article output with the compile-time-inlined Stylesheet.css() for CSP-safe standalone export while :email keeps a byte-frozen fully-inline wrapper for Outlook; render_block/2 redacts FieldCipher-encrypted values before render so ciphertext or plaintext never leaks into the body_html cache or PubSub deltas."
     }
   ]
 }

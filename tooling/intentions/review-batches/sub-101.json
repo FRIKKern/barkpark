@@ -1,0 +1,31 @@
+{
+  "subsystem": "web",
+  "count": 5,
+  "files": [
+    {
+      "path": "web/eslint.config.mjs",
+      "role": "ESLint configuration for Next.js web app",
+      "importance": 11
+    },
+    {
+      "path": "web/next.config.ts",
+      "role": "Next.js config + legacy redirects",
+      "importance": 15
+    },
+    {
+      "path": "web/postcss.config.mjs",
+      "role": "PostCSS config for Tailwind CSS",
+      "importance": 9
+    },
+    {
+      "path": "web/public/bp-graph.js",
+      "role": "self-contained Canvas2D graph renderer and force simulator",
+      "importance": 16
+    },
+    {
+      "path": "web/public/bp-paper-editor.bundle.js",
+      "role": "",
+      "importance": 18
+    }
+  ]
+}

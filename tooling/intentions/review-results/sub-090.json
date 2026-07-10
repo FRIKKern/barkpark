@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark_web/live/studio/sheet_grid",
+  "intentions": [
+    {
+      "title": "Render a spreadsheet grid in Studio that is pixel- and behavior-faithful to Excel/Google Sheets (formula bar, fmt-aware display vs raw round-trip, checkbox glyphs, alignment defaults, frozen panes, merges, fill-handle, sticky headers)",
+      "scale": "epic",
+      "evidence": "cells.ex: display/1 vs raw_of/1 split (fmt-formatted vs round-trippable raw), checkbox glyph rendering, default_align_class (numbers right, booleans center, Sheets/Excel General semantics), cell_style/8 composing sticky-position CSS with conditional-format styles, fill_nub?/3; geometry.ex: left_px/top_px frozen-band sums, col_letters A1 conversion, data_edge/4 implementing Ctrl+Arrow data-edge jump"
+    },
+    {
+      "title": "Keep the 500-row rendered DOM window scalable to arbitrarily large sheets without breaking addressability, accessibility counts, or per-viewer filtering",
+      "scale": "feature",
+      "evidence": "grid_data.ex: @max_rows 500 window with row_offset paging (not a hard clip), honest aria-rowcount/aria-rowindex accounting (rows vs used_rows vs cols_total asymmetry documented), paginate/7 with filter-aware branch that pages over Filter.visible_rows so a heavily-filtered sheet still fills the viewport (SF-D8)"
+    },
+    {
+      "title": "Support real-time multiplayer editing of a shared sheet: every edit becomes a session op broadcast to all viewers, with each viewer's cursor/selection/editing-state safely remapped across concurrent structural changes (tab reorder, row/col insert-delete, sort)",
+      "scale": "epic",
+      "evidence": "ops.ex: apply_delta/2 epoch/rev reconciliation (detects session-incarnation restarts, rev gaps trigger refetch), remap_tab/2, remap_selection/2 for insert/delete rows/cols and sort_range with permutation-following, shift_pos/land_after_delete closing an editor when its cell is deleted rather than silently retargeting a draft onto the wrong cell (documents a two-session clobber bug class it prevents)"
+    },
+    {
+      "title": "Never let presence/cursor broadcasts (~10/s per moving peer) trigger a full 500-row grid re-render — persist all render inputs as change-tracked socket assigns computed only on content/tab change",
+      "scale": "invariant",
+      "evidence": "grid_data.ex moduledoc + derive_grid/1: 'Assigns computed in render/1 ... re-mark as changed on EVERY render and silently defeat the tracking (measured: full-grid re-render per presence frame)'; cells.ex helpers called qualified (Cells.display(...)) specifically so templates don't re-mark assigns"
+    },
+    {
+      "title": "Provide per-viewer, non-destructive spreadsheet views: row filters (Google Sheets 'Filter views' model) and Ctrl+F find-in-sheet that never touch the shared document or other collaborators",
+      "scale": "feature",
+      "evidence": "filter.ex moduledoc: 'view-state only. It NEVER mutates the document — no op, no persist, no broadcast, zero wire surface'; fail-open matches?/2 for unrecognized criteria; cells.ex find_matches/2 scans the full sparse map (not just the DOM window) so off-page cells are still findable, with wrap-around next_match/3"
+    },
+    {
+      "title": "Enforce one shared evaluation kernel for all value-matching logic (conditional formatting, filters, formula errors) so semantics never fork across features",
+      "scale": "invariant",
+      "evidence": "filter.ex: value ops (gt/lt/eq/between/contains) delegate to CondFormat.matches?/2 'the ONE eval kernel (CF-D5 matrix, verbatim)'; cells.ex cell_style/8 composes CF style with manual \"s\" style through 'the ONE CondFormat kernel (CF-D1, no forked eval)'; @engine_errors single-sourced from Engine.error_values/0"
+    },
+    {
+      "title": "Fail safe/closed on malformed or adversarial stored data and forged client state so the grid degrades gracefully instead of crashing or leaking access",
+      "scale": "invariant",
+      "evidence": "ops.ex send_ops/2 drops all mutations for read_only sockets server-side; clamp_row_offset/2 and clamp_frozen/2 clamp forged/stale offsets; grid_data.ex cf_rules_list/1 filters non-map entries so a corrupted doc can't crash the CF panel; geometry.ex peer_color/2 re-validates hex color against #rrggbb before it lands in an inline style attribute"
+    }
+  ]
+}

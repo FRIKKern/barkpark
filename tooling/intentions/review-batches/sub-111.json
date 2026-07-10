@@ -1,0 +1,26 @@
+{
+  "subsystem": "tooling/aesthetics",
+  "count": 4,
+  "files": [
+    {
+      "path": "tooling/aesthetics/aesthetics.mjs",
+      "role": "",
+      "importance": 11
+    },
+    {
+      "path": "tooling/aesthetics/compare.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/aesthetics/compare.test.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/aesthetics/spotlight-clutter.test.mjs",
+      "role": "",
+      "importance": 1
+    }
+  ]
+}

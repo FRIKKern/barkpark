@@ -1,18 +1,46 @@
 {
-  "subsystem": "internal",
-  "count": 2,
+  "subsystem": "js/packages/create-barkpark-app/src",
+  "count": 8,
   "files": [
     {
-      "path": "internal/apiclient/client.go",
-      "role": "Go HTTP API client shared by TUI and CLI",
-      "importance": 71,
-      "usefulness": 74
+      "path": "js/packages/create-barkpark-app/src/constants.ts",
+      "role": "scaffolder constants (version, templates, demo URL)",
+      "importance": 11
     },
     {
-      "path": "internal/apiclient/schema.go",
-      "role": "Go API client schema type definitions and field type enum",
-      "importance": 61,
-      "usefulness": 68
+      "path": "js/packages/create-barkpark-app/src/hosted.ts",
+      "role": "Hosted demo setup helper",
+      "importance": 11
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/index.ts",
+      "role": "CLI entrypoint for project scaffolding",
+      "importance": 29
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/install.ts",
+      "role": "Dependency installer helper",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/pm.ts",
+      "role": "Package manager detector",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/post-install.ts",
+      "role": "Post-install instructions printer",
+      "importance": 14
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/prompts.ts",
+      "role": "CLI scaffolder interactive prompts",
+      "importance": 15
+    },
+    {
+      "path": "js/packages/create-barkpark-app/src/scaffold.ts",
+      "role": "Template file copier for scaffolder",
+      "importance": 13
     }
   ]
 }

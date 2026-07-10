@@ -1,1 +1,35 @@
-{"subsystem":"js/docs/app","summary":"Next.js app (via Fumadocs) that renders the Barkpark JS SDK documentation site — MDX content pages with ToC, a landing page, and a built-in full-text search endpoint.","intentions":[{"title":"Surface JS SDK documentation to developers","scale":"epic","evidence":"page.tsx renders MDX pages from a content source with title/description/ToC; home/page.tsx funnels users to /docs/getting-started; layout.config.tsx brands the nav 'Barkpark'"},{"title":"Provide searchable docs without a third-party search service","scale":"small","evidence":"api/search/route.ts uses fumadocs-core createFromSource — server-side search index built from the same content source, zero external dependency"},{"title":"Static-site generation for fast, cacheable docs delivery","scale":"small","evidence":"generateStaticParams() in page.tsx pre-renders every slug at build time; generateMetadata() emits per-page SEO metadata"},{"title":"Consistent branded navigation shell across all doc pages","scale":"small","evidence":"layout.config.tsx sets a shared BaseLayoutProps used by both docs/layout.tsx and the home layout, ensuring uniform nav chrome"}]}
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/website-starter/app",
+  "intentions": [
+    {
+      "title": "Give scaffolded Barkpark Next.js apps a complete, working marketing site out of the box (not a bare hello-world)",
+      "scale": "epic",
+      "evidence": "layout.tsx defines a full header/nav/skip-link/footer shell; about, pricing, contact, and posts/[slug] pages are real content-backed pages, not stubs — running `create-barkpark-app` yields a deployable multi-page site."
+    },
+    {
+      "title": "Every content page is driven live from Barkpark documents, so editing content in Studio updates the site with zero code changes",
+      "scale": "invariant",
+      "evidence": "about/page.tsx, pricing/page.tsx, posts/[slug]/page.tsx all call getDoc/getDocBySlug from '../../lib/barkpark' and render via @barkpark/react PortableText; each falls back to a friendly 'Run pnpm seed' message when the doc is missing rather than crashing."
+    },
+    {
+      "title": "SEO metadata (title, description, OpenGraph, canonical) is derived automatically from Barkpark document content on every page",
+      "scale": "feature",
+      "evidence": "generateMetadata() in about, pricing, and posts/[slug] pages calls barkparkMetadata(page, ...) from @barkpark/nextjs; layout.tsx sets metadataBase from NEXT_PUBLIC_SITE_URL so relative OG/canonical URLs resolve correctly in prod vs localhost."
+    },
+    {
+      "title": "Editing content in Barkpark Studio propagates to the live Next.js site via webhook-driven revalidation, without manual redeploys",
+      "scale": "feature",
+      "evidence": "api/barkpark/webhook/route.ts wires createWebhookHandler + revalidateBarkpark from @barkpark/nextjs/webhook and /revalidate, force-dynamic + nodejs runtime, secret-gated via BARKPARK_WEBHOOK_SECRET; comment documents Studio-side webhook config."
+    },
+    {
+      "title": "The starter demonstrates the full write path — visitor-submitted forms create Barkpark documents through Server Actions",
+      "scale": "feature",
+      "evidence": "contact/page.tsx is a client component using useActionState + submitContact server action (contact/actions.ts) that 'creates contact documents via the Barkpark mutate API' per its own copy, with accessible aria-live status feedback."
+    },
+    {
+      "title": "The scaffolded site meets baseline accessibility and production hygiene (WCAG skip-links, live regions, robots/sitemap, error/loading/not-found boundaries) without extra developer effort",
+      "scale": "invariant",
+      "evidence": "layout.tsx includes a WCAG 2.4.1 skip-to-content link and dark-mode-aware focus styles; contact form uses role=status aria-live=polite explained via inline comment; robots.ts, sitemap.ts, error.tsx, loading.tsx, not-found.tsx are all present as standard Next.js App Router conventions shipped by default."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/billing",
+  "intentions": [
+    {
+      "title": "Reach a €0-spend, fully-testable pay-once-and-subscribe go-live path for Barkpark Cloud",
+      "scale": "epic",
+      "evidence": "Gateway behaviour (gateway.ex) abstracts create_customer/charge/create_subscription/create_checkout_session/create_billing_portal_session/cancel_subscription/verify_webhook; StubGateway provides deterministic hash-based ids with zero network/state so the whole flow runs in tests at €0; StripeGateway's request/response IO is injected via HttpClient so tests assert build_request/3 output but never hit the wire."
+    },
+    {
+      "title": "Never let a payment provider name leak into the billing context — swap gateways purely via config",
+      "scale": "invariant",
+      "evidence": "gateway.ex moduledoc: 'the BarkparkCloud.Billing context never names a payment provider directly'; concrete gateway selected via Billing.gateway/0 config, mirroring Registry.Vault's key-source pattern; StripeGateway and StubGateway both implement @behaviour BarkparkCloud.Billing.Gateway with identical callback contracts."
+    },
+    {
+      "title": "Support Stripe hosted Checkout and Customer Portal so browsers, not the server, complete the actual payment/self-service flow",
+      "scale": "feature",
+      "evidence": "create_checkout_session/3 builds POST /v1/checkout/sessions with mode=subscription, line item on resolved price, success/cancel urls, and team_id+plan stamped in metadata (read back only from a Stripe-signed webhook, never trusted client input); create_billing_portal_session/2 builds POST /v1/billing_portal/sessions returning a self-manage portal URL (Coolify-anchor getStripeCustomerPortalSession)."
+    },
+    {
+      "title": "Implement Stripe's real webhook signature verification so inbound events can be trusted without a live secret in tests",
+      "scale": "feature",
+      "evidence": "StripeGateway.verify_webhook/2 implements Stripe's v1 scheme exactly: parses Stripe-Signature header (t= + one-or-more v1=), recomputes HMAC-SHA256, constant-time compares (secure_compare/constant_time_equal?), enforces a ±300s replay tolerance (@signature_tolerance_seconds), and fails closed with {:error, :no_secret} when STRIPE_WEBHOOK_SECRET is unset; StubGateway mirrors the contract with a single fixed @test_signature."
+    },
+    {
+      "title": "Close BILL-3: never allow a plan name to be sent to Stripe as a price — fail closed on unpriced plans",
+      "scale": "invariant",
+      "evidence": "create_subscription/2 resolves plan→price_id through Billing.price_id/1 (STRIPE_PRICE_* config seam) and returns {:error, :plan_invalid} rather than ever POSTing the plan name as items[0][price]; moduledoc explicitly documents this as closing a real bug (BILL-3)."
+    },
+    {
+      "title": "Model the subscription lifecycle (trial, dunning, cancellation grace, comp tier) as one Team-scoped row with exactly one live subscription",
+      "scale": "feature",
+      "evidence": "subscription.ex: @plans free/trial/supporter/support_plus/forever, @statuses active/canceled/past_due; past_due/cancel_at_period_end/current_period_end/canceled_at/refunded_at columns mirror Coolify's dunning gate columns; unique_constraint subscriptions_one_live_per_team_idx excludes canceled rows so re-subscribe doesn't collide; forever is admin-only via Billing.grant_forever/1, trial is self-serve 14-day via Billing.grant_trial/1, both carry no gateway ids so Stripe webhooks can't touch them."
+    },
+    {
+      "title": "Talk to Stripe over verified TLS with no new dependency, and close the blind-redirect SSRF hole in Erlang's :httpc",
+      "scale": "invariant",
+      "evidence": "http_client.ex uses OTP's built-in :httpc (no HTTP lib added) with verify: :verify_peer against :public_key.cacerts_get/0 and hostname-match checking; autoredirect: false is called out as LOAD-BEARING because :httpc defaults to following redirects, which could otherwise be exploited to reach 169.254.169.254/127.0.0.1 via a saved-then-redirected webhook URL."
+    }
+  ]
+}

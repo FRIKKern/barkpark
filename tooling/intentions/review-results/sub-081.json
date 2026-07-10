@@ -1,0 +1,35 @@
+{
+  "subsystem": "js/packages/codegen/src",
+  "intentions": [
+    {
+      "title": "Generate fully-typed TypeScript document interfaces from a live Barkpark dataset schema so SDK consumers get compile-time safety without hand-writing types",
+      "scale": "feature",
+      "evidence": "generate.ts emitInterface/mapField turn a fetched schema envelope into interfaces extending BarkparkSystemFields, with a BarkparkTypeMap and BarkparkAnyDocument discriminated union for typedClient<TMap> (index.ts, cli.ts `generate` command writes barkpark.types.ts)."
+    },
+    {
+      "title": "Support a network-free CI drift gate that regenerates types from a committed schema fixture and fails loudly on any mismatch",
+      "scale": "invariant",
+      "evidence": "cli.ts runFromFile() / `--from`/`--schema` flags: 'this is the path the CI drift gate runs from a committed schema fixture, so it must never touch the API'; schemaEnvelopeSchema.safeParse validates the fixture before generation."
+    },
+    {
+      "title": "Make generated output deterministic and byte-identical for a given schema so diffs in generated code only ever reflect real schema changes",
+      "scale": "invariant",
+      "evidence": "generate.ts sorts schemas/fields/union members by name before emission and formats with the repo's prettier config; docstring explicitly states 'the same input always produces byte-identical output'."
+    },
+    {
+      "title": "Extend schema introspection and type generation across Barkpark's multi-tenant workspace/project scoping without breaking existing flat-dataset consumers",
+      "scale": "feature",
+      "evidence": "schema-url.ts buildSchemaPath emits `/w/<workspace>/p/<project>/v1/schemas/<dataset>` only when both slugs given, else the back-compat `/v1/schemas/<dataset>`; cli.ts assertScopedPair() rejects a lone --workspace or --project to prevent silently generating types for the wrong (unscoped) content model."
+    },
+    {
+      "title": "Never silently drop unrecognized or malformed schema constructs — surface them as `unknown` types or thrown, locatable errors instead of producing invalid or misleading generated code",
+      "scale": "invariant",
+      "evidence": "generate.ts mapField default case returns 'unknown' for unrecognized field types; mapComposite throws a named error when a composite sub-field lacks `name`; literal() escapes control chars so a bad string never emits syntactically invalid TS; fetch-schema.ts and types.ts zod-validate the envelope and reject malformed responses with clear messages."
+    },
+    {
+      "title": "Let generated TypeScript modules stay standalone (no external type deps) while staying in lockstep with the server's reserved document fields and the SDK core's document contract",
+      "scale": "invariant",
+      "evidence": "generate.ts PRELUDE self-declares BarkparkSystemFields/BarkparkSlug/BarkparkImage/BarkparkReference/BarkparkPortableTextBlock with a comment: 'Mirrors the server's reserved keys (content/envelope.ex @reserved) and @barkpark/core's BarkparkDocument'."
+    }
+  ]
+}

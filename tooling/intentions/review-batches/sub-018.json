@@ -1,84 +1,121 @@
 {
-  "subsystem": "api/lib/barkpark/plugins/onixedit",
-  "count": 13,
+  "subsystem": "web/components",
+  "count": 23,
   "files": [
     {
-      "path": "api/lib/barkpark/plugins/onixedit/export.ex",
-      "role": "ONIX 3.0 XML export entry point",
-      "importance": 39,
-      "usefulness": 48
+      "path": "web/components/bench.tsx",
+      "role": "Search engine benchmarking UI component",
+      "importance": 13
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/codelists/staleness_checker.ex",
-      "role": "ONIX codelist staleness analyzer",
-      "importance": 35,
-      "usefulness": 28
+      "path": "web/components/desktop-only.tsx",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/lifecycle.ex",
-      "role": "OnixEdit Bokbasen auto-publish lifecycle hook",
-      "importance": 37,
-      "usefulness": 24
+      "path": "web/components/detail-chrome.tsx",
+      "role": "detail pane sticky header",
+      "importance": 1
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/importer.ex",
-      "role": "ONIX 3.0 XML to book content map importer",
-      "importance": 35,
-      "usefulness": 23
+      "path": "web/components/document-detail.tsx",
+      "role": "document detail pane server component",
+      "importance": 9
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/web/bokbasen_live.ex",
-      "role": "Bokbasen submission admin LiveView",
-      "importance": 34,
-      "usefulness": 22
+      "path": "web/components/document-nav.tsx",
+      "role": "keyboard navigation layer for document pane",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/web/export_controller.ex",
-      "role": "HTTP endpoint for streaming ONIX 3.0 XML per book",
-      "importance": 42,
-      "usefulness": 14
+      "path": "web/components/empty-state.tsx",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/actions.ex",
-      "role": "OnixEdit Studio action handlers",
-      "importance": 38,
-      "usefulness": 17
+      "path": "web/components/finder.tsx",
+      "role": "search UI control and result orchestration",
+      "importance": 18
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/schemas/contributor.ex",
-      "role": "OnixEdit Contributor sub-schema module",
-      "importance": 27,
-      "usefulness": 21
+      "path": "web/components/graph-landing.tsx",
+      "role": "Obsidian-style graph landing component",
+      "importance": 15
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/schemas/text_content.ex",
-      "role": "OnixEdit TextContent sub-schema module",
-      "importance": 26,
-      "usefulness": 20
+      "path": "web/components/graph-view.tsx",
+      "role": "Canvas graph renderer React bridge",
+      "importance": 13
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/web/staleness_live.ex",
-      "role": "OnixEdit codelist staleness admin LiveView",
-      "importance": 29,
-      "usefulness": 12
+      "path": "web/components/listings-map.tsx",
+      "role": "",
+      "importance": 13
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/schemas.ex",
-      "role": "OnixEdit sub-schema index/namespace module",
-      "importance": 26,
-      "usefulness": 14
+      "path": "web/components/live-bridge.tsx",
+      "role": "Live content subscription bridge",
+      "importance": 13
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/schemas/thema_subject_category.ex",
-      "role": "Thema subject category field definition",
-      "importance": 26,
-      "usefulness": 14
+      "path": "web/components/map-landing.tsx",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit/ping_live.ex",
-      "role": "plugin route highway smoke-test LiveView",
-      "importance": 15,
-      "usefulness": 3
+      "path": "web/components/meta-card.tsx",
+      "role": "document metadata display component",
+      "importance": 9
+    },
+    {
+      "path": "web/components/paper-editor-mount.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "web/components/portable-doc.tsx",
+      "role": "portable-doc block renderer",
+      "importance": 18
+    },
+    {
+      "path": "web/components/post-article.tsx",
+      "role": "post/document detail view component",
+      "importance": 13
+    },
+    {
+      "path": "web/components/posts-list.tsx",
+      "role": "posts list UI component",
+      "importance": 16
+    },
+    {
+      "path": "web/components/quick-switcher.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/components/sheet-grid.tsx",
+      "role": "spreadsheet grid renderer component",
+      "importance": 16
+    },
+    {
+      "path": "web/components/styleguide.tsx",
+      "role": "",
+      "importance": 14
+    },
+    {
+      "path": "web/components/theme-picker.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/components/theme-toggle.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/components/workspace-project-switcher.tsx",
+      "role": "workspace/project scope switcher UI",
+      "importance": 15
     }
   ]
 }

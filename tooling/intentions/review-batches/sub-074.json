@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/webhooks",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark/webhooks/delivery.ex",
+      "role": "Ecto schema for webhook delivery records",
+      "importance": 61
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/dispatcher.ex",
+      "role": "Webhook delivery with HMAC signing and retry",
+      "importance": 67
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/payload_rebuild.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/retry_worker.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/stuck_delivery_sweeper.ex",
+      "role": "",
+      "importance": 25
+    },
+    {
+      "path": "api/lib/barkpark/webhooks/webhook.ex",
+      "role": "Webhook Ecto schema and secret rotation logic",
+      "importance": 75
+    }
+  ]
+}

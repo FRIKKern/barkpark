@@ -1,0 +1,30 @@
+{
+  "subsystem": "js/packages/nextjs",
+  "intentions": [
+    {
+      "title": "Preserve the RSC/client boundary across a bundled Next.js SDK by re-injecting stripped 'use client' directives",
+      "scale": "invariant",
+      "evidence": "tsup.config.ts prependUseClient() re-prepends \"use client\" to client.{mjs,cjs} and actions.{mjs,cjs} chunks after esbuild strips module-level directives during bundling; explicit comment ties this to a previously-fixed RSC boundary bug ('subtask 1') and warns the server entry must stay directive-free since it's consumed under the react-server condition."
+    },
+    {
+      "title": "Ship one package with cleanly separable entry points (server/client/actions/webhook/draft-mode/revalidate/preload) so consumers only pull in what their runtime needs",
+      "scale": "feature",
+      "evidence": "tsup.config.ts entry map lists 8 distinct subpath entries built to both cjs/esm with splitting+treeshake enabled and react/next/server-only marked external, matching js/CLAUDE.md's documented subpath list (client/server/webhook/draft-mode/revalidate/preload/actions)."
+    },
+    {
+      "title": "Keep server-only and client-only code paths independently testable without cross-contamination",
+      "scale": "invariant",
+      "evidence": "vitest.config.ts splits into test.projects for vitest.server.config.ts (environment 'node', excludes *.client.test.ts, coverage excludes src/client/**) and vitest.client.config.ts (environment 'jsdom', includes only *.client.test.ts(x), coverage limited to src/client/**) — mirrors the tsup entry separation of client vs server bundles."
+    },
+    {
+      "title": "Let server-side tests exercise code that imports the 'server-only' package without failing outside a real Next.js server runtime",
+      "scale": "feature",
+      "evidence": "tests/setup.server.ts stubs `vi.mock('server-only', () => ({}))`, loaded via vitest.server.config.ts setupFiles, so server-only-guarded modules (e.g. draft-mode, server entry) can be unit tested under plain Node/vitest."
+    },
+    {
+      "title": "Adapt to vitest 4's removal of vitest.workspace.ts without losing per-target test invocation (--project=server / --project=client)",
+      "scale": "invariant",
+      "evidence": "vitest.config.ts comment explains vitest 4 removed workspace files in favor of test.projects on the root config, and preserves separate server/client config files specifically so named --project invocations keep working."
+    }
+  ]
+}

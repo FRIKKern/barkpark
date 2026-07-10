@@ -1,66 +1,106 @@
 {
-  "subsystem": "api",
-  "count": 10,
+  "subsystem": "api/lib/barkpark/search",
+  "count": 20,
   "files": [
     {
-      "path": "api/lib/barkpark_web.ex",
-      "role": "Phoenix web module macro factory",
-      "importance": 40,
-      "usefulness": 61
+      "path": "api/lib/barkpark/search/crystal.ex",
+      "role": "Ecto schema for search aggregate rows",
+      "importance": 53
     },
     {
-      "path": "api/mix.exs",
-      "role": "Elixir project manifest and build entrypoint",
-      "importance": 55,
-      "usefulness": 14
+      "path": "api/lib/barkpark/search/crystallizer.ex",
+      "role": "search analytics aggregation engine",
+      "importance": 43
     },
     {
-      "path": "api/start.sh",
-      "role": "Production Phoenix server entrypoint script",
-      "importance": 37,
-      "usefulness": 10
+      "path": "api/lib/barkpark/search/documents_retriever.ex",
+      "role": "Postgres-backed document search retriever",
+      "importance": 51
     },
     {
-      "path": "api/rel/env.sh.eex",
-      "role": "OTP release runtime environment template",
-      "importance": 34,
-      "usefulness": 9
+      "path": "api/lib/barkpark/search/event.ex",
+      "role": "Ecto schema for search analytics events",
+      "importance": 49
     },
     {
-      "path": "api/entrypoint.sh",
-      "role": "Docker/release container entrypoint script",
-      "importance": 30,
-      "usefulness": 4
+      "path": "api/lib/barkpark/search/golden_eval.ex",
+      "role": "search quality golden-query evaluation harness",
+      "importance": 30
     },
     {
-      "path": "api/bench/validation_perf.exs",
-      "role": "Validation engine performance benchmark",
-      "importance": 13,
-      "usefulness": 13
+      "path": "api/lib/barkpark/search/highlighter.ex",
+      "role": "search result text highlighter",
+      "importance": 49
     },
     {
-      "path": "api/scripts/prod-postcheck.sh",
-      "role": "post-deploy health check script",
-      "importance": 14,
-      "usefulness": 6
+      "path": "api/lib/barkpark/search/intelligence.ex",
+      "role": "Search analytics and suggestion engine",
+      "importance": 59
     },
     {
-      "path": "api/bench/support/synthetic_doc.ex",
-      "role": "deterministic benchmark document generator",
-      "importance": 11,
-      "usefulness": 6
+      "path": "api/lib/barkpark/search/media_intelligence.ex",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "api/.formatter.exs",
-      "role": "Elixir code formatter config",
-      "importance": 3,
-      "usefulness": 2
+      "path": "api/lib/barkpark/search/merge_pattern.ex",
+      "role": "search intel merge pattern Ecto schema",
+      "importance": 52
     },
     {
-      "path": "api/lib/barkpark.ex",
-      "role": "top-level application module stub",
-      "importance": 3,
-      "usefulness": 1
+      "path": "api/lib/barkpark/search/query_parser.ex",
+      "role": "search query tokenizer",
+      "importance": 47
+    },
+    {
+      "path": "api/lib/barkpark/search/query_pipeline.ex",
+      "role": "Unified search pipeline orchestrator",
+      "importance": 50
+    },
+    {
+      "path": "api/lib/barkpark/search/retriever.ex",
+      "role": "search engine behaviour / seam contract",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/search/retrievers.ex",
+      "role": "search engine retriever registry",
+      "importance": 35
+    },
+    {
+      "path": "api/lib/barkpark/search/sanitizer.ex",
+      "role": "search query sanitization and normalization gate",
+      "importance": 54
+    },
+    {
+      "path": "api/lib/barkpark/search/surface_config.ex",
+      "role": "Ecto schema for search surface configuration",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/search/surface_configs.ex",
+      "role": "search tuning config cache",
+      "importance": 61
+    },
+    {
+      "path": "api/lib/barkpark/search/synonym.ex",
+      "role": "Ecto schema for search synonyms",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark/search/synonyms.ex",
+      "role": "search synonym CRUD and query expansion",
+      "importance": 62
+    },
+    {
+      "path": "api/lib/barkpark/search/workers/crystallize.ex",
+      "role": "Oban background job for search crystallization",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/search/workers/prune.ex",
+      "role": "Oban background job for search index pruning",
+      "importance": 30
     }
   ]
 }

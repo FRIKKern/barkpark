@@ -1,138 +1,206 @@
 {
-  "subsystem": "api/lib/barkpark/plugins",
-  "count": 22,
+  "subsystem": "api/lib/barkpark/content",
+  "count": 40,
   "files": [
     {
-      "path": "api/lib/barkpark/plugins/registry.ex",
-      "role": "Plugin registry and resolver chain",
-      "importance": 57,
-      "usefulness": 70
+      "path": "api/lib/barkpark/content/analytics.ex",
+      "role": "",
+      "importance": 47
     },
     {
-      "path": "api/lib/barkpark/plugins/capabilities.ex",
-      "role": "CLI/API capabilities manifest assembler and auth-tier visibility filter",
-      "importance": 70,
-      "usefulness": 52
+      "path": "api/lib/barkpark/content/broadcast.ex",
+      "role": "",
+      "importance": 65
     },
     {
-      "path": "api/lib/barkpark/plugins/settings.ex",
-      "role": "encrypted plugin settings CRUD",
-      "importance": 42,
-      "usefulness": 56
+      "path": "api/lib/barkpark/content/caller_context.ex",
+      "role": "",
+      "importance": 62
     },
     {
-      "path": "api/lib/barkpark/plugins/media/assets.ex",
-      "role": "mediaAsset document lifecycle manager",
-      "importance": 40,
-      "usefulness": 52
+      "path": "api/lib/barkpark/content/codelists.ex",
+      "role": "Pluggable codelist registry (DB-backed)",
+      "importance": 61
     },
     {
-      "path": "api/lib/barkpark/plugins/tasks.ex",
-      "role": "Tasks plugin wiring layer",
-      "importance": 50,
-      "usefulness": 34
+      "path": "api/lib/barkpark/content/cross_validator.ex",
+      "role": "schema cross-validation rule evaluator",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/plugins/bootstrap.ex",
-      "role": "boot-time plugin schema installer",
-      "importance": 48,
-      "usefulness": 35
+      "path": "api/lib/barkpark/content/document.ex",
+      "role": "Document Ecto schema",
+      "importance": 66
     },
     {
-      "path": "api/lib/barkpark/plugins/hooks.ex",
-      "role": "plugin lifecycle-hook dispatcher",
-      "importance": 44,
-      "usefulness": 36
+      "path": "api/lib/barkpark/content/draft_id.ex",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "api/lib/barkpark/plugins/settings_record.ex",
-      "role": "plugin settings Ecto schema with encrypted storage",
-      "importance": 38,
-      "usefulness": 41
+      "path": "api/lib/barkpark/content/edge.ex",
+      "role": "Content graph edge schema + validation",
+      "importance": 51
     },
     {
-      "path": "api/lib/barkpark/plugins/bulldocs.ex",
-      "role": "Bulldocs plugin — paper schema + route registration + graph edge extraction",
-      "importance": 47,
-      "usefulness": 26
+      "path": "api/lib/barkpark/content/edges.ex",
+      "role": "",
+      "importance": 44
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets.ex",
-      "role": "Sheets plugin entrypoint and structural validator",
-      "importance": 40,
-      "usefulness": 31
+      "path": "api/lib/barkpark/content/encryption.ex",
+      "role": "",
+      "importance": 57
     },
     {
-      "path": "api/lib/barkpark/plugins/onixedit.ex",
-      "role": "ONIX 3.0 book metadata plugin entrypoint",
-      "importance": 38,
-      "usefulness": 30
+      "path": "api/lib/barkpark/content/envelope.ex",
+      "role": "v1 document envelope serializer",
+      "importance": 64
     },
     {
-      "path": "api/lib/barkpark/plugins/media.ex",
-      "role": "media library plugin entry point",
-      "importance": 43,
-      "usefulness": 24
+      "path": "api/lib/barkpark/content/error_codes.ex",
+      "role": "validation error code registry",
+      "importance": 23
     },
     {
-      "path": "api/lib/barkpark/plugins/bulldocs/events.ex",
-      "role": "paper_events context / query module",
-      "importance": 34,
-      "usefulness": 32
+      "path": "api/lib/barkpark/content/errors.ex",
+      "role": "API error envelope mapper",
+      "importance": 67
     },
     {
-      "path": "api/lib/barkpark/plugins/manifest.ex",
-      "role": "plugin manifest compile-time + runtime validator",
-      "importance": 41,
-      "usefulness": 22
+      "path": "api/lib/barkpark/content/event_log.ex",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/plugins/settings_audit.ex",
-      "role": "plugin settings audit log Ecto schema",
-      "importance": 26,
-      "usefulness": 37
+      "path": "api/lib/barkpark/content/expand.ex",
+      "role": "reference field expansion for query results",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/plugins/bulldocs/event.ex",
-      "role": "paper_events Ecto schema",
-      "importance": 31,
-      "usefulness": 26
+      "path": "api/lib/barkpark/content/export.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/plugins/frt.ex",
-      "role": "FRT game-design plugin — 25 schema registrations + Studio desk",
-      "importance": 33,
-      "usefulness": 21
+      "path": "api/lib/barkpark/content/field_visibility.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/plugins/run_status.ex",
-      "role": "in-memory plugin run-status GenServer",
-      "importance": 30,
-      "usefulness": 24
+      "path": "api/lib/barkpark/content/forms.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark/plugins/env_config.ex",
-      "role": "BARKPARK_PLUGINS env var parser for plugin registry",
-      "importance": 37,
-      "usefulness": 14
+      "path": "api/lib/barkpark/content/graph.ex",
+      "role": "content graph BFS traversal engine",
+      "importance": 66
     },
     {
-      "path": "api/lib/barkpark/plugins/media/codelists.ex",
-      "role": "Media plugin codelist seeder",
-      "importance": 31,
-      "usefulness": 19
+      "path": "api/lib/barkpark/content/labels.ex",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "api/lib/barkpark/plugins/settings/masking.ex",
-      "role": "plugin settings secret masker",
-      "importance": 27,
-      "usefulness": 20
+      "path": "api/lib/barkpark/content/lifecycle.ex",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/plugins/media/api_tests.ex",
-      "role": "declarative smoke-test specs for Media plugin",
-      "importance": 24,
-      "usefulness": 10
+      "path": "api/lib/barkpark/content/localized_text.ex",
+      "role": "localized text fallback resolver",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/content/mutation_event.ex",
+      "role": "Ecto schema for mutation_events table",
+      "importance": 64
+    },
+    {
+      "path": "api/lib/barkpark/content/mutations.ex",
+      "role": "",
+      "importance": 43
+    },
+    {
+      "path": "api/lib/barkpark/content/papers.ex",
+      "role": "",
+      "importance": 66
+    },
+    {
+      "path": "api/lib/barkpark/content/query.ex",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/content/revision.ex",
+      "role": "Revision Ecto schema",
+      "importance": 54
+    },
+    {
+      "path": "api/lib/barkpark/content/revisions.ex",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark/content/schema.ex",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark/content/schema_definition.ex",
+      "role": "Ecto schema for schema_definitions table",
+      "importance": 67
+    },
+    {
+      "path": "api/lib/barkpark/content/scope.ex",
+      "role": "Multi-tenant query scoping boundary",
+      "importance": 66
+    },
+    {
+      "path": "api/lib/barkpark/content/search.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/content/search_intelligence.ex",
+      "role": "search analytics adapter for document search",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/content/sheets.ex",
+      "role": "",
+      "importance": 55
+    },
+    {
+      "path": "api/lib/barkpark/content/validation.ex",
+      "role": "Document content validator (flat v1 + recursive v2)",
+      "importance": 41
+    },
+    {
+      "path": "api/lib/barkpark/content/write_scope.ex",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "api/lib/barkpark/content/writer.ex",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists/codelist.ex",
+      "role": "Ecto schema for codelist registry entries",
+      "importance": 46
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists/translation.ex",
+      "role": "Ecto schema for codelist value translations",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/content/codelists/value.ex",
+      "role": "Ecto schema for codelist values",
+      "importance": 46
     }
   ]
 }

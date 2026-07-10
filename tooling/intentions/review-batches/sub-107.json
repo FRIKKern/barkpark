@@ -1,0 +1,26 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/oauth",
+  "count": 4,
+  "files": [
+    {
+      "path": "cloud/lib/barkpark_cloud/oauth/github.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/oauth/google.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/oauth/provider.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/oauth/state.ex",
+      "role": "",
+      "importance": 1
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "subsystem": "tooling/aesthetics",
+  "intentions": [
+    {
+      "title": "Score the repo's filebase MESS (not code quality) — root clutter, tracked build artifacts, directory fan-out, spotlight-clutter dirs — as deterministic 0-100 Bloat and Aesthetics scores",
+      "scale": "feature",
+      "evidence": "aesthetics.mjs header explicitly positions itself as the critic Cody (code quality) is blind to; computes bloatScore = clamp(100 - rootClutterPenalty - artifactPenalty - fanoutPenalty - spotlightPenalty) and aestheticsScore = clamp(100 - deadDocPenalty - deadTaskPenalty - orphanPenalty), writing tooling/aesthetics/aesthetics-report.json."
+    },
+    {
+      "title": "Distinguish DELIBERATE committed build artifacts (served bundles, published npm dist) from genuinely-removable regenerable output, so cleanup guidance never breaks a served surface or an npm install",
+      "scale": "invariant",
+      "evidence": "aesthetics.mjs publishedDirs (scans package.json main/module/types/exports/files[]) and servedBy() (git grep for a .heex/.ex/.tsx/... reference) classify tracked-artifact findings into build-output (full penalty, gitignore) vs served/published (near-zero penalty, 'verify, likely keep') vs typedef."
+    },
+    {
+      "title": "Surface dead/orphaned documentation and stale bp tasks under a strict, false-positive-free YAGNI lens — never call something dead without a concrete inbound-reference or routing-table check",
+      "scale": "feature",
+      "evidence": "orphanDocs computed only when NOT in routingSet, NOT doc-tier-tagged, NOT a STANDARD filename, NOT a projectDoc (owned by a package/app root), and NOT referenced anywhere via git grep; junkTasks/unscopedOpen pulled live from `bp task ls --json` with graceful fallback to tasks-report.json snapshot when bp is unavailable."
+    },
+    {
+      "title": "Never falsely flag legitimate structure as clutter — Phoenix-convention flat dirs, real packages/projects, migrations/fixtures/tests, dot-prefixed infra dirs are all explicitly exempted from the fan-out and spotlight-clutter detectors",
+      "scale": "invariant",
+      "evidence": "FANOUT_THRESHOLD=45 (raised from 30) with FANOUT_EXCLUDE regex for migrations/tests/fixtures/batches/etc; SPOTLIGHT_MANIFEST/SPOTLIGHT_SRCDIR/SPOTLIGHT_INFRA guards ensure a real package.json/mix.exs/go.mod dir or bin/scripts/deploy/templates dir is never flagged as spotlight-clutter."
+    },
+    {
+      "title": "Gate PRs on newly-INTRODUCED structural filebase mess only, never on pre-existing debt, and never block the merge — an advisory-only CI regression diff between base and head aesthetics reports",
+      "scale": "feature",
+      "evidence": "compare.mjs compareReports() diffs base vs head structural findings (STRUCTURAL_KINDS = root-clutter, dead-doc, dir-fanout, yagni-orphan, plus build-output tracked-artifact rollups), deliberately EXCLUDES dead-task (bp absent in CI → non-deterministic), and always exits 0 with a flagged boolean feeding a ::warning:: line rather than a merge-blocking failure."
+    },
+    {
+      "title": "Keep the aesthetics/regression-diff logic unit-testable in plain Node rather than buried in CI YAML, with an embedded self-test runnable both standalone and from compare.test.mjs",
+      "scale": "invariant",
+      "evidence": "compare.mjs exports compareReports/renderMarkdown as pure functions, includes a --self-test CLI mode with fabricated base/head reports asserting new-finding detection and dead-task exclusion; compare.test.mjs and spotlight-clutter.test.mjs exist specifically to exercise this logic outside the GitHub Actions runner."
+    }
+  ]
+}

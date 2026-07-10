@@ -1,0 +1,31 @@
+{
+  "subsystem": "cloud",
+  "count": 5,
+  "files": [
+    {
+      "path": "cloud/.formatter.exs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/mix.exs",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "cloud/postfix/entrypoint.sh",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "cloud/lib/mix/tasks/barkpark_cloud.create_admin.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/mix/tasks/barkpark_cloud.grant_forever.ex",
+      "role": "",
+      "importance": 1
+    }
+  ]
+}

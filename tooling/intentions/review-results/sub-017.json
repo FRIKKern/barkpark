@@ -1,46 +1,45 @@
 {
-  "subsystem": "web/components",
-  "summary": "The Next.js web demo's React component layer — a document discovery UI built around a live full-text search finder, an Obsidian-style knowledge graph, and a PortableDoc block renderer. Together they make Barkpark's own content corpus browsable and searchable in a master/detail split layout with bidirectional graph↔list highlighting.",
+  "subsystem": "api/lib/barkpark/tasks",
   "intentions": [
     {
-      "title": "Dogfood Barkpark as a living documentation platform",
+      "title": "Provide an agent-native task substrate — task documents ARE the coordination layer, replacing Beads/bd entirely",
       "scale": "epic",
-      "evidence": "finder.tsx header reads 'Barkpark, documented in Barkpark' and 'Every page here is a Paper'; graph-landing.tsx labels the right pane 'Barkpark documentation graph'; the entire demo indexes Barkpark's own docs into its production dataset"
+      "evidence": "Barkpark.Tasks.{Claim,Close,Queue,Edges} implement claim/claim_by_id/close/dependency edges directly over `type:\"task\"` Documents; CLAUDE.md states 'Beads (bd/.beads/) is RETIRED — do not reinstate it. Use bp task for ALL task tracking.'; Barkpark.Tasks.Query powers `bp task ready`/prime/lookup."
     },
     {
-      "title": "Showcase dual-engine search (Indx BM25 vs Postgres full-text) with transparent quality signals",
-      "scale": "epic",
-      "evidence": "finder.tsx exposes an engine toggle (Indx/Postgres), a StrengthMeter (title/body/partial/fuzzy), exact-match-first partitioning, contextual match snippets, round-trip timing breakdowns, and a coverage boundary divider for Indx truncation — all designed to let users compare engines live"
+      "title": "Guarantee exactly-once claim semantics under concurrent multi-agent workers via row locking + CAS + advisory locks",
+      "scale": "invariant",
+      "evidence": "claim.ex: `Repo.transaction` + `lock: \"FOR UPDATE SKIP LOCKED\"` on the ready query; claim_by_id/3 takes a `pg_advisory_xact_lock(hashtext('task:'<>doc_id))` before reading; do_claim/4 does an optimistic `WHERE id=... AND rev=...` update_all and returns `{:error, :stale_claim}` on 0 rows updated."
     },
     {
-      "title": "Unify graph and list as a single cross-highlighting surface",
-      "scale": "epic",
-      "evidence": "graph-landing.tsx and graph-view.tsx receive `matches` (weighted search results) and `hoveredId`; finder.tsx's ResultRow publishes hover to setHoveredId and reads graphHovered to show a violet ring; GraphView.setHovered() cascades hover into the canvas — bidirectional sync between graph nodes and finder rows"
+      "title": "Detect and recover crashed-agent claims automatically (no task is permanently unreapable)",
+      "scale": "feature",
+      "evidence": "ttl_sweeper.ex: Oban worker scans `in_progress` tasks with stale/NULL `claim.ts_iso`, bumps `claim.epoch` (fencing kick) under the same advisory lock key close/3 uses, flips lifecycle back to `open`, clears the worker — so any late write from the dead worker is rejected as `:fenced_off`."
     },
     {
-      "title": "Render arbitrary PortableDoc block content in-browser without a dedicated backend renderer",
-      "scale": "small",
-      "evidence": "portable-doc.tsx handles heading/paragraph/list/callout/code/table/figure/sheet/asciicast/diagram block types via a pure React recursive renderer, enabling Papers to display in the Next.js web surface"
+      "title": "Prevent silent, stale closes — a worker cannot close a task whose brief changed under it without acknowledging the drift",
+      "scale": "invariant",
+      "evidence": "work_digest.ex computes per-field digests over title/description/acceptance_criteria at claim time; close.ex recomputes and refuses (`changed_fields`) when the digest drifted; deliberately narrower than a raw rev CAS so unrelated self-edits (labels, code_refs) don't trip the fence."
     },
     {
-      "title": "Keyboard-first navigation across Search → Facets → List → Document panes",
-      "scale": "small",
-      "evidence": "finder.tsx implements roving DOM focus with arrow-key routing across [data-nav-result] and [data-nav-facet] elements; document-nav.tsx + finder-nav-context handle ←/→ handoff between the finder list and the document detail pane"
+      "title": "Model and enforce a real dependency graph between tasks (blockers, discovered-from) driving readiness",
+      "scale": "feature",
+      "evidence": "edge.ex: typed `task_edges` schema (`blocks`, `discovered-from`, extensible kind column); edges.ex/query.ex compute unmet-blocker counts; claim.ex `check_deps_satisfied/1` refuses a targeted claim while any `blocks` dependency isn't `done`; TtlSweeper/Close cascade unblock dependents."
     },
     {
-      "title": "Search quality feedback loop via click and correction event recording",
-      "scale": "small",
-      "evidence": "finder.tsx posts find-events (kind: 'click' with position and queryEventId, kind: 'correction' with from/to) to /api/find-event fire-and-forget; session id is persisted in localStorage via getSearchSessionId; accepted corrections accumulate toward synonym auto-promotion on the API side"
+      "title": "Prevent duplicate task births via similarity-scored find-or-create with an auditable escape hatch",
+      "scale": "feature",
+      "evidence": "dedup.ex: `check_new_task/5` only gates genuine births (`prev_doc == nil`), scores candidates via Tasks.Similarity/Judge, fails open on fetch errors, and honors `content.distinct_from` as both bypass and persisted rejection trail — 'a bogus distinct_from cannot bypass a real duplicate'."
     },
     {
-      "title": "Live content subscription — server components refresh automatically on publish",
-      "scale": "small",
-      "evidence": "live-bridge.tsx mounts BarkparkLive from @barkpark/nextjs, debouncing SSE change events from /v1/data/listen into router.refresh() so content changes in the CMS appear without a page reload"
+      "title": "Expose safe, closed-vocabulary aggregate/rollup queries over the task graph for dashboards and PortableDoc data-viz blocks — without leaking tenant data through small buckets",
+      "scale": "feature",
+      "evidence": "query.ex `agg_for_query/3`: whitelisted groupBy dims/time buckets/measures (never a caller-supplied jsonb path), k-anonymity suppression (`@k_anon 5`) on sum/avg/min/max cells and totals, field-visibility cross-check via `Envelope.field_readable?` before exposing any measure, fail-closed tenancy via `Scope.scope_to_workspace/3`."
     },
     {
-      "title": "Performance-conscious search UX: adaptive debounce, DOM render cap, prefetch suppression",
-      "scale": "small",
-      "evidence": "finder.tsx uses a 90ms debounce on live-socket vs 250ms on HTTP fallback; caps DOM-rendered rows at 25 (RESULT_RENDER_CAP) to avoid keystroke-driven reconcile storms; sets prefetch={false} on result Link rows to prevent per-keystroke RSC payload avalanche"
+      "title": "Enforce a stable, permissive-but-shaped content contract for task documents so every writer (CLI, engine, legacy) stays compatible",
+      "scale": "invariant",
+      "evidence": "validation.ex: required `kind`/`lifecycle_status` enum, shape-only (never sub-key) checks on dossier fields (description, criteria, worklog, landed, distinct_from, etc.), explicitly loose to keep 'the bp task CLI, engine CAS updates, legacy docs' green."
     }
   ]
 }

@@ -1,1 +1,45 @@
-{"subsystem":"web","summary":"A read-only Next.js demo app that consumes the Phoenix API and hosts bp-graph.js, a self-contained Canvas2D force-directed graph renderer styled after Obsidian's graph view for visualising document blast-radius in the Studio pane.","intentions":[{"title":"Visualise document connection graphs (blast-radius) inside the Studio","scale":"epic","evidence":"bp-graph.js: BarkparkGraphRenderer, BFS depth layout, adjacency maps, node/edge ingest; integrated as a Phoenix LiveView hook (BarkparkGraph)"},{"title":"Obsidian-faithful minimalist aesthetic: restraint over spectacle","scale":"small","evidence":"bp-graph.js constants block: near-monochrome palette, flat BG, small flat dots (NODE_R_MIN/MAX 3.5–6px), thin faint threads, generous empty space; comments explicitly name Obsidian as the design thesis"},{"title":"Zero-dependency self-contained renderer (no npm, no CDN, no font fetch)","scale":"small","evidence":"bp-graph.js file header: 'ZERO npm, ZERO network-fetched libs, ZERO font fetch (Golden Rule)'; hand-rolled velocity-Verlet force sim, all colour math inlined"},{"title":"Smooth, polished interaction UX: eased zoom, hover cascade, idle breathing, pan inertia","scale":"small","evidence":"bp-graph.js: camTargetScale glide, BFS hop-cascade hover alpha, BREATH_FPS 12fps idle sway, pan inertia via lastMoves, easeOutBack entrance choreography"},{"title":"Full accessibility: keyboard navigation, a11y tree, live region, reduced-motion support","scale":"small","evidence":"bp-graph.js: canvas tabindex+role=application, parallel a11y role=tree DOM, aria-live polite liveRegion, reduceMQ prefers-reduced-motion branch (settleSync path), forced-colors detection"},{"title":"Stable view persistence across sessions and data updates","scale":"small","evidence":"bp-graph.js saveView/loadView via localStorage keyed by rootId+nodeSetHash; debounced save on wheel; diverged-camera guard (camFinite) to avoid persisting blown-up state"},{"title":"Unified document detail route with legacy redirect migration","scale":"small","evidence":"next.config.ts: /posts/:slug and /papers/:slug 308-redirect to /d/[type]/[slug]; comment explains unified reader intent"},{"title":"Phantom node support: surface broken references without crashing the graph","scale":"small","evidence":"bp-graph.js: phantom node detection, phantomByBrokenId map for O(1) edge resolution, phantom rendered as dim hollow dot at NODE_R_MIN"}]}
+{
+  "subsystem": "api/lib/barkpark_web/components",
+  "intentions": [
+    {
+      "title": "Give Studio one shared, family-organized component library instead of ad-hoc per-LiveView markup",
+      "scale": "feature",
+      "evidence": "studio_components.ex is an explicit facade (`defdelegate` re-exports) over Panes/Nav/Modals/Editor/EditorFields sub-modules under studio_components/, so `import BarkparkWeb.StudioComponents` brings every `<.component>` into scope while keeping compile-time attr/slot validation localized to the owning family module."
+    },
+    {
+      "title": "Make every document unfurl as a branded, correct social-share card with zero drift between write-time and read-time preview data",
+      "scale": "invariant",
+      "evidence": "share_meta.ex head/1 emits og:*/twitter:*/JSON-LD from a manifest resolved in order content[\"preview\"] -> Barkpark.Preview.project/3 (via apply/3 to avoid compile coupling) -> degraded_manifest; D3 absolutizes URLs against Endpoint.url() (no internal port, fixing #1190); D5 defaults to /images/og-default.jpg at 1200x630 so nothing unfurls blank; D12 never crashes on nil/partial manifests."
+    },
+    {
+      "title": "Keep the Studio classic editor's leaf-field rendering byte-identical to the pre-extraction StudioLive renderer while eliminating phantom-default persistence bugs",
+      "scale": "invariant",
+      "evidence": "field_inputs.ex moduledoc states output is byte-identical to the legacy render_input/2 clauses except two deliberate fixes: color fields no longer persist a phantom #3b82f6 default, and optional selects no longer serialize a phantom first option — both via hidden-input mirrors so Content.Forms.build_content/2's empty-string drop keeps unset fields absent."
+    },
+    {
+      "title": "Delegate rich/structured field UX (image, reference, richText) to self-contained Web Components rather than server round-trips",
+      "scale": "feature",
+      "evidence": "field_inputs.ex image/reference/richText clauses render bp-media-picker/bp-reference-picker/bp-rich-text-editor with phx-update=\"ignore\" + BarkparkFieldBridge hook, giving the WC sole DOM ownership and bridging value via a hidden input, per docs/studio/web-components.md."
+    },
+    {
+      "title": "Ship a zero-JS-dependency inline SVG icon system for consistent Studio chrome",
+      "scale": "invariant",
+      "evidence": "icons.ex moduledoc \"Inline SVG icons. No JS dependency.\" — a hand-maintained @icons map of Lucide-derived path data (file-text, settings, editor-header action icons, group-tab icons, theme-toggle icons) rendered inline rather than pulled from an external icon font/CDN."
+    },
+    {
+      "title": "Let editors see and trust exactly what changed between a draft and its published twin before publishing",
+      "scale": "feature",
+      "evidence": "draft_diff.ex computes a top-level, schema-driven field diff (:unchanged/:added/:removed/:changed) between draft and published content, rendering gracefully when published is nil, and explicitly scopes out nested composite diffing to keep v1 narrow per project CLAUDE.md guidance."
+    },
+    {
+      "title": "Provide a plugin-agnostic content preview pane so any registered plugin renderer can surface a side-pane preview without Studio knowing its type",
+      "scale": "invariant",
+      "evidence": "onix_preview.ex content_preview/1 accepts pre-rendered iodata from Plugins.Registry.collect_content_renderer/3 (first-wins across plugins) and is doc-type-agnostic; the legacy onix_preview/1 shim is kept only to pin the original ONIX-specific visual contract for its test file."
+    },
+    {
+      "title": "Standardize destructive/consequential Studio actions behind one reusable dry-run-then-confirm modal",
+      "scale": "feature",
+      "evidence": "confirm_modal.ex implements a generic two-stage (initial -> dryrun) confirmation flow driven by schema-declared `kind: \"modal\"` actions, accepting event name strings so existing phx-click wiring like confirm_publish_dryrun keeps working unchanged."
+    }
+  ]
+}

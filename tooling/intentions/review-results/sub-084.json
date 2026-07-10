@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/audit",
+  "intentions": [
+    {
+      "title": "Provide a tamper-evident, append-only audit log via a SHA-256 hash chain over deterministically-serialized event fields",
+      "scale": "epic",
+      "evidence": "Barkpark.Audit.Event has no update changeset (DB-enforced immutability, per moduledoc); Barkpark.Audit.Chain.hash/2 computes sha256(prev_hash <> canonical(row)) with canonical/1 producing order-stable, sorted-key serialization so metadata maps hash identically regardless of key order; verify_chain/1 walks rows checking both hash recomputation and prev_hash linkage, halting at the first {:broken_at, id}."
+    },
+    {
+      "title": "Keep the emit-side and verify-side hashing byte-identical so tamper-evidence is provable, not assumed",
+      "scale": "invariant",
+      "evidence": "Chain.ex moduledoc: 'Shared by the writer (Barkpark.Audit.emit/1) and the verifier (Barkpark.Audit.verify_chain/1) so the exact same bytes are hashed on both sides — the invariant that makes tamper-evidence real.' Single canonical/1 function is the sole serialization path for both directions."
+    },
+    {
+      "title": "Constrain audit events to a fixed, validated category vocabulary while leaving per-subsystem action naming free-form",
+      "scale": "invariant",
+      "evidence": "Event.@categories ~w(content_mutation auth membership secret plugin_settings token access) enforced via validate_inclusion; comment: 'the per-category action vocabulary is validated at the emit call site so a new subsystem never has to fight a global enum' — action field itself is unconstrained."
+    },
+    {
+      "title": "Stream the audit log to external SIEM/webhook endpoints via cursor-based tail-shipping, decoupled from the emit path",
+      "scale": "feature",
+      "evidence": "Export.flush_sink/1 reads events past sink.last_exported_id in batches of 500, advances the cursor only on a confirmed 2xx; ExportWorker is an Oban cron job (max_attempts: 1) run once a minute; moduledoc: 'no per-mutation overhead, no in-transaction HTTP'."
+    },
+    {
+      "title": "Reuse the existing webhook delivery substrate for audit export instead of building a parallel HTTP/security stack",
+      "scale": "invariant",
+      "evidence": "Export.deliver/2 calls Barkpark.Webhooks.Dispatcher.http_post_resp/3 (SSRF-guarded via SafeOutbound) and Dispatcher.signature_headers/3 for HMAC-SHA256 signing; auto-disable logic mirrors 'the webhook auto-disable streak threshold' (@max_consecutive_failures 15)."
+    },
+    {
+      "title": "Support both global (all-workspace) and workspace-scoped SIEM export destinations with per-sink format selection",
+      "scale": "feature",
+      "evidence": "ExportSink.workspace_id nil = global vs set = scoped, enforced in Export.filter_for_sink/2; @formats ~w(generic splunk datadog) validated in ExportSink.changeset/2; format_event/2 renders a stable documented JSON export schema (source, format, events[])."
+    },
+    {
+      "title": "Make export delivery self-healing: failed flushes never advance the cursor and automatically re-attempt, with auto-disable as a circuit breaker",
+      "scale": "invariant",
+      "evidence": "Export.record_failure/2 increments consecutive_failures and only advances/resets on success (Export.advance/2); at >=15 consecutive failures the sink is set active: false with auto_disabled_at and disable_reason recorded; ExportWorker moduledoc notes concurrent flushes of the same sink are idempotent since both read the same high-water mark."
+    }
+  ]
+}

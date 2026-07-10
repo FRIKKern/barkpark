@@ -1,0 +1,40 @@
+{
+  "subsystem": "deploy",
+  "intentions": [
+    {
+      "title": "Zero-downtime blue/green deploys for both fleets (content instances and the barkpark.cloud control plane)",
+      "scale": "epic",
+      "evidence": "deploy/instance-deploy.sh builds the idle slot (barkpark-slot@{blue,green} on :4000/:4001) while the active slot keeps serving, migrates, health-gates via /api/schemas polling, then flips Caddy's upstream with a graceful reload; deploy/cp-deploy.sh does the same for the control plane via docker compose profiles blue/green on :4100/:4101. Both scripts explicitly state 'an unhealthy new slot is simply stopped again — the active slot is never touched, so a bad deploy costs no downtime.'"
+    },
+    {
+      "title": "One script serves two deploy channels — strict production fast-forward vs. pre-merge staging proving ground — gated fail-closed on a filesystem marker",
+      "scale": "invariant",
+      "evidence": "instance-deploy.sh: absence of $APP/.staging forces `pull --ff-only origin main` and REFUSES any non-main DEPLOY_REF or non-origin DEPLOY_REMOTE (exit 11); presence of .staging allows fetching and hard-resetting to any ref (e.g. `pull/<n>/head`) so a branch or PR can be proven on a real box before it rides the auto-deploy merge train."
+    },
+    {
+      "title": "A deploy never presents a raw 502/connection-refused window to users — always a branded 'back in a moment' maintenance page",
+      "scale": "invariant",
+      "evidence": "instance-deploy.sh's arm_caddy_maintenance() idempotently injects a self-reverting handle_errors block (503 + Retry-After + auto-refreshing HTML) into the live Caddyfile, validated with `caddy validate` before reload and restored from backup on any failure; explicitly scoped to cover crash/restart windows outside the blue/green flip itself."
+    },
+    {
+      "title": "Fresh compute (Azure, or any box without Hetzner's baked snapshot) can be turned into a runnable Barkpark host from a bare Ubuntu image by one idempotent script",
+      "scale": "feature",
+      "evidence": "deploy/azure-base-install.sh installs Postgres/Caddy/build toolchain via apt, pins Erlang/Elixir via asdf to api/.tool-versions, installs Go pinned to go.mod, clones/fast-forwards the repo, and runs a full prod mix build — deliberately stopping short of secrets/DB/service start, which it hands off to the provisioner's configure/content steps."
+    },
+    {
+      "title": "Nightly self-healing warm-image pipeline keeps Hetzner's baked snapshot tracking main so provisioning never pays a stale on-box rebuild",
+      "scale": "feature",
+      "evidence": "deploy/bake-server-image.sh: resolves the newest role=warm-image snapshot + its baked commit, diffs against origin/main via GitHub API with an inert-path filter (docs/, cloud/, web/, js/, .github/, .claude/, tooling/, *.md) mirroring internal/cli/cloud/freshen.go's boxIrrelevantPrefixes, boots a throwaway bake box, rebuilds + pre-migrates with disposable secrets, strips them before snapshotting (label role=warm-image + commit=<sha>), and prunes to the newest 2 for rollback — so cloud.ResolveWarmImage always resolves a fresh, secret-free image with no env edit or worker restart required."
+    },
+    {
+      "title": "Outbound mail TLS renews unattended monthly via DNS-01, and the provisioner's worker is pinned to a stable public front so a blue/green port flip can never silently lock it out of the control plane",
+      "scale": "invariant",
+      "evidence": "deploy/renew-mail-cert.sh issues a Let's Encrypt cert for mail.barkpark.cloud via acme.sh + Hetzner Cloud DNS with dnssleep+retry to survive TXT-propagation races, then ships it into the cloud_postfix_tls volume and reloads postfix; deploy/cp-deploy.sh separately rewrites barkpark-provisioner.service's --control-url to the stable https://barkpark.cloud front after every deploy, documented as the root-cause fix for an incident where a hardcoded port-4100 worker was silently starved after a blue/green flip to 4101."
+    },
+    {
+      "title": "Every failure path in a deploy is provably reversible — git reset to the prior healthy commit, Caddyfile restore from backup, or a manual instant port-flip rollback",
+      "scale": "invariant",
+      "evidence": "instance-deploy.sh and cp-deploy.sh both `git reset --hard $OLD` on build/migrate/health/caddy failures, restore Caddyfile from a `.pre-deploy` backup on invalid-config or reload failure, and keep the retired slot's container/unit stopped-but-installed so 'instant manual rollback: flip the Caddyfile port back, reload caddy, start the old slot again' is always available; cp-deploy.sh additionally tags/restores a Docker `:rollback` image."
+    }
+  ]
+}

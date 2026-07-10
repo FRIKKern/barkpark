@@ -1,0 +1,41 @@
+{
+  "subsystem": "deploy",
+  "count": 7,
+  "files": [
+    {
+      "path": "deploy/azure-base-install.sh",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "deploy/bake-server-image.sh",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "deploy/cp-deploy.sh",
+      "role": "",
+      "importance": 14
+    },
+    {
+      "path": "deploy/cp-deploy_test.sh",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "deploy/instance-deploy.sh",
+      "role": "",
+      "importance": 17
+    },
+    {
+      "path": "deploy/instance-deploy_test.sh",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "deploy/renew-mail-cert.sh",
+      "role": "",
+      "importance": 11
+    }
+  ]
+}

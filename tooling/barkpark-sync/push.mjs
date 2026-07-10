@@ -31,9 +31,25 @@ const ids = new Set(nodes.map(n => n.id));
 const LANG = { ex: "elixir", exs: "elixir", go: "go", ts: "typescript", tsx: "tsx", js: "javascript", mjs: "javascript", jsx: "jsx", heex: "html", eex: "html", sh: "bash" };
 
 async function post(path, token, body) {
-  const r = await fetch(HOST + path, { method: "POST", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const t = await r.text();
-  return { ok: r.ok, status: r.status, body: t };
+  // 429s honor Retry-After (server sends retry_after seconds) instead of aborting
+  // a multi-minute push mid-sequence; anything else returns to the caller as before.
+  for (let attempt = 0; ; attempt++) {
+    let r;
+    try {
+      r = await fetch(HOST + path, { method: "POST", headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    } catch (e) {
+      // transient socket drop (ECONNRESET et al) under a long write storm — retry, don't abort the push
+      if (attempt < 5) { await new Promise((res) => setTimeout(res, 1000 * (attempt + 1))); continue; }
+      throw e;
+    }
+    const t = await r.text();
+    if (r.status === 429 && attempt < 5) {
+      const wait = (+r.headers.get("retry-after") || 1) * 1000 + 250;
+      await new Promise((res) => setTimeout(res, wait));
+      continue;
+    }
+    return { ok: r.ok, status: r.status, body: t };
+  }
 }
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 const f = (n) => n.fields;

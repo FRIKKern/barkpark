@@ -1,0 +1,11 @@
+{
+  "subsystem": "templates",
+  "count": 1,
+  "files": [
+    {
+      "path": "templates/place-directory/install.sh",
+      "role": "",
+      "importance": 11
+    }
+  ]
+}

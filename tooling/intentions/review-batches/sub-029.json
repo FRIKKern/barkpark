@@ -1,54 +1,86 @@
 {
-  "subsystem": "docs/snippets",
-  "count": 8,
+  "subsystem": "api/lib/barkpark/plugins/sheets",
+  "count": 16,
   "files": [
     {
-      "path": "docs/snippets/04-mutate-optimistic.tsx",
-      "role": "JS SDK usage snippet — optimistic mutation React component",
-      "importance": 4,
-      "usefulness": 6
+      "path": "api/lib/barkpark/plugins/sheets/cond_format.ex",
+      "role": "",
+      "importance": 62
     },
     {
-      "path": "docs/snippets/06-server-component-fetch.tsx",
-      "role": "JS SDK usage snippet — Next.js Server Component fetch",
-      "importance": 4,
-      "usefulness": 6
+      "path": "api/lib/barkpark/plugins/sheets/core.ex",
+      "role": "",
+      "importance": 66
     },
     {
-      "path": "docs/snippets/07-server-action-mutate.tsx",
-      "role": "JS SDK usage snippet — Next.js Server Action mutation",
-      "importance": 4,
-      "usefulness": 6
+      "path": "api/lib/barkpark/plugins/sheets/csv.ex",
+      "role": "CSV/TSV import-export converter for Sheets plugin",
+      "importance": 49
     },
     {
-      "path": "docs/snippets/08-revalidate-on-webhook.ts",
-      "role": "JS SDK usage snippet — webhook-triggered revalidation",
-      "importance": 4,
-      "usefulness": 6
+      "path": "api/lib/barkpark/plugins/sheets/engine.ex",
+      "role": "",
+      "importance": 67
     },
     {
-      "path": "docs/snippets/01-create-document.ts",
-      "role": "JS SDK usage snippet — create and publish",
-      "importance": 4,
-      "usefulness": 5
+      "path": "api/lib/barkpark/plugins/sheets/fmt.ex",
+      "role": "xlsx number-format classification and round-trip mapping",
+      "importance": 64
     },
     {
-      "path": "docs/snippets/02-query-with-filters.ts",
-      "role": "JS SDK usage snippet — filtered query",
-      "importance": 4,
-      "usefulness": 5
+      "path": "api/lib/barkpark/plugins/sheets/html.ex",
+      "role": "Sheet-to-standalone-HTML exporter",
+      "importance": 40
     },
     {
-      "path": "docs/snippets/03-listen-for-updates.ts",
-      "role": "JS SDK usage snippet — real-time subscription",
-      "importance": 4,
-      "usefulness": 5
+      "path": "api/lib/barkpark/plugins/sheets/markdown.ex",
+      "role": "Sheet-to-Markdown-table exporter",
+      "importance": 30
     },
     {
-      "path": "docs/snippets/05-publish-unpublish.ts",
-      "role": "JS SDK usage snippet — publish/unpublish",
-      "importance": 4,
-      "usefulness": 5
+      "path": "api/lib/barkpark/plugins/sheets/session.ex",
+      "role": "",
+      "importance": 65
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/structure.ex",
+      "role": "",
+      "importance": 55
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/xlsx_export.ex",
+      "role": "Sheet content to xlsx binary exporter",
+      "importance": 43
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/xlsx_import.ex",
+      "role": "xlsx binary to sheet content importer",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/session/ops.ex",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/session/replay_ring.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/web/export_controller.ex",
+      "role": "Sheets plugin multi-format export HTTP controller",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/web/import_controller.ex",
+      "role": "HTTP import endpoint for spreadsheet files",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
+      "role": "HTTP endpoint for cell and structural sheet ops",
+      "importance": 49
     }
   ]
 }

@@ -1,0 +1,31 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/notifications/channels",
+  "count": 5,
+  "files": [
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/channels/discord.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/channels/pushover.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/channels/slack.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/channels/telegram.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/channels/webhook.ex",
+      "role": "",
+      "importance": 9
+    }
+  ]
+}

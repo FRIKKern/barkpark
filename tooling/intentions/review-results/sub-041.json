@@ -1,46 +1,40 @@
 {
-  "subsystem": "api/config",
-  "summary": "Elixir/Phoenix application configuration layer that wires environment-specific defaults, runtime secrets, and feature toggles for every Barkpark subsystem — from Postgres and Oban job queues to plugins, rate limits, CORS, media CDN, LAN sharing, and the paperflow ingest seam.",
+  "subsystem": "api",
   "intentions": [
     {
-      "title": "Prevent production misconfiguration from silently breaking LiveView",
+      "title": "Ship one self-contained OTP release that boots and serves HTTP without depending on a host's Erlang/Elixir toolchain",
       "scale": "epic",
-      "evidence": "runtime.exs hard-raises on missing/IP-valued PHX_HOST with a named incident reference (studio-nav-bug-2026-04-19.md), validates PHX_SCHEME vs IP pattern, and builds an explicit check_origin allowlist covering the Vercel apex + preview URLs — all to stop websocket 403s that make Studio click-dead."
+      "evidence": "api/mix.exs releases/0 sets include_erts: true and include_executables_for: [:unix]; rel/env.sh.eex defaults PHX_SERVER=true so `bin/barkpark start` just works; api/entrypoint.sh runs Barkpark.Release.migrate()/seed() then `bin/barkpark start` as the container's exec target."
     },
     {
-      "title": "Keep secrets out of source control while staying operable in dev",
-      "scale": "epic",
-      "evidence": "SECRET_KEY_BASE, BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET, DATABASE_URL all hard-raise in prod when absent; dev.exs supplies documented constant fallbacks so the app boots with zero env setup locally. BARKPARK_CLOAK_KEY is explicitly separated from SECRET_KEY_BASE so rotating one doesn't invalidate the other."
+      "title": "Run production Phoenix as a systemd service that survives ASDF-managed Elixir installs and blue/green slot deploys",
+      "scale": "invariant",
+      "evidence": "api/start.sh sources ASDF shims (systemd can't use them directly), loads ../.env, and honors BARKPARK_PORT_OVERRIDE so two blue/green slots (barkpark-slot@.service) can bind distinct ports while sharing one .env."
     },
     {
-      "title": "Plugin kill switch and explicit whitelist via env",
-      "scale": "small",
-      "evidence": "runtime.exs parses BARKPARK_PLUGINS: unset = discover-all, empty string = register nothing, CSV = explicit allowlist. EnvConfig.parse/1 encodes the three-state distinction so a misconfigured env never silently loads zero plugins (that would look like a fresh install)."
+      "title": "Make every prod deploy/restart self-verifying instead of trusting a green systemctl exit code",
+      "scale": "invariant",
+      "evidence": "api/scripts/prod-postcheck.sh restarts the service if inactive, sleeps for BEAM boot, then curls /api/schemas and dumps `systemctl status` on failure — documented as a deliberate recovery guardrail, NOT a passive monitor."
     },
     {
-      "title": "Scoped LAN/tunnel sharing controlled without code changes",
-      "scale": "small",
-      "evidence": "BARKPARK_SHARES parses scope syntax; any non-empty result or BARKPARK_SHARE_LAN=1 flips the Endpoint bind from 127.0.0.1 to 0.0.0.0. BARKPARK_SHARE_HOST decouples 'which hostname share links advertise' from what the server binds, enabling Cloudflare tunnel sharing without firewall changes."
+      "title": "Keep validation-engine throughput under a hard 100ms ceiling for a realistic 200-field/100-rule document, enforced automatically in CI",
+      "scale": "invariant",
+      "evidence": "api/bench/validation_perf.exs runs Evaluator.run_rules 5x via `mix run --no-start` (no DB boot needed), computes min/median/max/mean, and System.halt(1)s when median exceeds @regression_alarm_ms (100ms, zero headroom by design); doc+rule fixtures inlined so the bench stays a single self-contained diff."
     },
     {
-      "title": "Safe defaults so the paperflow ingest seam is closed until explicitly opened",
-      "scale": "small",
-      "evidence": "config.exs sets :paperflow_ingest_token to nil; runtime.exs only populates it when PAPERFLOW_INGEST_TOKEN is present. The plug treats nil as 'no token configured → 401', so a fresh prod deploy can't accidentally accept ingest traffic."
+      "title": "Keep the PortableDoc canvas editor and the public reader rendering pixel-identical output from one shared render path",
+      "scale": "feature",
+      "evidence": "api/scripts/pass2_audit_harness.exs is the sanctioned standalone static harness (mix phx.server dies locally, so this is the only sanctioned reader-render path) that calls the exact same Barkpark.PortableDoc.Render.render_block/2 the canvas uses, emits a per-block-type HTML+signature table, and fails only on a real render exception — built for the paper edit⇄reader parity audit (charter W1.4)."
     },
     {
-      "title": "Background-job isolation to prevent subsystems starving each other",
-      "scale": "small",
-      "evidence": "config.exs declares seven named Oban queues (default, bokbasen, plugins, tasks_ttl, tasks_compact, indx, edge_projector) with deliberate concurrency caps. Comments explain that tasks_ttl=1 prevents double-sweep and that indx/edge_projector must be static (not plugin-contributed) or their jobs sit available forever."
+      "title": "Provide one Phoenix macro factory so every controller/LiveView/component gets consistent routing, Gettext, and shared Studio helpers without hand-wiring imports",
+      "scale": "invariant",
+      "evidence": "api/lib/barkpark_web.ex defines router/channel/controller/live_view/live_component/html quoted blocks sharing html_helpers (imports BarkparkWeb.StudioComponents, BarkparkWeb.Icons, Gettext) and verified_routes/0 binding BarkparkWeb.Endpoint/Router/static_paths — the `use BarkparkWeb, :thing` entrypoint for the whole web layer."
     },
     {
-      "title": "Pluggable search retriever seam configured at startup",
-      "scale": "small",
-      "evidence": "config.exs maps engine name 'indx' to Barkpark.Plugins.Indx.Retriever; an unknown engine falls back to Postgres so a misconfig never takes a surface dark. runtime.exs maps INDX_* env vars into the app env so Indx.Settings can resolve credentials in the same priority order as Bokbasen."
-    },
-    {
-      "title": "Media pipeline fully env-driven (CDN, signing, webhooks, processing callbacks)",
-      "scale": "small",
-      "evidence": "runtime.exs has four independent media config blocks: signing secret (derived from SECRET_KEY_BASE as fallback), CDN base URL + invalidation adapter, processing callback token, and webhook endpoint list with per-event filtering — each independently optional, each no-op when unset."
+      "title": "Let every optional capability (auth methods, image backend, plugin deps) be toggled per-environment without breaking a zero-friction native dev setup, especially on Windows",
+      "scale": "invariant",
+      "evidence": "api/mix.exs image_dep/0 drops :image (libvips NIF has no Windows prebuilt binary) unless BARKPARK_WITH_IMAGE=1 forces it or BARKPARK_SKIP_IMAGE=1 forces it off, with ImageMagick CLI documented as the Windows fallback; deps comments tie SSO/SAML/WebAuthn/passkey libs (jose, esaml, x509, wax_) and Sheets (xlsx_reader, elixlsx) and the tmux console (expty) each to their owning epic/wave (era-w2-passkeys, era-w3-oidc-rp/saml, T5.1)."
     }
   ]
 }

@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/config",
+  "intentions": [
+    {
+      "title": "Ship secure-by-default configuration that fails closed until an operator explicitly opts in",
+      "scale": "invariant",
+      "evidence": "config.exs defaults public_demo_studio:false, media_uploads allowlists empty (allow-all documented as deliberate today-behavior), ingest_token:nil, Sync/SelfUpdate.Runner enabled:false; runtime.exs raises hard errors in prod when BARKPARK_KEK, BARKPARK_CLOAK_KEY, SECRET_KEY_BASE, DATABASE_URL, PHX_HOST, or PREVIEW_JWT_SECRET are unset rather than silently falling back to dev defaults."
+    },
+    {
+      "title": "Let a single instance self-identify (staging vs prod, cloud-managed vs self-host) and adapt its own Studio chrome and trust posture without a redeploy",
+      "scale": "feature",
+      "evidence": "runtime.exs instance_env (BARKPARK_ENV) drives an 'unmissable banner'; BARKPARK_CLOUD_URL toggles the 'Log in with Barkpark Cloud' button; BARKPARK_PAPER_CANVAS/BARKPARK_PUBLIC_DEMO_STUDIO/BARKPARK_TMUX_CONSOLE/BARKPARK_CLAUDE_CHAT are all runtime env flags with documented prod-vs-dev defaults, all overridable per-box without recompiling."
+    },
+    {
+      "title": "Guarantee the PHX_HOST/PHX_SCHEME/check_origin/webauthn chain is internally consistent so LiveView never silently 403s and Studio never goes click-dead",
+      "scale": "invariant",
+      "evidence": "runtime.exs raises on missing PHX_HOST, raises on https+literal-IP-host combo, derives check_origin/webauthn rp_id/origin/url_port all from the same host+scheme, and cross-links docs/ops/studio-nav-bug-2026-04-19.md at each of these guards — codifying a previously-hit production incident as compile-time-adjacent config validation."
+    },
+    {
+      "title": "Keep every optional subsystem (Oban queues, plugin credentials, sync, self-update, SMTP, pulse, sharing) dormant until its own explicit env vars are supplied, so a fresh install boots minimal and safe",
+      "scale": "invariant",
+      "evidence": "runtime.exs pattern repeated for Bokbasen/Indx credentials, Barkpark.Sync (enabled/push_enabled separately gated), SelfUpdate/SelfUpdate.Runner, BARKPARK_PULSE_CHANNELS default %{}, BARKPARK_SHARES default [] with LAN bind untouched unless opted in; config.exs comments explicitly call out 'DORMANT default so a fresh install boots with X OFF'."
+    },
+    {
+      "title": "Make static, core (non-plugin) background infrastructure — Oban queues for indx/edge_projector/github_mirror/tasks_ttl/tasks_compact, task-lease TTL, webhook stuck-delivery sweep, audit export — explicit and tunable without code changes",
+      "scale": "feature",
+      "evidence": "config.exs Oban queues block with detailed rationale per queue (concurrency limits as intentional throttles, e.g. edge_projector own queue 'so it never competes with :indx'); task_lease_ttl_seconds default 2700s justified against real agent-task duration; BARKPARK_TASK_LEASE_TTL_SECONDS runtime override in runtime.exs."
+    },
+    {
+      "title": "Separate the three cryptographic secrets (SECRET_KEY_BASE, BARKPARK_CLOAK_KEY, BARKPARK_KEK) so each can rotate independently, and support live KEK rotation via previous_keys",
+      "scale": "invariant",
+      "evidence": "repeated moduledoc-style comments in config.exs and runtime.exs stating 'MUST stay independent' for LocalKek vs Cloak vs secret_key_base; BARKPARK_KEK_PREVIOUS comma-separated fallback list enabling Barkpark.Crypto.DataKeys.rewrap_all/0 to complete rotation without downtime."
+    },
+    {
+      "title": "Keep test and dev environments deterministic, isolated, and fast — no real network/mail/self-update, synchronous where races would flake CI",
+      "scale": "invariant",
+      "evidence": "test.exs sets Oban testing: :manual, Swoosh Adapters.Test, SelfUpdate.Client.Fake, search_analytics_async:false, run_boot_codelist_seeders:false and DrainWorker enabled:false all with comments explaining the specific ownership/race failure each avoids; dev.exs seeds a fixed dev token and allow_private_outbound:true for local webhook testing."
+    }
+  ]
+}

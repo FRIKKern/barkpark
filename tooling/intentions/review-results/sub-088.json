@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark/studio_chat",
+  "intentions": [
+    {
+      "title": "Make a live Claude Studio chat session survive tab closes and process crashes without losing a turn",
+      "scale": "epic",
+      "evidence": "Recorder.ex moduledoc: 'closing every tab no longer kills a running turn — the model finishes, the Recorder persists the answer, and the next reopen replays it from the store.' Session.ex primary key is the minted claude session UUID reused as the --resume key so a killed/reaped process lazy-resumes from the persisted cursor. idle_reap after 30 minutes closes the subprocess but marks session exited honestly rather than leaving a fake 'running' state."
+    },
+    {
+      "title": "Persist a durable, replayable display history of every chat turn (not the raw wire transcript)",
+      "scale": "invariant",
+      "evidence": "Message.ex: 'We persist source_markdown ONLY (never HTML) and re-render on read so the improving render engine wins.' Monotonic seq with a unique [session_id, seq] constraint guards against append races. Recorder writes rows only on message completion (never per streaming delta), and collapses multi-frame constructs (TodoWrite updates, thinking-token bouts, sub-agent task lifecycle frames) into single canonical rows so replay reconstructs one coherent final-state history."
+    },
+    {
+      "title": "Give every tab watching a session an identical live view via one server-owned runtime and PubSub fan-out",
+      "scale": "feature",
+      "evidence": "Recorder.ex: 'Tabs are VIEWERS, not owners... Multiple tabs on the same session co-view live (PubSub multicasts)... sends still serialize through the single Session process.' broadcast/2 rebroadcasts every sink message verbatim on `studio_chat:<session_id>`; a separate global `studio_chat:activity` topic lets the sidebar show live per-session state (working/needs_you/idle/offline) without polling."
+    },
+    {
+      "title": "Surface a live agents/mission-control rail (task tree, progress, status) for spawned sub-agents inside a chat turn",
+      "scale": "feature",
+      "evidence": "Recorder.ex charter D45/D47 comments and code: task_index correlates task_id ↔ tool_use_id across task_started/task_progress/task_updated/task_notification frames; rail_snapshot is a task_id-keyed mission-control map persisted coarsely (only on structural signature change) and hydrated on restart so a reopened mid-run session shows 'interrupted' rather than a fake spinner (interrupt_running_tasks on teardown)."
+    },
+    {
+      "title": "Auto-generate legible thread titles for chat sessions without ever blocking the chat or overwriting a human's rename",
+      "scale": "feature",
+      "evidence": "Titles.ex: three-layer fallback (Anthropic Haiku API → Claude CLI one-shot with --no-session-persistence and Task.yield/brutal_kill timeout → derived first-line truncation) that 'fails soft' and always returns a title. kick_title/3 runs fire-and-forget under Barkpark.TaskSupervisor and defers to the store's maybe_set_ai_title clobber guard so 'a human rename is never overwritten'."
+    },
+    {
+      "title": "Let an approved chat plan graduate into a real, publicly-readable Paper with zero extra infra",
+      "scale": "feature",
+      "evidence": "PlanPapers.ex moduledoc: 'the plan grows up' — projects an approved ExitPlanMode plan straight through FromMarkdown.blocks/1 into Content.upsert_paper/1, scope-less (resolves the seeded Default workspace/project) and published unconditionally, so it 'radiates for free to the reader, the TUI, and /v1/structure.' Deterministic slug (sha256 of session_id+request_id) makes re-approval idempotent — same plan updates the same row, never duplicates."
+    }
+  ]
+}

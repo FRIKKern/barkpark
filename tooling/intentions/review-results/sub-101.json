@@ -1,0 +1,35 @@
+{
+  "subsystem": "web",
+  "intentions": [
+    {
+      "title": "Run a read-only Next.js demo (barkpark.cloud) that consumes the Phoenix API exactly the way a real integrator would",
+      "scale": "epic",
+      "evidence": "web/README.md: 'Next.js (App Router) demo ... read-only consumer of the Phoenix API'; web/next.config.ts pins turbopack root to resolve @barkpark/core across the pnpm workspace so the demo exercises the real published SDK, not a shortcut import."
+    },
+    {
+      "title": "Ship an Obsidian-style interactive content graph (force sim + blast-radius) as a zero-dependency, hand-rolled renderer shared between Studio and the public web finder",
+      "scale": "feature",
+      "evidence": "web/public/bp-graph.js (3209 lines): header states 'ZERO npm, ZERO network-fetched libs, ZERO font fetch (Golden Rule)... Cytoscape is fully gutted', exposes window.BarkparkGraphRenderer + window.BarkparkGraph phx hook; consumed by web/lib/graph.ts and web/components/graph-view.tsx, meaning the same static asset backs both the LiveView Studio graph pane and the Next.js public graph explorer."
+    },
+    {
+      "title": "Give the graph a restrained, near-monochrome, accessibility-aware visual language (hover ego-network focus, keyboard focus ring, light/dark themes, authored parse-error state) rather than a 'glowing nebula'",
+      "scale": "invariant",
+      "evidence": "bp-graph.js comments: 'THE THESIS: restraint... Structure legible at a glance'; distinct A11Y_RING color from ACCENT; MONO_DARK/MONO_LIGHT + BG_DARK/BG_LIGHT theme pairs; depthForDist() BFS-hop recede function; explicit amber PARSE-ERROR state replacing 'the old silent JSON.parse -> [] swallow'."
+    },
+    {
+      "title": "Embed a full in-canvas rich-text Paper editor (ProseMirror-based) into the web demo, not just Studio, so Papers are editable from the public-facing surface too",
+      "scale": "feature",
+      "evidence": "web/public/bp-paper-editor.bundle.js (118-line minified bundle, ProseMirror internals like Mark/Fragment classes, exposes window.BP); mounted via web/components/paper-editor-mount.tsx and rendered in web/components/portable-doc.tsx / document-detail.tsx — ties into the 'Everything-editable initiative' (every PortableDoc block editable in-canvas)."
+    },
+    {
+      "title": "Preserve old per-type reader URLs as permanent redirects into the unified `/d/[type]/[slug]` detail route without breaking the bare `/papers` list page",
+      "scale": "invariant",
+      "evidence": "web/next.config.ts redirects(): `/posts/:slug` -> `/d/post/:slug`, `/papers/:slug` -> `/d/paper/:slug`, both permanent:true, with an inline comment explaining `:slug` requires a segment so `/papers` itself is unaffected — a deliberate backward-compatibility contract for external links."
+    },
+    {
+      "title": "Keep the web app's build tooling (lint, PostCSS/Tailwind) minimal and correctly scoped so generated/static assets never get linted or bundled as source",
+      "scale": "invariant",
+      "evidence": "web/eslint.config.mjs globalIgnores(['public/**', '.next/**', 'out/**', 'build/**', 'next-env.d.ts']) explicitly overrides eslint-config-next defaults to exclude public/ (where the two large hand-authored/vendored bundles live); web/postcss.config.mjs wires only @tailwindcss/postcss."
+    }
+  ]
+}

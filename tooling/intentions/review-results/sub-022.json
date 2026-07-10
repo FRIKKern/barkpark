@@ -1,36 +1,40 @@
 {
-  "subsystem": "api",
-  "summary": "Foundation and operational scaffolding for the Phoenix/Elixir backend: project manifest, web module macro factory, production startup, health checks, and validation engine benchmarking. These files wire the runtime together and gate performance regressions in CI.",
+  "subsystem": "api/lib/barkpark/search",
   "intentions": [
     {
-      "title": "Establish a composable Phoenix web layer via macro injection",
+      "title": "Give every product surface (documents, media DAM, future surfaces) a single unified relevance pipeline: parse → expand synonyms → retrieve → recover-from-zero-hits → highlight",
       "scale": "epic",
-      "evidence": "barkpark_web.ex defines router/controller/live_view/live_component/html factories via __using__ macros, injecting verified routes, Studio components, i18n, and LiveView layout into every surface from a single source of truth"
+      "evidence": "QueryPipeline.search/4 dispatches on `surface` tag through one parse→expand→retrieve→recover→highlight chain; DocumentsRetriever implements the Barkpark.Search.Retriever behaviour so Postgres and future non-Postgres engines (Indx) share the same contract; Retrievers.ex is the registry; SurfaceConfigs.get/2 supplies per-surface tuning (searchable_fields, typo_policy, zero_hit_strategy, low_hit_threshold) so each surface tunes ranking without forking the pipeline code."
     },
     {
-      "title": "Support self-contained OTP releases for zero-friction server deploy",
-      "scale": "small",
-      "evidence": "mix.exs releases config sets include_erts: true so the packaged binary carries its own BEAM runtime; rel/env.sh.eex defaults PHX_SERVER=true so `bin/barkpark start` serves HTTP without extra env setup"
+      "title": "Make search self-improving: turn raw query events into crystallized analytics, synonym suggestions, and golden-query regression scoring so search quality gets measurably better over time",
+      "scale": "epic",
+      "evidence": "Intelligence.record/6 + Event schema capture every query; Crystallizer.crystallize_due/1 rolls raw events into day/week/month Crystal aggregates with self-healing backfill (@backfill_days) for missed cron/Oban runs; MergePattern detects candidate synonym pairs from co-occurring reformulations; GoldenEval.run/3 scores retrieval (MRR, NDCG@10, zero-hit-rate) against JSONL fixtures and GoldenEval.compare/2 fails a regression check; Synonyms module turns detected patterns (or manual entries) into query-time expansion via search_terms/3."
     },
     {
-      "title": "Keep prod healthy with a recovery-oriented post-deploy gate",
-      "scale": "small",
-      "evidence": "prod-postcheck.sh auto-starts the service if stopped, waits for BEAM bind, then probes /api/schemas (no-auth endpoint) — exits 1 with systemctl tail on failure; designed as a recovery guardrail, not passive monitor"
+      "title": "Never let search analytics/telemetry break or slow down the actual search request",
+      "scale": "invariant",
+      "evidence": "Intelligence.record/6 and record_interaction/4 wrap every path in rescue/catch and always return :skipped rather than raising — moduledoc states 'analytics must not break search'; DocumentsRetriever bounds ranking cost via @default_ranking_pool_size (500) so a broad query doesn't pay full ts_rank/similarity cost on the whole corpus."
     },
     {
-      "title": "Guard validation engine throughput via CI benchmark regression alarm",
-      "scale": "small",
-      "evidence": "bench/validation_perf.exs runs 100-rule / 200-field / 30-contributor synthetic doc through Evaluator.run_rules/3, exits 1 if median exceeds 100ms; no-start mode avoids Postgres so CI stays fast"
+      "title": "Fail closed on cross-tenant/cross-owner data exposure in full-text search results",
+      "scale": "invariant",
+      "evidence": "DocumentsRetriever.search/4 applies scope_to_workspace_or_global and scope_to_owner unconditionally on every query; comments explain a nil caller_context restricts to owner_id IS NULL only (never another owner's rows) — 'a no-op solely for non-owner_scoped types, never a window onto another owner's rows'; QueryPipeline comment: a non-Postgres engine without workspace_id in opts falls back to the scoped Postgres retriever rather than risk a cross-workspace bypass."
     },
     {
-      "title": "Enforce pre-commit quality gates across compilation, deps, formatting, and tests",
-      "scale": "small",
-      "evidence": "mix.exs aliases define a `precommit` task that chains compile --warnings-as-errors, deps.unlock --unused, format, and test — single command surfaces all regressions before push"
+      "title": "Treat every unauthenticated/anonymous search input as hostile: sanitize, bound, and cap before it touches the database or gets persisted as analytics",
+      "scale": "invariant",
+      "evidence": "Sanitizer rejects invalid UTF-8, non-binary params, spam/punctuation-only/control-char/profanity queries, and enforces length bounds before storage ('Rejected queries are never stored verbatim'); DocumentsRetriever clamps limit (max 200) and offset (max 100_000) to stop unbounded LIMIT/OFFSET abuse as 'a free DoS amplifier on public browse'; SurfaceConfigs caps its ETS config cache at 512 entries with clear-on-full eviction so an attacker can't grow it unbounded via arbitrary scope strings."
     },
     {
-      "title": "Cross-platform image processing without breaking Windows dev setup",
-      "scale": "small",
-      "evidence": "mix.exs image_dep/0 conditionally omits the :image (libvips NIF) dep on Windows, with env-var overrides; media renditions fall back to ImageMagick CLI backend automatically"
+      "title": "Let each surface/scope tune its own ranking behavior (field weights, typo tolerance, zero-hit strategy) without code forks, cached for hot-path performance",
+      "scale": "feature",
+      "evidence": "SurfaceConfigs stores per-{surface,scope} tuning in a bounded ETS cache with 60s TTL (chosen over :persistent_term specifically to avoid BEAM-wide global GC per key, per its moduledoc); ships @default_documents and @default_media config maps (searchable_fields with weights, typo_policy thresholds, zero_hit_strategy, low_hit_threshold, highlight_fields) that SurfaceConfig Ecto rows can override."
+    },
+    {
+      "title": "Support operator-manageable synonym/correction rules (manual or auto-detected) that transparently expand and relabel search results",
+      "scale": "feature",
+      "evidence": "Synonyms.create/3, .list/2, .delete/3 provide CRUD over Synonym rows with `kind` (one_way vs alt_correction) and `source` (manual vs auto); search_terms/3 expands a raw query with synonym targets; QueryPipeline.expand_synonyms/3 also surfaces `corrected_to` so the UI can show 'Showing results for …'; MergePattern + Crystallizer auto-detect candidate synonyms from real query reformulation behavior."
     }
   ]
 }

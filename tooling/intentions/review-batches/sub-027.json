@@ -1,60 +1,91 @@
 {
-  "subsystem": "api/lib/barkpark/plugins/sheets",
-  "count": 9,
+  "subsystem": "api/lib/barkpark_web/live/studio/studio_live/handlers",
+  "count": 17,
   "files": [
     {
-      "path": "api/lib/barkpark/plugins/sheets/xlsx_import.ex",
-      "role": "xlsx binary to sheet content importer",
-      "importance": 38,
-      "usefulness": 36
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/access_panel.ex",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/fmt.ex",
-      "role": "xlsx number-format classification and round-trip mapping",
-      "importance": 29,
-      "usefulness": 39
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/airdrop.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/xlsx_export.ex",
-      "role": "Sheet content to xlsx binary exporter",
-      "importance": 33,
-      "usefulness": 30
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/bulk.ex",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/csv.ex",
-      "role": "CSV/TSV import-export converter for Sheets plugin",
-      "importance": 31,
-      "usefulness": 31
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/delete.ex",
+      "role": "",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/web/export_controller.ex",
-      "role": "Sheets plugin multi-format export HTTP controller",
-      "importance": 36,
-      "usefulness": 24
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/discard.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/web/import_controller.ex",
-      "role": "HTTP import endpoint for spreadsheet files",
-      "importance": 37,
-      "usefulness": 22
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/doc.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
-      "role": "HTTP endpoint for cell and structural sheet ops",
-      "importance": 40,
-      "usefulness": 19
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/fields.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/html.ex",
-      "role": "Sheet-to-standalone-HTML exporter",
-      "importance": 23,
-      "usefulness": 20
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/history.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark/plugins/sheets/markdown.ex",
-      "role": "Sheet-to-Markdown-table exporter",
-      "importance": 22,
-      "usefulness": 19
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/item_share.ex",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/lifecycle.ex",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/paper.ex",
+      "role": "",
+      "importance": 43
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/refs.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/schema.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/scope.ex",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/handlers/shares.ex",
+      "role": "",
+      "importance": 35
     }
   ]
 }

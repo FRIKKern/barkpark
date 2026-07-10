@@ -1,46 +1,50 @@
 {
-  "subsystem": "internal/cli",
-  "summary": "The manifest-driven `bp` CLI dispatcher: a zero-hardcoded-command binary that builds its entire noun/verb command tree at runtime from the server's /v1/capabilities manifest, then routes each invocation to the appropriate HTTP endpoint. It shares the same binary as the TUI, routing based on whether positional args are present.",
+  "subsystem": "api/lib/barkpark/plugins",
   "intentions": [
     {
-      "title": "Zero-code plugin extensibility via manifest-driven dispatch",
+      "title": "Keep Barkpark a headless CMS with one content model that stays fully operational with every plugin off",
+      "scale": "invariant",
+      "evidence": "registry.ex Discovery kill-switch/whitelist (`:barkpark, :plugins`), Enablement.ex 'installed vs surfaced' two-layer contract, capabilities.ex core_nouns/core_commands comment 'Plugins OFF ⇒ exactly these nouns/commands are emitted', sheets.ex/github.ex moduledocs explicitly stating core machinery keeps working with the plugin off (fresh-install invariant)."
+    },
+    {
+      "title": "Give every plugin one uniform behaviour contract (schemas, routes, workers, hooks, settings, CLI, desk items) so new domains bolt on without touching the host",
       "scale": "epic",
-      "evidence": "cli.go comment explicitly states 'Nothing in this package hardcodes a noun, verb, or route. The command tree is a pure function of the capabilities manifest.' run.go builds URLs via manifest.BuildURL. A new server-side plugin adds CLI commands with zero client code changes."
+      "evidence": "Barkpark.Plugin behaviour implemented by bulldocs.ex, sheets.ex, github.ex, frt.ex, onixedit.ex, media.ex, tasks.ex, tickets.ex, pulse.ex, quiz.ex; registry.ex ResolverChain reduces resolve_* callbacks (action_handlers, doc_actions, cli_commands, desk_items, checkers, codelist_seeders, extract_edges, api_tests) uniformly across all plugins."
     },
     {
-      "title": "Deterministic credential and server resolution with layered precedence",
+      "title": "Expose one auth-tiered, existence-hiding capabilities manifest (`/v1/capabilities`) that is the single source of truth bp CLI and every SDK consume",
       "scale": "epic",
-      "evidence": "cli.go resolveContext() implements flags > env(actually-set) > active(persisted config) > baked defaults. config.go Config struct + ToActiveContext() + SaveConfig() back the persistence layer. envContext() deliberately avoids baking a non-empty floor so saved config can win."
+      "evidence": "capabilities.ex assembles core + plugin nouns/commands, default-deny visible?/2 ladder (none<read<write<admin, scoped_admin, ingest side branches), content-addressed etag, provenance stamping `source: plugin:<name>` on every plugin-contributed command."
     },
     {
-      "title": "Multi-server management for local and cloud environments",
-      "scale": "small",
-      "evidence": "config.go KnownServers history, ServerEntry, RememberServer(), FindServer(), SetActiveServer(), ServerKind() local/cloud classifier. servers_cmd.go `bp use <name|url>` and `bp servers` let users switch active targets without re-typing URLs or tokens."
+      "title": "Let a workspace admin turn plugins on/off and reposition them in the Studio desk without redeploying or touching plugin code",
+      "scale": "feature",
+      "evidence": "enablement.ex effective/1 merges compile-time declaration defaults (default_enabled?/structure_placement) with a per-workspace jsonb override at workspaces.settings['plugins']; fails closed to defaults on any lookup failure to avoid deadlocking the Registry GenServer."
     },
     {
-      "title": "Scripting-friendly output and stable exit codes",
-      "scale": "small",
-      "evidence": "cli.go documents exit codes 0-8 (exitOK through exitServer) mapped from HTTP status. output.go renders table/JSON/YAML/minimal modes. run.go renderMinimal() prints only rev+ids for write receipts — designed for shell pipelines."
+      "title": "Store and audit every plugin credential/setting encrypted at rest, with masked display and reveal auditing",
+      "scale": "feature",
+      "evidence": "settings.ex CRUD wraps writes/deletes/reveals in transactions paired with SettingsAudit rows and telemetry; settings_record.ex Cloak-encrypted storage; settings/masking.ex secret masker; github.ex settings_schema uses :password/:masked fields for private_key/webhook_secret."
     },
     {
-      "title": "Production write-guard to prevent accidental mutations",
-      "scale": "small",
-      "evidence": "run.go confirmProdWrite() prompts [y/N] on stderr for any write targeting a prod-looking server (heuristic: name=prod/production or URL contains api.barkpark.cloud). Bypassed only with --yes global flag."
+      "title": "Run lifecycle hooks (before/after save/publish/unpublish/delete) across all plugins safely — never let one plugin's bug break a document mutation or another plugin's hook",
+      "scale": "invariant",
+      "evidence": "hooks.ex fire/2: before_* hooks run sequentially with halt-on-first-failure semantics, after_* run via Task.async_stream with 5s per-hook timeout and are fully rescued/caught so a raising plugin hook is logged and treated as :ok, never crashes the mutation path."
     },
     {
-      "title": "Unified TUI + CLI binary with shared server context",
-      "scale": "epic",
-      "evidence": "cli.go package doc: 'The SAME binary serves the interactive TUI (invoked with no args) and this CLI.' ResolvedAPIConfig() and ServerSource() exist specifically to let the TUI inherit exactly the same active-server resolution the CLI uses, so `bp use <name>` affects both surfaces."
+      "title": "Bridge Barkpark tasks to GitHub Issues as an outbound mirror + inbound adopt flow, off by default until an operator provisions a GitHub App",
+      "scale": "feature",
+      "evidence": "github.ex: default_enabled? false, required_creds fail-closed validate_settings, register_workers gates Auth+DrainWorker on whitelist, register_routes for webhook/adopt/status/ops console, resolve_doc_actions surfaces an 'Adopt from GitHub' button only for content.github.state == 'intake' tasks."
     },
     {
-      "title": "Safe credential handling and ingest-secret separation",
-      "scale": "small",
-      "evidence": "run.go authHeaders() maps auth_tier (none/read/write/admin/scoped_admin/ingest) to the right credential. ingestSecret() resolves BARKPARK_INGEST_TOKEN separately from the bearer API token. redactHeaders() masks tokens in --dry-run output."
+      "title": "Ship a first-party collaborative spreadsheet document type (Sheets) with strict structural/grid-bound validation enforced at save time",
+      "scale": "feature",
+      "evidence": "sheets.ex lifecycle_hooks before_save gate rejects non-A1 keys, out-of-bounds refs (col XFD/16384, row 1048576), oversized merges (merge_area_cap 10000), malformed conditional-format rules (cond_format_cap 200); register_routes exposes import/export/ops via the shared-secret :ingest bucket."
     },
     {
-      "title": "Offline and pre-deploy CLI operation via manifest override",
-      "scale": "small",
-      "evidence": "load.go precedence: --manifest flag > $BARKPARK_MANIFEST env > ETag-cached network fetch. Allows running the CLI against a local fixture file before /v1/capabilities is deployed on the target server."
+      "title": "Cache plugin-derived collectors (action handlers, routes, top-menu entries) via a persistent_term snapshot so hot read paths never pay GenServer.call latency, while ctx-dependent collectors always run live",
+      "scale": "invariant",
+      "evidence": "registry.ex moduledoc + refresh_snapshot/1: snapshot written only on register/2 mutation, read via :persistent_term.get with GenServer.call fallback; collect_desk_items_attributed/collect_checkers/collect_doc_actions explicitly documented as NOT cached because they vary per dataset/ctx."
     }
   ]
 }

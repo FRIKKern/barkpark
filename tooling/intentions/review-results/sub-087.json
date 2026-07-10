@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/edge_projector",
+  "intentions": [
+    {
+      "title": "Materialise a durable content graph (content_edges table) from every document's reference fields, working with zero plugins installed as the fresh-install floor",
+      "scale": "epic",
+      "evidence": "projector.ex: 'CORE reference-field edges — Content.extract_edges/2 ... this is the fresh-install floor: it emits edges with ALL plugins off.' project/3 does no DB reads, dedups by {from_id,to_id,kind}."
+    },
+    {
+      "title": "Let plugins (Tasks, Bulldocs) extend the content graph with their own edge kinds without touching core projection logic",
+      "scale": "feature",
+      "evidence": "projector.ex edges_for_doc/2 folds Registry.collect_edge_extractors/1 over each doc, seeding with core edges as baseline; Tasks projects blocks/discovered-from/parent, Bulldocs projects paper references."
+    },
+    {
+      "title": "Keep the content graph live and consistent across save/publish/unpublish/delete via debounced background jobs, never blocking the mutating request",
+      "scale": "feature",
+      "evidence": "lifecycle.ex routes after_save/after_publish/after_unpublish/after_delete to ProjectorWorker ops; enqueue_rebuild/1 always returns :ok; ProjectorWorker runs on dedicated :edge_projector Oban queue with 5s debounce."
+    },
+    {
+      "title": "Offer an incremental per-document upsert path as a spike-gated alternative to full-scope rebuilds, so large corpora don't require a full re-projection on every save",
+      "scale": "feature",
+      "evidence": "settings.ex incremental_project flag (default false, env EDGE_PROJECTOR_INCREMENTAL); projector.ex upsert_record/2 diffs one doc's outbound edges against stored; lifecycle.ex docs it as 'UNPROVEN, spike-gated' because there's no blue/green to discard on a mis-diff."
+    },
+    {
+      "title": "Guarantee tenancy isolation in the graph: a cross-tenant slug collision or unresolved workspace must never delete or expose another tenant's edges",
+      "scale": "invariant",
+      "evidence": "projector.ex doc_pk/2 comment 'TENANCY FAIL-CLOSED (FIX 3)'; Scope.scope_to_workspace/3 fails closed on nil workspace; projector_worker.ex run_rebuild/4 cancels {:cancel, :nil_workspace_multi_tenant} rather than list a cross-tenant corpus."
+    },
+    {
+      "title": "Prevent projection debounce collapse from silently dropping work across doc types (a save burst of one type must not swallow a different type's rebuild)",
+      "scale": "invariant",
+      "evidence": "projector_worker.ex moduledoc: Oban uniqueness key includes :types (lvw-t11-followup-dedup) — without it a ['task'] rebuild job swallowed a subsequent ['paper'] enqueue in the same window with no retry; types normalized (sorted+deduped) at enqueue so order can't defeat the key."
+    },
+    {
+      "title": "Retroactively backfill graph edges for documents that predate an edge-extractor (e.g. valueref/wikilink), without a full data migration",
+      "scale": "feature",
+      "evidence": "backfill.ex: 'a paper that predates the body-walk extractor has ZERO valueref/wikilink edges until re-touched'; mix barkpark.edges.backfill dry-run vs --apply; reuses Projector.rebuild_scope/3 per (dataset, workspace_id) scope, publish-gated corpus."
+    }
+  ]
+}

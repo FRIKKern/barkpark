@@ -1,0 +1,40 @@
+{
+  "subsystem": "cmd",
+  "intentions": [
+    {
+      "title": "Run Barkpark Cloud hosting as a fleet of small, honest, single-purpose Go daemons instead of one monolith",
+      "scale": "epic",
+      "evidence": "cmd/barkpark-agent (health/status reporter + approved-command runner), cmd/barkpark-builder (off-box nixpacks build worker), cmd/barkpark-runtime (on-box blue/green deploy executor), cmd/barkpark-provisioner (warm-pool provisioning worker), cmd/barkpark-waker (per-site scale-to-zero proxy) each own one job, poll the control plane over a shared bearer-token seam, and can run --once for tests or as a systemd timer."
+    },
+    {
+      "title": "Provision a live customer server in under 15 seconds via a pre-baked warm pool, with a proven one-shot fallback",
+      "scale": "feature",
+      "evidence": "barkpark-provisioner: WARM_POOL_SIZE env gates seams.WarmPoolSize/WarmClient; DefaultReconcile/DefaultRefresh keep pool boxes at target size and current on origin/main (reconcileEveryCycles=50, refreshEveryCycles=6); BARKPARK_SERVER_IMAGE required as the one-shot fallback snapshot so a fresh account never falls back to a bare, un-provisioned ubuntu image."
+    },
+    {
+      "title": "Never let provisioning, builds, or deploys silently corrupt or half-finish state — fail honestly and self-heal",
+      "scale": "invariant",
+      "evidence": "barkpark-provisioner: BARKPARK_SERVER_IMAGE unset -> refuse to start (comment: 'the honest signal is to refuse to start'); WARM_POOL_SIZE typo -> forced to 0 with a warning ('a typo must never silently enable paid pool boxes'); orphan-box sweep (sweepEveryCycles=200 + startup sweep) recovers boxes leaked by a prior create-succeeded/report-failed double-failure; graceful SIGTERM drains an in-flight job or releases its claim instead of blocking the >12min reaper; resurrect drain 'translate errors before any box is created'."
+    },
+    {
+      "title": "Keep the build plane physically separate from the customer-serving box so a tenant's build never starves their own live traffic",
+      "scale": "invariant",
+      "evidence": "barkpark-builder header comment: 'runs on a host PHYSICALLY SEPARATE from the customer's serving box, so a Next.js build never starves the Postgres + Caddy answering live traffic'; builder does nixpacks build -> docker save to a shared cache-dir; barkpark-runtime (on the box) then loads and blue/green-swaps the Caddy upstream, drains the old container, reports 'live'."
+    },
+    {
+      "title": "Scale hosted sites to zero without losing near-instant wake, at ~5MB memory cost per idle site",
+      "scale": "feature",
+      "evidence": "cmd/barkpark-waker/main.go: one waker process per site sits between Caddy and the container, brings the container up on first request, proxies, and reaps it after --idle-timeout; header states '~5 MB resident — cheap enough that a single box can host hundreds of zero-traffic sites'; spawned by barkpark-runtime when scale_mode=\"zero\"."
+    },
+    {
+      "title": "Give the browser reader a byte-identical terminal (TUI) rendering of any PortableDoc, not a second imitation renderer",
+      "scale": "invariant",
+      "evidence": "cmd/pdrender-wasm/main.go header: 'the exact same internal/pdrender code bp paper view runs; there is no second/imitation renderer'; compiles internal/pdrender to WASM, exposes bpRenderTUI(blocksJSON, width, mode, themeID), converts pdrender's true ANSI/SGR output to colored HTML spans so the web reader gets pdrender's real colors."
+    },
+    {
+      "title": "Turn a healthy, transparent on-box agent into the substrate for remote ops (health reporting + an approved-command allowlist) without hidden state",
+      "scale": "feature",
+      "evidence": "cmd/barkpark-agent/main.go: agent.Agent loops report->poll->run on --interval, reports disk/CPU/mem/load/req-stats via /proc probes with honest -1 sentinels when unwired (e.g. macOS dev), runs only agent.AllowedCommands(), and is described as 'a plain binary...it keeps no hidden state', removable via `bp agent uninstall`."
+    }
+  ]
+}

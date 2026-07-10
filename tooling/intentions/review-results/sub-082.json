@@ -1,0 +1,40 @@
+{
+  "subsystem": "js/packages/react/src",
+  "intentions": [
+    {
+      "title": "Give React/Next.js consumers a first-party rendering layer for Barkpark's core content primitives (Portable Text, images, references) instead of forcing every app to hand-roll renderers",
+      "scale": "epic",
+      "evidence": "PortableText.tsx, Image.tsx, Reference.tsx each implement a full renderer for one Barkpark data shape; index.ts barrels them as '@barkpark/react' with JSDoc @example blocks showing direct drop-in usage in a Next.js app."
+    },
+    {
+      "title": "Support Server Components / RSC by splitting a context-free server entry from the full client entry, so a Server Component can render Portable Text and images without pulling in client-only context APIs",
+      "scale": "invariant",
+      "evidence": "server.ts explicitly excludes BarkparkReference (uses createContext, which the react-server export condition doesn't expose) while re-exporting PortableText, toPlainText, and BarkparkImage; comments cite Next 15 App Router's react-server resolution and cross-reference exports.test.ts/exports-server.test.ts to keep the two entries' type exports mirrored."
+    },
+    {
+      "title": "Make Portable Text rendering resilient to malformed/legacy data — never let one bad block crash the whole tree",
+      "scale": "invariant",
+      "evidence": "PortableText.tsx guards non-array `children` (renderChildren), floors fractional/NaN `level` before using it as array length (renderNestedList, explicit RangeError-avoidance comment), and falls back to default HTML tags/`unknownBlockStyle`/`unknownMark`/`unknownType` for any unrecognized style/mark/type rather than throwing; toPlainText.ts mirrors the same fail-soft posture."
+    },
+    {
+      "title": "Resolve image assets across every shape Barkpark can store them in (bare URL string, unresolved `_ref`, expanded doc with inline url) and build workspace/project-scoped, preset-based rendition URLs consistent with the core SDK and Studio",
+      "scale": "feature",
+      "evidence": "Image.tsx's computeImageSrc/getAssetId/getAssetUrl handle ImageAssetRef | ImageAssetExpanded | string; preset+baseUrl+pathPrefix route through core's imageUrl to build `/media/renditions/<id>/<preset>` or scoped `/w/<ws>/p/<proj>/images/<id>` paths, matching Reference.tsx's buildDocPath scoping."
+    },
+    {
+      "title": "Keep rendering pure/synchronous and push all side effects (diagnostic warnings, missing-config callbacks) into effects, so concurrent/aborted React renders never double-fire user callbacks or console warnings",
+      "scale": "invariant",
+      "evidence": "Image.tsx's computeImageSrc is documented as having 'no user-visible side effects... safe to call on every render'; the actual onMissingBaseUrl callback and console.warn are deferred into a useEffect keyed on the commit, explicitly to avoid StrictMode double-firing."
+    },
+    {
+      "title": "Provide safe, cycle-guarded, depth-capped reference resolution via React's `use()`/Suspense, working with either a caller-supplied fetcher or a derived one from the Barkpark client's fetchRaw/doc methods",
+      "scale": "feature",
+      "evidence": "Reference.tsx's BarkparkReferenceContext tracks visited ids + depth across nested <BarkparkReference> trees (cap defaults to 5, root-establishes-and-children-can't-widen), resolveFetcher prefers client.doc(type,id) over fetchRaw+manual envelope-unwrapping, and AsyncResolve integrates with Suspense via `use(promise)`."
+    },
+    {
+      "title": "Give apps a pure, dependency-free plain-text extractor for excerpts, SEO descriptions, and reading-time/search indexing that works identically on server and client",
+      "scale": "feature",
+      "evidence": "toPlainText.ts is explicitly documented as 'the utility behind excerpts, SEO meta descriptions, reading-time estimates, and search indexing,' pure and dependency-free so it 'runs in a Server Component... as happily as on the client'; exported from both index.ts and server.ts."
+    }
+  ]
+}

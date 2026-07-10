@@ -1,51 +1,40 @@
 {
-  "subsystem": "js/packages/core/src",
-  "summary": "The runtime-agnostic JS SDK core that gives any JS/TS consumer a typed, resilient HTTP client over the Barkpark Phoenix API — covering read, write, live-stream, and tenancy surfaces with zero Node.js dependencies so it runs in browsers, Next.js edge, and Cloudflare Workers alike.",
+  "subsystem": "tooling",
   "intentions": [
     {
-      "title": "Provide a first-class JS/TS client API for Barkpark",
+      "title": "Turn the codebase itself into a navigable Barkpark graph — one paper per file, with real dependency/intention/co-change edges, so the codebase can be browsed and queried like content",
       "scale": "epic",
-      "evidence": "client.ts exposes createClient() + the full BarkparkClient interface (doc, docs, patch, transaction, publish, unpublish, listen, fetchRaw, tenancy); types.ts gives every consumer typed envelopes, builder interfaces, and config options; index.ts re-exports everything as the package's public surface."
+      "evidence": "tooling/barkpark-sync/generate.mjs builds nodes.json (one node per code file, quality metrics + content + deps); push.mjs creates/publishes a `paper` per file with typed reference fields (dependencies, intentions) into an isolated `codebase` dataset; graph-view.mjs renders it; push.mjs explicitly refuses `--dataset production` to prevent code papers leaking into prod content."
     },
     {
-      "title": "Enforce API contract correctness at call-time, not at runtime surprises",
-      "scale": "small",
-      "evidence": "client.ts validateConfig() throws BarkparkValidationError on malformed projectUrl, dataset, workspace/project slugs, apiVersion, perspective × useCdn conflicts; warns loudly when drafts/raw perspective is used without a token to prevent silent published-reads."
-    },
-    {
-      "title": "Deliver resilient reads with automatic exponential-backoff retry",
-      "scale": "small",
-      "evidence": "retry.ts defines DEFAULT_READ_POLICY (3 attempts, 300ms base, jitter), DEFAULT_WRITE_POLICY (1 attempt, safe default), and IDEMPOTENT_WRITE_POLICY (3 attempts + Idempotency-Key rotation); transport.ts wires the policy per request kind and injects uuidv7 Idempotency-Key headers on retry for opted-in writes."
-    },
-    {
-      "title": "Surface typed, actionable errors instead of raw HTTP status codes",
-      "scale": "small",
-      "evidence": "transport.ts decodeErrorAndThrow() maps every Phoenix error code and HTTP status to a specific class (BarkparkAuthError, BarkparkConflictError, BarkparkRateLimitError, BarkparkSchemaMismatchError, BarkparkNotFoundError, BarkparkValidationError, BarkparkTimeoutError, BarkparkNetworkError); errors.ts defines the taxonomy referenced in ADR-009."
-    },
-    {
-      "title": "Enable real-time document subscriptions via SSE without EventSource limitations",
+      "title": "Score codebase quality on programmatic, non-fabricated signals — reach, churn, defects, real test coverage, ownership, consistency — and roll them into one auditable grade with ranked worklists",
       "scale": "epic",
-      "evidence": "listen.ts implements createListenHandle using fetch()+ReadableStream (not EventSource) so Authorization headers can be sent; supports Last-Event-ID resume on reconnect, exponential backoff up to 5 reconnects, graceful unsubscribe via AbortController, and synchronous edge-runtime detection to fail fast in Workerd."
+      "evidence": "tooling/quality/quality.mjs computes four composites (HOTSPOT, PRIORITY, REFACTOR-WORTH, CRITICAL-UNTESTED) from risk-report.json, ergonomics-report.json, consistency-report.json, aesthetics-report.json; explicit comments reject 'false 100' fabrication when reports are missing (covReport, cite default to null/clean rather than 0/100 fakery); tooling/risk/risk.mjs measures REAL go/mix coverage (not proxy) and defect density via git bug-fix-word mining."
     },
     {
-      "title": "Stay runtime-agnostic to target browser, Node.js, and edge simultaneously",
+      "title": "Calibrate the scoring formulas themselves from the codebase's own git history instead of hand-tuned weights, so composite scores are learned and validated (AUC, temporal cross-validation) rather than asserted",
+      "scale": "feature",
+      "evidence": "tooling/fit/fit.mjs: assembles a per-file signal matrix, derives a 'future-defect' outcome label from git history, fits logistic-regression weights, flags collinearity (|r|>0.7), and cross-validates on a held-out recent window; outputs scoring-config.json consumed by quality.mjs's composites."
+    },
+    {
+      "title": "Cross-validate every relationship the graph asserts (file-to-file deps, file-to-task scope, co-change pairs) against ACTUAL git/commit evidence, so predicted structure never silently drifts from reality",
+      "scale": "invariant",
+      "evidence": "tooling/cochange/cochange.mjs (relationship cross-validation, 'accidental coupling'); tooling/tasks/tasks.mjs computes predicted∩actual/predicted−actual/actual−predicted per task by diffing commit-message-grepped files against intention-inherited scope; consistency.mjs flags deviation-from-group-norm as the definition of inconsistency."
+    },
+    {
+      "title": "Provide a single idempotent orchestration entrypoint (status.mjs) that runs the full ASSESS→ENRICH→PUBLISH pipeline for free (zero tokens) and only asks an agent for judgment work a parser genuinely can't do",
       "scale": "epic",
-      "evidence": "transport.ts and listen.ts accept config.fetch override so MSW/tracing can intercept; edge-detect.ts detects Workerd/Cloudflare and throws BarkparkEdgeRuntimeError on listen() since streaming fetch is unavailable there; no node: imports in core (enforced by CI per js/CLAUDE.md)."
+      "evidence": "tooling/status/status.mjs runs blast-index, signals, ergonomics, risk, deps, consistency, aesthetics, coverage, combined, quality, then usefulness/intentions merges and generate/push, gated on a content hash (`nodesHash !== lastHash`) so unchanged work costs nothing; reports 'pending agent work' per arc rather than doing it itself."
     },
     {
-      "title": "Support multi-tenant workspace/project scoping with back-compat flat routes",
-      "scale": "small",
-      "evidence": "scope.ts builds the /w/:workspace/p/:project prefix only when both fields are present, falling back to flat /v1 paths; tenancy.ts provides listWorkspaces, listProjects, createWorkspace, createProject over top-level /api/workspaces endpoints; client.ts validates both workspace and project slugs independently."
+      "title": "Layer a second, orthogonal edge-type onto the dependency graph — WHY a file exists (its intention/objective), not just what it imports — so scope/impact analysis can be intention-driven, not just import-driven",
+      "scale": "feature",
+      "evidence": "tooling/intentions/intentions.mjs tags files by objective; tooling/intentions/review.mjs partitions files into subsystem review batches (this very harness); push.mjs emits an `intentions` typed-reference field alongside `dependencies` on each paper; tooling/scope/scope.mjs consumes the intention graph to produce task-scoped context packs."
     },
     {
-      "title": "Provide observability hooks for tracing and monitoring integrations",
-      "scale": "small",
-      "evidence": "types.ts defines BarkparkHooks (onBeforeRequest, onResponse) with RequestContext and ResponseContext carrying attempt, durationMs, requestId, etag, syncTags, schemaHash; transport.ts runs both hooks on every attempt and fires onResponse on both success and error paths; requestTagPrefix injects X-Barkpark-Request-Tag per ADR-010."
-    },
-    {
-      "title": "Detect and surface API version + schema drift before silent data corruption",
-      "scale": "small",
-      "evidence": "handshake.ts caches /v1/meta (minApiVersion, maxApiVersion, currentDatasetSchemaHash); transport.ts maps schema_mismatch/apiversion_mismatch codes to BarkparkSchemaMismatchError with client/server version and hash fields; types.ts MetaResponse carries currentDatasetSchemaHash for drift comparison."
+      "title": "Never let a missing or stale derived report silently present as a perfect score — absent evidence must be visibly excluded or flagged, not treated as 100/clean",
+      "scale": "invariant",
+      "evidence": "quality.mjs comments call out a fixed bug: 'this path was silently empty, hiding 5 confirmed layering violations behind a perfect Architecture score'; covReport/cite default to null/clean-with-caveat rather than fabricated pass; risk.mjs's coverage cache signature (git blob hash + dirty state) forces re-run when source actually changes rather than trusting a stale cache."
     }
   ]
 }

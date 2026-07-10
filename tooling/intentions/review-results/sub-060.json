@@ -1,1 +1,35 @@
-{"subsystem":"internal","summary":"A framework-free Go HTTP client (shared by TUI and CLI) that abstracts all Barkpark Phoenix API interactions — document CRUD, schema/structure loading, real-time change detection via SSE with poll fallback, and task claim/close operations.","intentions":[{"title":"Decouple API access from any UI framework so TUI and CLI share one client","scale":"epic","evidence":"client.go package comment: 'ZERO Bubble Tea dependency'; OnChange callback replaces tea.Program coupling; Config.Perspective differentiates TUI (drafts) from CLI (published)"},{"title":"Normalize the v1 flat envelope onto legacy typed fields without breaking existing consumers","scale":"small","evidence":"Doc.UnmarshalJSON + normalizeEnvelope in client.go: maps _id/_updatedAt/_draft onto ID/UpdatedAt/Status, fills Values from flattened content fields, guards against double-applying"},{"title":"Surface real-time dataset changes to interactive consumers","scale":"small","evidence":"StartSSE + listenSSE in client.go: SSE stream fires OnChange on mutation events; pollOnce fallback hashes _id:_rev pairs via exportDocSetHash so spurious refreshes are suppressed"},{"title":"Protect structured data from accidental scalar overwrite in the editor","scale":"small","evidence":"schema.go FieldRaw enum + parseFieldType: v2 plugin types (object, composite, arrayOf, codelist, localizedText) map to read-only FieldRaw instead of editable FieldString"},{"title":"Expose task claim/close with fencing epoch for safe concurrent task dispatch","scale":"small","evidence":"TaskClaim and TaskClose in client.go: taskPost targets /v1/tasks/:id/claim and /close, carries observed_epoch for server-side fencing, returns epoch to caller for CAS"},{"title":"Support multi-tenant workspace/project scoping across all API calls","scale":"epic","evidence":"scopedURL in client.go builds /w/:workspace/p/:project prefix; Config carries Workspace/Project/Dataset; CreateWorkspace/CreateProject/ListWorkspaces/ListProjects manage the tenant hierarchy"}]}
+{
+  "subsystem": "js/packages/create-barkpark-app/src",
+  "intentions": [
+    {
+      "title": "Give developers a zero-to-running Barkpark app in one CLI command (create-barkpark-app)",
+      "scale": "epic",
+      "evidence": "index.ts orchestrates the full flow: prompts → scaffold → optional hosted-demo wiring → install → git init → printed next steps, mirroring create-next-app/create-vite UX; constants.ts exposes AVAILABLE_TEMPLATES=['website-starter','blog-starter']."
+    },
+    {
+      "title": "Let a prospect try Barkpark instantly against a public read-only hosted demo dataset, with a clear path to switch to local docker-compose later",
+      "scale": "feature",
+      "evidence": "hosted.ts applyHostedDemo() strips docker-compose files, writes .env.local pointing BARKPARK_API_URL at HOSTED_DEMO_URL (https://barkpark.dev), and flips on a HostedDemoBanner marker in app/layout.tsx; post-install.ts prints 'You are on the public hosted demo dataset (read-only)' plus instructions to re-run without --hosted-demo for local data."
+    },
+    {
+      "title": "Never leave a half-scaffolded or corrupted project directory behind, even on partial failure or bad input",
+      "scale": "invariant",
+      "evidence": "index.ts ensureTargetEmpty() refuses to scaffold into a non-empty directory before any writes happen; scaffold.ts assertTemplateExists() fails fast with a named error; prompts.ts projectNameError() validates non-interactive names (rejecting empty/dot-leading) specifically because skipping that check previously let '.' or '/' normalize to cwd and produce a confusing downstream 'directory not empty' error instead of a clear message."
+    },
+    {
+      "title": "Support both fully interactive (clack prompts) and fully scripted/CI (--yes, flags) invocation without divergent validation paths",
+      "scale": "feature",
+      "evidence": "prompts.ts runPrompts() branches on yesFlag to short-circuit to defaults, but still runs projectNameError() on any inputs.targetArg before that branch so CLI-arg and --yes paths get the same validation as the interactive p.text validator; index.ts wires -t/--template, -y/--yes, --skip-install, --skip-git, --hosted-demo flags via commander."
+    },
+    {
+      "title": "Keep the scaffolder package-manager agnostic and safe to run offline/without installing",
+      "scale": "feature",
+      "evidence": "pm.ts detects the invoking package manager; install.ts wraps the actual install as a separate, catchable step so a failed install doesn't abort the whole scaffold (index.ts catches and prints a manual-install fallback); index.ts also supports --skip-install and --skip-git."
+    },
+    {
+      "title": "Render project templates safely with simple, auditable string substitution rather than a templating engine, and normalize arbitrary project names into valid npm package names",
+      "scale": "invariant",
+      "evidence": "scaffold.ts renderTemplate() does a minimal {{key}} regex substitution over vars (projectName, packageName, pmCommand, barkparkVersion) applied only to recognized text-file extensions (isTextFile) or .tmpl files, binary files are fs.copyFile'd untouched; toPackageName() lowercases/strips/collapses into a valid slug, falling back to 'barkpark-site' if empty."
+    }
+  ]
+}

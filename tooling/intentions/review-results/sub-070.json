@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark/content/papers",
+  "intentions": [
+    {
+      "title": "Make the block-list the single write chokepoint for Papers so every author-facing shape defect (missing id, flat-string list item, template violation) is fixed exactly once and can never reach storage from any entry point",
+      "scale": "invariant",
+      "evidence": "block_ops.ex: ensure_block_ids/1 and normalize_list_items/1 are routed through by upsert_paper, apply_paper_block_op, apply_paper_block_ops, apply_document_block_op, proposals.ex's write_proposed_blocks, and the two backfill mix-task modules (backfill_block_ids.ex, doctrine_backfill.ex) — moduledoc explicitly enumerates all callers as 'the SINGLE chokepoint'."
+    },
+    {
+      "title": "Enforce a locked, non-blank-form paper template (required title heading, optional featured image, optional ingress) as a structural doctrine — never a field convention that a client can bypass",
+      "scale": "epic",
+      "evidence": "template.ex: paper_declarations/0 expressed in Barkpark.PortableDoc.Constraints vocabulary; client_declarations/0 mirrors it to the canvas as data-constraints; validate/1 is wired as a before_save gate; Patch backstop rejects remove/move/patch ops on locked blocks."
+    },
+    {
+      "title": "Migrate the entire legacy paper corpus onto the doctrine template and canonical block shape without ever bricking a paper or inventing content, via safe dry-run-by-default, idempotent, human-gated backfill tooling",
+      "scale": "feature",
+      "evidence": "doctrine_backfill.ex and backfill_block_ids.ex: dry_run: true default, plan/1 pure classifiers, :unfixable classification for non-derivable cases, unique_ids? post-condition refusal, 'Human runbook (the apply is HUMAN-GATED)' section, byte-stable/idempotent guarantees."
+    },
+    {
+      "title": "Enable AI/agent proposal of content edits (e.g. valueref suggestions) that can only insert new blocks into a draft, never silently overwrite existing prose, with mandatory dual-recorded provenance surviving the publish gate",
+      "scale": "feature",
+      "evidence": "proposals.ex: @insert_op_kinds restricted to append-block/insert-after; validate_ops rejects mutating ops; propose_paper_blocks writes drafts.<slug> only; provenance recorded both as a content_edges row pinned to the draft PK and a content[\"proposals\"] sidecar that survives publish; rollback on unresolvable source."
+    },
+    {
+      "title": "Allow a Studio user to edit an inline valueref and push the change back to its canonical source document, gated by target-scoped authorization, an impact preview of affected documents, and optimistic-concurrency CAS — reusing the existing guarded mutation path rather than a raw write",
+      "scale": "feature",
+      "evidence": "value_writeback.ex: inspect_target/writeback three-gate design (affordance, authorization via resolve_docs_by_ids + write_capable?, impact preview via Graph.reverse_referencers); writeback delegates to Content.apply_mutations with ifRevisionID CAS; ensure_no_diverged_draft guard; @revision_action tap for provenance."
+    },
+    {
+      "title": "Keep every paper write path byte-compatible and non-blocking for tenants that don't opt into new features (encryption, projection, doctrine template, workspace scoping) — additive enforcement that never bricks legacy or single-tenant data",
+      "scale": "invariant",
+      "evidence": "template.ex validate/1 returns [] for papers with no locked blocks; block_ops.ex encrypt_paper_blocks is a byte-identical no-op when schema marks nothing encrypted; get_existing_paper_for_write/get_block_op_paper fall back to unscoped lookup when no seeded Default workspace exists (fresh sandbox); doctrine_backfill.ex conforms? check leaves already-correct papers untouched."
+    }
+  ]
+}

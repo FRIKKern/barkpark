@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark/crypto",
+  "intentions": [
+    {
+      "title": "Encrypt content fields at rest with tenant-scoped envelope encryption, fail closed on tamper",
+      "scale": "feature",
+      "evidence": "field_cipher.ex: AES-256-GCM per field, scope used as AAD so ciphertext can't be replayed cross-tenant; GCM auth means any tamper -> :error; self-describing envelope map ({'_bpenc':1,'k':version,'v':base64}) stored inline in documents.content; encrypt/2 is idempotent on already-encrypted values."
+    },
+    {
+      "title": "Support DEK rotation without touching stored content",
+      "scale": "invariant",
+      "evidence": "data_keys.ex rotate_dek/1 deactivates old DEK version but keeps it decryptable; re-encryption is lazy on next field write; dek_for_version/2 lets decrypt/2 find the right historical key by version stamped in the envelope."
+    },
+    {
+      "title": "Support KEK rotation as a cheap re-wrap operation, never re-encrypting content",
+      "scale": "invariant",
+      "evidence": "data_keys.ex rewrap_all/0 re-wraps every stored DEK under the current KEK and bumps kek_version, touching only small wrapped-DEK blobs; local_kek.ex unwrap/1 tries current key then previous_keys (MEDIUM-9 fix) so rotation works while old ciphertext still decrypts."
+    },
+    {
+      "title": "Make the key-management backend pluggable (env-based KEK today, Vault/cloud KMS later) without touching callers",
+      "scale": "feature",
+      "evidence": "key_provider.ex is a @behaviour (wrap/1, unwrap/1, kek_version/0) selected via config :barkpark, :key_provider; local_kek.ex is the default AES-256-GCM implementation from BARKPARK_KEK; moduledoc explicitly frames this as the seam for swapping backends without Content knowing which provider is configured."
+    },
+    {
+      "title": "Bound and amortize the cost of key unwrapping under multi-tenant scale",
+      "scale": "invariant",
+      "evidence": "data_keys.ex keeps an ETS cache of unwrapped DEKs keyed by {scope, version} with @max_cached_deks 10_000 and clear-on-full eviction (correctness-preserving since a miss just re-derives via the cold KEK-unwrap path); avoids a KEK round-trip per field access."
+    },
+    {
+      "title": "Guarantee fail-closed behavior even against malformed/crafted ciphertext envelopes",
+      "scale": "invariant",
+      "evidence": "field_cipher.ex decrypt/2 pattern-guards on integer version/binary encoded (LOW-17 fix: previously a crafted envelope with wrong types raised FunctionClauseError on the admin reveal path; now falls through to :error); key_provider.ex moduledoc mandates implementations 'MUST fail closed on any tampering'."
+    }
+  ]
+}

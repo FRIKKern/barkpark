@@ -1,0 +1,41 @@
+{
+  "subsystem": "js",
+  "count": 7,
+  "files": [
+    {
+      "path": "js/eslint.config.js",
+      "role": "JS monorepo ESLint configuration",
+      "importance": 4
+    },
+    {
+      "path": "js/scripts/check-no-node-imports.sh",
+      "role": "CI lint script for edge-compat",
+      "importance": 11
+    },
+    {
+      "path": "js/scripts/post-build-dts.mjs",
+      "role": "post-build TypeScript declaration fixer",
+      "importance": 4
+    },
+    {
+      "path": "js/scripts/vercel-preview-smoke.sh",
+      "role": "stub smoke-test script",
+      "importance": 4
+    },
+    {
+      "path": "js/test-utils/vitest.setup.ts",
+      "role": "vitest global test lifecycle hooks",
+      "importance": 4
+    },
+    {
+      "path": "js/test-utils/msw/handlers.ts",
+      "role": "MSW API mock handlers",
+      "importance": 4
+    },
+    {
+      "path": "js/test-utils/msw/server.ts",
+      "role": "MSW test server setup",
+      "importance": 4
+    }
+  ]
+}

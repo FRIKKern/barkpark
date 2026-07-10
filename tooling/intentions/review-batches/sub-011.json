@@ -1,102 +1,156 @@
 {
-  "subsystem": "internal/cli",
-  "count": 16,
+  "subsystem": "api/lib/barkpark/plugins",
+  "count": 30,
   "files": [
     {
-      "path": "internal/cli/run.go",
-      "role": "CLI command execution core",
-      "importance": 62,
-      "usefulness": 44
+      "path": "api/lib/barkpark/plugins/bootstrap.ex",
+      "role": "boot-time plugin schema installer",
+      "importance": 53
     },
     {
-      "path": "internal/cli/cli.go",
-      "role": "bp CLI entry point and manifest-driven dispatcher",
-      "importance": 66,
-      "usefulness": 39
+      "path": "api/lib/barkpark/plugins/bulldocs.ex",
+      "role": "Bulldocs plugin (papers/paperflow lifecycle)",
+      "importance": 31
     },
     {
-      "path": "internal/cli/config.go",
-      "role": "CLI config persistence and context resolution",
-      "importance": 55,
-      "usefulness": 35
+      "path": "api/lib/barkpark/plugins/capabilities.ex",
+      "role": "CLI/API capabilities manifest assembler and auth-tier visibility filter",
+      "importance": 71
     },
     {
-      "path": "internal/cli/errors.go",
-      "role": "CLI API error decoding and exit-code mapping",
-      "importance": 49,
-      "usefulness": 21
+      "path": "api/lib/barkpark/plugins/content_probe.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "internal/cli/setup_cmd.go",
-      "role": "setup command adapter/bridge",
-      "importance": 44,
-      "usefulness": 26
+      "path": "api/lib/barkpark/plugins/enablement.ex",
+      "role": "",
+      "importance": 47
     },
     {
-      "path": "internal/cli/load.go",
-      "role": "CLI capabilities manifest loader with file/env/network precedence",
-      "importance": 50,
-      "usefulness": 15
+      "path": "api/lib/barkpark/plugins/env_config.ex",
+      "role": "BARKPARK_PLUGINS env var parser for plugin registry",
+      "importance": 18
     },
     {
-      "path": "internal/cli/output.go",
-      "role": "CLI output renderer (table/JSON/YAML/minimal)",
-      "importance": 42,
-      "usefulness": 21
+      "path": "api/lib/barkpark/plugins/frt.ex",
+      "role": "FRT game-design plugin — 25 schema registrations + Studio desk",
+      "importance": 42
     },
     {
-      "path": "internal/cli/globals.go",
-      "role": "CLI global flags parser",
-      "importance": 44,
-      "usefulness": 17
+      "path": "api/lib/barkpark/plugins/github.ex",
+      "role": "",
+      "importance": 66
     },
     {
-      "path": "internal/cli/builtins.go",
-      "role": "CLI built-in commands (version, capabilities)",
-      "importance": 42,
-      "usefulness": 18
+      "path": "api/lib/barkpark/plugins/hooks.ex",
+      "role": "plugin lifecycle-hook dispatcher",
+      "importance": 47
     },
     {
-      "path": "internal/cli/table.go",
-      "role": "CLI table renderer for API payloads",
-      "importance": 33,
-      "usefulness": 20
+      "path": "api/lib/barkpark/plugins/manifest.ex",
+      "role": "plugin manifest compile-time + runtime validator",
+      "importance": 35
     },
     {
-      "path": "internal/cli/usage.go",
-      "role": "CLI usage/help text renderer",
-      "importance": 35,
-      "usefulness": 17
+      "path": "api/lib/barkpark/plugins/media.ex",
+      "role": "media library plugin entry point",
+      "importance": 30
     },
     {
-      "path": "internal/cli/paper_cmd.go",
-      "role": "bp paper view CLI command",
-      "importance": 34,
-      "usefulness": 17
+      "path": "api/lib/barkpark/plugins/onixedit.ex",
+      "role": "ONIX 3.0 book metadata plugin entrypoint",
+      "importance": 32
     },
     {
-      "path": "internal/cli/migrate_cmd.go",
-      "role": "bp migrate command implementation",
-      "importance": 35,
-      "usefulness": 14
+      "path": "api/lib/barkpark/plugins/pulse.ex",
+      "role": "",
+      "importance": 31
     },
     {
-      "path": "internal/cli/servers_cmd.go",
-      "role": "bp use command — named-server switching",
-      "importance": 31,
-      "usefulness": 14
+      "path": "api/lib/barkpark/plugins/quiz.ex",
+      "role": "",
+      "importance": 23
     },
     {
-      "path": "internal/cli/upgrade.go",
-      "role": "bp self-upgrade command",
-      "importance": 29,
-      "usefulness": 14
+      "path": "api/lib/barkpark/plugins/registry.ex",
+      "role": "Plugin registry and resolver chain",
+      "importance": 67
     },
     {
-      "path": "internal/cli/uninstall_cmd.go",
-      "role": "bp uninstall command implementation",
-      "importance": 28,
-      "usefulness": 10
+      "path": "api/lib/barkpark/plugins/run_status.ex",
+      "role": "in-memory plugin run-status GenServer",
+      "importance": 46
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings.ex",
+      "role": "encrypted plugin settings CRUD",
+      "importance": 65
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings_audit.ex",
+      "role": "plugin settings audit log Ecto schema",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings_record.ex",
+      "role": "plugin settings Ecto schema with encrypted storage",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/sheets.ex",
+      "role": "Sheets plugin entrypoint and structural validator",
+      "importance": 59
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tasks.ex",
+      "role": "Tasks plugin wiring layer",
+      "importance": 51
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tickets.ex",
+      "role": "",
+      "importance": 28
+    },
+    {
+      "path": "api/lib/barkpark/plugins/bulldocs/event.ex",
+      "role": "paper_events Ecto schema",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/plugins/bulldocs/events.ex",
+      "role": "paper_events context / query module",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media/api_tests.ex",
+      "role": "declarative smoke-test specs for Media plugin",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media/assets.ex",
+      "role": "mediaAsset document lifecycle manager",
+      "importance": 65
+    },
+    {
+      "path": "api/lib/barkpark/plugins/media/codelists.ex",
+      "role": "Media plugin codelist seeder",
+      "importance": 35
+    },
+    {
+      "path": "api/lib/barkpark/plugins/settings/masking.ex",
+      "role": "plugin settings secret masker",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark/plugins/pulse/web/dashboard_live.ex",
+      "role": "",
+      "importance": 48
+    },
+    {
+      "path": "api/lib/barkpark/plugins/tasks/web/board_live.ex",
+      "role": "",
+      "importance": 51
     }
   ]
 }

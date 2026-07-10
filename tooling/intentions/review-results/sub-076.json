@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark_web/components/fields",
+  "intentions": [
+    {
+      "title": "Render the full v2 schema field-type vocabulary (composite, arrayOf, codelist, localizedText) as recursive, form-editable HEEx components without a client-side framework",
+      "scale": "epic",
+      "evidence": "composite_field.ex recurses into arrayOf/codelist/localizedText/composite subfields; array_field.ex dispatches per-element type (composite, arrayOf, codelist, localizedText, reference, leaf) with row-scoped paths like doc[contributors][0].market; all events are phx-click/phx-change server round-trips, no client framework — moduledocs cite masterplan-20260425-085425 Phase 0 as the governing spec."
+    },
+    {
+      "title": "Make large and hierarchical codelists (ISO country/language/currency, ONIX Thema ~3000 nodes) navigable in-form via automatic UI-shape selection instead of dumping thousands of <option> tags",
+      "scale": "feature",
+      "evidence": "codelist_field.ex G5: flat codelists >100 entries render as a <datalist> combobox instead of <select> (@combobox_threshold); G4: hierarchical codelists (parent_id present) >100 raw entries dispatch to TreeCodelistField LiveComponent (@tree_threshold); tree_codelist_field.ex loads via Codelists.tree/3, indexes to nodes_by_code for O(1) lookup, supports expand/collapse, search with ancestor auto-expansion, and single-select semantics explicitly chosen over multi-select (Goal barkpark-zdy removed the old ThemaTreePicker prototype)."
+    },
+    {
+      "title": "Never let a malformed or unexpected document value crash the Studio LiveView — degrade to a visible, editable-adjacent fallback instead",
+      "scale": "invariant",
+      "evidence": "array_field.ex leaf_display/1 comment: 'a map/list reaching the leaf fallback ... used to take down the whole LiveView. Render it as JSON so the row stays visible'; codelist_field.ex empty-registry placeholder renders literal 'no codelist registered' text instead of a silent empty <select>; tree_codelist_field.ex maybe_load_tree/1 rescues loader exceptions to []."
+    },
+    {
+      "title": "Support multilingual content editing with explicit fallback-chain resolution and visible provenance when the primary language is missing",
+      "scale": "feature",
+      "evidence": "localized_text_field.ex renders one input per field.languages, delegates resolution to Barkpark.Content.LocalizedText.resolve/2, and surfaces a 'primary translation X missing — using fallback Y' warning (data-severity=\"warning\" for a future severity DSL) per Decision 15 / Phase 0 line 58; distinguishes plain <textarea> vs rich bp-rich-text-editor Web Component bridged via BarkparkFieldBridge."
+    },
+    {
+      "title": "Let schema authors declare visibleWhen predicates so a field's presence in the form reacts live to sibling field values, with editor and cross-validator sharing one operator semantics",
+      "scale": "invariant",
+      "evidence": "visibility.ex is a thin delegate to Barkpark.Content.FieldVisibility, explicitly 'so the editor and cross-validation can never disagree on operator semantics'; composite_field.ex calls Visibility.visible?(sub, @value) to filter rendered subfields; supports eq/neq/in/empty/non_empty/starts_with operators per book.json's visibleWhen shape."
+    },
+    {
+      "title": "Give array-of-composite fields (e.g. task acceptance_criteria) a read-only progress readout without adding a second source of truth for 'met' counting",
+      "scale": "feature",
+      "evidence": "array_field.ex checklist_progress/2 detects a composite element with a boolean 'met' subfield and renders an 'm/n met' badge, delegating counting to the single canonical impl Barkpark.Tasks.Criteria.of_list/1 (comment: 'Counting semantics are owned by the ONE canonical impl'); purely render metadata, no events or persistence."
+    }
+  ]
+}

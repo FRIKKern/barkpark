@@ -1,1 +1,45 @@
-{"subsystem":"js/packages/create-barkpark-app/templates/website-starter","summary":"A scaffolded Next.js App Router starter that demonstrates Barkpark as a headless CMS backend — wiring schema definitions, a typed server-side fetch helper, and a seed script into a runnable site that developers get from `create-barkpark-app`.","intentions":[{"title":"Accelerate developer onboarding with a zero-to-running example","scale":"epic","evidence":"barkpark.config.ts.tmpl + package.json.tmpl scaffold a full Next.js project; seed.ts populates realistic authors/pages/posts so the first `pnpm dev` renders real content without manual data entry"},{"title":"Demonstrate the Barkpark query API surface (getDocs/getDoc/getDocBySlug)","scale":"small","evidence":"lib/barkpark.ts exposes three typed helpers that cover the three read patterns (list, by id, by slug), serving as living documentation of /v1/data/query and /v1/data/doc endpoints"},{"title":"Teach Next.js App Router cache integration with Barkpark sync tags","scale":"small","evidence":"lib/barkpark.ts sets next:{tags, revalidate:60} on every fetch, pairing cache tags in bp:ds:<dataset>:type:<type> / bp:ds:<dataset>:doc:<id> format that Barkpark's webhook revalidation can target"},{"title":"Show multi-workspace / scoped-prefix opt-in path","scale":"small","evidence":"barkpark.config.ts.tmpl comments out BARKPARK_WORKSPACE/PROJECT; seed.ts builds a SCOPE string conditionally — both files teach the flat-vs-scoped routing split without forcing it on new users"},{"title":"Establish a canonical schema authoring pattern for content types","scale":"small","evidence":"schemas/post.ts, schemas/author.ts, schemas/page.ts define richText, slug, reference, array fields as const objects matching the Barkpark schema contract, giving new projects a copy-paste starting point"}]}
+{
+  "subsystem": "internal/cli/setup",
+  "intentions": [
+    {
+      "title": "Collapse Barkpark onboarding into a single `bp setup` entry point covering connect, cloud login, local dev, remote deploy, and cloud provisioning",
+      "scale": "epic",
+      "evidence": "setup.go's SetupPlan/Target enum (connect|cloud|local|deploy|provision) and Execute dispatch table; wizard.go's stageTarget picker offering all five as one linear flow; deploy.sh + caddy.go + provision.go implement the heavier targets behind the same plan shape."
+    },
+    {
+      "title": "Make every setup path dry-runnable and JSON-renderable before it does anything real",
+      "scale": "invariant",
+      "evidence": "plan.go's Plan/RenderHuman split; BuildPlan in setup.go builds the same Plan struct the human dry-run and the --json dry-run both render from ('the two never drift'); connect.go's executeConnect explicitly skips all network I/O under opts.DryRun and prints exactly what it would save."
+    },
+    {
+      "title": "Never let a public/anonymous-resolving token get silently persisted as a working credential",
+      "scale": "invariant",
+      "evidence": "connect.go: /v1/capabilities is public so an invalid token never 401s — executeConnect explicitly refuses to save when plan.Token != \"\" but the probed tier resolves to none/anonymous, citing the same hint as the 401 path."
+    },
+    {
+      "title": "Prove a freshly deployed/provisioned Barkpark server is genuinely ready, not just reachable, before declaring go-live",
+      "scale": "feature",
+      "evidence": "healthgate.go's HealthGate runs 7 checks (capabilities, /studio, LiveView websocket non-403, TLS, Postgres-through-API, agent status, backup schedule) plus an optional cloud-sites check; explicitly targets the check_origin/PHX_HOST websocket-403 footgun documented as a recurring incident (docs/ops/studio-nav-bug-2026-04-19.md)."
+    },
+    {
+      "title": "Let a self-hosting user go from bare VPS to a running, TLS-terminated Barkpark with one script/command, on either ARM64 or x86_64",
+      "scale": "feature",
+      "evidence": "assets/deploy.sh installs Postgres, ASDF/Erlang/Elixir, Go, clones the repo, and requires a public DOMAIN (not an IP) specifically to avoid the check_origin 403 trap; caddy.go's CaddyOpts generates the ACME/Caddyfile + PHX_HOST/PHX_SCHEME env wiring for exactly one managed subdomain."
+    },
+    {
+      "title": "Chain cloud host provisioning straight into deploy so 'create a server' and 'install Barkpark on it' are one guided action, never a silent partial state",
+      "scale": "feature",
+      "evidence": "provision.go's executeProvision: always previews the exact provider CLI commands first; real creation requires opts.Confirm AND a present CLI+credential; on success it captures the new IP and 'CHAINS into the DEPLOY target' rather than leaving a provisioned-but-unconfigured host."
+    },
+    {
+      "title": "Ship an interactive terminal wizard that reuses the CLI's own semantic color roles, so setup feels like the rest of the TUI rather than a bolted-on installer",
+      "scale": "feature",
+      "evidence": "wizard.go's Bubble Tea model with target-select, server pick-list, per-target inputs, profile (clean vs demo seed), plugin multi-select, and confirm stages; styling pulled through internal/semrole (roleColor for ok/warn) rather than hardcoded colors, panicking on unknown roles to keep the vocabulary honest."
+    },
+    {
+      "title": "Keep the setup package import-clean of both the CLI's config storage and the cloud control-plane client",
+      "scale": "invariant",
+      "evidence": "setup.go doc comment: 'deliberately decoupled from the cli package's config storage to avoid an import cycle'; ConfigStore/CloudLoginFunc/WizardFunc are all injected hooks (Options.Store, Options.CloudLogin, Options.Wizard) so setup never imports cli or cloudclient directly."
+    }
+  ]
+}

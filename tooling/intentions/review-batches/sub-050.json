@@ -1,30 +1,51 @@
 {
-  "subsystem": "api/lib/barkpark/edge_projector",
-  "count": 4,
+  "subsystem": "api/lib/barkpark/plugins/onixedit/export",
+  "count": 9,
   "files": [
     {
-      "path": "api/lib/barkpark/edge_projector/projector.ex",
-      "role": "content edge materialisation engine",
-      "importance": 44,
-      "usefulness": 36
+      "path": "api/lib/barkpark/plugins/onixedit/export/codelists.ex",
+      "role": "ONIX 3.0 static codelist resolver",
+      "importance": 60
     },
     {
-      "path": "api/lib/barkpark/edge_projector/projector_worker.ex",
-      "role": "Oban worker driving debounced edge projection",
-      "importance": 40,
-      "usefulness": 26
+      "path": "api/lib/barkpark/plugins/onixedit/export/collateral_detail.ex",
+      "role": "ONIX 3.0 CollateralDetail block builder",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/edge_projector/lifecycle.ex",
-      "role": "content graph projection event router",
-      "importance": 40,
-      "usefulness": 24
+      "path": "api/lib/barkpark/plugins/onixedit/export/descriptive_detail.ex",
+      "role": "ONIX 3.0 DescriptiveDetail block builder",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/edge_projector/settings.ex",
-      "role": "edge projector settings resolver",
-      "importance": 27,
-      "usefulness": 19
+      "path": "api/lib/barkpark/plugins/onixedit/export/header.ex",
+      "role": "ONIX 3.0 Header element builder",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/message.ex",
+      "role": "ONIX 3.0 ONIXMessage root wrapper",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/product_supply.ex",
+      "role": "ONIX 3.0 ProductSupply block builder",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/publishing_detail.ex",
+      "role": "ONIX 3.0 PublishingDetail block builder",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/status_pill.ex",
+      "role": "Bokbasen export status color/label mapping",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/export/validator.ex",
+      "role": "ONIX 3.0 XSD validation gate via xmllint",
+      "importance": 30
     }
   ]
 }

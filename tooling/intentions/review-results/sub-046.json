@@ -1,21 +1,45 @@
 {
-  "subsystem": "js/packages/core",
-  "summary": "Build and test infrastructure for the @barkpark/core JS SDK — packages the client for CJS/ESM/TypeScript consumers and validates it across Node, browser, and Cloudflare Workers runtimes, plus a live regression harness against prod.",
+  "subsystem": "api/lib/barkpark_web/live/studio/studio_live",
   "intentions": [
     {
-      "title": "Ship a universal JS SDK that runs anywhere",
+      "title": "Decompose the Studio god-LiveView into state-coupled seam modules (Shared, Mount, Paths, DocActions, Blocks) so the callback module stays a thin dispatcher",
+      "scale": "invariant",
+      "evidence": "shared.ex moduledoc: 'Every function here was a defp on the StudioLive god-module before the handler-body extraction (Modularity gate)... behaviour-preserving'; mount.ex/paths.ex/doc_actions.ex/blocks.ex each extracted a single concern (init assigns, URL grammar, doc-action registry, block-patch catalog) with @doc false internal-seam markers."
+    },
+    {
+      "title": "Ship a continuous ProseMirror paper canvas that subsumes the legacy per-block editor without breaking it, behind a fail-toward-mainline feature flag",
       "scale": "epic",
-      "evidence": "tsup.config.ts emits both CJS (.cjs) and ESM (.mjs) with tree-shaking + dts; separate vitest configs for node, browser (Playwright/Chromium), and Cloudflare Workers (workerd) prove the same package works across all three runtimes"
+      "evidence": "paper_canvas.ex: paper_canvas_enabled?/0 defaults TRUE (D7/D9 cutover), only literal '0'/'false' opt out, any typo keeps canvas on; partition_runs/1 groups blocks into maximal contiguous canvas-eligible runs (prose, divider, callout, code/diagram attr-atoms, field-* controls, sheet/embed read-only atoms, 12 fleet types, table, figure, columns/section/terminal containers, card/stage widgets) vs boundary blocks that still split; extensive lockstep comments tying Elixir partitioning to run-convert.js."
     },
     {
-      "title": "Prevent API contract regressions from shipping to consumers",
-      "scale": "small",
-      "evidence": "scripts/live-regression.mjs imports the built dist and fires real requests at prod (89.167.28.206) to prove defects #16 (docs.find() envelope) and #18 (single-doc fetch) stay fixed; fails with non-zero exit on shape mismatch"
+      "title": "Grow the canvas's eligible-block surface incrementally (S3 through S10, t12a, editable-table/figure/section/terminal/card/stage) until nearly the whole document body is one editable run, while forbidding container-in-container",
+      "scale": "epic",
+      "evidence": "paper_canvas.ex module-attribute stack (@canvas_atom_types, @canvas_content_types, @canvas_attr_atom_types, @canvas_field_types, @canvas_picker_field_types, @canvas_readonly_atom_types, @canvas_fleet_types, @canvas_role_types, @canvas_table_types, @canvas_figure_types, @canvas_task_list_types, @canvas_container_types, @canvas_widget_types) each documenting a dated increment; 'V1 forbids container-in-container: a container encountered as a CHILD is carried as read-only verbatim'."
     },
     {
-      "title": "Maintain tight TypeScript DX for SDK consumers",
-      "scale": "small",
-      "evidence": "tsup.config.ts sets dts:true and sourcemap:true, targeting es2022 with code-splitting — consumers get full types, source maps, and shake-friendly imports out of the box"
+      "title": "Enforce a WordPress-style metadata sidebar doctrine: status/slug/context/labels/relations live outside the article body, title+featured-image stay locked body blocks",
+      "scale": "invariant",
+      "evidence": "paper_canvas.ex t6 section: sidebar_meta_op/2 returns {:doc_field, field, value} 'deliberately NOT a body block op'; slug_feedback/1 is a pure instant format check; visibility_label/1, paper_labels/1, paper_relations/1 pull sidebar data from doc fields/blocks without touching the article body."
+    },
+    {
+      "title": "Give every Studio surface (list, presence, sheet, graph, paper, media-explorer) consistent subscribe/unsubscribe and view-switch lifecycle so panes never leak stale PubSub topics or Presence trackers",
+      "scale": "invariant",
+      "evidence": "shared.ex: ensure_list_subscription/2, ensure_presence_subscription/1, ensure_sheet_subscription/2, resub_sheet_deltas/2, resub_sheet_presence/2, subscribe_to_doc/1 all diff old vs new topic before unsubscribing/tracking; rebuild_panes/1 dispatches to setup_paper_view/setup_sheet_view/setup_graph_view/media_explorer clearing the other views first."
+    },
+    {
+      "title": "Keep the Studio URL grammar single-sourced across flat and workspace/project-scoped surfaces",
+      "scale": "invariant",
+      "evidence": "paths.ex moduledoc: 'THE Studio URL builder — the single owner of the Studio path grammar'; studio_path_for/3, studio_path/4 (socket-free) mirrored by shared.ex's socket-aware studio_path/4 delegate; scoped_root/3 vs flat_root/1 as 'ONE owner each for the scoped and deliberate-flat grammars'."
+    },
+    {
+      "title": "Let plugins amend the document action bar (Publish/Unpublish/Delete/History/Export ONIX/Bokbasen) without the host hardcoding plugin-specific buttons",
+      "scale": "feature",
+      "evidence": "doc_actions.ex: resolved_doc_actions/1 builds a baseline via default_doc_actions/2 then calls Barkpark.Plugins.Registry.collect_doc_actions/1 so 'each plugin's resolve_doc_actions/2 can drop, reorder, or amend entries'; workspace_id threaded into ctx to skip per-workspace-disabled plugins."
+    },
+    {
+      "title": "Guarantee draft/publish/unpublish/bulk actions respect plugin-issued halts (e.g. cross-field validation, workflow gates) and surface partial-failure feedback to the editor",
+      "scale": "invariant",
+      "evidence": "shared.ex do_autosave/2, do_unpublish/1, do_action/3, bulk_action/2 all pattern-match {:error, {:halted, reason}} distinctly from generic {:error, _} and report 'cancelled by plugin rules' counts alongside ok/err counts in bulk_action/2's flash message."
     }
   ]
 }

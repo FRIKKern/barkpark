@@ -1,51 +1,40 @@
 {
-  "subsystem": "api/lib/barkpark_web/plugs",
-  "summary": "The plugs directory is the entire HTTP security and tenancy boundary layer for Barkpark's Phoenix API — every request passes through a composed pipeline of these plugs before reaching a controller, enforcing auth, multi-tenant isolation, rate limiting, CORS, and API contract hygiene.",
+  "subsystem": "api/lib/barkpark_web/controllers",
   "intentions": [
     {
-      "title": "Harden multi-tenant isolation at the routing layer",
+      "title": "Give every non-2xx API response one structured, contract-documented error envelope",
+      "scale": "invariant",
+      "evidence": "fallback_controller.ex routes ALL controller error tuples through Barkpark.Content.Errors.to_envelope/2, referencing docs/api-v1.md §Error codes; controllers like tasks_controller.ex and bulldocs_ingest_controller.ex still hand-roll per-endpoint {ok:false, reason:...} / {error:{code,message}} shapes on top of that, but the router-wide fallback guarantees no raw 500/changeset leaks."
+    },
+    {
+      "title": "Make `bp task` (and its retired bd-shim ancestor) a fully server-backed, race-safe task substrate over HTTP",
       "scale": "epic",
-      "evidence": "resolve_workspace.ex resolves workspace slug → struct and gates token membership before any controller runs; scope_helpers.ex is the single seam that translates conn/socket assigns into WHERE-clause opts so tenant scope is never hand-rolled at a call site; resolve_project.ex mirrors this for the project level. The cross-dataset read-leak fix is explicitly called out in resolve_workspace.ex moduledoc."
+      "evidence": "tasks_controller.ex implements 12+ endpoints (ready/prime/index/claim/claim_by_id/close/edges/labels/papers/move) with advisory-lock + CAS-on-epoch/rev semantics, resource-conflict 409s, doc_changed_since_claim fencing, and a `prime` one-call rehydration endpoint explicitly designed to replace 4 calls after context compaction."
     },
     {
-      "title": "Enforce layered, fail-closed authentication across multiple token types",
+      "title": "Make task hierarchy visible and navigable as a 'rail' — parent/child timelines with drift detection for concurrent agents",
+      "scale": "feature",
+      "evidence": "tasks_controller.ex's rail-l1/rail-l3 machinery: task_parent_id, with_rail_extras, rail_rev ETag comparison, blocked_while_claimed and rail_changed advisory notices, move/2 re-parenting with cycle guards, and child_tasks/graph_show/graph_tasks exposing a task's chronological children and expectation-satisfaction reverse view."
+    },
+    {
+      "title": "Expose the whole content corpus as a navigable, Obsidian-style reference graph (nodes/edges/orphans/dangling/phantoms)",
+      "scale": "feature",
+      "evidence": "tasks_controller.ex graph_corpus/2 builds a full dataset graph (real + phantom nodes, node budget 2000, truncation reporting) explicitly for 'the Web finder... Obsidian show the whole vault surface'; graph_show/graph_orphans/graph_dangling generalize BFS traversal to any content doc type via Content.Graph."
+    },
+    {
+      "title": "Let external producers stream and AI-propose paper content over HTTP without breaking the published reader contract",
       "scale": "epic",
-      "evidence": "require_token.ex (Bearer), optional_token.ex (soft Bearer), optional_session_token.ex (browser session), require_bearer_or_session_token.ex (dual-mode for media upload), preview_token.ex (JWT for preview), require_ingest_token.ex (paperflow ingest), require_media_processing_callback_token.ex (media callback) — each surface gets exactly the auth posture it needs, all fail closed by default."
+      "evidence": "bulldocs_ingest_controller.ex supports native-blocks ingest, raw-HTML legacy fallback, single-op and atomic-batch block streaming (apply_paper_block_op(s)) with ifRev optimistic concurrency, and an AI-proposes loop (propose/2) that writes ONLY to a drafts.<slug> twin with mandatory provenance edges, routing approval through the existing draft→publish gate rather than a new state machine."
     },
     {
-      "title": "Enable controlled public / anonymous access without weakening member security",
-      "scale": "epic",
-      "evidence": "require_share_scope.ex gates anonymous reads by exact (workspace, project, dataset, surface) share match, is DEFAULT-OFF, read-vs-write aware, and explicitly guards against downgrading authenticated members to share-grade access (bug found live 2026-06-10). public_read.ex restricts a special 'public-read' token to published perspective + public-schema routes only. require_share_edit_token.ex covers the write-side share path."
+      "title": "Keep flat and legacy Studio URLs alive by always funneling them to the canonical scoped /w/:ws/p/:proj/d/:ds/studio path",
+      "scale": "invariant",
+      "evidence": "studio_redirect_controller.ex always issues 302 (never 301, since target depends on token+Referer) via ScopeResolver.resolve_scope, preferring Referer workspace continuity over first-membership default, shared across PageController and LegacyRedirectController for a single resolution rule."
     },
     {
-      "title": "Scope CORS per-dataset and per-tenant rather than globally",
-      "scale": "small",
-      "evidence": "dataset_cors.ex resolves the dataset from path_info at the endpoint layer (before routing), reflects only origins in the dataset's cors_origins allow-list unioned with @always_allowed_origins, never wildcards, and handles both flat and /w/:ws/p/:proj prefixed routes with correct project-scoped resolution."
-    },
-    {
-      "title": "Protect API availability with per-token token-bucket rate limiting",
-      "scale": "small",
-      "evidence": "rate_limit.ex separates read vs write buckets, supports per-dataset config overrides, falls back to client IP for unauthenticated callers, and emits Retry-After headers on 429."
-    },
-    {
-      "title": "Make mutating API calls safe to retry via idempotency dedup",
-      "scale": "small",
-      "evidence": "idempotency.ex caches the response for (key, token_id, method, path) tuples on POST/PUT/PATCH/DELETE, replays on hit with Idempotency-Replay header, and skips caching on 5xx so transient errors never poison the cache."
-    },
-    {
-      "title": "Provide a backwards-compatible flat-route surface while the codebase migrates to scoped URLs",
-      "scale": "small",
-      "evidence": "assign_default_scope.ex back-fills workspace/project assigns for legacy flat routes so ScopeHelpers works identically on both flat and /w/:ws/p/:proj routes; legacy_deprecation.ex adds deprecation headers to old route responses; resolve_workspace.ex's allow_anonymous_default option carries the flat Studio's anonymous-Default posture onto the scoped successor."
-    },
-    {
-      "title": "Gate write and admin operations to appropriately permissioned tokens",
-      "scale": "small",
-      "evidence": "require_write_permission.ex gates mutating routes, require_admin.ex gates admin-only routes, require_workspace_role.ex gates workspace-admin actions — three distinct permission tiers enforced as composable plugs."
-    },
-    {
-      "title": "Normalise API contract surface via content negotiation plugs",
-      "scale": "small",
-      "evidence": "accept_barkpark_vendor.ex normalises vendor MIME Accept headers so controllers can pattern-match a single content-type; error_envelope_negotiation.ex versions the error envelope shape based on client API version headers."
+      "title": "Show readers exactly what links to the paper they're reading, using the same indexed graph engine as the Studio editor (not a text scan)",
+      "scale": "feature",
+      "evidence": "paper_backlinks.ex renders 'Used by' (valueref-kind) and 'Linked mentions' sections from Content.Graph.reverse_referencers/2, explicitly NOT a corpus scan, matching the Studio backlinks pane's partition_backlinks/1, fail-closed on out-of-scope/draft-only referencers, HTML-escaped, dark-mode-aware via CSS custom-property fallbacks."
     }
   ]
 }

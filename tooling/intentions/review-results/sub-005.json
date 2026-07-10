@@ -1,46 +1,45 @@
 {
-  "subsystem": "api/lib/barkpark/search",
-  "summary": "A self-improving, multi-engine search subsystem that executes queries across document and media surfaces, learns from user behavior to auto-promote synonyms and suggest improvements, and aggregates raw events into periodic crystals for analytics.",
+  "subsystem": "cloud/lib/barkpark_cloud",
   "intentions": [
     {
-      "title": "Deliver resilient, zero-dead-end search via automatic recovery",
+      "title": "Deliver one control plane for 'one login, one dashboard, for all your Barkparks' — identity, provisioning, and billing unified across a fleet of independently-hosted instances",
       "scale": "epic",
-      "evidence": "query_pipeline.ex implements drop_tokens + typo_widen recovery strategies; both zero-hit and thin-result paths trigger widening; a misconfigured engine falls back to Postgres silently (retriever.ex, retrievers.ex)"
+      "evidence": "accounts.ex: single User + Team membership fans identity out across every registered instance; registry.ex: Barkpark/Provider/AgentEvent/AgentToken all Team-scoped so one team never sees another's instances; router.ex moduledoc frames this as the JSON API the dashboard SPA, Go CLI, and on-box agents all share."
     },
     {
-      "title": "Decouple search engines behind a stable seam so plugins can swap retrievers",
-      "scale": "epic",
-      "evidence": "retriever.ex defines a @callback contract; retrievers.ex resolves engine name to module; query_pipeline.ex has D3-b tenant-scope gate that falls back to Postgres when workspace_id is absent to prevent cross-tenant bypass"
+      "title": "Run the control plane as a minimal Plug.Router JSON API — never Phoenix/LiveView — deliberately decoupled from the OSS Barkpark Studio stack",
+      "scale": "invariant",
+      "evidence": "web/router.ex moduledoc: 'Deliberately NOT Phoenix/LiveView'; application.ex boots Bandit directly with BarkparkCloud.Web.Router as the plug, gated by config `server:` for test isolation via Plug.Test."
     },
     {
-      "title": "Turn search behavior into actionable intelligence without blocking the request path",
-      "scale": "epic",
-      "evidence": "intelligence.ex records events, interactions, and corrections; crystallizer.ex aggregates raw events into day/week/month Crystal rows and detects merge patterns (zero_to_hit, facet_add, query_replace); workers/crystallize.ex and workers/prune.ex run these as background Oban jobs"
+      "title": "Gate managed infrastructure strictly behind entitlement — pay-once go-live, dunning grace, and suspend/resume tied to real Stripe subscription state, built and testable at €0 spend",
+      "scale": "feature",
+      "evidence": "billing.ex: gateway() indirection (StubGateway vs real Stripe), entitled?/1 checks active OR past_due-within-grace, @grace_days 3-day dunning window, cancel_subscription/1 SUSPENDS managed instances while recover_subscription/1 RESUMES them; router.ex POST /v1/go-live 'gate on active subscription'."
     },
     {
-      "title": "Auto-promote synonyms from observed user corrections",
-      "scale": "small",
-      "evidence": "intelligence.ex record_correction/4 counts distinct sessions signaling the same from→to pair and calls Synonyms.promote/3 when ≥2 sessions agree; query_pipeline.ex expand_synonyms/3 injects these at query time and returns corrected_to for UI display"
+      "title": "Make every usage/health meter on the dashboard honest — a meter with no real ceiling never draws a quota bar, and the full meter vocabulary is always present even when inputs fail",
+      "scale": "invariant",
+      "evidence": "usage.ex moduledoc: 'meters without truth are lies' (epic charter D48); compose/1 documented PURE and TOTAL (never touches network/DB, never raises, always emits fixed vocabulary); three explicit quota/threshold families (billing quota vs physical percent vs rate-with-no-quota)."
     },
     {
-      "title": "Surface actionable search quality hints to operators",
-      "scale": "small",
-      "evidence": "intelligence.ex improvement_hints/3 emits structured hints for high zero-hit-rate queries, low CTR despite volume, and common zero→hit recovery patterns; insights/1 assembles these alongside synonym candidates, zero_hit_rate, and recovery_rate"
+      "title": "Provision and operate a fleet of Barkpark instances (and their Sites/Deployments) through an off-box worker/agent/builder protocol with atomic claim, lease expiry, and stale-job reaping — no job silently stuck or double-run",
+      "scale": "feature",
+      "evidence": "registry.ex: claim_next_job/1 with @default_stale_after_seconds (12min, sized above the Go worker's 8min timeout), @default_max_provision_attempts cap, reap_stale_deployments; router.ex /v1/internal/provision-jobs/* and /v1/builder/* and /v1/agent/* claim/transition/console/detail endpoints; failure_copy.ex humanizes the resulting raw failure jargon for every read surface."
     },
     {
-      "title": "Normalize and sanitize all query input before any retrieval or analytics",
-      "scale": "small",
-      "evidence": "sanitizer.ex is used in query_pipeline.ex, intelligence.ex (qualify_query), crystallizer.ex, and synonyms.ex; query_parser.ex tokenizes into terms + phrases; rejected queries are recorded with reject_reason for quality tracking"
+      "title": "Fold three disjoint bearer-token principals (user session, on-box agent, shared worker secret) into one Authorization header contract, each with its own store and fail-closed default",
+      "scale": "invariant",
+      "evidence": "web/auth.ex moduledoc: require_user / require_agent / require_worker pipelines against separate stores; require_worker 'fails CLOSED' when no WORKER_TOKEN is configured rather than opening internal endpoints to all."
     },
     {
-      "title": "Highlight matched terms in results uniformly across engines",
-      "scale": "small",
-      "evidence": "highlighter.ex wraps every retriever via query_pipeline.ex highlight_hits/5, covering both documents and media surfaces"
+      "title": "Let a team stand up managed sites via a real GitHub connection (App install, repo picker, push-triggered deploys) while the app remains fully bootable with GitHub entirely unconfigured",
+      "scale": "feature",
+      "evidence": "github.ex moduledoc: 'HUMAN-LAST / fail-closed' — configured?/0 gates a 503 feature_not_configured, GitHub.Fake client used in dev/test, app 'BOOTS regardless (plugins-off philosophy)'; router.ex /v1/github/* + /v1/sites/:id/github/connect + /v1/webhooks/github/:site_id (HMAC-verified push → Deployment)."
     },
     {
-      "title": "Provide per-surface search tuning without code changes",
-      "scale": "small",
-      "evidence": "surface_configs.ex caches config rows keyed by surface+scope; config drives zero_hit_strategy, low_hit_threshold, and highlight behavior in query_pipeline.ex"
+      "title": "Reach every team member over email without ever leaking data cross-team or requiring SMTP setup before onboarding — settings-encrypted-at-rest, alert dispatch always team-scoped, transactional mail always on the platform mailer",
+      "scale": "invariant",
+      "evidence": "notifications.ex moduledoc: recipients 'ALWAYS team members' (mirrors Coolify's EmailChannel data-exfiltration guard), SMTP secrets run through Registry.Vault.encrypt/1 before the changeset, settings_view/1 masks ciphertext, transactional mail 'ALWAYS ride the platform BarkparkCloud.Mailer'."
     }
   ]
 }

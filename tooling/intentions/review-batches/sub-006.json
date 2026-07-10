@@ -1,126 +1,181 @@
 {
-  "subsystem": "web/lib",
-  "count": 20,
+  "subsystem": "api/assets/paper-editor/src",
+  "count": 35,
   "files": [
     {
-      "path": "web/lib/barkpark-client.ts",
-      "role": "Server-side Barkpark client factory",
-      "importance": 39,
-      "usefulness": 32
+      "path": "api/assets/paper-editor/src/__atom_chrome.test.mjs",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "web/lib/find.ts",
-      "role": "finder shared types and pure helpers",
-      "importance": 33,
-      "usefulness": 38
+      "path": "api/assets/paper-editor/src/__callout_parity.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/bp-fetch.ts",
-      "role": "server-side HTTP fetch client with keep-alive and retry",
-      "importance": 36,
-      "usefulness": 33
+      "path": "api/assets/paper-editor/src/__callout_shorthand.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/find-search.ts",
-      "role": "server-side search API client",
-      "importance": 37,
-      "usefulness": 32
+      "path": "api/assets/paper-editor/src/__cards.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/config.ts",
-      "role": "dataset name constant",
-      "importance": 24,
-      "usefulness": 37
+      "path": "api/assets/paper-editor/src/__code_interior.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/find-shape.ts",
-      "role": "search response normalizer / shape mapper",
-      "importance": 31,
-      "usefulness": 29
+      "path": "api/assets/paper-editor/src/__columns.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/graph.ts",
-      "role": "content graph data fetcher and shape transformer",
-      "importance": 23,
-      "usefulness": 36
+      "path": "api/assets/paper-editor/src/__constraint_slots.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/papers.ts",
-      "role": "PortableDoc paper document types and helpers",
-      "importance": 21,
-      "usefulness": 36
+      "path": "api/assets/paper-editor/src/__divider_parity.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/sheets.ts",
-      "role": "sheet document model and densification helpers",
-      "importance": 22,
-      "usefulness": 33
+      "path": "api/assets/paper-editor/src/__featured_placeholder.test.mjs",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "web/lib/hovered-doc-context.tsx",
-      "role": "Graph–finder hover and match context provider",
-      "importance": 25,
-      "usefulness": 29
+      "path": "api/assets/paper-editor/src/__figure.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/get-post.ts",
-      "role": "ISR-cached post fetch helper",
-      "importance": 29,
-      "usefulness": 24
+      "path": "api/assets/paper-editor/src/__fleet.test.mjs",
+      "role": "",
+      "importance": 14
     },
     {
-      "path": "web/lib/bp-tags.ts",
-      "role": "Next.js cache tag helpers mirroring webhook contract",
-      "importance": 21,
-      "usefulness": 29
+      "path": "api/assets/paper-editor/src/__locked.test.mjs",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "web/lib/get-document.ts",
-      "role": "generic document fetch utility",
-      "importance": 24,
-      "usefulness": 26
+      "path": "api/assets/paper-editor/src/__note.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/posts.ts",
-      "role": "demo post fetch helpers",
-      "importance": 18,
-      "usefulness": 32
+      "path": "api/assets/paper-editor/src/__one_surface.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/get-paper.ts",
-      "role": "ISR-cached paper fetch helper",
-      "importance": 26,
-      "usefulness": 23
+      "path": "api/assets/paper-editor/src/__picker_chrome.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/lib/use-live-search.ts",
-      "role": "WebSocket live search React hook",
-      "importance": 27,
-      "usefulness": 20
+      "path": "api/assets/paper-editor/src/__role.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/stem.ts",
-      "role": "conservative morphological token stemmer",
-      "importance": 16,
-      "usefulness": 27
+      "path": "api/assets/paper-editor/src/__role_parity.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/finder-nav-context.tsx",
-      "role": "keyboard navigation context for finder layout",
-      "importance": 17,
-      "usefulness": 17
+      "path": "api/assets/paper-editor/src/__section_parity.test.mjs",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "web/lib/search-session.ts",
-      "role": "persistent browser search session ID generator",
-      "importance": 14,
-      "usefulness": 14
+      "path": "api/assets/paper-editor/src/__smoke.mjs",
+      "role": "smoke test for portable-doc ↔ TipTap round-trip converters",
+      "importance": 18
     },
     {
-      "path": "web/lib/did-you-mean.ts",
-      "role": "client-side spelling suggestion utility",
-      "importance": 13,
-      "usefulness": 14
+      "path": "api/assets/paper-editor/src/__source_locked.test.mjs",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "api/assets/paper-editor/src/__stage.test.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "api/assets/paper-editor/src/__table.test.mjs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "api/assets/paper-editor/src/__table_parity.test.mjs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "api/assets/paper-editor/src/__terminal.test.mjs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "api/assets/paper-editor/src/__wikilink.test.mjs",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "api/assets/paper-editor/src/contract.js",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "api/assets/paper-editor/src/convert.js",
+      "role": "portable-doc ↔ TipTap JSON converter",
+      "importance": 16
+    },
+    {
+      "path": "api/assets/paper-editor/src/format-bubble.js",
+      "role": "floating text-format toolbar for paper editor",
+      "importance": 4
+    },
+    {
+      "path": "api/assets/paper-editor/src/index.js",
+      "role": "TipTap Web Component editor entrypoint",
+      "importance": 17
+    },
+    {
+      "path": "api/assets/paper-editor/src/markdown.js",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "api/assets/paper-editor/src/marks.js",
+      "role": "",
+      "importance": 11
+    },
+    {
+      "path": "api/assets/paper-editor/src/slash-menu.js",
+      "role": "Slash-command insert menu for paper editor",
+      "importance": 17
+    },
+    {
+      "path": "api/assets/paper-editor/src/tone.js",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "api/assets/paper-editor/src/wikilink-menu.js",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "api/assets/paper-editor/src/wikilink-trigger.js",
+      "role": "",
+      "importance": 9
     }
   ]
 }

@@ -1,51 +1,45 @@
 {
-  "subsystem": "web/lib",
-  "summary": "Server-side and shared utilities for the Next.js demo: a resilient HTTP/WebSocket client layer to the Barkpark API, a full advanced finder (dual-engine search, faceting, normalisation, live-search), and cross-surface glue between the content graph and finder results.",
+  "subsystem": "api/assets/paper-editor/src",
   "intentions": [
     {
-      "title": "Eliminate per-request TLS overhead on the Vercel→Hetzner hop",
+      "title": "Give every Barkpark Paper a premium per-block WYSIWYG editor whose in-canvas edits are byte-identical to the reader's PortableDoc render",
       "scale": "epic",
-      "evidence": "bp-fetch.ts opens a persistent undici Agent (64 connections, 30s keep-alive) shared across all SSR requests; use-live-search.ts routes per-keystroke queries over a persistent Phoenix WebSocket to skip the Vercel hop entirely — both exist explicitly for latency, documented in their module headers"
+      "evidence": "index.js docblock: 'premium per-block rich-text editor (Barkpark papers)'; convert.js maps every portable-doc block/inline shape 1:1 to TipTap JSON against api/lib/barkpark/portable_doc/render.ex and patch.ex; __smoke.mjs (18) is the round-trip harness asserting load-identity + edit-fold fixpoints across 1000+1000 property fuzz iterations (smoke/projection-fuzz.mjs, smoke/round-trip.mjs)."
     },
     {
-      "title": "Provide a single resilient upstream abstraction (timeout, retry, structured errors)",
-      "scale": "epic",
-      "evidence": "bp-fetch.ts is the one place all server routes call the API: AbortController timeout, 2-retry backoff over the restart window, definitive-vs-transient error distinction, and defensive text→JSON parse; find-search.ts and graph.ts both import bpFetchJson and do no raw fetch themselves"
+      "title": "LiveView remains the single source of truth for the block list — each block gets its own isolated TipTap instance that emits a DocPatchOp, never a giant shared ProseMirror document",
+      "scale": "invariant",
+      "evidence": "index.js: 'LiveView owns the block list; EACH rich-text block is edited by its OWN TipTap-vanilla instance... does NOT build one giant ProseMirror document'; on edit it emits patch-block via bubbling CustomEvent('bp-op') (buildPatchBlockOp in convert.js)."
     },
     {
-      "title": "Expose dual search engines (Postgres exact + Indx fuzzy) with transparent fallback",
-      "scale": "epic",
-      "evidence": "find.ts defines SearchEngine type and ENGINES metadata; find-search.ts selects the scoped Indx route only when a token is present and falls back to Postgres with an indxUnavailable flag; use-live-search.ts mirrors the same logic over the WebSocket path"
+      "title": "Notion-style '/' slash menu keeps every insertable block type (text, article-chrome, visual, field, structured) in lockstep with the server's default_block/2 and the Studio add-block dropdown, so the two entrypoints never diverge",
+      "scale": "feature",
+      "evidence": "slash-menu.js: SLASH_ITEMS is a curated ~30-item catalog (paragraph, heading, callout, diagram, field-string, composite, codelist...) explicitly documented as 'mirrors the add-block dropdown in studio_live.ex verbatim... resolves to a default_block/2 clause on the server'; EX2 expectation-aware top group reads server-rendered [data-expected-fields] JSON."
     },
     {
-      "title": "Normalise heterogeneous document types into a uniform FindHit for the finder UI",
-      "scale": "small",
-      "evidence": "find.ts normalizeHit derives title/excerpt/body/slug/date/facets from posts, papers, sheets, authors, categories — tolerating field aliases and PortableDoc block trees — so the finder renders any _type identically"
+      "title": "Enable inline `[[wikilink]]` and `#tag` autocomplete against live document/tag search without coupling the trigger-detection logic to the DOM or TipTap",
+      "scale": "feature",
+      "evidence": "wikilink-trigger.js is explicitly DOM-free ('no document, no TipTap, no HTMLElement') so parseOpenWikilink/parseOpenTag are unit-testable in plain Node (__wikilink.test.mjs, importance 9); wikilink-menu.js + index.js wire the browser half with async candidate sources (wikilinkSource/tagSource) and stale-response guarding via monotonic _wlSeq/_tagSeq."
     },
     {
-      "title": "Make the content graph and finder act as a single instrument (bidirectional hover + match highlighting)",
-      "scale": "small",
-      "evidence": "hovered-doc-context.tsx provides two split contexts: graph-node hover publishes a doc-id that finder rows consume to highlight; finder result-set publishes weighted GraphMatch[] that the Canvas2D graph uses to dim unmatched nodes — two separate contexts to avoid cross-render churn"
+      "title": "Template-locked structural blocks (forced title heading, featured image) can never be deleted or reordered out of a Paper, in both directions of the edit pipeline",
+      "scale": "invariant",
+      "evidence": "__locked.test.mjs (pdd-t2): asserts locked/role survive blocks<->nodes round-trip, runToOps in canvas/run-convert.js never emits remove-block/move-block for a locked id, and transactionVetoesLock (canvas/locks.js) rejects any tx deleting/moving a locked node — 'belt-and-braces over the server backstop + the live filterTransaction veto'."
     },
     {
-      "title": "Keep private schemas out of browse/facet counts and keep both HTTP and WS paths consistent",
-      "scale": "small",
-      "evidence": "find.ts DOC_TYPES allowlist (post/paper/sheet/page/author/category/project) is the single source; find-search.ts and use-live-search.ts both derive CONTENT_TYPES_CSV from it so neither can drift; omits siteSettings, navigation, etc."
+      "title": "Server-painted read-only 'fleet' components (task board, cards, pipeline, roadmap, forms, questionnaires, asciicast) ride inside the paper canvas as verbatim, structurally-only atoms — never decomposed into editable content ops",
+      "scale": "feature",
+      "evidence": "__fleet.test.mjs (pdd-t8, importance 14): FLEET_FIXTURES enumerates 12 fleet types kept in lockstep with run-convert.js CANVAS_FLEET_TYPES + shared/paper.ex @fleet_render_types + render/components.ex/figures.ex/forms.ex emitters; 'the WHOLE block rides VERBATIM on bpBlock, ZERO value/content ops'."
     },
     {
-      "title": "Support multi-tenant scoped routes without breaking flat back-compat paths",
-      "scale": "small",
-      "evidence": "barkpark-client.ts createClient() emits /w/<ws>/p/<project> paths when workspace+project are supplied and the flat /v1/... path otherwise; the exported `client` singleton uses the flat path for existing top-level routes"
+      "title": "Every non-editable canvas atom (sheet embed, generic embed, fleet block) is fully keyboard-reachable and screen-reader announceable — no mouse-only interaction",
+      "scale": "invariant",
+      "evidence": "__one_surface.test.mjs (pdd-t12c): tests isBlockLocked, atomAriaLabel, isActivateKey, sheetChipLabel/embedChipLabel/fleetChipLabel from canvas/embed-node.js as the pure half of tabindex/role/aria wiring and the Enter/Space -> NodeSelection bridge."
     },
     {
-      "title": "Surface content as a navigable knowledge graph on the landing",
-      "scale": "small",
-      "evidence": "graph.ts fetches /v1/graph, normalises nodes/edges with field-alias tolerance, computes a rootId (highest-degree or 'barkpark' preferred), and caches the result for 5 min via unstable_cache tagged for webhook-driven revalidation; feeds the Canvas2D renderer"
-    },
-    {
-      "title": "Record search events for anti-gaming correction auto-promotion",
-      "scale": "small",
-      "evidence": "find-search.ts threads sessionId (from localStorage bp-search-client) as X-BP-SEARCH-CLIENT and sets X-BP-SEARCH-RECORD on non-browse queries; the returned searchEventId is carried through FindResponse for click attribution"
+      "title": "Featured-image and other picker fields show a consistent empty-state placeholder (copy + activation model) until an asset is chosen, then commit the picked value through the same patch-op identity path",
+      "scale": "feature",
+      "evidence": "__featured_placeholder.test.mjs (t13, pd-doctrine rule 1+5): tests isEmptyPickerValue, imagePlaceholderModel, coercePickerValue, IMAGE_PLACEHOLDER_LABEL/HINT from canvas/field-node.js, decoupled from the browser-only ghost-frame reveal-on-activate node-view."
     }
   ]
 }

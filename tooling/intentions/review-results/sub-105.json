@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark/sharing",
+  "intentions": [
+    {
+      "title": "Let a single document or media item be shared via a Google-Docs-style opaque, revocable link (/s/<token>) without exposing the whole scope",
+      "scale": "feature",
+      "evidence": "Barkpark.Sharing.Links (P7): create/1 mints a 24-byte url-safe token, stores only its SHA256 (token_hash) plus the raw token for re-copy UX (share_link.ex field :token), and resolve/1 enforces revocation+expiry inline in the query so a dead link and a missing link are indistinguishable — a deliberate default-deny anti-enumeration design."
+    },
+    {
+      "title": "Provide a scoped-sharing registry that gates whole tenant surfaces (papers/docs/media) for LAN/self-host use, with Default-OFF and Default-DENY as non-negotiable invariants",
+      "scale": "invariant",
+      "evidence": "Barkpark.Sharing @moduledoc states the two invariants explicitly: active?/0 is false with no shares configured, and shared?/4 returns true ONLY on an exact (workspace,project,dataset) triple match listing the surface — every other input (unset config, partial match, unknown surface, malformed entry) yields false and never raises."
+    },
+    {
+      "title": "Make sharing configuration operable at runtime (bp share add/rm, Studio) without a restart, while never letting the persistent store widen access beyond what the env parser would allow",
+      "scale": "feature",
+      "evidence": "Sharing.refresh/0 merges shares_env() ++ list_stored() into the live :shares each boot and after every store write; StoredShare rows are re-validated through the SAME parse/1 as env entries on every read (list_stored/stored_to_shares), so a malformed/stale DB row is silently dropped rather than trusted directly."
+    },
+    {
+      "title": "Guarantee that revoking or downgrading a share scope kills any live edit tokens bound to it, so a removed grant can never be resurrected by a stale token",
+      "scale": "invariant",
+      "evidence": "Sharing.remove_share/3 calls Barkpark.Auth.revoke_share_tokens/3 as \"belt-and-suspenders\" alongside RequireShareEditToken's live access_for re-check, explicitly to stop a re-added :read share from reviving a stale :edit token."
+    },
+    {
+      "title": "Advertise share links with a URL that actually resolves for the recipient (public domain in prod, operator-set tunnel host, or LAN IPv4 in dev) instead of a useless localhost link",
+      "scale": "feature",
+      "evidence": "share_link_base/0 falls through configured_share_host() (BARKPARK_SHARE_HOST override for tunnels) → configured_public_base() (real Endpoint host, skipped for localhost/127.0.0.1/0.0.0.0) → lan_base_url() (detected LAN IPv4 via :inet.getifaddrs/0), purpose-built so the boot banner and Studio can print a copy-pasteable working URL."
+    },
+    {
+      "title": "Cap link TTLs and harden token/id handling against hostile or malformed input on every entry point",
+      "scale": "invariant",
+      "evidence": "Links @max_ttl (365 days) clamps a JSON-decoded ttl to stop a runaway bignum DateTime.add or an effectively-permanent link; revoke/1 guards Repo.uuid_or_nil before Repo.get to turn a non-UUID id into {:error, :not_found} instead of an Ecto.CastError 500."
+    }
+  ]
+}

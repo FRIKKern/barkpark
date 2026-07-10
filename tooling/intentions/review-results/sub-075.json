@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark_web/channels",
+  "intentions": [
+    {
+      "title": "Give every keystroke of live search a persistent WebSocket instead of one HTTPS round-trip per character",
+      "scale": "feature",
+      "evidence": "search_channel.ex: browser opens 'search:<ws>:<proj>:<dataset>' once and pushes a 'query' frame per keystroke, replying with the SAME shape SearchController.search/2 serves; user_socket.ex moduledoc states the win is purely transport — no per-keystroke TLS handshake or Vercel hop."
+    },
+    {
+      "title": "Never leak cross-tenant search results over the realtime path — the P0 leak guard holds on sockets exactly as it does on HTTP",
+      "scale": "invariant",
+      "evidence": "search_channel.ex join/3 resolves workspace+project via Tenancy.get_workspace_by_slug/get_project and calls TenancyAuth.authorize(api_token, ws.id, :read) before admitting the join; scope_opts(socket) threads workspace_id/dataset into every query and every PubSub-triggered re-run; schema_resolver is re-derived per push so private/owner_only fields stay dropped for live pushes too."
+    },
+    {
+      "title": "Live search results update in place when the underlying document changes, without the client polling or re-querying",
+      "scale": "feature",
+      "evidence": "search_channel.ex caches :last_query per socket, subscribes to 'documents:ws:<ws_id>:<dataset>' (falling back to the global dataset topic), and on {:document_changed,_} re-runs the cached query and pushes a 'results' event using the identical build_reply shaper as the query reply."
+    },
+    {
+      "title": "Turn every published page into a live, ambient shared surface (Shared Storm / Pulse) — visitors see each other's presence and cursors without any account or write access",
+      "scale": "epic",
+      "evidence": "pulse_socket.ex: anonymous connect always succeeds, gate lives at channel join; pulse_channel.ex tracks joined sockets in BarkparkWeb.Presence with sid+hue, pushes presence_state, rebroadcasts throttled ephemeral cursor frames (>=80ms) to every OTHER subscriber, never touching the DB — 'a stolen socket can therefore wiggle a ghost cursor and nothing else.'"
+    },
+    {
+      "title": "Run live multiplayer quiz rooms (hyperquiz) over one anonymous socket — join, roster, answer, tally, cursors and a hover heatmap, hardened against spoofing and abuse",
+      "scale": "epic",
+      "evidence": "quiz_channel.ex composes join+Presence, submit_answer (rate-limited 250ms, last-write-wins) broadcasting fresh tally, cursor (33ms) and hover (50ms) backpressure, binary CursorFrame/heatmap pushes, and an observer-join mode that's tracked but never counted as a player; quiz_socket.ex mints a server-authoritative player_id and hands back a Phoenix.Token the client presents on reconnect, closing 'the P2-review spoofing gap (a client can no longer claim an arbitrary id)'."
+    },
+    {
+      "title": "Keep writes off the realtime fan-out path — sockets are read/presence surfaces, mutations stay on rate-limited HTTP",
+      "scale": "invariant",
+      "evidence": "pulse_channel.ex moduledoc: 'Durable events flow ONE way ... Strike WRITES stay on the rate-limited HTTP POST'; pulse_channel.ex handle_in/3 catch-all silently ignores any other inbound event 'this stays a presence-and-feed surface, never a write path'; quiz_channel.ex separates ephemeral cursor/hover state from durable answer submission with its own throttle."
+    },
+    {
+      "title": "Fail every socket/channel join closed by default rather than trusting client-declared identity or scope",
+      "scale": "invariant",
+      "evidence": "user_socket.ex connect/3 rejects any params without a verifiable Bearer read token ('An unverifiable token fails the connect closed'); pulse_channel.ex join rejects unconfigured pulse channel names ('unknown channels fail closed, mirroring the HTTP surface's 404'); quiz_channel.ex join/3 catch-all returns bad_topic; search_channel.ex join returns unauthorized/bad_topic via a `with` chain."
+    }
+  ]
+}

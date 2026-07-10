@@ -1,0 +1,31 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/billing",
+  "count": 5,
+  "files": [
+    {
+      "path": "cloud/lib/barkpark_cloud/billing/gateway.ex",
+      "role": "",
+      "importance": 15
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/billing/http_client.ex",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/billing/stripe_gateway.ex",
+      "role": "",
+      "importance": 17
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/billing/stub_gateway.ex",
+      "role": "",
+      "importance": 15
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/billing/subscription.ex",
+      "role": "",
+      "importance": 14
+    }
+  ]
+}

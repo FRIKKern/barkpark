@@ -1,36 +1,50 @@
 {
-  "subsystem": "tooling/blast-radius",
-  "summary": "A pre-push change-impact analyzer for the polyglot monorepo (JS/TS, Go, Elixir). It builds a cached reverse-dependency graph offline, then runs a millisecond-fast pre-push hook that identifies which packages/files are reachable from each changed file and flags cross-language seam touchpoints that no single-language graph can see.",
+  "subsystem": "api/lib/barkpark/tenancy",
   "intentions": [
     {
-      "title": "Prevent silent cross-language breakage at push time",
+      "title": "Enforce Workspace as the hard multi-tenant boundary with a single total authorization chokepoint",
+      "scale": "invariant",
+      "evidence": "Barkpark.Tenancy.Auth.authorize/3 is documented as THE entry point router/controllers call; it is total (unknown action/non-member/unrecognised principal → {:error, :forbidden} rather than raising); cross-tenant isolation guaranteed by membership lookup keyed on (principal_id, workspace_id, principal_type) in membership/2 clauses in auth.ex."
+    },
+    {
+      "title": "Unify API-token and logged-in-user principals under one membership+role authorization model",
+      "scale": "feature",
+      "evidence": "Membership.principal_type (\"api_token\"|\"user\") discriminates two principal kinds; Auth.authorize/3 has separate clauses for %ApiToken{} (permissions[] array) and %User{} (membership role), both funneled through the same membership lookup and action vocabulary (:read/:write/:admin) in auth.ex."
+    },
+    {
+      "title": "Prevent cross-tenant privilege escalation: a token's global permissions never imply admin rights in a workspace it didn't create",
+      "scale": "invariant",
+      "evidence": "auth.ex @default_role \"member\" and role_for_permissions/1 docstring explicitly cite bug fixes barkpark-23yi/barkpark-fsko: a token ADDED to a workspace defaults to member regardless of global perms; role_for_permissions is scoped ONLY to a token's own home-workspace mint binding; workspace_admin?/2 checks the per-membership role, not global perms."
+    },
+    {
+      "title": "Support data-driven custom RBAC roles per workspace while keeping built-in roles (owner/admin/member) tamper-proof",
+      "scale": "feature",
+      "evidence": "role.ex: nil workspace_id = global built-in, set workspace_id = custom role scoped to workspace; role_permission.ex stores granted actions; auth.ex granted_actions/2 ALWAYS resolves built-in names from the compiled @builtin_role_actions map (ignoring any DB row of the same name) so a tenant can't redefine 'admin' to escalate, while custom roles resolve purely from DB rows; valid_role_names/1 in Auth widens accepted membership roles per-workspace."
+    },
+    {
+      "title": "Guarantee authorization never silently locks out built-in roles even on an unseeded or corrupted database",
+      "scale": "invariant",
+      "evidence": "auth.ex @builtin_role_actions comment: 'compiled-in action sets ... the fail-safe when no DB role_permissions row exists ... because enforcement falls back to this map, a fresh/unseeded DB (or a lost row) can NEVER silently lock out a built-in role'."
+    },
+    {
+      "title": "Model a strict tenancy hierarchy — Organization > Workspace > Project > Dataset — as an additive, non-breaking layering",
       "scale": "epic",
-      "evidence": "check.mjs seam-detection logic and --strict exit-1 behaviour; config.json seam.surfaces with consumers+guards; dossier.mjs builds self-contained agent payloads from diff hunks + consumer code slices specifically for cross-language edges"
+      "evidence": "organization.ex: thin tier ABOVE Workspace, nullable organization_id, 'no authorization path reads it yet', anchor for future SSO/SCIM; project.ex: Project lives under exactly one Workspace, slug unique within workspace; dataset.ex ('Wave-2'): Dataset lives under exactly one Project, dataset string stays authoritative while dataset_id rides alongside additively until later steps flip over."
     },
     {
-      "title": "Keep the pre-push hook sub-second by separating the slow graph build from the fast lookup",
-      "scale": "small",
-      "evidence": "build-index.mjs is explicitly 'the SLOW, out-of-band half' (run in CI or by hand); check.mjs is 'the FAST half — never invokes a compiler, only reads the cached index.json'; the split is the architectural centrepiece of the design"
+      "title": "Route safety: reserve slug namespaces so workspace/project slugs can never collide with system routes",
+      "scale": "invariant",
+      "evidence": "workspace.ex and project.ex both define @reserved_slugs ~w(admin api _plugins studio login media v1 w p) and validate_exclusion(:slug, @reserved_slugs) in their changesets."
     },
     {
-      "title": "Make blast-radius results consumable by AI agents without further exploration",
-      "scale": "small",
-      "evidence": "dossier.mjs assembles 'SELF-CONTAINED payload: symbol delta, consumer code slice, guard contents' so 'an agent can judge the edge with NO exploration tool calls'; verdictSchema field tells the agent exactly what JSON to emit"
+      "title": "Guarantee complete, hook-respecting workspace deletion with no orphaned blobs, CDN cache, or skipped plugin hooks",
+      "scale": "invariant",
+      "evidence": "workspace.ex @moduledoc mandates using Tenancy.delete_workspace/1, never raw Repo.delete/1: walks media_files firing Media.delete_file/1 (blob + CDN purge + :after_media_delete hook) and documents firing Content.delete_document/1 (:before_delete/:after_delete hooks) before the CASCADE delete; test/barkpark/tenancy_delete_workspace_test.exs proves the raw-delete leak as a deliberate control case."
     },
     {
-      "title": "Avoid redundant AI token spend via a content-hash verdict cache",
-      "scale": "small",
-      "evidence": "dossier.mjs content-hash cache keyed on (edgeId, sha256(payload)); unchanged edges are marked skip=true and excluded from token budget; cache stats subcommand for visibility"
-    },
-    {
-      "title": "Support all three language stacks (JS, Go, Elixir) with appropriate fidelity per stack",
-      "scale": "small",
-      "evidence": "build-index.mjs has distinct builders: JS uses package.json workspace graph (no tsc), Go uses go list -deps -json, Elixir uses mix xref (best-effort, non-fatal). check.mjs handles missing index gracefully per stack with degradation notes"
-    },
-    {
-      "title": "Surface dynamic/runtime edges that static analysis cannot discover",
-      "scale": "small",
-      "evidence": "config.json dynamicEdges.edges list; check.mjs populates impact.dynamicEdges; dossier.mjs builds dynamic dossiers; verdictSchema includes new_dynamic_edges field so agents can promote discovered blind spots back into config"
+      "title": "Lay groundwork for enterprise SSO/SCIM and org-wide policy enforcement (e.g. mandatory MFA) via the Organization tier",
+      "scale": "epic",
+      "evidence": "organization.ex require_mfa field with era-w2-org-require-mfa comment: 'every user who is a member (via any of this org's workspaces) must have an MFA factor enrolled ... Governing rule across orgs: ANY-org-requires → enforce'; described as opt-in/additive today, anchor for future SSO/SCIM connections."
     }
   ]
 }

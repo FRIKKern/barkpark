@@ -1,0 +1,31 @@
+{
+  "subsystem": "cloud/config",
+  "count": 5,
+  "files": [
+    {
+      "path": "cloud/config/config.exs",
+      "role": "",
+      "importance": 18
+    },
+    {
+      "path": "cloud/config/dev.exs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/config/prod.exs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/config/runtime.exs",
+      "role": "",
+      "importance": 18
+    },
+    {
+      "path": "cloud/config/test.exs",
+      "role": "",
+      "importance": 18
+    }
+  ]
+}

@@ -1,1 +1,45 @@
-{"subsystem":"packages","summary":"A deprecated standalone TypeScript client package (@barkpark/client) for the Barkpark v1 HTTP API — a thin, strongly-typed, immutable fetch wrapper that predates the workspace/project hierarchy and has been superseded by @barkpark/core. Its build tooling (tsup) targets ESM+CJS dual output with type declarations.","intentions":[{"title":"Provide a typed, framework-agnostic JS client for the Barkpark v1 API","scale":"small","evidence":"packages/client/src/client.ts exports Client class with query, mutate, create, patch, publish, schema methods; types.ts defines the full HTTP contract surface"},{"title":"Support dual ESM+CJS distribution with TypeScript declarations","scale":"small","evidence":"tsup.config.ts: format: ['esm','cjs'], dts: true, sourcemap: true — ensures the package works in both Node.js CJS environments and modern ESM bundlers"},{"title":"Document and enforce deprecation in favour of @barkpark/core","scale":"small","evidence":"client.ts JSDoc @deprecated block explicitly names @barkpark/core as successor, notes the flat /v1/... URL shape limitation vs workspace-scoped routing, and instructs 'Do not add features here'"},{"title":"Enable atomic batch mutations","scale":"small","evidence":"mutate() method in client.ts accepts Mutation[] and posts to /v1/data/mutate — comment states 'Either all succeed or none do — on failure the whole batch rolls back'"}]}
+{
+  "subsystem": "api/lib/barkpark/media/delivery",
+  "intentions": [
+    {
+      "title": "Give every media binary a single, tenant-correct JSON representation shared across all API surfaces",
+      "scale": "feature",
+      "evidence": "asset_response.ex's AssetResponse.render/3 merges a MediaFile blob row with its linked mediaAsset Document into one unified map (id, urls, mimeType, visibility, permissions, asset payload), consumed by both the scoped /w/:ws/p/:proj routes and legacy flat /media/* routes (legacy: true drops fields for backward compatibility)."
+    },
+    {
+      "title": "Never leak private or field-restricted mediaAsset metadata to an unauthorized caller",
+      "scale": "invariant",
+      "evidence": "asset_response.ex asset_payload/3 threads CallerContext through Envelope.render for the embedded mediaAsset document, with an anonymous fallback (caller_context/1) and comment describing the WS-B HIGH-2 fix: a nil/conn-less caller resolves to anonymous rather than 'full content', so redaction fails closed rather than leaking private/owner_only/readable_by fields."
+    },
+    {
+      "title": "Emit delivery URLs that are correct for the request's tenancy scope, signed when required, and CDN-fronted when configured",
+      "scale": "feature",
+      "evidence": "urls.ex builds original/thumbnail/preview/rendition URLs, prefixing with conn_scope_prefix (/w/:ws/p/:proj vs flat '') before signing (SignedUrl.sign) so a signed token verifies against the actually-requested path; maybe_sign only signs when the asset's visibility is 'token' (Access.visibility); cdn.ex's Cdn.public_url prefixes with the configured :media_cdn base_url when present, else passes through unchanged."
+    },
+    {
+      "title": "Keep CDN edge caches consistent with asset state via durable, retried invalidation and publish-status tracking",
+      "scale": "feature",
+      "evidence": "cdn.ex invalidate/1 purges original + all image rendition paths through invalidate_http, routed via Dispatcher.http_post to share webhook outbound policy; publish/2 patches the mediaAsset document's bp_cdn_status ('published'/'skipped') via Content.upsert_document so Studio/API consumers can see CDN state."
+    },
+    {
+      "title": "Guarantee media lifecycle webhooks (uploaded/processed/deleted) are delivered reliably even across crashes, using the same durable retry machinery as document webhooks",
+      "scale": "invariant",
+      "evidence": "events.ex moduledoc describes convergence onto the shared durable-row retry state machine (webhook_deliveries, source_kind: 'media'): first attempt via Dispatcher.deliver_media/3, retries scheduled by RetryWorker (not Process.sleep), crash recovery via StuckDeliverySweeper rebuilding payload from the persisted snapshot since media's source event doesn't persist; degrades to a single best-effort signed/unsigned POST only if the durable row insert itself fails."
+    },
+    {
+      "title": "Provide fast, faceted, typo-tolerant media search that never crosses tenant boundaries even through the joined mediaAsset metadata",
+      "scale": "feature",
+      "evidence": "search.ex build_query/2 and retriever.ex build_text_filter/4 both scope the LEFT JOIN to mediaAsset documents by dataset_id + NULL-tolerant workspace/project envelope, with inline comments citing 'barkpark-vmv1' cross-workspace metadata leak fixes (both the Ecto join path and the raw-SQL tags_facet_sql path); supports facets (kind, mimeType, status, processing, collection, tags, visibility), relevance/created/updated sort, and cursor pagination."
+    },
+    {
+      "title": "Parse untrusted search query params defensively so malformed input degrades to safe defaults instead of 500ing",
+      "scale": "invariant",
+      "evidence": "search_params.ex parse_facets/1 has a catch-all clause explicitly guarding against Phoenix parsing ?facets[]= or ?facets[k]=v into non-binary shapes that would otherwise raise FunctionClauseError; parse_int, blank_to_nil, and facet_selections merging (facet.* flat keys + nested facet map) all no-op safely on bad input."
+    },
+    {
+      "title": "Amortize per-request tenancy resolution cost across a single search's many sub-queries",
+      "scale": "feature",
+      "evidence": "search.ex search/2 resolves dataset string → dataset_id ONCE per request and threads it through opts[:dataset_id], with a comment noting this avoids ~9 redundant Tenancy.get_dataset/get_default_project roundtrips (7 facets + count + page) per search call."
+    }
+  ]
+}

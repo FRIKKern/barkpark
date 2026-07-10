@@ -1,1 +1,35 @@
-{"subsystem":"api/lib/barkpark_web/layouts","summary":"Phoenix HEEx layout shells that wrap the Studio UI, the public Bulldocs paper reader, and the Sheets reader — each surface gets a tailored HTML document skeleton with its own asset bundle, font strategy, and LiveView wiring.","intentions":[{"title":"Eliminate flash of unstyled content (FOUC) for dark/light theme","scale":"small","evidence":"root.html.heex: the ONLY blocking <head> script is the ~5-line theme-detection snippet; all other JS is deferred/async. Comment calls this out explicitly. Reads localStorage, falls back to OS prefers-color-scheme, and listens for live OS changes while no explicit user choice exists."},{"title":"Isolate asset bundles per surface to minimise payload","scale":"small","evidence":"root.html.heex loads studio.css + app.js for the Studio; bulldocs.html.heex loads a separate bulldocs.css; sheets.html.heex loads sheets.css. Each layout only pulls the assets its surface needs — readers never load Studio JS and vice versa."},{"title":"Provide a public reading surface for Bulldocs papers without Studio overhead","scale":"small","evidence":"bulldocs.html.heex is a lean shell (Source Serif 4 body font, no Studio chrome) wired to BulldocsLive. Keeps the reader experience typographically distinct and fast — no admin JavaScript shipped to anonymous readers."},{"title":"Provide a public reading surface for Sheets without Studio overhead","scale":"small","evidence":"sheets.html.heex mirrors the Bulldocs pattern — separate layout, separate CSS bundle, wired to SheetsReaderLive — so published sheets are accessible to anonymous visitors without loading the full Studio."},{"title":"Self-host performance-critical fonts to avoid external FOIT","scale":"small","evidence":"root.html.heex self-hosts Source Serif 4 via priv/static/fonts/ + Plug.Static (comment explains rationale); Inter is loaded from Google Fonts with preconnect hints. bulldocs.html.heex inherits the same Source Serif 4 for paper body text."},{"title":"Maintain LiveView socket and CSRF integrity across all surfaces","scale":"epic","evidence":"root.html.heex injects csrf-token meta, LiveView socket script, and the phx-socket path. Every surface (Studio, Bulldocs, Sheets) inherits this through the layout hierarchy so real-time features work uniformly without per-controller boilerplate."}]}
+{
+  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter",
+  "intentions": [
+    {
+      "title": "Give a new Barkpark adopter a working, deployable Next.js blog in one `create-barkpark-app` scaffold — no manual wiring of client, schemas, or seed data",
+      "scale": "epic",
+      "evidence": "package.json.tmpl wires next/react/@barkpark/{core,nextjs,react,codegen}; barkpark.config.ts.tmpl builds a ready createClient; seeds/seed.ts populates authors/tags/posts against docker-compose in one `pnpm seed` command."
+    },
+    {
+      "title": "Demonstrate the canonical read-path contract (envelope shape, cache tags, draft mode) as the reference implementation other integrations copy",
+      "scale": "feature",
+      "evidence": "lib/barkpark.ts defines QueryEnvelope/DocEnvelope with count/etag/syncTags, delegates ALL fetching through createBarkparkServer's barkparkFetch so read cache tags match webhook-driven revalidateBarkpark tags, and forces `cache: 'no-store'` under Next.js draftMode()."
+    },
+    {
+      "title": "Prove multi-tenant scoping (`/w/<workspace>/p/<project>/v1/...`) is optional and drops cleanly to the flat `/v1/...` path for single-tenant/local use",
+      "scale": "invariant",
+      "evidence": "barkpark.config.ts.tmpl comments explain workspace/project scoping requires a token even for public reads and are left unset by default; seeds/seed.ts computes SCOPE conditionally from WORKSPACE/PROJECT env vars with the same fallback logic."
+    },
+    {
+      "title": "Model a realistic content graph (post/author/tag with references, slugs, rich text, images) as the template schema for downstream blog/CMS starters",
+      "scale": "feature",
+      "evidence": "schemas/post.ts declares title/slug/excerpt/content(richText)/author(reference)/coverImage(image)/publishedAt/tags(arrayOf reference); seed.ts creates 2 authors, 3 tags, 7 posts (6 published + 1 intentionally-draft) exercising every field type and the publish mutation."
+    },
+    {
+      "title": "Pre-stage the ADR-003 typed-query/codegen migration path without blocking today's per-type query API",
+      "scale": "invariant",
+      "evidence": "lib/queries.ts holds GROQ-like query strings explicitly marked informational ('ready for the codegen + typed-query migration, ADR-003 Phase 8') while pages actually call typed helpers in lib/barkpark.ts; package.json.tmpl ships `codegen: barkpark generate` script already wired for that future."
+    },
+    {
+      "title": "Ensure slug lookups never return the wrong document even if server-side filtering is imprecise",
+      "scale": "invariant",
+      "evidence": "getDocBySlug in lib/barkpark.ts filters server-side via makeFilterExpression('slug.current','eq',slug) then re-validates client-side with docs.find(...) as an explicit safety net, per its inline comment."
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "subsystem": "cloud/config",
+  "intentions": [
+    {
+      "title": "Boot the control plane fully functional with every optional integration (Stripe billing, GitHub App, Vercel handoff, OAuth/SSO, Azure pricing, Hetzner object storage, SMTP relay) OFF by default, degrading each feature honestly (503 feature_not_configured / fail-closed :not_configured) rather than crashing or faking success",
+      "scale": "invariant",
+      "evidence": "config.exs wires BarkparkCloud.GitHub.Fake, BarkparkCloud.Vercel.Fake, BarkparkCloud.Billing.StubGateway, nil OAuth client creds, nil Azure.Pricing http_client, nil ArchiveStore creds as dev/test defaults; runtime.exs only swaps in Real/Stripe/SMTP when the corresponding env var is actually set, else keeps Real-with-nil-creds so calls fail closed instead of using the Fake in prod"
+    },
+    {
+      "title": "Separate 'must-raise-to-boot' secrets (DATABASE_URL, REGISTRY_ENCRYPTION_KEY, STRIPE_SECRET_KEY, OAUTH_STATE_SECRET) from 'boots-degraded-if-absent' secrets (GitHub App creds, Vercel token, Stripe prices/webhook secret, SMTP creds), so a partial go-live (e.g. free-trial-only) is a valid, intentional launch state instead of an all-or-nothing config gate",
+      "scale": "invariant",
+      "evidence": "runtime.exs raises hard for DATABASE_URL/REGISTRY_ENCRYPTION_KEY/STRIPE_SECRET_KEY/OAUTH_STATE_SECRET but only IO.warn()s when Stripe prices or webhook secret are missing ('BILL-2 boot-check'), and silently leaves GitHub/Vercel Real-with-nil-creds when their env vars are unset"
+    },
+    {
+      "title": "Keep all commercial/security secrets out of source control by threading them exclusively through runtime.exs env reads, never config.exs/prod.exs, with dev/test using clearly-labeled placeholder values",
+      "scale": "invariant",
+      "evidence": "prod.exs comment: 'Keep it COMPILE-TIME ONLY... never here — so the release assembles with no DB reachable and no secrets baked into the image'; config.exs Registry.Vault key and OAuth state_secret are explicitly commented 'DEV/TEST default ONLY'; runtime.exs reads STRIPE_SECRET_KEY, REGISTRY_ENCRYPTION_KEY, WORKER_TOKEN, SMTP_* from System.get_env"
+    },
+    {
+      "title": "Run a low-volume, fully static (no plugin-crontab merge) Oban job/cron substrate for control-plane housekeeping — stale-provision reaping, device-auth expiry, deployment recovery, health staleness, trial lifecycle, self-update status, autoupdate rollout, usage sampling, and data retention — each on a cadence and queue chosen to avoid stampeding",
+      "scale": "feature",
+      "evidence": "config.exs Oban block: queues default:10/maintenance:2, Cron crontab with 9 named workers (StaleProvisionJobReaper, DeviceAuthReaper, StaleDeploymentReaper, StalenessWorker, TrialExpiryWorker, UpdateStatusWorker, AutoupdateRolloutWorker, UsageSamplerWorker, AgentRetentionWorker) each with offset ticks to prevent collision; runtime.exs adds OBAN_QUEUES_DISABLED operational kill switch"
+    },
+    {
+      "title": "Enforce verified-TLS on every outbound network hop the control plane makes (Stripe, GitHub, Vercel, Azure pricing, SMTP) via one shared injected httpc-based HttpClient, with an explicit opt-out only for the trusted internal postfix sidecar",
+      "scale": "invariant",
+      "evidence": "runtime.exs wires &BarkparkCloud.Billing.HttpClient.request/1 identically for GitHub, Vercel, Azure.Pricing, and OAuth; SMTP TLS block defaults to verify: :verify_peer with cacerts_get()+SNI pinning and only disables via SMTP_VERIFY_PEER=false for the docker-compose-internal postfix sidecar"
+    },
+    {
+      "title": "Make usage quotas, trial length, audit retention, and stale-claim thresholds ops-tunable via environment variables without a redeploy, while keeping sane compiled-in defaults",
+      "scale": "feature",
+      "evidence": "config.exs defaults :provision_stale_after_seconds (25 min), :audit_retention_days (90), Billing.limits per plan; runtime.exs overrides each via AUDIT_RETENTION_DAYS, LIMIT_FREE/TRIAL/SUPPORTER/SUPPORT_PLUS, TRIAL_DAYS env vars"
+    },
+    {
+      "title": "Keep the test environment fully hermetic (zero network egress, deterministic ids, fast crypto) by injecting fakes/stubs for every outbound seam — billing, notifications, studio-link, Hetzner, Azure, domain-status DNS/TLS/HTTP, OAuth — and running Oban/bcrypt in cheap manual/low-round modes",
+      "scale": "invariant",
+      "evidence": "test.exs sets notifications_http_client/studio_link_http_client/hetzner_http_client/azure_http_client to Fake modules, domain_status_dns/tls/http to an OfflineGuard, Oban.Billing to StubGateway, StripeGateway to a fake key with no http_client, Oban testing: :manual, bcrypt log_rounds: 1"
+    }
+  ]
+}

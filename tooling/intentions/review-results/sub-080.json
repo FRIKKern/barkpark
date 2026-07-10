@@ -1,0 +1,40 @@
+{
+  "subsystem": "internal/manifest",
+  "intentions": [
+    {
+      "title": "Drive the entire CLI (dispatch, help, completion, URL building) as a pure function of the server's GET /v1/capabilities manifest, with zero hardcoded nouns/verbs/flags/routes",
+      "scale": "epic",
+      "evidence": "manifest.go package doc: 'The package hardcodes NO noun, verb, flag, or route... a future plugin adds commands with zero code change here.' tree.go builds Tree purely from m.Nouns/m.Commands; Command struct mirrors docs/cli/manifest.schema.json field-for-field."
+    },
+    {
+      "title": "Let a plugin extend the CLI surface (new nouns/commands) with zero code changes in the manifest package",
+      "scale": "invariant",
+      "evidence": "tree.go: Tree() synthesizes a node for any command whose noun wasn't declared in m.Nouns rather than dropping it ('the manifest is the sole source of truth, and dropping such a command would silently hide a capability'); Noun.Plugin and Command.Source fields track plugin provenance."
+    },
+    {
+      "title": "Minimize repeated manifest fetches via ETag-validated on-disk caching without ever risking a stale/incorrect command set",
+      "scale": "feature",
+      "evidence": "cache.go: sha256-keyed cache files, atomic temp-file+rename writes to prevent torn reads; fetch.go: Fetch() sends If-None-Match, on 304 returns cached body, on 200 reparses and refreshes cache; cache write failures are swallowed ('an optimisation, never a correctness dependency')."
+    },
+    {
+      "title": "Keep per-tenant/per-token manifests correctly isolated in cache (admin vs anon capability sets never collide) while never persisting raw tokens to disk",
+      "scale": "invariant",
+      "evidence": "cache.go CacheKey(): hashes token to an 8-byte salt ('anon' bucket for empty token) combined with base URL — 'an admin manifest and an anon manifest differ... the token itself never appears in the key or the filename.'"
+    },
+    {
+      "title": "Resolve CLI target context (server/token/workspace/project/dataset/output) via one deterministic precedence: flags > env > active context > defaults, in advance of a real on-disk context store",
+      "scale": "feature",
+      "evidence": "context.go Resolve() and its `pick` helper; ActiveContext documented as a 'clean seam' for future `barkpark context use <name>` persistence; DefaultDefaults() bakes in dataset=production, output=table per M0 decision A2."
+    },
+    {
+      "title": "Prevent CLI requests from ever silently hitting the wrong or a malformed path — fail loudly on unresolved placeholders, and keep the workspace/project scoped-prefix mirror inert until a server actually advertises it",
+      "scale": "invariant",
+      "evidence": "url.go fillTemplate(): 'A placeholder with no resolvable value is an error — better to fail loudly than to send a request to a path with an empty segment'; BuildURL only prepends ScopedPrefix when ctx.ScopedMirror is true, documented as inert in v1 to avoid turning a flat path into a 404/403 ('contract spine rule #4'); resolvePlaceholder lets an explicit positional arg override ambient ctx scope (documented onixedit.export dataset-per-call fix)."
+    },
+    {
+      "title": "Make manifest parsing strict and self-verifying so a malformed, truncated, or doubled server response is caught at decode time instead of propagating a corrupt CLI command tree",
+      "scale": "invariant",
+      "evidence": "manifest.go Parse(): DisallowUnknownFields(), requires manifest_version, and explicitly rejects trailing data after the first JSON value ('a doubled body, a truncated-then-retried response... must fail loud rather than be silently dropped')."
+    }
+  ]
+}

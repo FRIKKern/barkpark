@@ -1,0 +1,26 @@
+{
+  "subsystem": "api/assets/sheet-grid",
+  "count": 4,
+  "files": [
+    {
+      "path": "api/assets/sheet-grid/__formula.test.mjs",
+      "role": "",
+      "importance": 16
+    },
+    {
+      "path": "api/assets/sheet-grid/__hook.test.mjs",
+      "role": "",
+      "importance": 17
+    },
+    {
+      "path": "api/assets/sheet-grid/__palette.test.mjs",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "api/assets/sheet-grid/__pointing.test.mjs",
+      "role": "",
+      "importance": 9
+    }
+  ]
+}

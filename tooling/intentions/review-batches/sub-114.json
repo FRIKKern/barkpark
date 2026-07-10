@@ -1,0 +1,16 @@
+{
+  "subsystem": "packages",
+  "count": 2,
+  "files": [
+    {
+      "path": "packages/client/tsup.config.ts",
+      "role": "client package build config",
+      "importance": 4
+    },
+    {
+      "path": "packages/client/vitest.config.ts",
+      "role": "client package vitest config",
+      "importance": 4
+    }
+  ]
+}

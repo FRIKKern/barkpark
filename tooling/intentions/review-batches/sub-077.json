@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark_web/components/studio_components",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/components/studio_components/controls.ex",
+      "role": "",
+      "importance": 65
+    },
+    {
+      "path": "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark_web/components/studio_components/editor_fields.ex",
+      "role": "",
+      "importance": 41
+    },
+    {
+      "path": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "role": "",
+      "importance": 43
+    },
+    {
+      "path": "api/lib/barkpark_web/components/studio_components/nav.ex",
+      "role": "",
+      "importance": 50
+    },
+    {
+      "path": "api/lib/barkpark_web/components/studio_components/panes.ex",
+      "role": "",
+      "importance": 37
+    }
+  ]
+}

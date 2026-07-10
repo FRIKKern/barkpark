@@ -1,0 +1,30 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/oauth",
+  "intentions": [
+    {
+      "title": "Let users sign into Barkpark Cloud with GitHub or Google instead of only a password",
+      "scale": "feature",
+      "evidence": "github.ex and google.ex each implement authorize_url/token_request/userinfo_request/parse_identity for the full authorization-code flow against github.com/api.github.com and Google's OIDC endpoints; @scope is minimal (read:user user:email; openid email profile) — sign-in only, no repo/admin scope."
+    },
+    {
+      "title": "Add a third-party OAuth provider by writing one ~120-LOC module, never touching the OAuth context",
+      "scale": "invariant",
+      "evidence": "provider.ex is a @behaviour with authorize_url/3, token_request/3, userinfo_request/1, parse_identity/1 and an optional emails_request/1; moduledoc states the context 'never names a provider directly' and resolves provider -> {module, config} from config, mirroring BarkparkCloud.Billing.Gateway's strategy pattern."
+    },
+    {
+      "title": "Never trust an unverified email as a user's linkable identity",
+      "scale": "invariant",
+      "evidence": "Github.parse_identity keys off the numeric id (not login) and verified_primary_email/1 accepts only entries with primary:true AND verified:true from GET /user/emails; Google.verified_email/1 accepts email only when email_verified is true/\"true\"; both fall back to email: nil rather than trusting an unverified address, explicitly to prevent attacker pre-claim of a victim's email."
+    },
+    {
+      "title": "Keep OAuth on the same audited, dependency-free HTTP transport as billing, rather than pulling in Assent/Ueberauth",
+      "scale": "invariant",
+      "evidence": "provider.ex moduledoc: 'the control plane has a deliberate no-new-HTTP-dep ethos'; all *_request callbacks return the identical %{method,url,headers,body} map that Billing.HttpClient.request/1 consumes, so one :httpc TLS-verified path drives both Stripe and OAuth traffic; a library is deferred until per-team enterprise OIDC/SAML needs PKCE/nonce/JWKS."
+    },
+    {
+      "title": "Make the OAuth CSRF state token both tamper-proof and single-use, without relying on either property alone",
+      "scale": "invariant",
+      "evidence": "state.ex moduledoc: the `state` param is already a self-verifying HMAC-signed, TTL-bound token; this Ecto schema adds single-use via a ledger row keyed by nonce that verify_state/2 deletes on use (replay = row already gone) and a unique index on nonce guards CSPRNG collisions."
+    }
+  ]
+}

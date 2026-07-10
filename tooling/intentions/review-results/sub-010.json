@@ -1,46 +1,45 @@
 {
-  "subsystem": "api/lib/barkpark_web",
-  "summary": "The web layer wires every HTTP, WebSocket, and LiveView surface of Barkpark: it defines all pipelines, routes, auth hooks, and real-time channels that expose the core CMS — data CRUD, Studio UI, search, media, schemas, plugins — to browsers, the CLI, and the JS SDK.",
+  "subsystem": "js/packages/core/src",
   "intentions": [
     {
-      "title": "Enforce hard multi-tenant isolation at every entry point",
+      "title": "Give TypeScript consumers a single runtime-agnostic (Edge/Node/browser) SDK client that exposes the whole Barkpark API surface — docs, search, backlinks/graph, history, auth, media, schemas, webhooks, tenancy, listen, export — through one `createClient()` factory",
       "scale": "epic",
-      "evidence": "router.ex defines :scoped_api/:scoped_browser/:scoped_mutate pipelines with ResolveWorkspace/ResolveProject plugs; live_scope.ex re-authorizes on every live_patch so cross-tenant navigation is caught in-socket, not just at dead-render; search_channel.ex replicates the same membership gate on WebSocket join"
+      "evidence": "index.ts is a curated barrel export ('Every name here becomes a permanent contract — add only symbols with documented intent'); client.ts wires ~20 operation modules (doc.ts, docs.ts, search.ts, backlinks.ts, graph.ts, history.ts, auth.ts, media.ts, schemas.ts, webhooks.ts, tenancy.ts, patch.ts, transaction.ts, publish.ts, listen.ts, export.ts) into one object literal returned by createClient()."
     },
     {
-      "title": "Support fine-grained sharing of read and write surfaces without membership",
-      "scale": "epic",
-      "evidence": "router.ex defines :shared_docs_api, :shared_media_api, :shared_paper_browser, :shared_studio_browser pipelines wrapping RequireShareScope; P4/P5/P7 comments describe docs-read, media-edit-token, and per-item share-link surfaces; ShareController/ShareLinkController routes handle mint/list/revoke; live_scope.ex attaches a :live_scope_readonly gate for share_read grade"
+      "title": "Make every request fail in a typed, catchable, cross-bundle-safe way instead of leaking raw fetch/HTTP errors",
+      "scale": "invariant",
+      "evidence": "errors.ts defines a BarkparkError taxonomy (Auth/Network/Timeout/RateLimit/NotFound/Validation/Hmac/SchemaMismatch/EdgeRuntime/Conflict) where every subclass carries a `code` literal equal to its class name specifically so `instanceof` (unreliable under pnpm hoist duplicates) can be replaced by `isBarkparkError(e, code)`; transport.ts's decodeErrorAndThrow maps every Phoenix status/error-code combination (401/403, 429, 412, 422, 409, 404, schema_mismatch) onto the matching class, including edge cases like a bare string `error` field or `details: null`."
     },
     {
-      "title": "Allow plugins to contribute routes at compile time without modifying the host router",
-      "scale": "epic",
-      "evidence": "router/plugins.ex macro reads Registry.collect_routes/1 at compile time and emits Phoenix AST for 8 auth buckets (:admin,:ops,:public,:api,:token,:token_root,:ingest,:public_root); router.ex has 10+ plugin_routes() callsites covering both flat and /w/:ws/p/:proj scoped prefixes; the fresh-install invariant (empty plugins → no routes emitted) is explicitly preserved"
+      "title": "Guarantee the SDK works unmodified in Edge/Workerd runtimes, never silently degrading",
+      "scale": "invariant",
+      "evidence": "transport.ts comment: 'fetch-only (no node: built-ins, Edge-safe)'; util/edge-detect.ts + listen.ts throw BarkparkEdgeRuntimeError SYNCHRONOUSLY when SSE listen() is attempted somewhere it can't work (Workerd lacks ReadableStream readers needed for custom auth headers), rather than hanging or silently failing later."
     },
     {
-      "title": "Preserve backward compatibility for legacy clients while routing new clients to canonical URLs",
-      "scale": "small",
-      "evidence": "router.ex keeps /api/documents/:type (legacy TUI), /v1/paperflow/* (back-compat Bulldocs ingest alias), /studio/:dataset (flat→scoped 302), /studio/onixedit/book/:doc_id (LegacyRedirectController), /w/:ws/p/:proj/studio/:dataset (pre-/d/ canonical 302); LegacyDeprecation plug adds deprecation headers"
+      "title": "Make every client-side write either safely retryable or explicitly non-retryable, and never double-apply a mutation on retry",
+      "scale": "invariant",
+      "evidence": "transport.ts injects one stable uuidv7 Idempotency-Key shared across all attempts for writes opted into 'on-idempotency-key' retryPolicy so 'a lost-response-then-retry can't double-apply it'; retry.ts supplies DEFAULT_READ_POLICY/DEFAULT_WRITE_POLICY/IDEMPOTENT_WRITE_POLICY; reads default to retry-on-failure, writes default to no-retry unless opted in."
     },
     {
-      "title": "Deliver per-keystroke search over a persistent WebSocket to eliminate per-request TLS overhead",
-      "scale": "small",
-      "evidence": "search_channel.ex uses a single Phoenix Channel per tenant scope; seq field lets the client discard stale replies; response shape is identical to SearchController.search/2 so clients render identically over HTTP or socket"
+      "title": "Reject invalid client configuration and query input eagerly, before any network call, with a specific field-level reason",
+      "scale": "invariant",
+      "evidence": "client.ts's validateConfig() checks projectUrl/dataset/workspace/project/apiVersion/token/perspective/timeoutMs combinatorially (e.g. workspace+project must be set together, useCdn+drafts perspective is incompatible, timeoutMs<0 silently disabling the timeout is explicitly guarded against); filter-builder.ts's assertPaging/makeFilterExpression validate limit/offset/op/value shape before building a query string."
     },
     {
-      "title": "Provide a versioned API error contract that supports both legacy flat strings and structured violation envelopes",
-      "scale": "small",
-      "evidence": "error_envelope.ex serializes to v1 (flat string list) or v2 (JSON Pointer keyed violation maps with severity/code/rule) negotiated via Accept-Version header; handles legacy field maps, WI1 violation structs, and plain string lists uniformly"
+      "title": "Support live, reconnecting real-time subscriptions to dataset changes over SSE without EventSource's auth limitation, resilient to half-open sockets and silent proxy loops",
+      "scale": "feature",
+      "evidence": "listen.ts implements a hand-rolled fetch+ReadableStream SSE client (EventSource can't send Authorization headers) with DEFAULT_IDLE_TIMEOUT_MS (2.5x server keepalive) to detect half-open TCP sockets, MAX_SSE_BUFFER_BYTES to bound OOM from a frameless stream, MAX_CONSECUTIVE_CLEAN_CLOSES to escalate on a looping misconfigured proxy, and full-jitter exponential backoff to avoid reconnect-storm thundering herds."
     },
     {
-      "title": "Gate LiveView surfaces with role-differentiated auth hooks that fail closed",
-      "scale": "small",
-      "evidence": "live_auth.ex defines :admin, :ops, :fetch_api_token on_mount hooks; :admin requires 'admin' permission, :ops accepts 'ops' or 'admin'; failures redirect to /studio or /login with flash; dev environment auto-injects dev token for frictionless local workflow"
+      "title": "Let generated-schema consumers (@barkpark/codegen) get compile-time-narrowed document types on doc/docs/getDocuments without any runtime behavior change",
+      "scale": "feature",
+      "evidence": "index.ts's TypedClient<TMap> + typedClient() function re-type an existing BarkparkClient's type-keyed methods against a generated TypeMap ('the runtime is the IDENTITY — only the static types narrow'), designed to pair with `barkpark generate`."
     },
     {
-      "title": "Scope the Studio URL to workspace/project/dataset to make tenant context visible and bookmarkable",
-      "scale": "small",
-      "evidence": "router.ex canonical Studio is /w/:ws/p/:proj/d/:dataset/studio; live_scope.ex on_mount resolves from URL params (not session) and re-resolves on every handle_params patch; old /studio/:dataset flat form 302s to the canonical; StudioRedirectController handles legacy_scoped and studio redirects"
+      "title": "Detect and surface client/server drift (apiVersion or schema hash mismatch) so callers know to regenerate types or bump versions, via a cached handshake",
+      "scale": "feature",
+      "evidence": "handshake.ts's createHandshakeCache() dedupes concurrent /v1/meta calls per projectUrl+workspace+project+dataset key and exposes invalidate(); BarkparkSchemaMismatchError in errors.ts carries clientApiVersion/serverMinApiVersion/serverMaxApiVersion/localSchemaHash/remoteSchemaHash for that recovery flow (ADR-007/ADR-011)."
     }
   ]
 }

@@ -168,7 +168,9 @@ function build(tasks) {
   for (const t of tasks) { const pid = t.parent_id ?? t.content?.parent_id; if (pid) parentOf[t._id] = String(pid).replace(/^drafts\./, ""); }
   const childrenOf = {};
   for (const [c, p] of Object.entries(parentOf)) (childrenOf[p] ||= []).push(c);
-  const descendants = (id) => { const o = [], stack = [...(childrenOf[id] || [])]; while (stack.length) { const x = stack.pop(); o.push(x); for (const c of (childrenOf[x] || [])) stack.push(c); } return o; };
+  // visited-set: a parent_id cycle in live task data must degrade to a warning, not an infinite walk
+  const cyclic = new Set();
+  const descendants = (id) => { const o = [], seen = new Set([id]), stack = [...(childrenOf[id] || [])]; while (stack.length) { const x = stack.pop(); if (seen.has(x)) { cyclic.add(x); continue; } seen.add(x); o.push(x); for (const c of (childrenOf[x] || [])) stack.push(c); } return o; };
   const rawById = {}; for (const t of tasks) rawById[t._id] = actualFilesFor(t._id);
 
   const out = [];
@@ -230,6 +232,7 @@ function build(tasks) {
   }
   // tasks with real file evidence first, then by impact
   out.sort((a, b) => (b.actualFiles.length - a.actualFiles.length) || (b.impact - a.impact) || a.id.localeCompare(b.id));
+  if (cyclic.size) process.stderr.write(`  ⚠ parent_id CYCLE in task data through: ${[...cyclic].join(", ")} — rollups near the cycle are partial; fix the ledger\n`);
   return out;
 }
 

@@ -1,0 +1,35 @@
+{
+  "subsystem": "apps/hundesteder/components",
+  "intentions": [
+    {
+      "title": "Ship Hundesteder, a Norwegian editorial guide to dog-friendly places (cafes, parks, beaches, sights)",
+      "scale": "epic",
+      "evidence": "site-footer.tsx tagline 'En redaksjonell guide til hundevennlige steder i Norge'; site-header.tsx brand 'Hundesteder'; place-card.tsx links to /sted/<slug> detail pages"
+    },
+    {
+      "title": "Let visitors browse places by city and category with live-filtered chip controls and a results count",
+      "scale": "feature",
+      "evidence": "places-browser.tsx: client component deriving sorted city/category facets from the place list, chip toggles with aria-pressed, aria-live results-meta text, and an empty-state message when filters yield nothing"
+    },
+    {
+      "title": "Provide a zero-dependency slippy map of place pins as a first-class alternative to the list/grid browse view",
+      "scale": "feature",
+      "evidence": "places-map.tsx: hand-rolled Web-Mercator projection, Canvas2D tile/pin/label rendering, pointer-driven pan/zoom/hit-testing, popover with detail-page + OSM-directions links, zoom/fit controls, OSM attribution"
+    },
+    {
+      "title": "Map surface must never degrade to a blank box even with tiles disabled or blocked — pins always render over a calm fallback graticule",
+      "scale": "invariant",
+      "evidence": "places-map.tsx comment 'the surface never collapses to a blank box'; TILES_ENABLED env flag (NEXT_PUBLIC_MAP_TILES) branches between drawTiles and drawGraticule; tile load errors self-evict from cache after 5s instead of blocking"
+    },
+    {
+      "title": "House rule: no npm map libraries and no build-time tile bundling — maps stay vanilla Canvas2D with only an optional runtime tile fetch",
+      "scale": "invariant",
+      "evidence": "places-map.tsx top comment: 'House rules kept verbatim: vanilla Canvas2D, ZERO npm map libs (no Leaflet / Mapbox / MapLibre), ZERO build-time tile bundle'; adapted from web/components/listings-map.tsx but stripped of the finder↔map bridge this app doesn't have"
+    },
+    {
+      "title": "Give each place a scannable card identity (category icon/label, city, price range, teaser) that drives into its own detail route",
+      "scale": "feature",
+      "evidence": "place-card.tsx renders category icon via iconPath/categoryLabel from lib/categories, optional city/description/priceRange, and links to /sted/<slug>; used by places-browser.tsx's card-grid"
+    }
+  ]
+}

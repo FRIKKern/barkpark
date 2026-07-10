@@ -1,41 +1,40 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter",
-  "summary": "A complete, runnable Next.js App Router blog template scaffolded by create-barkpark-app, demonstrating how to build a content-driven site on Barkpark's API with server-side fetching, pagination, draft preview, and seed data.",
+  "subsystem": "web/app",
   "intentions": [
     {
-      "title": "Prove the SDK end-to-end in a realistic app",
+      "title": "Prove Barkpark's headless CMS with a real, polished Next.js consumer demo — not a toy",
       "scale": "epic",
-      "evidence": "lib/barkpark.ts uses @barkpark/core + @barkpark/nextjs/server to fetch typed documents via the REST API; app/page.tsx calls getDocs with pagination; this exercises the full stack from schema to render"
+      "evidence": "web/app/layout.tsx wires self-hosted fonts (no runtime Google CDN), FOUC-free dual theme seeding (mode + identity), Vercel Speed Insights for real-user Core Web Vitals; web/app/papers/page.tsx and (finder)/d/[type]/[slug]/page.tsx render production dataset content end-to-end via @barkpark/core and @barkpark/nextjs SDKs."
     },
     {
-      "title": "Reduce time-to-first-blog to near zero via scaffolding + seed",
-      "scale": "epic",
-      "evidence": "seeds/seed.ts inserts 2 authors, 3 tags, 7 posts (6 published, 1 draft) via the mutate API; package.json.tmpl exposes a 'pnpm seed' command; barkpark.config.ts.tmpl wires env vars automatically"
+      "title": "Ship an Obsidian-style finder: instant split-view search + document detail that never remounts on navigation",
+      "scale": "feature",
+      "evidence": "web/app/(finder)/layout.tsx hosts <Finder> in the layout (not children) so opening a doc via /d/[type]/[slug] swaps only the detail pane, preserving search text/scroll/in-flight queries; force-dynamic + server-seeded initial browse avoids CSR-bailout skeleton; prefix-seed index gives 0ms first-keystroke results before the live WS reply lands."
     },
     {
-      "title": "Demonstrate workspace/project URL scoping",
-      "scale": "small",
-      "evidence": "lib/barkpark.ts computes SCOPE via scopePrefix(); seeds/seed.ts builds SCOPE from BARKPARK_WORKSPACE + BARKPARK_PROJECT env vars, showing /w/<ws>/p/<project> vs flat /v1 routing"
+      "title": "Give every document type (post, paper, sheet, page, author, category, project, media) one unified, correctly-404ing detail route",
+      "scale": "feature",
+      "evidence": "web/app/(finder)/d/[type]/[slug]/page.tsx KNOWN_TYPES set scopes both search engines; generateMetadata calls notFound() before headers commit for a real HTTP 404 (not a 200-then-throw); children (not a parallel @detail slot) preserves that 404 semantics per the layout's own comment; ISR revalidate=300 backed by getDocument's unstable_cache + on-demand revalidateTag busting."
     },
     {
-      "title": "Model the draft/published perspective pattern",
-      "scale": "small",
-      "evidence": "lib/barkpark.ts passes perspective=drafts + Authorization header + revalidate:0 for draft fetches; seed.ts deliberately leaves post-upcoming unpublished to create a draft preview demo scenario; queries.ts documents the GROQ-ready postBySlug filter"
+      "title": "Drive every page's social/SEO metadata from one write-time preview manifest, never per-surface guesswork",
+      "scale": "invariant",
+      "evidence": "web/app/(finder)/d/[type]/[slug]/page.tsx generateMetadata calls metadataFromPreview(doc.preview, ...) — a single preview envelope (title/type/description/url/image/extensions) degrades gracefully to title-only for legacy unstamped docs; web/app/layout.tsx sets metadataBase once so every route's OG/canonical/twitter URL resolves absolutely, shared by sitemap/robots/feed."
     },
     {
-      "title": "Establish Next.js cache-tag discipline as the reference pattern",
-      "scale": "small",
-      "evidence": "fetchJson in lib/barkpark.ts sets next:{tags,revalidate:60} using bp:ds:<dataset>:type:<type> and bp:ds:<dataset>:doc:<id> tag shapes, aligning with the @barkpark/nextjs revalidate webhook contract"
+      "title": "Demonstrate multi-tenant workspace/project scoping as a first-class, navigable URL space",
+      "scale": "feature",
+      "evidence": "web/app/w/[workspace]/page.tsx resolves a workspace's default project server-side and redirects to /w/<workspace>/p/<project>; web/app/w/[workspace]/p/[project]/layout.tsx builds a WorkspaceProjectSwitcher from tenancy list endpoints (listWorkspaces/listProjects) with graceful degrade-to-static-label on fetch failure; per-request scoped @barkpark/core client via createClient({workspace, project})."
     },
     {
-      "title": "Show content schema definition as code (schema-as-config)",
-      "scale": "small",
-      "evidence": "schemas/post.ts, author.ts, tag.ts define documents with richText, slug, reference, array-of-reference fields as plain TS objects — the same shape the codegen pipeline consumes"
+      "title": "Bridge private, token-gated realtime updates to the browser without ever exposing the server token",
+      "scale": "invariant",
+      "evidence": "web/app/v1/data/listen/[dataset]/route.ts is a same-origin SSE proxy: injects BARKPARK_TOKEN server-side, forwards Last-Event-ID, disables proxy buffering (X-Accel-Buffering: no), and propagates upstream failures/misconfiguration as explicit 502/401 rather than silently hanging — used by <BarkparkLive/> from @barkpark/nextjs."
     },
     {
-      "title": "Prepare for typed-query migration (ADR-003 forward-compat)",
-      "scale": "small",
-      "evidence": "lib/queries.ts exports GROQ strings annotated as 'ready for the codegen + typed-query migration (ADR-003, Phase 8)' — informational today, wired tomorrow without file-level changes"
+      "title": "Let one demo codebase serve two different landing experiences (docs graph vs. place-directory map) via a single config switch, with heavy interactive surfaces never shipped to mobile",
+      "scale": "feature",
+      "evidence": "web/app/(finder)/page.tsx picks GraphFinderLanding (Obsidian-style force-graph via public/bp-graph.js, ~131KB) or MapFinderLanding (Canvas2D listings map) by NEXT_PUBLIC_FINDER_LANDING, both gated behind <DesktopOnly> so the client script never mounts below md — a CSS-only hidden would still download/execute it on phones."
     }
   ]
 }

@@ -1,96 +1,141 @@
 {
-  "subsystem": "js/packages/nextjs/src",
-  "count": 15,
+  "subsystem": "internal/taskboard",
+  "count": 27,
   "files": [
     {
-      "path": "js/packages/nextjs/src/server/core.ts",
-      "role": "Next.js server fetch core — URL builder + cache tag resolver",
-      "importance": 53,
-      "usefulness": 42
+      "path": "internal/taskboard/actions.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "js/packages/nextjs/src/revalidate/index.ts",
-      "role": "Next.js cache revalidation handler",
-      "importance": 54,
-      "usefulness": 38
+      "path": "internal/taskboard/anim.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "js/packages/nextjs/src/webhook/index.ts",
-      "role": "Next.js webhook handler factory",
-      "importance": 55,
-      "usefulness": 33
+      "path": "internal/taskboard/board.go",
+      "role": "",
+      "importance": 51
     },
     {
-      "path": "js/packages/nextjs/src/actions/defineActions.ts",
-      "role": "Next.js Server Actions factory",
-      "importance": 44,
-      "usefulness": 39
+      "path": "internal/taskboard/cache.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "js/packages/nextjs/src/draft-mode/index.ts",
-      "role": "Next.js draft-mode route factory",
-      "importance": 53,
-      "usefulness": 30
+      "path": "internal/taskboard/cmux.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "js/packages/nextjs/src/client/live.tsx",
-      "role": "Next.js SSE live-reload component",
-      "importance": 42,
-      "usefulness": 38
+      "path": "internal/taskboard/components.go",
+      "role": "",
+      "importance": 51
     },
     {
-      "path": "js/packages/nextjs/src/server/types.ts",
-      "role": "Next.js server config and fetch option types",
-      "importance": 33,
-      "usefulness": 40
+      "path": "internal/taskboard/compose.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "js/packages/nextjs/src/index.ts",
-      "role": "Next.js package root export stub",
-      "importance": 36,
-      "usefulness": 35
+      "path": "internal/taskboard/detail_data.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "js/packages/nextjs/src/preload/index.ts",
-      "role": "Next.js App Router preload utility",
-      "importance": 45,
-      "usefulness": 26
+      "path": "internal/taskboard/detail_render.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "js/packages/nextjs/src/server/index.ts",
-      "role": "Next.js server subpath export",
-      "importance": 51,
-      "usefulness": 18
+      "path": "internal/taskboard/fetch.go",
+      "role": "",
+      "importance": 48
     },
     {
-      "path": "js/packages/nextjs/src/actions/useOptimisticDocument.ts",
-      "role": "React hook for optimistic document mutations",
-      "importance": 28,
-      "usefulness": 28
+      "path": "internal/taskboard/frames.go",
+      "role": "",
+      "importance": 48
     },
     {
-      "path": "js/packages/nextjs/src/client/index.ts",
-      "role": "Next.js client-side subpath entrypoint",
-      "importance": 42,
-      "usefulness": 9
+      "path": "internal/taskboard/frontier.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "js/packages/nextjs/src/webhook/types.ts",
-      "role": "webhook config and handler types",
-      "importance": 25,
-      "usefulness": 25
+      "path": "internal/taskboard/hitmap.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "js/packages/nextjs/src/actions/index.ts",
-      "role": "Next.js actions package public entrypoint",
-      "importance": 39,
-      "usefulness": 8
+      "path": "internal/taskboard/live.go",
+      "role": "",
+      "importance": 50
     },
     {
-      "path": "js/packages/nextjs/src/draft-mode/types.ts",
-      "role": "draft-mode config and handler types",
-      "importance": 25,
-      "usefulness": 21
+      "path": "internal/taskboard/mdlite.go",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "internal/taskboard/merge.go",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "internal/taskboard/motion.go",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "internal/taskboard/overlaps.go",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "internal/taskboard/paper.go",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "internal/taskboard/program.go",
+      "role": "",
+      "importance": 51
+    },
+    {
+      "path": "internal/taskboard/render.go",
+      "role": "",
+      "importance": 51
+    },
+    {
+      "path": "internal/taskboard/repoctx.go",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "internal/taskboard/spine.go",
+      "role": "",
+      "importance": 49
+    },
+    {
+      "path": "internal/taskboard/spinner.go",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "internal/taskboard/theme.go",
+      "role": "",
+      "importance": 50
+    },
+    {
+      "path": "internal/taskboard/tokens_gen.go",
+      "role": "",
+      "importance": 47
+    },
+    {
+      "path": "internal/taskboard/types.go",
+      "role": "",
+      "importance": 51
     }
   ]
 }
