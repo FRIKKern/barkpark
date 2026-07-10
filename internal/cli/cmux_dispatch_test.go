@@ -158,6 +158,68 @@ func TestDispatchUsesSharedFrontier(t *testing.T) {
 	}
 }
 
+// --claim claims each pick (declaring its file scope) BEFORE spawning: the
+// winner is spawned with its lease (worker + epoch) in the pane env, and a pick
+// lost to a file-scope conflict is skipped with its holder named — never spawned.
+func TestDispatchClaimSpawnsOnlyWinners(t *testing.T) {
+	captured := map[string]*capturedClaim{}
+	srv := nextFrontierServer(t, map[string]claimReply{
+		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":5}}}`},
+		"task-b": {status: http.StatusConflict, body: `{"ok":false,"reason":"resource_conflict","conflicts":[{"task":"task-z","worker":"worker-9","resources":["internal/cli/cmux_dispatch.go"]}]}`},
+	}, captured)
+
+	var got []string
+	withCmuxSeams(t, true, func(id, cwd, cmd string) error { got = append(got, cmd); return nil })
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runCmuxDispatch(w, globals{}, dispatchCtx(srv.URL), []string{"--claim"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	if len(got) != 1 {
+		t.Fatalf("spawned %d panes, want only the 1 winner:\n%v", len(got), got)
+	}
+	// The winner's pane env carries the observed lease and the claimed task.
+	if !strings.Contains(got[0], "BARKPARK_TASK=task-a") ||
+		!strings.Contains(got[0], "BARKPARK_TASK_EPOCH=5") ||
+		!strings.Contains(got[0], "BARKPARK_WORKER_ID=") {
+		t.Errorf("winner pane env missing the lease (worker+epoch+task):\n%s", got[0])
+	}
+	// The claim body declared the pick's file scope.
+	if c := captured["task-a"]; c == nil || len(c.resources) != 1 || c.resources[0] != "internal/cli/cli.go" {
+		t.Errorf("winner claim did not carry the declared resources: %+v", captured["task-a"])
+	}
+	// The loser is named with its holder and NOT spawned.
+	out := so.String()
+	if !strings.Contains(out, "skipped task-b") || !strings.Contains(out, "task-z") || !strings.Contains(out, "worker-9") {
+		t.Errorf("loser skip did not name the holder task-z/worker-9:\n%s", out)
+	}
+	if strings.Contains(got[0], "task-b") {
+		t.Errorf("task-b must not be spawned — it lost the file fence:\n%v", got)
+	}
+}
+
+// Default dispatch (no --claim) claims NOTHING — the pane derives and claims its
+// own lease at SessionStart. This asserts the byte-unchanged default path never
+// hits the /claim endpoint.
+func TestDispatchDefaultNeverClaims(t *testing.T) {
+	captured := map[string]*capturedClaim{}
+	srv := nextFrontierServer(t, map[string]claimReply{}, captured)
+
+	withCmuxSeams(t, true, func(id, cwd, cmd string) error { return nil })
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	code := runCmuxDispatch(w, globals{}, dispatchCtx(srv.URL), nil)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr=%s", code, se.String())
+	}
+	if len(captured) != 0 {
+		t.Errorf("default dispatch claimed %d task(s), want 0 (pane self-claims):\n%v", len(captured), captured)
+	}
+}
+
 // shellSingleQuote escapes embedded single quotes so a title with an apostrophe
 // stays one safe shell token.
 func TestShellSingleQuote(t *testing.T) {
