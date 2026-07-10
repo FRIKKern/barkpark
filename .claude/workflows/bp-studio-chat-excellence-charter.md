@@ -1339,6 +1339,15 @@ reconciles the recorder.ex and studio_chat.ex touch points.
 - Studio chrome: `bash scripts/studio-literal-check.sh` (no color literals)
 - Real-binary E2E harnesses exist in the session scratchpad (not committed) —
   builders may replicate the pattern for new features.
+- **Wire-contract harness (D67): `docs/ops/claude-chat-harness.md`.** Three legs —
+  (1) per-PR fixture replay is ALREADY FREE (bare `mix test` runs the six-file
+  suite + frozen wave-10 fixtures, D62); (2) nightly real-binary smoke via
+  `scripts/claude-chat-nightly.sh` → `scripts/claude-chat-e2e.sh` (cron on
+  guerrilla, the only authenticated+pinned host; GH runners have neither binary
+  nor auth); (0) the version pin lives in ONE place —
+  `scripts/claude-pinned-version.txt` (2.1.206) — asserted by the e2e script AND
+  a cheap first `:real_binary` test, refusing on mismatch (PATH decoys are real).
+  Kill-signal: two breaking wire changes in a quarter → Agent SDK re-score.
 
 ## Wave log
 
