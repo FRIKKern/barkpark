@@ -111,6 +111,20 @@ defmodule BarkparkWeb.AuthController do
         issue_session(conn, user, mfa_verified: true)
 
       true ->
+        # A correct password with a missing OR invalid second factor is a failed
+        # login second factor — audit it, mirroring the step-up failure branch
+        # (mfa_step_up emits the same auth/mfa_failed). Without this the LOGIN
+        # second-factor failure was silent while step-up's was not. The `context`
+        # metadata distinguishes the two failure sites ("login" vs "step_up").
+        Audit.emit(%{
+          category: "auth",
+          action: "mfa_failed",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"context" => "login"}
+        })
+
         error(
           conn,
           401,
