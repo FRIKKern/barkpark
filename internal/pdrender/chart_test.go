@@ -143,3 +143,69 @@ func TestChartDegrade(t *testing.T) {
 		t.Error("malformed-axes render produced no output")
 	}
 }
+
+// TestFormatTickCompact pins the compact formatter contract exactly: the SI
+// thresholds, one-decimal with a trimmed ".0", sign preservation, and — the
+// backward-compat law — byte-identity with formatTick for every |v| < 10000 (so
+// no existing small-value chart golden can move).
+func TestFormatTickCompact(t *testing.T) {
+	cases := []struct {
+		in   float64
+		want string
+	}{
+		{45500000, "45.5M"},
+		{12500, "12.5k"},
+		{2000000000, "2B"},
+		{10000, "10k"},        // threshold boundary → compact
+		{500000, "500k"},      // whole → ".0" trimmed
+		{1500000, "1.5M"},     // M with one decimal
+		{-45500000, "-45.5M"}, // sign carried through
+		{9999, "9999"},        // just below threshold → formatTick
+	}
+	for _, c := range cases {
+		if got := formatTickCompact(c.in); got != c.want {
+			t.Errorf("formatTickCompact(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+
+	// Backward-compat law: below 10000, byte-identical to formatTick across a
+	// spread of integers and fractionals the existing chart goldens exercise.
+	for _, v := range []float64{0, 1, 3.7, 6, 100, 999, 1234, 5000, 9999.4, -42, -9999} {
+		if got, plain := formatTickCompact(v), formatTick(v); got != plain {
+			t.Errorf("formatTickCompact(%v) = %q diverged from formatTick = %q below the threshold", v, got, plain)
+		}
+	}
+}
+
+// TestChartCapsAtTwoSeries proves the max-2-series law directly on the renderer: a
+// three-series block renders exactly the first two swatches (plot + legend), and
+// the third series' larger max does NOT stretch the auto-scale — the cap runs
+// BEFORE scaling. The synthetic twin of the sample_m20 golden proof.
+func TestChartCapsAtTwoSeries(t *testing.T) {
+	ctx := chartTestCtx(60)
+	three := stripLines(chartRenderer{}.Render(Block{Type: "chart", Attrs: map[string]any{"series": []any{
+		map[string]any{"label": "aaa", "points": []any{1.0, 2.0, 3.0}},
+		map[string]any{"label": "bbb", "points": []any{2.0, 1.0, 2.0}},
+		map[string]any{"label": "ccc", "points": []any{9.0, 9.0, 9.0}},
+	}}}, ctx))
+	joined := strings.Join(three, "\n")
+
+	if strings.Contains(joined, "ccc") {
+		t.Errorf("third series 'ccc' leaked past the cap:\n%s", joined)
+	}
+	if !strings.Contains(joined, "aaa") || !strings.Contains(joined, "bbb") {
+		t.Errorf("expected the first two series (aaa, bbb) in the legend:\n%s", joined)
+	}
+
+	// The dropped series peaks at 9; the two kept series peak at 3. If the cap ran
+	// AFTER scaling, the top tick would read 9. A capped 3-series render must be
+	// byte-identical to the equivalent bare 2-series render — the cap fences the
+	// scale, the plot, and the legend alike.
+	two := stripLines(chartRenderer{}.Render(Block{Type: "chart", Attrs: map[string]any{"series": []any{
+		map[string]any{"label": "aaa", "points": []any{1.0, 2.0, 3.0}},
+		map[string]any{"label": "bbb", "points": []any{2.0, 1.0, 2.0}},
+	}}}, ctx))
+	if got, want := strings.Join(three, "\n"), strings.Join(two, "\n"); got != want {
+		t.Errorf("capped 3-series render differs from the equivalent 2-series render — the cap is not clean\n--- 3-series (capped) ---\n%s\n--- 2-series ---\n%s", got, want)
+	}
+}
