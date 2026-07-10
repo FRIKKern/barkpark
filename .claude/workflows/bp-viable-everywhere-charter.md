@@ -84,8 +84,8 @@ Perishability: every mechanism above shipped Mar–Jun 2026 and vendors move mon
 
 **Wave 2 (Tier 1 build):**
 4. `ve-w2-remote-mcp-bearer` (large, P1) — Go Streamable-HTTP MCP endpoint, bearer auth via verify_token; ABSORBS ao-backlog-remote-mcp. Spike-verify go-sdk handler wiring first (uncompiled-prototype risk).
-5. `ve-w2-agents-md-onramp` (medium, P1) — canonical consumer AGENTS.md emission; collapse 3 teach-layer wrappers; reconcile onramps-charter decision 8.
-6. `ve-w2-onramp-copilot` (small, P1) — `.vscode/mcp.json` `servers` emitter (highest single-surface reach).
+5. ~~`ve-w2-agents-md-onramp`~~ — **HANDED OFF 2026-07-10**: re-parented (`bp task move`) under `agent-onramps-epic` (38bd7e13), which now solely owns and builds it in its wave 2. Not viable-everywhere work anymore.
+6. ~~`ve-w2-onramp-copilot`~~ — **HANDED OFF 2026-07-10**: re-parented under `agent-onramps-epic` (38bd7e13), same handoff. Do NOT re-adopt either task in a future viable loop.
 7. `ve-w2-onramp-zed-cline` (medium, P2) — Zed `context_servers` emitter + Cline (after env-token verification).
 
 **Wave 3 (Tier 2):**
@@ -107,4 +107,4 @@ Perishability: every mechanism above shipped Mar–Jun 2026 and vendors move mon
 
 **Ledger:** truthful across the slate — 3 w1 tasks in_progress with active epoch-1 claims and evidence-stamped criteria (merge-gated criterion open for the lead); w2/w3 placeholders untouched open; ao-backlog-remote-mcp cancelled+pointed. No fixes needed. NOTE for lead: builders stamped criteria via doc-patch under the claim, so `bp task close` will 409 `doc_changed_since_claim` — re-read then close (documented recovery).
 
-**Next wave (w2 cut):** `ve-w2-remote-mcp-bearer` is the unlock (spike-verify go-sdk NewStreamableHTTPHandler wiring FIRST — uncompiled-prototype risk) + `ve-w2-agents-md-onramp` (must reconcile onramps-charter decision 8) + `ve-w2-onramp-copilot` (highest single-surface reach, small). Re-verify the paper's perishable matrix cells at w2 decide (Grok plan gates, Kilo dialect, Cline `${env:}` are the open unknowns). Consider promoting the paper-payload generator out of scratchpad if per-wave re-verification wants regeneration.
+**Next wave (w2 cut):** `ve-w2-remote-mcp-bearer` is the unlock (spike-verify go-sdk NewStreamableHTTPHandler wiring FIRST — uncompiled-prototype risk). ~~agents-md + copilot~~ HANDED OFF 2026-07-10 to `agent-onramps-epic` wave 2 (re-parented via `bp task move`; see `.claude/workflows/bp-cloud-epic-charter.md`) — this epic's w2 cut is bearer only; do not re-adopt. Re-verify the paper's perishable matrix cells at w2 decide (Grok plan gates, Kilo dialect, Cline `${env:}` are the open unknowns). Consider promoting the paper-payload generator out of scratchpad if per-wave re-verification wants regeneration.

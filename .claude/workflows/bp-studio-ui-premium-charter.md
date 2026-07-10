@@ -175,6 +175,110 @@ weighted section headers, aligned label/control columns. Settings is the flagshi
   *Why: layout audit falsified "give six screens the treatment" — four of six have nothing
   to treat.*
 
+### Wave-3 decisions (2026-07-10 — the closing wave)
+
+- **D19 — The D16-banked pane-model amendment is REJECTED, both variants; D4 is now a
+  permanent fence for this epic.** The licensed decision, made on the authenticated pixel
+  evidence: the desk STILL reads flat on 5 of 6 theme×mode combos — but the cause is
+  measured and token-level, not structural. ΔL(--surface-raised, --bg) dark: evergreen
+  0.0695 (visible), ember 0.0157 (invisible), fjord 0.0258 (barely); `--border-subtle`
+  INVERTS on ember dark (−0.009 — the hairline is darker than the bg) and vanishes on
+  fjord; light mode is near-flat on all three. Meanwhile the w2 row anatomy (header counts,
+  status dots, bold title + dim subtitle, demoted doc-id, iconed empty states) reads
+  genuinely premium, and org-admin's bp_cards prove elevation-via-`--border` works. So:
+  (a) **inline nested tree — rejected**, and on CORRECTED grounds: NOT "it needs a wire
+  change" (the /v1/structure wire already serializes the full nested tree recursively via
+  node_json; expand state could stay client-side) but because it is a multi-file Studio
+  rendering-MODEL rewrite (PaneBuilder.walk_path's Miller-columns list → recursive nested
+  rendering across pane_builder.ex, studio_live.ex, components.ex, panes.ex), contradicts
+  the drill-down D4 deliberately kept, and diverges the Studio desk from the Go TUI desk
+  that renders the SAME structure as drill-down columns (GUI/TUI parity break).
+  (b) **resizable pane columns — rejected**: provably cheap (width is a CSS constant,
+  root.html.heex `.pane-column` 260px; zero wire, zero TUI; localStorage precedent exists)
+  but the build-license condition — "pixels show cramped columns as a real defect" — was
+  NOT met; 260px × 3-4 visible columns reads generous. Building it would be treating a
+  token symptom with a pane sledgehammer. The desk's premium finish ships as D20 instead.
+- **D20 — Elevation becomes bg-RELATIVE in the dark rung (fit-first, evergreen
+  byte-identical).** Root cause: STUDIO_II in derive.mjs gives `--surface-raised`/
+  `--border-subtle` a FIXED absolute OKLCH L for dark (0.210/0.185) while per-theme dark bg
+  L differs (evergreen 0.1405, ember 0.1943, fjord 0.1842) — elevation anchored to an
+  absolute, not to the ground it sits on. Fix: the DARK bindings move to
+  `L = srgbToOklch(skin.dark.bg).L + ΔL` with ΔL EXACTLY 0.0695 (surface-raised) and
+  0.0445 (border-subtle) — these 4-sig-fig constants empirically reproduce evergreen's
+  committed bytes ("157.32 13.06% 8.96%" / "157.18 13.11% 6.89%") so Part F stays green
+  with zero override-count churn (0.069 and 0.070 both DRIFT the byte and red the gate).
+  Light rung stays absolute BY DESIGN (light bg ≈0.99-1.0 everywhere; light elevation
+  rides border+shadow — say so in the PR to preempt the reviewer question). SAME-LEVER
+  EXTENSION: `--bg-accent`/`--border-muted` carry the identical fixed-absolute-L bug
+  (selected rows RECEDE on ember/fjord dark, ΔL −0.028/−0.018) — convert them the same
+  way IF evergreen byte-identity is empirically provable; otherwise drop them from the PR
+  with a written reason (never pin — no override-count churn). Part H is value-driven
+  (re-derives live) so the token nudge needs NO table edit, but the gate must re-run
+  green: all 6 surface-raised pairings pre-verified to hold (tightest: ember scope-caret
+  nontext 3.969 ≥ 3.0; ember muted-text 5.449 ≥ 4.5).
+- **D21 — "api_tester + studio_live/components cosmetic sweep" scope corrected:
+  studio_live/components is a NO-OP.** The directory holds ONLY paper_editor.ex; its
+  chrome selects were converted in w2 and every remaining native control is a fenced
+  `bp-paper-edit-*` VALUE field (D11/D13 — the paper-edit design language). The real
+  sweep is api_tester alone: components.ex :85/:99 → bp_input, :93-97 → bp_select
+  (value-match selected), :106 → bp_textarea — which requires a small ADDITIVE kit
+  extension (bp_textarea gains a `class` passthrough + `spellcheck` in :rest, else the
+  `api-body-textarea` sizing and spellcheck=false silently vanish). The scenario-results
+  inline styles carry a HIDDEN AA DEFECT: `var(--fg-dim)` on `var(--bg-muted)` inline
+  (4.05–4.27, sub-AA) is INVISIBLE to Part H (which parses root.html.heex selectors) —
+  extraction to classes escalates the text to `--muted-text` AND adds the new pairings to
+  Part H in the same PR (COUPLING LAW). The dynamic verdict-fail row background stays
+  dynamic (modifier class/data-attr). api_tester has ZERO markup-pinning tests today, so
+  the brief pre-names a NEW protective render test (distrust vacuous green). tmux polish:
+  SKIPPED — no form controls at all (xterm host); gold-plating.
+- **D22 — Styleguide gallery DOM becomes the spec: render the real kit components.**
+  sg-controls swaps raw class primitives for actual `<.bp_input>` / `<.bp_select>`
+  (exercising prompt + optgroup so the gallery documents them) / `<.bp_textarea>` /
+  `<.bp_checkbox>` / `<.bp_radio>` / `<.bp_switch>`. Known pin drift, pre-named:
+  styleguide_live_test.exs :117/:118/:119 BREAK (kit inserts name=/id= attrs) and are
+  rewritten to kit attribute order; :122-125 (form-checkbox/switch/track/state) SURVIVE;
+  a bp_radio assertion is ADDED (none exists). Kept a SEPARATE slice from api_tester:
+  disjoint pin-sets, and isolating the AA-correctness risk (api_tester) from the pure
+  mechanical swap lets this land trivially.
+- **D23 — The last genuine native control + the exemption register.** Post-#2088 census:
+  the ONLY naked, non-exempt, non-chat native control left in Studio is
+  `shares_modal`'s `surfaces[]` checkboxes (modals.ex:139-144, class-less labels — the
+  airdrop sibling was swept in w2, this one was missed). It converts to bp_checkbox with
+  form-param semantics preserved; THIS is the criterion-2 blocker, not api_tester
+  (form-input-classed = cosmetic) or the styleguide (spec-fidelity). NEW DOCUMENTED
+  EXEMPTION: the airdrop custom-expiry `<input type="datetime-local">` — browsers paint
+  native date chrome inside any styled box; a custom JS date component is out of scope
+  for a closing wave. It joins the register: chat (D10 NO-GO), sr-only swatch radios
+  (D14), `bp-paper-edit-*` value fields (D11), fields/* + field_inputs (D6),
+  `type=hidden` inputs, the kit substrate itself. session_html login pages VERIFIED
+  at-bar (zero native controls, form-input + bp-auth-* throughout) — no login pass, don't
+  gold-plate. The chat control sweep leaves this epic entirely: criterion 2 says "chat
+  excluded", the chat epic owns its own sweep.
+- **D24 — QA close-out operational definitions (the epic's exit is stamped, not
+  vibed).** (a) The native-control census greps for the ABSENCE of the form-*/bp-* class
+  family, NEVER tag presence — bp_select itself emits `<select class="form-input">`; a
+  tag grep false-reds the kit, fields/*, and the styleguide. (b) Criterion 3's
+  operational definition: Part H machine-covers every real fg×surface co-occurrence the
+  epic touched (extended in the close-out for anything missed); the residual — text on
+  legacy screens the epic never touched — is flagged HONESTLY in the evidence, not
+  claimed. (c) Criterion 4 (user re-verdict) is a HUMAN GATE: the close-out produces the
+  authenticated pixel pack and surfaces it to the user; it is never agent-stamped.
+  (d) graph_view + swatch_live have NO live() harness — documented canvas/tool
+  exemptions, not new harnesses in a closing wave. (e) The repeatable pixel-evidence
+  harness, now proven agent-drivable: admin bearer from ~/.config/barkpark/config.json →
+  `POST /v1/auth/login-tickets` → browse `GET /login/ticket/:t` (session cookie,
+  redirects to /studio); both theme axes client-overridable from one session
+  (`document.documentElement.dataset.theme` + `dataset.bpTheme`) since all theme CSS
+  lives in root.html.heex — all 6 combos from one login. Builders should ALSO set the
+  workspace theme server-side once to eyeball the server-stamped path.
+- **D17 pin-set corrections (post-#2088; briefs use THESE, not the D17 originals):**
+  pane-doc pins moved to studio_components_pane_test.exs :295 (`pane-doc-sub`), :297
+  (refute `pane-doc-id`), :299 (`title="p1"`); pane-column markup pins at :36/:53/:56/:69;
+  panes_test.exs:85 and studio_live_task_realtime_test.exs:111 unchanged; the
+  resolver_outputs pin's REAL path is `api/test/barkpark_web/integration/
+  resolver_outputs_test.exs:237` (charter had a wrong path); EXTRA pin not in the D17
+  list: studio_live_empty_pane_test.exs (pane_empty no-documents hint).
+
 ## Roadmap
 
 Wave 1 (this wave — integration order as listed):
@@ -197,11 +301,28 @@ Wave 2 (this wave — integration order as listed; ALL worktrees cut from origin
 5. `sup-w2-desk-org-admin-rhythm` — desk row anatomy/header counts/empty state/elevation
    adoption per D16 + org_admin D7 rebuild per D18. **large**
 
-Wave 3 (planned): chat control sweep coordinated with the studio-chat epic lead
-(token-only until then); api_tester + studio_live/components cosmetic kit conversion +
-api_tester scenario-row inline-div cleanup; session_html login-page premium-feel pass;
-tmux polish; the BANKED D4 pane-model amendment (inline nested tree / resizable columns)
-only if the desk still reads flat after D16; final AA audit + close-out evidence.
+Wave 3 (this wave — THE CLOSING WAVE; integration order as listed; ALL worktrees cut
+from origin/main (f2df6d76 or later, post-#2088) after `git fetch` per D12 — the local
+primary checkout is BEHIND and rebuilds pre-#2088 markup):
+1. `sup-w3-token-evenness` — bg-relative dark rung for `--surface-raised`/
+   `--border-subtle` (+ `--bg-accent`/`--border-muted` verify-or-drop) per D20;
+   evergreen byte-identical, Part F/A/H green. **medium**
+2. `sup-w3-api-tester-kit` — api_tester onto the kit (bp_textarea class+spellcheck
+   extension), scenario-row inline→class extraction with fg-dim→muted-text AA fix,
+   new Part H rows (COUPLING LAW), new protective render test per D21. **medium**
+3. `sup-w3-styleguide-kit-dom` — sg-controls renders the real bp_* components; pins
+   :117-119 rewritten, bp_radio assertion added per D22. **small**
+4. `sup-w3-shares-modal-kit` — shares_modal surfaces[] checkboxes onto bp_checkbox
+   (the last criterion-2 blocker); datetime-local exemption recorded per D23. **small**
+5. `sup-w3-qa-closeout` — whole-surface QA census (class-absence grep, LiveViewTest
+   render census, Part H completeness), authenticated pixel pack via the login-ticket
+   harness (incl. sheet popovers + plugin settings, uncaptured so far), epic criteria
+   1-3 stamped with real evidence, criterion 4 surfaced to the user per D24. Runs
+   AFTER slices 1-4 merge. **large**
+
+Dropped from the old wave-3 sketch, with reasons: chat sweep (leaves the epic — D23),
+session_html login pass (at-bar — D23), tmux polish (no controls — D21), pane-model
+amendment (REJECTED — D19).
 
 ## Wave log
 
@@ -223,7 +344,7 @@ login-gated, local boot has known blockers), `--surface-raised` elevation is
 theme-uneven (visible on evergreen, near-flat on ember/fjord dark),
 `--surface-raised`/`--border-subtle` defined 6× but consumed by ~one rule.
 
-### Wave 2 — 2026-07-10 (reviewed; ready for the lead's merge train)
+### Wave 2 — 2026-07-10 (MERGED #2088, 871a3dd1, 02:32Z; all five tasks closed done)
 
 **All five slices built green and reviewed; nothing stalled.** Ledger: all five
 tasks published `in_progress`, criteria stamped with evidence, only the
