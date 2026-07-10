@@ -152,6 +152,61 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert ListenController.redacted_result(msg, @dataset, nil, []) == msg.document
   end
 
+  describe "live-leg admin fast-path (efficiency: get_document elided) — task-4469f80374b0bd24" do
+    # A broadcast snapshot that DIFFERS from the stored DB row by a sentinel key
+    # the row does NOT have. The sentinel can ONLY survive if the live leg
+    # forwards `msg.document` verbatim; a re-fetch + re-render from the DB would
+    # never reproduce it. So its presence PROVES the per-event Content.get_document
+    # round-trip was elided; its absence PROVES a re-fetch happened.
+    defp tainted_msg(doc) do
+      snapshot =
+        doc
+        |> Envelope.render(nil, :internal)
+        |> Map.put("_forwarded_only_marker", "sentinel")
+
+      %{doc_id: doc.doc_id, type: "post", document: snapshot}
+    end
+
+    test "an admin caller forwards the broadcast snapshot WITHOUT re-fetching", %{doc: doc} do
+      msg = tainted_msg(doc)
+
+      result = ListenController.live_result(msg, @dataset, admin(), caller_context: admin())
+
+      # Byte-identical to the in-hand snapshot → no DB fetch, no re-render.
+      assert result == msg.document
+      assert result["_forwarded_only_marker"] == "sentinel"
+    end
+
+    test "a redacting (non-admin) caller STILL re-derives from the DB — leak guard intact",
+         %{doc: doc} do
+      msg = tainted_msg(doc)
+
+      result = ListenController.live_result(msg, @dataset, reader(), caller_context: reader())
+
+      # The sentinel is GONE → the DB was re-fetched + re-rendered (not forwarded).
+      refute Map.has_key?(result, "_forwarded_only_marker"),
+             "non-admin caller forwarded the broadcast snapshot — redundant-fetch fix leaked past the admin guard"
+
+      # And the private field is still dropped → field-visibility redaction preserved.
+      refute Map.has_key?(result, "ssn")
+      assert result["body"] == "ok"
+      assert result["_id"] == doc.doc_id
+    end
+
+    test "a non-admin api_token that BYPASSES owner scoping is still NOT forwarded (fail closed)",
+         %{doc: doc} do
+      # `reader()` is a plain api_token: Scope.scope_to_owner leaves its query
+      # untouched (ownership bypass), yet Envelope.render STILL redacts its
+      # private fields. The fast-path must key on is_admin, NOT on the ownership
+      # bypass — otherwise a read-token subscriber would receive private fields.
+      msg = tainted_msg(doc)
+      result = ListenController.live_result(msg, @dataset, reader(), caller_context: reader())
+
+      refute Map.has_key?(result, "_forwarded_only_marker")
+      refute Map.has_key?(result, "ssn")
+    end
+  end
+
   test "delete event (document gone) redacts the FROZEN snapshot, not a re-render" do
     # No live document exists for this id — only the stored snapshot remains.
     snapshot = %{
