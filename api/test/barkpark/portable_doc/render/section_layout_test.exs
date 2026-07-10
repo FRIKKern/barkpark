@@ -289,4 +289,135 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       end
     end
   end
+
+  # ═══ EMAIL DEGRADE: a grid section stacks inline-safe, class-free, order-honored ══
+  #
+  # render.ex's :email document embeds NO stylesheet ("Outlook is the contract",
+  # inline-only — render.ex:152-162), so the :article grid's shared
+  # `.bp-section__grid` class + inert `--bp-tracks`/`--bp-grid-gap` custom props
+  # would arrive as an unstyled SILENT stack. The section clause style-branches
+  # INSIDE Compose.compose_block (never a parallel render fn) to a DESIGNED
+  # inline-safe stacked degrade that honors the per-cell `order` (stable sort,
+  # mirroring blocks.go gridBody's CSS-order reorder). These cases lock: no grid
+  # class / cell class / custom prop reaches the email bytes, the children stack
+  # in CSS-order, and :article stays the real CSS grid (the branch is proven).
+  @email %{style: :email}
+
+  defp email_grid(children, extra_layout \\ %{}) do
+    %{
+      "type" => "section",
+      "title" => "Overview",
+      "layout" => Map.merge(%{"mode" => "grid", "tracks" => 3}, extra_layout),
+      "blocks" => children
+    }
+  end
+
+  defp para(value, extra \\ %{}) do
+    Map.merge(
+      %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => value}]},
+      extra
+    )
+  end
+
+  # Byte offset of `needle` in `html` (asserts presence first for a clear failure).
+  defp bpos(html, needle) do
+    assert String.contains?(html, needle), "expected #{needle} in the rendered output"
+    :binary.match(html, needle) |> elem(0)
+  end
+
+  describe "email degrade: grid section → inline-safe ordered stack" do
+    test "a grid section in :email emits NO grid class, NO cell class, NO custom props" do
+      html = Render.render_block(email_grid([para("ALPHA"), para("BETA")]), @email)
+      refute String.contains?(html, "bp-section__grid"), "email grid must not emit the grid class"
+      refute String.contains?(html, "bp-section__cell"), "email grid must not emit cell wrappers"
+      refute String.contains?(html, "--bp-tracks"),
+             "email grid must not emit the tracks custom prop"
+
+      refute String.contains?(html, "--bp-grid-gap"),
+             "email grid must not emit the gap custom prop"
+    end
+
+    test "the degrade is a real stack — flex-column wrapper + a rule + the title survives" do
+      html = Render.render_block(email_grid([para("ALPHA")]), @email)
+      assert String.starts_with?(html, ~s(<div style="display:flex;flex-direction:column">))
+      assert String.contains?(html, "<hr"), "the stack keeps its leading/trailing rule"
+      assert String.contains?(html, "Overview"), "the section title survives the degrade"
+    end
+
+    test "children route through their OWN (inline-safe) emitters inside the degrade" do
+      section =
+        email_grid([
+          %{
+            "type" => "callout",
+            "tone" => "info",
+            "content" => [%{"type" => "text", "value" => "note"}]
+          },
+          para("BETA")
+        ])
+
+      html = Render.render_block(section, @email)
+      # The callout renders through its OWN :email emitter — an inline-styled box
+      # (border-left chrome), NEVER the stylesheet-only `bp-callout` class that
+      # Outlook would strip.
+      assert String.contains?(html, "border-left:3px solid"),
+             "callout child renders through its own inline-safe :email emitter"
+
+      refute String.contains?(html, "bp-callout"),
+             "the :email callout must not lean on the stylesheet-only class"
+
+      assert String.contains?(html, "note"), "callout child renders its own text"
+      assert String.contains?(html, "<p>BETA</p>"), "paragraph child renders as a real <p>"
+    end
+
+    test "per-cell `order` reorders the stack (stable sort by CSS order)" do
+      # source ALPHA(order:2), BETA(order:1), GAMMA(no order ≡ 0) → GAMMA, BETA, ALPHA
+      section =
+        email_grid([
+          para("ALPHA", %{"order" => 2}),
+          para("BETA", %{"order" => 1}),
+          para("GAMMA")
+        ])
+
+      html = Render.render_block(section, @email)
+
+      assert bpos(html, "GAMMA") < bpos(html, "BETA") and bpos(html, "BETA") < bpos(html, "ALPHA"),
+             "email degrade must stack children in CSS-order: GAMMA(0) < BETA(1) < ALPHA(2)"
+    end
+
+    test "absent/equal order preserves SOURCE position (the sort is stable)" do
+      html =
+        Render.render_block(email_grid([para("FIRST"), para("SECOND"), para("THIRD")]), @email)
+
+      assert bpos(html, "FIRST") < bpos(html, "SECOND") and
+               bpos(html, "SECOND") < bpos(html, "THIRD"),
+             "no order ⇒ source order preserved (stable sort, order default 0)"
+    end
+
+    test "a malformed order falls to 0; a legal negative order sorts ahead of it" do
+      section =
+        email_grid([
+          # malformed stringy order → order_int nil → 0
+          para("ALPHA", %{"order" => "1x"}),
+          # legal negative CSS order → sorts before 0
+          para("BETA", %{"order" => -1})
+        ])
+
+      html = Render.render_block(section, @email)
+
+      assert bpos(html, "BETA") < bpos(html, "ALPHA"),
+             "order:-1 sorts before the malformed(≡0) child; no crash"
+    end
+
+    test ":article STILL emits the real CSS grid — the degrade is :email-only (branch proven)" do
+      section = email_grid([para("ALPHA"), para("BETA")])
+
+      article = Render.render_block(section, @article)
+      assert String.contains?(article, "bp-section__grid"), ":article keeps the real grid class"
+      assert String.contains?(article, "--bp-tracks:3"), ":article keeps the tracks custom prop"
+
+      email = Render.render_block(section, @email)
+      refute String.contains?(email, "bp-section__grid")
+      assert email != article, "the email degrade must differ from the article grid bytes"
+    end
+  end
 end
