@@ -875,17 +875,8 @@ defmodule Barkpark.Content.Graph do
     # `:require_token` with no grant fold, so no live caller sets `grant_scoped`
     # here — but the seam keeps the corpus read fail-closed the moment a
     # grant-derived surface ever calls `orphans/1` / `dangling/1`. Byte-identical
-    # for every current caller (flag absent). Bridge form (D7): swap to
-    # `Scope.maybe_scope_to_grants(query, opts)` once the wrapper lands on main.
-    if Keyword.get(opts, :grant_scoped, false) do
-      Barkpark.Content.Scope.scope_to_grants(
-        query,
-        Keyword.get(opts, :caller_context),
-        Keyword.get(opts, :workspace_id)
-      )
-    else
-      query
-    end
+    # for every current caller (flag absent; no-op inside the wrapper).
+    Scope.maybe_scope_to_grants(query, opts)
   end
 
   # Resolve a slug/UUID to its documents.id, published-preferred (CASE-ordered,
@@ -933,19 +924,8 @@ defmodule Barkpark.Content.Graph do
     # when set, a grant-derived caller's slug resolution is narrowed to the union
     # of its grant scopes, failing CLOSED (`where: false` → nil) on an uncovered
     # target — that nil is what makes `reverse_referencers` return `[]` for a doc
-    # outside the grant ladder instead of leaking its referencers. Bridge form
-    # (D7): swap to `Scope.maybe_scope_to_grants(query, opts)` once the search
-    # slice hoists that public wrapper onto main.
-    query =
-      if Keyword.get(opts, :grant_scoped, false) do
-        Scope.scope_to_grants(
-          query,
-          Keyword.get(opts, :caller_context),
-          Keyword.get(opts, :workspace_id)
-        )
-      else
-        query
-      end
+    # outside the grant ladder instead of leaking its referencers.
+    query = Scope.maybe_scope_to_grants(query, opts)
 
     query |> limit(1) |> Repo.one()
   end
@@ -985,33 +965,21 @@ defmodule Barkpark.Content.Graph do
   # a caller that threads none (nil) now fails CLOSED to unowned-only rows
   # (LOW-12) instead of leaking every owner's nodes.
   defp scope_query(query, opts) do
-    scoped =
-      query
-      |> Scope.scope_to_workspace_or_global(
-        Keyword.get(opts, :workspace_id),
-        Keyword.get(opts, :project_id)
-      )
-      |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
-
-    # Layer-2 grant narrowing (airdrop-grants, ag-backlinks-grant-leak). Inert
-    # unless `opts[:grant_scoped]` — the flag ONLY AssignGrantScope /
+    # Layer-2 grant narrowing (airdrop-grants, ag-backlinks-grant-leak) rides
+    # last: inert unless `opts[:grant_scoped]` — the flag ONLY AssignGrantScope /
     # ResolveWorkspace / LiveScope set — so every existing caller (members,
     # tokens, anonymous, the graph_test suite's plain `[dataset: ...]` opts) is
     # byte-identical. When set, the keyed graph hydration reads (`docs_by_id/2`,
     # `hydrate_nodes/2`, `fetch_doc/2`) are restricted to the union of the
     # caller's grant scopes, failing CLOSED (`where: false`) on an
     # absent/uncovering grant — so a grant-derived socket's graph/blast-radius
-    # pane can never hydrate a node outside its grant ladder. Bridge form (D7):
-    # swap to `Scope.maybe_scope_to_grants(scoped, opts)` once the search slice
-    # hoists that public wrapper onto main.
-    if Keyword.get(opts, :grant_scoped, false) do
-      Scope.scope_to_grants(
-        scoped,
-        Keyword.get(opts, :caller_context),
-        Keyword.get(opts, :workspace_id)
-      )
-    else
-      scoped
-    end
+    # pane can never hydrate a node outside its grant ladder.
+    query
+    |> Scope.scope_to_workspace_or_global(
+      Keyword.get(opts, :workspace_id),
+      Keyword.get(opts, :project_id)
+    )
+    |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+    |> Scope.maybe_scope_to_grants(opts)
   end
 end

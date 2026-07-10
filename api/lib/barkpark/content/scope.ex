@@ -240,8 +240,10 @@ defmodule Barkpark.Content.Scope do
   grant — a grant-derived caller can never fall through to the whole workspace.
 
   Every read that must honour a grant threads through here: the `Content.Query`
-  read sites, the Postgres search `DocumentsRetriever` base query, and the Indx
-  hydration read. There is no private copy of the gate anywhere.
+  read sites, the Postgres search `DocumentsRetriever` base query, the Indx
+  hydration read, and the shared `Content.Graph` read helpers (`resolve_doc`,
+  `scope_query`, `scoped_docs_query` — backlinks + the Studio graph pane).
+  There is no private copy of the gate anywhere.
   """
   @spec maybe_scope_to_grants(Ecto.Queryable.t(), keyword()) :: Ecto.Queryable.t()
   def maybe_scope_to_grants(query, opts) do
