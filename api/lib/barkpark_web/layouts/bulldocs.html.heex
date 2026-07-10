@@ -613,13 +613,14 @@
     td.sheet-al-right { text-align: right; }
     td.sheet-al-center { text-align: center; }
 
-    /* ── TUI view: a terminal skin for the reader, toggled bottom-right ──────
-       Opt-in (body.bp-tui), persisted client-side. It re-skins the SAME article
-       HTML as a terminal — monospace, near-black ground, box-drawing tables,
-       markdown-ish heading prefixes — evoking the Go pdrender surface
-       (`bp paper view`). Purely presentational + additive; the render pipeline
-       is untouched. Scoped to `.bp-paper-article` so email/non-article papers
-       are never affected. */
+    /* ── View-toggle pills (bottom-right): switch between Reader, TUI, and Email
+       views of the same paper. Opt-in (body.bp-tui / body.bp-email), persisted
+       client-side. TUI view is NOT a CSS terminal imitation — it renders the
+       paper through the REAL Go pdrender compiled to WASM (the `#bp-terminal`
+       block ~50 lines below is the actual pdrender output, ANSI→HTML in the
+       wasm; the same renderer `bp paper view` runs). The rules HERE are only the
+       toggle-pill chrome — presentational + additive, and scoped to
+       `.bp-paper-article` so email/non-article papers are never affected. */
     .bp-view-toggle {
       position: fixed; right: 20px; bottom: 20px; z-index: 60;
       display: inline-flex; align-items: center; gap: 8px;
@@ -832,6 +833,48 @@
     @media (prefers-reduced-motion: reduce) {
       .bp-view-toggle { transition: none; }
       #bp-mailapp .bp-mail-dot, #bp-mailapp .bp-mail-unread { transition: none; }
+    }
+
+    /* ── Print: white paper, drop screen-only chrome, expand the reading column.
+       Modeled on the sibling sheets reader block (sheets.html.heex @media print).
+       A paper prints as the reading article on plain paper — the reader theme's
+       dark ground and every interactive/navigational affordance are screen-only.
+       Scoped like the rest of this sheet: article-only rules stay under
+       `.bp-paper-article` so non-article papers are untouched. */
+    @media print {
+      /* The reader theme paints a tinted/dark ground on <body> and on the
+         article shell; reset both to white so ink prints readably on any theme. */
+      body,
+      body:has(.bp-paper-article),
+      body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+        background: #fff; /* lit-allow: print reset — white paper, not a theme color */
+      }
+      /* Reclaim the full printable measure and drop the screen gutter. */
+      .bp-paper-shell { max-width: none; padding: 0; }
+      /* Screen-only chrome — the view-toggle pills, the TUI terminal window and
+         the mail-client window (alternate VIEWS of the same article), the sticky
+         doc-action / simplify bars, the fixed diff overlay, and the goal-path
+         rail are all interactive or navigational; none belong on paper. */
+      .bp-view-toggle,
+      #bp-terminal,
+      #bp-mailapp,
+      .bp-paper-article .bp-paper-actions,
+      .bp-paper-article .bp-paper-simplify,
+      .bp-paper-article .bp-diff-overlay,
+      .bp-paper-article .bp-goal-rail { display: none !important; }
+      /* Any surviving sticky/fixed positioning collapses to static so nothing
+         floats or clips in paged output. */
+      .bp-paper-article .bp-paper-actions,
+      .bp-paper-article .bp-goal-rail { position: static; float: none; }
+      /* Keep figures, data-viz cards, embeds, and code blocks whole across a
+         page break rather than splitting mid-figure. */
+      .bp-paper-article figure,
+      .bp-paper-article pre,
+      .bp-paper-article .bp-embed,
+      .bp-paper-article .bp-dataviz,
+      .bp-paper-article .bp-stat,
+      .bp-paper-article .bp-heat,
+      .bp-paper-article .bp-chart { break-inside: avoid; }
     }
   </style>
 </head>

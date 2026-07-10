@@ -53,11 +53,14 @@ html[data-theme="dark"] .bp-paper-body {
    the light bp theme. The `--paper-*` colour fallback is in the GENERATED marker
    region below (the html[data-theme] blocks win over it, as before). */
 .bp-paper-surface, .bp-paper-body {
-  /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
-     actually renders in the macOS system serif (Iowan Old Style). We mirror
-     that rendered face here; Source Serif 4 stays in the stack as a
-     cross-platform fallback. It is NOT self-hosted (@font-face'd) yet — that is
-     S9's flag-gated work; until then it resolves only where the OS has the face. */
+  /* Reading serif. Iowan Old Style leads the stack — the macOS system serif the
+     ORIGINAL Portable Doc editor renders in — so native reads pixel-match the
+     editor where the OS has that face. Source Serif 4 IS self-hosted now
+     (@font-face'd variable woff2, Roman + Italic, since #1984 — see
+     root.html.heex), so it supplies the same serif everywhere the OS lacks
+     Iowan; it is a real font here, not a bare fallback name. The stack ORDER and
+     these font values are owned by au-w5-reading-typography (human-gated) — do
+     not reorder or retune them here. */
   --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
   --paper-font-mono: ui-monospace, Menlo, monospace;
   /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
@@ -799,6 +802,59 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 .bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
 .bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
 
+/* ── data-viz slate 2: calendar heatmap, quantile dual-encode, matrix Σ,
+   stat denominators (gui-premium w5) ──
+   Quantile bin classes bp-heat__c--b0..b3 (zero/gap = --z) carry TWO channels,
+   the web read of the TUI shade ladder ░▒▓█: the color step (color-mix over
+   the accent — the same idiom as the legacy `--i` ramp, stepped at 22/44/66/88%)
+   AND a non-color channel — a growing ink inner marker on shade cells, the
+   exact value text on `--v` cells — so the datum survives grayscale and print.
+   Calendar heatmaps render EVERY week inside a horizontally scrollable
+   container; the web never width-drops weeks the way the terminal must. */
+.bp-paper-surface .bp-stat__denom { font-size: 1.05rem; font-weight: 500; color: var(--paper-ink-soft); }
+
+.bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
+.bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
+.bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; width: max-content; }
+.bp-paper-surface .bp-heat__ml { font-family: var(--paper-font-mono); font-size: 0.64rem; line-height: 1.2; color: var(--paper-ink-soft); white-space: nowrap; overflow: visible; min-width: 0; }
+
+.bp-paper-surface .bp-heat__c--z,
+.bp-paper-surface .bp-heat__c--b0,
+.bp-paper-surface .bp-heat__c--b1,
+.bp-paper-surface .bp-heat__c--b2,
+.bp-paper-surface .bp-heat__c--b3 { position: relative; }
+.bp-paper-surface .bp-heat__c--z { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--z::after { content: ""; position: absolute; top: 50%; left: 50%; width: 3px; height: 3px; margin: -1.5px 0 0 -1.5px; border-radius: 50%; background: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--b0 { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b1 { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b2 { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b3 { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--b0::after,
+.bp-paper-surface .bp-heat__c--b1::after,
+.bp-paper-surface .bp-heat__c--b2::after,
+.bp-paper-surface .bp-heat__c--b3::after { content: ""; position: absolute; border-radius: 1px; background: color-mix(in srgb, var(--paper-ink) 42%, transparent); }
+.bp-paper-surface .bp-heat__c--b0::after { inset: 41%; }
+.bp-paper-surface .bp-heat__c--b1::after { inset: 33%; }
+.bp-paper-surface .bp-heat__c--b2::after { inset: 24%; }
+.bp-paper-surface .bp-heat__c--b3::after { inset: 15%; }
+
+/* value cells: the exact number IS the second channel — the bin color moves to
+   an underline strip so ink text keeps full contrast on every theme. These come
+   AFTER the marker rules so the strip geometry wins at equal specificity. */
+.bp-paper-surface .bp-heat__c--v { aspect-ratio: auto; min-height: 0; padding: 3px 7px 6px; font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-style: normal; font-size: 0.7rem; line-height: 1.3; text-align: right; color: var(--paper-ink); background: transparent; border-radius: 4px; }
+.bp-paper-surface .bp-heat__c--v::after { content: ""; position: absolute; inset: auto 15% 0; top: auto; width: auto; height: 3px; margin: 0; border-radius: 2px; }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--z::after { background: var(--paper-rule); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b0::after { background: color-mix(in srgb, var(--paper-accent) 22%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b1::after { background: color-mix(in srgb, var(--paper-accent) 44%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b2::after { background: color-mix(in srgb, var(--paper-accent) 66%, var(--paper-rule)); }
+.bp-paper-surface .bp-heat__c--v.bp-heat__c--b3::after { background: color-mix(in srgb, var(--paper-accent) 88%, var(--paper-rule)); }
+
+/* Σ marginals: dim mono sums, the grand total emphasized. */
+.bp-paper-surface .bp-heat__sum { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.7rem; line-height: 1.3; color: var(--paper-ink-soft); text-align: right; padding: 3px 7px 6px; }
+.bp-paper-surface .bp-heat__sum--grand { font-weight: 650; color: var(--paper-ink); }
+.bp-paper-surface .bp-heat__cl--sum { text-align: right; padding-right: 7px; }
+
 /* ── form / questionnaire: the premium read (gui-premium w2) ──
    forms.ex emits <fieldset class="bp-form-question bp-form-q--<type>"> cards
    with classed option rows (article mode). The stylesheet owns ALL geometry:
@@ -869,3 +925,14 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
    centers the render inside the (already tokenized) figure card. */
 .bp-paper-surface pre.mermaid { display: flex; justify-content: center; margin: 0; overflow-x: auto; }
 .bp-paper-surface pre.mermaid svg { max-width: 100%; height: auto; }
+
+/* ── unsupported-block degrade (gui-premium w5) ──
+   The walker (walk.ex) and compose.ex both emit `<div class="bp-unknown-block">`
+   for a forward-compat or corrupt Pd-node kind ("Unsupported block: <kind>" /
+   "invalid block") rather than raising — papers are schemaless. Until now that
+   fallback rendered as a bare unstyled div. Give it the SAME honest dashed-box
+   treatment as `.bp-dataviz--empty`: a faint mono note in a dashed frame that
+   reads as a deliberate "nothing renders here" state, never a broken layout.
+   Appended at the end of the hand-authored section, clear of the data-viz slate
+   region above (concurrently owned by gp-w5-dataviz-fidelity). */
+.bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
