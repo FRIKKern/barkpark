@@ -246,6 +246,16 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
   end
 
+  # Layer-2 script-blocking CSP for the PUBLIC paper reader (defense-in-depth
+  # follow-up to the store-time body_html sanitizer). Layered ON TOP of a
+  # browser pipeline for the paper reader scopes ONLY. The plug SELF-GATES to
+  # `.../papers/:slug` paths, so on the SHARED `:public_root` bucket (scope "/"
+  # below — papers AND /sheets AND /quiz) it emits the policy for papers alone
+  # and is a pure no-op for the sibling readers. See PaperReaderCsp @moduledoc.
+  pipeline :paper_reader_csp do
+    plug(BarkparkWeb.Plugs.PaperReaderCsp)
+  end
+
   # :scoped_browser + the :docs share gate (P4) — the scoped STUDIO pipeline.
   # An anonymous request for a `:docs`-shared scope is pre-resolved by
   # RequireShareScope (read-only; LiveScope attaches the server-side write
@@ -909,7 +919,7 @@ defmodule BarkparkWeb.Router do
   # modules are fully qualified. Expands to nothing until a plugin contributes
   # a `:public_root` route.
   scope "/" do
-    pipe_through(:browser)
+    pipe_through([:browser, :paper_reader_csp])
 
     plugin_routes(scope: :public_root)
   end
@@ -1670,7 +1680,7 @@ defmodule BarkparkWeb.Router do
   # path doesn't collide with any of the `/v1/…` scoped routes, but keeping the
   # dedicated-pipeline route ahead of the catch-alls keeps intent obvious.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through(:shared_paper_browser)
+    pipe_through([:shared_paper_browser, :paper_reader_csp])
 
     # LIVE scoped reader (P4): the same BulldocsLive as the flat /papers/:slug
     # surface — per-block real-time streaming included (the paper PubSub topic
