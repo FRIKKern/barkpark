@@ -1,5 +1,6 @@
 defmodule Barkpark.Webhooks do
   import Ecto.Query
+  alias Barkpark.Audit
   alias Barkpark.Repo
   alias Barkpark.Content.Scope
   alias Barkpark.Webhooks.{Webhook, Delivery}
@@ -63,6 +64,7 @@ defmodule Barkpark.Webhooks do
     %Webhook{}
     |> Webhook.changeset(stamp_scope(attrs, opts))
     |> Repo.insert()
+    |> audit_webhook("webhook_created")
   end
 
   # Scope-id keys a client must never set — dropped (string AND atom form)
@@ -101,6 +103,7 @@ defmodule Barkpark.Webhooks do
     |> Webhook.changeset(attrs)
     |> maybe_apply_reenable(webhook)
     |> Repo.update()
+    |> audit_webhook("webhook_updated")
   end
 
   # When an update transitions `active` false→true, fold FULL re-enable
@@ -134,9 +137,39 @@ defmodule Barkpark.Webhooks do
     # stale_error_field turns the race into {:error, :not_found} (rendered 404).
     case Repo.delete(webhook, stale_error_field: :id) do
       {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
-      ok -> ok
+      ok -> audit_webhook(ok, "webhook_deleted")
     end
   end
+
+  # A webhook is an event-exfiltration surface (it forwards content + audit
+  # events off-box to an arbitrary URL and holds a signing secret), so every
+  # CRUD transition lands on the tamper-evident audit trail. Category
+  # `plugin_settings` (an EXISTING audit category, and already in the webhook
+  # subscription mirror) is the honest bucket — a webhook is a delivery-config
+  # surface, not a session/token credential. Chains into the row's OWN
+  # per-workspace hash chain via `workspace_id`, so a cross-tenant admin never
+  # sees another tenant's webhook events. Best-effort + isolated: the emit
+  # result is discarded and any infra raise/throw is swallowed, so an audit
+  # hiccup can never fail the CRUD that already committed. Field hygiene: the
+  # signing `secret` is NEVER put in metadata.
+  defp audit_webhook({:ok, %Webhook{} = webhook} = result, action) do
+    Audit.emit(%{
+      category: "plugin_settings",
+      action: action,
+      subject: webhook.id,
+      workspace_id: webhook.workspace_id,
+      project_id: webhook.project_id,
+      metadata: %{"name" => webhook.name, "dataset" => webhook.dataset}
+    })
+
+    result
+  rescue
+    _ -> result
+  catch
+    _, _ -> result
+  end
+
+  defp audit_webhook(result, _action), do: result
 
   @doc """
   Select the active webhooks that fire for an event, optionally scoped to a

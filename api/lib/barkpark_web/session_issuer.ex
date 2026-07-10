@@ -23,6 +23,8 @@ defmodule BarkparkWeb.SessionIssuer do
         [ip_address: client_ip(conn), user_agent: user_agent(conn)] ++ opts
       )
 
+    audit_session_mint(user, opts)
+
     conn
     |> configure_session(renew: true)
     |> put_session("user_session", token)
@@ -117,6 +119,29 @@ defmodule BarkparkWeb.SessionIssuer do
     conn
     |> get_req_header("accept")
     |> Enum.any?(&String.contains?(&1, "text/html"))
+  end
+
+  # Record the successful session mint on the tamper-evident audit trail. This
+  # is the shared choke point for the interactive login paths (password + magic
+  # link via AuthController, passkey via WebauthnController), so every one of
+  # them lands a `session_minted` event identically. `mfa_verified` marks the
+  # session as born strong-factor-fresh. Best-effort + fully isolated: an audit
+  # hiccup must never fail the login that already succeeded.
+  defp audit_session_mint(user, opts) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "session_minted",
+      subject: user.id,
+      actor_type: "user",
+      actor_id: user.id,
+      metadata: %{"mfa_verified" => Keyword.get(opts, :mfa_verified, false)}
+    })
+
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
