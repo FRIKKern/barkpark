@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 )
@@ -233,6 +234,163 @@ func TestOnrampGeminiCliGolden(t *testing.T) {
 	}
 }
 
+// TestOnrampCopilotGolden asserts the VS Code / GitHub Copilot emission is
+// byte-compatible with the stanza docs/setup/COPILOT.md publishes. The one
+// structural difference from every sibling is the top-level `servers` key (NOT
+// `mcpServers`) — live-pinned against
+// code.visualstudio.com/docs/agents/reference/mcp-configuration (2026-07-10).
+// Copilot shares Cursor's ${env:…} dialect, so the OLD cursor-leak guard
+// (env_vars absent) does not discriminate here; the discriminating leak-guards
+// are structural: contains `servers`, does NOT contain `mcpServers`, contains
+// `"type": "stdio"`.
+func TestOnrampCopilotGolden(t *testing.T) {
+	out, _, code := onrampRun(t, globals{server: guerrilla}, "copilot")
+	if code != exitOK {
+		t.Fatalf("copilot exit = %d, want %d", code, exitOK)
+	}
+	// BYTE-IDENTICAL to the json block docs/setup/COPILOT.md publishes (decision
+	// 14: doc == verb). Top-level `servers` is VS Code's MCP shape.
+	wantStanza := `{
+  "servers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${env:BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}`
+	if !strings.Contains(out, wantStanza) {
+		t.Errorf("copilot output missing the exact COPILOT.md stanza.\n--- got ---\n%s", out)
+	}
+	// The one structural difference: the top-level key is `servers`, never the
+	// sibling `mcpServers` — and the stdio discriminator is present.
+	if !strings.Contains(out, `"servers"`) {
+		t.Errorf("copilot output must use the top-level \"servers\" key")
+	}
+	if strings.Contains(out, `"mcpServers"`) {
+		t.Errorf("copilot output leaked the sibling \"mcpServers\" key — VS Code uses \"servers\"")
+	}
+	if !strings.Contains(out, `"type": "stdio"`) {
+		t.Errorf("copilot output missing the \"type\": \"stdio\" discriminator")
+	}
+	for _, want := range []string{
+		".vscode/mcp.json",
+		"MCP: List Servers",           // the verify step
+		"inputs",                      // the promptString alternative is named
+		"${env:BARKPARK_API_TOKEN}",   // Copilot shares Cursor's dialect
+		"docs/setup/AGENT-ONRAMPS.md", // full-journey pointer
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("copilot output missing %q", want)
+		}
+	}
+}
+
+// TestOnrampAgentsMdGolden asserts `bp onramp agents-md` emits the canonical
+// marker-managed AGENTS.md block, byte-identical to the checked-in golden, and
+// that the block keeps every item CODEX.md's wave-1 rendering had dropped.
+func TestOnrampAgentsMdGolden(t *testing.T) {
+	golden, err := os.ReadFile("testdata/agents_md.golden")
+	if err != nil {
+		t.Fatalf("read golden: %v", err)
+	}
+	// The golden carries a trailing newline (POSIX text file); the block does not.
+	if got := agentsMDBlock() + "\n"; got != string(golden) {
+		t.Errorf("agentsMDBlock drifted from testdata/agents_md.golden.\n--- got ---\n%s\n--- golden ---\n%s", got, golden)
+	}
+
+	out, _, code := onrampRun(t, globals{server: guerrilla}, "agents-md")
+	if code != exitOK {
+		t.Fatalf("agents-md exit = %d, want %d", code, exitOK)
+	}
+	// The full emitted block appears verbatim in the human print.
+	if !strings.Contains(out, agentsMDBlock()) {
+		t.Errorf("agents-md output missing the exact canonical block.\n--- got ---\n%s", out)
+	}
+	for _, want := range []string{
+		"<!-- barkpark:onramp:begin -->",
+		"<!-- barkpark:onramp:end -->",
+		"./AGENTS.md",
+		// The four items CODEX.md's lossy rendering dropped — all survive.
+		"bp task prime",
+		"Conventions:",
+		"parent_id",
+		"doc_changed_since_claim",
+		// Generalized worker-id + generalized MCP footer.
+		"`<tool>-<your-name-or-branch>`",
+		"docs/setup/AGENT-ONRAMPS.md",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("agents-md output missing %q", want)
+		}
+	}
+	// It is a teach block, not an MCP stanza — no server line, no token dialects.
+	if strings.Contains(out, "# server:") {
+		t.Errorf("agents-md must not print a server line (it bakes no URL)")
+	}
+	for _, leak := range []string{"mcpServers", "env_vars", "${env:BARKPARK_API_TOKEN}", "${BARKPARK_API_TOKEN}"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("agents-md leaked MCP-stanza content %q — it is a pure teach block", leak)
+		}
+	}
+}
+
+// TestOnrampAgentsMdJSON proves `-o json` for agents-md carries the single
+// ./AGENTS.md file whose content is the exact canonical block.
+func TestOnrampAgentsMdJSON(t *testing.T) {
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	if code := runOnramp(w, globals{server: guerrilla}, []string{"agents-md"}); code != exitOK {
+		t.Fatalf("json exit = %d, want %d", code, exitOK)
+	}
+	var got onrampSpec
+	if err := json.Unmarshal(so.Bytes(), &got); err != nil {
+		t.Fatalf("json did not decode into onrampSpec: %v\n%s", err, so.String())
+	}
+	if got.Target != "agents-md" {
+		t.Errorf("json target = %q, want agents-md", got.Target)
+	}
+	if len(got.Files) != 1 || got.Files[0].Path != "./AGENTS.md" {
+		t.Fatalf("agents-md json should carry one ./AGENTS.md file, got %+v", got.Files)
+	}
+	if got.Files[0].Content != agentsMDBlock() {
+		t.Errorf("agents-md json content is not the canonical block.\n--- got ---\n%s", got.Files[0].Content)
+	}
+}
+
+// TestOnrampAgentsMdWrapperParity is the DRIFT GATE: the three wave-1 teach
+// wrappers must each still embed the canonical body (in their own framing, with
+// their own two per-tool lines). Reading them via relative paths, a single edited
+// shared line in any wrapper makes the Contains fail — dedup is now gate-enforced.
+func TestOnrampAgentsMdWrapperParity(t *testing.T) {
+	cases := []struct {
+		path string
+		body string
+	}{
+		// Cursor rules asset: framing + cursor-prefixed worker-id + CURSOR.md footer.
+		{"../../.cursor/rules/barkpark-tasks.mdc", renderAgentsMDBody("cursor", "docs/setup/CURSOR.md")},
+		// Claude Code teach snippet: framing + claude-prefixed worker-id + CLAUDE-CODE.md footer.
+		{"../../.claude/CLAUDE-BARKPARK.md", renderAgentsMDBody("claude", "docs/setup/CLAUDE-CODE.md")},
+		// CODEX.md documents the canonical (`<tool>`) rendering verbatim.
+		{"../../docs/setup/CODEX.md", agentsMDCanonicalBody},
+	}
+	for _, c := range cases {
+		raw, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Errorf("read %s: %v", c.path, err)
+			continue
+		}
+		if !strings.Contains(string(raw), c.body) {
+			t.Errorf("%s no longer embeds its canonical AGENTS.md body — drift.\nExpected body:\n%s", c.path, c.body)
+		}
+	}
+}
+
 // TestOnrampRejectRemote proves chatgpt/claude-ai are rejected (exit 2) with a
 // pointer to REMOTE.md and no config block.
 func TestOnrampRejectRemote(t *testing.T) {
@@ -256,7 +414,7 @@ func TestOnrampUnknownTarget(t *testing.T) {
 	if code != exitUsage {
 		t.Errorf("unknown target exit = %d, want %d", code, exitUsage)
 	}
-	for _, want := range []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli"} {
+	for _, want := range []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("unknown-target error must list valid target %q, got: %q", want, errOut)
 		}
@@ -274,15 +432,28 @@ func TestOnrampNoTarget(t *testing.T) {
 	}
 }
 
-// TestOnrampRejectWriteFlag proves --write is NOT accepted in this wave — it must
-// be a usage error, never silently ignored.
-func TestOnrampRejectWriteFlag(t *testing.T) {
-	_, errOut, code := onrampRun(t, globals{server: guerrilla}, "cursor", "--write")
+// TestOnrampRejectUnknownFlag proves an unrecognised flag is a usage error, never
+// silently ignored. (--write/--force are now recognised — see onramp_write_test.go;
+// this guards everything else, e.g. a typo like --wrote.)
+func TestOnrampRejectUnknownFlag(t *testing.T) {
+	_, errOut, code := onrampRun(t, globals{server: guerrilla}, "cursor", "--wrote")
 	if code != exitUsage {
-		t.Errorf("--write exit = %d, want %d (must be rejected, not ignored)", code, exitUsage)
+		t.Errorf("--wrote exit = %d, want %d (must be rejected, not ignored)", code, exitUsage)
 	}
 	if !strings.Contains(errOut, "unknown flag") {
-		t.Errorf("--write should be an unknown-flag error, got: %q", errOut)
+		t.Errorf("--wrote should be an unknown-flag error, got: %q", errOut)
+	}
+}
+
+// TestOnrampForceWithoutWrite proves --force alone is a usage error — it only
+// means something paired with --write.
+func TestOnrampForceWithoutWrite(t *testing.T) {
+	_, errOut, code := onrampRun(t, globals{server: guerrilla}, "cursor", "--force")
+	if code != exitUsage {
+		t.Errorf("--force alone exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(errOut, "--force only applies with --write") {
+		t.Errorf("--force alone should explain it needs --write, got: %q", errOut)
 	}
 }
 

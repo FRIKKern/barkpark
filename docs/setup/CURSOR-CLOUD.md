@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: cursor-cloud-onramp | budget: 800tok -->
 # Barkpark in Cursor Cloud
 
-Cursor's cloud agents run in a fresh remote VM, not your laptop, so the onramp is two moves: **install `bp` when the box boots**, and **feed the token through Cursor's Secrets UI** — never a committed file. The shared AUTH and CREATE journeys live in `docs/setup/AGENT-ONRAMPS.md`; this is only what Cursor Cloud does differently.
+Cursor's cloud agents run in a fresh remote VM, not your laptop, so the onramp is two moves: **install `bp` when the box boots**, and **feed the token through Cursor's Secrets UI** — never a committed file. The shared AUTH and CREATE journeys live in [Agent Onramps](AGENT-ONRAMPS.md); this is only what Cursor Cloud does differently.
 
 > Cursor's cloud-agent config keys move faster than this doc. Confirm the current names at [cursor.com/docs/cloud-agent/setup](https://cursor.com/docs/cloud-agent/setup) before you commit.
 

@@ -2,13 +2,18 @@ package cli
 
 // onramp_cmd.go — `bp onramp <target>`: emit the exact MCP-registration config
 // block(s) for ONE AI-agent surface, where they belong, and how to verify.
-// PRINT-FIRST and print-only in v1 (exactly the cmux_install.go precedent): it
-// SHOWS the blocks and never writes a file. `--write` (safe JSON merge for the
-// JSON targets, marker-append for Codex TOML) is the reserved wave-2/3 slice and
-// is deliberately NOT defined here — a stray `--write` is a usage error, not a
-// silently-ignored flag.
+// PRINT-FIRST: by default it SHOWS the blocks and writes nothing. `--write` does
+// the work — a safe JSON merge that touches ONLY the barkpark entry
+// (onramp_write.go), idempotent and atomic; `--force` overwrites a differing
+// barkpark entry. Codex's TOML config stays print-only until wave 3 (reported
+// 'skipped' under --write, so no TOML dependency enters go.mod). A stray unknown
+// flag is a usage error, never silently ignored.
 //
-// Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli.
+// Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli |
+// copilot.
+// agents-md. agents-md is the odd one out — not an MCP stanza but the ONE
+// canonical consumer AGENTS.md teach block (the ~23-tool convergence standard),
+// marker-wrapped, that the three wave-1 teach-layer wrappers now derive from.
 // windsurf and gemini-cli both reuse mcpJSONStanza verbatim (charter decision 7)
 // — zero new mechanism — differing only in destination path and env dialect, and
 // both print codex-style MERGE-the-mcpServers-key guidance (their files are
@@ -53,12 +58,57 @@ const (
 	// per-tool and never shared across tools even when they happen to match
 	// (charter decision 9).
 	geminiTokenRef = "${BARKPARK_API_TOKEN}" // Gemini CLI dialect
+	// copilotTokenRef is VS Code / GitHub Copilot's dialect. VS Code expands
+	// ${env:VAR} inside `.vscode/mcp.json` values, reading the token from the shell
+	// so the secret never lands in the committed file — cited:
+	// code.visualstudio.com/docs/agents/reference/mcp-configuration (2026-07-10).
+	// Its VALUE coincides with cursorTokenRef, but it stays its OWN named constant
+	// — dialects are per-tool and never shared across tools even when they happen
+	// to match (charter decision 9; geminiTokenRef precedent above).
+	copilotTokenRef = "${env:BARKPARK_API_TOKEN}" // VS Code / Copilot dialect
 )
 
 // onrampFile is one config file a target needs: where it belongs + its content.
+// The merge-metadata fields (all omitempty, stamped in buildOnrampSpec) tell the
+// `--write` engine HOW to merge just the barkpark entry into an existing file
+// without a hardcoded key — see onramp_write.go. They stay omitempty so a file
+// that carries none (there are none today) prints no empty noise in `-o json`.
 type onrampFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	// MergeKind ∈ server-map | flat | toml (onramp_write.go constants). Empty
+	// means print-only, no --write strategy.
+	MergeKind string `json:"mergeKind,omitempty"`
+	// TopKey is the top-level object key --write merges under (mcpServers /
+	// servers / install).
+	TopKey string `json:"topKey,omitempty"`
+	// ServerKey is the entry inside TopKey --write owns (always "barkpark" for a
+	// server-map). Unused for flat/toml.
+	ServerKey string `json:"serverKey,omitempty"`
+}
+
+// The single entry every server-map onramp owns inside its top-level object.
+const onrampServerKey = "barkpark"
+
+// mcpServerFile / serversFile / flatFile / tomlFile stamp the merge metadata for
+// each shape so --write never hardcodes a key. mcpServerFile covers the
+// `mcpServers` map every stdio target uses; serversFile covers copilot's
+// `.vscode/mcp.json` (top-level `servers`) — wrap that target's file literal in
+// it when the copilot slice lands.
+func mcpServerFile(path, content string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeServerMap, TopKey: "mcpServers", ServerKey: onrampServerKey}
+}
+
+func serversFile(path, content string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeServerMap, TopKey: "servers", ServerKey: onrampServerKey}
+}
+
+func flatFile(path, content, topKey string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeFlat, TopKey: topKey}
+}
+
+func tomlFile(path, content string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeTOML}
 }
 
 // onrampSpec is the `-o json` emission: the resolved target, the file(s) to
@@ -72,7 +122,7 @@ type onrampSpec struct {
 
 // onrampLocalTargets is the ordered set of targets the verb prints config for.
 func onrampLocalTargets() []string {
-	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli"}
+	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot", "agents-md"}
 }
 
 // onrampServer resolves the URL to bake into the env block: --server wins, else
@@ -140,6 +190,34 @@ func claudeCodeMcpJSONStanza(server, tokenValue string) string {
 }`, server, tokenValue)
 }
 
+// copilotMcpJSONStanza renders the `.vscode/mcp.json` server block in VS Code /
+// GitHub Copilot's shape. The ONE structural difference from every sibling: the
+// top-level key is `servers`, NOT `mcpServers` — VS Code renamed it during the
+// MCP preview (live-pinned against
+// code.visualstudio.com/docs/agents/reference/mcp-configuration, 2026-07-10).
+// Otherwise it is the Claude Code shape: the explicit `"type": "stdio"`
+// discriminator plus command/args/env, carrying the SAME BARKPARK_API_URL env
+// key every sibling stanza uses (so COPILOT.md's retargeting prose stays
+// consistent). Key ORDER is fixed by a raw template — a map marshal would sort
+// keys and drift from the doc (decision 14). The token stays in the shell via
+// ${env:…}; the `inputs`/promptString alternative is documented in COPILOT.md,
+// never emitted here.
+func copilotMcpJSONStanza(server, tokenValue string) string {
+	return fmt.Sprintf(`{
+  "servers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": %q,
+        "BARKPARK_API_TOKEN": %q
+      }
+    }
+  }
+}`, server, tokenValue)
+}
+
 // codexTOMLBlock renders the `~/.codex/config.toml` [mcp_servers.barkpark] block.
 // The static env table carries ONLY the non-secret URL; the token rides
 // env_vars = ["BARKPARK_API_TOKEN"] (shell-forward whitelist). There is no ${…}
@@ -166,6 +244,71 @@ func cursorCloudEnvironmentJSON() string {
 }`, onrampInstallLine)
 }
 
+// AGENTS.md managed-block markers. `bp onramp agents-md` wraps the canonical
+// teach text in these so a re-run (and, later, `--write`) can find its own block
+// and replace ONLY between them — never a consumer's surrounding content.
+const (
+	agentsMDMarkerBegin = "<!-- barkpark:onramp:begin -->"
+	agentsMDMarkerEnd   = "<!-- barkpark:onramp:end -->"
+)
+
+// agentsMDHeading is the section title the emitted AGENTS.md block carries — the
+// framing above the shared body inside the markers.
+const agentsMDHeading = "## Task tracking — Barkpark (bp)"
+
+// renderAgentsMDBody is the ONE consumer-facing Barkpark teach text, the SUPERSET
+// the three wave-1 wrappers converge on: the cursor/claude common body (keeping
+// `bp task prime`, the Conventions header, the parent_id nesting line, and the
+// 409 doc_changed_since_claim line that CODEX.md's rendering had dropped). The two
+// per-derivation lines are parameters: workerPrefix seeds the worker-id line
+// (`<tool>-…`, `cursor-…`, `claude-…`) and mcpDocRef seeds the MCP footer's
+// "see …" pointer. Every other line is invariant, so the three wrappers can only
+// differ in exactly those two spots — the drift the parity test guards.
+func renderAgentsMDBody(workerPrefix, mcpDocRef string) string {
+	workerLine := "- Worker id: `" + workerPrefix + "-<your-name-or-branch>` — pick one and keep it for claim/close symmetry."
+	mcpFooter := "MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `" + mcpDocRef + "`."
+	lines := []string{
+		"All task tracking uses Barkpark — never markdown TODO lists, never a TODO tool.",
+		"The `bp` CLI talks to the configured server (`~/.config/barkpark/`).",
+		"",
+		"- `bp task ready` — list available work",
+		"- `bp task next <worker>` — atomically claim the next ready task; claim FIRST — the claim returns the brief and an epoch",
+		"- `bp task get <id>` — task detail (carries children + child_count)",
+		"- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.",
+		"- `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)",
+		"- `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events",
+		"- `bp capabilities -o json` — the whole API manifest when unsure",
+		"",
+		"Conventions:",
+		workerLine,
+		"- `lifecycle_status` is the done-signal (`open` → `done`), not the claim record.",
+		"- Closing can mark acceptance criteria in the same atomic write:",
+		"  `--set 'criteria:=[{\"index\":0,\"met\":true,\"evidence\":\"...\"}]'`",
+		"- Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.",
+		"- If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.",
+		"",
+		mcpFooter,
+	}
+	return strings.Join(lines, "\n")
+}
+
+// agentsMDCanonicalBody is the emitted/canonical rendering: worker-id generalized
+// to `<tool>-…` and the MCP footer pointed at the onramp hub. This exact string is
+// what CODEX.md documents; the .cursor/.claude wrappers embed their own
+// per-tool renderings of the same body.
+var agentsMDCanonicalBody = renderAgentsMDBody("<tool>", "docs/setup/AGENT-ONRAMPS.md")
+
+// agentsMDBlock is the full marker-managed block `bp onramp agents-md` emits into
+// a consumer's ./AGENTS.md: begin marker, section heading, the canonical body,
+// end marker. The markers make the block idempotently findable so a re-run
+// replaces only itself.
+func agentsMDBlock() string {
+	return agentsMDMarkerBegin + "\n" +
+		agentsMDHeading + "\n\n" +
+		agentsMDCanonicalBody + "\n" +
+		agentsMDMarkerEnd
+}
+
 // buildOnrampSpec assembles the file set + verify step for a local target. ok is
 // false for an unknown target (the caller renders the valid-set usage error).
 func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
@@ -174,7 +317,7 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: ".cursor/mcp.json", Content: mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))},
+				mcpServerFile(".cursor/mcp.json", mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))),
 			},
 			Verify: "reload MCP servers in Cursor Settings — the barkpark task tools appear in the Agent's tool list",
 		}, true
@@ -182,7 +325,7 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: ".mcp.json", Content: claudeCodeMcpJSONStanza(server, onrampTokenValue(claudeCodeTokenRef, token))},
+				mcpServerFile(".mcp.json", claudeCodeMcpJSONStanza(server, onrampTokenValue(claudeCodeTokenRef, token))),
 			},
 			Verify: "claude mcp list",
 		}, true
@@ -190,7 +333,7 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: "~/.codex/config.toml", Content: codexTOMLBlock(server)},
+				tomlFile("~/.codex/config.toml", codexTOMLBlock(server)),
 			},
 			Verify: "codex mcp list",
 		}, true
@@ -198,8 +341,8 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: ".cursor/environment.json", Content: cursorCloudEnvironmentJSON()},
-				{Path: ".cursor/mcp.json", Content: mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))},
+				flatFile(".cursor/environment.json", cursorCloudEnvironmentJSON(), "install"),
+				mcpServerFile(".cursor/mcp.json", mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))),
 			},
 			Verify: "open the Cursor Cloud agent — the barkpark task tools appear in its tool list once the environment builds",
 		}, true
@@ -211,7 +354,7 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: "~/.codeium/mcp_config.json", Content: mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))},
+				mcpServerFile("~/.codeium/mcp_config.json", mcpJSONStanza(server, onrampTokenValue(cursorTokenRef, token))),
 			},
 			Verify: "click Refresh in Windsurf's MCP settings (or reload the window) — the barkpark task tools appear in Cascade's tool list",
 		}, true
@@ -224,36 +367,86 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: ".gemini/settings.json", Content: mcpJSONStanza(server, onrampTokenValue(geminiTokenRef, token))},
+				mcpServerFile(".gemini/settings.json", mcpJSONStanza(server, onrampTokenValue(geminiTokenRef, token))),
 			},
 			Verify: "gemini mcp list  (or /mcp inside the Gemini CLI) — barkpark appears with its tools",
+		}, true
+	case "copilot":
+		// VS Code / GitHub Copilot reads `.vscode/mcp.json`. The one structural
+		// difference from every sibling is the top-level `servers` key (VS Code
+		// renamed it from mcpServers during the MCP preview — copilotMcpJSONStanza).
+		// It shares Cursor's ${env:VAR} dialect (copilotTokenRef, its own named
+		// constant per decision 9). The file may already hold other servers, so the
+		// human print carries a merge-the-key note rather than a whole-file label.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				{Path: ".vscode/mcp.json", Content: copilotMcpJSONStanza(server, onrampTokenValue(copilotTokenRef, token))},
+			},
+			Verify: `run "MCP: List Servers" from the VS Code Command Palette — barkpark appears; its task tools show in Copilot agent mode's tool picker`,
+		}, true
+	case "agents-md":
+		// The tool-agnostic teach block for the ~23-tool AGENTS.md convergence
+		// standard — Codex, Aider, and every AGENTS.md-reading agent. It carries no
+		// server/token (it teaches the claim-first contract, not an MCP stanza), so
+		// server and token are ignored. Marker-wrapped so a re-run replaces only its
+		// own block, never a consumer's surrounding AGENTS.md content.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				{Path: "./AGENTS.md", Content: agentsMDBlock()},
+			},
+			Verify: "open a fresh agent session in this repo — it reads AGENTS.md and knows the claim-first task contract before touching the board",
 		}, true
 	}
 	return onrampSpec{}, false
 }
 
-// runOnramp is the `bp onramp <target>` built-in. PRINT-ONLY in v1.
+// onrampTargetUsesServer reports whether a target bakes the resolved server URL
+// into its emission. agents-md is a pure teach block with no MCP stanza, so the
+// human print skips the `# server:` line for it.
+func onrampTargetUsesServer(target string) bool {
+	return target != "agents-md"
+}
+
+// runOnramp is the `bp onramp <target>` built-in. Prints the config by default;
+// `--write` merges just the barkpark entry into the target's JSON config (safe,
+// idempotent, atomic — see onramp_write.go), `--force` overwrites a differing
+// barkpark entry.
 func runOnramp(out *writer, g globals, args []string) int {
 	if g.help {
 		printOnrampHelp(out)
 		return exitOK
 	}
 
-	// Separate the single target from any trailing tokens. --server/--token are
-	// GLOBAL flags already folded into g, so any `-flag` reaching here is unknown
-	// — reject it (this is where a stray --write, reserved for a later wave, dies
-	// with a clear message rather than being silently accepted-and-ignored).
+	// Separate the single target from the recognised local flags. --server/--token
+	// are GLOBAL flags already folded into g; --write/--force are onramp-local; any
+	// OTHER `-flag` reaching here is unknown and rejected (never silently ignored).
 	target := ""
+	write := false
+	force := false
 	for _, a := range args {
+		switch a {
+		case "--write":
+			write = true
+			continue
+		case "--force":
+			force = true
+			continue
+		}
 		if strings.HasPrefix(a, "-") {
 			return usageErrf(out, func() { printOnrampHelp(out) },
-				"unknown flag %q (onramp is print-only in v1 — --write is a later wave)", a)
+				"unknown flag %q (onramp accepts --write and --force; --server/--token are global)", a)
 		}
 		if target != "" {
 			return usageErrf(out, func() { printOnrampHelp(out) },
 				"onramp takes exactly one target (got %q and %q)", target, a)
 		}
 		target = a
+	}
+	if force && !write {
+		return usageErrf(out, func() { printOnrampHelp(out) },
+			"--force only applies with --write (it overwrites a differing barkpark entry)")
 	}
 	if target == "" {
 		return usageErrf(out, func() { printOnrampHelp(out) },
@@ -277,6 +470,10 @@ func runOnramp(out *writer, g globals, args []string) int {
 			"unknown target %q (valid: %s)", target, strings.Join(onrampLocalTargets(), ", "))
 	}
 
+	if write {
+		return runOnrampWrite(out, spec, force)
+	}
+
 	if out.machineOut() {
 		out.renderJSON(spec)
 		return exitOK
@@ -289,8 +486,10 @@ func runOnramp(out *writer, g globals, args []string) int {
 // destination path, the per-target extras (one-liner shortcut, rules pointer,
 // dialect reminder), and the verify + full-journey pointer.
 func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec) {
-	out.outf("# bp onramp %s — paste these by hand (print-only in v1; nothing is written for you).", target)
-	out.outf("# server: %s", server)
+	out.outf("# bp onramp %s — paste these by hand, or re-run with --write to merge them for you.", target)
+	if onrampTargetUsesServer(target) {
+		out.outf("# server: %s", server)
+	}
 	if token != "" {
 		out.outf("# token:  a literal from --token is baked in below (the default keeps the secret in your shell env).")
 	}
@@ -331,6 +530,20 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 		out.outf("# settings.json holds your WHOLE Gemini CLI config — MERGE the \"barkpark\" entry into any")
 		out.outf("# existing \"mcpServers\" object rather than replacing the file.")
 		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${BARKPARK_API_TOKEN} is expanded by Gemini CLI (its dialect).")
+	case "copilot":
+		out.outf("# .vscode/mcp.json uses a top-level \"servers\" key — VS Code's MCP shape (siblings nest under mcpServers).")
+		out.outf("# If the file already holds other servers, MERGE the \"barkpark\" entry into \"servers\" — don't overwrite it.")
+		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${env:BARKPARK_API_TOKEN} reads it (VS Code dialect, shared with Cursor).")
+		out.outf("# Prefer a typed prompt over a shell var? Add an \"inputs\" promptString and reference ${input:id} — see docs/setup/COPILOT.md.")
+	case "agents-md":
+		out.outf("# This is the ONE canonical teach block — the AGENTS.md standard that Codex,")
+		out.outf("# Aider, and every AGENTS.md-reading agent converge on. It bakes no token and")
+		out.outf("# no server URL: it teaches the claim-first task contract, not an MCP stanza.")
+		out.outf("# The barkpark:onramp markers make it a managed block — paste it into your")
+		out.outf("# repo-root ./AGENTS.md (or MERGE it in; keep the markers so a re-run updates")
+		out.outf("# only this block, never your surrounding content).")
+		out.outf("# The .cursor/rules/barkpark-tasks.mdc and .claude/CLAUDE-BARKPARK.md wrappers")
+		out.outf("# are the same body in each tool's native framing.")
 	}
 
 	out.outf("")
@@ -342,11 +555,11 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 
 // printOnrampHelp is the usage/help screen for `bp onramp`.
 func printOnrampHelp(out *writer) {
-	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli> [--server URL] [--token TOKEN]")
+	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot|agents-md> [--write [--force]] [--server URL] [--token TOKEN]")
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
-	out.outf("block(s), where they belong, and how to verify. PRINT-ONLY in v1: nothing is")
-	out.outf("written for you (--write is a later wave).")
+	out.outf("block(s), where they belong, and how to verify. With --write, merge just the")
+	out.outf("barkpark entry into the target's JSON config (idempotent; codex TOML is wave 3).")
 	out.outf("")
 	out.outf("targets")
 	out.outf("  cursor        .cursor/mcp.json stanza (${env:BARKPARK_API_TOKEN}) + rules pointer")
@@ -355,11 +568,17 @@ func printOnrampHelp(out *writer) {
 	out.outf("  cursor-cloud  .cursor/environment.json install + Secrets UI note + the cursor stanza")
 	out.outf("  windsurf      ~/.codeium/mcp_config.json stanza (${env:BARKPARK_API_TOKEN}) + merge note")
 	out.outf("  gemini-cli    .gemini/settings.json stanza (${BARKPARK_API_TOKEN}) + global/merge note")
+	out.outf("  copilot       .vscode/mcp.json stanza (top-level `servers`, ${env:BARKPARK_API_TOKEN}) + inputs note")
+	out.outf("  agents-md     ./AGENTS.md marker-managed teach block (the AGENTS.md convergence standard — Codex, Aider, …)")
 	out.outf("")
 	out.outf("chatgpt / claude-ai are remote-agent onramps (no local config) — see docs/setup/REMOTE.md")
 	out.outf("")
 	out.outf("flags")
+	out.outf("  --write        merge the barkpark entry into the target's JSON config in place —")
+	out.outf("                 created / updated / unchanged / skipped, per file, atomically")
+	out.outf("  --force        with --write: overwrite an existing, differing barkpark entry")
 	out.outf("  --server URL   BARKPARK_API_URL to bake in (default: your active server, else %s)", onrampDefaultServer)
 	out.outf("  --token TOKEN  bake a literal token instead of the ${…} env placeholder (default: keep it in the shell)")
-	out.outf("  -o json        emit {target, files:[{path,content}], verify} for scripted setup")
+	out.outf("  -o json        without --write: emit {target, files:[{path,content}], verify};")
+	out.outf("                 with --write: emit {target, actions:[{path,action}]} for scripted setup")
 }

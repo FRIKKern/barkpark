@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "note": "a foreign server the user configured — --write must never touch it"
+    },
+    "barkpark": {
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://STALE.example.old",
+        "BARKPARK_API_TOKEN": "${env:BARKPARK_API_TOKEN}"
+      }
+    }
+  },
+  "someUnrelatedTopLevelKey": {
+    "keep": true,
+    "value": 42
+  }
+}
