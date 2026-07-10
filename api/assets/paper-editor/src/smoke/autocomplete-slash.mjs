@@ -17,6 +17,9 @@ import {
   slashTypeToNode,
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
+  CANVAS_COMPOUND_INSERTS,
+  compoundInsertBlock,
+  compoundKindToNode,
 } from "../canvas/slash-insert.js";
 import { normalizeTone } from "../tone.js";
 import {
@@ -63,6 +66,7 @@ const SLASH_INSERTABLE = [
   "columns",
   "terminal",
   "table",
+  "card",
   "field-string",
   "field-boolean",
 ];
@@ -211,6 +215,32 @@ check("S-slash: /table inserts a bpTable headed 1-body 2-col grid", () => {
   assert.deepEqual(ins.block.rows, [[[], []]], "one 2-cell body row");
 });
 
+// (a'''') THE CARD WIDGET — /card inserts a slots-native card consistent with
+//         cardNodeToBlock: a "New card" title slot + a body slot (the empty inline
+//         run normalizes to content:[] — the persisted fixed point), and NO
+//         tone/media/action keys (present-only chrome: a fresh card must not gain
+//         a tone modifier).
+check("S-slash: /card inserts a bpCard → slots-native { title, body }, no tone", () => {
+  const { ops } = slashInsertOps("card");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("card").type, "bpCard", "projects to bpCard");
+  assert.equal(slashTypeToNode("card").attrs.title, "New card", "title rides node.attrs");
+  assert.equal(ins.block.type, "card", "block is a card");
+  assert.deepEqual(
+    ins.block.slots.title,
+    [{ type: "heading", text: "New card" }],
+    "the title slot carries the default heading",
+  );
+  assert.deepEqual(
+    ins.block.slots.body,
+    [{ type: "paragraph", content: [] }],
+    "the body slot is the canonical empty paragraph (fixed point of the projection)",
+  );
+  assert.ok(!("tone" in ins.block), "no tone key (present-only — no modifier gained)");
+  assert.ok(!("media" in ins.block.slots), "no media slot on a fresh card");
+  assert.ok(!("action" in ins.block.slots), "no action slot on a fresh card");
+});
+
 // (b) INSERT INTO AN EMPTY RUN — append-block (no surviving anchor). A divider into
 //     an empty doc appends and reconstructs as a divider block.
 check("S-slash: /divider into an EMPTY run → append-block of a divider", () => {
@@ -228,7 +258,7 @@ check("S-slash: /divider into an EMPTY run → append-block of a divider", () =>
 check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   for (const t of [
     "paragraph", "heading", "list", "callout", "note", "code", "divider", "diagram",
-    "action", "figure", "columns", "section", "terminal", "table", "stage",
+    "action", "figure", "columns", "section", "terminal", "table", "stage", "card",
     "field-string", "field-slug", "field-text", "field-boolean",
     "field-select", "field-datetime", "field-color",
   ]) {
@@ -249,7 +279,7 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 22, "exactly 22 insertable types (+ note, + stage)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 23, "exactly 23 insertable types (+ note, + stage, + card)");
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
@@ -372,8 +402,8 @@ check("P5 palette: registry is well-formed (id/label/group/run on every command)
     assert.ok(c.label.length > 0, `${c.id}: label non-empty`);
     assert.equal(typeof c.group, "string", `${c.id}: group is a string`);
     assert.ok(
-      ["Insert", "Format", "Turn into"].includes(c.group),
-      `${c.id}: group is one of Insert/Format/Turn into (got ${c.group})`,
+      ["Insert", "Starters", "Format", "Turn into"].includes(c.group),
+      `${c.id}: group is one of Insert/Starters/Format/Turn into (got ${c.group})`,
     );
     assert.equal(typeof c.run, "function", `${c.id}: run is a function`);
   }
@@ -417,7 +447,7 @@ check("P5 palette: Insert command default block == slash-menu default block (par
     // `section` is EXCLUDED — its seeded child mints a nondeterministic nested id per
     // runToOps call, so two reconstructions are not byte-equal (see SLASH_INSERTABLE).
     "paragraph", "heading", "list", "callout", "code", "divider", "diagram",
-    "action", "figure", "columns", "terminal", "table",
+    "action", "figure", "columns", "terminal", "table", "card",
     "field-string", "field-slug", "field-text", "field-boolean",
     "field-select", "field-datetime", "field-color",
   ]) {
@@ -452,12 +482,13 @@ check("P5 palette: fuzzy filter returns the expected matches", () => {
   const h2 = fuzzyFilterCommands(PALETTE_REGISTRY, "h2");
   assert.ok(h2.some((c) => c.id === "turn-h2"), "\"h2\" matches Turn into Heading 2");
 
-  // Group is part of the haystack: "insert" returns ALL Insert commands.
+  // Group is part of the haystack: "insert" returns ALL Insert commands — and the
+  // Starters compounds too (their labels carry the same "Insert …" verb).
   const ins = fuzzyFilterCommands(PALETTE_REGISTRY, "insert");
   assert.equal(
     ins.length,
-    PALETTE_REGISTRY.filter((c) => c.group === "Insert").length,
-    "\"insert\" matches every Insert command (group in the haystack)",
+    PALETTE_REGISTRY.filter((c) => c.group === "Insert" || c.group === "Starters").length,
+    "\"insert\" matches every Insert + Starters command (label/group in the haystack)",
   );
 
   // Empty query passes EVERYTHING (the open-palette resting state).
@@ -505,4 +536,106 @@ check("P5 palette: editor-filtered registry hides unregistered commands (underli
   // Insert + turn-into still present (their commands are registered).
   assert.ok(ids.includes("insert-callout"), "insert still present");
   assert.ok(ids.includes("turn-h2"), "turn-into still present");
+});
+
+// ── COMPOUND INSERTS (the Starters group — grid-of-cards) ────────────────────
+//
+// A compound insert is ONE authoring action inserting a PRE-COMPOSED subtree (a
+// container + seeded children) as a SINGLE node. It deliberately lives OUTSIDE
+// CANVAS_SLASH_TYPES (typed single-node — the size-23 pin and the one-Insert-command-
+// per-type parity above stay honest) in its own registry + palette group. These
+// checks prove: the registry⇄palette lockstep, the built block's shape (the
+// SECTION_OF_CARDS shape smoke/cards.mjs proves round-trips at zero ops), the insert
+// path (ONE insert-after, every id minted, fold reproduces the doc), and that the
+// INSERTED compound is the projection fixed point (zero ops on the next load).
+
+check("compound: registry ⇄ palette Starters lockstep (one command per kind, none in Insert)", () => {
+  assert.ok(CANVAS_COMPOUND_INSERTS.length > 0, "at least one compound starter");
+  const starters = PALETTE_REGISTRY.filter((c) => c.group === "Starters");
+  for (const c of CANVAS_COMPOUND_INSERTS) {
+    assert.equal(typeof c.kind, "string", "kind is a string");
+    assert.ok(!CANVAS_SLASH_TYPES.has(c.kind), `${c.kind} is NOT a fake CANVAS_SLASH_TYPES member`);
+    assert.ok(
+      starters.some((s) => s.id === `compound-${c.kind}`),
+      `Starters command for ${c.kind} present`,
+    );
+  }
+  assert.equal(
+    starters.length,
+    CANVAS_COMPOUND_INSERTS.length,
+    "exactly one Starters command per compound kind (no extras)",
+  );
+  // And none of them leaked into the Insert group (the count-parity contract).
+  assert.ok(
+    !PALETTE_REGISTRY.some((c) => c.group === "Insert" && c.id.startsWith("compound-")),
+    "no compound command rides the Insert group",
+  );
+});
+
+check("compound: cards-grid block = section{grid,2 tracks} + 2 default cards (id-less)", () => {
+  const block = compoundInsertBlock("cards-grid");
+  assert.equal(block.type, "section", "the compound is ONE section block");
+  assert.deepEqual(block.layout, { mode: "grid", tracks: 2 }, "2-track grid layout");
+  assert.equal(block.blocks.length, 2, "two seeded children");
+  for (const child of block.blocks) {
+    assert.deepEqual(child, canvasDefaultBlock("card"), "each child IS the default card");
+    assert.equal(child.id, null, "children are id-less (runToOps mints)");
+  }
+  assert.equal(block.id, null, "the section is id-less (runToOps mints)");
+  // Defensive: an unknown kind builds nothing (callers no-op).
+  assert.equal(compoundInsertBlock("nope"), null, "unknown kind → null");
+  assert.equal(compoundKindToNode("nope"), null, "unknown kind → no node");
+});
+
+check("compound: inserting cards-grid → ONE insert-after, every id minted, fold reproduces", () => {
+  const anchor = { id: "p-1", type: "paragraph", content: [{ type: "text", value: "anchor" }] };
+  const prev = [anchor];
+  const prevDoc = runToTiptap(prev);
+  const node = compoundKindToNode("cards-grid");
+  assert.equal(node.type, "bpSection", "the compound projects to ONE bpSection node");
+  assert.equal(node.content.length, 2, "holding 2 children");
+  assert.equal(node.content[0].type, "bpCard", "child 1 is a bpCard");
+  assert.equal(node.content[1].type, "bpCard", "child 2 is a bpCard");
+  const nextDoc = { type: "doc", content: [...prevDoc.content, node] };
+  const ops = runToOps(prev, nextDoc);
+  assert.equal(ops.length, 1, "ONE authoring action → ONE op");
+  const ins = ops[0];
+  assert.equal(ins.op, "insert-after", "an insert-after (the anchor survives)");
+  assert.equal(ins.afterId, "p-1", "anchored after the surviving block");
+  assert.equal(ins.block.type, "section", "carrying the section");
+  assert.deepEqual(ins.block.layout, { mode: "grid", tracks: 2 }, "grid layout carried");
+  assert.equal(ins.block.blocks.length, 2, "both cards carried");
+  const ids = [ins.block.id, ins.block.blocks[0].id, ins.block.blocks[1].id];
+  for (const id of ids) assert.ok(id != null, "every id minted (section + both cards)");
+  assert.equal(new Set(ids).size, 3, "minted ids are distinct (no collision)");
+  for (const child of ins.block.blocks) {
+    assert.equal(child.type, "card", "child is a card");
+    assert.deepEqual(
+      child.slots.title,
+      [{ type: "heading", text: "New card" }],
+      "child title slot is the default",
+    );
+    assert.ok(!("tone" in child), "child gained no tone (present-only)");
+  }
+  assertFolds(prev, nextDoc, ops, "compound cards-grid insert");
+});
+
+check("compound: the INSERTED cards-grid round-trips at ZERO ops (+ real bpCard children)", () => {
+  // Reconstruct the persisted block exactly as the insert path does (minted ids)…
+  const node = compoundKindToNode("cards-grid");
+  const insertOps = runToOps([], { type: "doc", content: [node] });
+  const persisted = insertOps[0].block;
+  // …then re-project it (the next editor load) and prove ZERO ops. Anti-vacuous:
+  // the re-projected section really carries 2 bpCard children.
+  const blocks = [persisted];
+  const doc = runToTiptap(blocks);
+  const sec = doc.content[0];
+  assert.equal(sec.type, "bpSection");
+  assert.equal(sec.content.length, 2, "two card children survive the round-trip");
+  assert.equal(sec.content[0].type, "bpCard");
+  assert.equal(sec.content[1].type, "bpCard");
+  const ops = runToOps(blocks, doc);
+  assert.deepEqual(ops, [], "the inserted compound is the projection fixed point (zero ops)");
+  const folded = assertFolds(blocks, doc, ops, "inserted cards-grid re-load");
+  assert.deepEqual(folded, blocks, "the persisted grid survives byte-identical");
 });

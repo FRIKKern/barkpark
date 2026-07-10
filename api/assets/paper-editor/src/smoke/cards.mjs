@@ -23,6 +23,7 @@ import {
   docToBlocks,
   reconcileServerEcho,
 } from "../canvas/run-convert.js";
+import { canvasDefaultBlock } from "../canvas/slash-insert.js";
 
 // A card WIDGET fixture: tone + title + a one-paragraph body slot.
 const CARD = (id = "cw-1") => ({
@@ -102,6 +103,63 @@ check("card runToOps: an untouched grid SECTION-OF-CARDS round-trips with ZERO o
   assert.equal(ops.length, 0, "an untouched section-of-cards emits ZERO ops");
   const folded = assertFolds(blocks, doc, ops, "section-of-cards round-trip");
   assert.deepEqual(folded[0], SECTION_OF_CARDS(), "the whole grid section survives byte-identical");
+});
+
+// ── THE AUTHORING DEFAULT (cd-8: /card + palette insert) ─────────────────────
+//
+// canvasDefaultBlock("card") is what a slash/palette pick inserts. It must be
+// CONSISTENT with cardNodeToBlock's persisted shape ({type:"card",slots:{title,body}},
+// present-only chrome) and, once persisted (the canonical reconstruction), round-trip
+// at ZERO ops on the next load — or every fresh card would emit a spurious op forever.
+check("card default: canvasDefaultBlock('card') projects to bpCard and reconstructs to the cardNodeToBlock shape", () => {
+  const def = canvasDefaultBlock("card");
+  assert.equal(def.type, "card");
+  assert.equal(def.id, null, "id:null — the new-block signal (runToOps mints)");
+  // Projection: a real bpCard carrying the default title, NO tone/media/action
+  // (present-only chrome — a fresh card must not gain a modifier).
+  const node = runToTiptap([def]).content[0];
+  assert.equal(node.type, "bpCard", "projects to the bpCard node");
+  assert.equal(node.attrs.title, "New card", "default title rides node.attrs");
+  assert.ok(node.attrs.tone == null, "no tone attr (present-only)");
+  assert.ok(node.attrs.media == null, "no media attr");
+  assert.ok(node.attrs.action == null, "no action attr");
+  // Reconstruction (what the server persists on insert): the cardNodeToBlock shape —
+  // the empty inline run normalizes to content:[] (the callout/paragraph precedent).
+  const ops = runToOps([], { type: "doc", content: [node] });
+  assert.equal(ops.length, 1, "one append (the insert)");
+  const { id, ...persisted } = ops[0].block;
+  assert.ok(id != null, "a minted id");
+  assert.deepEqual(
+    persisted,
+    {
+      type: "card",
+      slots: {
+        title: [{ type: "heading", text: "New card" }],
+        body: [{ type: "paragraph", content: [] }],
+      },
+    },
+    "the persisted default card is exactly the cardNodeToBlock slots-native shape",
+  );
+});
+
+check("card default: the PERSISTED default card round-trips at ZERO ops (+ real bpCard)", () => {
+  // The canonical persisted form (the fixed point the insert lands): title slot +
+  // empty-paragraph body slot, with a server id.
+  const persisted = {
+    id: "cw-new",
+    type: "card",
+    slots: {
+      title: [{ type: "heading", text: "New card" }],
+      body: [{ type: "paragraph", content: [] }],
+    },
+  };
+  const blocks = [persisted];
+  const doc = runToTiptap(blocks);
+  // Anti-vacuous: the projection is a REAL bpCard carrying the title.
+  assert.equal(doc.content[0].type, "bpCard");
+  assert.equal(doc.content[0].attrs.title, "New card");
+  assert.equal(runToOps(blocks, doc).length, 0, "an untouched fresh card emits ZERO ops");
+  assert.deepEqual(docToBlocks(doc), blocks, "and docToBlocks returns it byte-identical");
 });
 
 check("card docToBlocks: a card round-trips blocks→node→docToBlocks BYTE-EQUAL", () => {
