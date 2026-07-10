@@ -5,10 +5,14 @@ import Config
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
+# CI keeps the stock postgres/postgres service creds (the defaults). The env
+# overrides exist for boxes whose Postgres has real auth (e.g. the prod host),
+# where tests run as a dedicated random-password role instead of downgrading
+# the superuser password to a known constant.
 config :barkpark, Barkpark.Repo,
-  username: "postgres",
-  password: "postgres",
-  hostname: "localhost",
+  username: System.get_env("BARKPARK_TEST_DB_USER", "postgres"),
+  password: System.get_env("BARKPARK_TEST_DB_PASS", "postgres"),
+  hostname: System.get_env("BARKPARK_TEST_DB_HOST", "localhost"),
   database: "barkpark_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: System.schedulers_online() * 2,
