@@ -2133,10 +2133,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
       </aside>
 
       <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
-      <%!-- Slim header (charter D44): title + one honest status label. The mode
-            select, model picker + observed-model fact, context ring, and Send/Stop
-            all moved into the composer footer cockpit below — where you type. --%>
-      <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border-muted); flex: none;">
+      <%!-- Slim header (charter D44): title only. The mode select, model picker +
+            observed-model fact, context ring, and Send/Stop all moved into the
+            composer footer cockpit below — where you type. The header's visible
+            status label is gone (leftover clutter next to the cockpit's own
+            affordances), but the machine-readable truth survives as
+            data-chat-status: the session's status atom, stamped on the header so
+            tests (and tooling) can assert lifecycle transitions — new/ready/
+            working/interrupting/offline — without coupling to visible copy. --%>
+      <div
+        data-chat-status={@status}
+        style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border-muted); flex: none;"
+      >
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
         </span>
