@@ -1,46 +1,45 @@
 {
-  "subsystem": "api/lib/barkpark_web/controllers",
-  "summary": "The HTTP controller layer is the complete public API surface of Barkpark: it translates every inbound HTTP request into a Content/Tasks/Plugins domain call, enforces multi-tenant scoping and auth tiers on every read and write, and serialises results into stable JSON envelopes consumed by the CLI, SDK, Studio LiveView, and external integrators.",
+  "subsystem": "api/lib/barkpark",
   "intentions": [
     {
-      "title": "Expose a stable, versioned HTTP API contract that CLI, SDK, and plugins can rely on without breaking",
+      "title": "One headless-CMS core context layer (Content, Tenancy, Auth, Access, Media) that every surface — API, Studio, TUI, SDKs — reads and writes through, never around",
       "scale": "epic",
-      "evidence": "capabilities_controller.ex serves a tier-projected manifest (GET /v1/capabilities) that the bp CLI self-discovers on every session; query_controller.ex, mutate_controller.ex, and fallback_controller.ex all emit consistent structured envelopes (transactionId, error.code, syncTags, etag) documented in docs/api-v1.md; legacy_controller.ex and legacy_redirect_controller.ex keep backward-compat paths alive while the canonical routes evolve"
+      "evidence": "content.ex delegates to Content.{Query,Mutations,Writer,Lifecycle,Search,Export,Papers,...}; Plugin @moduledoc forbids plugins from importing Barkpark.Repo directly ('bypasses the draft-prefix logic, lifecycle-hook dispatcher, PubSub broadcast, webhook dispatcher'); Tenancy, Media, Access, Auth are all separate contexts plugins/controllers call into rather than touching Ecto schemas directly."
     },
     {
-      "title": "Enforce strict multi-tenant isolation on every read, write, and real-time stream",
+      "title": "Sanity-style draft/published document model with three read perspectives (published/drafts/raw), enforced uniformly at the query layer",
+      "scale": "invariant",
+      "evidence": "content.ex moduledoc: 'drafts.{id}' vs published id convention; list_documents/get_document accept :perspective opt; publish_document/unpublish_document/discard_draft in api/CLAUDE.md; drafts perspective merges via SQL DISTINCT ON."
+    },
+    {
+      "title": "Workspace -> Project -> Dataset tenancy hierarchy with a hard, additive scoping boundary on every read/write path (content, media, webhooks, access grants)",
       "scale": "epic",
-      "evidence": "Every controller imports ScopeHelpers.scope_opts/1 and threads workspace_id+project_id into every query and mutation. listen_controller.ex subscribes to workspace-scoped PubSub topics and has a forward_event?/3 gate that drops cross-tenant events. tasks_controller.ex deliberately avoids Content.get_document (which has a dataset-coalescence bug) and filters directly on workspace+project. query_controller.ex's anon_pinned? pins anonymous callers to the published perspective to prevent draft leakage."
+      "evidence": "tenancy.ex Workspace/Project/Dataset/Membership/Organization contexts; content.ex list_documents docstring 'Tenancy scoping (Wave 1 hard boundary)'; webhooks.ex stamp_scope/scope helpers drop client-supplied workspace_id/project_id and stamp server-resolved scope so 'a wsA-scoped admin cannot POST a hook into wsB'; media.ex upload/2 stamps workspace_id/project_id on insert."
     },
     {
-      "title": "Provide a durable, CAS-safe task substrate for multi-agent paperflow orchestration",
+      "title": "Plugins extend the host purely through schemas + pure-function modules and a compile-time manifest — never own UI, routes-at-runtime, or direct Repo access — so a plugin-free install still fully works",
+      "scale": "invariant",
+      "evidence": "plugin.ex moduledoc: 'A plugin is schemas + business logic — never UI'; forbidden-surfaces list (no Repo import, no BarkparkWeb.* modules, no runtime Phoenix.Router.routes, no reaching into Registry internals); 'Fresh-install invariant' section requires boot/Studio/public-API to work with `plugins: []`; plugin_free_boot_test.exs regression bar."
+    },
+    {
+      "title": "Idempotent, self-healing plugin schema registration so schema install never requires manual ops intervention",
+      "scale": "feature",
+      "evidence": "plugin.ex: 'Schema registration is idempotent' — Plugins.Bootstrap.register_all_schemas/0 upserts via Content.upsert_schema/2 idempotent on (name, dataset); a raising plugin callback logs+skips but sibling schemas still install; 'Never reintroduce manual mix run ... registration'."
+    },
+    {
+      "title": "Pluggable, ETS-backed field/value validation (checkers) that built-ins and plugins share through one namespaced registry, kept hot-path fast and hot-reload safe",
+      "scale": "feature",
+      "evidence": "validation/checker.ex behaviour (@callback check/2); validation/registry.ex GenServer-guarded writes + ETS read-fast find/1, built-in isbn13/gtin14/iso639/iso4217/nonempty checkers, plugin checkers namespaced 'plugin:<name>:<checker>' to avoid collision, reload_plugin_checkers/0 called on plugin registry boot."
+    },
+    {
+      "title": "Time-boxed, scope-contained, fail-closed sharing primitives — API tokens, webhooks, and airdrop access grants — so no principal can escalate privilege or exfiltrate data across tenants",
       "scale": "epic",
-      "evidence": "tasks_controller.ex implements 11 endpoints covering the full paperflow claim/close lifecycle (queue-based claim, targeted claim_by_id, close with observed_epoch CAS, edge add/query, label mutation, paper-ref attachment). The prime endpoint aggregates in-progress + ready + recent_events + lifecycle counts in one call to minimise agent rehydration round-trips. Resource conflict detection (409 with holder details) prevents two agents claiming overlapping files."
+      "evidence": "access.ex: grant mint is checked via Tenancy.Auth.authorize/3 ('no escalation at mint'), claim/2 is atomic (WHERE claimed_at IS NULL), scope ladder [:workspace_id,:project_id,:dataset,:type,:doc_id] enforces total containment; auth.ex verify_token/1 rejects revoked/expired/wrong-kind tokens indistinguishably from missing ones (no existence leak), login-ticket 60s TTL, share-edit tokens capped at 1 year; webhooks.ex secret/scope are immutable on update except through rotate_secret/3."
     },
     {
-      "title": "Deliver real-time document change streams with resume support to SDKs and Studio",
-      "scale": "small",
-      "evidence": "listen_controller.ex opens an SSE stream, replays missed events via Last-Event-ID, sends 30-second keepalives, and formats each event with syncTags so JS SDK caches can selectively invalidate. The scoped PubSub topic subscription (documents:ws:<ws>:<dataset>) prevents all-tenant broadcast noise."
-    },
-    {
-      "title": "Gate content visibility by auth tier and publication state",
-      "scale": "small",
-      "evidence": "query_controller.ex blocks anonymous callers from fetching drafts (anon_pinned? → :published perspective always), enforces schema visibility (public vs private), and lets preview tokens force a perspective. The capabilities controller projects the manifest through a per-tier allow-list. bulldocs_ingest_controller.ex requires a separate ingest token distinct from the API token."
-    },
-    {
-      "title": "Support content-graph traversal and whole-corpus visualisation (Obsidian-style)",
-      "scale": "small",
-      "evidence": "tasks_controller.ex also hosts graph_show (BFS traversal from any doc, depth 1-5, direction, kind+source filters), graph_corpus (full dataset node+edge dump for the finder's landing graph), graph_orphans, and graph_dangling. The corpus endpoint includes phantom nodes (referenced but absent docs) to mirror Obsidian's showOrphans behaviour."
-    },
-    {
-      "title": "Support plugin extensibility without modifying core controllers",
-      "scale": "small",
-      "evidence": "bulldocs_ingest_controller.ex and bulldocs_intents_controller.ex are plugin-owned controllers registered via register_routes/1; plugins_controller.ex serves the plugin roster at GET /v1/plugins; plugin_settings_controller.ex provides admin-gated plugin config CRUD. The capabilities manifest (capabilities_controller.ex) is assembled by Plugins.Capabilities so plugins can inject their own endpoints."
-    },
-    {
-      "title": "Preserve backward compatibility across API and URL surface changes",
-      "scale": "small",
-      "evidence": "legacy_controller.ex preserves the original Go TUI endpoint shapes; legacy_redirect_controller.ex issues 301/302s from old URL patterns; studio_redirect_controller.ex funnels flat /studio URLs to the scoped /w/:ws/p/:proj/studio path. The /v1/paperflow/* alias of /v1/plugins/bulldocs/* is explicitly kept alive pending producer repointing."
+      "title": "A generic, schema-driven Studio navigation tree (tiered desk: Main / Plugins / …Rest) that never hides a document type and stays backward-compatible with old Go TUI clients",
+      "scale": "feature",
+      "evidence": "structure.ex moduledoc describes three tiers built from ONLY existing node types so 'old Go TUI binaries render every tier without a client change'; …Rest tier guarantees every doc type in a dataset appears somewhere via Analytics.type_census/2, 'the tree never silently hides a doc type, it only organizes it'."
     }
   ]
 }

@@ -1,21 +1,40 @@
 {
-  "subsystem": ".claude",
-  "summary": "Project-local Claude Code configuration: a pre-tool-use hook that gates force-push operations with an opt-in escape hatch, and a workflow script that runs an adversarial View↔Edit parity audit across all PortableDoc block types.",
+  "subsystem": "docs/snippets",
   "intentions": [
     {
-      "title": "Guard against unsafe git operations while preserving rebase workflows",
-      "scale": "small",
-      "evidence": "on-pre-tool-use.sh blocks bare --force push unconditionally but allows --force-with-lease when DOEY_ALLOW_FORCE_PUSH=1 is set; falls through to upstream doey hook for all other rules"
+      "title": "Give every JS SDK capability a copy-pasteable, runnable canonical example instead of prose-only docs",
+      "scale": "feature",
+      "evidence": "8 numbered snippets (01-08) each carry an 'Expected:' comment block documenting exact runtime output/status codes, covering create/publish, filtered query, SSE listen, optimistic mutate, publish/unpublish, server-component fetch, server-action mutate, and webhook revalidate — a runnable spec-by-example for the whole @barkpark/core + @barkpark/nextjs surface."
     },
     {
-      "title": "Enforce View↔Edit visual parity for PortableDoc rendering",
+      "title": "Prove the transaction → publish lifecycle (draft create, commit, explicit publish/unpublish) as the sanctioned mutation pattern",
+      "scale": "invariant",
+      "evidence": "01-create-document.ts uses client.transaction().create().commit() then a separate client.publish(); 05-publish-unpublish.ts round-trips actions.publish/unpublish and asserts _draft flips true/false — establishing draft-then-publish as the required two-step, never a direct write-to-published."
+    },
+    {
+      "title": "Make the DocsBuilder query API (where/order/limit/offset/findOne) the discoverable, typed way to filter content",
+      "scale": "feature",
+      "evidence": "02-query-with-filters.ts chains client.docs<Post>('post').where(...).order(...).limit(5).find() and a separate findOne(), typed via BarkparkDocument generics."
+    },
+    {
+      "title": "Deliver real-time content updates to consumers via a typed SSE stream with clean subscribe/unsubscribe semantics",
+      "scale": "feature",
+      "evidence": "03-listen-for-updates.ts uses client.listen<Post>() as an async iterator, handles a 'welcome' event with eventId, and unsubscribes via handle.unsubscribe() on a timer/finally block."
+    },
+    {
+      "title": "Ship first-class Next.js integration (Server Components, Server Actions, optimistic client mutation, webhook-driven ISR) so Barkpark is a drop-in headless CMS for App Router apps",
       "scale": "epic",
-      "evidence": "view-edit-parity.workflow.js enumerates all block types from render.ex, extracts inline styles and editor CSS from root.html.heex, diffs every block×variant pair, adversarially verifies findings with two independent agent voters, and writes a parity matrix report"
+      "evidence": "06-server-component-fetch.tsx (createBarkparkServer + barkparkFetch with next.tags), 07-server-action-mutate.tsx ('use server' + defineActions createDoc/patchDoc), 04-mutate-optimistic.tsx (useOptimisticDocument with conflict banner), 08-revalidate-on-webhook.ts (createWebhookHandler + revalidateBarkpark) together cover the full read/write/realtime Next.js surface."
     },
     {
-      "title": "Systematise quality audits via reproducible multi-agent workflows",
-      "scale": "small",
-      "evidence": "The workflow uses paperflow agent types (paperflow-researcher, paperflow-doc-writer), structured JSON schemas per phase, parallel fan-out, and a 2-voter adversarial gate — establishing a repeatable audit pattern rather than a one-off script"
+      "title": "Enforce tag-scoped cache invalidation so a single document mutation only revalidates the Next.js cache entries it actually affects",
+      "scale": "invariant",
+      "evidence": "06-server-component-fetch.tsx wires next.tags = ['bp:ds:<dataset>:_all', 'bp:ds:<dataset>:type:<type>']; 07-server-action-mutate.tsx expects revalidateTag() fan-out to ['bp:ds:production:doc:<id>', 'bp:ds:production:type:post']; 08-revalidate-on-webhook.ts narrows webhook payloads into doc:<id>+type:<type> tags via revalidateBarkpark()."
+    },
+    {
+      "title": "Make webhook-triggered revalidation secure and idempotent under retries and secret rotation",
+      "scale": "invariant",
+      "evidence": "08-revalidate-on-webhook.ts requires HMAC verification (401 bad_signature/stale), deduplicates retried deliveries via an LRU window (200 {deduped:true}), rejects non-POST (405), and supports a previousSecret for zero-downtime secret rotation."
     }
   ]
 }

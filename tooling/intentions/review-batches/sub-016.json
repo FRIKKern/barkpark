@@ -1,90 +1,136 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter",
-  "count": 14,
+  "subsystem": "web/app",
+  "count": 26,
   "files": [
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/lib/barkpark.ts",
-      "role": "blog-starter server fetch helper",
-      "importance": 20,
-      "usefulness": 28
+      "path": "web/app/error.tsx",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/barkpark.config.ts.tmpl",
-      "role": "blog-starter scaffolder config template",
-      "importance": 18,
-      "usefulness": 8
+      "path": "web/app/global-error.tsx",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/package.json.tmpl",
-      "role": "package.json template for blog-starter scaffolded app",
-      "importance": 18,
-      "usefulness": 8
+      "path": "web/app/layout.tsx",
+      "role": "Next.js root layout for web demo",
+      "importance": 17
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/seeds/seed.ts",
-      "role": "blog starter seed script",
-      "importance": 11,
-      "usefulness": 8
+      "path": "web/app/not-found.tsx",
+      "role": "404 not-found page",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/lib/queries.ts",
-      "role": "template GROQ query constants",
-      "importance": 4,
-      "usefulness": 11
+      "path": "web/app/robots.ts",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/components/Pagination.tsx",
-      "role": "blog starter pagination component",
-      "importance": 4,
-      "usefulness": 10
+      "path": "web/app/sitemap.ts",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/page.tsx",
-      "role": "blog starter home/post-listing page",
-      "importance": 5,
-      "usefulness": 4
+      "path": "web/app/(finder)/layout.tsx",
+      "role": "Finder split-view layout shell",
+      "importance": 16
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/app/layout.tsx",
-      "role": "blog starter root layout",
-      "importance": 5,
-      "usefulness": 3
+      "path": "web/app/(finder)/page.tsx",
+      "role": "finder landing page with corpus graph",
+      "importance": 14
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/schemas/author.ts",
-      "role": "template author schema definition",
-      "importance": 3,
-      "usefulness": 5
+      "path": "web/app/bench/page.tsx",
+      "role": "benchmark page route",
+      "importance": 1
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/schemas/post.ts",
-      "role": "template post schema definition",
-      "importance": 3,
-      "usefulness": 5
+      "path": "web/app/feed.xml/route.ts",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/next.config.mjs",
-      "role": "template Next.js config",
-      "importance": 3,
-      "usefulness": 4
+      "path": "web/app/find/page.tsx",
+      "role": "permanent redirect from /find to /",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/postcss.config.js",
-      "role": "template PostCSS config",
-      "importance": 3,
-      "usefulness": 3
+      "path": "web/app/papers/loading.tsx",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/schemas/tag.ts",
-      "role": "template tag schema definition",
-      "importance": 3,
-      "usefulness": 3
+      "path": "web/app/papers/page.tsx",
+      "role": "Papers (Bulldocs PortableDoc) listing page",
+      "importance": 13
     },
     {
-      "path": "js/packages/create-barkpark-app/templates/blog-starter/tailwind.config.ts",
-      "role": "template Tailwind CSS config",
-      "importance": 3,
-      "usefulness": 2
+      "path": "web/app/styleguide/page.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/app/tags/[tag]/loading.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/app/tags/[tag]/page.tsx",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "web/app/w/[workspace]/loading.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/app/w/[workspace]/page.tsx",
+      "role": "workspace landing redirect resolver",
+      "importance": 4
+    },
+    {
+      "path": "web/app/(finder)/d/[type]/[slug]/loading.tsx",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "web/app/(finder)/d/[type]/[slug]/page.tsx",
+      "role": "unified document detail page for the finder",
+      "importance": 15
+    },
+    {
+      "path": "web/app/v1/data/listen/[dataset]/route.ts",
+      "role": "SSE proxy for live-listen stream",
+      "importance": 9
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/layout.tsx",
+      "role": "Scoped workspace/project layout",
+      "importance": 15
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/loading.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/page.tsx",
+      "role": "Scoped workspace/project post listing page",
+      "importance": 13
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/posts/[slug]/loading.tsx",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/app/w/[workspace]/p/[project]/posts/[slug]/page.tsx",
+      "role": "Scoped post detail page",
+      "importance": 13
     }
   ]
 }

@@ -1,41 +1,45 @@
 {
-  "subsystem": "web/app/api",
-  "summary": "Next.js API route layer that acts as a secure server-side proxy between the browser and the Barkpark Phoenix API — handling search queries, cache invalidation via webhooks, search index rebuilds, and search feedback recording — all while keeping auth tokens off the client.",
+  "subsystem": "apps/hundesteder",
   "intentions": [
     {
-      "title": "Keep API credentials off the client",
+      "title": "Ship Hundesteder.no — a Norwegian-language editorial guide to dog-friendly places (cafes, parks, beaches, sights) as a standalone Next.js consumer site dogfooding Barkpark as a headless CMS",
       "scale": "epic",
-      "evidence": "All four routes run 'nodejs' runtime and explicitly read BARKPARK_READ_TOKEN server-side. Comments in find/route.ts and find-event/route.ts explicitly note the token is 'never bundled to the browser'. Proxying same-origin is the stated reason for the route's existence."
+      "evidence": "app/layout.tsx sets nb locale, Norwegian OG metadata, custom font stack (Fraunces/Inter Tight/JetBrains Mono); app/page.tsx hero copy 'Hundevennlige steder, fra Oslo til Tromsø'; lib/places.ts fetches from api.barkpark.cloud/w/hundesteder/p/default as the CMS backend."
     },
     {
-      "title": "Deliver always-fresh search results without caching",
-      "scale": "small",
-      "evidence": "find/route.ts comment says 'Search is always fresh — runSearch hits the engine directly, no cache' and deliberately omits force-dynamic since the handler is already dynamic via searchParams."
+      "title": "Give every place a map-first presentation: home page hero map, per-place detail map centred on its pin, OpenStreetMap deep link for directions",
+      "scale": "feature",
+      "evidence": "app/page.tsx renders PlacesMap for all places with a 'map shown on larger screens' hint; app/sted/[slug]/page.tsx renders PlacesMap scoped to the single place at zoom 14 and links out to openstreetmap.org with mlat/mlon."
     },
     {
-      "title": "Keep Next.js ISR cache in sync with content mutations",
-      "scale": "epic",
-      "evidence": "barkpark/webhook/route.ts verifies HMAC signatures + timestamps, deduplicates retries via an LRU set, and calls revalidateTag for all affected cache tags (doc tags, _all tags, FIND_TAG) on every Barkpark mutation event."
+      "title": "Provide a browsable, filterable catalog of all places (by city/category) distinct from the curated home-page grid",
+      "scale": "feature",
+      "evidence": "app/steder/page.tsx renders PlacesBrowser with filter copy 'Filtrer på by og kategori for å finne fram', separate from the home page's un-filtered card-grid."
     },
     {
-      "title": "Harden webhook delivery against replay and forgery attacks",
-      "scale": "small",
-      "evidence": "webhook/route.ts uses timingSafeEqual for HMAC comparison, enforces a 5-minute timestamp tolerance, supports both a current and previous secret for key rotation, and rejects malformed/stale signatures with explicit 401 responses."
+      "title": "Statically pre-render every place detail page at build time with proper per-page SEO metadata, since the dataset is small",
+      "scale": "feature",
+      "evidence": "generateStaticParams() in app/sted/[slug]/page.tsx enumerates all places for SSG; generateMetadata() derives title/description per place; comment 'the dataset is tiny — 12 docs'."
     },
     {
-      "title": "Support dual search engines (Postgres + Indx) with on-demand reindex",
-      "scale": "small",
-      "evidence": "find/route.ts passes engine param ('postgres' | 'indx') through to runSearch. admin/reindex/route.ts triggers a blue/green Indx rebuild via the Phoenix endpoint, covering all finder doc types including sheets, then immediately purges FIND_TAG."
+      "title": "Never let a CMS/upstream outage crash the site — degrade to an empty, calm state instead",
+      "scale": "invariant",
+      "evidence": "lib/places.ts doc comment 'this module NEVER throws'; bpFetch wraps fetch in try/catch returning null on any failure; fetchPlaces() falls back to []; page.tsx and steder/page.tsx both render an 'Ingen steder å vise akkurat nå' empty state."
     },
     {
-      "title": "Collect search feedback signals for relevance improvement",
-      "scale": "small",
-      "evidence": "find-event/route.ts records 'correction' (Did-you-mean accepts) and 'click' (result interactions with position) events upstream, attributed by session id. Explicitly fire-and-forget — always returns 200 so a dropped signal never blocks UX."
+      "title": "Normalize permissive/loosely-typed upstream CMS documents into a strict typed Place domain model, dropping unusable records rather than propagating bad data",
+      "scale": "invariant",
+      "evidence": "normalizePlace() in lib/places.ts requires a finite non-(0,0) lat/lng or returns null (place undiscoverable on a map otherwise), coerces stringly-typed geo coordinates via coord(), and filters tags/address fields defensively field-by-field."
     },
     {
-      "title": "Graceful degradation on upstream failures",
-      "scale": "small",
-      "evidence": "find/route.ts returns emptyResponse (not an error status) on runSearch failure. suggestions() catches and returns empty arrays. find-event/route.ts swallows upstream errors. admin/reindex/route.ts maps transient errors to 503 vs definitive errors to their real status."
+      "title": "Keep server-only credentials (Barkpark bearer token) strictly out of the browser bundle while sharing a stable env-var contract across Barkpark-hosted Next.js apps",
+      "scale": "invariant",
+      "evidence": "lib/places.ts top-of-file 'server-only' import and comment 'authenticates with a server-only bearer token that must never reach the browser (no NEXT_PUBLIC_ prefix)'; canonical env names BARKPARK_API_URL/BARKPARK_TOKEN with fallback to pre-unification names per task dwb-3, referencing templates/DEPLOYING.md."
+    },
+    {
+      "title": "Present categories with Norwegian-localized labels and consistent iconography across cards, filters, and detail pages",
+      "scale": "feature",
+      "evidence": "lib/categories.ts maps raw English category values (Café, Food hall, Restaurant, Bar, Park, Beach, Sight) to Norwegian labels (Kafé, Mathall, Strand, Severdighet) and to a fixed icon set in public/icons/, with 'paw' as the default fallback."
     }
   ]
 }

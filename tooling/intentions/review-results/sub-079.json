@@ -1,0 +1,40 @@
+{
+  "subsystem": "internal/apiclient",
+  "intentions": [
+    {
+      "title": "Provide one framework-free Go HTTP client for the Phoenix API that both the TUI and the CLI share, with zero Bubble Tea coupling",
+      "scale": "epic",
+      "evidence": "client.go package doc: 'ZERO Bubble Tea dependency and is shared by the TUI today and the CLI later'; real-time changes surfaced via OnChange callback instead of tea.Program; change.go/listen.go/export.go/schema.go split out purely to keep client.go under a size budget, all same package."
+    },
+    {
+      "title": "Make workspace/project/dataset tenancy scoping and perspective (published/drafts/raw) selection a single, consistently-applied concern across every read and write path",
+      "scale": "invariant",
+      "evidence": "ScopedURL/scopedURL is the one owner of the /w/:workspace/p/:project URL scheme (@canonical marker); Config.Perspective threaded through Query/Search/Get/GetPerspective/Export/Listen; PerspectiveFromEnv documents TUI-defaults-to-drafts vs CLI-defaults-to-published contract."
+    },
+    {
+      "title": "Give callers honest, fine-grained failure semantics instead of collapsing every API error into a boolean, so UIs (TUI status bar, task frontier) can react correctly",
+      "scale": "feature",
+      "evidence": "humanAPIError turns server error envelopes into one-line messages; DocReadOutcome distinguishes NotFound vs Unreachable; TaskClaimOutcome/TaskClaimResources surface reason+Conflicts instead of an opaque error for lost races/resource fences; TaskNotice surfaces advisory rail-awareness signals."
+    },
+    {
+      "title": "Deliver real-time dataset awareness (live SSE mutation feed with poll-fallback and honest liveness state) to any consumer",
+      "scale": "feature",
+      "evidence": "change.go: StartSSE/listenSSE/pollOnce/exportDocSetHash implement SSE-with-NDJSON-poll-fallback and a document-set hash for change detection; OnChange vs OnChangeFallback vs OnLivePulse are three distinct nil-safe seams so a caller can render ● live vs ◐ polling honestly; listen.go's user-facing Listen() supports resumable replay via Last-Event-ID and backoff/reconnect tuned to tolerate deploy blips."
+    },
+    {
+      "title": "Support the full document lifecycle (create/duplicate/publish/unpublish/discard draft/delete/upsert) through the generic Sanity-style mutate contract, while protecting Papers' block-tree data from silent loss",
+      "scale": "feature",
+      "evidence": "Create/Duplicate/Publish/Unpublish/DiscardDraft/Delete/Upsert in client.go all route through MutateResults→POST /v1/data/mutate; Duplicate explicitly refuses to clone Papers ('papers cannot be duplicated here — use Studio') because the generic mutate path has no blocks field."
+    },
+    {
+      "title": "Let the client drive Barkpark's task system (claim/close/relabel/frontier graph) with correct optimistic-concurrency fencing",
+      "scale": "feature",
+      "evidence": "TaskClaim/TaskClaimN/TaskClaimResources return a CAS fencing epoch that TaskClose/TaskCloseN/TaskCloseRevN must echo back; TaskClaimResources declares file resources so the server's check_resources_free fence can reject conflicting claims; GraphShow feeds `bp task frontier` real cross-root block edges."
+    },
+    {
+      "title": "Decode the server's document/schema wire formats defensively so malformed, legacy, or partial data degrades gracefully rather than crashing or silently corrupting the TUI/CLI",
+      "scale": "invariant",
+      "evidence": "Doc.UnmarshalJSON normalizes the v1 flat envelope onto legacy-shaped fields with guarded fills; scalarString/ContentString/ClaimEpoch/PaperBlocks all fail closed on absent/null/mistyped data; parseFieldType maps unknown v2 field types to read-only FieldRaw instead of an editable text box to prevent overwriting structured data (task.claim) with a scalar."
+    }
+  ]
+}

@@ -1,324 +1,376 @@
 {
-  "subsystem": "api/lib/barkpark",
-  "count": 53,
+  "subsystem": "internal/cli",
+  "count": 74,
   "files": [
     {
-      "path": "api/lib/barkpark/content.ex",
-      "role": "core document and schema CRUD context",
-      "importance": 67,
-      "usefulness": 78
+      "path": "internal/cli/builtins.go",
+      "role": "CLI built-in commands (version, capabilities)",
+      "importance": 44
     },
     {
-      "path": "api/lib/barkpark/plugin.ex",
-      "role": "plugin behaviour contract and use macro",
-      "importance": 60,
-      "usefulness": 76
+      "path": "internal/cli/chrome_table.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/repo.ex",
-      "role": "Ecto repository definition",
-      "importance": 55,
-      "usefulness": 71
+      "path": "internal/cli/cli.go",
+      "role": "bp CLI entry point and manifest-driven dispatcher",
+      "importance": 60
     },
     {
-      "path": "api/lib/barkpark/auth.ex",
-      "role": "API token auth context",
-      "importance": 59,
-      "usefulness": 64
+      "path": "internal/cli/cloud12_cmd.go",
+      "role": "",
+      "importance": 44
     },
     {
-      "path": "api/lib/barkpark/webhooks.ex",
-      "role": "Webhook context — CRUD, scoped queries, delivery slot claiming, secret rotation",
-      "importance": 60,
-      "usefulness": 62
+      "path": "internal/cli/cloud_cmd.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/tenancy.ex",
-      "role": "Workspace/Project/Dataset tenancy context",
-      "importance": 56,
-      "usefulness": 64
+      "path": "internal/cli/cloud_deploy_cmd.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/webhooks/webhook.ex",
-      "role": "Webhook Ecto schema and secret rotation logic",
-      "importance": 59,
-      "usefulness": 52
+      "path": "internal/cli/cloud_domain_cmd.go",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "api/lib/barkpark/auth/api_token.ex",
-      "role": "API token Ecto schema",
-      "importance": 52,
-      "usefulness": 57
+      "path": "internal/cli/cloud_instance_archive_cmd.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/validation/registry.ex",
-      "role": "ETS-backed validation checker registry GenServer",
-      "importance": 62,
-      "usefulness": 46
+      "path": "internal/cli/cloud_instance_cmd.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/media.ex",
-      "role": "media upload and file management context",
-      "importance": 49,
-      "usefulness": 57
+      "path": "internal/cli/cloud_instance_lifecycle_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/sharing.ex",
-      "role": "scoped-sharing access control registry",
-      "importance": 47,
-      "usefulness": 58
+      "path": "internal/cli/cloud_instance_resurrect_cmd.go",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "api/lib/barkpark/webhooks/dispatcher.ex",
-      "role": "Webhook delivery with HMAC signing and retry",
-      "importance": 47,
-      "usefulness": 56
+      "path": "internal/cli/cloud_instance_top_cmd.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/sheets.ex",
-      "role": "core sheets A1 address and snapshot utilities",
-      "importance": 41,
-      "usefulness": 58
+      "path": "internal/cli/cloud_lifecycle_vocab.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/tasks.ex",
-      "role": "Task document schema and lifecycle engine",
-      "importance": 54,
-      "usefulness": 45
+      "path": "internal/cli/cloud_members.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/validation/checker.ex",
-      "role": "Validation checker behaviour definition",
-      "importance": 55,
-      "usefulness": 42
+      "path": "internal/cli/cloud_open_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/sheets/session.ex",
-      "role": "collaborative sheet session GenServer",
-      "importance": 46,
-      "usefulness": 48
+      "path": "internal/cli/cloud_providers_cmd.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/sheets/engine.ex",
-      "role": "spreadsheet formula engine",
-      "importance": 42,
-      "usefulness": 47
+      "path": "internal/cli/cloud_status_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/application.ex",
-      "role": "OTP application entrypoint and supervision tree",
-      "importance": 74,
-      "usefulness": 14
+      "path": "internal/cli/cloud_usage.go",
+      "role": "",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/structure.ex",
-      "role": "Studio navigation structure builder",
-      "importance": 45,
-      "usefulness": 39
+      "path": "internal/cli/cloud_verify_cmd.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/schema_bootstrap.ex",
-      "role": "boot-time plugin schema registration orchestrator",
-      "importance": 49,
-      "usefulness": 29
+      "path": "internal/cli/cloud_webhook_cmd.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/sheets/structure.ex",
-      "role": "sheet row/column structural rewrite engine",
-      "importance": 37,
-      "usefulness": 40
+      "path": "internal/cli/cmux_cmd.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/external_sync.ex",
-      "role": "external sync registry and PubSub hub",
-      "importance": 40,
-      "usefulness": 36
+      "path": "internal/cli/cmux_dispatch.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/preview_token.ex",
-      "role": "short-lived HS256 preview JWT manager",
-      "importance": 46,
-      "usefulness": 27
+      "path": "internal/cli/cmux_hook.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/webhooks/delivery.ex",
-      "role": "Ecto schema for webhook delivery records",
-      "importance": 30,
-      "usefulness": 41
+      "path": "internal/cli/cmux_install.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/sharing/stored_share.ex",
-      "role": "Ecto schema for persisted share grants",
-      "importance": 23,
-      "usefulness": 47
+      "path": "internal/cli/cmux_install_merge.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/validation/cross_codelist.ex",
-      "role": "Cross-field codelist consistency helper",
-      "importance": 50,
-      "usefulness": 20
+      "path": "internal/cli/config.go",
+      "role": "CLI config persistence and context resolution",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/idempotency.ex",
-      "role": "idempotency-key dedup store",
-      "importance": 37,
-      "usefulness": 27
+      "path": "internal/cli/doctor_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/codelists/editeur.ex",
-      "role": "EDItEUR ONIX codelist XML parser/seeder",
-      "importance": 36,
-      "usefulness": 27
+      "path": "internal/cli/errors.go",
+      "role": "CLI API error decoding and exit-code mapping",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/tasks/edge.ex",
-      "role": "Ecto schema for task dependency edges",
-      "importance": 38,
-      "usefulness": 24
+      "path": "internal/cli/export_cmd.go",
+      "role": "",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/api_tester/endpoints.ex",
-      "role": "Studio API docs and playground spec registry",
-      "importance": 34,
-      "usefulness": 27
+      "path": "internal/cli/globals.go",
+      "role": "CLI global flags parser",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/tasks/ttl_sweeper.ex",
-      "role": "crashed-agent claim reaper (Oban worker)",
-      "importance": 45,
-      "usefulness": 16
+      "path": "internal/cli/hetzner_backup_cmd.go",
+      "role": "",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/rate_limiter.ex",
-      "role": "ETS token-bucket rate limiter",
-      "importance": 38,
-      "usefulness": 21
+      "path": "internal/cli/hetzner_cmd.go",
+      "role": "",
+      "importance": 44
     },
     {
-      "path": "api/lib/barkpark/sharing/share_link.ex",
-      "role": "Ecto schema for share links",
-      "importance": 33,
-      "usefulness": 26
+      "path": "internal/cli/hetzner_confirm.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/release.ex",
-      "role": "Production release task runner (migrations + seeds)",
-      "importance": 45,
-      "usefulness": 11
+      "path": "internal/cli/hetzner_dns_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/sharing/links.ex",
-      "role": "item share link context (create/resolve/revoke)",
-      "importance": 37,
-      "usefulness": 18
+      "path": "internal/cli/hetzner_instance_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/tasks/compactor.ex",
-      "role": "Oban worker for task document storage compaction",
-      "importance": 36,
-      "usefulness": 14
+      "path": "internal/cli/hetzner_instance_transfer_cmd.go",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark/papers/text_diff.ex",
-      "role": "Line-level LCS diff utility for paperflow goal-path rail",
-      "importance": 24,
-      "usefulness": 24
+      "path": "internal/cli/hetzner_lb_cmd.go",
+      "role": "",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/api_test_runner/asserts.ex",
-      "role": "built-in assertion evaluators for API test runner",
-      "importance": 26,
-      "usefulness": 21
+      "path": "internal/cli/hetzner_net_cmd.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/api_test_runner.ex",
-      "role": "Plugin API test spec executor",
-      "importance": 24,
-      "usefulness": 20
+      "path": "internal/cli/hetzner_overview_cmd.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/seeds/clean.ex",
-      "role": "clean-install seed profile",
-      "importance": 31,
-      "usefulness": 13
+      "path": "internal/cli/hetzner_resources_cmd.go",
+      "role": "",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/api_tester/runner.ex",
-      "role": "API tester HTTP request executor",
-      "importance": 29,
-      "usefulness": 13
+      "path": "internal/cli/hetzner_storage_cmd.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/seeds.ex",
-      "role": "database seed dispatcher",
-      "importance": 29,
-      "usefulness": 11
+      "path": "internal/cli/listen_cmd.go",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/vault.ex",
-      "role": "Cloak encryption vault",
-      "importance": 35,
-      "usefulness": 5
+      "path": "internal/cli/load.go",
+      "role": "CLI capabilities manifest loader with file/env/network precedence",
+      "importance": 35
     },
     {
-      "path": "api/lib/barkpark/encrypted_map.ex",
-      "role": "encrypted map Ecto type",
-      "importance": 31,
-      "usefulness": 8
+      "path": "internal/cli/login_device.go",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "api/lib/barkpark/auth/public_read.ex",
-      "role": "public-read token rotation helper",
-      "importance": 30,
-      "usefulness": 9
+      "path": "internal/cli/make_cmd.go",
+      "role": "",
+      "importance": 43
     },
     {
-      "path": "api/lib/barkpark/seeds/shared.ex",
-      "role": "seed tenancy bootstrap helper",
-      "importance": 16,
-      "usefulness": 20
+      "path": "internal/cli/mcp_bridge.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/release/secrets.ex",
-      "role": "first-run crypto secret generator for local installs",
-      "importance": 25,
-      "usefulness": 10
+      "path": "internal/cli/mcp_resources.go",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "api/lib/barkpark/workers/search_analytics_prune.ex",
-      "role": "Oban worker shim for search analytics pruning",
-      "importance": 26,
-      "usefulness": 8
+      "path": "internal/cli/mcp_serve.go",
+      "role": "",
+      "importance": 40
     },
     {
-      "path": "api/lib/barkpark/workers/search_analytics_crystallize.ex",
-      "role": "Oban worker shim for search analytics crystallization",
-      "importance": 27,
-      "usefulness": 5
+      "path": "internal/cli/mcp_tasks.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/seeds/demo.ex",
-      "role": "Demo seed data module",
-      "importance": 18,
-      "usefulness": 13
+      "path": "internal/cli/migrate_cmd.go",
+      "role": "bp migrate command implementation",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark/telemetry/handlers.ex",
-      "role": "telemetry event attachment for Oban and plugin observability",
-      "importance": 26,
-      "usefulness": 5
+      "path": "internal/cli/onramp_cmd.go",
+      "role": "",
+      "importance": 41
     },
     {
-      "path": "api/lib/barkpark/text_diff.ex",
-      "role": "rail diff wrapper for goal-path modal",
-      "importance": 18,
-      "usefulness": 10
+      "path": "internal/cli/onramp_write.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark/workers/smoke.ex",
-      "role": "Oban smoke-test worker",
-      "importance": 17,
-      "usefulness": 6
+      "path": "internal/cli/output.go",
+      "role": "CLI output renderer (table/JSON/YAML/minimal)",
+      "importance": 43
+    },
+    {
+      "path": "internal/cli/paper_cmd.go",
+      "role": "bp paper view CLI command",
+      "importance": 43
+    },
+    {
+      "path": "internal/cli/run.go",
+      "role": "CLI command execution core",
+      "importance": 44
+    },
+    {
+      "path": "internal/cli/seed_cmd.go",
+      "role": "",
+      "importance": 43
+    },
+    {
+      "path": "internal/cli/servers_cmd.go",
+      "role": "bp use command — named-server switching",
+      "importance": 42
+    },
+    {
+      "path": "internal/cli/setup_cloud_login.go",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "internal/cli/setup_cmd.go",
+      "role": "setup command adapter/bridge",
+      "importance": 43
+    },
+    {
+      "path": "internal/cli/sites_cmd.go",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "internal/cli/sites_tarball.go",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "internal/cli/style_cmd.go",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "internal/cli/table.go",
+      "role": "CLI table renderer for API payloads",
+      "importance": 44
+    },
+    {
+      "path": "internal/cli/tasks_board_cmd.go",
+      "role": "",
+      "importance": 41
+    },
+    {
+      "path": "internal/cli/tasks_create_cmd.go",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "internal/cli/tasks_frontier_cmd.go",
+      "role": "",
+      "importance": 39
+    },
+    {
+      "path": "internal/cli/tasks_lint_cmd.go",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "internal/cli/tasks_next_cmd.go",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "internal/cli/tinker_cmd.go",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "internal/cli/uninstall_cmd.go",
+      "role": "bp uninstall command implementation",
+      "importance": 35
+    },
+    {
+      "path": "internal/cli/update_notice.go",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "internal/cli/upgrade.go",
+      "role": "bp self-upgrade command",
+      "importance": 41
+    },
+    {
+      "path": "internal/cli/usage.go",
+      "role": "CLI usage/help text renderer",
+      "importance": 43
+    },
+    {
+      "path": "internal/cli/vercel_cmd.go",
+      "role": "",
+      "importance": 43
     }
   ]
 }

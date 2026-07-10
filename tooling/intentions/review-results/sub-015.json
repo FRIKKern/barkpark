@@ -1,46 +1,40 @@
 {
-  "subsystem": "internal/pdrender",
-  "summary": "pdrender is a terminal renderer for Bulldocs portable-doc block trees, producing width-aware ANSI-styled output via lipgloss — the terminal counterpart to the Phoenix HTML renderer. It maps every block type (heading, paragraph, code, table, figure, field-*, sheet, form, diagram, etc.) to terminal-safe output with graceful degradation for blocks that have no honest terminal representation.",
+  "subsystem": "api/lib/mix/tasks",
   "intentions": [
     {
-      "title": "Render Bulldocs content natively in the Go TUI without a browser",
+      "title": "Lock cross-surface structural parity (Elixir View / Go pdrender / web reader / Sheets) with regenerable golden fixtures instead of hand-maintained JSON",
+      "scale": "invariant",
+      "evidence": "barkpark.paper_components.gen_golden_parity.ex writes byte-identical PortableDoc component fixtures to api/test/support/fixtures, web/__tests__/fixtures and internal/pdrender/testdata, deriving 'expected' as a STRUCTURAL projection (never literal-HTML/text diff) from Render.StatusVocab so a manifest edit re-derives at build time; barkpark.sheets.gen_golden_parity.ex does the same for the sheet-golden-parity.json fixture across api/web/Go, pinning every Engine error code, CF composition rule, fmt class and sparkline cell. Both moduledocs explicitly document COVERED vs NOT COVERED divergences so the harness never implies parity it doesn't hold, and both 'build/*' functions are pure so a freshness test can regenerate in-memory and fail CI on drift."
+    },
+    {
+      "title": "Make plugin authoring a one-command scaffold that always registers correctly (compiled lib/ + priv manifest + test, matching Registry.resolve_module conventions)",
+      "scale": "feature",
+      "evidence": "barkpark.plugin.new.ex generates a plugin.json manifest, an entry module under lib/barkpark/plugins/<name>.ex (elixirc_paths-visible), a README and a test module — mirroring the working OnixEdit layout so the plugin actually auto-discovers via Barkpark.Plugins.Registry; validates the manifest against Barkpark.Plugins.Manifest (D20) and the module against the Barkpark.Plugin behaviour (D7, compile-time not runtime eval); default module name uses the same Macro.camelize/1 fold the Registry uses to resolve plugin_name -> module. barkpark.gen.plugin.ex is marked a deprecated shim (importance 11 despite deprecation) pointing at this successor."
+    },
+    {
+      "title": "Give operators safe, dry-run-by-default migration/backfill tooling for irreversible content-shape changes (doctrine template, media assets, block IDs, previews, embeds)",
+      "scale": "invariant",
+      "evidence": "barkpark.paper.doctrine_backfill.ex defaults to a dry run (must pass --apply explicitly), reports per-paper conform/backfill-plan/UNFIXABLE, refuses to write any paper that would still violate Template.validate/1, and documents a human runbook (apply on staging first, re-run dry-run to confirm idempotency = 0 remaining). Sibling tasks (barkpark.media.backfill, barkpark.preview.backfill, barkpark.paper.backfill_block_ids, barkpark.sheets.rehydrate_embeds, barkpark.edges.backfill, barkpark.rehydrate_body_html, barkpark.workspace.provision_schemas) follow the same idempotent-backfill-as-Mix-task pattern for one-time or repeatable corpus repairs without a full migration."
+    },
+    {
+      "title": "Support ONIX/Bokbasen publishing operations end-to-end: bulk import, submission-state visibility, and safe replay of stuck publishes",
       "scale": "epic",
-      "evidence": "pdrender.go package comment calls it 'the terminal counterpart to render.ex'; DefaultRegistry wires all block types; RenderDoc produces a single ANSI string the TUI paper-viewer embeds directly"
+      "evidence": "onix.import.ex bulk-imports ONIX 3.0 XML as draft book documents via Barkpark.Content.create_document/3 with --dry-run and per-product doc_id derivation/fallback and a fail-loud exit-code contract (summarize/1). bokbasen.status.ex is a pure-DB-read operator tool listing all 9 lifecycle states (pending..cannot_cancel) per book or corpus-wide, explicitly 'never logs credentials'. bokbasen.list.ex and bokbasen.replay.ex round out the same operator toolkit (list by state, replay a stuck publish). onix.export_proof.ex regenerates ONIX export proof artifacts. Together these are the human-facing control surface for the Bokbasen/ONIX publishing pipeline."
     },
     {
-      "title": "Mirror render.ex's block model exactly so document fidelity is consistent across surfaces",
-      "scale": "epic",
-      "evidence": "Every renderer cites its render.ex counterpart (compose_block, heading_style/2, compose_inline/2); field names, recursion shape, and inline node coercion all mirror the Elixir side"
+      "title": "Keep the ONIX EDItEUR codelist registry current and auditable (seed + staleness detection) without silent drift",
+      "scale": "feature",
+      "evidence": "barkpark.codelists.seed.ex seeds the ONIX codelist registry; codelists.staleness.ex is a Mix task explicitly for 'ONIX codelist staleness reporting and revalidation' — an operator check that catches when the vendored EDItEUR lists have drifted from upstream."
     },
     {
-      "title": "Honest graceful degradation for terminal-impossible blocks",
-      "scale": "small",
-      "evidence": "hardblocks.go: diagram/asciicast/image each render a clearly-labeled placeholder box instead of faking a capability; comment explains why (sixel smear, no Mermaid lib, .cast is a stream)"
+      "title": "Regenerate machine-consumable API contracts (OpenAPI spec, plugin TypeScript types) from source so SDK/docs consumers never hand-sync",
+      "scale": "invariant",
+      "evidence": "barkpark.openapi.ex generates the OpenAPI spec; barkpark.plugin.gen_types.ex regenerates plugin TypeScript types — both are codegen Mix tasks that keep downstream consumers (JS SDK, docs) derived from the Elixir source of truth rather than manually maintained, following the same 'never hand-edit the generated artifact' doctrine as the golden-parity generators."
     },
     {
-      "title": "Keep pdrender extractable as a standalone module (clean import seam)",
-      "scale": "small",
-      "evidence": "pdrender.go IMPORT DISCIPLINE comment: only lipgloss + x/ansi + stdlib; Theme and Block are owned types injected by the caller; no apiclient or main-package dependency"
-    },
-    {
-      "title": "Width-aware, ANSI-correct text layout without a constraint solver",
-      "scale": "small",
-      "evidence": "RenderCtx.Width passed immutably down the tree; WithWidth/Deeper derive narrowed contexts; wrapLines uses ansi.Wrap for cell-accurate wrapping; MinWidth floor drops chrome at narrow widths"
-    },
-    {
-      "title": "Support adaptive color profiles and OSC 8 hyperlinks per terminal capability",
-      "scale": "small",
-      "evidence": "Profile enum (NoColor→TrueColor) in pdrender.go; supportsHyperlinks gates OSC 8 on ≥ANSI256; asciicastRenderer and inline link renderer both follow this gate"
-    },
-    {
-      "title": "Expose resolver seams for field-reference and codelist lookups without coupling to the API client",
-      "scale": "small",
-      "evidence": "RenderCtx.RefResolver and CodelistResolver are caller-supplied func fields; nil fallback renders raw id/code; mirrors render.ex's injected :ref_resolver / :codelist_resolver opts"
-    },
-    {
-      "title": "Support the full schema-v2 and sheet block vocabulary for ONIX/Bulldocs content in the TUI",
-      "scale": "small",
-      "evidence": "DefaultRegistry registers composite/arrayOf/codelist/localizedText (v2fields.go) and PdSheet/sheet (sheet.go); form/questionnaire alias registered for paperflow questionnaire blocks"
+      "title": "Automate weekly public-read token rotation as an unattended operational safeguard",
+      "scale": "invariant",
+      "evidence": "barkpark.rotate_public_read.ex is described as 'Mix task for weekly public-read token rotation' — a recurring security-hygiene job runnable via cron/systemd-timer rather than manual token management, reducing the blast radius of a leaked public-read token."
     }
   ]
 }

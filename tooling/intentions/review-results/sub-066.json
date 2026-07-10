@@ -1,0 +1,40 @@
+{
+  "subsystem": "design",
+  "intentions": [
+    {
+      "title": "One design/tokens.json drives every per-surface color/type/lifecycle artifact — Cloud SPA CSS, Studio root.html.heex, web demo globals.css, paper-surface.css, and Go (taskboard, pdrender, semrole) tokens_gen.go — so no surface ever hand-authors a color literal independent of the source",
+      "scale": "epic",
+      "evidence": "design/emit.mjs builds ARTIFACTS for cloud/static/app.css, layouts/root.html.heex, web/app/globals.css, paper-surface.css, taskboard/tokens_gen.go, pdrender/tokens_gen.go, semrole/tokens_gen.go via shared baseVars/statusVars/chromeVars helpers; check.mjs Part A byte-compares regenerated output against committed files and fails on drift."
+    },
+    {
+      "title": "Support N themes as authored {bg,ink,accent}×{light,dark} skins that compile into full palettes via a deterministic OKLCH color-math pipeline, so adding theme N+1 is one design/themes/<name>.json file, not a hand-tuned palette",
+      "scale": "epic",
+      "evidence": "derive.mjs Part II's derive(theme) resolves the full 150+-slot SLOTS contract from a 6-color skin using OKLCH neutral ladders, chrome ladders, accent ramps and AA-walked status roles; emit.mjs loadThemes()/themePalette()/themeBlocks() render each theme into its own [data-bp-theme] CSS block across every surface; check.mjs Part F frozen OVERRIDE_COUNT_FROZEN = {evergreen:82, ember:3, fjord:3}."
+    },
+    {
+      "title": "Characterize the shipped evergreen theme byte-for-byte: derive(evergreen) must reproduce tokens.json's theme-varying slots exactly, so the compiler can never silently retint the flagship palette",
+      "scale": "invariant",
+      "evidence": "check.mjs Part F 'byte gate' compares derive(evergreen)[slot] against tokenSlot(slot) read straight from disk for every SLOTS entry and fails on any mismatch; derive.mjs comment: 'A compiler that retints evergreen to fit its own math has FAILED.'"
+    },
+    {
+      "title": "Guarantee WCAG AA contrast is never silently shipped as a failure — every AA-walk residual miss must be declared and owned, and curated Studio fg×surface pairings must clear AA across every theme and mode",
+      "scale": "invariant",
+      "evidence": "derive.mjs aaWalk() returns hit/misses; derive() collects misses onto a non-enumerable list; check.mjs Part F requires every miss be declared in theme._aaExceptions; check.mjs Part H runs a curated PAIRINGS table of real DOM co-occurrences (e.g. .pane-doc-sub on --bg-accent) through contrast() at AA 4.5/3.0 thresholds for every derived theme × mode."
+    },
+    {
+      "title": "Keep GUI (CSS) and TUI (Go) presentations of the same semantic state (task lifecycle, cloud instance lifecycle, provider identity) in lockstep so a browser vs terminal divergence is caught mechanically, not by eyeball",
+      "scale": "invariant",
+      "evidence": "check.mjs Part B parses emitted Go taskboard/tokens_gen.go, paper-surface.css .bp-lg-- classes, and Studio --life-*/TokensGen lifecycle rows and asserts glyph/color/braille-frame agreement across all three; Part D does the analogous cross-surface check for instanceLifecycle + provider identity tints (CSS .bp-inst--/--provider- vs Go semrole/chrome_gen.go)."
+    },
+    {
+      "title": "Ratchet hand-stamped color literals toward zero — a frozen per-surface exemption ledger only moves down, and any hex/rgb/hsl literal added outside the generated block is a build-breaking regression",
+      "scale": "invariant",
+      "evidence": "check.mjs Part E reads design/exemptions.json, recounts literals per surface via LEDGER_LITERAL regex (excluding the BEGIN/END GENERATED block and comments), and fails on any growth or un-lowered shrink — 'the theme-system north star is no surface holds a color literal the compiler did not put there.'"
+    },
+    {
+      "title": "Keep theme identity (data-bp-theme) orthogonal to light/dark mode across every attribute surface, with complete tone-pairs at both mode scopes and no leakage of positional-passthrough vars into theme scopes",
+      "scale": "invariant",
+      "evidence": "check.mjs Part G asserts every ATTR_SURFACES entry (cloud SPA, Studio, web demo, login, paper-surface) carries a [data-bp-theme=\"evergreen\"] block, that --life-*/--provider-*/.bp-lg--/.bp-inst-- never appear inside a theme scope (D25), and that light/dark scopes declare the identical var set (tone-pair nesting, D26)."
+    }
+  ]
+}

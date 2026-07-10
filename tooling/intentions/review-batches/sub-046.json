@@ -1,36 +1,56 @@
 {
-  "subsystem": "js/packages/core",
-  "count": 5,
+  "subsystem": "api/lib/barkpark_web/live/studio/studio_live",
+  "count": 10,
   "files": [
     {
-      "path": "js/packages/core/tsup.config.ts",
-      "role": "core SDK build config",
-      "importance": 35,
-      "usefulness": 10
+      "path": "api/lib/barkpark_web/live/studio/studio_live/blocks.ex",
+      "role": "",
+      "importance": 52
     },
     {
-      "path": "js/packages/core/vitest.config.ts",
-      "role": "Node.js unit test config",
-      "importance": 21,
-      "usefulness": 8
+      "path": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "role": "",
+      "importance": 44
     },
     {
-      "path": "js/packages/core/vitest.browser.config.ts",
-      "role": "browser test config",
-      "importance": 20,
-      "usefulness": 7
+      "path": "api/lib/barkpark_web/live/studio/studio_live/doc_actions.ex",
+      "role": "",
+      "importance": 47
     },
     {
-      "path": "js/packages/core/vitest.workerd.config.ts",
-      "role": "Cloudflare Workers test config",
-      "importance": 20,
-      "usefulness": 7
+      "path": "api/lib/barkpark_web/live/studio/studio_live/mount.ex",
+      "role": "",
+      "importance": 50
     },
     {
-      "path": "js/packages/core/scripts/live-regression.mjs",
-      "role": "live regression test script",
-      "importance": 19,
-      "usefulness": 8
+      "path": "api/lib/barkpark_web/live/studio/studio_live/paper_canvas.ex",
+      "role": "",
+      "importance": 63
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/path.ex",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/paths.ex",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/shared.ex",
+      "role": "",
+      "importance": 66
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex",
+      "role": "",
+      "importance": 44
     }
   ]
 }

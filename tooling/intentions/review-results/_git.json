@@ -1,114 +1,259 @@
 {
   "intentions": [
     {
-      "title": "Build a fully-scoped multi-tenant Studio with canonical URLs, workspace/project/dataset switching, and tenant-boundary safety",
+      "title": "Go TUI task board (bp tasks) — from portrait board to mouse-driven mission control",
       "scale": "epic",
-      "evidence": "studio (88 commits): scoped Studio mount, P1–P5 cutover, StudioChrome contract, scope menu, canonical URL /w/:ws/p/:proj/d/:dataset/studio, tenant-boundary fixes, top bar restructure"
+      "evidence": "tui/taskboard (~120 commits): waves 1-16 (ALIVENESS, categorization, navigation shell, claim-forward retune, activity band, phase bands, THE MOUSE #2042), dispatch frontier v1/v2 (#1191, #2147), detail-ceiling doctrine, creative-slate 1&2 (heatmaps/gauges/calendars), Doey UI study integration"
     },
     {
-      "title": "Ship an Obsidian-style interactive content graph — Canvas2D renderer with force sim, BFS blast-rings, hover cascades, and graph↔finder bidirectional highlight",
+      "title": "Studio Claude Chat — in-Studio agent chat sessions (mission control)",
       "scale": "epic",
-      "evidence": "graph (19 commits): Northern Night Canvas2D renderer, Obsidian restyle, hop-cascade, /v1/graph corpus endpoint, force integrator bounds, idle breathing, graph↔finder highlight, graph landing"
+      "evidence": "studio-chat (~21+ commits across #1612-#2049): wave 1 persistence/resume, wave 2 managed sidebar, wave 3 adopt-on-reopen, wave 4 server-owned runtime, waves 5-8 living cards/diffs/composer cockpit, wave 9 mission control (agents rail, plans as Papers), wave 10-11 wire truth + phase journey in agents rail"
     },
     {
-      "title": "Build a rich semantic search layer spanning Postgres full-text and Indx (typo-tolerant, faceted, ranked, per-keystroke WebSocket)",
+      "title": "Unified design-token system — one token manifest driving every surface",
       "scale": "epic",
-      "evidence": "search (16), indx (15), web (56): Indx v5, typo-tolerant title tier, per-keystroke WS search, Postgres parity facets, N+1 batch hydration, click-feedback autocorrection, fuzzy/exact ranking, qualitative match meter"
+      "evidence": "aesthetic/au-w (~17-56 commits #1275-#2114): tokens.json single source (W1.1), emitters+drift gate, W2 literal-lint sweeps (web/studio/CLI/TUI), W3 web tokens, W4 CLI/TUI chrome + semantic roles, W5 PortableDoc component-parity harness, living styleguide, aesthetic endgame wave 2 (CLI truecolor, terracotta accent)"
     },
     {
-      "title": "Deliver a manifest-driven Go CLI (bp) — multi-server, atomic task queue, plugin verbs, self-update, Windows release",
+      "title": "Theme system — N-theme derive/emit pipeline (Ember, Fjord, evergreen)",
       "scale": "epic",
-      "evidence": "cli (22 commits): M0–M4, /v1/capabilities manifest, bp setup/use/servers/migrate/share/task, Windows release, release binaries + installer, bp task next/prime/close"
+      "evidence": "theme/ts-w (~21 commits #1689-#1789): derive.mjs OKLCH compiler (W3), Go+Elixir emitters loop themes dir (W4-5), evergreen characterization gate, persisted workspace theme, styleguide becomes theme showroom, Ember+Fjord designed themes, web+cloud theme pickers"
     },
     {
-      "title": "Build a feature-complete terminal TUI — Miller-column nav, field editing, publish/draft lifecycle, reference picker, paper viewer, Studio parity",
+      "title": "Studio UI premium — icons-only chrome, AA tokens, themed control kit",
+      "scale": "feature",
+      "evidence": "studio UI premium (#2067,#2088,#2101): wave 1 icons-only top bar + scope chip, wave 2 AA machine gate + bp_radio + modals onto kit, wave 3 dark elevation on every theme + gallery DOM=spec QA census"
+    },
+    {
+      "title": "Multi-cloud hosting — Azure alongside Hetzner via a provider-neutral seam",
       "scale": "epic",
-      "evidence": "tui (45 commits): pdrender M0–M2, Miller-column nav, publish/unpublish/discard, reference picker, slug generate, revision history, diff view, bulk mark/act, image fields, object arrays, required markers, schema validation"
+      "evidence": "azure-hetzner (~31 commits #1629-#1843 charter waves 1-7): CloudProvider seam v2, Azure ARM provider, warm-pool/pricing/domain-status, bp-bundle-v1 portable archive, cross-provider resurrect (bundle store, SigV4 reader), monitoring beat + metrics on both surfaces"
     },
     {
-      "title": "Implement a task system as first-class Barkpark documents — dep graph, atomic claim/close, lease sweep, compactor, Studio integration, bp CLI surface",
+      "title": "Cloud console SPA — usage, quota, fleet dashboards across CLI+SPA",
       "scale": "epic",
-      "evidence": "tasks (20 commits), w7-01 through w7-11: task-document schema, edge table, CAS claim, TtlSweeper, Compactor, /v1/tasks HTTP controller, resource claims, bp task verbs, Tasks plugin owns routes (C4-3), Studio task surfaces"
+      "evidence": "cloud-console (~31 commits, waves 1-5 #1399-#2080): quota bars/instances meter, fleet usage sampler + Cmd+K palette, usage history sparklines, machine meters (cpu/ram/req-s/p95) end to end, CLI/SPA twins throughout"
     },
     {
-      "title": "Establish a content graph edge layer — EdgeProjector, plugin extract_edges seam, BFS engine, /v1/graph API, orphan/dangling endpoints",
+      "title": "Airdrop grants — scoped access-grant system with enforcement everywhere",
       "scale": "epic",
-      "evidence": "graph phases 2–5: content_edges schema, EdgeProjector worker, plugin seam, BFS engine, reverse_referencers, Studio graph pane, tenancy fail-closed, arrayOf-aware guard"
+      "evidence": "access/ag- (~26 commits #1303-#2145): access_grants entity, claim flow (no-oracle), Studio Share-access sheet, cross-surface /v1/access noun, enforcement fold into CallerContext, live-socket liveness + deny matrix + MCP parity proof (enforcement endgame #2145)"
     },
     {
-      "title": "Ship a Sheets plugin — collaborative spreadsheet with SheetSession, formula engine, presence cursors, soft locks, per-user undo, xlsx round-trip",
+      "title": "Sheets — Excel-parity spreadsheet engine (formulas, CF, sort, spill, collab)",
       "scale": "epic",
-      "evidence": "sheets (8 commits): M0–M5, SheetSession supervision, cell-op wire endpoint, formula engine, presence cursors/selections, soft locks, per-user undo, live public reader, xlsx deps"
+      "evidence": "sheets (~86 commits, cycles 1-18+): formula-function coverage batches, VLOOKUP/XLOOKUP/SUMPRODUCT, Conditional Formatting v1 (CF-A..E), Sort engine, A:A cross-tab ranges, dynamic-array spill (=SORT, #SPILL!), presence cursors/soft locks/undo, sheets-parity wave 2 chained-spill fixpoint + RAND volatility + perf floor (#2044)"
     },
     {
-      "title": "Build a first-class content-sharing layer — scoped tokens, LAN tunnel, per-item share links, revocable edit access, bp share CLI",
+      "title": "Tickets — external low-trust support plugin with Studio inbox",
+      "scale": "feature",
+      "evidence": "tickets (~11 commits #997-#1074): plugin core (type:ticket, thread, derived status), low-trust ticket-key auth tier, Studio operator inbox goes live, per-key rate limits, CLI verbs via manifest"
+    },
+    {
+      "title": "GitHub Issues/Projects bridge plugin — full inbound/outbound sync",
       "scale": "epic",
-      "evidence": "sharing (18 commits): P1a–P7a, Barkpark.Sharing registry, default-deny, scoped paper reader, docs surface, scoped media, persistent share registry, bp share CLI, edit access tokens, Studio Share popover, PublicShareGuard hardening"
+      "evidence": "github (~9 commits, waves 1-8 #1229-#1994): outbound mirror engine (DrainWorker/MirrorJob), inbound intake (issue→born-dark task), adoption + conflict quarantine, Projects v2 dashboard, /admin/github console, wave 8 struct-safe adopt + edge tenancy hardening"
     },
     {
-      "title": "Introduce a plugin highway — typed route buckets, plugin-contributed Oban crons, Tasks + Bulldocs as native plugins, fresh-install invariant",
+      "title": "bp mcp serve — stdio Model Context Protocol bridge",
+      "scale": "feature",
+      "evidence": "mcp (~3+ commits #1790-#1993): bp mcp serve stdio server + capabilities→MCP bridge (w1), honest tool catalog + Papers as MCP resources + real-server validation (w2)"
+    },
+    {
+      "title": "Email fleet — PortableDoc blocks render as real email components",
+      "scale": "feature",
+      "evidence": "email gp-w4 (~5+ commits #1897-#1913): task-family, cards/notes/pipeline, terminal/columns/status-legend blocks render natively in email (gui-premium wave 4a-c, 'the set is complete')"
+    },
+    {
+      "title": "Agent onramps — one-command install docs/verbs for every AI coding agent",
+      "scale": "feature",
+      "evidence": "onramps (~8 commits #1825-#2129): AGENT-ONRAMPS hub, CLAUDE-CODE/CODEX/CURSOR/REMOTE docs, bp onramp <target> print-first verb, wave 2 adds copilot target + canonical AGENTS.md emitter"
+    },
+    {
+      "title": "bp login UX — device-link login, sign-in IS setup",
+      "scale": "feature",
+      "evidence": "bp-login-ux (~10 commits #1838-#2115): RFC-8628 device-auth trio, /activate approve page, bp login device-link, wizard Cloud target, wave 2 single-fleet auto-connect + steal-guard, wave 3 bare-bp-ends-clean + 2FA challenge card"
+    },
+    {
+      "title": "cmux bridge — a tmux pane that IS a Barkpark worker",
+      "scale": "feature",
+      "evidence": "cmux (~6 commits #1200-#2134): bp cmux bridge v1, Stop hook closes past work-digest fence, wave 1 fail-safe matrix + one worker id + install --merge"
+    },
+    {
+      "title": "Dispatch frontier — the real task-interference graph model",
+      "scale": "feature",
+      "evidence": "df-/dispatch-frontier (~7 commits #1191-#2147): bp task frontier command, cross-root block-edge precision, area vocabulary, lint nudge, v2 file-truth edges + atomic claim + overlap report"
+    },
+    {
+      "title": "Multi-tenancy keystone — workspace/project/dataset scoping across the whole stack",
       "scale": "epic",
-      "evidence": "plugins (22), plugin (9): :token_root + :ingest + :public_root + :token highway buckets, Bulldocs plugin, Tasks plugin owns schema + routes, frt/OnixEdit plugins, plugin extract_edges seam, plugin-dynamic CLI verbs"
+      "evidence": "workspaces/w1-w2 + tenancy security swarm (~150 commits): Wave 1 foundation (tables, scoped_api pipeline, SDK/CLI/web/TUI scope threading across ~28 slices), W1.5 sibling-controller scoping, W2 dataset_id-authoritative flip, then a dozen-plus paired [beads] security-review cycles closing P0 cross-tenant read/write leaks (search, media, sharing, PubSub, revisions, onixedit) and perf fixes (memoized dataset resolution, composite indexes)"
     },
     {
-      "title": "Ingest the codebase graph into Barkpark and surface tooling intelligence — quality scorecard, blast-radius analysis, incremental status-quo reports",
+      "title": "Enterprise-ready auth — SSO/SAML/OIDC/SCIM/MFA/RBAC/passkeys",
       "scale": "epic",
-      "evidence": "tooling (5), barkpark-sync (4): barkpark-sync ingest, graph visualizer, codebase-quality scorecard, codebase-intelligence suite, incremental verdict caching, Tested + Reliability axes, intentions/goal layer"
+      "evidence": "era-w (~20 commits #1123-#1163): OIDC relying party, social login, SAML SP + IdP-init/SLO, SCIM 2.0 Users+Groups, JIT provisioning, step-up MFA + passkeys, org-wide require-MFA, per-account lockout + HIBP check, session management, auth-event webhooks"
     },
     {
-      "title": "Run a premium first-run setup — bp setup wizard, local self-sufficiency, version pinning, sha256 verify, Windows support, seed profiles",
+      "title": "Auth/accounts core — passwordless, sessions, tenancy principals",
+      "scale": "feature",
+      "evidence": "auth core (#412-#1276): magic-link sign-in, User as first-class authorize/3 principal, org-admin shell, GDPR export/erasure, append-only audit bus, atomic recovery-code consume (TOCTOU fix #962), owned api-tokens (ag-bp-user-identity-auth)"
+    },
+    {
+      "title": "JS/TS SDK (@barkpark/core) — full Sanity-parity capability build-out",
       "scale": "epic",
-      "evidence": "premium-setup commits A1–D2: bp setup interactive bootstrapper, C1–C4, profile flag, first-run detection, bp upgrade/uninstall builtins, go:embed deploy.sh, QUICKSTART + HANDBOOK docs"
+      "evidence": "core/react/nextjs/codegen (~250 commits): query builder + filter-op sugar, patch ops (set/inc/unset/append), history/backlinks/graph, schema-typed client + codegen drift gate, media collections, auth surface, webhook typing, AbortSignal/cancellation parity across every read op, dozens of doc-truth-guard-driven README completions"
     },
     {
-      "title": "Mirror and read Barkpark's own docs as Papers inside Barkpark — dogfooding the product as its own documentation CMS",
+      "title": "bp CLI — manifest-driven capability parity with the SDK",
       "scale": "epic",
-      "evidence": "docs dataset demo, web (56): 51 GitHub docs mirrored as Papers, 68 Papers seeded, docs-dataset finder, Obsidian graph landing over the docs dataset, demo/docs-graph branch"
+      "evidence": "cli (~199 commits): M0-M4 GA tooling (manifest schema, capabilities-driven dispatch, shell completion bash/zsh/fish), bp tinker/seed/make-schema, bp doc/media/schema/webhook CRUD verbs mirroring the SDK, -o json/yaml envelope discipline, humane error hints, bp setup/migrate/export/listen"
     },
     {
-      "title": "Reach multi-server, multi-workspace tenancy safety — scope threading, cascade deletes, cross-tenant read-leak remediation, dataset-id backfills",
+      "title": "Webhooks — delivery, retry, replay across Elixir + edge JS handlers",
+      "scale": "feature",
+      "evidence": "webhooks (~13 commits #294-#1013): reconcile dispatcher/SDK signature, delivery log + replay + secret-rotate (D50/C5), scheduled re-enqueue, auto-disable dead endpoints + re-enable path, Edge-compatible verifyWebhookSignature"
+    },
+    {
+      "title": "Media library — WoodWing-style DAM (search, collections, governance, CDN)",
       "scale": "epic",
-      "evidence": "tenancy (5), migration (5), [beads] reconcile commits: scope threading in Content.get_document/expand, workspace-delete cleanup, cascade deletes, paper_events dataset_id re-stamp, search dedup post-flip"
+      "evidence": "media (~26 commits #variety): WoodWing-style platform (delivery/search/governance/collections), media-collection share links + membership writes, checkout/relations, ImageMagick Windows rendition backend, scoped delivery + serve-path XSS hardening (#1025)"
     },
     {
-      "title": "Establish a structured doc spine with byte-budgeted cards, CI enforcement, doc-tier routing, and attic quarantine",
+      "title": "ONIX/Bokbasen export plugin — Norwegian book-trade XML compliance",
       "scale": "epic",
-      "evidence": "docs-refactor waves 0–5, docs (6): 7-card hard cap, byte budgets CI-enforced, fact-rescue, anchors check, doc-tier agent/human/cold, attic freeze"
+      "evidence": "onix/bokbasen (~47 commits, Phase 6-8): ONIXMessage builder, XSD validation gate, Thema codelist registry, Bokbasen HTTP client stage+poll+cancel, PublishWorker, BookEditor 8-tab framework, sign-off gate viz, mix onix.import ingest"
     },
     {
-      "title": "Achieve real Core Web Vitals — instant first paint, Data Cache, keep-alive pools, CWV monitoring, LCP optimization",
-      "scale": "small",
-      "evidence": "perf(web): CWV monitoring, single-shot home LCP, instant first paint, real Data Cache, fra1 region, keep-alive connection pool; perf(indx): batch hit hydration"
+      "title": "Plugin architecture — the Barkpark.Plugin behaviour and route highway",
+      "scale": "epic",
+      "evidence": "plugins/G1-G5 (~53 commits): plugin_routes/1 macro + highway buckets (:token, :token_root, :ops, :api), lifecycle_hooks + doc_actions resolver chain, settings_schema + admin LV + hot reload, fresh-install plugin-free invariant regression bar, per-workspace enablement (ssp-w1)"
     },
     {
-      "title": "Make the Next.js web finder the primary product showcase — spacious hero, master/detail, Popular shortcuts, UX polish passes",
-      "scale": "small",
-      "evidence": "web (56): finder as frontpage, 1080px rail, master/detail, cache-mode toggle, /bench sweep, UTC hydration fix, stable results header, Popular shortcuts, Options disclosure, thin scrollbars"
+      "title": "pdrender — Go terminal renderer for PortableDoc + data-viz",
+      "scale": "epic",
+      "evidence": "pdrender (~59 commits): M0-M2 block coverage, TUI Mermaid flowcharts/sequence diagrams (wave 1-6), tui-slate heatmap/stat/sparkline blocks, creative-slate braille charts + calendars, real truecolor images (half-block mosaic), wasm reader proof (#1357)"
     },
     {
-      "title": "Publish a JS SDK monorepo with changeset-gated releases, live-update SSE proxy, and starter templates",
-      "scale": "small",
-      "evidence": "js (4), ci(js): @barkpark/nextjs live updates, SSE proxy, blog/website starters fixed, changeset job CI gate, TS authoring SDK (bp CLI M3)"
+      "title": "PortableDoc continuous-canvas editor — composition doctrine + in-canvas editing",
+      "scale": "epic",
+      "evidence": "paper-editor/paper-canvas (~50 commits, Phase 4-6 #185-#1262): <bp-paper-canvas> engine over one prose run, node-view widening (callout/code/diagram/sheet/embed), markdown source-mode toggle, composition tiers (element|widget|section), every structural block slash-insertable and editable"
     },
     {
-      "title": "Wire ONIX/Bokbasen export as a plugin — deterministic JSON bridge, schema field types, named SVG icons, game-CMS plugin (frt)",
-      "scale": "small",
-      "evidence": "onix (10), bokbasen (7), onixedit (13), frt (6), g2–g4: mix frt.export Godot bridge, named icons, OnixEdit plugin, schema v2 field types"
+      "title": "View↔Edit visual parity for Papers — reader and editor render identically",
+      "scale": "invariant",
+      "evidence": "parity S1-S9 + endgame (~7+ commits #909-#1982): single-sourced --bp-* typography tokens, code-block frame token-bound, callout/code/chip at-rest parity, edit⇄reader endgame wave 1 (value-lockstep, DOM-binding, section gates)"
     },
     {
-      "title": "Give Studio a rich richText toolbar, real article rendering, slug Generate, discard-draft, schema-level list_preview badges",
-      "scale": "small",
-      "evidence": "studio commits: richText toolbar (bold/italic/links), article h1/h2 render, slug Generate, discard-draft, list_preview badges, Sanity-style reference search, scope menu dropdown"
+      "title": "Rebrander — Sanity Studio TUI rewritten and relaunched as Barkpark",
+      "scale": "epic",
+      "evidence": "rename (bottom of history, ~#3041-3086): SanityApi→Barkpark rename across modules/configs/docs, barkpark-cms→barkpark rename, native Hetzner deploy + Makefile, self-hosted JS assets, LiveView JS client fixes — the founding CMS bootstrap"
     },
     {
-      "title": "Surface content usefulness metrics and intention/goal edges as a second edge type in the graph",
-      "scale": "small",
-      "evidence": "feat(intentions): goal/intention layer — second edge type; feat(usefulness): per-file usefulness metric + why-useful surfaced on papers"
+      "title": "Rebrander wave — canvas-editor default-ON cutover with parity gate",
+      "scale": "feature",
+      "evidence": "rebrander (#1161-#1177): resolve seam + content-first body template, wave 1 locks felt + parity gated + featured placeholder, wave 2 fleet-in-canvas (D8) + migration dry-run + mainline audit, wave 3 modes die (canvas default ON)"
     },
     {
-      "title": "Harden CI — Elixir test gate unblocked, Go sum tracked, JS changeset gate, format advisory, no-cancel-on-main",
-      "scale": "small",
-      "evidence": "ci (9): mix-test blocking, go.sum tracked, elixir paid-runner fix, cancel-in-progress disabled on main, JS monorepo gate"
+      "title": "Sharing — safe external sharing via revocable scoped tokens",
+      "scale": "feature",
+      "evidence": "sharing (~20 commits, P1-P7 #~1372): Barkpark.Sharing default-deny core, gated scoped paper/media readers, `bp share` CLI + admin CRUD, per-item Share popover, LAN transport + tunnel (BARKPARK_SHARE_HOST), TTL clamp + PublicShareGuard hardening"
+    },
+    {
+      "title": "Living Values workflow — inline live-value nodes (valueref) across surfaces",
+      "scale": "feature",
+      "evidence": "lvw-t1..t12 (~13 commits #746-#825): valueref node+mark on all three renderers, used-by/impact panel, AI-proposes loop with provenance, stale-drift marker + accept-baseline, writeback (impact-gated edit-through), reverse expectation view"
+    },
+    {
+      "title": "Barkpark Cloud control plane — signup, provisioning, billing, dashboard",
+      "scale": "epic",
+      "evidence": "cloud (~181 commits total; core cloud-1..cloud-13 #251-#284): CloudProvider/DNSProvider seams, Stripe billing gateway, control-plane HTTP API, go-live rehearsal, dashboard redesign (Forge-quality), Cloud GUI epic wave1 spine+contracts (#923), team switcher, IA reshape"
+    },
+    {
+      "title": "Deploy with Barkpark button — zero-config template-to-live-site flow",
+      "scale": "epic",
+      "evidence": "dwb-1..dwb-20 (~19 commits): template manifest spec, /new?template= flow, GitHub App seam + repo-from-template, build-log console, warm-pool instant provisioning, failure-recovery + idempotency hardening across the whole chain"
+    },
+    {
+      "title": "Self-update / instance-lifecycle rail — instances stay current autonomously",
+      "scale": "epic",
+      "evidence": "isu-1..isu-10 (~9 commits) + instance lifecycle admin (#903): build-identity checker, Studio update banner, zero-downtime rebuild, self-managing snapshot lifecycle (nightly bake), fork-divergence handling, archive/decommission/resurrect/adopt/eject/audit verbs"
+    },
+    {
+      "title": "Task-obsessed workflow governance — dedup, judge, land digest, PR gate",
+      "scale": "feature",
+      "evidence": "tob-w1..w4 (~6 commits #1206-#1226): find-or-create dedup gate, tier-2 LLM judge on dedup band, land digest at close + reland-check, pr-task-gate every PR must reference an active task"
+    },
+    {
+      "title": "Rail-awareness — multi-agent claim fencing and lease renewal",
+      "scale": "feature",
+      "evidence": "rail-awareness L1-L4 (~4+ commits #1146-#1155): rail_rev ETag + typed notices, fence close on claim-time work digest, task move + allow-and-fence + lease renewal"
+    },
+    {
+      "title": "Epic-cycle agent orchestration — Fable strategizes, Opus builds",
+      "scale": "feature",
+      "evidence": "epic-cycle (~4+ commits #1644-#1648): 5-phase redesign, task-obsessed rework (bp tasks as the spine), Judge+Perfect phases (Cody-principled honest grading), judge_model fallback to Opus"
+    },
+    {
+      "title": "Hyperquiz — stranded quiz engine ported onto main as a plugin",
+      "scale": "feature",
+      "evidence": "quiz (#2040): the P1-P6 engine lands as Barkpark.Plugins.Quiz, 'hyperquiz lands'"
+    },
+    {
+      "title": "Studio structure polish — tiered desk, plugin enablement, honest counts",
+      "scale": "epic",
+      "evidence": "ssp-w1..w3 (~9 commits #1846-#2038): per-workspace plugin enablement (off-by-default), Workspace Settings placement UI, tiered desk (MAIN/Plugins/…Rest), typeless-enable honesty, scoped Settings-URL"
+    },
+    {
+      "title": "Studio nav consistency — one canonical URL/nav model everywhere",
+      "scale": "epic",
+      "evidence": "nav-shell + deep-link (~5+ commits #1905-#1938): StudioChrome :handle_params owns current_path, canonical nav model (delete dead Nav fork), Paths is THE URL builder, pin URL==state route-sweep guard"
+    },
+    {
+      "title": "Cody / codebase-quality suite — scorecard, graph, standing gates",
+      "scale": "epic",
+      "evidence": "cqv2-cqv8 + tooling (~56 commits): real measurements, composite scoring, symbol-level blast-radius graph, concept/feature layer, boundary-gate CI, discoverability (@canonical markers), intentions taxonomy + barkpark-sync graph ingest"
+    },
+    {
+      "title": "Docs governance — doc-truth verification, budgets, anchor gates",
+      "scale": "invariant",
+      "evidence": "docs-refactor + doc-truth (~29 commits): full-corpus truth audit (234 fixes/95 files, #318), surface-parity guard, docs-refactor waves 0-5 (fact-rescue, 7 cards, CI budget+anchor gates), metric-currency guard"
+    },
+    {
+      "title": "God-module decomposition — Modularity metric drove a repo-wide split sweep",
+      "scale": "invariant",
+      "evidence": "grade-modularity/grade-tested (~39 commits, PRs #133-#178): tasks.ex, studio_live, render.ex, content.ex, media, sheet_grid, apiclient/client.go, tui.go, api_tester Endpoints — each decomposed behind a facade; matched by a parallel 'Tested push' test-coverage sweep"
+    },
+    {
+      "title": "Obsidian-style knowledge graph + finder search",
+      "scale": "epic",
+      "evidence": "search/indx/graph (~76 commits): Postgres+Indx dual-engine search, typo-tolerant fuzzy ranking, click-feedback auto-correction, Content.Graph BFS engine (backlinks/orphans/dangling), Northern Night Canvas2D graph renderer restyled faithful-Obsidian, wikilink/blockref/tag autocompletes"
+    },
+    {
+      "title": "create-barkpark-app — scaffolder and starter templates",
+      "scale": "feature",
+      "evidence": "create-barkpark-app (~22 commits): blog/website starters, SEO metadata + sitemap/robots, a11y (skip-links, aria-current), vitest coverage, sanitize scaffolded package.json, per-page metadata"
+    },
+    {
+      "title": "Preview-contract — one OpenGraph-shaped manifest drives every surface",
+      "scale": "epic",
+      "evidence": "pc-w1..w4 (~5 commits #1903-#1994): write-time preview manifest + exact-crop og rendition, papers+sheets readers emit og/twitter/JSON-LD, every internal surface reads the manifest, parity gate + no-oEmbed law"
+    },
+    {
+      "title": "Zero-downtime deploy infra — blue/green swap, CD pipeline, warm pool",
+      "scale": "invariant",
+      "evidence": "deploy (#530-#1224): production CD auto-deploys on merge, zero-downtime blue/green hot-swap, self-refreshing warm pool tracks origin/main, precompiled release artifacts (no on-box compile), Caddy maintenance-page + supersession-safe path filter"
+    },
+    {
+      "title": "Tenant-scope + envelope security hardening sweep",
+      "scale": "invariant",
+      "evidence": "security fixes threaded through history (#672-#1025 and beyond): canonical §9 error envelope rollout across every controller, binary_id CastError guards consolidated to Repo.uuid_or_nil, stored-XSS closures (media serve, search highlighter, render), SSRF guard on outbound webhook/media/CDN requests"
+    },
+    {
+      "title": "Barkpark Sheets → paper embed pipeline (M0-M5 foundation)",
+      "scale": "feature",
+      "evidence": "sheets M0-M5 (#pre-#1108): data model + embed block + write-through snapshots (M0), SheetSession supervision + cell-op wire endpoint (M1), formula engine + conversions (M3/M5), presence cursors + soft locks + live public reader (M4)"
     }
   ]
 }

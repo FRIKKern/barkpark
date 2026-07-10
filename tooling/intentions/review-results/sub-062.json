@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/media/storage",
+  "intentions": [
+    {
+      "title": "Neutralize stored-XSS from browser-executable MIME types (svg/html/xml/js) at both write and serve edges",
+      "scale": "invariant",
+      "evidence": "media_file.ex @dangerous_mimes list + neutralize_dangerous_mime/1 changeset hook rewrites mime_type to application/octet-stream at write; serve_content_type/1 pins the same neutralization at the serve edge (MediaController.maybe_send_file); comment explicitly names the attack: outsider write key stores .svg served inline as image/svg+xml -> stored XSS since default asset visibility is public."
+    },
+    {
+      "title": "Enforce a WoodWing-style per-asset permission model (view/preview/original/edit_metadata) driven by visibility, auth, signed-URL, and checkout state",
+      "scale": "feature",
+      "evidence": "access.ex Access.allowed?/4 and permission_set/2 compute permissions from Document 'bp_visibility' (public/token/private), authenticated?/admin? conn assigns, SignedUrl.verify?, and checkedOutBy; edit_metadata/use_original permissions are stripped from non-holders when an asset is checked out."
+    },
+    {
+      "title": "Gate 'token'-visibility media delivery behind short-lived HMAC-signed URLs instead of exposing assets to any authenticated bearer",
+      "scale": "feature",
+      "evidence": "signed_url.ex sign/3 and verify?/3 implement HMAC-SHA256 over media_file_id:path:exp with Plug.Crypto.secure_compare, default 7-day TTL; consumed by access.ex signed_for?/2 for /media/files/* and /media/renditions/* delivery checks."
+    },
+    {
+      "title": "Prevent cross-workspace data leakage across the media relation graph, collections, and share-link mutations despite a shared legacy 'dataset' string",
+      "scale": "invariant",
+      "evidence": "relations.ex graph/3 threads workspace_id/project_id scope into both outbound and inbound relatedAssets queries (barkpark-m21z comments); collections.ex list/get scope collection reads via Content.Scope.scope_to_workspace_or_global; share.ex create/revoke thread the same scope into Collections.get and the follow-on upsert write_opts (barkpark-ukzs) so a share-link mutation lands on the caller's own tenant row, not a Default-workspace duplicate."
+    },
+    {
+      "title": "Provide an editorial single-writer checkout/lock workflow on media assets so concurrent editors don't clobber each other, with admin override",
+      "scale": "feature",
+      "evidence": "checkout.ex checkout/3 and undo_checkout/4 patch checkedOutBy/checkedOutAt on the mediaAsset document; ensure_available/2 blocks checkout by a non-holder; ensure_can_release/3 allows admin or the lock holder to release; release also invalidates cached renditions via Barkpark.Media.Renditions.delete_for_file/1."
+    },
+    {
+      "title": "Model folders and saved/virtual (query-defined) media collections as first-class browsable groupings with dynamic membership",
+      "scale": "feature",
+      "evidence": "collections.ex distinguishes 'folder' (explicit collection/collections membership on mediaAsset docs) vs 'virtual' (virtualFilter -> Media.search_files opts) kinds; add_member/remove_member patch membership on the asset doc; assets/3 resolves either kind through the same Media.search_files call."
+    },
+    {
+      "title": "Let media collections be shared publicly via revocable, expiring tokened links without exposing the underlying asset API",
+      "scale": "feature",
+      "evidence": "share.ex create/2 mints a random 18-byte token stored as shareLink{enabled,token,expiresAt} on the collection doc, revoke/2 flips enabled false, resolve/2 checks token match + expiry via share_active?/1, share_path/2 exposes a stable public URL pattern /v1/media/:dataset/share/:token."
+    }
+  ]
+}

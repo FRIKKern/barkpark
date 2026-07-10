@@ -1,0 +1,35 @@
+{
+  "subsystem": "web/app/api",
+  "intentions": [
+    {
+      "title": "Keep the Barkpark API host and server-only tokens invisible to the browser by proxying every search/admin call same-origin through Next.js route handlers",
+      "scale": "invariant",
+      "evidence": "find/route.ts, find-event/route.ts, and admin/reindex/route.ts all comment 'Node runtime: reads the server-only BARKPARK_TOKEN (never bundled to the browser) and proxies same-origin so the client never sees the API host/token'; find-event uses PUBLIC_API_URL + READ_TOKEN server-side only."
+    },
+    {
+      "title": "Make search degrade gracefully instead of erroring — suggestions, seed, and feedback recording all fail closed to empty/ok rather than surfacing upstream failures to the user",
+      "scale": "invariant",
+      "evidence": "find/route.ts suggestions() catches and returns {popular:[],nohits:[]}; find/route.ts GET catches runSearch errors and returns emptyResponse with status 200; search-seed/route.ts buildSeed() catches and returns {index:{},docs:[]}; find-event/route.ts always returns {ok:true} even on upstream fetch failure, only console.error's."
+    },
+    {
+      "title": "Deliver 0ms perceived search latency for 1-2 character queries via a precomputed prefix index inlined at SSR, ahead of the live WebSocket/API response",
+      "scale": "feature",
+      "evidence": "search-seed/route.ts: 'emits the bundled prefix index the finder uses to resolve 1-2 character queries LOCALLY in 0ms, before the live WebSocket reply arrives'; buildSeed exported for direct SSR call by the (finder) layout, avoiding an HTTP round-trip; cached revalidate=3600."
+    },
+    {
+      "title": "Close the search-quality feedback loop by capturing 'Did you mean' correction-accepts and result-click interactions, attributed to a per-browser session id, without ever blocking the UX",
+      "scale": "feature",
+      "evidence": "find-event/route.ts forwards kind:'correction'|'click' to /v1/data/search/{DATASET}/correction and /interaction with X-BP-SEARCH-CLIENT sid header for anti-gaming attribution; described as fire-and-forget, 'a dropped signal is acceptable, a blocked correction-accept ... is not'."
+    },
+    {
+      "title": "Let operators trigger a live Indx blue/green search-index rebuild from the demo, spanning all finder content types, and purge stale cached results once it lands",
+      "scale": "feature",
+      "evidence": "admin/reindex/route.ts POST hits /v1/data/search/{DATASET}/reindex?types=post,page,author,category,project,paper,sheet with a Bearer token, then revalidateTag(FIND_TAG); TYPES comment says it 'Mirrors the finder's content types ... including sheets ... not just Postgres'; 503 if BARKPARK_TOKEN missing."
+    },
+    {
+      "title": "Keep ISR/tag caches in the demo consistent with upstream content mutations via an authenticated, replay-safe webhook that busts exactly the affected cache tags",
+      "scale": "feature",
+      "evidence": "barkpark/webhook/route.ts: HMAC-SHA256 signature verification with timingSafeEqual over 'current' and 'previous' secrets (rotation support), ±300s timestamp tolerance, in-process LRU dedup by delivery id backing the dispatcher's DB-level UNIQUE(endpoint_id,event_id), and tagsFor() reconstructing scoped + flat _all tags plus FIND_TAG for revalidateTag; fails loud (500) if BARKPARK_WEBHOOK_SECRET is unset rather than silently 200."
+    }
+  ]
+}

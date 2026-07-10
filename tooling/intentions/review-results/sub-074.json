@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark/webhooks",
+  "intentions": [
+    {
+      "title": "Deliver Stripe-style signed, dedup'd, retried webhook notifications for content mutations",
+      "scale": "epic",
+      "evidence": "dispatcher.ex build_payload/sign_payload/signature_headers implement 'X-Barkpark-Timestamp'/'X-Barkpark-Signature: v1=<hex HMAC>' wire format; dispatch_async/6 dedups via UNIQUE(endpoint_id, event_id) in webhook_deliveries; retryable_4xx? classifies 408/425/429 as transient vs terminal 4xx"
+    },
+    {
+      "title": "Never park a bounded delivery worker slot sleeping through backoff — schedule retries as durable Oban jobs instead",
+      "scale": "invariant",
+      "evidence": "dispatcher.ex moduledoc 'Retries are SCHEDULED, not slept in-task'; reschedule_retry/6 calls Webhooks.schedule_retry then returns to free the WebhookDeliverySupervisor async_stream slot; retry_worker.ex resumes via redeliver/5 fenced on updated_at"
+    },
+    {
+      "title": "Guarantee at-least-once delivery survives dispatcher crashes without violating the dedup UNIQUE constraint",
+      "scale": "invariant",
+      "evidence": "stuck_delivery_sweeper.ex per-minute Oban cron reclaims rows stuck 'pending' past webhook_stuck_delivery_after_seconds via CAS on (id,status,updated_at), rebuilds payload via PayloadRebuild, redelivers on the SAME row (never re-inserts)"
+    },
+    {
+      "title": "Converge document, media, and audit-event delivery onto one durable state machine and one payload-rebuild seam",
+      "scale": "feature",
+      "evidence": "delivery.ex source_kind ('document'|'media'|'audit') with kind-specific required fields; payload_rebuild.ex is 'the SINGLE place the source_kind branch lives' shared by RetryWorker and StuckDeliverySweeper; dispatcher.ex deliver_media/2, deliver_audit/2 route through the same attempt/5 loop"
+    },
+    {
+      "title": "Support zero-downtime webhook secret rotation without breaking in-flight signature verification",
+      "scale": "feature",
+      "evidence": "webhook.ex previous_secret/previous_secret_expires_at fields are server-managed only (not client-castable); effective_secrets/2 returns primary+unexpired previous secret; dispatcher.ex verify_signature/5 checks against all effective secrets with constant-time compare and replay-window freshness check mirroring the JS SDK twin"
+    },
+    {
+      "title": "Extend webhook delivery to auth/audit-domain subscriptions (auth, membership, secret, token events), not just content mutations",
+      "scale": "feature",
+      "evidence": "webhook.ex audit_categories/audit_actions fields kept in sync with Barkpark.Audit.Event.categories/0; dispatcher.ex dispatch_audit_async/1 and audit_targets/1 fan an emitted audit event out to matching AUDIT subscriptions through the same signed+retried+dead-lettered path"
+    }
+  ]
+}

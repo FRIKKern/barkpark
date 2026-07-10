@@ -1,0 +1,30 @@
+{
+  "subsystem": "js/packages/core",
+  "intentions": [
+    {
+      "title": "Ship @barkpark/core as a single runtime-agnostic HTTP client bundled for both CJS and ESM consumers",
+      "scale": "feature",
+      "evidence": "tsup.config.ts builds src/index.ts to dual cjs/esm output with generated .d.ts, tree-shaking, and es2022 target; 'undici' kept external so Node/edge/browser hosts can each supply their own fetch implementation."
+    },
+    {
+      "title": "Prove @barkpark/core actually works across every JS runtime it claims to support (Node, browser, Cloudflare Workers)",
+      "scale": "invariant",
+      "evidence": "Three separate vitest configs — vitest.config.ts (node environment, v8 coverage), vitest.browser.config.ts (real Chromium via @vitest/browser-playwright), vitest.workerd.config.ts (@cloudflare/vitest-pool-workers with nodejs_compat) — each scoped by include/exclude globs to its own runtime.test.ts file so no runtime is validated only by code review."
+    },
+    {
+      "title": "Keep the SDK's dependency-injected browser/workerd test setup working through upstream vitest 4 breaking changes",
+      "scale": "invariant",
+      "evidence": "Inline comments in vitest.browser.config.ts and vitest.workerd.config.ts document the vitest 4 API migrations (browser.provider factory replacing browser.name; cloudflareTest() Vite plugin replacing defineWorkersConfig/poolOptions.workers) — configs were actively rewritten to track the tooling upgrade rather than pinned to an old version."
+    },
+    {
+      "title": "Guarantee the envelope/response contract (client.docs().find(), client.doc()) holds against the real production API, not just mocks",
+      "scale": "invariant",
+      "evidence": "scripts/live-regression.mjs runs the built dist against BARKPARK_API_URL (defaulting to prod 89.167.28.206:4000), asserting non-empty arrays, presence of _id/_type/_rev, and explicitly re-proves two named prior defects (#16 query envelope, #18 doc envelope) so they cannot silently regress."
+    },
+    {
+      "title": "Catch build-vs-source drift by testing the compiled dist output, not source, in live regression",
+      "scale": "invariant",
+      "evidence": "live-regression.mjs imports from '../dist/index.mjs' with a comment warning to run `pnpm build` after src changes — deliberately exercises what ships to npm rather than TypeScript source, catching bundling/tree-shaking mistakes that unit tests against src wouldn't."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "subsystem": "packages/client/src",
+  "count": 4,
+  "files": [
+    {
+      "path": "packages/client/src/client.ts",
+      "role": "deprecated flat-API HTTP client",
+      "importance": 11
+    },
+    {
+      "path": "packages/client/src/errors.ts",
+      "role": "SDK typed error class",
+      "importance": 4
+    },
+    {
+      "path": "packages/client/src/index.ts",
+      "role": "JS client SDK public API barrel",
+      "importance": 20
+    },
+    {
+      "path": "packages/client/src/types.ts",
+      "role": "SDK public type contracts",
+      "importance": 4
+    }
+  ]
+}

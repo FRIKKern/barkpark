@@ -1,0 +1,40 @@
+{
+  "subsystem": "internal/hetzner",
+  "intentions": [
+    {
+      "title": "Replace argv-shelling to the `hcloud` CLI with a native SDK-backed Hetzner client so provisioning has no external binary dependency, structured errors, and real action polling",
+      "scale": "epic",
+      "evidence": "client.go doc comment: 'the drop-in replacement for the argv-shelling cloud.HcloudProvider'; wraps github.com/hetznercloud/hcloud-go/v2 instead of exec'ing `hcloud`; provider.go and dns.go each carry compile-time assertions (_ cloud.CloudProvider = (*APIProvider)(nil), _ cloud.DNSProvider = (*DNS)(nil)) proving they are behavior-identical swap-ins."
+    },
+    {
+      "title": "Guarantee the native provider is a true drop-in for the argv provider: identical label keys, identical idempotence/error tolerances, identical SSH-key resolution order, so callers can swap providers with zero behavior change",
+      "scale": "invariant",
+      "evidence": "provider.go: same cloud.ManagedLabelKey stamped at create; resolveSSHKey mirrors argv provider's order (BARKPARK_SSH_KEY, else exactly-one account key, else clear error); Delete/DeleteRecord are explicitly idempotent (absent server/rrset = no-op, matching CloudDNS's 'not found' swallow); toCloudServers mirrors argv's Labels-nil-unless-ListByLabel contract."
+    },
+    {
+      "title": "Never leak a billed orphan server when a Create partially succeeds",
+      "scale": "invariant",
+      "evidence": "provider.go cleanupFailedCreate: on action-wait or IP-read-back failure after the server exists, best-effort delete on a FRESH bounded context (cleanupTimeout = 2*time.Minute) so the original ctx cancellation can't block cleanup; failure to delete is appended to the surfaced error, never silently swallowed."
+    },
+    {
+      "title": "Zero-new-setup credential resolution: reuse whatever Hetzner auth the operator already has, in a documented priority ladder",
+      "scale": "feature",
+      "evidence": "client.go ResolveToken: --token flag (caller-side) > HCLOUD_TOKEN env > active `hcloud context` from cli.toml via TokenFromCLIContext; hcloud_context.go implements a deliberate dependency-free TOML subset parser tolerant of unknown keys, reading ~/.config/hcloud/cli.toml (or HCLOUD_CONFIG override) so users of the official hcloud CLI authenticate with zero setup."
+    },
+    {
+      "title": "Fold DNS management onto Hetzner's integrated Cloud DNS zone/rrset API, unifying compute and DNS behind one native SDK path",
+      "scale": "feature",
+      "evidence": "dns.go: DNS implements cloud.DNSProvider over hcloud-go v2's zone/rrset resources (UpsertRecord/DeleteRecord/Resolve), same semantics as cloud.CloudDNS (apex='@', A records, idempotent delete, sorted Resolve results); doc comment frames it as 'the SDK path the native provider family will unify on'."
+    },
+    {
+      "title": "Provide a robust S3-compatible Object Storage client for backups/exports — handling Hetzner-specific SigV4 quirks and objects past the single-PUT ceiling",
+      "scale": "feature",
+      "evidence": "objstore/client.go: NewClient sets RequestChecksumCalculationWhenRequired/ResponseChecksumValidationWhenRequired to avoid aws-chunked framing Hetzner chokes on, uses VIRTUAL-HOSTED addressing (UsePathStyle=false), signs with location-as-region; PutLarge streams via 64MiB multipart parts with abort-on-failure to avoid orphaned multipart uploads and a zero-byte-body special case; PresignGetObject hands time-limited GET URLs to browsers/customers without sharing account credentials."
+    },
+    {
+      "title": "Keep the whole hetzner package fully test-doubled — no test ever dials a real network",
+      "scale": "invariant",
+      "evidence": "Every constructor (hetzner.NewClient, objstore.NewClient) exposes WithEndpoint/WithHTTPClient options explicitly documented as test seams pointing at httptest fakes or request-recording transports; hetzner.Client also exposes WithPollBackoff so action-wait tests against a fake action complete instantly instead of using the SDK's real exponential backoff."
+    }
+  ]
+}

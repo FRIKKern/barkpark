@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark_web/channels",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/channels/pulse_channel.ex",
+      "role": "",
+      "importance": 41
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/pulse_socket.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/quiz_channel.ex",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/quiz_socket.ex",
+      "role": "",
+      "importance": 54
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/search_channel.ex",
+      "role": "WebSocket channel for per-keystroke live search",
+      "importance": 41
+    },
+    {
+      "path": "api/lib/barkpark_web/channels/user_socket.ex",
+      "role": "Phoenix WebSocket auth gate for SearchChannel",
+      "importance": 26
+    }
+  ]
+}

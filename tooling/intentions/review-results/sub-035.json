@@ -1,1 +1,40 @@
-{"subsystem":"api/lib/barkpark/plugins/onixedit/bokbasen","summary":"Async pipeline that submits book metadata to Bokbasen's national distribution registry via ONIX 3.0 XML over their metadata-import API. Covers OAuth2 token caching, HTTP stage/poll/cancel lifecycle, durable Oban-based state machine, and per-document export-status tracking.","intentions":[{"title":"Publish book metadata to Norwegian national distribution (Bokbasen)","scale":"epic","evidence":"publish_worker.ex drives a :pending→:staging→:staged→:polling→:accepted state machine; client.ex POSTs ONIX XML to /metadata/import/onix/v2 and polls for acceptance; the entire subsystem exists to get a publisher's book record into the Norwegian Bokbasen registry"},{"title":"Idempotent async publication with Oban snooze/retry","scale":"epic","evidence":"publish_worker.ex uses unique: [keys: [:document_id], period: 60] to deduplicate re-enqueues, {:snooze, secs} between stage and poll, and submission_id presence to skip re-staging on retry — no duplicate submissions even under crash/retry"},{"title":"Durable, observable per-document export status","scale":"epic","evidence":"status.ex maintains a normalized composite bp_export_status map on the document, with backwards-compat read across three historical storage shapes; write/2 broadcasts {:bokbasen_status_update, …} on PubSub so Studio LiveViews refresh in real time; ExternalSync.broadcast emits a plugin-agnostic topic too"},{"title":"Resilient HTTP client with typed error discrimination","scale":"small","evidence":"client.ex maps 401/403→AuthError, 422→SchemaRejectionError, 429→RateLimitError, 5xx→retried HTTPError, transport failures→NetworkError; publish_worker.ex pattern-matches each struct to decide snooze vs cancel vs retry — no string parsing"},{"title":"Secure credential handling with redaction in logs","scale":"small","evidence":"settings.ex resolves credentials env-first then encrypted DB row; errors.ex implements custom Inspect for all five error structs, scrubbing authorization headers and access_token/client_secret/client_id JSON keys before any inspect/Logger call"},{"title":"Multi-tenant scope isolation for async jobs","scale":"small","evidence":"publish_worker.ex put_scope_args/2 and scope_opts_from_args/1 round-trip workspace_id/project_id through Oban string-keyed args so the worker re-reads the correct tenant's document even after a crash and re-execution"},{"title":"Rate-limit and retry budget enforcement","scale":"small","evidence":"client.ex applies a configurable per-request floor sleep (BOKBASEN_RATE_LIMIT_MS), respects Retry-After on 429 up to a 5-second budget, auto-retries 5xx up to max_retries; publish_worker.ex enforces a separate @max_effective_attempts cap and snoozed backoff"}]}
+{
+  "subsystem": "tooling/doc-truth",
+  "intentions": [
+    {
+      "title": "Make documentation citations self-verifying against ground truth (paths, symbols, routes, linerefs, commands) instead of trusting hand-maintained prose",
+      "scale": "epic",
+      "evidence": "verify-docs.mjs extracts TYPED CLAIMS from markdown backtick spans and code doc-comments, then verifies each against the on-disk tree, symbol-graph (symbols.json), and router.ex; turns 'the one-time 22-agent doc audit into a repeatable tool' (file header)."
+    },
+    {
+      "title": "Never cry wolf: every candidate false/stale citation must survive an independent RE-VERIFY GATE before becoming a finding, with low-confidence leads routed to a human-review queue instead of auto-flagged",
+      "scale": "invariant",
+      "evidence": "verify-docs.mjs `reverify()` re-runs path/lineref checks independently before emission; header cites the js-tests.yml false-flag regression the gate was built to prevent; acceptance-code-comments.mjs asserts a clean control file emits ZERO findings ('NEVER CRY WOLF' check b)."
+    },
+    {
+      "title": "Extend citation truth-checking from markdown docs into code doc-comments (@moduledoc/@doc, //, /** */), since 27 of 29 known citation-truth defects lived in comment prose the markdown-only extractor never read",
+      "scale": "feature",
+      "evidence": "verify-docs.mjs extractCommentSpans/extractCommentClaims + langFor(elixir/go/ts); acceptance-code-comments.mjs proves fail-before on 29 frozen defects, pass-after on the fixed live tree, and catches planted stale linerefs/dead-tech assertions."
+    },
+    {
+      "title": "Catch prose that still asserts a gutted/retired dependency is live (e.g. claiming the graph pane 'uses Cytoscape' after it was replaced by a Canvas2D renderer, or citing the retired bin/bd-shim as an existing binary)",
+      "scale": "feature",
+      "evidence": "retired-terms.mjs is a context-aware denylist distinguishing live-use assertions from negated/historical mentions via NEG_BROAD/NEG_DEATH windows and doc-truth-allow pragmas; scanCorpus() enforces a never-worse gate over the live tree."
+    },
+    {
+      "title": "Guard against hand-maintained documentation enumerations (CLI HANDBOOK, cheatsheet, SDK README) silently falling behind the manifest-driven command/method surface as features ship",
+      "scale": "invariant",
+      "evidence": "surface-parity.mjs cross-checks capabilities.ex ops against docs/cli/HANDBOOK.md + bp.md cheatsheet, and @barkpark/core's BarkparkClient interface + VALID_OPS filter operators against the package README; cites PRs #363/#364/#367 as the recurring drift class this automates."
+    },
+    {
+      "title": "Keep live-computed metrics (Cody quality-report scores, critic count, overall grade) from silently rotting in README prose after every recompute",
+      "scale": "feature",
+      "evidence": "metric-currency.mjs diffs the README '## Codebase grade' section against quality-report.json (per-critic scores, N/100 overall, N-critic count claim) and offers `--fix` to regenerate the table from the live report rather than hand-edit it."
+    },
+    {
+      "title": "Build a capstone pipeline (P1-P5: verify-docs → waterfall → highways → priority → remake) so a doc restructure can be gated on 'loses no verifiable fact, no outbound link, no reachable heading' rather than reviewed by eyeball",
+      "scale": "epic",
+      "evidence": "remake.mjs composes extractClaims/factKeyForClaim/runHighways into a CLAIM DIFF + LINK CHECK + STRUCTURE gate that auto-applies prose-only remakes and routes destructive merges/splits to human review; waterfall.mjs (P2) detects duplicate facts via Jaccard similarity over verifiable claim anchors, never prose similarity."
+    }
+  ]
+}

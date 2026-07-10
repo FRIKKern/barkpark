@@ -1,0 +1,26 @@
+{
+  "subsystem": "api/lib/barkpark/sharing",
+  "count": 4,
+  "files": [
+    {
+      "path": "api/lib/barkpark/sharing/links.ex",
+      "role": "item share link context (create/resolve/revoke)",
+      "importance": 57
+    },
+    {
+      "path": "api/lib/barkpark/sharing/share_link.ex",
+      "role": "Ecto schema for share links",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/sharing/sharing.ex",
+      "role": "",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark/sharing/stored_share.ex",
+      "role": "Ecto schema for persisted share grants",
+      "importance": 26
+    }
+  ]
+}

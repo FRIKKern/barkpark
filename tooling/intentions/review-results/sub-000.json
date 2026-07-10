@@ -1,51 +1,50 @@
 {
-  "subsystem": "api/lib/barkpark",
-  "summary": "The core Elixir business-logic layer of the Barkpark CMS: document/schema CRUD with draft-publish lifecycle, multi-tenant isolation, plugin extensibility, webhooks, tasks, sheets, auth, and sharing. It is the single source of truth all other surfaces (Studio, API controllers, CLI, plugins) delegate to.",
+  "subsystem": "internal/cli",
   "intentions": [
     {
-      "title": "Provide a clean, extensible plugin highway that keeps the core always bootable",
-      "scale": "epic",
-      "evidence": "plugin.ex defines a strict behaviour contract (schemas+logic only, never UI) with compile-time-only discovery and a fresh-install invariant enforced by a boot test. schema_bootstrap.ex auto-registers plugin schemas on every boot. The forbidden-surfaces list in plugin.ex and tenancy scoping in content.ex prevent plugins from bypassing the host lifecycle."
+      "title": "Drive the entire bp CLI command tree from the /v1/capabilities manifest, so a new plugin noun/verb appears with zero CLI code change",
+      "scale": "invariant",
+      "evidence": "cli.go doc comment: 'Nothing in this package hardcodes a noun, verb, or route... dispatch fills the per-command http.path_template via manifest.BuildURL'; load.go's loadManifest resolves the manifest via --manifest/$BARKPARK_MANIFEST/ETag-cached GET /v1/capabilities; run.go's buildManifestRequest pipeline (splitArgs→bindArgs→BuildURL→applyQuery→buildBody→authHeaders) is fully manifest-generic."
     },
     {
-      "title": "Enforce hard multi-tenant isolation at the data layer",
-      "scale": "epic",
-      "evidence": "tenancy.ex, webhooks.ex, sharing.ex, and content.ex all scope every query to (workspace_id, project_id, dataset_id). Webhooks scope is enforced in WHERE clauses so cross-tenant id-guessing returns :not_found. sharing.ex is default-OFF and default-DENY — active only when an exact (ws/project/dataset) triple is configured."
+      "title": "Give the TUI and the headless MCP server the exact same request-build/send pipeline as the interactive CLI, so no surface can drift in what a command actually does",
+      "scale": "invariant",
+      "evidence": "run.go separates buildManifestRequest/sendManifestRequest/execManifestCommand (headless, no rendering) from runCommand (adds --dry-run, prod write-guard, --all pagination, rendering); mcp_serve.go: 'runMCPServe... reuses the CLI's manifest-driven request machinery... so the tools can never drift from what `bp task …` does.'"
     },
     {
-      "title": "Implement a Sanity-compatible draft/publish document lifecycle",
-      "scale": "epic",
-      "evidence": "content.ex leads with a detailed @moduledoc on the drafts. prefix convention, three perspectives (:published, :drafts, :raw), and the publish/unpublish/discard_draft operations. tasks.ex adds a separate lifecycle_status axis on task documents to avoid polluting the Sanity status axis."
+      "title": "Guarantee stable, documented exit codes (0-8) mapped from the server's canonical error envelope, never re-derived from HTTP status, so scripts/agents can branch reliably on failure class",
+      "scale": "invariant",
+      "evidence": "errors.go: codeExit map and doc comment 'the CLI keys on the envelope's `code` string and NEVER re-derives an exit code from the HTTP status'; exit constants documented against docs/cli/error-exit-table.md; special-cased 'halted' and task-conflict codes (fenced_off, stale_claim, rev_mismatch) mapped to exit 6."
     },
     {
-      "title": "Ship a task substrate that lets agent orchestrators claim and close work atomically",
-      "scale": "epic",
-      "evidence": "tasks.ex stores tasks as documents with a content.lifecycle_status field and CAS claim epochs; tasks/ttl_sweeper.ex reaps stale agent claims; tasks/compactor.ex compacts the storage; tasks/edge.ex tracks dependency DAG edges. The whole system is what bp task claim/close/ready/next rides on."
+      "title": "Make bp a full native control plane for Hetzner Cloud (servers, networking, storage, backups) without requiring the hcloud binary",
+      "scale": "feature",
+      "evidence": "hetzner_cmd.go header comment describing the full command tree (server/ssh-key/volume/network/firewall/load-balancer/dns/storage/backup); hetzner_dns_cmd.go, hetzner_lb_cmd.go, hetzner_net_cmd.go, hetzner_storage_cmd.go, hetzner_backup_cmd.go, hetzner_resources_cmd.go as sibling verb files; token resolution via --token/HCLOUD_TOKEN/hcloud context; every mutating verb waits Action.WaitFor to completion."
     },
     {
-      "title": "Deliver reliable webhook fan-out with HMAC signing, retry, and idempotency",
-      "scale": "small",
-      "evidence": "webhooks/dispatcher.ex signs payloads and retries delivery; webhooks/webhook.ex rotates secrets; webhooks/delivery.ex records each attempt. idempotency.ex deduplicates mutation writes by key so retried clients don't double-apply."
+      "title": "Let bp be the CLI onramp into Barkpark Cloud: authenticate, provision, and manage a fleet of hosted Barkparks from one binary",
+      "scale": "feature",
+      "evidence": "cloud12_cmd.go: bp login/signup/logout, bp barkparks (authoritative fleet from registry), bp provider add, bp launch, bp go-live, all via internal/cloudclient; cloud_instance_*.go (archive/lifecycle/resurrect/top), cloud_status_cmd.go, cloud_usage.go, cloud_webhook_cmd.go, cloud_members.go, cloud_domain_cmd.go round out fleet lifecycle management."
     },
     {
-      "title": "Expose fine-grained, revocable API token auth with time-bounded sharing grants",
-      "scale": "small",
-      "evidence": "auth.ex verifies tokens with revocation + expiry enforced in SQL (never post-filter, to prevent existence leaks). preview_token.ex issues short-lived HS256 JWTs for preview routes. auth.ex models share-edit tokens with a 7-day default TTL and hard 1-year cap, restricted to (docs, media) surfaces only."
+      "title": "Prove a Barkpark deployment is actually healthy end-to-end via one command (bp doctor), including auth, TLS, websocket, and Postgres reachability",
+      "scale": "feature",
+      "evidence": "doctor_cmd.go: 'runs the 7-check health gate... covering the full readiness battery (the websocket-not-403 footgun, TLS, Postgres-via-API)'; honest not-ready reporting for unimplemented stub probes rather than fake green; opt-in cloud-sites probe when a Cloud token is present."
     },
     {
-      "title": "Embed a collaborative spreadsheet engine inside the CMS document model",
-      "scale": "small",
-      "evidence": "sheets.ex, sheets/engine.ex (formula subset with cycle detection), sheets/session.ex (per-sheet GenServer with debounced persist and op batching up to 1000/call), sheets/structure.ex (ref-shift on row/col inserts). Sheets live as type:sheet documents, plugged into the same draft-publish and PubSub pipeline."
+      "title": "Turn agentic coding sessions (cmux panes, Claude Code hooks) into first-class Barkpark task-queue workers that claim, renew, and close tasks automatically",
+      "scale": "feature",
+      "evidence": "cmux_cmd.go/cmux_hook.go/cmux_dispatch.go/cmux_install.go: 'a cmux pane that IS a Barkpark worker — claim its task on SessionStart, renew the lease while working, close on proven acceptance'; hook path is fail-safe (always exits 0, 'a hook must never break the agent'); tasks_frontier_cmd.go computes the maximal parallel-safe task set client-side from the same taskboard.Frontier model the TUI uses."
     },
     {
-      "title": "Support content-graph edges between documents as a first-class primitive",
-      "scale": "small",
-      "evidence": "content.ex imports Content.Edge; tasks/edge.ex is the Ecto schema for task dependency edges. The graph-edge goal dogfoods Barkpark's own content graph, treating edges as the dual of the Indx retriever seam."
+      "title": "Expose Barkpark Tasks (and optionally the full manifest) as MCP tools over stdio for any MCP-native client (Cursor, Claude Desktop, etc.)",
+      "scale": "feature",
+      "evidence": "mcp_serve.go: 'bp mcp serve' stdio JSON-RPC server; fail-fast manifest load ('a ready server on the pipe... must die immediately'); strict invariant that tool handlers write nothing to stdout to avoid corrupting the protocol stream; mcp_bridge.go/mcp_resources.go/mcp_tasks.go implement the tool surface."
     },
     {
-      "title": "Keep the system observable and operationally safe in production",
-      "scale": "small",
-      "evidence": "application.ex wires the OTP supervision tree; telemetry/handlers.ex attaches Oban and plugin telemetry; rate_limiter.ex provides ETS token-bucket rate limiting; vault.ex + encrypted_map.ex encrypt sensitive fields at rest; release.ex runs migrations without the app running; workers/smoke.ex provides an Oban smoke-test worker."
+      "title": "Uphold a stable, self-describing usage/help and output-format contract (table/JSON/YAML/minimal) across every command so scripting and human use share one CLI",
+      "scale": "invariant",
+      "evidence": "output.go 'CLI output renderer (table/JSON/YAML/minimal)', table.go 'CLI table renderer for API payloads', usage.go 'CLI usage/help text renderer', globals.go 'CLI global flags parser' — all generic, cmd-shape-agnostic renderers consumed uniformly by manifest and built-in commands alike."
     }
   ]
 }

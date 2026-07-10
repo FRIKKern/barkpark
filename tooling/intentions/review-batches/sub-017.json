@@ -1,90 +1,126 @@
 {
-  "subsystem": "web/components",
-  "count": 14,
+  "subsystem": "api/lib/barkpark/tasks",
+  "count": 24,
   "files": [
     {
-      "path": "web/components/finder.tsx",
-      "role": "Next.js full-text search + faceted finder UI",
-      "importance": 38,
-      "usefulness": 26
+      "path": "api/lib/barkpark/tasks/board.ex",
+      "role": "",
+      "importance": 43
     },
     {
-      "path": "web/components/graph-view.tsx",
-      "role": "Next.js graph canvas React component",
-      "importance": 29,
-      "usefulness": 23
+      "path": "api/lib/barkpark/tasks/claim.ex",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "web/components/portable-doc.tsx",
-      "role": "portable-doc block renderer",
-      "importance": 27,
-      "usefulness": 24
+      "path": "api/lib/barkpark/tasks/close.ex",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "web/components/document-detail.tsx",
-      "role": "document detail pane server component",
-      "importance": 25,
-      "usefulness": 21
+      "path": "api/lib/barkpark/tasks/compactor.ex",
+      "role": "Oban worker for task document storage compaction",
+      "importance": 39
     },
     {
-      "path": "web/components/live-bridge.tsx",
-      "role": "Live content subscription bridge",
-      "importance": 23,
-      "usefulness": 17
+      "path": "api/lib/barkpark/tasks/criteria.ex",
+      "role": "",
+      "importance": 45
     },
     {
-      "path": "web/components/document-nav.tsx",
-      "role": "keyboard navigation layer for document pane",
-      "importance": 20,
-      "usefulness": 18
+      "path": "api/lib/barkpark/tasks/dedup.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "web/components/sheet-grid.tsx",
-      "role": "spreadsheet grid renderer component",
-      "importance": 20,
-      "usefulness": 18
+      "path": "api/lib/barkpark/tasks/edge.ex",
+      "role": "Ecto schema for task dependency edges",
+      "importance": 53
     },
     {
-      "path": "web/components/graph-landing.tsx",
-      "role": "Obsidian-style graph landing component",
-      "importance": 23,
-      "usefulness": 14
+      "path": "api/lib/barkpark/tasks/edges.ex",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "web/components/post-article.tsx",
-      "role": "shared post detail view component",
-      "importance": 21,
-      "usefulness": 15
+      "path": "api/lib/barkpark/tasks/expectations.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "web/components/workspace-project-switcher.tsx",
-      "role": "workspace/project scope switcher UI",
-      "importance": 22,
-      "usefulness": 14
+      "path": "api/lib/barkpark/tasks/fence.ex",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "web/components/detail-chrome.tsx",
-      "role": "detail pane sticky header",
-      "importance": 17,
-      "usefulness": 17
+      "path": "api/lib/barkpark/tasks/internal.ex",
+      "role": "",
+      "importance": 63
     },
     {
-      "path": "web/components/posts-list.tsx",
-      "role": "posts list UI component",
-      "importance": 19,
-      "usefulness": 12
+      "path": "api/lib/barkpark/tasks/judge.ex",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "web/components/meta-card.tsx",
-      "role": "document metadata display component",
-      "importance": 14,
-      "usefulness": 11
+      "path": "api/lib/barkpark/tasks/move.ex",
+      "role": "",
+      "importance": 35
     },
     {
-      "path": "web/components/bench.tsx",
-      "role": "Search engine benchmarking UI component",
-      "importance": 12,
-      "usefulness": 11
+      "path": "api/lib/barkpark/tasks/mutations.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/tasks/prime.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/tasks/query.ex",
+      "role": "",
+      "importance": 53
+    },
+    {
+      "path": "api/lib/barkpark/tasks/queue.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/tasks/rail.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/tasks/release.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/tasks/schema.ex",
+      "role": "",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/tasks/similarity.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/tasks/ttl_sweeper.ex",
+      "role": "crashed-agent claim reaper (Oban worker)",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/tasks/validation.ex",
+      "role": "",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark/tasks/work_digest.ex",
+      "role": "",
+      "importance": 37
     }
   ]
 }

@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/content/validation",
+  "intentions": [
+    {
+      "title": "Support cross-field validation rules declared as inert JSON data, never as evaluated code",
+      "scale": "invariant",
+      "evidence": "rule.ex moduledoc cites locked Decision D7 ('.doey/plans/masterplan-20260425-085425.md'): 'There is NO Code.eval_*, no Code.string_to_quoted + eval, no macro evaluation.' Rules.compile/1 turns JSON like {\"when\":{\"path\":\"/format\",\"op\":\"eq\",\"value\":\"epub\"},\"then\":{\"path\":\"/isbn\",\"op\":\"nonempty\"}} into a plain %Rule{} struct; Evaluator/Ops interpret it recursively rather than executing generated code."
+    },
+    {
+      "title": "Let a schema author express when/then business rules (e.g. 'ISBN required for epub format') without writing Elixir",
+      "scale": "feature",
+      "evidence": "Rules.compile/1 documented example maps a JSON rule (name/severity/message/tags/when/then) into a compiled Rule; docs/contracts/schema-v2.md is cited as the declared shape; Evaluator.run/3 applies a schema's compiled rules to a document and returns bucketed errors/warnings/infos with concrete paths and messages."
+    },
+    {
+      "title": "Evaluate validation rules over nested/array content via JSON-Pointer paths with wildcard fan-out",
+      "scale": "feature",
+      "evidence": "Path.resolve/2 supports RFC6901-style paths ('/foo', '/foo/0', '/foo/*', '/items/*/tags/*'), decodes ~0/~1 escapes, and expands `*` into one {concrete_path, value} tuple per array element so a rule like 'every item needs a tag' can be expressed once and checked against every element, substituting integer indices back into violation paths."
+    },
+    {
+      "title": "Scope rule execution by pipeline stage (live edit vs mutate vs export) so expensive or intrusive rules don't run everywhere",
+      "scale": "feature",
+      "evidence": "Rule.tags is a MapSet of :live/:mutate/:export; Evaluator.run/3 takes a `tag` argument and applies_to_tag?/2 filters rules with a non-empty tag set to only fire for the matching stage — an empty tag set means 'run always'."
+    },
+    {
+      "title": "Keep the compiled-rule cache correct and fast under a tenant-scoped, low-write-rate schema store",
+      "scale": "invariant",
+      "evidence": "Rules is a GenServer holding schema_id -> [Rule.t()] in a plain map (ETS explicitly rejected 'to guarantee consistent ordering with future PubSub-driven invalidation'); put/invalidate/clear/reload_all funnel all mutation through one process while for_schema/1 stays a single GenServer.call on the hot path, sized for '~tens of schemas × tens of rules' with '100+ rule evaluations per pass' being negligible against call overhead."
+    },
+    {
+      "title": "Make individual rule/checker failures fail closed (rule doesn't fire) rather than crashing document validation",
+      "scale": "invariant",
+      "evidence": "Ops.eval/3 catch-all returns false for unknown ops ('Unknown ops return false rather than raising — invalid rules are inert'); {:matches, name} dispatch wraps the checker call in try/rescue and treats any exception or unknown registry lookup as false; Rules.load_from_db/0 wraps DB/compile failures in rescue blocks returning %{} or []."
+    },
+    {
+      "title": "Provide an extensible custom-checker plugin point (matches:<name>) so schema-specific validators (e.g. codelist_ref, ISBN format) can be added without touching the evaluator",
+      "scale": "feature",
+      "evidence": "Ops.eval({:matches, name}, lhs, args) defers to Barkpark.Validation.Registry.find/1 and calls mod.check(lhs, args); Evaluator moduledoc documents the WI3 handshake: 'registers a codelist_ref checker into Registry... op: \"matches:codelist_ref\"... No change to this evaluator is required,' establishing checkers as the sanctioned extension seam."
+    }
+  ]
+}

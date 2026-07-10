@@ -1,72 +1,111 @@
 {
-  "subsystem": "js/packages",
-  "count": 11,
+  "subsystem": "cmd/barkpark",
+  "count": 21,
   "files": [
     {
-      "path": "js/packages/react/tsup.config.ts",
-      "role": "React SDK build config",
-      "importance": 25,
-      "usefulness": 8
+      "path": "cmd/barkpark/bulk.go",
+      "role": "",
+      "importance": 23
     },
     {
-      "path": "js/packages/groq/src/index.ts",
-      "role": "deferred GROQ package stub",
-      "importance": 21,
-      "usefulness": 3
+      "path": "cmd/barkpark/diff.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "js/packages/nextjs-query/src/index.ts",
-      "role": "deferred nextjs-query package stub",
-      "importance": 21,
-      "usefulness": 3
+      "path": "cmd/barkpark/help.go",
+      "role": "",
+      "importance": 29
     },
     {
-      "path": "js/packages/create-barkpark-app/tsup.config.ts",
-      "role": "CLI build config for create-barkpark-app",
-      "importance": 18,
-      "usefulness": 3
+      "path": "cmd/barkpark/history.go",
+      "role": "",
+      "importance": 27
     },
     {
-      "path": "js/packages/codegen/tsup.config.ts",
-      "role": "Codegen package build config",
-      "importance": 10,
-      "usefulness": 3
+      "path": "cmd/barkpark/main.go",
+      "role": "",
+      "importance": 45
     },
     {
-      "path": "js/packages/codegen/vitest.config.ts",
-      "role": "Codegen test runner config",
-      "importance": 6,
-      "usefulness": 2
+      "path": "cmd/barkpark/objtable.go",
+      "role": "",
+      "importance": 23
     },
     {
-      "path": "js/packages/groq/tsup.config.ts",
-      "role": "groq package build config",
-      "importance": 5,
-      "usefulness": 2
+      "path": "cmd/barkpark/paper.go",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "js/packages/nextjs-query/tsup.config.ts",
-      "role": "nextjs-query package build config",
-      "importance": 5,
-      "usefulness": 2
+      "path": "cmd/barkpark/refpicker.go",
+      "role": "",
+      "importance": 25
     },
     {
-      "path": "js/packages/react/vitest.config.ts",
-      "role": "react package test config",
-      "importance": 3,
-      "usefulness": 3
+      "path": "cmd/barkpark/schema.go",
+      "role": "",
+      "importance": 29
     },
     {
-      "path": "js/packages/groq/vitest.config.ts",
-      "role": "groq package test config",
-      "importance": 3,
-      "usefulness": 2
+      "path": "cmd/barkpark/search.go",
+      "role": "",
+      "importance": 29
     },
     {
-      "path": "js/packages/nextjs-query/vitest.config.ts",
-      "role": "nextjs-query package test config",
-      "importance": 3,
-      "usefulness": 2
+      "path": "cmd/barkpark/selector.go",
+      "role": "",
+      "importance": 29
+    },
+    {
+      "path": "cmd/barkpark/store.go",
+      "role": "",
+      "importance": 25
+    },
+    {
+      "path": "cmd/barkpark/structure.go",
+      "role": "",
+      "importance": 29
+    },
+    {
+      "path": "cmd/barkpark/styles.go",
+      "role": "",
+      "importance": 29
+    },
+    {
+      "path": "cmd/barkpark/tui-fields.go",
+      "role": "",
+      "importance": 28
+    },
+    {
+      "path": "cmd/barkpark/tui-mutations.go",
+      "role": "",
+      "importance": 29
+    },
+    {
+      "path": "cmd/barkpark/tui-pane-nav.go",
+      "role": "",
+      "importance": 23
+    },
+    {
+      "path": "cmd/barkpark/tui-render.go",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "cmd/barkpark/tui-update.go",
+      "role": "",
+      "importance": 29
+    },
+    {
+      "path": "cmd/barkpark/tui-view.go",
+      "role": "",
+      "importance": 28
+    },
+    {
+      "path": "cmd/barkpark/tui.go",
+      "role": "",
+      "importance": 31
     }
   ]
 }

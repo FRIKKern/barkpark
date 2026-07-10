@@ -1,0 +1,35 @@
+{
+  "subsystem": "tooling/blast-radius",
+  "intentions": [
+    {
+      "title": "Give every push a milliseconds-fast blast-radius readout without ever shelling out to a compiler at push time",
+      "scale": "feature",
+      "evidence": "check.mjs explicitly never invokes go/mix/tsc — it only reads the pre-built index.json reverse-dependency graph and diffs git; build-index.mjs is the deliberately-separated 'SLOW, out-of-band half' that does the expensive `go list -deps -json`, `mix xref graph`, and package.json walk."
+    },
+    {
+      "title": "Catch cross-language seam breakage (HTTP API v1, plugin contracts, etc.) that no single-language dependency graph can see",
+      "scale": "invariant",
+      "evidence": "check.mjs's `cfg.seam.surfaces` loop matches changed files against seam globs and reports consumers/guards on the other side regardless of index presence — comment: 'seam (needs NO index; highest value)'; dossier.mjs builds a full symbol-delta + consumer-slice + guard-slice payload specifically for these seam edges."
+    },
+    {
+      "title": "Keep the Elixir dependency layer reliable across fresh clones and CI instead of silently vanishing when api/_build is absent",
+      "scale": "invariant",
+      "evidence": "build-index.mjs buildElixir() comment: 'without _build the old code SILENTLY skipped → the densest dependency layer (286 files) vanished on every fresh clone and in CI' — now it warms via `mix compile` once, with a content-hash cache (elixirSig) keyed on tracked+dirty .ex/.exs files so mix xref only reruns when Elixir actually changed."
+    },
+    {
+      "title": "Bridge the mechanical blast-radius signal to an LLM judgment layer at zero exploration cost",
+      "scale": "feature",
+      "evidence": "dossier.mjs assembles self-contained dossiers (diff hunks of the changed side + consumer code slices + guard file contents + a verdictSchema with breaking/confidence/evidence/suggested_fix/new_dynamic_edges) so 'an agent can judge the edge with NO exploration tool calls'; MAX_FILES_PER_CONSUMER guards against a loose glob exploding a dossier."
+    },
+    {
+      "title": "Never re-spend judgment tokens on an edge whose content hasn't changed",
+      "scale": "invariant",
+      "evidence": "dossier.mjs computes a sha256 contentHash over changedSlices+consumerSlices+guardSlices, looks it up in verdict-cache.json, and marks the dossier `skip` with the cached verdict when unchanged; `record` and `cache` subcommands let the agent layer persist verdicts back into that cache."
+    },
+    {
+      "title": "Make the safety net installable per-developer without touching shared git hook config",
+      "scale": "invariant",
+      "evidence": "install-hook.sh copies tooling/blast-radius/pre-push into .git/hooks/pre-push, refuses to clobber a pre-existing non-blast-radius hook, and is explicitly 'additive, local-only, reversible — does not touch core.hooksPath or any existing pre-commit hook'."
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/content/papers",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark/content/papers/backfill_block_ids.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/content/papers/block_ops.ex",
+      "role": "",
+      "importance": 62
+    },
+    {
+      "path": "api/lib/barkpark/content/papers/doctrine_backfill.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/content/papers/proposals.ex",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "api/lib/barkpark/content/papers/template.ex",
+      "role": "",
+      "importance": 61
+    },
+    {
+      "path": "api/lib/barkpark/content/papers/value_writeback.ex",
+      "role": "",
+      "importance": 35
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "subsystem": "sdk/src",
+  "intentions": [
+    {
+      "title": "Give external authors a typed, ergonomic TypeScript SDK to construct PortableDoc papers without hand-writing JSON",
+      "scale": "epic",
+      "evidence": "sdk/src/blocks.ts defines a full Block union (heading, paragraph, ingress, pullquote, eyebrow, byline, list, callout, action, code, diagram, asciicast, image, table, divider, section) with one constructor function per type; sdk/src/paper.ts's Paper builder collects blocks and serializes the exact publish body the ingest endpoint accepts; sdk/src/index.ts barrels blocks/ops/paper/client into '@barkpark/bulldocs-sdk'."
+    },
+    {
+      "title": "Keep the SDK's block/op field names byte-identical to the Elixir renderer and patch engine so authored JSON never silently mismatches the server contract",
+      "scale": "invariant",
+      "evidence": "blocks.ts header comment explicitly states field names mirror Barkpark.PortableDoc.Render.compose_block/2 (api/lib/barkpark/portable_doc/render.ex) exactly, calling out non-obvious traps ('code -> value, NOT lang/code'; 'diagram -> source, NOT mermaid'); ops.ts header states keys mirror Barkpark.PortableDoc.Patch and BulldocsIngestController.apply_op/2 exactly, with the 'op' discriminator being a hyphenated string not a camelCase tag."
+    },
+    {
+      "title": "Guarantee deterministic, reproducible block ids across SDK-generated documents (no wall-clock or randomness in output)",
+      "scale": "invariant",
+      "evidence": "blocks.ts implements a monotonic __counter with nextBlockId() minting 'b1','b2',... and resetBlockIds() explicitly documented for test reproducibility, replacing any Date.now()/random-based id scheme; every block constructor calls withId(id) to auto-mint when the author omits one."
+    },
+    {
+      "title": "Support incremental, atomic document editing via a typed patch-op vocabulary (append/insert/patch/replace/remove/move) with optimistic concurrency",
+      "scale": "feature",
+      "evidence": "ops.ts defines Op union + constructors (appendBlock, insertAfter, patchBlock, replaceBlock, removeBlock, moveBlock) matching Barkpark.PortableDoc.Patch; client.ts's submitOps() batches all ops into one POST to /papers/{slug}/ops with an optional ifRev precondition guard that rejects the whole batch atomically on mismatch (precondition_failed)."
+    },
+    {
+      "title": "Provide a minimal, dependency-light HTTP client for Bulldocs ingest that surfaces server errors as typed exceptions",
+      "scale": "feature",
+      "evidence": "client.ts's BulldocsClient wraps publish() and submitOps() over global fetch (injectable for tests), authenticates via Bearer ingestToken against RequireIngestToken-gated routes, and throws a typed BulldocsError carrying code/status/body parsed from the server's {error:{code,message}} shape on non-2xx responses."
+    },
+    {
+      "title": "Model rich inline text (marks, links, wikilinks, blockrefs, tags) as a ProseMirror-like Inline node tree while keeping the common case (plain string) ergonomic",
+      "scale": "feature",
+      "evidence": "blocks.ts defines the Inline union (InlineText, InlineStrong, InlineEm, InlineStrike, InlineUnderline, InlineCode, InlineLink, InlineWikilink, InlineBlockref, InlineTag) accepting bare strings as text leaves per compose_inline/2, plus an inlineContent() coercion helper used by every constructor taking string | Inline[]."
+    }
+  ]
+}

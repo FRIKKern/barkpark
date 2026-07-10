@@ -1,0 +1,26 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/github",
+  "count": 4,
+  "files": [
+    {
+      "path": "cloud/lib/barkpark_cloud/github/client.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/github/fake.ex",
+      "role": "",
+      "importance": 11
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/github/installation.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/github/real.ex",
+      "role": "",
+      "importance": 4
+    }
+  ]
+}

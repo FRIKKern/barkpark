@@ -1,0 +1,35 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/notifications",
+  "intentions": [
+    {
+      "title": "Give Barkpark Cloud a Coolify-parity alert system: per-team email settings with per-event opt-in/opt-out toggles and a first-class, team-scoped delivery log",
+      "scale": "epic",
+      "evidence": "email_settings.ex models the same shape as Coolify's EmailNotificationSettings.php with @events toggle columns (provision_succeeded/failed, deployment_succeeded/failed, agent_reachable/unreachable, subscription_past_due, member_invited, token_expiring); delivery.ex is explicitly 'the observability surface Coolify lacks' with status/attempts/last_error per recipient per event, modeled on Barkpark.Webhooks.Delivery."
+    },
+    {
+      "title": "Extend alerting beyond email into chat egress channels (Discord, Slack, Telegram, Pushover, generic webhook) with one render pass shared across all channel envelopes",
+      "scale": "epic",
+      "evidence": "delivery.ex @channels widened to ~w(email discord slack telegram pushover webhook) 'notifications-chat widened this beyond email'; channel_config.ex embeds per-team channel configs with per-type credential shapes; render.ex builds one {title, body, severity} per event so 'every chat channel shaper wraps the SAME line in its provider envelope' (the 'identical message, different envelope' property); email_settings.ex event_routes maps event => [channel_type, ...]."
+    },
+    {
+      "title": "Never let a misconfigured or unsealed notification channel reach a deliverable state",
+      "scale": "invariant",
+      "evidence": "channel_config.ex validate_enabled_has_credentials/1 blocks an enabled channel from having nil/empty credentials_encrypted at the changeset level ('the dispatcher would select it and then fail to build an envelope'); email_settings.ex validate_event_routes/3 rejects unknown event names or unknown channel types so 'the dispatcher never reads a route pointing at a phantom event/channel'."
+    },
+    {
+      "title": "Secrets (SMTP creds, chat bot tokens, webhook URLs, API keys) are never persisted in plaintext anywhere in the notifications data model",
+      "scale": "invariant",
+      "evidence": "every *_encrypted field across email_settings.ex and channel_config.ex is `redact: true` and holds Base64 of BarkparkCloud.Registry.Vault.encrypt/1 output; moduledocs state the context seals plaintext BEFORE the changeset ever sees it, mirroring Registry.connect_provider/3 and Registry.Provider.encrypted_token."
+    },
+    {
+      "title": "Close the SSRF hole in operator-supplied webhook URLs with DNS-rebinding-safe resolution, going one step beyond Coolify's regex-only SafeWebhookUrl check",
+      "scale": "feature",
+      "evidence": "safe_url.ex resolves the host via :inet.getaddrs/2 over both inet and inet6 families and checks EVERY returned address against private/loopback/link-local/ULA/cloud-metadata ranges (169.254.169.254 explicitly called out), applied at both put_channel validation time and send time as defense in depth; explicitly framed as 'the one improvement over Coolify' which only regexes the string."
+    },
+    {
+      "title": "Keep identity/transactional email (invite, password reset, email verification, email-change code) fully decoupled from team-configurable transport so a team can never lock itself out of onboarding",
+      "scale": "invariant",
+      "evidence": "transactional.ex moduledoc: 'they NEVER consult a team's EmailSettings transport... They always ride the platform BarkparkCloud.Mailer... otherwise a team could lock itself out of onboarding'; every deliver_* function goes straight through Mailer.deliver() bypassing per-team SMTP/API transport selection."
+    }
+  ]
+}

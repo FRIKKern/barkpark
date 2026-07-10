@@ -1,90 +1,136 @@
 {
-  "subsystem": "internal/pdrender",
-  "count": 14,
+  "subsystem": "api/lib/mix/tasks",
+  "count": 26,
   "files": [
     {
-      "path": "internal/pdrender/pdrender.go",
-      "role": "terminal portable-doc renderer core types and registry",
-      "importance": 63,
-      "usefulness": 40
+      "path": "api/lib/mix/tasks/barkpark.codelists.seed.ex",
+      "role": "Mix task — seed ONIX EDItEUR codelist registry",
+      "importance": 4
     },
     {
-      "path": "internal/pdrender/blocks.go",
-      "role": "pdrender core block renderers (heading, paragraph, list, etc.)",
-      "importance": 49,
-      "usefulness": 52
+      "path": "api/lib/mix/tasks/barkpark.edges.backfill.ex",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "internal/pdrender/code.go",
-      "role": "portable-doc code block renderer",
-      "importance": 49,
-      "usefulness": 44
+      "path": "api/lib/mix/tasks/barkpark.gen.plugin.ex",
+      "role": "deprecated plugin scaffold shim",
+      "importance": 11
     },
     {
-      "path": "internal/pdrender/attrs.go",
-      "role": "portable-doc JSON attribute helpers",
-      "importance": 48,
-      "usefulness": 37
+      "path": "api/lib/mix/tasks/barkpark.media.backfill.ex",
+      "role": "Mix task — backfill mediaAsset documents",
+      "importance": 4
     },
     {
-      "path": "internal/pdrender/inline.go",
-      "role": "pdrender inline node renderer",
-      "importance": 47,
-      "usefulness": 37
+      "path": "api/lib/mix/tasks/barkpark.openapi.ex",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "internal/pdrender/theme.go",
-      "role": "pdrender theme/palette definition",
-      "importance": 49,
-      "usefulness": 34
+      "path": "api/lib/mix/tasks/barkpark.paper.backfill_block_ids.ex",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "internal/pdrender/decode.go",
-      "role": "pdrender JSON document decoder",
-      "importance": 47,
-      "usefulness": 32
+      "path": "api/lib/mix/tasks/barkpark.paper.doctrine_backfill.ex",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "internal/pdrender/richblocks.go",
-      "role": "pdrender rich block renderers (table, figure, action, pullquote, ingress, eyebrow, byline)",
-      "importance": 45,
-      "usefulness": 30
+      "path": "api/lib/mix/tasks/barkpark.paper_components.gen_golden_parity.ex",
+      "role": "",
+      "importance": 17
     },
     {
-      "path": "internal/pdrender/sheet.go",
-      "role": "pdrender spreadsheet block renderer",
-      "importance": 42,
-      "usefulness": 23
+      "path": "api/lib/mix/tasks/barkpark.plugin.gen_types.ex",
+      "role": "Mix task to regenerate plugin TypeScript types",
+      "importance": 9
     },
     {
-      "path": "internal/pdrender/fields.go",
-      "role": "pdrender field-* block renderers",
-      "importance": 40,
-      "usefulness": 24
+      "path": "api/lib/mix/tasks/barkpark.plugin.new.ex",
+      "role": "plugin scaffold generator Mix task",
+      "importance": 16
     },
     {
-      "path": "internal/pdrender/v2fields.go",
-      "role": "pdrender schema-v2 field block renderers (composite, arrayOf, codelist, localizedText)",
-      "importance": 40,
-      "usefulness": 21
+      "path": "api/lib/mix/tasks/barkpark.preview.backfill.ex",
+      "role": "",
+      "importance": 11
     },
     {
-      "path": "internal/pdrender/hardblocks.go",
-      "role": "pdrender hard-fallback block renderers (diagram, asciicast, image)",
-      "importance": 40,
-      "usefulness": 20
+      "path": "api/lib/mix/tasks/barkpark.preview.gen_parity.ex",
+      "role": "",
+      "importance": 11
     },
     {
-      "path": "internal/pdrender/form.go",
-      "role": "pdrender form/questionnaire block renderer",
-      "importance": 38,
-      "usefulness": 16
+      "path": "api/lib/mix/tasks/barkpark.rehydrate_body_html.ex",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "internal/pdrender/cmd/demo/main.go",
-      "role": "pdrender standalone demo entrypoint",
-      "importance": 22,
-      "usefulness": 3
+      "path": "api/lib/mix/tasks/barkpark.rotate_public_read.ex",
+      "role": "Mix task for weekly public-read token rotation",
+      "importance": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.sheets.gen_golden_parity.ex",
+      "role": "",
+      "importance": 15
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.sheets.rehydrate_embeds.ex",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "api/lib/mix/tasks/barkpark.workspace.provision_schemas.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/bokbasen.list.ex",
+      "role": "Mix task: list Bokbasen submissions by state",
+      "importance": 13
+    },
+    {
+      "path": "api/lib/mix/tasks/bokbasen.replay.ex",
+      "role": "Bokbasen publish replay operator tool",
+      "importance": 11
+    },
+    {
+      "path": "api/lib/mix/tasks/bokbasen.status.ex",
+      "role": "Mix task: Bokbasen publish status summary or per-book detail",
+      "importance": 13
+    },
+    {
+      "path": "api/lib/mix/tasks/codelists.staleness.ex",
+      "role": "Mix task for ONIX codelist staleness reporting and revalidation",
+      "importance": 9
+    },
+    {
+      "path": "api/lib/mix/tasks/frt.export.ex",
+      "role": "Mix task: FRT dataset export to game-ready JSON",
+      "importance": 1
+    },
+    {
+      "path": "api/lib/mix/tasks/frt.seed.ex",
+      "role": "Mix task: FRT dataset seeder",
+      "importance": 1
+    },
+    {
+      "path": "api/lib/mix/tasks/onix.export_proof.ex",
+      "role": "ONIX proof artifact regeneration task",
+      "importance": 13
+    },
+    {
+      "path": "api/lib/mix/tasks/onix.import.ex",
+      "role": "ONIX XML bulk import CLI",
+      "importance": 14
+    },
+    {
+      "path": "api/lib/mix/tasks/search.eval.ex",
+      "role": "Mix task — golden search evaluation harness",
+      "importance": 4
     }
   ]
 }

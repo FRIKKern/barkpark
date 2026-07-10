@@ -1,0 +1,35 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/github",
+  "intentions": [
+    {
+      "title": "Let a team deploy Barkpark straight into its own GitHub account — install the App, create a repo from a template, push files, wire a push webhook — with zero real GitHub credentials required to build or test the path",
+      "scale": "epic",
+      "evidence": "GitHub.Client behaviour (client.ex) documents the full flow (App-JWT → installation-token exchange → create_repo/push_files/register_webhook/list_repos); GitHub.Real (real.ex) builds real GitHub App API request shapes; GitHub.Fake (fake.ex) is the default in dev/test so the whole context is exercised with no App private key; moduledocs explicitly call this 'gh-2' and 'HUMAN-LAST — the App credentials are a later human gate'."
+    },
+    {
+      "title": "Isolate every GitHub API call behind one behaviour (BarkparkCloud.GitHub.Client) so the control plane context never talks to api.github.com directly",
+      "scale": "invariant",
+      "evidence": "client.ex: 'the BarkparkCloud.GitHub context never talks to api.github.com directly'; concrete client selected from config exactly like Billing.Gateway and :studio_link_http_client — a repeated seam pattern across the codebase."
+    },
+    {
+      "title": "Never let a test (or an unconfigured deploy) make a real network call to GitHub",
+      "scale": "invariant",
+      "evidence": "real.ex: http_client resolved from config; when unset, any callback that would hit the wire returns {:error, :http_client_not_configured} — 'it can NEVER silently call GitHub'; fake.ex is the default client in dev/test, fully in-memory (Process dictionary), no network."
+    },
+    {
+      "title": "Make GitHub App authentication (RS256 App-JWT, installation-token exchange) work with zero new dependencies, using OTP's built-in :public_key",
+      "scale": "feature",
+      "evidence": "real.ex build_app_jwt/3 hand-assembles the compact JWS and signs with :public_key.sign(input, :sha256, rsa_key) — 'exactly PKCS#1-v1.5 RSA-SHA256 = RS256'; comment notes 'no JWT/JOSE library in the tree — and needs none'; pure builder is directly unit-testable against a throwaway key."
+    },
+    {
+      "title": "Encrypt a team's GitHub installation id at rest, never logging or exposing the plaintext handle",
+      "scale": "invariant",
+      "evidence": "installation.ex: installation_id_encrypted field is redact: true and always populated via BarkparkCloud.Registry.Vault.encrypt/1 (AES-256-GCM) before the changeset; moduledoc equates it to 'the same encrypt-at-rest seam' used for Registry.Provider tokens; account_login stays plaintext deliberately as a non-secret display value."
+    },
+    {
+      "title": "Make the fake GitHub client deterministic and self-inspecting so async tests can assert exact outcomes without global state or fixtures",
+      "scale": "feature",
+      "evidence": "fake.ex: ids/tokens/logins are pure functions of input (SHA-256 truncated digest); side effects recorded in the calling process's dictionary (created_repos/pushes/registered_webhooks helpers) — 'async-safe under async: true ... with no global state to reset between tests'; webhook registration is idempotent by (repo, url) to model GitHub's real one-hook-per-url behavior."
+    }
+  ]
+}

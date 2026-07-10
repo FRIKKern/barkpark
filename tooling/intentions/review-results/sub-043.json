@@ -1,1 +1,45 @@
-{"subsystem":"api/lib/barkpark/tenancy","summary":"Defines the hard multi-tenant boundary of Barkpark: Workspace → Project → Dataset hierarchy with slug-based routing, and token-as-principal membership/authorization model that maps API tokens to workspaces via role-based grants.","intentions":[{"title":"Enforce hard workspace tenant isolation","scale":"epic","evidence":"Workspace.ex calls itself 'the hard tenant boundary'; auth.ex authorize/3 gates every controller action on membership + permissions; workspace-scoped PubSub topics in content.ex; safe delete path in Workspace moduledoc walks all child resources before CASCADE"},{"title":"Token-first identity model (no user accounts)","scale":"epic","evidence":"auth.ex @moduledoc: 'the principal is the API TOKEN — there is NO users/accounts model'; Membership schema principal_type defaults to 'api_token' with room for future kinds; authorize/3 accepts ApiToken struct only"},{"title":"Prevent cross-tenant privilege escalation","scale":"epic","evidence":"auth.ex role_for_permissions/1 and create_membership/4 default to 'member' regardless of global token permissions; comments cite bug barkpark-23yi/barkpark-fsko: 'a global-admin token added to workspace B must NOT become admin of B'; workspace_admin?/2 reads the grant row, not global perms"},{"title":"Hierarchical slug-based routing namespace (Workspace → Project → Dataset)","scale":"small","evidence":"Workspace slug unique globally, Project slug unique within workspace, Dataset slug unique within project — mirroring /w/:ws/p/:proj URL structure in router.ex; reserved_slugs list blocks collision with system routes"},{"title":"Additive Dataset entity seam for multi-dataset content isolation","scale":"small","evidence":"Dataset.ex moduledoc 'Wave-2' note: promotes the plain dataset string into a first-class row while keeping the string authoritative for reads; additive only — dataset_id rides alongside until W2 steps flip over; api/CLAUDE.md: scoped reads filter WHERE dataset_id with NO NULL-fallback"},{"title":"Safe cascading workspace deletion with plugin hook propagation","scale":"small","evidence":"Workspace.ex moduledoc documents the canonical delete path: fires Media.delete_file/1, Content.delete_document/1 with plugin hooks before Repo.delete, then Postgres CASCADE; test proves raw Repo.delete leaks orphan blobs and misses hooks"}]}
+{
+  "subsystem": "internal/provisioner",
+  "intentions": [
+    {
+      "title": "Bridge the Elixir control plane to real cloud provisioning via a Go worker that drains a job queue over a poll-based (no Oban, no websocket) claim/succeed/fail protocol",
+      "scale": "epic",
+      "evidence": "worker.go package doc: '/v1/launch + /v1/go-live pay and create a provisioning row but do NOT provision — this worker does'; Worker.RunOnce implements claim → Provision → succeed/fail against /v1/internal/provision-jobs/*; WORKER_TOKEN bearer auth is a separate principal from user/agent tokens."
+    },
+    {
+      "title": "Guarantee a live box is never orphaned from the control plane and never billed silently: every failure path tears down what it created, classifying transient (5xx/timeout, retried ~60s) vs terminal (4xx, stop) control-plane report failures",
+      "scale": "invariant",
+      "evidence": "worker.go RunOnce doc 'THE MONEY EDGE'; succeedWithRetry/failWithRetry/reportWithRetry with reportRetries=5 and is4xx classification; ProvisionWith's Teardown returned non-nil only on success; SweepFunc/SweepOrphans recovers boxes labeled barkpark-orphaned=true."
+    },
+    {
+      "title": "Provide a warm pool of pre-baked, continuously-freshened boxes so a go-live can assign a live instance in ≤15s instead of waiting on a cold Hetzner create, while staying billing-safe at exactly the configured pool size",
+      "scale": "feature",
+      "evidence": "warmpool.go: WarmPoolClient (Claim/ClaimForRetire/ClaimForRefresh/Register/Delete/CountReady) backed by a Postgres FOR UPDATE SKIP LOCKED claim store; tryWarmAssign/launchWarmRefill/ReconcileWarmPoolWith grow-shrink to target size; freshenWarmBox+dwb-17 fail-closed freshen before a box enters the pool; recycleStaleWarmBox rolls the pool onto the newest bake one box at a time."
+    },
+    {
+      "title": "Never declare a provisioned instance 'ready' until the golden path is proven end-to-end — not just healthy but actually loggable-into — closing the #957 class of dead-on-arrival boxes (e.g. truncated SECRET_KEY_BASE)",
+      "scale": "invariant",
+      "evidence": "verify.go: three ordered probes (verify.api, verify.login with sentinel wrong creds expecting <500, verify.studio scoped-redirect walk); runVerifyGate runs after content bootstrap and before ready, tearing the box down on any red probe (same cleanup path as a content failure)."
+    },
+    {
+      "title": "Bootstrap a freshly-provisioned box with real content (workspace, schemas, seed data, tokens) from a catalog template so an owner lands in a working site, not an empty box",
+      "scale": "feature",
+      "evidence": "provision.go DefaultBootstrap resolves catalog.Get(req.Template), runs bootstrap.Run with schema/seed bytes; ConsoleSink/DetailSink tee sub-step narration to the live console + curated captions (dwb-16/dwb-19); a bootstrap failure tears the box down through the same cleanup machinery as any other failure."
+    },
+    {
+      "title": "Extend provisioning to be provider-neutral (Hetzner and Azure) with honest degraded behavior on non-Hetzner kinds (no warm pool, provider-appropriate image resolution) rather than silently misapplying Hetzner assumptions",
+      "scale": "feature",
+      "evidence": "provision.go ProvisionWith 'Provider routing (charter Decision 9)': kind defaults to Hetzner for back-compat, Azure requires envAzureSSHPubKey checked BEFORE any resource is created, forces WarmPoolSize=0/WarmClient=nil off Hetzner, resolves image via cloud.ProviderFor(kind, job.Credentials)."
+    },
+    {
+      "title": "Support cross-provider disaster recovery: rebuild a whole instance from a portable archive bundle onto a fresh box on either provider, preserving its prior identity (KEK carried, never minted) so links and tokens survive",
+      "scale": "feature",
+      "evidence": "restore.go RESURRECT chain (charter S14, Decision 12): RestoreDriver seam (CreateHost/Freshen/InstallSecrets/pg_restore); ResurrectStepOrder mirrors the launch step vocabulary so /new renders it identically; resurrect NEVER warm-assigns (D40); BundleRef/BundleManifest in worker.go carry Store/Key/KEK/Manifest across the worker-token channel."
+    },
+    {
+      "title": "Make graceful shutdown safe for in-flight provisions: give a running job a bounded grace window to finish, then interrupt and release its claim (no consumed attempt) rather than losing or double-running work",
+      "scale": "invariant",
+      "evidence": "worker.go dwb-15 Shutdown/setInflight/clearInflight/releaseWithRetry machinery; DefaultShutdownDeadline=60s; release POST flips claimed→pending via /v1/internal/provision-jobs/:id/release with claim-fence token so a swept-and-re-claimed job's stale worker can't flip a row it lost."
+    }
+  ]
+}

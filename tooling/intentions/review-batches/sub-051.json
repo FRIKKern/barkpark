@@ -1,30 +1,51 @@
 {
-  "subsystem": "api/lib/barkpark/portable_doc",
-  "count": 4,
+  "subsystem": "cloud/lib/barkpark_cloud/workers",
+  "count": 9,
   "files": [
     {
-      "path": "api/lib/barkpark/portable_doc/patch.ex",
-      "role": "PortableDoc block tree patch engine",
-      "importance": 49,
-      "usefulness": 70
+      "path": "cloud/lib/barkpark_cloud/workers/agent_retention_worker.ex",
+      "role": "",
+      "importance": 11
     },
     {
-      "path": "api/lib/barkpark/portable_doc/render.ex",
-      "role": "Pd-tree to HTML renderer",
-      "importance": 50,
-      "usefulness": 61
+      "path": "cloud/lib/barkpark_cloud/workers/autoupdate_rollout_worker.ex",
+      "role": "",
+      "importance": 9
     },
     {
-      "path": "api/lib/barkpark/portable_doc/projection.ex",
-      "role": "PortableDoc bound/free block projection engine",
-      "importance": 48,
-      "usefulness": 37
+      "path": "cloud/lib/barkpark_cloud/workers/chat_notification_worker.ex",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/lib/barkpark/portable_doc/synthesis.ex",
-      "role": "legacy document block list synthesizer",
-      "importance": 39,
-      "usefulness": 29
+      "path": "cloud/lib/barkpark_cloud/workers/device_auth_reaper.ex",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/workers/stale_deployment_reaper.ex",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/workers/stale_provision_job_reaper.ex",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/workers/trial_expiry_worker.ex",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/workers/update_status_worker.ex",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/workers/usage_sampler_worker.ex",
+      "role": "",
+      "importance": 4
     }
   ]
 }

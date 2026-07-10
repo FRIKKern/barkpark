@@ -1,36 +1,61 @@
 {
-  "subsystem": "api/lib/barkpark/tenancy",
-  "count": 5,
+  "subsystem": "internal/provisioner",
+  "count": 11,
   "files": [
     {
-      "path": "api/lib/barkpark/tenancy/auth.ex",
-      "role": "token-based workspace authorization primitives",
-      "importance": 53,
-      "usefulness": 62
+      "path": "internal/provisioner/attach_domain.go",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark/tenancy/workspace.ex",
-      "role": "Workspace Ecto schema and changeset",
-      "importance": 42,
-      "usefulness": 47
+      "path": "internal/provisioner/console.go",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark/tenancy/project.ex",
-      "role": "Ecto schema for Project tenancy entity",
-      "importance": 38,
-      "usefulness": 42
+      "path": "internal/provisioner/deprovision.go",
+      "role": "",
+      "importance": 39
     },
     {
-      "path": "api/lib/barkpark/tenancy/membership.ex",
-      "role": "Ecto schema for workspace membership",
-      "importance": 35,
-      "usefulness": 43
+      "path": "internal/provisioner/provision.go",
+      "role": "",
+      "importance": 44
     },
     {
-      "path": "api/lib/barkpark/tenancy/dataset.ex",
-      "role": "Ecto schema for Dataset entity",
-      "importance": 33,
-      "usefulness": 42
+      "path": "internal/provisioner/restore.go",
+      "role": "",
+      "importance": 35
+    },
+    {
+      "path": "internal/provisioner/restore_driver.go",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "internal/provisioner/stepreport.go",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "internal/provisioner/verify.go",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "internal/provisioner/warmpool.go",
+      "role": "",
+      "importance": 43
+    },
+    {
+      "path": "internal/provisioner/worker.go",
+      "role": "",
+      "importance": 43
+    },
+    {
+      "path": "internal/provisioner/catalog/catalog.go",
+      "role": "",
+      "importance": 30
     }
   ]
 }

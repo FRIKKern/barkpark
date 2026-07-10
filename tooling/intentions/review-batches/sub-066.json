@@ -1,0 +1,41 @@
+{
+  "subsystem": "design",
+  "count": 7,
+  "files": [
+    {
+      "path": "design/check.mjs",
+      "role": "",
+      "importance": 18
+    },
+    {
+      "path": "design/derive.mjs",
+      "role": "",
+      "importance": 16
+    },
+    {
+      "path": "design/derive.test.mjs",
+      "role": "",
+      "importance": 16
+    },
+    {
+      "path": "design/emit.mjs",
+      "role": "",
+      "importance": 18
+    },
+    {
+      "path": "design/paper-editor-mirror.mjs",
+      "role": "",
+      "importance": 11
+    },
+    {
+      "path": "design/theme-emit.test.mjs",
+      "role": "",
+      "importance": 11
+    },
+    {
+      "path": "design/validate.mjs",
+      "role": "",
+      "importance": 17
+    }
+  ]
+}

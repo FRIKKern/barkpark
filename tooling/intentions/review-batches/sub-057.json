@@ -1,30 +1,46 @@
 {
-  "subsystem": "web",
-  "count": 4,
+  "subsystem": "api/lib/barkpark_web/components",
+  "count": 8,
   "files": [
     {
-      "path": "web/public/bp-graph.js",
-      "role": "Studio graph renderer (self-contained canvas)",
-      "importance": 28,
-      "usefulness": 32
+      "path": "api/lib/barkpark_web/components/confirm_modal.ex",
+      "role": "generic two-stage confirm modal LiveView component",
+      "importance": 37
     },
     {
-      "path": "web/next.config.ts",
-      "role": "Next.js config + legacy redirects",
-      "importance": 26,
-      "usefulness": 8
+      "path": "api/lib/barkpark_web/components/draft_diff.ex",
+      "role": "Studio UI component for draft-vs-published field diff",
+      "importance": 30
     },
     {
-      "path": "web/postcss.config.mjs",
-      "role": "PostCSS config for Tailwind CSS",
-      "importance": 14,
-      "usefulness": 3
+      "path": "api/lib/barkpark_web/components/external_sync_pill.ex",
+      "role": "UI status pill for external sync integrations",
+      "importance": 18
     },
     {
-      "path": "web/eslint.config.mjs",
-      "role": "ESLint configuration for Next.js web app",
-      "importance": 11,
-      "usefulness": 3
+      "path": "api/lib/barkpark_web/components/field_inputs.ex",
+      "role": "Studio editor leaf-field input components",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark_web/components/icons.ex",
+      "role": "Inline SVG icon library",
+      "importance": 67
+    },
+    {
+      "path": "api/lib/barkpark_web/components/onix_preview.ex",
+      "role": "doc-type-agnostic content preview sidebar component",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark_web/components/share_meta.ex",
+      "role": "",
+      "importance": 58
+    },
+    {
+      "path": "api/lib/barkpark_web/components/studio_components.ex",
+      "role": "Shared Studio UI component library",
+      "importance": 67
     }
   ]
 }

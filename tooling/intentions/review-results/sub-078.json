@@ -1,0 +1,55 @@
+{
+  "subsystem": "api/lib/barkpark_web/live",
+  "intentions": [
+    {
+      "title": "Stream paper edits into the live reader block-by-block without a whole-page reload or losing scroll/focus",
+      "scale": "feature",
+      "evidence": "bulldocs_live.ex: Phoenix.LiveView stream keyed by block id, {:paper_block, frame} deltas append/insert/patch/delete a single stream item; #paper-sentinel proof that the container survives handle_info diffs; rev-gap recovery refetches + re-streams on a missed monotonic rev."
+    },
+    {
+      "title": "Keep the public papers reader workspace/tenant-scoped so a same-slug paper in another tenant can never leak into a viewer's live session",
+      "scale": "invariant",
+      "evidence": "bulldocs_live.ex mount: PubSub subscribe topic is built from paper.workspace_id (falling back to reader_scope), explicit comment citing barkpark-n56v P0 fix for a prior cross-tenant leak; get_public_paper/2 resolves only within the seeded Default workspace for the flat /papers/:slug route."
+    },
+    {
+      "title": "Make an embedded live plan/task block inside a paper visibly progress in real time without turning every paper into a subscriber",
+      "scale": "feature",
+      "evidence": "bulldocs_live.ex: has_live_task_blocks?/1 gates an additional subscribe to \"documents:ws:#{task_ws}:#{dataset}\" only when the paper embeds a task query, re-resolving/re-rendering the embedded board/list/roadmap on :document_changed."
+    },
+    {
+      "title": "Ship a real-time split-surface quiz (Hyperquiz) — a big-screen host/projector view and a phone player view synced over one PubSub room with no polling",
+      "scale": "epic",
+      "evidence": "quiz_host_live.ex + quiz_play_live.ex: Quiz.ensure_room/join/leave/submit_answer, Quiz.room_topic/1, {:tally,_}/{:player_joined,_}/{:player_left,_}/{:question_updated,_} broadcasts drive live tally bars and question swaps; canvas element wired for a separate cursor-heatmap client (P2/P5)."
+    },
+    {
+      "title": "Let a quiz host live-edit a running question and have host + all players update instantly without disconnecting anyone",
+      "scale": "feature",
+      "evidence": "quiz_host_live.ex and quiz_play_live.ex both handle {:quiz, _pin, {:question_updated, question}} — player clears its prior pick, host swaps the displayed prompt/choices, both via the room's existing PubSub subscription."
+    },
+    {
+      "title": "Prevent a quiz room from being spun up as a side effect of a bare/crawler GET, and correctly shed disconnected players from the roster",
+      "scale": "invariant",
+      "evidence": "quiz_play_live.ex: room join/subscribe only inside `if connected?(socket)`, dead render shows a placeholder; terminate/2 calls Quiz.leave/2 on tab-close/navigate/disconnect so player_count never only grows."
+    },
+    {
+      "title": "Give sheets the same live, no-reload public reader precedent as papers, while guaranteeing anonymous visitors only ever see published content, never draft edits",
+      "scale": "invariant",
+      "evidence": "sheets_reader_live.ex moduledoc: deliberately subscribes to the PUBLISHED-doc topic (Content.doc_topic/4) rather than the session delta topic ({:sheets_op,...}), re-reads Content.get_public_document/2 on every {:doc_updated,_} rather than trusting the broadcast payload — fail-closed by construction; grid rendered via Studio.SheetGrid in read_only mode with editing affordances and send_ops stripped."
+    },
+    {
+      "title": "Let an admin manage per-plugin encrypted settings and secrets entirely through the browser, replacing SSH + mix run, without ever leaking a stored secret into rendered DOM by default",
+      "scale": "feature",
+      "evidence": "admin/plugin_settings_live.ex: masked password inputs, per-field Reveal/Clear flip a socket assign before echoing a value, blank password submit preserves the existing encrypted value, one Plugins.Settings.put/3 call per settings row for a granular audit log, generic Test-connection button via Registry.collect_test_connection/2 with zero per-plugin branching in the host."
+    },
+    {
+      "title": "Close the \"why doesn't my plugin work?\" loop with a live admin dashboard showing which Barkpark.Plugin callbacks each plugin actually overrides and letting an admin idempotently reload schemas/codelist seeds in-process",
+      "scale": "feature",
+      "evidence": "admin/plugins_live.ex: @callbacks list diffed against overrides, RunStatus surfaces last bootstrap/seed result+timestamp, reload-plugin handler calls Bootstrap.install_by_name/1 + Registry.run_codelist_seeders_by_name/1 with no systemctl restart required, both idempotent UPSERT paths."
+    },
+    {
+      "title": "Gate every admin-facing LiveView in this subsystem behind the same admin permission and scoped-canonical URL so a non-admin token is always redirected, and legacy flat admin URLs still resolve via 302",
+      "scale": "invariant",
+      "evidence": "admin/plugin_settings_live.ex and admin/plugins_live.ex both mounted in live_session :scoped_admin_studio_dataset with BarkparkWeb.LiveAuth.:admin on_mount hook; moduledocs note the flat /studio/:dataset/_plugins* spelling 302s to the scoped canonical (sdl-w1-admin-canonical)."
+    }
+  ]
+}

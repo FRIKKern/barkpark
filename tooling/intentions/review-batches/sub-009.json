@@ -1,120 +1,171 @@
 {
-  "subsystem": "js/packages/core/src",
-  "count": 19,
+  "subsystem": "tooling",
+  "count": 33,
   "files": [
     {
-      "path": "js/packages/core/src/index.ts",
-      "role": "JS SDK public API surface / barrel export",
-      "importance": 79,
-      "usefulness": 66
+      "path": "tooling/barkpark-sync/generate.mjs",
+      "role": "Graph Generator (Core Seam)",
+      "importance": 16
     },
     {
-      "path": "js/packages/core/src/types.ts",
-      "role": "JS SDK canonical type definitions",
-      "importance": 69,
-      "usefulness": 75
+      "path": "tooling/barkpark-sync/graph-view.mjs",
+      "role": "Graph Visualization",
+      "importance": 11
     },
     {
-      "path": "js/packages/core/src/client.ts",
-      "role": "JS SDK client factory and main method implementations",
-      "importance": 73,
-      "usefulness": 68
+      "path": "tooling/barkpark-sync/push.mjs",
+      "role": "Graph Ingest Pipeline",
+      "importance": 17
     },
     {
-      "path": "js/packages/core/src/transport.ts",
-      "role": "Core HTTP transport layer",
-      "importance": 69,
-      "usefulness": 70
+      "path": "tooling/cochange/cochange.mjs",
+      "role": "Relationship Cross-Validation (Core Signal)",
+      "importance": 1
     },
     {
-      "path": "js/packages/core/src/listen.ts",
-      "role": "SSE live-stream transport",
-      "importance": 65,
-      "usefulness": 68
+      "path": "tooling/cody/cody.mjs",
+      "role": "bound-variables synchronization tool — bridges Barkpark papers with code literals",
+      "importance": 11
     },
     {
-      "path": "js/packages/core/src/errors.ts",
-      "role": "JS SDK error class taxonomy",
-      "importance": 59,
-      "usefulness": 68
+      "path": "tooling/combined/combine.mjs",
+      "role": "Priority worklist synthesizer (root-clean)",
+      "importance": 11
     },
     {
-      "path": "js/packages/core/src/retry.ts",
-      "role": "HTTP retry policy engine",
-      "importance": 60,
-      "usefulness": 66
+      "path": "tooling/consistency/consistency.mjs",
+      "role": "consistency scanner and batch manager",
+      "importance": 14
     },
     {
-      "path": "js/packages/core/src/patch.ts",
-      "role": "Single-document patch builder",
-      "importance": 60,
-      "usefulness": 63
+      "path": "tooling/doc-onboarding/onboarding.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/core/src/doc.ts",
-      "role": "JS SDK single-document fetch operation",
-      "importance": 64,
-      "usefulness": 58
+      "path": "tooling/ergonomics/ergonomics.mjs",
+      "role": "god-file and bloat detector",
+      "importance": 9
     },
     {
-      "path": "js/packages/core/src/docs.ts",
-      "role": "JS SDK fluent list-query operation",
-      "importance": 64,
-      "usefulness": 58
+      "path": "tooling/ergonomics/measure.mjs",
+      "role": "ergonomics analysis script",
+      "importance": 1
     },
     {
-      "path": "js/packages/core/src/transaction.ts",
-      "role": "Atomic multi-mutation transaction builder",
-      "importance": 61,
-      "usefulness": 61
+      "path": "tooling/ergonomics/safety-classifier.test.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/core/src/filter-builder.ts",
-      "role": "SDK query filter/builder and query-string encoder",
-      "importance": 55,
-      "usefulness": 63
+      "path": "tooling/file-importance/build-signals.mjs",
+      "role": "file importance signal builder and batch partitioner",
+      "importance": 11
     },
     {
-      "path": "js/packages/core/src/scope.ts",
-      "role": "URL scope prefix builder",
-      "importance": 56,
-      "usefulness": 62
+      "path": "tooling/file-importance/merge.mjs",
+      "role": "Criticality merger: agent verdicts + programmatic signals",
+      "importance": 4
     },
     {
-      "path": "js/packages/core/src/util/headers.ts",
-      "role": "HTTP header utilities",
-      "importance": 58,
-      "usefulness": 58
+      "path": "tooling/fit/fit.mjs",
+      "role": "the calibration engine — learns scoring weights from codebase history via logistic regression",
+      "importance": 9
     },
     {
-      "path": "js/packages/core/src/handshake.ts",
-      "role": "SDK meta-endpoint cache",
-      "importance": 58,
-      "usefulness": 50
+      "path": "tooling/intentions/intentions.mjs",
+      "role": "second-edge-type layering — tags files by objective/intention instead of dependency",
+      "importance": 4
     },
     {
-      "path": "js/packages/core/src/publish.ts",
-      "role": "Draft publish/unpublish mutations",
-      "importance": 56,
-      "usefulness": 52
+      "path": "tooling/intentions/review.mjs",
+      "role": "Taxonomy generator / subsystem partitioner",
+      "importance": 1
     },
     {
-      "path": "js/packages/core/src/tenancy.ts",
-      "role": "Workspace and project enumeration client",
-      "importance": 50,
-      "usefulness": 57
+      "path": "tooling/map/manifest.mjs",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "js/packages/core/src/fetchRaw.ts",
-      "role": "JS SDK escape-hatch raw HTTP fetch",
-      "importance": 54,
-      "usefulness": 48
+      "path": "tooling/map/query.mjs",
+      "role": "",
+      "importance": 13
     },
     {
-      "path": "js/packages/core/src/util/edge-detect.ts",
-      "role": "Edge runtime detector",
-      "importance": 44,
-      "usefulness": 50
+      "path": "tooling/map/what-breaks.mjs",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "tooling/quality/quality.mjs",
+      "role": "Capstone synthesizer: quality scorecard & four composite worklists",
+      "importance": 17
+    },
+    {
+      "path": "tooling/re-indexer/re-indexer.mjs",
+      "role": "",
+      "importance": 13
+    },
+    {
+      "path": "tooling/research-coverage/coverage.mjs",
+      "role": "research-coverage ledger engine",
+      "importance": 1
+    },
+    {
+      "path": "tooling/risk/fn-coverage.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/risk/fn-coverage.test.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/risk/risk.mjs",
+      "role": "core analytics engine",
+      "importance": 17
+    },
+    {
+      "path": "tooling/scope/scope.mjs",
+      "role": "Delivery capability / context-pack generator",
+      "importance": 1
+    },
+    {
+      "path": "tooling/status/report.mjs",
+      "role": "Status aggregator / comprehensive overview generator",
+      "importance": 9
+    },
+    {
+      "path": "tooling/status/status.mjs",
+      "role": "orchestration entrypoint for codebase-intelligence",
+      "importance": 16
+    },
+    {
+      "path": "tooling/symbol-graph/build-symbols.mjs",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "tooling/task-obsession/reland_check.test.sh",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "tooling/tasks/tasks.mjs",
+      "role": "Core intelligence layer — task/intention cross-validation orchestrator",
+      "importance": 13
+    },
+    {
+      "path": "tooling/twoslash-mocks/next-stubs.d.ts",
+      "role": "TypeScript ambient stubs for Next.js internals used in docs twoslash fences",
+      "importance": 4
+    },
+    {
+      "path": "tooling/usefulness/usefulness.mjs",
+      "role": "Programmatic reach/importance analyzer — core of file importance scoring",
+      "importance": 4
     }
   ]
 }

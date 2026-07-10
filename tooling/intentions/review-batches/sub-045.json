@@ -1,36 +1,56 @@
 {
-  "subsystem": "api/lib/barkpark_web/studio",
-  "count": 5,
+  "subsystem": "api/lib/barkpark/portable_doc",
+  "count": 10,
   "files": [
     {
-      "path": "api/lib/barkpark_web/studio/pane_builder.ex",
-      "role": "Studio pane-tree builder",
-      "importance": 45,
-      "usefulness": 45
+      "path": "api/lib/barkpark/portable_doc/body_walk.ex",
+      "role": "",
+      "importance": 33
     },
     {
-      "path": "api/lib/barkpark_web/studio/presence_state.ex",
-      "role": "Studio collaborative presence helpers",
-      "importance": 33,
-      "usefulness": 22
+      "path": "api/lib/barkpark/portable_doc/constraints.ex",
+      "role": "",
+      "importance": 42
     },
     {
-      "path": "api/lib/barkpark_web/studio/workspace_switcher.ex",
-      "role": "Studio workspace/project/dataset scope switcher component",
-      "importance": 39,
-      "usefulness": 14
+      "path": "api/lib/barkpark/portable_doc/from_markdown.ex",
+      "role": "",
+      "importance": 37
     },
     {
-      "path": "api/lib/barkpark_web/studio/nav.ex",
-      "role": "Studio navigation tab definitions",
-      "importance": 30,
-      "usefulness": 10
+      "path": "api/lib/barkpark/portable_doc/patch.ex",
+      "role": "PortableDoc block tree patch engine",
+      "importance": 50
     },
     {
-      "path": "api/lib/barkpark_web/studio/dataset_switcher.ex",
-      "role": "Studio dataset selector component",
-      "importance": 29,
-      "usefulness": 8
+      "path": "api/lib/barkpark/portable_doc/projection.ex",
+      "role": "PortableDoc bound/free block projection engine",
+      "importance": 64
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/render.ex",
+      "role": "Pd-tree to HTML renderer",
+      "importance": 67
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/slots.ex",
+      "role": "",
+      "importance": 54
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/synthesis.ex",
+      "role": "legacy document block list synthesizer",
+      "importance": 53
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/task_resolver.ex",
+      "role": "",
+      "importance": 58
+    },
+    {
+      "path": "api/lib/barkpark/portable_doc/tiers.ex",
+      "role": "",
+      "importance": 47
     }
   ]
 }

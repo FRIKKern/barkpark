@@ -1,1 +1,55 @@
-{"subsystem":"js/packages/create-barkpark-app/src","summary":"CLI scaffolder (create-barkpark-app) that bootstraps new Barkpark-powered apps from starter templates — website-starter or blog-starter — with interactive prompts, variable substitution, optional dependency install, git init, and a hosted-demo mode pointing at barkpark.dev instead of local docker-compose.","intentions":[{"title":"Zero-friction first run: get a new project to 'it works' in one command","scale":"epic","evidence":"index.ts chains prompts → scaffold → install → git-init → printNextSteps; --yes flag skips all interaction; post-install.ts prints exact next commands"},{"title":"Template variable injection to personalise scaffolded output","scale":"small","evidence":"scaffold.ts renderTemplate() substitutes {{projectName}}, {{pmCommand}}, {{barkparkVersion}} in all text files; .tmpl suffix marks substitution targets"},{"title":"Hosted demo onramp: let evaluators skip local infrastructure","scale":"small","evidence":"hosted.ts removes docker-compose files, writes .env.local pointing at https://barkpark.dev, and enables HostedDemoBanner in layout.tsx"},{"title":"Package-manager agnosticism so the DX matches the user's existing toolchain","scale":"small","evidence":"pm.ts detects npm/pnpm/yarn/bun from environment; pmCommand threaded through scaffold vars and install/printNextSteps so all instructions use the detected PM"},{"title":"Graceful CI/non-interactive usage via --yes and flag overrides","scale":"small","evidence":"index.ts --yes flag, --skip-install, --skip-git flags; prompts.ts short-circuits all p.* calls when yesFlag is true, returning defaults directly"}]}
+{
+  "subsystem": "internal/cli/cloud",
+  "intentions": [
+    {
+      "title": "Ship a provider-neutral cloud-provisioning seam so Hetzner and Azure (and future clouds) plug in as implementations, never forks",
+      "scale": "epic",
+      "evidence": "provider.go defines a deliberately narrow CloudProvider interface (Create/IP/Delete/List) plus optional capability interfaces (Cataloger, Archiver, Resurrector, Decommissioner, Adopter, Auditor, Pauser, ServerLabeler/LabelLister/ServerLabelRemover); registry.go's ProviderFor resolves a slug to a factory so 'a new provider lands as a Register call, not a new switch arm'; azure/provider.go and fake.go both satisfy the same seam."
+    },
+    {
+      "title": "Turn go-live provisioning into an instant, always-warm operation via a self-refilling warm host pool instead of create-on-demand",
+      "scale": "feature",
+      "evidence": "warmpool.go: Pool.pop() returns a ready host AND triggers a replacement create (refill) in one call; WarmPool.Provision chains assign→secrets→dns→caddy→secrets-install→migrate→admin-token→health→register, described as 'local Barkpark → live server in seconds is a warm-pool move, not a create-on-demand one'."
+    },
+    {
+      "title": "Make the go-live chain fail closed: no server is ever registered as live unless the post-deploy health gate passes",
+      "scale": "invariant",
+      "evidence": "warmpool.go doc comment: 'The chain FAILS CLOSED: if the health gate does not pass, Provision returns an error and does NOT register the server or mark it ready'; pollHealth bounds retries via healthPollDeadline/healthPollInterval and only succeeds on report.OK."
+    },
+    {
+      "title": "Guarantee every provisioned tenant gets fully independent cryptographic identity — no shared secrets across instances",
+      "scale": "invariant",
+      "evidence": "warmpool.go Secrets struct (SecretKeyBase, Kek, CloakKey, PreviewJWTSecret) each drawn from an INDEPENDENT crypto/rand call in defaultSecretGen; secretsInstallStep documents that the baked warm image bakes a SHARED key across tenants and this step exists precisely to replace it per-instance before migrate runs (runtime.exs requires BARKPARK_KEK)."
+    },
+    {
+      "title": "Prevent secret leakage through provisioning failures — every step's captured output is scrubbed before it can reach logs, error columns, or worker stderr",
+      "scale": "invariant",
+      "evidence": "warmpool.go: CaddyStep.Redact (literal substrings) + RedactEnvSecrets (pattern-based scrubEnvSecrets for SECRET_KEY_BASE/BARKPARK_KEK/BARKPARK_CLOAK_KEY/PREVIEW_JWT_SECRET/DATABASE_URL and ecto/postgres userinfo) funnel through scrubStepOutput before any fmt.Errorf; adminTokenStep, agentInstallStep, secretsInstallStep all set Redact/RedactEnvSecrets; validateAdminToken/validateSecretValue/validateAgentURL guard against shell-injection before interpolation."
+    },
+    {
+      "title": "Build a provider-portable disaster-recovery format (bp-bundle-v1) so an instance archived on one cloud can be resurrected on a different one",
+      "scale": "epic",
+      "evidence": "bundle.go: WriteBundle streams db.dump, media.tar.gz, AES-256-GCM sealed secrets.enc, then manifest.json LAST as a completeness fence (torn uploads are invisible to readers); IdentitySecretKeys/SelectIdentitySecrets carry the identity secrets needed to decrypt the Cloak-encrypted DB after cross-provider restore; contrasted explicitly against the project-bound Hetzner snapshot path."
+    },
+    {
+      "title": "Make provider capability gaps honest and renderable rather than silently faked — a provider only claims what it actually implements",
+      "scale": "invariant",
+      "evidence": "provider.go Capabilities struct + DetectCapabilities: lifecycle facets (Archive/Resurrect/Decommission/Adopt/Audit) are independent bools, two-source detected (interface satisfaction OR RegisterLifecycleVerbs registration); registry.go's committed providers_capabilities.json fixture is the canonical cross-surface contract with a parity test failing on drift; comments state Azure has 'honest decommission + audit but no snapshot-based archive/resurrect'."
+    },
+    {
+      "title": "Keep every external dependency (cloud API, DNS API, SSH, object storage) behind an injectable interface so the whole provisioning chain is testable at zero spend",
+      "scale": "invariant",
+      "evidence": "fake.go's FakeProvider/FakeBundleStore, dns.go's FakeDNS, and warmpool.go's injected StepRunner/HealthChecker/RegistryClient/SecretGen seams all mirror real production paths (HcloudProvider, HetznerDNS, SSHStepRunner) with deterministic in-memory behavior; FakeProvider is marked as honoring every optional capability so real providers are 'verified for equivalence against this behaviour'."
+    },
+    {
+      "title": "Give the fleet resilience against sold-out server types/regions via an automatic fallback ladder",
+      "scale": "feature",
+      "evidence": "provider.go's HetznerCandidates + CreateWithFallback walk an ordered ladder of type/location alternatives and aggregate all failures into one legible error; used by both SeedPool and Pool.pop's refill so ARM (cax) stockouts don't block go-lives."
+    },
+    {
+      "title": "Never strand a paid box: recover from create/delete failures automatically via orphan labeling and sweep",
+      "scale": "invariant",
+      "evidence": "provider.go: ManagedLabelKey/OrphanedLabelKey/FQDNLabelKey/WarmLabelKey scheme; HcloudProvider.Create deletes a just-created server if IP read-back fails ('so a failed IP read-back never leaks a paid box'); ListByLabel/LabelServer are the safe inputs SweepOrphans relies on to find and clean up boxes truly meant to be gone."
+    }
+  ]
+}

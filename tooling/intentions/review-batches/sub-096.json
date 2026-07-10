@@ -1,0 +1,31 @@
+{
+  "subsystem": "internal/hetzner",
+  "count": 5,
+  "files": [
+    {
+      "path": "internal/hetzner/client.go",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "internal/hetzner/dns.go",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "internal/hetzner/hcloud_context.go",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "internal/hetzner/provider.go",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "internal/hetzner/objstore/client.go",
+      "role": "",
+      "importance": 55
+    }
+  ]
+}

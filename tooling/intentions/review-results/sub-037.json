@@ -1,1 +1,45 @@
-{"subsystem":"api/lib/barkpark_web/components/fields","summary":"A set of LiveView HEEx components that render the v2 schema field types (composite, arrayOf, codelist, localizedText, tree codelist) in Studio's document editor, with schema-driven conditional visibility evaluated at render time.","intentions":[{"title":"Render schema-v2 field types faithfully in Studio","scale":"epic","evidence":"composite_field.ex, array_field.ex, codelist_field.ex, localized_text_field.ex each map a v2 field type to a LiveView component; all reference masterplan-20260425-085425 Phase 0"},{"title":"Schema-driven conditional field visibility","scale":"small","evidence":"visibility.ex evaluates `visibleWhen` predicates (eq, neq, in, empty, non_empty, starts_with) against live doc state; composite_field.ex and array_field.ex gate sub-field rendering through Visibility.visible?/2"},{"title":"Plugin-supplied codelist registry with graceful degradation","scale":"small","evidence":"codelist_field.ex renders a disabled placeholder with the literal `no codelist registered` message when no plugin has registered the list, and routes to tree vs flat vs datalist rendering based on entry count and hierarchy"},{"title":"Recursive nesting of heterogeneous field types","scale":"small","evidence":"composite_field.ex dispatches to ArrayField, CodelistField, LocalizedTextField recursively; array_field.ex does the same for its element type; dotted path prefix threads through all levels"},{"title":"Readonly/audit mode propagated recursively","scale":"small","evidence":"All components accept a `:readonly` assign that disables inputs and suppresses add/remove/reorder controls, passing the flag down into nested composite and array children"},{"title":"Server-side array reordering without client JS","scale":"small","evidence":"array_field.ex uses phx-click with phx-value-action (move_up/move_down/add_row/remove_row) and explicitly defers drag-and-drop to v2, keeping all order mutations as server round-trips"},{"title":"i18n-aware editing with fallback-chain warnings","scale":"small","evidence":"localized_text_field.ex renders one input per language, shows an inline warning when the primary translation is missing but a fallback fills it, and encodes severity for a future DSL"}]}
+{
+  "subsystem": "cloud/lib/barkpark_cloud/registry",
+  "intentions": [
+    {
+      "title": "Give every Team one dashboard of all their Barkparks, regardless of who provisioned or hosts them",
+      "scale": "epic",
+      "evidence": "barkpark.ex: Barkpark row is the metadata unifying managed/byo/self_hosted instances under one Team-scoped model, with separate health_status/agent_status/suspended axes so the dashboard never conflates 'unreachable' with 'billing lapsed' or 'agent down'."
+    },
+    {
+      "title": "Make provider-neutral hosting real: Hetzner and Azure are interchangeable backends behind one provisioning contract",
+      "scale": "epic",
+      "evidence": "barkpark.ex `provider` field (hetzner|azure) plus region/server_type; hetzner_catalog.ex `normalize/2` and azure_catalog.ex both emit the identical %{regions, server_types, currency} shape (charter Decision 9) so the UI/CLI never special-case a provider."
+    },
+    {
+      "title": "Go-live in under 15 seconds via a crash-safe warm pool of pre-baked, self-refreshing boxes",
+      "scale": "feature",
+      "evidence": "warm_server.ex: ready/claimed/retiring/refreshing states claimed via `SELECT ... FOR UPDATE SKIP LOCKED` to avoid the old fixed-name 'warm-1' collision bug; refreshing boxes rejoin `ready` on completion so idle pool boxes never drift from origin/main."
+    },
+    {
+      "title": "Drive the create-to-live provisioning chain (and deprovision/attach-domain/resurrect) through one auditable, retry-bounded job queue shared by the Elixir control plane and the Go worker",
+      "scale": "feature",
+      "evidence": "provision_job.ex: flat pending→claimed→succeeded/failed state machine with claim_token/attempts/stale re-claim, one-active-job-per-(barkpark,kind) unique index (dwb-11 money-path backstop), and append-only steps/console fields (dwb-14/dwb-16) that let /new render honest server-confirmed progress."
+    },
+    {
+      "title": "Ship Barkpark-hosted website deployments (gh: build, push, promote, branch previews) with the same claim-fencing discipline as instance provisioning",
+      "scale": "feature",
+      "evidence": "deployment.ex: queued→building→pushing→live/failed transition graph enforced via `legal_transition?/2`, claim_worker/claim_epoch CAS fencing mirroring bp task claims, environment=production|preview split (gh-6) so branch previews never touch the production live pointer, and promote-by-new-deployment (never a pointer flip, charter decision 7)."
+    },
+    {
+      "title": "Never let a cloud-provider action reach a customer's account outside an explicit, tiered allowlist",
+      "scale": "invariant",
+      "evidence": "hetzner_catalog.ex: `fetch/2` is an exact (resource, verb) lookup against a pure static catalog — no prefix matching, no free-form passthrough; :read served now, :mutate/:destroy declared but unrouted, every destroy entry demands a server-verified typed-name `confirm` echo before executing (charter decision 5)."
+    },
+    {
+      "title": "Encrypt every credential and secret at rest behind one Vault seam, and never let a narrow write path widen into identity or team reassignment",
+      "scale": "invariant",
+      "evidence": "provider.ex: `encrypted_token` is the single ciphertext column for both hetzner tokens and azure service-principal JSON, validated pre-encryption via a virtual `:credential` field; barkpark.ex has 8+ narrow changesets (health_changeset, suspend_changeset, vercel_changeset, custom_host_changeset, autoupdate_changeset, etc.) each explicitly scoped to prevent an agent/worker/billing write from renaming or re-teaming an instance."
+    },
+    {
+      "title": "Keep an append-only, honest audit trail of everything an on-box agent (and the control plane's own verification) reports about an instance",
+      "scale": "invariant",
+      "evidence": "agent_event.ex: jsonb payload per typed event (health/status/backup/tls/content/verify), inserted_at only (no updated_at) — a fact at a point in time, never mutated; `verify` events let the control plane re-issue and timeline a golden-path readiness proof independent of on-box coupling (D16)."
+    }
+  ]
+}

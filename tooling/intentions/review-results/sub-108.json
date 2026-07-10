@@ -1,0 +1,45 @@
+{
+  "subsystem": ".",
+  "intentions": [
+    {
+      "title": "One-command bare-metal provisioning of a full Barkpark server (Erlang/Elixir/Go/Postgres/Caddy) from a stock Hetzner VPS via `bash -s < deploy.sh`",
+      "scale": "epic",
+      "evidence": "deploy.sh installs system packages, PostgreSQL, ASDF-managed Erlang 27/Elixir 1.18, Go, clones the repo, builds Phoenix + the Go TUI, writes a systemd unit (barkpark.service), opens ufw ports, and optionally installs Caddy for automatic Let's Encrypt TLS — all idempotent (checks for existing installs before acting) and supporting both ARM64 (cax*) and x86_64 (cpx*/ccx*) architectures."
+    },
+    {
+      "title": "Never repeat the check_origin/WebSocket-403 LiveView outage: force operators to declare the real public DOMAIN and scheme at deploy time",
+      "scale": "invariant",
+      "evidence": "deploy.sh hard-fails with an explanatory error if DOMAIN is unset (lines 31-42), citing 'docs/ops/studio-nav-bug-2026-04-19.md' and task #11; PHX_HOST/PHX_SCHEME are written into .env from that value so Phoenix's endpoint check_origin always matches the browser's Origin header."
+    },
+    {
+      "title": "Guarantee every required prod secret (SECRET_KEY_BASE, BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET, BARKPARK_KEK) exists with the exact byte-length the runtime expects, on both fresh installs and upgrades of older boxes",
+      "scale": "invariant",
+      "evidence": "deploy.sh generates all four secrets into .env on first install, and separately backfills any missing one on existing installs (lines 164-180) without ever overwriting existing values; comments explicitly document that `mix phx.gen.secret 32` truncates to ~24 bytes and would brick BARKPARK_KEK, so KEK is always sourced via `openssl rand -base64 32` instead."
+    },
+    {
+      "title": "Deploy without ever clobbering a hand-tuned production reverse proxy or an operator's chosen seed/plugin posture",
+      "scale": "invariant",
+      "evidence": "the Caddy install block (lines 274-310) skips entirely if `caddy` is already present rather than overwriting /etc/caddy/Caddyfile ('prod runs its own multi-site Caddy'); BARKPARK_PLUGINS is only persisted into .env when the caller explicitly set it, tested via `${VAR+x}` (not `:-`) because empty string is itself the plugin kill-switch; BARKPARK_SEED_PROFILE defaults to 'demo' but supports a 'clean' profile that mints a one-time-shown admin token instead of seeding the shared dev token."
+    },
+    {
+      "title": "Serve a friendly, self-refreshing maintenance page instead of a broken connection during zero-downtime deploys",
+      "scale": "feature",
+      "evidence": "deploy.sh's generated Caddyfile includes a `handle_errors` block returning a styled 503 HTML page with a spinner and `setTimeout(...location.reload()...)` auto-refresh every 15s plus a `Retry-After: 15` header, shown whenever the upstream Phoenix app is mid-restart."
+    },
+    {
+      "title": "Give a solo/small-team dev a single command that stands up the whole local stack (Claude Code + hot-reloading Go TUI + hot-reloading Phoenix API) in one tmux session with a sane pane layout",
+      "scale": "feature",
+      "evidence": "dev.sh installs `air` if missing, compiles the API on first run, kills/recreates a `barkpark-dev` tmux session, splits it into three panes (10% Claude Code / 45% TUI via watch.sh / 45% `mix phx.server`), sizes panes by terminal width, and attaches — turning multi-process local dev into one script."
+    },
+    {
+      "title": "Let a developer run the Go TUI against a local or already-running Phoenix API with zero manual setup, auto-installing Go via Homebrew if absent",
+      "scale": "feature",
+      "evidence": "run.sh checks `$SANITY_API_URL/api/schemas` (default localhost:4000), backgrounds `mix phx.server` and polls until ready if the API isn't up, installs Homebrew Go if `go` is missing, then `go mod tidy && go run ./cmd/barkpark` — collapsing 'start API, start TUI' into one command."
+    },
+    {
+      "title": "Fast Go TUI edit-compile-test loop: rebuild and relaunch on every quit without leaving the terminal",
+      "scale": "feature",
+      "evidence": "watch.sh loops forever, rebuilding `./cmd/barkpark` to `./tmp/barkpark` and relaunching it each time the TUI exits (press q to restart with latest changes), pausing for Enter on build failure rather than crash-looping."
+    }
+  ]
+}

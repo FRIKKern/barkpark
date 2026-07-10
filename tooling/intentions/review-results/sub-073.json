@@ -1,0 +1,35 @@
+{
+  "subsystem": "api/lib/barkpark/validation/checkers",
+  "intentions": [
+    {
+      "title": "Give the validation rule DSL a pluggable library of publishing-domain field checkers (ONIX codelists, checksums, ISO codes, presence)",
+      "scale": "feature",
+      "evidence": "All six modules implement the same `Barkpark.Validation.Checker` behaviour with a single `check(value, params)` callback, letting Phase 3's rule engine treat GTIN/ISBN checksums, codelist lookups, currency/language codes, and non-empty checks as interchangeable rule primitives."
+    },
+    {
+      "title": "Validate ONIX ContributorRole and other codelist-governed fields against a version-pinned, plugin-scoped codelist registry",
+      "scale": "feature",
+      "evidence": "codelist_ref.ex wires Phase 0's `Barkpark.Content.Codelists` (Codelist/Value schemas) into the rule DSL, distinguishing `:codelist_version_mismatch` (wrong issue pinned) from `:codelist_unknown_value` (value absent), keyed by `(registry_id, list_id, issue)` — e.g. EDItEUR list 17 issue 73 used by the OnixEdit plugin."
+    },
+    {
+      "title": "Catch bad product identifiers before they reach downstream systems: enforce GTIN-14 and ISBN-13 check-digit correctness",
+      "scale": "invariant",
+      "evidence": "gtin14_checksum.ex and isbn13_checksum.ex independently implement the standard weighted mod-10 checksum algorithms (weights 3,1 vs 1,3), each returning distinct `{:error, :bad_length | :non_digit | :bad_checksum}` reasons so a typo'd EAN/ISBN can't silently pass content validation."
+    },
+    {
+      "title": "Reject obviously-wrong currency and language codes with zero external dependencies, ahead of a full codelist-backed registry",
+      "scale": "feature",
+      "evidence": "iso4217_currency.ex and iso639_language.ex ship hardcoded MapSet subsets (major currencies; ISO-639-2/T plus 2-letter shorthands) explicitly documented as a stopgap — moduledocs note the full ISO-4217/639 lists 'belongs in the codelist registry (WI3)' but these exist so rules can fire in the boot path without loading a registry."
+    },
+    {
+      "title": "Provide a universal 'field must be present' check usable across all content types",
+      "scale": "invariant",
+      "evidence": "nonempty.ex treats nil, \"\", [], and %{} uniformly as `{:error, :empty}`, giving rule authors one canonical presence check instead of ad hoc nil/blank handling scattered per field type."
+    },
+    {
+      "title": "Let empty/absent values pass type-specific checks so presence and format are validated independently",
+      "scale": "invariant",
+      "evidence": "codelist_ref.ex explicitly bypasses nil/\"\" values as `:ok` ('use a separate `:required` rule when presence is mandatory'), establishing a convention of composable rules rather than monolithic per-field validators."
+    }
+  ]
+}

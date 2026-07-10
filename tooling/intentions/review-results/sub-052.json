@@ -1,41 +1,35 @@
 {
-  "subsystem": "api/lib/barkpark_web/live",
-  "summary": "Four LiveView modules that surface Barkpark's content and plugin infrastructure as real-time browser UIs: a streaming paper reader (Bulldocs), a public read-only sheet viewer, and two admin LiveViews for managing and debugging plugins without SSH access.",
+  "subsystem": "api/lib/barkpark/accounts",
   "intentions": [
     {
-      "title": "Zero-reload live content reading",
+      "title": "Give Barkpark core a first-class human user account (email+password) independent of API tokens",
       "scale": "epic",
-      "evidence": "BulldocsLive implements a two-path renderer (block-streamed Wave 4 + HTML-only Wave 3 fallback) with PubSub subscriptions, rev-gap recovery via full refetch, and a DOM sentinel that proves no page reload occurred across delta updates. SheetsReaderLive subscribes to Session delta topic and forwards ops into SheetGrid in read_only mode, showing live edits as they happen."
+      "evidence": "user.ex moduledoc: 'Core historically had no user model (only API tokens); this is the first-class account.' Argon2id hashing, citext-unique email, has_many :sessions."
     },
     {
-      "title": "Plugin system operability without SSH",
-      "scale": "epic",
-      "evidence": "PluginsLive exposes per-plugin callback coverage, bootstrap/seed run status, and idempotent in-process Reload without restarting Phoenix. PluginSettingsLive provides a secure settings form (encrypted at rest, audit-logged) with Reveal/Clear/Test-connection actions, replacing manual `mix run` or SSH sessions for credential management."
+      "title": "Enforce defense-in-depth password hygiene: length bounds, HIBP breach-corpus rejection via k-anonymity, and constant-time verification that never leaks account existence",
+      "scale": "invariant",
+      "evidence": "user.ex validate_password/validate_not_breached (12-72 chars, HIBP fail-open), hibp.ex k-anonymity SHA-1 prefix range API opt-in/fail-open, valid_password?/2 runs Argon2.no_user_verify() for nil user to keep timing constant."
     },
     {
-      "title": "Paperflow orchestrator bridge via Barkpark events",
-      "scale": "epic",
-      "evidence": "BulldocsLive's action buttons (Create plan, Grill, Build, Submit, Simplify) record user intent as `paper_events` rows (routing Option B) scoped to the paper's workspace/project, letting the paperflow orchestrator pick up user decisions without a daemon or CLAUDE_TARGET nonce."
+      "title": "Support layered MFA (TOTP + WebAuthn/passkeys) with replay- and clone-resistant verification",
+      "scale": "feature",
+      "evidence": "user.ex totp_secret encrypted via Cloak, last_totp_at anti-replay, recovery_codes_hashed SHA-256; webauthn.ex wraps `wax` FIDO2 for registration/authentication ceremonies, monotonic sign_count clone detection (counter_ok?), webauthn_credential.ex persists credentials."
     },
     {
-      "title": "Goal-path lifecycle visibility inside published papers",
-      "scale": "small",
-      "evidence": "BulldocsLive mounts a sticky goal-path rail rendering a Mermaid gitGraph of `kind:event` Barkpark tasks for the paper's goal_id, with shift-click diff modal (TextDiff line diff of two event payloads) — surfacing the paperflow Goal history inside the reading surface."
+      "title": "Manage session lifecycle as hashed, revocable, auditable bearer tokens with room to add idle-timeout and step-up MFA freshness without breaking today's semantics",
+      "scale": "invariant",
+      "evidence": "user_session.ex: token_hash only (SHA-256) stored, plaintext returned once; revoked_at kill switch; expired?/idle_expired?/active? predicates — idle_timeout_seconds is nil by design and NOT wired into verify path per module comment (avoids evicting valid sessions); mfa_fresh?/default_step_up_window for step-up auth; SAML birth-context fields for SP-initiated logout."
     },
     {
-      "title": "Multi-tenant isolation for paper reads and events",
-      "scale": "small",
-      "evidence": "BulldocsLive resolves reader_scope from URL params (/w/:ws/p/:proj/papers/:slug vs flat /papers/:slug), subscribes to workspace-keyed PubSub topics, and stamps all recorded events with the paper's own workspace_id/project_id — preventing cross-tenant PubSub leakage and event pollution."
+      "title": "Satisfy GDPR data-subject rights (export + erasure) while preserving the append-only security audit trail",
+      "scale": "feature",
+      "evidence": "privacy.ex: export_subject/1 builds machine-readable bundle excluding secrets; erase_subject/1 pseudonymises (erased-<id>@erased.invalid email, unknowable Argon2 hash, cleared TOTP) rather than deleting the row, revokes all sessions/tokens/memberships, and emits an Audit event — explicit tradeoff between erasure and audit integrity."
     },
     {
-      "title": "Plugin secrets security model",
-      "scale": "small",
-      "evidence": "PluginSettingsLive never serialises stored secrets into the DOM; password fields render empty with a masked badge; Reveal is a separate explicit action; blank password submission preserves existing encrypted value; every read/write/reveal/delete is audit-logged in plugin_settings_audits."
-    },
-    {
-      "title": "Published-only public content surfaces",
-      "scale": "small",
-      "evidence": "Both BulldocsLive (via get_public_paper) and SheetsReaderLive (via get_public_document + NotFound exception for draft-only slugs) enforce that public reader routes only resolve against published documents in the seeded Default workspace."
+      "title": "Deliver transactional auth email (confirmation, reset, magic-link) without leaking account existence to an unauthenticated caller",
+      "scale": "invariant",
+      "evidence": "user_notifier.ex deliver_already_registered/1 implements 'MEDIUM-7 anti-enumeration' — notifies the real owner out-of-band instead of the API leaking existence; deliver/3 fails soft (logs but returns success upstream) so a down mail relay can't be used to fingerprint accounts."
     }
   ]
 }

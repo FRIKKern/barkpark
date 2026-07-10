@@ -1,36 +1,55 @@
 {
-  "subsystem": "api/lib/barkpark/plugins/onixedit",
-  "summary": "The OnixEdit plugin integrates Barkpark with the Norwegian book trade standard ONIX 3.0 and the Bokbasen distribution channel. It provides bidirectional ONIX 3.0 XML conversion (import + XSD-validated export), automated publish-on-save to Bokbasen via lifecycle hooks, a Studio admin surface, and codelist drift detection.",
+  "subsystem": "web/components",
   "intentions": [
     {
-      "title": "Emit standards-compliant ONIX 3.0 XML for trade distribution",
+      "title": "Prove the Next.js SDK consumption path with a real, working demo site (not a toy)",
       "scale": "epic",
-      "evidence": "export.ex builds full EDItEUR-conformant ONIXMessage trees (DescriptiveDetail, CollateralDetail, PublishingDetail, ProductSupply); export_controller.ex streams XSD-gated XML at GET /v1/plugins/onixedit/export/:dataset/:id.onix; to_iodata/1 refuses to emit invalid XML"
+      "evidence": "web/AGENTS.md: 'web/ is the read-only Next.js demo consuming the Phoenix API'; posts-list.tsx renders 'Headless CMS demo' from the production dataset; live-bridge.tsx wires @barkpark/nextjs's <BarkparkLive/> for realtime; components consume @barkpark/core client end-to-end."
     },
     {
-      "title": "Automate Bokbasen submission on normal publish (zero extra clicks)",
-      "scale": "epic",
-      "evidence": "lifecycle.ex registers an after_publish hook that enqueues Bokbasen.PublishWorker whenever a book document is published; recursion guard on ctx.source == :worker prevents infinite re-enqueue loops"
+      "title": "Ship a unified master/detail Finder — instant search, cross-engine (Postgres vs Indx), with explainable match-quality signals instead of opaque scores",
+      "scale": "feature",
+      "evidence": "finder.tsx: partitionExact() promotes exact substring hits above fuzzy trigram noise; matchSnippet() builds contextual snippets around the actual matched term; matchQuality is deliberately qualitative ('title'/'body'/'partial'/'fuzzy') because 'Postgres ts_rank, Indx BM25F, and fuzzy trigram aren't comparable across engines'; recordFindEvent posts correction/click telemetry."
     },
     {
-      "title": "Support round-trip ONIX import so external catalogs can be ingested",
-      "scale": "small",
-      "evidence": "importer.ex parses ONIX 3.0 XML back to book content maps that byte-stably re-export through the same exporter; designed as the explicit inverse of export.ex"
+      "title": "Ship an Obsidian-style interactive documentation graph that stays wired to live Finder search state",
+      "scale": "feature",
+      "evidence": "graph-landing.tsx: canvas graph on '/' right pane; node click swaps only the (finder) route segment so left-rail search state in the query string survives; useGraphMatches ties node brightness to search rank; onNodeHover cross-highlights the matching finder result row; graph-view.tsx is the Canvas renderer React bridge."
     },
     {
-      "title": "Surface Bokbasen dry-run preview and manual retry in Studio",
-      "scale": "small",
-      "evidence": "actions.ex exposes publish_to_bokbasen/3 in :dryrun and :real modes; bokbasen_live.ex provides an admin LiveView for submission state; export_onix_path/2 renders a kind:link download action in the Studio schema registry"
+      "title": "Render every PortableDoc block type (rich text marks, wikilinks, task boards, sheets, roadmaps) faithfully on the read surface, matching the Studio editor's serialization",
+      "scale": "feature",
+      "evidence": "portable-doc.tsx: renderInline/wrapMark handle strong/em/strike/underline/code/link marks matching serializer order; wikilink nodes render an unresolved-target affordance with data-wikilink hook for a future resolver; imports SheetSnapshot, taskBoardColumns, statusLegendProjection/roadmapProjection — one renderer for many embedded block kinds."
     },
     {
-      "title": "Detect and surface ONIX codelist version drift before submissions fail downstream",
-      "scale": "small",
-      "evidence": "staleness_checker.ex classifies every pinned codelist ref as :current/:stale/:deprecated/:acknowledged against the current registry issue; staleness_live.ex surfaces this in a Studio admin panel; revalidate/2 computes the diff needed to bring a doc current"
+      "title": "Render spreadsheet (Sheets plugin) data losslessly in read-only paper embeds: merges, formats, row heights, checkboxes — without a client-side formula engine",
+      "scale": "invariant",
+      "evidence": "sheet-grid.tsx: DenseSnapshot comment states 'there is no formula engine on this side'; splitRowHeights/withCheckboxFmts re-derive Studio-parity rendering (row_heights keying 'twin of the Studio's Geometry.row_px/2', checkbox fmt recovery) purely from the server-precomputed snapshot."
     },
     {
-      "title": "Enforce multi-tenant isolation on ONIX export",
-      "scale": "small",
-      "evidence": "export_controller.ex loads documents via Content.get_document with scope_opts(conn) so a cross-workspace book never resolves; lifecycle.ex captures workspace_id/project_id into Oban job args so the worker re-reads the correct tenant's book"
+      "title": "Keep the demo tenancy-aware: workspace/project scoped routing degrades honestly when no list endpoint exists, never fabricating data",
+      "scale": "invariant",
+      "evidence": "workspace-project-switcher.tsx: with no `options` renders a static 'w/<workspace> · p/<project>' label instead of a fake switcher; when another workspace's projects aren't fetched yet, renders a disabled single-option select rather than guessing — explicit comments reject fabrication."
+    },
+    {
+      "title": "Give the map/listings surface a zero-dependency, degrade-gracefully rendering path — no npm map libs, works with tiles off",
+      "scale": "invariant",
+      "evidence": "listings-map.tsx: 'ZERO npm map libs (no Leaflet / Mapbox / MapLibre), ZERO build-time tile bundle'; tiles are optional and 'with tiles off (or blocked) the pins still render over a calm graticule, so the surface never collapses to a blank box'; shares the same finder↔pane bridge contract (matches/hoveredId/onHover) as the graph."
+    },
+    {
+      "title": "Make live/realtime content updates opt-in and inert by default so the demo never surprises an unprovisioned deployment",
+      "scale": "invariant",
+      "evidence": "live-bridge.tsx: gated behind NEXT_PUBLIC_BARKPARK_LIVE=1, 'stays inert (no connection attempts, no console noise) until... explicitly switched on'; routes through a same-origin proxy so the browser client carries no token."
+    },
+    {
+      "title": "Give the demo an honest, empirical way to compare search engines (Postgres vs Indx) instead of trusting vendor claims",
+      "scale": "feature",
+      "evidence": "bench.tsx: fixed QUERIES set, RUNS=6 samples per cell reporting median client round-trip AND upstream server time separately, 'Search is always direct (no cache), so this measures the real engine + network round-trip'."
+    },
+    {
+      "title": "Keep visual identity single-sourced from the emitted design-token pipeline, never hand-picked colors, across the whole component surface",
+      "scale": "invariant",
+      "evidence": "styleguide.tsx: 'Every swatch is painted with var(--color-…), resolving live from the GENERATED block in app/globals.css (emitted by design/emit.mjs from design/tokens.json)'; listings-map.tsx pulls canvas.primary/mutedText from lib/tokens.gen instead of hardcoded hex."
     }
   ]
 }

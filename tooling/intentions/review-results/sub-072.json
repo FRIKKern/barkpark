@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/quiz",
+  "intentions": [
+    {
+      "title": "Ship a hyperinteractive live quiz game (Kahoot-class) built entirely on Phoenix processes, not a persisted-state engine",
+      "scale": "epic",
+      "evidence": "Barkpark.Quiz.Room is a per-room GenServer (P1 'walking skeleton', /papers/hyperquiz-architecture) that owns players, current question, and answer tallies in memory only ('nothing persists per-tick', /papers/hyperquiz-scaling). Lifecycle staged as P1-P6 papers referenced across every module's @moduledoc (hyperquiz-architecture, hyperquiz-realtime-protocol, hyperquiz-content-model, hyperquiz-scaling, hyperquiz-risks)."
+    },
+    {
+      "title": "Let hosts author and live-edit quiz content in the existing Barkpark Studio — a Studio edit reaches players in the same second, no redeploy",
+      "scale": "feature",
+      "evidence": "Barkpark.Quiz.Content defines a schema-v2 'quiz' document type; Barkpark.Quiz.Bridge subscribes to 'documents:<dataset>' mutation broadcasts, reloads the quiz via Content.load_question/2 on change, and calls Room.apply_question/2 which broadcasts {:question_updated, question} to connected players with no reconnect. Content.ex moduledoc: 'the differentiator: a Studio edit to a quiz updates the running game in the same second.'"
+    },
+    {
+      "title": "Scale crowd-cursor visualization from individual per-player dots to an aggregate density heatmap as room size grows, keeping bandwidth O(1)/O(N) instead of O(N²)",
+      "scale": "feature",
+      "evidence": "CursorFrame batches all positions into one delta-encoded binary frame per ~15Hz tick (idx::16,qx::16,qy::16). Above @heatmap_threshold (300, room-overridable) Room switches to Heatmap.encode/1 — a fixed 32x32 grid of u16 counts, constant payload size regardless of player count, explicitly designed for '10k+ players' (/papers/hyperquiz-scaling)."
+    },
+    {
+      "title": "Guarantee the correct answer never leaks to players before reveal, even though it's stored inline in the same document players' rooms read from",
+      "scale": "invariant",
+      "evidence": "Content.schema/0 is marked visibility: \"private\" specifically because 'the doc stores the correct answer inline... players could fetch the answer key' via the public API; Room.public_question/1 strips :answer from every snapshot/broadcast except the explicit :reveal phase payload; apply_question/2 rejects malformed questions to avoid corrupting that invariant mid-round."
+    },
+    {
+      "title": "Make a quiz room's absence of state a safe default: no room, no quiz, or a crashed room must never break or resurrect incorrectly",
+      "scale": "invariant",
+      "evidence": "Room.ensure/1 is 'the ONLY path that starts a room'; leave/tally/state/submit_answer resolve via whereis/1 and never start one ('no resurrection'). restart: :temporary means a crashed room is simply gone. Room keeps a hardcoded @default_question fallback so a missing/unselected quiz doesn't break P1/P2 behavior. Bridge.apply_now/3 swallows load failures and rescues/catches exceptions so a DB hiccup 'must never crash the bridge... drop every room↔quiz binding'."
+    },
+    {
+      "title": "Give hosts/ops cheap, always-on visibility into live quiz load without touching the room's hot path",
+      "scale": "feature",
+      "evidence": "Barkpark.Quiz.Stats exposes live_room_count/0 (Registry.count) and room_stats/1 (players/cursors/phase) for a dashboard; Room emits a [:barkpark, :quiz, :tick] :telemetry event every ~15Hz tick with cursor counts — described as 'P6 observability for the hyperquiz layer'."
+    },
+    {
+      "title": "Enforce a bounded, resource-safe game lifecycle so idle or abandoned rooms self-clean and abuse is capped",
+      "scale": "invariant",
+      "evidence": "Room self-stops after an idle window (@empty_idle_ms=2min unpopulated, @idle_stop_ms=60min with players), generation-tokened so stale :idle_stop messages can't kill an active room; per-room cap @max_players=2000 and global cap via RoomSupervisor max_children; hibernate_after releases heap between bursts."
+    }
+  ]
+}

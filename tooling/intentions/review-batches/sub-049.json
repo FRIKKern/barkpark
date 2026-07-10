@@ -1,36 +1,56 @@
 {
-  "subsystem": "sdk/src",
-  "count": 5,
+  "subsystem": "js/packages/create-barkpark-app/templates/website-starter",
+  "count": 10,
   "files": [
     {
-      "path": "sdk/src/blocks.ts",
-      "role": "PortableDoc block type definitions and constructors",
-      "importance": 31,
-      "usefulness": 34
+      "path": "js/packages/create-barkpark-app/templates/website-starter/barkpark.config.ts.tmpl",
+      "role": "website-starter scaffolder config template",
+      "importance": 13
     },
     {
-      "path": "sdk/src/client.ts",
-      "role": "Bulldocs HTTP ingest client",
-      "importance": 29,
-      "usefulness": 32
+      "path": "js/packages/create-barkpark-app/templates/website-starter/next.config.mjs",
+      "role": "scaffold template Next.js config",
+      "importance": 4
     },
     {
-      "path": "sdk/src/ops.ts",
-      "role": "PortableDoc patch-op type definitions and constructors",
-      "importance": 28,
-      "usefulness": 32
+      "path": "js/packages/create-barkpark-app/templates/website-starter/package.json.tmpl",
+      "role": "package.json template for website-starter scaffolded app",
+      "importance": 16
     },
     {
-      "path": "sdk/src/paper.ts",
-      "role": "Paper builder",
-      "importance": 25,
-      "usefulness": 23
+      "path": "js/packages/create-barkpark-app/templates/website-starter/postcss.config.js",
+      "role": "scaffold template PostCSS config",
+      "importance": 4
     },
     {
-      "path": "sdk/src/index.ts",
-      "role": "Bulldocs SDK barrel entrypoint",
-      "importance": 26,
-      "usefulness": 18
+      "path": "js/packages/create-barkpark-app/templates/website-starter/tailwind.config.ts",
+      "role": "starter-template Tailwind config",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/lib/barkpark.ts",
+      "role": "website-starter server fetch helper",
+      "importance": 16
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/author.ts",
+      "role": "scaffold template author schema definition",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/page.ts",
+      "role": "scaffold template marketing page schema definition",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/schemas/post.ts",
+      "role": "starter-template schema fixture",
+      "importance": 11
+    },
+    {
+      "path": "js/packages/create-barkpark-app/templates/website-starter/seeds/seed.ts",
+      "role": "website starter seed script",
+      "importance": 11
     }
   ]
 }

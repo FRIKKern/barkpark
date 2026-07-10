@@ -1,0 +1,31 @@
+{
+  "subsystem": "apps/hundesteder/components",
+  "count": 5,
+  "files": [
+    {
+      "path": "apps/hundesteder/components/place-card.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/components/places-browser.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/components/places-map.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/components/site-footer.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/components/site-header.tsx",
+      "role": "",
+      "importance": 1
+    }
+  ]
+}

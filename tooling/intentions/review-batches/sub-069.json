@@ -1,0 +1,41 @@
+{
+  "subsystem": "cmd",
+  "count": 7,
+  "files": [
+    {
+      "path": "cmd/barkpark-agent/main.go",
+      "role": "",
+      "importance": 45
+    },
+    {
+      "path": "cmd/barkpark-builder/main.go",
+      "role": "",
+      "importance": 34
+    },
+    {
+      "path": "cmd/barkpark-provisioner/main.go",
+      "role": "",
+      "importance": 47
+    },
+    {
+      "path": "cmd/barkpark-runtime/main.go",
+      "role": "",
+      "importance": 34
+    },
+    {
+      "path": "cmd/barkpark-waker/main.go",
+      "role": "",
+      "importance": 34
+    },
+    {
+      "path": "cmd/pdrender-wasm/main.go",
+      "role": "",
+      "importance": 41
+    },
+    {
+      "path": "cmd/pdrender-wasm/smoke.mjs",
+      "role": "",
+      "importance": 25
+    }
+  ]
+}

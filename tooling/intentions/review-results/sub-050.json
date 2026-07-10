@@ -1,1 +1,35 @@
-{"subsystem":"api/lib/barkpark/edge_projector","summary":"Materialises a durable content graph into the `content_edges` Postgres table by projecting reference-field edges (core) and plugin-contributed edges on every document save, publish, unpublish, or delete. Debounced Oban workers drive three ops — full-scope rebuild, per-doc upsert, and per-doc delete — keeping the graph consistent with the published corpus.","intentions":[{"title":"Maintain a queryable content graph as a first-class durable artefact","scale":"epic","evidence":"projector.ex: atomic DELETE+bulk-add per scope into `content_edges`; lifecycle.ex routes all four after_* events; worker queues named :edge_projector with max_attempts 5"},{"title":"Fresh-install invariant — graph works with all plugins off","scale":"small","evidence":"projector.ex moduledoc: core `Content.extract_edges/2` is the floor; `Registry.collect_edge_extractors/1` with plugins [] contributes nothing; lifecycle.ex is wired directly from `Content.fire_after/3`, not through plugin hooks"},{"title":"Plugin highway for edge extraction — plugins extend without owning","scale":"small","evidence":"projector.ex `edges_for_doc/2`: folds plugin `resolve_extract_edges/2` on top of core baseline; Tasks projects blocks/discovered-from/parent, Bulldocs projects paper references"},{"title":"Harden multi-tenant isolation on graph writes (fail-closed tenancy)","scale":"epic","evidence":"projector_worker.ex: nil-workspace rebuild cancelled in multi-tenant mode (`{:cancel, :nil_workspace_multi_tenant}`); `require_workspace: true` forwarded to all three op paths; projector.ex `doc_pk/2` uses `Scope.scope_to_workspace/3` strict resolution to prevent cross-tenant PK collision"},{"title":"Debounce burst writes to amortise full-scope rebuilds","scale":"small","evidence":"projector_worker.ex: `@debounce_seconds 5`, unique on `(op, scope, _id)` across available/scheduled/executing so a burst of saves to one scope collapses into a single rebuild job"},{"title":"Spike-gate incremental upsert path until proven safe","scale":"small","evidence":"settings.ex: `incremental_project` defaults false; lifecycle.ex comment 'UNPROVEN — a mis-diff strands stale edges in a durable Postgres table (no blue/green to discard)'; worker `run_upsert` still falls back to rebuild on missing type"}]}
+{
+  "subsystem": "api/lib/barkpark/plugins/onixedit/export",
+  "intentions": [
+    {
+      "title": "Produce EDItEUR-spec-conformant ONIX 3.0 XML from book documents for Bokbasen wholesale ingestion",
+      "scale": "epic",
+      "evidence": "message.ex wraps Header + Product children into <ONIXMessage release=\"3.0\"> with the reference-tag namespace per EDItEUR §3.0; descriptive_detail.ex, collateral_detail.ex, publishing_detail.ex, product_supply.ex each build one ONIX block; codelists.ex resolves 14 ONIX codelists (17,93,150,175,23,25,45,58,65,91,96,153,154,158,159) against the vendored XSD at priv/onix/onix-3.0/ONIX_BookProduct_CodeLists.xsd."
+    },
+    {
+      "title": "Never let structurally invalid ONIX leave the pipeline — XSD validation is a hard gate, not a lint",
+      "scale": "invariant",
+      "evidence": "validator.ex runs `xmllint --noout --schema` against the vendored EDItEUR reference XSD (ONIX_BookProduct_3.0_reference.xsd); tests tagged `:validator` and CI installs libxml2-utils with 'no --exclude :validator on CI — the gate must run'; codelists.ex raises ArgumentError on unknown codes rather than silently emitting an invalid enum value."
+    },
+    {
+      "title": "Guarantee every export is byte-stable and reproducible across VM restarts for proof-artifact regeneration",
+      "scale": "invariant",
+      "evidence": "message.ex explicitly uses an ordered keyword list (not a map) for ONIXMessage attrs, with a comment citing Goal barkpark-mgu surfacing map-enumeration nondeterminism as proof-artifact drift in `mix onix.export_proof` regens."
+    },
+    {
+      "title": "Synthesize Bokbasen-friendly defaults (Norwegian locale, sane placeholders) so incomplete book.json never blocks export",
+      "scale": "feature",
+      "evidence": "product_supply.ex synthesizes a default NO-territory ProductSupply with SupplierRole 09, ProductAvailability 20 (Available), UnpricedItemType 01 (Free of charge placeholder) when book.json carries no productSupplies; header.ex defaults dataset to \"production\" and SenderName to placeholder \"barkpark.cloud\" pending WI7 GLN identifier."
+    },
+    {
+      "title": "Give Bokbasen submission status a single consistent visual vocabulary across every Studio surface",
+      "scale": "invariant",
+      "evidence": "status_pill.ex consolidates color_class/1 and label/1 into one module after two earlier call sites (removed BookEditor LV and BokbasenLive) each carried duplicate copies of the same 9-state → 5-bucket mapping; moduledoc frames this as 'Phase 8 WI5 consolidation... defined in exactly one place'."
+    },
+    {
+      "title": "Emit only XSD-legal element ordering and cardinality even where it costs extra branching",
+      "scale": "invariant",
+      "evidence": "product_supply.ex moduledoc: AgentRole must precede AgentName ('XSD enforces that ordering'); MarketPublishingStatus is emitted as mandatory even under defaults; empty optional containers (e.g. empty <Price>) are never emitted because they 'fail XSD validation in WI5'."
+    }
+  ]
+}

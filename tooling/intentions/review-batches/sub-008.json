@@ -1,120 +1,176 @@
 {
-  "subsystem": ".",
-  "count": 19,
+  "subsystem": "internal/pdrender",
+  "count": 34,
   "files": [
     {
-      "path": "tui.go",
-      "role": "Go TUI main model and renderer",
-      "importance": 44,
-      "usefulness": 32
+      "path": "internal/pdrender/attrs.go",
+      "role": "portable-doc JSON attribute helpers",
+      "importance": 56
     },
     {
-      "path": "main.go",
-      "role": "Go binary entrypoint (TUI + CLI router)",
-      "importance": 56,
-      "usefulness": 18
+      "path": "internal/pdrender/blocks.go",
+      "role": "pdrender core block renderers (heading, paragraph, list, etc.)",
+      "importance": 62
     },
     {
-      "path": "deploy.sh",
-      "role": "server provisioning and deploy script",
-      "importance": 45,
-      "usefulness": 12
+      "path": "internal/pdrender/braille.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "structure.go",
-      "role": "Go TUI structure builder API",
-      "importance": 29,
-      "usefulness": 28
+      "path": "internal/pdrender/chart.go",
+      "role": "",
+      "importance": 59
     },
     {
-      "path": "schema.go",
-      "role": "Go TUI schema type aliases",
-      "importance": 30,
-      "usefulness": 22
+      "path": "internal/pdrender/code.go",
+      "role": "portable-doc code block renderer",
+      "importance": 61
     },
     {
-      "path": "selector.go",
-      "role": "TUI scope selector modal (workspace/project/dataset picker)",
-      "importance": 28,
-      "usefulness": 20
+      "path": "internal/pdrender/composeblocks.go",
+      "role": "",
+      "importance": 60
     },
     {
-      "path": "objtable.go",
-      "role": "TUI object-array table renderer",
-      "importance": 18,
-      "usefulness": 24
+      "path": "internal/pdrender/dashboard.go",
+      "role": "",
+      "importance": 54
     },
     {
-      "path": "styles.go",
-      "role": "TUI lipgloss style definitions",
-      "importance": 22,
-      "usefulness": 20
+      "path": "internal/pdrender/decode.go",
+      "role": "pdrender JSON document decoder",
+      "importance": 54
     },
     {
-      "path": "bulk.go",
-      "role": "TUI bulk publish/unpublish implementation",
-      "importance": 20,
-      "usefulness": 20
+      "path": "internal/pdrender/fields.go",
+      "role": "pdrender field-* block renderers",
+      "importance": 58
     },
     {
-      "path": "search.go",
-      "role": "TUI full-text search UI",
-      "importance": 20,
-      "usefulness": 20
+      "path": "internal/pdrender/form.go",
+      "role": "pdrender form/questionnaire block renderer",
+      "importance": 58
     },
     {
-      "path": "store.go",
-      "role": "TUI type aliases and presentation helpers for apiclient",
-      "importance": 24,
-      "usefulness": 14
+      "path": "internal/pdrender/gaugelist.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "refpicker.go",
-      "role": "TUI reference-field picker modal",
-      "importance": 23,
-      "usefulness": 14
+      "path": "internal/pdrender/gridblocks.go",
+      "role": "",
+      "importance": 61
     },
     {
-      "path": "diff.go",
-      "role": "TUI draft-vs-published diff modal",
-      "importance": 14,
-      "usefulness": 21
+      "path": "internal/pdrender/hardblocks.go",
+      "role": "pdrender hard-fallback block renderers (diagram, asciicast, image)",
+      "importance": 62
     },
     {
-      "path": "paper.go",
-      "role": "TUI paper viewer layout helper",
-      "importance": 22,
-      "usefulness": 11
+      "path": "internal/pdrender/heatmap.go",
+      "role": "",
+      "importance": 61
     },
     {
-      "path": "history.go",
-      "role": "TUI document history view component",
-      "importance": 16,
-      "usefulness": 16
+      "path": "internal/pdrender/imagemosaic.go",
+      "role": "",
+      "importance": 49
     },
     {
-      "path": "help.go",
-      "role": "TUI help overlay UI component",
-      "importance": 13,
-      "usefulness": 14
+      "path": "internal/pdrender/inline.go",
+      "role": "pdrender inline node renderer",
+      "importance": 62
     },
     {
-      "path": "run.sh",
-      "role": "local dev launcher script",
-      "importance": 21,
-      "usefulness": 5
+      "path": "internal/pdrender/joincols.go",
+      "role": "",
+      "importance": 60
     },
     {
-      "path": "dev.sh",
-      "role": "local dev environment launcher",
-      "importance": 14,
-      "usefulness": 8
+      "path": "internal/pdrender/layoutblocks.go",
+      "role": "",
+      "importance": 61
     },
     {
-      "path": "watch.sh",
-      "role": "Go TUI hot-reload dev script",
-      "importance": 5,
-      "usefulness": 5
+      "path": "internal/pdrender/mermaid.go",
+      "role": "",
+      "importance": 58
+    },
+    {
+      "path": "internal/pdrender/mermaidflow.go",
+      "role": "",
+      "importance": 60
+    },
+    {
+      "path": "internal/pdrender/mermaidflowlr.go",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "internal/pdrender/mermaidheur.go",
+      "role": "",
+      "importance": 49
+    },
+    {
+      "path": "internal/pdrender/mermaidseq.go",
+      "role": "",
+      "importance": 56
+    },
+    {
+      "path": "internal/pdrender/pdrender.go",
+      "role": "terminal portable-doc renderer core types and registry",
+      "importance": 63
+    },
+    {
+      "path": "internal/pdrender/pipelineflow.go",
+      "role": "",
+      "importance": 49
+    },
+    {
+      "path": "internal/pdrender/richblocks.go",
+      "role": "pdrender rich block renderers (table, figure, action, pullquote, ingress, eyebrow, byline)",
+      "importance": 62
+    },
+    {
+      "path": "internal/pdrender/sheet.go",
+      "role": "pdrender spreadsheet block renderer",
+      "importance": 60
+    },
+    {
+      "path": "internal/pdrender/stat.go",
+      "role": "",
+      "importance": 59
+    },
+    {
+      "path": "internal/pdrender/taskblocks.go",
+      "role": "",
+      "importance": 62
+    },
+    {
+      "path": "internal/pdrender/theme.go",
+      "role": "pdrender theme/palette definition",
+      "importance": 61
+    },
+    {
+      "path": "internal/pdrender/tokens_gen.go",
+      "role": "",
+      "importance": 62
+    },
+    {
+      "path": "internal/pdrender/v2fields.go",
+      "role": "pdrender schema-v2 field block renderers (composite, arrayOf, codelist, localizedText)",
+      "importance": 58
+    },
+    {
+      "path": "internal/pdrender/cmd/demo/main.go",
+      "role": "pdrender standalone demo entrypoint",
+      "importance": 39
+    },
+    {
+      "path": "internal/pdrender/cmd/dump/main.go",
+      "role": "",
+      "importance": 34
     }
   ]
 }

@@ -1,36 +1,40 @@
 {
-  "subsystem": "js/packages/react/src",
-  "summary": "React renderer package (@barkpark/react) providing framework-agnostic UI primitives — PortableText, BarkparkImage, BarkparkReference — that let consumers display Barkpark CMS content without reimplementing block rendering, image URL resolution, or async reference resolution.",
+  "subsystem": "cloud/lib/barkpark_cloud/accounts",
   "intentions": [
     {
-      "title": "Eliminate boilerplate for rendering Barkpark content in React apps",
+      "title": "One login for all your Barkparks: a control-plane User/Team/Membership identity layer distinct from api/'s per-tenant Workspace principals",
       "scale": "epic",
-      "evidence": "PortableText.tsx implements full block/span/mark/list rendering with component override hooks; consumers pass a value and optional component map and get correct HTML. Without this, every app would re-implement the same block-walking logic."
+      "evidence": "user.ex moduledoc: 'the principal behind one login for all your Barkparks'; team.ex is explicitly 'the Cloud analogue of api/'s Barkpark.Tenancy.Workspace'; team_membership.ex is 'the Cloud mirror of api/'s Barkpark.Tenancy.Membership'; authz.ex is 'the Cloud mirror of api/'s Barkpark.Tenancy.Auth'"
     },
     {
-      "title": "Make image asset rendering portable across frameworks (plain img vs next/image)",
-      "scale": "small",
-      "evidence": "BarkparkImage accepts an `as` prop so consumers can swap in next/image or any component; it forwards lqip as blurDataURL only for non-string components, and falls back to building /images/<id> URLs from baseUrl when the asset lacks an inline url."
+      "title": "Ship email+password auth with a full lifecycle (verify, change-email, password reset) plus passwordless OAuth (GitHub/Google) without ever using email as the account-linking key",
+      "scale": "feature",
+      "evidence": "user.ex registration_changeset/confirm_changeset/email_change_changeset/apply_email_change_changeset/oauth_changeset; external_identity.ex binds on (provider, provider_uid) not email, explicitly to avoid 'Coolify's email-only account-reconstruction footgun' / account-takeover via a second IdP"
     },
     {
-      "title": "Safe async reference resolution with cycle detection and depth capping",
-      "scale": "small",
-      "evidence": "BarkparkReference uses React's use() + Suspense, tracks visited ids via context to break cycles, caps recursion at maxDepth (default 5), and ensures nested instances cannot widen the root's cap — preventing infinite reference chains in documents."
+      "title": "Ship per-user TOTP two-factor authentication with encrypted-at-rest secrets, single-use replay-guarded codes, and recovery codes",
+      "scale": "feature",
+      "evidence": "two_factor.ex (NimbleTOTP, Vault.encrypt for secret + codes, matching_step/3 replay guard via two_factor_last_step); user.ex two_factor_enroll/confirm/disable/codes changesets; two_factor_rate_limiter.ex"
     },
     {
-      "title": "RSC / App Router compatibility without splitting the package",
-      "scale": "small",
-      "evidence": "server.ts re-exports only context-free renderers (PortableText, BarkparkImage) and omits BarkparkReference (which calls createContext), so a Server Component can import from this entry without crashing the RSC import graph. index.ts carries 'use client' for the full client build."
+      "title": "Issue and govern bearer credentials for both interactive sessions and programmatic Personal Access Tokens from a single hash-at-rest token table, with a bounded, server-enforced PAT ability vocabulary (read/write/deploy/root)",
+      "scale": "feature",
+      "evidence": "user_token.ex: dual context session/pat, SHA-256 token_hash never plaintext, revoked_at/expires_at kill switches, normalize_abilities/1 enforcing root/deploy exclusivity server-side 'mirroring Coolify's ApiTokens.updatedPermissions ... THIS is the authority'"
     },
     {
-      "title": "Scope-aware API paths aligned with the multi-tenant core client",
-      "scale": "small",
-      "evidence": "BarkparkReference.buildDocPath calls scopePrefix from @barkpark/core when a client config (workspace/project/dataset) is present, producing /w/:ws/p/:proj/v1/... paths — falling back to flat /v1/... only for unscoped configs — keeping reference resolution consistent with the client's multi-tenant routing."
+      "title": "Enforce role-ranked, per-team authorization (member < admin < owner) as the single source of truth for every money- and infra-destructive action, with total (never-raising) policy evaluation and anti-escalation grant limits",
+      "scale": "invariant",
+      "evidence": "authz.ex authorize/3 policy table (read=member, launch/delete_barkpark/connect_provider/manage_members=admin, billing/delete_team=owner), 'TOTAL ... never raises', can_grant?/3 blocks an admin from minting a role at or above their own rank"
     },
     {
-      "title": "Extensible rendering surface via component override slots",
-      "scale": "epic",
-      "evidence": "PortableTextComponents exposes override slots for every node type (block, mark, list, listItem, types) plus unknown-* fallbacks; BarkparkImage's `as` prop and BarkparkReference's `fetcher`/`children` render-prop follow the same pattern — the package is an integration point, not a closed renderer."
+      "title": "Maintain an append-only, tamper-proof audit trail of every security/account-relevant action per team, enforced at the database level not just the ORM",
+      "scale": "invariant",
+      "evidence": "audit_event.ex: no updated_at field, closed @actions vocabulary via validate_inclusion, moduledoc states 'the migration installs a BEFORE UPDATE/DELETE trigger so a raw SQL mutation is rejected at the DB, not just by Ecto'; actor_user_id nilified (not cascaded) on account deletion"
+    },
+    {
+      "title": "Drive durable, resumable team onboarding (subscription/instance/published_doc checklist) and a one-trial-per-team-ever entitlement ledger that survives subscription teardown",
+      "scale": "feature",
+      "evidence": "team.ex onboarding_state/onboarding_completed_at + onboarding_changeset (separate from the registration changeset so it can't trip name/slug validation); trial_started_at/trial_ends_at/trial_notice_3d_sent_at/trial_notice_1d_sent_at columns described as 'the DURABLE one-trial-per-team-EVER ledger' with an atomic claim guard"
     }
   ]
 }

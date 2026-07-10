@@ -1,36 +1,56 @@
 {
-  "subsystem": "js/packages/nextjs",
-  "count": 5,
+  "subsystem": "api/lib/barkpark_web/studio",
+  "count": 10,
   "files": [
     {
-      "path": "js/packages/nextjs/tsup.config.ts",
-      "role": "Next.js SDK build config with use-client directive injection",
-      "importance": 31,
-      "usefulness": 14
+      "path": "api/lib/barkpark_web/studio/caps.ex",
+      "role": "",
+      "importance": 59
     },
     {
-      "path": "js/packages/nextjs/vitest.client.config.ts",
-      "role": "vitest client-side test config",
-      "importance": 15,
-      "usefulness": 5
+      "path": "api/lib/barkpark_web/studio/claude_chat.ex",
+      "role": "",
+      "importance": 55
     },
     {
-      "path": "js/packages/nextjs/vitest.server.config.ts",
-      "role": "vitest server-side test config",
-      "importance": 15,
-      "usefulness": 5
+      "path": "api/lib/barkpark_web/studio/dataset_switcher.ex",
+      "role": "Studio dataset selector component",
+      "importance": 42
     },
     {
-      "path": "js/packages/nextjs/tests/setup.server.ts",
-      "role": "server test setup — mock server-only module",
-      "importance": 14,
-      "usefulness": 5
+      "path": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "role": "Studio pane-tree builder",
+      "importance": 56
     },
     {
-      "path": "js/packages/nextjs/vitest.workspace.ts",
-      "role": "vitest workspace root config",
-      "importance": 15,
-      "usefulness": 3
+      "path": "api/lib/barkpark_web/studio/presence_state.ex",
+      "role": "Studio collaborative presence helpers",
+      "importance": 56
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/return_to.ex",
+      "role": "",
+      "importance": 45
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/scope_resolver.ex",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/tmux_console.ex",
+      "role": "",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/tokens_gen.ex",
+      "role": "",
+      "importance": 56
+    },
+    {
+      "path": "api/lib/barkpark_web/studio/workspace_switcher.ex",
+      "role": "Studio workspace/project/dataset scope switcher component",
+      "importance": 43
     }
   ]
 }

@@ -1,0 +1,31 @@
+{
+  "subsystem": "api/lib/barkpark/studio_chat",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark/studio_chat/message.ex",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark/studio_chat/plan_papers.ex",
+      "role": "",
+      "importance": 30
+    },
+    {
+      "path": "api/lib/barkpark/studio_chat/recorder.ex",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/studio_chat/session.ex",
+      "role": "",
+      "importance": 48
+    },
+    {
+      "path": "api/lib/barkpark/studio_chat/titles.ex",
+      "role": "",
+      "importance": 26
+    }
+  ]
+}

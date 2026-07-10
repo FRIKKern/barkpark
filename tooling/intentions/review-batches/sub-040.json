@@ -1,36 +1,66 @@
 {
-  "subsystem": "api/assets/paper-editor/src",
-  "count": 5,
+  "subsystem": "js/packages",
+  "count": 12,
   "files": [
     {
-      "path": "api/assets/paper-editor/src/convert.js",
-      "role": "portable-doc ↔ TipTap JSON converter",
-      "importance": 30,
-      "usefulness": 39
+      "path": "js/packages/codegen/tsup.config.ts",
+      "role": "Codegen package build config",
+      "importance": 4
     },
     {
-      "path": "api/assets/paper-editor/src/index.js",
-      "role": "TipTap Web Component editor entrypoint",
-      "importance": 34,
-      "usefulness": 27
+      "path": "js/packages/codegen/vitest.config.ts",
+      "role": "Vitest configuration for codegen package",
+      "importance": 9
     },
     {
-      "path": "api/assets/paper-editor/src/slash-menu.js",
-      "role": "Slash-command insert menu for paper editor",
-      "importance": 27,
-      "usefulness": 26
+      "path": "js/packages/create-barkpark-app/tsup.config.ts",
+      "role": "CLI build config for create-barkpark-app",
+      "importance": 11
     },
     {
-      "path": "api/assets/paper-editor/src/format-bubble.js",
-      "role": "floating text-format toolbar for paper editor",
-      "importance": 17,
-      "usefulness": 24
+      "path": "js/packages/create-barkpark-app/vitest.config.ts",
+      "role": "",
+      "importance": 4
     },
     {
-      "path": "api/assets/paper-editor/src/__smoke.mjs",
-      "role": "smoke test for portable-doc ↔ TipTap round-trip converters",
-      "importance": 7,
-      "usefulness": 9
+      "path": "js/packages/groq/tsup.config.ts",
+      "role": "groq package build config",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/groq/vitest.config.ts",
+      "role": "TypeScript test configuration for groq package",
+      "importance": 9
+    },
+    {
+      "path": "js/packages/groq/src/index.ts",
+      "role": "deferred GROQ package stub",
+      "importance": 31
+    },
+    {
+      "path": "js/packages/nextjs-query/tsup.config.ts",
+      "role": "nextjs-query package build config",
+      "importance": 4
+    },
+    {
+      "path": "js/packages/nextjs-query/vitest.config.ts",
+      "role": "TypeScript test configuration for nextjs-query package",
+      "importance": 9
+    },
+    {
+      "path": "js/packages/nextjs-query/src/index.ts",
+      "role": "deferred nextjs-query package stub",
+      "importance": 30
+    },
+    {
+      "path": "js/packages/react/tsup.config.ts",
+      "role": "React SDK build config",
+      "importance": 11
+    },
+    {
+      "path": "js/packages/react/vitest.config.ts",
+      "role": "TypeScript test configuration for react renderers package",
+      "importance": 9
     }
   ]
 }

@@ -1,36 +1,45 @@
 {
-  "subsystem": "api/lib/barkpark/plugins/onixedit/export",
-  "summary": "Builds and validates standards-compliant ONIX 3.0 XML messages from Barkpark book documents for submission to Bokbasen (the Norwegian book trade distributor). Each module owns one ONIX block composite, backed by a shared codelist resolver and an XSD validation gate.",
+  "subsystem": "api/lib/barkpark_web",
   "intentions": [
     {
-      "title": "Enable Norwegian book trade distribution via Bokbasen",
+      "title": "Enforce a hard multi-tenant boundary across every entrypoint (flat + workspace/project-scoped URLs, sockets, plugin routes) via a single small family of composable Plug pipelines",
       "scale": "epic",
-      "evidence": "collateral_detail.ex has explicit Norwegian-first locale logic (nob > eng fallback with Logger.warning); country_code/currency_code maps in codelists.ex are Nordic-first (NO, SE, DK, FI); status_pill.ex maps Bokbasen-specific export lifecycle states (staged, polling, accepted, rejected). The whole pipeline exists to ship product records to Bokbasen."
+      "evidence": "router.ex defines paired :api/:scoped_api, :browser/:scoped_browser, :media_mutate/:scoped_media_mutate pipelines; ResolveWorkspace/ResolveProject membership-gate every scoped route; AssignDefaultScope is a documented back-compat shim for flat routes inferring the seeded Default workspace; scoped mirrors exist for plugin admin/public/ops/api buckets (scope \"/w/:workspace_slug/p/:project_slug/...\")."
     },
     {
-      "title": "Enforce ONIX 3.0 spec compliance at the boundary, not at the caller",
+      "title": "Let anonymous, read-only visitors reach specific published content (papers, docs, media) through explicit share grants, never through a broadened default posture",
       "scale": "epic",
-      "evidence": "validator.ex runs xmllint against the vendored EDItEUR reference XSD (ONIX_BookProduct_3.0_reference.xsd) before any export ships. codelists.ex raises ArgumentError on unknown codes rather than silently passing them through — the fail-fast design is explicitly documented as preventing silent XSD failures downstream."
+      "evidence": "router.ex pipelines :shared_docs_api, :shared_media_api, :shared_paper_browser, :shared_studio_browser all insert RequireShareScope(surface: ...) before the membership-gating resolvers, documented as no-ops when the scope isn't shared; live_scope.ex's authorize_read/4 has explicit :share_read grade and attach_readonly_gate/2 halts all mutating LiveView events for a share-graded socket."
     },
     {
-      "title": "Map internal book.json document shape to ONIX composite blocks",
-      "scale": "small",
-      "evidence": "descriptive_detail.ex, collateral_detail.ex, product_supply.ex, publishing_detail.ex each own exactly one ONIX composite block and map fields from the Barkpark `book` document schema (e.g. productForm, titleDetails, contributors, themaSubjectCategory) to XmlBuilder element trees."
+      "title": "Allow externally granted, sub-scoped access (airdrop grants) to read and write narrowly-scoped content without ever widening beyond the grant, additive to membership",
+      "scale": "feature",
+      "evidence": "router.ex :api_grant_read pipeline (ResolveTokenOwner + AssignGrantScope) layered only on flat READ routes; live_scope.ex grant_read_ctx/2, has_write_grant?/2, attach_write_gate/2 and write_target/3 implement per-event write-target containment via Access.validate/3, explicitly ordered last so grants only add access."
     },
     {
-      "title": "Silently suppress empty ONIX blocks to avoid XSD rejection",
-      "scale": "small",
-      "evidence": "Every block builder (descriptive_detail.ex, collateral_detail.ex) returns nil when no child produced output, documented as 'preferable to a wall of empty tags'. The Product orchestrator filters nils so the assembled ONIXMessage only contains populated composites."
+      "title": "Keep the API and Studio fully self-serviceable by plugins through a compile-time route-injection macro, so plugins get first-class auth tiers (admin/ops/public/api/token/ingest/public_api/github_webhook/ticket_key/session_token_root/public_root) without touching the host router by hand",
+      "scale": "epic",
+      "evidence": "router.ex imports BarkparkWeb.Router.Plugins and calls plugin_routes(scope: ...) across ~12 distinct auth-tier scopes (admin, public, ops, api, token, public_api, github_webhook, token_root, session_token_root, ticket_key, public_root, ingest), each documented as dormant-until-a-plugin-contributes; scoped mirrors duplicate several of these under /w/:ws/p/:proj."
     },
     {
-      "title": "Centralise Bokbasen export status presentation in a single pill mapping",
-      "scale": "small",
-      "evidence": "status_pill.ex was extracted from two earlier call sites (BookEditor LV and BokbasenLive) to a single module mapping 9 export states to 5 CSS pill buckets. Its moduledoc explicitly names the consolidation as Phase 8 WI5 and points at the two removed duplicates."
+      "title": "Provide a session-cookie-aware auth ladder (Bearer token, login session, share-edit token, ticket key, ingest shared-secret) so browser, API-client, and low-trust submitter callers each get the minimum-privilege credential path without cross-contamination",
+      "scale": "invariant",
+      "evidence": "router.ex comments distinguish OptionalToken (Bearer-only) vs OptionalSessionToken (Bearer-or-cookie) vs RequireBearerOrSessionToken (CSRF-checked cookie branch) vs session_token_root (GET-only, no-CSRF-header cookie navigation) vs ticket_key/ingest (shared-secret, no tenancy); live_auth.ex on_mount(:admin/:ops/:fetch_api_token) mirrors the same ladder for LiveView mounts, with authorize_user/3 falling back to Tenancy.Auth.authorize for account-session admins."
     },
     {
-      "title": "Support Thema subject classification for Nordic book metadata",
-      "scale": "small",
-      "evidence": "descriptive_detail.ex implements Thema (List 93) subject emission with the 'Boss Q3 convention': first Thema code gets a MainSubject flag, subsequent codes do not. codelists.ex carries a representative Thema subset skewed toward fiction/non-fiction/children categories common in Norwegian publishing."
+      "title": "Give operators a single-workspace admin/settings surface (SettingsLive, org-admin, styleguide, tmux console, Claude chat) reachable at both a stable flat URL and its scope-canonical URL, redirecting the flat spelling once scoped",
+      "scale": "feature",
+      "evidence": "router.ex AdminStudioRedirectController 302s /studio/settings to /w/:ws/p/:proj/studio/settings (sdl-w1-admin-canonical); scoped_admin_studio live_session with LiveScope.:resolve; org-admin/styleguide/tmux/chat kept flat as genuinely scope-free; StudioChrome shared top-bar hook composed onto every admin-gated live_session."
+    },
+    {
+      "title": "Preserve one theme identity attribute on every rendered HTML surface (Studio, papers, swatch) without disturbing byte-identical output for the default theme",
+      "scale": "invariant",
+      "evidence": "layouts.ex bp_theme_attr/1 returns nil (omitting the attribute) when assigns[:bp_theme] equals the default theme or is unset, otherwise emits the workspace's resolved theme id for [data-bp-theme=...] CSS to key off."
+    },
+    {
+      "title": "Keep search-quality telemetry (actor/session identity, tags, tentative/committed recording) uniformly derivable from request headers across every API surface that touches search",
+      "scale": "feature",
+      "evidence": "search_intel.ex centralizes actor_key/session_key/parent_event_id/tags/should_record? parsing from x-bp-search-* headers, with should_record? distinguishing client-tracked (needs explicit commit header) vs untracked (record by default) requests and defensive parse_period_start/1 clauses fixing a prior anonymous-request 500."
     }
   ]
 }

@@ -1,16 +1,41 @@
 {
-  "subsystem": "internal",
-  "count": 2,
+  "subsystem": "api/lib/barkpark_web/layouts",
+  "count": 7,
   "files": [
     {
-      "path": "internal/apiclient/client.go",
-      "role": "",
-      "importance": 59
+      "path": "api/lib/barkpark_web/layouts/app.html.heex",
+      "role": "app shell layout template",
+      "importance": 31
     },
     {
-      "path": "internal/apiclient/schema.go",
+      "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+      "role": "Bulldocs paper reader HTML layout",
+      "importance": 32
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/quiz.html.heex",
       "role": "",
-      "importance": 58
+      "importance": 31
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/root.html.heex",
+      "role": "Studio HTML shell / global layout entrypoint",
+      "importance": 48
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/sheets.html.heex",
+      "role": "Sheets public reader HTML layout",
+      "importance": 31
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/studio.html.heex",
+      "role": "Studio shell layout template",
+      "importance": 32
+    },
+    {
+      "path": "api/lib/barkpark_web/layouts/swatch.html.heex",
+      "role": "",
+      "importance": 18
     }
   ]
 }

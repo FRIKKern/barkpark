@@ -1,1 +1,40 @@
-{"subsystem":"packages/client/src","summary":"A now-deprecated flat-API TypeScript HTTP client for Barkpark v1 that predates the workspace/project routing hierarchy. It exposes typed query, document, schema, and atomic mutation operations as a thin wrapper over fetch, with structured error handling.","intentions":[{"title":"Expose a strongly-typed JS surface for the Barkpark v1 HTTP API","scale":"epic","evidence":"types.ts defines DocumentEnvelope, Mutation union, QueryOptions, ErrorEnvelope etc.; client.ts wraps every v1 endpoint (query, getDocument, mutate, schemas) with generic type params; index.ts re-exports all for external consumers"},{"title":"Guarantee atomic multi-mutation transactions from the client side","scale":"small","evidence":"client.ts mutate() batches Mutation[] into a single POST /v1/data/mutate call and documents 'Either all succeed or none do'; all single-shot helpers (create, patch, publish, delete) delegate through mutate()"},{"title":"Provide structured, catchable error types rather than raw HTTP failures","scale":"small","evidence":"errors.ts BarkparkError parses the ErrorEnvelope.code discriminant union (not_found, rev_mismatch, conflict, etc.) and exposes .code/.status/.details; client.ts throws it on every non-2xx response"},{"title":"Keep client instances immutable and composable","scale":"small","evidence":"client.ts withPerspective/withDataset/withToken each return a new Client sharing the same fetch impl — allows scoped sub-clients without mutating shared state"},{"title":"Allow injectable fetch for SSR and test environments","scale":"small","evidence":"ClientConfig.fetch?: typeof fetch lets callers pass a custom implementation; client.ts falls back to globalThis.fetch and throws a clear error when neither is available"},{"title":"Mark a migration path away from the flat-URL API toward @barkpark/core","scale":"small","evidence":"client.ts JSDoc @deprecated block explicitly names the workspace/project routing gap, confirms no monorepo importers, and directs consumers to @barkpark/core createClient"}]}
+{
+  "subsystem": "api/lib/barkpark/plugins/tickets",
+  "intentions": [
+    {
+      "title": "Let operators support outside users through a low-trust, named ticket-key credential that rides the existing api_tokens infrastructure but is kind-fenced inert everywhere else",
+      "scale": "epic",
+      "evidence": "keys.ex: kind==\"ticket\" tokens reuse ApiToken hashing/revocation/expiry but Auth.verify_token/1 filters kind==\"api\" so RequireToken/RequireAdmin/session auth reject them; permissions=[\"ticket\"] satisfies no global tier; bptk_ prefix, raw shown once at mint."
+    },
+    {
+      "title": "Give the operator a triage-first Studio inbox (needs answer / waiting on them / recently closed) so the oldest-waiting submitter always surfaces first",
+      "scale": "feature",
+      "evidence": "triage.ex sort_key buckets open(0)/answered(1)/closed(2), open sorted oldest-waiting-first, answered/closed newest-first; inbox_live.ex renders the three partitions via InboxPresenter; plugin-owned LiveView at /tickets with :admin live_session."
+    },
+    {
+      "title": "Guarantee one lifecycle orchestration for ticket answer/close shared by both the HTTP operator surface and the Studio inbox, so a Studio action always emits the same semantic mutation event a webhook consumer sees",
+      "scale": "invariant",
+      "evidence": "thread.ex operator_answer/operator_close called identically from TicketsController and InboxLive; emit_event/2 is the single public emitter (referenced against MEMORY error-emitters-duplicated); status is derived via transition/2, never client-set."
+    },
+    {
+      "title": "Make a leaked or hostile ticket key harmless: bounded thread growth, bounded message/attachment size, fail-closed ownership scoping that never leaks existence via 403 vs 404",
+      "scale": "invariant",
+      "evidence": "thread.ex caps @max_messages 200, @max_body_bytes 65536, @max_attachments_per_message 10; owned_by_key?/2 + get_for_key/2 return {:error,:not_found} for foreign or missing ids (never 403, no probing); keys.ex verify/1 folds revoked/expired/wrong-kind into one :unauthorized while paused is distinguishable (403)."
+    },
+    {
+      "title": "Get a new ticket key from mint to a working first ticket in about two minutes with zero custom tooling, via a golden-tested, pure handoff card of copy-pasteable curl commands",
+      "scale": "feature",
+      "evidence": "handoff.ex card/2 is a pure string builder (no DB/config/clock) golden-tested in handoff_test.exs; three curl commands (file, list, read) plus etiquette note; inbox_live.ex key-management view shows the one-time secret + handoff card on mint."
+    },
+    {
+      "title": "Keep the ticket/ticket-key CLI manifest honest: only verbs a real bp credential can execute are advertised, and the operator's 'answer & close' UX is a first-class flag",
+      "scale": "invariant",
+      "evidence": "cli.ex: submitter verbs (ls/file/reply) are deliberately NOT advertised because bptk_ bearers project tier none and operator bearers 401 on :ticket_key routes; ticket.answer command exposes a --close flag; mint/rotate default_output \"table\" so the one-time secret is visible."
+    },
+    {
+      "title": "Treat ticket attachments as the hostile-upload surface: verify file type by magic bytes only, never client-declared MIME or extension, independent of the global media allowlist",
+      "scale": "invariant",
+      "evidence": "attachments.ex sniff/1 derives MIME from magic bytes; allow?/1 checks a charter allowlist (png/jpeg/gif/webp/pdf/txt/log/zip); validate/2 returns typed :too_large/:mime_spoofed/:mime_not_allowed; linked_asset/4 scopes retrieval to the presented ticket only."
+    }
+  ]
+}

@@ -1,72 +1,106 @@
 {
-  "subsystem": "tooling",
-  "count": 11,
+  "subsystem": "api/lib/barkpark/plugins/onixedit",
+  "count": 20,
   "files": [
     {
-      "path": "tooling/consistency/consistency.mjs",
-      "role": "consistency scanner and batch manager",
-      "importance": 28,
-      "usefulness": 27
+      "path": "api/lib/barkpark/plugins/onixedit/actions.ex",
+      "role": "OnixEdit Studio action handlers",
+      "importance": 42
     },
     {
-      "path": "tooling/combined/combine.mjs",
-      "role": "importance x consistency join script",
-      "importance": 27,
-      "usefulness": 21
+      "path": "api/lib/barkpark/plugins/onixedit/api_tests.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "tooling/ergonomics/ergonomics.mjs",
-      "role": "god-file and bloat detector",
-      "importance": 22,
-      "usefulness": 20
+      "path": "api/lib/barkpark/plugins/onixedit/cli.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "tooling/quality/quality.mjs",
-      "role": "codebase quality synthesizer",
-      "importance": 29,
-      "usefulness": 9
+      "path": "api/lib/barkpark/plugins/onixedit/codelist_seeders.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "tooling/file-importance/build-signals.mjs",
-      "role": "file importance signal builder and batch partitioner",
-      "importance": 24,
-      "usefulness": 11
+      "path": "api/lib/barkpark/plugins/onixedit/export.ex",
+      "role": "ONIX 3.0 XML export entry point",
+      "importance": 65
     },
     {
-      "path": "tooling/research-coverage/coverage.mjs",
-      "role": "research-coverage ledger engine",
-      "importance": 24,
-      "usefulness": 10
+      "path": "api/lib/barkpark/plugins/onixedit/importer.ex",
+      "role": "ONIX 3.0 XML to book content map importer",
+      "importance": 37
     },
     {
-      "path": "tooling/status/status.mjs",
-      "role": "status-quo entry point / orchestrator",
-      "importance": 22,
-      "usefulness": 12
+      "path": "api/lib/barkpark/plugins/onixedit/lifecycle.ex",
+      "role": "OnixEdit Bokbasen auto-publish lifecycle hook",
+      "importance": 39
     },
     {
-      "path": "tooling/ergonomics/measure.mjs",
-      "role": "ergonomics analysis script",
-      "importance": 18,
-      "usefulness": 11
+      "path": "api/lib/barkpark/plugins/onixedit/menu.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "tooling/risk/risk.mjs",
-      "role": "risk axis analyzer",
-      "importance": 21,
-      "usefulness": 8
+      "path": "api/lib/barkpark/plugins/onixedit/ping_live.ex",
+      "role": "plugin route highway smoke-test LiveView",
+      "importance": 37
     },
     {
-      "path": "tooling/file-importance/merge.mjs",
-      "role": "importance-score merge pipeline",
-      "importance": 20,
-      "usefulness": 8
+      "path": "api/lib/barkpark/plugins/onixedit/plugin_settings.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "tooling/twoslash-mocks/next-stubs.d.ts",
-      "role": "TypeScript ambient stubs for Next.js internals used in docs twoslash fences",
-      "importance": 6,
-      "usefulness": 5
+      "path": "api/lib/barkpark/plugins/onixedit/routes.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas.ex",
+      "role": "OnixEdit sub-schema index/namespace module",
+      "importance": 18
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/sync_entries.ex",
+      "role": "",
+      "importance": 26
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/codelists/staleness_checker.ex",
+      "role": "ONIX codelist staleness analyzer",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas/contributor.ex",
+      "role": "OnixEdit Contributor sub-schema module",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas/text_content.ex",
+      "role": "OnixEdit TextContent sub-schema module",
+      "importance": 37
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/schemas/thema_subject_category.ex",
+      "role": "Thema subject category field definition",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/web/bokbasen_live.ex",
+      "role": "Bokbasen submission admin LiveView",
+      "importance": 47
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/web/export_controller.ex",
+      "role": "HTTP endpoint for streaming ONIX 3.0 XML per book",
+      "importance": 48
+    },
+    {
+      "path": "api/lib/barkpark/plugins/onixedit/web/staleness_live.ex",
+      "role": "OnixEdit codelist staleness admin LiveView",
+      "importance": 37
     }
   ]
 }

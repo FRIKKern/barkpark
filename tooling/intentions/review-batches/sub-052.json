@@ -1,30 +1,46 @@
 {
-  "subsystem": "api/lib/barkpark_web/live",
-  "count": 4,
+  "subsystem": "api/lib/barkpark/accounts",
+  "count": 8,
   "files": [
     {
-      "path": "api/lib/barkpark_web/live/bulldocs_live.ex",
-      "role": "LiveView paper reader with block streaming",
-      "importance": 42,
-      "usefulness": 30
+      "path": "api/lib/barkpark/accounts/hibp.ex",
+      "role": "",
+      "importance": 30
     },
     {
-      "path": "api/lib/barkpark_web/live/admin/plugin_settings_live.ex",
-      "role": "admin LiveView for per-plugin encrypted settings management",
-      "importance": 38,
-      "usefulness": 22
+      "path": "api/lib/barkpark/accounts/privacy.ex",
+      "role": "",
+      "importance": 26
     },
     {
-      "path": "api/lib/barkpark_web/live/admin/plugins_live.ex",
-      "role": "admin plugin debug LiveView",
-      "importance": 32,
-      "usefulness": 20
+      "path": "api/lib/barkpark/accounts/user.ex",
+      "role": "",
+      "importance": 62
     },
     {
-      "path": "api/lib/barkpark_web/live/sheets_reader_live.ex",
-      "role": "LiveView for public read-only sheet reader",
-      "importance": 27,
-      "usefulness": 19
+      "path": "api/lib/barkpark/accounts/user_email_token.ex",
+      "role": "",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/accounts/user_notifier.ex",
+      "role": "",
+      "importance": 47
+    },
+    {
+      "path": "api/lib/barkpark/accounts/user_session.ex",
+      "role": "",
+      "importance": 62
+    },
+    {
+      "path": "api/lib/barkpark/accounts/webauthn.ex",
+      "role": "",
+      "importance": 33
+    },
+    {
+      "path": "api/lib/barkpark/accounts/webauthn_credential.ex",
+      "role": "",
+      "importance": 26
     }
   ]
 }

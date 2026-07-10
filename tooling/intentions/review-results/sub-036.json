@@ -1,1 +1,40 @@
-{"subsystem":"api/lib/barkpark/validation/checkers","summary":"Atomic validation checkers that implement the Checker behaviour for publishing-industry data integrity: ONIX codelist membership, ISBN-13 and GTIN-14 check-digit algorithms, ISO-639 language codes, ISO-4217 currency codes, and non-empty presence. These plug into the validation rule DSL used primarily by the OnixEdit plugin.","intentions":[{"title":"Enforce publishing-industry data standards at ingest","scale":"epic","evidence":"isbn13_checksum.ex and gtin14_checksum.ex implement the exact GS1/ISBN check-digit algorithms; codelist_ref.ex validates values against versioned ONIX codelists (e.g. ContributorRole list 17 issue 73) — all guard the integrity of book metadata destined for Bokbasen/ONIX export"},{"title":"Keep boot-path validation zero-dependency","scale":"small","evidence":"iso639_language.ex and iso4217_currency.ex use compile-time MapSets with hardcoded publishing-relevant subsets explicitly because the full codelist registry (WI3) is not available at boot; modules comment this design choice directly"},{"title":"Make validation composable via a uniform Checker behaviour","scale":"small","evidence":"Every module declares @behaviour Barkpark.Validation.Checker and implements a single check/2 returning :ok | {:error, atom}, making them interchangeable atoms in the rule DSL rather than ad-hoc guard clauses"},{"title":"Surface version-aware codelist mismatches rather than silent failures","scale":"small","evidence":"codelist_ref.ex distinguishes :codelist_version_mismatch (list exists but wrong issue) from :codelist_unknown_value (value absent), letting rule authors give actionable errors when ONIX codelist versions drift"}]}
+{
+  "subsystem": "api/assets/paper-editor/src/smoke",
+  "intentions": [
+    {
+      "title": "Guarantee the canvas editor's blocks⇄TipTap-doc⇄ops projector never silently corrupts a PortableDoc on save",
+      "scale": "invariant",
+      "evidence": "harness.mjs implements applyOps, a pure-JS twin of api/lib/barkpark/portable_doc/patch.ex, and assertFolds proves every emitted op list actually folds prev blocks into the live doc — round-trip.mjs's comment explains this was added after two real bugs (front-insert landing at END; an insert stranded by a later move) passed shape-only assertions. Every check pairs op-shape assertions with a fold gate."
+    },
+    {
+      "title": "Make every canvas-eligible block type (prose, lists, marks, wikilinks, blockrefs, tags, valuerefs, dividers, callouts, code, diagrams, native fields, sections) round-trip byte-identically through the editor with zero spurious ops on load",
+      "scale": "epic",
+      "evidence": "round-trip.mjs's 17 numbered checks + S0-a..k projector gates, node-views.mjs's S3/S3.2/S3.3/S3.4 sections (divider/callout/code/diagram), sections.mjs's S2 layout-engine tests — each pins 'untouched → ZERO ops' plus 'edit → exactly one minimal op (patch-block, not replace-block)'."
+    },
+    {
+      "title": "Support nested container blocks (sections with grid/stack layout, span/order-positioned children) while forbidding recursive nesting and preventing id collisions across the whole tree",
+      "scale": "feature",
+      "evidence": "sections.mjs: bpSection projection, V1 forbid-nesting (nested sections carried as bpOpaque verbatim), the 'duplicate_id guard' test proving minted ids are seeded from the WHOLE tree including nested children, and the S2 grid-layout suite (mode toggle, span/order hoisted to a bpId-keyed cells map that survives reordering — the regression test for span/order sticking to the wrong child)."
+    },
+    {
+      "title": "Ship a slash-menu and Cmd-P command palette where every insertable block type produces byte-identical default content via both paths",
+      "scale": "feature",
+      "evidence": "autocomplete-slash.mjs: CANVAS_SLASH_TYPES allowlist (22 types), reconstructDefault() proving canonical default shapes for paragraph/heading/list/callout/code/divider/diagram/action/figure/columns/section/terminal/table/field-*, the callout-shorthand (`> [!warn]-`) parser, slashTriggerAllowsParent's Bug#2 guard against destroying an enclosing callout, and P5 palette tests proving Insert-command parity with slash-menu defaults plus a working fuzzy filter."
+    },
+    {
+      "title": "Preserve inline live-references (wikilinks with alias/docId, task-chip wikilinks, valuerefs with reserved as/label passthrough) across edits to neighboring text without ever deleting or flattening them",
+      "scale": "invariant",
+      "evidence": "round-trip.mjs checks 9-13, 12v/12w/12x, S0-v1/S0-v2: explicit regression tests documenting a pre-fix defect where the whole-content rewrite on save deleted valuerefs, and where wikilinks/blockrefs/tags lost their target/alias/docId keys or gained stray undefined keys."
+    },
+    {
+      "title": "Keep change-detection robust to editor-serialization noise (ProseMirror getJSON key ordering) so no block is spuriously re-patched on every keystroke",
+      "scale": "invariant",
+      "evidence": "S0-mark check in round-trip.mjs and reordered-attrs checks throughout node-views.mjs (S3.2-b, S3.3-b, S3.4-b) simulate getJSON's {type,marks,text} / reordered attrs key order and assert ZERO ops on an unedited mount despite the reordering."
+    },
+    {
+      "title": "Defensively tolerate legacy/malformed stored data (flat-string list items) without crashing either editor, while normalizing it to the canonical shape on save",
+      "scale": "invariant",
+      "evidence": "round-trip.mjs checks 4a/4b and the S0 flat-string-item checks: documented as 'the obsidian crash shape' — 7 real legacy papers had items as flat strings and inlineArrayToTiptap would throw calling .forEach on a string, crashing both editors on open."
+    }
+  ]
+}

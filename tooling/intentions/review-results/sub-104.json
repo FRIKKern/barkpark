@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark/plugins/registry",
+  "intentions": [
+    {
+      "title": "Let Barkpark boot with zero plugins and still be fully operational (fresh-install / kill-switch invariant)",
+      "scale": "invariant",
+      "evidence": "discovery.ex: explicit `Application.put_env(:barkpark, :plugins, [])` short-circuits disk discovery to :ok; boot_collectors.ex mirrors the same unset-vs-empty distinction for workers/oban_crontab/routes so `plugin_free_boot_test.exs` holds end-to-end at every collection point, not just discovery."
+    },
+    {
+      "title": "Auto-fold bundled and dependency plugins into the running app without any manual registration step",
+      "scale": "feature",
+      "evidence": "discovery.ex default_paths/0 walks `priv/plugins` (bundled) and `Mix.Project.deps_path()` (dev/test); plugin_dirs_in/1 finds any subdir with a plugin.json; resolve_module/1 derives the module from an explicit `module` key or PascalCases `plugin_name` — no hand-wiring needed per plugin."
+    },
+    {
+      "title": "Guarantee one misbehaving plugin can never crash the host, at every callback surface",
+      "scale": "invariant",
+      "evidence": "Every dispatch path (resolver_chain.ex safe_resolver_call/apply_resolver, boot_collectors.ex safe_register_workers/safe_oban_crontab/safe_register_routes, plugin_callbacks.ex safe_content_renderer_call/safe_test_connection/invoke_seeder) wraps plugin calls in try/rescue/catch, logs a warning, and falls back to a safe default (prev/[]/nil/:skip) — discovery.ex moduledoc states 'discovery NEVER raises.'"
+    },
+    {
+      "title": "Compose plugin contributions into host UI/behavior via two deliberate strategies: additive-fold for lists/maps (nav, checkers, actions) vs first-wins for singular surfaces (preview pane, connection test)",
+      "scale": "feature",
+      "evidence": "resolver_chain.ex reduce_resolvers/3 threads `prev` through every plugin via list_concat/map_merge lift_kind per @resolver_callbacks; plugin_callbacks.ex collect_content_renderer/3 and collect_test_connection/2 instead return the FIRST match because a preview pane 'holds a single <pre>' and settings pages are per-plugin, not merged."
+    },
+    {
+      "title": "Give operators deterministic, explicit control over plugin load order and per-workspace surfacing without breaking legacy alphabetical behavior",
+      "scale": "feature",
+      "evidence": "resolver_chain.ex load_ordered_plugins/0: Application.get_env(:barkpark, :plugins) wins when configured (explicit order), else alphabetical Registry.all/0 sort; enablement_filtered_plugins/2 applies per-workspace Enablement filtering ONLY to the three SURFACING callbacks (resolve_desk_items/top_menu_entries/doc_actions), deliberately leaving lifecycle/render/route/worker/capability callbacks unfiltered so an installed plugin's data-integrity gates always run."
+    },
+    {
+      "title": "Keep plugin discovery/dispatch deadlock-safe and boot-order-safe across three different execution phases (compile-time routes, pre-Oban worker/crontab collection, and live-GenServer resolver chain)",
+      "scale": "invariant",
+      "evidence": "boot_collectors.ex moduledoc: 'every function here is PURE — does NOT require the Registry GenServer to be alive' because routes collect at router compile time (via Code.ensure_compiled/1 to force build ordering) and workers/crontab collect before Oban/Registry start; resolver_chain.ex load_ordered_plugins/0 explicitly avoids Registry.lookup/1 (a GenServer.call to self) inside register/2 to prevent 'process attempted to call itself' deadlocks."
+    },
+    {
+      "title": "Nudge plugin authors away from redundant dual-form callbacks without breaking either form",
+      "scale": "feature",
+      "evidence": "resolver_chain.ex warn_duplicate_forms/0 + resolver_is_default_lift?/4: runs both the resolver and additive callback with an empty prev, compares outputs behaviorally (no AST available at runtime) to distinguish an author override from the `use Barkpark.Plugin` synthesized default, and only warns on genuine duplication — called on registration and again on every runtime register/2."
+    }
+  ]
+}

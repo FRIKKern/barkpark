@@ -1,30 +1,46 @@
 {
-  "subsystem": "js/packages/codegen/src",
-  "count": 4,
+  "subsystem": "api/lib/barkpark/media",
+  "count": 8,
   "files": [
     {
-      "path": "js/packages/codegen/src/schema-url.ts",
-      "role": "Schema introspection URL builder",
-      "importance": 18,
-      "usefulness": 29
+      "path": "api/lib/barkpark/media/delivery.ex",
+      "role": "media URL builder + HTTP cache header helper",
+      "importance": 40
     },
     {
-      "path": "js/packages/codegen/src/types.ts",
-      "role": "TypeScript config and schema types for codegen CLI",
-      "importance": 24,
-      "usefulness": 23
+      "path": "api/lib/barkpark/media/image_backend.ex",
+      "role": "pluggable image transform backend behaviour",
+      "importance": 51
     },
     {
-      "path": "js/packages/codegen/src/cli.ts",
-      "role": "codegen CLI entrypoint",
-      "importance": 29,
-      "usefulness": 14
+      "path": "api/lib/barkpark/media/probe.ex",
+      "role": "image dimension prober via binary parsing",
+      "importance": 40
     },
     {
-      "path": "js/packages/codegen/src/index.ts",
-      "role": "codegen package public entrypoint",
-      "importance": 29,
-      "usefulness": 14
+      "path": "api/lib/barkpark/media/processing.ex",
+      "role": "post-upload media processing pipeline",
+      "importance": 42
+    },
+    {
+      "path": "api/lib/barkpark/media/renditions.ex",
+      "role": "On-disk image rendition cache and generator",
+      "importance": 65
+    },
+    {
+      "path": "api/lib/barkpark/media/storage.ex",
+      "role": "",
+      "importance": 18
+    },
+    {
+      "path": "api/lib/barkpark/media/image_backend/magick.ex",
+      "role": "ImageMagick CLI image rendition backend",
+      "importance": 39
+    },
+    {
+      "path": "api/lib/barkpark/media/image_backend/vix.ex",
+      "role": "libvips image rendition backend",
+      "importance": 39
     }
   ]
 }

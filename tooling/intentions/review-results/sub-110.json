@@ -1,0 +1,40 @@
+{
+  "subsystem": "packages/client/src",
+  "intentions": [
+    {
+      "title": "Deprecate the flat-URL @barkpark/client in favor of @barkpark/core without breaking anyone still depending on it",
+      "scale": "invariant",
+      "evidence": "client.ts's JSDoc explicitly states: '@deprecated Superseded by @barkpark/core. This standalone client predates the workspace/project hierarchy: its URL builders emit only the flat /v1/... shape and were never updated for the /w/:workspace/p/:project/v1/... routing. It has no importers in the monorepo (the lockfile marks it extraneous). Use @barkpark/core's createClient instead. Do not add features here.' The package is kept but frozen, not deleted — implying compat/migration concerns for external consumers who may still import @barkpark/client directly."
+    },
+    {
+      "title": "Give framework-agnostic JS/TS consumers a strongly-typed, zero-magic wrapper over the Barkpark v1 HTTP contract (query/get/schemas/mutate)",
+      "scale": "feature",
+      "evidence": "client.ts implements query(), getDocument(), schemas(), schema(), and mutate()-backed convenience methods (create, createOrReplace, createIfNotExists, patch, publish, unpublish, discardDraft, delete) that map 1:1 onto the /v1/data/query, /v1/data/doc, /v1/schemas, and /v1/data/mutate endpoints described in docs/api-v1.md. Comment: 'a thin, strongly-typed wrapper — no caching, no batching, no runtime magic beyond per-instance config.'"
+    },
+    {
+      "title": "Guarantee atomic multi-document writes: a mutate() batch either fully commits or fully rolls back",
+      "scale": "invariant",
+      "evidence": "client.ts mutate() docstring: 'Submit a batch of mutations atomically. Either all succeed or none do — on failure the whole batch rolls back and a BarkparkError is thrown.' All single-shot write helpers (create, patch, publish, unpublish, discardDraft, delete) are implemented as one-element mutate() calls, so every write goes through the same atomic transaction path."
+    },
+    {
+      "title": "Make clients immutable and derivation-based so callers can safely fork context (perspective/dataset/token) without mutating a shared instance",
+      "scale": "invariant",
+      "evidence": "client.ts: 'Clients are immutable: withPerspective / withDataset / withToken return a fresh instance sharing the same fetch function.' Each with* method calls `new Client({...this.config(), ...})`, never mutates `this`."
+    },
+    {
+      "title": "Surface Barkpark's structured API error envelope as a typed, catchable JS error class instead of raw fetch Response objects",
+      "scale": "feature",
+      "evidence": "errors.ts BarkparkError extends Error, carries typed `code` (from ErrorEnvelope['code']: not_found/unauthorized/forbidden/schema_unknown/rev_mismatch/conflict/malformed/validation_failed/internal_error), `status`, and `details`. `fromResponse()` degrades gracefully to a synthesized internal_error envelope when the body isn't valid JSON or doesn't match the expected shape, so callers always get a BarkparkError rather than a parse exception."
+    },
+    {
+      "title": "Publish a minimal, explicit public API surface (index.ts barrel) so downstream consumers only see Client/createClient/BarkparkError and the documented type contracts, not internal helpers",
+      "scale": "feature",
+      "evidence": "index.ts re-exports exactly: Client, createClient, BarkparkError, and a curated set of types (ClientConfig, CreateInput, DocumentEnvelope, ErrorEnvelope, MutateResponse, Mutation, MutationResult, Order, PatchOptions, Perspective, QueryOptions, QueryResponse, SchemaDefinition, SchemaShowResponse, SchemasResponse) — the private `request()` method and internal config() helper in client.ts are not exported."
+    },
+    {
+      "title": "Encode the draft/publish content lifecycle and reserved envelope fields as compile-time types shared across every SDK consumer",
+      "scale": "invariant",
+      "evidence": "types.ts DocumentEnvelope pins reserved keys (_id, _type, _rev, _draft, _publishedId, _createdAt, _updatedAt) alongside arbitrary user fields; Perspective is constrained to 'published' | 'drafts' | 'raw'; Mutation is a discriminated union covering create/createOrReplace/createIfNotExists/patch/publish/unpublish/discardDraft/delete, mirroring the lifecycle operations the API supports."
+    }
+  ]
+}

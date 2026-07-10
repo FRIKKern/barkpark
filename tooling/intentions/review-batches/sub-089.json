@@ -1,0 +1,31 @@
+{
+  "subsystem": "api/lib/barkpark_web/controllers/session_html",
+  "count": 5,
+  "files": [
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html/magic_request.html.heex",
+      "role": "",
+      "importance": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html/mfa.html.heex",
+      "role": "",
+      "importance": 18
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html/new.html.heex",
+      "role": "Studio login form template",
+      "importance": 28
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html/reset.html.heex",
+      "role": "",
+      "importance": 14
+    },
+    {
+      "path": "api/lib/barkpark_web/controllers/session_html/reset_request.html.heex",
+      "role": "",
+      "importance": 14
+    }
+  ]
+}

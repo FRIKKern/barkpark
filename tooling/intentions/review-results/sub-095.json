@@ -1,0 +1,35 @@
+{
+  "subsystem": "cloud/lib/barkpark_cloud/notifications/channels",
+  "intentions": [
+    {
+      "title": "Deliver Barkpark Cloud events into a team's own chat/paging tools — Discord, Slack, Telegram, Pushover, and arbitrary webhooks — via a uniform channel-shaper contract",
+      "scale": "feature",
+      "evidence": "Each module exposes shape(creds, event, payload) -> {:ok, url, body, headers} | {:error, reason}, sharing BarkparkCloud.Notifications.Render for title/body/severity; discord.ex, slack.ex, telegram.ex, pushover.ex, webhook.ex all implement the same interface so a dispatcher can treat channels interchangeably."
+    },
+    {
+      "title": "Mirror Coolify's proven notification-channel design (DiscordChannel/SlackChannel/TelegramChannel/PushoverChannel/SendWebhookJob) rather than inventing a new integration surface",
+      "scale": "invariant",
+      "evidence": "Every moduledoc explicitly states 'the analog of Coolify's app/Notifications/Channels/...' — discord.ex, pushover.ex, slack.ex, telegram.ex, webhook.ex all cite the corresponding Coolify class/DTO they port."
+    },
+    {
+      "title": "Map internal event severity onto each channel's native visual/priority vocabulary instead of exposing raw event data",
+      "scale": "invariant",
+      "evidence": "Discord maps severity to embed colour (@colors red/amber/green); Pushover maps severity to priority ('1' for :error, '0' otherwise); Slack renders header+section Block Kit with a text fallback for previews; Telegram concatenates title/body into plain text."
+    },
+    {
+      "title": "Keep operator-supplied webhook URLs from becoming an SSRF vector, re-checked at send time not just at configuration time",
+      "scale": "invariant",
+      "evidence": "webhook.ex calls BarkparkCloud.Notifications.SafeUrl.check(url) inside shape/4 itself, with the moduledoc noting this defends against DNS rebinding — a URL valid at put_channel time but now resolving to a private address is blocked at the last moment, matching Coolify's SendWebhookJob defense-in-depth."
+    },
+    {
+      "title": "Support each provider's actual auth/addressing quirks (derived bot-token URLs, form-encoded vs JSON bodies, forum thread routing) rather than a lowest-common-denominator payload",
+      "scale": "feature",
+      "evidence": "telegram.ex derives the send URL from the bot token and supports optional message_thread_id from payload or creds for forum topics; pushover.ex encodes params as x-www-form-urlencoded (not JSON) per Pushover's API; discord/slack/webhook all default to application/json."
+    },
+    {
+      "title": "Fail closed with specific, actionable error atoms when a channel is misconfigured, so the caller can surface setup guidance instead of a generic delivery failure",
+      "scale": "invariant",
+      "evidence": "Each shape/3-4 has explicit fallback clauses returning distinct errors: :missing_url (discord/slack/webhook), :missing_credentials and :missing_chat_id (telegram), :missing_credentials (pushover) — pattern-matched on which required creds key is absent."
+    }
+  ]
+}

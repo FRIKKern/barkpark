@@ -1,16 +1,41 @@
 {
-  "subsystem": "packages",
-  "count": 2,
+  "subsystem": "cloud/lib/barkpark_cloud/notifications",
+  "count": 7,
   "files": [
     {
-      "path": "packages/client/tsup.config.ts",
+      "path": "cloud/lib/barkpark_cloud/notifications/channel_config.ex",
       "role": "",
-      "importance": 5
+      "importance": 9
     },
     {
-      "path": "packages/client/vitest.config.ts",
+      "path": "cloud/lib/barkpark_cloud/notifications/delivery.ex",
       "role": "",
-      "importance": 5
+      "importance": 14
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/email_settings.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/event_email.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/render.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/safe_url.ex",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "cloud/lib/barkpark_cloud/notifications/transactional.ex",
+      "role": "",
+      "importance": 4
     }
   ]
 }

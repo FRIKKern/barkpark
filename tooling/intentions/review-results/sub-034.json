@@ -1,31 +1,40 @@
 {
-  "subsystem": "js/packages/create-barkpark-app/templates/blog-starter/app",
-  "summary": "Next.js App Router pages and API routes for the blog-starter scaffold template, demonstrating how to build a real content-driven site on top of the Barkpark JS SDK with draft-mode preview, webhook revalidation, and content relationships (posts, authors, tags).",
+  "subsystem": "tooling/concept-map",
   "intentions": [
     {
-      "title": "Lower the time-to-first-working-site for new adopters",
+      "title": "Detect architectural CONCEPTS (features/domains) straight off the real symbol graph, never a hand-maintained list, so the model can't go stale as the codebase moves",
       "scale": "epic",
-      "evidence": "All 7 files together form a runnable blog; page.tsx + tags/page.tsx + authors/page.tsx give a complete content graph out of the box so a scaffolded project starts with real pages, not stubs"
+      "evidence": "concepts.mjs derives concept names structurally from file paths (api/lib/barkpark/plugins/<X>/, api/lib/barkpark/<X>/) then folds cross-tree members (barkpark_web/, test/) by longest-token match; explicitly excludes Mix CLI tasks (api/lib/mix/tasks/*) as entry-points, not feature members, so 'tasks' isn't polluted by onix.import.ex etc."
     },
     {
-      "title": "Demonstrate draft-mode (preview) as a first-class SDK pattern",
-      "scale": "small",
-      "evidence": "draft-preview.tsx uses useOptimisticDocument from @barkpark/nextjs/actions; page.tsx branches on draftMode() to swap in the preview component; api/preview/route.ts and api/exit-preview/route.ts handle enter/exit lifecycle"
+      "title": "Classify every concept on Robert Martin's dependency-stability gradient (KERNEL / CLEAN-FEATURE / CLEAN-NONPLUGIN / UNSTABLE-EDGE) using live-computed Ca/Ce/instability/cohesion, never hardcoded numbers",
+      "scale": "invariant",
+      "evidence": "concepts.mjs header defines the band math (Ca afferent, Ce efferent, I=Ce/(Ca+Ce), cohesion=intra/(intra+Ca+Ce)) and states kernel concepts are 'NOT extractable — high reach IS the substrate role'; acceptance-p1.mjs asserts these bands against the live graph."
     },
     {
-      "title": "Show webhook-driven ISR cache invalidation as the canonical publish flow",
-      "scale": "small",
-      "evidence": "api/barkpark/webhook/route.ts wires createWebhookHandler + revalidateBarkpark, with inline comment instructing users to set BARKPARK_WEBHOOK_SECRET and point Studio at the route"
+      "title": "Grade every concept against five measured architectural gaps (gratuitous-core, test-scatter, sideways edges, manifest-absence, framework-scatter) and emit a five-word verdict vocabulary {kernel, clean, clean-lib, improvable, tangled} with NAMED, concrete remediation (colocate/cut edges)",
+      "scale": "epic",
+      "evidence": "grade.mjs's runGrade() computes coreHalfReuse, testScatter, sidewaysEdges, manifestPresence per concept and derives verdictFor(); output includes remediation.colocate/cut lists with exact edge names and percentages (e.g. 'sheets core-half → feature folder, 3% external'); acceptance-p3.mjs pins the verdict vocabulary and specific exemplars (content/tenancy=kernel, release/portable_doc=clean-lib, media/search/tasks=tangled)."
     },
     {
-      "title": "Prove the SDK's optimistic-edit API with a concrete UI example",
-      "scale": "small",
-      "evidence": "draft-preview.tsx exposes a commitOptimistic stub and an 'Optimistic edit title' button, explicitly inviting users to wire it to a real server action"
+      "title": "Treat web-controller and Mix-CLI-task edges as orchestration, not domain coupling, so cross-feature boundary violations are measured on real domain knots rather than inflated by request-composition plumbing",
+      "scale": "invariant",
+      "evidence": "entrypoints.mjs's isEntryPoint/isWebLayerFile/isMixTaskFile predicates are shared by grade.mjs's sidewaysEdges and boundary.mjs; acceptance-p3.mjs proves media→search domain cluster < raw cluster (~22 web-origin edges dropped) and that the tasks→onixedit 'knot' was an artifact of Mix tasks being mis-folded into the tasks concept."
     },
     {
-      "title": "Teach relationship traversal (refs) using the SDK client helpers",
-      "scale": "small",
-      "evidence": "page.tsx resolves author and tags via getDocById using _ref fields; tags/page.tsx filters posts client-side by tag._id, showing both patterns (server join via ref and in-memory filter)"
+      "title": "Enforce architectural boundaries prospectively — gate a PROPOSED change's new edges/files for sideways coupling, wrong-direction (kernel→feature) dependencies, and scatter-increase before they land, rather than only reporting debt after the fact",
+      "scale": "feature",
+      "evidence": "boundary.mjs's gateBoundary(proposed) returns {verdict:'ok'|'violation', violations} typed 'sideways'/'wrong-direction'/'scatter-increase'; acceptance-p5.mjs verifies both violation classes fire on synthetic edges and that legitimate feature→kernel edges pass clean."
+    },
+    {
+      "title": "Propose (never auto-execute) lose-none recolocation and decycling plans for scattered/tangled concepts, with an explicit never-worse accounting guarantee before any move is even suggested",
+      "scale": "feature",
+      "evidence": "boundary.mjs's proposeRecolocation() requires every member file accounted for (count before === count after, 0 lost) and is 'ALWAYS propose-only — moves nothing, touches no real file'; proposeDecycle (media⇄search) picks the cut direction by higher netReduction and reports an honest nonzero residual rather than a false 'clean cut'; acceptance-p5.mjs asserts working-tree is byte-identical before/after the call."
+    },
+    {
+      "title": "Keep the whole concept-map/grade/gate pipeline dependency-free (Node ESM + `node:` builtins only) and fully re-derivable from the live symbol graph, so it never drifts into a stale fixture-based lint",
+      "scale": "invariant",
+      "evidence": "every file's header states 'Dependency-free. ESM, node: builtins only... never hardcodes an expected number, edge, or verdict'; all five acceptance-p*.mjs gates compute assertions as ranges/structural checks against runGrade()/runConcepts()/gateBoundary() output rather than pinned literals, explicitly designed to survive a successful de-cycle (e.g. media→search 20→1) without breaking."
     }
   ]
 }

@@ -1,30 +1,46 @@
 {
-  "subsystem": "web/app/api",
-  "count": 4,
+  "subsystem": "apps/hundesteder",
+  "count": 8,
   "files": [
     {
-      "path": "web/app/api/find/route.ts",
-      "role": "Next.js search API route handler",
-      "importance": 36,
-      "usefulness": 21
+      "path": "apps/hundesteder/next.config.ts",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/app/api/barkpark/webhook/route.ts",
-      "role": "webhook receiver for on-demand ISR cache revalidation",
-      "importance": 34,
-      "usefulness": 23
+      "path": "apps/hundesteder/app/layout.tsx",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/app/api/admin/reindex/route.ts",
-      "role": "Next.js admin reindex API route",
-      "importance": 26,
-      "usefulness": 9
+      "path": "apps/hundesteder/app/not-found.tsx",
+      "role": "",
+      "importance": 1
     },
     {
-      "path": "web/app/api/find-event/route.ts",
-      "role": "search feedback proxy API route",
-      "importance": 14,
-      "usefulness": 8
+      "path": "apps/hundesteder/app/page.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/lib/categories.ts",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/lib/places.ts",
+      "role": "",
+      "importance": 9
+    },
+    {
+      "path": "apps/hundesteder/app/steder/page.tsx",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "apps/hundesteder/app/sted/[slug]/page.tsx",
+      "role": "",
+      "importance": 1
     }
   ]
 }

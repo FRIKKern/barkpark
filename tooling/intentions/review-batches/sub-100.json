@@ -1,0 +1,31 @@
+{
+  "subsystem": "tooling/lib",
+  "count": 5,
+  "files": [
+    {
+      "path": "tooling/lib/barkpark-env.mjs",
+      "role": "",
+      "importance": 1
+    },
+    {
+      "path": "tooling/lib/consensus.mjs",
+      "role": "Multi-vote consensus engine / verdict aggregator",
+      "importance": 1
+    },
+    {
+      "path": "tooling/lib/formula.mjs",
+      "role": "Safe expression evaluator / scoring formula engine",
+      "importance": 4
+    },
+    {
+      "path": "tooling/lib/scoring.mjs",
+      "role": "Orthogonality engine / composite computation core",
+      "importance": 9
+    },
+    {
+      "path": "tooling/lib/thresholds.mjs",
+      "role": "Configuration anchor / shared threshold source-of-truth",
+      "importance": 11
+    }
+  ]
+}

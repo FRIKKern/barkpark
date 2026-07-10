@@ -1,0 +1,40 @@
+{
+  "subsystem": "api/lib/barkpark_web/components/studio_components",
+  "intentions": [
+    {
+      "title": "Guarantee Studio screens carry zero unthemed/native controls by routing every form primitive through one tokenized kit",
+      "scale": "invariant",
+      "evidence": "controls.ex bp_input/bp_select/bp_textarea/bp_switch/bp_checkbox/bp_radio all draw color solely from CSS classes (.form-input, .form-switch, .form-checkbox) backed by var(--…) tokens; moduledoc states this makes a Studio screen 'pass scripts/studio-literal-check.sh by construction — no inline color literal ever appears'."
+    },
+    {
+      "title": "Keep the top-level Studio nav (Structure/Media/API + admin extras) as one canonical, plugin-extensible model instead of scattered per-LiveView tab lists",
+      "scale": "feature",
+      "evidence": "nav.ex's default_top_menu_entries/4 is tagged @canonical capability:studio-nav-model; it seeds Barkpark.Plugins.Registry.collect_top_menu_entries/1 as :baseline so plugins can reorder/drop/amend host tabs; plugin_tab_active?/2 unifies active-state highlighting across regex/string/exact-path rules."
+    },
+    {
+      "title": "Let a self-hosted Studio instance safely self-update in place with a one-click apply path, degrading gracefully when the feature is off",
+      "scale": "feature",
+      "evidence": "studio_update_banner/1 reads Barkpark.SelfUpdate.status/0 and Runner.enabled?/0, both wrapped rescue/catch fail-closed; renders 'Update now' (POST /v1/admin/self-update) when BARKPARK_SELF_UPDATE_APPLY=1, else 'How to update' instructions; also handles a fork-behind-canonical-upstream advisory state."
+    },
+    {
+      "title": "Make non-production Studio instances visually unmistakable to prevent accidental prod-vs-staging confusion",
+      "scale": "invariant",
+      "evidence": "studio_env_banner/1 reads BARKPARK_ENV via instance_env; nil/prod/production render nothing (byte-identical to before), 'staging' shows a fixed high-contrast warning strip, any other tag self-labels generically — using only --warn/--warn-fg tokens."
+    },
+    {
+      "title": "Ship a layered access-sharing system — public item links, network-scope shares, and time-boxed account-bound capability grants — each gated admin-only client-side with server-side re-checks",
+      "scale": "epic",
+      "evidence": "modals.ex implements three distinct sharing surfaces: shares_modal (P6 network shares by scope), item_share_popover (P7 single-item /s/<token> public read links), and airdrop_sheet + access_panel (airdrop-grants: minted /grant/<token> capability grants with duration, capabilities, single-use, live expiry countdown via ExpiryCountdown hook, and revoke)."
+    },
+    {
+      "title": "Support real-time multiplayer editing in Studio with presence, conflict detection, and cross-field validation surfaced directly in the editor pane",
+      "scale": "feature",
+      "evidence": "editor.ex's doc_conflict_banner (studio-concurrent-edit: reload-remote-doc on remote-save collision) and cross_violations_banner (rule-level error/warning banner); editor_fields.ex's presence_nav (avatar/tooltip per co-editor, jump-to-user, PresenceIdentity hook) and bulk_action_bar (multi-select publish/unpublish)."
+    },
+    {
+      "title": "Drive the entire document editor form generically off schema (v1 leaf fields + v2 composite/arrayOf/localizedText types, field groups, plugin-contributed doc actions) so no per-type editor code is needed",
+      "scale": "feature",
+      "evidence": "editor.ex's studio_field_renderer dispatches to FieldInputs.input (v1) or PluginAdapter.render (v2 self-titled composite/arrayOf/localizedText); schema_groups/visible_fields drive a Sanity-style tab bar from schema.groups; doc_action_button renders event/modal/link actions from Barkpark.Plugin.doc_action-typed maps with href interpolation for :dataset/:id/:workspace/:project."
+    }
+  ]
+}

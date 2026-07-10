@@ -1,0 +1,36 @@
+{
+  "subsystem": "api/lib/barkpark/quiz",
+  "count": 6,
+  "files": [
+    {
+      "path": "api/lib/barkpark/quiz/bridge.ex",
+      "role": "",
+      "importance": 49
+    },
+    {
+      "path": "api/lib/barkpark/quiz/content.ex",
+      "role": "",
+      "importance": 50
+    },
+    {
+      "path": "api/lib/barkpark/quiz/cursor_frame.ex",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark/quiz/heatmap.ex",
+      "role": "",
+      "importance": 40
+    },
+    {
+      "path": "api/lib/barkpark/quiz/room.ex",
+      "role": "",
+      "importance": 44
+    },
+    {
+      "path": "api/lib/barkpark/quiz/stats.ex",
+      "role": "",
+      "importance": 28
+    }
+  ]
+}

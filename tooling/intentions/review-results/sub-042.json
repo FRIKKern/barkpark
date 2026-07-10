@@ -1,1 +1,45 @@
-{"subsystem":"api/lib/barkpark/content/validation","summary":"A declarative, schema-bound cross-field validation engine: JSON rules (when/then path+op pairs) are compiled to an interpreted AST, cached per schema in a GenServer, and evaluated against documents at mutate, live, and export time, emitting structured violations for the v2 error envelope.","intentions":[{"title":"Enforce domain-specific cross-field business rules without code changes","scale":"epic","evidence":"rules.ex compiles JSON rule maps (e.g. 'isbn-required when format==epub') into Rule structs; evaluator.ex runs them at runtime — schema authors declare rules in data, not Elixir code (Decision D7 in rule.ex: no Code.eval_*)"},{"title":"Gate content mutations, live previews, and ONIX exports at different validation checkpoints","scale":"small","evidence":"evaluator.ex tag filtering (:live, :mutate, :export) — a rule fires only for the tagged operation; rules.ex parses tag lists from JSON into a MapSet; downstream WI2/WI3/WI4 comments name the concrete consumers"},{"title":"Keep the hot validation path allocation-cheap via memoisation and a compiled AST","scale":"small","evidence":"evaluator.ex per-pass cache keyed by {op, value, args} short-circuits repeated checker calls on array docs; rules.ex deliberately avoids ETS (tiny dataset, rare writes) and returns a pre-compiled list on GenServer.call"},{"title":"Make validation extensible to external checkers without touching core ops","scale":"small","evidence":"ops.ex {:matches, name} clause delegates to Barkpark.Validation.Registry.find/1 → mod.check/2; rules.ex maps 'matches:isbn13' op strings to {:matches, 'isbn13'} tuples — WI3 registers codelist_ref this way"},{"title":"Surface violations with precise, wildcard-expanded JSON-Pointer paths for UI error mapping","scale":"small","evidence":"path.ex resolves /items/*/tags/* to concrete paths like /items/2/tags/0, substituting array indices; evaluator.ex build_violation/2 puts the concrete path in the violation map consumed by WI2's error envelope serializer"}]}
+{
+  "subsystem": "api/lib/barkpark/plugins/indx",
+  "intentions": [
+    {
+      "title": "Give Barkpark a dedicated single-tenant full-text search engine (Indx) as a swappable plugin behind the same search contract",
+      "scale": "epic",
+      "evidence": "client.ex documents the full Indx v5 HTTP surface (Login, CreateOrOpen, AnalyzeString, SetFieldConfiguration, LoadString, IndexDataSet, Search, GetJson, DeleteDataSet, per-record insert/update/delete); settings.ex resolves env > encrypted plugin_settings DB row > defaults so the engine is fully self-hosted and tenant-configurable; retriever.ex implements the plugin's search contract on top of the client."
+    },
+    {
+      "title": "Never corrupt or wedge the live search index during a rebuild — always rebuild into a fresh dataset and atomically swap",
+      "scale": "invariant",
+      "evidence": "indexer.ex moduledoc: 'CRITICAL SYNC RULE (spike 2026-06-01): NEVER re-load an existing key onto a live indexed dataset — it HANGS and WEDGES the engine manager'; rebuild/3 always creates a fresh `<prefix>_<scope>_v<n>` dataset, and swap/2 is the sole atomic pointer flip; on any rebuild-step failure the fresh dataset is best-effort deleted so boot recovery never seats the live pointer on a partial dataset."
+    },
+    {
+      "title": "Support low-latency incremental index updates (upsert/delete) as a fast path alongside the safe full blue/green rebuild, with automatic fallback",
+      "scale": "feature",
+      "evidence": "Settings :incremental_upsert flag (default false, env INDX_INCREMENTAL_UPSERT); indexer.ex upsert_record/3 and delete_record/3 mutate the live dataset in place via stable-keyed insert/update/delete, explicitly called out as the ONE exception to 'never touch a live dataset'; indexer_worker.ex routes to a full rebuild whenever the engine reports {:reindex_required, _} or the live dataset/key_map is missing post-restart."
+    },
+    {
+      "title": "Make delete/update targeting exact and restart-safe via a deterministic, collision-resolved _id→numeric-key mapping that survives process restarts",
+      "scale": "invariant",
+      "evidence": "key_for_id/1 (SHA-256-derived, 63-bit positive) plus render_corpus/1's deterministic linear collision probing keep the per-corpus key set injective; swap/2 records the resulting key_map and persists it via Persistence.save so Recovery/restore_pointer can reseat the :persistent_term live pointer after a restart wipes it; delete_record/3 reverse-looks-up the persisted map before falling back to the bare hash, emitting a telemetry/log signal when the fallback fires."
+    },
+    {
+      "title": "Debounce and serialize per-scope index churn so bursts of document saves collapse into one rebuild instead of one per document",
+      "scale": "feature",
+      "evidence": "indexer_worker.ex moduledoc: Oban worker unique on the scope partition key over a debounce window across available/scheduled/executing states; rebuild op is 'types-blind on purpose' — lists the WHOLE public corpus per scope so the blue/green swap never erases untouched types."
+    },
+    {
+      "title": "Never leak Indx credentials or bearer tokens into logs, error dumps, or telemetry",
+      "scale": "invariant",
+      "evidence": "errors.ex defines a redaction policy scrubbing 'authorization' headers and token/password/userPassWord JSON keys via custom Inspect impls on AuthError/IndexError/SearchError/NetworkError, delegating to the shared Barkpark.Redaction engine; user_password is stored encrypted at rest via the plugin_settings row (settings.ex)."
+    },
+    {
+      "title": "Make Indx outages and silent-fallback degradation observable to operators instead of presenting as ambiguous 'no results'",
+      "scale": "feature",
+      "evidence": "monitor.ex: 'the retriever falls back to empty results when the Indx engine is unreachable ... the user has no way to tell'; implements a per-scope ETS outcome counter (success/fallback/error, last_error_at/reason, fallback_rate) plus a canonical [:barkpark, :indx, :retriever, :outcome] telemetry event, exposed to bp doctor; table is self-bounding (wholesale clear at @max_rows) to avoid unbounded tenant-driven growth."
+    },
+    {
+      "title": "Keep the query path fast and safe by indexing a bounded, flattened, plain-text projection rather than raw nested document JSON",
+      "scale": "invariant",
+      "evidence": "indexer.ex render_record/body_text: drops the raw :content JSONB (paper block trees up to 1.5MB timed out AnalyzeString), flattens to plain text via collect_text/2 skipping structural keys, and truncates to @body_max 4000 chars — with an explicit note that raising it to 8000 regressed BM25F ranking, so the cap is deliberate not a blind limit."
+    }
+  ]
+}

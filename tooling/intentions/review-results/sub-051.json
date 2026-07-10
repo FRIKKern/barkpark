@@ -1,41 +1,40 @@
 {
-  "subsystem": "api/lib/barkpark/portable_doc",
-  "summary": "Pure Elixir engine for Barkpark's PortableDoc block format: immutable patch operations over a block tree, dual-target HTML rendering (email and article), bound/free block projection onto document fields, and a legacy block-list synthesizer. Together these modules form the server-side document processing core that powers Papers (Bulldocs), the Studio editor View pane, and email export.",
+  "subsystem": "cloud/lib/barkpark_cloud/workers",
   "intentions": [
     {
-      "title": "Maintain a cross-process, cross-language PortableDoc contract",
-      "scale": "epic",
-      "evidence": "patch.ex explicitly ports TS applyDocPatch() and references a shared inter-repo contract (docs/doc-patch-op-contract.md) and golden fixtures. render.ex calls itself 'a direct in-process port of the TS walk() in portable-doc/packages/backend-web'. Both modules operate on string-keyed maps (the JSON wire shape) to stay byte-compatible with TypeScript consumers."
+      "title": "Make crashed control-plane workers self-heal instead of wedging customer resources forever",
+      "scale": "invariant",
+      "evidence": "stale_deployment_reaper.ex sweeps deploy claims left in 'building'/'pushing' by a crashed builder or on-box agent; stale_provision_job_reaper.ex does the same for provision jobs stuck in 'claimed' after a crashed worker. Both explicitly frame the alternative as 'stuck behind an eternal spinner permanently' / 'provisioning forever' and both run every minute via the same unique-window Oban pattern (period:60, states spanning available/scheduled/executing/retryable/suspended) so a slow sweep never stacks with the next tick."
     },
     {
-      "title": "Provide a pure, immutable, all-or-nothing patch engine for block trees",
-      "scale": "epic",
-      "evidence": "patch.ex apply_patch/2 and apply_patches/2 are stateless (no Repo, no GenServer, no I/O), return structured errors on the first failure, never partially-apply a batch, and rebuild only the changed path (structural sharing). Six ops cover insert, append, patch, replace, remove, and move."
+      "title": "Ship autonomous, health-gated fleet self-update rollout with zero human trigger step",
+      "scale": "feature",
+      "evidence": "autoupdate_rollout_worker.ex (isu-w4) advances one instance at a time (serial cohort-of-1 canary), settles in-flight instances against their own live verdict, pauses (never retries) an instance that fails to settle within 20 minutes or reports 503 (no one-click apply armed), and treats a blessed release from release-curator as the sole trigger — 'no human step, opt-out per instance'."
     },
     {
-      "title": "Render rich document content to HTML for both email and article surfaces without a Node sidecar",
-      "scale": "epic",
-      "evidence": "render.ex declares 'NO React, NO JSX, NO Node sidecar'. Two palettes (email, article) diverge on typography, semantics (PdHeading vs bold span, PdParagraph vs PdText, PdList vs flex-row scaffold), and CSS variable vs hardcoded-hex colour — email stays byte-stable for Outlook; article uses CSS variables that flip with the Studio dark-mode theme."
+      "title": "Give every instance an honest, continuously-refreshed self-update status without the fleet dashboard ever blocking on it",
+      "scale": "feature",
+      "evidence": "update_status_worker.ex (isu-6) treats each instance as source of truth for its own update state via GET /v1/admin/self-update, sweeps hourly plus on-demand per-instance refresh after a manual trigger, always lands 'unknown' rather than raising, and isolates one bad instance from sinking the whole sweep."
     },
     {
-      "title": "Project field-block values onto document content keys on every write (no-drift guarantee)",
-      "scale": "small",
-      "evidence": "projection.ex bound/free partition writes content[fieldName] and content['body'] on every block op or upsert, declared as the SOLE writer of those keys. Existing Classic queries read content[fieldName] unchanged — the projection is a backwards-compatible derived index."
+      "title": "Let the fleet Overview render usage instantly by pre-computing a cached sample per instance instead of live fan-out",
+      "scale": "feature",
+      "evidence": "usage_sampler_worker.ex (cloud-console wave 3) writes one Usage.Sample row per checkable instance every ~15 minutes so GET /v1/usage/summary answers with zero instance HTTP; explicitly degrades a down box to 'unmetered' (never a fake zero) while still stamping a real measured_at, and per-instance isolation stops one pathological gather from sinking the sweep."
     },
     {
-      "title": "Support paperflow-native article typography (serif body, parchment palette, Mermaid figures, asciicast embeds)",
-      "scale": "small",
-      "evidence": "render.ex article_palette uses Iowan Old Style / Georgia serif stack and CSS variable warm-parchment colours. Dedicated compose_block clauses for diagram, asciicast, figure, divider, code, eyebrow, byline, ingress emit article-mode HTML that mirrors doc.css visual conventions; email mode degrades gracefully."
+      "title": "Enforce trial billing as a strictly one-way, spam-free, never-teardown-a-paying-customer lifecycle",
+      "scale": "invariant",
+      "evidence": "trial_expiry_worker.ex (dwb-13) sends T-3/T-1 notices via atomic UPDATE...WHERE stamp IS NULL claims (exactly-once), and tears down only teams still in Billing.active_trials/0 — the moduledoc calls out 'MONEY-PATH SAFETY (adversarial)': a converted team's row is a paid plan so it can never be torn down, and conversion additionally cancels any in-flight deprovision job to close the convert-just-after-expiry race."
     },
     {
-      "title": "Enforce XSS safety at the renderer boundary with a strict URL allowlist and HTML escaping",
-      "scale": "small",
-      "evidence": "render.ex safe_url/1 restricts href/src to https?/mailto/tel schemes; safe_hex/1 validates color values before they reach inline styles; escape_html/1 is called on all user strings; the _raw escape hatch is used only for internally-generated HTML (diagram, code, form blocks), never for user content."
+      "title": "Bound every unbounded append-only cloud-plane table with age-based retention so operational history never grows forever",
+      "scale": "invariant",
+      "evidence": "agent_retention_worker.ex (charter D48) runs daily to prune agent_events (14d), dead agent_tokens (30d grace past revoked_at/expires_at, live tokens never touched), and usage_samples (14d) — explicitly the housekeeping counterpart to per-minute staleness reapers; device_auth_reaper.ex does the same per-minute for expired device-authorization rows, framed as pure hygiene since expiry is already enforced in-band by query filters."
     },
     {
-      "title": "Render structured field blocks (composite, arrayOf, codelist, localizedText) as human-readable View output",
-      "scale": "small",
-      "evidence": "render.ex has compose_block clauses for field-string, field-boolean, field-select, field-datetime, field-color, field-reference, field-image, composite, arrayOf, codelist, localizedText — each produces a labelled PdBox(column) row. ref_resolver and codelist_resolver injected via opts keep the renderer pure while enabling title and label resolution."
+      "title": "Move outbound chat notification delivery off the request path with retry semantics that distinguish terminal failures from transient ones",
+      "scale": "feature",
+      "evidence": "chat_notification_worker.ex is the Oban replacement for a swarm-candidate's Task.Supervisor + inline Process.sleep retry loop: 4xx/bad-creds/SSRF/gone map to {:cancel, reason} (terminal, no retry) while 5xx/transport errors get Oban-driven [1s,5s,30s] backoff; credentials are decrypted in-process per delivery and never carried in job args."
     }
   ]
 }

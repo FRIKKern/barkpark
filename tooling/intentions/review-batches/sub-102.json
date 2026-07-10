@@ -1,0 +1,31 @@
+{
+  "subsystem": "web/app/api",
+  "count": 5,
+  "files": [
+    {
+      "path": "web/app/api/find-event/route.ts",
+      "role": "search feedback proxy API route",
+      "importance": 11
+    },
+    {
+      "path": "web/app/api/find/route.ts",
+      "role": "Next.js search API route handler",
+      "importance": 16
+    },
+    {
+      "path": "web/app/api/search-seed/route.ts",
+      "role": "",
+      "importance": 4
+    },
+    {
+      "path": "web/app/api/admin/reindex/route.ts",
+      "role": "Next.js admin reindex API route",
+      "importance": 15
+    },
+    {
+      "path": "web/app/api/barkpark/webhook/route.ts",
+      "role": "webhook receiver for on-demand ISR cache revalidation",
+      "importance": 11
+    }
+  ]
+}

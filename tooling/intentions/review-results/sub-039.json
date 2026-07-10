@@ -1,1 +1,35 @@
-{"subsystem":"scripts","summary":"Operational tooling for CI doc-integrity enforcement, cross-platform CLI distribution, and production smoke testing. Keeps the doc spine lean and verifiable while lowering the barrier to adopt the bp CLI on any platform.","intentions":[{"title":"Enforce doc-spine integrity as a hard CI gate","scale":"epic","evidence":"docs-anchors-check.sh validates routing-table targets, INDEX entries, card Code anchors, G1 doc-tier headers, canonical-for uniqueness, and ARCHIVED banners — failing the gate on any violation"},{"title":"Keep agent-context docs lean and non-proliferating","scale":"epic","evidence":"check-doc-budgets.sh enforces per-file byte caps and a hard 7-card limit; remedy message explicitly forbids raising caps — forces content retirement over accumulation"},{"title":"Zero-friction cross-platform CLI onboarding","scale":"small","evidence":"install-cli.sh (POSIX sh, curl|sh pattern, sha256 verification, /usr/local/bin fallback) and install-cli.ps1 + setup-windows.ps1 cover macOS/Linux and Windows with a single command"},{"title":"Verify media-platform feature surface end-to-end on prod","scale":"small","evidence":"media-smoke.sh exercises upload, v1 detail + delivery URLs, search, collections, share links, governance checkout, and rendition serving against the live prod server in one script"}]}
+{
+  "subsystem": "api/lib/barkpark/sync",
+  "intentions": [
+    {
+      "title": "Continuously mirror a remote Barkpark dataset into a local workspace via a resumable SSE pull, so a local install stays live-synced without polling",
+      "scale": "epic",
+      "evidence": "worker.ex opens a streaming Req.get to GET /v1/data/listen/:dataset, resumes via Last-Event-ID sourced from Cursor.get, reconnects with capped exponential backoff + jitter (floor 1s/cap 30s) on stream end/error, and uses a dedicated Finch pool so the endless stream can't starve the webhook dispatcher."
+    },
+    {
+      "title": "Push local mutations back to the remote as a CAS-safe replay, so a cloned/edited workspace can round-trip changes without clobbering the source of truth",
+      "scale": "epic",
+      "evidence": "pusher.ex drain/3 walks Outbox events id ASC, routes task.* events through claim/close endpoints and others through push_fun, records PushDocRev (remote rev priming) and PushConflict on rejection, and only advances PushCursor after a durable write (write-then-advance)."
+    },
+    {
+      "title": "Never let pull and push cursors, or sync-originated and locally-originated events, cross-contaminate — prevent ping-pong/echo amplification between two Barkparks",
+      "scale": "invariant",
+      "evidence": "push_cursor.ex moduledoc: pull tracks remote Last-Event-ID, push tracks local mutation_events.id, 'mixing them would let one rewind the other'; outbox.ex excludes source=\"sync\" rows from the push feed; applier.ex prime_push_ledger primes PushDocRev with the remote rev on apply so a later local edit doesn't spuriously conflict."
+    },
+    {
+      "title": "Guarantee sync writes always land in a resolvable, correctly-scoped local workspace — never a NULL/global write",
+      "scale": "invariant",
+      "evidence": "applier.ex apply_event/2 refuses to write and logs a warning when ctx.scope == :unresolved; settings.ex requires workspace present for `enabled`; worker.ex listen_url builds a workspace/project-scoped path and schedule_reconnect/2 gives unresolved-workspace errors a long fixed 300s backoff (config error, not a flaky link) instead of storming reconnects."
+    },
+    {
+      "title": "Make sync default-off and independently gated (pull vs push) so a fresh install boots inert and each direction is opt-in",
+      "scale": "invariant",
+      "evidence": "settings.ex: config.exs default enabled:false; `enabled` requires full creds (url/token/dataset/workspace) AND the flag; `push_active?/1` is a separate AND of enabled and push_enabled, so push can be off while pull is on, or vice versa; PushCursor.bootstrap_if_absent skips pre-enablement history so first-enable never replays a backlog."
+    },
+    {
+      "title": "Treat failed events as durably quarantined, not silently dropped or endlessly retried — dead-letter after max attempts, record conflicts on CAS rejection",
+      "scale": "feature",
+      "evidence": "applier.ex apply_event/2 calls DeadLetter.record_failure/mark_dead and advances the cursor past a dead-lettered event only after the durable DL write; push_conflict.ex records the losing local_document on INSERT only and never overwrites it on re-record; pusher.ex halts the drain (cursor not advanced) on {:error, :transient} so the next tick replays from the same event."
+    }
+  ]
+}

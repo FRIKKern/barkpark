@@ -1,0 +1,40 @@
+{
+  "subsystem": ".claude",
+  "intentions": [
+    {
+      "title": "Automate the full epic-team development loop — strategize, explore, decide, build, review, judge, perfect — as one Claude Code workflow driven entirely through the bp task ledger",
+      "scale": "epic",
+      "evidence": "bp-epic-cycle.workflow.js defines 7 phases (Strategize/Explore/Decide/Build/Review/Judge/Perfect) each dispatching Fable (thinking) or Opus (fan-out work) agents per the phase↔model doctrine comment; TASKS_BLOCK and GATES_BLOCK are injected into every phase's prompt so the bp task ledger and local gate commands stay the spine of every step."
+    },
+    {
+      "title": "Guarantee the bp task ledger never lies: every slice must be claimed before work, published before it 'exists', and stamped with concrete evidence before being called done",
+      "scale": "invariant",
+      "evidence": "TASKS_BLOCK: 'If a slice has no published, claimable bp task, that slice does not exist'; PLAN_SCHEMA.tasks_verified requires a read-back pass confirming publication/parenting/rubric quality; Review phase step 6 'LEDGER AUDIT' fixes ledger lies/omissions via bp and records them in ledger_fixes; builders are barred from closing merge-gated criteria — only the lead does on merge."
+    },
+    {
+      "title": "Never trust a single pass judgment — every wave gets adversarial review, then independent quality judging, then targeted repair, before it's declared shippable",
+      "scale": "invariant",
+      "evidence": "Review phase re-diffs each slice against origin/main merge-base and re-runs gates before commit; Judge phase explicitly re-judges rather than trusting the reviewer's verdicts ('the reviewer's own verdicts are input, not truth — re-judge'); JUDGE_SCHEMA requires 'distrust vacuous green... spot-check that load-bearing tests actually pin the behavior claimed'; Perfect phase dispatches isolated fixers only for judge-named issues."
+    },
+    {
+      "title": "Keep each epic's charter file as living memory: founding waves write Vision/Decisions/Roadmap, later waves reconcile against it and append a dated wave log",
+      "scale": "feature",
+      "evidence": "architect prompt: CHARTER_EXISTS branches between 'UPDATE the charter' (reconcile + fold in decisions) vs 'WRITE the epic charter' (##Vision/##Decisions/##Roadmap/##Wave log); Review phase step 7 appends a '### Wave <today>' entry and sets wave_log_appended=true only after actually writing it; guard comment recounts a real incident where a hardcoded charter_path caused two wrong-charter waves."
+    },
+    {
+      "title": "Isolate every parallel agent (build/review/judge/perfect) in its own git worktree so concurrent workers never collide on main or each other's WIP",
+      "scale": "invariant",
+      "evidence": "agent() calls for Build/Review/Judge/Perfect pass isolation:'worktree'; build prompt explicitly forbids pushing or touching main and 'don't touch other worktrees' WIP'; each phase works on its own branch suffix convention (loop-epic/<slug>-i, -r for review fixes, -p for perfect fixes) so the lead integrates the correct final branch."
+    },
+    {
+      "title": "Audit and guarantee pixel-level View↔Edit visual parity for every PortableDoc block type via static analysis plus adversarial 2-voter verification, producing a durable HTML parity report",
+      "scale": "feature",
+      "evidence": "view-edit-parity.workflow.js enumerates every compose_block/2 :article-mode block + variant from render.ex, extracts inline-style emitters vs root.html.heex CSS rules, runs one parity diff per block×variant, then two independent refute-agents per candidate divergence (confirmed only if both agree), and writes a paper-style report to docs/specs/2026-05-31-view-edit-parity-matrix.html with severity-ranked findings and fix recommendations."
+    },
+    {
+      "title": "Default agent behavior in this repo is safety-conservative on divergence claims and destructive git operations, opting into risk only via explicit, narrowly-scoped flags",
+      "scale": "invariant",
+      "evidence": "view-edit-parity refute prompts: 'Default to refuted (isReal=false) if not certain'; on-pre-tool-use.sh blocks all git push --force by default, allowing only --force-with-lease (never bare --force) and only when DOEY_ALLOW_FORCE_PUSH=1 is explicitly set on the command, otherwise falls through to the upstream hook preserving all other rules (Subtaskmaster role guards, --no-verify block)."
+    }
+  ]
+}

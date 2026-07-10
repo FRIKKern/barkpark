@@ -1,1 +1,35 @@
-{"subsystem":"js/docs","summary":"A Fumadocs-powered Next.js documentation site for the Barkpark JS SDK monorepo, serving MDX content from a content/docs directory with syntax-highlighted code blocks.","intentions":[{"title":"Surface JS SDK documentation to developers","scale":"epic","evidence":"source.config.ts defines docs/meta from content/docs; lib/source.ts wires Fumadocs loader at /docs baseUrl; next.config.mjs integrates MDX pipeline — together they publish SDK reference docs"},{"title":"Standardise code block presentation with theme-paired syntax highlighting","scale":"small","evidence":"source.config.ts rehypeCodeOptions sets github-light/github-dark themes for light/dark mode parity"},{"title":"Extend Fumadocs default MDX component set for consistent rendering","scale":"small","evidence":"mdx-components.tsx spreads defaultMdxComponents and merges per-page overrides, establishing a single component registry for all doc pages"}]}
+{
+  "subsystem": "api/lib/barkpark/api_tester/endpoints",
+  "intentions": [
+    {
+      "title": "Give Studio a self-documenting, runnable API catalog covering every public HTTP surface (query, mutate, history, export, webhooks, analytics, SSE) instead of a static reference doc",
+      "scale": "epic",
+      "evidence": "Each module (query.ex, mutate.ex, history.ex, export.ex, webhooks.ex, misc.ex) builds an entries/1 catalog of maps with id/category/label/method/path_template/description/response_shape/possible_errors — data structures clearly meant to render as a docs+playground pane and to actually be executed (`runnable: true`), not just read."
+    },
+    {
+      "title": "Make every catalog entry directly executable against a live dataset with pre-filled realistic examples, so the docs pane doubles as an interactive Postman-style tester",
+      "scale": "feature",
+      "evidence": "body_example fields with concrete payloads (e.g. mutate.ex playground-create-#{unique_integer} ids for idempotent re-runs), path_params with defaults, query_params with options, and `runnable: true` flags across query.ex, history.ex, webhooks.ex, export.ex."
+    },
+    {
+      "title": "Encode expected outcomes (status codes + assertion labels) per endpoint and per scenario so the catalog also functions as an executable conformance/smoke-test suite",
+      "scale": "feature",
+      "evidence": "`expect: {200, :envelope_has_reserved_keys}` etc. plus `scenarios` lists with `path_overrides`/`query_overrides`/`no_auth: true`/expected error codes (e.g. query.ex 'nonexistent type → 404', webhooks.ex 'no auth → 401', misc.ex analytics empty-dataset/no-auth cases) — this is a test matrix, not just documentation."
+    },
+    {
+      "title": "Teach API consumers the draft/publish lifecycle and revision model through worked, chained examples rather than prose alone",
+      "scale": "feature",
+      "evidence": "mutate.ex chains createOrReplace→publish→unpublish/discardDraft/delete in single body_example transactions demonstrating the drafts.<id> convention; history.ex explains revision snapshots per mutation and restore-to-draft semantics without auto-publishing."
+    },
+    {
+      "title": "Document and enforce per-endpoint auth tiers (public / token / admin) as first-class catalog metadata so the playground can gate execution and the docs communicate access requirements accurately",
+      "scale": "invariant",
+      "evidence": "Every entry carries `auth: :public | :token | :admin` (webhooks.ex uses :admin for list/create/delete; query.ex uses :public for list/search; mutate.ex/history.ex/export.ex use :token) consistently paired with `possible_errors` including :unauthorized/:forbidden."
+    },
+    {
+      "title": "Keep the catalog maintainable by splitting one large facade into per-category modules that are moved verbatim and concatenated in stable order",
+      "scale": "invariant",
+      "evidence": "Every module's @moduledoc states it was 'Split out of Barkpark.ApiTester.Endpoints (the facade) — each entry is moved verbatim' and entries/1 returns 'this category's slice ... in the exact order the facade concatenates it', with misc.ex explicitly folding Analytics+Real-time together 'to keep the module count lean (YAGNI)'."
+    }
+  ]
+}

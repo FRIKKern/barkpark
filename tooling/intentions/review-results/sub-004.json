@@ -1,1 +1,40 @@
-{"subsystem":"api/lib/barkpark/media","summary":"A WoodWing-style Digital Asset Management (DAM) layer that handles binary blob storage, on-demand image renditions, per-asset access control, CDN delivery, signed URLs, and outbound lifecycle webhooks — all scoped to the tenant (workspace/project/dataset) model.","intentions":[{"title":"Serve media assets at scale with minimal latency via CDN offloading and immutable cache headers","scale":"epic","evidence":"cdn.ex prefixes every delivery URL with a configured CDN base and fires cache invalidation on update/delete; delivery.ex stamps `public, max-age=31536000, immutable` + ETag headers and handles 304 Not Modified, so upstream CDN can serve the vast majority of asset traffic"},{"title":"Enforce per-asset, per-actor access control modelled on WoodWing governance","scale":"epic","evidence":"access.ex gates four permission levels (view, preview, original, edit_metadata) against bp_visibility (public/token/private), auth token presence, signed-URL validity, and editorial checkout state; permissions/2 is the API surface for response serialization"},{"title":"Deliver format-optimised image renditions (thumb/preview/hero/og) without burdening the upload path","scale":"small","evidence":"renditions.ex generates lazily on first HTTP request or eagerly post-upload via processing.ex; four presets with explicit max dimensions + format (webp for hero, jpg for og); pluggable ImageBackend behaviour (vix.ex libvips default, magick.ex fallback)"},{"title":"Gate token-visibility assets behind HMAC signed URLs with TTL expiry","scale":"small","evidence":"signed_url.ex appends ?_=sig&exp=unix to delivery paths and verifies via Plug.Crypto.secure_compare; delivery.ex calls sign only when visibility==token; access.ex consults SignedUrl.verify? as an alternative to session auth"},{"title":"Keep asset metadata (dimensions, CDN status, processing state) in the content graph as a live document","scale":"small","evidence":"processing.ex runs probe→renditions→CDN publish and writes bp_processing_status + fileInfo.{width,height} + bp_cdn_status back to the mediaAsset document via Content.upsert_document after upload"},{"title":"Notify downstream systems of media lifecycle events via signed, retry-backed webhooks","scale":"small","evidence":"events.ex dispatches media.uploaded/processed/deleted payloads with CDN URL map and sync_tags to per-dataset configured endpoints; retries on 5xx/network errors with three escalating delays; uses same signing scheme as document webhooks (Dispatcher.sign_payload)"},{"title":"Preserve multi-tenant isolation for media blobs (workspace/project/dataset scoping)","scale":"epic","evidence":"media_file.ex carries workspace_id, project_id, and dataset_id FK (W2 additive seam) with unique constraint on (path, dataset_id); delivery.ex supports a scope_prefix opt so scoped API responses emit /w/<ws>/p/<proj>/media/… paths that are signed against the requested scope, never the raw asset row"}]}
+{
+  "subsystem": "api/lib/barkpark_web/plugs",
+  "intentions": [
+    {
+      "title": "Enforce the hard multi-tenant boundary at the routing layer, before any query runs",
+      "scale": "invariant",
+      "evidence": "resolve_workspace.ex authorizes membership (TenancyAuth.authorize) or an active grant before assigning :current_workspace, failing closed to 403 otherwise; scope_helpers.ex is 'the single, shared tenancy-scope extractor' that every controller/LiveView must call to turn assigns into [workspace_id:, project_id:] opts so the WHERE-clause scope is 'never hand-rolled (and silently forgotten) at a new call site'; resolve_project.ex, assign_default_scope.ex extend the same seam to flat back-compat routes."
+    },
+    {
+      "title": "Let anonymous demo/public access exist without weakening the tenant gate for everyone else",
+      "scale": "feature",
+      "evidence": "resolve_workspace.ex's allow_anonymous_default (:studio_demo vs true) options, gated per-pipeline and per BARKPARK_PUBLIC_DEMO_STUDIO config, redirect anonymous Studio HTML requests to /login while paper readers stay world-readable; public_share_guard.ex, require_share_scope.ex, require_share_edit_token.ex, public_cors.ex, public_read.ex implement scoped anonymous read/write paths (share_public/share_writer flags) that are opt-in per route and never touch the default membership gate."
+    },
+    {
+      "title": "Support multiple credential kinds (API bearer tokens, session cookies, preview JWTs, ingest tokens, webhook signatures, ticket keys, SCIM tokens) through one uniform verify-then-assign plug pattern so every surface authenticates consistently",
+      "scale": "epic",
+      "evidence": "require_token.ex / optional_token.ex verify Bearer tokens via Auth.verify_token; preview_token.ex verifies short-lived preview JWTs bound to a dataset claim (check_dataset_scope prevents cross-dataset draft escalation); require_bearer_or_session_token.ex, optional_session_token.ex, optional_user_session.ex, require_user_session.ex cover browser session auth; require_ingest_token.ex, require_media_processing_callback_token.ex, github_webhook_signature.ex, require_scim_token.ex, require_ticket_key.ex cover machine/service credentials; each halts with the same Content.Errors envelope pattern on failure."
+    },
+    {
+      "title": "Layer fine-grained authorization (admin, write-permission, workspace role, org MFA, grant-scoped reads) on top of authentication so 'who you are' and 'what you may do' stay separately composable per route",
+      "scale": "invariant",
+      "evidence": "require_admin.ex, require_write_permission.ex, require_workspace_role.ex, require_principal_user.ex, require_org_mfa_enrolment.ex, require_recent_mfa.ex plugs exist as discrete pipeline steps; scope_helpers.ex's maybe_grant_scoped only sets grant_scoped when ResolveWorkspace admitted a GRANT-DERIVED caller (never a member), so Content.Query row-narrowing is additive and opt-in (airdrop-grants Layer 2)."
+    },
+    {
+      "title": "Protect the API from abuse and duplicate side-effects without punishing legitimate SDK/browser traffic",
+      "scale": "feature",
+      "evidence": "rate_limit.ex implements per-token/per-IP, read/write-class, per-dataset-overridable token-bucket limiting with Retry-After; idempotency.ex dedups mutating requests by (raw_key, token_id, method, path) and replays cached sub-500 responses; ticket_rate_limit.ex applies the same discipline to the external ticket surface; cache_body_reader.ex exists to let the request body be read twice (signature verification + normal parsing) without breaking either."
+    },
+    {
+      "title": "Guarantee cross-origin requests are safe by default: dataset-scoped CORS reflection, never wildcards, fail-closed on mismatch",
+      "scale": "invariant",
+      "evidence": "dataset_cors.ex resolves the owning dataset (including under the /w/:ws/p/:project prefix) and reflects access-control-allow-origin ONLY for matching entries in a per-dataset cors_origins allow-list unioned with a fixed @always_allowed_origins list; explicitly documents 'Never wildcards — fail-closed'; wildcard_match? is anchored regex to block path-injected origin spoofing; plugin_path? carve-out lets router-level plugin buckets (e.g. public_cors.ex) own their own CORS story instead of double-gating."
+    },
+    {
+      "title": "Keep legacy/back-compat surfaces (flat routes, deprecated endpoints, vendor MIME negotiation, error envelope versioning) working identically while the tenancy-scoped architecture evolves underneath them",
+      "scale": "invariant",
+      "evidence": "assign_default_scope.ex assigns the seeded Default workspace/project for flat routes so old callers keep working unscoped; legacy_deprecation.ex adds deprecation headers without breaking legacy routes; accept_barkpark_vendor.ex normalizes vendor MIME Accept headers; error_envelope_negotiation.ex negotiates error envelope version so older SDK clients keep their expected error shape; api_security_headers.ex applies baseline security headers across all API responses."
+    }
+  ]
+}

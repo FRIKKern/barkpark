@@ -1,1 +1,40 @@
-{"subsystem":"js","summary":"JS SDK monorepo build and test infrastructure — workspace test runner, MSW API mocks, edge-compat enforcement, and TypeScript declaration fixups that make the SDK reliable across runtimes and module systems.","intentions":[{"title":"Ship a runtime-agnostic SDK that runs in Node, edge workers (Cloudflare workerd), and browsers without modification","scale":"epic","evidence":"vitest.workspace.ts configures three distinct test pools (node, core-workerd/miniflare, react-browser/playwright); check-no-node-imports.sh enforces ADR-002 — no node: imports in core or nextjs edge subpaths"},{"title":"Keep TypeScript declaration files correct for all modern module resolution strategies (Bundler, NodeNext, CJS)","scale":"small","evidence":"post-build-dts.mjs copies .d.ts → .d.mts post-tsup so consumers using moduleResolution:Bundler or NodeNext get correct import.types; preserves .d.cts for CJS fallback"},{"title":"Enable fast, network-free unit tests against the Barkpark HTTP API contract","scale":"small","evidence":"test-utils/msw/handlers.ts mocks /v1/meta, /v1/schemas/:dataset, /v1/data/query, /v1/data/doc, and /v1/data/mutate; server.ts + vitest.setup.ts wire MSW lifecycle (listen/reset/close) globally across the suite"}]}
+{
+  "subsystem": "api/lib/barkpark/portable_doc/render",
+  "intentions": [
+    {
+      "title": "Render one PortableDoc block tree to two structurally different, byte-locked outputs — a semantic classed article DOM for the paper reader/editor and an inline-styled, table-based email skin for stylesheet-less mail clients — from a single compose/walk pass",
+      "scale": "epic",
+      "evidence": "compose.ex: nearly every compose_block/2,3 clause has an :article branch (semantic <h1>/<p>/<ul>) and a default/email branch (inline PdBox/PdText scaffolds, e.g. list items become flex-row spans with literal '• '/'1. ' prefixes because 'Outlook strips <ul> padding'); walk.ex moduledoc states the DATA-vs-THEME contract explicitly: article emits bare elements styled by Stylesheet, email is frozen inline HTML 'byte-identical to the pre-palette walker'."
+    },
+    {
+      "title": "Keep every non-article render surface (email, bare export) working with zero shared stylesheet by threading a resolved palette/theme (colors, fonts, widths) through compose+walk instead of relying on CSS",
+      "scale": "invariant",
+      "evidence": "palettes.ex: email_palette/1 and article_palette/1 build fully resolved literal color/font maps from TokensGen; article_palette wraps every value in var(--paper-*, <hex>) so it degrades to the same hex when rendered outside .bp-paper-surface (paper.html.heex, email backend); compose.ex @default_theme :evergreen note: 'the evergreen default makes compose_block(b, style, :evergreen) byte-identical to compose_block(b, style)'."
+    },
+    {
+      "title": "Never let a malformed, unknown, or type-mismatched block crash the render pipeline — degrade every leaf/table/heading field and every unrecognized block type to a visible fallback instead of a 500",
+      "scale": "invariant",
+      "evidence": "compose.ex stringish/1 coerces non-binary author fields to '' rather than raising Protocol.UndefinedError; compose_block(%{'type' => type}, _style) and the final compose_block(_other, _style) catch-all both degrade to an escaped 'Unsupported block' / 'invalid block' div citing 'Papers are schemaless, so any raw API/SDK/CLI mutate can persist a block type this engine has no clause for'; image block with empty src composes to '' rather than a broken <img>."
+    },
+    {
+      "title": "Keep the Elixir HTML renderer and the Go pdrender TUI renderer as parity twins driven by the same golden fixtures and the same manifest/token sources, so a paper looks/behaves consistently whether read in a browser or a terminal",
+      "scale": "epic",
+      "evidence": "compose.ex moduledoc: 'Its cross-runtime twin is the block-composition step of the Go internal/pdrender renderer (held in parity by the shared golden fixtures)'; util.ex safe_url doc names parity twins web/lib/safe-href.ts and internal/pdrender/inline.go; status_vocab.ex reads design/status-manifest.json at compile time so 'sibling surfaces...derive from the SAME file via scripts/status-manifest-check.sh'; layout engine comments describe the TUI COLLAPSING grid→stack since 'a terminal has no grid'."
+    },
+    {
+      "title": "Never let content author input (URLs, hex colors, HTML-significant characters, block field values) escape into unsafe HTML — sanitize every leaf through one owned escape/URL-allowlist path",
+      "scale": "invariant",
+      "evidence": "util.ex escape_html/1 escapes & < > \" ' in fixed order to avoid double-escaping; safe_url/1 allowlists http/https/mailto/tel + root-relative/in-document paths and rejects protocol-relative //host, defaulting unsafe hrefs to '#'; compose.ex routes every field-* value/label/type through escape_html/escape_attr/safe_hex/safe_url before it reaches HTML."
+    },
+    {
+      "title": "Keep task/status vocabulary (glyphs, spinner roles, labels) single-sourced from the repo-root design manifest so the paper renderer, CSS tone tokens, and eventually Go/web surfaces can never drift on what a task status looks like",
+      "scale": "invariant",
+      "evidence": "status_vocab.ex reads design/status-manifest.json at compile time via @external_resource, precomputes glyph/spinner/label/meaning-by-role maps, and is tagged '@canonical capability:status-vocabulary' — moduledoc: 'there is no second copy to keep in sync.'"
+    },
+    {
+      "title": "Support a growing library of rich, editable content widgets (tasks, task-detail, task-board, roadmap, cards, notes, pipeline, stages, terminals, columns, data-viz stat/heatmap/chart, sheets, forms, diagrams, asciicasts) each with matched article and email renderings, without breaking byte-identical output for existing papers",
+      "scale": "feature",
+      "evidence": "compose.ex has dedicated clauses and _email_html twins for every widget family (FleetEmail, CardsEmail, PanelsEmail, DataViz, Components), each annotated 'ADDITIVE: the legacy X clause above is UNTOUCHED' or 'byte-identical to before'; forms.ex renders questionnaire/grill blocks as render-only <fieldset> markup with no script/action wiring, deferred to 'a later phase'."
+    }
+  ]
+}
