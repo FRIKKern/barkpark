@@ -1,3 +1,12 @@
+// ─────────────────────────────────────────────────────────────────────────
+// MIRROR PAIR — canonical lives at api/priv/static/assets/bp-graph.js
+// This file is kept BYTE-IDENTICAL across two surfaces:
+//   • api/priv/static/assets/bp-graph.js  (canonical — Studio blast-radius pane)
+//   • web/public/bp-graph.js              (mirror — Next.js web demo landing)
+// Edit the canonical copy, then copy it verbatim to the mirror. Never hand-edit
+// one side alone — the two drifted to 0.79 similarity once and had to be
+// reconciled (Cody duplication finding, task-e94f519629c2dc52).
+// ─────────────────────────────────────────────────────────────────────────
 // bp-graph.js — Obsidian-style graph renderer for the Studio blast-radius
 // pane. Self-contained vanilla Canvas2D + a hand-rolled velocity-Verlet force
 // simulation. ZERO npm, ZERO network-fetched libs, ZERO font fetch (Golden
