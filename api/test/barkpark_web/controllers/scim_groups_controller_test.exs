@@ -146,6 +146,41 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
     end
   end
 
+  describe "DELETE /scim/v2/Groups/:id — via Barkpark.Scim, tenancy-scoped" do
+    test "deletes the group in this org" do
+      %{token: token} = org_with_ws("grp-del")
+
+      gid =
+        scim(token)
+        |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => "Gone", "role" => "member"}))
+        |> json_response(201)
+        |> Map.fetch!("id")
+
+      assert scim(token) |> delete("/scim/v2/Groups/#{gid}") |> response(204)
+      assert scim(token) |> get("/scim/v2/Groups/#{gid}") |> json_response(404)
+    end
+
+    test "org isolation: org B cannot delete a group in org A" do
+      %{org: org_a, token: token_a} = org_with_ws("g-del-a")
+      %{org: org_b, token: token_b} = org_with_ws("g-del-b")
+
+      gid =
+        scim(token_a)
+        |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => "AOnly", "role" => "member"}))
+        |> json_response(201)
+        |> Map.fetch!("id")
+
+      # org B can't see it → 404, and the group survives in org A.
+      assert scim(token_b) |> delete("/scim/v2/Groups/#{gid}") |> json_response(404)
+      assert scim(token_a) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
+
+      # The context is tenancy-scoped: a delete on org B's behalf removes nothing.
+      group_a = Scim.get_org_group(org_a, gid)
+      assert {:ok, 0} = Scim.delete_group(org_b, group_a)
+      assert Scim.get_org_group(org_a, gid)
+    end
+  end
+
   # A raw path `:id` binds to Group's `:binary_id` PK. Before the guard a
   # non-UUID id raised Ecto.CastError → HTTP 500; now it folds into the not_found
   # branch → SCIM 404. Positive control: a well-formed UUID still resolves.

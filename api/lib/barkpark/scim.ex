@@ -265,6 +265,19 @@ defmodule Barkpark.Scim do
       Repo.all(from g in Group, where: g.organization_id == ^oid, order_by: [asc: g.display_name])
 
   @doc """
+  Delete `group` from `org`. Tenancy-scoped: the delete is filtered by
+  `organization_id`, so a token for org A can never remove a group in org B.
+  Returns `{:ok, deleted_count}` (0 when the group is not in this org).
+  """
+  @spec delete_group(Organization.t(), Group.t()) :: {:ok, non_neg_integer()}
+  def delete_group(%Organization{id: oid}, %Group{} = group) do
+    {n, _} =
+      Repo.delete_all(from g in Group, where: g.id == ^group.id and g.organization_id == ^oid)
+
+    {:ok, n}
+  end
+
+  @doc """
   Add `user_id` to `group`: set that user's membership role (in the org's
   workspaces) to the group's mapped role. No-op if the user isn't provisioned
   into the org. Audited.
