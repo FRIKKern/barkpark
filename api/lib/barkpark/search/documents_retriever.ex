@@ -4,12 +4,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
   @behaviour Barkpark.Search.Retriever
 
   import Ecto.Query
+
   import Barkpark.Content.Scope,
     only: [
       scope_to_workspace_or_global: 3,
       scope_to_owner: 2,
       maybe_scope_to_grants: 2
     ]
+
   alias Barkpark.Content.Document
   alias Barkpark.Repo
 
