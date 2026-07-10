@@ -231,13 +231,17 @@ const EXPECTATIONS = {
   provisioning: {
     what: "the watched provisioning timeline",
     container: "instance-body",
-    includes: ["bp-timeline", "bp-tl-steps", "bp-tl-step--active", "bp-console", "Provisioning"],
+    // #1180 (9eff1fee) retired the bp-tl-step* classes: the timeline now renders
+    // the shared newStepsHtml rows (new-steps / new-step active) — expectation lagged.
+    includes: ["bp-timeline", "new-steps", "new-step active", "bp-console", "Provisioning"],
     excludes: ["bp-tl-fail"],
   },
   failed: {
     what: "the setup-failed state with the verbatim error",
     container: "instance-body",
-    includes: ["bp-tl-fail", "bp-tl-step--failed", "Setup failed", "Retry setup", "Studio never came up"],
+    // #1180 (9eff1fee) retired the bp-tl-step* classes: the failed row is now
+    // new-step failed (the bp-tl-fail block itself survived) — expectation lagged.
+    includes: ["bp-tl-fail", "new-step failed", "Setup failed", "Retry setup", "Studio never came up"],
   },
   // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
   // Current chip, the prior live row offers rollback, the failed row neither.
