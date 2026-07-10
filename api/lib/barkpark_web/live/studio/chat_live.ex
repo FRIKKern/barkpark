@@ -2140,9 +2140,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
         </span>
-        <span class="text-xs text-dim" style="margin-left: auto;">
-          <%= status_label(@status) %> — Claude on this host, admins only.
-        </span>
       </div>
 
       <div
@@ -4718,15 +4715,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # pre-compaction size, so we never invent a number we don't have.
   defp compact_size(pre) when is_integer(pre) and pre > 0, do: " (was ~#{pre} tokens)"
   defp compact_size(_), do: ""
-
-  defp status_label(:new), do: "new chat"
-  defp status_label(:resumable), do: "resumable"
-  defp status_label(:starting), do: "starting"
-  defp status_label(:ready), do: "ready"
-  defp status_label(:working), do: "working"
-  defp status_label(:thinking), do: "working"
-  defp status_label(:interrupting), do: "stopping…"
-  defp status_label(:offline), do: "offline"
 
   # A turn is in flight while the model works or while we're aborting it — both
   # states show Stop, never Send (there is no queue; the only in-turn control
