@@ -49,6 +49,7 @@ import (
 var usageMeterOrder = []string{
 	"documents", "datasets", "webhooks", "db_size", "disk", "seats",
 	"api_requests", "bandwidth", "instances",
+	"cpu", "ram", "req_per_s", "p95_ms",
 }
 
 var usageMeterLabels = map[string]string{
@@ -61,6 +62,10 @@ var usageMeterLabels = map[string]string{
 	"api_requests": "API requests",
 	"bandwidth":    "Bandwidth",
 	"instances":    "Instances",
+	"cpu":          "CPU",
+	"ram":          "RAM",
+	"req_per_s":    "Req/s",
+	"p95_ms":       "p95 latency",
 }
 
 // unmeteredValue is the honest "no truth here" sentinel the envelope carries in
@@ -605,7 +610,10 @@ func usageStateToken(m cloudclient.UsageMeter, present bool) string {
 		return "unmetered"
 	}
 	n, _ := usageNumber(m.Value) // ok — usageIsMetered guaranteed a number
-	if m.Quota != nil && n >= *m.Quota {
+	// OC25: over fires at the red line (over_at) OR the inclusive quota ceiling —
+	// so a bar-less rate/latency meter reddens at over_at with no quota, and a
+	// physical meter reddens at over_at (90) BELOW its 100 bar ceiling.
+	if (m.OverAt != nil && n >= *m.OverAt) || (m.Quota != nil && n >= *m.Quota) {
 		return "over_limit"
 	}
 	if m.WarnAt != nil && n >= *m.WarnAt {
@@ -693,14 +701,19 @@ func usageNumber(v any) (float64, bool) {
 }
 
 // formatMeterValue formats a metered number by the meter's unit, inferred from
-// its name: db_size is bytes (human units), disk is a percent, everything else
+// its name: db_size is bytes (human units); disk / cpu / ram are percents;
+// req_per_s is a rate ("12.4/s"); p95_ms is a latency ("140 ms"); everything else
 // is a plain count.
 func formatMeterValue(name string, n float64) string {
 	switch name {
 	case "db_size":
 		return humanBytes(n)
-	case "disk":
+	case "disk", "cpu", "ram":
 		return trimFloat(n) + "%"
+	case "req_per_s":
+		return trimFloat(n) + "/s"
+	case "p95_ms":
+		return trimFloat(n) + " ms"
 	default:
 		return trimFloat(n)
 	}
@@ -753,6 +766,7 @@ ONE INSTANCE
 
     documents · datasets · webhooks    instance-sourced inventory counts
     db_size · disk                     the agent's health-beat telemetry
+    cpu · ram · req_per_s · p95_ms     host capacity (CPU/RAM %, request rate, p95 latency)
     seats · instances                  your team's members + provisioned boxes
     api_requests · bandwidth           flow meters (not yet metered)
 

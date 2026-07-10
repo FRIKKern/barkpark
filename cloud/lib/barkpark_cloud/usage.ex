@@ -14,30 +14,43 @@ defmodule BarkparkCloud.Usage do
 
       documents      datasets      webhooks       — instance-sourced inventory counts
       db_size        disk                          — telemetry-sourced (the agent's health beat)
+      cpu            ram                           — telemetry machine meters (0-100 %, 100/70/90 ceiling)
+      req_per_s      p95_ms                        — telemetry load meters (rate/latency, warn+over, no bar)
       seats          instances                     — control-plane-sourced (team members / fleet count)
-      api_requests   bandwidth                     — FLOW meters, D31-sequenced (see below)
+      api_requests   bandwidth                     — FLOW meters, not yet metered (see below)
 
   Every meter is the SAME shape:
 
       %{
         value: number | "unmetered",
-        quota: non_neg_integer | nil,   # the enforced ceiling when one exists, else nil
-        warn_at: non_neg_integer | nil, # the amber threshold when a quota is present, else nil
+        quota: non_neg_integer | nil,   # the enforced/physical ceiling when one exists, else nil
+        warn_at: non_neg_integer | nil, # the amber threshold, else nil
+        over_at: non_neg_integer | nil, # the red threshold (OC25), else nil — over fires here BEFORE quota
         source: String.t(),  # always names where the number does / would come from
         measured_at: String.t() | nil   # RFC3339 snapshot time, or nil for a live/current read
       }
 
-  ## Quotas — honest ceilings only (OC7 / OC11)
+  ## Quotas + thresholds — honest ceilings only (OC7 / OC11 / OC23 / OC25)
 
-  `quota`/`warn_at` are nil for every meter that has NO enforcement-backed
-  ceiling — which in v1 is all but one. Drawing a bar "to nowhere" for an
-  unlimited meter is exactly the dishonesty the wish forbids. The lone exception
-  is `instances`: the managed-instance count IS enforced today (the create-time
-  402 guard and the quota reconciler both key on `Billing.barkpark_limit/1`), so
-  it carries a real `quota` — but only when the router resolves one (a
-  subscription-backed, non-placeholder ceiling; see the input contract). Given a
-  quota, `warn_at` is `min(quota - 1, ceil(quota * 0.8))` once `quota >= 2` (a
-  ceiling of 1 has no room for a warning tier), else nil.
+  A meter draws a quota BAR only when it carries a real ceiling; drawing a bar
+  "to nowhere" for an unlimited meter is the dishonesty the wish forbids. Three
+  ceiling/threshold families:
+
+    * **`instances`** — a BILLING quota: the managed-instance count IS enforced
+      today (the create-time 402 guard and the quota reconciler both key on
+      `Billing.barkpark_limit/1`), so it carries a real `quota` when the router
+      resolves one (subscription-backed, non-placeholder). `warn_at` is derived:
+      `min(quota - 1, ceil(quota * 0.8))` once `quota >= 2`, else nil. No
+      `over_at` — its red line IS the inclusive quota.
+    * **`cpu` / `ram` / `disk`** — PHYSICAL percent meters: a fixed `quota: 100`
+      (the 0-100 bar ceiling) with `warn_at: 70` / `over_at: 90`. The red state
+      fires at `over_at` (90) BELOW the bar ceiling (OC25).
+    * **`req_per_s` / `p95_ms`** — RATE/LATENCY meters: `warn_at` + `over_at`
+      thresholds but NO `quota` (a rate has no plan wall) → they tint but draw no
+      bar.
+
+  Every OTHER meter (inventory counts, db_size, seats, flow) keeps
+  `quota`/`warn_at`/`over_at` nil — no invented limits.
 
   The `seats` meter additionally carries `:pending_invitations` (a non-negative
   integer, or absent when unavailable) — a cheap extra detail beside the seat
@@ -53,7 +66,7 @@ defmodule BarkparkCloud.Usage do
      infinity.
 
   2. **Flow meters (`api_requests`, `bandwidth`) are ALWAYS `"unmetered"`.** Flow
-     metering does not exist yet (D31 sequencing); pretending otherwise with a
+     metering does not exist yet; pretending otherwise with a
      zero would be a lie. They render as a designed "not yet metered" state, not
      a number, regardless of any input.
 
@@ -118,6 +131,14 @@ defmodule BarkparkCloud.Usage do
   @src_webhooks "instance.webhooks"
   @src_db_size "telemetry.pg_size_bytes"
   @src_disk "telemetry.disk_used_percent"
+  # Machine meters (OC23/OC26): the host's live capacity pressure, sourced from
+  # the SAME agent health beat as disk. cpu/ram carry the physical 0-100 ceiling
+  # (100 with warn 70 / over 90); req_per_s / p95_ms are RATE/LATENCY signals with
+  # no plan wall to draw a bar to (quota nil), just an amber warn + a red over.
+  @src_cpu "telemetry.cpu_percent"
+  @src_ram "telemetry.mem_used_percent"
+  @src_req_per_s "telemetry.req_per_s"
+  @src_p95_ms "telemetry.p95_ms"
   @src_seats "control-plane.team_members"
   # The fleet meter is a pure control-plane read (the team's managed-instance
   # count) — it returns even when every instance is down.
@@ -148,9 +169,30 @@ defmodule BarkparkCloud.Usage do
         webhooks: instance_meter(Map.get(inputs, :webhooks), @src_webhooks),
         db_size: db_size_meter(telemetry, measured_at),
         disk: disk_meter(telemetry, measured_at),
+        # Machine meters (OC23/OC26) — the host's capacity pressure off the same
+        # health beat. cpu/ram are percents with the physical 100/70/90 ceiling;
+        # req_per_s / p95_ms are rate/latency signals with warn+over thresholds
+        # but no quota bar. An unwired probe (-1) / absent signal → "unmetered",
+        # never a fake 0 (guard n >= 0). req_per_s / p95_ms stay unmetered until
+        # the instance runtime reports them — honest, not a zero.
+        cpu: telemetry_threshold_meter(telemetry, :cpu, @src_cpu, measured_at, 100, 70, 90),
+        ram: telemetry_threshold_meter(telemetry, :mem, @src_ram, measured_at, 100, 70, 90),
+        req_per_s:
+          telemetry_threshold_meter(
+            telemetry,
+            :req_per_s,
+            @src_req_per_s,
+            measured_at,
+            nil,
+            210,
+            270
+          ),
+        p95_ms:
+          telemetry_threshold_meter(telemetry, :p95_ms, @src_p95_ms, measured_at, nil, 500, 1000),
         seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
         instances: instances_meter(Map.get(inputs, :instances)),
-        # FLOW meters — always unmetered, whatever anyone passes (D31).
+        # FLOW meters — always unmetered, whatever anyone passes. req/s is a
+        # RATE, not the billing request count — the flow meters stay dark here.
         api_requests: meter(@unmetered, @src_not_metered, nil),
         bandwidth: meter(@unmetered, @src_not_metered, nil)
       }
@@ -181,11 +223,33 @@ defmodule BarkparkCloud.Usage do
   # the probe was never wired (Telemetry moduledoc: sentinel interpretation is a
   # view concern) — treat a negative / non-number as "not measured", never a
   # fake 0% that reads as an empty disk.
+  # Disk used-percent, retrofitted to the machine-meter thresholds (OC23): a real
+  # physical ceiling of 100 with warn 70 / over 90, so a filling disk ambers then
+  # reddens on every surface exactly like cpu/ram. A negative / non-number is "not
+  # measured" → unmetered (the ceiling still rides, but no bar/state on a sentinel).
   defp disk_meter(telemetry, measured_at) do
-    case telemetry && get_in(telemetry, [:disk, :used_pct]) do
-      n when is_number(n) and n >= 0 -> meter(n, @src_disk, measured_at)
-      _ -> meter(@unmetered, @src_disk, measured_at)
-    end
+    value =
+      case telemetry && get_in(telemetry, [:disk, :used_pct]) do
+        n when is_number(n) and n >= 0 -> n
+        _ -> @unmetered
+      end
+
+    meter(value, @src_disk, measured_at, 100, 70, 90)
+  end
+
+  # A telemetry-sourced meter carrying warn/over thresholds (OC23/OC26). The value
+  # is the beat's signal when it's a real non-negative number, else "unmetered"
+  # (an unwired `-1` probe or an absent signal is NEVER a fake 0). The ceiling +
+  # thresholds ride on EVERY branch — they are a property of the meter, not the
+  # reading — so a still-dark cpu meter already knows its 100% wall.
+  defp telemetry_threshold_meter(telemetry, key, source, measured_at, quota, warn_at, over_at) do
+    value =
+      case telemetry && Map.get(telemetry, key) do
+        n when is_number(n) and n >= 0 -> n
+        _ -> @unmetered
+      end
+
+    meter(value, source, measured_at, quota, warn_at, over_at)
   end
 
   # Seat count from the team's membership — a control-plane read that returns
@@ -234,10 +298,22 @@ defmodule BarkparkCloud.Usage do
 
   defp warn_at_for(_), do: nil
 
-  # The uniform meter shape. `quota`/`warn_at` default to nil — the honest state
-  # for every meter without an enforcement-backed ceiling (all but `instances`).
-  defp meter(value, source, measured_at, quota \\ nil, warn_at \\ nil) do
-    %{value: value, quota: quota, warn_at: warn_at, source: source, measured_at: measured_at}
+  # The uniform meter shape. `quota`/`warn_at`/`over_at` default to nil — the
+  # honest state for a meter with no ceiling and no threshold. `over_at` (OC25) is
+  # the red line: state is `over` when (over_at && value >= over_at) OR (quota &&
+  # value >= quota), `warn` at warn_at, else `ok`/`live`. A physical meter
+  # (cpu/ram/disk) reddens at over_at (90) BELOW its 100 bar ceiling; the
+  # `instances` billing meter carries a quota and no over_at, so it reddens at the
+  # quota itself (the inclusive create-time guard).
+  defp meter(value, source, measured_at, quota \\ nil, warn_at \\ nil, over_at \\ nil) do
+    %{
+      value: value,
+      quota: quota,
+      warn_at: warn_at,
+      over_at: over_at,
+      source: source,
+      measured_at: measured_at
+    }
   end
 
   # ── Input coercion (stay total) ─────────────────────────────────────────────

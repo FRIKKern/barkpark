@@ -2903,11 +2903,13 @@ test("C10: the Usage + Members helpers are exported", () => {
     "invitationRowHtml", "membersPanelHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  // The fixed 9-meter vocabulary, in SPA render order — `instances` leads as the
-  // headline quota meter (order is surface-local; the fixture tripwire below binds
-  // only the name SET, not the order).
+  // The fixed 13-meter vocabulary, in SPA render order — `instances` leads as the
+  // headline quota meter, the machine meters (cpu/ram/req_per_s/p95_ms) group
+  // after disk in the host-capacity block, flow meters last (order is
+  // surface-local; the fixture tripwire below binds only the name SET, not order).
   assert.deepEqual([...hooks.usageMeters.map((m) => m.key)],
-    ["instances", "seats", "documents", "datasets", "webhooks", "db_size", "disk", "api_requests", "bandwidth"]);
+    ["instances", "seats", "documents", "datasets", "webhooks", "db_size", "disk",
+      "cpu", "ram", "req_per_s", "p95_ms", "api_requests", "bandwidth"]);
 });
 
 // ── the meter vocabulary is name-SET-pinned against the shared fixture ───────
@@ -2981,7 +2983,7 @@ test("C10: usageMetersHtml renders the full grid; metered vs unmetered chrome di
   const empty = hooks.usageMetersHtml({});
   // Every meter label present even with an empty payload — the grid is always full.
   for (const spec of hooks.usageMeters) assert.ok(empty.includes(hooks.esc(spec.label)), spec.label + " missing");
-  assert.equal((empty.match(/Not yet metered/g) || []).length, 9);
+  assert.equal((empty.match(/Not yet metered/g) || []).length, 13);
   const metered = hooks.usageMetersHtml({ documents: { value: 7, measured_at: null } });
   assert.match(metered, /<strong>7<\/strong>/);          // real value is bold
   assert.match(metered, /<span class="dim">Not yet metered<\/span>/); // still-empty meters stay dim
@@ -3048,6 +3050,76 @@ test("C10/OC7: usageMeterHtml — an unlimited meter renders byte-identically to
   const unlimited = hooks.usageMeterHtml(instSpec(), { value: 3, quota: null, measured_at: null });
   assert.ok(!unlimited.includes("usage-bar"), "no bar chrome when there is no ceiling");
   assert.match(unlimited, /<strong>3<\/strong>/); // the value renders exactly as a plain metered meter
+});
+
+// ── OC23/OC26 machine meters: units + over_at state, bar iff a quota ──────────
+const cpuSpec = () => usageSpec("cpu");
+const reqSpec = () => usageSpec("req_per_s");
+const p95Spec = () => usageSpec("p95_ms");
+
+test("OC26: c10FmtValue — ms + rate units", () => {
+  const req = hooks.usageMeterDisplay(reqSpec(), { value: 12.45, measured_at: null });
+  assert.equal(req.value, "12.5/s"); // one decimal, trimmed
+  const reqWhole = hooks.usageMeterDisplay(reqSpec(), { value: 200, measured_at: null });
+  assert.equal(reqWhole.value, "200/s"); // no trailing .0
+  const p95 = hooks.usageMeterDisplay(p95Spec(), { value: 143.6, measured_at: null });
+  assert.equal(p95.value, "144 ms"); // rounded ms
+  const cpu = hooks.usageMeterDisplay(cpuSpec(), { value: 63.4, measured_at: null });
+  assert.equal(cpu.value, "63%"); // percent, rounded
+});
+
+test("OC25: usageMeterDisplay — cpu reddens at over_at (90) BELOW its 100 bar ceiling", () => {
+  // 94% cpu: state over (>= over_at 90) even though the bar isn't full (94 < 100).
+  const hot = hooks.usageMeterDisplay(cpuSpec(), { value: 94, quota: 100, warn_at: 70, over_at: 90 });
+  assert.equal(hot.state, "over");
+  assert.equal(hot.bar.tone, "over");
+  assert.equal(hot.bar.pct, 94); // true 0-100 bar, not full
+  // 76% cpu: warn band (>= 70, < 90).
+  const warm = hooks.usageMeterDisplay(cpuSpec(), { value: 76, quota: 100, warn_at: 70, over_at: 90 });
+  assert.equal(warm.state, "warn");
+  assert.equal(warm.bar.tone, "warn");
+  // 40% cpu: ok — a threshold-bearing meter that has tripped none.
+  const cool = hooks.usageMeterDisplay(cpuSpec(), { value: 40, quota: 100, warn_at: 70, over_at: 90 });
+  assert.equal(cool.state, "ok");
+});
+
+test("OC25: usageMeterDisplay — a rate meter has state + tint but NO bar (quota nil)", () => {
+  // req_per_s over its red line (270): state over, but no bar to nowhere.
+  const over = hooks.usageMeterDisplay(reqSpec(), { value: 300, warn_at: 210, over_at: 270 });
+  assert.equal(over.state, "over");
+  assert.equal(over.bar, null); // no quota → no bar
+  // Between warn and over → warn.
+  const near = hooks.usageMeterDisplay(reqSpec(), { value: 250, warn_at: 210, over_at: 270 });
+  assert.equal(near.state, "warn");
+  assert.equal(near.bar, null);
+  // Under warn → ok.
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 40, warn_at: 210, over_at: 270 }).state, "ok");
+});
+
+test("OC25: usageMeterHtml — a bar-less rate meter over its threshold tints the ROW, no Manage-plan", () => {
+  const over = hooks.usageMeterHtml(reqSpec(), { value: 300, warn_at: 210, over_at: 270 });
+  assert.match(over, /class="fleet-row usage-row usage-row--over"/); // the row tints
+  assert.ok(!over.includes("usage-bar"), "a rate meter draws no bar (no quota ceiling)");
+  assert.ok(!over.includes("#settings/billing"), "a capacity meter is not a billing dead-end");
+});
+
+test("OC25: usageMeterHtml — an over cpu meter tints red but carries NO Manage-plan link", () => {
+  // Only the billing quota meter (instances) routes to Manage plan; a physical
+  // meter over its wall is a capacity signal, tinted, with no billing action.
+  const cpu = hooks.usageMeterHtml(cpuSpec(), { value: 95, quota: 100, warn_at: 70, over_at: 90 });
+  assert.match(cpu, /usage-bar--over/); // the bar reddens
+  assert.ok(!cpu.includes("#settings/billing"), "cpu over 90% is not a billing dead-end");
+  // The instances billing meter over its ceiling DOES keep the one recovery action.
+  const inst = hooks.usageMeterHtml(instSpec(), { value: 12, quota: 10, warn_at: 8 });
+  assert.match(inst, /<a class="usage-bar-action" href="#settings\/billing">Manage plan<\/a>/);
+});
+
+test("OC25: usageMeterDisplay — an unmetered machine meter never reads a state (no fake alarm)", () => {
+  // req_per_s not yet reported: honest unmetered, no state, no bar — never a fake 0.
+  const dark = hooks.usageMeterDisplay(reqSpec(), { value: "unmetered", warn_at: 210, over_at: 270 });
+  assert.equal(dark.unmetered, true);
+  assert.equal(dark.state, null);
+  assert.equal(dark.bar, null);
 });
 
 // ── Wave 4 (OC19): Usage-tab sparklines — the 14-day history read path ────────

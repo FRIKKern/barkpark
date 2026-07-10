@@ -2838,3 +2838,12 @@ select.form-input {
 .usage-spark .spark { display: block; width: 120px; height: 32px; }
 .usage-row--warn .usage-spark { color: var(--warn); }
 .usage-row--over .usage-spark { color: var(--danger); }
+
+/* ── Wave 5 (OC23/OC26): machine-meter threshold tinting ──────────────────────
+   req_per_s / p95_ms carry warn_at/over_at but NO quota — a rate/latency has no
+   plan ceiling to draw a bar to — so the OC25 state tints the row's VALUE badge
+   instead of a fill. Percent meters (cpu/ram/disk) keep their true 0-100 bar AND
+   pick this up, so a hot box's number reddens alongside its bar. Reuses the S4
+   role tokens (no new literals); append-only, no token-block/index edits. */
+.usage-row--warn .fleet-badges strong { color: var(--warn); }
+.usage-row--over .fleet-badges strong { color: var(--danger); }

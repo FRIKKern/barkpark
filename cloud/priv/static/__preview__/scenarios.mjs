@@ -510,7 +510,14 @@ const quotaBarsUsage = {
     datasets: m(4, { source: "instance.datasets" }),                // metered but unlimited (quota nil) → bar-less
     webhooks: m("unmetered", { source: "instance.webhooks" }),
     db_size: m("unmetered", { source: "telemetry.pg_size_bytes" }),
-    disk: m("unmetered", { source: "telemetry.disk_used_percent" }),
+    disk: m(58, { quota: 100, warn_at: 70, over_at: 90, source: "telemetry.disk_used_percent", measured_at: T }), // healthy 0-100 bar
+    // Machine meters (OC23/OC26): cpu OVER its red line (94 ≥ 90, bar not full),
+    // ram in the warn band (76 ≥ 70), req_per_s near its rate warn line (bar-less
+    // tint), p95_ms not yet reported by the instance runtime (honest unmetered).
+    cpu: m(94, { quota: 100, warn_at: 70, over_at: 90, source: "telemetry.cpu_percent", measured_at: T }),
+    ram: m(76, { quota: 100, warn_at: 70, over_at: 90, source: "telemetry.mem_used_percent", measured_at: T }),
+    req_per_s: m(250, { warn_at: 210, over_at: 270, source: "telemetry.req_per_s", measured_at: T }),
+    p95_ms: m("unmetered", { warn_at: 500, over_at: 1000, source: "telemetry.p95_ms" }),
     api_requests: m("unmetered", { source: "not-metered" }),
     bandwidth: m("unmetered", { source: "not-metered" }),
   },
@@ -540,6 +547,8 @@ const usageQuotaHistory = {
     seats: histPts([8, 8, 8, 8, 8, 8]),                        // flat — draws along the mid-line
     documents: histPts([1100, null, 1180, null, 1210, 1240]),  // gappy — nulls break the stroke
     datasets: histPts([null, null, null, null, null, null]),   // all-null → no spark (honest absence)
+    cpu: histPts([61, 68, 74, 82, 88, 94]),                    // machine meter climbing into the red
+    ram: histPts([76, 76, 76, 76, 76, 76]),                    // steady warm — flat mid-line
   },
 };
 

@@ -1298,9 +1298,14 @@ func routeError(status int, body []byte) error {
 // the RFC3339 snapshot time, or nil for a live/current read. PendingInvitations
 // rides only on the seats meter (a cheap detail, never a second meter).
 type UsageMeter struct {
-	Value              any      `json:"value"`
-	Quota              *float64 `json:"quota"`
-	WarnAt             *float64 `json:"warn_at"`
+	Value  any      `json:"value"`
+	Quota  *float64 `json:"quota"`
+	WarnAt *float64 `json:"warn_at"`
+	// OverAt is the red threshold (OC25): a metered value at/past it reads
+	// over_limit even when a bar-less meter (rate/latency) carries no quota, and
+	// a physical meter (cpu/ram/disk) reddens here BELOW its 100 bar ceiling. Nil
+	// for a meter with no red line.
+	OverAt             *float64 `json:"over_at"`
 	Source             string   `json:"source"`
 	MeasuredAt         *string  `json:"measured_at"`
 	PendingInvitations *int     `json:"pending_invitations,omitempty"`

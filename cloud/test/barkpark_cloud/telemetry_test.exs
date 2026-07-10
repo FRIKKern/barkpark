@@ -23,6 +23,11 @@ defmodule BarkparkCloud.TelemetryTest do
     %{
       "disk_used_percent" => 42,
       "pg_size_bytes" => 123_456_789,
+      "cpu_percent" => 37,
+      "mem_used_percent" => 58,
+      "load1" => 0.42,
+      "req_per_s" => 12,
+      "p95_ms" => 140,
       "backup_ok" => true,
       "backup_detail" => "daily backup 2h ago",
       "dirty_tree" => false,
@@ -39,6 +44,11 @@ defmodule BarkparkCloud.TelemetryTest do
       assert Telemetry.normalize(full_payload()) == %{
                disk: %{used_pct: 42},
                db_size: 123_456_789,
+               cpu: 37,
+               mem: 58,
+               load1: 0.42,
+               req_per_s: 12,
+               p95_ms: 140,
                backup: %{ok: true, detail: "daily backup 2h ago"},
                checks: %{pass: 3, total: 3, failing: []},
                dirty_tree: false,
@@ -63,6 +73,25 @@ defmodule BarkparkCloud.TelemetryTest do
       payload = Map.put(full_payload(), "disk_used_percent", -1)
       assert Telemetry.normalize(payload).disk == %{used_pct: -1}
     end
+
+    test "machine vitals map through num_or_nil; -1 sentinels pass through verbatim, absent → nil" do
+      env =
+        full_payload()
+        |> Map.merge(%{"cpu_percent" => -1, "load1" => -1})
+        |> Map.delete("req_per_s")
+        |> Map.delete("p95_ms")
+        |> Telemetry.normalize()
+
+      # -1 rides verbatim (the meter builder, not the normalizer, reads it as "not
+      # measured") …
+      assert env.cpu == -1
+      assert env.load1 == -1
+      # … a still-reported signal is preserved …
+      assert env.mem == 58
+      # … and an absent signal (an older instance runtime) is honestly nil.
+      assert env.req_per_s == nil
+      assert env.p95_ms == nil
+    end
   end
 
   describe "normalize/1 — absent / empty / garbage payloads never crash" do
@@ -70,6 +99,11 @@ defmodule BarkparkCloud.TelemetryTest do
       assert Telemetry.normalize(%{}) == %{
                disk: %{used_pct: nil},
                db_size: nil,
+               cpu: nil,
+               mem: nil,
+               load1: nil,
+               req_per_s: nil,
+               p95_ms: nil,
                backup: %{ok: nil, detail: nil},
                checks: %{pass: 0, total: 0, failing: []},
                dirty_tree: nil,
@@ -91,6 +125,11 @@ defmodule BarkparkCloud.TelemetryTest do
       payload = %{
         "disk_used_percent" => "high",
         "pg_size_bytes" => nil,
+        "cpu_percent" => "hot",
+        "mem_used_percent" => nil,
+        "load1" => "busy",
+        "req_per_s" => [],
+        "p95_ms" => "slow",
         "backup_ok" => "yes",
         "backup_detail" => 500,
         "dirty_tree" => 1,
@@ -100,6 +139,11 @@ defmodule BarkparkCloud.TelemetryTest do
       assert Telemetry.normalize(payload) == %{
                disk: %{used_pct: nil},
                db_size: nil,
+               cpu: nil,
+               mem: nil,
+               load1: nil,
+               req_per_s: nil,
+               p95_ms: nil,
                backup: %{ok: nil, detail: nil},
                checks: %{pass: 0, total: 0, failing: []},
                dirty_tree: nil,

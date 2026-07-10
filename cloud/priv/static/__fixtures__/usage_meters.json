@@ -8,6 +8,10 @@
     { "name": "seats", "label": "Seats" },
     { "name": "api_requests", "label": "API requests" },
     { "name": "bandwidth", "label": "Bandwidth" },
-    { "name": "instances", "label": "Instances" }
+    { "name": "instances", "label": "Instances" },
+    { "name": "cpu", "label": "CPU" },
+    { "name": "ram", "label": "RAM" },
+    { "name": "req_per_s", "label": "Req/s" },
+    { "name": "p95_ms", "label": "p95 latency" }
   ]
 }

@@ -8264,6 +8264,13 @@
     { key: "webhooks", label: "Webhooks", fmt: "count" },
     { key: "db_size", label: "Database size", fmt: "bytes" },
     { key: "disk", label: "Disk used", fmt: "percent" },
+    // Machine meters (OC23/OC26): cpu/ram are percents with a true 0-100 bar;
+    // req_per_s / p95_ms are rate/latency signals — bar-less, tinted from OC25
+    // over_at. Grouped after disk (the host-capacity block), flow meters last.
+    { key: "cpu", label: "CPU", fmt: "percent" },
+    { key: "ram", label: "RAM", fmt: "percent" },
+    { key: "req_per_s", label: "Req/s", fmt: "rate" },
+    { key: "p95_ms", label: "p95 latency", fmt: "ms" },
     { key: "api_requests", label: "API requests", fmt: "count" },
     { key: "bandwidth", label: "Bandwidth", fmt: "bytes" }
   ];
@@ -8281,6 +8288,9 @@
   function c10FmtValue(fmt, value) {
     if (fmt === "bytes") return c10FmtBytes(value);
     if (fmt === "percent") return Math.round(value) + "%";
+    if (fmt === "ms") return Math.round(value) + " ms";
+    // rate: one decimal, trailing ".0" trimmed (12 → "12/s", 12.45 → "12.5/s").
+    if (fmt === "rate") return (Math.round(value * 10) / 10) + "/s";
     return String(value); // count
   }
 
@@ -8297,19 +8307,34 @@
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
+    // OC25 — the threshold state, computed independent of whether a bar draws.
+    // "over" when the value reaches over_at OR the quota ceiling (both inclusive,
+    // mirroring the create-time guard); "warn" once it crosses warn_at; "ok" for a
+    // metered meter that carries ANY threshold but has tripped none. A meter with
+    // no threshold at all (a plain count) has no state (null → no tint). This lets
+    // a bar-less rate/latency meter (req_per_s / p95_ms — quota nil, warn_at +
+    // over_at set) still tint the row, honestly, without a bar to nowhere.
+    var hasThreshold = typeof meter.over_at === "number" ||
+      typeof meter.warn_at === "number" ||
+      (typeof meter.quota === "number" && meter.quota > 0);
+    var state = null;
+    if (!unmetered && hasThreshold) {
+      var over = (typeof meter.over_at === "number" && meter.value >= meter.over_at) ||
+        (typeof meter.quota === "number" && meter.quota > 0 && meter.value >= meter.quota);
+      var warn = typeof meter.warn_at === "number" && meter.value >= meter.warn_at;
+      state = over ? "over" : warn ? "warn" : "ok";
+    }
     // OC7 — the quota bar model. A bar is drawn ONLY when a real ceiling is
     // present (numeric quota > 0) AND the meter reports a real number; a nil/zero
-    // quota is an honest "unlimited" — no bar, no fake ceiling. Tone: "over" once
-    // the value reaches the ceiling (inclusive, mirroring the create-time guard),
-    // "warn" once it crosses a numeric warn_at, else "ok". pct clamps at 100 so an
-    // over-limit meter fills the whole track rather than overflowing it.
+    // quota is an honest "unlimited" — no bar, no fake ceiling. cpu/ram/disk carry
+    // the physical 100 ceiling → a true 0-100 bar; req_per_s / p95_ms have no
+    // quota → no bar (their state still tints the row). pct clamps at 100 so an
+    // over-limit meter fills the whole track rather than overflowing it. The tone
+    // is the shared OC25 state.
     var bar = null;
     if (!unmetered && typeof meter.quota === "number" && meter.quota > 0) {
       var pct = Math.min(100, Math.round((meter.value / meter.quota) * 100));
-      var tone = meter.value >= meter.quota ? "over"
-        : (typeof meter.warn_at === "number" && meter.value >= meter.warn_at) ? "warn"
-          : "ok";
-      bar = { pct: pct, tone: tone, quota: c10FmtValue(spec.fmt, meter.quota), quotaText: value + " / " + c10FmtValue(spec.fmt, meter.quota) };
+      bar = { pct: pct, tone: state, quota: c10FmtValue(spec.fmt, meter.quota), quotaText: value + " / " + c10FmtValue(spec.fmt, meter.quota) };
     }
     // Wave 4 (OC19): the 14-day sparkline values, threaded in from /usage/history.
     // `spark` is the value|null array fed VERBATIM to sparklineSvg (a null is a
@@ -8320,7 +8345,7 @@
     var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
       ? history.slice()
       : null;
-    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, bar: bar, spark: spark };
+    return { key: spec.key, label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
   }
 
   function usageMeterHtml(spec, meter, history) {
@@ -8334,12 +8359,14 @@
     var sparkHtml = d.spark
       ? '<div class="usage-spark">' + sparklineSvg(d.spark, { width: 120, height: 32 }) + "</div>"
       : "";
-    // The quota bar (when present) lives under the meter name. The OVER state is a
-    // terminal one, so per D25 it carries exactly ONE recovery action — a "Manage
-    // plan" link to the Settings billing view (never a dead end).
+    // The quota bar (when present) lives under the meter name. Manage-plan is the
+    // ONE recovery action (D25) for the BILLING quota meter's over state — the
+    // instances ceiling routes to Settings billing. A physical meter over its
+    // wall (cpu/ram/disk at 90%+) is a capacity signal, not a billing dead-end, so
+    // it tints red without a "Manage plan" link that would do nothing for it.
     var barHtml = "";
     if (d.bar) {
-      var manage = d.bar.tone === "over"
+      var manage = d.bar.tone === "over" && d.key === "instances"
         ? '<a class="usage-bar-action" href="#settings/billing">Manage plan</a>'
         : "";
       var quotaCls = d.bar.tone === "ok" ? "usage-bar-quota dim" : "usage-bar-quota";
@@ -8352,7 +8379,11 @@
           manage +
         "</div>";
     }
-    return '<div class="fleet-row' + (d.bar ? " usage-row usage-row--" + d.bar.tone : "") + '">' +
+    // The row tint follows the OC25 state (not the bar) so a bar-less rate/latency
+    // meter over its threshold reddens the value badge too. "ok" carries no tint —
+    // only warn/over colour the row (a healthy meter reads neutral).
+    var rowTone = d.state === "warn" || d.state === "over" ? d.state : "";
+    return '<div class="fleet-row' + (rowTone ? " usage-row usage-row--" + rowTone : "") + '">' +
       '<div class="fleet-main"><div class="fleet-name">' + esc(d.label) + "</div>" +
       (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") +
       barHtml + "</div>" +
