@@ -88,7 +88,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
          session: nil,
          store_session_id: nil,
          session_id: nil,
-         sessions: StudioChat.list_sessions(),
+         # `sessions` + `pending_ask_roles` are loaded together by
+         # refresh_sessions/1 (chained below) — the roles map is the store-truth
+         # half of the needs-you strip (wave 12), so the two must never drift.
+         sessions: [],
+         pending_ask_roles: %{},
          show_archived: false,
          renaming_session: nil,
          open_menu_session: nil,
@@ -178,6 +182,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          title_source: "default",
          title_kicked: false
        )
+       |> refresh_sessions()
        |> subscribe_activity()
        |> allow_upload(:attachments,
          # Charter D25: paste/drop images ride the SAME user turn as base64
@@ -214,8 +219,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       true ->
         # Switch-away moment (charter D36c): persist the draft of the session we
         # are LEAVING before anything else, so its unsent words survive the swap
-        # and reload when it is reopened.
-        socket = capture_draft(socket)
+        # and reload when it is reopened. Leaving also stamps last_visited_at
+        # (wave 12) — everything up to the departure was SEEN, so only what
+        # happens after counts as "while away".
+        socket = socket |> capture_draft() |> stamp_visited_on_leave()
 
         case StudioChat.get_session(sid) do
           nil ->
@@ -234,7 +241,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_params(params, _uri, socket) do
-    {:noreply, socket |> put_return_to(params) |> capture_draft() |> reset_to_new_chat()}
+    # Leaving to the new-chat state stamps the departed session's visit (wave
+    # 12) and re-reads the list, so the strip never claims "finished while away"
+    # for the session you just walked out of watching.
+    {:noreply,
+     socket
+     |> put_return_to(params)
+     |> capture_draft()
+     |> stamp_visited_on_leave()
+     |> reset_to_new_chat()
+     |> refresh_sessions()}
   end
 
   # Ingest a `return_to` param from the wire (charter D5). Only OVERWRITE the
@@ -254,6 +270,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp capture_draft(socket) do
     if sid = socket.assigns[:store_session_id] do
       StudioChat.set_draft(sid, socket.assigns[:composer_draft])
+    end
+
+    socket
+  end
+
+  # Leaving a session stamps its `last_visited_at` (wave 12, the needs-you
+  # strip): everything up to the departure was on screen — SEEN — so only what
+  # happens after you leave can count as "finished while away". Rides the same
+  # switch-away seam as capture_draft; no-op on the new-chat state.
+  defp stamp_visited_on_leave(socket) do
+    if sid = socket.assigns[:store_session_id] do
+      StudioChat.mark_visited(sid)
     end
 
     socket
@@ -1457,6 +1485,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
         do: Map.delete(socket.assigns.activity, sid),
         else: Map.put(socket.assigns.activity, sid, activity)
 
+    # Watching a session settle counts as SEEING it (wave 12): a terminal
+    # activity for the ON-SCREEN session re-stamps last_visited_at, so the
+    # needs-you strip never claims "finished while away" for a finish that
+    # happened right in front of you.
+    if sid == socket.assigns.store_session_id and activity.state in [:idle, :offline] do
+      StudioChat.mark_visited(sid)
+    end
+
     # Always re-read the list: a session that just became active may not be in
     # the sidebar yet (created by another tab), and a terminal transition needs
     # the fresh stored summary/status. Activity events are change-only, so this
@@ -1889,6 +1925,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           background: var(--primary);
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
+        /* Needs-you strip rows (wave 12): compact inbox lines above the session
+           list — badge + title + age, quiet until hovered. */
+        .bp-chat-strip-row {
+          display: flex; align-items: center; gap: 6px;
+          padding: 3px 6px; border-radius: 6px; text-decoration: none;
+          min-width: 0;
+        }
+        .bp-chat-strip-row:hover { background: hsl(var(--primary-hsl) / 0.08); }
         .bp-chat-session-row { position: relative; border-radius: 8px; }
         /* !important beats the inline `background` the active/inactive row style
            sets, so an inactive row still lights on hover. */
@@ -1960,6 +2004,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
             style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
           >
             <.icon name="plus" size={13} /> New
+          </.link>
+        </div>
+
+        <%!-- The needs-you strip (wave 12): a cross-session inbox — pending asks,
+              running turns, and finished-while-away sessions, priority-ordered
+              (approve > answer > plan ready > running > done). Derived from
+              persisted rows (cold-mount correct) + the live activity overlay;
+              the ON-SCREEN session is never "away". Visiting a session clears
+              it. Hidden on the archived shelf — the strip is about live work. --%>
+        <% strip = strip_entries(assigns) %>
+        <div
+          :if={not @show_archived and @sessions != []}
+          style="flex: none; border-bottom: 1px solid var(--border-muted); padding: 6px;"
+          data-test-id="chat-strip"
+        >
+          <div
+            class="text-dim"
+            style="padding: 2px 4px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;"
+          >
+            Inbox
+          </div>
+          <div
+            :if={strip == []}
+            class="text-xs text-dim"
+            style="padding: 0 4px 4px;"
+            data-test-id="chat-strip-empty"
+          >
+            All quiet — nothing waiting on you.
+          </div>
+          <.link
+            :for={e <- strip}
+            patch={ReturnTo.with_return_to("/studio/chat/#{e.session.id}", @return_to)}
+            class="bp-chat-strip-row"
+            data-test-id={"chat-strip-#{e.session.id}"}
+          >
+            <span
+              class={"badge #{strip_badge(e.kind)}"}
+              style="height: 16px; padding: 0 6px; font-size: 9px; flex: none; display: inline-flex; align-items: center;"
+            >
+              <%= strip_label(e.kind) %>
+            </span>
+            <span
+              class="text-xs"
+              style="color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;"
+            >
+              <%= e.session.title %>
+            </span>
+            <span class="text-xs text-dim" style="margin-left: auto; flex: none;">
+              <%= session_stamp(e.session) %>
+            </span>
           </.link>
         </div>
 
@@ -3021,6 +3115,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # D28): its Recorder owns the runtime; we only stop listening to it.
     socket = socket |> unsubscribe_session() |> subscribe_session(session.id)
 
+    # Arriving stamps last_visited_at (wave 12): opening a session clears it
+    # from the needs-you strip's finished-while-away state — you are looking at
+    # it now. The refresh_sessions at the tail re-reads the stamped row.
+    StudioChat.mark_visited(session.id)
+
     {session_pid, status, live?} =
       case live_runtime(session.id) do
         nil ->
@@ -3211,8 +3310,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp refresh_sessions(socket) do
+    sessions = StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true)
+
+    # The needs-you strip's store-truth half (wave 12): the pending ask ROLES of
+    # every listed session whose denormalised counter says the agent needs the
+    # human — one grouped query, only for the rows that can carry a needs-you
+    # kind. Loaded together with `sessions` so the two assigns never drift.
+    pending_ids =
+      for s <- sessions, is_integer(s.pending_approvals) and s.pending_approvals > 0, do: s.id
+
     assign(socket,
-      sessions: StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true)
+      sessions: sessions,
+      pending_ask_roles: StudioChat.pending_ask_roles(pending_ids)
     )
   end
 
@@ -4881,6 +4990,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp ensure_slash(name), do: "/" <> name
 
   # ── sidebar helpers ─────────────────────────────────────────────────────
+
+  # The needs-you strip (wave 12): pure derivation over the ALREADY-loaded
+  # sidebar assigns — `sessions` + `pending_ask_roles` (store truth, cold-mount
+  # correct) + the live `activity` overlay (arrive/leave freshness). The
+  # on-screen session is never "away". All the truth logic lives in
+  # `StudioChat.needs_you_strip/2`; this only threads assigns.
+  defp strip_entries(assigns) do
+    StudioChat.needs_you_strip(assigns.sessions,
+      current_session_id: assigns.store_session_id,
+      pending_roles: assigns.pending_ask_roles,
+      activity: assigns.activity
+    )
+  end
+
+  # Strip kind → badge class (existing tokenized chat badges — warn for every
+  # needs-you kind, working tone for a running turn, the ok/idle tone for an
+  # unseen finish) and → imperative label. Copy is deliberately DISTINCT from
+  # the session-row pill texts ("needs you"/"working"/…) so the two surfaces
+  # never read as duplicates.
+  defp strip_badge(:working), do: "badge-chat-working"
+  defp strip_badge(:finished_while_away), do: "badge-chat-idle"
+  defp strip_badge(_needs_you_kind), do: "badge-chat-approval"
+
+  defp strip_label(:pending_approval), do: "approve"
+  defp strip_label(:awaiting_input), do: "answer"
+  defp strip_label(:plan_ready), do: "plan ready"
+  defp strip_label(:working), do: "running"
+  defp strip_label(:finished_while_away), do: "done"
 
   # Session → tokenized pill. Precedence (charter D14): PendingApproval > Working
   # > Exited > Idle. A session with a persisted pending approval outranks every

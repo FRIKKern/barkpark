@@ -1588,4 +1588,249 @@ defmodule Barkpark.StudioChatTest do
       assert StudioChat.format_tokens(nil) == "—"
     end
   end
+
+  # ── the needs-you strip (wave 12 — sidebar inbox) ──────────────────────────
+
+  # Pin the away-axis pair directly (bypassing the mutation helpers, whose
+  # `utc_now()` stamps would make ordering-sensitive tests racy by microseconds).
+  defp set_times(session_id, active, visited) do
+    {1, _} =
+      Repo.update_all(
+        from(s in Session, where: s.id == ^session_id),
+        set: [last_active_at: active, last_visited_at: visited]
+      )
+
+    StudioChat.get_session(session_id)
+  end
+
+  defp minutes_ago(n), do: DateTime.add(DateTime.utc_now(), -n * 60, :second)
+
+  # A pending ask row of the given role, via the real append path (which also
+  # bumps the session's denormalised pending_approvals — the store truth the
+  # strip reads).
+  defp seed_pending_ask(session, role, request_id) do
+    {:ok, _} =
+      StudioChat.append_message(session, %{
+        role: role,
+        metadata: %{"request_id" => request_id, "approval_status" => "pending"}
+      })
+  end
+
+  describe "mark_visited/1 + creation stamp (wave 12)" do
+    test "creation stamps last_visited_at EQUAL to last_active_at — never unseen at birth" do
+      s = new_session()
+      assert %DateTime{} = s.last_visited_at
+      assert DateTime.compare(s.last_visited_at, s.last_active_at) == :eq
+      refute StudioChat.finished_while_away?(s)
+    end
+
+    test "mark_visited stamps the visit WITHOUT bumping last_active_at" do
+      s = set_times(new_session().id, minutes_ago(10), minutes_ago(30))
+
+      assert {:ok, updated} = StudioChat.mark_visited(s.id)
+      assert DateTime.compare(updated.last_visited_at, s.last_visited_at) == :gt
+      # visiting must not reorder the sidebar (the set_draft precedent)
+      assert DateTime.compare(updated.last_active_at, s.last_active_at) == :eq
+    end
+
+    test "a missing or non-UUID id is a clean :not_found" do
+      assert StudioChat.mark_visited(Ecto.UUID.generate()) == {:error, :not_found}
+      assert StudioChat.mark_visited("not-a-uuid") == {:error, :not_found}
+    end
+  end
+
+  describe "pending_ask_roles/1 (wave 12)" do
+    test "groups PENDING needs-you roles per session; resolved asks don't count" do
+      a = new_session()
+      b = new_session()
+      c = new_session()
+
+      seed_pending_ask(a, "approval", "ra1")
+      seed_pending_ask(a, "question", "ra2")
+      seed_pending_ask(b, "plan", "rb1")
+      # a RESOLVED ask is not pending — must not appear
+      seed_pending_ask(c, "approval", "rc1")
+      {:ok, _} = StudioChat.update_approval_status(c.id, "rc1", "allowed")
+
+      roles = StudioChat.pending_ask_roles([a.id, b.id, c.id])
+
+      assert Enum.sort(roles[a.id]) == ["approval", "question"]
+      assert roles[b.id] == ["plan"]
+      refute Map.has_key?(roles, c.id)
+      assert StudioChat.pending_ask_roles([]) == %{}
+    end
+  end
+
+  describe "strip_kind/3 — per-session derivation (wave 12)" do
+    test "pending ask roles map to kinds with approval > question > plan precedence" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "r1")
+      s = StudioChat.get_session(s.id)
+
+      assert StudioChat.strip_kind(s, ["plan", "question", "approval"], nil) ==
+               :pending_approval
+
+      assert StudioChat.strip_kind(s, ["plan", "question"], nil) == :awaiting_input
+      assert StudioChat.strip_kind(s, ["plan"], nil) == :plan_ready
+      # an overlay :needs_you racing the store read degrades to the generic
+      # kind — never dropped
+      assert StudioChat.strip_kind(s, [], nil) == :pending_approval
+    end
+
+    test "a live :needs_you overlay raises the kind even before the counter is re-read" do
+      s = new_session()
+      assert s.pending_approvals == 0
+
+      assert StudioChat.strip_kind(s, [], %{state: :needs_you, line: "asking you"}) ==
+               :pending_approval
+
+      assert StudioChat.strip_kind(s, ["question"], %{state: :needs_you, line: "asking you"}) ==
+               :awaiting_input
+    end
+
+    test "working: live overlay OR persisted status — and it beats finished-while-away" do
+      s = new_session()
+      assert StudioChat.strip_kind(s, [], %{state: :working, line: "writing…"}) == :working
+
+      # persisted "working" alone (cold mount) is enough — even with an unseen
+      # last_active_at, a running turn is :working, never :finished_while_away
+      {:ok, _} = StudioChat.update_status(s.id, "working")
+      s = set_times(s.id, minutes_ago(1), minutes_ago(10))
+      assert StudioChat.strip_kind(s, [], nil) == :working
+    end
+
+    test "a pending ask outranks a running turn" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "r1")
+      {:ok, _} = StudioChat.update_status(s.id, "working")
+      s = StudioChat.get_session(s.id)
+
+      assert StudioChat.strip_kind(s, ["approval"], %{state: :working, line: "writing…"}) ==
+               :pending_approval
+    end
+
+    test "finished-while-away: settled after the last visit; quiet otherwise" do
+      # settled (active) with activity AFTER the visit → surfaces
+      s = set_times(new_session().id, minutes_ago(1), minutes_ago(10))
+      assert StudioChat.strip_kind(s, [], nil) == :finished_while_away
+
+      # exited counts as settled too
+      {:ok, _} = StudioChat.update_status(s.id, "exited")
+      s = set_times(s.id, minutes_ago(1), minutes_ago(10))
+      assert StudioChat.strip_kind(s, [], nil) == :finished_while_away
+
+      # visited AFTER it settled → seen, quiet
+      quiet = set_times(new_session().id, minutes_ago(10), minutes_ago(1))
+      assert StudioChat.strip_kind(quiet, [], nil) == nil
+
+      # a nil last_visited_at (pre-migration row) is honestly QUIET, never a
+      # fake unseen-finish
+      unknown = set_times(new_session().id, minutes_ago(1), nil)
+      assert StudioChat.strip_kind(unknown, [], nil) == nil
+    end
+  end
+
+  describe "needs_you_strip/2 — cross-session aggregation (wave 12)" do
+    test "COLD-MOUNT correct: kinds + priority order derive from persisted rows alone" do
+      # done (settled after last visit)
+      done = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
+
+      # working (persisted status — no overlay)
+      working = new_session()
+      {:ok, _} = StudioChat.update_status(working.id, "working")
+      working = StudioChat.get_session(working.id)
+
+      # plan ready / awaiting input / pending approval (pending rows + counter)
+      plan = new_session()
+      seed_pending_ask(plan, "plan", "rp")
+      question = new_session()
+      seed_pending_ask(question, "question", "rq")
+      approval = new_session()
+      seed_pending_ask(approval, "approval", "rap")
+
+      # quiet: visited after settling — no entry
+      quiet = set_times(new_session().id, minutes_ago(20), minutes_ago(2))
+
+      sessions =
+        Enum.map(
+          [done.id, working.id, plan.id, question.id, approval.id, quiet.id],
+          &StudioChat.get_session/1
+        )
+
+      strip =
+        StudioChat.needs_you_strip(sessions,
+          pending_roles: StudioChat.pending_ask_roles(Enum.map(sessions, & &1.id)),
+          activity: %{}
+        )
+
+      assert Enum.map(strip, & &1.kind) ==
+               [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+
+      assert Enum.map(strip, & &1.session.id) ==
+               [approval.id, question.id, plan.id, working.id, done.id]
+
+      refute Enum.any?(strip, &(&1.session.id == quiet.id))
+    end
+
+    test "the on-screen session is never 'away' — excluded even mid-ask" do
+      s = new_session()
+      seed_pending_ask(s, "approval", "r1")
+      s = StudioChat.get_session(s.id)
+
+      assert StudioChat.needs_you_strip([s],
+               current_session_id: s.id,
+               pending_roles: %{s.id => ["approval"]}
+             ) == []
+
+      # …and present for every OTHER viewer
+      assert [%{kind: :pending_approval}] =
+               StudioChat.needs_you_strip([s], pending_roles: %{s.id => ["approval"]})
+    end
+
+    test "within a kind, most recently active first" do
+      older = set_times(new_session().id, minutes_ago(30), minutes_ago(60))
+      newer = set_times(new_session().id, minutes_ago(5), minutes_ago(60))
+
+      assert [%{session: %{id: first}}, %{session: %{id: second}}] =
+               StudioChat.needs_you_strip([older, newer])
+
+      assert {first, second} == {newer.id, older.id}
+    end
+
+    test "the live overlay contributes the line and live arrive/leave kinds" do
+      s = new_session()
+
+      # arrive: a :working overlay surfaces the session with its live tool line
+      assert [%{kind: :working, line: "Bash — mix test"}] =
+               StudioChat.needs_you_strip([s],
+                 activity: %{s.id => %{state: :working, line: "Bash — mix test"}}
+               )
+
+      # leave: overlay gone (idle deletes the entry) + row still settled-as-seen
+      # → no entry; the strip yields to the store
+      assert StudioChat.needs_you_strip([s], activity: %{}) == []
+    end
+
+    test "visiting clears a finished-while-away entry (mark_visited round-trip)" do
+      s = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
+      assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([s])
+
+      {:ok, _} = StudioChat.mark_visited(s.id)
+      s = StudioChat.get_session(s.id)
+      assert StudioChat.needs_you_strip([s]) == []
+    end
+
+    test "list_sessions carries the strip fields (select must not orphan the derivation)" do
+      s = set_times(new_session().id, minutes_ago(2), minutes_ago(20))
+
+      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert %DateTime{} = listed.last_visited_at
+      assert [%{kind: :finished_while_away}] = StudioChat.needs_you_strip([listed])
+    end
+
+    test "strip_kinds/0 IS the priority order (S7's notification vocabulary)" do
+      assert StudioChat.strip_kinds() ==
+               [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+    end
+  end
 end
