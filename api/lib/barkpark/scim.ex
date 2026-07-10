@@ -170,7 +170,11 @@ defmodule Barkpark.Scim do
 
     # count DISTINCT users (the join can fan out across a user's workspaces)
     total =
-      base |> select([u], u.id) |> distinct(true) |> subquery() |> then(&Repo.aggregate(&1, :count))
+      base
+      |> select([u], u.id)
+      |> distinct(true)
+      |> subquery()
+      |> then(&Repo.aggregate(&1, :count))
 
     page =
       base
@@ -359,8 +363,7 @@ defmodule Barkpark.Scim do
     ws_ids = workspace_ids(org)
 
     from(m in Membership,
-      where:
-        m.principal_type == "user" and m.workspace_id in ^ws_ids and m.role == ^role_name,
+      where: m.principal_type == "user" and m.workspace_id in ^ws_ids and m.role == ^role_name,
       select: m.principal_id,
       distinct: true
     )

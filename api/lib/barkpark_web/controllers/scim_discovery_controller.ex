@@ -43,7 +43,8 @@ defmodule BarkparkWeb.ScimDiscoveryController do
       ],
       "meta" => %{
         "resourceType" => "ServiceProviderConfig",
-        "location" => ScimResponse.location(conn, "ServiceProviderConfig", "") |> String.trim_trailing("/")
+        "location" =>
+          ScimResponse.location(conn, "ServiceProviderConfig", "") |> String.trim_trailing("/")
       }
     })
   end
@@ -91,7 +92,10 @@ defmodule BarkparkWeb.ScimDiscoveryController do
         attr("active", "boolean", false, "readWrite"),
         attr("externalId", "string", false, "readWrite")
       ],
-      "meta" => %{"resourceType" => "Schema", "location" => ScimResponse.location(conn, "Schemas", @user_urn)}
+      "meta" => %{
+        "resourceType" => "Schema",
+        "location" => ScimResponse.location(conn, "Schemas", @user_urn)
+      }
     }
   end
 
@@ -105,7 +109,10 @@ defmodule BarkparkWeb.ScimDiscoveryController do
         attr("displayName", "string", true, "readWrite"),
         members_attr()
       ],
-      "meta" => %{"resourceType" => "Schema", "location" => ScimResponse.location(conn, "Schemas", @group_urn)}
+      "meta" => %{
+        "resourceType" => "Schema",
+        "location" => ScimResponse.location(conn, "Schemas", @group_urn)
+      }
     }
   end
 

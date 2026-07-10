@@ -196,8 +196,11 @@ defmodule BarkparkWeb.ScimGroupsController do
   # absent If-Match proceeds; a stale one → 412 Precondition Failed.
   defp with_precondition(conn, group, fun) do
     case ScimResponse.if_match(conn, ScimResponse.version(group.updated_at)) do
-      :ok -> fun.(conn)
-      :precondition_failed -> ScimResponse.error(conn, 412, "resource version mismatch (If-Match)")
+      :ok ->
+        fun.(conn)
+
+      :precondition_failed ->
+        ScimResponse.error(conn, 412, "resource version mismatch (If-Match)")
     end
   end
 

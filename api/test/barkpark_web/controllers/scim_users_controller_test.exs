@@ -185,7 +185,9 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
   describe "ListResponse paging (RFC 7644 §3.4.2.4)" do
     test "honours count as a page limit + emits startIndex/itemsPerPage/totalResults" do
       %{token: token} = org_with_ws("pageco")
-      for e <- ~w(a@pageco.com b@pageco.com c@pageco.com), do: provision(token, e) |> json_response(201)
+
+      for e <- ~w(a@pageco.com b@pageco.com c@pageco.com),
+          do: provision(token, e) |> json_response(201)
 
       page1 = scim(token) |> get("/scim/v2/Users?count=2") |> json_response(200)
       assert page1["totalResults"] == 3
@@ -198,7 +200,9 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
 
     test "startIndex offsets into the result set (last page is a partial)" do
       %{token: token} = org_with_ws("page2co")
-      for e <- ~w(a@page2co.com b@page2co.com c@page2co.com), do: provision(token, e) |> json_response(201)
+
+      for e <- ~w(a@page2co.com b@page2co.com c@page2co.com),
+          do: provision(token, e) |> json_response(201)
 
       last = scim(token) |> get("/scim/v2/Users?startIndex=3&count=2") |> json_response(200)
       assert last["totalResults"] == 3
@@ -245,7 +249,10 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
 
       assert scim(token)
              |> put_req_header("if-match", body["meta"]["version"])
-             |> put("/scim/v2/Users/#{user.id}", Jason.encode!(%{"userName" => "ok@ifmatchok.com"}))
+             |> put(
+               "/scim/v2/Users/#{user.id}",
+               Jason.encode!(%{"userName" => "ok@ifmatchok.com"})
+             )
              |> json_response(200)
     end
   end
