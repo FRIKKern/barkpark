@@ -147,6 +147,95 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
     end
   end
 
+  describe "task_to_issue/1 — label clamp (D16, never 422 the outbound PATCH)" do
+    # The live-witnessed defect: this 53-char worker id produced a 60-char
+    # `worker:` label that 422'd the WHOLE close-mirror PATCH (Oban 40404).
+    @live_worker "epic-builder-live-proof-one-frikkern-opened-smoke-iss"
+
+    defp worker_label(issue),
+      do: Enum.find(issue.labels, &String.starts_with?(&1, "worker:"))
+
+    test "a >50-char worker label is clamped to ≤50 keeping the greppable prefix" do
+      issue = Projection.task_to_issue(task(%{"claim" => %{"worker" => @live_worker}}))
+      label = worker_label(issue)
+
+      assert is_binary(label)
+      # The whole point: GitHub's 50-char ceiling is respected.
+      assert String.length(label) <= 50
+      # The `worker:` prefix survives so the label stays greppable/legible.
+      assert String.starts_with?(label, "worker:")
+      # A truncated label carries the deterministic `-<6 hex>` disambiguator.
+      assert label =~ ~r/-[0-9a-f]{6}$/
+    end
+
+    test "an already-valid label is byte-identical (identity — no re-PATCH churn)" do
+      # Short values must pass through untouched or fingerprint/4 would read
+      # drift and re-PATCH all 609 live mirrors for nothing.
+      issue =
+        Projection.task_to_issue(
+          task(%{
+            "priority" => 0,
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "fable-7"},
+            "parent_id" => "goal-xyz"
+          })
+        )
+
+      assert issue.labels == [
+               "goal:goal-xyz",
+               "priority:p0",
+               "status:in_progress",
+               "worker:fable-7"
+             ]
+    end
+
+    test "the clamp is deterministic — same input always yields the same label" do
+      once = Projection.task_to_issue(task(%{"claim" => %{"worker" => @live_worker}}))
+      twice = Projection.task_to_issue(task(%{"claim" => %{"worker" => @live_worker}}))
+      assert worker_label(once) == worker_label(twice)
+    end
+
+    test "two distinct long workers do NOT collapse to the same label" do
+      # Same 44-char prefix, different tails — the hash keeps them distinct.
+      a = "epic-builder-live-proof-one-frikkern-opened-alpha"
+      b = "epic-builder-live-proof-one-frikkern-opened-bravo"
+      la = worker_label(Projection.task_to_issue(task(%{"claim" => %{"worker" => a}})))
+      lb = worker_label(Projection.task_to_issue(task(%{"claim" => %{"worker" => b}})))
+      assert String.length(la) <= 50 and String.length(lb) <= 50
+      refute la == lb
+    end
+
+    test "goal_label — the latent twin — is clamped too" do
+      long_goal = "goal-" <> String.duplicate("x", 80)
+      issue = Projection.task_to_issue(task(%{"parent_id" => long_goal}))
+      label = Enum.find(issue.labels, &String.starts_with?(&1, "goal:"))
+      assert is_binary(label)
+      assert String.length(label) <= 50
+      assert String.starts_with?(label, "goal:")
+    end
+
+    test "property — NO field value yields a label name over 50 chars" do
+      for len <- [0, 1, 43, 44, 49, 50, 51, 60, 120, 500] do
+        val = String.duplicate("a", len)
+
+        issue =
+          Projection.task_to_issue(
+            task(%{
+              "priority" => 2,
+              "lifecycle_status" => "status-#{val}",
+              "claim" => %{"worker" => val},
+              "parent_id" => "goal-#{val}"
+            })
+          )
+
+        for label <- issue.labels do
+          assert String.length(label) <= 50,
+                 "label #{inspect(label)} (#{String.length(label)} chars) breaches the 50-char cap"
+        end
+      end
+    end
+  end
+
   describe "upsert_blocks_marker/2 — idempotent, prose-preserving" do
     test "applying twice equals applying once (idempotent)" do
       body = "Human context here."
