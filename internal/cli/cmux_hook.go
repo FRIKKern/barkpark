@@ -77,23 +77,25 @@ func newHookClient(ctx manifest.Context) *apiclient.Client {
 // is that a hook error can never abort or stall the agent's turn. args is the
 // tail after `cmux hook` (args[0] = the Claude event name).
 func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (code int) {
-	event := ""
-	if len(args) > 0 {
-		event = args[0]
-	}
-	task := os.Getenv("BARKPARK_TASK")
-	worker := taskboard.CmuxWorkerID()
-
 	// A top-level recover is the last line of the fail-safe contract: even a
 	// panic (nil map, bad decode, anything) resolves to a clean exit 0. It also
 	// drops a best-effort breadcrumb so a crash-looping hook is still
 	// diagnosable — the write is panic-guarded, so it can never re-panic here.
+	// Armed FIRST, before ANY derivation, so no statement in this function runs
+	// outside the recover.
+	var event, task, worker string
 	defer func() {
 		if r := recover(); r != nil {
 			writeHookBreadcrumb(event, worker, task, fmt.Sprintf("panic: %v", r))
 			code = exitOK
 		}
 	}()
+
+	if len(args) > 0 {
+		event = args[0]
+	}
+	task = os.Getenv("BARKPARK_TASK")
+	worker = taskboard.CmuxWorkerID()
 
 	dryRun := g.dryRun || hasFlag(args, "--dry-run")
 	debug := dryRun || os.Getenv("BP_CMUX_DEBUG") != ""
