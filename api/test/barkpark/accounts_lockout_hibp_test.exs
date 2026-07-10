@@ -3,8 +3,16 @@ defmodule Barkpark.AccountsLockoutHibpTest do
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Accounts
+  alias Barkpark.Audit.Event
 
   @password "correct-horse-battery"
+
+  defp locked_event_exists?(user_id) do
+    Barkpark.Repo.exists?(
+      from e in Event,
+        where: e.category == "auth" and e.action == "account_locked" and e.subject == ^user_id
+    )
+  end
 
   defp user!(email) do
     {:ok, u} = Accounts.register_user(%{email: email, password: @password})
@@ -68,6 +76,74 @@ defmodule Barkpark.AccountsLockoutHibpTest do
       end
 
       refute Accounts.get_user_by_email("ghost@example.com")
+    end
+
+    test "crossing the threshold emits a distinct auth/account_locked audit event" do
+      user = user!("audit-lock@example.com")
+
+      for _ <- 1..3 do
+        Accounts.get_user_by_email_and_password("audit-lock@example.com", "wrong")
+      end
+
+      assert locked_event_exists?(user.id)
+    end
+
+    test "DENY-path: attempts BELOW the threshold emit no account_locked event" do
+      user = user!("audit-nolock@example.com")
+
+      # Two failures with a threshold of 3 — not locked, so no lockout event.
+      for _ <- 1..2 do
+        Accounts.get_user_by_email_and_password("audit-nolock@example.com", "wrong")
+      end
+
+      refute Accounts.get_user_by_email("audit-nolock@example.com").locked_until
+      refute locked_event_exists?(user.id)
+    end
+
+    test "DENY-path: unknown-email failures emit no account_locked event (nothing to lock)" do
+      for _ <- 1..5 do
+        Accounts.get_user_by_email_and_password("audit-ghost@example.com", "whatever")
+      end
+
+      refute Barkpark.Repo.exists?(
+               from e in Event, where: e.action == "account_locked"
+             )
+    end
+  end
+
+  describe "recovery-code use emits an audit event" do
+    # Enrol TOTP so the user has a fresh batch of one-time recovery codes.
+    defp enrol_with_recovery(email) do
+      user = user!(email)
+      secret = Accounts.totp_secret()
+      code = NimbleTOTP.verification_code(secret)
+      {:ok, user, [recovery | _] = codes} = Accounts.enable_totp(user, secret, code)
+      {user, recovery, codes}
+    end
+
+    test "consuming a recovery code emits auth/recovery_code_used with the remaining count" do
+      {user, recovery, codes} = enrol_with_recovery("rec@example.com")
+
+      assert {:ok, _} = Accounts.consume_recovery_code(user, recovery)
+
+      row =
+        Barkpark.Repo.one!(
+          from e in Event,
+            where: e.category == "auth" and e.action == "recovery_code_used" and e.subject == ^user.id
+        )
+
+      # One of the batch was burned — the audit records how many are left.
+      assert row.metadata["remaining"] == length(codes) - 1
+    end
+
+    test "DENY-path: a wrong recovery code emits nothing" do
+      {user, _recovery, _codes} = enrol_with_recovery("rec-bad@example.com")
+
+      assert :error = Accounts.consume_recovery_code(user, "not-a-real-code")
+
+      refute Barkpark.Repo.exists?(
+               from e in Event, where: e.action == "recovery_code_used"
+             )
     end
   end
 

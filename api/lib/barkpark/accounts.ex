@@ -14,6 +14,7 @@ defmodule Barkpark.Accounts do
       only as hashes.
   """
   import Ecto.Query, warn: false
+  alias Barkpark.Audit
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, UserSession, UserEmailToken}
   alias Barkpark.Tenancy.Membership
@@ -143,9 +144,10 @@ defmodule Barkpark.Accounts do
   # for an unknown email (nothing to protect / would enable user enumeration).
   defp record_failed_login(%User{} = user) do
     n = (user.failed_login_count || 0) + 1
+    locked? = n >= max_failed_logins()
 
     attrs =
-      if n >= max_failed_logins() do
+      if locked? do
         %{
           failed_login_count: n,
           locked_until: DateTime.add(DateTime.utc_now(), lockout_window_seconds(), :second)
@@ -155,6 +157,25 @@ defmodule Barkpark.Accounts do
       end
 
     user |> Ecto.Changeset.change(attrs) |> Repo.update()
+
+    # The lockout TRIP is a distinct security event — a real account crossed the
+    # failed-attempt threshold and is now locked. Only fired on the crossing
+    # (a locked account short-circuits in `locked?/1` before ever reaching here),
+    # so it is not re-emitted on every subsequent blocked attempt. This DOES
+    # imply the account exists, but that is inherent to a lockout (you cannot
+    # lock a non-existent account) and unlike the generic failed-login event it
+    # takes 10 failures to provoke — no cheap enumeration oracle.
+    if locked? do
+      emit_audit(%{
+        category: "auth",
+        action: "account_locked",
+        subject: user.id,
+        actor_type: "user",
+        actor_id: user.id,
+        metadata: %{"failed_count" => n}
+      })
+    end
+
     :ok
   end
 
@@ -683,10 +704,37 @@ defmodule Barkpark.Accounts do
       |> Repo.update_all([])
 
     if count == 1 do
-      {:ok, %{user | recovery_codes_hashed: List.delete(hashes, hash)}}
+      remaining = List.delete(hashes, hash)
+
+      # A one-time recovery code was just burned — a security-relevant fallback
+      # authentication. Record it (with how many codes remain) so a run of
+      # recovery-code use, or a user running low, is visible on the audit trail.
+      emit_audit(%{
+        category: "auth",
+        action: "recovery_code_used",
+        subject: id,
+        actor_type: "user",
+        actor_id: id,
+        metadata: %{"remaining" => length(remaining)}
+      })
+
+      {:ok, %{user | recovery_codes_hashed: remaining}}
     else
       :error
     end
+  end
+
+  # Best-effort audit emit: an audit-bus hiccup must NEVER break an
+  # authentication decision (the change it records has already committed). The
+  # emit result is discarded and any infra-level raise/throw is swallowed —
+  # mirrors `Barkpark.Access.emit_grant_event/4`.
+  defp emit_audit(attrs) do
+    Audit.emit(attrs)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   # ── Step-up MFA ──────────────────────────────────────────────────────────────

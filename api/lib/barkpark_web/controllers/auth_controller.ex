@@ -70,6 +70,21 @@ defmodule BarkparkWeb.AuthController do
   def login(conn, %{"email" => email, "password" => password} = params) do
     case Accounts.get_user_by_email_and_password(email, password) do
       nil ->
+        # ONE generic failed-login event, emitted HERE (not in Accounts) on
+        # purpose: `get_user_by_email_and_password/2` returns nil identically for
+        # an unknown email, a wrong password, AND a locked account, so this site
+        # sees every failure with a CONSTANT shape — no `subject`, no user id, no
+        # email — and therefore the presence of the event never reveals whether
+        # the address is registered. Emitting the failure inside Accounts (where
+        # the User struct only exists for real accounts) would reintroduce that
+        # enumeration oracle on the audit log itself.
+        audit(%{
+          category: "auth",
+          action: "login_failed",
+          actor_type: "anonymous",
+          metadata: %{"reason" => "invalid_credentials"}
+        })
+
         error(
           conn,
           401,
@@ -304,6 +319,7 @@ defmodule BarkparkWeb.AuthController do
           # Capture the session's SAML birth context BEFORE revoking, so a
           # SAML-born logout can hand back the IdP LogoutRequest URL (SLO).
           slo = saml_slo_url(token)
+          audit_logout(token)
           Accounts.revoke_user_session_token(token)
           slo
       end
@@ -404,7 +420,19 @@ defmodule BarkparkWeb.AuthController do
 
   def reset(conn, %{"token" => token, "password" => password}) do
     case Accounts.reset_user_password(token, %{password: password}) do
-      {:ok, _user} ->
+      {:ok, user} ->
+        # A token-based reset also revokes every session ("sign out everywhere")
+        # and, on the recovery path, wipes MFA — a high-value account-recovery
+        # event worth recording on the tamper-evident trail.
+        audit(%{
+          category: "auth",
+          action: "password_reset",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"via" => "reset_token"}
+        })
+
         json(conn, %{ok: true})
 
       {:error, cs} ->
@@ -649,6 +677,39 @@ defmodule BarkparkWeb.AuthController do
       ["Bearer " <> raw] -> String.trim(raw)
       _ -> get_session(conn, "user_session")
     end
+  end
+
+  # Self-service logout. Resolve the owning user (best-effort — a stale/invalid
+  # bearer yields a nil subject rather than failing the logout) so the event is
+  # attributed, then record it. Emitted BEFORE the token is revoked so the
+  # session still resolves; the revoke itself is what actually signs the user out.
+  defp audit_logout(token) do
+    subject =
+      case Accounts.verify_user_session(token) do
+        {%{id: id}, _session} -> id
+        _ -> nil
+      end
+
+    audit(%{
+      category: "auth",
+      action: "logout",
+      subject: subject,
+      actor_type: "user",
+      actor_id: subject,
+      metadata: %{}
+    })
+  end
+
+  # Best-effort audit emit: an audit-bus hiccup must never break the auth flow
+  # it accompanies (the state change has already committed). Result discarded,
+  # infra raise/throw swallowed — mirrors the isolation of other emit producers.
+  defp audit(attrs) do
+    Audit.emit(attrs)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   defp build_url(path, token), do: BarkparkWeb.Endpoint.url() <> path <> token
