@@ -3,8 +3,8 @@
 > NOTE ON THIS PATH: the former "Barkpark Cloud — Peak Aesthetics, UX and DX" charter that
 > lived at this filename was preserved verbatim at
 > `.claude/workflows/bp-cloud-peak-aesthetics-charter.md` (and in git history, 75951d8f).
-> `bp-cloud-console-charter.md` references its parent by this old path — read the
-> preserved copy. This file is now the memory of the **studio-ui-premium** epic.
+> `bp-cloud-console-charter.md`'s parent-epic pointer targets that preserved copy.
+> This file is now the memory of the **studio-ui-premium** epic.
 
 Epic bp task: `studio-ui-premium` (published; every slice task is its child).
 User verdict at kickoff: current Studio UI is 3/10. Bar: the new Claude Code TUI / Linear / Sanity-class tools.
