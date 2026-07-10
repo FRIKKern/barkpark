@@ -172,6 +172,46 @@ func TestFirstRunDetection(t *testing.T) {
 	}
 }
 
+// TestFirstRunResult pins the pure post-wizard decision RunFirstTimeSetup
+// delegates to: a LoggedInOnly cloud finish (CloudToken, no content server)
+// must report configured=false so main.go exits as given WITHOUT resolving a
+// desk — this is the headline W3 fix — while an ordinary connected server
+// reports configured=true. Neither ever returns a non-OK exit.
+func TestFirstRunResult(t *testing.T) {
+	// Neutralize ambient server env so on-disk config is the sole signal.
+	t.Setenv("BARKPARK_API_URL", "")
+	t.Setenv("BARKPARK_SERVER", "")
+	t.Setenv("BARKPARK_API_TOKEN", "")
+
+	t.Run("cloud token, no server → (false, exitOK)", func(t *testing.T) {
+		withTempConfigHome(t)
+		if err := SaveConfig(&Config{CloudURL: "https://api.barkpark.cloud", CloudToken: "sess"}); err != nil {
+			t.Fatal(err)
+		}
+		configured, code := firstRunResult()
+		if configured {
+			t.Fatal("logged-in-without-server must report configured=false so main skips the desk")
+		}
+		if code != exitOK {
+			t.Fatalf("logged-in-without-server must exit as given (exitOK=%d), got %d", exitOK, code)
+		}
+	})
+
+	t.Run("connected server → (true, exitOK)", func(t *testing.T) {
+		withTempConfigHome(t)
+		if err := SaveConfig(&Config{Server: "https://my.barkpark", Token: "tok"}); err != nil {
+			t.Fatal(err)
+		}
+		configured, code := firstRunResult()
+		if !configured {
+			t.Fatal("a saved content server means configured=true so main falls through to the desk")
+		}
+		if code != exitOK {
+			t.Fatalf("configured finish must exit exitOK=%d, got %d", exitOK, code)
+		}
+	})
+}
+
 // TestSetupConnectExplicitServerOverridesSaved confirms an explicit --server still
 // wins over the saved active server.
 func TestSetupConnectExplicitServerOverridesSaved(t *testing.T) {

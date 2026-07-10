@@ -275,8 +275,30 @@ func RunFirstTimeSetup() (configured bool, exit int) {
 		out.userErr("%v", err)
 		return false, exitGeneric
 	}
-	// RunInteractive returns nil on both success and a clean abort; a config on
-	// disk is the success signal (the connect chain persisted it).
+	// RunInteractive returns nil on both success and a clean abort; the pure
+	// firstRunResult helper reads the on-disk config to decide what to report
+	// (and stays unit-testable without a real Bubble Tea wizard).
+	return firstRunResult()
+}
+
+// firstRunResult decides what RunFirstTimeSetup reports once the wizard returns
+// nil. A config on disk is normally the "connected" signal (the connect chain
+// persisted it) — so configured = !FirstRun(). But a LoggedInOnly cloud finish
+// (empty fleet, blank/EOF pick, no_admin_token skip, still-provisioning — the
+// four flavors in setup/cloud.go) persists ONLY a CloudToken with no content
+// server, which also flips FirstRun() false. LoggedInWithoutServer keys on that
+// exact signature {CloudToken set, Server empty, no server env}, catching all
+// four in one seam. When it holds, report configured=false: main.go's
+// `if !configured { return code }` then exits as given WITHOUT resolving a desk
+// — the same clean outcome as a wizard abort. So here configured=false now
+// carries a second meaning ("logged in to Cloud, no barkpark connected"), and
+// both meanings correctly mean "exit-as-given + skip the desk". This is
+// deliberately NOT the ExitOpenDesk=256 sentinel: that belongs to the
+// cli.Execute→runTUI hand-off (a request to OPEN the desk), the opposite wish.
+func firstRunResult() (configured bool, exit int) {
+	if LoggedInWithoutServer() {
+		return false, exitOK
+	}
 	return !FirstRun(), exitOK
 }
 

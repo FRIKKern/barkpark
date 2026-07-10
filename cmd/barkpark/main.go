@@ -46,6 +46,17 @@ func runTUI() int {
 		}
 	}
 
+	// Returning cloud-only user: a later bare `bp` skips the wizard (a saved
+	// CloudToken already made FirstRun() false) and would otherwise fall to the
+	// baked localhost:4000 floor below, print "Connecting to …", fail to load
+	// schemas, and exit 1. Intercept BEFORE any network noise: the user is signed
+	// in to Barkpark Cloud but has connected no barkpark — point them at setup and
+	// exit 0 (logged-in is a complete state, not an error).
+	if cli.LoggedInWithoutServer() {
+		fmt.Fprintf(os.Stderr, "logged in to Barkpark Cloud but no barkpark connected — run `bp setup` to connect one.\n")
+		return 0
+	}
+
 	// Follow the SAME active server the `bp` CLI uses: resolved through
 	// flags(none here) > explicitly-set BARKPARK_* env > saved-config active
 	// server > baked defaults. So `bp use prod` moves the TUI too, and an
@@ -63,13 +74,9 @@ func runTUI() int {
 		switch {
 		case cli.FirstRun():
 			fmt.Fprintf(os.Stderr, "No server is configured yet — run `bp setup` to connect to one or bring one up.\n")
-		case cli.LoggedInWithoutServer():
-			// Signed in to Barkpark Cloud but no barkpark connected: saving the
-			// Cloud token made FirstRun() false, so without this branch the user
-			// would hit the misleading "Is the Phoenix API running?" hint below
-			// (they never asked for a local Phoenix). Point them at setup instead.
-			fmt.Fprintf(os.Stderr, "logged in to Barkpark Cloud but no barkpark connected — run `bp setup` to connect one.\n")
 		default:
+			// Note: the logged-in-to-Cloud-but-no-barkpark state is intercepted
+			// above (before the Connecting print), so it never reaches here.
 			fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
 		}
 		return 1

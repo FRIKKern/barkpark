@@ -104,6 +104,10 @@
     name_required: "A name is required.",
     no_active_subscription: "You need an active subscription to launch.",
     plan_invalid: "That plan can't be checked out.",
+    // Two-factor challenge (POST /v1/auth/two-factor-challenge) — DISTINCT copy
+    // so a 401 (wrong code, retryable) never reads like a 429 (limiter tripped).
+    invalid_code: "That code didn't match. Authenticator codes rotate every 30 seconds — enter the current one, or use a recovery code.",
+    rate_limited: "Too many attempts. Wait a moment, then try the code again.",
     no_team: "Your account has no team yet.",
     invalid: "That didn't work — check your input.",
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
@@ -1822,6 +1826,192 @@
   function showAuthError(msg) { var e = $("#auth-error"); setText(e, msg); show(e); }
   function hideAuthError() { hide($("#auth-error")); }
 
+  // ---------------------------------------------------- two-factor challenge card
+  // The control plane's login is two-phase for TOTP-enrolled accounts: POST
+  // /v1/auth/login answers `200 {two_factor_required:true, challenge_token}`
+  // (the challenge_token is a 5-min single-use pending token) instead of a
+  // session, and POST /v1/auth/two-factor-challenge trades {challenge_token,
+  // code|recovery_code} for the SAME `{token, team_id}` a plain login mints —
+  // or 401 {error:"invalid_code"} / 429 {error:"rate_limited"}. ONE shared card
+  // renders at every login submit site (main #login-card, /new, and the /activate
+  // logged-out park→resume that rides submitAuth). The challenge_token lives in
+  // the mount CLOSURE only — never sessionStorage/localStorage (short-lived
+  // secret). SECONDS the disabled-countdown mirrors renderActivateRateLimited so
+  // a 429 can't be instantly re-fired.
+  var TFA_RATE_WAIT_S = 30;
+
+  // Pure classifier for a POST /v1/auth/login result: does it carry a session,
+  // a two-factor challenge, or an error? Shared by submitAuth + newSubmitAuth so
+  // every submit site routes to the card identically (node-pinned).
+  function loginResponseKind(r) {
+    if (r && r.ok && r.data && r.data.token) return "session";
+    if (r && r.data && r.data.two_factor_required && r.data.challenge_token) return "two_factor";
+    return "error";
+  }
+
+  // Pure classifier for the challenge response → the card's next state.
+  function twoFactorChallengeOutcome(r) {
+    if (r && r.ok && r.data && r.data.token) {
+      return { state: "success", token: r.data.token, team_id: (r.data.team_id != null ? r.data.team_id : null) };
+    }
+    if (r && r.status === 429) return { state: "rate_limited" };
+    if (r && (r.status === 401 || (r.data && r.data.error === "invalid_code"))) return { state: "invalid_code" };
+    return { state: "error" };
+  }
+
+  function twoFactorErrorCopy(state, recovery) {
+    if (state === "invalid_code") return ERRORS.invalid_code;
+    if (state === "empty") return recovery ? "Enter a recovery code." : "Enter your 6-digit code.";
+    return "Couldn't verify that code just now — nothing changed. Please try again.";
+  }
+
+  // Pure card markup — tokens only, no native controls. `mode` toggles the OTP
+  // field ↔ the recovery-code field; `error` paints an honest inline message;
+  // `rateLimited` swaps in the paused-retry state; `back` adds a return link.
+  function twoFactorCardHtml(opts) {
+    opts = opts || {};
+    var recovery = opts.mode === "recovery";
+    var backLink = opts.back
+      ? '<p class="auth-foot dim"><a href="#" id="tfa-back">Back to sign in</a></p>'
+      : "";
+    var head =
+      '<div class="auth-brand">' +
+        '<svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>' +
+        '<span class="wordmark-text">Barkpark <b>Cloud</b></span>' +
+      '</div>' +
+      '<h1 class="new-title">Two-factor authentication</h1>' +
+      '<p class="new-desc">' + (recovery
+        ? "Enter one of your recovery codes to finish signing in."
+        : "Enter the 6-digit code from your authenticator app to finish signing in.") + "</p>";
+
+    if (opts.rateLimited) {
+      return head +
+        '<p class="form-error" id="tfa-error" role="alert">' + esc(ERRORS.rate_limited) + "</p>" +
+        '<button class="btn btn-primary btn-block" id="tfa-submit" type="button" disabled>' +
+          "Try again in " + (opts.waitSecs || TFA_RATE_WAIT_S) + "s</button>" +
+        backLink;
+    }
+
+    var errHtml = opts.error
+      ? '<p class="form-error" id="tfa-error" role="alert">' + esc(twoFactorErrorCopy(opts.error, recovery)) + "</p>"
+      : '<p class="form-error" id="tfa-error" role="alert" hidden></p>';
+
+    var field = recovery
+      ? '<div class="field"><label class="label" for="tfa-code">Recovery code</label>' +
+          '<input class="form-input" id="tfa-code" type="text" autocomplete="one-time-code" ' +
+            'autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="xxxxxxxx" /></div>'
+      : '<div class="field"><label class="label" for="tfa-code">Authentication code</label>' +
+          '<input class="form-input" id="tfa-code" type="text" inputmode="numeric" autocomplete="one-time-code" ' +
+            'autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="123456" maxlength="6" /></div>';
+
+    return head +
+      '<form id="tfa-form" novalidate>' +
+        field + errHtml +
+        '<button class="btn btn-primary btn-block" id="tfa-submit" type="submit">Verify</button>' +
+      "</form>" +
+      '<p class="auth-foot dim">' +
+        (recovery
+          ? 'Have your authenticator app? <a href="#" id="tfa-alt">Use a 6-digit code</a>.'
+          : 'Lost your device? <a href="#" id="tfa-alt">Use a recovery code</a>.') +
+      "</p>" +
+      backLink;
+  }
+
+  // Mount the shared card into `root`, wiring the challenge round-trip. The
+  // challenge_token is captured HERE and never leaves the closure. opts.onDone
+  // (sess) is the success continuation (setSession + render, or renderNewFlow);
+  // opts.onBack (optional) returns to the prior screen.
+  function mountTwoFactorCard(root, opts) {
+    if (!root) return;
+    opts = opts || {};
+    var challengeToken = opts.challengeToken;
+    var mode = "otp"; // "otp" | "recovery"
+
+    function wireBack() {
+      var back = root.querySelector("#tfa-back");
+      if (back && opts.onBack) back.addEventListener("click", function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        opts.onBack();
+      });
+    }
+
+    function paint(errState) {
+      root.innerHTML = twoFactorCardHtml({ mode: mode, error: errState || null, back: !!opts.onBack });
+      wireBack();
+      var alt = root.querySelector("#tfa-alt");
+      if (alt) alt.addEventListener("click", function (e) {
+        if (e && e.preventDefault) e.preventDefault();
+        mode = mode === "otp" ? "recovery" : "otp";
+        paint();
+      });
+      var form = root.querySelector("#tfa-form");
+      if (form) form.addEventListener("submit", onSubmit);
+      var input = root.querySelector("#tfa-code");
+      if (input && input.focus) input.focus();
+    }
+
+    function paintRateLimited() {
+      root.innerHTML = twoFactorCardHtml({ mode: mode, rateLimited: true, waitSecs: TFA_RATE_WAIT_S, back: !!opts.onBack });
+      wireBack();
+      var btn = root.querySelector("#tfa-submit");
+      if (!btn) return;
+      var left = TFA_RATE_WAIT_S;
+      var tick = setInterval(function () {
+        left -= 1;
+        if (left <= 0) { clearInterval(tick); paint(); } // the live form returns
+        else { btn.textContent = "Try again in " + left + "s"; }
+      }, 1000);
+    }
+
+    function onSubmit(e) {
+      if (e && e.preventDefault) e.preventDefault();
+      var input = root.querySelector("#tfa-code");
+      var code = ((input && input.value) || "").trim();
+      if (!code) { paint("empty"); return; }
+      var btn = root.querySelector("#tfa-submit");
+      if (btn) btn.disabled = true;
+      var body = mode === "recovery"
+        ? { challenge_token: challengeToken, recovery_code: code }
+        : { challenge_token: challengeToken, code: code };
+      return api("POST", "/v1/auth/two-factor-challenge", body, { noAuth: true }).then(function (r) {
+        var out = twoFactorChallengeOutcome(r);
+        if (out.state === "success") { if (opts.onDone) opts.onDone({ token: out.token, team_id: out.team_id }); return; }
+        if (out.state === "rate_limited") { paintRateLimited(); return; }
+        paint(out.state); // "invalid_code" (re-enabled form) | "error"
+      });
+    }
+
+    paint();
+  }
+
+  // Main #login-card site: swap the login form for the shared card. `remember`
+  // is threaded from submitAuth so the minted session honours the checkbox.
+  function showTwoFactorLoginCard(challengeToken, remember) {
+    hideAuthError();
+    var card = $("#twofa-card");
+    if (!card) { // no dedicated slot (shouldn't happen) — fail honest, not silent
+      showAuthError("Two-factor sign-in isn't available here — reload and try again.");
+      return;
+    }
+    hide($("#login-card"));
+    show(card);
+    mountTwoFactorCard(card, {
+      challengeToken: challengeToken,
+      onDone: function (sess) {
+        setSession({ token: sess.token, team_id: sess.team_id || null }, remember);
+        hide(card);
+        location.hash = "#overview"; // the /activate resume intercept runs first regardless
+        render();
+      },
+      onBack: function () {
+        hide(card);
+        show($("#login-card"));
+        hideAuthError();
+        var em = $("#auth-email"); if (em && em.focus) em.focus();
+      }
+    });
+  }
+
   // ----------------------------------------------------------- password reset
   // The token from an emailed reset link, held between render() (which reads the
   // hash) and submitReset() (which POSTs it). Cleared once consumed.
@@ -1911,10 +2101,16 @@
 
     api("POST", path, body, { noAuth: true }).then(function (r) {
       btn.disabled = false;
-      if (r.ok && r.data && r.data.token) {
+      var kind = loginResponseKind(r);
+      if (kind === "session") {
         setSession({ token: r.data.token, team_id: r.data.team_id || null }, remember);
         location.hash = "#overview";
         render();
+      } else if (kind === "two_factor") {
+        // TOTP-enrolled account: swap in the shared challenge card. The minted
+        // session honours the "Remember me" choice; a parked /activate code
+        // resumes on the post-challenge render() for free.
+        showTwoFactorLoginCard(r.data.challenge_token, remember);
       } else {
         showAuthError(friendly(r.data, "Couldn't sign you in."));
       }
@@ -7343,16 +7539,34 @@
     var path = newAuthMode === "login" ? "/v1/auth/login" : "/v1/auth/register";
     api("POST", path, { email: email, password: password }, { noAuth: true }).then(function (r) {
       btn.disabled = false;
-      if (r.ok && r.data && r.data.token) {
+      var kind = loginResponseKind(r);
+      if (kind === "session") {
         setSession({ token: r.data.token, team_id: r.data.team_id || null }, true);
         renderNewFlow(); // stay on /new — now authed, proceed to Launch
-      } else if (r.data && r.data.two_factor_required) {
-        // 2FA users finish on the main login screen, then return via the badge.
-        try { localStorage.setItem(NEW_RETURN_KEY, newState.slug); } catch (x) {}
-        location.href = "/";
+      } else if (kind === "two_factor") {
+        // TOTP-enrolled account: render the SAME shared card in place and finish
+        // right here — no punt to "/", no round-trip through localStorage.
+        showNewTwoFactorCard(r.data.challenge_token);
       } else {
         setText(err, friendly(r.data, "Couldn't sign you in.")); show(err);
       }
+    });
+  }
+
+  // /new site: mount the shared challenge card into the flow's panel body. On
+  // success the session lands (remember=true, like the /new token branch) and
+  // renderNewFlow proceeds to Launch; Back returns to the sign-in step.
+  function showNewTwoFactorCard(challengeToken) {
+    newSetBody(newPanel('<div id="new-twofa"></div>'));
+    var root = $("#new-twofa");
+    if (!root) { location.href = "/"; return; } // defensive fallback
+    mountTwoFactorCard(root, {
+      challengeToken: challengeToken,
+      onDone: function (sess) {
+        setSession({ token: sess.token, team_id: sess.team_id || null }, true);
+        renderNewFlow();
+      },
+      onBack: function () { renderNewFlow(); }
     });
   }
 
@@ -9577,6 +9791,10 @@
       subError = false;
       hide($("#app-shell"));
       show($("#auth-screen"));
+      // A partial 2FA challenge is abandoned by any fresh logged-out render
+      // (switch-account, Back, reload): the closure token is gone, so restore
+      // the login form and drop the stale card.
+      hide($("#twofa-card"));
 
       // An emailed password-reset link (#/auth/reset?token=…) lands here while
       // logged out — show the set-new-password card instead of the login form.
@@ -10153,6 +10371,13 @@
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,
+      // bp-login-ux W3 — shared two-factor challenge card (decision 39): the two
+      // pure classifiers (login-response kind + challenge outcome), the card
+      // markup, the error copy, and the mount seam (driven with a stubbed fetch,
+      // mountTimelineTab-style). The challenge_token stays in the mount closure.
+      loginResponseKind: loginResponseKind, twoFactorChallengeOutcome: twoFactorChallengeOutcome,
+      twoFactorCardHtml: twoFactorCardHtml, twoFactorErrorCopy: twoFactorErrorCopy,
+      mountTwoFactorCard: mountTwoFactorCard, twoFactorRateWaitS: TFA_RATE_WAIT_S,
       // bp-login-ux W1 — /activate device-login approve page pure helpers.
       normalizeUserCode: normalizeUserCode, userCodeComplete: userCodeComplete,
       activateCodeFromSearch: activateCodeFromSearch, activateInspectState: activateInspectState,
@@ -10160,6 +10385,13 @@
       // bp-login-ux W2 — tolerant real-path matcher (trailing-slash safe) + the
       // two predicates it backs, so the harness can pin /activate/ ≡ /activate.
       pathClean: pathClean, isActivateFlow: isActivateFlow, isNewFlow: isNewFlow,
+      // bp-login-ux W3 (decision 40) — the /activate render functions, exported so
+      // __app.test.mjs can DOM-test each state via the fakeDom() swap idiom. The
+      // click-driven approved/denied terminals aren't smokeable (smoke's click() is
+      // inert), so renderActivateResult('approved'|'denied') is called directly.
+      renderActivateEntry: renderActivateEntry, renderActivateConfirm: renderActivateConfirm,
+      renderActivateResult: renderActivateResult, renderActivateError: renderActivateError,
+      renderActivateRateLimited: renderActivateRateLimited,
       failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.
