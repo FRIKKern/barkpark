@@ -288,8 +288,10 @@ if (failed === failedBeforeD)
 //   literal-hsl disappears and its var() replacement is not re-counted).
 //   Before counting, two noise sources are blanked (newline-preserving, so the
 //   regex can't match across them):
-//     1. the BEGIN/END GENERATED: tokens marker region (the emitter owns those
-//        literals — they are not hand-stamped), and
+//     1. every BEGIN/END GENERATED: <name> marker region — a generator owns those
+//        literals, so they are not hand-stamps. Three generators emit such blocks:
+//        `tokens` (design/emit.mjs), `paper-surface` (the reader→editor mirror), and
+//        `status-tones` (the status skin) — all blanked, and
 //     2. comments — CSS `/* … */`, HTML `<!-- … -->`, and HEEx `<%!-- … --%>` /
 //        `<%# … %>` — so e.g. the `#940` PR-ref inside app.css's
 //        `/* Pre-claim queued state (#940) … */` note is not miscounted as a hex.
@@ -300,8 +302,15 @@ console.log("\ndesign/check.mjs — Part E: hand-stamped color-literal exemption
 const failedBeforeE = failed;
 
 const here = dirname(fileURLToPath(import.meta.url));
+// Any generator-owned block — `/* BEGIN GENERATED: <name> … END GENERATED: <name> */`
+// — is emitter output, not a hand-stamp. Today three generators write such blocks:
+// `tokens` (the theme compiler, design/emit.mjs), `paper-surface` (the reader→editor
+// mirror, scripts/paper-editor-mirror-check.sh), and `status-tones` (the status skin,
+// scripts/status-manifest-check.sh). The name is captured and back-referenced so the
+// END must match its own BEGIN — abutting blocks (status-tones then tokens in
+// paper-surface.css) each strip cleanly instead of one swallowing the other.
 const LEDGER_MARKER =
-  /[ \t]*\/\* BEGIN GENERATED: tokens[\s\S]*?END GENERATED: tokens \*\//g;
+  /[ \t]*\/\* BEGIN GENERATED: ([\w-]+)[\s\S]*?END GENERATED: \1 \*\//g;
 const LEDGER_LITERAL = /#[0-9a-fA-F]{3,8}\b|(?:rgba?|hsla?)\(\s*(?!var\()/gi;
 const ledgerBlank = (m) => m.replace(/[^\n]/g, " ");
 
