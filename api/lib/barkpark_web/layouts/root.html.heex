@@ -988,10 +988,20 @@
       margin-left: auto; flex-shrink: 0;
       padding: 1px 7px; border-radius: 999px;
       font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
-      background: var(--bg-muted); color: var(--fg-dim);
+      background: var(--bg-muted); color: var(--muted-text);
       border: 1px solid var(--border-muted);
     }
     .pane-doc-meta { font-size: 11px; color: var(--fg-dim); flex-shrink: 0; }
+    /* WCAG-AA: --fg-dim is the dimmest text tier and clears 4.5:1 only on the
+       page/card ground (--surface). On the RAISED row fills it drops sub-AA
+       (evergreen 3.89–4.27), so the secondary id/meta escalate one tier per the
+       row's prominence — muted-text on the --bg-muted hover fill, full --fg on the
+       --bg-accent selected fill (mirrors .pane-item.selected). Pairing-site fix,
+       no token nudge; asserted by design/check.mjs Part H. */
+    .pane-doc-item:hover .pane-doc-id { color: var(--muted-text); }
+    .pane-doc-item:hover .pane-doc-meta { color: var(--muted-text); }
+    .pane-doc-item.selected .pane-doc-id { color: var(--fg); }
+    .pane-doc-item.selected .pane-doc-meta { color: var(--fg); }
 
     /* Collapsed pane: narrow strip shown when the user has drilled past
        this pane and needs the viewport for the rightmost focus pane.
