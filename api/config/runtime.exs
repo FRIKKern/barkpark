@@ -40,6 +40,21 @@ if config_env() == :prod do
          System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO") in ["1", "true"]
 end
 
+# staging-barkpark identity tag: BARKPARK_ENV names WHICH instance this is
+# ("staging", "prod", …) so the Studio chrome renders an unmissable banner.
+# This is an IDENTITY label, NOT MIX_ENV — a prod-compiled release runs on the
+# staging box with BARKPARK_ENV=staging. Raw lowercased string; stays nil when
+# unset or empty (same opt-in shape as BARKPARK_PUBLIC_DEMO_STUDIO above).
+if config_env() == :prod do
+  case System.get_env("BARKPARK_ENV") do
+    v when is_binary(v) and v != "" ->
+      config :barkpark, :instance_env, String.downcase(v)
+
+    _ ->
+      :ok
+  end
+end
+
 # Studio tmux console: ON by default on every Studio (admin-gated; auto-refused
 # on any host where public_demo_studio is on). Opt OUT per host by setting
 # BARKPARK_TMUX_CONSOLE to a falsy value. Merge keeps the compiled backend.

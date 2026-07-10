@@ -15,21 +15,52 @@ import (
 // With no argument it prints the current active server plus the list of known
 // names as a hint. An unknown name/URL is a clean usage error (exit 2) that
 // lists the known names so the user can correct the typo.
+//
+// GUARD: a Kind=="staging" entry is DISPOSABLE and must never become the ambient
+// target (that is exactly how `bp` ends up pointed at a throwaway box). `bp use`
+// refuses to persist it as the default without --force, and names the ephemeral
+// `bp -s <name>` path instead.
 func runUse(out *writer, args []string) int {
 	cfg, err := LoadConfig()
 	if err != nil {
 		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
 	}
 
-	// No arg: show active + the hint list.
-	if len(args) == 0 || args[0] == "" {
+	// Split off --force/-f from the positional name/URL. A server name never
+	// starts with "-", so any other leading-dash token is an unknown flag.
+	force := false
+	q := ""
+	for _, a := range args {
+		switch a {
+		case "--force", "-f":
+			force = true
+		case "", "-":
+			// ignored / bare-dash placeholder
+		default:
+			if strings.HasPrefix(a, "-") {
+				return useError(out, "usage", fmt.Sprintf("unknown flag %q (usage: bp use <name|url> [--force])", a), exitUsage)
+			}
+			if q == "" {
+				q = a
+			}
+		}
+	}
+
+	// No name: show active + the hint list.
+	if q == "" {
 		return runUseStatus(out, cfg)
 	}
 
-	q := args[0]
 	entry, ok := cfg.FindServer(q)
 	if !ok {
 		return useUnknown(out, cfg, q)
+	}
+
+	if cfg.KindOf(entry) == "staging" && !force {
+		name := cfg.DisplayName(entry)
+		return useError(out, "refused",
+			fmt.Sprintf("refusing to make staging server %q your default — staging is disposable and must never become the ambient bp target; use it per-command with `bp -s %s <cmd>` instead, or pass --force to override", name, name),
+			exitUsage)
 	}
 
 	cfg.SetActiveServer(entry)
