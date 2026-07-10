@@ -572,6 +572,7 @@ USAGE
   bp cloud instance <verb>              provider-neutral fleet control (any provider)
   bp cloud open <target>                open a dashboard deep link
   bp cloud verify <instance>            re-run the golden-path probe suite
+  bp cloud deploy <target>              push any git ref to an instance over SSH
   bp cloud <provider> <resource> <verb> drive a provider's API directly
 
 FLEET (control plane — needs 'bp login')
@@ -583,6 +584,8 @@ FLEET (control plane — needs 'bp login')
             control an instance's webhooks             (bp cloud webhook -h)
   verify    re-run the readiness probes (API · login · Studio) against a live
             box; exit 0 only when all pass             (bp cloud verify -h)
+  deploy    push any git ref (branch/PR/main) to an instance over SSH — the
+            same blue/green mechanics, pointed anywhere (bp cloud deploy -h)
   domain    a domain's DNS/TLS checklist (found · points here · TLS · serving);
             exit 0 only when it's serving              (bp cloud domain -h)
   usage     an instance's usage meters — honest counts, "unmetered" where a
