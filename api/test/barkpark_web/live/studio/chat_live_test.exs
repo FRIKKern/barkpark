@@ -399,7 +399,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # Keyboard-first affordances are documented UNCONDITIONALLY (charter D42):
     # the footer hint is present on the very first mount, before any turn runs or
     # cost strip appears — a sibling of that conditional strip, never gated on it.
-    test "the keyboard footer hint renders on fresh mount, before any turn completes", %{html: html} do
+    test "the keyboard footer hint renders on fresh mount, before any turn completes", %{
+      html: html
+    } do
       assert html =~ "esc interrupt"
       assert html =~ "/ commands"
       assert html =~ "↵ send"
@@ -1273,7 +1275,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       pid_before = session_pid(view)
       refute pid_before == nil
 
-      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      html =
+        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+
       # the mode change is recorded honestly with the friendly label…
       assert html =~ "Permission mode → accept edits"
       assert html =~ "accept edits"
@@ -1285,7 +1289,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "mode change with no live session just updates the selector", %{view: view} do
-      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      html =
+        render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+
       refute html =~ "New session started"
       assert html =~ "accept edits"
       assert session_pid(view) == nil
@@ -1351,7 +1357,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # the queued turn starts → system/init fires → the badge clears in memory,
       # but the words stay on screen (the row is now a plain ❯ prompt).
-      send(view.pid, {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "sonnet"}})
+      send(
+        view.pid,
+        {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "sonnet"}}
+      )
+
       html = render(view)
       refute html =~ "⧗ queued"
       assert html =~ "queued one"
@@ -2539,6 +2549,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # persist bypass through the only legal road — the arm ceremony (D48)
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
       render_click(element(view, ~s(button[phx-click=arm-bypass])))
       assert StudioChat.get_session(sid).mode == "bypassPermissions"
@@ -4032,11 +4043,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "the picker renders every allowlisted alias + default", %{view: view} do
+      assert has_element?(view, ~s(select[name="model"] option[value="default"][selected]))
       html = render(view)
-      assert html =~ "model: default"
-      assert html =~ "Haiku — fastest"
-      assert html =~ "Opus — powerful"
-      assert html =~ "Fable — frontier"
+      assert html =~ "Haiku"
+      assert html =~ "Opus"
+      assert html =~ "Fable"
     end
 
     test "picking a model persists the choice and confirms honestly", %{view: view} do
@@ -4045,7 +4056,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       html = render_change(element(view, ~s(form[phx-change=set-model])), %{"model" => "opus"})
 
-      assert html =~ "Model → Opus — powerful."
+      assert html =~ "Model → Opus."
       assert StudioChat.get_session(sid).model_choice == "opus"
     end
 
@@ -4067,7 +4078,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # navigate away and back — the picker follows the stored intent
       render_patch(view, "/studio/chat")
-      assert render(view) =~ "model: default"
+      assert has_element?(view, ~s(select[name="model"]))
       render_patch(view, "/studio/chat/#{sid}")
       html = render(view)
       assert html =~ ~s(value="sonnet" selected)
@@ -4082,14 +4093,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view: view}
     end
 
-    test "the picker renders every tier composed with the model (Fable · high)",
-         %{view: view} do
-      html = render(view)
-      assert html =~ "effort: default"
+    test "the picker renders every tier beside the model select", %{view: view} do
+      assert has_element?(view, ~s(select[name="effort"] option[value="default"][selected]))
       # every allowlisted tier is offered
+      html = render(view)
       for e <- ~w(low medium high xhigh max), do: assert(html =~ ~s(value="#{e}"))
-      # composed as one group with the model select (the dim "·" separator)
-      assert html =~ "·"
     end
 
     test "picking a tier persists it and confirms honestly", %{view: view} do
@@ -4107,7 +4115,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
       sid = store_id(view)
 
-      html = render_change(element(view, ~s(form[phx-change=set-effort])), %{"effort" => "ludicrous"})
+      html =
+        render_change(element(view, ~s(form[phx-change=set-effort])), %{"effort" => "ludicrous"})
 
       assert html =~ "Effort → the CLI default"
       assert StudioChat.get_session(sid).effort_choice == nil
@@ -4136,11 +4145,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute has_element?(view, ~s(button[phx-click=arm-bypass]))
 
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       assert has_element?(view, ~s(button[phx-click=arm-bypass]))
     end
 
     test "the Arm button is disabled until the exact word is typed", %{view: view} do
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       assert has_element?(view, ~s(button[phx-click=arm-bypass][disabled]))
 
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
@@ -4154,6 +4165,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = store_id(view)
 
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
       html = render_click(element(view, ~s(button[phx-click=arm-bypass])))
 
@@ -4168,6 +4180,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "cancel closes the panel and never arms", %{view: view} do
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       assert has_element?(view, ~s(button[phx-click=arm-bypass]))
 
       render_click(element(view, ~s(button[phx-click=cancel-arm-bypass])))
@@ -4189,7 +4202,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # exact word: Enter arms without touching the button
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
-      html = render_submit(element(view, ~s(form[phx-submit=arm-bypass])), %{"confirm" => "bypass"})
+
+      html =
+        render_submit(element(view, ~s(form[phx-submit=arm-bypass])), %{"confirm" => "bypass"})
+
       assert lv_assigns(view)[:mode] == "bypassPermissions"
       assert html =~ "ARMED"
     end
@@ -4490,6 +4506,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # pick bypass → opens the arm panel (mode still plan, nothing persisted)
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       assert lv_assigns(view)[:mode] == "plan"
 
       # type the confirm word, then arm
@@ -4510,6 +4527,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       # pick bypass but NEVER complete the ceremony
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "no arming"})
 
       argv = read_marker(marker)
@@ -4524,6 +4542,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view, _html} = live(conn, "/studio/chat")
 
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "yes"})
       # the button is disabled client-side; a FORGED event by name still hits the
       # server guard, which refuses to arm on the wrong word (defense in depth).
@@ -5084,7 +5103,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         sid,
         todo_frame("toolu_todo", [
           %{"content" => "explore the tree", "status" => "completed"},
-          %{"content" => "write the matrix", "status" => "in_progress", "activeForm" => "Writing"},
+          %{
+            "content" => "write the matrix",
+            "status" => "in_progress",
+            "activeForm" => "Writing"
+          },
           %{"content" => "run the gate", "status" => "pending"}
         ])
       )
@@ -5150,7 +5173,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a mid-turn queued ❯ row renders flush with its badge", %{view: view} do
       # the setup's "go" turn is still live (cat never sends a result), so a second
       # send is mid-turn → an echoed ❯ row wearing the ⧗ queued badge
-      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "queued prompt"})
+      html =
+        render_submit(element(view, "form[phx-submit=send]"), %{"message" => "queued prompt"})
+
       assert html =~ "queued prompt"
       assert html =~ "⧗ queued"
       assert_flush_gutter_text(html)
@@ -5200,7 +5225,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     assert html =~ "margin-top: 0", "the #1849 margin-top:0 declaration is missing"
 
-    first = html |> LazyHTML.from_fragment() |> LazyHTML.query(".bp-paper-surface.bp-chat-md > :first-child")
+    first =
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(".bp-paper-surface.bp-chat-md > :first-child")
 
     assert Enum.count(first) >= 1,
            "no .bp-paper-surface.bp-chat-md > :first-child element — the #1849 rule targets nothing"
