@@ -330,15 +330,28 @@ func TestOnrampNoTarget(t *testing.T) {
 	}
 }
 
-// TestOnrampRejectWriteFlag proves --write is NOT accepted in this wave — it must
-// be a usage error, never silently ignored.
-func TestOnrampRejectWriteFlag(t *testing.T) {
-	_, errOut, code := onrampRun(t, globals{server: guerrilla}, "cursor", "--write")
+// TestOnrampRejectUnknownFlag proves an unrecognised flag is a usage error, never
+// silently ignored. (--write/--force are now recognised — see onramp_write_test.go;
+// this guards everything else, e.g. a typo like --wrote.)
+func TestOnrampRejectUnknownFlag(t *testing.T) {
+	_, errOut, code := onrampRun(t, globals{server: guerrilla}, "cursor", "--wrote")
 	if code != exitUsage {
-		t.Errorf("--write exit = %d, want %d (must be rejected, not ignored)", code, exitUsage)
+		t.Errorf("--wrote exit = %d, want %d (must be rejected, not ignored)", code, exitUsage)
 	}
 	if !strings.Contains(errOut, "unknown flag") {
-		t.Errorf("--write should be an unknown-flag error, got: %q", errOut)
+		t.Errorf("--wrote should be an unknown-flag error, got: %q", errOut)
+	}
+}
+
+// TestOnrampForceWithoutWrite proves --force alone is a usage error — it only
+// means something paired with --write.
+func TestOnrampForceWithoutWrite(t *testing.T) {
+	_, errOut, code := onrampRun(t, globals{server: guerrilla}, "cursor", "--force")
+	if code != exitUsage {
+		t.Errorf("--force alone exit = %d, want %d", code, exitUsage)
+	}
+	if !strings.Contains(errOut, "--force only applies with --write") {
+		t.Errorf("--force alone should explain it needs --write, got: %q", errOut)
 	}
 }
 

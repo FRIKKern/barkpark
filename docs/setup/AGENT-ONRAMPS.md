@@ -103,3 +103,31 @@ bp paper view hello
 ## MCP
 
 Every target with a local shell registers the same server: `bp mcp serve` (stdio) turns the capability manifest into a tool catalog the agent calls directly — claim, read the brief, close with epoch-CAS, no shell. The default `--tools tasks` ships six curated task tools (task_ready · task_next · task_show · task_close · task_create · task_prime); `--tools all` is expert-only (Cursor hard-caps 40 tools vs ~107 manifest commands). The server **fails fast** if the target Barkpark has the Tasks plugin disabled — point it at one with Tasks enabled. Registration stanza per surface: each target doc above.
+
+## One-step onramp — `bp onramp <target>`
+
+`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default (nothing is written). Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli`, `copilot` (`chatgpt` / `claude-ai` are remote — see [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` env placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
+
+### `--write` — merge it for you
+
+`bp onramp <target> --write` does the work: it merges **only** the `barkpark` entry into the target's JSON config and touches nothing else. Every other MCP server and every unrelated top-level key survives verbatim — only the barkpark key is swapped (a merge re-emits the file in canonical 2-space form, so unusual whitespace or key order is normalised; values are never altered, and a fresh `created` file is the doc stanza byte-for-byte). Writes are **atomic** (temp file + rename, so a crash never leaves a half-written config) and land at mode `0644` / dir `0755` — these are project-committed configs holding a `${env:}` placeholder, not secrets.
+
+It is **idempotent** and honest per file:
+
+| action | when |
+|---|---|
+| `created` | the file did not exist — written with just the barkpark stanza |
+| `updated` | the file existed with no barkpark entry (or a differing one under `--force`) — barkpark merged in, everything else preserved |
+| `unchanged` | the barkpark entry already matches — exit 0, nothing written |
+| `skipped` | a **different** barkpark entry is already present — left untouched; re-run with `--force` to overwrite it (also the Codex `config.toml` row: TOML write is wave 3) |
+
+Re-running `--write` is always safe: an already-correct config reports `unchanged` and is not rewritten. `--force` only changes the `skipped`→`updated` case; it still never touches a foreign server or an unrelated key.
+
+`--write -o json` emits one document, `{target, actions:[{path,action,note}]}`; human progress stays on stderr so stdout is a single parseable report.
+
+```bash
+bp onramp cursor --write            # merge barkpark into .cursor/mcp.json
+bp onramp cursor --write --force    # overwrite an existing, differing barkpark entry
+bp onramp cursor-cloud --write      # both .cursor/environment.json + .cursor/mcp.json, per file
+bp onramp codex --write             # skipped — Codex TOML is wave 3; paste the block by hand
+```
