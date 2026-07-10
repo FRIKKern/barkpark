@@ -9,9 +9,16 @@ package cli
 //	SessionStart  → claim  (renewal-safe: re-claim under the same worker renews)
 //	PreToolUse    → renew  (re-claim), throttled ≤1/renewEvery via an on-disk stamp
 //	Stop/SessionEnd → close IFF every acceptance criterion is met, else LEAVE it
-//	                  claimed so the 300s lease expires → task.lease_expired →
-//	                  a `↩ resume` in the NEXT strip (already built)
+//	                  claimed so the server lease TTL expires → task.lease_expired
+//	                  → a `↩ resume` in the NEXT strip (already built). That TTL is
+//	                  the server's BARKPARK_TASK_LEASE_TTL_SECONDS (default 2700s).
 //	other/unknown → no-op
+//
+// Fail-safe is NOT fail-invisible: every swallowed failure also drops a small
+// last-error breadcrumb next to the renew stamp (writeHookBreadcrumb), so a dead
+// bridge is diagnosable via `bp cmux status` even though the hook itself stays
+// silent. The breadcrumb write is best-effort and panic-guarded — it can never
+// change the exit code, touch stdout, or re-panic out of the top-level recover.
 //
 // CARDINAL fail-safe contract (design §7): a hook must NEVER break the agent.
 // EVERY path exits 0 (incl a panic → recover → 0); NOTHING is written to stdout
@@ -27,6 +34,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -46,8 +54,8 @@ var (
 )
 
 // renewEvery is the PreToolUse renew throttle: at most one re-claim per window,
-// well inside the 300s lease TTL, so a busy agent renews cheaply but not on
-// every tool call.
+// well inside the server lease TTL (BARKPARK_TASK_LEASE_TTL_SECONDS, default
+// 2700s), so a busy agent renews cheaply but not on every tool call.
 const renewEvery = 60 * time.Second
 
 // newHookClient builds the bounded, drafts-reading apiclient the hook acts
@@ -69,18 +77,24 @@ func newHookClient(ctx manifest.Context) *apiclient.Client {
 // is that a hook error can never abort or stall the agent's turn. args is the
 // tail after `cmux hook` (args[0] = the Claude event name).
 func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (code int) {
-	// A top-level recover is the last line of the fail-safe contract: even a
-	// panic (nil map, bad decode, anything) resolves to a clean exit 0.
-	defer func() {
-		if r := recover(); r != nil {
-			code = exitOK
-		}
-	}()
-
 	event := ""
 	if len(args) > 0 {
 		event = args[0]
 	}
+	task := os.Getenv("BARKPARK_TASK")
+	worker := taskboard.CmuxWorkerID()
+
+	// A top-level recover is the last line of the fail-safe contract: even a
+	// panic (nil map, bad decode, anything) resolves to a clean exit 0. It also
+	// drops a best-effort breadcrumb so a crash-looping hook is still
+	// diagnosable — the write is panic-guarded, so it can never re-panic here.
+	defer func() {
+		if r := recover(); r != nil {
+			writeHookBreadcrumb(event, worker, task, fmt.Sprintf("panic: %v", r))
+			code = exitOK
+		}
+	}()
+
 	dryRun := g.dryRun || hasFlag(args, "--dry-run")
 	debug := dryRun || os.Getenv("BP_CMUX_DEBUG") != ""
 
@@ -89,25 +103,33 @@ func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (c
 			out.errf("cmux hook %s: "+format, append([]any{event}, a...)...)
 		}
 	}
+	// fail records a swallowed failure: it logs to stderr under debug (like dbg)
+	// AND leaves the last-error breadcrumb `bp cmux status` surfaces. NEVER writes
+	// stdout and NEVER changes the exit code — the breadcrumb is the only trace.
+	fail := func(format string, a ...any) {
+		msg := fmt.Sprintf(format, a...)
+		if debug {
+			out.errf("cmux hook %s: %s", event, msg)
+		}
+		writeHookBreadcrumb(event, worker, task, msg)
+	}
 
 	// Drain stdin best-effort (Claude writes the hook JSON there). We key on env,
 	// not stdin, so a malformed/empty body is harmless — decode and move on.
 	_ = drainHookStdin()
 
-	task := os.Getenv("BARKPARK_TASK")
 	if task == "" {
 		dbg("no BARKPARK_TASK — this pane owns no task; no-op")
 		return exitOK
 	}
-	worker := taskboard.CmuxWorkerID()
 
 	switch event {
 	case "SessionStart":
-		hookSessionStart(newHookClient(ctx), task, worker, dryRun, dbg)
+		hookSessionStart(newHookClient(ctx), task, worker, dryRun, dbg, fail)
 	case "PreToolUse":
-		hookPreToolUse(newHookClient(ctx), task, worker, dryRun, dbg)
+		hookPreToolUse(newHookClient(ctx), task, worker, dryRun, dbg, fail)
 	case "Stop", "SessionEnd":
-		hookStopClose(newHookClient(ctx), task, worker, dryRun, dbg)
+		hookStopClose(newHookClient(ctx), task, worker, dryRun, dbg, fail)
 	default:
 		dbg("unhandled event — no-op (cmux's own hook may still act)")
 	}
@@ -117,24 +139,29 @@ func runCmuxHook(out *writer, g globals, ctx manifest.Context, args []string) (c
 // hookSessionStart claims the pane's task as the derived worker. A re-claim under
 // the same worker id renews the lease (new epoch) and is idempotent across
 // subagents, so a fresh subagent SessionStart just renews rather than 409ing.
-func hookSessionStart(c *apiclient.Client, task, worker string, dryRun bool, dbg func(string, ...any)) {
+func hookSessionStart(c *apiclient.Client, task, worker string, dryRun bool, dbg, fail func(string, ...any)) {
 	if dryRun {
 		dbg("would claim %s as %s", task, worker)
 		return
 	}
 	res := taskboard.DoClaim(c, task, worker)
-	dbg("%s", res.Message)
-	if res.OK {
-		// Seed the throttle so the first tool call doesn't immediately re-claim.
-		writeRenewStamp(worker, task)
+	if !res.OK {
+		fail("SessionStart claim failed: %s", res.Message)
+		return
 	}
+	dbg("%s", res.Message)
+	// Seed the throttle so the first tool call doesn't immediately re-claim.
+	writeRenewStamp(worker, task)
+	// A healthy claim clears any stale breadcrumb: the last-error is present iff
+	// the MOST RECENT hook action failed, so a recovered bridge reads clean.
+	clearHookBreadcrumb(worker)
 }
 
 // hookPreToolUse renews the lease (re-claim), throttled to ≤1/renewEvery via an
 // on-disk stamp. A missing/corrupt stamp fails OPEN (renew now) — renewing more
 // often than needed is always safe; the only cost of a missed renew is an
 // honest resume, never a hang.
-func hookPreToolUse(c *apiclient.Client, task, worker string, dryRun bool, dbg func(string, ...any)) {
+func hookPreToolUse(c *apiclient.Client, task, worker string, dryRun bool, dbg, fail func(string, ...any)) {
 	if !renewDue(worker, task) {
 		dbg("within throttle window — skip renew")
 		return
@@ -144,10 +171,13 @@ func hookPreToolUse(c *apiclient.Client, task, worker string, dryRun bool, dbg f
 		return
 	}
 	res := taskboard.DoClaim(c, task, worker)
-	dbg("renew: %s", res.Message)
-	if res.OK {
-		writeRenewStamp(worker, task)
+	if !res.OK {
+		fail("PreToolUse renew failed: %s", res.Message)
+		return
 	}
+	dbg("renew: %s", res.Message)
+	writeRenewStamp(worker, task)
+	clearHookBreadcrumb(worker)
 }
 
 // hookStopClose is the acceptance-gated close (design §2a). Stop fires at the end
@@ -158,10 +188,12 @@ func hookPreToolUse(c *apiclient.Client, task, worker string, dryRun bool, dbg f
 // no persisted epoch across the separate SessionStart/Stop processes) — a
 // re-claim that 409s means someone else holds the lease, so we don't close (no
 // theft).
-func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg func(string, ...any)) {
+func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, fail func(string, ...any)) {
 	doc, ok := c.GetPerspective("task", task, "drafts")
 	if !ok {
-		dbg("task unreadable — can't prove acceptance; leaving claimed → resume")
+		// A read failure (server down / gone) blocked the close — a genuine
+		// failure worth a breadcrumb, not the honest unmet-criteria no-ops below.
+		fail("Stop: task unreadable — can't prove acceptance; leaving claimed → resume")
 		return
 	}
 	total, allMet := acceptanceAllMet(doc)
@@ -179,7 +211,7 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg fu
 	}
 	epoch, _, err := c.TaskClaimN(task, worker)
 	if err != nil {
-		dbg("re-claim for epoch failed (%v) — not closing (no theft)", err)
+		fail("Stop: re-claim for epoch failed (%v) — not closing (no theft)", err)
 		return
 	}
 	// The agent marking its own acceptance criteria met is a LEGITIMATE
@@ -194,7 +226,12 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg fu
 		rev = docRev(fresh)
 	}
 	res := taskboard.DoCloseRev(c, task, worker, epoch, rev)
+	if !res.OK {
+		fail("Stop: close failed: %s", res.Message)
+		return
+	}
 	dbg("close: %s", res.Message)
+	clearHookBreadcrumb(worker)
 }
 
 // docRev pulls the document rev out of the flattened envelope (the doc API
@@ -315,6 +352,89 @@ func writeRenewStamp(worker, task string) {
 		return
 	}
 	_ = os.WriteFile(p, data, 0o644)
+}
+
+// hookBreadcrumb is the last-error trace a swallowed hook failure leaves behind
+// so a dead bridge is diagnosable in one `bp cmux status`. It lives beside the
+// renew stamp in the cmux state dir, one file per worker (pane), overwritten by
+// each new failure and REMOVED by the next healthy action — so its presence
+// means "the most recent hook action failed", nothing older.
+type hookBreadcrumb struct {
+	Event  string `json:"event"`
+	Error  string `json:"error"`
+	Worker string `json:"worker"`
+	Task   string `json:"task"`
+	Unix   int64  `json:"unix"`
+}
+
+// cmuxLastErrorPath is {UserConfigDir}/barkpark/cmux/lasterr-<sha1(worker)>.json.
+// The `lasterr-` prefix + a worker-only hash keep it distinct from the renew
+// stamp's <sha1(worker\x00task)>.json in the same directory.
+func cmuxLastErrorPath(worker string) (string, error) {
+	base, err := userConfigDir()
+	if err != nil || base == "" {
+		return "", errors.New("no user config dir")
+	}
+	sum := sha1.Sum([]byte("lasterr\x00" + worker))
+	return filepath.Join(base, "barkpark", "cmux", "lasterr-"+hex.EncodeToString(sum[:])+".json"), nil
+}
+
+// writeHookBreadcrumb records a swallowed failure. Best-effort AND panic-guarded:
+// it MUST NOT change the exit code, touch stdout, or re-panic — the top-level
+// recover calls it, so an unwritable/panicking state dir has to resolve here to a
+// silent no-op rather than escaping the recover.
+func writeHookBreadcrumb(event, worker, task, errMsg string) {
+	defer func() { _ = recover() }()
+	p, err := cmuxLastErrorPath(worker)
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return
+	}
+	data, err := json.Marshal(hookBreadcrumb{
+		Event:  event,
+		Error:  errMsg,
+		Worker: worker,
+		Task:   task,
+		Unix:   time.Now().Unix(),
+	})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(p, data, 0o644)
+}
+
+// clearHookBreadcrumb removes a worker's breadcrumb after a healthy action, so a
+// recovered bridge stops reporting a stale error. Best-effort + panic-guarded.
+func clearHookBreadcrumb(worker string) {
+	defer func() { _ = recover() }()
+	p, err := cmuxLastErrorPath(worker)
+	if err != nil {
+		return
+	}
+	_ = os.Remove(p)
+}
+
+// readHookBreadcrumb loads a worker's last-error breadcrumb for `bp cmux status`.
+// Reports ok=false when absent, unreadable, malformed, or empty-error — the
+// status path stays silent when there is nothing honest to show. Panic-guarded
+// so a hostile state dir degrades to (zero,false) rather than crashing status.
+func readHookBreadcrumb(worker string) (hookBreadcrumb, bool) {
+	defer func() { _ = recover() }()
+	var bc hookBreadcrumb
+	p, err := cmuxLastErrorPath(worker)
+	if err != nil {
+		return bc, false
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return bc, false
+	}
+	if json.Unmarshal(data, &bc) != nil || bc.Error == "" {
+		return hookBreadcrumb{}, false
+	}
+	return bc, true
 }
 
 // hasFlag reports whether flag appears verbatim in args (for the defensive
