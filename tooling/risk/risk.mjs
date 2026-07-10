@@ -126,12 +126,25 @@ function tryRun(cmd, a, opts) {
 }
 const COVSIG = covSig();
 const priorRpt = existsSync(join(HERE, "risk-report.json")) ? JSON.parse(readFileSync(join(HERE, "risk-report.json"), "utf8")) : {};
-const covCacheHit = !NO_COVERAGE && COVSIG && priorRpt.coverageSig === COVSIG && priorRpt.realCov && Object.keys(priorRpt.realCov).length;
+// The cache is only a hit if the prior report actually RAN the heavy suites: a
+// --no-coverage run persists JS-only realCov (the free ingest) with a valid sig,
+// which must not let the next full run skip go/mix and report null totals.
+const covCacheHit = !NO_COVERAGE && COVSIG && priorRpt.coverageSig === COVSIG && priorRpt.realCov && Object.keys(priorRpt.realCov).length
+  && (priorRpt.coverageTotals?.go != null || priorRpt.coverageTotals?.elixir != null);
 if (covCacheHit) {
   Object.assign(realCov, priorRpt.realCov);
   Object.assign(fnCov, priorRpt.fnCov || {});
   ({ go: goPct = null, elixir: exPct = null, js: jsPct = null } = priorRpt.coverageTotals || {});
   process.stderr.write("[coverage] reused cache — no code/test change (skipped go/mix suites)\n");
+}
+if (NO_COVERAGE && priorRpt.realCov) {
+  // --no-coverage means "skip the heavy suites", not "forget the last real
+  // measurement": carry the prior go/elixir coverage forward (JS re-ingests
+  // fresh below), so intermediate cheap runs don't degrade Tested to the proxy.
+  for (const [p, c] of Object.entries(priorRpt.realCov)) if (c.source !== "js") realCov[p] = c;
+  Object.assign(fnCov, priorRpt.fnCov || {});
+  ({ go: goPct = null, elixir: exPct = null } = priorRpt.coverageTotals || {});
+  if (Object.keys(realCov).length) process.stderr.write("[coverage] --no-coverage: carried forward prior go/elixir measurements\n");
 }
 if (!NO_COVERAGE && !covCacheHit) {
   // -- Go: `go test -cover ./...` → "ok PKG ... coverage: NN.N% of statements" per package
