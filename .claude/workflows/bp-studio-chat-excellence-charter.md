@@ -1592,6 +1592,62 @@ children sit at offsets 53–115; always pass `--limit`/use `bp task get`.
 
 ## Wave log
 
+### Wave 2026-07-10 (wave 12 BUILT + REVIEWED — Claude's hands + the workday)
+
+All 8 slices built green and reviewer-fixed; grade A-. Landed: **moat** — S1
+`%Capabilities{}` matrix (anti-drift tests mirror Session.modes /
+ClaudeChat.models+efforts; `@spawn_names` compile-time sourced; no-tax proven
+by revert experiment) + scoped transcript⊕rail golden byte-lock; S2 wire
+harness (pin 2.1.206 in ONE file, e2e refusal proven live, nightly wrapper,
+docs/ops/claude-chat-harness.md, kill-signal = 2 breaking wire changes/quarter
+→ Agent SDK re-score). **Hands** — S3 sanitized 2.1.206 MCP wire fixtures +
+always-on shape tests (10/0), minted-token→`bp mcp serve` e2e probe
+(:probe_mcp_loopback), D68 REAL-ARGV verdict (plan-mode Workflow gate is
+MODEL-level courtesy, NOT CLI enforcement → S4's `--disallowedTools Workflow`
+on plan spawns is CONFIRMED-KEEP, not provisional); S4 loopback (D63 mint
+`create_claude_session_token/3` 4h/24h TTL + revoke in both terminate clauses,
+D64 per-session 0600 mcp-config with env-pinned URL+token, D65 read-only
+auto-approve at the single ask seam); S5 task/paper/search chips (name+decode
+dispatch, ≤8 hits + "+N more", honest degrade to the generic row). **Workday**
+— S6 `last_visited_at` + pure `needs_you_strip/2` (5-kind vocabulary in strict
+priority) + sidebar Inbox strip; S7 Notifier seam (opt-out + per-session
+debounce, channel list data-driven for w13) + D69 return_to on chat deep links
+(open-redirect-guarded `sanitize_dest/1`). S8 fork verdict: NO message.uuid —
+top-level frame uuid captured to `metadata.frame_uuid`; fork-from-head = floor
+shippable now, branch-from-any-turn = display-level ceiling on our uuid-keyed
+log; D26 stays closed.
+
+REVIEWER FIXES (on -r branches; gates re-run green): S1 golden swallowed the
+`#bp-build-version` footer (compile-time git SHA → red on EVERY later commit;
+reproduced) — scope now slices out `studio-footer`, golden regenerated in the
+same diff; S4+S5 argv-echo marker race (read_marker saw half-written argv once
+the argv grew) — fake now writes tmp+rename, atomic; S7 Notifier debounce
+ledger prunes expired stamps. Ledger: S3's builder stamped evidence but never
+flipped met flags (fixed, 4/5), all 8 lifecycles corrected open→in_progress.
+
+INTEGRATION NOTES (lead): merge order S1→S8 with `-r` branches where they
+exist (S1, S4, S5, S7, S8; others unchanged). CHARTER conflicts → take S8-r's
+copy (it is the reconciled union: S3's D63–D69 + wave-12 plan, S8's full D70
+under one header, S2's Gates bullet byte-identical, this wave-log entry).
+recorder.ex S4×S8 conflict in persist_assistant_blocks — resolution:
+`parent_agent = parent_meta(ev); frame = Map.merge(parent_agent,
+frame_uuid_meta(ev))`; text rows stamp `frame`; TodoWrite guard keys on
+`parent_agent == %{}`; tool rows merge base → `mcp_meta(name)` → `frame`; keep
+both helpers. claude_chat_real_binary_test.exs S2×S3 conflict (S2 adds the
+version-pin describe + pinned_version helper; S3 rewrites setup for
+needs_claude:false + adds probes 4/5) — keep both sides, S3's setup wins.
+chat_live_test.exs: S4-r and S5-r carry the IDENTICAL atomic-marker hunk (auto
+-merges). S5's mcp fixtures under test/support/fixtures/studio_chat/mcp/ are
+authored shapes — reconcile against S3's committed wire fixtures
+post-merge (task filed). Merge-gated criteria on all 8 tasks are the lead's.
+
+NEXT WAVE should take: wire S6's strip transitions to S7's Notifier.notify
+(away-detection call site — the seam is deliberately not self-subscribing) +
+runtime.exs recipient env (scc-w12-notify-recipient-wiring); the hands/no-
+hands UI indicator (task-scc-bl-mcp-hands-indicator); chip replay beyond the
+4KB recorder cap (task-5a49dc55626ea80d); guerrilla cron install (S2 doc step);
+then w13 fork/branch UI on D70's schema proposal + notify channels.
+
 ### Wave 2026-07-09 (wave 10 BUILT + REVIEWED — the real-binary probe wave)
 
 **All four slices green; every wave-9 wire assumption now has a verdict.**
