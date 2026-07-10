@@ -1028,6 +1028,8 @@ already assumed.
   real capture shows it, gate the vanish-flip on "no non-terminal workflow
   agents".)
 
+### Wave-12 decisions (2026-07-10)
+
 - **D63 — Loopback credential: mint an ApiToken, authorize through the grants
   gate — NEVER Access.mint.** Proven by red/green run: a raw `Access.mint/2`
   token lives in the `grants` table (`link_token_hash`) and
@@ -1150,18 +1152,84 @@ already assumed.
   grant_controller.ex:58-59). Ships WITH notify — the email promise is
   dishonest without it.
 
-- **D70 — Fork wire truth: a TOP-LEVEL frame uuid; resumeSessionAt is not a
-  CLI primitive.** `message.uuid` does not exist — every frame (system/
-  assistant/user/result) carries a top-level `uuid` sibling of `message`.
-  The Recorder drops it today; capture is metadata-only
-  (`chat_messages.metadata["frame_uuid"]`, jsonb, NO migration).
-  `--resume`/`--fork-session` are real on 2.1.206; `resumeSessionAt` is
-  t3-pattern APP-level bookkeeping, not a flag (`claude --help` scanned
-  line-by-line). The fork-probe's verdict answers: does `--resume
-  --fork-session` + our uuid-keyed message log give branch-from-any-turn
-  UX (floor: fork-from-head)? D26 re-opens ONLY if true message-granular
-  rewind emerges. Deliverable is a written verdict + schema proposal — no UI
-  this wave.
+- **D70 — The wire id is a TOP-LEVEL frame uuid; fork verdict = floor built,
+  ceiling banked; D26 STAYS CLOSED.** (S8 fork-probe, real binary 2.1.206.)
+
+  **Ground truth (probed 2026-07-10, haiku-pinned, `--max-turns 1` per D56):**
+  - EVERY frame carries a top-level `uuid` — proven across `system/init`,
+    `system/thinking_tokens`, `system/hook_*`, `assistant`, `rate_limit_event`,
+    and `result` (stream-json `--verbose` dump: 23/23 frames had `uuid`, all
+    distinct). **There is NO `message.uuid`** — the earlier task title's premise
+    is wrong; the wire id lives at the frame envelope. NOTE a single logical
+    assistant turn streams as MULTIPLE assistant frames, each with its OWN uuid
+    (2 assistant frames in a one-word reply), so uuid granularity is
+    per-frame, finer than per-turn.
+  - `--resume <id> --fork-session` **MINTS A NEW session id** and **PRESERVES
+    FULL HISTORY**. Codeword proof: turn 1 `--session-id 27494fff…` stored
+    "FJORD-77"; `--resume 27494fff… --fork-session` returned
+    `session_id=c9a45a76…` (≠ original) and `result="FJORD-77"` (full recall).
+    This re-confirms D26's finding on 2.1.206: fork = a full-memory branch, NOT
+    a rewind — it never drops turns and exposes no per-turn truncation flag.
+  - `resumeSessionAt` is **NOT a CLI primitive** (`--help` on 2.1.206 scanned;
+    it is t3-pattern app-level bookkeeping over the app's own message log) — no
+    flag was probed for, none exists.
+
+  **CAPTURE (built this wave):** the Recorder now persists each frame's
+  top-level `uuid` into `chat_messages.metadata["frame_uuid"]` (jsonb, NO
+  migration) for every assistant-frame-derived row (text + tool), merged
+  alongside `parent_meta` so a sub-agent row carries BOTH `frame_uuid` and
+  `parent_tool_use_id` (recorder.ex `frame_uuid_meta/1`, disjoint from the S4
+  mcp tagging). Scope honesty: the Recorder only WRITES assistant-frame rows —
+  the user's typed message row is persisted in chat_live.ex (no wire uuid; we
+  authored it) and a `result` frame updates SESSION metrics, not a message row —
+  so there is no user/result *message row* for the Recorder to stamp; the
+  assistant frame's uuid is the wire id for that turn's rendered rows. This
+  makes our message log a uuid-keyed index of rendered rows — the branch-point
+  substrate a wave-13 UI needs — with D1 intact (we never read the CLI's private
+  transcript jsonl).
+
+  **VERDICT — floor vs ceiling:**
+  - **FLOOR (shippable now, no new CLI primitive): fork-from-head.** `--resume
+    <id> --fork-session` gives a fresh session id whose model memory == the
+    parent's full history. A "Branch from here" affordance on the LATEST turn is
+    real today: spawn a fork, record `parent_session_id` + the parent's last
+    `frame_uuid` as the branch point, list both sessions as siblings.
+  - **CEILING (display-level branch-from-ANY-turn, app-level, non-destructive):**
+    achievable PURELY on our uuid-keyed log WITHOUT a CLI rewind primitive. The
+    CLI fork always carries full memory, so "branch from turn N" is a RENDER
+    contract, not a memory operation: fork-from-head for the live process, then
+    on replay HIDE every row whose `seq` is after the chosen branch point's
+    `frame_uuid`. The model still *remembers* post-branch content (unavoidable
+    without transcript surgery, which D1 forbids), but the USER sees a clean
+    branch. This is exactly t3's `resumeSessionAt` pattern — bookkeeping over our
+    own log, which the `frame_uuid` capture now enables. True memory-rewrite
+    branch-from-turn remains impossible without reading/truncating the CLI's
+    private jsonl (version-fragile, D1 violation) — unchanged from D26.
+
+  **Schema proposal for the wave-13 branch UI** (backlog
+  `task-scc-w13-fork-rewind-ui` consumes this; NOT built this wave):
+  - `chat_sessions`: add nullable `parent_session_id :binary_id` (FK to
+    `chat_sessions.id`, `on_delete: :nilify_all`) + nullable
+    `forked_at_frame_uuid :string`. A root session leaves both null; a fork
+    stamps parent id + the parent `frame_uuid` it branched from. Partial index
+    `ON (parent_session_id) WHERE parent_session_id IS NOT NULL` for the
+    sibling/children lookup. NO `forked_at_turn` integer — the `frame_uuid` is
+    the stable branch key (turn indices renumber on compaction; uuids do not).
+  - Fork op: mint a child session, spawn `--resume <parent_id> --fork-session`
+    (child id = the CLI's newly-minted id, pinned via `--session-id` at spawn so
+    D2 holds), copy the parent's rendered rows up to the branch `frame_uuid` into
+    the child as replayable history, stamp `parent_session_id` +
+    `forked_at_frame_uuid`. The sidebar renders a branch tree; "branch from turn
+    N" = fork + display-hide after N's uuid (the ceiling), "branch" on the head =
+    the floor.
+
+  **D26 disposition: STAYS CLOSED.** No true rewind primitive emerged — fork is
+  full-memory on 2.1.206, exactly as D26 recorded; `resumeSessionAt` is not a
+  CLI flag. What CHANGED is that the display-level ceiling is now cheaply
+  reachable (the `frame_uuid` capture is the missing substrate), so wave-13 can
+  ship branch UX on the floor+ceiling above WITHOUT reopening the
+  transcript-surgery path D26 correctly parked. Checkpoint/rewind-of-MEMORY
+  stays cut; branch-of-VIEW is unlocked.
 
 ### Wave 11 plan (decided 2026-07-10) — "the journey, not the list"
 
@@ -1523,6 +1591,62 @@ children sit at offsets 53–115; always pass `--limit`/use `bp task get`.
   Kill-signal: two breaking wire changes in a quarter → Agent SDK re-score.
 
 ## Wave log
+
+### Wave 2026-07-10 (wave 12 BUILT + REVIEWED — Claude's hands + the workday)
+
+All 8 slices built green and reviewer-fixed; grade A-. Landed: **moat** — S1
+`%Capabilities{}` matrix (anti-drift tests mirror Session.modes /
+ClaudeChat.models+efforts; `@spawn_names` compile-time sourced; no-tax proven
+by revert experiment) + scoped transcript⊕rail golden byte-lock; S2 wire
+harness (pin 2.1.206 in ONE file, e2e refusal proven live, nightly wrapper,
+docs/ops/claude-chat-harness.md, kill-signal = 2 breaking wire changes/quarter
+→ Agent SDK re-score). **Hands** — S3 sanitized 2.1.206 MCP wire fixtures +
+always-on shape tests (10/0), minted-token→`bp mcp serve` e2e probe
+(:probe_mcp_loopback), D68 REAL-ARGV verdict (plan-mode Workflow gate is
+MODEL-level courtesy, NOT CLI enforcement → S4's `--disallowedTools Workflow`
+on plan spawns is CONFIRMED-KEEP, not provisional); S4 loopback (D63 mint
+`create_claude_session_token/3` 4h/24h TTL + revoke in both terminate clauses,
+D64 per-session 0600 mcp-config with env-pinned URL+token, D65 read-only
+auto-approve at the single ask seam); S5 task/paper/search chips (name+decode
+dispatch, ≤8 hits + "+N more", honest degrade to the generic row). **Workday**
+— S6 `last_visited_at` + pure `needs_you_strip/2` (5-kind vocabulary in strict
+priority) + sidebar Inbox strip; S7 Notifier seam (opt-out + per-session
+debounce, channel list data-driven for w13) + D69 return_to on chat deep links
+(open-redirect-guarded `sanitize_dest/1`). S8 fork verdict: NO message.uuid —
+top-level frame uuid captured to `metadata.frame_uuid`; fork-from-head = floor
+shippable now, branch-from-any-turn = display-level ceiling on our uuid-keyed
+log; D26 stays closed.
+
+REVIEWER FIXES (on -r branches; gates re-run green): S1 golden swallowed the
+`#bp-build-version` footer (compile-time git SHA → red on EVERY later commit;
+reproduced) — scope now slices out `studio-footer`, golden regenerated in the
+same diff; S4+S5 argv-echo marker race (read_marker saw half-written argv once
+the argv grew) — fake now writes tmp+rename, atomic; S7 Notifier debounce
+ledger prunes expired stamps. Ledger: S3's builder stamped evidence but never
+flipped met flags (fixed, 4/5), all 8 lifecycles corrected open→in_progress.
+
+INTEGRATION NOTES (lead): merge order S1→S8 with `-r` branches where they
+exist (S1, S4, S5, S7, S8; others unchanged). CHARTER conflicts → take S8-r's
+copy (it is the reconciled union: S3's D63–D69 + wave-12 plan, S8's full D70
+under one header, S2's Gates bullet byte-identical, this wave-log entry).
+recorder.ex S4×S8 conflict in persist_assistant_blocks — resolution:
+`parent_agent = parent_meta(ev); frame = Map.merge(parent_agent,
+frame_uuid_meta(ev))`; text rows stamp `frame`; TodoWrite guard keys on
+`parent_agent == %{}`; tool rows merge base → `mcp_meta(name)` → `frame`; keep
+both helpers. claude_chat_real_binary_test.exs S2×S3 conflict (S2 adds the
+version-pin describe + pinned_version helper; S3 rewrites setup for
+needs_claude:false + adds probes 4/5) — keep both sides, S3's setup wins.
+chat_live_test.exs: S4-r and S5-r carry the IDENTICAL atomic-marker hunk (auto
+-merges). S5's mcp fixtures under test/support/fixtures/studio_chat/mcp/ are
+authored shapes — reconcile against S3's committed wire fixtures
+post-merge (task filed). Merge-gated criteria on all 8 tasks are the lead's.
+
+NEXT WAVE should take: wire S6's strip transitions to S7's Notifier.notify
+(away-detection call site — the seam is deliberately not self-subscribing) +
+runtime.exs recipient env (scc-w12-notify-recipient-wiring); the hands/no-
+hands UI indicator (task-scc-bl-mcp-hands-indicator); chip replay beyond the
+4KB recorder cap (task-5a49dc55626ea80d); guerrilla cron install (S2 doc step);
+then w13 fork/branch UI on D70's schema proposal + notify channels.
 
 ### Wave 2026-07-09 (wave 10 BUILT + REVIEWED — the real-binary probe wave)
 
