@@ -351,6 +351,13 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["stat"] = statRenderer{}
 	r.blocks["stats"] = statsRenderer{}
 	r.blocks["stat-grid"] = statsRenderer{}
+	// gauge-list: a ranked stack of proportion meters (▓/░, the statBar idiom).
+	// COUNT mode buckets a verbatim task-list snapshot by worker/phase/status/
+	// priority; SHARE mode draws author {label,value,note} rows. Snapshot-
+	// authoritative (never reads `query`); the datum lives in the bar length +
+	// the right-aligned digits, so it survives an ANSI strip at every profile.
+	// The most Barkpark-native slate block (see gaugelist.go).
+	r.blocks["gauge-list"] = gaugeListRenderer{}
 	// chart: a braille step-line (or bar) plot of one or more numeric series,
 	// rasterised through the braille.go 2×4 dot-canvas. It reuses W2's sparkline
 	// normaliser (sparkNorm) for point scaling — honouring pinned axes.min/max,

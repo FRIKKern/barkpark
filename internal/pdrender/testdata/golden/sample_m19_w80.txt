@@ -1,0 +1,25 @@
+KPI CELLS — DENOMINATOR                                                         
+───────────────────────                                                         
+                                                                                
+                                                                                
+                                                                                
+71/118                                                                          
+tasks done                                                                      
+                                                                                
+92%                                                                             
+coverage                                                                        
+                                                                                
+14/20                                                                           
+open PRs                                                                        
+                                                                                
+1.2k                                                                            
+stars                                                                           
+                                                                                
+340/512                                                                         
+storage used (MB)                                                               
+                                                                                
+4.7                                                                             
+avg rating                                                                      
+                                                                                
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  71/118
+quota used                                                                      

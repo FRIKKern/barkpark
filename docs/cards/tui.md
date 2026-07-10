@@ -9,7 +9,8 @@ Desk task `c`/`x` via `/v1/tasks/:id/{claim,close}`.
 ## Papers / Bulldocs in the TUI
 - `cmd/barkpark/paper.go` — viewer; blocks via `internal/pdrender` (`Decode`→`DefaultRegistry(theme)`→`Render`); `bp paper` shares it.
 - **Parity rule:** a new block type ships in all three renderers — `render_html/2` (server HTML), `.bp-paper-surface` CSS (root.html.heex), pdrender (terminal).
-- **Go pin: `go.mod` `go 1.25.0`** (#726); chroma v2.20.0. Prod builds TUI server-side; don't bump casually.
+- Render doctrine → docs/contracts/tui-render-doctrine.md
+- **Go pin: `go.mod` `go 1.25.0`** (#726); don't bump.
 
 ## `bp tasks` — live portrait task board
 Pane `internal/taskboard`, zero-config, SSE-live. NAV (D11): `enter` descends board→task→paper→tasks→children…, `esc` ascends+breadcrumb. Adaptive: two-pane ≥110c else full-frame (±4 hyst). ACTS `c`/`x`/`o` follow reader. Entry `cli.go` `case "tasks"`→`taskboard.Run`.

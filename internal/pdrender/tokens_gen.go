@@ -55,7 +55,9 @@ const (
 // data-viz values (the presence / matchQuality passthrough precedent, D21).
 // GenChartSeries is chart.go's per-series TrueColor cycle; GenHeatmapBase/Peak
 // are heatmap.go's dark→bright gradient endpoints. Byte-faithful to the former
-// hand literals, so the render is unchanged.
+// hand literals, so the render is unchanged. GenHeatRamp is the 4 discrete shade
+// steps (light→full) heatmap.go's quantile dual-encode paints as each glyph bin's
+// Foreground — ramp[3] == GenHeatmapPeak so the discrete scale meets the gradient.
 var GenChartSeries = []lipgloss.Color{
 	lipgloss.Color("#60a5fa"),
 	lipgloss.Color("#f472b6"),
@@ -63,6 +65,13 @@ var GenChartSeries = []lipgloss.Color{
 	lipgloss.Color("#fbbf24"),
 	lipgloss.Color("#a78bfa"),
 	lipgloss.Color("#22d3ee"),
+}
+
+var GenHeatRamp = []lipgloss.Color{
+	lipgloss.Color("#0e4429"),
+	lipgloss.Color("#006d32"),
+	lipgloss.Color("#26a641"),
+	lipgloss.Color("#39d353"),
 }
 
 const (
