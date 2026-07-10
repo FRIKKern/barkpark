@@ -885,6 +885,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             cross_violations={@cross_violations}
             save_status={@save_status}
             doc_conflict={@doc_conflict}
+            paper_halt={@paper_halt}
             presences={@presences}
             parent_assigns={assigns}
             nav_group={@nav_group}
