@@ -367,15 +367,35 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # byte-identically (the callout maybe_put_true precedent: absence and
   # explicit-stack are indistinguishable at the bytes).
   #
-  # STEP-6 SEAM (data-only note, no code): the `layout` object is shaped so
-  # pdrender (Go TUI) and portable-doc.tsx (web) can interpret it later. The TUI
-  # COLLAPSES grid→stack (renders children in source order, ignoring
-  # tracks/span/order) since a terminal has no grid. Breakpoints beyond the
-  # built-in ≤720px 1-col collapse are DATA-carried now, rendered in step 6.
+  # SURFACE LEGS of the grid path (style-branched INSIDE this one clause — never a
+  # parallel render function):
+  #   * :article — the full CSS grid (`section_grid_html/3`): the shared
+  #     `.bp-section__grid` class + structural `--bp-tracks`/`--bp-grid-gap` custom
+  #     props, painted by paper-surface.css (the :article document DOES embed the
+  #     stylesheet — render.ex:143-150).
+  #   * :email (every non-:article style) — a DESIGNED inline-safe degrade: the
+  #     plain-stack Pd-tree seam (`compose_section_stack/2`) over order-sorted
+  #     children. render.ex's :email document embeds NO stylesheet ("Outlook is
+  #     the contract", inline-only — render.ex:152-162), so the grid class + inert
+  #     `--bp-tracks` custom props would arrive as an unstyled SILENT stack. This
+  #     leg stacks the children through the same inline-styled seam the plain stack
+  #     uses — NO bp-section__grid/__cell classes, NO custom props — honoring
+  #     per-cell `order` (a stable sort, mirroring blocks.go gridBody's CSS-order
+  #     reorder; absent/malformed order ≡ 0, source position preserved).
+  # The Go TUI (pdrender) renders a REAL adaptive grid (PR #1410, 2026-07-08:
+  # tracks/span/order honored, degrading to the stack ONLY below the per-cell width
+  # floor) — it does NOT unconditionally collapse grid→stack. Breakpoints beyond
+  # the built-in ≤720px 1-col collapse are DATA-carried, honored by that TUI solve.
   def compose_block(%{"type" => "section"} = b, style) do
     case grid_layout(b) do
-      nil -> compose_section_stack(b, style)
-      layout -> %{"kind" => "_raw", "html" => section_grid_html(b, layout, style)}
+      nil ->
+        compose_section_stack(b, style)
+
+      _layout when style != :article ->
+        compose_section_stack(order_children(b), style)
+
+      layout ->
+        %{"kind" => "_raw", "html" => section_grid_html(b, layout, style)}
     end
   end
 
@@ -1374,6 +1394,28 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
   end
 
+  # EMAIL-DEGRADE helper — stable-sort a grid section's `blocks` by their CSS
+  # `order` so the inline-safe stack (compose_section_stack) honors placement the
+  # SAME way the :article reader's `order:` on the cell does. Mirrors blocks.go
+  # `gridBody`'s `sort.SliceStable(items, cellOrder)`: absent/malformed order ≡ 0
+  # (order_int → nil → 0) and Enum.sort_by is stable, so equal-order children keep
+  # their source position. Returns `b` with only `blocks` reordered — span/order
+  # keys ride along on each child but are inert in the stack (the child's own
+  # compose ignores them; only `section_grid_html`'s cell wrapper reads them), so
+  # NO custom props leak into the email bytes.
+  defp order_children(b) do
+    ordered =
+      b
+      |> Map.get("blocks", [])
+      |> List.wrap()
+      |> Enum.sort_by(&cell_order/1)
+
+    Map.put(b, "blocks", ordered)
+  end
+
+  defp cell_order(child) when is_map(child), do: order_int(Map.get(child, "order")) || 0
+  defp cell_order(_), do: 0
+
   # `grid_layout/1` — the ONE predicate gating the grid path everywhere. Returns
   # the layout object iff its `mode` is exactly "grid"; ANY other shape (absent,
   # null, a non-map layout, or a non-"grid" mode such as an explicit
@@ -1398,10 +1440,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # (cell_layout_attr → span_int/order_int) so a malformed value falls safe (no style
   # injection, D2: no px, only structural ints).
   #
-  # DOCUMENTED FOLLOW-ON: the Go TUI (pdrender) + web (portable-doc.tsx) surfaces
-  # COLLAPSE grid→stack (a terminal/narrow surface has no grid) and render children
-  # in source order, ignoring tracks/span/order — a separate, filed follow-on, not
-  # this step.
+  # SURFACE NOTE: this `_raw` grid HTML is the :article leg ONLY — it needs the
+  # paper-surface.css `.bp-section__grid` rules to lay out, which the :article
+  # document embeds. The :email leg degrades to an inline-safe ORDERED stack (the
+  # section clause above), since Outlook strips the stylesheet this markup needs.
+  # The Go TUI (pdrender) renders a REAL adaptive grid (PR #1410: tracks/span/order
+  # honored, degrading to the stack only below the per-cell width floor) — it does
+  # NOT unconditionally collapse grid→stack. Web (portable-doc.tsx) still ignores
+  # section layout entirely — a filed follow-on (cd-11), not this step.
   defp section_grid_html(b, layout, style) do
     tracks = grid_tracks(Map.get(layout, "tracks"))
     gap = gap_token_var(Map.get(layout, "gap"))
