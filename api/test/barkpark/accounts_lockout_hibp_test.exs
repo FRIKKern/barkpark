@@ -105,9 +105,7 @@ defmodule Barkpark.AccountsLockoutHibpTest do
         Accounts.get_user_by_email_and_password("audit-ghost@example.com", "whatever")
       end
 
-      refute Barkpark.Repo.exists?(
-               from e in Event, where: e.action == "account_locked"
-             )
+      refute Barkpark.Repo.exists?(from e in Event, where: e.action == "account_locked")
     end
   end
 
@@ -129,7 +127,9 @@ defmodule Barkpark.AccountsLockoutHibpTest do
       row =
         Barkpark.Repo.one!(
           from e in Event,
-            where: e.category == "auth" and e.action == "recovery_code_used" and e.subject == ^user.id
+            where:
+              e.category == "auth" and e.action == "recovery_code_used" and
+                e.subject == ^user.id
         )
 
       # One of the batch was burned — the audit records how many are left.
