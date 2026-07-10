@@ -12,6 +12,7 @@ defmodule BarkparkWeb.SocialController do
   alias Barkpark.Accounts
   alias Barkpark.Sso
   alias Barkpark.Sso.Social
+  alias BarkparkWeb.SessionIssuer
 
   def start(conn, %{"provider" => name}) do
     case Social.provider(name) do
@@ -33,29 +34,41 @@ defmodule BarkparkWeb.SocialController do
 
     cond do
       is_nil(p) ->
+        Sso.record_login_failure("social:#{name}", nil, :provider_not_enabled)
         conn |> put_status(404) |> json(%{error: "provider not enabled"})
 
       state != get_session(conn, :social_state) ->
+        Sso.record_login_failure("social:#{name}", nil, :state_mismatch)
         conn |> put_status(400) |> json(%{error: "state mismatch"})
 
       true ->
         case Social.handle_callback(p, code, callback_uri(name)) do
           {:ok, user} ->
-            Sso.record_login(user, "social:#{name}", nil)
+            # era-w8-sso-mfa-binding: org-require-MFA binds at session-mint
+            # time — a governed factor-less user (via existing workspace
+            # memberships; social login is app-level, no org of its own) is
+            # refused HERE (audited), never landed in Studio.
+            if SessionIssuer.org_mfa_enrolment_blocked?(user) do
+              SessionIssuer.deny_org_mfa_enrolment(conn, user, "social:#{name}")
+            else
+              Sso.record_login(user, "social:#{name}", nil)
 
-            {:ok, token} =
-              Accounts.create_user_session_token(user,
-                ip_address: client_ip(conn),
-                user_agent: user_agent(conn)
-              )
+              {:ok, token} =
+                Accounts.create_user_session_token(user,
+                  ip_address: client_ip(conn),
+                  user_agent: user_agent(conn)
+                )
 
-            conn
-            |> configure_session(renew: true)
-            |> put_session("user_session", token)
-            |> put_status(:created)
-            |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+              conn
+              |> configure_session(renew: true)
+              |> put_session("user_session", token)
+              |> put_status(:created)
+              |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+            end
 
           {:error, reason} ->
+            # Failed exchange lands on the audit trail (era-w8).
+            Sso.record_login_failure("social:#{name}", nil, reason)
             conn |> put_status(401) |> json(%{error: "social_failed", detail: to_string(reason)})
         end
     end

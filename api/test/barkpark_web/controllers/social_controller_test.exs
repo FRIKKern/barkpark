@@ -2,7 +2,9 @@ defmodule BarkparkWeb.SocialControllerTest do
   @moduledoc "Social login HTTP surface — start redirect + callback session mint."
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Accounts, Sso.Social}
+  import Ecto.Query
+
+  alias Barkpark.{Accounts, Repo, Tenancy, Sso.Social}
 
   defmodule MockHTTP do
     @behaviour Barkpark.Sso.Social.HTTP
@@ -54,16 +56,55 @@ defmodule BarkparkWeb.SocialControllerTest do
     assert Accounts.verify_user_session_token(body["token"])
   end
 
-  test "GET callback with a mismatched state is rejected", %{conn: conn} do
+  test "GET callback with a mismatched state is rejected and audited", %{conn: conn} do
     conn =
       conn
       |> init_test_session(%{social_state: "real"})
       |> get("/v1/auth/social/google/callback?code=abc&state=forged")
 
     assert json_response(conn, 400)
+
+    # era-w8: the failed callback is on the audit trail.
+    assert Repo.exists?(
+             from e in Barkpark.Audit.Event,
+               where: e.action == "sso_login_failed"
+           )
   end
 
   test "start for an unconfigured provider is 404", %{conn: conn} do
     assert conn |> get("/v1/auth/social/github/start") |> json_response(404)
+  end
+
+  test "org-require-MFA: a governed factor-less user is refused a session at the callback (era-w8)",
+       %{conn: conn} do
+    # A user already governed via workspace membership in a require_mfa org —
+    # social login is app-level (no org of its own), so governance comes from
+    # the user's existing memberships.
+    {:ok, user} =
+      Accounts.register_user(%{email: "governed@example.com", password: "correct-horse-battery"})
+
+    {:ok, org} = Tenancy.create_organization(%{slug: "social-strict", name: "social-strict"})
+    {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "social-strict-ws", name: "social-strict-ws"})
+    {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
+
+    Application.put_env(:barkpark, :social_test, %{
+      "email" => "governed@example.com",
+      "sub" => "g-7",
+      "id" => "g-7"
+    })
+
+    conn =
+      conn
+      |> init_test_session(%{social_state: "s1"})
+      |> get("/v1/auth/social/google/callback?code=abc&state=s1")
+
+    body = json_response(conn, 403)
+    assert body["error"]["code"] == "mfa_enrolment_required"
+    refute body["token"]
+
+    # Fail closed: NO session was minted.
+    refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^user.id)
   end
 end

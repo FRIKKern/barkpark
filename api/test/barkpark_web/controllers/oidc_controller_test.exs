@@ -2,7 +2,9 @@ defmodule BarkparkWeb.OidcControllerTest do
   @moduledoc "OIDC RP HTTP surface — start redirect + callback session mint (era-w3-oidc-rp)."
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Accounts, Tenancy}
+  import Ecto.Query
+
+  alias Barkpark.{Accounts, Repo, Tenancy}
   alias Barkpark.Sso.Oidc
 
   @issuer "https://idp.example.com"
@@ -42,7 +44,7 @@ defmodule BarkparkWeb.OidcControllerTest do
         jwks_uri: @issuer <> "/jwks"
       })
 
-    :ok
+    {:ok, org: org}
   end
 
   defp mock_op(claims) do
@@ -99,5 +101,72 @@ defmodule BarkparkWeb.OidcControllerTest do
 
   test "start for an org without a connection is 404", %{conn: conn} do
     assert conn |> get("/v1/auth/oidc/no-such-org/start") |> json_response(404)
+  end
+
+  test "org-require-MFA: a governed factor-less user is refused a session at the callback (era-w8)",
+       %{conn: conn, org: org} do
+    # Make octrl govern: require MFA + give the org a workspace, so the
+    # callback's JIT provisioning puts the user under governance.
+    {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "octrl-ws", name: "octrl-ws"})
+    {:ok, _ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+    mock_op(%{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "exp" => System.system_time(:second) + 300,
+      "nonce" => "n1",
+      "email" => "governed@octrl.com"
+    })
+
+    conn =
+      conn
+      |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+      |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
+
+    body = json_response(conn, 403)
+    assert body["error"]["code"] == "mfa_enrolment_required"
+    refute body["token"]
+
+    # Fail closed: the account exists (JIT ran) but NO session was minted.
+    user = Accounts.get_user_by_email("governed@octrl.com")
+    assert user
+    refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^user.id)
+  end
+
+  test "failed callbacks audit: missing connection, state mismatch, exchange failure (era-w8)",
+       %{conn: _conn} do
+    # Missing connection → 404, audited.
+    assert build_conn()
+           |> get("/v1/auth/oidc/ghost-org/callback?code=x&state=y")
+           |> json_response(404)
+
+    # State mismatch → 400, audited.
+    assert build_conn()
+           |> init_test_session(%{oidc_state: "real", oidc_nonce: "n1", oidc_verifier: "v1"})
+           |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
+           |> json_response(400)
+
+    # Token-exchange/claims failure (nonce mismatch in the id_token) → 401, audited.
+    mock_op(%{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "exp" => System.system_time(:second) + 300,
+      "nonce" => "WRONG",
+      "email" => "nope@octrl.com"
+    })
+
+    assert build_conn()
+           |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+           |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
+           |> json_response(401)
+
+    failures = Repo.all(from e in Barkpark.Audit.Event, where: e.action == "sso_login_failed")
+    reasons = Enum.map(failures, & &1.metadata["reason"])
+
+    assert length(failures) == 3
+    assert Enum.all?(failures, &(&1.metadata["provider"] == "oidc"))
+    assert "no_connection" in reasons
+    assert "state_mismatch" in reasons
   end
 end

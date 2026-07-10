@@ -14,6 +14,20 @@ defmodule BarkparkWeb.LiveAuth do
       future operator persona can be granted publish-ops access without
       exposing the full admin surface (settings reveal, schema CRUD).
 
+    * `:require_org_mfa` — org-require-MFA on the LiveView surface
+      (era-w8-sso-mfa-binding), defence-in-depth behind the session-mint
+      chokepoints: a `user_session` cookie resolving to a user who is
+      governed by a `require_mfa` org and has NO factor enrolled is halted
+      to `/login` with enrolment guidance. Covers cookie reuse — a session
+      minted before the org flipped `require_mfa` on, or the deliberately
+      flagged `POST /v1/auth/login` enrolment session (which the API
+      surface gates via `RequireOrgMfaEnrolment`, but LiveViews never ran
+      a plug). Anonymous and api_token-only sessions pass untouched — the
+      other hooks own those gates — and an undecidable `user_session` is
+      already treated as logged out by `user_from_session/1` (fail
+      closed). Runs in the scoped + admin + plugin Studio live_sessions
+      (router.ex).
+
   Both hooks read `session["api_token"]` (the raw bearer token), verify it
   via `Barkpark.Auth`, and halt with a redirect to `/studio` on failure.
 
@@ -40,6 +54,23 @@ defmodule BarkparkWeb.LiveAuth do
 
   def on_mount(:ops, _params, session, socket) do
     authorize(socket, session, ["ops", "admin"], "Operator access required")
+  end
+
+  def on_mount(:require_org_mfa, _params, session, socket) do
+    case user_from_session(session) do
+      %Barkpark.Accounts.User{} = user ->
+        if BarkparkWeb.SessionIssuer.org_mfa_enrolment_blocked?(user) do
+          {:halt,
+           socket
+           |> put_flash(:error, BarkparkWeb.SessionIssuer.org_mfa_enrolment_message())
+           |> redirect(to: "/login")}
+        else
+          {:cont, socket}
+        end
+
+      _ ->
+        {:cont, socket}
+    end
   end
 
   def on_mount(:fetch_api_token, _params, session, socket) do
