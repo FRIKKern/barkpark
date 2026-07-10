@@ -274,4 +274,125 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
       assert scim(token) |> get("/scim/v2/Users/#{user.id}") |> json_response(200)
     end
   end
+
+  # era-w8-scim-conformance — real-IdP (Okta / Azure AD) onboarding breadth.
+
+  describe "ListResponse paging (RFC 7644 §3.4.2.4)" do
+    test "honours count as a page limit + emits startIndex/itemsPerPage/totalResults" do
+      %{token: token} = org_with_ws("pageco")
+
+      for e <- ~w(a@pageco.com b@pageco.com c@pageco.com),
+          do: provision(token, e) |> json_response(201)
+
+      page1 = scim(token) |> get("/scim/v2/Users?count=2") |> json_response(200)
+      assert page1["totalResults"] == 3
+      assert page1["startIndex"] == 1
+      assert page1["itemsPerPage"] == 2
+      assert length(page1["Resources"]) == 2
+      # ordered by email asc — first page is a@, b@
+      assert Enum.map(page1["Resources"], & &1["userName"]) == ["a@pageco.com", "b@pageco.com"]
+    end
+
+    test "startIndex offsets into the result set (last page is a partial)" do
+      %{token: token} = org_with_ws("page2co")
+
+      for e <- ~w(a@page2co.com b@page2co.com c@page2co.com),
+          do: provision(token, e) |> json_response(201)
+
+      last = scim(token) |> get("/scim/v2/Users?startIndex=3&count=2") |> json_response(200)
+      assert last["totalResults"] == 3
+      assert last["startIndex"] == 3
+      assert last["itemsPerPage"] == 1
+      assert [%{"userName" => "c@page2co.com"}] = last["Resources"]
+    end
+  end
+
+  describe "resource meta + ETag concurrency (RFC 7643 §3.1, RFC 7644 §3.14)" do
+    test "a provisioned user carries meta.created/lastModified/version + ETag header" do
+      %{token: token} = org_with_ws("metaco")
+      conn = provision(token, "m@metaco.com")
+      body = json_response(conn, 201)
+
+      meta = body["meta"]
+      assert meta["resourceType"] == "User"
+      assert is_binary(meta["created"])
+      assert is_binary(meta["lastModified"])
+      assert String.starts_with?(meta["version"], "W/\"")
+      assert meta["location"] =~ "/scim/v2/Users/#{body["id"]}"
+      # the ETag response header mirrors meta.version
+      assert [meta["version"]] == get_resp_header(conn, "etag")
+    end
+
+    test "a stale If-Match on PUT → 412 (never silently overwrites)" do
+      %{token: token} = org_with_ws("ifmatchco")
+      provision(token, "w@ifmatchco.com") |> json_response(201)
+      user = Accounts.get_user_by_email("w@ifmatchco.com")
+
+      resp =
+        scim(token)
+        |> put_req_header("if-match", ~s(W/"0"))
+        |> put("/scim/v2/Users/#{user.id}", Jason.encode!(%{"userName" => "w@ifmatchco.com"}))
+        |> json_response(412)
+
+      assert resp["status"] == "412"
+    end
+
+    test "a matching If-Match on PUT proceeds → 200" do
+      %{token: token} = org_with_ws("ifmatchok")
+      body = provision(token, "ok@ifmatchok.com") |> json_response(201)
+      user = Accounts.get_user_by_email("ok@ifmatchok.com")
+
+      assert scim(token)
+             |> put_req_header("if-match", body["meta"]["version"])
+             |> put(
+               "/scim/v2/Users/#{user.id}",
+               Jason.encode!(%{"userName" => "ok@ifmatchok.com"})
+             )
+             |> json_response(200)
+    end
+  end
+
+  describe "error shapes carry scimType (RFC 7644 §3.12)" do
+    test "400 missing userName → scimType invalidValue" do
+      %{token: token} = org_with_ws("scimtypeco")
+      resp = scim(token) |> post("/scim/v2/Users", Jason.encode!(%{})) |> json_response(400)
+      assert resp["scimType"] == "invalidValue"
+      assert resp["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
+    end
+  end
+
+  describe "discovery endpoints (RFC 7644 §4)" do
+    test "GET /ServiceProviderConfig advertises patch/filter/etag" do
+      %{token: token} = org_with_ws("spcco")
+      resp = scim(token) |> get("/scim/v2/ServiceProviderConfig") |> json_response(200)
+
+      assert resp["patch"]["supported"] == true
+      assert resp["filter"]["supported"] == true
+      assert resp["filter"]["maxResults"] == 200
+      assert resp["etag"]["supported"] == true
+      assert [%{"type" => "oauthbearertoken"}] = resp["authenticationSchemes"]
+    end
+
+    test "GET /ResourceTypes lists User + Group as a ListResponse" do
+      %{token: token} = org_with_ws("rtco")
+      resp = scim(token) |> get("/scim/v2/ResourceTypes") |> json_response(200)
+
+      assert resp["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+      ids = Enum.map(resp["Resources"], & &1["id"]) |> Enum.sort()
+      assert ids == ["Group", "User"]
+    end
+
+    test "GET /Schemas lists the core User + Group schemas" do
+      %{token: token} = org_with_ws("schemaco")
+      resp = scim(token) |> get("/scim/v2/Schemas") |> json_response(200)
+
+      ids = Enum.map(resp["Resources"], & &1["id"])
+      assert "urn:ietf:params:scim:schemas:core:2.0:User" in ids
+      assert "urn:ietf:params:scim:schemas:core:2.0:Group" in ids
+    end
+
+    test "deny: discovery is behind the SCIM bearer — 401 without a token" do
+      assert build_conn() |> get("/scim/v2/ServiceProviderConfig") |> json_response(401)
+    end
+  end
 end

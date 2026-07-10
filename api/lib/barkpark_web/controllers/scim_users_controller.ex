@@ -1,18 +1,20 @@
 defmodule BarkparkWeb.ScimUsersController do
   @moduledoc """
-  SCIM 2.0 `/scim/v2/Users` — directory-sync user provisioning (era-w4-scim-users).
+  SCIM 2.0 `/scim/v2/Users` — directory-sync user provisioning (era-w4-scim-users;
+  conformance hardening era-w8-scim-conformance).
 
   Org-scoped via `RequireScimToken` (`conn.assigns.scim_org`). Provision (POST)
   creates a confirmed user + org membership; deprovision (DELETE, or PATCH/PUT
   `active:false`) revokes all sessions + membership immediately. Every mutating
-  op is audited.
+  op is audited. Wire shapes (ListResponse paging, resource `meta`/ETag, error
+  `scimType`) render through `BarkparkWeb.ScimResponse`.
   """
   use BarkparkWeb, :controller
 
   alias Barkpark.Scim
+  alias BarkparkWeb.ScimResponse
 
   @user_schema "urn:ietf:params:scim:schemas:core:2.0:User"
-  @list_schema "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 
   # POST /scim/v2/Users — provision.
   def create(conn, params) do
@@ -20,13 +22,16 @@ defmodule BarkparkWeb.ScimUsersController do
 
     case Scim.provision_user(org, params) do
       {:ok, user} ->
-        conn |> put_status(201) |> json(render_user(user))
+        conn
+        |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))
+        |> put_status(201)
+        |> json(render_user(conn, user))
 
       {:error, :missing_username} ->
-        scim_error(conn, 400, "userName is required")
+        ScimResponse.error(conn, 400, "userName is required", "invalidValue")
 
       {:error, _} ->
-        scim_error(conn, 400, "could not provision user")
+        ScimResponse.error(conn, 400, "could not provision user", "invalidValue")
     end
   end
 
@@ -35,22 +40,27 @@ defmodule BarkparkWeb.ScimUsersController do
     org = conn.assigns.scim_org
 
     case Scim.get_org_user(org, id) do
-      nil -> scim_error(conn, 404, "user not found in this organization")
-      user -> json(conn, render_user(user))
+      nil ->
+        ScimResponse.error(conn, 404, "user not found in this organization")
+
+      user ->
+        conn
+        |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))
+        |> json(render_user(conn, user))
     end
   end
 
-  # GET /scim/v2/Users?filter=userName eq "x"
+  # GET /scim/v2/Users?filter=userName eq "x"&startIndex=1&count=50
   def index(conn, params) do
     org = conn.assigns.scim_org
+    {start_index, count} = ScimResponse.paging(params)
     email = parse_username_filter(params["filter"])
-    users = Scim.list_org_users(org, email)
 
-    json(conn, %{
-      "schemas" => [@list_schema],
-      "totalResults" => length(users),
-      "Resources" => Enum.map(users, &render_user/1)
-    })
+    {total, users} =
+      Scim.list_org_users(org, filter: email, start_index: start_index, count: count)
+
+    resources = Enum.map(users, &render_user(conn, &1))
+    json(conn, ScimResponse.list_response(resources, total, start_index))
   end
 
   # PATCH /scim/v2/Users/:id — the deprovision signal is active:false.
@@ -59,15 +69,19 @@ defmodule BarkparkWeb.ScimUsersController do
 
     case Scim.get_org_user(org, id) do
       nil ->
-        scim_error(conn, 404, "user not found in this organization")
+        ScimResponse.error(conn, 404, "user not found in this organization")
 
       user ->
-        if deactivating?(params) do
-          {:ok, _} = Scim.deprovision_user(org, user)
-          json(conn, render_user(user, false))
-        else
-          json(conn, render_user(user))
-        end
+        with_precondition(conn, user, fn conn ->
+          if deactivating?(params) do
+            {:ok, _} = Scim.deprovision_user(org, user)
+            json(conn, render_user(conn, user, false))
+          else
+            conn
+            |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))
+            |> json(render_user(conn, user))
+          end
+        end)
     end
   end
 
@@ -80,24 +94,44 @@ defmodule BarkparkWeb.ScimUsersController do
 
     case Scim.get_org_user(org, id) do
       nil ->
-        scim_error(conn, 404, "user not found in this organization")
+        ScimResponse.error(conn, 404, "user not found in this organization")
 
       user ->
-        {:ok, _} = Scim.deprovision_user(org, user, hard: true)
-        send_resp(conn, 204, "")
+        with_precondition(conn, user, fn conn ->
+          {:ok, _} = Scim.deprovision_user(org, user, hard: true)
+          send_resp(conn, 204, "")
+        end)
     end
   end
 
   # ── SCIM rendering ─────────────────────────────────────────────────────────
 
-  defp render_user(user, active \\ true) do
+  defp render_user(conn, user, active \\ true) do
     %{
       "schemas" => [@user_schema],
       "id" => user.id,
       "userName" => user.email,
       "active" => active,
-      "meta" => %{"resourceType" => "User"}
+      "meta" =>
+        ScimResponse.meta(
+          "User",
+          ScimResponse.location(conn, "Users", user.id),
+          user.inserted_at,
+          user.updated_at
+        )
     }
+  end
+
+  # Guard a mutation behind the resource's current ETag (RFC 7644 §3.14): an
+  # absent If-Match proceeds; a stale one → 412 Precondition Failed.
+  defp with_precondition(conn, user, fun) do
+    case ScimResponse.if_match(conn, ScimResponse.version(user.updated_at)) do
+      :ok ->
+        fun.(conn)
+
+      :precondition_failed ->
+        ScimResponse.error(conn, 412, "resource version mismatch (If-Match)")
+    end
   end
 
   # `active:false` arrives either as a top-level PUT field or a PATCH Operations
@@ -123,15 +157,5 @@ defmodule BarkparkWeb.ScimUsersController do
       [_, email] -> email
       _ -> nil
     end
-  end
-
-  defp scim_error(conn, status, detail) do
-    conn
-    |> put_status(status)
-    |> json(%{
-      "schemas" => ["urn:ietf:params:scim:api:messages:2.0:Error"],
-      "status" => to_string(status),
-      "detail" => detail
-    })
   end
 end
