@@ -431,7 +431,7 @@ function paperBlock(themes = loadThemes()) {
 // values are HSL channels OR a bare var(--role) reference (border-muted light =
 // --border; fg-accent dark = --text) — the emitter passes a var() through.
 const STATUS_FG = ["ok-fg", "warn-fg", "danger-fg", "info-fg"];
-const CHROME_ALIASES = ["bg-accent", "border-muted", "fg-dim", "fg-accent"];
+const CHROME_ALIASES = ["bg-accent", "border-muted", "fg-dim", "fg-accent", "surface-raised", "border-subtle"];
 const chromeVal = (v) => (v.startsWith("var(") ? v : hsl(v));
 
 function onStatusVars(theme, indent, t = tokens) {

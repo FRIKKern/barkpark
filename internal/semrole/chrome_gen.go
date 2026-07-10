@@ -20,7 +20,7 @@ var (
 	GenChromeCursorBg      = lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"}
 	GenChromeBorder        = lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}
 	GenChromeBorderActive  = lipgloss.AdaptiveColor{Light: "#3b82f6", Dark: "#3b82f6"}
-	GenChromeLabel         = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"}
+	GenChromeLabel         = lipgloss.AdaptiveColor{Light: "#6e6e77", Dark: "#a1a1aa"}
 	GenChromePrimaryCta    = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
 	GenChromeOnPrimary     = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1e18"}
 )
@@ -123,8 +123,8 @@ var GenInstanceLifecycle = map[string]GenInstanceLifecycleToken{
 	"provisioning":   {Glyph: "◌", ASCIIGlyph: "~", Role: "info", HueLight: "#3b82f6", HueDark: "#3b82f6"},
 	"live":           {Glyph: "●", ASCIIGlyph: "*", Role: "ok", HueLight: "#137236", HueDark: "#45c474"},
 	"degraded":       {Glyph: "◐", ASCIIGlyph: "!", Role: "warn", HueLight: "#ba7008", HueDark: "#f8ab25"},
-	"stopped":        {Glyph: "○", ASCIIGlyph: "o", Role: "", HueLight: "#71717a", HueDark: "#a1a1aa"},
-	"archived":       {Glyph: "▢", ASCIIGlyph: "#", Role: "", HueLight: "#71717a", HueDark: "#a1a1aa"},
+	"stopped":        {Glyph: "○", ASCIIGlyph: "o", Role: "", HueLight: "#6e6e77", HueDark: "#a1a1aa"},
+	"archived":       {Glyph: "▢", ASCIIGlyph: "#", Role: "", HueLight: "#6e6e77", HueDark: "#a1a1aa"},
 	"decommissioned": {Glyph: "✕", ASCIIGlyph: "x", Role: "danger", HueLight: "#b42222", HueDark: "#ef6161"},
 	"adopted":        {Glyph: "◈", ASCIIGlyph: "+", Role: "info", HueLight: "#3b82f6", HueDark: "#3b82f6"},
 }

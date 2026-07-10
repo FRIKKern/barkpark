@@ -20,7 +20,7 @@
   --color-surface: hsl(0 0% 100%);
   --color-muted-surface: hsl(240 4.8% 95.9%);
   --color-text: hsl(240 10% 3.9%);
-  --color-muted-text: hsl(240 3.8% 46.1%);
+  --color-muted-text: hsl(240 3.8% 45%);
   --color-border: hsl(240 5.9% 90%);
   --color-ring: hsl(163 42% 30%);
   --color-accent: hsl(30 92% 42%);
@@ -55,7 +55,7 @@
   --color-surface: hsl(0 0% 100%);
   --color-muted-surface: hsl(240 4.8% 95.9%);
   --color-text: hsl(240 10% 3.9%);
-  --color-muted-text: hsl(240 3.8% 46.1%);
+  --color-muted-text: hsl(240 3.8% 45%);
   --color-border: hsl(240 5.9% 90%);
   --color-ring: hsl(163 42% 30%);
   --color-accent: hsl(30 92% 42%);
