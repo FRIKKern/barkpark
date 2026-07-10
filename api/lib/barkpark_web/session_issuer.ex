@@ -36,14 +36,87 @@ defmodule BarkparkWeb.SessionIssuer do
   # enrolment. The key is ADDITIVE and only present when true — with no org
   # requiring MFA the response is byte-identical to before.
   defp login_body(token, user) do
-    body = %{token: token, user: %{id: user.id, email: user.email}}
-
-    if not Accounts.mfa_enrolled?(user) and
-         Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) do
-      Map.put(body, :mfa_enrolment_required, true)
+    if org_mfa_enrolment_blocked?(user) do
+      %{token: token, user: %{id: user.id, email: user.email}, mfa_enrolment_required: true}
     else
-      body
+      %{token: token, user: %{id: user.id, email: user.email}}
     end
+  end
+
+  @doc """
+  Is `user` held to org-MFA enrolment — governed by a `require_mfa` org
+  (`Barkpark.Tenancy.org_requires_mfa_for_user?/1`, ANY-org-requires →
+  enforce) with NO factor enrolled? The ONE predicate every session-mint
+  chokepoint shares (era-w8-sso-mfa-binding): password/magic login flags the
+  session, the SSO callbacks refuse to mint, and the LiveView `on_mount`
+  hook refuses to mount.
+  """
+  @spec org_mfa_enrolment_blocked?(Accounts.User.t()) :: boolean()
+  def org_mfa_enrolment_blocked?(%Accounts.User{} = user) do
+    not Accounts.mfa_enrolled?(user) and
+      Barkpark.Tenancy.org_requires_mfa_for_user?(user.id)
+  end
+
+  @doc """
+  Refuse an SSO session-mint for a governed factor-less user
+  (era-w8-sso-mfa-binding). Audits the block, then forks on the caller: a
+  browser (Accept: text/html) is redirected to `/login` with enrolment
+  guidance — never landed in Studio; an API caller gets the SAME
+  `403 mfa_enrolment_required` envelope `RequireOrgMfaEnrolment` emits, so
+  clients handle one shape. No session token is created on this path —
+  unlike `POST /v1/auth/login`, an IdP redirect has no enrolment story that
+  needs the session, so the SSO door fails closed.
+  """
+  @spec deny_org_mfa_enrolment(Plug.Conn.t(), Accounts.User.t(), String.t(), binary() | nil) ::
+          Plug.Conn.t()
+  def deny_org_mfa_enrolment(conn, %Accounts.User{} = user, provider, org_id \\ nil) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "mfa_enrolment_required",
+      subject: user.id,
+      actor_type: "user",
+      actor_id: user.id,
+      metadata: %{
+        "reason" => "org_require_mfa",
+        "provider" => provider,
+        "organization_id" => org_id,
+        "path" => conn.request_path
+      }
+    })
+
+    if browser?(conn) do
+      conn
+      |> Phoenix.Controller.fetch_flash()
+      |> Phoenix.Controller.put_flash(:error, org_mfa_enrolment_message())
+      |> Phoenix.Controller.redirect(to: "/login")
+    else
+      conn
+      |> put_status(403)
+      |> json(%{
+        error: %{
+          code: "mfa_enrolment_required",
+          message: "an organization you belong to requires MFA — enrol a factor to continue",
+          hint:
+            "enrol TOTP via POST /v1/auth/mfa/enroll + /verify, or a passkey via " <>
+              "POST /v1/auth/webauthn/register/challenge + /register, then retry"
+        }
+      })
+    end
+  end
+
+  @doc "The human-facing org-MFA enrolment guidance shared by the browser doors."
+  @spec org_mfa_enrolment_message() :: String.t()
+  def org_mfa_enrolment_message do
+    "Your organization requires MFA. Enrol a factor first " <>
+      "(POST /v1/auth/mfa/enroll or `bp auth mfa enroll`), then sign in again."
+  end
+
+  # A browser's form POST / redirect chain advertises text/html; API clients
+  # (interop suite, SDKs) don't — they keep the JSON contract.
+  defp browser?(conn) do
+    conn
+    |> get_req_header("accept")
+    |> Enum.any?(&String.contains?(&1, "text/html"))
   end
 
   defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()

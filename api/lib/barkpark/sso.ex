@@ -34,6 +34,34 @@ defmodule Barkpark.Sso do
   end
 
   @doc """
+  Record a FAILED SSO callback on the audit trail (era-w8-sso-mfa-binding).
+  Emits an `auth`/`sso_login_failed` event with the provider, the targeted org
+  slug (nil for app-level social login), and the failure reason. Before this,
+  only the success path audited — a forged assertion, replayed state, or failed
+  token exchange left no trail.
+  """
+  @spec record_login_failure(String.t(), String.t() | nil, term()) :: :ok
+  def record_login_failure(provider, org_slug, reason) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "sso_login_failed",
+      subject: org_slug,
+      actor_type: "anonymous",
+      metadata: %{
+        "provider" => provider,
+        "org_slug" => org_slug,
+        "reason" => reason_string(reason)
+      }
+    })
+
+    :ok
+  end
+
+  defp reason_string(reason) when is_binary(reason), do: reason
+  defp reason_string(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp reason_string(reason), do: inspect(reason)
+
+  @doc """
   Find-or-create the SSO-authenticated User by `email`. New accounts get an
   unusable local password (they sign in via the IdP) and are confirmed (the IdP
   vouched for the identity). Shared by the OIDC / SAML flows.

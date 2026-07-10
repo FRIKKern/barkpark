@@ -131,6 +131,108 @@ defmodule BarkparkWeb.SamlControllerTest do
            )
   end
 
+  describe "org-require-MFA at the ACS mint (era-w8-sso-mfa-binding)" do
+    test "a governed factor-less user is refused a session (JSON caller)", %{conn: conn} do
+      i = idp()
+      {org, _ws} = setup_conn(i.cert_pem)
+      {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+
+      resp =
+        post(conn, "/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("governed@samlctrl.com", i.key, i.cert_der)
+        })
+
+      body = json_response(resp, 403)
+      assert body["error"]["code"] == "mfa_enrolment_required"
+      refute body["token"]
+
+      # Fail closed: the account was JIT-provisioned but NO session exists.
+      user = Accounts.get_user_by_email("governed@samlctrl.com")
+      assert user
+
+      refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^user.id)
+
+      # The block is on the audit trail.
+      assert Repo.exists?(
+               from e in Barkpark.Audit.Event,
+                 where: e.action == "mfa_enrolment_required" and e.subject == ^user.id
+             )
+    end
+
+    test "a governed factor-less BROWSER is routed to /login, never Studio", %{conn: conn} do
+      i = idp()
+      {org, _ws} = setup_conn(i.cert_pem)
+      {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+
+      conn =
+        conn
+        |> put_req_header("accept", "text/html")
+        |> post("/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("browser-gov@samlctrl.com", i.key, i.cert_der)
+        })
+
+      assert redirected_to(conn) == "/login"
+      refute get_session(conn, "user_session")
+    end
+
+    test "a governed user WITH a factor mints unchanged (zero-tax)", %{conn: conn} do
+      i = idp()
+      {org, _ws} = setup_conn(i.cert_pem)
+      {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+
+      {:ok, user} =
+        Accounts.register_user(%{email: "armed@samlctrl.com", password: "correct-horse-battery"})
+
+      secret = NimbleTOTP.secret()
+
+      {:ok, _user, _codes} =
+        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+      body =
+        conn
+        |> post("/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("armed@samlctrl.com", i.key, i.cert_der)
+        })
+        |> json_response(201)
+
+      assert body["token"]
+      assert Accounts.verify_user_session_token(body["token"])
+    end
+  end
+
+  test "failed ACS callbacks land on the audit trail (era-w8)", %{conn: conn} do
+    # No connection for the org → 404, audited.
+    assert conn
+           |> post("/v1/auth/saml/no-such-org/acs", %{"SAMLResponse" => Base.encode64("<x/>")})
+           |> json_response(404)
+
+    i = idp()
+    setup_conn(i.cert_pem)
+
+    # Bad base64 → 400, audited.
+    assert build_conn()
+           |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => "!!!not-base64!!!"})
+           |> json_response(400)
+
+    # Forged signature (attacker key, victim connection) → 401, audited.
+    attacker = idp()
+
+    assert build_conn()
+           |> post("/v1/auth/saml/#{@slug}/acs", %{
+             "SAMLResponse" =>
+               signed_response("victim@samlctrl.com", attacker.key, attacker.cert_der)
+           })
+           |> json_response(401)
+
+    failures = Repo.all(from e in Barkpark.Audit.Event, where: e.action == "sso_login_failed")
+    reasons = Enum.map(failures, & &1.metadata["reason"])
+
+    assert length(failures) == 3
+    assert Enum.all?(failures, &(&1.metadata["provider"] == "saml"))
+    assert "no_connection" in reasons
+    assert "invalid_base64" in reasons
+  end
+
   test "POST ACS with a bad base64 body is 400", %{conn: conn} do
     i = idp()
     setup_conn(i.cert_pem)

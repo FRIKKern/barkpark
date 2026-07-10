@@ -48,6 +48,27 @@ defmodule BarkparkWeb.StudioUserLoginTest do
     {user, secret}
   end
 
+  # Put `user` under org-MFA governance: member of a workspace owned by a
+  # `require_mfa` organization.
+  defp govern_mfa!(user, slug) do
+    {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
+    {:ok, _org} = Tenancy.set_organization_require_mfa(org.id, true)
+    {:ok, gws} = Tenancy.create_workspace(%{slug: slug <> "-gov", name: slug <> "-gov"})
+    {:ok, gws} = Tenancy.assign_workspace_to_organization(gws, org.id)
+    member!(gws, user)
+    :ok
+  end
+
+  # Mint a session token directly and plant it as the browser cookie — the
+  # cookie-REUSE simulation (era-w8-sso-mfa-binding): the password and SSO
+  # doors now refuse to mint for a governed factor-less user, so the live
+  # threat is a session minted BEFORE the org flipped `require_mfa` on (or
+  # the deliberately flagged POST /v1/auth/login enrolment session).
+  defp cookie_conn(conn, user) do
+    {:ok, token} = Accounts.create_user_session_token(user, [])
+    init_test_session(conn, %{"user_session" => token})
+  end
+
   describe "account sign-in (email + password)" do
     test "signs in and lands on /studio with a user_session cookie", %{conn: conn} do
       register!("dana@example.com")
@@ -175,6 +196,46 @@ defmodule BarkparkWeb.StudioUserLoginTest do
 
       assert {:error, {:redirect, %{to: "/studio"}}} =
                conn |> recycle() |> live("/studio/org-admin")
+    end
+  end
+
+  describe "org-require-MFA on LiveView mounts (era-w8-sso-mfa-binding)" do
+    test "a governed factor-less session cookie is denied the scoped Studio mount",
+         %{conn: conn} do
+      user = register!("cookie-reuse@example.com")
+      ws = workspace!("mfa-scope")
+      member!(ws, user)
+      govern_mfa!(user, "mfa-scope-org")
+
+      conn = cookie_conn(conn, user)
+
+      assert {:error, {:redirect, %{to: "/login"}}} =
+               live(conn, "/w/mfa-scope/p/main/d/production/studio")
+    end
+
+    test "a governed factor-less admin cookie is denied the admin mount", %{conn: conn} do
+      user = register!("govadmin@example.com")
+      %{id: default_ws_id} = Tenancy.get_default_workspace()
+      {:ok, _} = TenancyAuth.create_membership(default_ws_id, user.id, "owner", "user")
+      govern_mfa!(user, "govadmin-org")
+
+      conn = cookie_conn(conn, user)
+
+      # LiveAuth :admin passes (owner in Default) — :require_org_mfa halts.
+      assert {:error, {:redirect, %{to: "/login"}}} = live(conn, "/studio/org-admin")
+    end
+
+    test "a governed user WITH a factor mounts unchanged (zero-tax)", %{conn: conn} do
+      user = register!("armed-mount@example.com")
+      ws = workspace!("armed-scope")
+      member!(ws, user)
+      govern_mfa!(user, "armed-scope-org")
+      {user, _secret} = enroll_totp!(user)
+
+      conn = cookie_conn(conn, user)
+
+      assert {:ok, _view, html} = live(conn, "/w/armed-scope/p/main/d/production/studio")
+      assert html =~ "armed-scope"
     end
   end
 
