@@ -2752,6 +2752,149 @@ test("liveness chip: renderLivenessChip paints a data-state + label without thro
   }
 });
 
+// ── /activate device-login render states (fake-DOM swap) ────────────────────
+// bp-login-ux W3 (decision 40). The pre-click skeletons (entry/confirm/gone/
+// rate_limited) are smoke-pinned in __preview__/smoke.mjs, but the click-driven
+// approved/denied terminals morph #activate-body IN PLACE — smoke's click() is
+// inert, so they're DOM-tested here by calling renderActivateResult directly
+// against a swapped document (the same swap idiom the liveness-chip tests use).
+// A minimal CAPTURING DOM: querySelector caches one element per #id and records
+// the raw innerHTML string, so assertions read the literal markup (unlike the
+// class-span-parsing fakeDom() above). setInterval is inert in the sandbox, so
+// renderActivateRateLimited pins its INITIAL disabled skeleton, never a tick.
+function activateDom() {
+  const els = new Map();
+  const make = (id) => ({
+    id: id || "", innerHTML: "", textContent: "", value: "", disabled: false,
+    hidden: false, addEventListener() {}, focus() {}, querySelector() { return null; },
+  });
+  const byId = (id) => {
+    if (!els.has(id)) els.set(id, make(id));
+    return els.get(id);
+  };
+  return {
+    document: {
+      querySelector: (sel) => byId(String(sel).replace(/^#/, "")),
+      getElementById: (id) => byId(id),
+      createElement: () => make(""),
+    },
+    body: () => byId("activate-body").innerHTML,
+  };
+}
+
+function withActivateDom(fn) {
+  const orig = sandbox.document;
+  const dom = activateDom();
+  sandbox.document = dom.document;
+  try { return fn(dom); } finally { sandbox.document = orig; }
+}
+
+test("the /activate render functions are exported on the test hook", () => {
+  for (const name of ["renderActivateEntry", "renderActivateConfirm",
+    "renderActivateResult", "renderActivateError", "renderActivateRateLimited"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("renderActivateResult('approved'): the signed-in terminal, distinct from denied", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateResult("approved");
+    const html = dom.body();
+    assert.ok(html.includes("You're signed in"), "announces success");
+    assert.ok(html.includes("Approved"), "carries the approved eyebrow");
+    assert.ok(html.includes("finishing sign-in"), "tells the user to return to the terminal");
+    assert.ok(!html.includes("Request denied"), "must NOT read as the denied terminal");
+  });
+});
+
+test("renderActivateResult('denied'): the denied terminal, nothing shared", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateResult("denied");
+    const html = dom.body();
+    assert.ok(html.includes("Request denied"), "names the denial");
+    assert.ok(html.includes("Nothing was shared"), "reassures nothing leaked");
+    assert.ok(!html.includes("You're signed in"), "must NOT read as the approved terminal");
+  });
+});
+
+test("renderActivateResult('gone'): the expired/used dead-end offers a fresh code", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateResult("gone");
+    const html = dom.body();
+    assert.ok(html.includes("This code has expired or was already used"));
+    assert.ok(html.includes("Enter a different code"), "offers a retry with a fresh code");
+    assert.ok(html.includes('id="activate-retry"'));
+  });
+});
+
+test("renderActivateEntry: the manual code-entry form", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateEntry("");
+    const html = dom.body();
+    assert.ok(html.includes('id="activate-form"'));
+    assert.ok(html.includes('id="activate-code"'));
+    assert.ok(html.includes("Approve a device sign-in"));
+    assert.ok(html.includes(">Continue<"));
+  });
+});
+
+test("renderActivateEntry: a partial prefill is normalized into the field value", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateEntry("abcd23");
+    const html = dom.body();
+    // normalizeUserCode: uppercase, dash after 4, ambiguous chars dropped.
+    assert.ok(html.includes('value="ABCD-23"'), "prefill normalized into the input");
+  });
+});
+
+test("renderActivateConfirm: names the requesting machine + explicit Approve/Deny", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateConfirm("ABCD-2345", {
+      client_name: "bp on nimbus.local",
+      ip_address: "203.0.113.7",
+      user_agent: "bp/1.0 (darwin arm64)",
+      expires_at: new Date(Date.now() + 9 * 60000).toISOString(),
+    });
+    const html = dom.body();
+    assert.ok(html.includes("Approve this sign-in?"));
+    assert.ok(html.includes("bp on nimbus.local"), "names the device");
+    assert.ok(html.includes("203.0.113.7"), "shows the requesting IP");
+    assert.ok(html.includes('id="activate-approve"'));
+    assert.ok(html.includes('id="activate-deny"'));
+  });
+});
+
+test("renderActivateConfirm: a bare inspect body still renders (Unknown device, no empty rows)", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateConfirm("ABCD-2345", {});
+    const html = dom.body();
+    assert.ok(html.includes("Unknown device"), "falls back to a generic device name");
+    assert.ok(!html.includes("IP address"), "no IP row when the server sent none");
+    assert.ok(!html.includes("Client</span>"), "no user-agent row when the server sent none");
+  });
+});
+
+test("renderActivateError: the transient failure is retryable, code preserved", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateError("ABCD-2345", { error: "internal" });
+    const html = dom.body();
+    assert.ok(html.includes("Something went wrong"));
+    assert.ok(html.includes('id="activate-again"'), "offers a live Try-again");
+    assert.ok(html.includes(">Try again<"));
+    assert.ok(!html.includes("Too many attempts"), "distinct from the 429 rate-limited state");
+  });
+});
+
+test("renderActivateRateLimited: the honest 429 pauses retry (disabled countdown)", () => {
+  withActivateDom((dom) => {
+    hooks.renderActivateRateLimited("ABCD-2345");
+    const html = dom.body();
+    assert.ok(html.includes("Too many attempts"));
+    assert.match(html, /Try again in \d+s/, "the initial paused countdown label");
+    assert.ok(html.includes("disabled"), "retry starts disabled through the countdown");
+  });
+});
+
 // ── S5 four-surface coherence harness (__preview__/coherence.html) ──────────
 // The standing sign-off instrument composes Studio + web + paper + TUI on one
 // page under ONE light/dark toggle. Its pure logic lives in app.js (theme

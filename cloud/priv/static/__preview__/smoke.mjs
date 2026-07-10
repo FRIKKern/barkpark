@@ -125,10 +125,14 @@ function bootScenario(name) {
     store.set("bpcloud.session", JSON.stringify({ token: "preview", team_id: "preview-team" }));
   }
 
+  // pathname/search are smoke-only optional scenario fields: a scenario that
+  // needs a real path (e.g. /activate, to unlock isActivateFlow()) sets them.
+  // Default "/"+"" keeps every pre-existing hash-routed scenario unchanged; the
+  // browser harness (mock.js) ignores these and uses the actually-served path.
   const location = {
     hash: scen.deepLink || "#overview",
-    pathname: "/",
-    search: "",
+    pathname: scen.pathname || "/",
+    search: scen.search || "",
     origin: "http://localhost",
     href: "http://localhost/",
   };
@@ -377,6 +381,49 @@ const EXPECTATIONS = {
     container: "instance-verify",
     includes: ["Run first check", "vf-chip vf-chip--unknown", "Never checked"],
     excludes: ["vf-chip--pass", "vf-chip--fail"],
+  },
+  // bp-login-ux W3 (decision 40): the /activate device-login approve page's
+  // PRE-CLICK skeletons. Each asserts DISTINCT per-state markup (a `device`
+  // fixture that went missing would make inspect fall to the /v1/ catch-all's
+  // 200 {}, folding gone/rate_limited into a degenerate "confirm" — the excludes
+  // catch exactly that false-confirm). Click-driven approved/denied morphs are
+  // DOM-tested in __app.test.mjs (smoke's click() is inert).
+  "activate-entry": {
+    what: "the manual code-entry form (authed, no prefill)",
+    container: "activate-body",
+    includes: ['id="activate-form"', 'id="activate-code"', "Approve a device sign-in", ">Continue<"],
+    excludes: ["Approve this sign-in?", "Too many attempts", "expired or was already used"],
+  },
+  "activate-confirm": {
+    what: "the confirm screen naming the requesting machine + Approve/Deny",
+    container: "activate-body",
+    includes: ["Approve this sign-in?", "bp on nimbus.local", "203.0.113.7",
+      'id="activate-approve"', 'id="activate-deny"'],
+    excludes: ["Too many attempts", "expired or was already used", "Unknown device"],
+  },
+  "activate-gone": {
+    what: "the expired/used dead-end offering a fresh-code retry",
+    container: "activate-body",
+    includes: ["This code has expired or was already used", ">Enter a different code<"],
+    excludes: ["Approve this sign-in?", "Too many attempts"],
+  },
+  "activate-rate-limited": {
+    what: "the honest 429 with a PAUSED (disabled) retry countdown",
+    container: "activate-body",
+    // The countdown ticker is stubbed inert (smoke's setInterval never fires), so
+    // this pins the INITIAL disabled skeleton only, never a tick.
+    includes: ["Too many attempts", "Try again in 15s", "disabled"],
+    excludes: ["Approve this sign-in?", "This code has expired"],
+  },
+  "activate-logged-out": {
+    what: "logged out — the sign-in card banners the parked device code (park → resume)",
+    check(reg) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      assert.equal(reg.get("app-shell").hidden, true, "app shell must be hidden");
+      const banner = (reg.get("auth-activate") || {}).innerHTML || "";
+      assert.ok(banner.includes("Approve a device sign-in."), "banner must announce the device approval");
+      assert.ok(banner.includes("ABCD-2345"), "banner must show the parked code");
+    },
   },
 };
 
