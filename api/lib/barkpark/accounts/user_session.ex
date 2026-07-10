@@ -98,6 +98,62 @@ defmodule Barkpark.Accounts.UserSession do
     is_nil(r) and not expired?(s, now) and not idle_expired?(s, now)
   end
 
+  # ── Org session-policy predicates (era-w8-org-session-policy) ──────────────
+  #
+  # These take the window FROM THE CALLER (the org-resolved value), NOT the
+  # held-back module constant `@idle_timeout_seconds`. They are the fail-closed
+  # enforcement the verify path calls once an org governs the session. A `nil`
+  # (or non-positive) bound imposes NO limit — the zero-tax default.
+
+  @doc """
+  True when `window` (seconds) is a positive idle bound AND the session has been
+  idle past it, measured from `last_used_at` (falling back to `inserted_at`,
+  then `now`). The org-policy counterpart of `idle_expired?/2`, driven by an
+  explicit window instead of the module constant.
+  """
+  @spec idle_expired_for_window?(t(), pos_integer() | nil, DateTime.t()) :: boolean()
+  def idle_expired_for_window?(session, window, now \\ DateTime.utc_now())
+
+  def idle_expired_for_window?(%__MODULE__{last_used_at: last, inserted_at: ins}, window, now)
+      when is_integer(window) and window > 0 do
+    base = last || ins || now
+    DateTime.compare(now, DateTime.add(base, window, :second)) != :lt
+  end
+
+  def idle_expired_for_window?(%__MODULE__{}, _window, _now), do: false
+
+  @doc """
+  True when `max_age` (seconds) is a positive absolute bound AND the session's
+  age from birth (`inserted_at`) has reached it. The org-policy absolute-lifetime
+  counterpart of `expired?/2` (which reads the per-session `expires_at`); this
+  one measures from birth against an org-supplied window.
+  """
+  @spec absolute_expired_for_window?(t(), pos_integer() | nil, DateTime.t()) :: boolean()
+  def absolute_expired_for_window?(session, max_age, now \\ DateTime.utc_now())
+
+  def absolute_expired_for_window?(%__MODULE__{inserted_at: ins}, max_age, now)
+      when is_integer(max_age) and max_age > 0 and not is_nil(ins) do
+    DateTime.compare(now, DateTime.add(ins, max_age, :second)) != :lt
+  end
+
+  def absolute_expired_for_window?(%__MODULE__{}, _max_age, _now), do: false
+
+  @doc """
+  True when the session SATISFIES an org session policy — neither idle past
+  `policy.idle_timeout_seconds` nor older than `policy.absolute_lifetime_seconds`.
+  A `nil` bound on either axis imposes no limit, so the all-nil policy (the
+  zero-tax default) is always satisfied. FAIL-CLOSED companion to `active?/2`:
+  the verify path treats a `false` here as "no session" (logged out).
+  """
+  @spec within_org_policy?(t(), map(), DateTime.t()) :: boolean()
+  def within_org_policy?(session, policy, now \\ DateTime.utc_now()) do
+    idle = Map.get(policy, :idle_timeout_seconds)
+    absolute = Map.get(policy, :absolute_lifetime_seconds)
+
+    not idle_expired_for_window?(session, idle, now) and
+      not absolute_expired_for_window?(session, absolute, now)
+  end
+
   @doc """
   Default step-up window (seconds): how long a successful MFA factor keeps a
   session "fresh" for sensitive actions. 10 minutes — long enough to chain a

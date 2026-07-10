@@ -264,11 +264,24 @@ defmodule Barkpark.Accounts do
 
     case Repo.one(query) do
       %UserSession{user_id: uid, last_used_at: prev} = session ->
-        effective_last_used = maybe_touch_session_last_used(hash, prev, now)
+        # era-w8-org-session-policy: enforce the strictest idle/absolute-lifetime
+        # bound governing this user's orgs. FAIL CLOSED — a governed session that
+        # is idle past the window, or older than the absolute lifetime, is treated
+        # as no session (logged out). Checked BEFORE touching last_used_at so the
+        # idle measurement uses the real prior-activity timestamp, not this
+        # request. An all-nil policy (the default: no governing org sets a bound)
+        # is always satisfied, so this path is byte-identical to before — zero-tax.
+        policy = Barkpark.Tenancy.org_session_policy_for_user(uid)
 
-        case Repo.get(User, uid) do
-          %User{} = user -> {user, %{session | last_used_at: effective_last_used}}
-          nil -> nil
+        if UserSession.within_org_policy?(session, policy, now) do
+          effective_last_used = maybe_touch_session_last_used(hash, prev, now)
+
+          case Repo.get(User, uid) do
+            %User{} = user -> {user, %{session | last_used_at: effective_last_used}}
+            nil -> nil
+          end
+        else
+          nil
         end
 
       nil ->
