@@ -464,6 +464,28 @@ func hoverPaint(line string, width int) string {
 	return open + body + closeSeq
 }
 
+// faintPaint recedes one selectable spine row to "lower opacity" (the terminal's
+// faint attribute) while a pointer hover is live on ANOTHER row — the picker law
+// flattenSpine enforces: siblings dim, the hovered row lights up. Same survival
+// mechanics as hoverPaint (a lipgloss segment's \x1b[0m reset would clear the
+// attribute, so it is re-armed after every inner reset) and the same honest
+// degrade: under a profile that renders no SGR the row is returned untouched.
+// Unlike hoverPaint it never pads — faint is not a background, so a ragged right
+// edge stays ragged and the ansi-stripped text is byte-identical.
+func faintPaint(line string) string {
+	probe := faintStyle.Render(hoverSentinel)
+	i := strings.Index(probe, hoverSentinel)
+	if i < 0 {
+		return line // profile mangled the sentinel — never paint (paranoia)
+	}
+	open, closeSeq := probe[:i], probe[i+len(hoverSentinel):]
+	if open == "" {
+		return line // no SGR in this profile — honest no-op
+	}
+	body := strings.ReplaceAll(line, "\x1b[0m", "\x1b[0m"+open)
+	return open + body + closeSeq
+}
+
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
 // flattenSpine renders every spine display line and reports the line index of
@@ -502,16 +524,35 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		selIdx++
 		return selected, idx
 	}
-	for _, sr := range spineRows(b, st) {
-		// A selectable row whose Ref matches the pointer target wears the hover
-		// tint (charter D94/D95). paint() is the identity for every other row, so
-		// a "" target (no mouse) leaves the frame byte-identical, and separators /
-		// phase bands / dead-epic lines (Selectable:false, or an empty Ref) can
-		// never tint. Only the ONE hovered row pads to a full rectangle.
-		hovered := st.HoverTarget != "" && sr.Selectable && sr.Ref == st.HoverTarget
+	rows := spineRows(b, st)
+	// hoverLive: the pointer target resolves to a SELECTABLE spine row (charter
+	// D94/D95 — a non-selectable Ref, e.g. a dead-epic tombstone, never hovers).
+	// Only then does the picker law engage: the hovered row wears the tint at
+	// full brightness and every OTHER selectable row recedes to faint, so the
+	// hover reads as "lit up". With no live target paint() is the identity and
+	// the frame is byte-identical (goldens, the no-mouse board, keyboard flow).
+	hoverLive := false
+	if st.HoverTarget != "" {
+		for _, sr := range rows {
+			if sr.Selectable && sr.Ref == st.HoverTarget {
+				hoverLive = true
+				break
+			}
+		}
+	}
+	for _, sr := range rows {
+		// The hovered selectable row wears the hover tint; while a hover is live,
+		// its selectable siblings faint (lower opacity). Separators / phase bands /
+		// dead-epic lines (Selectable:false, or an empty Ref) never tint AND never
+		// faint — they are already dim display chrome. Only the ONE hovered row
+		// pads to a full rectangle.
+		hovered := hoverLive && sr.Selectable && sr.Ref == st.HoverTarget
 		paint := func(s string) string {
 			if hovered {
 				return hoverPaint(s, width)
+			}
+			if hoverLive && sr.Selectable {
+				return faintPaint(s)
 			}
 			return s
 		}
@@ -531,7 +572,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		case spineTask:
 			selected, idx := markSel()
 			tgt := LineTarget{Kind: LineSpineRow, CursorIndex: idx}
-			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, sr.Guide, width, st.Frame, now) {
+			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, st.OpenTasks[sr.Ref], sr.Depth, sr.Guide, width, st.Frame, now) {
 				emit(paint(ln), tgt)
 			}
 		case spineMore:

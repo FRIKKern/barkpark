@@ -449,9 +449,19 @@ const dropMetaBelow = 52
 // level WITHOUT a spurious guide — charter wave-10 W10-A). Everything is
 // width-safe: when tight the meta sheds right→left (title never clips below 8
 // cols), and below dropMetaBelow the row is glyph + title only.
-func TaskRow(t Task, selected bool, depth int, guide bool, width, frame int, now time.Time) []string {
+//
+// `opened` marks the task the user has ENTERED (a FrameTask on the navigation
+// stack — UIState.OpenTasks): its glyph column renders the checked radio ●
+// (ASCII '*') in the SAME lifecycle color, the picker vocabulary — enter checks
+// the row, esc reverts it to the lifecycle glyph. Shape yields, color (= state)
+// stays.
+func TaskRow(t Task, selected, opened bool, depth int, guide bool, width, frame int, now time.Time) []string {
 	marker := SelectionMarker(selected)
-	glyph := glyphStyleFor(t, now).Render(boardGlyph(t.Lifecycle, frame))
+	glyphRune := boardGlyph(t.Lifecycle, frame)
+	if opened {
+		glyphRune = checkedGlyph()
+	}
+	glyph := glyphStyleFor(t, now).Render(glyphRune)
 	indent := childIndent + depth*2
 	guideStr, pad := "", indent
 	if guide {

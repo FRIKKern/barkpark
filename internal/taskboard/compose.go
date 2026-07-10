@@ -121,13 +121,18 @@ func composeAt(m Model, width, height int) string {
 	}
 	now := m.now()
 	top := m.topFrame()
+	// The board pane reads the breadcrumb trail as render state: OpenTasks is
+	// derived from the stack HERE, at paint time (never stored), so the checked
+	// radio on an entered task can never desync from the frames actually open.
+	ui := m.ui
+	ui.OpenTasks = openTaskRefs(m.stack)
 
 	if !m.wide {
 		// NARROW — full-frame push. The board at depth 0 is oriented by its own
 		// header, so it renders whole (no redundant "tasks" breadcrumb); a pushed
 		// reading frame gets the breadcrumb as its top line + a per-kind footer.
 		if top.Kind == FrameBoard {
-			return Render(m.board, m.ui, width, height, now)
+			return Render(m.board, ui, width, height, now)
 		}
 		crumb := Breadcrumb(m.stack, width)
 		footer := readingFooter(m.ui, width)
@@ -155,7 +160,7 @@ func composeAt(m Model, width, height int) string {
 	if inner < 1 {
 		inner = 1
 	}
-	leftLines := strings.Split(Render(m.board, m.ui, boardPaneWidth, inner, now), "\n")
+	leftLines := strings.Split(Render(m.board, ui, boardPaneWidth, inner, now), "\n")
 
 	rightW := width - boardPaneWidth - paneGutter2
 	if rightW < minReadingWidth {
@@ -231,6 +236,25 @@ func Breadcrumb(stack []Frame, width int) string {
 	// Still too wide: middle-clip, honoring the last segment (where you ARE).
 	tail := disp(segs[len(segs)-1]) + disp(crumbSep)
 	return dimStyle.Render(truncateMiddle(full, width, tail))
+}
+
+// openTaskRefs collects the doc_ids of every FrameTask on the navigation stack
+// — the tasks the user has ENTERED and not yet escaped out of. The board wears
+// the checked radio on exactly these rows (UIState.OpenTasks). Returns nil when
+// none are open, so the zero state stays byte-identical. Usually one ref; a
+// deeper trail (task → paper → task) checks every task on it, mirroring the
+// breadcrumb.
+func openTaskRefs(stack []Frame) map[string]bool {
+	var refs map[string]bool
+	for _, f := range stack {
+		if f.Kind == FrameTask && f.Ref != "" {
+			if refs == nil {
+				refs = make(map[string]bool, 1)
+			}
+			refs[f.Ref] = true
+		}
+	}
+	return refs
 }
 
 // crumbSeg is a frame's breadcrumb label: its Title, else "tasks" for the board,
