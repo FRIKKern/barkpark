@@ -49,10 +49,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @default_interrupt_timeout_ms 8_000
 
   # How long a fully-settled agents rail (every entry terminal) lingers below
-  # the composer before it clears. The rail STATE survives in the store
-  # (replay law, charter D47) — this only ends its screen residency, so a
-  # finished fleet stops squatting under the input forever.
-  @rail_linger_ms 60_000
+  # the composer before it clears — long enough to read the fleet's outcome,
+  # short enough that a done fleet stops squatting under the input forever.
+  # The rail STATE survives in the store (replay law, charter D47) — this
+  # only ends its screen residency.
+  @rail_linger_ms 5 * 60_000
 
   # The exact deny message a "Keep planning" click sends back to the model
   # (charter D34, proven on the real binary: the model re-plans and the next
