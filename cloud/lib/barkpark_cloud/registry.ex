@@ -2519,16 +2519,43 @@ defmodule BarkparkCloud.Registry do
   @doc """
   Barkparks whose self-update status is worth refreshing: LIVE (`host` set —
   a box actually exists) and not billing-suspended (we don't poll an unpaid
-  fleet). The `UpdateStatusWorker`'s hourly scan set.
+  fleet). The `UpdateStatusWorker`'s hourly scan set + the usage sampler's
+  fleet sweep. GLOBAL — deliberately ignores team scoping (a maintenance
+  sweep). The team-scoped counterpart is `checkable_barkparks/1`.
   """
   @spec update_checkable_barkparks() :: [Barkpark.t()]
   def update_checkable_barkparks do
-    from(b in Barkpark,
-      where: not is_nil(b.host) and b.host != "",
-      where: b.suspended == false,
-      order_by: [asc: b.inserted_at]
-    )
+    Barkpark
+    |> checkable_scope()
+    |> order_by([b], asc: b.inserted_at)
     |> Repo.all()
+  end
+
+  @doc """
+  A single Team's checkable Barkparks — the SAME "live + not billing-suspended"
+  predicate `update_checkable_barkparks/0` sweeps globally, scoped to one team
+  (`GET /v1/usage/summary`'s fleet strip is team-private). Owning the predicate
+  in ONE place (`checkable_scope/1`) means a change to what "checkable" means
+  can never drift between the maintenance sweep and the team read.
+  """
+  @spec checkable_barkparks(Team.t() | binary()) :: [Barkpark.t()]
+  def checkable_barkparks(team) do
+    tid = team_id(team)
+
+    Barkpark
+    |> where([b], b.team_id == ^tid)
+    |> checkable_scope()
+    |> order_by([b], desc: b.inserted_at)
+    |> Repo.all()
+  end
+
+  # The lone definition of "checkable": a live box (`host` set) that isn't
+  # billing-suspended. Both the global sweep and the team-scoped read compose it
+  # so the fleet scope can never diverge between them.
+  defp checkable_scope(query) do
+    query
+    |> where([b], not is_nil(b.host) and b.host != "")
+    |> where([b], b.suspended == false)
   end
 
   @doc """

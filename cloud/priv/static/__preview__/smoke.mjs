@@ -231,13 +231,17 @@ const EXPECTATIONS = {
   provisioning: {
     what: "the watched provisioning timeline",
     container: "instance-body",
-    includes: ["bp-timeline", "bp-tl-steps", "bp-tl-step--active", "bp-console", "Provisioning"],
+    // #1180 (9eff1fee) retired the bp-tl-step* classes: the timeline now renders
+    // the shared newStepsHtml rows (new-steps / new-step active) — expectation lagged.
+    includes: ["bp-timeline", "new-steps", "new-step active", "bp-console", "Provisioning"],
     excludes: ["bp-tl-fail"],
   },
   failed: {
     what: "the setup-failed state with the verbatim error",
     container: "instance-body",
-    includes: ["bp-tl-fail", "bp-tl-step--failed", "Setup failed", "Retry setup", "Studio never came up"],
+    // #1180 (9eff1fee) retired the bp-tl-step* classes: the failed row is now
+    // new-step failed (the bp-tl-fail block itself survived) — expectation lagged.
+    includes: ["bp-tl-fail", "new-step failed", "Setup failed", "Retry setup", "Studio never came up"],
   },
   // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
   // Current chip, the prior live row offers rollback, the failed row neither.
@@ -316,14 +320,28 @@ const EXPECTATIONS = {
     container: "instance-body",
     includes: ["inst-tabs", '/timeline" aria-current="page"'],
   },
-  // C10/OC7: the Usage sub-tab routes on its deep link. The meter wall itself
-  // mounts through element-level querySelector (kept inert by this shim, exactly
-  // like Timeline) — the quota-bar rendering is pinned in __app.test.mjs; here we
-  // prove the tab strip registers Usage and marks it current.
+  // C10/OC7 + W4/OC19: the Usage sub-tab routes on its deep link AND fills its
+  // meter wall — including the Wave-4 14-day sparklines. mountUsageTab re-acquires
+  // the tabpanel by id (the same idiom refreshInstanceTimeline uses), so its
+  // parallel /usage + /usage/history fetches render into the OBSERVABLE
+  // #instance-tabpanel here. The tab strip lands in #instance-body; the sparkline
+  // markup lands in #instance-tabpanel (both proved below).
   "usage-quota": {
-    what: "the instance workspace routes the Usage tab",
-    container: "instance-body",
-    includes: ["inst-tabs", '/usage" aria-current="page"', 'id="instance-tabpanel"', ">Usage<"],
+    what: "the Usage tab routes and fills the meter wall with 14-day sparklines",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      for (const needle of ["inst-tabs", '/usage" aria-current="page"', 'id="instance-tabpanel"', ">Usage<"]) {
+        assert.ok(body.includes(needle), "#instance-body missing " + JSON.stringify(needle));
+      }
+      const panel = (reg.get("instance-tabpanel") || {}).innerHTML || "";
+      assert.ok(panel.length > 0, "#instance-tabpanel meter wall rendered empty");
+      // Progressive fill landed: a meter with numeric history carries a sparkline.
+      assert.ok(panel.includes('class="usage-spark"'), "meter wall must carry a sparkline container");
+      assert.ok(panel.includes("<polyline"), "a real history run draws a polyline");
+      // The grid is still fully present (every meter label renders, sparks or not).
+      assert.ok(panel.includes("Documents"), "the documents meter renders in the wall");
+    },
   },
   // Wave 3: the Overview fleet usage strip. Unlike the Usage meter wall, the
   // strip fills its OWN #overview-fleet-usage container (a real registry element

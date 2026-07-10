@@ -516,6 +516,33 @@ const quotaBarsUsage = {
   },
 };
 
+// ── usage history (GET /v1/barkparks/:id/usage/history — OC19 Usage.history/2) ─
+// The 14-day trend the Wave-4 Usage-tab sparklines paint. Mirrors the Metrics
+// envelope: a top-level `series` of {at, value|nil} points, oldest→newest. This
+// fixture carries all four honest spark states in one shot so a single Usage shot
+// proves the ladder: a FRESH rising series (instances), a FLAT series (seats), a
+// GAPPY series with mid-run nulls (documents — the D48 null-is-gap stroke break),
+// and an ABSENT/all-null series (datasets → no spark drawn). Derived from the
+// same meter names as quotaBarsUsage — NOT invented.
+const WINDOW_S = 14 * 24 * 3600;
+const histPts = (vals) => vals.map((v, i) => ({
+  at: tMinus(Math.round(((vals.length - 1 - i) / Math.max(1, vals.length - 1)) * WINDOW_S)),
+  value: v,
+}));
+const usageQuotaHistory = {
+  ok: true,
+  collected_at: T,
+  window_days: 14,
+  points: 6,
+  instance: { id: IDS.liveInstance, name: "Acme Production", slug: "acme-prod", host: "acme.barkpark.cloud" },
+  series: {
+    instances: histPts([1, 1, 2, 2, 3, 3]),                    // fresh, rising toward the ok value
+    seats: histPts([8, 8, 8, 8, 8, 8]),                        // flat — draws along the mid-line
+    documents: histPts([1100, null, 1180, null, 1210, 1240]),  // gappy — nulls break the stroke
+    datasets: histPts([null, null, null, null, null, null]),   // all-null → no spark (honest absence)
+  },
+};
+
 // ── fleet usage summary (GET /v1/usage/summary — OC16 sampler read) ───────────
 // The Overview fleet strip's contract: a team-level instances quota meter + one
 // cached-sample row per instance. This one envelope carries all four honest
@@ -623,6 +650,7 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       usage: quotaBarsUsage,
+      usageHistory: usageQuotaHistory,
     },
   },
   // ── Wave 3: Overview fleet usage strip (OC16/OC18/OC6) ────────────────────
@@ -962,6 +990,14 @@ export function route(name, method, path) {
   // (never a 404 that would read as "instance gone").
   if (/^\/v1\/barkparks\/[^/]+\/usage$/.test(p)) {
     return { status: 200, body: { usage: d.usage || { meters: {} } } };
+  }
+
+  // Wave 4 (OC19): the per-instance usage HISTORY read — the sparkline series. A
+  // scenario without a `usageHistory` fixture answers an empty series, so the
+  // Usage tab renders bar-less (honest absence, exactly like an older control
+  // plane that never shipped the endpoint).
+  if (/^\/v1\/barkparks\/[^/]+\/usage\/history$/.test(p)) {
+    return { status: 200, body: d.usageHistory || { ok: true, window_days: 14, series: {} } };
   }
 
   // C8: the instance event history (agent events + verify runs, newest first).

@@ -26,10 +26,11 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Registry, Repo, Usage}
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient, as: Fake
+  alias BarkparkCloud.Usage.Sample
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -646,6 +647,178 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert Jason.decode!(nonexistent.resp_body) == Jason.decode!(malformed.resp_body)
 
       assert Fake.requests() == []
+    end
+  end
+
+  # ── GET /v1/barkparks/:id/usage/history — the sparkline series (wave 4) ───────
+
+  @meter_names ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)
+
+  defp seed_sample(bp, envelope, measured_at) do
+    {:ok, sample} =
+      %Sample{}
+      |> Sample.changeset(%{barkpark_id: bp.id, envelope: envelope, measured_at: measured_at})
+      |> Repo.insert()
+
+    sample
+  end
+
+  defp history(conn), do: Jason.decode!(conn.resp_body)
+
+  # A fake programmed to blow up on ANY request — history is a PURE cached read.
+  defp forbid_instance_http do
+    Fake.program(%{"/__any__" => {:error, {:http_client, :should_never_be_called}}})
+  end
+
+  describe "GET /v1/barkparks/:id/usage/history — the pure cached series" do
+    test "a never-sampled instance is a normal 200 with all-nil series, ZERO instance HTTP" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      forbid_instance_http()
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage/history", token: session_token(user))
+
+      assert conn.status == 200
+      h = history(conn)
+
+      assert h["ok"] == true
+      assert is_binary(h["collected_at"])
+      assert h["window_days"] == 14
+      assert h["points"] == 56
+      assert h["instance"]["id"] == bp.id
+      assert h["instance"]["name"] == bp.name
+      assert h["instance"]["slug"] == bp.slug
+      assert h["instance"]["host"] == bp.host
+
+      # Every meter's series is present, full-length, and honestly all-nil.
+      assert Enum.sort(Map.keys(h["series"])) == Enum.sort(@meter_names)
+
+      for name <- @meter_names do
+        series = h["series"][name]
+        assert length(series) == 56
+        assert Enum.all?(series, &(&1["value"] == nil)), "#{name} should be all-nil, never a zero"
+        # The x-axis is a real oldest→newest RFC3339 ladder.
+        ats = Enum.map(series, & &1["at"])
+        assert Enum.all?(ats, &is_binary/1)
+        assert ats == Enum.sort(ats)
+      end
+
+      assert Fake.requests() == []
+    end
+
+    test "a recent sample lands in the newest bucket; numeric values plot, unmetered stays a nil gap" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      forbid_instance_http()
+
+      # documents is a real 42; seats a real 3; the rest degrade to "unmetered".
+      envelope = Usage.compose(%{documents: {:ok, 42}, seats: 3})
+      seed_sample(bp, envelope, DateTime.add(DateTime.utc_now(), -60, :second))
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage/history", token: session_token(user))
+      assert conn.status == 200
+      series = history(conn)["series"]
+
+      # Exactly one populated point (the newest bucket) for a metered meter.
+      docs = series["documents"]
+      assert List.last(docs)["value"] == 42
+      assert Enum.count(docs, &(&1["value"] != nil)) == 1
+      assert List.last(series["seats"])["value"] == 3
+
+      # An "unmetered" meter in the sample is a nil GAP, never a fake zero.
+      assert List.last(series["webhooks"])["value"] == nil
+      assert Enum.all?(series["webhooks"], &(&1["value"] == nil))
+      # Flow meters are unmetered by construction → nil.
+      assert Enum.all?(series["api_requests"], &(&1["value"] == nil))
+    end
+
+    test "the LATEST sample in a bucket wins" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      forbid_instance_http()
+
+      now = DateTime.utc_now()
+      # Two samples minutes apart → same (6h) bucket; the newer documents count wins.
+      seed_sample(bp, Usage.compose(%{documents: {:ok, 5}}), DateTime.add(now, -180, :second))
+      seed_sample(bp, Usage.compose(%{documents: {:ok, 9}}), DateTime.add(now, -60, :second))
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage/history", token: session_token(user))
+      docs = history(conn)["series"]["documents"]
+
+      assert List.last(docs)["value"] == 9
+      assert Enum.count(docs, &(&1["value"] != nil)) == 1
+    end
+
+    test "points is clamped via the shared parse_limit idiom" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      forbid_instance_http()
+
+      conn =
+        call(:get, "/v1/barkparks/#{bp.id}/usage/history?points=10", token: session_token(user))
+
+      h = history(conn)
+      assert h["points"] == 10
+      assert length(h["series"]["documents"]) == 10
+
+      # Over the cap → clamped to 200; garbage / non-positive → the 56 default.
+      capped =
+        call(:get, "/v1/barkparks/#{bp.id}/usage/history?points=9999", token: session_token(user))
+
+      assert history(capped)["points"] == 200
+
+      junk =
+        call(:get, "/v1/barkparks/#{bp.id}/usage/history?points=abc", token: session_token(user))
+
+      assert history(junk)["points"] == 56
+    end
+
+    test "a sample OLDER than the 14-day window never appears in the series" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      forbid_instance_http()
+
+      # 15 days old — outside the window; must be excluded entirely.
+      seed_sample(
+        bp,
+        Usage.compose(%{documents: {:ok, 7}}),
+        DateTime.add(DateTime.utc_now(), -15 * 86_400, :second)
+      )
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage/history", token: session_token(user))
+      docs = history(conn)["series"]["documents"]
+      assert Enum.all?(docs, &(&1["value"] == nil))
+    end
+  end
+
+  describe "GET /v1/barkparks/:id/usage/history — auth + team-scope fail-closed" do
+    test "no auth → 401, no read" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage/history")
+      assert conn.status == 401
+    end
+
+    test "wrong-team / nonexistent / malformed ids are the SAME 404" do
+      {_owner_b, team_b} = user_with_team()
+      bp_b = live_barkpark(team_b)
+
+      {user_a, _team_a} = user_with_team()
+      token_a = session_token(user_a)
+
+      wrong_team = call(:get, "/v1/barkparks/#{bp_b.id}/usage/history", token: token_a)
+
+      nonexistent =
+        call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/usage/history", token: token_a)
+
+      malformed = call(:get, "/v1/barkparks/not-a-uuid/usage/history", token: token_a)
+
+      assert wrong_team.status == 404
+      assert nonexistent.status == 404
+      assert malformed.status == 404
+      assert Jason.decode!(wrong_team.resp_body) == Jason.decode!(nonexistent.resp_body)
+      assert Jason.decode!(nonexistent.resp_body) == Jason.decode!(malformed.resp_body)
     end
   end
 end

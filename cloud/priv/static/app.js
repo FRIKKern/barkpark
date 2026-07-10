@@ -8289,7 +8289,7 @@
   // zero, never an error. `measured_at` nil renders as a LIVE read ("live"),
   // NOT an error (acceptance criterion 2); a present measured_at renders
   // "as of <relTime>". The seats meter's pending_invitations rides along.
-  function usageMeterDisplay(spec, meter) {
+  function usageMeterDisplay(spec, meter, history) {
     meter = meter || {};
     var unmetered = meter.value === "unmetered" || typeof meter.value !== "number";
     var value = unmetered ? "Not yet metered" : c10FmtValue(spec.fmt, meter.value);
@@ -8311,12 +8311,29 @@
           : "ok";
       bar = { pct: pct, tone: tone, quota: c10FmtValue(spec.fmt, meter.quota), quotaText: value + " / " + c10FmtValue(spec.fmt, meter.quota) };
     }
-    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, bar: bar };
+    // Wave 4 (OC19): the 14-day sparkline values, threaded in from /usage/history.
+    // `spark` is the value|null array fed VERBATIM to sparklineSvg (a null is a
+    // GAP — the stroke breaks, never a fake zero, D48/D51). It stays null unless
+    // the series carries at least one real number, so an absent / all-null history
+    // renders NO spark chrome (honest absence — progressive fill, not a placeholder
+    // line). `history` is optional: today's two-arg callers (the strip) get null.
+    var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
+      ? history.slice()
+      : null;
+    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, bar: bar, spark: spark };
   }
 
-  function usageMeterHtml(spec, meter) {
-    var d = usageMeterDisplay(spec, meter);
+  function usageMeterHtml(spec, meter, history) {
+    var d = usageMeterDisplay(spec, meter, history);
     var sub = [d.freshness, d.pending].filter(Boolean).join(" · ");
+    // Wave 4 (OC19): the quiet 14-day trend. Rendered ONLY when the meter has real
+    // numeric history — an absent/all-null series draws nothing (honest absence).
+    // sparklineSvg is reused VERBATIM (currentColor, null-is-gap, isolated-point
+    // dot, flat-midline all already pinned there); the .usage-spark wrapper tints
+    // it (muted, or the row's quota tone) and sizes it ~120×32.
+    var sparkHtml = d.spark
+      ? '<div class="usage-spark">' + sparklineSvg(d.spark, { width: 120, height: 32 }) + "</div>"
+      : "";
     // The quota bar (when present) lives under the meter name. The OVER state is a
     // terminal one, so per D25 it carries exactly ONE recovery action — a "Manage
     // plan" link to the Settings billing view (never a dead end).
@@ -8340,16 +8357,43 @@
       (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") +
       barHtml + "</div>" +
       '<div class="fleet-badges">' +
+      sparkHtml +
       (d.unmetered ? '<span class="dim">' + esc(d.value) + "</span>" : "<strong>" + esc(d.value) + "</strong>") +
       "</div></div>";
   }
 
+  // Pure: normalise the /usage/history envelope to its meter→points `series` map.
+  // S1 carries `series` at top level (mirroring the Metrics shape); a defensive
+  // `usage_history` wrapper is tolerated so a backend top-level-key change never
+  // silently blanks every sparkline. Garbage → {} (the grid then draws bar-less,
+  // exactly as before history landed).
+  function usageHistorySeries(payload) {
+    payload = payload || {};
+    var wrap = (payload.usage_history && typeof payload.usage_history === "object") ? payload.usage_history : payload;
+    return (wrap && typeof wrap.series === "object" && wrap.series) ? wrap.series : {};
+  }
+
+  // Pure: one meter's history as a value|null array for sparklineSvg. A missing
+  // meter / non-array → []; each point's non-finite value → null (a GAP, never a
+  // fake zero — D48/D51). Order is preserved oldest→newest (the envelope's order).
+  function usageHistoryValues(series, meterKey) {
+    var raw = (series && typeof series === "object" && Array.isArray(series[meterKey])) ? series[meterKey] : [];
+    return raw.map(function (p) {
+      p = p || {};
+      return (typeof p.value === "number" && isFinite(p.value)) ? p.value : null;
+    });
+  }
+
   // Pure: the whole meter grid from a /usage `meters` object. A missing meter
   // degrades to the unmetered state (usageMeterDisplay tolerates absent input),
-  // so the grid is always fully present.
-  function usageMetersHtml(meters) {
+  // so the grid is always fully present. `series` (optional; the /usage/history
+  // map) threads each meter's 14-day trend — absent (before history lands / on a
+  // failed fetch) → today's bar-less grid, unchanged (progressive fill).
+  function usageMetersHtml(meters, series) {
     meters = meters || {};
-    return USAGE_METERS.map(function (spec) { return usageMeterHtml(spec, meters[spec.key]); }).join("");
+    return USAGE_METERS.map(function (spec) {
+      return usageMeterHtml(spec, meters[spec.key], series ? usageHistoryValues(series, spec.key) : null);
+    }).join("");
   }
 
   // The loading skeleton — a hung box can hold /usage ~15s (D51), so the tab
@@ -8370,21 +8414,53 @@
       '</p><p><button class="btn btn-primary btn-sm" data-usage-retry type="button">Retry</button></p></div>';
   }
 
+  // The 14-day sparklines default to one point per ~6h (OC19: default 56, cap 200).
+  var USAGE_HISTORY_POINTS = 56;
+
   // Mount the Usage tab into the instance tabpanel: paint the skeleton, fetch
   // /usage, then swap in the meter grid — or an honest, retryable error state.
+  // PROGRESSIVE FILL (Wave 4 / OC19): a SECOND fetch to /usage/history runs in
+  // PARALLEL; the meters render exactly as today the moment /usage lands, and the
+  // per-meter sparklines fill in when history lands. Before history lands — or if
+  // it fails / 404s (an older control plane) — NO spark markup renders (honest
+  // absence, never a spinner or a placeholder line). Either fetch order is safe:
+  // paint() only draws once /usage has landed, threading whatever history it has.
   function mountUsageTab(panel, bp) {
+    // Defensive re-acquire by id: the caller passes the freshly-rendered tabpanel,
+    // but a lost ref still resolves through getElementById — so the meter wall
+    // renders (and stays observable to the preview harness) rather than no-op.
+    if (!panel && typeof document !== "undefined" && document.getElementById) panel = document.getElementById("instance-tabpanel");
     if (!panel) return;
     panel.innerHTML = usageTabShellHtml();
-    var box = panel.querySelector(".fleet-body");
+    // The skeleton's .fleet-body is the swap target in the live DOM; if a harness
+    // can't resolve the sub-query, fall back to the panel itself (same element the
+    // grid would land in).
+    var box = panel.querySelector(".fleet-body") || panel;
+    var meters = null;   // set when /usage lands; null keeps the skeleton up
+    var series = null;   // set when /usage/history lands; null → bar-less grid
+    function paint() {
+      if (!box || box.isConnected === false) return; // navigated away mid-flight
+      if (!meters) return; // meters not in yet — leave the skeleton (or error) untouched
+      box.innerHTML = usageMetersHtml(meters, series);
+    }
     api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/usage").then(function (r) {
       if (!box || box.isConnected === false) return; // navigated away mid-flight
       if (r.ok && r.data && r.data.usage && r.data.usage.meters) {
-        box.innerHTML = usageMetersHtml(r.data.usage.meters);
+        meters = r.data.usage.meters;
+        paint();
         return;
       }
       box.innerHTML = usageErrorHtml(r.status);
       var retry = box.querySelector("[data-usage-retry]");
       if (retry) retry.addEventListener("click", function () { mountUsageTab(panel, bp); });
+    });
+    // The history fetch is best-effort garnish: a failure/404 leaves `series` null
+    // so the meters simply stay bar-less. It never surfaces its own error state.
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/usage/history?points=" + USAGE_HISTORY_POINTS).then(function (r) {
+      if (!box || box.isConnected === false) return;
+      if (!r.ok || !r.data) return; // honest absence — no spark markup
+      series = usageHistorySeries(r.data);
+      paint(); // re-render with sparks iff /usage has already landed (paint guards)
     });
   }
 
@@ -10121,6 +10197,10 @@
       usageMeters: USAGE_METERS.map(function (m) { return { key: m.key, label: m.label, fmt: m.fmt }; }),
       c10FmtBytes: c10FmtBytes, usageMeterDisplay: usageMeterDisplay,
       usageMeterHtml: usageMeterHtml, usageMetersHtml: usageMetersHtml,
+      // Wave 4 (OC19): the 14-day sparkline read path. usageHistorySeries
+      // normalises the /usage/history envelope; usageHistoryValues extracts one
+      // meter's value|null array for sparklineSvg (null-is-gap preserved).
+      usageHistorySeries: usageHistorySeries, usageHistoryValues: usageHistoryValues,
       usageTabShellHtml: usageTabShellHtml, usageFailureCopy: usageFailureCopy,
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
