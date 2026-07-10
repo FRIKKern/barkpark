@@ -227,7 +227,8 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
         autoupdate_paused: true,
         pinned_release: "v0.2.24",
         channel: "staging",
-        update_checked_at: ~U[2026-07-10 12:00:00.000000Z]
+        update_checked_at: ~U[2026-07-10 12:00:00.000000Z],
+        autoupdate_triggered_at: ~U[2026-07-10 12:05:00.000000Z]
       )
       |> Repo.update!()
 
@@ -241,5 +242,7 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     assert row["pinned_release"] == "v0.2.24"
     assert row["channel"] == "staging"
     assert row["update_checked_at"] == "2026-07-10T12:00:00.000000Z"
+    # the in-flight marker rides along — the console "Updating" badge reads it
+    assert row["autoupdate_triggered_at"] == "2026-07-10T12:05:00.000000Z"
   end
 end

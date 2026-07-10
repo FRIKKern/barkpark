@@ -5898,11 +5898,14 @@ defmodule BarkparkCloud.Web.Router do
       update_checked_at: bp.update_checked_at,
       # isu-w5.2 fleet-autoupdate policy + channel — the console renders the
       # rollout state (enabled/paused/pinned/channel) per row. EXACT names —
-      # sibling slices S3/S4 read these off the fleet-list JSON.
+      # sibling slices S3/S4 read these off the fleet-list JSON. The in-flight
+      # marker rides along so the console's "Updating" badge can outrank a
+      # stale cached verdict while a rollout is actively landing.
       autoupdate_enabled: bp.autoupdate_enabled,
       autoupdate_paused: bp.autoupdate_paused,
       pinned_release: bp.pinned_release,
       channel: bp.channel,
+      autoupdate_triggered_at: bp.autoupdate_triggered_at,
       # Instance custom domain — the attached platform-zone host (nil until a
       # team attaches one), so the dashboard can render it on the fleet row.
       custom_host: bp.custom_host,
