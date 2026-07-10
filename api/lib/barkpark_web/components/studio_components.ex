@@ -47,6 +47,7 @@ defmodule BarkparkWeb.StudioComponents do
   defdelegate shares_modal(assigns), to: Modals
   defdelegate item_share_popover(assigns), to: Modals
   defdelegate airdrop_sheet(assigns), to: Modals
+  defdelegate access_panel(assigns), to: Modals
   defdelegate ref_picker_modal(assigns), to: Modals
   defdelegate history_modal(assigns), to: Modals
   defdelegate delete_modal(assigns), to: Modals

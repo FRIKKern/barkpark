@@ -123,6 +123,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       airdrop_link: nil,
       airdrop_error: nil,
       airdrop_suggestions: [],
+      # ── Access panel (airdrop-grants slice 3 UI) ─────────────────────
+      # The read/revoke sibling of the airdrop mint sheet. `access_open`
+      # toggles the panel; `access_workspace_grants` is loaded on open ONLY
+      # for a workspace member (membership-gated like AccessController.index),
+      # and `access_workspace_view` gates that whole section. The caller's OWN
+      # inbound grants render from the separate `:access_grants` assign.
+      access_open: false,
+      access_workspace_view: false,
+      access_workspace_grants: [],
+      access_error: nil,
       validation_errors: %{},
       # ── Cross-field validations (Task barkpark-cgn) ──────────────────
       # Populated after every autosave by `Barkpark.Content.CrossValidator

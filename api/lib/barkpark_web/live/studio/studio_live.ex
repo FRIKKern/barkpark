@@ -33,6 +33,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
+    AccessPanel,
     Airdrop,
     Bulk,
     Delete,
@@ -297,6 +298,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("airdrop-close", _params, socket), do: Airdrop.airdrop_close(socket)
   def handle_event("airdrop-create", params, socket), do: Airdrop.airdrop_create(params, socket)
   def handle_event("airdrop-suggest", params, socket), do: Airdrop.airdrop_suggest(params, socket)
+
+  # Access panel (airdrop-grants slice 3 UI) — read/revoke sibling of airdrop.
+  def handle_event("access-open", _params, socket), do: AccessPanel.access_open(socket)
+  def handle_event("access-close", _params, socket), do: AccessPanel.access_close(socket)
+  def handle_event("access-revoke", params, socket), do: AccessPanel.access_revoke(params, socket)
 
   def handle_event("open-secondary-picker", _params, socket),
     do: Secondary.open_secondary_picker(socket)
