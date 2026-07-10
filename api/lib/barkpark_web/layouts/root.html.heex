@@ -957,7 +957,12 @@
     .pane-item.selected { background: var(--bg-accent); color: var(--fg); border-left-color: var(--primary); }
     .pane-item-icon { width: 18px; text-align: center; font-size: 15px; }
     .pane-item-label { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pane-item-chevron { color: var(--fg-dim); font-size: 14px; }
+    /* Drill chevron, hover-revealed (matches .pane-doc-chevron): the affordance
+       appears when the row is hovered or already the drilled/selected ancestor,
+       so the resting pane reads as clean navigation, not a wall of glyphs. */
+    .pane-item-chevron { color: var(--fg-dim); font-size: 14px; opacity: 0; transition: opacity 0.1s; }
+    .pane-item:hover .pane-item-chevron,
+    .pane-item.selected .pane-item-chevron { opacity: 1; }
 
     .pane-section-header {
       display: flex; align-items: center; gap: 6px;
@@ -1004,18 +1009,27 @@
        the visual rhythm consistent with .pane-item. */
     a.pane-item.nav-plugin-entry {
       text-decoration: none;
-      color: inherit;
+      color: var(--fg-muted);
       display: flex;
       align-items: center;
     }
+    /* nav-plugin-entry's own specificity (0,2,1) beats .pane-item:hover (0,2,0),
+       so the shared hover lift needs a matching rule to reach link rows. */
+    a.pane-item.nav-plugin-entry:hover { color: var(--fg); }
 
     .pane-doc-item {
-      padding: 10px 14px; cursor: pointer;
+      cursor: pointer;
       border-left: 3px solid transparent; transition: all 0.1s;
     }
     .pane-doc-item:hover { background: var(--bg-muted); }
+    .pane-doc-item:hover .pane-doc-title { color: var(--fg); }
     .pane-doc-item.selected { background: var(--bg-accent); border-left-color: var(--primary); }
-    .pane-doc-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+    /* Plain tier matches the nav rows' --fg-muted; the title escalates to --fg on
+       hover (above) and when selected (below) — the ONE state ladder every pane
+       depth speaks. The selected override also holds the AA fence: a muted tier on
+       --bg-accent is sub-AA (evergreen-light 4.16), so selected rows use --fg. */
+    .pane-doc-title { font-size: 13px; font-weight: 500; color: var(--fg-muted); display: flex; align-items: center; gap: 8px; }
+    .pane-doc-item.selected .pane-doc-title { color: var(--fg); }
     .pane-doc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .pane-doc-dot.published { background: var(--success); }
     .pane-doc-dot.draft { background: var(--warning); }
