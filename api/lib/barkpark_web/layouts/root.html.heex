@@ -4753,6 +4753,39 @@
     html[data-theme="light"] .sheet-filter-error { color: #dc2626; }
     .sheet-filter-actions { display: flex; justify-content: space-between; gap: 6px; }
     /* studio-literal-check: skip-end */
+
+    /* API-tester scenario results (sup-w3-api-tester-kit). Extracted from inline
+       styles in api_tester_live.ex so the fg×surface pairings become visible to
+       design/check.mjs Part H. The rows ride the Response focus pane
+       (.pane-column--last → --surface-raised); the category header paints its own
+       --bg-muted fill. Every dim text ESCALATES fg-dim → --muted-text — inline
+       fg-dim on these grounds measured 4.05–4.27 (sub-AA) and was invisible to
+       the machine gate because it lived in a style="" attribute. */
+    .scenario-scroll { overflow-y: auto; max-height: calc(100vh - 140px); }
+    .scenario-cat-header {
+      padding: 4px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase;
+      color: var(--muted-text); border-bottom: 1px solid var(--border-muted);
+      background: var(--bg-muted);
+    }
+    .scenario-row {
+      padding: 6px 12px; border-bottom: 1px solid var(--border-muted);
+      display: flex; justify-content: space-between; align-items: center; font-size: 13px;
+    }
+    /* Dynamic verdict fill — the fail row tints its ground; the endpoint/duration
+       text is gated against the base --surface-raised (the 5% overlay barely
+       shifts luminance, so surface-raised is the honest AA baseline). */
+    .scenario-row--fail { background: hsl(var(--danger-hsl) / 0.05); }
+    .scenario-endpoint { color: var(--muted-text); }
+    .scenario-label { margin-left: 6px; }
+    .scenario-verdict { display: flex; align-items: center; gap: 8px; }
+    .scenario-duration { font-size: 11px; color: var(--muted-text); font-family: var(--font-mono); }
+
+    /* Schema browser cards (sup-w3-api-tester-kit) — extraction only. Text uses
+       the existing utility classes; these rules are pure geometry, not AA-critical. */
+    .api-schema-card { margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+    .api-schema-summary { display: flex; gap: 12px; align-items: center; cursor: pointer; }
+    .api-schema-fields { margin-top: 8px; }
+    .api-schema-json { font-size: 11px; }
   </style>
 </head>
 <body>

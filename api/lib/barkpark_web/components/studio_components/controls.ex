@@ -141,6 +141,11 @@ defmodule BarkparkWeb.StudioComponents.Controls do
   @doc """
   A tokenized textarea (`textarea.form-input`). Set `mono` for code/JSON,
   which switches the face to `var(--font-mono)` (still a token — no literal).
+
+  `class` appends to the base `form-input` (mirrors `bp_input`) so a call site
+  can carry a sizing/idiom class (e.g. the API tester's `api-body-textarea`
+  min-height + mono face) without dropping the themed base. `spellcheck` rides
+  the `:rest` passthrough for code fields that want the red squiggle off.
   """
   attr :name, :string, required: true
   attr :value, :string, default: ""
@@ -148,7 +153,8 @@ defmodule BarkparkWeb.StudioComponents.Controls do
   attr :rows, :integer, default: 6
   attr :placeholder, :string, default: nil
   attr :mono, :boolean, default: false
-  attr :rest, :global, include: ~w(readonly form)
+  attr :class, :string, default: nil
+  attr :rest, :global, include: ~w(readonly form spellcheck)
 
   def bp_textarea(assigns) do
     ~H"""
@@ -157,7 +163,7 @@ defmodule BarkparkWeb.StudioComponents.Controls do
       id={@id}
       rows={@rows}
       placeholder={@placeholder}
-      class="form-input"
+      class={["form-input" | List.wrap(@class)]}
       style={@mono && "font-family: var(--font-mono);"}
       {@rest}
     >{@value}</textarea>
