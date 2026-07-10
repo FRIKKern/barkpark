@@ -684,6 +684,10 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
 .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
 .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+.bp-canvas-card__select { flex: 0 0 auto; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+/* The real media picker rides the whole control row (its own ghost frame paints the
+ * preview / "add an image" affordance); give it a sane min so it never collapses. */
+.bp-canvas-card__media-picker { flex: 1 1 100%; min-width: 0; }
 
 /* ── notes-grid split: the `note` WIDGET edit chrome (bp-canvas-note*) ─────────
  * UNLIKE callout/card, the note canvas node does NOT class-share with the reader
