@@ -36,6 +36,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   use BarkparkWeb, :live_view
 
+  import BarkparkWeb.StudioComponents.Controls
+
   require Logger
 
   alias Barkpark.Content
@@ -358,8 +360,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="settings-live" style="max-width: 720px; margin: 2rem auto; font-family: ui-sans-serif, system-ui;">
-      <h1 style="margin-bottom:.25rem;">Workspace Settings</h1>
+    <div class="settings-live" style="max-width: 720px; margin: 32px auto; padding: 0 24px; font-family: var(--font);">
+      <h1 class="h1" style="margin-bottom: 4px;">Workspace Settings</h1>
       <%= if @current_workspace do %>
         <p style="color: var(--fg-muted); margin-top:0; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
           <span>Theme, plugins and credentials for</span>
@@ -392,31 +394,27 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
       {render_plugins_section(assigns)}
 
-      <section
-        aria-labelledby="credentials-heading"
-        style="border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin-bottom:2rem;"
-      >
-        <h2 id="credentials-heading" style="margin-top:0;">Plugin credentials</h2>
-
-        <p style="color: var(--fg-muted);">
+      <.bp_card aria-labelledby="credentials-heading">
+        <.bp_section_header id="credentials-heading" title="Plugin credentials">
           Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
           to fetch unmasked (audited). Credentials are global to the installation,
           not per-workspace.
-        </p>
+        </.bp_section_header>
 
-        <form phx-change="update_name" phx-submit="load" style="margin-bottom:1rem;">
-          <label>
-            Plugin name
-            <input
-              type="text"
-              name="plugin_name"
-              value={@plugin_name}
-              placeholder="e.g. onixedit, bokbasen"
-              autocomplete="off"
-              required
-            />
-          </label>
-          <button type="submit">Load</button>
+        <form phx-change="update_name" phx-submit="load" style="margin-bottom: 16px;">
+          <.bp_field_row label="Plugin name" for="plugin_name" required>
+            <div style="display: flex; gap: 8px;">
+              <.bp_input
+                id="plugin_name"
+                name="plugin_name"
+                value={@plugin_name}
+                placeholder="e.g. onixedit, bokbasen"
+                autocomplete="off"
+                required
+              />
+              <button type="submit" class="btn btn-primary">Load</button>
+            </div>
+          </.bp_field_row>
         </form>
 
         <%= if @settings_fields == [] do %>
@@ -426,13 +424,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <% end %>
 
         <%= if @error do %>
-          <p role="alert" style="color:var(--destructive);">{@error}</p>
+          <p role="alert" style="color: var(--destructive); margin-top: 12px;">{@error}</p>
         <% end %>
 
-        <p style="margin-top:1rem; color:var(--fg-muted); font-size:.9em;">
+        <p style="margin-top: 16px; color: var(--fg-muted); font-size: 13px;">
           Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
         </p>
-      </section>
+      </.bp_card>
     </div>
     """
   end
@@ -447,11 +445,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # client-side); this control never touches `data-theme`.
   defp render_theme_section(assigns) do
     ~H"""
-    <section
-      aria-labelledby="theme-heading"
-      style="border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin-bottom:2rem;"
-    >
-      <h2 id="theme-heading" style="margin-top:0;">Workspace theme</h2>
+    <.bp_card aria-labelledby="theme-heading">
+      <.bp_section_header id="theme-heading" title="Workspace theme" />
 
       <div
         id="bp-theme-mirror"
@@ -462,37 +457,33 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       </div>
 
       <%= if @current_workspace do %>
-        <p style="color: var(--fg-muted);">
-          The theme identity for
-          <strong>{@current_workspace.name}</strong>. Applies to the reader,
-          Studio and emailed papers — light/dark mode stays a separate switch.
-        </p>
-
         <form phx-change="set_workspace_theme">
           <input type="hidden" name="ws" value={@current_workspace.id} />
-          <label>
-            Theme
-            <select name="theme" style="margin-left:.5rem;">
-              <%= for id <- @known_themes do %>
-                <option value={id} selected={to_string(@bp_theme) == id}>{id}</option>
+          <.bp_field_row label="Theme" for="workspace-theme">
+            <.bp_select
+              id="workspace-theme"
+              name="theme"
+              value={to_string(@bp_theme)}
+              options={@known_themes}
+            />
+            <:hint>
+              The theme identity for <strong>{@current_workspace.name}</strong>.
+              Applies to the reader, Studio and emailed papers — light/dark mode
+              stays a separate switch.
+              <%= if length(@known_themes) == 1 do %>
+                One theme ships today; more land as the compiler emits them.
+              <% else %>
+                Saved server-side and stamped on the first byte — no flash.
               <% end %>
-            </select>
-          </label>
+            </:hint>
+          </.bp_field_row>
         </form>
-
-        <p style="color: var(--fg-muted); font-size:.9em; margin-bottom:0;">
-          <%= if length(@known_themes) == 1 do %>
-            One theme ships today; more land as the compiler emits them.
-          <% else %>
-            Saved server-side and stamped on the first byte — no flash.
-          <% end %>
-        </p>
       <% else %>
-        <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
+        <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
           No workspace in scope to theme.
         </p>
       <% end %>
-    </section>
+    </.bp_card>
     """
   end
 
@@ -504,11 +495,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # state flows through `Enablement.effective/1` + `Tenancy.set_workspace_plugin_settings/2`.
   defp render_plugins_section(assigns) do
     ~H"""
-    <section
-      aria-labelledby="plugins-heading"
-      style="border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin-bottom:2rem;"
-    >
-      <h2 id="plugins-heading" style="margin-top:0;">Plugins</h2>
+    <.bp_card aria-labelledby="plugins-heading">
+      <.bp_section_header id="plugins-heading" title="Plugins" />
 
       <%= cond do %>
         <% is_nil(@current_workspace) -> %>
@@ -552,29 +540,27 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                   </small>
                 </div>
 
-                <label style="display:inline-flex; align-items:center; gap:.4rem;">
-                  <input
-                    type="checkbox"
-                    checked={row.enabled}
-                    phx-click="toggle_plugin"
-                    phx-value-plugin={row.name}
-                    phx-value-ws={@current_workspace.id}
-                  />
-                  <span style={enabled_span_style(row.enabled)}>
-                    {if row.enabled, do: "Enabled", else: "Disabled"}
-                  </span>
-                </label>
+                <.bp_switch
+                  checked={row.enabled}
+                  on_label="Enabled"
+                  off_label="Disabled"
+                  phx-click="toggle_plugin"
+                  phx-value-plugin={row.name}
+                  phx-value-ws={@current_workspace.id}
+                  aria-label={"Enable #{row.display} for this workspace"}
+                />
 
-                <form phx-change="set_plugin_placement" style="margin:0;">
+                <form phx-change="set_plugin_placement" style="margin: 0;">
                   <input type="hidden" name="plugin" value={row.name} />
                   <input type="hidden" name="ws" value={@current_workspace.id} />
-                  <label style="display:inline-flex; align-items:center; gap:.4rem; color:var(--fg-muted); font-size:.9em;">
+                  <label style="display: inline-flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: 13px;">
                     Placement
-                    <select name="placement" disabled={not row.enabled}>
-                      <%= for {value, label} <- @placement_labels do %>
-                        <option value={value} selected={to_string(row.placement) == value}>{label}</option>
-                      <% end %>
-                    </select>
+                    <.bp_select
+                      name="placement"
+                      value={to_string(row.placement)}
+                      options={@placement_labels}
+                      disabled={not row.enabled}
+                    />
                   </label>
                 </form>
 
@@ -592,12 +578,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
             <% end %>
           </ul>
 
-          <p style="color: var(--fg-muted); font-size:.9em; margin-bottom:0;">
+          <p style="color: var(--fg-muted); font-size: 13px; margin-bottom: 0;">
             Installed plugins always keep their schemas, routes and background jobs
             registered — these controls decide only what THIS workspace surfaces.
           </p>
       <% end %>
-    </section>
+    </.bp_card>
     """
   end
 
@@ -605,17 +591,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     ~H"""
     <form phx-submit="save">
       <input type="hidden" name="plugin_name" value={@plugin_name} />
-      <textarea
-        id="settings_json"
-        name="settings_json"
-        rows="14"
-        style="width:100%; font-family: ui-monospace, monospace;"
-      >{@settings_json}</textarea>
+      <.bp_textarea id="settings_json" name="settings_json" rows={14} value={@settings_json} mono />
 
-      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-        <button type="submit" disabled={@plugin_name == ""}>Save</button>
+      <div style="display: flex; gap: 8px; margin-top: 12px;">
+        <button type="submit" class="btn btn-primary" disabled={@plugin_name == ""}>Save</button>
         <button
           type="button"
+          class="btn"
           phx-click="reveal"
           phx-value-plugin_name={@plugin_name}
           disabled={not @loaded? or not @masked}
@@ -624,6 +606,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         </button>
         <button
           type="button"
+          class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
           data-confirm="Delete settings for this plugin?"
@@ -641,18 +624,19 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     <form phx-submit="save" data-preset={@plugin_name}>
       <input type="hidden" name="plugin_name" value={@plugin_name} />
 
-      <fieldset style="border:1px solid var(--border); padding:.75rem; margin-bottom:.5rem;">
-        <legend>{@plugin_name} settings</legend>
+      <fieldset style="border: 1px solid var(--border-muted); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 12px;">
+        <legend style="padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--fg);">{@plugin_name} settings</legend>
 
         <%= for field <- @settings_fields do %>
           {render_field(Map.merge(assigns, %{field: field, key: flat_key(field)}))}
         <% end %>
       </fieldset>
 
-      <div style="display:flex; gap:.5rem; margin-top:.5rem;">
-        <button type="submit">Save</button>
+      <div style="display: flex; gap: 8px; margin-top: 12px;">
+        <button type="submit" class="btn btn-primary">Save</button>
         <button
           type="button"
+          class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
           data-confirm={"Delete settings for #{@plugin_name}?"}
@@ -666,26 +650,26 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   end
 
   defp render_field(assigns) do
+    assigns = assign(assigns, :value, Map.get(assigns.typed_form, assigns.key, default_for(assigns.field)))
+
     ~H"""
-    <p>
-      <label>
-        {@field.label}<%= if @field[:required] do %> <span style="color:var(--destructive);">*</span><% end %>
-        {render_input(Map.merge(assigns, %{value: Map.get(@typed_form, @key, default_for(@field))}))}
-      </label>
-      <%= if @field[:masked] do %>
-        <button
-          type="button"
-          phx-click="reveal_field"
-          phx-value-field={@key}
-          disabled={not @loaded?}
-        >
-          Reveal
-        </button>
-      <% end %>
-      <%= if hint = @field[:hint] do %>
-        <br /><small style="color:var(--fg-muted);">{hint}</small>
-      <% end %>
-    </p>
+    <.bp_field_row label={@field.label} for={@key} required={!!@field[:required]}>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        {render_input(assigns)}
+        <%= if @field[:masked] do %>
+          <button
+            type="button"
+            class="btn btn-sm"
+            phx-click="reveal_field"
+            phx-value-field={@key}
+            disabled={not @loaded?}
+          >
+            Reveal
+          </button>
+        <% end %>
+      </div>
+      <:hint :if={@field[:hint]}>{@field[:hint]}</:hint>
+    </.bp_field_row>
     """
   end
 
@@ -702,29 +686,25 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   defp render_select(assigns) do
     ~H"""
-    <select name={@key} style="width:100%;">
-      <%= for opt <- (@field[:options] || []) do %>
-        <option value={opt} selected={to_string(@value) == to_string(opt)}>{opt}</option>
-      <% end %>
-    </select>
+    <.bp_select id={@key} name={@key} value={@value} options={@field[:options] || []} />
     """
   end
 
   defp render_boolean(assigns) do
     ~H"""
-    <input type="checkbox" name={@key} value="true" checked={truthy?(@value)} />
+    <.bp_switch id={@key} name={@key} value="true" checked={truthy?(@value)} />
     """
   end
 
   defp render_secret(assigns) do
     ~H"""
-    <input
+    <.bp_input
+      id={@key}
       type={if Map.get(@revealed, @key, false), do: "text", else: "password"}
       name={@key}
       value={@value}
       placeholder={@field[:placeholder]}
       autocomplete="off"
-      style="width:100%;"
       required={!!@field[:required]}
     />
     """
@@ -732,13 +712,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
   defp render_string(assigns) do
     ~H"""
-    <input
+    <.bp_input
+      id={@key}
       type={if @field[:masked] == true and not Map.get(@revealed, @key, false), do: "password", else: "text"}
       name={@key}
       value={@value}
       placeholder={@field[:placeholder]}
       autocomplete="off"
-      style="width:100%;"
       required={!!@field[:required]}
     />
     """
@@ -748,13 +728,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     assigns = Map.put(assigns, :html_type, html_type)
 
     ~H"""
-    <input
+    <.bp_input
+      id={@key}
       type={@html_type}
       name={@key}
       value={@value}
       placeholder={@field[:placeholder]}
       autocomplete="off"
-      style="width:100%;"
       required={!!@field[:required]}
     />
     """
@@ -935,9 +915,6 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     on_off = if enabled, do: "on", else: "off"
     "#{on_off} by default · #{placement_label(to_string(placement))}"
   end
-
-  defp enabled_span_style(true), do: "color:var(--success); font-size:.9em;"
-  defp enabled_span_style(false), do: "color:var(--fg-muted); font-size:.9em;"
 
   # ── Load paths ─────────────────────────────────────────────────────────
 
