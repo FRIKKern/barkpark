@@ -96,6 +96,15 @@ func newUsageServer(t *testing.T, status int, body string) (gotMethod, gotPath, 
 	t.Helper()
 	var m, p, a string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The per-instance human path also probes /usage/history (OC21). Answer it
+		// 404 by default so the fail-soft branch drops the TREND column and these
+		// goldens stay the pre-existing (history-free) table — the primary /usage
+		// request is the one recorded. TREND tests use newUsageHistoryServer.
+		if strings.HasSuffix(r.URL.Path, "/usage/history") {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not_found"}`))
+			return
+		}
 		m, p, a = r.Method, r.URL.Path, r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
@@ -106,6 +115,41 @@ func newUsageServer(t *testing.T, status int, body string) (gotMethod, gotPath, 
 	seedCloudLogin(t, srv.URL)
 	return &m, &p, &a
 }
+
+// newUsageHistoryServer stands up a fake control plane that answers BOTH the
+// per-instance /usage route (with usageBody) and its /usage/history route (with
+// histStatus + histBody), so a TREND test can drive the two-fetch human path. It
+// records the path of EACH request seen (in order) so a test can assert that the
+// raw path makes no history call.
+func newUsageHistoryServer(t *testing.T, usageBody string, histStatus int, histBody string) *[]string {
+	t.Helper()
+	paths := []string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/usage/history") {
+			w.WriteHeader(histStatus)
+			_, _ = w.Write([]byte(histBody))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(usageBody))
+	}))
+	t.Cleanup(srv.Close)
+	withTempConfigHome(t)
+	seedCloudLogin(t, srv.URL)
+	return &paths
+}
+
+// usageHistoryEnvelope is a mixed history payload for the TREND tests: documents
+// RISING, db_size GAPPY (a nil sample dropped), disk FLAT (steady → mid-height),
+// and webhooks ALL-NIL (every point a gap → an honest em-dash cell). The other
+// meters are absent from the series (no history → em dash too).
+const usageHistoryEnvelope = `{"ok":true,"series":{` +
+	`"documents":[{"at":"2026-07-10T00:00:00Z","value":10},{"at":"2026-07-10T00:15:00Z","value":20},{"at":"2026-07-10T00:30:00Z","value":40},{"at":"2026-07-10T00:45:00Z","value":80}],` +
+	`"db_size":[{"at":"2026-07-10T00:00:00Z","value":1048576},{"at":"2026-07-10T00:15:00Z","value":null},{"at":"2026-07-10T00:30:00Z","value":2097152}],` +
+	`"disk":[{"at":"2026-07-10T00:00:00Z","value":42},{"at":"2026-07-10T00:15:00Z","value":42},{"at":"2026-07-10T00:30:00Z","value":42}],` +
+	`"webhooks":[{"at":"2026-07-10T00:00:00Z","value":null},{"at":"2026-07-10T00:15:00Z","value":null}]}}`
 
 // runUsage drives runCloudUsage with an in-memory writer at the chosen output +
 // color, returning stdout, stderr, exit.
@@ -722,6 +766,207 @@ func TestFleetRowState(t *testing.T) {
 	}
 	if got := fleetRowState(over); got != "over_limit" {
 		t.Errorf("over-limit row = %q, want over_limit", got)
+	}
+}
+
+// ---- TREND sparkline column (per-instance history, OC21) ----
+
+// TestSparkRunes pins the eighth-block primitive directly: an ascending series
+// walks the full ladder, endpoints land on ▁/█ regardless of scale, a flat or
+// single-point series paints MID-height (▅, the deliberate divergence from
+// pdrender's baseline floor), and an empty series is "" (the caller's em-dash
+// signal).
+func TestSparkRunes(t *testing.T) {
+	if got := sparkRunes([]float64{1, 2, 3, 4, 5, 6, 7, 8}); got != "▁▂▃▄▅▆▇█" {
+		t.Errorf("ascending ladder: got %q, want ▁▂▃▄▅▆▇█", got)
+	}
+	got := sparkRunes([]float64{100, 800})
+	if r := []rune(got); string(r[0]) != "▁" || string(r[len(r)-1]) != "█" {
+		t.Errorf("scaled endpoints: got %q, want first ▁ last █", got)
+	}
+	if got := sparkRunes([]float64{5, 5, 5}); got != "▅▅▅" {
+		t.Errorf("flat series: got %q, want mid-height ▅▅▅", got)
+	}
+	if got := sparkRunes([]float64{9}); got != "▅" {
+		t.Errorf("single point: got %q, want mid-height ▅", got)
+	}
+	if got := sparkRunes(nil); got != "" {
+		t.Errorf("empty series: got %q, want empty string", got)
+	}
+}
+
+// fp2 builds a *float64 for a history point value (a nil pointer is a gap).
+func fp2(v float64) *float64 { return &v }
+
+// TestUsageTrendCell pins the per-meter cell logic: a rising series draws its
+// sparkline, a gappy series DROPS its nils (never a fake zero), a flat series is
+// mid-height, an all-nil series is an em dash, and a meter absent from the history
+// is an em dash.
+func TestUsageTrendCell(t *testing.T) {
+	history := map[string][]cloudclient.UsageHistoryPoint{
+		"documents": {{Value: fp2(10)}, {Value: fp2(20)}, {Value: fp2(40)}, {Value: fp2(80)}},
+		"db_size":   {{Value: fp2(1048576)}, {Value: nil}, {Value: fp2(2097152)}},
+		"disk":      {{Value: fp2(42)}, {Value: fp2(42)}, {Value: fp2(42)}},
+		"webhooks":  {{Value: nil}, {Value: nil}},
+	}
+	cases := []struct {
+		name, want string
+	}{
+		{"documents", "▁▂▄█"}, // rising, own min..max
+		{"db_size", "▁█"},     // the nil gap is dropped, two real points
+		{"disk", "▅▅▅"},       // flat → mid-height
+		{"webhooks", "—"},     // all-nil → honest em dash
+		{"datasets", "—"},     // absent from history → em dash
+	}
+	for _, c := range cases {
+		if got := usageTrendCell(c.name, history); got != c.want {
+			t.Errorf("%s: usageTrendCell = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestHistoryHasData proves the column gate: a history with any numeric point is
+// data (column shows); an empty map, a nil map, and an all-gaps history are NOT
+// (column dropped, never a lonely run of em dashes).
+func TestHistoryHasData(t *testing.T) {
+	if !historyHasData(map[string][]cloudclient.UsageHistoryPoint{"documents": {{Value: fp2(1)}}}) {
+		t.Errorf("a series with a real point must count as data")
+	}
+	if historyHasData(nil) {
+		t.Errorf("a nil history must not count as data")
+	}
+	if historyHasData(map[string][]cloudclient.UsageHistoryPoint{}) {
+		t.Errorf("an empty history must not count as data")
+	}
+	allGaps := map[string][]cloudclient.UsageHistoryPoint{"webhooks": {{Value: nil}, {Value: nil}}}
+	if historyHasData(allGaps) {
+		t.Errorf("an all-gaps history must not count as data")
+	}
+}
+
+// TestRunCloudUsageTrendColumn: when the sampler's history is present the human
+// table grows a TREND column painting each meter's sparkline — rising documents,
+// a gap-dropped db_size, and a flat mid-height disk all render.
+func TestRunCloudUsageTrendColumn(t *testing.T) {
+	newUsageHistoryServer(t, usageMixedEnvelope, 200, usageHistoryEnvelope)
+
+	stdout, _, code := runUsage(t, "table", false, testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "TREND") {
+		t.Fatalf("history present must add a TREND column header:\n%s", stdout)
+	}
+	if docs := usageTestRow(t, stdout, "Documents"); !strings.Contains(docs, "▁▂▄█") {
+		t.Fatalf("documents TREND must draw the rising sparkline:\n%s", docs)
+	}
+	if db := usageTestRow(t, stdout, "DB size"); !strings.Contains(db, "▁█") {
+		t.Fatalf("db_size TREND must drop the nil gap and draw two points:\n%s", db)
+	}
+	if disk := usageTestRow(t, stdout, "Disk"); !strings.Contains(disk, "▅▅▅") {
+		t.Fatalf("disk TREND must draw a flat mid-height run:\n%s", disk)
+	}
+}
+
+// TestRunCloudUsageTrendFailSoft: a history read that 404s (an older control
+// plane without the route) or 500s degrades SILENTLY to the pre-existing table —
+// no TREND column, exit 0, the meters still render.
+func TestRunCloudUsageTrendFailSoft(t *testing.T) {
+	for _, hs := range []int{404, 500} {
+		newUsageHistoryServer(t, usageMixedEnvelope, hs, `{"error":"nope"}`)
+		stdout, _, code := runUsage(t, "table", false, testInstanceID)
+		if code != exitOK {
+			t.Fatalf("history %d: exit = %d, want 0 (fail-soft)\n%s", hs, code, stdout)
+		}
+		if strings.Contains(stdout, "TREND") {
+			t.Fatalf("history %d: a failed history read must drop the TREND column:\n%s", hs, stdout)
+		}
+		if !strings.Contains(stdout, "Documents") || !strings.Contains(stdout, "128") {
+			t.Fatalf("history %d: the meters must still render on the fail-soft path:\n%s", hs, stdout)
+		}
+	}
+}
+
+// TestRunCloudUsageTrendEmptyHistory: a 200 history with NO numeric points (a box
+// the sampler has stored only gaps for, or a just-deployed empty series) draws no
+// TREND column — a lonely all-em-dash column is noise, not signal.
+func TestRunCloudUsageTrendEmptyHistory(t *testing.T) {
+	newUsageHistoryServer(t, usageMixedEnvelope, 200, `{"ok":true,"series":{}}`)
+	stdout, _, code := runUsage(t, "table", false, testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if strings.Contains(stdout, "TREND") {
+		t.Fatalf("an empty history must not draw a TREND column:\n%s", stdout)
+	}
+}
+
+// TestRunCloudUsageTrendRawNoFetch: the raw paths (-o json/-o yaml) emit the LIVE
+// /usage envelope byte-unchanged and make NO history fetch — scripts depend on the
+// exact shape, and the trend is a human garnish only.
+func TestRunCloudUsageTrendRawNoFetch(t *testing.T) {
+	// json is byte-verbatim AND never touches /usage/history.
+	paths := newUsageHistoryServer(t, usageMixedEnvelope, 200, usageHistoryEnvelope)
+	stdout, _, code := runUsage(t, "json", false, testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if stdout != usageMixedEnvelope+"\n" {
+		t.Fatalf("json must be the /usage envelope verbatim (no history):\n got: %q\nwant: %q", stdout, usageMixedEnvelope+"\n")
+	}
+	for _, p := range *paths {
+		if strings.HasSuffix(p, "/usage/history") {
+			t.Fatalf("the raw path must make NO history fetch, saw %q", p)
+		}
+	}
+
+	// yaml likewise makes no history fetch.
+	paths2 := newUsageHistoryServer(t, usageMixedEnvelope, 200, usageHistoryEnvelope)
+	if _, _, code := runUsage(t, "yaml", false, testInstanceID); code != exitOK {
+		t.Fatalf("yaml exit = %d, want 0", code)
+	}
+	for _, p := range *paths2 {
+		if strings.HasSuffix(p, "/usage/history") {
+			t.Fatalf("the yaml raw path must make NO history fetch, saw %q", p)
+		}
+	}
+}
+
+// TestRunCloudUsageTrendRawByteStable: the -o json bytes are IDENTICAL whether the
+// history endpoint is present (200) or absent (404) — the trend never leaks into
+// the machine contract.
+func TestRunCloudUsageTrendRawByteStable(t *testing.T) {
+	newUsageHistoryServer(t, usageMixedEnvelope, 200, usageHistoryEnvelope)
+	withHist, _, _ := runUsage(t, "json", false, testInstanceID)
+
+	newUsageHistoryServer(t, usageMixedEnvelope, 404, `{"error":"not_found"}`)
+	withoutHist, _, _ := runUsage(t, "json", false, testInstanceID)
+
+	if withHist != withoutHist {
+		t.Fatalf("json bytes must be identical with/without history:\n present: %q\n absent:  %q", withHist, withoutHist)
+	}
+	if withHist != usageMixedEnvelope+"\n" {
+		t.Fatalf("json must be the /usage envelope verbatim:\n got: %q", withHist)
+	}
+}
+
+// TestRunCloudFleetUsageNoHistoryFetch: the fleet (no-arg) path reads ONLY
+// /v1/usage/summary — it never probes /usage/history (the trend is a per-instance
+// garnish, and the fleet view is byte-unchanged by this slice).
+func TestRunCloudFleetUsageNoHistoryFetch(t *testing.T) {
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{freshFleetRow()})
+	paths := newUsageHistoryServer(t, body, 200, usageHistoryEnvelope)
+
+	if _, _, code := runUsage(t, "table", false); code != exitOK {
+		t.Fatalf("fleet exit != 0")
+	}
+	for _, p := range *paths {
+		if strings.HasSuffix(p, "/usage/history") {
+			t.Fatalf("the fleet path must make NO history fetch, saw %q", p)
+		}
+		if !strings.HasSuffix(p, "/usage/summary") {
+			t.Fatalf("the fleet path must hit only /usage/summary, saw %q", p)
+		}
 	}
 }
 
