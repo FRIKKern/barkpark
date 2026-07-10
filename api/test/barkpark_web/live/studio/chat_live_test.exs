@@ -402,15 +402,15 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "studio-tab active"
     end
 
-    # Keyboard-first affordances are documented UNCONDITIONALLY (charter D42):
-    # the footer hint is present on the very first mount, before any turn runs or
-    # cost strip appears — a sibling of that conditional strip, never gated on it.
-    test "the keyboard footer hint renders on fresh mount, before any turn completes", %{
+    # Keyboard-first affordances are documented from the very first mount
+    # (charter D42) — they live in the idle composer PLACEHOLDER, not a
+    # standing footer row, so they vanish the moment the user types.
+    test "the keyboard affordances render in the idle placeholder on fresh mount", %{
       html: html
     } do
-      assert html =~ "esc interrupt"
-      assert html =~ "/ commands"
-      assert html =~ "↵ send"
+      assert html =~ "/ for commands"
+      assert html =~ "↵ to send"
+      assert html =~ "esc to interrupt"
       # the cost strip is still conditional — no result yet, so no cost line
       refute html =~ "⏵"
     end

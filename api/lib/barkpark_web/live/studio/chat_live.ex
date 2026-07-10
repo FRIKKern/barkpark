@@ -2495,11 +2495,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     and wipes the options the instant the menu opens. --%>
               <ul
                 id="chat-slash-menu"
+                class="bp-composer-menu"
                 phx-update="ignore"
                 role="listbox"
                 aria-label="Slash commands"
                 hidden
-                style="position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-muted); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); z-index: 20;"
               >
               </ul>
             </div>
@@ -2701,19 +2701,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </button>
           </form>
         </div>
-        <%!-- Cost strip + keyboard hint (charter D42): ONE quiet line under the
-              card — facts left, affordances right. The hint side is
-              unconditional so it shows from the very first mount. --%>
+        <%!-- Cost strip: facts only, and only once a turn has a cost. The
+              keyboard affordances (charter D42) moved into the idle composer
+              PLACEHOLDER — no standing footer row. --%>
         <div
+          :if={@last_result && @last_result.cost_usd}
           class="text-xs text-dim"
-          style="max-width: 860px; margin: 5px auto 0; padding: 0 6px; display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 11px; opacity: 0.6;"
+          style="max-width: 860px; margin: 5px auto 0; padding: 0 6px; font-family: var(--font-mono); font-size: 11px; opacity: 0.6;"
         >
-          <span :if={@last_result && @last_result.cost_usd}>
-            <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(
-              @last_result.duration_ms
-            ) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
-          </span>
-          <span style="margin-left: auto;">esc interrupt · / commands · ↵ send</span>
+          <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(
+            @last_result.duration_ms
+          ) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </div>
 
         <%!-- Agents rail (charter D47): the Claude-Code-TUI mission-control view,
@@ -5012,13 +5010,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp approval_outcome_label(_), do: "✗ denied"
 
   # The idle/ready clause teaches the composer's verbs (charter D44) — never a
-  # mic, never @-mentions. Degraded states keep their honest, specific copy.
-  defp composer_placeholder(:new), do: "Plan, build… / for commands"
+  # mic, never @-mentions. The keyboard affordances (D42) live HERE in the
+  # placeholder, not in a footer row: visible from the very first mount, gone
+  # the moment you type. Degraded states keep their honest, specific copy.
+  @idle_placeholder "Plan, build… · / for commands · ↵ to send · esc to interrupt"
+  defp composer_placeholder(:new), do: @idle_placeholder
   defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"
   defp composer_placeholder(:offline), do: "Send a message to resume this session…"
-  defp composer_placeholder(:thinking), do: "Claude is working — press Stop to interrupt…"
+  defp composer_placeholder(:thinking), do: "Claude is working — esc or Stop to interrupt…"
   defp composer_placeholder(:interrupting), do: "Stopping…"
-  defp composer_placeholder(_), do: "Plan, build… / for commands"
+  defp composer_placeholder(_), do: @idle_placeholder
 
   # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
 
