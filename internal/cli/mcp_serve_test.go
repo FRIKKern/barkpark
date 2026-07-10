@@ -259,6 +259,116 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 }
 
+// TestMCPTaskCreateWeightedTags proves the task_create tool's new `tags` property
+// survives the MCP→body→mutate translation as a weighted-object array. It stands
+// up a fake /v1/data/mutate server, calls task_create over a real in-memory MCP
+// session with three weighted tags (publish:false so the single create mutation is
+// the whole exchange), and asserts the captured create body carries tags as
+// {tag,strength,rationale} objects with the strengths intact — the coverage the
+// name-only tools/list assertions never provided.
+func TestMCPTaskCreateWeightedTags(t *testing.T) {
+	var createBody []byte
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			createBody, _ = io.ReadAll(req.Body)
+			io.WriteString(rw, `{"results":[{"id":"drafts.task-1"}]}`)
+			return
+		}
+		rw.WriteHeader(http.StatusNotFound)
+		io.WriteString(rw, `{"error":{"code":"not_found"}}`)
+	}))
+	defer ts.Close()
+
+	m, err := manifest.Parse([]byte(mcpTestManifest))
+	if err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	ctx := manifest.Context{Server: ts.URL, Token: "tok"}
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: "barkpark-tasks", Version: "test"}, nil)
+	if err := registerTaskTools(srv, globals{yes: true}, ctx, m); err != nil {
+		t.Fatalf("registerTaskTools: %v", err)
+	}
+
+	serverT, clientT := mcp.NewInMemoryTransports()
+	bg := context.Background()
+	ss, err := srv.Connect(bg, serverT, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer ss.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(bg, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer cs.Close()
+
+	res, err := cs.CallTool(bg, &mcp.CallToolParams{
+		Name: "task_create",
+		Arguments: map[string]any{
+			"title":   "weighted task",
+			"publish": false, // keep the exchange to the single create mutation
+			"tags": []any{
+				map[string]any{"tag": "auth", "strength": 90, "rationale": "core to the seam"},
+				map[string]any{"tag": "cli", "strength": 40, "rationale": "surfaced in bp"},
+				map[string]any{"tag": "docs", "strength": 10, "rationale": "card touched"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_create: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_create unexpectedly IsError: %s", mcpContentText(res))
+	}
+
+	// The create mutation body must carry tags as a weighted-object array under the
+	// create op — {mutations:[{create:{_type:task, tags:[{tag,strength,rationale}…]}}]}.
+	var sent struct {
+		Mutations []struct {
+			Create map[string]any `json:"create"`
+		} `json:"mutations"`
+	}
+	if err := json.Unmarshal(createBody, &sent); err != nil {
+		t.Fatalf("create body did not parse: %v (%q)", err, createBody)
+	}
+	if len(sent.Mutations) != 1 || sent.Mutations[0].Create == nil {
+		t.Fatalf("expected one create mutation; got %q", createBody)
+	}
+	create := sent.Mutations[0].Create
+	if create["_type"] != "task" || create["title"] != "weighted task" {
+		t.Fatalf("create op missing task defaults: %q", createBody)
+	}
+	tags, ok := create["tags"].([]any)
+	if !ok || len(tags) != 3 {
+		t.Fatalf("create tags not a 3-element array: %q", createBody)
+	}
+	// Strengths land as numbers (distinct, unique max) and the labels/rationales survive.
+	want := []struct {
+		tag       string
+		strength  float64
+		rationale string
+	}{
+		{"auth", 90, "core to the seam"},
+		{"cli", 40, "surfaced in bp"},
+		{"docs", 10, "card touched"},
+	}
+	for i, w := range want {
+		obj, _ := tags[i].(map[string]any)
+		if obj == nil {
+			t.Fatalf("tags[%d] not an object: %q", i, createBody)
+		}
+		if obj["tag"] != w.tag || obj["rationale"] != w.rationale {
+			t.Fatalf("tags[%d] tag/rationale wrong: %v (%q)", i, obj, createBody)
+		}
+		s, isNum := obj["strength"].(float64)
+		if !isNum || s != w.strength {
+			t.Fatalf("tags[%d] strength = %v (%T), want %v as a number: %q", i, obj["strength"], obj["strength"], w.strength, createBody)
+		}
+	}
+}
+
 // mcpContentText concatenates the text of a result's content blocks.
 func mcpContentText(res *mcp.CallToolResult) string {
 	var b strings.Builder
