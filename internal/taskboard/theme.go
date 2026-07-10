@@ -159,6 +159,18 @@ var (
 	// extension, so the motion_test GetBackground==NoColor guards stay green.
 	hoverStyle = lipgloss.NewStyle().Background(hoverBgColor)
 
+	// faintStyle is the picker-law recede that makes the hover read as "lit up"
+	// (the agent-picker vocabulary: siblings at lower opacity, the focused row at
+	// full brightness). While a pointer hover is resolved onto a selectable spine
+	// row, every OTHER selectable row wears the terminal's faint attribute (SGR 2)
+	// — an ATTRIBUTE, not a color, so it composes over the row's own lifecycle /
+	// priority hues without recoloring them ("color = state" stays intact) and
+	// costs zero new palette entries. It paints ONLY while a hover target is live
+	// (faintPaint re-arms it across a row's embedded resets, hoverPaint-style);
+	// with no pointer the board is byte-identical, so goldens and the at-rest
+	// aliveness budget are untouched.
+	faintStyle = lipgloss.NewStyle().Faint(true)
+
 	// verbHoverStyle is the pointer-hover affordance on a clickable footer verb
 	// (charter D96), on the D94 background vocabulary: verbs wear the STRONGER
 	// chrome-selection-bg tint (pressedBg — rows keep the subtle chrome-cursor-bg

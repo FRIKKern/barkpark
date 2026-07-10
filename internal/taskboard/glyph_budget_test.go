@@ -39,7 +39,7 @@ var glyphAllowlist = map[rune]string{
 	'⠇': "in_progress spinner frame 8",
 	'⠏': "in_progress spinner frame 9",
 	'⠿': "in_progress spinner frozen frame (reduced-motion / NO_MOTION)",
-	'●': "live connection dot",
+	'●': "live connection dot / checked radio on an entered (open) task row",
 	'◐': "polling connection dot",
 	'○': "ready/open status glyph",
 	'✓': "done status glyph / met criterion / momentum done tally",

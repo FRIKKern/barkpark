@@ -261,9 +261,12 @@ type UIState struct {
 	// is resolved by the ttm-s1 compose-level hit map from a Motion MouseMsg and
 	// set through setHoverTarget (the hover-changed guard IS the debounce — a
 	// Motion onto the same row is a no-op, so an all-motion stream never
-	// re-renders). Render paints hoverStyle over exactly this row; a "" target
-	// paints nothing, so a board with no mouse is byte-identical. Cleared on any
-	// key input, so the keyboard flow is untouched.
+	// re-renders). Render paints the picker law from exactly this row: the
+	// hovered row wears hoverStyle's tint at full brightness and every OTHER
+	// selectable row recedes to faint (lower opacity), so the hover reads as
+	// lit up. A "" target paints nothing, so a board with no mouse is
+	// byte-identical. Cleared on any key input, so the keyboard flow is
+	// untouched.
 	HoverTarget string
 	// MouseReleased is the mouse-mode toggle (charter D96): false (the zero
 	// value, and the program's start state) means mouse reporting is ON — the
@@ -279,6 +282,15 @@ type UIState struct {
 	// a background tint (the terminal's hover vocabulary); at rest (0) the footer
 	// is one dim span, byte-identical to the pre-mouse footer, so goldens stay calm.
 	HoverFooterVerb rune
+	// OpenTasks is the set of task doc_ids currently OPEN as FrameTask frames on
+	// the navigation stack — the breadcrumb trail as a lookup. The board renders
+	// those rows' status glyph as the checked radio ● (ASCII '*'): enter checks
+	// the row, esc unchecks it — the picker vocabulary, visible in the wide
+	// two-pane where the board stays pinned beside the reading frame. It is
+	// DERIVED from Model.stack at compose time (openTaskRefs, compose.go), never
+	// stored shell state, so it cannot desync from the breadcrumb; nil while
+	// nothing is open, so an at-rest render is byte-identical.
+	OpenTasks map[string]bool
 }
 
 // ActionStrip is the single role-colored status line rendered directly above

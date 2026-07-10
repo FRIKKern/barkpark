@@ -218,7 +218,7 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 		Criteria:  &Criteria{Met: 1, Total: 2},
 	}
 	for _, width := range []int{60, 72, 100} {
-		rows := TaskRow(task, false, 0, false, width, 0, testNow)
+		rows := TaskRow(task, false, false, 0, false, width, 0, testNow)
 		if len(rows) != 1 {
 			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
 		}
@@ -241,7 +241,7 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, 0, false, 40, 0, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, false, 0, false, 40, 0, testNow)[0])
 	if strings.Contains(line, "opus-3") {
 		t.Errorf("below 60 cols meta should be dropped: %q", line)
 	}
@@ -260,9 +260,25 @@ func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
 		Lifecycle: "in_progress",
 		UpdatedAt: testNow.Add(-8 * 24 * time.Hour),
 	}
-	line := ansi.Strip(TaskRow(task, false, 0, false, 80, 0, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, false, 0, false, 80, 0, testNow)[0])
 	if !strings.Contains(line, "8d") {
 		t.Errorf("unclaimed stale in_progress row must wear its age badge: %q", line)
+	}
+}
+
+// TestTaskRowOpenedWearsCheckedRadio — the picker vocabulary: an ENTERED task
+// (opened=true, a FrameTask on the navigation stack) swaps its lifecycle glyph
+// for the checked radio ●; un-opened it keeps the lifecycle glyph. The color
+// source (glyphStyleFor) is unchanged — shape yields, color (= state) stays.
+func TestTaskRowOpenedWearsCheckedRadio(t *testing.T) {
+	task := Task{DocID: "t", Title: "Wire the bridge", Lifecycle: "ready", UpdatedAt: testNow}
+	open := ansi.Strip(TaskRow(task, false, true, 0, false, 80, 0, testNow)[0])
+	if !strings.Contains(open, "●") || strings.Contains(open, "○") {
+		t.Errorf("opened row must wear the checked ● instead of ○: %q", open)
+	}
+	closed := ansi.Strip(TaskRow(task, false, false, 0, false, 80, 0, testNow)[0])
+	if !strings.Contains(closed, "○") || strings.Contains(closed, "●") {
+		t.Errorf("un-opened row must keep its lifecycle glyph: %q", closed)
 	}
 }
 

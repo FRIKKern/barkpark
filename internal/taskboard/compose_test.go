@@ -159,6 +159,57 @@ func TestComposeWideGolden(t *testing.T) {
 	composeGolden(t, "compose_wide_120.txt", got)
 }
 
+// TestEnterChecksOpenTaskRow — the picker vocabulary: entering a task CHECKS
+// its radio. While a FrameTask is on the navigation stack its board row wears
+// the ● checked glyph (in place of the lifecycle glyph, same color), and
+// popping the frame (esc) reverts it. Exercised in WIDE mode, where the board
+// stays pinned beside the reading frame so the check is actually visible.
+func TestEnterChecksOpenTaskRow(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 1 // the subject task
+
+	// subjectRow finds the subject task's BOARD-PANE row: the match must sit in
+	// the left 46 columns (the pinned board), and the breadcrumb (the first two
+	// output lines: the Compose blank + the crumb, which also carries the title
+	// once a frame is pushed) is skipped.
+	subjectRow := func(frame string) string {
+		t.Helper()
+		for i, ln := range strings.Split(frame, "\n") {
+			if i < 2 {
+				continue
+			}
+			r := []rune(ln)
+			if len(r) > boardPaneWidth {
+				r = r[:boardPaneWidth]
+			}
+			if strings.Contains(string(r), "Wire the SSE") {
+				return ln[:len(string(r))]
+			}
+		}
+		t.Fatalf("subject row not found in the board pane:\n%s", frame)
+		return ""
+	}
+
+	before := subjectRow(ansi.Strip(Compose(m)))
+	if strings.Contains(before, "●") {
+		t.Fatalf("subject row is checked before enter: %q", before)
+	}
+
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "Wire the SSE live bridge"})
+	during := subjectRow(ansi.Strip(Compose(m)))
+	if !strings.Contains(during, "●") {
+		t.Fatalf("entered task's board row is not checked: %q", during)
+	}
+
+	(&m).popFrame()
+	after := subjectRow(ansi.Strip(Compose(m)))
+	if strings.Contains(after, "●") {
+		t.Fatalf("escaped task's board row is still checked: %q", after)
+	}
+}
+
 func composeName(prefix string, w int) string {
 	switch w {
 	case 60:
