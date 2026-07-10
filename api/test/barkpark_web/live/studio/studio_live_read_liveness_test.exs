@@ -174,7 +174,9 @@ defmodule BarkparkWeb.Studio.StudioLiveReadLivenessTest do
       # TWO workspace-wide read grants: one will expire, the other keeps the desk
       # admitted — so the tick narrows the snapshot without killing the socket.
       keep = bind_grant!(ws, user, grantor, %{capabilities: ["read"], expires_at: future(7200)})
-      expiring = bind_grant!(ws, user, grantor, %{capabilities: ["read"], expires_at: future(3600)})
+
+      expiring =
+        bind_grant!(ws, user, grantor, %{capabilities: ["read"], expires_at: future(3600)})
 
       {:ok, view, _html} = live(conn, desk_url(ws, proj))
 
