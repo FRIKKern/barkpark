@@ -214,3 +214,28 @@ as superseded by cb-next-frontier-claim; the D14 children pass is wave-3 slice 2
   (opus), df-docs-files-doctrine (opus). Backlog filed: graph-endpoint-latency (standalone,
   server-side). Wave Paper: dispatch-frontier-wave-2026-07-10. C3 stamps as-strengthened per D13; the
   lead closes the epic at review.
+
+### Wave 2026-07-10 (wave 3 review — built, reviewed, ready to merge)
+
+All three slices landed green and reviewed; nothing stalled. **df-v3-ready-header-decouple**
+(branch `loop-epic/ready-header-answers-instantly-decouple--0`, commit 6caeae67): the D12 fix —
+`bp task ready` header computes with ZERO graph calls (pure `taskboard.Frontier` over the snapshot,
+`FrontierOpts{}` in printReadyFrontierHeader); `fetchCrossEdges` → `fetchCrossEdgesBounded` (8-worker
+pool, ONE 4s total deadline, best-effort fold on expiry, buffered sends so abandoned workers never
+block). Reviewer re-proved the D4 deny-path non-vacuous (restoring the CrossEdges call turned
+TestReadyFrontierHeaderZeroGraphCalls red at 2 graph hits) and ran the pool tests under -race: clean.
+Accepted looseness: the header count can read slightly higher than `task frontier`'s when real
+cross-root block edges exist (D12: a headline needs no cross-root precision); on live guerrilla
+(~10s/graph call) the 4s deadline usually yields zero cross edges until `graph-endpoint-latency`
+fixes the server. **df-close-ledger-stamp** (bp-only, no branch): D14 done — 7 v1-era children
+stamped met==total from close_reason evidence (test names verified in-tree; suites re-run green at
+review), df-seed-area-labels 0/3 with the honest decay caveat (files_less=60), proj:dispatch-frontier
+added to df-exclude-epic-roots-from-hard-conflict, cmux-bridge-goal criteria (a)-(f) authored+stamped
+6/6, cb-ledger-close claimed(epoch 3)+closed done 5/5. **df-docs-files-doctrine** (branch
+`loop-epic/files-doctrine-reaches-every-decide-phas-2`, commit 6624b896 + this review commit): D16 —
+one files:-authoring bullet in the epic-cycle TASKS_BLOCK, D2 server-fence caveat in
+dispatch-areas.md; all three doc gates green. Next: the LEAD merges both branches (PR bodies carry
+Task: <id>), closes the merge-gated criteria (df-v3 c6, df-docs c4, df-close-ledger-stamp c6
+read-back), stamps goal C3 as-strengthened per D13, and CLOSES dispatch-frontier-goal — remaining
+work (graph-endpoint-latency, files: seeding, epic-cycle --frontier consumption, Studio overlap
+surfacing) lives in the §Gap register, not in a new wave.
