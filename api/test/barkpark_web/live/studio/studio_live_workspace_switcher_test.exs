@@ -19,7 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
   target the title button and the OPEN popover. NB the page `<style>` block
   contains `.scope-menu*` / `.scope-title*` CSS selectors, so open/closed
   assertions use markup-only strings (`aria-label=…`, `phx-click=…`,
-  `scope-title-ws">…`), never bare class-name substrings.
+  `scope-avatar">…`), never bare class-name substrings.
 
   Covers:
     * the title button renders with the current (member) workspace; the open
@@ -130,10 +130,12 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_workspace.slug == acme_ws.slug
       assert assigns.current_project.slug == acme_blog.slug
 
-      # The title shows the workspace name + the "project / dataset" trail
-      # (dataset rides the trail as its SLUG).
-      assert html =~ ~s{scope-title-ws">#{acme_ws.name}</span>}
-      assert html =~ ~r{scope-title-trail">\s*#{acme_blog.name} · #{@dataset}\s*<}
+      # The avatar carries the workspace (initial + full name in the button
+      # tooltip); the visible chip shows project trail + dataset badge.
+      assert html =~ ~s{scope-avatar" aria-hidden="true">#{String.first(acme_ws.name) |> String.upcase()}</span>}
+      assert html =~ ~s{title="Switch scope — #{acme_ws.name}}
+      assert html =~ ~r{scope-title-trail">#{acme_blog.name}<}
+      assert html =~ ~r{scope-dataset-badge">#{@dataset}<}
 
       # Open the menu: BOTH member workspaces are offered.
       open = render_click(view, "scope-menu-toggle", %{})
@@ -210,8 +212,8 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       # Project re-defaulted to the new workspace's first project.
       assert assigns.current_project.slug == acme_blog.slug
 
-      # The scope title now shows the new workspace's project in its trail.
-      assert render(view) =~ ~r{scope-title-trail">\s*#{acme_blog.name} · }
+      # The scope chip now shows the new workspace's project in its trail.
+      assert render(view) =~ ~r{scope-title-trail">#{acme_blog.name}<}
     end
 
     test "switch-workspace to a NON-MEMBER workspace is REJECTED (scope unchanged)", %{

@@ -723,6 +723,7 @@ const TOKEN_SLOT = {
   "--fg-dim": "studioChrome.fg-dim",
   "--bg-accent": "studioChrome.bg-accent",
   "--surface-raised": "studioChrome.surface-raised",
+  "--primary": "primary", "--primary-fg": "primary-fg",
 };
 
 // Derive every committed theme once (a THROW is skipped loudly, not fatal).
@@ -778,7 +779,10 @@ const PAIRINGS = [
   // Compact scope chip — surface-raised trigger fill.
   { sel: ".scope-title-caret",                     surface: "--surface-raised", kind: "nontext", where: "root.html.heex .scope-title-caret — glyph on .scope-title --surface-raised" },
   { sel: ".scope-title-trail",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-trail — trail text on .scope-title --surface-raised" },
-  { sel: ".scope-title-ws",                        surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-ws — workspace name on .scope-title --surface-raised" },
+  // Scope chip v2: the workspace rides the avatar square (primary fill); the
+  // dataset a .pane-doc-badge-pattern pill on its own --bg-muted fill.
+  { sel: ".scope-avatar",                          surface: "--primary",         kind: "text",    where: "root.html.heex .scope-avatar — workspace initial on the --primary brand square" },
+  { sel: ".scope-dataset-badge",                   surface: "--bg-muted",        kind: "text",    where: "root.html.heex .scope-dataset-badge — dataset pill paints its own --bg-muted fill" },
   // API-tester scenario results (sup-w3): rows ride the Response focus pane
   // (.pane-column--last → --surface-raised); the category header paints its own
   // --bg-muted fill. All three escalate fg-dim → --muted-text at the pairing site.

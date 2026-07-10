@@ -17,9 +17,10 @@
   <.studio_topbar>
     <:brand>
       <div class="studio-bar-brand">
-        <div class="sidebar-brand-icon">B</div>
-        <%!-- Sanity-style: the WORKSPACE is the studio's identity — the
-              wordmark only shows when no workspace is resolved. --%>
+        <%!-- Sanity-style: the WORKSPACE is the studio's identity — when one
+              resolves, the scope chip's avatar carries it (workspace initial),
+              so the standalone brand square + wordmark only show without one. --%>
+        <div :if={!assigns[:current_workspace]} class="sidebar-brand-icon">B</div>
         <span :if={!assigns[:current_workspace]} style="font-weight: 700; font-size: 15px;">Barkpark</span>
         <%= if assigns[:current_workspace] do %>
           <BarkparkWeb.Studio.WorkspaceSwitcher.switcher

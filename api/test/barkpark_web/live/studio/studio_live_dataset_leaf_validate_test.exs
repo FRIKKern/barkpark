@@ -121,9 +121,10 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
              "a valid project-owned dataset leaf must be honoured (no redirect), " <>
                "got #{inspect(assigns.dataset)}"
 
-      # The view rendered against the valid scope — the chrome's scope title
-      # trail shows "project / dataset" for the honoured leaf.
-      assert html =~ ~r{scope-title-trail">\s*Blog · staging\s*<}
+      # The view rendered against the valid scope — the chrome's scope chip
+      # shows the project in its trail and the honoured leaf as the badge.
+      assert html =~ ~r{scope-title-trail">Blog<}
+      assert html =~ ~r{scope-dataset-badge">staging<}
     end
 
     test "the project's default ('production') is NOT redirected (no loop, seeded slug owned)", %{
