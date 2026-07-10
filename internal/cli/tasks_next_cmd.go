@@ -266,10 +266,14 @@ func (e *frontierArgError) Error() string {
 }
 
 // printReadyFrontierHeader prepends the dispatch-capacity line to `bp task ready`
-// (human/table mode). It reuses the SAME taskboard.Frontier the `frontier` verb
-// reads, so the headline number can never drift from `bp task frontier`. Purely
-// best-effort: any fetch/compute error drops the header silently and the ready
-// list renders untouched.
+// (human/table mode). It runs the SAME taskboard.Frontier model the `frontier`
+// verb reads, but with ZERO graph calls (charter D12): no CrossEdges enrichment,
+// because the per-root GET /v1/graph/:root fan-out can cost ~10s/root live and
+// the header must answer instantly — a capacity HEADLINE needs no cross-root
+// graph precision. (The explicit verbs — `bp task frontier`, `bp task next
+// --frontier` — keep the enrichment, bounded by fetchCrossEdges' pool +
+// deadline.) Purely best-effort: any fetch/compute error drops the header
+// silently and the ready list renders untouched.
 func printReadyFrontierHeader(out *writer, ctx manifest.Context) {
 	client := apiclient.New(apiclient.Config{
 		BaseURL:     ctx.Server,
@@ -285,9 +289,7 @@ func printReadyFrontierHeader(out *writer, ctx manifest.Context) {
 	}
 	now := time.Now().UTC()
 	board := taskboard.BuildBoard(snap, taskboard.RepoContext{}, now)
-	full := taskboard.Frontier(snap, details, board.Now, now, taskboard.FrontierOpts{
-		CrossEdges: fetchCrossEdges(client, snap),
-	})
+	full := taskboard.Frontier(snap, details, board.Now, now, taskboard.FrontierOpts{})
 	proven, unproven := frontierTally(full)
 	out.outf("FRONTIER · %d independent · %d proven · %d unproven", len(full), proven, unproven)
 }

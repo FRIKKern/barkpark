@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -196,6 +198,52 @@ func TestReadyFrontierHeader(t *testing.T) {
 	var so, se bytes.Buffer
 	w := &writer{stdout: &so, stderr: &se, output: "table"}
 	printReadyFrontierHeader(w, dispatchCtx(srv.URL))
+	if !strings.Contains(so.String(), "FRONTIER · 2 independent") {
+		t.Fatalf("ready header missing the capacity line:\n%s", so.String())
+	}
+}
+
+// TestReadyFrontierHeaderZeroGraphCalls — D12/D4 deny-path: the ready header
+// must compute its capacity with ZERO graph calls, so a graph endpoint that
+// BLOCKS FOREVER cannot stall `bp task ready`. The snapshot deliberately spans
+// two epic roots (task-a and task-b are parentless) — exactly the
+// ReadyRootSpan>=2 state that used to arm the sequential per-root fan-out and
+// stall the interactive path for minutes on a live board.
+func TestReadyFrontierHeaderZeroGraphCalls(t *testing.T) {
+	var graphHits atomic.Int32
+	list := `{"docs":[
+		{"doc_id":"task-a","title":"Task A","lifecycle_status":"open","kind":"task","priority":1,"labels":["proj:alpha"],"inserted_at":"2026-07-01T00:00:00Z","updated_at":"2026-07-01T00:00:00Z"},
+		{"doc_id":"task-b","title":"Task B","lifecycle_status":"open","kind":"task","priority":1,"labels":["proj:beta"],"inserted_at":"2026-07-01T00:00:00Z","updated_at":"2026-07-01T00:00:00Z"}
+	]}`
+	prime := `{"counts":{"open":2},"recent_events":[],"ready":[{"doc_id":"task-a"},{"doc_id":"task-b"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v1/tasks":
+			_, _ = w.Write([]byte(list))
+		case r.URL.Path == "/v1/tasks/prime":
+			_, _ = w.Write([]byte(prime))
+		case strings.HasPrefix(r.URL.Path, "/v1/graph/"):
+			graphHits.Add(1)
+			<-r.Context().Done() // block "forever" — released only when the caller gives up
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	start := time.Now()
+	printReadyFrontierHeader(w, dispatchCtx(srv.URL))
+	elapsed := time.Since(start)
+
+	if got := graphHits.Load(); got != 0 {
+		t.Fatalf("graph endpoint hit %d time(s), want 0 — the ready header must not fan out", got)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("ready header took %v — it must answer instantly", elapsed)
+	}
 	if !strings.Contains(so.String(), "FRONTIER · 2 independent") {
 		t.Fatalf("ready header missing the capacity line:\n%s", so.String())
 	}

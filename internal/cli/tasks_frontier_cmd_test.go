@@ -3,8 +3,11 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/taskboard"
@@ -166,13 +169,14 @@ func TestEmitFrontierJSON(t *testing.T) {
 
 // fakeGraphShower counts GraphShow calls and returns canned results keyed by
 // root, so fetchCrossEdges' zero-fetch guard is testable without a network.
+// The call counter is atomic because fetchCrossEdges fans out on a worker pool.
 type fakeGraphShower struct {
-	calls   int
+	calls   atomic.Int32
 	results map[string]*apiclient.GraphResult
 }
 
 func (f *fakeGraphShower) GraphShow(id string) (*apiclient.GraphResult, error) {
-	f.calls++
+	f.calls.Add(1)
 	if r, ok := f.results[id]; ok {
 		return r, nil
 	}
@@ -190,8 +194,8 @@ func TestFetchCrossEdgesZeroCallGuard(t *testing.T) {
 	}}
 	gs := &fakeGraphShower{}
 	edges := fetchCrossEdges(gs, snap)
-	if gs.calls != 0 {
-		t.Errorf("GraphShow calls = %d, want 0 (single-root ready set → no fetch)", gs.calls)
+	if got := gs.calls.Load(); got != 0 {
+		t.Errorf("GraphShow calls = %d, want 0 (single-root ready set → no fetch)", got)
 	}
 	if edges != nil {
 		t.Errorf("edges = %v, want nil", edges)
@@ -224,11 +228,86 @@ func TestFetchCrossEdgesFetchesAndFolds(t *testing.T) {
 		},
 	}}
 	edges := fetchCrossEdges(gs, snap)
-	if gs.calls != 2 {
-		t.Errorf("GraphShow calls = %d, want 2 (one per candidate root)", gs.calls)
+	if got := gs.calls.Load(); got != 2 {
+		t.Errorf("GraphShow calls = %d, want 2 (one per candidate root)", got)
 	}
 	if edges == nil || len(edges["a"]) != 1 || edges["a"][0] != "b" {
 		t.Fatalf("folded edges = %+v, want a→[b]", edges)
+	}
+}
+
+// slowGraphShower answers fast roots from the canned map and BLOCKS every other
+// root until release is closed — the D12 pathology (a ~10s-per-call graph
+// endpoint) made absolute.
+type slowGraphShower struct {
+	fast    map[string]*apiclient.GraphResult
+	release chan struct{}
+}
+
+func (s *slowGraphShower) GraphShow(id string) (*apiclient.GraphResult, error) {
+	if r, ok := s.fast[id]; ok {
+		return r, nil
+	}
+	<-s.release
+	return nil, errors.New("blocked root released")
+}
+
+// crossEdgeSnapTwoRoots is the minimal multi-root snapshot (ready set spans two
+// epic roots) that arms the cross-edge fan-out.
+func crossEdgeSnapTwoRoots() taskboard.Snapshot {
+	return taskboard.Snapshot{Tasks: []taskboard.Task{
+		{DocID: "r1", Lifecycle: "open"},
+		{DocID: "r2", Lifecycle: "open"},
+		{DocID: "a", ParentID: "r1", Lifecycle: "ready", Priority: "1"},
+		{DocID: "b", ParentID: "r2", Lifecycle: "ready", Priority: "1"},
+	}}
+}
+
+// TestFetchCrossEdgesDeadlineNeverHangs — D12/D4 deny-path: a graph endpoint
+// that NEVER answers must not hang fetchCrossEdges. The bounded fan-out returns
+// (empty-handed, no error) once the TOTAL wall-clock deadline fires, orders of
+// magnitude before the blocked calls would ever finish.
+func TestFetchCrossEdgesDeadlineNeverHangs(t *testing.T) {
+	gs := &slowGraphShower{release: make(chan struct{})}
+	t.Cleanup(func() { close(gs.release) }) // unblock abandoned workers
+
+	start := time.Now()
+	edges := fetchCrossEdgesBounded(gs, crossEdgeSnapTwoRoots(), 2, 100*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if elapsed > 2*time.Second {
+		t.Fatalf("fetchCrossEdgesBounded took %v — the total deadline must bound the fan-out", elapsed)
+	}
+	if edges != nil {
+		t.Errorf("edges = %+v, want nil (nothing arrived before the deadline)", edges)
+	}
+}
+
+// TestFetchCrossEdgesDeadlineKeepsCollected — best-effort on deadline: the root
+// that answered in time contributes its cross-root block edge; the root still
+// blocked when the deadline fires is dropped WITHOUT erroring the whole fetch.
+func TestFetchCrossEdgesDeadlineKeepsCollected(t *testing.T) {
+	gs := &slowGraphShower{
+		fast: map[string]*apiclient.GraphResult{
+			"r1": {
+				OK:   true,
+				Root: "r1",
+				Nodes: []apiclient.GraphNode{
+					{ID: "a", DocID: "a"}, {ID: "b", DocID: "b"},
+				},
+				Edges: []apiclient.GraphEdgeWire{
+					{FromID: "a", ToID: "b", Kind: "blocks"},
+				},
+			},
+			// r2 is absent from fast → its fetch blocks past the deadline.
+		},
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(gs.release) })
+
+	edges := fetchCrossEdgesBounded(gs, crossEdgeSnapTwoRoots(), 2, 150*time.Millisecond)
+	if edges == nil || len(edges["a"]) != 1 || edges["a"][0] != "b" {
+		t.Fatalf("collected edges = %+v, want a→[b] kept from the fast root", edges)
 	}
 }
 
