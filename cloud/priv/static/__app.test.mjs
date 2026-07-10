@@ -4376,7 +4376,8 @@ test("azh-w7: resurrectModalHtml — the slug is HTML-escaped (no markup injecti
 
 test("the /activate helpers are exported", () => {
   for (const name of ["normalizeUserCode", "userCodeComplete", "activateCodeFromSearch",
-    "activateInspectState", "activateExpiryText"]) {
+    "activateInspectState", "activateExpiryText",
+    "pathClean", "isActivateFlow", "isNewFlow"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
   assert.equal(hooks.activateAlphabet, "23456789ABCDEFGHJKMNPQRSTVWXYZ");
@@ -4423,7 +4424,55 @@ test("activateInspectState folds the frozen D10 responses into view states", () 
   assert.equal(hooks.activateInspectState(404, { error: "expired_or_invalid" }), "gone");
   assert.equal(hooks.activateInspectState(500, {}), "error"); // retryable
   assert.equal(hooks.activateInspectState(200, null), "error"); // 200 without a body
-  assert.equal(hooks.activateInspectState(429, {}), "error"); // unexpected → retryable
+  // W2: 429 is a FIRST-CLASS rate-limited state, no longer folded into "error"
+  // (the old generic error screen let Try-again re-fire inspect instantly and
+  // re-trip the limiter). rate_limited renders a paused/countdown retry.
+  assert.equal(hooks.activateInspectState(429, {}), "rate_limited");
+  assert.equal(hooks.activateInspectState(429, { error: "rate_limited" }), "rate_limited");
+});
+
+// ── bp-login-ux W2: /activate trailing-slash tolerance ──────────────────────
+// The control plane serves /activate/ (and //) as the same 200 as /activate
+// (Plug.Router drops the trailing slash), so an EXACT pathname check missed the
+// slashed spellings — the approve page never rendered and the hash-router escape
+// guards bounced the user to the dashboard. pathClean strips trailing slashes
+// (keeping "/" itself), and isActivateFlow/isNewFlow route through it.
+
+test("pathClean strips trailing slashes but keeps root intact", () => {
+  assert.equal(hooks.pathClean("/activate"), "/activate");
+  assert.equal(hooks.pathClean("/activate/"), "/activate");
+  assert.equal(hooks.pathClean("/activate//"), "/activate");
+  assert.equal(hooks.pathClean("/new/"), "/new");
+  assert.equal(hooks.pathClean("/"), "/"); // root must NOT collapse to ""
+  assert.equal(hooks.pathClean("//"), "/"); // repeated root → "/"
+  assert.equal(hooks.pathClean(""), "/"); // empty → "/"
+  assert.equal(hooks.pathClean(null), "/"); // nullish never throws
+});
+
+test("isActivateFlow matches every trailing-slash spelling, and only /activate", () => {
+  const orig = sandbox.location.pathname;
+  const at = (p) => { sandbox.location.pathname = p; return hooks.isActivateFlow(); };
+  try {
+    assert.equal(at("/activate"), true);
+    assert.equal(at("/activate/"), true); // the bug: server 200s this
+    assert.equal(at("/activate//"), true);
+    assert.equal(at("/activated"), false); // prefix, NOT a slash variant → no match
+    assert.equal(at("/new/"), false);
+    assert.equal(at("/"), false);
+  } finally { sandbox.location.pathname = orig; }
+});
+
+test("isNewFlow matches /new and /new/ (same defect class), and only those", () => {
+  const orig = sandbox.location.pathname;
+  const at = (p) => { sandbox.location.pathname = p; return hooks.isNewFlow(); };
+  try {
+    assert.equal(at("/new"), true);
+    assert.equal(at("/new/"), true);
+    assert.equal(at("/new//"), true);
+    assert.equal(at("/newsletter"), false); // prefix, not a slash variant
+    assert.equal(at("/activate/"), false);
+    assert.equal(at("/"), false);
+  } finally { sandbox.location.pathname = orig; }
 });
 
 test("activateExpiryText renders a humane countdown and fails closed", () => {
