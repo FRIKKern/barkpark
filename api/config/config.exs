@@ -69,6 +69,14 @@ config :barkpark, :media_signing_secret, "dev-media-signing-secret-change-in-pro
 # public PAPER READER is unaffected (published papers stay world-readable).
 config :barkpark, :public_demo_studio, false
 
+# Instance identity tag (staging-barkpark). Names WHICH deployment this box is
+# — "staging", "prod", … — so the Studio chrome can wear an unmissable banner
+# (staging is the canary for Barkpark's own builds; its data is disposable).
+# This is an IDENTITY label, NOT MIX_ENV: a prod-compiled release runs on the
+# staging box. Default nil (dev/test show no banner); prod sets it from
+# BARKPARK_ENV at runtime (runtime.exs), mirroring the public_demo_studio opt-in.
+config :barkpark, :instance_env, nil
+
 # Studio tmux console — ON by default on every Studio. It stays admin-gated
 # (the /studio/tmux route's on_mount) and `enabled?/0` HARD-REFUSES any host
 # where anonymous Studio is on (public_demo_studio) so a demo box never
