@@ -5524,10 +5524,12 @@
         // applies a paper-ops batch it re-partitions the CONFIRMED blocks and
         // pushes `bp:canvas-update` {runs:[{run_id, blocks}, …]} via push_event/3,
         // ONE entry per prose RUN keyed exactly as the wrapper is
-        // ("paper-canvas-"<>run_id, where run_id is the run's ORDINAL "run-<i>" —
-        // Bug #1a: a STABLE id that survives a leading-block delete, NOT the mutable
-        // first-block id. The "run-" prefix keeps the first run's id truthy so the
-        // `!run.run_id` guard below never drops it). This listener filters to the run
+        // ("paper-canvas-"<>run_id, where run_id is the paper's SLUG + the run's
+        // ORDINAL, "<slug>-run-<i>" — Bug #1a: the ordinal is a STABLE id that
+        // survives a leading-block delete, NOT the mutable first-block id; Bug #1c:
+        // the slug keeps ids unique ACROSS papers so a patch-navigation can never
+        // transplant a stale canvas. The prefix keeps the first run's id truthy so
+        // the `!run.run_id` guard below never drops it). This listener filters to the run
         // whose wrapper id matches and calls the WC's
         // applyServerBlocks(blocks):
         //   - the OWN-ECHO common case (the user just made this edit, the server
@@ -5621,10 +5623,14 @@
         // Request the initial preview once the hook (and its listener above) is
         // mounted, so the live rows land even if the server's setup-time push
         // raced ahead of this handler's registration. Guarded to run-0 so a
-        // multi-run paper fires exactly ONE request, not one per wrapper. The
-        // per-block task-query field can push the SAME event with phx-debounce
-        // to drive the ~500ms re-resolve on a query edit.
-        if (this.el.id === "paper-canvas-run-0") {
+        // multi-run paper fires exactly ONE request, not one per wrapper (the
+        // wrapper id is slug-namespaced — "paper-canvas-<slug>-run-<i>" — so
+        // match the ordinal SUFFIX; "-run-0" can only be the first run: a
+        // higher ordinal like "-run-10" doesn't end in "-run-0", and a slug
+        // ending in "run-0" still carries its own "-run-<i>" tail after it).
+        // The per-block task-query field can push the SAME event with
+        // phx-debounce to drive the ~500ms re-resolve on a query edit.
+        if (this.el.id.endsWith("-run-0")) {
           this.pushEvent("task-preview-refresh", {});
         }
       },

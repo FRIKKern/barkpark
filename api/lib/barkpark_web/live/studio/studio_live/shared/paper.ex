@@ -311,14 +311,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # assigned it), partitions them into the SAME maximal prose runs the editor
   # mounts (PaperCanvas.partition_runs — the identical keying components.ex uses),
   # and pushes `bp:canvas-update` carrying ONE entry per prose RUN: %{run_id:
-  # <"run-"<>ordinal>, blocks: <run blocks>}.
+  # <slug<>"-run-"<>ordinal>, blocks: <run blocks>}.
   #
-  # Bug #1a: each run is keyed by its ORDINAL in the partition (via the SAME
-  # PaperCanvas.with_run_ordinals/1 helper components.ex uses for the wrapper id),
-  # NOT its mutable first-block id. So the echo for run `i` always matches the
-  # wrapper "paper-canvas-run-<i>" that components.ex rendered for run `i` — even
-  # when the run's LEADING block was just deleted/merged (the run stays at the same
-  # ordinal). The inbound hook routes each run to its element by that id.
+  # Bug #1a: each run is keyed by the paper's SLUG + its ORDINAL in the partition
+  # (via the SAME PaperCanvas.run_id/2 + with_run_ordinals/1 helpers components.ex
+  # uses for the wrapper id), NOT its mutable first-block id. So the echo for run
+  # `i` always matches the wrapper "paper-canvas-<slug>-run-<i>" that components.ex
+  # rendered for run `i` — even when the run's LEADING block was just deleted/merged
+  # (the run stays at the same ordinal). The slug half is Bug #1c: it keeps the id
+  # unique ACROSS papers so a patch-navigation can never transplant a stale canvas
+  # (see PaperCanvas.run_id/2). The inbound hook routes each run to its element by
+  # that id.
   # Only `{:run, _}` segments are echoed — the non-prose `{:block, _}` boundaries
   # have no canvas to update. The canvas treats its OWN echo as a pure baseline
   # reset (no caret move); an external edit lands as a confirmed re-render. This
@@ -327,10 +330,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # to receive the event, but we also gate so the OFF path pushes nothing).
   def push_canvas_echo(socket) do
     if PaperCanvas.paper_canvas_enabled?() do
-      blocks =
+      {slug, blocks} =
         case socket.assigns[:paper_doc] do
-          %{content: %{"blocks" => blocks}} when is_list(blocks) -> blocks
-          _ -> []
+          %{doc_id: doc_id, content: %{"blocks" => blocks}} when is_list(blocks) ->
+            {doc_id, blocks}
+
+          _ ->
+            {nil, []}
         end
 
       runs =
@@ -339,7 +345,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> PaperCanvas.with_run_ordinals()
         |> Enum.flat_map(fn
           {:run, run_blocks, ordinal} ->
-            [%{run_id: PaperCanvas.run_id(ordinal), blocks: run_blocks}]
+            [%{run_id: PaperCanvas.run_id(slug, ordinal), blocks: run_blocks}]
 
           {:block, _block} ->
             []

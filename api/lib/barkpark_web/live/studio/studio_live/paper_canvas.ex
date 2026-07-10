@@ -393,13 +393,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def canvas?(_), do: false
 
   @doc """
-  The STABLE run id for a run at ORDINAL `i` in the ordered `partition_runs/1`
-  output: `"run-" <> i`.
+  The STABLE run id for a run at ORDINAL `i` of the paper `slug`, in the ordered
+  `partition_runs/1` output: `slug <> "-run-" <> i`.
 
-  Bug #1a fix — run identity is now the run's ORDINAL, NOT its first-block id.
-  The first-block id is MUTABLE: when a run's leading block is deleted / merged /
-  front-reordered, the re-partitioned run's first id becomes the NEW first id. The
-  old first-block-id keying then broke two ways:
+  Bug #1a fix — run identity WITHIN a paper is the run's ORDINAL, NOT its
+  first-block id. The first-block id is MUTABLE: when a run's leading block is
+  deleted / merged / front-reordered, the re-partitioned run's first id becomes
+  the NEW first id. The old first-block-id keying then broke two ways:
 
     * the echo `bp:canvas-update {run_id: newId}` no longer matched the still-
       mounted wrapper `paper-canvas-oldId` → the hook dropped it → the canvas diff
@@ -414,14 +414,29 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   shift ordinals → a remount — acceptable and out of scope: the remount re-seeds the
   run from the confirmed blocks, so no data is lost.)
 
-  Returns a STRING (`"run-0"`, `"run-1"`, …), NOT a bare integer: the inbound hook
+  Bug #1c fix — run identity ACROSS papers is namespaced by the paper `slug`.
+  A bare-ordinal id (`"run-0"`) is IDENTICAL for every paper, and morphdom does
+  GLOBAL keyed-node reuse: on a paper→paper patch-navigation it finds the OLD
+  paper's `paper-canvas-run-0` wrapper by id and TRANSPLANTS it into the new
+  paper's editor subtree instead of creating a fresh node. Under
+  `phx-update="ignore"` the transplanted node's children are never touched and
+  the hook's `mounted()` (the only place `data-canvas-blocks` is seeded into the
+  WC) never re-fires — so the canvas kept showing the PREVIOUS paper while
+  everything outside the ignore wrappers (sidebar, backlinks, title) moved on.
+  The slug prefix makes the id change on navigation → remove+add → a fresh
+  mount seeds the new paper. Within one paper the slug is constant, so every
+  Bug #1a stability property above is preserved verbatim. (The read-only stream
+  container solved the same collision the same way: `paper-body-<slug>`.)
+
+  Returns a STRING (`"<slug>-run-0"`, …), NOT a bare integer: the inbound hook
   guards with `if (!run.run_id) return;`, so a bare `0` (the first run's ordinal)
-  would be falsy and the first run's echo would be silently dropped. The `"run-"`
-  prefix makes every ordinal id truthy, so the hook needs no change.
+  would be falsy and the first run's echo would be silently dropped. The slug +
+  `"-run-"` prefix makes every ordinal id truthy, so the hook needs no change.
   """
-  @spec run_id(non_neg_integer()) :: String.t()
-  def run_id(ordinal) when is_integer(ordinal) and ordinal >= 0,
-    do: "run-" <> Integer.to_string(ordinal)
+  @spec run_id(String.t(), non_neg_integer()) :: String.t()
+  def run_id(slug, ordinal)
+      when is_binary(slug) and is_integer(ordinal) and ordinal >= 0,
+      do: slug <> "-run-" <> Integer.to_string(ordinal)
 
   @doc """
   Pair each `{:run, blocks}` segment from `partition_runs/1` with its run ORDINAL

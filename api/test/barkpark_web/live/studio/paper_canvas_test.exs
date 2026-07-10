@@ -704,23 +704,32 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "run_id/1 (Bug #1a: keyed by ORDINAL, not first-block id)" do
-    test "is \"run-\" <> ordinal — a STABLE string id, NOT the first block's id" do
-      # Run identity is the run's ORDINAL in partition_runs output, not its mutable
-      # first-block id. (Previously run_id([first | _]) returned first["id"], which
-      # changed when a run's leading block was deleted — the bug.)
-      assert PaperCanvas.run_id(0) == "run-0"
-      assert PaperCanvas.run_id(1) == "run-1"
-      assert PaperCanvas.run_id(7) == "run-7"
+  describe "run_id/2 (Bug #1a: keyed by ORDINAL, not first-block id; Bug #1c: slug-namespaced)" do
+    test "is slug <> \"-run-\" <> ordinal — a STABLE string id, NOT the first block's id" do
+      # Run identity WITHIN a paper is the run's ORDINAL in partition_runs output,
+      # not its mutable first-block id. (Previously run_id([first | _]) returned
+      # first["id"], which changed when a run's leading block was deleted — the bug.)
+      assert PaperCanvas.run_id("my-paper", 0) == "my-paper-run-0"
+      assert PaperCanvas.run_id("my-paper", 1) == "my-paper-run-1"
+      assert PaperCanvas.run_id("my-paper", 7) == "my-paper-run-7"
+    end
+
+    test "the id is namespaced by the paper slug so ids never collide ACROSS papers (Bug #1c)" do
+      # A bare-ordinal id ("run-0") is identical for every paper; morphdom's global
+      # keyed-node reuse then transplants the OLD paper's phx-update="ignore" wrapper
+      # into the NEW paper's editor on a patch-navigation — the stuck-paper bug. The
+      # slug prefix makes the id change on navigation → remove+add → fresh mount.
+      refute PaperCanvas.run_id("paper-a", 0) == PaperCanvas.run_id("paper-b", 0)
+      assert PaperCanvas.run_id("paper-a", 0) == PaperCanvas.run_id("paper-a", 0)
     end
 
     test "the id is a non-empty STRING so the hook's `!run.run_id` guard never drops run 0" do
       # The inbound hook guards `if (!run.run_id) return;`. A bare integer 0 would be
-      # falsy → the FIRST run's echo silently dropped. The "run-" prefix makes every
-      # ordinal id truthy.
-      assert PaperCanvas.run_id(0) == "run-0"
-      assert is_binary(PaperCanvas.run_id(0))
-      refute PaperCanvas.run_id(0) == ""
+      # falsy → the FIRST run's echo silently dropped. The slug + "-run-" prefix makes
+      # every ordinal id truthy.
+      assert PaperCanvas.run_id("my-paper", 0) == "my-paper-run-0"
+      assert is_binary(PaperCanvas.run_id("my-paper", 0))
+      refute PaperCanvas.run_id("my-paper", 0) == ""
     end
   end
 
@@ -744,7 +753,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     test "ordinal is STABLE under a leading-block delete (the Bug #1a invariant)" do
       # A run's first block changing (leading-block delete/merge) does NOT shift the
       # run's ordinal — it stays at the same index in partition_runs output. So the
-      # wrapper id (run_id(ordinal)) is unchanged → no remount, echo still matches.
+      # wrapper id (run_id(slug, ordinal)) is unchanged → no remount, echo still
+      # matches.
       before = PaperCanvas.partition_runs([para("p1"), para("p2"), para("p3")])
       after_del = PaperCanvas.partition_runs([para("p2"), para("p3")])
 
@@ -753,7 +763,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
       assert ord_before == 0
       assert ord_after == 0
-      assert PaperCanvas.run_id(ord_before) == PaperCanvas.run_id(ord_after)
+
+      assert PaperCanvas.run_id("my-paper", ord_before) ==
+               PaperCanvas.run_id("my-paper", ord_after)
     end
   end
 

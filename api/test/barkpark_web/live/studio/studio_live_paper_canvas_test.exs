@@ -32,6 +32,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
   @dataset "production"
   @slug "2026-06-23-canvas-paper"
 
+  # Bug #1c (cross-paper transplant): run ids are SLUG-NAMESPACED so a
+  # patch-navigation to another paper can never reuse a stale ignore wrapper.
+  # This is the seed paper's first-run id as it rides the echo payload; the DOM
+  # wrapper id prefixes it with "paper-canvas-".
+  @run0_id "#{@slug}-run-0"
+
   @snapshot_path Path.join(__DIR__, "snapshots/paper_editor_flag_off.html")
 
   defp seed_paper_schema! do
@@ -139,12 +145,13 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # On the opt-out path a block paper opens in the READ-ONLY streamed View —
       # the toggle is present and the block editor is NOT yet rendered. (Key on
-      # the real render marker `paper-canvas-run-0`, NOT the bare `<bp-paper-canvas`
-      # string — the latter also appears in the root layout's JS hook comments.)
+      # the real render marker `paper-canvas-<slug>-run-0`, NOT the bare
+      # `<bp-paper-canvas` string — the latter also appears in the root layout's
+      # JS hook comments.)
       assert html =~ ~s(data-test-id="paper-edit-toggle")
       assert html =~ ~s(phx-update="stream")
       refute html =~ ~s(data-test-id="studio-paper-block-editor")
-      refute html =~ ~s(id="paper-canvas-run-0")
+      refute html =~ ~s(id="paper-canvas-#{@run0_id}")
       refute html =~ ~s(data-test-id="paper-canvas-run")
     end
 
@@ -215,11 +222,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
 
       # The editor is live on open… (key on the real render marker
-      # `paper-canvas-run-0` — the bare `<bp-paper-canvas` string also appears in
-      # the root layout's JS hook comments, so it would assert vacuously.)
+      # `paper-canvas-<slug>-run-0` — the bare `<bp-paper-canvas` string also
+      # appears in the root layout's JS hook comments, so it would assert
+      # vacuously.)
       assert html =~ ~s(data-test-id="studio-paper-block-editor")
       assert html =~ ~s(data-test-id="paper-canvas-run")
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-#{@run0_id}")
 
       # …and the View⇄Edit toggle is GONE — there are no modes to be in.
       refute html =~ ~s(data-test-id="paper-edit-toggle")
@@ -288,7 +296,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # invent an editor where no blocks exist).
       assert html =~ "Legacy body, nothing to edit."
       refute html =~ ~s(data-test-id="studio-paper-block-editor")
-      refute html =~ ~s(id="paper-canvas-run-0")
+      refute html =~ ~s(id="paper-canvas-#{legacy_slug}-run-0")
       refute html =~ ~s(data-test-id="paper-edit-toggle")
 
       # The accessible name must NOT claim an editing surface here — the label
@@ -303,8 +311,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # As of S3.2 the callout is canvas-eligible, so the whole seed
       # [heading, paragraph, callout, paragraph, divider] is ONE maximal run, KEYED
-      # by its ORDINAL (Bug #1a) — run 0 → "paper-canvas-run-0".
-      assert edit_html =~ ~s(id="paper-canvas-run-0")
+      # by the slug + its ORDINAL (Bug #1a/#1c) — run 0 → "paper-canvas-<slug>-run-0".
+      assert edit_html =~ ~s(id="paper-canvas-#{@run0_id}")
       assert edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
       assert edit_html =~ ~s(phx-update="ignore")
       assert edit_html =~ ~s(<bp-paper-canvas)
@@ -368,7 +376,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # rendered at the top of the editor body, above the partitioned runs), so it
       # cannot be nested inside a phx-update="ignore" canvas.
       carrier_at = :binary.match(edit_html, ~s(id="bp-expected-fields")) |> elem(0)
-      first_canvas_at = :binary.match(edit_html, ~s(id="paper-canvas-run-0")) |> elem(0)
+      first_canvas_at = :binary.match(edit_html, ~s(id="paper-canvas-#{@run0_id}")) |> elem(0)
       assert carrier_at < first_canvas_at
     end
 
@@ -420,7 +428,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the callout
       # does NOT split it into two canvases with a per-block widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-callout-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The callout is NOT rendered as a separate per-block widget — it lives
@@ -459,7 +467,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (the heading) —
       # the divider does NOT split it into two canvases with a widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-div-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The divider is NOT rendered as a separate per-block widget between two
@@ -500,7 +508,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the code
       # block does NOT split it into two canvases with a per-block widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-code-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The code block is NOT rendered as a separate per-block widget — it lives
@@ -549,7 +557,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the diagram
       # block does NOT split it into two canvases with a per-block widget between.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-diagram-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The diagram block is NOT rendered as a separate per-block widget — it lives
@@ -599,7 +607,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the native
       # field-string does NOT split it into two canvases with a per-block widget.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-field-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The field is NOT rendered as a separate per-block widget — it lives INSIDE
@@ -650,7 +658,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # (its bp-media-picker WC is client-side). So ONE <bp-paper-canvas> run keyed by
       # the run's first block (p-1) — NOT split into two canvases with a per-block widget.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-field-image-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The field-image is NOT a separate per-block widget — it lives INSIDE the single
@@ -702,7 +710,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # ONE canvas run — the field-reference picker rides it as a control-atom.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-field-reference-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # NOT a per-block boundary widget.
@@ -750,7 +758,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # sheet is a READ-ONLY atom that rides the run, NOT a boundary widget between two
       # canvases.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-sheet-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The sheet is NOT a separate per-block widget — it lives INSIDE the single run
@@ -770,8 +778,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     #
     # After apply_paper_block_ops persists a batch, paper_ops/2 re-reads the paper
     # and pushes `bp:canvas-update` carrying the CONFIRMED blocks, partitioned into
-    # prose runs keyed by each run's ORDINAL ("paper-canvas-run-<i>"; Bug #1a — a
-    # STABLE id that survives a leading-block delete, NOT the mutable first-block id).
+    # prose runs keyed by the slug + each run's ORDINAL ("paper-canvas-<slug>-run-<i>";
+    # Bug #1a — a STABLE id that survives a leading-block delete, NOT the mutable
+    # first-block id; Bug #1c — slug-namespaced so ids never collide across papers).
     # The canvas hook routes each run to its <bp-paper-canvas> and calls
     # applyServerBlocks — an own-echo resets the baseline (no caret move), an external
     # edit re-renders.
@@ -781,7 +790,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       open_editor(view)
 
       # The seed [heading, paragraph, callout, paragraph, divider] is ONE maximal
-      # run keyed by its ORDINAL (Bug #1a) — run 0 → "run-0". Edit the intro paragraph.
+      # run keyed by the slug + its ORDINAL (Bug #1a/#1c) — run 0 → "<slug>-run-0".
+      # Edit the intro paragraph.
       render_hook(view, "paper-ops", %{
         "ops" => [
           %{
@@ -793,10 +803,10 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       })
 
       # ONE bp:canvas-update push carrying ONE run (the whole seed is a single run),
-      # keyed by its ORDINAL ("run-0"), carrying the CONFIRMED post-apply blocks —
+      # keyed by the slug + its ORDINAL, carrying the CONFIRMED post-apply blocks —
       # including the edit we just made (the echo the canvas resets its baseline to).
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
 
       # The run blocks are the confirmed blocks IN ORDER, edit applied.
       assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "c-note", "p-after", "d-end"]
@@ -811,7 +821,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       open_editor(view)
 
       # The seed [h-1, p-intro, c-note, p-after, d-end] is ONE run at ordinal 0
-      # ("run-0"). Remove its LEADING block (h-1) — the case that used to break:
+      # ("<slug>-run-0"). Remove its LEADING block (h-1) — the case that used to break:
       # under the old first-block-id keying the re-partitioned run_id became "p-intro",
       # so the echo `{run_id: "p-intro"}` no longer matched the still-mounted wrapper
       # "paper-canvas-h-1" → the hook dropped it (baseline stuck) AND the re-render
@@ -823,13 +833,13 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
 
       # Bug #1a fix: the run is STILL ordinal 0 after the leading-block delete, so the
-      # echo carries run_id "run-0" — the SAME id as the still-mounted wrapper
-      # "paper-canvas-run-0". So the hook MATCHES it → applyServerBlocks runs → the
-      # baseline advances, and the wrapper id is unchanged → no remount.
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      # echo carries run_id "<slug>-run-0" — the SAME id as the still-mounted wrapper
+      # "paper-canvas-<slug>-run-0". So the hook MATCHES it → applyServerBlocks runs →
+      # the baseline advances, and the wrapper id is unchanged → no remount.
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
 
       # The echoed blocks are the SURVIVORS (h-1 gone), in order — the run the
-      # still-mounted "paper-canvas-run-0" wrapper resets its baseline to.
+      # still-mounted "paper-canvas-<slug>-run-0" wrapper resets its baseline to.
       assert Enum.map(blocks, & &1["id"]) == ["p-intro", "c-note", "p-after", "d-end"]
     end
 
@@ -875,9 +885,12 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
 
       # TWO runs (the composite boundary is NOT echoed — it has no canvas),
-      # keyed by each run's ORDINAL (Bug #1a): the first prose run is "run-0", the
-      # second (after the nested-structure boundary) is "run-1".
-      assert [%{run_id: "run-0", blocks: run_a}, %{run_id: "run-1", blocks: run_b}] = runs
+      # keyed by the slug + each run's ORDINAL (Bug #1a/#1c): the first prose run
+      # is "<slug>-run-0", the second (after the nested-structure boundary) is
+      # "<slug>-run-1".
+      run0 = "#{split_slug}-run-0"
+      run1 = "#{split_slug}-run-1"
+      assert [%{run_id: ^run0, blocks: run_a}, %{run_id: ^run1, blocks: run_b}] = runs
       assert Enum.map(run_a, & &1["id"]) == ["p-a"]
       assert Enum.map(run_b, & &1["id"]) == ["p-b"]
 
@@ -889,7 +902,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
          %{conn: conn} do
       # push_canvas_echo partitions with the SAME PaperCanvas.partition_runs the
       # editor mounts, so after the t12a flip a top-level fleet block folds INTO the
-      # run — the whole doc echoes as ONE run keyed "run-0", the fleet block riding
+      # run — the whole doc echoes as ONE run keyed "<slug>-run-0", the fleet block riding
       # verbatim between the prose blocks (it paints in-canvas via bpFleet, D8/D5).
       fleet_slug = "2026-07-06-canvas-fleet"
 
@@ -923,7 +936,8 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
 
       # ONE run — the task-board rides it verbatim, no boundary split.
-      assert [%{run_id: "run-0", blocks: run_blocks}] = runs
+      fleet_run0 = "#{fleet_slug}-run-0"
+      assert [%{run_id: ^fleet_run0, blocks: run_blocks}] = runs
       assert Enum.map(run_blocks, & &1["id"]) == ["f-h", "f-board", "f-after"]
 
       # The fleet block rode VERBATIM (D5): still a raw task-board, no snapshot
@@ -960,7 +974,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # ONE <bp-paper-canvas> run keyed by the run's first block (p-1) — the embed is a
       # READ-ONLY atom that rides the run.
       assert html =~ ~s(<bp-paper-canvas)
-      assert html =~ ~s(id="paper-canvas-run-0")
+      assert html =~ ~s(id="paper-canvas-doc-embed-run-0")
       assert length(Regex.scan(~r/data-test-id="paper-canvas-run"/, html)) == 1
 
       # The embed is NOT a separate per-block widget — it lives INSIDE the single run.
@@ -971,6 +985,38 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # are in the Jason-encoded block list on the canvas wrapper).
       assert html =~ "em-1"
       assert html =~ "Linked Note"
+    end
+
+    test "Bug #1c: patch-navigating to ANOTHER paper changes every canvas wrapper id (no stale ignore-wrapper reuse)",
+         %{conn: conn} do
+      other_slug = "2026-07-10-canvas-other"
+
+      other_blocks = [
+        %{
+          "id" => "o-p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "The other paper's body."}]
+        }
+      ]
+
+      {:ok, _} =
+        Content.upsert_paper(%{slug: other_slug, dataset: @dataset, blocks: other_blocks})
+
+      {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      assert html =~ ~s(id="paper-canvas-#{@run0_id}")
+
+      # Patch-navigate WITHIN the mounted LiveView to the other paper — the exact
+      # gesture of clicking another paper in the Studio list. The rendered wrapper
+      # id must be the OTHER paper's (slug-namespaced) and the first paper's id
+      # must be GONE. A bare-ordinal id ("paper-canvas-run-0") is identical for
+      # both papers, and morphdom's global keyed-node reuse then TRANSPLANTS the
+      # old paper's phx-update="ignore" wrapper — old canvas content and all —
+      # into the new editor: the stuck-paper navigation bug. Distinct ids force
+      # remove+add → a fresh hook mount → the new paper's blocks seed the canvas.
+      html = render_patch(view, scoped_studio("/d/#{@dataset}/studio/paper/#{other_slug}"))
+
+      assert html =~ ~s(id="paper-canvas-#{other_slug}-run-0")
+      refute html =~ ~s(id="paper-canvas-#{@run0_id}")
     end
   end
 
@@ -984,7 +1030,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
   #   1. PERSIST — re-read the paper's stored blocks (Content.paper_blocks/2, the
   #      same read sync_paper_edit_doc uses) and assert the mutation landed on disk.
   #   2. ECHO    — assert_push_event "bp:canvas-update" carries the CONFIRMED run(s)
-  #      keyed by ORDINAL run_id, with the edit applied.
+  #      keyed by slug+ordinal run_id, with the edit applied.
   #   3. RELOAD  — (case 7) re-mount live/2 for the same paper and assert the canvas
   #      run renders the EDITED blocks — the strongest "it really persisted" proof.
   #
@@ -1008,7 +1054,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     end
 
     # The seed paper is ONE maximal run (heading+paragraph+callout+paragraph+divider
-    # are all canvas-eligible), so its echo is a single entry keyed "run-0".
+    # are all canvas-eligible), so its echo is a single entry keyed "<slug>-run-0".
     @seed_order ["h-1", "p-intro", "c-note", "p-after", "d-end"]
 
     # Mount the Studio paper editor flag-ON for the seed paper and open the editor.
@@ -1052,7 +1098,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # (b) the echo carries the CONFIRMED run with the edit; (c) keyed by ordinal.
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
       assert Enum.map(blocks, & &1["id"]) == @seed_order
 
       intro = Enum.find(blocks, &(&1["id"] == "p-intro"))
@@ -1085,7 +1131,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       # Echo: still ONE run (the inserted paragraph is canvas-eligible), and the new
       # block rides it in position.
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
 
       assert Enum.map(blocks, & &1["id"]) ==
                ["h-1", "p-intro", "p-fresh", "c-note", "p-after", "d-end"]
@@ -1106,7 +1152,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # Echo: still ONE run, now without c-note.
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
       assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "p-after", "d-end"]
     end
 
@@ -1124,7 +1170,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert persisted_ids() == ["h-1", "p-after", "p-intro", "c-note", "d-end"]
 
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
       assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-after", "p-intro", "c-note", "d-end"]
     end
 
@@ -1169,7 +1215,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # Exactly ONE echo for the whole batch (NOT one per op).
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
       assert Enum.map(blocks, & &1["id"]) == ["h-1", "p-intro", "p-batch", "c-note", "p-after"]
 
       # No SECOND echo leaked from the same batch.
@@ -1192,7 +1238,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
         ]
       })
 
-      assert_push_event(view, "bp:canvas-update", %{runs: [%{run_id: "run-0"}]})
+      assert_push_event(view, "bp:canvas-update", %{runs: [%{run_id: @run0_id}]})
 
       assert persisted_block("p-intro")["content"] == [
                %{"type" => "text", "value" => "Round one."}
@@ -1220,7 +1266,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       # The second edit produced its OWN echo carrying BOTH confirmed edits.
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
 
       assert Enum.find(blocks, &(&1["id"] == "p-after"))["content"] ==
                [%{"type" => "text", "value" => "Round two."}]
@@ -1256,7 +1302,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
 
       reload_html = open_editor(reloaded)
 
-      assert reload_html =~ ~s(id="paper-canvas-run-0")
+      assert reload_html =~ ~s(id="paper-canvas-#{@run0_id}")
       assert reload_html =~ "data-canvas-blocks"
       # The edit survived persistence into a brand-new mount's canvas.
       assert reload_html =~ sentinel
@@ -1295,7 +1341,7 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       refute render(view) =~ "Edit failed"
 
       assert_push_event(view, "bp:canvas-update", %{runs: runs})
-      assert [%{run_id: "run-0", blocks: blocks}] = runs
+      assert [%{run_id: @run0_id, blocks: blocks}] = runs
 
       assert Enum.find(blocks, &(&1["id"] == "p-after"))["content"] ==
                [%{"type" => "text", "value" => "Patched past a ghost."}]
