@@ -16,8 +16,8 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Barkpark.AccessFixtures
 
-  alias Barkpark.Access.Grant
   alias Barkpark.Accounts
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
@@ -67,7 +67,12 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       %ApiToken{}
       |> ApiToken.changeset(
         Map.merge(
-          %{token_hash: ApiToken.hash_token(raw), label: "t", dataset: "test", permissions: ["read"]},
+          %{
+            token_hash: ApiToken.hash_token(raw),
+            label: "t",
+            dataset: "test",
+            permissions: ["read"]
+          },
           attrs
         )
       )
@@ -81,45 +86,16 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
 
   defp unowned_token(perms \\ ["read"]), do: insert_token!(%{permissions: perms})
 
-  # A grant CLAIMED by `user` (so `list_active_grants_for_grantee/1` loads it),
-  # scoped to the Default workspace + project, dataset "granted", type "post".
-  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
-  # member of `ws` holding read+write+admin, so a grant it mints still confers
-  # (a grant only admits while its grantor still holds the capability).
-  defp grant_authority!(ws) do
-    {:ok, token} =
-      %Barkpark.Auth.ApiToken{}
-      |> Barkpark.Auth.ApiToken.changeset(%{
-        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
-        label: "ag-grantor",
-        dataset: "test",
-        permissions: ["read", "write", "admin"]
-      })
-      |> Repo.insert()
+  # `grant_authority!/1` + `bind_grant!/3` moved to `Barkpark.AccessFixtures`
+  # (imported above). This suite's grants are project-scoped, so each call site
+  # folds the Default project ladder (project_id / dataset "granted" / type
+  # "post") into `bind_grant!`'s `overrides` map — see `grant_ladder/1`.
 
-    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
-    token
-  end
-
-  defp bind_grant!(ws, project, user, overrides \\ %{}) do
-    attrs =
-      %{
-        grantor_id: grant_authority!(ws).id,
-        grantee_email: user.email,
-        grantee_user_id: user.id,
-        claimed_at: DateTime.utc_now(),
-        workspace_id: ws.id,
-        project_id: project.id,
-        dataset: @granted_ds,
-        type: "post",
-        capabilities: ["read"],
-        link_token_hash: "hash-" <> Ecto.UUID.generate()
-      }
-      |> Map.merge(overrides)
-
-    {:ok, grant} = %Grant{} |> Grant.changeset(attrs) |> Repo.insert()
-    grant
-  end
+  # The project-scoped ladder these flat-path grants carry: the Default project,
+  # dataset "granted", type "post" (merge extra overrides like capabilities on
+  # top). Keeps the call sites terse without a second `bind_grant!` clause.
+  defp grant_ladder(project, extra \\ %{}),
+    do: Map.merge(%{project_id: project.id, dataset: @granted_ds, type: "post"}, extra)
 
   defp auth(conn, raw), do: put_req_header(conn, "authorization", "Bearer #{raw}")
 
@@ -136,10 +112,13 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
   # ── 1 + 5. Grantee sees EXACTLY the grant scope; containment ⊆ ─────────────
 
   describe "owned-token grantee — narrowed to the grant scope" do
-    test "sees exactly the in-scope (dataset,type) row, nothing outside it", %{ws: ws, project: project} do
+    test "sees exactly the in-scope (dataset,type) row, nothing outside it", %{
+      ws: ws,
+      project: project
+    } do
       user = register_user()
       {raw, _} = owned_token(user)
-      bind_grant!(ws, project, user)
+      bind_grant!(ws, user, grant_ladder(project))
 
       # in-scope dataset+type → EXACTLY the granted row
       assert titles(query(build_conn(), raw, @granted_ds, "post")) == ["in-scope"]
@@ -159,11 +138,14 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
   # ── 3. Fail-closed: a grant that doesn't cover the request → zero rows ─────
 
   describe "fail-closed" do
-    test "an owned grantee whose grant misses the dataset sees no rows (never the workspace)", %{ws: ws, project: project} do
+    test "an owned grantee whose grant misses the dataset sees no rows (never the workspace)", %{
+      ws: ws,
+      project: project
+    } do
       user = register_user()
       {raw, _} = owned_token(user)
       # grant covers dataset "granted" only
-      bind_grant!(ws, project, user)
+      bind_grant!(ws, user, grant_ladder(project))
 
       # request the OTHER dataset — a fail-open bug would leak "wrong-dataset"
       assert query(build_conn(), raw, @other_ds, "post")["count"] == 0
@@ -192,12 +174,15 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
   # ── 4. WRITE PATH UNAFFECTED — the blast-radius guard ──────────────────────
 
   describe "write path untouched (blast-radius containment)" do
-    test "an owned grantee with a WRITE grant is NOT elevated on a flat write route", %{ws: ws, project: project} do
+    test "an owned grantee with a WRITE grant is NOT elevated on a flat write route", %{
+      ws: ws,
+      project: project
+    } do
       user = register_user()
       # read-only TOKEN, but a WRITE-capable grant: if the grant leaked onto the
       # write path it could elevate. It must not — the grant plugs are read-only.
       {owned_raw, _} = owned_token(user, ["read"])
-      bind_grant!(ws, project, user, %{capabilities: ["read", "write"]})
+      bind_grant!(ws, user, grant_ladder(project, %{capabilities: ["read", "write"]}))
 
       {unowned_raw, _} = unowned_token(["read"])
 
@@ -220,6 +205,58 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
       # so a read-only token stays denied write regardless of any write grant.
       assert owned_status == unowned_status
       refute owned_status in [200, 201]
+    end
+  end
+
+  # ── 6. EXPIRY + REVOCATION enforced at the flat HTTP surface ───────────────
+  #
+  # Expiry/revocation are re-evaluated SERVER-SIDE at request time: `AssignGrantScope`
+  # folds only ACTIVE grants (`CallerContext.from_user/2` filters expired /
+  # revoked in-query), so a lapsed grant is never flagged `grant_scoped` and the
+  # caller is not narrowed. No grace, no stale narrowing carried into the next
+  # request.
+  #
+  # NOTE on "zero rows": the flat back-compat route's grants NARROW a token that
+  # already holds the Default read — they never GATE it (ratified above by
+  # "byte-identical for non-grantees"). So a lapsed grant reverts to that
+  # back-compat read, NOT to zero rows; the sole-access "expired ⇒ no rows"
+  # scenario is the SCOPED non-member route (ResolveWorkspace 403), already
+  # proven by access_enforcement_test + scoped_studio_mount_test. What the flat
+  # HTTP surface uniquely proves here: the grant's narrowing is LIVE — an ACTIVE
+  # grant denies the out-of-scope dataset (zero rows), and the instant it expires
+  # or is revoked that denial lifts (the stale scope does not persist).
+  describe "expiry + revocation are live at the flat HTTP surface" do
+    test "an EXPIRED grant stops narrowing — the out-of-scope deny lifts, back-compat returns",
+         %{ws: ws, project: project} do
+      user = register_user()
+      {raw, _} = owned_token(user)
+      past = DateTime.add(DateTime.utc_now(), -3600, :second)
+      bind_grant!(ws, user, grant_ladder(project, %{expires_at: past}))
+
+      # An ACTIVE grant would deny this out-of-scope dataset (zero rows — proven
+      # in "fail-closed" above). The EXPIRED grant does not narrow, so the read
+      # reverts to the token's back-compat Default view — the row is visible.
+      assert titles(query(build_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
+
+      # And byte-identical to an owned token with NO grant at all (no residue).
+      {plain_raw, _} = owned_token(register_user())
+
+      assert query(build_conn(), raw, @granted_ds, "post") ==
+               query(build_conn(), plain_raw, @granted_ds, "post")
+    end
+
+    test "a REVOKED grant stops narrowing — the out-of-scope deny lifts, back-compat returns",
+         %{ws: ws, project: project} do
+      user = register_user()
+      {raw, _} = owned_token(user)
+      bind_grant!(ws, user, grant_ladder(project, %{revoked_at: DateTime.utc_now()}))
+
+      assert titles(query(build_conn(), raw, @other_ds, "post")) == ["wrong-dataset"]
+
+      {plain_raw, _} = owned_token(register_user())
+
+      assert query(build_conn(), raw, @granted_ds, "post") ==
+               query(build_conn(), plain_raw, @granted_ds, "post")
     end
   end
 end
