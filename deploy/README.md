@@ -71,6 +71,65 @@ deploys fully automatic.
    (The CLAUDE.md prod box `89.167.28.206` is a candidate once the deploy key is
    added to its `authorized_keys`.)
 
+## Staging channel — prove a Barkpark build before the fleet gets it
+
+`staging.barkpark.cloud` is one disposable box that runs Barkpark **itself**, so a
+new build is smoke-tested BEFORE the merge train auto-deploys it everywhere. It is
+NOT local dev, NOT guerrilla (the content + `bp`-task server, role untouched), NOT
+old prod, NOT the control plane — it owns its DNS/TLS, Postgres, `.env`, and a
+throwaway dataset, and is resettable without touching any prod data.
+
+**One script, two channels.** `instance-deploy.sh` picks its behaviour from a
+marker file — the **fail-closed safety boundary**:
+
+| Channel | `/opt/barkpark/.staging` | Trigger | Ref it deploys |
+|---|---|---|---|
+| guerrilla / prod | **absent** | merge → `deploy.yml` | strict **fast-forward `origin/main`** only |
+| staging | **present** | on-demand only — never a merge job | `DEPLOY_REF` (any branch/PR/sha) from `DEPLOY_REMOTE` (default `origin`), hard reset |
+
+Marker absent, the script refuses any non-ff move — every fleet box can only ever
+advance along `main`, so a random branch can never be pushed to it. Present, it
+opts that ONE box into arbitrary-ref, hard-reset deploys. The boundary is the file,
+not a flag: no marker, no non-`main` deploy, ever.
+
+**The verb.** `bp cloud deploy staging [--branch <x> | --pr <n>] [--clean]` sshes
+the staging host and runs `instance-deploy.sh` with `DEPLOY_REF` set (default: the
+current `main`). It writes **zero** `bp` config — your active server
+(`~/.config/barkpark/`, = guerrilla) is untouched and `bp` never defaults to
+staging; staging content ops use an **ephemeral** target instead
+(`bp -s https://staging.barkpark.cloud …`, never a remembered server).
+
+- `--branch <x>` / `--pr <n>` — deploy that ref instead of `main`. This is the
+  whole point of staging: try a build **before** the auto-deploy-on-merge train.
+- `--clean` — `rm /opt/barkpark/.instance-deploy-last` first, forcing a full
+  rebuild even when the ref looks unchanged (skips the coalesce no-op check).
+
+**The canary loop** — how a Barkpark change reaches the fleet safely:
+
+```
+1. worktree branch     git worktree add ../wt -b fix/x
+2. deploy to staging   bp cloud deploy staging --branch fix/x
+3. smoke the box       curl -s  https://staging.barkpark.cloud/api/schemas | head
+                       curl -sL https://staging.barkpark.cloud/studio | grep -E 'pane-layout|Sign in'
+                       curl -s  https://staging.barkpark.cloud/v1/data/query/production/post | grep count
+4. merge the PR        green smokes → merge to main
+5. fleet auto-deploys  deploy.yml ships main to guerrilla/prod (pipeline at top)
+```
+
+**Identity + data.** The staging build serves a `BARKPARK_ENV=staging` banner in
+Studio so a human can never mistake it for prod. Its Postgres is its own and
+**disposable** — reset it freely (a `bp cloud deploy staging --reset` verb lands in
+wave 2; today reset is manual on the box).
+
+**Adding the staging host** (mirrors *Adding another host*):
+
+1. Trust the deploy key: add `DEPLOY_SSH_KEY`'s public half to the staging box's
+   `root` `authorized_keys` (same Barkpark account key as guerrilla/prod).
+2. Point the verb at it: `BARKPARK_STAGING_HOST` (defaults to
+   `staging.barkpark.cloud`).
+3. Arm the channel ON THE BOX: `touch /opt/barkpark/.staging`. Without it the box
+   stays strict-`main` and every staging deploy is refused — fail-closed by design.
+
 ## Instance mail (provisioner-injected)
 
 Every provisioned instance must relay transactional mail (magic-link /
