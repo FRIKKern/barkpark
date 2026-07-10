@@ -42,6 +42,45 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerTest do
     end
   end
 
+  describe "sanitize/1 neutralises HTML-entity / whitespace scheme-obfuscation" do
+    # A browser decodes attribute-value entities and strips tab/newline in the
+    # scheme BEFORE URL parsing, so a raw-byte scheme test is not enough. Each
+    # vector must leave no decodable `javascript:`/`vbscript:`/`data:text/html`.
+    # These FAILED against the first sanitizer (the vacuous-green miss) and are
+    # the regression proof for the entity-decode hardening.
+    @decoded_exec ~r/(?:javascript|vbscript):|data:text\/html/i
+
+    for {name, payload} <- [
+          {"decimal-entity colon", "<a href=\"javascript&#58;alert(1)\">x</a>"},
+          {"hex-entity colon", "<a href=\"javascript&#x3a;alert(1)\">x</a>"},
+          {"named-entity colon", "<a href=\"javascript&colon;alert(1)\">x</a>"},
+          {"entity-encoded scheme letter", "<a href=\"&#106;avascript:alert(1)\">x</a>"},
+          {"tab-in-scheme entity", "<a href=\"jav&#9;ascript:alert(1)\">x</a>"},
+          {"no-semicolon numeric entity", "<a href=\"javascript&#58alert(1)\">x</a>"},
+          {"data:text/html entity colon", "<a href=\"data&#58;text/html,payload\">y</a>"}
+        ] do
+      test "neutralises #{name}" do
+        refute Regex.match?(@decoded_exec, browser_decode(S.sanitize(unquote(payload))))
+      end
+    end
+  end
+
+  # Mirror the browser's entity/whitespace decode of an attribute value so the
+  # assertion judges what actually executes, not the stored bytes.
+  defp browser_decode(html) do
+    html
+    |> String.replace(~r/&#x([0-9a-f]+);?/i, fn m ->
+      [_, h] = Regex.run(~r/&#x([0-9a-f]+);?/i, m)
+      <<String.to_integer(h, 16)::utf8>>
+    end)
+    |> String.replace(~r/&#([0-9]+);?/, fn m ->
+      [_, d] = Regex.run(~r/&#([0-9]+);?/, m)
+      <<String.to_integer(d)::utf8>>
+    end)
+    |> String.replace("&colon;", ":")
+    |> String.replace(~r/[\x00-\x20]/, "")
+  end
+
   describe "sanitize/1 preserves legitimate producer HTML" do
     for {name, html} <- [
           {"headings and links",

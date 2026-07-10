@@ -111,25 +111,58 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
   end
 
   # ── Dangerous URL schemes in URL-bearing attributes ───────────────────────
-  # Matches attr = (optional quote) scheme: … and rewrites the value to "#".
   @url_attrs ~w(href src xlink:href action formaction poster background)
 
+  # Named HTML entities a browser decodes inside an attribute value that can
+  # forge or hide a dangerous URL scheme. The colon is the payload; tab/newline
+  # obfuscate the scheme token (a browser strips them before URL parsing).
+  @scheme_entities %{
+    "colon" => ":",
+    "tab" => "\t",
+    "newline" => "\n",
+    "sol" => "/",
+    "newl" => "\n"
+  }
+
+  # Capture the FULL attribute value (quoted or bare) and judge it the way a
+  # browser will: decode HTML entities and drop ASCII control/space from the
+  # scheme, THEN test the scheme. A raw-byte scheme test (the naive version)
+  # was defeated by an entity-encoded colon — `href="javascript&#58;alert(1)"`
+  # has no literal `:` after the scheme token, so it slipped through while the
+  # browser decoded `&#58;`→`:` and executed it. See the entity-bypass cases in
+  # html_sanitizer_test.exs.
   defp neutralize_dangerous_uris(html) do
     attr_alt = @url_attrs |> Enum.map(&Regex.escape/1) |> Enum.join("|")
 
-    # Capture attr, opening quote, scheme, and the immediate value tail (so a
-    # `data:image/…` inline image can be distinguished from `data:text/html`).
     Regex.replace(
-      ~r/\b(#{attr_alt})\s*=\s*(["']?)\s*([a-z][a-z0-9\-.+]*)\s*:([^"'>\s]*)/i,
+      ~r/\b(#{attr_alt})\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i,
       html,
-      fn full, attr, quote, scheme, rest ->
-        if dangerous_scheme?(scheme, rest) do
-          "#{attr}=#{quote}#"
+      fn full, attr, dq, sq, bare ->
+        # Exactly one of the three value groups is populated; the others are "".
+        value = dq <> sq <> bare
+
+        if dangerous_url?(value) do
+          ~s(#{attr}="#")
         else
           full
         end
       end
     )
+  end
+
+  defp dangerous_url?(value) do
+    normalized =
+      value
+      |> decode_entities()
+      # A browser removes ASCII whitespace/control (incl. tab/newline/CR) while
+      # parsing the URL scheme; strip them so `jav\tascript:` reads as
+      # `javascript:`.
+      |> String.replace(~r/[\x00-\x20]/, "")
+
+    case Regex.run(~r/^([a-z][a-z0-9\-.+]*):(.*)$/is, normalized) do
+      [_, scheme, rest] -> dangerous_scheme?(scheme, rest)
+      _ -> false
+    end
   end
 
   # `data:image/…` is the one preserved `data:` form (inline images from real
@@ -138,6 +171,37 @@ defmodule Barkpark.PortableDoc.HtmlSanitizer do
     case String.downcase(scheme) do
       "data" -> not String.starts_with?(String.downcase(rest), "image/")
       s -> s in ~w(javascript vbscript blob)
+    end
+  end
+
+  # Decode the HTML entities a browser resolves in an attribute value: numeric
+  # decimal (`&#58;`), numeric hex (`&#x3a;`), and the scheme-relevant named
+  # set — with an OPTIONAL trailing `;` (browsers accept numeric refs without
+  # it). Over-decoding only risks neutralising a rare legit URL, never a false
+  # negative, so it fails safe for a denylist.
+  defp decode_entities(value) do
+    value
+    |> decode_numeric_entities()
+    |> decode_named_entities()
+  end
+
+  defp decode_numeric_entities(value) do
+    value = Regex.replace(~r/&#x([0-9a-f]+);?/i, value, fn _m, hex -> codepoint(hex, 16) end)
+    Regex.replace(~r/&#([0-9]+);?/, value, fn _m, dec -> codepoint(dec, 10) end)
+  end
+
+  defp decode_named_entities(value) do
+    Regex.replace(~r/&([a-z]+);/i, value, fn full, name ->
+      Map.get(@scheme_entities, String.downcase(name), full)
+    end)
+  end
+
+  defp codepoint(digits, base) do
+    case Integer.parse(digits, base) do
+      # Valid scalar values only — skip surrogates (invalid UTF-8) and
+      # out-of-range; a dropped char still can't reconstruct a live scheme.
+      {cp, ""} when cp in 0..0xD7FF or cp in 0xE000..0x10FFFF -> <<cp::utf8>>
+      _ -> ""
     end
   end
 end
