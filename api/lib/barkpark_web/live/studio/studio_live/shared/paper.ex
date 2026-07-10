@@ -58,6 +58,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> sync_paper_edit_doc()
             |> assign(save_status: "Auto-saved")
+            # A prior halt cleared: the next accepted edit dismisses the banner.
+            |> assign(paper_halt: nil)
 
           # A constraint veto (pdd-t20) carries a human-readable reason —
           # surface it so a calmly-rejected edit explains itself.
@@ -65,6 +67,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> put_flash(:error, constraint_flash(message))
             |> assign(save_status: "Save failed")
+
+          # A lifecycle-hook HALT (server-owned quality gate — the hollow-doc
+          # gate from sibling p-hollow-gate-server lands here) carries a
+          # human-readable reason. MIRROR the server truth: raise the banner
+          # with the reason verbatim, never invent copy here (D5/D6).
+          {:error, {:halted, reason}} ->
+            put_paper_halt(socket, reason)
 
           {:error, _reason} ->
             socket
@@ -113,14 +122,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> push_canvas_echo()
             |> push_task_previews()
             |> push_block_renders()
+            # A prior halt cleared: the next accepted batch dismisses the banner.
+            |> assign(paper_halt: nil)
 
           # A constraint veto (pdd-t20) carries a human-readable reason —
           # surface it so a calmly-rejected batch explains itself.
           {:error, {:constraint, message, _op}} ->
             put_flash(socket, :error, constraint_flash(message))
 
+          # A lifecycle-hook HALT on the batch path. The batch branch never set
+          # save_status on error before — put_paper_halt/2 fixes that so a
+          # rejected canvas run reads "Save failed" just like the single-op
+          # path, and raises the server reason verbatim in the mirror banner.
+          {:error, {:halted, reason}} ->
+            put_paper_halt(socket, reason)
+
           {:error, _reason} ->
-            put_flash(socket, :error, "Edit failed")
+            socket
+            |> put_flash(:error, "Edit failed")
+            |> assign(save_status: "Save failed")
         end
     end
   end
@@ -133,6 +153,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     do: "Edit rejected — " <> String.replace_prefix(message, "constraint: ", "")
 
   defp constraint_flash(_), do: "Edit failed"
+
+  @doc false
+  # MIRROR a server-owned write halt in the paper canvas. Shared by
+  # paper_pane_op/2 (single op) and paper_ops/2 (batch) so BOTH write seams
+  # surface an identical halt: stash the verbatim server reason for the mirror
+  # banner (editor.ex `paper_halt_banner`), flash the same copy, and mark the
+  # save failed (the batch path never set save_status on error before). The
+  # editor authors NO copy of its own (charter D5/D6) — the message is always
+  # the server's reason string.
+  def put_paper_halt(socket, reason) do
+    message = halt_reason(reason)
+
+    socket
+    |> assign(paper_halt: message)
+    |> put_flash(:error, message)
+    |> assign(save_status: "Save failed")
+  end
+
+  # Normalise a lifecycle-hook halt reason into a display string. The paper
+  # gate emits a binary (content/papers/block_ops.ex), which passes through
+  # verbatim — the editor NEVER authors its own copy (D5/D6). A non-binary
+  # reason falls back to the same inspect form the API envelope uses
+  # (content/errors.ex halt_message/1) so the mirror can't diverge from the
+  # server's own message.
+  defp halt_reason(reason) when is_binary(reason) and reason != "", do: reason
+
+  defp halt_reason(reason),
+    do: "mutation vetoed by a plugin lifecycle hook: #{inspect(reason)}"
 
   @doc false
   # t9 — LIVE TASK-BLOCK PREVIEW push. Resolve every query-carrying task block in

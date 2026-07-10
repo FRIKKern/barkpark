@@ -259,6 +259,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # banner (studio_editor_shell). "reload-remote-doc" reloads from the DB.
       editor_dirty: false,
       doc_conflict: false,
+      # ── Server-owned save-halt mirror (p-hollow-studio-mirror) ────────
+      # nil = no active halt. Set to the verbatim `{:error, {:halted, reason}}`
+      # string by the paper handlers (shared/paper.ex paper_pane_op/paper_ops)
+      # when a plugin lifecycle gate vetoes a write; the editor renders it in
+      # the paper-halt banner and clears it on the next accepted edit. The
+      # editor MIRRORS this server truth, it never owns the gate (D5/D6).
+      paper_halt: nil,
       # ── Switcher create affordances (Task barkpark-ylrw) ──────────────
       # Which inline "+ New" form the WorkspaceSwitcher shows: "workspace",
       # "project", or nil (both closed). The "＋" buttons toggle this via
