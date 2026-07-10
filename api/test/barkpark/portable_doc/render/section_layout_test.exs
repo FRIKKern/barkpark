@@ -330,7 +330,8 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       html = Render.render_block(email_grid([para("ALPHA"), para("BETA")]), @email)
       refute String.contains?(html, "bp-section__grid"), "email grid must not emit the grid class"
       refute String.contains?(html, "bp-section__cell"), "email grid must not emit cell wrappers"
-      refute String.contains?(html, "--bp-tracks"), "email grid must not emit the tracks custom prop"
+      refute String.contains?(html, "--bp-tracks"),
+             "email grid must not emit the tracks custom prop"
 
       refute String.contains?(html, "--bp-grid-gap"),
              "email grid must not emit the gap custom prop"
@@ -384,7 +385,8 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
     end
 
     test "absent/equal order preserves SOURCE position (the sort is stable)" do
-      html = Render.render_block(email_grid([para("FIRST"), para("SECOND"), para("THIRD")]), @email)
+      html =
+        Render.render_block(email_grid([para("FIRST"), para("SECOND"), para("THIRD")]), @email)
 
       assert bpos(html, "FIRST") < bpos(html, "SECOND") and
                bpos(html, "SECOND") < bpos(html, "THIRD"),
