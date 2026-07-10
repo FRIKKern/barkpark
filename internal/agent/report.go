@@ -8,9 +8,14 @@
 package agent
 
 import (
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
@@ -63,6 +68,17 @@ type Report struct {
 	MemUsedPercent int `json:"mem_used_percent"`
 	// Load1 is the 1-minute load average. -1 when the probe was not wired/failed.
 	Load1 float64 `json:"load1"`
+
+	// ReqPerS is the instance's recent requests-per-second, read from the
+	// instance RequestStats route over the SAME base+token seam as the health
+	// gate. -1 when the probe was not wired, failed, or the instance is old and
+	// lacks the route (a 404 degrades silently — version-skew honesty, D48/D51).
+	ReqPerS float64 `json:"req_per_s"`
+	// P95Ms is the instance's p95 request latency in milliseconds. -1 when the
+	// probe was not wired/failed, OR when the instance reported p95 null (no
+	// samples in the window yet) — the CP renders that unmetered, never a fake 0.
+	P95Ms int `json:"p95_ms"`
+
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
 	// recent backup present and scheduled?
 	BackupOK     bool   `json:"backup_ok"`
@@ -145,6 +161,12 @@ type ReportConfig struct {
 	MemProbe func() (int, error)
 	// LoadProbe returns the 1-minute load average. nil → Load1=-1.
 	LoadProbe func() (float64, error)
+	// ReqStatsProbe returns (req/s, p95 ms) from the instance RequestStats route.
+	// nil → ReqPerS=-1 and P95Ms=-1. Fail-soft like the other probes: a non-nil
+	// error leaves BOTH sentinels; a successful read with a null instance-side p95
+	// lands req/s but keeps P95Ms=-1 (see NewReqStatsProbe). Wire the production
+	// implementation with NewReqStatsProbe(base, token, rootCAs).
+	ReqStatsProbe func() (reqPerS float64, p95Ms int, err error)
 	// PGSizeProbe returns the Postgres DB size in bytes. nil → PGSizeBytes=-1.
 	PGSizeProbe func() (int64, error)
 	// BackupProbe returns (ok, human-detail). nil → BackupOK=false, detail noted.
@@ -173,6 +195,8 @@ func gatherReport(cfg ReportConfig) Report {
 		CPUUsedPercent:  -1,
 		MemUsedPercent:  -1,
 		Load1:           -1,
+		ReqPerS:         -1,
+		P95Ms:           -1,
 	}
 
 	// Git signals (deployed commit + dirty tree).
@@ -203,6 +227,16 @@ func gatherReport(cfg ReportConfig) Report {
 	if cfg.LoadProbe != nil {
 		if l, err := cfg.LoadProbe(); err == nil {
 			r.Load1 = l
+		}
+	}
+
+	// Request stats (req/s + p95). Fail-soft as one unit: a probe error leaves
+	// both at the -1 sentinel; a null instance-side p95 arrives as P95Ms=-1 with
+	// a real req/s (NewReqStatsProbe applies that mapping).
+	if cfg.ReqStatsProbe != nil {
+		if rps, p95, err := cfg.ReqStatsProbe(); err == nil {
+			r.ReqPerS = rps
+			r.P95Ms = p95
 		}
 	}
 
@@ -245,4 +279,76 @@ func gatherReport(cfg ReportConfig) Report {
 	}
 
 	return r
+}
+
+// requestStatsPath is the instance route the ReqStatsProbe reads, served by the
+// sibling wave-5 slice (cloud-console-w5-instance-req-stats — mounted in
+// api/lib/barkpark_web/router.ex as GET /v1/instance/request-stats). It answers
+// 200 {"req_per_s": float, "p95_ms": int|null, "window_s": int} for a valid
+// bearer token; an instance built before that slice returns 404, which the probe
+// degrades to sentinels (version-skew honesty, D48/D51). This string is the
+// cross-slice contract — keep it in lockstep with the route the instance mounts.
+const requestStatsPath = "/v1/instance/request-stats"
+
+// reqStatsTimeout bounds the per-beat RequestStats GET. It is short by design:
+// the stats read must never stall the whole report cycle, and a slow/hung box
+// degrades to the -1 sentinel rather than blocking every other vital.
+const reqStatsTimeout = 3 * time.Second
+
+// reqStatsBody is the instance RequestStats response. P95Ms is a pointer so a
+// JSON null (no samples in the window yet) is distinguishable from a real 0 and
+// maps to the -1 sentinel — never a fake zero latency.
+type reqStatsBody struct {
+	ReqPerS float64 `json:"req_per_s"`
+	P95Ms   *int    `json:"p95_ms"`
+}
+
+// NewReqStatsProbe builds the production ReqStatsProbe: a short-timeout HTTP GET
+// against the instance RequestStats route (base+requestStatsPath) carrying the
+// health gate's bearer token — the SAME base+token seam the health gate uses.
+//
+// It is fail-soft to sentinels: any transport error, non-200 status (a 404 from
+// an old instance without the route included), or undecodable body returns a
+// non-nil error so gatherReport keeps ReqPerS=-1 and P95Ms=-1. On a 200 the
+// decoded req/s always lands; a null p95_ms maps to the -1 sentinel while req/s
+// still reports. base=="" returns a nil probe (unwired), mirroring how the
+// health gate is skipped when HealthBaseURL is empty.
+func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float64, int, error) {
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return nil
+	}
+	url := base + requestStatsPath
+	return func() (float64, int, error) {
+		req, err := http.NewRequest(http.MethodGet, url, nil)
+		if err != nil {
+			return -1, -1, err
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		client := &http.Client{Timeout: reqStatsTimeout}
+		if rootCAs != nil {
+			tr := http.DefaultTransport.(*http.Transport).Clone()
+			tr.TLSClientConfig = &tls.Config{RootCAs: rootCAs}
+			client.Transport = tr
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return -1, -1, err
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return -1, -1, fmt.Errorf("request-stats: status %d", resp.StatusCode)
+		}
+		var body reqStatsBody
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return -1, -1, err
+		}
+		p95 := -1
+		if body.P95Ms != nil {
+			p95 = *body.P95Ms
+		}
+		return body.ReqPerS, p95, nil
+	}
 }

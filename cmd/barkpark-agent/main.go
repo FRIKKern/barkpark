@@ -75,11 +75,15 @@ func run(args []string) int {
 		Interval:   *interval,
 		Runner:     agent.ExecRunner{},
 		ReportProbes: agent.ReportConfig{
-			Checkout:      *checkout,
-			DiskProbe:     dfRootProbe,
-			CPUProbe:      cpuProcProbe,
-			MemProbe:      memProcProbe,
-			LoadProbe:     loadProcProbe,
+			Checkout:  *checkout,
+			DiskProbe: dfRootProbe,
+			CPUProbe:  cpuProcProbe,
+			MemProbe:  memProcProbe,
+			LoadProbe: loadProcProbe,
+			// Request stats ride the SAME base+token seam as the health gate: the
+			// probe GETs the instance RequestStats route at *healthURL. Empty
+			// health-url → nil probe → req/s + p95 report their -1 sentinels.
+			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
 			HealthBaseURL: *healthURL,
 			HealthToken:   *healthTok,
 			HealthGateOpts: setup.HealthGate{
