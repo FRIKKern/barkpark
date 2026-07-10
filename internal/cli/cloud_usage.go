@@ -154,11 +154,14 @@ func runCloudUsage(out *writer, g globals, args []string) int {
 const usageHistoryPoints = 24
 
 // fleetHeadlineMeters is the per-instance subset the fleet table paints (a full
-// 9×N grid is unreadably wide): the two inventory counts most operators watch,
-// the box's storage/health telemetry, and the team's seats. The STATE cell rolls
-// the WORST usageStateToken across exactly these meters, so a headline meter over
-// its quota reddens the whole row at a glance.
-var fleetHeadlineMeters = []string{"documents", "db_size", "disk", "seats"}
+// grid is unreadably wide): the inventory count operators watch, the box's
+// storage telemetry, the team's seats, and the on-box agent's CPU · RAM capacity
+// beat (OC18/OC27). The STATE cell rolls the WORST usageStateToken across exactly
+// these meters, so a headline meter over its ceiling reddens the whole row at a
+// glance — and an un-armed box (no agent → cpu_pct/ram_pct absent) rolls to
+// "unmetered" rather than a false "live" glow, the same honesty a dark inventory
+// pipe already gets (a box whose capacity we can't see never reads fully healthy).
+var fleetHeadlineMeters = []string{"documents", "db_size", "disk", "seats", "cpu_pct", "ram_pct"}
 
 // runCloudFleetUsage is `bp cloud usage` (no positional): the fleet summary — one
 // row per instance from the sampler's CACHED snapshots (OC16), never a live
@@ -223,15 +226,16 @@ func fleetInstancesHeader(out *writer, m cloudclient.UsageMeter, present bool) s
 }
 
 // renderFleetTable paints the aligned per-instance table: INSTANCE (name, with
-// slug/host/id fallbacks) · DOCS · DB · DISK · SEATS (the headline meter values,
-// each formatted by its unit, an em dash when that meter is unmetered/absent) ·
+// slug/host/id fallbacks) · DOCS · DB · DISK · SEATS · CPU · RAM (the headline
+// meter values, each formatted by its unit — CPU/RAM as the agent's capacity
+// percent — an em dash when that meter is unmetered/absent) ·
 // AS OF (the row's cached-sample age, or "no sample yet" when the sampler has
 // never captured it — never a fake-fresh reading) · STATE (the WORST
 // usageStateToken across the row's headline meters, painted through the shared
 // statusRole seam). Widths are measured on BARE strings so painting the STATE
 // cell never shifts a column; piped/--no-color output is byte-identical.
 func renderFleetTable(out *writer, rows []cloudclient.UsageInstanceRow) {
-	headers := []string{"INSTANCE", "DOCS", "DB", "DISK", "SEATS", "AS OF", "STATE"}
+	headers := []string{"INSTANCE", "DOCS", "DB", "DISK", "SEATS", "CPU", "RAM", "AS OF", "STATE"}
 	cells := make([][]string, 0, len(rows))
 	stateTokens := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -242,6 +246,8 @@ func renderFleetTable(out *writer, rows []cloudclient.UsageInstanceRow) {
 			fleetMeterCell("db_size", row.Meters),
 			fleetMeterCell("disk", row.Meters),
 			fleetMeterCell("seats", row.Meters),
+			fleetMeterCell("cpu_pct", row.Meters),
+			fleetMeterCell("ram_pct", row.Meters),
 			fleetAsOfCell(row.MeasuredAt),
 			token,
 		})
@@ -261,7 +267,7 @@ func renderFleetTable(out *writer, rows []cloudclient.UsageInstanceRow) {
 	}
 
 	out.outf("%s", joinCols(headers, widths))
-	const stateCol = 6 // the STATE column index — the one painted cell
+	const stateCol = 8 // the STATE column index — the one painted cell
 	for r, row := range cells {
 		parts := make([]string, len(row))
 		for i, c := range row {
@@ -757,9 +763,10 @@ THE FLEET SUMMARY (no argument)
   the D36 terminal twin of the console's Overview strip: a header line with your
   team's instances count (against its plan limit when one applies) and one row
   per instance from the sampler's CACHED snapshots — INSTANCE · DOCS · DB · DISK
-  · SEATS · AS OF · STATE. AS OF is the sample's age ("3m ago") or an honest
-  "no sample yet"; STATE rolls the worst meter across the row. This is a cached
-  read — never a live fan-out — so it answers instantly even when a box is down.
+  · SEATS · CPU · RAM · AS OF · STATE. CPU/RAM are the on-box agent's capacity
+  percent (an em dash on an un-armed box). AS OF is the sample's age ("3m ago") or
+  an honest "no sample yet"; STATE rolls the worst meter across the row. This is a
+  cached read — never a live fan-out — so it answers instantly even when down.
 
 ONE INSTANCE
   the same meter wall the dashboard draws — one row per meter:

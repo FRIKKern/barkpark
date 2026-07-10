@@ -560,7 +560,11 @@ const usageQuotaHistory = {
 // NO-SAMPLE row (measured_at null → the honest "no sample yet" cell). Derived
 // from the sampler's Usage.compose/1 meter shape — NOT invented.
 const fleetMeter = (value, over) => Object.assign({ value, quota: null, warn_at: null, source: "preview", measured_at: null }, over || {});
-const fleetInstMeters = (docs, db, disk, seats, at) => ({
+// The machine capacity beat (cpu/ram) rides the on-box agent, so it carries the
+// PHYSICAL ceiling the sampler stamps (quota 100, warn 70). `machine` is
+// {cpu, ram} for an armed box, or omitted → the honest un-armed dimmed cell
+// (4 of 5 fleet boxes carry no agent — never a fake zero).
+const fleetInstMeters = (docs, db, disk, seats, at, machine) => ({
   instances: fleetMeter("unmetered"),
   seats: fleetMeter(seats, { source: "control-plane.team_members", measured_at: at }),
   documents: fleetMeter(docs, { source: "instance.documents", measured_at: at }),
@@ -568,6 +572,12 @@ const fleetInstMeters = (docs, db, disk, seats, at) => ({
   webhooks: fleetMeter("unmetered", { source: "instance.webhooks" }),
   db_size: fleetMeter(db, { source: "telemetry.pg_size_bytes", measured_at: at }),
   disk: fleetMeter(disk, { source: "telemetry.disk_used_percent", measured_at: at }),
+  cpu_pct: machine
+    ? fleetMeter(machine.cpu, { quota: 100, warn_at: 70, source: "agent.cpu_percent", measured_at: at })
+    : fleetMeter("unmetered", { source: "agent.cpu_percent" }),
+  ram_pct: machine
+    ? fleetMeter(machine.ram, { quota: 100, warn_at: 70, source: "agent.ram_percent", measured_at: at })
+    : fleetMeter("unmetered", { source: "agent.ram_percent" }),
   api_requests: fleetMeter("unmetered", { source: "not-metered" }),
   bandwidth: fleetMeter("unmetered", { source: "not-metered" }),
 });
@@ -576,10 +586,14 @@ const fleetUsageSummary = {
   // over tone + Manage-plan recovery (OC11/D25).
   team: { instances: fleetMeter(12, { quota: 10, warn_at: 8, source: "control-plane.barkparks" }) },
   instances: [
+    // A HOT armed box: RAM pegged at its ceiling (over → the row reddens), CPU
+    // past its warn line — the capacity glance the wave exists for.
     { id: IDS.liveInstance, name: "Acme Production", slug: "acme-prod", host: "acme.barkpark.cloud",
-      measured_at: tMinus(20), meters: fleetInstMeters(412, 1048576, 37, 4, tMinus(20)) },
+      measured_at: tMinus(20), meters: fleetInstMeters(412, 1048576, 37, 4, tMinus(20), { cpu: 88, ram: 100 }) },
+    // A calm armed box: CPU/RAM comfortably under their ceilings (live green).
     { id: IDS.behindInstance, name: "Analytics", slug: "analytics", host: "an.barkpark.cloud",
-      measured_at: tMinus(3 * 3600), meters: fleetInstMeters(88, 262144, 21, 2, tMinus(3 * 3600)) },
+      measured_at: tMinus(3 * 3600), meters: fleetInstMeters(88, 262144, 21, 2, tMinus(3 * 3600), { cpu: 12, ram: 34 }) },
+    // An un-armed box: no agent → the honest dimmed "—" capacity cells.
     { id: IDS.suspendedInstance, name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
       measured_at: null, meters: fleetInstMeters("unmetered", "unmetered", "unmetered", "unmetered", null) },
   ],
