@@ -3,10 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -355,18 +355,16 @@ func (m *model) closeTask(doc *Doc) {
 	m.setStatus("closed", false)
 }
 
-// workerIdentity computes the TUI's task-claim worker id once per process:
-// BARKPARK_WORKER_ID when set, else "tui-<hostname>" ("tui-unknown" when the
-// hostname is unreadable).
+// workerIdentity computes the desk TUI's task-claim worker id once per process.
+// It DELEGATES to taskboard.CmuxWorkerID() — the one honored-everywhere
+// derivation — so a cmux pane owns its task consistently: the same
+// cmux-<CMUX_SURFACE_ID> id the `bp cmux` hook claims with, falling through to
+// the historic tui-<hostname> convention outside cmux entirely. Previously this
+// was a hand-copied clone that stopped at BARKPARK_WORKER_ID → tui-<hostname>,
+// so a raw cmux pane (CMUX_SURFACE_ID set, BARKPARK_WORKER_ID unset) claimed via
+// the hook as cmux-<surface> yet closed here as tui-<host> → 409 fenced_off.
 func workerIdentity() string {
-	if v := os.Getenv("BARKPARK_WORKER_ID"); v != "" {
-		return v
-	}
-	host, err := os.Hostname()
-	if err != nil || host == "" {
-		return "tui-unknown"
-	}
-	return "tui-" + host
+	return taskboard.CmuxWorkerID()
 }
 
 // setStatus stores a transient status-line message. isErr=true marks it an error
