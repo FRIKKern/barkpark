@@ -694,15 +694,26 @@ const STUDIO_II = {
   "fg-dim":        { light: { L: 0.550, C: 0.008 }, dark: { L: 0.605, C: 0.010 } },
   "fg-accent":     { light: { L: 0.220, C: 0.014 }                                },
   "border-muted":  {                                 dark: { L: 0.156, C: 0.006 } },
-  // surface-raised: an elevated panel/card fill that VISIBLY separates from --bg
-  // in dark (evergreen bg OKLCH L 0.141 → raised 0.210, a legible +0.069 step);
+  // surface-raised: an elevated panel/card fill that VISIBLY separates from --bg.
+  // DARK rung is bg-RELATIVE (raisedDark below): L = theme's dark-bg L + 0.0695 so
+  // the elevation step is CONSTANT across themes. A fixed absolute L gave evergreen
+  // a legible +0.069 step but only +0.016 on ember / +0.026 on fjord (invisible).
+  // dark.L below is the evergreen fit target (0.14051 bg + 0.0695 = 0.21001, the
+  // committed 0.210 byte) kept for reference; only dark.C is consumed by the helper.
   // light ≈ bg (near-white) since light-mode elevation rides border + shadow.
   "surface-raised": { light: { L: 0.992, C: 0.004 }, dark: { L: 0.210, C: 0.010 } },
-  // border-subtle: a hairline sitting BETWEEN --border-muted and --bg (dark:
-  // bg 0.141 < subtle 0.185 < border-muted 0.223) — quieter than border-muted.
+  // border-subtle: a hairline sitting BETWEEN --border-muted and --bg. DARK rung is
+  // bg-relative too (L = dark-bg L + 0.0445); a fixed L INVERTED below bg on ember
+  // dark (hairline darker than the ground). dark.L is the evergreen fit target
+  // (0.14051 + 0.0445 = 0.18501, the committed 0.185 byte); only dark.C is consumed.
   "border-subtle":  { light: { L: 0.960, C: 0.005 }, dark: { L: 0.185, C: 0.008 } },
 };
 const neutralII = (skin, mode, spec) => oklchHsl(spec.L, spec.C, accentHueOf(skin, mode));
+// bg-relative dark elevation rung — L rides the theme's OWN dark-bg lightness so a
+// raised surface / subtle hairline sits a CONSTANT OKLCH-L step above the ground on
+// every theme (evergreen, ember, fjord), C/hue staying chrome-neutral toward accent.
+const raisedDark = (skin, dL, C) =>
+  oklchHsl(srgbToOklch(skin.dark.bg).L + dL, C, accentHueOf(skin, "dark"));
 
 // CLI chrome gray ramp — the theme ink mixed over the theme bg in gamma sRGB
 // (the frozen zinc hexes evergreen pins; a fresh theme's chrome carries its tint).
@@ -822,9 +833,9 @@ function buildFormulas() {
   F["studioChrome.fg-accent.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["fg-accent"].light);
   F["studioChrome.fg-accent.dark"] = () => "var(--text)";
   F["studioChrome.surface-raised.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["surface-raised"].light);
-  F["studioChrome.surface-raised.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["surface-raised"].dark);
+  F["studioChrome.surface-raised.dark"] = (c) => raisedDark(c.skin, 0.0695, STUDIO_II["surface-raised"].dark.C);
   F["studioChrome.border-subtle.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["border-subtle"].light);
-  F["studioChrome.border-subtle.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["border-subtle"].dark);
+  F["studioChrome.border-subtle.dark"] = (c) => raisedDark(c.skin, 0.0445, STUDIO_II["border-subtle"].dark.C);
 
   // — onStatus: warm-white on every status chip; the two fills that don't clear
   // AA 4.5 on white (warn/info light) are the charter's known warn/info AA
