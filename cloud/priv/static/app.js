@@ -7230,7 +7230,17 @@
   var newAuthMode = "login";
   var newFlowFleetHook = null; // handleLiveEvent() calls this on an SSE "fleet" tick
 
-  function isNewFlow() { return location.pathname === "/new"; }
+  // Tolerant pathname match for the real-path screens (/new, /activate). The
+  // control plane's Plug.Router serves /activate/ (and //) as the same 200 it
+  // serves /activate, so an EXACT pathname === "/activate" check silently misses
+  // the trailing-slash spellings — the approve page never renders and the
+  // hash-router escape guards bounce the user to the dashboard. Strip trailing
+  // slashes, but keep "/" itself as "/" (never collapse the root to "").
+  function pathClean(pathname) {
+    var p = String(pathname == null ? "" : pathname).replace(/\/+$/, "");
+    return p === "" ? "/" : p;
+  }
+  function isNewFlow() { return pathClean(location.pathname) === "/new"; }
   function newParams() {
     try { return new URLSearchParams(location.search || ""); }
     catch (e) { return { get: function () { return null; } }; }
@@ -9276,6 +9286,7 @@
   // signal), so 404 → "gone"; a 200 with a body → "confirm"; else retryable.
   function activateInspectState(status, data) {
     if (status === 404) return "gone";
+    if (status === 429) return "rate_limited"; // limiter tripped — honest, paused retry
     if (status === 200 && data) return "confirm";
     return "error";
   }
@@ -9290,7 +9301,7 @@
     return mins > 0 ? "expires in " + mins + "m " + secs + "s" : "expires in " + secs + "s";
   }
 
-  function isActivateFlow() { return location.pathname === "/activate"; }
+  function isActivateFlow() { return pathClean(location.pathname) === "/activate"; }
   function activateCodePrefill() { return activateCodeFromSearch(location.search); }
   function parkedActivateCode() {
     try { return sessionStorage.getItem(ACTIVATE_KEY); } catch (e) { return null; }
@@ -9379,6 +9390,7 @@
       var state = activateInspectState(r.status, r.data);
       if (state === "confirm") { renderActivateConfirm(code, r.data); return; }
       if (state === "gone") { renderActivateResult("gone"); return; }
+      if (state === "rate_limited") { renderActivateRateLimited(code); return; }
       renderActivateError(code, r.data);
     });
   }
@@ -9416,9 +9428,16 @@
     api("POST", "/v1/auth/device/" + decision, { user_code: code }).then(function (r) {
       if (r.status === 200) { renderActivateResult(decision === "approve" ? "approved" : "denied"); return; }
       if (r.status === 404) { renderActivateResult("gone"); return; }
-      // Transient failure — nothing changed; re-arm the buttons and explain.
+      // Transient/rate-limited failure — nothing changed; re-arm and explain.
       if (approveBtn) { approveBtn.disabled = false; approveBtn.textContent = "Approve sign-in"; }
       if (denyBtn) { denyBtn.disabled = false; denyBtn.textContent = "Deny"; }
+      if (r.status === 429) {
+        // Honest: the limiter tripped, not a network failure. Nothing changed —
+        // the buttons are re-armed so the user can retry after a moment.
+        toast({ kind: "error", title: "Too many attempts",
+          body: "You're going a little fast — wait a moment, then " + decision + " again. Nothing changed." });
+        return;
+      }
       toast({ kind: "error", title: "Couldn't reach the server", body: friendly(r.data, "Nothing changed — please try again.") });
     });
   }
@@ -9462,6 +9481,38 @@
     var other = $("#activate-other");
     if (again) again.addEventListener("click", function () { activateInspect(code); });
     if (other) other.addEventListener("click", function () { renderActivateEntry(""); });
+  }
+
+  // 429 on inspect: the limiter tripped. Honest copy, and the retry is PAUSED —
+  // the button stays disabled through a short countdown so a tap can't instantly
+  // re-fire inspect and re-trip the limiter (the old generic "error" screen let
+  // Try-again fire immediately). Code preserved; "Enter a different code" is a
+  // deliberate navigation, not an auto-retry, so it stays live.
+  var ACTIVATE_RATE_WAIT_S = 15;
+  function renderActivateRateLimited(code) {
+    activateSetBody(activatePanel(
+      activateHead("Too many attempts",
+        "You've made a few requests in quick succession. Wait a moment, then try again — nothing has changed.") +
+      '<button class="btn btn-primary btn-block" id="activate-again" type="button" disabled>' +
+        "Try again in " + ACTIVATE_RATE_WAIT_S + "s</button>" +
+      '<button class="btn btn-ghost btn-block" id="activate-other" type="button" style="margin-top:8px">Enter a different code</button>'));
+    var again = $("#activate-again");
+    var other = $("#activate-other");
+    if (other) other.addEventListener("click", function () { renderActivateEntry(""); });
+    if (again) {
+      var left = ACTIVATE_RATE_WAIT_S;
+      var tick = setInterval(function () {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(tick);
+          again.disabled = false;
+          again.textContent = "Try again";
+        } else {
+          again.textContent = "Try again in " + left + "s";
+        }
+      }, 1000);
+      again.addEventListener("click", function () { if (!again.disabled) activateInspect(code); });
+    }
   }
 
   // The logged-out companion: a banner on the sign-in card saying what logging
@@ -10106,6 +10157,9 @@
       normalizeUserCode: normalizeUserCode, userCodeComplete: userCodeComplete,
       activateCodeFromSearch: activateCodeFromSearch, activateInspectState: activateInspectState,
       activateExpiryText: activateExpiryText, activateAlphabet: ACTIVATE_ALPHABET,
+      // bp-login-ux W2 — tolerant real-path matcher (trailing-slash safe) + the
+      // two predicates it backs, so the harness can pin /activate/ ≡ /activate.
+      pathClean: pathClean, isActivateFlow: isActivateFlow, isNewFlow: isNewFlow,
       failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.
