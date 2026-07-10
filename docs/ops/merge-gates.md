@@ -111,17 +111,21 @@ Elixir security gates, path-triggered on `api/**`:
    acceptance that they are safe.
 
 10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
-    dep) over `mix.lock`. **Advisory** (`continue-on-error: true`). The current
-    lock carries 8 real, pre-existing CVEs (mint 1.7.1 ×4, postgrex 0.22.0,
-    phoenix 1.8.5, decimal 2.3.0, esaml 4.6.0), all fixed by a version bump —
-    NOT by accepting them. Baselining them behind a green check would be a
-    vacuous green; advisory keeps the signal **visible and honest** while the
-    fleet stays unblocked. The protective proof (a pinned known-vulnerable
-    version reds it) is satisfied by the current lock itself: `mix deps.audit`
-    exits 1 today. **Flip to blocking** (drop `continue-on-error`) once the deps
-    are bumped and the lock is clean (follow-up task). To baseline an accepted
-    advisory instead, mix_audit takes `--ignore-file <path>` (advisory IDs, one
-    per line).
+    dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8
+    pre-existing CVEs were remediated by a version bump (task-726cab56d9a84551),
+    NOT by accepting them: mint 1.7.1→1.9.1 (×4 advisories), postgrex
+    0.22.0→0.22.3, phoenix 1.8.5→1.8.9, decimal 2.3.0→3.1.1 (the last needed
+    ecto 3.13.5→3.13.6 + ex_json_schema 0.11.2→0.11.5 to relax decimal to
+    `~> 3.0`). The 8th — **esaml GHSA-4g2h-vm7x-747c** (XXE, local-file
+    disclosure/SSRF) — has **no upstream fix** (every release ≤ 4.6.0 is
+    affected), so it is the single `--ignore-advisory-ids GHSA-4g2h-vm7x-747c`
+    suppression in the audit step, justified because OTP 27+ neutralises the XXE
+    (xmerl disables external entities by default) and both CI (OTP 27.0) and
+    prod run OTP 27+. Every OTHER CVE must be fixed by a bump — never ignored.
+    Protective proof: `mix deps.audit` exits 1 on the pre-bump lock and on any
+    new CVE; drop the esaml id the moment upstream ships a patch. To suppress
+    additional accepted advisories, mix_audit also takes `--ignore-file <path>`
+    (advisory IDs, one per line).
 
 Both deps are `only: [:dev, :test], runtime: false` in `api/mix.exs` — analysis
 tooling that never ships in the release.

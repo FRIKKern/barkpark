@@ -21,13 +21,13 @@ name: security
 #                   the baseline is regenerated IN CI (matched toolchain) or the
 #                   30 real high/medium findings are remediated (task-c9d6d29cc0059d2a),
 #                   then flip to blocking.
-#   2. mix-audit  — dependency CVE scan over mix.lock. ADVISORY initially
-#                   (continue-on-error: true): the current lock carries 8 real,
-#                   pre-existing CVEs (mint, postgrex, phoenix, decimal, esaml)
-#                   that are fixed by a version bump, NOT by accepting them —
-#                   baselining them would be a vacuous green. Advisory keeps the
-#                   signal HONEST and VISIBLE while the fleet stays unblocked;
-#                   flip to blocking once the deps are bumped (follow-up task).
+#   2. mix-audit  — dependency CVE scan over mix.lock. BLOCKING (no
+#                   continue-on-error). The 8 pre-existing CVEs (mint ×4,
+#                   postgrex, phoenix, decimal, esaml) were remediated by a dep
+#                   bump (task-726cab56d9a84551): 7 cleared by version bumps; the
+#                   8th, esaml (XXE), has no upstream fix and is mitigated by
+#                   OTP 27+ — it is the single documented --ignore-advisory-ids
+#                   suppression in the audit step. A NEW CVE reds the fleet.
 #
 # Policy of record: docs/ops/merge-gates.md §Security gates.
 
@@ -98,11 +98,16 @@ jobs:
         run: mix sobelow --skip --exit Low
 
   mix-audit:
-    name: Dependency CVE audit (mix_audit over mix.lock, advisory)
-    # ADVISORY until the 8 pre-existing CVEs in mix.lock are remediated by a
-    # dep bump (follow-up task). The signal stays visible; it does not block the
-    # fleet. Flip to blocking (drop continue-on-error) once the lock is clean.
-    continue-on-error: true
+    name: Dependency CVE audit (mix_audit over mix.lock, blocking)
+    # BLOCKING (no continue-on-error). The 8 pre-existing CVEs were remediated by
+    # a dep bump (task-726cab56d9a84551): 7 cleared outright — mint 1.7.1→1.9.1,
+    # postgrex 0.22.0→0.22.3, phoenix 1.8.5→1.8.9, decimal 2.3.0→3.1.1 (the last
+    # via ecto 3.13.5→3.13.6 + ex_json_schema 0.11.2→0.11.5, which relaxed
+    # decimal to ~> 3.0). The 8th, esaml GHSA-4g2h-vm7x-747c (XXE), has NO
+    # upstream fix — every release ≤ 4.6.0 is affected — and is mitigated at
+    # runtime by OTP 27+ (xmerl disables external entities by default), which
+    # this job (OTP 27.0) and prod both run. It is the single documented
+    # suppression below; revisit if esaml ships a patched release.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -133,4 +138,9 @@ jobs:
         run: mix deps.get
 
       - name: mix deps.audit (scans mix.lock against the advisory DB)
-        run: mix deps.audit
+        # esaml GHSA-4g2h-vm7x-747c is the ONE suppressed advisory: no patched
+        # release exists (all ≤ 4.6.0 affected) and the XXE is neutralised by
+        # OTP 27+'s xmerl entity-disabling default (this runner + prod). Every
+        # other CVE must be fixed by a bump, never ignored — drop the esaml id
+        # the moment upstream ships a fix.
+        run: mix deps.audit --ignore-advisory-ids GHSA-4g2h-vm7x-747c
