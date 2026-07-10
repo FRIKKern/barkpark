@@ -56,6 +56,53 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     end
   end
 
+  # era-w8-org-session-policy: set the org-wide idle timeout + absolute lifetime
+  # (seconds). Blank clears an axis (no limit → zero-tax). A non-positive /
+  # non-numeric entry is rejected with a flash, not persisted.
+  @impl true
+  def handle_event("set_session_policy", %{"org" => org_id} = params, socket) do
+    with {:ok, idle} <- parse_policy_seconds(params["idle"]),
+         {:ok, absolute} <- parse_policy_seconds(params["absolute"]) do
+      policy = %{idle_timeout_seconds: idle, absolute_lifetime_seconds: absolute}
+
+      case Tenancy.set_organization_session_policy(org_id, policy) do
+        {:ok, _org} ->
+          {:noreply, socket |> put_flash(:info, "Session policy updated.") |> load()}
+
+        {:error, _} ->
+          {:noreply, put_flash(socket, :error, "could not update the session policy")}
+      end
+    else
+      :error ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Enter a positive whole number of seconds, or leave blank for no limit."
+         )}
+    end
+  end
+
+  # "" / nil → nil (clear the bound). A positive integer string → {:ok, n}.
+  # Anything else (0, negative, non-numeric) → :error, surfaced as a flash.
+  defp parse_policy_seconds(nil), do: {:ok, nil}
+
+  defp parse_policy_seconds(value) when is_binary(value) do
+    case String.trim(value) do
+      "" ->
+        {:ok, nil}
+
+      trimmed ->
+        case Integer.parse(trimmed) do
+          {n, ""} when n > 0 -> {:ok, n}
+          _ -> :error
+        end
+    end
+  end
+
+  defp policy_label(nil), do: "no limit"
+  defp policy_label(seconds) when is_integer(seconds), do: "#{seconds}s"
+
   defp load(socket) do
     orgs = Enum.map(Tenancy.list_organizations(), &org_status/1)
 
@@ -140,6 +187,22 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
               {if o.org.require_mfa, do: "on", else: "off"}
             </span>
           </div>
+
+          <div class="org-admin-status-group" data-panel="session-policy">
+            <span class="org-admin-status-label">Session policy</span>
+            <span
+              class={"badge #{if o.org.session_idle_timeout_seconds, do: "badge-active", else: "badge-muted"}"}
+              data-idle-timeout={to_string(o.org.session_idle_timeout_seconds)}
+            >
+              idle {policy_label(o.org.session_idle_timeout_seconds)}
+            </span>
+            <span
+              class={"badge #{if o.org.session_absolute_lifetime_seconds, do: "badge-active", else: "badge-muted"}"}
+              data-absolute-lifetime={to_string(o.org.session_absolute_lifetime_seconds)}
+            >
+              max {policy_label(o.org.session_absolute_lifetime_seconds)}
+            </span>
+          </div>
         </div>
 
         <div class="org-admin-actions">
@@ -163,6 +226,48 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             {if o.org.require_mfa, do: "Stop requiring MFA", else: "Require MFA org-wide"}
           </button>
         </div>
+
+        <form
+          phx-submit="set_session_policy"
+          data-session-policy-form={o.org.slug}
+          class="org-admin-policy-form"
+          style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-top: 12px;"
+        >
+          <input type="hidden" name="org" value={o.org.id} />
+          <label class="text-sm" style="display: flex; flex-direction: column; gap: 4px;">
+            Idle timeout (seconds)
+            <input
+              type="number"
+              name="idle"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              placeholder="no limit"
+              value={o.org.session_idle_timeout_seconds}
+              data-idle-input
+            />
+          </label>
+          <label class="text-sm" style="display: flex; flex-direction: column; gap: 4px;">
+            Absolute lifetime (seconds)
+            <input
+              type="number"
+              name="absolute"
+              min="1"
+              step="1"
+              inputmode="numeric"
+              placeholder="no limit"
+              value={o.org.session_absolute_lifetime_seconds}
+              data-absolute-input
+            />
+          </label>
+          <button type="submit" class="btn btn-sm" data-save-session-policy={o.org.slug}>
+            Save session policy
+          </button>
+          <p class="text-sm" style="width: 100%; margin: 0; color: var(--fg-muted);">
+            Blank = no limit. Governed users are logged out once a session sits idle past the
+            idle timeout, or reaches the absolute lifetime — strictest across a user's orgs wins.
+          </p>
+        </form>
 
         <p :if={@minted[o.org.id]} data-minted-token class="org-admin-token">
           Copy this token now — it won't be shown again:<br />{@minted[o.org.id]}
