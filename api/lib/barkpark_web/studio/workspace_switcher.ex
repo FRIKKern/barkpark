@@ -58,10 +58,12 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
         aria-expanded={if @menu, do: "true", else: "false"}
         title={scope_hint(@current_workspace, @current_project, @current_dataset)}
       >
-        <span class="scope-title-ws"><%= name_of(@current_workspace) %></span>
-        <span class="scope-title-trail">
-          <%= name_of(@current_project) %> · <%= @current_dataset || "—" %>
-        </span>
+        <%!-- The avatar IS the workspace: its initial in the brand square, the
+              full name riding the button tooltip + aria (scope_hint) — so the
+              visible text shrinks to project + dataset-badge. --%>
+        <span class="scope-avatar" aria-hidden="true"><%= initial_of(@current_workspace) %></span>
+        <span class="scope-title-trail"><%= name_of(@current_project) %></span>
+        <span class="scope-dataset-badge"><%= @current_dataset || "—" %></span>
         <span class="scope-title-caret" aria-hidden="true"><.icon name="chevron-down" size={13} /></span>
       </button>
 
@@ -181,6 +183,14 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
 
   defp name_of(%{name: name}) when is_binary(name), do: name
   defp name_of(_), do: "—"
+
+  # The workspace avatar letter: first grapheme of the workspace name,
+  # upcased — "B" when no workspace resolves (the brand fallback).
+  defp initial_of(%{name: name}) when is_binary(name) and name != "" do
+    name |> String.graphemes() |> hd() |> String.upcase()
+  end
+
+  defp initial_of(_), do: "B"
 
   # The chip's native tooltip spells out the full scope in words — so the
   # visible trail can stay compact (workspace prominent, project · dataset

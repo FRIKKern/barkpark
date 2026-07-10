@@ -30,20 +30,20 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       assert html =~ ~s|<div class="studio-shell">|
       assert html =~ ~s|<div class="studio-bar">|
 
-      # Brand
-      assert html =~ ~s|<div class="sidebar-brand-icon">B</div>|
-      # Sanity-style brand: the logo mark + the workspace title (scope
-      # switcher) ARE the identity; the "Barkpark" wordmark renders only
-      # when no workspace resolves (StudioChrome gives every studio-layout
-      # surface one, so effectively never).
-      assert html =~ ~s|class="sidebar-brand-icon"|
+      # Brand (Sanity-style): the WORKSPACE is the identity — its avatar
+      # (initial) lives in the scope chip; the standalone "B" square +
+      # "Barkpark" wordmark render only when no workspace resolves
+      # (StudioChrome gives every studio-layout surface one, so never here).
+      assert html =~ ~s|class="scope-avatar"|
+      refute html =~ ~s|<div class="sidebar-brand-icon">B</div>|
       assert html =~ ~s|class="scope-switcher"|
 
       # Scope title (Sanity-style): ONE bar button opens the scope menu; the
       # active dataset rides the title trail as its slug. Markup-only
       # anchors — the page <style> block also mentions .scope-title*.
       assert html =~ ~s|phx-click="scope-menu-toggle"|
-      assert html =~ ~r|scope-title-trail">\s*[^<]+ · production\s*<|
+      assert html =~ ~r|scope-title-trail">[^<]+<|
+      assert html =~ ~r|scope-dataset-badge">production<|
 
       # Nav tabs (Structure active for StudioLive) — hrefs are scoped (P3)
       assert html =~ ~s|<a href="#{scoped_studio("/d/production/studio")}"| and
@@ -73,12 +73,8 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       # so the Task #9 nav-disappears fix does not regress).
       assert html =~ ~s|<div class="studio-shell">|
       assert html =~ ~s|<div class="studio-bar">|
-      assert html =~ ~s|<div class="sidebar-brand-icon">B</div>|
-      # Sanity-style brand: the logo mark + the workspace title (scope
-      # switcher) ARE the identity; the "Barkpark" wordmark renders only
-      # when no workspace resolves (StudioChrome gives every studio-layout
-      # surface one, so effectively never).
-      assert html =~ ~s|class="sidebar-brand-icon"|
+      # Workspace avatar carries the brand on admin too (same chrome).
+      assert html =~ ~s|class="scope-avatar"|
       assert html =~ ~s|class="scope-switcher"|
 
       # Sign-out form is conditional on @api_token, which the :ops

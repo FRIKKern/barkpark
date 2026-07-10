@@ -2060,8 +2060,22 @@
       transition: border-color 0.12s, background 0.12s;
     }
     .scope-title:hover { background: var(--bg-muted); border-color: var(--fg-dim); }
-    .scope-title-ws { font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
-    .scope-title-trail { font-size: 12px; color: var(--fg-muted); white-space: nowrap; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+    /* The avatar IS the workspace (its initial; the full name rides the chip
+       tooltip/aria) — same square as .sidebar-brand-icon, chip-sized. */
+    .scope-avatar {
+      width: 22px; height: 22px; border-radius: var(--radius-sm); flex-shrink: 0;
+      background: var(--primary); color: var(--primary-fg);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+    }
+    .scope-title-trail { font-size: 13px; font-weight: 600; color: var(--fg); white-space: nowrap; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+    /* Dataset badge: same tokens as .pane-doc-badge (Part-H covered pairing). */
+    .scope-dataset-badge {
+      flex-shrink: 0; padding: 1px 7px; border-radius: 999px;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+      background: var(--bg-muted); color: var(--muted-text);
+      border: 1px solid var(--border-muted);
+    }
     .scope-title-caret { color: var(--fg-dim); display: inline-flex; flex-shrink: 0; }
     .sr-only {
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
