@@ -4586,6 +4586,17 @@
       display: flex; align-items: center; gap: 2px;
       padding: 0 4px; border-left: 1px solid var(--border);
     }
+    /* The fmt + text-to-columns toolbar selects ride the kit (.form-input via
+       bp_select, sup-w2 sheet-grid sweep). The themed chrome — token border/bg,
+       custom caret, focus ring — comes from select.form-input; these overrides
+       (specificity 0,2,1 → beat select.form-input) only shrink the control so it
+       sits inline with the btn-sm toolbar buttons. Mirrors the dataset-switcher
+       compact pattern. */
+    .sheet-fmt-group select.form-input,
+    .sheet-split-group select.form-input {
+      width: auto; height: 30px; font-size: 12px;
+      padding: 4px 26px 4px 10px; font-family: inherit;
+    }
 
     /* ── Conditional-formatting panel (CF-C, Studio-only per arc-1 Decision
        13 — NOT mirrored to layouts/sheets.html.heex; readers never author
@@ -4622,13 +4633,13 @@
       border-top: 1px solid var(--border); padding-top: 8px;
     }
     .sheet-cf-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
-    .sheet-cf-field > input[type="text"], .sheet-cf-field > select {
-      padding: 4px 6px; font-size: 12px; color: var(--fg);
-      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-    }
-    .sheet-cf-field > input:focus-visible, .sheet-cf-field > select:focus-visible {
-      outline: 2px solid var(--ring); outline-offset: -1px;
-    }
+    /* CF controls ride the kit (.form-input via bp_input/bp_select, sup-w2
+       sheet-grid sweep): base chrome — token border/bg/text, custom caret and
+       the focus ring — comes from .form-input / select.form-input; these
+       overrides (specificity 0,2,0 / 0,2,1) only compact the control to the
+       dense popover. */
+    .sheet-cf-field > .form-input { height: 30px; padding: 4px 8px; font-size: 12px; }
+    .sheet-cf-field > select.form-input { padding-right: 26px; }
     .sheet-cf-flags { flex-direction: row; gap: 12px; }
     .sheet-cf-flags label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
     /* The bg radios are visually the swatch squares; the selected one gets a
@@ -4665,13 +4676,9 @@
     .sheet-filter-title { font-weight: 600; font-size: 12px; color: var(--fg); }
     .sheet-filter-form { display: flex; flex-direction: column; gap: 7px; }
     .sheet-filter-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
-    .sheet-filter-field > input[type="text"], .sheet-filter-field > select {
-      padding: 4px 6px; font-size: 12px; color: var(--fg);
-      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
-    }
-    .sheet-filter-field > input:focus-visible, .sheet-filter-field > select:focus-visible {
-      outline: 2px solid var(--ring); outline-offset: -1px;
-    }
+    /* Filter controls ride the kit (.form-input), same compact treatment as CF. */
+    .sheet-filter-field > .form-input { height: 30px; padding: 4px 8px; font-size: 12px; }
+    .sheet-filter-field > select.form-input { padding-right: 26px; }
     .sheet-filter-error { margin: 0; font-size: 11px; color: #f87171; }
     html[data-theme="light"] .sheet-filter-error { color: #dc2626; }
     .sheet-filter-actions { display: flex; justify-content: space-between; gap: 6px; }
