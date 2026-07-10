@@ -266,13 +266,16 @@ func heatUseTrueColor(ramp string, ctx RenderCtx) bool {
 	return ramp == "truecolor" && ctx.Profile == TrueColor
 }
 
-// heatCell renders one intensity cell. The truecolor path emits a lipgloss-styled
-// full block in the interpolated ramp colour; the shade path (also the auto-degrade
-// fallback) emits a ladder glyph in the body tone. This is the single primitive the
-// grid, the legend, and the later slate blocks all draw through.
+// heatCell renders one intensity cell. Both paths paint the SAME shade-ladder glyph
+// (heatShadeGlyph) so the datum lives in geometry, not colour — the truecolor path
+// just layers the interpolated ramp colour on top of that glyph as REINFORCEMENT
+// (dual-encode), while the shade path (also the auto-degrade fallback) tones it with
+// the body colour. Because the glyph is identical, ansi.Strip(truecolor) equals the
+// NoColor render, so the truecolor grid satisfies the detail-ceiling strip law. This
+// is the single primitive the grid, the legend, and the later slate blocks draw through.
 func heatCell(intensity float64, trueColor bool, ctx RenderCtx) string {
 	if trueColor {
-		return lipgloss.NewStyle().Foreground(heatTrueColor(intensity)).Render("█")
+		return lipgloss.NewStyle().Foreground(heatTrueColor(intensity)).Render(heatShadeGlyph(intensity))
 	}
 	return ctx.Theme.Body.Render(heatShadeGlyph(intensity))
 }
@@ -284,7 +287,7 @@ func heatCellN(intensity float64, w int, trueColor bool, ctx RenderCtx) string {
 		return heatCell(intensity, trueColor, ctx)
 	}
 	if trueColor {
-		return lipgloss.NewStyle().Foreground(heatTrueColor(intensity)).Render(strings.Repeat("█", w))
+		return lipgloss.NewStyle().Foreground(heatTrueColor(intensity)).Render(strings.Repeat(heatShadeGlyph(intensity), w))
 	}
 	return ctx.Theme.Body.Render(strings.Repeat(heatShadeGlyph(intensity), w))
 }

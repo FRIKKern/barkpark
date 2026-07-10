@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "rm22",
+      "type": "roadmap",
+      "start": "2026-01-01",
+      "end": "2026-06-30",
+      "today": "2026-03-20",
+      "scale": ["Jan", "Feb", "Mar", "Apr", "May", "Jun"],
+      "snapshot": [
+        { "title": "Discovery", "phase_row": true, "status": "done", "start": "2026-01-01", "end": "2026-02-15" },
+        { "title": "Kickoff", "milestone": true, "status": "done", "start": "2026-01-08", "end": "2026-01-08" },
+        { "title": "Build", "status": "in_progress", "start": "2026-02-01", "end": "2026-04-30", "note": true },
+        { "title": "Beta", "milestone": true, "status": "ready", "start": "2026-04-15", "end": "2026-04-15" },
+        { "title": "Launch", "phase_row": true, "status": "blocked", "start": "2026-05-01", "end": "2026-06-30" },
+        { "title": "GA", "milestone": true, "status": "blocked", "start": "2026-06-20", "end": "2026-06-20" },
+        { "title": "Legacy plan", "status": "ready", "left": 5, "width": 30 }
+      ]
+    }
+  ]
+}

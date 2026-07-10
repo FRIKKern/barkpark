@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -23,11 +24,20 @@ import (
 // lose the content-aware wrap, so table stays on its native sizer. (Settled call —
 // left self-documented so a future "why isn't table on the solver?" audit doesn't
 // re-open it, same spirit as the section breakpoints no-mode note.)
+//
+// TYPED COLUMNS (opt-in, CONTENT ONLY): an optional `cols` attr — an
+// index-aligned array of {type} maps — tags each column text | num | delta |
+// spark. It changes only the CELL BODY (and, for num/delta, the per-column
+// alignment via the existing StyleFunc); it never touches width math, so the
+// lipgloss/table auto-sizer stays the sole width authority. `cols` ABSENT ⇒ every
+// column is text ⇒ the render is byte-identical to a table with no spec. The key
+// is `cols`, NOT `columns` (an overloaded layout block name + layout attr).
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	head := attrSlice(b.Attrs, "head")
 	rows := attrSlice(b.Attrs, "rows")
+	colTypes := parseColTypes(attrSlice(b.Attrs, "cols"))
 
 	t := ltable.New().
 		Width(clampWidth(ctx.Width)).
@@ -50,7 +60,7 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	addedRows := 0
 	for _, r := range rows {
-		cells := tr.rowCells(r, ctx)
+		cells := tr.rowCells(r, colTypes, ctx)
 		if len(cells) == 0 {
 			continue // skip empty rows — ltable panics on zero-column rows
 		}
@@ -70,27 +80,134 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	bodyStyle := ctx.Theme.Body
 	t.StyleFunc(func(row, col int) lipgloss.Style {
 		// table.HeaderRow is -1; style the header band muted+bold, body plain.
+		// num/delta columns right-align so digits/deltas line up on their ones
+		// place — the header rides right too so the label sits over its column.
+		// colRightAlign is false for every column when `cols` is absent, so this
+		// path stays byte-identical to the legacy render.
 		if row == ltable.HeaderRow {
-			return headerStyle.Padding(0, 1)
+			hs := headerStyle.Padding(0, 1)
+			if colRightAlign(colTypes, col) {
+				hs = hs.Align(lipgloss.Right)
+			}
+			return hs
 		}
-		return bodyStyle.Padding(0, 1)
+		bs := bodyStyle.Padding(0, 1)
+		if colRightAlign(colTypes, col) {
+			bs = bs.Align(lipgloss.Right)
+		}
+		return bs
 	})
 
 	return strings.Split(t.Render(), "\n")
 }
 
-// rowCells renders a row (an array of cells) to a []string of styled cells.
-func (tr tableRenderer) rowCells(row any, ctx RenderCtx) []string {
+// rowCells renders a row (an array of cells) to a []string of styled cells,
+// each cell rendered per its column type (index-aligned to colTypes; text/legacy
+// when colTypes is nil or the index is out of range).
+func (tr tableRenderer) rowCells(row any, colTypes []string, ctx RenderCtx) []string {
 	cells, ok := row.([]any)
 	if !ok {
-		// A bare scalar row coerces to a single cell.
-		return []string{tr.cellString(row, ctx)}
+		// A bare scalar row coerces to a single cell (column 0).
+		return []string{tr.typedCell(row, colType(colTypes, 0), ctx)}
 	}
 	out := make([]string, 0, len(cells))
-	for _, c := range cells {
-		out = append(out, tr.cellString(c, ctx))
+	for i, c := range cells {
+		out = append(out, tr.typedCell(c, colType(colTypes, i), ctx))
 	}
 	return out
+}
+
+// typedCell renders one cell according to its column type. num shares the text
+// BODY (only its alignment differs, in the StyleFunc), so a num column stays
+// content-identical to legacy text; delta and spark transform the body.
+func (tr tableRenderer) typedCell(cell any, typ string, ctx RenderCtx) string {
+	switch typ {
+	case "delta":
+		return tr.deltaCell(cell, ctx)
+	case "spark":
+		return tr.sparkCell(cell, ctx)
+	default: // text, num, "" — legacy inline body
+		return tr.cellString(cell, ctx)
+	}
+}
+
+// deltaCell prefixes a numeric cell with a leading direction glyph derived from
+// its SIGN (▲ up / ▼ down / - flat), then the magnitude — glyph-first, so the
+// direction survives with zero color (color would be reinforcement only). A cell
+// that does not coerce to a number falls back to the legacy text body (no glyph).
+func (tr tableRenderer) deltaCell(cell any, ctx RenderCtx) string {
+	f, ok := toFloat(cell)
+	if !ok {
+		return tr.cellString(cell, ctx)
+	}
+	glyph := "-"
+	switch {
+	case f > 0:
+		glyph = "▲"
+	case f < 0:
+		glyph = "▼"
+	}
+	return glyph + " " + toStr(math.Abs(f))
+}
+
+// sparkCell renders a numeric series cell as the canonical stat.go sparkline
+// capped to 14 cells (the ONE sparkline primitive — no new ladder, no braille
+// canvas). A non-series / empty cell falls back to the legacy text body.
+func (tr tableRenderer) sparkCell(cell any, ctx RenderCtx) string {
+	series, ok := cell.([]any)
+	if !ok {
+		return tr.cellString(cell, ctx)
+	}
+	vals := make([]float64, 0, len(series))
+	for _, v := range series {
+		if f, ok := toFloat(v); ok {
+			vals = append(vals, f)
+		}
+	}
+	if len(vals) == 0 {
+		return tr.cellString(cell, ctx)
+	}
+	return sparkline(vals, 14)
+}
+
+// parseColTypes reads the optional `cols` spec into an index-aligned slice of
+// column type names. Each entry is a {type} map; a missing or unknown type falls
+// back to "text" (the legacy path). An ABSENT `cols` yields nil — and nil means
+// every column is text, i.e. byte-identical to a table carrying no spec.
+func parseColTypes(cols []any) []string {
+	if len(cols) == 0 {
+		return nil
+	}
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		typ := "text"
+		if m, ok := c.(map[string]any); ok {
+			switch t := attrStr(m, "type"); t {
+			case "num", "delta", "spark", "text":
+				typ = t
+			}
+		}
+		out[i] = typ
+	}
+	return out
+}
+
+// colType returns the type of column i (text when out of range or unspecified).
+func colType(types []string, i int) string {
+	if i >= 0 && i < len(types) {
+		return types[i]
+	}
+	return "text"
+}
+
+// colRightAlign reports whether column col right-aligns (num + delta). Always
+// false when `cols` is absent, which is what keeps the legacy render byte-stable.
+func colRightAlign(types []string, col int) bool {
+	switch colType(types, col) {
+	case "num", "delta":
+		return true
+	}
+	return false
 }
 
 // cellString renders one cell. A cell is an array of inline nodes; a bare

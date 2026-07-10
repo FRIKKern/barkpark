@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -59,6 +60,13 @@ func (taskListRenderer) Render(b Block, ctx RenderCtx) []string {
 	rows := itemMaps(b.Attrs, "snapshot")
 	if len(rows) == 0 {
 		return []string{ctx.Theme.Dim.Render("No tasks yet.")}
+	}
+
+	// layout:{mode:"tree"} switches to the dependency-tree axis (├─ └─ │ rails +
+	// a right-aligned worker/priority meta grid). Any other/absent layout falls
+	// through to the byte-identical legacy phase-grouped rendering below.
+	if layout, ok := b.Attrs["layout"].(map[string]any); ok && attrStr(layout, "mode") == "tree" {
+		return taskTreeLines(b, rows, ctx)
 	}
 
 	w := clampWidth(ctx.Width)
@@ -188,6 +196,193 @@ func rowMeta(r map[string]any) []string {
 		meta = append(meta, wk)
 	}
 	return meta
+}
+
+// ── task-list layout:{mode:"tree"} ───────────────────────────────────────────
+//
+// The dependency-tree axis: the SAME bold-title + momentum header as the flat
+// list, then one row per snapshot entry drawn as a ├─ └─ │ tree whose rails are
+// derived PURELY from the consecutive `depth` sequence of the author-literal
+// rows. parent_id is a QUERY filter, never on the row wire (row_from_task emits
+// only title/status/priority/worker/criteria/phase/depth — the D6 precedent), so
+// this renderer NEVER reads or invents it: a row at depth d is the child of the
+// nearest preceding depth d-1 row, and the rails fall straight out of that
+// sequence. A right-aligned worker/priority meta grid trails every row with its
+// two columns padded to a shared width so they line up down the surface.
+
+// clampDepth clamps an author-literal `depth` into the supported 0..5 band (the
+// same band taskRowLines uses for its indent).
+func clampDepth(d int) int {
+	if d < 0 {
+		return 0
+	}
+	if d > 5 {
+		return 5
+	}
+	return d
+}
+
+func taskTreeLines(b Block, rows []map[string]any, ctx RenderCtx) []string {
+	w := clampWidth(ctx.Width)
+	var out []string
+
+	if title := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "title"))); title != "" {
+		out = append(out, wrapLines(ctx.Theme.Body.Bold(true).Render(title), w)...)
+	}
+	out = append(out, momentumLine(rows, ctx, w))
+	out = append(out, momentumBar(rows, ctx, w))
+
+	// Snapshot the depth sequence once (rails are a pure function of it), and
+	// measure the meta grid's two columns across every row so they align.
+	depths := make([]int, len(rows))
+	workers := make([]string, len(rows))
+	pris := make([]string, len(rows))
+	workerW, priW := 0, 0
+	for i, r := range rows {
+		depths[i] = clampDepth(attrInt(r, "depth", 0))
+		workers[i] = sanitizeText(strings.TrimSpace(attrStr(r, "worker")))
+		pris[i] = priorityLabel(attrStr(r, "priority"))
+		if n := runeWidth(workers[i]); n > workerW {
+			workerW = n
+		}
+		if n := runeWidth(pris[i]); n > priW {
+			priW = n
+		}
+	}
+	metaW := 0
+	if workerW > 0 {
+		metaW += workerW
+	}
+	if priW > 0 {
+		if metaW > 0 {
+			metaW++ // the single space joining the two meta columns
+		}
+		metaW += priW
+	}
+
+	for i, r := range rows {
+		out = append(out, treeRow(r, ctx, w, depths, i, workers[i], pris[i], workerW, priW, metaW))
+	}
+	return out
+}
+
+// treeRow renders one tree row: `<dim rails><glyph> <title>   <worker> <pri>`.
+// The label is house-ellipsis truncated to whatever the rails and the meta grid
+// leave (so a deep row — depth≥3 — clamps its label instead of shoving the meta
+// grid off the right edge), then the meta grid is padded flush-right.
+func treeRow(r map[string]any, ctx RenderCtx, w int, depths []int, i int, worker, pri string, workerW, priW, metaW int) string {
+	prefix := treeRailPrefix(depths, i)
+	prefixW := runeWidth(prefix)
+	glyph := glyphForStatus(ctx.Theme, attrStr(r, "status"))
+	title := sanitizeText(strings.TrimSpace(attrStr(r, "title")))
+
+	// Title budget = surface − rails − (glyph+space) − meta grid − a 2-col gutter.
+	const gutter = 2
+	budget := w - prefixW - 2 - metaW
+	if metaW > 0 {
+		budget -= gutter
+	}
+	if budget < 1 {
+		budget = 1
+	}
+	if runeWidth(title) > budget {
+		title = padOrTruncate(title, budget) // house-ellipsis, exactly `budget` wide
+	}
+
+	left := ctx.Theme.Dim.Render(prefix) + glyph + " " + ctx.Theme.Body.Render(title)
+	leftW := prefixW + 2 + runeWidth(title)
+	if metaW == 0 {
+		return left
+	}
+	pad := w - metaW - leftW
+	if pad < 1 {
+		pad = 1
+	}
+	return left + strings.Repeat(" ", pad) + treeMetaCell(ctx, worker, pri, workerW, priW)
+}
+
+// treeMetaCell builds the dim two-column meta grid: worker LEFT-aligned in its
+// column, priority RIGHT-aligned in its own, joined by one space. An empty cell
+// pads to spaces so the columns stay aligned down the tree.
+func treeMetaCell(ctx RenderCtx, worker, pri string, workerW, priW int) string {
+	var parts []string
+	if workerW > 0 {
+		parts = append(parts, padOrTruncate(worker, workerW))
+	}
+	if priW > 0 {
+		parts = append(parts, leftPad(pri, priW))
+	}
+	return ctx.Theme.Dim.Render(strings.Join(parts, " "))
+}
+
+// treeRailPrefix builds the (plain — the caller renders it dim) ├─ └─ │ rail
+// prefix for row i from the depth sequence. Depth-0 rows are forest roots and
+// carry no prefix. A row at depth d≥1 gets (d-1) ancestor-continuation cells
+// (│ where that ancestor still has a later sibling, blank where it was the last
+// child) then its own connector (└─ when it is the last child at its depth, ├─
+// otherwise). Every cell is exactly 3 display columns so labels align by depth.
+func treeRailPrefix(depths []int, i int) string {
+	d := depths[i]
+	if d <= 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for l := 1; l < d; l++ {
+		if ancestorHasLaterSibling(depths, i, l) {
+			sb.WriteString("│  ")
+		} else {
+			sb.WriteString("   ")
+		}
+	}
+	if isLastSibling(depths, i) {
+		sb.WriteString("└─ ")
+	} else {
+		sb.WriteString("├─ ")
+	}
+	return sb.String()
+}
+
+// isLastSibling reports whether row i is the last row at its depth within its
+// parent group: scanning forward, the first row at depth ≤ d(i) is SHALLOWER (we
+// left the subtree) or the list ends — no later sibling at the same depth.
+func isLastSibling(depths []int, i int) bool {
+	d := depths[i]
+	for j := i + 1; j < len(depths); j++ {
+		if depths[j] < d {
+			return true
+		}
+		if depths[j] == d {
+			return false
+		}
+	}
+	return true
+}
+
+// ancestorHasLaterSibling reports whether row i's ancestor at level l still has a
+// sibling coming after i — i.e. whether the │ continuation must be drawn at
+// column l. The ancestor at level l is the nearest preceding row at depth l; it
+// has a later sibling exactly when it is NOT itself a last sibling.
+func ancestorHasLaterSibling(depths []int, i, l int) bool {
+	a := ancestorAt(depths, i, l)
+	if a < 0 {
+		return false
+	}
+	return !isLastSibling(depths, a)
+}
+
+// ancestorAt returns the index of row i's ancestor at depth level l — the nearest
+// preceding row at depth exactly l — or -1 when the sequence has no proper
+// ancestor there (a malformed depth jump degrades to a blank rail column).
+func ancestorAt(depths []int, i, l int) int {
+	for j := i - 1; j >= 0; j-- {
+		if depths[j] == l {
+			return j
+		}
+		if depths[j] < l {
+			return -1
+		}
+	}
+	return -1
 }
 
 // ── task-detail ──────────────────────────────────────────────────────────────
@@ -576,14 +771,30 @@ func boardCardLines(r map[string]any, role string, ctx RenderCtx, w int) []strin
 	return wrapLines(line, w)
 }
 
-// ── roadmap ──────────────────────────────────────────────────────────────────
-// {snapshot: [row], today?: 0-100, scale?: [str]}. row: {status, title,
-// phase_row, left: 0-100, width: 0-100}. Author-positioned bars: each row is
-// `label │····▓▓▓▓····│` — a fixed-width ASCII track, ▓ filled for the row's
-// [left, left+width) run (colored by role via statusGlyphStyle), · elsewhere.
-// Phase rows carry a bold label; an optional `scale` axis prints above; an
-// optional `today` marker (┃) is overlaid in the track. This is the one bespoke
-// renderer — bar math is simple and every index is clamped, so it never panics.
+// ── roadmap (v2 — date rails, month scale, milestone glyph layer) ─────────────
+// {snapshot: [row], today?: 0-100|ISO, scale?: [str], start?: ISO, end?: ISO,
+// months?: int}. row: {status, title, phase_row, left: 0-100, width: 0-100,
+// start?: ISO, end?: ISO, milestone?: bool, note?: bool}. Author-positioned
+// bars: each row is `label │····▓▓▓▓····│` — a fixed-width track, filled for the
+// row's [left, left+width) run, · elsewhere.
+//
+// GLYPH LAYER (v2). Each track cell resolves to exactly one glyph by precedence
+// ┃ > ◆ > ◇ > ▓/░ > ┊ > · (highest wins where markers coincide):
+//
+//	┃ today   — block `today` (numeric pct OR an ISO date within [start,end]).
+//	◆ milestone — a row with `milestone:true`, at the bar's end cell.
+//	◇ note      — a row with `note:true`, at the bar's start cell.
+//	▓ / ░ fill  — ▓ for a done-role row, ░ (planned) otherwise; colored by role.
+//	┊ month tick — interior month boundaries, placed by distributeSegments so
+//	               the ticks never drift (they sum to EXACTLY the track).
+//	· empty.
+//
+// DATE RAILS: when the block carries `start`+`end` ISO dates, a row's own
+// `start`/`end` derive its left/width off that span; a row WITHOUT dates falls
+// back to its literal pct left/width — byte-identical to the pre-v2 path (the
+// pct math is untouched). Month ticks derive from `months` (explicit) else the
+// month count of the span. This is the one bespoke renderer — every index is
+// clamped, so it never panics.
 type roadmapRenderer struct{}
 
 func (roadmapRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -634,26 +845,37 @@ func (roadmapRenderer) Render(b Block, ctx RenderCtx) []string {
 	// Track = surface − label − " " − the two │ rails.
 	track := clampWidth(w - labelW - 3)
 
-	// Optional today now-marker cell.
-	todayCell := -1
-	if v, ok := b.Attrs["today"]; ok {
-		if f, ok := toFloat(v); ok {
-			todayCell = pctToCell(clampPct(f), track)
-			if todayCell >= track {
-				todayCell = track - 1
-			}
-		}
+	// Optional block-level ISO date span → date-derived lanes + month ticks.
+	blockStart, blockEnd, haveSpan := roadmapSpan(b.Attrs)
+
+	// Month ┊ ticks: explicit `months` wins, else derive from the span.
+	months := attrInt(b.Attrs, "months", 0)
+	if months <= 0 && haveSpan {
+		months = monthsBetween(blockStart, blockEnd)
 	}
+	ticks := monthTickCells(track, months)
+
+	// Optional today now-marker cell (numeric pct OR an ISO date in the span).
+	todayCell := roadmapTodayCell(b.Attrs, blockStart, blockEnd, haveSpan, track)
 
 	for _, r := range rows {
-		out = append(out, roadmapLane(r, ctx, labelW, track, todayCell))
+		out = append(out, roadmapLane(r, ctx, labelW, track, todayCell, ticks, blockStart, blockEnd, haveSpan))
 	}
 	return out
 }
 
+// laneMarks carries the per-row glyph-layer inputs renderTrack resolves by
+// precedence. milestone/note are cell indices, or -1 when absent.
+type laneMarks struct {
+	fillGlyph       string
+	fillStyle       lipgloss.Style
+	start, fill     int
+	milestone, note int
+}
+
 // roadmapLane draws one row: a padded (phase→bold) label, then the bordered
-// track holding the author-positioned fill run and an optional today marker.
-func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int) string {
+// track holding the fill run and the optional milestone/note/today markers.
+func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int, ticks map[int]bool, blockStart, blockEnd time.Time, haveSpan bool) string {
 	role := roleForStatus(attrStr(r, "status"))
 	title := sanitizeText(strings.TrimSpace(attrStr(r, "title")))
 	label := padOrTruncate(title, labelW)
@@ -662,8 +884,7 @@ func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int) 
 		labelStyle = ctx.Theme.Body.Bold(true)
 	}
 
-	left := clampPct(attrFloat(r, "left"))
-	width := clampBarWidth(attrFloat(r, "width"), left)
+	left, width := roadmapLeftWidth(r, blockStart, blockEnd, haveSpan)
 	start := pctToCell(left, track)
 	fill := pctToCell(width, track)
 	if start > track {
@@ -676,7 +897,36 @@ func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int) 
 		fill = 0
 	}
 
-	bar := renderTrack(ctx, role, track, start, fill, todayCell)
+	// Fill glyph: ▓ for a done row, ░ (planned) otherwise — dual-encoded so the
+	// done/planned distinction survives an ANSI strip (color is reinforcement).
+	fillGlyph := "░"
+	if role == "done" {
+		fillGlyph = "▓"
+	}
+
+	// Optional per-row point markers, resolved by precedence inside renderTrack.
+	milestone := -1
+	if attrBool(r, "milestone") {
+		milestone = start
+		if fill > 0 {
+			milestone = start + fill - 1 // the bar's end cell
+		}
+		milestone = clampCell(milestone, track)
+	}
+	note := -1
+	if attrBool(r, "note") {
+		note = clampCell(start, track)
+	}
+
+	marks := laneMarks{
+		fillGlyph: fillGlyph,
+		fillStyle: statusGlyphStyle(ctx.Theme, role),
+		start:     start,
+		fill:      fill,
+		milestone: milestone,
+		note:      note,
+	}
+	bar := renderTrack(ctx, marks, track, todayCell, ticks)
 	rail := ctx.Theme.Dim.Render("│")
 	// Two UNEQUAL-width cells joined by joinColumns (the shared side-by-side body):
 	// the label cell (labelW) and the bordered track cell (│bar│, track+2 rails), the
@@ -688,40 +938,64 @@ func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int) 
 	return firstLine(joined)
 }
 
-// renderTrack composes the track cells, run-grouping consecutive same-class
-// cells so the styled string stays compact. class: fill (role color), today
-// (accent ┃), or empty (dim ·).
-func renderTrack(ctx RenderCtx, role string, track, start, fill, todayCell int) string {
-	roleStyle := statusGlyphStyle(ctx.Theme, role)
-	todayStyle := lipgloss.NewStyle().Foreground(ctx.Theme.Accent).Bold(true)
+// track-cell glyph classes, ordered LOW→HIGH so a numerically greater class wins
+// where markers coincide: · < ┊ < ▓/░ < ◇ < ◆ < ┃ (the v2 precedence chain).
+const (
+	clsEmpty = iota
+	clsTick
+	clsFill
+	clsNote
+	clsMilestone
+	clsToday
+)
 
-	// classify(i): 0 empty, 1 fill, 2 today. today overlays whatever is beneath.
+// renderTrack composes the track cells, run-grouping consecutive same-class
+// cells so the styled string stays compact. Each cell's class is the HIGHEST
+// marker present at that index (the precedence ┃ > ◆ > ◇ > ▓/░ > ┊ > ·).
+func renderTrack(ctx RenderCtx, m laneMarks, track, todayCell int, ticks map[int]bool) string {
+	accent := lipgloss.NewStyle().Foreground(ctx.Theme.Accent).Bold(true)
+
 	classify := func(i int) int {
-		if i == todayCell {
-			return 2
+		switch {
+		case i == todayCell:
+			return clsToday
+		case i == m.milestone:
+			return clsMilestone
+		case i == m.note:
+			return clsNote
+		case i >= m.start && i < m.start+m.fill:
+			return clsFill
+		case ticks[i]:
+			return clsTick
+		default:
+			return clsEmpty
 		}
-		if i >= start && i < start+fill {
-			return 1
-		}
-		return 0
 	}
 	glyphOf := func(class int) string {
 		switch class {
-		case 1:
-			return "▓"
-		case 2:
+		case clsToday:
 			return "┃"
+		case clsMilestone:
+			return "◆"
+		case clsNote:
+			return "◇"
+		case clsFill:
+			return m.fillGlyph
+		case clsTick:
+			return "┊"
 		default:
 			return "·"
 		}
 	}
 	styleOf := func(class int) lipgloss.Style {
 		switch class {
-		case 1:
-			return roleStyle
-		case 2:
-			return todayStyle
-		default:
+		case clsToday:
+			return accent
+		case clsMilestone:
+			return m.fillStyle.Bold(true)
+		case clsFill:
+			return m.fillStyle
+		default: // note, tick, empty all render in Dim
 			return ctx.Theme.Dim
 		}
 	}
@@ -740,6 +1014,158 @@ func renderTrack(ctx RenderCtx, role string, track, start, fill, todayCell int) 
 		i = j
 	}
 	return b.String()
+}
+
+// ── roadmap v2 helpers: date rails + distributed-rounding month ticks ─────────
+
+// roadmapSpan reads the block-level `start`+`end` ISO dates that anchor
+// date-derived lanes. Both must parse and end must be after start; otherwise the
+// block has no span and every lane uses its literal pct left/width.
+func roadmapSpan(attrs map[string]any) (time.Time, time.Time, bool) {
+	s, ok1 := parseISODate(attrStr(attrs, "start"))
+	e, ok2 := parseISODate(attrStr(attrs, "end"))
+	if ok1 && ok2 && e.After(s) {
+		return s, e, true
+	}
+	return time.Time{}, time.Time{}, false
+}
+
+// roadmapLeftWidth resolves a lane's [left, width] percentages. With a block
+// span AND parseable row `start`/`end`, they derive off the span; otherwise the
+// literal `left`/`width` pct path (byte-identical to pre-v2). Both paths funnel
+// through the SAME clampPct/clampBarWidth so date- and pct-positioned lanes land
+// on identical cell math.
+func roadmapLeftWidth(r map[string]any, start, end time.Time, haveSpan bool) (left, width float64) {
+	if haveSpan {
+		rs, ok1 := parseISODate(attrStr(r, "start"))
+		re, ok2 := parseISODate(attrStr(r, "end"))
+		if ok1 && ok2 {
+			// Subtract the CLAMPED left, not the raw pct: a row whose start
+			// predates the block span clamps to the track's left edge, and its
+			// bar must still END at the row-end's true position — subtracting
+			// the raw (negative) left would inflate the width past that end.
+			left = clampPct(dateToPct(rs, start, end))
+			width = clampBarWidth(dateToPct(re, start, end)-left, left)
+			return left, width
+		}
+	}
+	left = clampPct(attrFloat(r, "left"))
+	width = clampBarWidth(attrFloat(r, "width"), left)
+	return left, width
+}
+
+// roadmapTodayCell maps the block `today` marker onto a track cell. A numeric
+// value is a 0-100 pct (the pre-v2 path, kept byte-identical); an ISO date
+// derives its pct off the span. Absent/uncoercible → -1 (no marker).
+func roadmapTodayCell(attrs map[string]any, start, end time.Time, haveSpan bool, track int) int {
+	v, ok := attrs["today"]
+	if !ok {
+		return -1
+	}
+	clampToTrack := func(cell int) int {
+		if cell >= track {
+			return track - 1
+		}
+		return cell
+	}
+	if f, ok := toFloat(v); ok {
+		return clampToTrack(pctToCell(clampPct(f), track))
+	}
+	if haveSpan {
+		if d, ok := parseISODate(toStr(v)); ok {
+			return clampToTrack(pctToCell(clampPct(dateToPct(d, start, end)), track))
+		}
+	}
+	return -1
+}
+
+// parseISODate parses a YYYY-MM-DD author-literal date; blank/malformed → !ok.
+func parseISODate(s string) (time.Time, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// dateToPct maps a date onto a 0-100 position within [start, end]. A degenerate
+// span (end ≤ start) collapses to 0. Uses hours so day fractions never round-trip
+// through an integer day count.
+func dateToPct(d, start, end time.Time) float64 {
+	span := end.Sub(start).Hours()
+	if span <= 0 {
+		return 0
+	}
+	return d.Sub(start).Hours() / span * 100
+}
+
+// monthsBetween counts the calendar months the [a, b] span touches, inclusive
+// (Jan→Mar = 3). Drives the month-tick count when the block gives no explicit
+// `months`.
+func monthsBetween(a, b time.Time) int {
+	m := (b.Year()*12 + int(b.Month())) - (a.Year()*12 + int(a.Month())) + 1
+	if m < 1 {
+		return 1
+	}
+	return m
+}
+
+// clampCell clamps a marker cell index into the drawable track [0, track-1].
+func clampCell(i, track int) int {
+	if track <= 0 {
+		return -1
+	}
+	if i < 0 {
+		return 0
+	}
+	if i >= track {
+		return track - 1
+	}
+	return i
+}
+
+// monthTickCells returns the interior month-boundary cells for `months` months
+// across `track` cells. The boundaries come from distributeSegments so the ticks
+// sum to EXACTLY the track (no independent-rounding drift); the final boundary
+// (== track, the right rail) is not a tick.
+func monthTickCells(track, months int) map[int]bool {
+	ticks := map[int]bool{}
+	if months <= 1 || track <= 0 {
+		return ticks
+	}
+	pos := 0
+	sizes := distributeSegments(track, months)
+	for k := 0; k < len(sizes)-1; k++ {
+		pos += sizes[k]
+		if pos > 0 && pos < track {
+			ticks[pos] = true
+		}
+	}
+	return ticks
+}
+
+// distributeSegments splits `total` cells into `n` contiguous segments whose
+// sizes sum to EXACTLY total and differ by at most one cell. It walks ONE
+// running boundary — boundary k lands at round(k·total/n) — so the k==n boundary
+// IS total by construction and the rounding error can never accumulate. This is
+// the drift-free replacement for calling pctToCell per tick, where each boundary
+// rounds in isolation and the last tick can miss the end or two ticks can collide.
+func distributeSegments(total, n int) []int {
+	if n <= 0 || total <= 0 {
+		return nil
+	}
+	sizes := make([]int, n)
+	prev := 0
+	for k := 1; k <= n; k++ {
+		cur := int(math.Round(float64(k) * float64(total) / float64(n)))
+		sizes[k-1] = cur - prev
+		prev = cur
+	}
+	return sizes
 }
 
 // ── shared small helpers ─────────────────────────────────────────────────────

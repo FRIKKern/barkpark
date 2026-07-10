@@ -30,6 +30,15 @@ import (
 //	stat    → value:n, spark:[n…]
 //
 // so the golden IS the shape/2 → renderer contract, byte-locked at four widths.
+//
+// MAX-2-SERIES CAP (pbp-slate2-chart-units): the fixture's chart still carries the
+// THREE status series shape/2 resolves (open/ready/done) — that is the honest
+// resolver output — but the renderer now caps a chart at the first two series
+// (chart.go maxChartSeries), so the golden shows open+ready only and the "done"
+// curve+swatch are dropped. That makes this fixture double as the live-data proof
+// that the cap holds on real resolved data, not just a synthetic 3-series unit
+// test. The goldens were regenerated once for this cap; nothing else moved (the
+// compact-unit tick change is a no-op below 10000, and every m15 value is small).
 // TestM15ResolvedVsQueryOnly is the non-vacuous companion: a block WITH the
 // resolved shape renders its live content, the SAME block type carrying only a
 // `query` renders the placeholder — the resolve→render transparency and the

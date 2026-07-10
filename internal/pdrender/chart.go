@@ -48,6 +48,10 @@ type chartRenderer struct{}
 // resolution). Four cells give a legible curve and four y-ticks.
 const chartCellHeight = 4
 
+// maxChartSeries is the ratified series ceiling (pbp-slate2-chart-units): a chart
+// plots at most the first two series, legend included. See the cap in Render.
+const maxChartSeries = 2
+
 type chartSeries struct {
 	label  string
 	points []float64
@@ -57,6 +61,15 @@ func (chartRenderer) Render(b Block, ctx RenderCtx) []string {
 	series := parseChartSeries(b.Attrs)
 	if len(series) == 0 {
 		return []string{unresolvedPlaceholder(ctx, "chart")}
+	}
+
+	// Max-2-series law: a chart renders at most the FIRST two series. Braille
+	// step-lines beyond two overlap into an unreadable union (there is no colour
+	// to lean on at the NoColor floor), so the cap is a hard readability contract,
+	// not a style choice. It fences the whole downstream pipeline — scale, plot,
+	// legend all read `series` below — so no surface can leak a third curve.
+	if len(series) > maxChartSeries {
+		series = series[:maxChartSeries]
 	}
 
 	kind := strings.TrimSpace(attrStr(b.Attrs, "kind"))
@@ -79,7 +92,7 @@ func (chartRenderer) Render(b Block, ctx RenderCtx) []string {
 		if H > 1 {
 			frac = float64(row) / float64(H-1)
 		}
-		ticks[row] = formatTick(effMax - frac*(effMax-effMin))
+		ticks[row] = formatTickCompact(effMax - frac*(effMax-effMin))
 		if n := runeWidth(ticks[row]); n > gutterW {
 			gutterW = n
 		}
@@ -417,6 +430,32 @@ func formatTick(v float64) string {
 		return toStr(r)
 	}
 	return strconv.FormatFloat(v, 'f', 1, 64)
+}
+
+// formatTickCompact renders a y-tick with compact SI-style units once the
+// magnitude reaches 10000: 12500→"12.5k", 45500000→"45.5M", 2000000000→"2B" — one
+// decimal place with a trailing ".0" trimmed, so a large-value axis keeps a narrow
+// gutter instead of splaying eight-digit ticks that crowd out the plot. BELOW the
+// 10000 threshold it is byte-identical to formatTick, so every existing
+// small-value chart golden (m13, m15) stays byte-stable. Sign is preserved
+// (-45500000→"-45.5M") because the division carries it through.
+func formatTickCompact(v float64) string {
+	if math.Abs(v) < 10000 {
+		return formatTick(v)
+	}
+	var div float64
+	var suffix string
+	switch abs := math.Abs(v); {
+	case abs >= 1e9:
+		div, suffix = 1e9, "B"
+	case abs >= 1e6:
+		div, suffix = 1e6, "M"
+	default:
+		div, suffix = 1e3, "k"
+	}
+	s := strconv.FormatFloat(v/div, 'f', 1, 64)
+	s = strings.TrimSuffix(s, ".0")
+	return s + suffix
 }
 
 // leftPad right-aligns s within w display columns (spaces on the left). An
