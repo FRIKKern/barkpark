@@ -91,8 +91,9 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
-  # In dev, Studio gets the seeded token automatically so media upload works
-  # without a separate /login step. Production always requires POST /login.
+  # In dev, Studio gets the seeded token automatically — media upload and the
+  # :admin/:ops gates all fall back to it — so the host never needs a separate
+  # /login step. Production always requires POST /login.
   defp dev_browser_token_fallback do
     if Mix.env() == :dev do
       Application.get_env(:barkpark, :dev_browser_token)
@@ -100,7 +101,7 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   defp authorize(socket, session, allowed_perms, denial_flash) do
-    raw = session["api_token"]
+    raw = session["api_token"] || dev_browser_token_fallback()
 
     with token when is_binary(token) <- raw,
          {:ok, api_token} <- Auth.verify_token(token),
