@@ -17,6 +17,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   """
   use BarkparkWeb, :html
 
+  import BarkparkWeb.StudioComponents.Controls, only: [bp_select: 1]
+
   alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -350,45 +352,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       >
         <label>
           + Add block
-          <select name="block-type">
-            <optgroup label="Text">
-              <option value="paragraph">Paragraph</option>
-              <option value="heading">Heading</option>
-              <option value="list">List</option>
-              <option value="callout">Callout</option>
-              <option value="code">Code</option>
-              <option value="divider">Divider</option>
-              <option value="section">Section</option>
-            </optgroup>
-            <optgroup label="Article chrome">
-              <option value="eyebrow">Eyebrow</option>
-              <option value="byline">Byline</option>
-              <option value="ingress">Ingress</option>
-              <option value="pullquote">Pullquote</option>
-            </optgroup>
-            <optgroup label="Visual">
-              <option value="diagram">Diagram</option>
-            </optgroup>
-            <optgroup label="Basic fields">
-              <option value="field-string">String</option>
-              <option value="field-slug">Slug</option>
-              <option value="field-text">Long text</option>
-              <option value="field-boolean">Boolean</option>
-              <option value="field-select">Select</option>
-              <option value="field-datetime">Date &amp; time</option>
-              <option value="field-color">Color</option>
-            </optgroup>
-            <optgroup label="Media &amp; reference">
-              <option value="field-image">Image</option>
-              <option value="field-reference">Reference</option>
-            </optgroup>
-            <optgroup label="Structured">
-              <option value="composite">Composite</option>
-              <option value="arrayOf">Array of</option>
-              <option value="codelist">Code list</option>
-              <option value="localizedText">Localized text</option>
-            </optgroup>
-          </select>
+          <.bp_select name="block-type" options={add_block_options()} />
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Add</button>
       </form>
@@ -405,6 +369,56 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </footer>
     </div>
     """
+  end
+
+  # The `+ Add block` menu, grouped by optgroup so the (long) list of creatable
+  # portable-doc block types stays scannable. Each value resolves to
+  # `default_block/2` and is applied through the paper-add-block → paper_op
+  # pipeline. `{group, [{value, label}, …]}` tuples render as `<optgroup>`s via
+  # `StudioComponents.Controls.bp_select/1`.
+  defp add_block_options do
+    [
+      {"Text",
+       [
+         {"paragraph", "Paragraph"},
+         {"heading", "Heading"},
+         {"list", "List"},
+         {"callout", "Callout"},
+         {"code", "Code"},
+         {"divider", "Divider"},
+         {"section", "Section"}
+       ]},
+      {"Article chrome",
+       [
+         {"eyebrow", "Eyebrow"},
+         {"byline", "Byline"},
+         {"ingress", "Ingress"},
+         {"pullquote", "Pullquote"}
+       ]},
+      {"Visual", [{"diagram", "Diagram"}]},
+      {"Basic fields",
+       [
+         {"field-string", "String"},
+         {"field-slug", "Slug"},
+         {"field-text", "Long text"},
+         {"field-boolean", "Boolean"},
+         {"field-select", "Select"},
+         {"field-datetime", "Date & time"},
+         {"field-color", "Color"}
+       ]},
+      {"Media & reference",
+       [
+         {"field-image", "Image"},
+         {"field-reference", "Reference"}
+       ]},
+      {"Structured",
+       [
+         {"composite", "Composite"},
+         {"arrayOf", "Array of"},
+         {"codelist", "Code list"},
+         {"localizedText", "Localized text"}
+       ]}
+    ]
   end
 
   # Phase-4 S2: stamp each `{:block, b}` segment with its index in the FREE-block
@@ -936,10 +950,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       >
         <label>
           + Add property
-          <select name="fieldName">
-            <option value="" disabled selected>Choose a field…</option>
-            <option :for={d <- @unbound} value={d.name}>{d.label}</option>
-          </select>
+          <.bp_select
+            name="fieldName"
+            prompt="Choose a field…"
+            options={Enum.map(@unbound, &{&1.name, &1.label})}
+          />
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Add</button>
       </form>
