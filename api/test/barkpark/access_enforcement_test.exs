@@ -16,8 +16,8 @@ defmodule Barkpark.AccessEnforcementTest do
   use Barkpark.DataCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Barkpark.AccessFixtures
 
-  alias Barkpark.Access.Grant
   alias Barkpark.Accounts
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
@@ -32,43 +32,8 @@ defmodule Barkpark.AccessEnforcementTest do
     user
   end
 
-  # Insert a grant bound (claimed) to `grantee`, so
-  # `Access.list_active_grants_for_grantee/1` (which `from_user/2` calls) loads
-  # it. `overrides` set the scope ladder / capabilities / expiry / revocation.
-  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
-  # member of `ws` holding read+write+admin, so a grant it mints still confers
-  # (a grant only admits while its grantor still holds the capability).
-  defp grant_authority!(ws) do
-    {:ok, token} =
-      %Barkpark.Auth.ApiToken{}
-      |> Barkpark.Auth.ApiToken.changeset(%{
-        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
-        label: "ag-grantor",
-        dataset: "test",
-        permissions: ["read", "write", "admin"]
-      })
-      |> Repo.insert()
-
-    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
-    token
-  end
-
-  defp bind_grant!(ws, grantee, overrides) do
-    attrs =
-      %{
-        grantor_id: grant_authority!(ws).id,
-        grantee_email: grantee.email,
-        grantee_user_id: grantee.id,
-        claimed_at: DateTime.utc_now(),
-        workspace_id: ws.id,
-        capabilities: ["read"],
-        link_token_hash: "hash-" <> Ecto.UUID.generate()
-      }
-      |> Map.merge(overrides)
-
-    {:ok, grant} = %Grant{} |> Grant.changeset(attrs) |> Repo.insert()
-    grant
-  end
+  # `grant_authority!/1` + `bind_grant!/3` moved to `Barkpark.AccessFixtures`
+  # (imported above) — shared byte-identically across the four enforcement suites.
 
   # A grant-derived read: caller_context folds the grantee's active grants, the
   # `grant_scoped` flag is on (set by ResolveWorkspace in prod), workspace scoped.
@@ -289,6 +254,40 @@ defmodule Barkpark.AccessEnforcementTest do
       ctx = CallerContext.from_user(grantee.id)
       assert Auth.authorize(ctx, ws.id, :read) == :ok
       assert titles(grant_read("post", ws, ctx)) == ["secret"]
+    end
+
+    # Defense-in-depth for the LIVE read path (ag-liveview-read-liveness). The
+    # Studio socket feeds `scope_to_grants` a caller_context SNAPSHOT. If a
+    # refresh path is ever missed, an expired grant could linger in that snapshot
+    # — so `covers_workspace_read?` re-applies the expiry time-compare on the
+    # grant STRUCT. Here we bypass the in-query active filter by passing the
+    # expired grant EXPLICITLY in `grants:`; the read-union must STILL exclude it
+    # (zero rows) purely on the struct-level expiry compare.
+    test "an expired grant in a STALE snapshot is still excluded by the struct compare" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantee = grantee_user()
+      {:ok, _doc} = create_document_in!(ws, proj, "post", %{"title" => "secret"}, @dataset)
+
+      past = DateTime.add(DateTime.utc_now(), -3600, :second)
+      expired = bind_grant!(ws, grantee, %{capabilities: ["read"], expires_at: past})
+
+      # A stale context that STILL carries the expired grant (as if a refresh was
+      # missed) — `from_user` would have dropped it, so we inject it directly.
+      stale_ctx = %CallerContext{
+        principal_type: :user,
+        user_id: grantee.id,
+        grants: [expired]
+      }
+
+      assert grant_read("post", ws, stale_ctx) == []
+
+      # Non-vacuous control: the SAME grant, unexpired, in the same stale-shaped
+      # context DOES serve — proving the struct compare (not some other clause)
+      # is what excludes the expired one.
+      live_grant = %{expired | expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)}
+      live_ctx = %{stale_ctx | grants: [live_grant]}
+      assert titles(grant_read("post", ws, live_ctx)) == ["secret"]
     end
   end
 

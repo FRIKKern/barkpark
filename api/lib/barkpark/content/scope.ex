@@ -243,9 +243,33 @@ defmodule Barkpark.Content.Scope do
   # by a grant whose grantor lost authority (no bypass between the two paths).
   defp covers_workspace_read?(%Grant{workspace_id: ws, capabilities: caps} = grant, workspace_id)
        when is_list(caps),
-       do: ws == workspace_id and "read" in caps and Access.grantor_authorizes?(grant, :read)
+       do:
+         ws == workspace_id and "read" in caps and grant_live?(grant) and
+           Access.grantor_authorizes?(grant, :read)
 
   defp covers_workspace_read?(_grant, _workspace_id), do: false
+
+  # Defense-in-depth (ag-liveview-read-liveness). The read-union is fed a
+  # CallerContext SNAPSHOT (`caller_context.grants`), loaded active-filtered at
+  # mount / refresh time. This re-applies the grant's OWN `revoked_at` /
+  # `expires_at` on the struct at read time, so if a refresh path is ever missed
+  # a grant whose `expires_at` has since passed is STILL excluded from the union
+  # (an expired grant behaves exactly like no grant — no cache leak).
+  #
+  # ASYMMETRY — why this cannot catch a mid-session REVOKE: a grant is snapshotted
+  # while ACTIVE, so its struct carries `revoked_at: nil`; a revoke that lands
+  # AFTER the snapshot loaded does NOT mutate that in-memory struct, so this
+  # compare reads `nil` forever and the row would still serve. That is exactly
+  # why revoke's truth is a fresh DB reload (`Access.revoke/2` broadcasts
+  # `{:airdrop_revoked}` → `StudioLive` rebuilds `caller_context`), NOT a struct
+  # compare. The `revoked_at` clause here only catches an already-revoked grant
+  # that was somehow snapshotted (belt-and-suspenders), never a live revoke.
+  defp grant_live?(%Grant{revoked_at: revoked, expires_at: expires}) do
+    is_nil(revoked) and not grant_expired?(expires)
+  end
+
+  defp grant_expired?(nil), do: false
+  defp grant_expired?(%DateTime{} = at), do: DateTime.compare(at, DateTime.utc_now()) != :gt
 
   # AND of the non-NULL ladder levels below workspace, stopping at the first
   # NULL (null-covers-below). An all-NULL-below grant (workspace-wide) yields

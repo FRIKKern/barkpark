@@ -585,6 +585,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 title={"Share access to #{pane.type_name}"}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
+              <%!-- Access panel entry (airdrop-grants): review + revoke scoped
+                    access. Open to any authenticated principal (grantees too). --%>
+              <button
+                :if={@airdrop_can_share?}
+                class="pane-add-btn"
+                phx-click="access-open"
+                title="Review scoped access grants"
+                data-test-id="access-open-type"
+              ><.icon name="clock" size={14} /></button>
               <button
                 class="pane-add-btn"
                 phx-click="new-document"
@@ -802,6 +811,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               data-test-id="airdrop-open-workspace"
             >
               <.icon name="send" size={14} /> Share access
+            </button>
+            <%!-- Access panel (airdrop-grants): review your own scoped access +
+                  (for members) the workspace's active grants, with one-click
+                  revoke. Open to any authenticated principal — a grantee sees
+                  their own "Your access" section even without membership. --%>
+            <button
+              :if={@airdrop_can_share?}
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="access-open"
+              title="Review scoped access grants"
+              data-test-id="access-open"
+            >
+              <.icon name="clock" size={14} /> Access
             </button>
           </div>
           <div style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
@@ -1078,6 +1101,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         link={@airdrop_link}
         error={@airdrop_error}
         suggestions={@airdrop_suggestions}
+      />
+
+      <.access_panel
+        show={@access_open}
+        own_grants={@access_grants}
+        workspace_view={@access_workspace_view}
+        workspace_grants={@access_workspace_grants}
+        error={@access_error}
       />
     </.pane_layout>
 

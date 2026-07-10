@@ -15,11 +15,11 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.{Accounts, Auth, Content, Sharing}
-  alias Barkpark.Access.Grant
   alias Barkpark.Repo
   alias Barkpark.TenancyFixtures
 
   import Barkpark.TenancyFixtures
+  import Barkpark.AccessFixtures
 
   alias BarkparkWeb.Studio.Caps
 
@@ -84,40 +84,8 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
     {user, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
   end
 
-  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
-  # member of `ws` holding read+write+admin, so a grant it mints still confers
-  # (a grant only admits while its grantor still holds the capability).
-  defp grant_authority!(ws) do
-    {:ok, token} =
-      %Barkpark.Auth.ApiToken{}
-      |> Barkpark.Auth.ApiToken.changeset(%{
-        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
-        label: "ag-grantor",
-        dataset: "test",
-        permissions: ["read", "write", "admin"]
-      })
-      |> Repo.insert()
-
-    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
-    token
-  end
-
-  defp bind_grant!(ws, user, overrides) do
-    attrs =
-      %{
-        grantor_id: grant_authority!(ws).id,
-        grantee_email: user.email,
-        grantee_user_id: user.id,
-        claimed_at: DateTime.utc_now(),
-        workspace_id: ws.id,
-        capabilities: ["read"],
-        link_token_hash: "hash-" <> Ecto.UUID.generate()
-      }
-      |> Map.merge(overrides)
-
-    {:ok, grant} = %Grant{} |> Grant.changeset(attrs) |> Repo.insert()
-    grant
-  end
+  # `grant_authority!/1` + `bind_grant!/3` moved to `Barkpark.AccessFixtures`
+  # (imported above) — shared byte-identically across the four enforcement suites.
 
   defp caps(view), do: :sys.get_state(view.pid).socket.assigns.caps
   defp flash_error(view), do: :sys.get_state(view.pid).socket.assigns.flash["error"]

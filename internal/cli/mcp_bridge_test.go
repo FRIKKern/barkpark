@@ -385,6 +385,105 @@ func TestBuildCommandTail(t *testing.T) {
 	}
 }
 
+// accessCommands mirrors the six CORE `access` verbs defined in
+// api/lib/barkpark/plugins/capabilities.ex (access.grant/ls/show/revoke/claim/
+// mine) — the airdrop-grants grant-lifecycle surface. The fixture manifest
+// predates the access noun, so the parity proof synthesizes the commands the
+// same way TestBridgeShadowing synthesizes doc.create: the bridge is pure over
+// the manifest, so a manifest carrying these six MUST generate their tools.
+func accessCommands() []manifest.Command {
+	return []manifest.Command{
+		{
+			ID: "access.grant", Noun: "access", Verb: "grant", Writes: true,
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/access"},
+			Args: []manifest.Arg{
+				{Name: "grantee_email", Required: true, Type: "string", Summary: "Who the link is FOR."},
+				{Name: "workspace_id", Required: true, Type: "string", Summary: "Workspace scope top."},
+				{Name: "capabilities", Required: true, Type: "string", Summary: "read|write|admin."},
+			},
+			Flags: []manifest.Flag{
+				{Name: "project_id", Type: "string", Summary: "Narrow to a project."},
+				{Name: "expires_at", Type: "string", Summary: "ISO-8601 expiry."},
+				{Name: "single_use", Type: "boolean", Summary: "Spend on first claim."},
+			},
+		},
+		{
+			ID: "access.ls", Noun: "access", Verb: "ls",
+			HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/access"},
+			Flags: []manifest.Flag{
+				{Name: "workspace_id", Type: "string", Summary: "Workspace whose grants to list."},
+			},
+		},
+		{
+			ID: "access.show", Noun: "access", Verb: "show",
+			HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/access/:id"},
+			Args: []manifest.Arg{{Name: "id", Required: true, Type: "string", Summary: "Grant id."}},
+		},
+		{
+			ID: "access.revoke", Noun: "access", Verb: "revoke", Writes: true,
+			HTTP: manifest.HTTP{Method: "DELETE", PathTemplate: "/v1/access/:id"},
+			Args: []manifest.Arg{{Name: "id", Required: true, Type: "string", Summary: "Grant id."}},
+		},
+		{
+			ID: "access.claim", Noun: "access", Verb: "claim", Writes: true,
+			HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/access/claim"},
+			Args: []manifest.Arg{{Name: "token", Required: true, Type: "string", Summary: "Raw airdrop token."}},
+		},
+		{
+			ID: "access.mine", Noun: "access", Verb: "mine",
+			HTTP: manifest.HTTP{Method: "GET", PathTemplate: "/v1/access/mine"},
+		},
+	}
+}
+
+// TestBridgeAccessParity is the airdrop-grants parity guard (Task:
+// ag-access-mcp-parity-proof). It pins two facts so a future shadow-set edit or
+// verb rename turns into a red test:
+//
+//  1. No access.* id is ever in bridgeShadowedIDs — the curated overlay covers
+//     only the five task queue/read/close verbs, never an access verb, so the
+//     bridge must be free to generate all six.
+//  2. registerBridgeTools over a manifest carrying the six access commands
+//     yields bp_access_grant/ls/show/revoke/claim/mine over a real MCP session's
+//     tools/list — full grant-lifecycle parity under `--tools all`.
+func TestBridgeAccessParity(t *testing.T) {
+	access := accessCommands()
+
+	// (1) The shadow set must never swallow an access verb.
+	for _, cmd := range access {
+		if bridgeShadowedIDs[cmd.ID] {
+			t.Errorf("access verb %q is in bridgeShadowedIDs — the curated overlay must never shadow an access verb (it covers only the 5 task twins)", cmd.ID)
+		}
+	}
+	// Belt-and-suspenders: no shadowed id is under the access noun at all.
+	for id := range bridgeShadowedIDs {
+		if strings.HasPrefix(id, "access.") {
+			t.Errorf("bridgeShadowedIDs contains %q — access verbs must never be shadowed", id)
+		}
+	}
+
+	// (2) A manifest carrying the six access commands generates all six tools.
+	m := loadFixtureManifest(t)
+	m.Commands = append(m.Commands, access...)
+
+	cs := newBridgeSession(t, globals{}, manifest.Context{Server: "http://x"}, m)
+	tools := listAllTools(t, cs)
+
+	want := []string{
+		"bp_access_grant",
+		"bp_access_ls",
+		"bp_access_show",
+		"bp_access_revoke",
+		"bp_access_claim",
+		"bp_access_mine",
+	}
+	for _, name := range want {
+		if _, ok := tools[name]; !ok {
+			t.Errorf("access tool %q must generate under --tools all; have %v", name, toolNames(tools))
+		}
+	}
+}
+
 // ── small test helpers ───────────────────────────────────────────────────────
 
 func findCommand(t *testing.T, m *manifest.Manifest, id string) manifest.Command {
