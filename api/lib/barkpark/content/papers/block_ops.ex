@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.{Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
-  alias Barkpark.PortableDoc.{Patch, Projection, Render}
+  alias Barkpark.PortableDoc.{HtmlSanitizer, Patch, Projection, Render}
   alias Barkpark.Preview
 
   @paper_type "paper"
@@ -178,7 +178,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
     body_html =
       cond do
         is_list(blocks) -> Render.render_blocks(blocks, render_opts)
-        is_binary(attrs["body_html"]) -> attrs["body_html"]
+        # Legacy HTML-only leg: an external producer supplied opaque body_html
+        # with no blocks. Scrub it through the strict allowlist BEFORE store so
+        # a <script>/onerror= payload never persists (defensive; the reader CSP
+        # is the second layer). See Barkpark.PortableDoc.HtmlSanitizer.
+        is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"])
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
 
