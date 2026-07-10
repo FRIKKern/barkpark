@@ -80,12 +80,16 @@ const nodesHash = existsSync(join(ROOT, "tooling/barkpark-sync/nodes.json")) ? c
 const lastHash = txt("tooling/barkpark-sync/.last-push-hash", "");
 const publishNeeded = nodesHash && nodesHash !== lastHash;
 let published = false;
+let pushFailed = false;
 if (PUBLISH && up && (publishNeeded || FORCE)) {
   e(`  ${C.b}publishing to Barkpark (codebase dataset)…${C.x}`);
-  run("push", "tooling/barkpark-sync/push.mjs", ["--dataset", "codebase"]);
-  run("graph-view", "tooling/barkpark-sync/graph-view.mjs", ["--dataset", "codebase"]);
-  writeFileSync(join(ROOT, "tooling/barkpark-sync/.last-push-hash"), nodesHash);
-  published = true;
+  // stamp + report success ONLY when push actually succeeded — a failed push must
+  // leave the arc red and the hash unstamped so the next run retries it.
+  if (run("push", "tooling/barkpark-sync/push.mjs", ["--dataset", "codebase"])) {
+    run("graph-view", "tooling/barkpark-sync/graph-view.mjs", ["--dataset", "codebase"]);
+    writeFileSync(join(ROOT, "tooling/barkpark-sync/.last-push-hash"), nodesHash);
+    published = true;
+  } else pushFailed = true;
 }
 
 // ════════════════ REPORT BOARD ════════════════
@@ -120,6 +124,7 @@ if (enrichPending) {
 e("");
 e(`${C.b}PUBLISH${C.x}  Barkpark ${up ? C.g + "reachable" + C.x : C.r + "not reachable" + C.x} · nodes ${publishNeeded ? C.y + "changed" + C.x : C.g + "in sync" + C.x}`);
 if (published) e(`  ${C.g}✓ pushed → /d/codebase/papers/:slug · /v1/graph?dataset=codebase · codebase-graph.html${C.x}`);
+else if (pushFailed) e(`  ${C.r}✗ push FAILED — the published dataset is still behind (see the push error above)${C.x}`);
 else if (!up) e(`  ${C.y}· start Barkpark (make dev) then re-run with --publish${C.x}`);
 else if (publishNeeded) e(`  ${C.y}⟳ ${PUBLISH ? "" : "data changed — "}run with --publish to ship into Barkpark${C.x}`);
 else e(`  ${C.g}✓ in sync${C.x}`);

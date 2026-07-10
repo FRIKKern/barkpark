@@ -126,7 +126,11 @@ function tryRun(cmd, a, opts) {
 }
 const COVSIG = covSig();
 const priorRpt = existsSync(join(HERE, "risk-report.json")) ? JSON.parse(readFileSync(join(HERE, "risk-report.json"), "utf8")) : {};
-const covCacheHit = !NO_COVERAGE && COVSIG && priorRpt.coverageSig === COVSIG && priorRpt.realCov && Object.keys(priorRpt.realCov).length;
+// The cache is only a hit if the prior report actually RAN the heavy suites: a
+// --no-coverage run persists JS-only realCov (the free ingest) with a valid sig,
+// which must not let the next full run skip go/mix and report null totals.
+const covCacheHit = !NO_COVERAGE && COVSIG && priorRpt.coverageSig === COVSIG && priorRpt.realCov && Object.keys(priorRpt.realCov).length
+  && (priorRpt.coverageTotals?.go != null || priorRpt.coverageTotals?.elixir != null);
 if (covCacheHit) {
   Object.assign(realCov, priorRpt.realCov);
   Object.assign(fnCov, priorRpt.fnCov || {});
