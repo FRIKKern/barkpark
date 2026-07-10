@@ -30,7 +30,7 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.Content.Papers.BlockOps
 
-  alias Barkpark.PortableDoc.{Projection, Synthesis}
+  alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Synthesis}
   alias Barkpark.Preview
 
   # W7a step 1 — task documents carry a tight `content` field contract
@@ -139,6 +139,13 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts) do
+    # XSS hardening: the raw mutate/Writer path stores content verbatim, so an
+    # attacker-supplied content["body_html"] would persist and later be emitted
+    # raw() to the anonymous /papers reader. Scrub it here (covers create AND
+    # createOrReplace — both the insert and the prev_doc-update branch below run
+    # off this attrs). Mirrors the BlockOps chokepoint for the ingest path.
+    attrs = maybe_sanitize_paper_body_html(attrs, type)
+
     payload = %{
       event: :before_save,
       doc: attrs,
@@ -468,11 +475,28 @@ defmodule Barkpark.Content.Writer do
       # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
       # (legacy field-map save) skips it untouched.
       |> maybe_project_document_content(dataset)
+      # XSS hardening (mirror of create_after_dedup): scrub a verbatim
+      # content["body_html"] on the patch/autosave path so poisoned markup
+      # never persists as a draft that publish later promotes unchanged.
+      |> maybe_sanitize_paper_body_html(type)
 
     with :ok <- validate_task_kind(type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
   end
+
+  # Scrub an untrusted verbatim `content["body_html"]` on a paper write. Papers
+  # carrying `content["blocks"]` still get scrubbed here (the reader serves the
+  # body_html cache only when there are no blocks, but the cache on this generic
+  # path is caller-supplied, not re-rendered — so it is never trusted). Every
+  # non-paper type and any paper without a string body_html passes through
+  # byte-identical.
+  defp maybe_sanitize_paper_body_html(%{"content" => %{"body_html" => html} = content} = attrs, "paper")
+       when is_binary(html) do
+    Map.put(attrs, "content", Map.put(content, "body_html", HtmlSanitizer.sanitize(html)))
+  end
+
+  defp maybe_sanitize_paper_body_html(attrs, _type), do: attrs
 
   defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
     ctx = WriteScope.build_ctx(opts)
