@@ -22,6 +22,8 @@ defmodule Barkpark.Content.Errors do
       "Re-fetch the document and retry with the current revision — it changed under you.",
     "malformed" =>
       "Send a well-formed JSON body matching the endpoint's expected shape; check Content-Type: application/json.",
+    "unsupported_if_match_for_batch" =>
+      "A single If-Match header can't fence a multi-op batch — drop the header and put an ifRevisionID (or ifMatch) inside each mutation instead.",
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
@@ -187,6 +189,20 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :malformed}),
     do: %{code: "malformed", message: "request body is malformed", status: 400}
+
+  # A multi-op batch mutation carried an HTTP If-Match header. One ETag cannot
+  # unambiguously gate N potentially-different documents, and silently dropping
+  # it (the pre-fix behavior) discarded the caller's optimistic-lock intent →
+  # lost update with no 412. Fail CLOSED with a 400 that steers the caller to the
+  # per-op ifRevisionID/ifMatch fence, which is batch-size-independent.
+  defp build({:error, :unsupported_if_match_for_batch}),
+    do: %{
+      code: "unsupported_if_match_for_batch",
+      message:
+        "If-Match is unsupported on a multi-op batch; put an ifRevisionID/ifMatch " <>
+          "inside each mutation instead",
+      status: 400
+    }
 
   # An unknown filter operator (e.g. ?filter[status][bogus]=x). Fail CLOSED with
   # a 400 instead of the old fail-OPEN behaviour, where an unrecognized op fell
