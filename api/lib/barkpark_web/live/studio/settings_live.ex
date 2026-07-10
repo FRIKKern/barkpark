@@ -105,7 +105,6 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     |> assign_plugin_rows()
   end
 
-
   @impl true
   def handle_event("update_name", %{"plugin_name" => name}, socket) do
     {:noreply, assign(socket, plugin_name: name)}
@@ -650,7 +649,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   end
 
   defp render_field(assigns) do
-    assigns = assign(assigns, :value, Map.get(assigns.typed_form, assigns.key, default_for(assigns.field)))
+    assigns =
+      assign(
+        assigns,
+        :value,
+        Map.get(assigns.typed_form, assigns.key, default_for(assigns.field))
+      )
 
     ~H"""
     <.bp_field_row label={@field.label} for={@key} required={!!@field[:required]}>

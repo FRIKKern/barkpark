@@ -474,6 +474,9 @@
       transition: all 0.15s; white-space: nowrap;
     }
     .btn:hover { background: var(--bg-accent); }
+    /* Disabled state for every .btn variant (sup-w1 control kit): dimmed +
+       inert, no hover feedback. Opacity-based so it needs no color token. */
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
     .btn-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
     .btn-primary:hover { background: var(--primary-hover); }
     .btn-destructive { background: transparent; border-color: var(--border); color: var(--destructive); }
@@ -622,6 +625,7 @@
       box-shadow: 0 0 0 2px var(--primary-soft);
     }
     .form-input::placeholder { color: var(--fg-dim); }
+    .form-input:disabled { opacity: 0.5; cursor: not-allowed; }
     textarea.form-input { height: auto; padding: 10px 12px; resize: vertical; min-height: 80px; line-height: 1.5; }
     select.form-input { cursor: pointer; appearance: none; padding-right: 32px;
       background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236b7280' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
@@ -660,6 +664,7 @@
     .form-switch input:focus-visible + .form-switch-track {
       outline: 2px solid var(--primary); outline-offset: 2px;
     }
+    .form-switch:has(input:disabled) { cursor: not-allowed; opacity: 0.5; }
     .form-switch-state { font-size: 12px; color: var(--fg-muted); }
 
     /* ── Perspective toggle ────────────────────────────────────────────── */
