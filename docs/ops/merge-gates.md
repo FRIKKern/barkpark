@@ -83,6 +83,49 @@ GitHub. The checks that *should* be green before merge are `mix-prod-compile`,
 matters only when the PR touches `api/priv/plugins/**`. If these are meant to
 be enforced, add a branch-protection rule requiring those status checks.
 
+## Security gates (Sobelow + mix_audit)
+
+`.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
+Elixir security gates, path-triggered on `api/**`:
+
+9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
+   SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
+   `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
+   true`) — Sobelow fingerprints are derived from compiled AST and are NOT
+   stable across Elixir toolchains, so a baseline generated on a dev machine's
+   Elixir does not match CI's 1.18.1/OTP27 and a blocking gate would red the
+   fleet on fingerprint drift rather than real regressions. Findings stay
+   VISIBLE in CI; flip to blocking once the baseline is regenerated **in CI**
+   (matched toolchain) or the 30 real high/medium findings are remediated
+   (task-c9d6d29cc0059d2a). The 98 findings that existed on main at wiring time
+   (21 high / 9 medium / 68 low confidence) are captured in
+   `api/.sobelow-skips` — the **reviewed baseline**. Command:
+   `mix sobelow --skip --exit Low` (`--skip` reads the baseline; `--exit Low`
+   fails on any non-baselined finding at Low confidence or above, so even a
+   low-confidence new `raw()` reds it — proven by planting a
+   `send_resp(conn, 200, params["body"])`). Regenerate the baseline **only**
+   after a reviewed cleanup: `cd api && mix sobelow --mark-skip-all`, then commit
+   the shrunk `.sobelow-skips`. The baselined high-confidence findings are real
+   and tracked for remediation (follow-up task); baselining them here is the
+   standard "gate catches regressions, backlog fixes history" split — NOT an
+   acceptance that they are safe.
+
+10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
+    dep) over `mix.lock`. **Advisory** (`continue-on-error: true`). The current
+    lock carries 8 real, pre-existing CVEs (mint 1.7.1 ×4, postgrex 0.22.0,
+    phoenix 1.8.5, decimal 2.3.0, esaml 4.6.0), all fixed by a version bump —
+    NOT by accepting them. Baselining them behind a green check would be a
+    vacuous green; advisory keeps the signal **visible and honest** while the
+    fleet stays unblocked. The protective proof (a pinned known-vulnerable
+    version reds it) is satisfied by the current lock itself: `mix deps.audit`
+    exits 1 today. **Flip to blocking** (drop `continue-on-error`) once the deps
+    are bumped and the lock is clean (follow-up task). To baseline an accepted
+    advisory instead, mix_audit takes `--ignore-file <path>` (advisory IDs, one
+    per line).
+
+Both deps are `only: [:dev, :test], runtime: false` in `api/mix.exs` — analysis
+tooling that never ships in the release.
+
 ### Making `pr-task-gate` binding (required-by-name)
 
 The gate ships **advisory** — a red check does not yet block a merge, because

@@ -101,7 +101,14 @@ defmodule Barkpark.MixProject do
       # ALL envs — the console is on by default on every Studio (admin-gated,
       # hard-refused on public-demo hosts). Precompiled NIFs cover the prod
       # aarch64-linux / x86_64-linux targets (source-build fallback otherwise).
-      {:expty, "~> 0.2.1"}
+      {:expty, "~> 0.2.1"},
+      # Security CI gates (fix-security-ci — task-a41fc4590b2c2eb1). Both are
+      # analysis-only tooling, dev/test env + runtime:false so they NEVER ship
+      # in the release. Sobelow = Phoenix-aware static analysis (XSS.Raw, SQL
+      # injection, unsafe atom, missing CSRF, hardcoded secrets…); MixAudit =
+      # dependency CVE scan against mix.lock. Wired in .github/workflows/security.yml.
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
     ] ++ image_dep()
   end
 

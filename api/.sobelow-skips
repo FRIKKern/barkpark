@@ -1,0 +1,101 @@
+
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/content/validation.ex:109,FD6035
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/sheets.ex:113,1FB65CC
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/media.ex:400,73AD83
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:61,4751632
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:260,EF507
+Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/media/renditions.ex:107,3D69773
+XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:67,6A41676
+CI.System: Command Injection via `System` function,lib/barkpark/plugins/onixedit/export/validator.ex:72,3AD95E4
+XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/sheets/web/export_controller.ex:80,5D50FD6
+Traversal.FileModule: Directory Traversal in `File.cp`,lib/barkpark/media.ex:62,323F7CD
+XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/share_link_controller.ex:128,755DB9A
+XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/controllers/saml_controller.ex:119,159DB05
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/studio_chat.ex:1769,391BF73
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/studio_chat.ex:1749,7B625AD
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:14,573850F
+Traversal.FileModule: Directory Traversal in `File.chmod!`,lib/barkpark/release/secrets.ex:98,5A4F670
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/onixedit/export/validator.ex:79,1029F9E
+Traversal.FileModule: Directory Traversal in `File.write!`,lib/barkpark/plugins/onixedit/export/validator.ex:68,24B460D
+Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/media_controller.ex:134,687ABA0
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/sheets/web/import_controller.ex:133,5E8AF41
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:266,73D7868
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:878,2A7C0D7
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:248,20038CB
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:211,65F4F64
+Traversal.FileModule: Directory Traversal in `File.open`,lib/barkpark_web/studio/claude_chat.ex:1007,21B19EA
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:141,4DBAB0D
+XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/sheets/web/export_controller.ex:37,3708861
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:3570,169732F
+Traversal.FileModule: Directory Traversal in `File.chmod`,lib/barkpark_web/studio/claude_chat.ex:943,5C5580B
+XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/onixedit/web/export_controller.ex:52,64EB26D
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:231,4E16B48
+XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2831,24A3B95
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:375,306C9D2
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/codelists/editeur.ex:298,227D73E
+XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/media_controller.ex:131,3C3490F
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:445,2817798
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:696,28E1CF2
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit.ex:458,599B843
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/frt.ex:141,227F1B8
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/media.ex:96,340ACA6
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:296,26C21D1
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:895,79260C4
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/onixedit/export.ex:261,7022E71
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/tickets/attachments.ex:288,6BE392C
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/media.ex:98,2B751C3
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/contributor.ex:54,EA8085
+XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/sheets/web/export_controller.ex:66,66E7068
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:135,3D8504C
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/indx/persistence.ex:77,20C0DB8
+XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/plugs/idempotency.ex:84,29C0B1D
+XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:215,1947BE
+Config.Secrets: Hardcoded Secret,config/config.exs:64,4FF6931
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:149,A91E89
+XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/controllers/status_controller.ex:35,46F7AA7
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:953,28C63BB
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/manifest.ex:90,6A0A6D5
+CI.System: Command Injection via `System` function,lib/barkpark/studio_chat/titles.ex:366,5BC7F60
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/media/probe.ex:27,2C782D6
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:391,3F06623
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/release/secrets.ex:144,76B922D
+Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/plugins/indx/persistence.ex:67,40F0060
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1960,322555B
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:295,3CA05A1
+Traversal.FileModule: Directory Traversal in `File.write!`,lib/barkpark/release/secrets.ex:95,571CEC5
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/text_content.ex:40,1DCA539
+Misc.BinToTerm: Unsafe `binary_to_term`,lib/barkpark/accounts/webauthn.ex:126,4DE1B06
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:188,5B403E1
+Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:218,180AC52
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/bulldocs.ex:144,3021DFC
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark_web/studio/claude_chat.ex:944,79F85C
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:61,5D00D6
+RCE.CodeModule: Code Execution in `Code.eval_file`,lib/barkpark/release.ex:23,5B901F4
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github.ex:192,15B2898
+Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/studio_chat.ex:1748,6593101
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/indx/persistence.ex:92,3F75C2B
+Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/studio_chat.ex:1788,4BFD5DB
+Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/share_link_controller.ex:134,2C625F2
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/search/golden_eval.ex:23,4D27E0F
+CI.System: Command Injection via `System` function,lib/barkpark/media/image_backend/magick.ex:30,3BBFB5A
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:142,F7AE3D
+Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:158,B1A314
+SQL.Query: SQL injection,lib/barkpark/media/delivery/search.ex:400,50C80BF
+Traversal.FileModule: Directory Traversal in `File.stream!`,lib/barkpark/codelists/editeur.ex:122,107C442
+Misc.BinToTerm: Unsafe `binary_to_term`,lib/barkpark/plugins/indx/persistence.ex:95,7984F61
+XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/controllers/bulldocs_email_controller.ex:41,696A2EE
+Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/release/secrets.ex:77,3E96E62
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/media.ex:115,47AF102
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/validation.ex:146,3BA50DF
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:209,5D51BAD
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/release/secrets.ex:90,3AA2C2B
+Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/media/renditions.ex:113,CD9C35
+XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark/plugins/sheets/web/export_controller.ex:78,26D44BD
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/indx/persistence.ex:68,552AA5
+XSS.Raw: XSS,lib/barkpark_web/controllers/error_html.ex:25,6380E04
+Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/media.ex:61,28E547D
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:255,2D76706
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1966,2C0C16C
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:3571,4E6DAA4
