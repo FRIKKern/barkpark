@@ -75,10 +75,23 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # the theme + plugin rows here too — they must never lag the bound scope.
   @impl true
   def handle_params(_params, _uri, socket) do
-    {:noreply,
-     socket
-     |> assign(:bp_theme, Tenancy.workspace_theme(socket.assigns[:current_workspace]))
-     |> assign_plugin_rows()}
+    # NAMED COST (doctrine lever #2): `handle_params` runs on the DISCARDED
+    # disconnected render AND again on connect. `assign_plugin_rows/1` fans out
+    # to several DB reads (Enablement.effective, Structure schema scan,
+    # list_schemas, type_census) and `workspace_theme/1` is another. This page
+    # is admin-gated (no crawler consumes the dead HTML), so load the settings
+    # projection ONLY on the live mount; the dead render keeps the empty
+    # defaults `assign_page/1` seeded.
+    socket =
+      if connected?(socket) do
+        socket
+        |> assign(:bp_theme, Tenancy.workspace_theme(socket.assigns[:current_workspace]))
+        |> assign_plugin_rows()
+      else
+        socket
+      end
+
+    {:noreply, socket}
   end
 
   defp assign_page(socket) do
@@ -100,9 +113,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       # A scope switch fired from Settings re-opens Settings under the NEW
       # scope, not the desk (chrome D16 seam) — StudioChrome appends this to
       # the target's studio_root.
-      scope_subpath: "/settings"
+      scope_subpath: "/settings",
+      # Empty defaults for the dead render — the connected `handle_params`
+      # loads the real theme + plugin rows once, on connect (see there).
+      bp_theme: nil,
+      plugin_rows: []
     )
-    |> assign_plugin_rows()
   end
 
   @impl true

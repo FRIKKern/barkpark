@@ -25,6 +25,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
   @admin_token "projects-board-admin-test-token"
 
+  # Default Ecto telemetry event for a repo with `otp_app: :barkpark`.
+  @repo_query_event [:barkpark, :repo, :query]
+
   setup do
     {:ok, _} =
       Auth.create_token(@admin_token, "projects board admin", "production", [
@@ -215,6 +218,50 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       # The momentum header is still present — 0%, but always-on.
       assert html =~ ~s(data-role="momentum")
       assert html =~ "0%"
+    end
+  end
+
+  # PROTECTIVE TEST (task-d8970b41d745e066): the authenticated board mount used
+  # to run the full `Board.snapshot/1` projection on the DISCARDED disconnected
+  # render, doubling the queries per open. It is now guarded behind
+  # `connected?/1`. These two tests count the `edges`-table query — the unique
+  # signature of `load_blocker_targets` inside `Board.snapshot` (nothing else on
+  # the board mount reads task_edges) — to prove 2× → 1×.
+  describe "disconnected mount elides the Board.snapshot projection" do
+    setup do
+      # A single task guarantees `load_blocker_targets` fires its edges query on
+      # the projection — its guard clause skips the query for an empty corpus.
+      task("solo1", "Wire the pipeline", lifecycle: "in_progress", priority: 1)
+      :ok
+    end
+
+    test "the disconnected (dead) render runs ZERO board-projection queries and paints a loading skeleton",
+         %{conn: conn} do
+      {conn, edge_reads} = count_edge_queries(fn -> get(conn, "/admin/projects") end)
+
+      body = html_response(conn, 200)
+      # The dead render shows the loading skeleton, NOT the projected board.
+      assert body =~ ~s(data-test-id="board-loading")
+      refute body =~ "Wire the pipeline"
+
+      # Board.snapshot's load_blocker_targets never ran on the discarded mount.
+      assert edge_reads == 0,
+             "the disconnected mount must issue zero board-projection (edges) queries, " <>
+               "got #{edge_reads}"
+    end
+
+    test "the connected mount runs Board.snapshot exactly once (2x -> 1x)", %{conn: conn} do
+      # `live/2` does the disconnected render THEN connects. The disconnected leg
+      # now contributes 0 edges queries (the fix), so the ONE edges query across
+      # the whole flow proves the snapshot runs a single time — on connect.
+      {{:ok, _view, html}, edge_reads} =
+        count_edge_queries(fn -> live(conn, "/admin/projects") end)
+
+      # Behavior parity: the connected view shows the same data as before.
+      assert html =~ "Wire the pipeline"
+
+      assert edge_reads == 1,
+             "Board.snapshot must run exactly once (on connect), got #{edge_reads} edges queries"
     end
   end
 
@@ -1915,6 +1962,33 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       _ ->
         false
+    end
+  end
+
+  # Count Repo queries that touch the `task_edges` table within `fun` — the unique
+  # signature of `Board.snapshot/1`'s `load_blocker_targets`. No pid filter: the
+  # connected mount runs in a spawned LiveView process, so the counter must see
+  # queries from ANY process during the block (safe — this module is async:
+  # false, so nothing else runs concurrently).
+  defp count_edge_queries(fun) do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    handler_id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      @repo_query_event,
+      fn _event, _measurements, %{source: source}, _config ->
+        if source == "task_edges", do: Agent.update(counter, &(&1 + 1))
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, Agent.get(counter, & &1)}
+    after
+      :telemetry.detach(handler_id)
+      Agent.stop(counter)
     end
   end
 
