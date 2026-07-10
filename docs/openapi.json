@@ -142,6 +142,7 @@
                   "storage_unavailable",
                   "unauthorized",
                   "unprocessable",
+                  "unsupported_if_match_for_batch",
                   "unsupported_media_type",
                   "validation_failed",
                   "webhook_not_found"

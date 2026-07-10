@@ -596,4 +596,65 @@ defmodule BarkparkWeb.Contract.MutateTest do
 
     assert fresh.status == 200
   end
+
+  # A single HTTP If-Match header carries ONE ETag, but a 2+-op batch touches N
+  # potentially-different docs — the header cannot unambiguously target any of
+  # them. The old code silently DROPPED it for multi-op batches (only the
+  # [mutation] single-op head injected it), so a client's optimistic-lock intent
+  # evaporated and both patches applied last-write-wins with no 412 → lost update.
+  # Fail CLOSED with a 400 that steers callers to the per-op ifRevisionID/ifMatch
+  # mechanism, which fences each doc unambiguously.
+  test "If-Match HTTP header on a multi-op batch is rejected 400, not silently dropped",
+       %{conn: conn} do
+    {:ok, a} = Content.create_document("post", %{"_id" => "batch-im-a", "title" => "a1"}, "test")
+    {:ok, b} = Content.create_document("post", %{"_id" => "batch-im-b", "title" => "b1"}, "test")
+
+    body = %{
+      "mutations" => [
+        %{"patch" => %{"id" => a.doc_id, "type" => "post", "set" => %{"title" => "a2"}}},
+        %{"patch" => %{"id" => b.doc_id, "type" => "post", "set" => %{"title" => "b2"}}}
+      ]
+    }
+
+    resp =
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("if-match", ~s("#{a.rev}"))
+      |> post("/v1/data/mutate/test", Jason.encode!(body))
+
+    assert resp.status == 400
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "unsupported_if_match_for_batch"
+
+    # And the writes must NOT have applied — fail-closed, not last-write-wins.
+    # A successful patch bumps the rev, so an unchanged rev proves no write ran.
+    assert {:ok, still_a} = Content.get_document(a.doc_id, "post", "test")
+    assert still_a.rev == a.rev
+  end
+
+  # The per-op fence is the sanctioned batch mechanism: an ifRevisionID INSIDE
+  # each mutation is honored regardless of batch size (Content.Mutations.if_rev/1),
+  # and no HTTP If-Match header is present, so the batch is accepted.
+  test "per-op ifRevisionID fences each doc in a multi-op batch (no HTTP header)",
+       %{conn: conn} do
+    {:ok, a} = Content.create_document("post", %{"_id" => "batch-op-a", "title" => "a1"}, "test")
+    {:ok, b} = Content.create_document("post", %{"_id" => "batch-op-b", "title" => "b1"}, "test")
+
+    fresh = %{
+      "mutations" => [
+        %{"patch" => %{"id" => a.doc_id, "type" => "post", "ifRevisionID" => a.rev, "set" => %{"title" => "a2"}}},
+        %{"patch" => %{"id" => b.doc_id, "type" => "post", "ifRevisionID" => b.rev, "set" => %{"title" => "b2"}}}
+      ]
+    }
+
+    assert do_mutate(conn, fresh).status == 200
+
+    stale = %{
+      "mutations" => [
+        %{"patch" => %{"id" => a.doc_id, "type" => "post", "ifRevisionID" => "not-the-rev", "set" => %{"title" => "a3"}}}
+      ]
+    }
+
+    assert do_mutate(conn, stale).status == 412
+  end
 end
