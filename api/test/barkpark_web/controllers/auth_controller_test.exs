@@ -341,6 +341,17 @@ defmodule BarkparkWeb.AuthControllerTest do
       assert authed(a) |> get("/v1/auth/me") |> json_response(401)
     end
 
+    test "a MALFORMED session id is 404 not_found, never a binary_id 500", %{token_a: a} do
+      # The Ecto.UUID.cast guard in Accounts.revoke_user_session_by_id/2 rejects
+      # the garbage BEFORE Repo.get_by, so a live session deleting a non-UUID id
+      # gets the same clean 404 as an unknown-but-valid id — no CastError → 500.
+      resp = authed(a) |> delete("/v1/auth/sessions/not-a-uuid") |> json_response(404)
+      assert resp["error"]["code"] == "not_found"
+
+      # The live bearer that issued the delete is untouched by the failed probe.
+      assert authed(a) |> get("/v1/auth/me") |> json_response(200)
+    end
+
     test "another USER's session id is 404 and their session survives", %{token_a: a} do
       register!(build_conn(), "other-user@example.com")
       other_token = login_token(build_conn(), "other-user@example.com")
