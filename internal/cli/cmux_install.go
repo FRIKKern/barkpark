@@ -7,7 +7,11 @@ package cli
 // --merge is the reserved §5c slice). The hooks run ALONGSIDE cmux's own — the
 // settings hooks map is additive per event, so ours ADD, never replace.
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/taskboard"
+)
 
 // cmuxHooksBlock is the settings.json fragment wiring the four Claude Code
 // events to `bp cmux hook <event>`. PreToolUse uses a catch-all matcher (renew
@@ -28,13 +32,6 @@ const cmuxHooksBlock = `{
     ]
   }
 }`
-
-// cmuxWorkerShellLine is the guarded shell-profile line that gives every cmux
-// pane one worker id derived from its durable surface id. Guarded on
-// CMUX_SURFACE_ID so a non-cmux shell never exports a broken/empty worker id
-// (outside cmux, CmuxWorkerID falls through to tui-<hostname>).
-const cmuxWorkerShellLine = `# Barkpark: one worker id per cmux pane, derived from the durable surface id.
-[ -n "$CMUX_SURFACE_ID" ] && export BARKPARK_WORKER_ID="cmux-$CMUX_SURFACE_ID"`
 
 func runCmuxInstall(out *writer, g globals, args []string) int {
 	if g.help {
@@ -63,7 +60,7 @@ func runCmuxInstall(out *writer, g globals, args []string) int {
 	out.outf("# 2. Worker-id shell line → your shell profile (~/.zshrc / ~/.bashrc) or the")
 	out.outf("#    cmux pane-init hook, so every pane exports it before Claude starts.")
 	out.outf("")
-	out.outf("%s", cmuxWorkerShellLine)
+	out.outf("%s", taskboard.CmuxShellLine())
 	out.outf("")
 	out.outf("# Then: set BARKPARK_TASK=<doc_id> in a pane (or use `bp cmux dispatch`), and")
 	out.outf("# that pane's Claude claims the task on SessionStart. `bp cmux status` shows it.")
@@ -86,7 +83,7 @@ func printCmuxInstallHelp(out *writer) {
 	out.outf("")
 	out.outf("Print the Claude Code settings.json hook block (SessionStart/PreToolUse/Stop/")
 	out.outf("SessionEnd → `bp cmux hook <event>`) and the guarded worker-id shell line")
-	out.outf("(`export BARKPARK_WORKER_ID=cmux-$CMUX_SURFACE_ID`), with instructions for")
+	out.outf("(`export BARKPARK_WORKER_ID=%s`), with instructions for", taskboard.CmuxSurfaceExport)
 	out.outf("where to paste each. The hooks run ALONGSIDE cmux's own — they ADD, never")
 	out.outf("replace. This NEVER writes ~/.claude/settings.json (print-only in v1).")
 }
