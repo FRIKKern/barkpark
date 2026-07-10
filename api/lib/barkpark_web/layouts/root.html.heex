@@ -652,6 +652,12 @@
       width: 16px; height: 16px; accent-color: var(--primary);
       border-radius: 4px; cursor: pointer;
     }
+    /* Radio — the .form-checkbox sibling for one-of-N choices. Same 16px accent
+       control; the browser draws the circle, accent-color themes it. */
+    .form-radio { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .form-radio input[type="radio"] {
+      width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer;
+    }
     /* Boolean fields render as a labeled switch (Sanity-style), not a bare
        checkbox. The real checkbox stays in the DOM (form semantics, a11y,
        keyboard toggle) but is visually replaced by the track + thumb; the
@@ -1383,6 +1389,10 @@
     .shares-field-label { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
     .shares-surfaces { display: flex; gap: 16px; font-size: 13px; }
     .shares-surfaces label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    /* Airdrop duration radios + capability checkboxes flow as one wrapping
+       inline row — the kit's .form-radio/.form-checkbox labels are flex
+       (block-level), so a bare wrapper would stack them vertically. */
+    .airdrop-duration, .airdrop-caps { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
     .shares-note { font-size: 11px; color: var(--fg-muted); margin: 0; }
     .shares-error { font-size: 12px; color: var(--destructive); margin: 0; }
     .shares-add-actions { display: flex; justify-content: flex-end; }

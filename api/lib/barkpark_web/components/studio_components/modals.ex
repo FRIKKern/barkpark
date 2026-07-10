@@ -10,6 +10,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   use Phoenix.Component
 
   import BarkparkWeb.Icons
+  import BarkparkWeb.StudioComponents.Controls, only: [bp_radio: 1, bp_checkbox: 1]
 
   @doc """
   Image-picker modal, formerly a legacy inline block in StudioLive, now
@@ -388,18 +389,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <div class="shares-field">
               <span class="shares-field-label">Access lasts</span>
               <div class="airdrop-duration" role="radiogroup" aria-label="Duration">
-                <label class="airdrop-chip">
-                  <input type="radio" name="duration" value="30m" /> 30 min
-                </label>
-                <label class="airdrop-chip">
-                  <input type="radio" name="duration" value="5h" /> 5 hours
-                </label>
-                <label class="airdrop-chip">
-                  <input type="radio" name="duration" value="1d" checked /> 1 day
-                </label>
-                <label class="airdrop-chip">
-                  <input type="radio" name="duration" value="custom" /> Custom…
-                </label>
+                <.bp_radio name="duration" value="30m">30 min</.bp_radio>
+                <.bp_radio name="duration" value="5h">5 hours</.bp_radio>
+                <.bp_radio name="duration" value="1d" checked>1 day</.bp_radio>
+                <.bp_radio name="duration" value="custom">Custom…</.bp_radio>
               </div>
               <input
                 type="datetime-local"
@@ -418,19 +411,28 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 </p>
               <% else %>
                 <div class="airdrop-caps">
-                  <label :if={"read" in @caps} class="airdrop-chip">
-                    <input type="checkbox" name="capabilities[]" value="read" checked /> View
-                  </label>
-                  <label :if={"write" in @caps} class="airdrop-chip">
-                    <input type="checkbox" name="capabilities[]" value="write" /> Edit
-                  </label>
+                  <.bp_checkbox
+                    :if={"read" in @caps}
+                    name="capabilities[]"
+                    value="read"
+                    label="View"
+                    checked
+                  />
+                  <.bp_checkbox
+                    :if={"write" in @caps}
+                    name="capabilities[]"
+                    value="write"
+                    label="Edit"
+                  />
                 </div>
               <% end %>
             </div>
 
-            <label class="airdrop-single-use">
-              <input type="checkbox" name="single_use" value="true" /> Single use (link is spent on first claim)
-            </label>
+            <.bp_checkbox
+              name="single_use"
+              value="true"
+              label="Single use (link is spent on first claim)"
+            />
 
             <p :if={@error} class="shares-error" data-test-id="airdrop-error"><%= @error %></p>
 
@@ -726,6 +728,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <label class="form-label">Color</label>
             <div class="profile-colors">
               <%= for c <- ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316) do %>
+                <%!-- D14 exempt: this radio is display:none behind the custom
+                      color-swatch UI — the browser never paints the control, so
+                      it stays a raw <input> (bp_radio would render a visible
+                      circle). The approved swatch hex literals are D10-exempt. --%>
                 <label class={"profile-color-option #{if c == @user_color, do: "selected"}"}>
                   <input type="radio" name="color" value={c} checked={c == @user_color} style="display:none" />
                   <span class="profile-color-swatch" style={"background: #{c}"}></span>
