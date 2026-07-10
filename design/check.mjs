@@ -778,7 +778,11 @@ const PAIRINGS = [
   { sel: ".pane-item",                             surface: "--surface",        kind: "text",    where: "root.html.heex .pane-item — nav row on .pane-column surface" },
   { sel: ".pane-item",                             surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-item — nav row on the .pane-column--last focus pane" },
   { sel: ".pane-item.selected",                    surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-item.selected — selected-row-on-bg-accent" },
-  { sel: ".pane-item-chevron",                     surface: "--surface",        kind: "nontext", where: "root.html.heex .pane-item-chevron — drill glyph on surface" },
+  // sup-w4: the nav drill chevron is hover-revealed (opacity 0 at rest), so its
+  // REAL visible grounds are the hover fill (--bg-muted) and the selected fill
+  // (--bg-accent) — the old --surface row became a phantom co-occurrence.
+  { sel: ".pane-item-chevron",                     surface: "--bg-muted",       kind: "nontext", where: "root.html.heex .pane-item:hover .pane-item-chevron — revealed glyph on the hover fill" },
+  { sel: ".pane-item-chevron",                     surface: "--bg-accent",      kind: "nontext", where: "root.html.heex .pane-item.selected .pane-item-chevron — revealed glyph on the selected fill" },
   // sup-w4 row-state ladder: plugin-contributed nav rows (e.g. Projects) now paint
   // the SAME --fg-muted plain tier as sibling .pane-item rows (was color:inherit →
   // body --fg, the "Projects outshines its siblings" bug). Gate the fixed color so
