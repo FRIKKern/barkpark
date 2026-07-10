@@ -35,6 +35,8 @@ defmodule Barkpark.Content.Errors do
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
+    "idempotency_key_in_use" =>
+      "Another request with this Idempotency-Key is still in flight — wait for it to finish, then retry to replay its result (or use a fresh key for a distinct operation).",
     "storage_unavailable" =>
       "Media storage could not be written (disk full, read-only mount, or permissions). Retry shortly; if it persists, check the server's media volume.",
     "payload_too_large" =>
@@ -165,6 +167,16 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :conflict}),
     do: %{code: "conflict", message: "document already exists", status: 409}
+
+  # Claim-first idempotency: a concurrent request already holds a fresh claim on
+  # this Idempotency-Key. 409 so the client retries (Stripe-style) — the handler
+  # never runs, so a non-idempotent mutation cannot double-apply.
+  defp build({:error, :idempotency_key_in_use}),
+    do: %{
+      code: "idempotency_key_in_use",
+      message: "a request with this Idempotency-Key is already in progress",
+      status: 409
+    }
 
   # A plugin lifecycle hook (before_save / before_publish) returned
   # {:halt, reason}, vetoing the write. 409 Conflict with the CANONICAL
