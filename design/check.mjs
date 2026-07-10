@@ -754,16 +754,21 @@ function ruleColor(sel) {
 // Curated table — every (fg-site, surface) is a REAL co-occurrence. `where` cites
 // the mirrored CSS rule. NOT a cartesian product.
 const PAIRINGS = [
-  // Pane document rows — the live sub-AA defects this slice fixes at the pairing site.
+  // Pane document rows (sup-w2 desk anatomy: subtitle .pane-doc-sub, hover
+  // fill --bg-muted, selected fill --bg-accent; the rightmost focus pane rides
+  // --surface-raised via .pane-column--last).
   { sel: ".pane-doc-badge",                        surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-badge — pill paints its own --bg-muted fill" },
-  { sel: ".pane-doc-item:hover .pane-doc-id",      surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover row fill" },
-  { sel: ".pane-doc-item:hover .pane-doc-meta",    surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover row fill" },
-  { sel: ".pane-doc-item.selected .pane-doc-id",   surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected row fill" },
-  { sel: ".pane-doc-item.selected .pane-doc-meta", surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected row fill" },
-  { sel: ".pane-doc-id",                           surface: "--surface",        kind: "text",    where: "root.html.heex .pane-doc-id — normal row on .pane-column --bg-card(=surface)" },
-  { sel: ".pane-doc-meta",                         surface: "--surface",        kind: "text",    where: "root.html.heex .pane-doc-meta — normal row on .pane-column surface" },
+  { sel: ".pane-doc-sub",                          surface: "--surface",        kind: "text",    where: "root.html.heex .pane-doc-sub — subtitle on a non-last .pane-column --bg-card(=surface)" },
+  { sel: ".pane-doc-sub",                          surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-doc-sub — subtitle on the .pane-column--last focus pane" },
+  { sel: ".pane-doc-sub",                          surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover row fill" },
+  { sel: ".pane-doc-item.selected .pane-doc-sub",  surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected row fill (escalates to --fg)" },
+  // Pane chrome (headers/counts) — the focus pane ground is --surface-raised.
+  { sel: ".pane-section-header",                   surface: "--surface",        kind: "text",    where: "root.html.heex .pane-section-header — section label on a non-last pane" },
+  { sel: ".pane-column--last .pane-section-header", surface: "--surface-raised", kind: "text",   where: "root.html.heex .pane-column--last .pane-section-header — escalated on the raised focus pane" },
+  { sel: ".pane-header-count",                     surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-header-count — count pill paints its own --bg-muted fill" },
   // Pane navigation items.
   { sel: ".pane-item",                             surface: "--surface",        kind: "text",    where: "root.html.heex .pane-item — nav row on .pane-column surface" },
+  { sel: ".pane-item",                             surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-item — nav row on the .pane-column--last focus pane" },
   { sel: ".pane-item.selected",                    surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-item.selected — selected-row-on-bg-accent" },
   { sel: ".pane-item-chevron",                     surface: "--surface",        kind: "nontext", where: "root.html.heex .pane-item-chevron — drill glyph on surface" },
   // Compact scope chip — surface-raised trigger fill.

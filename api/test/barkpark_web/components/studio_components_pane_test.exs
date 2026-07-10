@@ -276,7 +276,7 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
   end
 
   describe "pane_doc_item/1" do
-    test "renders title, id, and status dot" do
+    test "renders title, subtitle, hover doc-id, and status dot" do
       html =
         render_component(&StudioComponents.pane_doc_item/1, %{
           phx_click: "select",
@@ -285,15 +285,20 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
           title: "Hello World",
           doc_id: "p1",
           status: "published",
-          is_draft: false
+          is_draft: false,
+          meta: "Updated 2h ago"
         })
 
       assert html =~ ~s(class="pane-doc-item)
       assert html =~ ~s(class="pane-doc-title")
-      assert html =~ ~s(class="pane-doc-id")
+      # sup-w2: the second line is a real subtitle (:meta), not a mono doc id.
+      assert html =~ ~s(class="pane-doc-sub")
+      assert html =~ "Updated 2h ago"
+      refute html =~ ~s(class="pane-doc-id")
+      # the raw doc id is demoted to a hover title= tooltip on the row body.
+      assert html =~ ~s(title="p1")
       assert html =~ ~s(class="pane-doc-dot published")
       assert html =~ "Hello World"
-      assert html =~ "p1"
       assert html =~ ~s(phx-click="select")
       assert html =~ ~s(phx-value-pane="1")
       assert html =~ ~s(phx-value-id="p1")

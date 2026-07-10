@@ -69,7 +69,9 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyPaneTest do
     {:ok, _view, html} = live(conn, "/w/#{@ws_slug}/p/#{@proj_slug}/d/#{@dataset}/studio/author")
 
     assert html =~ "No documents yet"
-    assert html =~ "press + to create one"
+    # sup-w2: the empty branch is now the iconed pane_empty component with a
+    # create affordance (the button text only appears in the empty state).
+    assert html =~ "New document"
   end
 
   test "hint disappears once a document exists", %{conn: conn, scope: scope} do

@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   """
   use BarkparkWeb, :live_view
   import Ecto.Query, warn: false
+  import BarkparkWeb.StudioComponents.Controls
 
   alias Barkpark.{Audit, Repo, Scim, Tenancy}
   alias Barkpark.Sso.{Oidc, Saml}
@@ -90,78 +91,95 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="org-admin" style="max-width: 920px; margin: 0 auto; padding: 24px;">
-      <h1>Organization Admin</h1>
-      <p style="color:var(--muted-text);">
+    <div class="org-admin" style="max-width: 920px; margin: 0 auto; padding: 24px; font-family: var(--font);">
+      <h1 class="h1" style="margin-bottom: 4px;">Organization Admin</h1>
+      <p class="text-sm" style="color: var(--fg-muted); margin-top: 0;">
         Configure enterprise SSO and directory sync, and review activity — per organization.
       </p>
 
-      <p :if={@orgs == []}>No organizations yet.</p>
+      <.bp_card :if={@orgs == []}>
+        <p style="margin: 0; color: var(--fg-muted);">No organizations yet.</p>
+      </.bp_card>
 
-      <section
-        :for={o <- @orgs}
-        data-org={o.org.slug}
-        style="border:1px solid var(--border); border-radius:10px; padding:16px; margin:16px 0;"
-      >
-        <h2 style="margin:0 0 8px;">
-          {o.org.name} <span style="color:var(--muted-text); font-size:14px;">/{o.org.slug}</span>
-        </h2>
+      <.bp_card :for={o <- @orgs} data-org={o.org.slug}>
+        <.bp_section_header title={o.org.name}>/{o.org.slug}</.bp_section_header>
 
-        <div style="display:flex; gap:24px; flex-wrap:wrap; font-size:14px;">
-          <div data-panel="sso">
-            <strong>SSO:</strong>
-            <span data-oidc={to_string(o.oidc?)}>OIDC {if o.oidc?, do: "✓", else: "—"}</span>,
-            <span data-saml={to_string(o.saml?)}>SAML {if o.saml?, do: "✓", else: "—"}</span>
+        <div class="org-admin-status">
+          <div class="org-admin-status-group" data-panel="sso">
+            <span class="org-admin-status-label">SSO</span>
+            <span
+              class={"badge #{if o.oidc?, do: "badge-active", else: "badge-muted"}"}
+              data-oidc={to_string(o.oidc?)}
+            >
+              OIDC {if o.oidc?, do: "on", else: "off"}
+            </span>
+            <span
+              class={"badge #{if o.saml?, do: "badge-active", else: "badge-muted"}"}
+              data-saml={to_string(o.saml?)}
+            >
+              SAML {if o.saml?, do: "on", else: "off"}
+            </span>
           </div>
-          <div data-panel="members"><strong>Members:</strong> {o.members}</div>
-          <div data-panel="scim"><strong>SCIM tokens:</strong> {length(o.scim_tokens)}</div>
-          <div data-panel="mfa">
-            <strong>Require MFA:</strong>
-            <span data-require-mfa={to_string(o.org.require_mfa)}>
+
+          <div class="org-admin-status-group" data-panel="members">
+            <span class="org-admin-status-label">Members</span>
+            <span class="badge badge-muted">{o.members}</span>
+          </div>
+
+          <div class="org-admin-status-group" data-panel="scim">
+            <span class="org-admin-status-label">SCIM tokens</span>
+            <span class="badge badge-muted">{length(o.scim_tokens)}</span>
+          </div>
+
+          <div class="org-admin-status-group" data-panel="mfa">
+            <span class="org-admin-status-label">Require MFA</span>
+            <span
+              class={"badge #{if o.org.require_mfa, do: "badge-active", else: "badge-muted"}"}
+              data-require-mfa={to_string(o.org.require_mfa)}
+            >
               {if o.org.require_mfa, do: "on", else: "off"}
             </span>
           </div>
         </div>
 
-        <div style="margin-top:12px;">
+        <div class="org-admin-actions">
           <button
             type="button"
+            class="btn btn-sm"
             phx-click="mint_scim"
             phx-value-org={o.org.id}
             data-mint-scim={o.org.slug}
-            style="font-size:13px; padding:6px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer;"
           >
             Mint SCIM token
           </button>
           <button
             type="button"
+            class="btn btn-sm"
             phx-click="toggle_require_mfa"
             phx-value-org={o.org.id}
             phx-value-to={to_string(not o.org.require_mfa)}
             data-toggle-require-mfa={o.org.slug}
-            style="font-size:13px; padding:6px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer;"
           >
             {if o.org.require_mfa, do: "Stop requiring MFA", else: "Require MFA org-wide"}
           </button>
-          <p
-            :if={@minted[o.org.id]}
-            data-minted-token
-            style="margin-top:8px; font-family:monospace; font-size:12px; background:var(--muted-surface); padding:8px; border-radius:6px;"
-          >
-            Copy this token now — it won't be shown again:<br />{@minted[o.org.id]}
-          </p>
         </div>
-      </section>
 
-      <section aria-label="Audit Log" style="margin-top:24px;">
-        <h2>Recent activity</h2>
-        <p :if={@recent_audit == []}>No activity yet.</p>
-        <ul data-audit-log style="font-family:monospace; font-size:12px;">
+        <p :if={@minted[o.org.id]} data-minted-token class="org-admin-token">
+          Copy this token now — it won't be shown again:<br />{@minted[o.org.id]}
+        </p>
+      </.bp_card>
+
+      <.bp_card aria-labelledby="audit-heading">
+        <.bp_section_header id="audit-heading" title="Recent activity" />
+        <p :if={@recent_audit == []} style="margin: 0; color: var(--fg-muted);">No activity yet.</p>
+        <ul :if={@recent_audit != []} data-audit-log class="org-admin-audit">
           <li :for={e <- @recent_audit}>
-            {e.action} · {e.category} <span style="color:var(--muted-text);">{e.actor_id}</span>
+            <span class="org-admin-audit-action">{e.action}</span>
+            <span class="badge badge-muted">{e.category}</span>
+            <span class="org-admin-audit-actor">{e.actor_id}</span>
           </li>
         </ul>
-      </section>
+      </.bp_card>
     </div>
     """
   end
