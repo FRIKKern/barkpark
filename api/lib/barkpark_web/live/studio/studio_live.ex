@@ -29,6 +29,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   require Logger
 
   alias Barkpark.Access
+  alias Barkpark.Content.CallerContext
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
@@ -132,6 +133,88 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   defp refresh_caps(socket), do: Phoenix.Component.assign(socket, :caps, Caps.derive(socket))
 
+  # Rebuild the grant-derived access state after a grant-set change — the expiry
+  # tick OR a revoke broadcast (ag-liveview-read-liveness). WRITES were already
+  # closed (the Caps gate re-derives per mutating event), but READS leaked: the
+  # row-narrowing `Content.Scope.scope_to_grants` reads `caller_context.grants`,
+  # which `ScopeHelpers.scope_opts(socket)` pulls verbatim from the MOUNT-TIME
+  # `:caller_context` assign — so an expired/revoked grant kept serving its rows
+  # until reconnect. This rebuilds that snapshot from the DB, so the very next
+  # read narrows to the caller's CURRENT active grants.
+  #
+  #   * `load_access_grants` — the `:access_grants` panel list (active-filtered).
+  #   * `refresh_caller_context` — the grant-bearing ctx the READ path consumes.
+  #   * `refresh_caps` — the affordance map + the deny-gate's cached caps.
+  defp refresh_grant_access(socket) do
+    socket
+    |> load_access_grants()
+    |> refresh_caller_context()
+    |> refresh_caps()
+  end
+
+  # Rebuild the grant-bearing `:caller_context` from the DB so the LIVE read path
+  # (scope_opts → CallerContext.from_conn reads `:caller_context` verbatim →
+  # scope_to_grants) narrows to CURRENT active grants, not the mount-time
+  # snapshot. `from_user/2` re-loads active grants in-query (expired / revoked
+  # ones already dropped), so an invalidated grant's rows vanish on the next
+  # read. ONLY a grant-scoped socket carries this ctx; a member / anonymous /
+  # share socket never routes through scope_to_grants, so it is left untouched.
+  defp refresh_caller_context(socket) do
+    case {socket.assigns[:grant_scoped_read], socket.assigns[:current_user]} do
+      {true, %{id: uid}} when is_binary(uid) ->
+        Phoenix.Component.assign(socket, :caller_context, CallerContext.from_user(uid))
+
+      _ ->
+        socket
+    end
+  end
+
+  # Re-run mount-level admission after a grant-set refresh. A grant-SCOPED socket
+  # was admitted at mount ONLY because some active grant admitted the mounted
+  # desk for :read (LiveScope.grant_read_ctx). If, after the refresh, NO active
+  # grant still admits it, the grant that opened this desk is gone (expired or
+  # revoked) — and an invalid grant is a DEAD desk, indistinguishable from no
+  # grant. So we kill it exactly as `LiveScope.deny/1` would have at mount
+  # (redirect to /login). Member / anonymous / share sockets never carry
+  # `:grant_scoped_read`, so this is a no-op for them (never an over-deny).
+  defp enforce_admission(%{assigns: %{grant_scoped_read: true}} = socket) do
+    if grant_admission_holds?(socket) do
+      socket
+    else
+      socket
+      |> put_flash(:error, "Your access grant is no longer valid.")
+      |> redirect(to: "/login")
+    end
+  end
+
+  defp enforce_admission(socket), do: socket
+
+  defp grant_admission_holds?(socket) do
+    ctx = socket.assigns[:caller_context]
+    desk = admission_desk_scope(socket)
+
+    match?(%CallerContext{}, ctx) and is_map(desk) and
+      Enum.any?(ctx.grants, &(Access.admits_desk?(&1, :read, desk) == true))
+  end
+
+  # The mounted desk (workspace/project/dataset granularity) — mirrors
+  # `LiveScope.desk_scope/3`, fed to `Access.admits_desk?/3`. Nil workspace ⇒ nil
+  # (no desk to admit ⇒ admission fails closed).
+  defp admission_desk_scope(socket) do
+    ws = socket.assigns[:current_workspace]
+    proj = socket.assigns[:current_project]
+    dataset = socket.assigns[:dataset]
+
+    if is_map(ws) and is_binary(Map.get(ws, :id)) do
+      %{workspace_id: ws.id}
+      |> put_scope_level(:project_id, is_map(proj) && Map.get(proj, :id))
+      |> put_scope_level(:dataset, dataset)
+    end
+  end
+
+  defp put_scope_level(scope, key, value) when is_binary(value), do: Map.put(scope, key, value)
+  defp put_scope_level(scope, _key, _value), do: scope
+
   @impl true
   def handle_params(params, uri, socket) do
     dataset = params["dataset"] || default_dataset()
@@ -170,17 +253,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
      put_flash(socket, :info, "You've been granted access — check your email to claim it.")}
   end
 
-  # Expiry tick (airdrop-grants): a grant crossed its expiry. Reload active
-  # grants (expired ones drop in-query) + re-derive caps so access DROPS with no
-  # reload; re-arm for the next-soonest expiry.
+  # Expiry tick (airdrop-grants / ag-liveview-read-liveness): a grant crossed its
+  # expiry. Rebuild the grant-derived access state — grants + the read-path
+  # `caller_context` + caps — so both WRITES (caps gate) and READS
+  # (scope_to_grants) drop the expired grant with NO reload; re-arm for the
+  # next-soonest expiry; then re-run admission so a desk that no longer has ANY
+  # covering grant is killed (dead desk = zero rows), not merely narrowed.
   def handle_info(:access_expiry_tick, socket) do
     socket =
       socket
-      |> load_access_grants()
-      |> refresh_caps()
+      |> refresh_grant_access()
       |> schedule_access_expiry()
+      |> enforce_admission()
 
     {:noreply, socket}
+  end
+
+  # Live revoke (ag-liveview-read-liveness): `Access.revoke/2` broadcast
+  # `{:airdrop_revoked}` on this grantee's user topic. Rebuild the grant-derived
+  # access state (the revoked grant drops in-query) so the next read narrows,
+  # then re-run admission — a revoke that removes the desk's only covering grant
+  # kills the socket, exactly like an expiry. There is no re-arm: revoke is
+  # event-driven, not time-driven.
+  def handle_info({:airdrop_revoked}, socket) do
+    {:noreply, socket |> refresh_grant_access() |> enforce_admission()}
   end
 
   def handle_info({:doc_updated, msg}, socket), do: Lifecycle.doc_updated(msg, socket)

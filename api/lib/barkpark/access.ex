@@ -249,6 +249,8 @@ defmodule Barkpark.Access do
             "revoked_at" => iso(revoked_grant.revoked_at)
           })
 
+          broadcast_revoked(revoked_grant)
+
           {:ok, revoked_grant}
         end
     end
@@ -540,6 +542,27 @@ defmodule Barkpark.Access do
   defp actor_fields(%User{id: id}), do: {"user", id}
   defp actor_fields(%ApiToken{id: id}), do: {"token", id}
   defp actor_fields(_), do: {nil, nil}
+
+  # LIVE revoke signal (ag-liveview-read-liveness). A grantee sitting in a
+  # mounted Studio desk holds a MOUNT-TIME grant snapshot in its socket assigns
+  # (`:access_grants` + the grant-bearing `:caller_context`) — the read
+  # row-narrowing (`Content.Scope.scope_to_grants`) reads that snapshot, so a
+  # revoke would keep serving granted rows until the socket reconnected. Mirror
+  # the mint-time `{:airdrop_granted}` push (`handlers/airdrop.ex`) with a
+  # grantee-addressed `{:airdrop_revoked}` on the grantee's OWN user topic;
+  # `StudioLive` handles it by reloading grants + rebuilding `caller_context` +
+  # re-deriving caps, then re-running admission (a now-uncovered desk is killed).
+  #
+  # Only a CLAIMED grant has a bound `grantee_user_id` (an unclaimed grant has no
+  # live socket to signal). Side-record only: broadcast to a local PubSub cannot
+  # raise, but it is offered AFTER `Repo.update` succeeds and its result is
+  # ignored, so it can never affect the revoke outcome.
+  defp broadcast_revoked(%Grant{grantee_user_id: uid}) when is_binary(uid) do
+    Phoenix.PubSub.broadcast(Barkpark.PubSub, "user:#{uid}", {:airdrop_revoked})
+    :ok
+  end
+
+  defp broadcast_revoked(_grant), do: :ok
 
   # Audit metadata is a jsonb map hashed into the tamper-evident chain, whose
   # canonicaliser accepts only plain scalars/lists/maps — never a struct. So a

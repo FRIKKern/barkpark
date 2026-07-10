@@ -290,6 +290,40 @@ defmodule Barkpark.AccessEnforcementTest do
       assert Auth.authorize(ctx, ws.id, :read) == :ok
       assert titles(grant_read("post", ws, ctx)) == ["secret"]
     end
+
+    # Defense-in-depth for the LIVE read path (ag-liveview-read-liveness). The
+    # Studio socket feeds `scope_to_grants` a caller_context SNAPSHOT. If a
+    # refresh path is ever missed, an expired grant could linger in that snapshot
+    # — so `covers_workspace_read?` re-applies the expiry time-compare on the
+    # grant STRUCT. Here we bypass the in-query active filter by passing the
+    # expired grant EXPLICITLY in `grants:`; the read-union must STILL exclude it
+    # (zero rows) purely on the struct-level expiry compare.
+    test "an expired grant in a STALE snapshot is still excluded by the struct compare" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantee = grantee_user()
+      {:ok, _doc} = create_document_in!(ws, proj, "post", %{"title" => "secret"}, @dataset)
+
+      past = DateTime.add(DateTime.utc_now(), -3600, :second)
+      expired = bind_grant!(ws, grantee, %{capabilities: ["read"], expires_at: past})
+
+      # A stale context that STILL carries the expired grant (as if a refresh was
+      # missed) — `from_user` would have dropped it, so we inject it directly.
+      stale_ctx = %CallerContext{
+        principal_type: :user,
+        user_id: grantee.id,
+        grants: [expired]
+      }
+
+      assert grant_read("post", ws, stale_ctx) == []
+
+      # Non-vacuous control: the SAME grant, unexpired, in the same stale-shaped
+      # context DOES serve — proving the struct compare (not some other clause)
+      # is what excludes the expired one.
+      live_grant = %{expired | expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)}
+      live_ctx = %{stale_ctx | grants: [live_grant]}
+      assert titles(grant_read("post", ws, live_ctx)) == ["secret"]
+    end
   end
 
   # ---------------------------------------------------------------------------
