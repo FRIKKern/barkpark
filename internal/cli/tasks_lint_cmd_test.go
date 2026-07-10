@@ -94,11 +94,19 @@ func TestAreaLintAdvisoryExit(t *testing.T) {
 		t.Errorf("renderAreaLintTable with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
 	}
 
+	filesFindings, _ := filesLintFindings(lintFixture())
 	var jo, je bytes.Buffer
 	jw := newWriter(&jo, &je)
 	jw.output = "json"
-	if code := emitAreaLintJSON(jw, findings, readyLeaves); code != exitOK {
-		t.Errorf("emitAreaLintJSON with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
+	if code := emitLintJSON(jw, findings, filesFindings, readyLeaves); code != exitOK {
+		t.Errorf("emitLintJSON with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
+	}
+
+	var fo, fe bytes.Buffer
+	fw := newWriter(&fo, &fe)
+	fw.color = false
+	if code := renderFilesLintTable(fw, filesFindings, readyLeaves); code != exitOK {
+		t.Errorf("renderFilesLintTable with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
 	}
 }
 
@@ -146,18 +154,24 @@ func TestEmitAreaLintJSON(t *testing.T) {
 	var so, se bytes.Buffer
 	w := newWriter(&so, &se)
 	w.output = "json"
-	emitAreaLintJSON(w, findings, readyLeaves)
+	filesFindings, _ := filesLintFindings(lintFixture())
+	emitLintJSON(w, findings, filesFindings, readyLeaves)
 
 	var payload struct {
 		OK          bool `json:"ok"`
 		Advisory    bool `json:"advisory"`
 		ReadyLeaves int  `json:"ready_leaves"`
 		AreaLess    int  `json:"area_less"`
+		FilesLess   int  `json:"files_less"`
 		Findings    []struct {
 			ID        string `json:"id"`
 			Title     string `json:"title"`
 			Suggested string `json:"suggested_area"`
 		} `json:"findings"`
+		FilesFindings []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"files_findings"`
 	}
 	if err := json.Unmarshal(so.Bytes(), &payload); err != nil {
 		t.Fatalf("json unmarshal: %v\n%s", err, so.String())
@@ -167,6 +181,14 @@ func TestEmitAreaLintJSON(t *testing.T) {
 	}
 	if payload.ReadyLeaves != 3 || payload.AreaLess != 2 {
 		t.Errorf("ready_leaves/area_less = %d/%d, want 3/2", payload.ReadyLeaves, payload.AreaLess)
+	}
+	// files_less sits beside area_less. In the fixture NO leaf carries a files:
+	// label, so all 3 ready leaves are files-less.
+	if payload.FilesLess != 3 {
+		t.Errorf("files_less = %d, want 3 (no fixture leaf declares files:)", payload.FilesLess)
+	}
+	if len(payload.FilesFindings) != 3 {
+		t.Fatalf("files_findings = %d, want 3", len(payload.FilesFindings))
 	}
 	if len(payload.Findings) != 2 {
 		t.Fatalf("findings = %d, want 2", len(payload.Findings))
@@ -180,5 +202,110 @@ func TestEmitAreaLintJSON(t *testing.T) {
 	}
 	if s, ok := byID["leaf-child"]; !ok || s != "" {
 		t.Errorf("leaf-child suggested_area = %q (present=%v), want empty", s, ok)
+	}
+}
+
+// filesFixture exercises the files: nudge branches:
+//   - epic-goal:    a ready PARENT — EXCLUDED (not a leaf)
+//   - naked-leaf:   ready leaf, no files: label — FLAGGED
+//   - scoped-leaf:  ready leaf carrying an authored files: label — NOT flagged
+//   - dir-leaf:     ready leaf carrying a trailing-slash directory files: label — NOT flagged
+//   - done-leaf:    a leaf that is not ready — EXCLUDED (not workable)
+func filesFixture() taskboard.Snapshot {
+	return taskboard.Snapshot{
+		Tasks: []taskboard.Task{
+			{DocID: "drafts.epic-goal", Title: "big epic", Lifecycle: "ready"},
+			{DocID: "drafts.naked-leaf", Title: "files-less child", Lifecycle: "ready", ParentID: "epic-goal"},
+			{DocID: "drafts.scoped-leaf", Title: "scoped", Lifecycle: "ready", Labels: []string{"area:cli", "files:internal/cli/x.go"}},
+			{DocID: "drafts.dir-leaf", Title: "dir scoped", Lifecycle: "ready", Labels: []string{"files:internal/taskboard/"}},
+			{DocID: "drafts.done-leaf", Title: "finished", Lifecycle: "done"},
+		},
+	}
+}
+
+// TestFilesLintFindings is the deny-path proof: a KNOWN files-less leaf IS caught,
+// while a leaf that declared files: (path or trailing-slash directory) is silent.
+// A nudge that never fires on a real gap would be vacuous.
+func TestFilesLintFindings(t *testing.T) {
+	findings, readyLeaves := filesLintFindings(filesFixture())
+
+	// naked-leaf, scoped-leaf, dir-leaf are ready leaves; epic (parent) + done are not.
+	if readyLeaves != 3 {
+		t.Fatalf("readyLeaves = %d, want 3", readyLeaves)
+	}
+
+	got := map[string]bool{}
+	for _, f := range findings {
+		got[f.ID] = true
+	}
+
+	// (a) the files-less leaf IS flagged — the known-collision deny path.
+	if !got["naked-leaf"] {
+		t.Errorf("files-less ready leaf not flagged; findings=%v", got)
+	}
+	// (b) a leaf with an authored files:<path> label is silent.
+	if got["scoped-leaf"] {
+		t.Errorf("files-scoped leaf must not be flagged; findings=%v", got)
+	}
+	// (c) a trailing-slash directory files: label also counts as declared.
+	if got["dir-leaf"] {
+		t.Errorf("files-dir leaf must not be flagged; findings=%v", got)
+	}
+	// (d) parent + non-ready excluded.
+	if got["epic-goal"] || got["done-leaf"] {
+		t.Errorf("parent/done leaves must not be flagged; findings=%v", got)
+	}
+
+	if len(findings) != 1 {
+		t.Fatalf("findings = %d, want 1 (naked-leaf only)", len(findings))
+	}
+	if findings[0].ID != "naked-leaf" {
+		t.Errorf("finding ID = %q, want naked-leaf", findings[0].ID)
+	}
+}
+
+// TestFilesLintSilentWhenAllScoped — when every ready leaf declares files:, the
+// nudge is fully silent and the clean table confirms it, exit 0.
+func TestFilesLintSilentWhenAllScoped(t *testing.T) {
+	snap := taskboard.Snapshot{Tasks: []taskboard.Task{
+		{DocID: "drafts.a", Title: "scoped", Lifecycle: "ready", Labels: []string{"files:internal/cli/a.go"}},
+	}}
+	findings, readyLeaves := filesLintFindings(snap)
+	if len(findings) != 0 {
+		t.Fatalf("findings = %d, want 0 (all leaves declare files:)", len(findings))
+	}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.color = false
+	if code := renderFilesLintTable(w, findings, readyLeaves); code != exitOK {
+		t.Errorf("clean files table exit = %d, want exitOK", code)
+	}
+	if !strings.Contains(so.String(), "every workable leaf declares a files:") {
+		t.Errorf("clean files table should confirm all scoped, got:\n%s", so.String())
+	}
+}
+
+// TestRenderFilesLintTable — the nudge lists the files-less leaf and the exact
+// suggested syntax (files:<repo-relative-path>), and exits OK despite findings.
+func TestRenderFilesLintTable(t *testing.T) {
+	findings, readyLeaves := filesLintFindings(filesFixture())
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.color = false
+	if code := renderFilesLintTable(w, findings, readyLeaves); code != exitOK {
+		t.Errorf("files table with findings exit = %d, want exitOK — nudge never gates", code)
+	}
+	got := so.String()
+	for _, want := range []string{
+		"LINT · 1 of 3 ready leaves carry no files: label",
+		"advisory",
+		"naked-leaf",
+		"files-less child",
+		"files:<repo-relative-path>",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("files table missing %q\n---\n%s", want, got)
+		}
 	}
 }

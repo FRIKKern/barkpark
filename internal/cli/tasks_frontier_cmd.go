@@ -73,10 +73,16 @@ func runTaskFrontier(out *writer, g globals, ctx manifest.Context, tail []string
 	capacity := len(full)
 	proven, unproven := frontierTally(full)
 
+	// The claimed-collision report (df-file-edge): of the tasks ALREADY in flight,
+	// which two share a declared surface? Surfaced HERE, not at merge time.
+	overlaps := taskboard.ClaimOverlaps(board.Now)
+
 	if out.machineOut() {
-		return emitFrontierJSON(out, picks, capacity, proven, unproven)
+		return emitFrontierJSON(out, picks, capacity, proven, unproven, overlaps)
 	}
-	return renderFrontierTable(out, picks, capacity, proven, unproven, opts)
+	rc := renderFrontierTable(out, picks, capacity, proven, unproven, opts)
+	renderOverlaps(out, overlaps)
+	return rc
 }
 
 // parseFrontierFlags reads the command-local flags out of tail: --max N (cap
@@ -175,6 +181,8 @@ func frontierTally(picks []taskboard.Pick) (proven, unproven int) {
 // riskTag renders a compact risk label for the table's [risk] column.
 func riskTag(p taskboard.Pick) string {
 	switch p.Risk {
+	case taskboard.RiskFileIsolated:
+		return "file-iso"
 	case taskboard.RiskIsolated:
 		return "isolated"
 	case taskboard.RiskNeighborhood:
@@ -269,6 +277,38 @@ func renderFrontierTable(out *writer, picks []taskboard.Pick, capacity, proven, 
 	return exitOK
 }
 
+// renderOverlaps prints the OVERLAP section: the in_progress claims whose
+// declared blast radii already collide (df-file-edge). Silent when none — a
+// clean claim set prints nothing, so the section only ever signals real trouble.
+func renderOverlaps(out *writer, overlaps []taskboard.OverlapPair) {
+	if len(overlaps) == 0 {
+		return
+	}
+	out.outf("")
+	out.outf("OVERLAP · %d claimed pair(s) share a surface — resolve before merge:", len(overlaps))
+	for _, o := range overlaps {
+		aw := o.AWorker
+		if aw == "" {
+			aw = "?"
+		}
+		bw := o.BWorker
+		if bw == "" {
+			bw = "?"
+		}
+		out.outf("  ⚠ %s (%s) ⋈ %s (%s) — %s %s", o.AID, aw, o.BID, bw, o.Kind, o.Shared)
+	}
+}
+
+// frontierOverlapJSON is the machine-readable shape of one claimed collision.
+type frontierOverlapJSON struct {
+	A       string `json:"a"`
+	B       string `json:"b"`
+	AWorker string `json:"a_worker"`
+	BWorker string `json:"b_worker"`
+	Kind    string `json:"kind"`
+	Shared  string `json:"shared"`
+}
+
 // frontierPickJSON is the machine-readable shape of one pick. conflicts_with is
 // the blast-radius cost (the candidates this pick displaced).
 type frontierPickJSON struct {
@@ -291,7 +331,7 @@ type frontierConflict struct {
 	Reason string `json:"reason"`
 }
 
-func emitFrontierJSON(out *writer, picks []taskboard.Pick, capacity, proven, unproven int) int {
+func emitFrontierJSON(out *writer, picks []taskboard.Pick, capacity, proven, unproven int, overlaps []taskboard.OverlapPair) int {
 	rows := make([]frontierPickJSON, 0, len(picks))
 	for _, p := range picks {
 		conf := make([]frontierConflict, 0, len(p.Displaced))
@@ -322,12 +362,24 @@ func emitFrontierJSON(out *writer, picks []taskboard.Pick, capacity, proven, unp
 			ConflictsWith:   conf,
 		})
 	}
+	orows := make([]frontierOverlapJSON, 0, len(overlaps))
+	for _, o := range overlaps {
+		orows = append(orows, frontierOverlapJSON{
+			A:       o.AID,
+			B:       o.BID,
+			AWorker: o.AWorker,
+			BWorker: o.BWorker,
+			Kind:    o.Kind,
+			Shared:  o.Shared,
+		})
+	}
 	payload := map[string]any{
 		"ok":          true,
 		"independent": capacity,
 		"proven":      proven,
 		"unproven":    unproven,
 		"picks":       rows,
+		"overlaps":    orows,
 	}
 	if out.output == "yaml" {
 		out.renderYAML(payload)
@@ -348,9 +400,13 @@ func printTaskFrontierHelp(out *writer) {
 	out.outf("")
 	out.outf("Every pick carries a dominant reason, its neighborhood key, its area set")
 	out.outf("(a \"~\" marks a surface DERIVED from a phase band, not authored), and a risk")
-	out.outf("class: isolated (area-proven disjoint), nbhd (sole rep of its epic),")
-	out.outf("unproven (a metadata-thin stranger, independent by assumption), or SOLO (a")
-	out.outf("broad epic that should run alone).")
+	out.outf("class: file-iso (files: blast radius declared and path-disjoint — the")
+	out.outf("strongest proof), isolated (area-proven disjoint), nbhd (sole rep of its")
+	out.outf("epic), unproven (a metadata-thin stranger, independent by assumption), or")
+	out.outf("SOLO (a broad epic that should run alone).")
+	out.outf("")
+	out.outf("An OVERLAP section follows when two ALREADY-CLAIMED tasks share a declared")
+	out.outf("surface — a collision to resolve before merge, not discover at merge time.")
 	out.outf("")
 	out.outf("flags:")
 	out.outf("  --max N         cap the emitted picks (0 / omitted = the full capacity)")

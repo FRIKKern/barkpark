@@ -121,7 +121,7 @@ func TestEmitFrontierJSON(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	w.output = "json"
 	picks := samplePicks()
-	emitFrontierJSON(w, picks, 15, 1, 14)
+	emitFrontierJSON(w, picks, 15, 1, 14, nil)
 
 	var payload struct {
 		OK          bool `json:"ok"`
@@ -229,5 +229,62 @@ func TestFetchCrossEdgesFetchesAndFolds(t *testing.T) {
 	}
 	if edges == nil || len(edges["a"]) != 1 || edges["a"][0] != "b" {
 		t.Fatalf("folded edges = %+v, want a→[b]", edges)
+	}
+}
+
+// TestRenderOverlaps — the OVERLAP section prints each claimed collision with
+// both workers and the shared surface, and prints NOTHING when the claim set is
+// clean.
+func TestRenderOverlaps(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.color = false
+	overlaps := []taskboard.OverlapPair{
+		{AID: "a", BID: "b", AWorker: "w1", BWorker: "w2", Kind: "files", Shared: "internal/cli/onramp_cmd.go"},
+	}
+	renderOverlaps(w, overlaps)
+	got := stdout.String()
+	for _, want := range []string{"OVERLAP", "1 claimed pair", "internal/cli/onramp_cmd.go", "w1", "w2", "files"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("overlap output missing %q\n---\n%s", want, got)
+		}
+	}
+	// silent when none
+	stdout.Reset()
+	renderOverlaps(w, nil)
+	if stdout.String() != "" {
+		t.Errorf("no overlaps should render nothing, got %q", stdout.String())
+	}
+}
+
+// TestEmitFrontierJSONOverlaps — the JSON payload carries the overlaps array.
+func TestEmitFrontierJSONOverlaps(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	overlaps := []taskboard.OverlapPair{
+		{AID: "a", BID: "b", AWorker: "w1", BWorker: "w2", Kind: "files", Shared: "internal/cli/onramp_cmd.go"},
+	}
+	emitFrontierJSON(w, nil, 0, 0, 0, overlaps)
+
+	var payload struct {
+		Overlaps []struct {
+			A       string `json:"a"`
+			B       string `json:"b"`
+			AWorker string `json:"a_worker"`
+			BWorker string `json:"b_worker"`
+			Kind    string `json:"kind"`
+			Shared  string `json:"shared"`
+		} `json:"overlaps"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("json unmarshal: %v\n%s", err, stdout.String())
+	}
+	if len(payload.Overlaps) != 1 {
+		t.Fatalf("overlaps = %d, want 1", len(payload.Overlaps))
+	}
+	o := payload.Overlaps[0]
+	if o.A != "a" || o.B != "b" || o.Kind != "files" || o.Shared != "internal/cli/onramp_cmd.go" || o.AWorker != "w1" || o.BWorker != "w2" {
+		t.Errorf("overlap = %+v", o)
 	}
 }
