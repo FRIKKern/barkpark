@@ -320,10 +320,10 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
           </div>
         </div>
 
-        <%!-- Checkbox + switch --%>
+        <%!-- Checkbox + radio + switch --%>
         <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
           <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
-            Toggles · .form-checkbox / .form-switch
+            Toggles · .form-checkbox / .form-radio / .form-switch
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start;">
             <div style="display: flex; flex-direction: column; gap: 10px;">
@@ -334,6 +334,17 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
                 <input type="checkbox" /> Unchecked
               </label>
               <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-checkbox</span>
+            </div>
+            <%!-- Radio — the .form-radio primitive the bp_radio kit component
+                  wraps; one-of-N choice, checked + unchecked, tokenized accent. --%>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <label class="form-radio">
+                <input type="radio" name="sg-radio" checked /> Selected
+              </label>
+              <label class="form-radio">
+                <input type="radio" name="sg-radio" /> Unselected
+              </label>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-radio · bp_radio</span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
               <label class="form-switch">

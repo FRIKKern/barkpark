@@ -144,6 +144,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
   alias BarkparkWeb.Studio.TokensGen
 
+  # The tokenized Studio control kit (studio-ui-premium): every popover/toolbar
+  # form control below rides `bp_select`/`bp_input`/`bp_checkbox` so the sheet
+  # editor carries ZERO native/unthemed controls. name=/data-test-id/aria-* pass
+  # through the kit's :rest (Phoenix globals) onto the real element, so LiveView
+  # form serialization and the pinning tests are unchanged.
+  import BarkparkWeb.StudioComponents.Controls
+
   # Paste preflight bound: a fat-finger whole-column paste (Excel ships up to
   # 1M rows) is refused whole rather than ground through 1000s of serial session
   # calls. Mirrors the client PASTE_CELL_CAP and the session's 50k cell_cap.
@@ -2389,7 +2396,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # Inline position for the right-click context menu. x/y are viewport coords
   # (position:fixed); the JS hook re-clamps against the real menu rect on open.
-  defp cell_menu_style({:cell, x, y}), do: "position: fixed; left: #{x}px; top: #{y}px; z-index: 20;"
+  defp cell_menu_style({:cell, x, y}),
+    do: "position: fixed; left: #{x}px; top: #{y}px; z-index: 20;"
+
   defp cell_menu_style(_), do: nil
 
   # The presence overlay — absolutely positioned boxes inside .sheet-scroll,
@@ -2591,14 +2600,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               select) that splits the selected single column on a fixed delimiter
               into the adjacent columns, all-or-nothing. --%>
         <form phx-change="text-to-columns" phx-target={@myself} class="sheet-split-group">
-          <select name="delim" class="sheet-split-select" aria-label="Split text to columns" data-test-id="sheet-split-select">
-            <option value="">Split…</option>
-            <option value="comma">Comma</option>
-            <option value="semicolon">Semicolon</option>
-            <option value="space">Space</option>
-            <option value="colon">Colon</option>
-            <option value="pipe">Pipe</option>
-          </select>
+          <.bp_select
+            name="delim"
+            value=""
+            options={[
+              {"", "Split…"},
+              {"comma", "Comma"},
+              {"semicolon", "Semicolon"},
+              {"space", "Space"},
+              {"colon", "Colon"},
+              {"pipe", "Pipe"}
+            ]}
+            aria-label="Split text to columns"
+            data-test-id="sheet-split-select"
+          />
         </form>
 
         <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select).
@@ -2611,13 +2626,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title="Percent (25.00%)" data-test-id="sheet-fmt-percent">%</button>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title="Thousands separator (1,234)" data-test-id="sheet-fmt-thousands">,</button>
           <form phx-change="set-fmt" phx-target={@myself}>
-            <select name="fmt" class="sheet-fmt-select" aria-label="Number format class" data-test-id="sheet-fmt-select">
-              <option value="" selected={is_nil(@active_fmt)}>General</option>
-              <option value="fixed" selected={@active_fmt == "fixed"}>Fixed</option>
-              <option value="date" selected={@active_fmt == "date"}>Date</option>
-              <option value="datetime" selected={@active_fmt == "datetime"}>Datetime</option>
-              <option value="checkbox" selected={@active_fmt == "checkbox"}>Checkbox</option>
-            </select>
+            <.bp_select
+              name="fmt"
+              value={@active_fmt}
+              options={[
+                {"", "General"},
+                {"fixed", "Fixed"},
+                {"date", "Date"},
+                {"datetime", "Datetime"},
+                {"checkbox", "Checkbox"}
+              ]}
+              aria-label="Number format class"
+              data-test-id="sheet-fmt-select"
+            />
           </form>
         </div>
 
@@ -2694,29 +2715,58 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <input type="hidden" name="editing" value={@cf_panel["editing"]} />
               <label class="sheet-cf-field">
                 <span>Apply to range</span>
-                <input type="text" name="range" value={@cf_panel["range"]} autocomplete="off" spellcheck="false" placeholder="B2:B10" data-test-id="sheet-cf-range" />
+                <.bp_input
+                  name="range"
+                  value={@cf_panel["range"]}
+                  placeholder="B2:B10"
+                  autocomplete="off"
+                  spellcheck="false"
+                  data-test-id="sheet-cf-range"
+                />
               </label>
               <label class="sheet-cf-field">
                 <span>Format cells where the value</span>
-                <select name="op" data-test-id="sheet-cf-op">
-                  <option value="gt" selected={@cf_panel["op"] == "gt"}>is greater than</option>
-                  <option value="lt" selected={@cf_panel["op"] == "lt"}>is less than</option>
-                  <option value="eq" selected={@cf_panel["op"] == "eq"}>is equal to</option>
-                  <option value="between" selected={@cf_panel["op"] == "between"}>is between</option>
-                  <option value="contains" selected={@cf_panel["op"] == "contains"}>contains</option>
-                </select>
+                <.bp_select
+                  name="op"
+                  value={@cf_panel["op"]}
+                  options={[
+                    {"gt", "is greater than"},
+                    {"lt", "is less than"},
+                    {"eq", "is equal to"},
+                    {"between", "is between"},
+                    {"contains", "contains"}
+                  ]}
+                  data-test-id="sheet-cf-op"
+                />
               </label>
               <label class="sheet-cf-field">
                 <span><%= if @cf_panel["op"] == "between", do: "min", else: "value" %></span>
-                <input type="text" name="value" value={@cf_panel["value"]} autocomplete="off" spellcheck="false" data-test-id="sheet-cf-value" />
+                <.bp_input
+                  name="value"
+                  value={@cf_panel["value"]}
+                  autocomplete="off"
+                  spellcheck="false"
+                  data-test-id="sheet-cf-value"
+                />
               </label>
               <label :if={@cf_panel["op"] == "between"} class="sheet-cf-field">
                 <span>max</span>
-                <input type="text" name="value2" value={@cf_panel["value2"]} autocomplete="off" spellcheck="false" data-test-id="sheet-cf-value2" />
+                <.bp_input
+                  name="value2"
+                  value={@cf_panel["value2"]}
+                  autocomplete="off"
+                  spellcheck="false"
+                  data-test-id="sheet-cf-value2"
+                />
               </label>
               <div class="sheet-cf-field">
                 <span>Background</span>
                 <span class="sheet-bg-swatches" role="radiogroup" aria-label="Rule background color">
+                  <%!-- KIT-EXEMPT (charter D14): these radios are `.sr-only` —
+                        the browser never paints them; the visible affordance is
+                        the custom `.sheet-bg-swatch` square with a selection ring.
+                        A themed control would be invisible here, so they stay
+                        native. --%>
                   <label :for={swatch <- TokensGen.sheet_cf_backgrounds()} class="sheet-cf-swatch-opt" title={"Background " <> swatch}>
                     <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" />
                     <span class="sheet-bg-swatch" style={"background: #{swatch};"} data-test-id={"sheet-cf-bg-" <> String.trim_leading(swatch, "#")} data-selected={to_string(@cf_panel["bg"] == swatch)}></span>
@@ -2724,8 +2774,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 </span>
               </div>
               <div class="sheet-cf-field sheet-cf-flags">
-                <label><input type="checkbox" name="b" checked={@cf_panel["b"]} data-test-id="sheet-cf-bold" /> Bold</label>
-                <label><input type="checkbox" name="i" checked={@cf_panel["i"]} data-test-id="sheet-cf-italic" /> Italic</label>
+                <.bp_checkbox name="b" label="Bold" checked={@cf_panel["b"]} data-test-id="sheet-cf-bold" />
+                <.bp_checkbox name="i" label="Italic" checked={@cf_panel["i"]} data-test-id="sheet-cf-italic" />
               </div>
               <div class="sheet-cf-actions">
                 <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-cf-submit"><%= if @cf_panel["editing"] in [nil, ""], do: "Add rule", else: "Save rule" %></button>
@@ -3268,23 +3318,42 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 <input type="hidden" name="col" value={c} />
                 <label class="sheet-filter-field">
                   <span>Show rows where</span>
-                  <select name="op" data-test-id="sheet-filter-op">
-                    <option value="nonblank" selected={@filter_panel["op"] == "nonblank"}>is not empty</option>
-                    <option value="blank" selected={@filter_panel["op"] == "blank"}>is empty</option>
-                    <option value="eq" selected={@filter_panel["op"] == "eq"}>is equal to</option>
-                    <option value="gt" selected={@filter_panel["op"] == "gt"}>is greater than</option>
-                    <option value="lt" selected={@filter_panel["op"] == "lt"}>is less than</option>
-                    <option value="between" selected={@filter_panel["op"] == "between"}>is between</option>
-                    <option value="contains" selected={@filter_panel["op"] == "contains"}>contains</option>
-                  </select>
+                  <.bp_select
+                    name="op"
+                    value={@filter_panel["op"]}
+                    options={[
+                      {"nonblank", "is not empty"},
+                      {"blank", "is empty"},
+                      {"eq", "is equal to"},
+                      {"gt", "is greater than"},
+                      {"lt", "is less than"},
+                      {"between", "is between"},
+                      {"contains", "contains"}
+                    ]}
+                    data-test-id="sheet-filter-op"
+                  />
                 </label>
                 <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
                   <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
-                  <input type="text" name="value" value={@filter_panel["value"]} inputmode={if @filter_panel["op"] in ["gt", "lt", "between"], do: "decimal"} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value" />
+                  <.bp_input
+                    name="value"
+                    value={@filter_panel["value"]}
+                    inputmode={if @filter_panel["op"] in ["gt", "lt", "between"], do: "decimal"}
+                    autocomplete="off"
+                    spellcheck="false"
+                    data-test-id="sheet-filter-value"
+                  />
                 </label>
                 <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
                   <span>max</span>
-                  <input type="text" name="value2" value={@filter_panel["value2"]} inputmode="decimal" autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value2" />
+                  <.bp_input
+                    name="value2"
+                    value={@filter_panel["value2"]}
+                    inputmode="decimal"
+                    autocomplete="off"
+                    spellcheck="false"
+                    data-test-id="sheet-filter-value2"
+                  />
                 </label>
                 <%!-- A vacuous criterion (no number / no value) is refused with
                       the reason inline — applying it would silently hide every

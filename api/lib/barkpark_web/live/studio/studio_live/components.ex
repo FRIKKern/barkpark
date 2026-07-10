@@ -561,9 +561,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <% num_panes = length(@panes) %>
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
         <% collapsed = PaneBuilder.collapse?(idx, num_panes, has_editor) %>
+        <% doc_count = Enum.count(pane.items, &(&1.type == :doc)) %>
         <.pane_column
           id={"pane-#{pane.title |> String.downcase() |> String.replace(~r/[^a-z0-9]/, "-")}"}
           title={pane.title}
+          count={doc_count}
+          last={idx == num_panes - 1 and not has_editor}
           collapsed={collapsed}
           marker_class={if pane[:type_name], do: "bp-doc-list", else: nil}
           phx_click={if collapsed, do: "expand-pane", else: nil}
@@ -610,9 +613,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
           <div class="pane-body">
             <%= if pane.items == [] and pane[:type_name] != nil do %>
-              <div class="text-sm text-muted" style="padding: 20px; text-align: center;">
-                No documents yet — press + to create one
-              </div>
+              <.pane_empty message="No documents yet">
+                <:icon><.icon name={pane[:icon] || "file"} size={32} /></:icon>
+                <button
+                  class="btn btn-primary btn-sm"
+                  phx-click="new-document"
+                  phx-value-type={pane.type_name}
+                >
+                  <.icon name="plus" size={14} /> New document
+                </button>
+              </.pane_empty>
             <% end %>
             <%!-- Presence hoist: scan the presence list ONCE per pane (filter by
                   dataset, group by doc_id) instead of re-running PresenceState.on_doc/3
@@ -666,7 +676,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     status={item.status || ""}
                     is_draft={item.is_draft}
                     badge={item[:badge]}
-                    meta={item[:meta]}
+                    meta={item[:meta] || item[:updated]}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}

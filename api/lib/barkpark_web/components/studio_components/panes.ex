@@ -51,6 +51,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   attr :phx_click, :string, default: nil
   attr :phx_value_idx, :string, default: nil
   attr :id, :string, default: nil
+  # Optional dimmed item count shown next to the title (e.g. a doc-list pane's
+  # document count). nil or 0 → no count chip. Callers pass the already-filtered
+  # count (only :doc items) so :divider/:header/:plugin_link never inflate it.
+  attr :count, :integer, default: nil
   # Optional extra class appended to the (non-collapsed) column wrapper —
   # used by callers to mark structurally-significant panes (e.g.
   # `bp-doc-list` on the document-list pane so Beta focus mode can hide it
@@ -102,7 +106,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         style={@flex && "flex: #{@flex}; width: auto; min-width: 0;"}
       >
         <div class="pane-header">
-          <span class="pane-header-title"><%= @title %></span>
+          <span class="pane-header-titlewrap">
+            <span class="pane-header-title"><%= @title %></span>
+            <span :if={@count && @count > 0} class="pane-header-count"><%= @count %></span>
+          </span>
           <%= if @header_actions != [] do %>
             <div class="pane-header-actions"><%= render_slot(@header_actions) %></div>
           <% end %>
@@ -159,13 +166,19 @@ defmodule BarkparkWeb.StudioComponents.Panes do
 
   @doc """
   Placeholder rendered when there's nothing to show in a pane column.
+
+  Optional `:icon` slot renders a dimmed type glyph above the message (the
+  caller passes `<.icon>` so this module stays icon-authority-free); the
+  `:inner_block` holds the create affordance (e.g. a `+ New` button).
   """
   attr :message, :string, required: true
+  slot :icon
   slot :inner_block
 
   def pane_empty(assigns) do
     ~H"""
     <div class="empty-state">
+      <div :if={@icon != []} class="empty-state-icon"><%= render_slot(@icon) %></div>
       <div class="empty-state-text"><%= @message %></div>
       <%= render_slot(@inner_block) %>
     </div>
@@ -281,8 +294,11 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   @doc """
   Rich row for a document inside a pane's doc list.
 
-  Two visual lines: title with leading status dot, below it the doc id
-  in mono font. Optional trailing slot for inline content (e.g. presence
+  Two visual lines: title with leading status dot, below it a real subtitle
+  (`:meta` — a declared/manifest summary or a humanized "updated" time). The
+  published doc id is demoted to a hover `title=` tooltip on the row (it is
+  machine metadata, not a subtitle). A hover-revealed drill chevron sits at
+  the trailing edge. Optional trailing slot for inline content (e.g. presence
   dots). `is_draft: true` overrides the status dot's class to `"draft"`
   regardless of the `status` string.
 
@@ -304,9 +320,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
                           value-derived modifier class). nil → no markup.
                           Fed by the schema's `list_preview` declaration
                           via PaneBuilder — generic for every doc type.
-    * `:meta`           — optional string; renders as a dimmed
-                          `.pane-doc-meta` suffix right after the title.
-                          nil → no markup.
+    * `:meta`           — optional string; renders as the `.pane-doc-sub`
+                          subtitle line under the title (a declared/manifest
+                          summary, or a humanized updated-at fallback supplied
+                          by PaneBuilder). nil → no subtitle line.
 
   ## Slots
 
@@ -361,24 +378,33 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <% end %>
       <div
         class="bp-doc-row-body"
+        title={@doc_id}
         phx-click={@phx_click}
         phx-value-pane={@phx_value_pane}
         phx-value-id={@phx_value_id}
       >
-        <div class="pane-doc-title">
-          <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
-          <%= @title %>
+        <div class="pane-doc-main">
+          <div class="pane-doc-title">
+            <span class={"pane-doc-dot #{if @is_draft, do: "draft", else: @status}"}></span>
+            <%= @title %>
+            <%= if @trailing != [] do %>
+              <%= render_slot(@trailing) %>
+            <% end %>
+            <%= if @badge do %>
+              <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge)}"}><%= @badge %></span>
+            <% end %>
+          </div>
           <%= if @meta do %>
-            <span class="pane-doc-meta"><%= @meta %></span>
-          <% end %>
-          <%= if @trailing != [] do %>
-            <%= render_slot(@trailing) %>
-          <% end %>
-          <%= if @badge do %>
-            <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge)}"}><%= @badge %></span>
+            <div class="pane-doc-sub"><%= @meta %></div>
           <% end %>
         </div>
-        <div class="pane-doc-id"><%= @doc_id %></div>
+        <span class="pane-doc-chevron" aria-hidden="true">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
+            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            style="display:inline-block;vertical-align:middle;flex-shrink:0;">
+            <path d="m9 18 6-6-6-6"/>
+          </svg>
+        </span>
       </div>
     </div>
     """
