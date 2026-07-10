@@ -1424,7 +1424,8 @@ type UsageHistoryResult struct {
 // UsageHistory fetches an instance's usage history via
 // GET /v1/barkparks/:id/usage/history?points=<n> (Bearer, team-scoped). It is a
 // PURE read over the sampler's stored rows (OC16/OC21) — never a live fan-out.
-// `points` caps the window (<=0 → the server default). The envelope is
+// The window is FIXED at the server's trailing 14 days; `points` is the number
+// of uniform buckets it is split into (<=0 → the server default). The envelope is
 // `{ok, series:{<meter>:[{at, value|null}]}}`; a 404 (an older control plane
 // without the route) surfaces as *CloudRouteError{Code:"not_found"} so the caller
 // can fail soft and simply drop the trend column.

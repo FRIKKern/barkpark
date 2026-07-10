@@ -140,10 +140,11 @@ func runCloudUsage(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
-// usageHistoryPoints is the trend window the per-instance view requests: the last
-// 24 samples (OC21). At the sampler's 4-ticks-an-hour cadence that is ~6 hours of
-// TREND — enough to read a shape, bounded so the sparkline stays one glyph-run
-// wide. A server with fewer stored rows returns what it has (the gap discipline
+// usageHistoryPoints is the trend RESOLUTION the per-instance view requests
+// (OC21). The server's window is fixed at the trailing 14 days; `points` is how
+// many uniform buckets it splits into (latest sample per bucket, empty bucket →
+// nil gap) — so 24 glyphs ≈ 14h each, a two-week trend that stays one glyph-run
+// wide. A sparsely-sampled box simply carries more gaps (the gap discipline
 // handles a short/holey series).
 const usageHistoryPoints = 24
 
