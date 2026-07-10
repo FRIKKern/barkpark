@@ -520,6 +520,27 @@ select.form-input {
   box-shadow: var(--shadow-sm);
 }
 
+/* ------------------------------------------ update panel (isu-w5) */
+.update-panel { padding: 16px 18px; margin-bottom: 20px; }
+.update-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.update-panel-head h2 { margin: 0; }
+.update-badge { flex: 0 0 auto; }
+.update-panel-body { display: flex; flex-direction: column; gap: 2px; }
+.update-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
 /* ---------------------------------------------------------- badge */
 .badge {
   display: inline-flex;
