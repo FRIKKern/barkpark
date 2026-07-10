@@ -841,6 +841,18 @@ defmodule Barkpark.StudioChat do
   def rail_terminal?(%{"status" => s}), do: s in ["completed", "interrupted"]
   def rail_terminal?(_), do: false
 
+  @doc """
+  True when the rail is non-empty and EVERY entry is terminal — the "mission
+  accomplished" state that earns the display sweep. The rail STATE is still
+  never deleted by the folds (replay law, charter D47); this only tells the
+  view the rail has nothing live left to show, so it may age out.
+  """
+  @spec rail_all_terminal?(any()) :: boolean()
+  def rail_all_terminal?(rail) when is_map(rail) and map_size(rail) > 0,
+    do: Enum.all?(rail, fn {_tid, entry} -> rail_terminal?(entry) end)
+
+  def rail_all_terminal?(_), do: false
+
   @doc "A rail entry's insertion seq (0 when absent) — the cap/order key."
   @spec rail_seq(any()) :: integer()
   def rail_seq(entry) when is_map(entry), do: entry["seq"] || 0

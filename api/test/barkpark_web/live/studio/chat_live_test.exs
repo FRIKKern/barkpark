@@ -3238,7 +3238,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "a {ok:false} outcome (empty-queue claim) is a real non-result — no chip" do
-      assert ChatToolRenderer.chip("mcp__barkpark__task_next", mcp_fixture("no_ready.json")) == nil
+      assert ChatToolRenderer.chip("mcp__barkpark__task_next", mcp_fixture("no_ready.json")) ==
+               nil
     end
 
     test "a HOST tool name never triggers a chip — D38 shape dispatch is untouched" do
@@ -3258,7 +3259,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "PAYLOAD LAW: a >100KB search result is SUMMARIZED, not dumped" do
       hits =
         for i <- 1..700 do
-          %{"doc_id" => "task-#{i}", "title" => "Result number #{i} #{String.duplicate("x", 100)}", "type" => "task"}
+          %{
+            "doc_id" => "task-#{i}",
+            "title" => "Result number #{i} #{String.duplicate("x", 100)}",
+            "type" => "task"
+          }
         end
 
       payload = Jason.encode!(%{"ok" => true, "docs" => hits})
@@ -3322,7 +3327,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "a chip with no id renders the pill WITHOUT a link (honest, never a dead href)" do
-      html = render_component(&ChatToolRenderer.tool_chip/1, chip: %{kind: :task, label: "no id", href: nil})
+      html =
+        render_component(&ChatToolRenderer.tool_chip/1,
+          chip: %{kind: :task, label: "no id", href: nil}
+        )
 
       assert html =~ "no id"
       refute html =~ "href="
@@ -3819,6 +3827,44 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-rail-task="t")
       assert html =~ ~s(data-rail-status="running")
       assert html =~ "Build the rail"
+    end
+
+    test "a fully-settled rail sweeps after the linger; a stale or still-live sweep is a no-op",
+         %{view: view, sid: sid} do
+      launch =
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "fleet"}
+        ])
+
+      done = bg_changed([])
+
+      send_frame(sid, launch)
+
+      # A sweep fired while the task still runs must not clear the rail — the
+      # all-terminal guard holds regardless of the signature it rode in with.
+      {:claude_chat_event, launch_ev} = launch
+      running_rail = StudioChat.rail_apply_background(%{}, launch_ev)
+      send(view.pid, {:rail_sweep, StudioChat.rail_signature(running_rail)})
+      assert render(view) =~ ~s(data-rail-status="running")
+
+      # The task vanishes from the snapshot ⇒ completed, rail still lingers.
+      send_frame(sid, done)
+      assert render(view) =~ ~s(data-rail-status="completed")
+
+      # Rebuild the settled rail through the SAME pure folds (D47 shared-fold
+      # law) — the signature excludes seq/token churn, so it matches the view's.
+      {:claude_chat_event, done_ev} = done
+
+      settled_sig =
+        StudioChat.rail_signature(StudioChat.rail_apply_background(running_rail, done_ev))
+
+      # A STALE signature (rail changed since that timer was armed) is a no-op.
+      send(view.pid, {:rail_sweep, ["bogus"]})
+      assert render(view) =~ ~s(data-rail-status="completed")
+
+      # The matching sweep clears the rail from the screen.
+      send(view.pid, {:rail_sweep, settled_sig})
+      refute render(view) =~ ~s(data-role="agents-rail")
     end
 
     test "a RUNNING cycle reads as a journey: aggregate header, settled phases, breathing active phase, dim futures",

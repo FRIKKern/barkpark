@@ -48,6 +48,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
   @default_interrupt_timeout_ms 8_000
 
+  # How long a fully-settled agents rail (every entry terminal) lingers below
+  # the composer before it clears. The rail STATE survives in the store
+  # (replay law, charter D47) — this only ends its screen residency, so a
+  # finished fleet stops squatting under the input forever.
+  @rail_linger_ms 60_000
+
   # The exact deny message a "Keep planning" click sends back to the model
   # (charter D34, proven on the real binary: the model re-plans and the next
   # system/init stays in plan mode).
@@ -1357,6 +1363,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
+
+  # The linger timer fired: clear a rail that is STILL fully settled. Guarded by
+  # the rail signature (same stale-timer pattern as :interrupt_timeout) — any
+  # new launch or status flip since scheduling changed the sig, making this a
+  # no-op; the fresh fold scheduled its own sweep. Clearing only drops the
+  # on-screen assign; the stored rail_snapshot keeps the replay law intact.
+  def handle_info({:rail_sweep, sig}, socket) do
+    if sig == socket.assigns.rail_sig and StudioChat.rail_all_terminal?(socket.assigns.rail),
+      do: {:noreply, assign(socket, rail: %{}, rail_sig: StudioChat.rail_signature(%{}))},
+      else: {:noreply, socket}
+  end
 
   # A real port exit (exit_status frame). Run the shared honest teardown, and
   # tell the truth about a DOOMED spawn (charter D54): a nonzero exit BEFORE any
@@ -3222,6 +3239,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # adopt), so re-read the sidebar list once — the pending pill and the working
     # pill both stay honest on reopen.
     |> refresh_sessions()
+    # A reopened session whose rehydrated rail is already fully settled gets the
+    # same linger-then-clear as a live one — replay shows it, then it ages out.
+    |> schedule_rail_sweep()
   end
 
   # A reopened session whose persisted mode is bypassPermissions (charter D55).
@@ -4715,7 +4735,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     if sig == socket.assigns.rail_sig,
       do: socket,
-      else: assign(socket, rail: new_rail, rail_sig: sig)
+      else: socket |> assign(rail: new_rail, rail_sig: sig) |> schedule_rail_sweep()
+  end
+
+  # Once EVERY rail entry settles terminal, start the linger clock; the
+  # {:rail_sweep, sig} it sends re-checks against the then-current signature,
+  # so a rail that came back to life in the meantime is left alone. Scheduling
+  # is idempotent-enough: an extra timer from a later terminal fold just
+  # re-verifies the same guard.
+  defp schedule_rail_sweep(socket) do
+    if StudioChat.rail_all_terminal?(socket.assigns.rail) do
+      Process.send_after(self(), {:rail_sweep, socket.assigns.rail_sig}, @rail_linger_ms)
+    end
+
+    socket
   end
 
   # Rail entries in stable insertion order (seq), for a deterministic render.

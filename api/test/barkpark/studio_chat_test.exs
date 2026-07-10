@@ -260,7 +260,9 @@ defmodule Barkpark.StudioChatTest do
              })
 
       assert StudioChat.todo_shaped?(%{
-               "todos" => [%{"content" => "a", "status" => "completed", "priority" => "high", "id" => "1"}]
+               "todos" => [
+                 %{"content" => "a", "status" => "completed", "priority" => "high", "id" => "1"}
+               ]
              })
     end
 
@@ -1040,14 +1042,26 @@ defmodule Barkpark.StudioChatTest do
         "t" => %{
           "row" => %{"task_type" => "local_workflow", "description" => "run"},
           "status" => "running",
-          "workflow" => [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running", "tokens" => 10}]
+          "workflow" => [
+            %{
+              "type" => "workflow_agent",
+              "label" => "explorer",
+              "state" => "running",
+              "tokens" => 10
+            }
+          ]
         }
       }
 
       # only tokens + usage advanced ⇒ SAME signature (change-only guard)
       token_tick =
         put_in(base, ["t", "workflow"], [
-          %{"type" => "workflow_agent", "label" => "explorer", "state" => "running", "tokens" => 9_000}
+          %{
+            "type" => "workflow_agent",
+            "label" => "explorer",
+            "state" => "running",
+            "tokens" => 9_000
+          }
         ])
         |> put_in(["t", "usage"], %{"total_tokens" => 9_000})
 
@@ -1058,7 +1072,9 @@ defmodule Barkpark.StudioChatTest do
       refute StudioChat.rail_signature(base) == StudioChat.rail_signature(state_flip)
 
       # a NEW row ⇒ different signature
-      row_added = Map.put(base, "u", %{"row" => %{"description" => "another"}, "status" => "running"})
+      row_added =
+        Map.put(base, "u", %{"row" => %{"description" => "another"}, "status" => "running"})
+
       refute StudioChat.rail_signature(base) == StudioChat.rail_signature(row_added)
     end
 
@@ -1077,7 +1093,9 @@ defmodule Barkpark.StudioChatTest do
       # "a" drops from the snapshot ⇒ completed; entries are never deleted
       rail2 =
         StudioChat.rail_apply_background(rail, %{
-          "tasks" => [%{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}]
+          "tasks" => [
+            %{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}
+          ]
         })
 
       assert rail2["a"]["status"] == "completed"
@@ -1089,6 +1107,24 @@ defmodule Barkpark.StudioChatTest do
       # "a" is absent from the new snapshot — it stays interrupted, not completed
       out = StudioChat.rail_apply_background(rail, %{"tasks" => []})
       assert out["a"]["status"] == "interrupted"
+    end
+
+    test "rail_all_terminal? — non-empty all-terminal rails only" do
+      # empty rail never sweeps (nothing to age out)
+      refute StudioChat.rail_all_terminal?(%{})
+      refute StudioChat.rail_all_terminal?(nil)
+
+      # a single live entry blocks the sweep
+      refute StudioChat.rail_all_terminal?(%{
+               "a" => %{"status" => "completed"},
+               "b" => %{"status" => "running"}
+             })
+
+      # completed ∪ interrupted both count as settled
+      assert StudioChat.rail_all_terminal?(%{
+               "a" => %{"status" => "completed"},
+               "b" => %{"status" => "interrupted"}
+             })
     end
 
     test "rail_capture_progress only touches the rail with a tree or existing entry" do
@@ -1129,7 +1165,9 @@ defmodule Barkpark.StudioChatTest do
       # everything vanishes except done-1 ⇒ 20 complete, done-1 stays running
       rail =
         StudioChat.rail_apply_background(rail, %{
-          "tasks" => [%{"task_id" => "done-1", "task_type" => "local_workflow", "description" => "d1"}]
+          "tasks" => [
+            %{"task_id" => "done-1", "task_type" => "local_workflow", "description" => "d1"}
+          ]
         })
 
       assert map_size(rail) <= 20
