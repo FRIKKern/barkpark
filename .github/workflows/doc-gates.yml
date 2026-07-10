@@ -77,6 +77,12 @@ on:
       - "internal/cli/**"
       - "internal/taskboard/theme.go"
       - "scripts/go-literal-check.sh"
+      # Tenant fail-open read baseline gate — a NEW scope_to_workspace_or_global /
+      # by-PK Repo.get(Document) tenant read must carry a reviewed `# global-read:`
+      # justification or update the baseline (barkpark-w9dg scar class).
+      - "api/lib/**/*.ex"
+      - "scripts/tenant-scope-check.sh"
+      - "scripts/tenant-scope-baseline.txt"
   pull_request:
     paths:
       - "**/*.md"
@@ -147,6 +153,12 @@ on:
       - "internal/cli/**"
       - "internal/taskboard/theme.go"
       - "scripts/go-literal-check.sh"
+      # Tenant fail-open read baseline gate — a NEW scope_to_workspace_or_global /
+      # by-PK Repo.get(Document) tenant read must carry a reviewed `# global-read:`
+      # justification or update the baseline (barkpark-w9dg scar class).
+      - "api/lib/**/*.ex"
+      - "scripts/tenant-scope-check.sh"
+      - "scripts/tenant-scope-baseline.txt"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -279,3 +291,22 @@ jobs:
         run: |
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
+
+      # Tenant fail-open read baseline gate (barkpark-w9dg scar class — the FIXED
+      # public-paper cross-workspace leak). Tenant isolation on the document/graph
+      # read spine is scope-by-construction via Barkpark.Content.Scope, EXCEPT two
+      # convention-enforced seams: the fail-OPEN scope family
+      # (scope_to_workspace_or_global/_including_global/_global, nil→all-tenants)
+      # and by-PK Repo.get(Document, id) (no tenant clause). Both are safe today —
+      # every live caller threads scope — so this BASELINES the current occurrences
+      # (scripts/tenant-scope-baseline.txt) and REDs on a NEW one unless it carries
+      # a reviewed `# global-read:` justification. Defense-in-depth against the next
+      # w9dg. See scripts/tenant-scope-check.sh.
+      - name: Tenant fail-open read baseline gate (blocking)
+        run: bash scripts/tenant-scope-check.sh
+
+      # Durable tripwire (distrust vacuous green): prove the gate actually REDs on a
+      # planted fail-open + by-PK read — a temp-dir self-test that plants nothing in
+      # the tree. Guards the gate against a future edit that weakens the scanner.
+      - name: Tenant fail-open read gate self-test (tripwire)
+        run: bash scripts/tenant-scope-check.sh --selftest
