@@ -102,7 +102,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
       Barkpark.Plugins.Indx.Monitor.record_success(scope, %{dataset: dataset})
 
-      {hits, length(ranked), engine_meta(facets, tindex)}
+      {hits, total_for(ranked, scope, opts), engine_meta(facets, tindex)}
     else
       {:error, err} ->
         # P4b Hardening A: turn silent fallback into a queryable signal.
@@ -362,6 +362,28 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
   defp id_type_pair(_other), do: nil
 
+  # Reported total. For an ordinary read the candidate-pool length is the honest
+  # match count. For a GRANT-DERIVED caller (`opts[:grant_scoped]`) the pool
+  # counts out-of-grant hits the hydration read drops, so the raw length would
+  # OVER-report — leak the existence/count of docs outside the grant. Recompute
+  # the total as ONE grant-narrowed Postgres count over the ranked candidate id
+  # set (same dataset/workspace/owner/grant scoping the row hydration applies),
+  # fail-closed: a reported total can never exceed the grant-visible matches.
+  defp total_for(ranked, scope, opts) do
+    if Keyword.get(opts, :grant_scoped, false) do
+      ranked_ids =
+        ranked
+        |> Enum.map(&id_type_pair/1)
+        |> Enum.reject(&is_nil/1)
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.uniq()
+
+      Content.count_documents_by_ids(ranked_ids, scope, scope_opts(opts))
+    else
+      length(ranked)
+    end
+  end
+
   # Forward the tenant-scope opts AND the caller_context into the authoritative
   # Postgres read. Tenancy keys cannot bypass `scope_to_workspace_or_global/3`
   # (the P0 leak guard); the caller_context lets `get_documents_by_ids/3`'s
@@ -370,7 +392,12 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # user's Indx search dropped their own owned docs (a nil caller now fails
   # CLOSED to unowned-only — over-restrictive, the LOW seam this closes). It is
   # NOT a leak: a missing/anonymous caller still resolves to unowned-only.
-  defp scope_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id, :caller_context])
+  # `:grant_scoped` rides through so the hydration read
+  # (`get_documents_by_ids/3` → `maybe_scope_to_grants/2`) narrows a
+  # grant-derived caller's ROWS, and `count_documents_by_ids/3` narrows the
+  # reported total — parity with the Postgres `DocumentsRetriever` seal.
+  defp scope_opts(opts),
+    do: Keyword.take(opts, [:workspace_id, :project_id, :caller_context, :grant_scoped])
 
   defp to_string_or_nil(nil), do: nil
   defp to_string_or_nil(v) when is_binary(v), do: v

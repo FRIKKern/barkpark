@@ -24,7 +24,11 @@ defmodule Barkpark.Content.Query do
   alias Barkpark.Content.{Document, DraftId}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, scope_to_owner: 2, scope_to_grants: 3]
+    only: [
+      scope_to_workspace_or_global: 3,
+      scope_to_owner: 2,
+      maybe_scope_to_grants: 2
+    ]
 
   @doc """
   List documents by type and dataset.
@@ -112,26 +116,6 @@ defmodule Barkpark.Content.Query do
   defp maybe_scope_to_owner(query, type, dataset, opts) do
     if Barkpark.Content.owner_scoped?(type, dataset, opts) do
       scope_to_owner(query, Keyword.get(opts, :caller_context))
-    else
-      query
-    end
-  end
-
-  # Grant row-narrowing (airdrop-grants ag-enforcement, Layer 2). A NO-OP on
-  # every ordinary read: it fires ONLY when `opts[:grant_scoped]` is true — the
-  # flag `ResolveWorkspace` sets when it admits a grant-only caller and
-  # `ScopeHelpers.scope_opts/1` threads through. So members / tokens / anonymous
-  # reads are byte-identical (no clause added). When the flag IS present the read
-  # is restricted to the union of the caller's grant scopes, FAILING CLOSED
-  # (`where: false`) if the caller_context is absent or carries no covering grant
-  # — a grant-derived caller can never fall through to the whole workspace.
-  defp maybe_scope_to_grants(query, opts) do
-    if Keyword.get(opts, :grant_scoped, false) do
-      scope_to_grants(
-        query,
-        Keyword.get(opts, :caller_context),
-        Keyword.get(opts, :workspace_id)
-      )
     else
       query
     end
@@ -1018,6 +1002,35 @@ defmodule Barkpark.Content.Query do
     |> maybe_scope_to_grants(opts)
     |> Repo.all()
     |> Map.new(fn d -> {d.doc_id, d} end)
+  end
+
+  @doc """
+  Grant-narrowed COUNT companion to `get_documents_by_ids/3`: how many of the
+  given `doc_ids` are visible to this caller under the EXACT SAME scoping stack
+  (`scope_to_dataset` + `scope_to_workspace_or_global` + `scope_to_owner` +
+  `maybe_scope_to_grants` — the same P0 leak + owner + grant guards). Fail-closed
+  identically: a grant-derived caller (`opts[:grant_scoped]`) with no covering
+  grant counts ZERO, never the whole candidate set.
+
+  Used by the Indx retriever to report a `total` that never exceeds the
+  grant-visible matches — the raw candidate-pool length would over-count
+  out-of-grant hits the hydration read already drops.
+  """
+  @spec count_documents_by_ids([String.t()], String.t(), keyword()) :: non_neg_integer()
+  def count_documents_by_ids([], _dataset, _opts), do: 0
+
+  def count_documents_by_ids(doc_ids, dataset, opts) when is_list(doc_ids) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
+    Document
+    |> where([d], d.doc_id in ^doc_ids)
+    |> scope_to_dataset(dataset, opts)
+    |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> scope_to_owner(Keyword.get(opts, :caller_context))
+    |> maybe_scope_to_grants(opts)
+    |> exclude(:order_by)
+    |> Repo.aggregate(:count)
   end
 
   @doc """

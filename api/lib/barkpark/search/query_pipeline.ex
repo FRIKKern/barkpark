@@ -111,7 +111,15 @@ defmodule Barkpark.Search.QueryPipeline do
         # caller now FAILS CLOSED — scope_to_owner/2 restricts to unowned rows
         # (owner_id IS NULL) only; byte-identical only for non-owner_scoped types
         # (whose rows are all unowned), never a window onto another owner's rows.
-        caller_context: Keyword.get(opts, :caller_context)
+        caller_context: Keyword.get(opts, :caller_context),
+        # Grant row-narrowing (airdrop-grants Layer 2). Thread the grant flag so
+        # BOTH retrievers can apply `Scope.maybe_scope_to_grants/2`. This single
+        # thread-point covers the primary retrieve (:130), try_drop_tokens (:192)
+        # and try_typo_widen (:207) — they all reuse `retriever_opts`. Without it
+        # a grant-derived caller's search dropped the flag before either retriever
+        # and saw out-of-grant hits (the ag-search-grant-leak deny). nil/absent =
+        # ordinary read (no narrowing), so members/tokens/anonymous are unchanged.
+        grant_scoped: Keyword.get(opts, :grant_scoped)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery

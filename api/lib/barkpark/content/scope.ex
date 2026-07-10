@@ -225,6 +225,37 @@ defmodule Barkpark.Content.Scope do
   # Fail CLOSED: no caller_context, wrong shape, or nil workspace → zero rows.
   def scope_to_grants(query, _caller_context, _workspace_id), do: where(query, false)
 
+  @doc """
+  Opts-gated grant row-narrowing — the SINGLE owner of the `grant_scoped` gate.
+
+  A NO-OP on every ordinary read: it applies `scope_to_grants/3` ONLY when
+  `opts[:grant_scoped]` is true — the flag `ResolveWorkspace` / `AssignGrantScope`
+  / `LiveScope` set when they admit a grant-only caller and
+  `ScopeHelpers.scope_opts/1` threads through. Members, tokens, and anonymous
+  reads carry no flag, so the query is byte-identical (grants only ADD access).
+
+  When the flag IS present the read is restricted to the union of the caller's
+  grant scopes, pulling `caller_context` + `workspace_id` off `opts` and FAILING
+  CLOSED (`where: false`) if the caller_context is absent or carries no covering
+  grant — a grant-derived caller can never fall through to the whole workspace.
+
+  Every read that must honour a grant threads through here: the `Content.Query`
+  read sites, the Postgres search `DocumentsRetriever` base query, and the Indx
+  hydration read. There is no private copy of the gate anywhere.
+  """
+  @spec maybe_scope_to_grants(Ecto.Queryable.t(), keyword()) :: Ecto.Queryable.t()
+  def maybe_scope_to_grants(query, opts) do
+    if Keyword.get(opts, :grant_scoped, false) do
+      scope_to_grants(
+        query,
+        Keyword.get(opts, :caller_context),
+        Keyword.get(opts, :workspace_id)
+      )
+    else
+      query
+    end
+  end
+
   # The READ-union covering set: a grant contributes its scope ladder to the
   # read narrowing ONLY when it (a) covers this workspace AND (b) actually
   # confers READ. A workspace-covering WRITE-ONLY grant (capabilities
