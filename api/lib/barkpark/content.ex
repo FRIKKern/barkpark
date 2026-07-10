@@ -101,6 +101,15 @@ defmodule Barkpark.Content do
   def get_documents_by_ids(doc_ids, dataset, opts \\ []),
     do: Query.get_documents_by_ids(doc_ids, dataset, opts)
 
+  @doc """
+  Grant-narrowed COUNT companion to `get_documents_by_ids/3`: how many of the
+  given `doc_ids` this caller may see under the same dataset/workspace/owner/grant
+  scoping. Fail-closed. Delegates to `Barkpark.Content.Query.count_documents_by_ids/3`.
+  """
+  @spec count_documents_by_ids([String.t()], String.t(), keyword()) :: non_neg_integer()
+  def count_documents_by_ids(doc_ids, dataset, opts \\ []),
+    do: Query.count_documents_by_ids(doc_ids, dataset, opts)
+
   # ── Reference / codelist labels (extracted → Content.Labels) ───────────────
   #
   # Public `reference_title/4` and `codelist_label/3` keep their facade entry

@@ -704,4 +704,200 @@ defmodule Barkpark.Content.GraphTest do
                                 |> Enum.map(& &1.from_doc_id))
     end
   end
+
+  # ════════════════════════════════════════════════════════════════════════
+  # Airdrop-grants Layer-2 on the graph read path (ag-backlinks-grant-leak)
+  #
+  # A grant-derived caller (`grant_scoped: true` + a grant-bearing
+  # CallerContext + workspace_id) must have its graph reads narrowed to the
+  # UNION of its active grant scopes — the SAME `Scope.scope_to_grants` clause
+  # that narrows `Content.Query`. This seals BOTH the HTTP backlinks cell (via
+  # `resolve_doc` → `reverse_referencers`) AND the Studio PaneBuilder graph /
+  # blast-radius pane (via `traverse` → `hydrate_nodes`), which already threads
+  # `grant_scoped` but which Graph previously ignored. WITHOUT the flag every
+  # read is byte-identical (the flag is the sole narrowing cause) — the whole
+  # suite above proves the no-flag path unchanged; these cases isolate the flag.
+  # ════════════════════════════════════════════════════════════════════════
+  describe "grant-scoped graph reads (airdrop-grants Layer-2 — ag-backlinks-grant-leak)" do
+    import Barkpark.TenancyFixtures
+    import Barkpark.AccessFixtures
+
+    alias Barkpark.Accounts
+    alias Barkpark.Content.CallerContext
+
+    @granted_ds "granted"
+    @other_ds "other"
+    @password "correct-horse-battery"
+
+    setup do
+      # Mirror the HTTP deny test's setup (grant_single_doc_deny_test.exs): the
+      # DEFAULT workspace/project, so publish + edge-endpoint resolution resolve
+      # the dataset cleanly (a fresh workspace's per-tenant dataset_id would need
+      # scope threaded into every publish/add_edges call — the default scope is
+      # the proven, minimal harness for the graph reads under test).
+      {ws, project} = ensure_default_scope!()
+
+      # `post` (grant-covered) lives in BOTH datasets; `note` (grant type is
+      # `post`, so a note is OUT of the grant even in the granted dataset) lives
+      # in the granted dataset — the type-ladder probe for the hydration seam.
+      for ds <- [@granted_ds, @other_ds] do
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          ds
+        )
+      end
+
+      Content.upsert_schema(
+        %{"name" => "note", "title" => "Note", "visibility" => "public", "fields" => []},
+        @granted_ds
+      )
+
+      seed = fn id, type, ds, title ->
+        {:ok, _} =
+          create_document_in!(ws, project, type, %{"_id" => id, "title" => title}, ds)
+
+        {:ok, doc} = Content.publish_document(id, type, ds)
+        doc
+      end
+
+      # in-scope (granted/post): target-in ← ref-in
+      target_in = seed.("gr-target-in", "post", @granted_ds, "in-scope target")
+      seed.("gr-ref-in", "post", @granted_ds, "in-scope referencer")
+
+      Content.add_edges([%{from_id: "gr-ref-in", to_id: "gr-target-in", kind: "references"}],
+        dataset: @granted_ds
+      )
+
+      # out-of-scope (other/post): target-out ← ref-out
+      seed.("gr-target-out", "post", @other_ds, "out-of-scope target")
+      seed.("gr-ref-out", "post", @other_ds, "out-of-scope referencer")
+
+      Content.add_edges([%{from_id: "gr-ref-out", to_id: "gr-target-out", kind: "references"}],
+        dataset: @other_ds
+      )
+
+      %{ws: ws, project: project, target_in: target_in}
+    end
+
+    # A CallerContext folding the grantee's ONE active read grant, scoped to
+    # (project, dataset "granted", type "post") — the exact shape ResolveWorkspace
+    # / AssignGrantScope fold in prod. The grantor is a live admin (AccessFixtures).
+    defp grantee_ctx(ws, project) do
+      email = "gr-grantee-#{System.unique_integer([:positive])}@example.com"
+      {:ok, user} = Accounts.register_user(%{email: email, password: @password})
+
+      bind_grant!(ws, user, %{
+        project_id: project.id,
+        dataset: @granted_ds,
+        type: "post",
+        capabilities: ["read"]
+      })
+
+      ctx = CallerContext.from_user(user.id)
+      # Non-vacuous: the grant actually loaded, else every read fails closed for
+      # the wrong reason (and the byte-identical no-flag control would still pass).
+      assert length(ctx.grants) == 1
+      ctx
+    end
+
+    defp grant_opts(ctx, ws, ds, extra \\ []) do
+      [dataset: ds, workspace_id: ws.id, caller_context: ctx, grant_scoped: true] ++ extra
+    end
+
+    test "resolve_doc grant-narrows: in-scope resolves, uncovered-dataset target → nil (fail-closed)",
+         %{ws: ws, project: project} do
+      ctx = grantee_ctx(ws, project)
+
+      assert %Content.Document{doc_id: "gr-target-in"} =
+               Graph.resolve_doc("gr-target-in", @granted_ds, grant_opts(ctx, ws, @granted_ds))
+
+      # uncovered dataset: grant ladder ANDs `dataset == "granted"` → no row → nil
+      assert Graph.resolve_doc("gr-target-out", @other_ds, grant_opts(ctx, ws, @other_ds)) == nil
+
+      # byte-identical WITHOUT the flag (same ctx/workspace, grant_scoped dropped):
+      # the out-of-grant doc resolves — the flag is the sole narrowing cause.
+      assert %Content.Document{doc_id: "gr-target-out"} =
+               Graph.resolve_doc("gr-target-out", @other_ds,
+                 dataset: @other_ds,
+                 workspace_id: ws.id,
+                 caller_context: ctx
+               )
+    end
+
+    test "reverse_referencers grant-narrows: in-scope returns its referencer, uncovered target → []",
+         %{ws: ws, project: project} do
+      ctx = grantee_ctx(ws, project)
+
+      in_refs =
+        "gr-target-in"
+        |> Graph.reverse_referencers(grant_opts(ctx, ws, @granted_ds))
+        |> Enum.map(& &1.from_doc_id)
+
+      assert "gr-ref-in" in in_refs
+
+      # THE sealed leak: an uncovered-dataset target resolves to nil under the
+      # grant → reverse_referencers short-circuits to [] (never its referencers).
+      assert Graph.reverse_referencers("gr-target-out", grant_opts(ctx, ws, @other_ds)) == []
+
+      # byte-identical WITHOUT the flag: the out-of-grant referencer surfaces.
+      out_refs =
+        "gr-target-out"
+        |> Graph.reverse_referencers(
+          dataset: @other_ds,
+          workspace_id: ws.id,
+          caller_context: ctx
+        )
+        |> Enum.map(& &1.from_doc_id)
+
+      assert "gr-ref-out" in out_refs
+    end
+
+    test "traverse grant-narrows hydration (Studio graph pane): an out-of-grant node is dropped with the flag, visible without it",
+         %{ws: ws, project: project, target_in: target_in} do
+      ctx = grantee_ctx(ws, project)
+
+      # A `note` in the GRANTED dataset — same workspace/project/dataset as the
+      # root, differing ONLY on the type ladder level (grant covers `post`). The
+      # edge is intra-dataset so it materialises cleanly; the ONLY thing that can
+      # hide the note from the grantee is the grant's `type == "post"` clause.
+      {:ok, _} =
+        create_document_in!(
+          ws,
+          project,
+          "note",
+          %{"_id" => "gr-note", "title" => "out-of-grant note"},
+          @granted_ds
+        )
+
+      {:ok, _} = Content.publish_document("gr-note", "note", @granted_ds)
+
+      Content.add_edges([%{from_id: "gr-target-in", to_id: "gr-note", kind: "references"}],
+        dataset: @granted_ds
+      )
+
+      base = [dataset: @granted_ds, workspace_id: ws.id, depth: 2, direction: :out]
+
+      node_ids = fn opts ->
+        target_in.id |> Graph.traverse(opts) |> Map.fetch!(:nodes) |> Enum.map(& &1.doc_id)
+      end
+
+      grant_ids = node_ids.([caller_context: ctx, grant_scoped: true] ++ base)
+      assert "gr-target-in" in grant_ids
+      refute "gr-note" in grant_ids, "grant covers type post only — the note must not hydrate"
+
+      # byte-identical WITHOUT the flag: the out-of-grant note hydrates.
+      plain_ids = node_ids.([caller_context: ctx] ++ base)
+      assert "gr-note" in plain_ids
+    end
+
+    test "fail-closed: grant_scoped with NO covering grant (nil caller_context) yields nil / []",
+         %{ws: ws} do
+      # A grant-derived read that carries the flag but no grant context must NEVER
+      # fall through to the whole workspace — resolve_doc → nil, backlinks → [].
+      opts = [dataset: @granted_ds, workspace_id: ws.id, grant_scoped: true]
+
+      assert Graph.resolve_doc("gr-target-in", @granted_ds, opts) == nil
+      assert Graph.reverse_referencers("gr-target-in", opts) == []
+    end
+  end
 end

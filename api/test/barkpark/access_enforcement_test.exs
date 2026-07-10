@@ -392,4 +392,67 @@ defmodule Barkpark.AccessEnforcementTest do
       assert after_with_ctx == before
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # The Indx count seal (ag-search-grant-leak D2). The Indx retriever reports its
+  # total via `Content.count_documents_by_ids/3` for a grant-derived caller, so
+  # a reported total can never exceed the grant-visible matches. These pin that
+  # count function grant-narrows + fails closed — the exact mechanism the Indx
+  # `total_for/3` relies on (the light-record harness has no DB-backed do_search
+  # mock, so this is the tightest protection of the count seal).
+  # ---------------------------------------------------------------------------
+  describe "Layer 2 — count_documents_by_ids grant-narrows the reported total" do
+    test "a grant_scoped caller counts ONLY grant-visible ids; out-of-grant ids drop" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantee = grantee_user()
+
+      {:ok, in_doc} = create_document_in!(ws, proj, "post", %{"title" => "in"}, @dataset)
+      {:ok, out_doc} = create_document_in!(ws, proj, "note", %{"title" => "out"}, @dataset)
+      ids = [in_doc.doc_id, out_doc.doc_id]
+
+      # grant covers type "post" only → the note id must not be counted
+      bind_grant!(ws, grantee, %{
+        project_id: proj.id,
+        dataset: @dataset,
+        type: "post",
+        capabilities: ["read"]
+      })
+
+      ctx = CallerContext.from_user(grantee.id)
+
+      assert Content.count_documents_by_ids(ids, @dataset,
+               workspace_id: ws.id,
+               caller_context: ctx,
+               grant_scoped: true
+             ) == 1
+
+      # WITHOUT the flag the same id set counts BOTH — byte-identical to today,
+      # proving the narrowing is the grant clause, not some unrelated filter.
+      assert Content.count_documents_by_ids(ids, @dataset, workspace_id: ws.id) == 2
+    end
+
+    test "fail-closed: a grant_scoped caller with NO covering grant counts ZERO" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantee = grantee_user()
+
+      {:ok, a} = create_document_in!(ws, proj, "post", %{"title" => "a"}, @dataset)
+
+      # grantee holds NO grant → empty union → where:false → 0
+      ctx = CallerContext.from_user(grantee.id)
+
+      assert Content.count_documents_by_ids([a.doc_id], @dataset,
+               workspace_id: ws.id,
+               caller_context: ctx,
+               grant_scoped: true
+             ) == 0
+
+      # nil caller_context under the flag also fails closed
+      assert Content.count_documents_by_ids([a.doc_id], @dataset,
+               workspace_id: ws.id,
+               grant_scoped: true
+             ) == 0
+    end
+  end
 end
