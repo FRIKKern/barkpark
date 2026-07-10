@@ -261,6 +261,7 @@ echo "--- E. met-flip (patch + publish) then Stop closes the task ---"
   || bad "doc publish (met-flip) failed"
 run_hook '{}' Stop BARKPARK_TASK="$T1"
 [ "$HOOK_RC" = "0" ] && ok "Stop rc==0" || bad "Stop rc=$HOOK_RC (must be 0)"
+[ "$HOOK_BYTES" = "0" ] && ok "closing Stop stdout byte-empty (branch-heaviest hook path)" || bad "closing Stop wrote $HOOK_BYTES stdout bytes (must be 0)"
 status_of "$T1"
 LC="$(sfield "$STATUS" lifecycle)"
 [ "$LC" = "done" ] && ok "lifecycle == done (observed_rev CAS close)" || bad "lifecycle='$LC' (expected done after met-flip)"
@@ -299,7 +300,10 @@ for t in "$T1" "$T2"; do
   ep=$(printf '%s' "$cl" | grep -oE 'epoch=[0-9]+' | head -1 | cut -d= -f2 || true)
   [ -n "$ep" ] && "$BP" task close "$t" "$WORKER" "$ep" done "smoke closed by harness" >/dev/null 2>&1 || true
 done
-ok "closed throwaway tasks T1=$T1 T2=$T2 (labeled smoke)"
+# VERIFY the closes landed (T1 closed in scenario E; T2 by the loop above) — an
+# ||-guarded loop must not report green while leaving a claimed smoke task behind.
+status_of "$T2"
+[ "$(sfield "$STATUS" lifecycle)" = "done" ] && ok "throwaway tasks closed on guerrilla (T2 lifecycle==done; T1 closed in E)" || bad "T2 lifecycle='$(sfield "$STATUS" lifecycle)' — throwaway task left unclosed on guerrilla"
 
 AFTER_SETTINGS="$(sha_of "$REAL_SETTINGS")"
 AFTER_CONFIG="$(sha_of "$REAL_CONFIG")"
