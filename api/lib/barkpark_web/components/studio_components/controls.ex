@@ -166,26 +166,41 @@ defmodule BarkparkWeb.StudioComponents.Controls do
 
   @doc """
   A themed select (`select.form-input`) — no native dropdown chrome. `options`
-  is a list of either scalars (`"evergreen"`) or `{value, label}` tuples; the
-  option whose value matches `value` is marked `selected`.
+  is a list of either scalars (`"evergreen"`), `{value, label}` tuples, or
+  `{group_label, [option, …]}` tuples (a nested list becomes an `<optgroup>`);
+  the option whose value matches `value` is marked `selected`.
+
+  Pass `prompt` to lead with a disabled, value-less placeholder option
+  (selected while `value` is blank) — the "Choose a field…" affordance.
   """
   attr :name, :string, required: true
   attr :value, :any, default: nil
   attr :options, :list, required: true
+  attr :prompt, :string, default: nil
   attr :id, :string, default: nil
   attr :disabled, :boolean, default: false
   attr :rest, :global, include: ~w(form)
 
   def bp_select(assigns) do
-    assigns = assign(assigns, :norm_options, normalize_options(assigns.options))
+    assigns = assign(assigns, :entries, normalize_options(assigns.options))
 
     ~H"""
     <select name={@name} id={@id} disabled={@disabled} class="form-input" {@rest}>
-      <option
-        :for={{val, label} <- @norm_options}
-        value={val}
-        selected={to_string(@value) == val}
-      >{label}</option>
+      <option :if={@prompt} value="" disabled selected={to_string(@value) == ""}>{@prompt}</option>
+      <%= for entry <- @entries do %>
+        <%= case entry do %>
+          <% {:optgroup, group_label, opts} -> %>
+            <optgroup label={group_label}>
+              <option
+                :for={{val, label} <- opts}
+                value={val}
+                selected={to_string(@value) == val}
+              >{label}</option>
+            </optgroup>
+          <% {val, label} -> %>
+            <option value={val} selected={to_string(@value) == val}>{label}</option>
+        <% end %>
+      <% end %>
     </select>
     """
   end
@@ -221,7 +236,11 @@ defmodule BarkparkWeb.StudioComponents.Controls do
         {@rest}
       />
       <span class="form-switch-track" aria-hidden="true"></span>
-      <span class="form-switch-state">{if @checked, do: @on_label, else: @off_label}</span>
+      <%!-- Both words ship in the DOM and CSS `:checked` picks the visible one,
+            so the word stays truthful when the switch toggles inside a
+            submit-only form (no LiveView re-render — e.g. plugin settings).
+            aria-hidden: the real checkbox announces state to AT. --%>
+      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">{@off_label}</span><span class="form-switch-state-on">{@on_label}</span></span>
     </label>
     """
   end
@@ -285,11 +304,20 @@ defmodule BarkparkWeb.StudioComponents.Controls do
     """
   end
 
-  # {value, label} normalization — a scalar option becomes {v, v}.
+  # Option normalization: a scalar becomes `{v, v}`, a `{value, label}` tuple is
+  # stringified, and a `{group_label, [option, …]}` tuple (nested list) becomes
+  # an `{:optgroup, label, [{val, label}, …]}` entry the renderer draws as an
+  # `<optgroup>`.
   defp normalize_options(options) do
     Enum.map(options, fn
-      {value, label} -> {to_string(value), to_string(label)}
-      value -> {to_string(value), to_string(value)}
+      {group_label, opts} when is_list(opts) ->
+        {:optgroup, to_string(group_label), Enum.map(opts, &normalize_leaf/1)}
+
+      leaf ->
+        normalize_leaf(leaf)
     end)
   end
+
+  defp normalize_leaf({value, label}), do: {to_string(value), to_string(label)}
+  defp normalize_leaf(value), do: {to_string(value), to_string(value)}
 end

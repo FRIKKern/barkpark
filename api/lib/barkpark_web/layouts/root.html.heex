@@ -688,6 +688,13 @@
     }
     .form-switch:has(input:disabled) { cursor: not-allowed; opacity: 0.5; }
     .form-switch-state { font-size: 12px; color: var(--fg-muted); }
+    /* CSS-truthful state word: bp_switch ships BOTH words and :checked picks
+       the visible one, so the word never lies in a submit-only form where no
+       LiveView re-render follows the click (e.g. plugin settings). Hand-written
+       single-word .form-switch-state spans (styleguide) are unaffected. */
+    .form-switch .form-switch-state-on { display: none; }
+    .form-switch input:checked ~ .form-switch-state .form-switch-state-on { display: inline; }
+    .form-switch input:checked ~ .form-switch-state .form-switch-state-off { display: none; }
 
     /* ── Perspective toggle ────────────────────────────────────────────── */
     .perspective-tabs {

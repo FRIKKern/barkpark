@@ -57,6 +57,8 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
   use BarkparkWeb, :live_view
 
+  import BarkparkWeb.StudioComponents.Controls
+
   require Logger
 
   alias Barkpark.Plugins.Registry
@@ -342,15 +344,13 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
       )
 
     ~H"""
-    <select
+    <.bp_select
       id={field_id(@field)}
       name={"settings[#{@field.name}]"}
+      value={@current}
+      options={@options}
       data-test-input={@field.name}
-    >
-      <%= for opt <- @options do %>
-        <option value={opt} selected={to_string(@current) == opt}>{opt}</option>
-      <% end %>
-    </select>
+    />
     """
   end
 
@@ -362,8 +362,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
     ~H"""
     <input type="hidden" name={"settings[#{@field.name}]"} value="false" />
-    <input
-      type="checkbox"
+    <.bp_switch
       id={field_id(@field)}
       name={"settings[#{@field.name}]"}
       value="true"
@@ -392,7 +391,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     assigns = assign(assigns, field: field, html_type: html_type, current: current)
 
     ~H"""
-    <input
+    <.bp_input
       type={@html_type}
       id={field_id(@field)}
       name={"settings[#{@field.name}]"}
@@ -406,7 +405,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     assigns = assign(assigns, field: field, has_stored: stored?(assigns.stored, field))
 
     ~H"""
-    <input
+    <.bp_input
       type="password"
       id={field_id(@field)}
       name={"settings[#{@field.name}]"}
