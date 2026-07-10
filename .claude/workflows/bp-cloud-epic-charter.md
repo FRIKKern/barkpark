@@ -1,237 +1,132 @@
-# Epic: studio-ui-premium — Studio UI premium overhaul
+# Epic charter — TUI Creative Slate, pass 2 (heat + meters + tokens)
 
-> NOTE ON THIS PATH: the former "Barkpark Cloud — Peak Aesthetics, UX and DX" charter that
-> lived at this filename was preserved verbatim at
-> `.claude/workflows/bp-cloud-peak-aesthetics-charter.md` (and in git history, 75951d8f).
-> `bp-cloud-console-charter.md`'s parent-epic pointer targets that preserved copy.
-> This file is now the memory of the **studio-ui-premium** epic.
+> NOTE ON THIS PATH: this filename is the epic-cycle charter slot and has carried earlier
+> epics. The former **staging-barkpark** charter that lived here is preserved verbatim at
+> `.claude/workflows/bp-staging-barkpark-charter.md` (and in git history); earlier charters
+> at `bp-studio-ui-premium-charter.md` / `bp-cloud-peak-aesthetics-charter.md`.
+> This file is now the memory of the **pbp-tui-slate-2** epic.
 
-Epic bp task: `studio-ui-premium` (published; every slice task is its child).
-User verdict at kickoff: current Studio UI is 3/10. Bar: the new Claude Code TUI / Linear / Sanity-class tools.
+Epic bp task: `pbp-tui-slate-2` (published; child of `pdrender-block-parity`; every slice task is its child).
+Predecessor `pbp-tui-creative` is CLOSED (done 2026-07-08) — it delivered the ratified slate paper `pbp-tui-creative-slate` plus the first pass (heatmap #1472, stat #1490, chart #1499) AND the aggregate-resolver arc (#1510/#1546/#1516). This epic is the SECOND slate pass.
 
 ## Vision
 
-Studio reads premium in the first three seconds. A quiet icons-only top bar — every nav
-entry a Lucide glyph with tooltip + aria-label — and the workspace scope condensed to one
-compact chip driving its existing Miller-columns popover. A desk tree that is instantly
-legible because every document type wears its own always-visible icon from ONE resolution
-authority. No native browser control anywhere in Studio: every select, checkbox, toggle
-and input rides a shared themed control kit, and all text meets WCAG AA against the actual
-theme background in all three themes × light/dark. Layout quality is structure, not
-decoration — card/panel surfaces with consistent radius+border tokens, 8px spacing rhythm,
-weighted section headers, aligned label/control columns. Settings is the flagship rebuild
-(it is the 3/10 artifact); every other screen follows on the same kit.
+`bp` and the TUI reader show Claude-Code-/usage-grade dashboards — a 38-week contribution calendar, KPI stat cells with dim denominators (71/118), ▓/░ meter rows of task counts by worker/phase — and every one of them, piped through `| cat` with ANSI stripped, is still a complete readable artifact. Datum lives in geometry (░▒▓█ glyphs, aligned digits); truecolor is reinforcement only. That detail-ceiling law is machine-checked: one shared golden helper asserts strip-equality across NoColor/ANSI256/TrueColor for the data-viz family, forever.
 
 ## Decisions
 
-- **D1 — Icons-only top bar rides the existing dormant channel.** Populate `icon:` on all
-  host nav entries in `nav.ex` (today all `nil`: lines 424/431/438/459/494/505/523) and teach
-  `studio_tabs/1` (nav.ex:315-358) to render `<.icon>` + `title`/`aria-label` instead of the
-  text label. No parallel channel, no plugin-registry contract change — `tab.path` is
-  pre-built via Paths, so zero studio-link-lint exposure. *Why: exploration proved the field
-  exists on the type and the renderer simply ignores it; populating it is the minimal true fix.*
-- **D2 — Icon-less plugin entries degrade gracefully.** A plugin `top_menu_entry` with no
-  `icon:` (or an unknown name) renders the generic glyph with the label as tooltip +
-  aria-label. `icon` stays optional in the plugin contract (plugin.ex:202). *Why: the label
-  survives as the accessible name regardless; a contract change buys nothing and risks every plugin.*
-- **D3 — Compact scope chip = restyle, not rebuild.** The "Default Workspace · Default
-  Project / production" run is ALREADY a chip+popover (`WorkspaceSwitcher.switcher`,
-  workspace_switcher.ex:53-66) with full LiveView plumbing (scope-menu-toggle/ws/proj,
-  scope-open → push_navigate). The slice condenses the trigger's markup/CSS only and keeps
-  every event and the Miller-columns popover intact. The native `<select>` fallback in
-  `dataset_switcher.ex:22` gets themed in the same slice. *Why: exploration falsified the
-  "plain text run" premise; rebuilding the working switcher is pure regression risk.*
-- **D4 — Tree "collapsed by default" is architecturally already satisfied — declared no-op.**
-  The desk is a multi-pane drill-down (Sanity-style): sub-lists NEVER render inline, they
-  appear only as the next column. `Structure.Node` has no expanded field, nor does the
-  `/v1/structure` wire or the Go client. There is nothing to flip. If the user actually wants
-  an inline nested tree, that is a pane-model replacement requiring an explicit new decision —
-  never file a flag-flip task for this. *Why: explorer verified no expand/collapse state
-  exists anywhere in the pipeline.*
-- **D5 — Tree icons: emoji stay on the wire; icons.ex is the single resolution authority.**
-  Fix = complete `@emoji_map` (📰 📊 🎫 🧩 🗂, remap ✅ → check-square, 📑 → a distinct
-  page glyph) and add the missing Lucide paths (~14: newspaper, table, ticket, puzzle,
-  folder-tree, columns, kanban, check-square, zap, github, clock, sticky-note…). NO change to
-  `structure.ex` icon VALUES. *Why: the Go TUI's `terminalIcon` (structure.go:189-196) keeps
-  emoji and DROPS ASCII Lucide names — names on the wire would strip every TUI desk icon.
-  Emoji-on-the-wire keeps this a 1-surface Studio slice (au-w5 classification).*
-- **D6 — Control kit = wrap the EXISTING CSS primitives into `StudioComponents.Controls`
-  function components.** root.html.heex already ships tokenized `.btn` family, `.card`/
-  `.card-header`, `.form-input` (incl. themed `select.form-input` with SVG chevron),
-  `.form-switch`, `.form-checkbox`. The kit wraps these as `bp_select` / `bp_checkbox` /
-  `bp_switch` / `bp_input` / `bp_field_row` / `bp_card` / `bp_section_header`; screens
-  consume the components going forward (the classes remain the styling substrate).
-  FieldInputs stays editor-form-specific — reference, not the kit. *Why: the visual language
-  exists; the 3/10 comes from screens bypassing it. Wrapping once ends per-screen drift.*
-- **D7 — Settings is the flagship adoption target and rebuilds FIRST.** settings_live.ex is
-  100% native controls + inline-style divs + `ui-sans-serif` font. Rebuild on the kit:
-  `var(--font)`, card sections, weighted section headers, aligned label/control rows, zero
-  native controls. MUST preserve the freshly-landed scoped route
-  (`/w/:ws/p/:proj/studio/settings`), fail-closed write guard, plugin-toggle and
-  typeless-feedback logic (#1981/#2038/#1997). *Why: the page the user named, and mostly
-  adoption not invention — highest ROI per hour.*
-- **D8 — Contrast fixes land in the token manifest, not per-screen.** Verified token defects:
-  `--fg-dim` fails AA on `--bg` in ALL six theme×mode combos (2.53–3.90) yet paints settings
-  hints and placeholders; evergreen-light `--muted-text` on `--muted-surface` is ~4.39 (<4.5).
-  Fix: raise `--fg-dim` L to clear 4.5:1 everywhere (still the dimmest text tier), nudge the
-  evergreen-light muted pairing, and add `--surface-raised` + `--border-subtle` semantic
-  tokens (dark `--surface` 5.5% L barely separates from `--bg` 3.9% — cards have no visible
-  elevation). *Why: the grays are already tokens (studio-literal-check is green); the token
-  VALUES are the defect.*
-- **D9 — New chrome tokens follow the 3-file lockstep.** `design/tokens.json` (evergreen
-  reference values) + `derive.mjs` (`STUDIO_II` anchor + formula) + `emit.mjs`
-  (`CHROME_ALIASES`), then `node design/emit.mjs --write`. tokens_gen.ex stays byte-stable
-  (chrome vars never enter it). Zero new lit-allows. *Why: skipping derive.mjs breaks the
-  derive(evergreen)===tokens byte-identity proof (check.mjs Part F) and reds CI.*
-- **D10 — Chat is a layout NO-GO zone this epic.** bp-studio-chat-excellence wave 9 is in
-  flight with immovable client contracts (form#chat-composer-form, input#chat-composer) and
-  test-pinned selectors. Chat inherits token-value fixes automatically (fully tokenized);
-  its native selects/buttons are swept in a LATER wave, coordinated with that epic. Same
-  restraint for literal-check-EXEMPT files (modals.ex color picker, paper_editor.ex): their
-  native controls are fair game later, their approved hex literals are not.
-- **D11 — Evidence = LiveViewTest HTML assertions; screenshots are an authenticated add-on.**
-  Every screen has a `live/2` test harness rendering full HTML with no server boot.
-  Before/after proof is committed test assertions (`refute html =~ ~s(<select` /
-  `assert html =~ "bp-select"` style). guerrilla Studio is login-gated — never write a
-  criterion assuming an anonymous screenshot.
+- **D1 — New anchor, not adoption.** `pbp-tui-creative` is done; this epic files a NEW anchor `pbp-tui-slate-2` under the still-open `pdrender-block-parity`. *Why:* reopening a closed strategy task would falsify the ledger; its waves are all merged.
+- **D2 — The aggregate resolver is NOT future work.** `agg_for_query/2` (tasks/query.ex:228) + `@dataviz_types` shapers (task_resolver.ex) are MERGED. *Why:* the wish's "resolver is wave 3, don't build it" is stale — no slice re-files it; wave blocks are snapshot-authoritative (`{query,snapshot}`, resolver deletes `query` on resolve — the shipped house pattern). Wiring `gauge` into `@dataviz_types` + `gauge_shape/1` is a future Elixir slice, out of this Go-only wave.
+- **D3 — Extend-not-fork on heat.** heatmap-calendar and matrix-extras are MODES of the one canonical `heatmapRenderer`/`heatCell` family (heatmap.go). *Why:* the matrix render (rowLabels/colLabels) already ships (heatmap.go:99-164); a sibling renderer would be a decoy fork of a ratified contract. New law is additive: one quantile-bin function (4 bins) drives BOTH the glyph `░▒▓█` and `GenHeatRamp[k]` color from one index (simultaneous dual-encode). The legacy either/or `ramp:` path, `heatTrueColor` 2-endpoint interpolation, and sample_m11 goldens stay byte-untouched. Stamp `@canonical capability:heat-quantile-bin` on the bin function.
+- **D4 — GenHeatRamp = 4 hand-authored literal hexes** as a `ramp` array on the EXISTING `color.pdrenderHeatmap` passthrough node. *Why:* already in PASSTHROUGH_FAMILIES (derive.mjs:944) — zero new registration; hand-authored (GitHub-style non-linear greens) because computing stops from base/peak in Go re-introduces the interpolation the passthrough family exists to avoid. Emitted verbatim by `pdrenderGo` as `[]lipgloss.Color` mirroring `GenChartSeries`; tokens.json + tokens_gen.go land in ONE commit (`node design/emit.mjs --write`); both `.ex` artifacts stay byte-stable because only `pdrenderGo` reads that node.
+- **D5 — stat-grid is NOT rebuilt.** `stats`/`stat-grid` (statsRenderer) already ships with DefaultFlex-measured 2-col→1-col (stat.go:257). *Why:* filing "build stat-grid" would re-implement a registered block. The only delta: a `denom` item field → dim label / accent value / dim denominator. Zero width arithmetic; `TestNoInlineDivideFormulaOutsideSolver` stays green.
+- **D6 — gauge-list count-mode buckets in Go** over the existing task-list snapshot row, dims `worker|phase|status|priority` only. *Why:* those fields are already on the wire (task_resolver.ex row_from_task); `group_by epic` is UNBACKED (no epic on the row, none in `@agg_group_dims`) — deferred to the future resolver-dim slice, never faked from `parent`.
+- **D7 — The "14-renderer parity harness" does not exist.** Real invariants: the 12 cross-surface Elixir-generated goldens stay byte-unchanged (a Go wave may not regen them), the 16 milestone goldens stay byte-unchanged, and each new block adds its own milestone trio (sample_mN.json + TestGoldenMN + goldens/). *Why:* criteria phrased against a phantom harness are vacuous or force forbidden Elixir work.
+- **D8 — Dim = `ctx.Theme.Dim` (foreground color), NEVER `lipgloss.Faint()`.** *Why:* the wasm reader's `applySGR` has no case for SGR 2 — Faint-dim passes every ANSI-stripped Go golden yet silently vanishes in the browser. Calendar zero cells = dim `·`, never `▁`, never blank.
+- **D9 — The 3-profile golden helper drives BOTH knobs** — pdrender `ctx.Profile` AND the inverted termenv global `lipgloss.SetColorProfile` (termenv: TrueColor=0…Ascii=3; the two in-repo comments contradict — the helper's doc comment settles it). Law enforced: `ansi.Strip(out@ANSI256) == ansi.Strip(out@TrueColor) == out@NoColor` — the machine form of "datum in geometry, color as reinforcement".
+- **D10 — Doctrine lives in a NEW contract doc** `docs/contracts/tui-render-doctrine.md` (fresh `canonical-for: tui-render-doctrine`; contracts are byte-unbounded). *Why:* docs/cards/tui.md is 2388/2400B (12 bytes free) and cards are hard-capped at 7 — the wish's "trim within budget" is impossible by ~48x. The card gets a ~70B trim + one-line pointer in the same PR (doc-gates trigger on `**/*.go`, so the card must be ≤2400B whenever it rides a Go PR).
+- **D11 — "Renders in the WASM reader" needs a real proof.** *Why:* the wasm gate only recompiles and renders sample.json — a registered block can compile to wasm and never be exercised. Final slice extends `cmd/pdrender-wasm/smoke.mjs` to render every new block's snapshot and assert non-fallback output + dim-as-color-escape.
+- **D12 — Go-only wave, worktrees mandatory** (internal/pdrender is hot concurrent-dev); merge on the Go gate (`go build/vet/test`), never waiting for Elixir Test.
 
-## Roadmap
+### Wave-2 decisions (charts + structure)
 
-Wave 1 (this wave — integration order as listed):
-1. `sup-w1-icon-authority` — complete the icon resolution authority in icons.ex (emoji map + missing Lucide glyphs); tree types become distinct with zero wire change. **small**
-2. `sup-w1-topbar-scope-chip` — icons-only top bar tabs + compact scope chip restyle + themed dataset-switcher fallback. **medium**
-3. `sup-w1-tokens-aa` — `--surface-raised`/`--border-subtle` tokens + AA fixes for `--fg-dim` and evergreen-light muted pairing, via the 3-file lockstep. **medium**
-4. `sup-w1-controls-settings` — `StudioComponents.Controls` kit + full settings-page rebuild on it. **large**
-5. `sup-w1-styleguide-gallery` — extend StyleguideLive with a control-kit gallery section (living spec + evidence surface; CSS-class based so it parallels slice 4). **small**
+- **D13 — heatCell goes Barkpark dual-encode, MINIMAL flavor.** Inside the `if trueColor` branch ONLY: heatmap.go:275 `Render("█")` → `Render(heatShadeGlyph(intensity))`; :287 `strings.Repeat("█", w)` → `strings.Repeat(heatShadeGlyph(intensity), w)`. `heatTrueColor` foreground and the legacy linear 6-step ladder stay untouched — NOT converged onto quantile `heatDualCell` (that flavor would churn sample_m11's NoColor shade goldens). *Why:* GitHub-solid █ would amend the strip law we ratified one wave ago; dual-encode is already the D3 house pattern; the minimal flavor is provably zero-golden-churn (every stored golden renders at NoColor, which never enters the branch). The doctrine §Known-gap (tui-render-doctrine.md:75-83) and the golden_profiles_test.go:100-104 gap comments are deleted in the SAME PR that wires the sample_m11 TRUECOLOR grid into assertStripComplete.
+- **D14 — The box-curve junction slice is DROPPED — false premise.** chart.go plots every series into a shared braille union canvas (braille.go:71-82, :137); no ╰│╮ glyphs exist anywhere in the chart path and orphan fragments cannot occur. No box-drawing line-chart mode is commissioned — that would fork the braille renderer against extend-not-fork. The chart slice reframes to the two real gaps: compact-unit y-ticks and enforcing max-2-series.
+- **D15 — Compact-unit y-ticks are NET-NEW; max-2-series becomes ENFORCED law.** No k/M formatter exists to reuse (stat.go consumes pre-formatted display strings). A small `formatTickCompact` lands beside `formatTick` (chart.go:415): |v| ≥ 10 000 → k/M/B, one decimal with trailing .0 trimmed (45500000 → `45.5M`); below threshold byte-identical to today so small-value chart goldens stay stable. max-2-series is aspirational today (unbounded loop chart.go:105-108, modulo color cycle :408) — the slice caps at the first 2 series with a test.
+- **D16 — Table typed columns extend cell CONTENT, never width math.** tableRenderer's delegation to lipgloss/table's own auto-sizer is settled law (richblocks.go:18-25) — no Flex port, ever. Typed spec = new table attr `cols:[{type:text|num|delta|spark}]` — key is `cols`, NOT `columns` (overloaded: layout block name + layout attr). spark reuses stat.go `sparkline(values, 14)` (the one canonical primitive; braille canvas and heat ladders are decoys); delta renders ▲/▼/− from the numeric value via toFloat — glyph-encoded, color as reinforcement only; num/delta right-align via the existing (row,col) StyleFunc. `TestNoInlineDivideFormulaOutsideSolver` stays green by construction.
+- **D17 — Roadmap v2 is GLYPH-LAYER ONLY; the structural projection is untouchable in a Go wave.** roadmap.golden.json is the mix-generated cross-surface parity fixture — no new structural role/lane, or the slice stops being Go-only. Everything rides existing lanes + NEW optional author attrs: ▓done/░planned derived from the existing status role; ◆ from optional row `milestone:true`; date rails from optional block `start`/`end` ISO dates + per-row dates (Go date→pct math over author-supplied literals — snapshot-authoritative; resolver enrichment stays a future wave — row_from_task doesn't even emit left/width today); month ┊ ticks placed by a NEW largest-remainder distributed-rounding helper (none exists; pctToCell's independent rounding drifts). Glyph precedence ┃>◆>note>▓>░>┊>·. The slice owns the sample_m6_w*.txt regen with rationale (status-derived ▓/░ changes existing roadmap bytes).
+- **D18 — tasks layout:tree derives from the depth SEQUENCE; the parent_id framing is dropped.** parent_id is a query INPUT, never a row output — row_from_task emits only title/status/priority/worker/criteria/phase (task_resolver.ex:311-321). D6 precedent: never fake a wire dim. `depth` IS a supported literal-row field (sample_m6 uses it), so the tree renders ├─└─│ rails from the consecutive-depth structure of author rows. `layout:` is a NEW dispatch axis on taskListRenderer (only grid mode exists today). Right-aligned worker/pri meta grid; labelW clamp at depth≥3; the existing 0..5 depth clamp holds.
+- **D19 — pipeline layout:flow files for WAVE 3, linear v1.** The mermaidflow/mermaidflowlr engine already gives ──▶ arrowheads, no-crossings-by-default (crossers defer to the legend), and Dim-styled wire; the delta is a ~40-80 LOC snapshot→mmGraph adapter chaining implicit node[i]→node[i+1] edges. Cheap — but wave capacity is 5 slices and finishing beats starting. DAG branching needs an edges wire field (future resolver wave; never invented from snapshot). wasm-proof stays sequenced last, after wave-2 blocks are on main and deployed.
+- **D20 — Merge guard update.** #2089 is MERGED (f2df6d76). Builders cut worktrees from `origin/main` after `git fetch` — never `integrate/slate2-w1` (historical), never the stale local checkout.
 
-Wave 2 (planned): native-control sweep of remaining screens onto the Controls kit —
-sheet_grid.ex (7 controls), modals.ex radios/checkboxes, api_tester select, paper_editor
-block selects; consume `--surface-raised` for card/panel elevation across desk + editor;
-in-browser computed-style contrast verification per theme×mode (confirm the two marginal
-cases from D8); layout-rhythm pass (spacing scale, typographic hierarchy) on desk, media,
-projects screens.
+## Roadmap (integration order)
 
-Wave 3 (planned): chat control sweep coordinated with the studio-chat epic lead
-(token-only until then); org_admin/tmux polish; final AA audit + close-out evidence.
+| # | Slice | Task | Size | Status |
+|---|-------|------|------|--------|
+| 1 | Detail-ceiling doctrine contract + tui.md card pointer + shared 3-profile width-golden helper (proven on existing heatmap/stats/chart fixtures) | `pbp-slate2-doctrine-goldens` | medium | merged #2089 |
+| 2 | Heat family v2: GenHeatRamp[4] tokens + quantile bin + simultaneous dual-encode + heatmap-calendar mode + matrix Σ marginals/exact values | `pbp-slate2-heat-family` | large | merged #2089 |
+| 3 | gauge-list block — share/count modes, snapshot-authoritative, ▓/░ meter rows over the task-list wire contract | `pbp-slate2-gauge-list` | medium | merged #2089 |
+| 4 | stat cell denom — dim label / accent value / dim denominator (71/118) | `pbp-slate2-stat-denom` | small | merged #2089 |
+| 5 | heatCell truecolor dual-encode (D13 minimal flavor) + close the doctrine §Known-gap + wire m11 truecolor grid into assertStripComplete | `pbp-slate2-heatcell-dualencode` | small | wave 2 |
+| 6 | chart compact-unit y-ticks (45.5M) + max-2-series enforced (D14/D15; junction slice dropped) — trio sample_m20 | `pbp-slate2-chart-units` | small | wave 2 |
+| 7 | table typed columns `cols:[text\|num\|delta\|spark]` (D16) — trio sample_m21 | `pbp-slate2-table-typed-cols` | medium | wave 2 |
+| 8 | roadmap v2 glyph layer: date rails, month ┊, ▓done/░planned, ┃today, ◆milestones, precedence, distributed-rounding ticks (D17) — owns sample_m6_w*.txt regen; trio sample_m22 | `pbp-slate2-roadmap-v2` | large | wave 2 |
+| 9 | tasks layout:tree from the depth sequence + right-aligned meta grid (D18) — trio sample_m23 | `pbp-slate2-tasks-tree` | medium | wave 2 |
+| 10 | pipeline layout:flow linear v1 — snapshot→mmGraph adapter over mermaidflow (D19) | `pbp-slate2-pipeline-flow` | small | wave 3 (filed) |
+| 11 | WASM reader per-block proof — smoke.mjs enumerates the new blocks | `pbp-slate2-wasm-proof` | small | open — sequenced LAST, after wave-2/3 blocks are on main |
+| 12 | (future, Elixir) `gauge` → `@dataviz_types` + `gauge_shape/1`; resolver emits depth/parent_id/dates for tree+roadmap; epic/root-ancestor agg dim; plural-stats shaper | unfiled | medium | later |
+| 13 | (future) dashboard container + $span; migrate the ~17 duplicated golden read/write blocks onto the shared helper | unfiled | medium | later |
 
 ## Wave log
 
-### Wave 1 — 2026-07-10 (reviewed)
+- **Wave 1 (merged 2026-07-10, PR #2089, f2df6d76):** doctrine contract + assertStripComplete helper, GenHeatRamp[4] + quantile dual-encode heat family with calendar mode + marginals (trios m17/m18/m19), gauge-list, stat denom. All four slice tasks closed done with evidence (one multi-task PR; body carries the doctrine-goldens trailer — the other three record #2089 as the shipping commit). Follow-up filed from the wave: `pbp-slate2-heatcell-dualencode` (the pre-existing truecolor heatCell violates the new strip law — tracked as the doctrine §Known-gap).
+- **Wave 2 plan (2026-07-10, this entry):** charts + structure — 5 slices (rows 5-9 above), integration order heatcell → chart-units → table → roadmap-v2 → tasks-tree. taskblocks.go is shared by rows 8+9 (different functions: roadmapRenderer vs taskListRenderer) — tree merges AFTER roadmap-v2 and rebases. Milestone numbers assigned to avoid collisions: m20 chart, m21 table, m22 roadmap, m23 tree. Junction-policy sub-slice dropped as a false premise (D14). pipeline layout:flow filed for wave 3 (D19).
 
-**All 5 slices green, reviewed, fixed in place, integration-verified.** A scratch merge of all
-five `-r` branches was clean (no conflicts) and fully green: 80 Elixir tests, studio-link-lint,
-studio-literal-check, design emit --check + check.mjs + derive.test.mjs (48/48). Merge the `-r`
-branches, in roadmap order:
+### Wave 2 — 2026-07-10 (charts + structure, reviewer log)
 
-1. `sup-w1-icon-authority` → `loop-epic/icon-authority-complete-emoji-map-icons--0-r` — icons.ex
-   is the complete authority (5 new emoji mappings, ✅→check-square, 📑→sticky-note, 13 new Lucide
-   paths; plugin desk links columns/zap/github/clock now resolve). Wire fence held: emoji
-   byte-verified identical across icons.ex ↔ structure.ex ↔ schema JSONs (no variation-selector
-   drift). Reviewer fix: mix format.
-2. `sup-w1-topbar-scope-chip` → `loop-epic/icons-only-top-bar-with-tooltips-compact-1-r` —
-   icons-only tabs (title + aria-label, no visible text), compact scope chip, themed dataset
-   fallback; all four scope events intact. Reviewer fix: the chip fill referenced `--bg-subtle`,
-   which is **defined nowhere in the repo** (computes to transparent) — now
-   `var(--surface-raised, var(--bg-muted))`.
-3. `sup-w1-tokens-aa` → `loop-epic/token-manifest-surface-raised-border-sub-2-r` — new chrome
-   tokens via the 3-file lockstep; fg-dim + evergreen-light muted-text clear AA in all 6
-   theme×mode combos with committed protective node tests; tokens_gen.ex byte-stable (verified
-   against BOTH real tokens_gen.ex paths). Reviewer fix: the muted-text ripple broke the pdrender
-   golden `TestPdrenderTokensGolden` (chrome-label light #71717a→#6e6e77) — fixture regenerated,
-   full `go build ./...` + pdrender/semrole/taskboard tests green. The builder's "only my gate"
-   blind spot was real; the Elixir CI gate would NOT have caught it (the Go gate would).
-4. `sup-w1-controls-settings` → `loop-epic/studiocomponents-controls-kit-settings-p-3-r` —
-   Controls kit (8 components) + Settings rebuilt, zero native controls, 35 tests green, event
-   plumbing verified (`:global` passes phx-click/phx-value-*). Reviewer fix: added the missing
-   `:disabled` rules (`.btn:disabled`, `.form-input:disabled`,
-   `.form-switch:has(input:disabled)`) — Settings ships disabled Save/Reveal/placement controls
-   that previously gave zero visual feedback; plus mix format.
-5. `sup-w1-styleguide-gallery` → `loop-epic/styleguide-control-kit-gallery-the-livin-4-r` —
-   Controls gallery in StyleguideLive. Reviewer fix: disabled specimens now show the REAL
-   `:disabled` rules from slice 4 (inline opacity simulation removed — **merge 4 before 5**), and
-   `.btn-icon` renders the real `plus` glyph instead of a `＋` text placeholder.
+**Landed (5/5 slices green, reviewed; scratch merge of all five final branches onto origin/main
+(f2df6d76) was conflict-free — full `go build/vet/test ./internal/...` green, gofmt clean).**
+Merge the branches in integration order (lead closes each task's "PR merged" criterion on merge;
+all five claim epochs = 1):
 
-**Lead actions on merge:** close each task's "PR merged" criterion (all 5 tasks honest:
-in_progress, evidence stamped, only the merge criterion open); then flip epic criterion 0.
-This charter file rides the styleguide `-r` branch; the main checkout holds the strategist's
-uncommitted copy WITHOUT this wave log — the branch version supersedes it (reconcile by keeping
-the branch version).
+1. **pbp-slate2-heatcell-dualencode** → `loop-epic/heatcell-truecolor-dual-encode-d13-minim-0-r`
+   (this branch; carries the charter rotation + this log). D13 minimal flavor verbatim: the two
+   truecolor branches Render(heatShadeGlyph(intensity)) under the untouched heatTrueColor
+   foreground; m11 truecolor grid wired into assertStripComplete; doctrine §Known-gap deleted.
+   ZERO stored golden bytes moved. Reviewer mutation-probed the new subtest (solid █ reds it,
+   the fix greens it) — no changes needed.
+2. **pbp-slate2-chart-units** → `loop-epic/chart-y-axis-learns-compact-units-45-5m--1`
+   (no reviewer changes). formatTickCompact (|v|≥10000 → k/M/B, below byte-identical to
+   formatTick) + maxChartSeries=2 enforced BEFORE scaling (capped 3-series render proven
+   byte-identical to the bare 2-series render). **LEAD DECISION AT MERGE:** the slice owns a
+   sample_m15 golden regen — m15's chart carries THREE resolver series (open/ready/done), so the
+   enforced cap drops `done` and rescales the axis. Criterion 4 honestly left met=false to
+   surface this. Reviewer endorses the regen: the cap is charter law and m15 now doubles as the
+   live-data proof; the alternative (exempting the fixture) leaves a law-violating render on main.
+3. **pbp-slate2-table-typed-cols** → `loop-epic/table-learns-typed-columns-cols-text-num-2`
+   (no reviewer changes). Optional `cols:[{type:text|num|delta|spark}]` — content-only, auto-sizer
+   untouched, num/delta right-align via the existing StyleFunc, delta glyph-first ▲/▼/- with
+   absolute magnitude (double-sign asserted absent), spark = the ONE stat.go sparkline(values,14).
+   cols-absent proven byte-identical (every pre-existing table golden untouched). Known clip: at
+   w40 the 4-col table clips the spark mid-run — same behavior as the legacy m1 table, honest.
+4. **pbp-slate2-roadmap-v2** → `loop-epic/roadmap-v2-date-rails-month-scale-done-p-3-r`
+   (**merge the -r branch**). Glyph layer ┃>◆>◇>▓/░>┊>· with a collision-matrix test; date rails
+   through the SAME clampPct/clampBarWidth/pctToCell; distributeSegments (one running boundary —
+   exact totals, ≤1 spread, unit-tested); roadmap.golden.json byte-unchanged WITHOUT regen; owns
+   the sample_m6 regen (diff confined to roadmap lanes, ▓→░ for non-done). Reviewer fix
+   (24a6779d): a row whose start date predates the block span had its width inflated by the
+   negative raw left — width now subtracts the CLAMPED left; in-span rows byte-identical, zero
+   golden churn.
+5. **pbp-slate2-tasks-tree** → `loop-epic/tasks-layout-tree-rails-from-the-depth-s-4`
+   (no reviewer changes). layout:{mode:"tree"} on taskListRenderer; ├─└─│ rails purely from the
+   consecutive depth sequence (parent_id never read — D18/D6 held); right-aligned worker/pri meta
+   grid with shared column widths; house-ellipsis label clamp. Merges cleanly after roadmap-v2
+   (scratch merge proved no conflict on the shared taskblocks.go).
 
-**Debt found, deliberately not fixed this wave (wave-2 fodder):**
-- `--bg-subtle` is consumed ~21 more places in root.html.heex and **defined nowhere** — every one
-  silently paints transparent (shares/attach/actions-bar hover fills). Decide: alias it in the
-  manifest or sweep the usages onto real tokens.
-- `--surface-raised` dark elevation is theme-uneven: the STUDIO_II anchor is absolute (L 0.210),
-  so ember (bg L≈0.194) / fjord (bg L≈0.184) get Δ0.016/0.026 — near-flat. Make the dark formula
-  relative to bg (≈ bgL + 0.07) or pin per-theme; extend the elevation test beyond evergreen.
-- Nothing consumes `--surface-raised`/`--border-subtle` yet except the reviewer's chip-fill —
-  wave 2's card/panel elevation pass is where they land.
-- No real-browser pixel eyeball happened anywhere this wave — all evidence is rendered-HTML +
-  math. Wave 2 must include an authenticated screenshot pass (guerrilla login) or a booted local
-  LiveView eyeball, especially Settings + the icons-only top bar + the styleguide gallery in both
-  modes.
-- Styleguide gallery is class-based by design; a later wave swaps it onto the Controls components.
+**Ledger state:** all five tasks in_progress, claim epoch 1, evidence stamped, ONLY the merge
+criterion open (chart-units additionally holds criterion 4 open for the m15 decision above).
+wasm-proof (open, epoch 2) and pipeline-flow (open, unclaimed, wave 3) untouched — honest.
+No ledger fixes were needed.
 
-**Wave 2 direction:** roadmap as written (native-control sweep of sheet_grid ×7 / modals /
-api_tester / paper_editor onto the kit; consume surface-raised for desk+editor elevation;
-in-browser computed-style contrast verification; layout-rhythm pass on desk/media/projects) PLUS
-resolve the --bg-subtle defect and the surface-raised theme-evenness, and pay the pixel-eyeball
-debt first — it gates the user's re-verdict.
-### Wave 2026-07-04 resync + wave-4 cut (architect)
+**Charter rotation (this commit):** slot content replaced by this epic's charter; the outgoing
+studio-ui-premium charter was already preserved at `bp-studio-ui-premium-charter.md` (newer,
+wave-2 inclusive); the staging-barkpark wave-1 reviewer log that rode this slot is now appended
+to `bp-staging-barkpark-charter.md` §Wave log; the slate-2 wave-1 full reviewer log lives in git
+history (f2df6d76) and condensed in the Wave-1 bullet above.
 
-A parallel console loop (D45–D66) landed half of the wave-3 cut between charter snapshots: sub-tabs+webhooks, on-demand verify, `__preview__`, DESIGN.md, onboarding narrative, FailureCopy, usage endpoint. Decisions 32–36 recorded; verify SSE clause voided (33 — verify rides instance events + `fleet`); render-rig slice cancelled (satisfied by `__preview__`); dep-pill confirmed still alive → decision-24 sweep scope widened; row-grammar strategist proposal absorbed into the sweep (24); capability freeze re-affirmed against five strategists' expansion pressure (35); log spine acknowledged as the top parity hole and scheduled with its own scrutiny (wave 7). **Wave 4 cut: items 9b, 10, 11, 11b.** app.js contention: item 9b owns the instance region + TYPE_ACTIONS wiring; item 10 owns the site-detail region + a new invite view + routes; both append-only to app.css end / `__app.test.mjs` / `__bpTestHook` exports (textual conflicts, merge sequentially: 11 → 10 → 9b → 11b). Item 11 owns app.css token blocks + index.html + styleguide.html + `__css_check.mjs` and must not edit app.js. Item 11b is Go-only. Every SPA slice adds `__preview__` scenarios for its new states; perfecters attach renders (amendment 2.4).
+**Debt / wave-3 fodder:**
+- No live-terminal or wasm pixel eyeball of the new truecolor dual-encoded heat grid, the m22
+  roadmap, or the m23 tree — exactly `pbp-slate2-wasm-proof`'s job; RE-LAUNCH it once this wave
+  is on main and deployed (it is the sequenced-last slice, epoch 2, still honestly open).
+- Month ┊ ticks are equal-width segments via distributeSegments, not calendar-day-accurate
+  boundaries; the space-joined scale header is not positionally aligned under the ticks —
+  both acknowledged, candidate polish if roadmap v3 ever lands date-accurate ticks.
+- The m23 fixture names a "Junction crossing policy" row — a story the epic dropped (D14);
+  cosmetic only, rewording would churn four goldens for nothing.
+- The strip-helper dedup + @canonical doc-repoint hygiene slice from wave 1 is still unfiled.
 
-### Wave 2026-07-04 (wave 4 — keep every promise; become Barkpark)
-
-**Landed (4/4 green, all perfecter-approved "merge the -p branch"):**
-- **11 Identity drop** (424913bc + perfecter polish): evergreen/sage mirror-pair primary + amber accent, 149-byte inline-SVG mark, genuinely self-hosted Inter (offline-render proven), dimensional token ladders defined (primitives-only migration per decision 29), E5 WCAG contrast engine (29-pair manifest × 2 themes = 58 checks), E6 raw-literal error + allowlist, E7 no-external-host lint, R4 px backlog report (132 lines), /styleguide.html sign-off page. All 10 gate mutations probed. Perfecter caught a REAL ratification-surface bug (scoped `[data-theme]` var-substitution rendered light colors in the styleguide's dark panes) — fixed + gated as E8.
-- **10 Zero broken promises** (58100d00): confirmModal born (pure reducer, mutate + destroy tiers, trapTarget refactor, D25 one-recovery-action contract), Rollback/Redeploy UI on the promote route (Current chip, consequence copy, promoteFailure map), invitation accept flow end-to-end (legacyRoute for the minted shape, token parked in sessionStorage + URL scrubbed, preview banner, designed terminals incl. wrong-account resume). Decision-26 broken promise CLOSED.
-- **9b Timeline + verify chips** (7ca5a94a): incident home whole per decision 34 — pure mergeTimeline (order/dedup/403-degrade harness-pinned), inline expansion surviving SSE remounts, verify chips byte-pinned to `__fixtures__/verify_probes.json`, Check-now with honest unreachable rendering, 409/404 each one recovery action. Zero Elixir. Repaired the pre-existing stale `__preview__` 'empty' expectation.
-- **11b `bp cloud verify`** : verdict line + probe table through statusRole/joinColsPainted, `-o json` verbatim, exit ladder via useError, fixture tripwire now spanning Go CLI + Go provisioner + Elixir. Dispatch registered in hetzner_cmd.go (runCloud lives there, NOT cloud_cmd.go — FILES list was wrong, builder correct).
-
-**Wave verdict:** the strongest wave yet against the wish — identity (aesthetics), zero-broken-promises + incident home (UX), CLI twin + merge gates (DX). No drift into micro-repair; the freeze held.
-
-**BLOCKING before/at integration:** (1) decision-27 human ratification of /styleguide.html — serve the **-p branch's** page (dark panes differ from the builder's original); nothing merges before it since 11 heads the merge train. (2) Merge order 11 → 10 → 9b → 11b, sequential — known textual conflicts: app.css tail, `__app.test.mjs`, ALLOW_PREFIXES, `__preview__` EXPECTATIONS, runCloud switch/help. (3) Full cloud Elixir suite at integration (builder ran only the touched allowlist test in-worktree). (4) macOS Go gate needs CC=clang (environmental).
-
-**Owed post-merge (file as tasks):** real-browser light/dark eyeball of Timeline/verify-chip/rollback/invite screens (profile lock blocked it two waves running — pixel debt is accumulating); one real `bp cloud verify` + curl smoke on guerrilla (envelope parity rests on handwritten test envelopes); loadInstanceSites re-query race (A's sites can paint into B's slot); invite already-member detection only sees the current team + session not switched after join (server contract question for the wave-7 members panel); first destroy-tier consumer must browser-click the typed-echo input once; consider promoting `__preview__/smoke.mjs` into a gate (it's green and it caught the IA-reshape drift).
-
-**Feeds wave 5:** status hues visibly retinted in BOTH themes (forced by the AA gate) — the decision-22 `design_tokens.json` cross-runtime fixture is now UNBLOCKED and urgent (CLI ANSI must derive from the NEW values, do it early); --dur-3 defined-unconsumed + 132-px R4 backlog are explicit sweep fodder for decision 24 — if the sweep slips, these rot into permanent debt.
-
-### Wave 2026-07-10 (epic staging-barkpark, wave 1 — reviewer log)
-
-*(Filed here because this charter is the file the staging-barkpark workflow reads; the staging epic carries no charter of its own yet — the wave-2 lead should mint one or keep logging here under the slug.)*
-
-**Landed (4/4 code slices green, reviewer-fixed in place — integrate the `-r` branches):**
-- **staging-w1-channel-seam** (`loop-epic/instance-deploy-sh-gains-a-fail-closed-d-0-r`, 0b10610c): DEPLOY_REF/DEPLOY_REMOTE channel seam in `deploy/instance-deploy.sh`, fail-closed on the `/opt/barkpark/.staging` marker — prod keeps byte-identical `pull --ff-only origin main` and REFUSES non-main refs (exit 11); staging fetch+hard-resets any branch or `pull/<n>/head`. Reviewer fix: prod also REFUSES a non-origin `DEPLOY_REMOTE` (was silently ignored — safe outcome, wrong intent) + 5 new harness checks incl. staging non-origin-remote fetch. 49/49, both guards mutation-probed.
-- **staging-w1-deploy-verb** (`loop-epic/bp-cloud-deploy-one-verb-pushes-any-ref--1-r`, c364bb78): `bp cloud deploy <target> [--branch|--pr|--host|--clean|--dry-run]` — streams the LOCAL instance-deploy.sh over SSH under the exact seam env contract; host precedence --host → fleet row → BARKPARK_STAGING_HOST → clear error; ZERO config writes (byte-asserted); `bp use` refuses a staging default without --force. 13 new tests. Reviewer fix: gofmt only. KNOWN GAP (accepted): RunFeed buffers CombinedOutput, so the deploy log prints after completion, not live — a streaming exec seam in cloud/sshrunner.go is wave-2 fodder.
-- **staging-w1-identity-banner** (`loop-epic/studio-wears-its-environment-barkpark-en-2`, 37e4b719, no reviewer changes): `BARKPARK_ENV` → `:instance_env` (runtime.exs prod, identity tag NOT MIX_ENV) → `Nav.studio_env_banner/1` in studio.html.heex — staging strip with disposable-data copy, generic uppercase for unknown tags, nothing for nil/prod/production; warn-token colors verified present in all 8 themes; literal-check green; 51 tests. **Elixir slice — WAIT for the Elixir Test gate before merge.** app.html.heex does NOT carry the banner (Studio-only this wave, by brief).
-- **staging-w1-canary-runbook** (`loop-epic/deploy-readme-md-teaches-the-staging-cha-4-r`, 99ce648a): deploy/README.md "Staging channel" section — two-channel table, the verb, the 5-step canary loop, staging-host onboarding. Reviewer fixes against the built code: real host-resolution precedence (BARKPARK_STAGING_HOST has NO default), operator key `~/.ssh/barkpark_indx` not CI's DEPLOY_SSH_KEY, branch/PR refs not raw shas. Doc gates green. Its criterion 1 ("match MERGED implementations, cite PRs") stays open until the lead merges seam+verb and cites the PRs.
-
-**Stalled (honest):** **staging-w1-box-provision** — HUMAN-GATED, all 6 criteria open with a prepared executor runbook stamped as evidence. Hard gates: staging.barkpark.cloud NXDOMAIN (DNS zone is on the SEPARATE Hetzner token — cannot be automated with the present credentials); billable `hcloud server create` forbidden unsupervised; newest warm snapshot is x86 (use cx22/cpx11, NOT cax11 ARM). Also blocked on seam+verb merging first.
-
-**Merge order:** seam-r → verb-r (Go gate; may merge on it) → banner (WAIT for Elixir Test) → runbook-r last (docs-only). No textual conflicts expected — disjoint files. Lead closes each task's "PR merged" criterion on merge (claim epochs: seam/verb/banner/runbook = 1; box-provision = 2 — do NOT patch briefs, the close fence digests them).
-
-**Wave 2 should take:** (1) the human executes box-provision (runbook is in the task evidence; D6 timing measurement rides the first real `bp cloud deploy staging`); (2) `bp cloud deploy staging --reset` (disposable-data verb the runbook already promises); (3) live-stream the deploy log (exec seam in sshrunner); (4) consider the banner on app.html.heex-rendered admin surfaces; (5) a real end-to-end smoke: branch → deploy → three curls → merge, timed against the seconds-to-minutes wish.
-
-### Wave 2026-07-10 (epic pbp-tui-slate-2 "heat + meters + tokens", wave 1 — reviewer log)
-
-*(Filed here because this charter is the file the tui-creative-slate workflow reads; epic anchor task `pbp-tui-slate-2` under the pdrender-block-parity lineage.)*
-
-**Landed (4/4 code slices green; scratch merge of all four onto origin/main was conflict-free and fully green: go build/vet/test, emit --check 17/17, check.mjs, doc budgets, docs-anchors):**
-- **pbp-slate2-doctrine-goldens** (`loop-epic/detail-ceiling-doctrine-contract-tui-md--0-r`) — docs/contracts/tui-render-doctrine.md (strip law `ansi.Strip(ANSI256)==ansi.Strip(TrueColor)==NoColor`, dual-encode+quantile, zero=dim `·`, dim-never-Faint, two-knob profile plumbing incl. the INVERTED termenv enum) + shared `assertStripComplete` helper proven on shade heatmap/stats/chart + testRegistry `SetColorProfile(0→3)` fix (0 was TrueColor, not Ascii). Honest Known-gap section: legacy truecolor `heatCell` is color-ONLY encoding — follow-up task `pbp-slate2-heatcell-dualencode` filed (needs strategist sign-off on GitHub-solid vs dual-encode). Reviewer fix: doctrine heat clause said reinforcement lights at `Profile==TrueColor` only, contradicting the ratified heat-family gate — now `Profile>=ANSI256`.
-- **pbp-slate2-heat-family** (`loop-epic/heat-family-v2-genheatramp-4-tokens-quan-1`, no reviewer changes) — GenHeatRamp[4] tokens through the emitter (zero .ex churn), exported `HeatQuantileBins` (@canonical heat-quantile-bin), `heatDualCell` (░▒▓█ + GenHeatRamp at ≥ANSI256, zero=dim `·`), calendar mode landing 38 weeks at EXACTLY 80 cols (drops oldest whole weeks below), matrix Σ marginals + exact values. Legacy grid byte-untouched; m17 goldens at 4 widths + strip-equality + quantile-spread protective test.
-- **pbp-slate2-gauge-list** (`loop-epic/gauge-list-block-snapshot-authoritative--2`, no reviewer changes) — new gauge-list renderer: count mode buckets verbatim task-list snapshot rows (missing→"(none)", desc count/asc label), share mode value/max-else-Σ with percent readout + dim note column; snapshot-authoritative (`query` never read), groupBy epic → honest dim resolver note; m18 goldens + degrade-path tests.
-- **pbp-slate2-stat-denom** (`loop-epic/stat-cell-denom-dim-label-accent-value-d-3`, no reviewer changes) — optional `denom` on the ONE statCell body (dim "/118" beside the accent value, in bar mode reserved inside the existing FILL); denom-absent byte-identical (m12/m15 untouched); m19 goldens + strip parity with vacuity guards.
-
-**Stalled (honest):** **pbp-slate2-wasm-proof** — SEQUENCED LAST by design; launched before prerequisites merged, builder verified origin/main lacks all three blocks, stopped without committing, stamped a durable blocker_note (claim epoch 1, all criteria open). RE-LAUNCH after heat-family + gauge-list + stat-denom land on main.
-
-**Merge order:** doctrine-goldens-r (carries this wave log) → heat-family → gauge-list → stat-denom. All Go/docs-only — each merges on its own gate, no Elixir wait. No textual conflicts (scratch merge proved it). Lead closes each task's "PR merged" criterion on merge — claim epochs: doctrine-goldens = 2, heat-family/gauge-list/stat-denom = 1.
-
-**Debt / wave-2+ fodder:**
-- Three inline strip-equality implementations (m17/m18/m19 tests) coexist with `assertStripComplete` — branches couldn't depend on the unmerged helper. Post-merge dedup is a small, mechanical wave-2 slice.
-- heat-family's `@canonical … doc:` points at docs/cards/tui.md (the doctrine contract didn't exist on its branch; docs-anchors §8 fails unresolvable backlinks). One-line repoint to docs/contracts/tui-render-doctrine.md after both merge.
-- Marginals-only (values:false) Σ fields render fixed █ bars that mark but don't encode magnitude — values:true is the informative mode; consider sizing the Σ bar or documenting the limit.
-- `pbp-slate2-heatcell-dualencode` (open): legacy truecolor heatCell fails the strip law; needs a strategist visual decision, then wire sample_m11's truecolor grid into assertStripComplete.
-- No real WASM execution happened (builders verified by inspection: dual-encode rides the existing 38;2 path) — that is exactly pbp-slate2-wasm-proof's job next wave.
-
-**Wave 2 should take:** (1) re-launch pbp-slate2-wasm-proof immediately after the four merges; (2) the strip-helper dedup + @canonical repoint as one tiny hygiene slice; (3) heatcell-dualencode after strategist sign-off; (4) then the slate's wave-2 blocks (step-line token chart polish, aggregate query resolver stays WAVE 3/Elixir).
+**Wave 3 should take:** (1) re-launch `pbp-slate2-wasm-proof` after these five merge and deploy;
+(2) `pbp-slate2-pipeline-flow` (filed, D19 — linear v1 over the mermaidflow engine);
+(3) the wave-1 hygiene slice (inline strip-equality dedup in m17/m18/m19 tests + heat-family's
+@canonical doc: repoint to the doctrine contract); (4) then the Elixir resolver wave (row 12:
+gauge in @dataviz_types, depth/dates on the row wire) unlocks live data for tree + roadmap v2.
