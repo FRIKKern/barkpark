@@ -76,8 +76,12 @@ defmodule BarkparkWeb.ScimGroupsController do
     org = conn.assigns.scim_org
 
     case Scim.get_org_group(org, id) do
-      nil -> scim_error(conn, 404, "group not found in this organization")
-      group -> Barkpark.Repo.delete!(group) && send_resp(conn, 204, "")
+      nil ->
+        scim_error(conn, 404, "group not found in this organization")
+
+      group ->
+        Scim.delete_group(org, group)
+        send_resp(conn, 204, "")
     end
   end
 
