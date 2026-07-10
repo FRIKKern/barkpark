@@ -19,8 +19,9 @@
 # TWO CHANNELS, ONE SCRIPT — the git step is channel-gated on a $APP/.staging
 # marker (fail-closed: absent => production channel):
 #   * production (no .staging): strict `pull --ff-only origin main`, exactly as
-#     before. A non-main DEPLOY_REF is REFUSED (exit 11) — a prod content box
-#     only ever fast-forwards main; it can never be pushed to a branch or PR.
+#     before. A non-main DEPLOY_REF or non-origin DEPLOY_REMOTE is REFUSED
+#     (exit 11) — a prod content box only ever fast-forwards origin main; it
+#     can never be pushed to a branch, a PR, or a foreign remote.
 #   * staging (.staging present): deploy ANY ref — DEPLOY_REF (default main),
 #     DEPLOY_REMOTE (default origin) — via `fetch $DEPLOY_REMOTE $DEPLOY_REF`
 #     then `reset --hard FETCH_HEAD`. This is the pre-merge proving path: try a
@@ -73,6 +74,10 @@ if [ -f "$APP/.staging" ]; then
 else
   if [ "$DEPLOY_REF" != "main" ]; then
     log "refusing DEPLOY_REF '$DEPLOY_REF' on a production box (no $APP/.staging marker) — prod only fast-forwards main"
+    exit 11
+  fi
+  if [ "$DEPLOY_REMOTE" != "origin" ]; then
+    log "refusing DEPLOY_REMOTE '$DEPLOY_REMOTE' on a production box (no $APP/.staging marker) — prod only pulls origin; ignoring it silently would deploy the wrong remote"
     exit 11
   fi
   # Built artifacts (committed bin/, go.sum churn) block --ff-only; discard them.

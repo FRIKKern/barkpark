@@ -155,6 +155,10 @@ check "no build attempted"               "[ ! -e '$APP/api/_build_green' ] && [ 
 check "no slot booted"                    "! grep -q 'restart barkpark-slot' '$SYSCTLLOG'"
 check "Caddy upstream unchanged (:4000)"  "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
 check "state file NOT written"            "[ ! -f '$APP/.instance-deploy-last' ]"
+: > "$GITLOG"
+rc="$(DEPLOY_REMOTE=fork run_deploy 200 refusesha)"   # ref=main, remote=fork
+check "non-origin remote: exit 11"        "[ '$rc' = '11' ]"
+check "non-origin remote: no git mutation" "! grep -qE 'fetch|reset --hard FETCH_HEAD|pull --ff-only' '$GITLOG'"
 rm -rf "$TMP"
 
 echo "== Case 5: production box, default ref -> unchanged guerrilla ff-only path =="
@@ -185,6 +189,11 @@ check "fetched origin pull/123/head"      "grep -q 'fetch origin pull/123/head' 
 check "PR hard reset to FETCH_HEAD"       "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
 check "blue root built this time"         "[ -f '$APP/api/_build_blue/prod/MARKER' ]"
 check "Caddy flipped back to :4000"       "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(DEPLOY_REMOTE=fork DEPLOY_REF=feature-y run_deploy 200 forksha)"
+check "non-origin remote honored on staging" "grep -q 'fetch fork feature-y' '$GITLOG'"
+check "non-origin remote: hard reset ran"    "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "non-origin remote: exit 0"            "[ '$rc' = '0' ]"
 rm -rf "$TMP"
 
 echo "== Case 7: coalesce no-op, then rm STATE forces a rebuild =="
