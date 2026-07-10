@@ -82,6 +82,15 @@ defmodule Barkpark.Plugins.Github.Projection do
   @parent_end "<!-- barkpark:parent:end -->"
   @trailer_prefix "Task:"
 
+  # GitHub rejects a label name longer than 50 chars with a 422 that fails the
+  # WHOLE outbound PATCH (charter D16 — witnessed live on the close-mirror when a
+  # 53-char worker id produced a 60-char `worker:` label). EVERY value `labels/1`
+  # emits is routed through `clamp_label/1` so no projected label can ever 422.
+  @label_max 50
+  # Deterministic disambiguator length: the same input ALWAYS yields the same
+  # label, so a clamp never reads as drift across the 609 live mirrors.
+  @label_hash_len 6
+
   @typedoc "The desired GitHub Issue shape the mirror should converge to."
   @type issue :: %{
           title: String.t(),
@@ -243,7 +252,55 @@ defmodule Barkpark.Plugins.Github.Projection do
       goal_label(get(content, "parent_id"))
     ]
     |> Enum.reject(&is_nil/1)
+    |> Enum.map(&clamp_label/1)
     |> Enum.sort()
+  end
+
+  # Charter D16 — the ONE seam every projected label passes through so no name
+  # can 422 the outbound PATCH.
+  #
+  #   * IDENTITY for a name already ≤ 50 chars — byte-identical, so an
+  #     already-valid label never changes and `fingerprint/4` (which folds the
+  #     sorted labels) reads no drift → zero re-PATCH churn.
+  #   * OVER-BUDGET → keep the greppable `worker:`/`goal:`/… prefix, a truncated
+  #     value, and a `-` + short DETERMINISTIC hash of the full name, total ≤ 50.
+  #     The hash makes the clamp injective enough that two distinct long values
+  #     don't collapse to one label, and deterministic so the same input always
+  #     yields the same label (a reconcile reads it as stable, never drift).
+  defp clamp_label(label) when is_binary(label) do
+    if String.length(label) <= @label_max do
+      label
+    else
+      {prefix, value} = split_prefix(label)
+      hash = short_hash(label)
+      # Room left for the truncated value once the prefix, the `-`, and the hash
+      # are reserved. Never negative for our fixed short prefixes; guarded anyway.
+      keep = @label_max - String.length(prefix) - 1 - @label_hash_len
+      body = if keep > 0, do: String.slice(value, 0, keep), else: ""
+      clamped = prefix <> body <> "-" <> hash
+
+      # Total-safety guard: a pathological over-long prefix can't breach the cap.
+      if String.length(clamped) > @label_max,
+        do: String.slice(clamped, 0, @label_max),
+        else: clamped
+    end
+  end
+
+  # Split "worker:<value>" into {"worker:", "<value>"} so the greppable prefix
+  # survives truncation. No colon → the whole string is the value ({"", label}).
+  defp split_prefix(label) do
+    case String.split(label, ":", parts: 2) do
+      [prefix, value] -> {prefix <> ":", value}
+      [value] -> {"", value}
+    end
+  end
+
+  # Deterministic 6-hex-char fingerprint of the full label — same input, same
+  # output, forever (never `System`/`:rand`), so a clamped label is stable.
+  defp short_hash(s) do
+    :crypto.hash(:sha256, s)
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, @label_hash_len)
   end
 
   defp priority_label(p) when is_integer(p) and p >= 0 and p <= 4, do: "priority:p#{p}"
