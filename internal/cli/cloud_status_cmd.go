@@ -369,7 +369,7 @@ func statusDash(s string) string {
 // renders byte-identical to before:
 //
 //   - UPDATE  running → latest (the behind marker) — only when versions are known
-//   - CHANNEL the release channel (stable/canary) — only when the CP emits it
+//   - CHANNEL the release channel (prod/staging) — only when the CP emits it
 //   - POLICY  compact autoupdate flag (pin@tag / paused / off / auto)
 //   - DETAIL  the control plane's own reason for a failure/suspension
 //
@@ -475,7 +475,7 @@ WHAT IT SHOWS
   (each only when a row uses it, so the table stays lean):
 
     UPDATE    the running → latest release (the arrow is the "behind" marker)
-    CHANNEL   the release channel the box rides (stable / canary)
+    CHANNEL   the release channel the box rides (prod / staging)
     POLICY    the autoupdate policy, compact: pin@<tag> · paused · off · auto
 
   Manage the policy with 'bp cloud autoupdate' and the fleet rollout with

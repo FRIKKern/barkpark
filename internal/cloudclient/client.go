@@ -120,7 +120,7 @@ type Barkpark struct {
 	//     present true is the auto-ride default. AutoupdatePaused is the temporary
 	//     hold (absent → false, an honest "not paused"). PinnedRelease freezes the
 	//     box at a version (empty → unpinned).
-	//   - Channel — the release channel the box rides (e.g. "stable" / "canary").
+	//   - Channel — the release channel the box rides ("prod" / "staging").
 	//     Empty until the CP emits it.
 	UpdateRunningRelease string `json:"update_running_release"`
 	UpdateLatestRelease  string `json:"update_latest_release"`

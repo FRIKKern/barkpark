@@ -319,7 +319,7 @@ func rolloutFail(out *writer, err error) int {
 				exitNotFound)
 		case "forbidden":
 			return useError(out, "auth",
-				"fleet rollout is admin-only — you need a team-admin session",
+				"fleet rollout is platform-operator only — a team session cannot drive it",
 				exitAuth)
 		}
 	}
@@ -361,7 +361,7 @@ OUTPUT
 
 // printCloudRolloutHelp writes `bp cloud rollout` usage.
 func printCloudRolloutHelp(out *writer) {
-	const help = `bp cloud rollout — the fleet-wide autoupdate brake (admin).
+	const help = `bp cloud rollout — the fleet-wide autoupdate brake (platform operator).
 
 USAGE
   bp cloud rollout status
@@ -371,8 +371,9 @@ USAGE
 
 WHAT IT DOES
   The control plane rolls blessed releases across the fleet one health-gated box
-  at a time. These verbs are the GLOBAL control over that rollout (needs 'bp
-  login'; team-admin-gated):
+  at a time. These verbs are the GLOBAL control over that rollout. They are
+  PLATFORM-OPERATOR gated (the control plane's operator credential, above any
+  team) — a plain team session is refused:
 
     status   is the rollout running or halted, and how many boxes are eligible /
              behind / in-flight (each shown when the control plane reports it).
