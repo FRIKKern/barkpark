@@ -8514,7 +8514,7 @@
   // the charter's order: DOCS · DB · DISK · SEATS · CPU · RAM (OC18/OC27). The
   // count/byte meters pull their number format from the shared USAGE_METERS spec
   // so a formatting change can never drift between the strip and the Usage tab.
-  // The MACHINE meters (cpu_pct/ram_pct — the on-box agent's capacity beat) pin
+  // The MACHINE meters (cpu/ram — the on-box agent's capacity beat) pin
   // their own `fmt: "percent"` on the headline entry: they land in the shared
   // vocabulary via the machine-meters slice, and the headline fmt keeps the strip
   // formatting them correctly regardless of that spec's presence. An un-armed box
@@ -8526,8 +8526,8 @@
     { key: "db_size", label: "DB" },
     { key: "disk", label: "Disk" },
     { key: "seats", label: "Seats" },
-    { key: "cpu_pct", label: "CPU", fmt: "percent" },
-    { key: "ram_pct", label: "RAM", fmt: "percent" }
+    { key: "cpu", label: "CPU", fmt: "percent" },
+    { key: "ram", label: "RAM", fmt: "percent" }
   ];
 
   function fleetStripSpecFor(key) {

@@ -506,8 +506,8 @@ func freshFleetRow() map[string]any {
 			"db_size":      fMeter(4194304.0, "telemetry.pg_size_bytes"),
 			"disk":         fMeter(42.0, "telemetry.disk_used_percent"),
 			"seats":        fMeter(2.0, "control-plane.team_members"),
-			"cpu_pct":      fMeterQuota(23.0, 100.0, 70.0, "agent.cpu_percent"),
-			"ram_pct":      fMeterQuota(58.0, 100.0, 70.0, "agent.ram_percent"),
+			"cpu":          fMeterQuota(23.0, 100.0, 70.0, "agent.cpu_percent"),
+			"ram":          fMeterQuota(58.0, 100.0, 70.0, "agent.ram_percent"),
 			"api_requests": fMeter(unmeteredValue, "not-metered"),
 			"bandwidth":    fMeter(unmeteredValue, "not-metered"),
 			"instances":    fMeter(3.0, "control-plane.team_instances"),
@@ -762,12 +762,12 @@ func TestFleetRowState(t *testing.T) {
 	// ceilings (the machine cpu/ram beat included) → live.
 	live := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 10.0}, "db_size": {Value: 100.0}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
-		"cpu_pct": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram_pct": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(live); got != "live" {
 		t.Errorf("all-metered armed row = %q, want live", got)
 	}
-	// An un-armed box (no agent → cpu_pct/ram_pct absent) rolls to unmetered even
+	// An un-armed box (no agent → cpu/ram absent) rolls to unmetered even
 	// though its inventory meters are live — a box whose CAPACITY we can't see never
 	// reads fully healthy (the same honesty a dark inventory pipe gets, D51).
 	unarmed := map[string]cloudclient.UsageMeter{
@@ -778,7 +778,7 @@ func TestFleetRowState(t *testing.T) {
 	}
 	dark := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 10.0}, "db_size": {Value: "unmetered"}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
-		"cpu_pct": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram_pct": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(dark); got != "unmetered" {
 		t.Errorf("partially-dark row = %q, want unmetered", got)
@@ -787,7 +787,7 @@ func TestFleetRowState(t *testing.T) {
 	// beat contributes to the STATE fold exactly like an inventory quota.
 	hot := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 10.0}, "db_size": {Value: 100.0}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
-		"cpu_pct": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram_pct": {Value: 88.0, Quota: fp(100), WarnAt: fp(70)},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 88.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(hot); got != "near_limit" {
 		t.Errorf("hot-RAM row = %q, want near_limit", got)
@@ -795,7 +795,7 @@ func TestFleetRowState(t *testing.T) {
 	near := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 90.0, Quota: fp(100), WarnAt: fp(80)}, "db_size": {Value: "unmetered"},
 		"disk": {Value: 5.0}, "seats": {Value: 2.0},
-		"cpu_pct": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram_pct": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(near); got != "near_limit" {
 		t.Errorf("near-limit-with-dark row = %q, want near_limit (near outranks unmetered)", got)
@@ -803,7 +803,7 @@ func TestFleetRowState(t *testing.T) {
 	over := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 100.0, Quota: fp(100), WarnAt: fp(80)}, "db_size": {Value: 90.0, Quota: fp(100), WarnAt: fp(80)},
 		"disk": {Value: 5.0}, "seats": {Value: 2.0},
-		"cpu_pct": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram_pct": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(over); got != "over_limit" {
 		t.Errorf("over-limit row = %q, want over_limit", got)

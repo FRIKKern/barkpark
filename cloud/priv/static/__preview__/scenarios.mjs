@@ -572,10 +572,10 @@ const fleetInstMeters = (docs, db, disk, seats, at, machine) => ({
   webhooks: fleetMeter("unmetered", { source: "instance.webhooks" }),
   db_size: fleetMeter(db, { source: "telemetry.pg_size_bytes", measured_at: at }),
   disk: fleetMeter(disk, { source: "telemetry.disk_used_percent", measured_at: at }),
-  cpu_pct: machine
+  cpu: machine
     ? fleetMeter(machine.cpu, { quota: 100, warn_at: 70, source: "agent.cpu_percent", measured_at: at })
     : fleetMeter("unmetered", { source: "agent.cpu_percent" }),
-  ram_pct: machine
+  ram: machine
     ? fleetMeter(machine.ram, { quota: 100, warn_at: 70, source: "agent.ram_percent", measured_at: at })
     : fleetMeter("unmetered", { source: "agent.ram_percent" }),
   api_requests: fleetMeter("unmetered", { source: "not-metered" }),

@@ -158,10 +158,10 @@ const usageHistoryPoints = 24
 // storage telemetry, the team's seats, and the on-box agent's CPU · RAM capacity
 // beat (OC18/OC27). The STATE cell rolls the WORST usageStateToken across exactly
 // these meters, so a headline meter over its ceiling reddens the whole row at a
-// glance — and an un-armed box (no agent → cpu_pct/ram_pct absent) rolls to
+// glance — and an un-armed box (no agent → cpu/ram absent) rolls to
 // "unmetered" rather than a false "live" glow, the same honesty a dark inventory
 // pipe already gets (a box whose capacity we can't see never reads fully healthy).
-var fleetHeadlineMeters = []string{"documents", "db_size", "disk", "seats", "cpu_pct", "ram_pct"}
+var fleetHeadlineMeters = []string{"documents", "db_size", "disk", "seats", "cpu", "ram"}
 
 // runCloudFleetUsage is `bp cloud usage` (no positional): the fleet summary — one
 // row per instance from the sampler's CACHED snapshots (OC16), never a live
@@ -246,8 +246,8 @@ func renderFleetTable(out *writer, rows []cloudclient.UsageInstanceRow) {
 			fleetMeterCell("db_size", row.Meters),
 			fleetMeterCell("disk", row.Meters),
 			fleetMeterCell("seats", row.Meters),
-			fleetMeterCell("cpu_pct", row.Meters),
-			fleetMeterCell("ram_pct", row.Meters),
+			fleetMeterCell("cpu", row.Meters),
+			fleetMeterCell("ram", row.Meters),
 			fleetAsOfCell(row.MeasuredAt),
 			token,
 		})

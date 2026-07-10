@@ -3287,8 +3287,8 @@ const fleetSummaryFixture = () => ({
         disk: { value: 37, measured_at: fleetIso(20) },
         seats: { value: 4, measured_at: fleetIso(20) },
         // The armed machine beat — under its physical ceilings (live).
-        cpu_pct: { value: 23, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
-        ram_pct: { value: 58, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
+        cpu: { value: 23, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
+        ram: { value: 58, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
       },
     },
     {
@@ -3313,13 +3313,13 @@ test("W3/W5 fleet strip: helpers exported + headline subset is DOCS·DB·DISK·S
   for (const name of ["fleetStripModel", "fleetStripWorst", "fleetStripCellHtml", "fleetStripHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats", "cpu_pct", "ram_pct"]);
+  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats", "cpu", "ram"]);
   // No drift: every headline key is a real meter in the shared vocabulary OR one
-  // of the wave-5 machine meters (cpu_pct/ram_pct land in the vocabulary via the
+  // of the wave-5 machine meters (cpu/ram land in the vocabulary via the
   // machine-meters slice; the strip references them by their fixed names ahead of
   // and independent of that spec — so this guard still catches an invented key).
   const known = new Set(hooks.usageMeters.map((m) => m.key));
-  const machine = new Set(["cpu_pct", "ram_pct"]);
+  const machine = new Set(["cpu", "ram"]);
   for (const k of hooks.fleetStripMeters) assert.ok(known.has(k) || machine.has(k), k + " must be a real usage meter");
 });
 
@@ -3333,8 +3333,8 @@ test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shar
   assert.equal(byKey.db_size.value, "1.0 MB");  // bytes (base-1024, shared fmt)
   assert.equal(byKey.disk.value, "37%");        // percent
   assert.equal(byKey.seats.value, "4");
-  assert.equal(byKey.cpu_pct.value, "23%");     // machine capacity beat, percent fmt
-  assert.equal(byKey.ram_pct.value, "58%");
+  assert.equal(byKey.cpu.value, "23%");     // machine capacity beat, percent fmt
+  assert.equal(byKey.ram.value, "58%");
   for (const c of fresh.cells) assert.equal(c.unmetered, false);
 });
 
@@ -3416,8 +3416,8 @@ test("W5 fleet strip: a hot armed box paints CPU/RAM percent cells and lights it
           disk: { value: 37, measured_at: iso },
           seats: { value: 4, measured_at: iso },
           // RAM pegged at its physical ceiling → over; CPU past its warn line.
-          cpu_pct: { value: 88, quota: 100, warn_at: 70, measured_at: iso },
-          ram_pct: { value: 100, quota: 100, warn_at: 70, measured_at: iso },
+          cpu: { value: 88, quota: 100, warn_at: 70, measured_at: iso },
+          ram: { value: 100, quota: 100, warn_at: 70, measured_at: iso },
         },
       },
       {
@@ -3431,9 +3431,9 @@ test("W5 fleet strip: a hot armed box paints CPU/RAM percent cells and lights it
   const model = hooks.fleetStripModel(summary);
   const hot = model.rows.find((r) => r.id === "inst-hot");
   const byKey = Object.fromEntries(hot.cells.map((c) => [c.key, c]));
-  assert.equal(byKey.cpu_pct.value, "88%");        // percent fmt on the headline entry
-  assert.equal(byKey.ram_pct.value, "100%");
-  assert.equal(byKey.cpu_pct.unmetered, false);
+  assert.equal(byKey.cpu.value, "88%");        // percent fmt on the headline entry
+  assert.equal(byKey.ram.value, "100%");
+  assert.equal(byKey.cpu.unmetered, false);
   // The physical ceiling lights the worst-state fold for free (OC22, no reimpl):
   // RAM at 100 >= its quota → over.
   assert.equal(hot.worstState, "over");
@@ -3442,9 +3442,9 @@ test("W5 fleet strip: a hot armed box paints CPU/RAM percent cells and lights it
   // fake zero — and no quota tone (nothing to accent).
   const bare = model.rows.find((r) => r.id === "inst-bare");
   const bareByKey = Object.fromEntries(bare.cells.map((c) => [c.key, c]));
-  assert.equal(bareByKey.cpu_pct.value, "—");
-  assert.equal(bareByKey.cpu_pct.unmetered, true);
-  assert.equal(bareByKey.ram_pct.unmetered, true);
+  assert.equal(bareByKey.cpu.value, "—");
+  assert.equal(bareByKey.cpu.unmetered, true);
+  assert.equal(bareByKey.ram.unmetered, true);
   assert.equal(bare.worstState, null);
 
   // The rendered strip carries the CPU/RAM cell labels and the lit over accent.
