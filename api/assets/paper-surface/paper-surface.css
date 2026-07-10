@@ -53,11 +53,14 @@ html[data-theme="dark"] .bp-paper-body {
    the light bp theme. The `--paper-*` colour fallback is in the GENERATED marker
    region below (the html[data-theme] blocks win over it, as before). */
 .bp-paper-surface, .bp-paper-body {
-  /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
-     actually renders in the macOS system serif (Iowan Old Style). We mirror
-     that rendered face here; Source Serif 4 stays in the stack as a
-     cross-platform fallback. It is NOT self-hosted (@font-face'd) yet — that is
-     S9's flag-gated work; until then it resolves only where the OS has the face. */
+  /* Reading serif. Iowan Old Style leads the stack — the macOS system serif the
+     ORIGINAL Portable Doc editor renders in — so native reads pixel-match the
+     editor where the OS has that face. Source Serif 4 IS self-hosted now
+     (@font-face'd variable woff2, Roman + Italic, since #1984 — see
+     root.html.heex), so it supplies the same serif everywhere the OS lacks
+     Iowan; it is a real font here, not a bare fallback name. The stack ORDER and
+     these font values are owned by au-w5-reading-typography (human-gated) — do
+     not reorder or retune them here. */
   --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
   --paper-font-mono: ui-monospace, Menlo, monospace;
   /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
@@ -869,3 +872,14 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
    centers the render inside the (already tokenized) figure card. */
 .bp-paper-surface pre.mermaid { display: flex; justify-content: center; margin: 0; overflow-x: auto; }
 .bp-paper-surface pre.mermaid svg { max-width: 100%; height: auto; }
+
+/* ── unsupported-block degrade (gui-premium w5) ──
+   The walker (walk.ex) and compose.ex both emit `<div class="bp-unknown-block">`
+   for a forward-compat or corrupt Pd-node kind ("Unsupported block: <kind>" /
+   "invalid block") rather than raising — papers are schemaless. Until now that
+   fallback rendered as a bare unstyled div. Give it the SAME honest dashed-box
+   treatment as `.bp-dataviz--empty`: a faint mono note in a dashed frame that
+   reads as a deliberate "nothing renders here" state, never a broken layout.
+   Appended at the end of the hand-authored section, clear of the data-viz slate
+   region above (concurrently owned by gp-w5-dataviz-fidelity). */
+.bp-paper-surface .bp-unknown-block { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
