@@ -1,18 +1,18 @@
 export const meta = {
   name: 'bp-epic-cycle',
-  description: 'Task-obsessed epic-team loop: 1 Fable strategist sets direction + exploration questions → Opus explorers ground it in the repo → 1 Fable strategist decides, owns the charter AND files+perfects bp tasks for every slice → Opus builders claim their bp task, build in worktrees, gate + commit → 1 Fable reviewer reviews everything (code + task ledger), fixes obvious issues, and writes the wave log. The USER WISH is the focus; the bp task ledger is the spine — every phase reads and writes it.',
+  description: 'Task-obsessed 7-phase epic loop: 1 Fable strategizes fast → 5-20 Sonnets survey wide → 1 Fable digests and designs a targeted verify fleet → Sonnet/Opus verifiers PROVE claims (running tests where needed) → 1 Fable decides, owns the charter AND files+perfects bp tasks → Fable/Opus builders (model per slice complexity) claim their bp task, build in worktrees, gate + commit → 1 Fable reviews everything (code + ledger), fixes issues in place, writes a Paper debrief, hands off. The USER WISH is the focus; the bp task ledger is the LIVE spine — every phase stamps it the moment state changes.',
   phases: [
-    { title: 'Strategize', detail: '1 Fable strategist: bold direction for this wave + the exploration questions that must be answered before deciding', model: 'fable' },
-    { title: 'Explore', detail: 'up to 5 Opus explorers, read-only: answer the strategist\'s questions against the real repo — verify claims, map files, name seams and gates', model: 'opus' },
-    { title: 'Decide', detail: '1 Fable strategist-architect: synthesizes strategy + exploration, writes/updates the epic charter, cuts this wave of slices, files + publishes + PERFECTS a bp task per slice', model: 'fable' },
-    { title: 'Build', detail: 'up to 5 Opus builders, worktree-isolated: CLAIM the bp task first, build, gate, honest self-review, commit, stamp evidence into the task', model: 'opus' },
-    { title: 'Review', detail: '1 Fable reviewer: reviews EVERY green slice (code) + the task ledger, fixes obvious issues in place, re-gates, appends the charter wave log', model: 'fable' },
-    { title: 'Judge', detail: '1 Fable quality judge (Cody principles): grades the reviewed wave with honest commentary — never a bare number; verdict ship|fix with up to 3 named issues', model: 'fable' },
-    { title: 'Perfect', detail: 'conditional — only when the judge says fix: 1-3 Fable perfecters, worktree-isolated, each solves ONE judge-named issue on a -p branch, re-gates, stamps evidence', model: 'fable' },
+    { title: 'Strategize', detail: '1 Fable, ~5 min: bold direction + 5-20 broad survey questions — think hard, read little', model: 'fable' },
+    { title: 'Survey', detail: '5-20 Sonnet surveyors, read-only, ~5 min each: wide cheap sweep — bp search first, then the repo; breadth over depth', model: 'sonnet' },
+    { title: 'Digest', detail: '1 Fable, ~10 min: synthesize the survey, name contradictions + unknowns, design the LAST explore round — per assignment pick Sonnet or Opus and what must be PROVEN by running tests', model: 'fable' },
+    { title: 'Verify', detail: 'Fable-chosen fleet of Sonnet/Opus verifiers: targeted deep answers; claims that need proof get tests/gates actually RUN, output quoted' },
+    { title: 'Decide', detail: '1 Fable, whatever time it needs: finalize choices, write/update the charter, cut the wave (≤8 slices, builder model per slice), file + publish + PERFECT a bp task per slice, seed the backlog', model: 'fable' },
+    { title: 'Build', detail: 'Fable or Opus builders per slice complexity, worktree-isolated: CLAIM the bp task first, stamp evidence as each criterion is proven, gate, honest self-review, commit' },
+    { title: 'Review', detail: '1 Fable, whatever time it needs: review every green slice + the ledger, FIX issues in place, re-gate, Cody-grade verdict, append wave log, write the Paper debrief, hand off', model: 'fable' },
   ],
 }
 
-// args = { wish, charter_exists, charter_path?, epic_task_id?, strategist_model?, explore_model?, review_model?, lead_notes? }
+// args = { wish, charter_exists, charter_path?, epic_task_id?, strategist_model?, survey_model?, review_model?, lead_notes? }
 // GUARD (restored 2026-07-04 after a SECOND worktree revert wiped it — this bug
 // built 2 waves against the wrong (cloud) charter): args can arrive as a JSON
 // STRING; charter_path was hardcoded to cloud so every charter_exists wave read
@@ -26,11 +26,13 @@ if (!A.wish) throw new Error('epic-cycle requires an explicit args.wish')
 const WISH = A.wish
 const CHARTER_PATH = A.charter_path || '.claude/workflows/bp-cloud-epic-charter.md'
 const EPIC_TASK_ID = A.epic_task_id || null
-// Phase↔model doctrine (lead mandate 2026-07-09): every THINKING phase is ONE
-// Fable agent (strategize, decide, review); every FAN-OUT WORK phase is Opus
-// (explore, build). Overrides exist only as a fallback for Fable exhaustion.
+// Phase↔model doctrine (lead mandate 2026-07-10, rev 2): every THINKING phase
+// is ONE Fable agent (strategize, digest, decide, review). The broad survey is
+// Sonnet — cheap width. The verify fleet and the build fleet are MIXED: the
+// digest/decide Fable picks Sonnet vs Opus per verification and Opus vs Fable
+// per slice. Never Haiku anywhere. Overrides exist only for Fable exhaustion.
 const STRAT_MODEL = A.strategist_model || 'fable'
-const EXPLORE_MODEL = A.explore_model || 'opus'
+const SURVEY_MODEL = A.survey_model || 'sonnet'
 const REVIEW_MODEL = A.review_model || 'fable'
 const CHARTER_EXISTS = !!A.charter_exists
 const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS WAVE:\n${A.lead_notes}` : ''
@@ -57,20 +59,26 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
   Builders do NOT close merge-gated criteria ("PR merged") — the LEAD closes those on merge. A builder whose work is done but unmerged leaves lifecycle in_progress with evidence stamped.
 - Never TodoWrite, never markdown TODO lists. If a slice has no published, claimable bp task, that slice does not exist.`
 
+const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
+- Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.
+- The epic parent task carries a flat \`wave_status\` field — the heartbeat. Fable phases update it on entry and exit (e.g. "wave: digesting survey", "wave: building 6 slices", "wave: complete — debrief <paper-id>") via bp patch + publish (bp doc patch if this binary has it, else HTTP /v1/data/mutate — \`bp capabilities -o json\` shows what exists). Skip silently only if the epic task does not exist yet.
+- Work discovered but NOT taken this wave gets filed NOW as a published child task (honest description, sane priority) — the visible backlog is part of the system being alive.
+- Patches to tasks go through /v1/data/mutate semantics: fields FLAT, patch merges into content, re-publish after mutating (boards read the published ledger only).`
+
 const STRATEGY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['direction', 'exploration'],
+  required: ['direction', 'survey'],
   properties: {
     direction: { type: 'string', description: 'bold strategic direction for THIS wave: what the finished experience looks/feels like, the choices you are leaning toward, what matters most right now' },
-    exploration: {
+    survey: {
       type: 'array',
-      description: '1-5 exploration assignments whose answers the Decide phase needs; each becomes one Opus explorer',
+      description: '5-20 broad survey assignments; each becomes one Sonnet surveyor. Cast a WIDE net — cheap width now buys precise depth later',
       items: {
         type: 'object', additionalProperties: false,
         required: ['key', 'question', 'why'],
         properties: {
           key: { type: 'string', description: 'short kebab-case label' },
-          question: { type: 'string', description: 'a concrete, answerable question about the repo/product — name suspected files, claims to verify, seams to map' },
+          question: { type: 'string', description: 'a concrete, answerable question about the repo/product/ledger — name suspected files, claims to check, seams to map' },
           why: { type: 'string', description: 'how the answer changes the plan' },
         },
       },
@@ -78,12 +86,12 @@ const STRATEGY_SCHEMA = {
   },
 }
 
-const EXPLORE_SCHEMA = {
+const SURVEY_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['key', 'findings', 'facts', 'risks', 'relevant_files'],
+  required: ['key', 'findings', 'facts', 'risks', 'relevant_files', 'open_questions'],
   properties: {
     key: { type: 'string' },
-    findings: { type: 'string', description: 'the answer to the question, honestly — including "the premise is wrong" when it is' },
+    findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
     facts: {
       type: 'array',
       description: 'load-bearing facts, each with file:line evidence — verified by reading, not assumed',
@@ -95,23 +103,85 @@ const EXPLORE_SCHEMA = {
     },
     risks: { type: 'array', items: { type: 'string' } },
     relevant_files: { type: 'array', items: { type: 'string' } },
+    open_questions: { type: 'array', items: { type: 'string' }, description: 'what you could NOT settle in the timebox — candidates for the verify round' },
+  },
+}
+
+const AIM_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['synthesis', 'verification', 'heartbeat_stamped'],
+  properties: {
+    synthesis: { type: 'string', description: 'what the survey established, where reports contradict each other or the direction, and what remains unknown that the Decide phase cannot live without' },
+    verification: {
+      type: 'array',
+      description: 'the LAST explore round: 1-15 targeted assignments. YOU pick the fleet — model per assignment, and which claims must be PROVEN by actually running tests/gates rather than read',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['key', 'question', 'why', 'model', 'verify_commands', 'needs_worktree'],
+        properties: {
+          key: { type: 'string' },
+          question: { type: 'string', description: 'sharp and targeted — this round closes unknowns, it does not browse' },
+          why: { type: 'string' },
+          model: { type: 'string', enum: ['sonnet', 'opus'], description: 'sonnet for mapping/breadth follow-ups; opus for subtle correctness, cross-surface reasoning, or judgment-heavy verification' },
+          verify_commands: { type: 'string', description: 'shell command(s) the verifier must RUN to prove/refute the claim (tests, gates, curl against localhost) — empty string when reading suffices' },
+          needs_worktree: { type: 'boolean', description: 'true only if verification requires a throwaway probe edit or an isolated build dir' },
+        },
+      },
+    },
+    heartbeat_stamped: { type: 'boolean', description: 'true only after you stamped wave_status on the epic task (or it does not exist yet)' },
+  },
+}
+
+const VERIFY_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['key', 'findings', 'facts', 'proofs', 'risks', 'relevant_files'],
+  properties: {
+    key: { type: 'string' },
+    findings: { type: 'string', description: 'the answer, honestly — including "the premise is wrong" when it is' },
+    facts: {
+      type: 'array',
+      description: 'load-bearing facts, each with file:line evidence — verified by reading, not assumed',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['claim', 'evidence'],
+        properties: { claim: { type: 'string' }, evidence: { type: 'string' } },
+      },
+    },
+    proofs: {
+      type: 'array',
+      description: 'one entry per claim you PROVED or REFUTED by running something — quote real output, never paraphrase a pass',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['claim', 'command', 'output_excerpt', 'passed'],
+        properties: {
+          claim: { type: 'string' },
+          command: { type: 'string' },
+          output_excerpt: { type: 'string', description: 'the actual decisive lines of output' },
+          passed: { type: 'boolean' },
+        },
+      },
+    },
+    risks: { type: 'array', items: { type: 'string' } },
+    relevant_files: { type: 'array', items: { type: 'string' } },
   },
 }
 
 const PLAN_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['charter_written', 'epic_task_id', 'tasks_verified', 'decisions_summary', 'wave'],
+  required: ['charter_written', 'epic_task_id', 'tasks_verified', 'backlog_filed', 'heartbeat_stamped', 'decisions_summary', 'wave'],
   properties: {
     charter_written: { type: 'boolean', description: `true only after you actually wrote/updated ${CHARTER_PATH}` },
     epic_task_id: { type: 'string', description: 'slug of the PUBLISHED epic parent task (created this wave or pre-existing)' },
     tasks_verified: { type: 'boolean', description: 'true only after you re-read every wave task from the server and confirmed each is published, parented, and rubric-quality' },
+    backlog_filed: { type: 'string', description: 'discovered-but-deferred work you filed as published child tasks (ids), or "none"' },
+    heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is building' },
     decisions_summary: { type: 'string' },
     wave: {
       type: 'array',
-      description: 'this wave of build slices, ≤5, integration-ordered',
+      description: 'this wave of build slices, ≤8, integration-ordered',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['title', 'task_id', 'surface', 'files', 'instructions', 'gate', 'size'],
+        required: ['title', 'task_id', 'surface', 'files', 'instructions', 'gate', 'size', 'builder_model'],
         properties: {
           title: { type: 'string' },
           task_id: { type: 'string', description: 'slug of the PUBLISHED bp task for this slice — you created or verified it' },
@@ -120,6 +190,7 @@ const PLAN_SCHEMA = {
           instructions: { type: 'string', description: 'complete enough to build without more context; name the key choices it must respect' },
           gate: { type: 'string', description: 'exact shell command(s) that prove it' },
           size: { type: 'string', enum: ['small', 'medium', 'large'] },
+          builder_model: { type: 'string', enum: ['opus', 'fable'], description: 'opus for well-specified slices; fable for the genuinely hard ones — subtle design, cross-surface coupling, high blast radius' },
         },
       },
     },
@@ -128,7 +199,7 @@ const PLAN_SCHEMA = {
 
 const BUILD_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['ok', 'task_id', 'task_claimed', 'branch', 'summary', 'gate_command', 'gate_passed', 'review', 'files_changed'],
+  required: ['ok', 'task_id', 'task_claimed', 'branch', 'summary', 'gate_command', 'gate_passed', 'review', 'files_changed', 'ledger_stamps'],
   properties: {
     ok: { type: 'boolean' },
     task_id: { type: 'string' },
@@ -139,12 +210,13 @@ const BUILD_SCHEMA = {
     gate_passed: { type: 'boolean' },
     review: { type: 'string', description: 'honest self-review: what could break, blind spots' },
     files_changed: { type: 'array', items: { type: 'string' } },
+    ledger_stamps: { type: 'string', description: 'the task mutations you made DURING the build (claim, per-criterion evidence, deviation notes) — proof the ledger stayed live' },
   },
 }
 
 const REVIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'next_wave', 'overall_verdict'],
+  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'debrief_paper', 'heartbeat_stamped', 'next_wave', 'overall_verdict'],
   properties: {
     reviewed: {
       type: 'array',
@@ -164,79 +236,41 @@ const REVIEW_SCHEMA = {
     },
     ledger_fixes: { type: 'string', description: 'bp task mutations you made to make the ledger match reality, or "none"' },
     wave_log_appended: { type: 'boolean', description: `true only after you actually appended the wave entry to ${CHARTER_PATH}` },
+    grade: { type: 'string', description: 'letter grade A+..F for the wave AS IT WILL MERGE (final branches), judged against the WISH' },
+    commentary: { type: 'string', description: 'the Cody mandate: honest agent-judged commentary that EARNS the grade — what is genuinely strong, what falls short and why, never a bare number. Correctness, completeness vs the wish, bloat, aesthetics; tree-tidiness has no value.' },
+    debrief_paper: { type: 'string', description: 'id/slug of the published Barkpark Paper debrief for this wave, or "failed: <why>"' },
+    heartbeat_stamped: { type: 'boolean', description: 'true only after wave_status on the epic task says the wave is complete and names the debrief paper' },
     next_wave: { type: 'string', description: 'what the next wave should take and why — the direction handoff' },
     overall_verdict: { type: 'string', description: 'did this wave move the WISH forward; cross-slice coherence; risks' },
   },
 }
 
-const JUDGE_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['grade', 'commentary', 'verdict', 'issues'],
-  properties: {
-    grade: { type: 'string', description: 'letter grade A+..F for the wave AS REVIEWED (the -r branches), judged against the WISH' },
-    commentary: {
-      type: 'string',
-      description: 'the Cody mandate: honest agent-judged commentary that EARNS the grade — what is genuinely strong, what falls short and why, never a bare number. Judge correctness, completeness vs the wish, bloat, and aesthetics; tree-tidiness has no value.',
-    },
-    verdict: { type: 'string', enum: ['ship', 'fix'], description: 'ship = the wave honestly meets the Kinsta/Vercel bar as-is; fix = it does not, and the issues below are worth Fable time' },
-    issues: {
-      type: 'array', maxItems: 3,
-      description: 'REQUIRED non-empty when verdict=fix, empty when ship: the 1-3 highest-leverage defects/quality shortfalls, each concrete enough for one agent to solve without more context',
-      items: {
-        type: 'object', additionalProperties: false,
-        required: ['title', 'branch', 'task_id', 'where', 'why', 'fix_direction', 'severity'],
-        properties: {
-          title: { type: 'string' },
-          branch: { type: 'string', description: 'the -r (or original) branch carrying the defect' },
-          task_id: { type: 'string', description: 'the bp task whose evidence the fix must update' },
-          where: { type: 'string', description: 'file:line anchors you actually read' },
-          why: { type: 'string', description: 'the failure scenario or quality shortfall, concretely' },
-          fix_direction: { type: 'string', description: 'the fix you would make — direction, not a diff' },
-          severity: { type: 'string', enum: ['blocking', 'quality'] },
-        },
-      },
-    },
-  },
-}
-
-const PERFECT_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['ok', 'issue_title', 'branch', 'summary', 'gate_passed'],
-  properties: {
-    ok: { type: 'boolean' },
-    issue_title: { type: 'string' },
-    branch: { type: 'string', description: 'the -p branch carrying your fix (the branch the lead must now integrate INSTEAD of its base)' },
-    summary: { type: 'string', description: 'what you changed and the proof it solves the judged issue' },
-    gate_passed: { type: 'boolean', description: 'the slice gate re-run green on the -p branch' },
-  },
-}
-
-// ── Phase 1: Strategize — one Fable agent sets direction + exploration ──
+// ── Phase 1: Strategize — one Fable mind, ~5 minutes, direction + wide net ──
 phase('Strategize')
 const strategist = await agent(
-  `You are the STRATEGIST of a Barkpark epic wave — one Fable mind setting bold direction. Risk is welcome here; rigor comes later.
+  `You are the STRATEGIST of a Barkpark epic wave — one Fable mind setting bold direction FAST. Budget: ~5 minutes of thinking, minimal reading. Risk is welcome here; two whole exploration rounds of rigor come after you.
 
 ${USER_WISH_BLOCK}
 
 ${CHARTER_EXISTS
-    ? `The epic charter exists at ${CHARTER_PATH} — read it fully, plus .claude/workflows/bp-loop-ledger.md, and the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''}. Reconcile with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
-    : `This is the FOUNDING wave — no charter yet. Skim the repo's real surfaces (cloud/priv/static/, internal/cli/, the control-plane Elixir beside them; .claude/workflows/bp-loop-ledger.md for settled ground) just enough to strategize honestly — deep verification is the explorers' job, not yours.`}
+    ? `The epic charter exists at ${CHARTER_PATH} — read it, plus the epic's bp task tree${EPIC_TASK_ID ? ` (bp task get ${EPIC_TASK_ID} carries children)` : ''}. Reconcile with what actually landed, then set the direction for THIS wave: what matters most now, what should be finished vs started, where the quality bar (Kinsta/Vercel) is not yet met.`
+    : `This is the FOUNDING wave — no charter yet. Skim just enough to strategize honestly (a \`bp search\` for prior papers/tasks on this topic, a fast look at the obvious surface dirs) — verification is the fleets' job, not yours.`}
 
 Return:
-1. direction — the bold strategic direction for this wave: what the finished experience looks/feels like, the key choices you lean toward (decide tentatively; the Decide phase finalizes after exploration), what to prioritize.
-2. exploration — 1-5 concrete assignments for Opus explorers: the questions whose answers you NEED before the plan can be cut. Name suspected files, claims to verify, seams to map, prior art to find. Do not ask what you already know; do not skip what you merely assume.
+1. direction — the bold strategic direction for this wave: what the finished experience looks/feels like, the key choices you lean toward (tentatively; Decide finalizes after two explore rounds), what to prioritize.
+2. survey — 5-20 BROAD assignments for cheap Sonnet surveyors. Cast a wide net: suspected files, prior art (in the repo AND in bp papers/tasks), claims to check, seams to map, adjacent systems that might constrain the design. Width is cheap here — ask everything you'd want a scout report on. The Digest phase distills; you do not need to be precise yet.
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: STRAT_MODEL }
 )
-const assignments = (strategist.exploration || []).slice(0, 5)
-log(`Strategist set direction; ${assignments.length} exploration assignments`)
+const surveyAssignments = (strategist.survey || []).slice(0, 20)
+log(`Strategist set direction; ${surveyAssignments.length} survey assignments`)
 
-// ── Phase 2: Explore — Opus fan-out grounds the strategy in the repo ──
-phase('Explore')
-const explorations = assignments.length === 0 ? [] : (await parallel(
-  assignments.map((q) => () =>
+// ── Phase 2: Survey — wide cheap Sonnet sweep, ~5 minutes each ──
+phase('Survey')
+const surveys = surveyAssignments.length === 0 ? [] : (await parallel(
+  surveyAssignments.map((q) => () =>
     agent(
-      `You are an EXPLORER grounding a Barkpark epic wave in reality. READ-ONLY: no edits, no commits, no bp mutations. Your job is truth the strategist can plan on — verified by reading actual code, never assumed.
+      `You are a SURVEYOR on a Barkpark epic wave — one of up to 20 scouts in a fast, wide sweep. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — breadth over depth. A fast honest answer with real file:line anchors beats a deep dive; park what you can't settle in open_questions (a targeted verify round runs after you).
 
 ${USER_WISH_BLOCK}
 
@@ -246,52 +280,117 @@ ${strategist.direction}
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
 
-Investigate the repo (grep/read; ${CHARTER_EXISTS ? `the charter at ${CHARTER_PATH} and ` : ''}.claude/workflows/bp-loop-ledger.md are fair sources). Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs file:line evidence you actually read.`,
-      { label: `explore:${q.key}`, phase: 'Explore', schema: EXPLORE_SCHEMA, model: EXPLORE_MODEL }
+Search Barkpark FIRST (\`bp search "<terms>"\` — papers and tasks carry prior art the tree doesn't), then grep/read the repo${CHARTER_EXISTS ? `; the charter at ${CHARTER_PATH} is a fair source` : ''}. Answer honestly — "the premise is wrong" is a valid and valuable answer. Every load-bearing fact needs file:line evidence you actually read.`,
+      { label: `survey:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: SURVEY_MODEL }
     )
   )
 )).filter(Boolean)
-log(`${explorations.length}/${assignments.length} explorers reported`)
+log(`${surveys.length}/${surveyAssignments.length} surveyors reported`)
 
-// ── Phase 3: Decide — one Fable agent finalizes charter + wave + tasks ──
+// ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
+phase('Digest')
+const aim = await agent(
+  `You are the DIGEST strategist of a Barkpark epic wave — the same Fable judgment that set the direction, now holding ${surveys.length} survey reports. Budget: ~10 minutes. Your output designs the LAST exploration round before the plan is cut — after it, there is no more looking.
+
+${USER_WISH_BLOCK}
+
+STRATEGIC DIRECTION (yours, from Strategize):
+${strategist.direction}
+
+SURVEY REPORTS (wide but shallow — trust file:line evidence over prose; treat unanchored claims as rumors):
+${JSON.stringify(surveys, null, 2)}
+
+Your job:
+1. SYNTHESIZE: what is now established, where reports contradict each other or the direction, which open_questions actually matter for the wish, and what the Decide phase cannot live without knowing.
+2. DESIGN THE VERIFY FLEET (1-15 assignments) — you choose, per assignment:
+   - model: 'sonnet' for mapping/breadth follow-ups; 'opus' for subtle correctness, cross-surface reasoning, judgment-heavy digs. Spend Opus where being wrong is expensive.
+   - verify_commands: where a survey claim (or your own assumption) is load-bearing, the verifier must PROVE it by RUNNING something — the surface's tests/gates, a targeted mix/go test, curl against localhost. Reading is not proof for claims like "the gate passes", "this endpoint returns X", "these tests pin that behavior" (distrust vacuous green — a pass only counts if the RIGHT thing produced it). Empty string when reading genuinely suffices.
+   - needs_worktree: true only for probe edits or isolated build dirs.
+   Do not re-ask what the survey settled with evidence. This round closes unknowns; it does not browse.
+3. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}'s flat wave_status field ("wave: verifying — <one-line synthesis>") and re-publish.` : 'if a published epic parent task for this epic already exists, stamp its wave_status; if none exists yet, set heartbeat_stamped=true and move on (Decide creates it).'}
+${LIVENESS_BLOCK}
+${GATES_BLOCK}${LEAD_NOTES}`,
+  { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: STRAT_MODEL }
+)
+if (!aim) throw new Error('Digest phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
+const verifyAssignments = (aim.verification || []).slice(0, 15)
+log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'opus').length} opus, ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
+
+// ── Phase 4: Verify — the Fable-designed fleet closes the unknowns ──
+phase('Verify')
+const verifications = verifyAssignments.length === 0 ? [] : (await parallel(
+  verifyAssignments.map((q) => () =>
+    agent(
+      `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, no bp mutations, never touch main${q.needs_worktree ? ' (you are in your OWN throwaway worktree — probe edits are fine, but commit nothing)' : ' , no repo edits'}.
+
+${USER_WISH_BLOCK}
+
+STRATEGIC DIRECTION:
+${strategist.direction}
+
+DIGEST SYNTHESIS (what is established and what you exist to close):
+${aim.synthesis}
+
+YOUR ASSIGNMENT [${q.key}]: ${q.question}
+WHY IT MATTERS: ${q.why}
+${q.verify_commands ? `MUST RUN (proof, not reading): ${q.verify_commands}
+Run it (plus whatever else proves/refutes the claim), and QUOTE the decisive output lines in proofs[] — never paraphrase a pass. A failing command is a finding, not a failure of yours.` : 'Reading suffices for this assignment, but if you find a load-bearing claim that only a run can settle, run it and record the proof.'}
+
+Investigate sharply — grep/read${CHARTER_EXISTS ? `, the charter at ${CHARTER_PATH},` : ''} bp search for prior art. "The premise is wrong" remains a valid answer. Every fact needs file:line evidence; every proof needs real output.`,
+      { label: `verify:${q.key}`, phase: 'Verify', schema: VERIFY_SCHEMA, model: q.model === 'opus' ? 'opus' : 'sonnet', ...(q.needs_worktree ? { isolation: 'worktree' } : {}) }
+    )
+  )
+)).filter(Boolean)
+log(`${verifications.length}/${verifyAssignments.length} verifiers reported; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs`)
+
+// ── Phase 5: Decide — one Fable mind finalizes charter + wave + tasks ──
 phase('Decide')
 const EPIC_TASK_LINE = EPIC_TASK_ID
   ? `The epic parent task is ${EPIC_TASK_ID} — verify it exists and is published; file this wave's slice tasks as its children (parent_id=${EPIC_TASK_ID}).`
   : `Ensure ONE published epic parent task exists for this epic (create it if missing — slug it from the charter name); file this wave's slice tasks as its children via parent_id.`
 const architect = await agent(
-  `You are the STRATEGIST-ARCHITECT of a Barkpark epic — the same Fable judgment that set the direction now decides, with the explorers' ground truth in hand. This is where the IMPORTANT CHOICES get made.
+  `You are the STRATEGIST-ARCHITECT of a Barkpark epic — the same Fable judgment that set direction and digested exploration, now DECIDING with two rounds of ground truth in hand. Take whatever time this needs; the IMPORTANT CHOICES get made here.
 
 ${USER_WISH_BLOCK}
 
-STRATEGIC DIRECTION (from the Strategize phase):
+STRATEGIC DIRECTION (from Strategize):
 ${strategist.direction}
 
-EXPLORATION REPORTS (ground truth — trust their file:line evidence over your priors; spot-check anything load-bearing that smells off):
-${JSON.stringify(explorations, null, 2)}
+DIGEST SYNTHESIS (from Digest):
+${aim.synthesis}
+
+VERIFICATION REPORTS (the deep round — proofs[] carry actually-run output; trust proofs > facts > prose; spot-check anything load-bearing that smells off):
+${JSON.stringify(verifications, null, 2)}
+
+SURVEY REPORTS (the wide round, already distilled by the synthesis — consult for detail, not direction):
+${JSON.stringify(surveys.map((s) => ({ key: s.key, findings: s.findings, relevant_files: s.relevant_files })), null, 2)}
 
 Your job:
-1. DECIDE: finalize the key choices (decide them — don't list options). Where exploration contradicted the direction, follow the evidence.
+1. DECIDE: finalize the key choices (decide them — don't list options). Where verification contradicted the direction, follow the evidence.
 2. ${CHARTER_EXISTS
       ? `UPDATE the charter at ${CHARTER_PATH} (Read then Edit): reconcile with what landed, fold in decision changes, set the wave plan.`
       : `WRITE the epic charter to ${CHARTER_PATH} (Write tool): ## Vision, ## Decisions (each with a one-line why), ## Roadmap (all slices, ordered, sized), ## Wave log (empty). This file is the epic's memory — every future wave reads it.`} Set charter_written=true only after you actually wrote it.
 3. FILE THE TASKS: ${EPIC_TASK_LINE} Every slice gets a published bp task with rubric-quality acceptance criteria (include a merge-gated criterion the lead closes). A slice without a published task does not exist — wave[].task_id is required.
-4. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
-5. Cut THE WAVE: up to 5 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s).
+4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
+5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
+6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). Per slice pick builder_model: 'opus' for well-specified work; 'fable' for the genuinely hard slices — subtle design judgment, cross-surface coupling, high blast radius. ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s).
+7. HEARTBEAT: stamp the epic task's wave_status ("wave: building <n> slices — <one-line plan>") and re-publish. Set heartbeat_stamped=true only after you did.
 ${TASKS_BLOCK}
+${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: STRAT_MODEL }
 )
 
 if (!architect) throw new Error('Decide phase returned no result (agent died — check auth/spend); resume the run rather than restarting')
-const wave = (architect.wave || []).slice(0, 5)
-log(`Architect cut ${wave.length} slices; charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}`)
+const wave = (architect.wave || []).slice(0, 8)
+log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written}; tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 if (wave.length === 0) {
-  return { exploration: explorations.length, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary }
+  return { surveys: surveys.length, verifications: verifications.length, wave: 0, built: 0, note: 'architect cut no slices', decisions: architect.decisions_summary }
 }
 
 const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
 
-// ── Phase 4: Build — Opus builders, task-first ──
+// ── Phase 6: Build — Fable/Opus builders per slice complexity, task-first ──
 phase('Build')
 const built = (await parallel(
   wave.map((item, i) => () =>
@@ -310,17 +409,19 @@ SIZE: ${item.size}
 INSTRUCTIONS: ${item.instructions}
 GATE (must pass before you commit): ${item.gate}
 
-Steps — task first, code second:
+Steps — task first, code second, and the ledger stays LIVE throughout:
 1. CLAIM your task before touching code: bp task claim ${item.task_id} epic-builder-${slug(item.title)} — read the brief it carries; the task, not this prompt, is the contract of record. If the claim fails, STOP and report ok:false task_claimed:false with the error.
 2. Build it properly — this may be a real feature slice, not just a patch. Match surrounding code style. Quality bar: Kinsta/Vercel — honest states (loading/empty/error), safe actions, immediate feedback.
-3. JS SDK public API change ⇒ add a js/.changeset/ entry (correctness gate, never skip).
-4. Run the gate. Fix until it passes; if it truly cannot, STOP without committing and report ok:false with why (leave the task claimed + in_progress with a note).
-5. Honest self-review: what could break, what you didn't cover, blind spots.
-6. Only if the gate passes: branch 'loop-epic/${slug(item.title)}-${i}', one clear conventional commit. Do NOT push. Do NOT touch main.
-7. Stamp the evidence into your task: flip every criterion you actually proved (--set criteria:=[...] with concrete evidence: gate output, test names, branch). Do NOT close merge-gated criteria and do NOT set lifecycle done — the lead closes on merge. Leave the task in_progress with your branch named in the evidence.
+3. STAMP AS YOU GO: the moment a criterion is actually proven (gate output, test name, behavior observed), stamp its evidence into the task — do not batch to the end. If you deviate from the brief or hit a wall, stamp a note the moment it happens. Record everything you stamped in ledger_stamps.
+4. JS SDK public API change ⇒ add a js/.changeset/ entry (correctness gate, never skip).
+5. Run the gate. Fix until it passes; if it truly cannot, STOP without committing and report ok:false with why (leave the task claimed + in_progress with a stamped note explaining the stall).
+6. Honest self-review: what could break, what you didn't cover, blind spots.
+7. Only if the gate passes: branch 'loop-epic/${slug(item.title)}-${i}', one clear conventional commit. Do NOT push. Do NOT touch main.
+8. Final ledger state: every criterion you proved carries concrete evidence (gate output, test names, branch); merge-gated criteria stay open and lifecycle stays in_progress — the LEAD closes on merge. Your branch is named in the evidence.
 ${TASKS_BLOCK}
+${LIVENESS_BLOCK}
 Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.`,
-      { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: EXPLORE_MODEL, isolation: 'worktree' }
+      { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: item.builder_model === 'fable' ? 'fable' : 'opus', isolation: 'worktree' }
     )
   )
 )).filter(Boolean)
@@ -328,12 +429,12 @@ Constraints: curl localhost only; never mix compile against prod; don't touch ot
 const greenBuilt = built.filter((r) => r.ok && r.gate_passed && r.branch)
 log(`Build: ${greenBuilt.length}/${built.length} slices green`)
 
-// ── Phase 5: Review — one Fable agent reviews everything, fixes, writes the wave log ──
+// ── Phase 7: Review — one Fable mind reviews, fixes, grades, debriefs, hands off ──
 phase('Review')
 let review = null
-if (greenBuilt.length > 0 || built.length > 0) {
+if (built.length > 0) {
   review = await agent(
-    `You are the REVIEWER for a just-built Barkpark epic wave — one Fable agent reviewing EVERYTHING: the code of every green slice AND the task ledger. You are in your OWN git worktree. There is no perfection pass behind you: review at the Kinsta/Vercel bar and FIX the obvious issues yourself instead of reporting them.
+    `You are the REVIEWER for a just-built Barkpark epic wave — one Fable agent, the LAST hands before merge, taking whatever time this needs. You review EVERYTHING (code of every green slice + the task ledger), FIX issues yourself instead of reporting them, grade the wave honestly, write the Paper debrief, and hand off. You are in your OWN git worktree.
 
 ${USER_WISH_BLOCK}
 
@@ -350,16 +451,19 @@ ${JSON.stringify(wave.map((w) => ({ title: w.title, task_id: w.task_id, instruct
 
 For EACH green slice, in integration order:
 1. \`git checkout -b <branch>-r <branch>\` in your worktree; study the full diff vs its merge-base with origin/main. Chase the builder's own doubts first.
-2. Review adversarially for correctness (edge cases, escaping, stale-state, error paths) AND against the Kinsta/Vercel quality bar (honest loading/empty/error states, legibility, feedback, consistency with the charter's design decisions).
-3. FIX obvious issues in place — bugs, missing states, sloppy copy, style drift, unformatted code (run the surface's formatter: mix format / gofmt). If it's already right, change nothing. Do NOT redesign the slice; structural concerns go in the verdict for the lead.
+2. Review adversarially for correctness (edge cases, escaping, stale-state, error paths) AND against the Kinsta/Vercel quality bar (honest loading/empty/error states, legibility, feedback, consistency with the charter's design decisions). Distrust vacuous green — spot-check that the load-bearing tests actually pin the behavior claimed.
+3. FIX issues in place — bugs, missing states, sloppy copy, style drift, unformatted code (run the surface's formatter: mix format / gofmt). If it's already right, change nothing. Do NOT redesign the slice; structural concerns go in the verdict for the lead.
 4. Re-run the slice's gate (must pass on your final state). Commit fixes as follow-up commit(s) on the -r branch.
 5. Cross-slice pass: do the slices cohere (shared vocabulary, no duplicated helpers, no conflicting UI states)? Fix small incoherences on the owning slice's -r branch; flag big ones in overall_verdict.
 
 Then, once, for the wave:
-6. LEDGER AUDIT: for every slice task, verify the builder claimed it, stamped honest evidence, and left lifecycle truthful (in_progress, not done — merge-gated criteria stay open for the lead). Not-green slices' tasks must say so. Verify tasks NOT in this wave weren't touched. Fix ledger lies/omissions directly via bp and record them in ledger_fixes.
-7. WAVE LOG: APPEND a '### Wave <today>' entry to the charter's ## Wave log (Edit tool): what landed, what stalled, what the next wave should take. Set wave_log_appended=true only after you actually wrote it. Put the direction handoff in next_wave.
-8. Report per slice: final_branch = the -r branch if you changed anything, else the original; gate_passed on your final state; an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
-${TASKS_BLOCK}`,
+6. LEDGER AUDIT: for every slice task, verify the builder claimed it, stamped honest evidence AS THEY WORKED (their ledger_stamps claim vs the task's actual state), and left lifecycle truthful (in_progress, not done — merge-gated criteria stay open for the lead). Not-green slices' tasks must say so. Verify tasks NOT in this wave weren't touched. Fix ledger lies/omissions directly via bp and record them in ledger_fixes.
+7. GRADE (Cody mandate): a letter grade A+..F for the wave as it will merge, judged against the WISH — correctness, completeness, bloat, aesthetics; tree-tidiness has no value. The commentary must EARN the grade: name what is genuinely strong AND what falls short. Never a bare number. Do not manufacture criticism to look rigorous.
+8. WAVE LOG: APPEND a '### Wave <today>' entry to the charter's ## Wave log (Edit tool): what landed, what stalled, what the next wave should take. Set wave_log_appended=true only after you actually wrote it.
+9. PAPER DEBRIEF: write this wave's debrief as a Barkpark Paper (style=article — without it the render falls back to the ugly email look; \`bp capabilities -o json\` shows the doc verbs; bp doc create ignores stdin, so mutate content via the HTTP /v1/data/mutate path if needed, then publish). Content: the wish, what shipped (per slice: task, branch, verdict), the grade + commentary, ledger state, what the next wave should take. Link it to the epic: stamp the paper's id into the epic task (flat field debrief_paper or in wave_status) so the board reaches the story in one hop. Report its id in debrief_paper.
+10. HEARTBEAT + HANDOFF: stamp the epic task's wave_status ("wave: complete — grade <g>, debrief <paper-id>") and re-publish; set heartbeat_stamped accordingly. Put the direction handoff in next_wave; per slice report final_branch (the -r branch if you changed anything), gate_passed on your final state, and an honest verdict incl. anything the lead must know before merging (the lead closes merge-gated criteria on merge — name them).
+${TASKS_BLOCK}
+${LIVENESS_BLOCK}`,
     { label: 'review', phase: 'Review', schema: REVIEW_SCHEMA, model: REVIEW_MODEL, isolation: 'worktree' }
   )
 }
@@ -369,79 +473,17 @@ for (const r of (review && review.reviewed) || []) reviewedByTask[r.task_id] = r
 const green = greenBuilt.map((b) => ({ ...b, reviewed: reviewedByTask[b.task_id] || null }))
   .filter((b) => !b.reviewed || b.reviewed.gate_passed)
 
-// ── Phase 6: Judge — one Fable agent decides whether the wave meets the bar ──
-// (Cody principles: the grade EARNS its honest commentary — never a bare
-// number; correctness/completeness/bloat/aesthetics count, tree-tidiness
-// does not. verdict=fix dispatches 1-3 Fable perfecters.)
-phase('Judge')
-let judgment = null
-let perfected = []
-if (review && green.length > 0) {
-  judgment = await agent(
-    `You are the QUALITY JUDGE of a just-reviewed Barkpark epic wave — one Fable mind deciding whether this wave actually meets the bar, AFTER the reviewer already fixed the obvious. You are in your OWN git worktree. You change NOTHING — you judge.
-
-${USER_WISH_BLOCK}
-
-Read the epic charter at ${CHARTER_PATH}. Then, for every slice below, check out its final branch and study the REAL diff vs its merge-base with origin/main — judge the code that will merge, not the summaries.
-
-REVIEWED WAVE (the reviewer's own verdicts are input, not truth — re-judge):
-${JSON.stringify(green.map((b) => ({ task_id: b.task_id, branch: (b.reviewed && b.reviewed.final_branch) || b.branch, summary: b.summary, reviewer_fixes: b.reviewed ? b.reviewed.fixes : null, reviewer_verdict: b.reviewed ? b.reviewed.verdict : null })), null, 2)}
-
-REVIEWER'S OVERALL VERDICT: ${review.overall_verdict}
-
-Cody principles (the grading law):
-- The grade gets honest agent-judged COMMENTARY that earns it — never a bare number. Name what is genuinely strong AND what falls short.
-- Judge against the WISH holistically: correctness (would it break?), completeness (does the wish's finished experience actually exist?), bloat (is there code that shouldn't be?), aesthetics (Kinsta/Vercel bar — honest states, legibility, feel).
-- Tree-tidiness has no value. Do not manufacture issues to look rigorous — 'ship' is the correct verdict for a wave that meets the bar.
-- Distrust vacuous green: a pass only counts if the RIGHT thing produced it — spot-check that the load-bearing tests actually pin the behavior claimed.
-
-Verdict 'fix' ONLY when you found 1-3 issues genuinely worth Fable time (real defects, missing wish-critical states, quality below the bar). Each issue must carry file:line anchors you read and a fix direction one agent can execute without more context.`,
-    { label: 'judge', phase: 'Judge', schema: JUDGE_SCHEMA, model: REVIEW_MODEL, isolation: 'worktree' }
-  )
-  if (judgment) log(`Judge: grade ${judgment.grade} — verdict ${judgment.verdict}${judgment.verdict === 'fix' ? ` (${(judgment.issues || []).length} issues)` : ''}`)
-
-  // ── Phase 7: Perfect — 1-3 Fable perfecters solve the judged issues ──
-  if (judgment && judgment.verdict === 'fix' && (judgment.issues || []).length > 0) {
-    phase('Perfect')
-    perfected = (await parallel(
-      judgment.issues.slice(0, 3).map((iss) => () =>
-        agent(
-          `You are a PERFECTER on a Barkpark epic wave — one Fable agent solving EXACTLY ONE judged issue, in your OWN git worktree. The reviewer and judge are behind you; you are the last hands before merge.
-
-${USER_WISH_BLOCK}
-
-Read the epic charter at ${CHARTER_PATH} first.
-
-THE ISSUE (severity: ${iss.severity}):
-${iss.title}
-WHERE: ${iss.where}
-WHY IT FAILS THE BAR: ${iss.why}
-FIX DIRECTION (judge's lean — follow the code where it disagrees): ${iss.fix_direction}
-BASE BRANCH: ${iss.branch}
-BP TASK: ${iss.task_id}
-
-Steps:
-1. \`git checkout -b ${iss.branch}-p ${iss.branch}\` — your fix lands as follow-up commit(s) on this -p branch. Never touch main or other slices' branches.
-2. Solve the issue properly — minimal, surgical, matching surrounding style. No redesigns, no ride-alongs beyond the issue.
-3. Re-run the slice's gate (find it in the bp task / charter) plus any test that pins your fix — add a protective test if the issue was a real defect with none. Green or report ok:false honestly.
-4. Stamp what you did into the bp task's evidence (bp doc patch + publish — do NOT close, do NOT flip merge-gated criteria).
-5. Report the -p branch — the lead integrates it INSTEAD of its base.
-${TASKS_BLOCK}`,
-          { label: `perfect:${slug(iss.title)}`, phase: 'Perfect', schema: PERFECT_SCHEMA, model: STRAT_MODEL, isolation: 'worktree' }
-        )
-      )
-    )).filter(Boolean)
-    log(`Perfect: ${perfected.filter((p) => p.ok && p.gate_passed).length}/${perfected.length} issues solved green`)
-  }
-}
-
 return {
   direction: strategist.direction,
-  exploration: explorations.length,
+  surveys: surveys.length,
+  synthesis: aim.synthesis,
+  verifications: verifications.length,
+  proofs: verifications.reduce((n, v) => n + (v.proofs || []).length, 0),
   decisions: architect.decisions_summary,
   charter_written: architect.charter_written,
   epic_task_id: architect.epic_task_id,
   tasks_verified: architect.tasks_verified,
+  backlog_filed: architect.backlog_filed,
   wave: wave.length,
   built: green.length,
   green_branches: green.map((r) => ({
@@ -456,8 +498,9 @@ return {
   not_green: built.filter((r) => !greenBuilt.includes(r)).map((r) => ({ task_id: r.task_id, summary: r.summary, review: r.review })),
   ledger_fixes: review ? review.ledger_fixes : null,
   wave_log_appended: review ? review.wave_log_appended : false,
+  grade: review ? review.grade : null,
+  commentary: review ? review.commentary : null,
+  debrief_paper: review ? review.debrief_paper : null,
   next_wave: review ? review.next_wave : null,
   overall_verdict: review ? review.overall_verdict : null,
-  judgment: judgment ? { grade: judgment.grade, verdict: judgment.verdict, commentary: judgment.commentary, issues: judgment.issues } : null,
-  perfected: perfected.map((p) => ({ issue: p.issue_title, branch: p.branch, ok: p.ok && p.gate_passed, summary: p.summary })),
 }
