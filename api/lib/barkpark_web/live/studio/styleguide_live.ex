@@ -32,6 +32,11 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
 
   use BarkparkWeb, :live_view
 
+  # The tokenized Studio control kit — the Controls gallery below renders these
+  # real function components (bp_input/bp_select/bp_textarea/bp_checkbox/
+  # bp_radio/bp_switch), so the gallery DOM IS the component DOM (D22).
+  import BarkparkWeb.StudioComponents.Controls
+
   alias Barkpark.Tenancy
   alias Barkpark.PortableDoc.Render.Palettes
   alias BarkparkWeb.Studio.TokensGen
@@ -230,17 +235,22 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
       <section data-test-id="sg-controls" style="margin: 0 0 2.5rem;">
         <h2 style="margin: 0 0 .25rem;">Controls</h2>
         <p style="color: var(--muted-text); font-size: 13px; margin: 0 0 1.25rem; max-width: 68ch;">
-          Every interactive control-kit class Studio chrome ships, rendered DIRECTLY from the
-          <code style="font-family: var(--font-mono);">.btn</code> /
-          <code style="font-family: var(--font-mono);">.form-*</code> /
+          The interactive Studio control kit, rendered live. The form controls come straight from
+          the <code style="font-family: var(--font-mono);">StudioComponents.Controls</code>
+          kit (<code style="font-family: var(--font-mono);">bp_input</code>,
+          <code style="font-family: var(--font-mono);">bp_select</code>,
+          <code style="font-family: var(--font-mono);">bp_textarea</code>,
+          <code style="font-family: var(--font-mono);">bp_checkbox</code>,
+          <code style="font-family: var(--font-mono);">bp_radio</code>,
+          <code style="font-family: var(--font-mono);">bp_switch</code>) — so the gallery DOM IS the
+          component DOM and a kit edit shows here first. Buttons, card, badges and the segmented
+          tabs render from their <code style="font-family: var(--font-mono);">.btn</code> /
           <code style="font-family: var(--font-mono);">.card</code> /
           <code style="font-family: var(--font-mono);">.badge</code> /
           <code style="font-family: var(--font-mono);">.perspective-tabs</code>
-          rules in <code style="font-family: var(--font-mono);">layouts/root.html.heex</code> —
-          so a retint or a control-shape edit shows here first. Each specimen is labelled with its
-          class in muted mono; flip the theme above to prove every state in both modes. These are
-          the class primitives (not the Elixir component wrappers) — the living contract a human
-          eyeballs before sign-off.
+          primitives in <code style="font-family: var(--font-mono);">layouts/root.html.heex</code>.
+          Each specimen is labelled in muted mono; flip the theme above to prove every state in
+          both modes — the living contract a human eyeballs before sign-off.
         </p>
 
         <%!-- Buttons — every variant, enabled + disabled --%>
@@ -287,83 +297,87 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
           </div>
         </div>
 
-        <%!-- Text + select inputs --%>
+        <%!-- Text / select / textarea — the Controls kit itself (bp_input,
+              bp_select, bp_textarea), so the gallery DOM IS the component DOM. --%>
         <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
           <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
-            Inputs · .form-input
+            Inputs · bp_input / bp_select / bp_textarea
           </div>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; max-width: 720px;">
             <label style="display: flex; flex-direction: column; gap: 6px;">
               <span class="form-label">Text input</span>
-              <input type="text" class="form-input" value="Fleet at a glance" aria-label="Text input specimen" />
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">input.form-input</span>
+              <.bp_input
+                name="sg-text-input"
+                id="sg-text-input"
+                value="Fleet at a glance"
+                aria-label="Text input specimen"
+              />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_input</span>
             </label>
             <label style="display: flex; flex-direction: column; gap: 6px;">
               <span class="form-label">Text input · placeholder</span>
-              <input type="text" class="form-input" placeholder="Search documents…" aria-label="Placeholder input specimen" />
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">input.form-input::placeholder</span>
+              <.bp_input
+                name="sg-text-placeholder"
+                id="sg-text-placeholder"
+                placeholder="Search documents…"
+                aria-label="Placeholder input specimen"
+              />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_input · placeholder</span>
             </label>
             <label style="display: flex; flex-direction: column; gap: 6px;">
-              <span class="form-label">Select · themed chevron</span>
-              <select class="form-input" aria-label="Select specimen">
-                <option>Published</option>
-                <option>Drafts</option>
-                <option>Raw</option>
-              </select>
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">select.form-input</span>
+              <span class="form-label">Select · prompt + optgroup</span>
+              <%!-- exercises BOTH the prompt affordance and an <optgroup> so the
+                    gallery documents them (bp_select's two non-obvious paths). --%>
+              <.bp_select
+                name="sg-select"
+                id="sg-select"
+                prompt="Choose a perspective…"
+                options={[
+                  {"Live", ["Published", "Drafts"]},
+                  {"System", [{"raw", "Raw"}]}
+                ]}
+                aria-label="Select specimen"
+              />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_select · prompt + optgroup</span>
             </label>
             <label style="display: flex; flex-direction: column; gap: 6px;">
               <span class="form-label">Textarea</span>
-              <textarea class="form-input" aria-label="Textarea specimen">Multi-line content, own vertical rhythm.</textarea>
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">textarea.form-input</span>
+              <.bp_textarea
+                name="sg-textarea"
+                id="sg-textarea"
+                value="Multi-line content, own vertical rhythm."
+                aria-label="Textarea specimen"
+              />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_textarea</span>
             </label>
           </div>
         </div>
 
-        <%!-- Checkbox + radio + switch --%>
+        <%!-- Checkbox + radio + switch — the kit components (bp_checkbox,
+              bp_radio, bp_switch); every state kept (checked/unchecked, on/off,
+              disabled), so the true anatomy renders here. --%>
         <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
           <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
-            Toggles · .form-checkbox / .form-radio / .form-switch
+            Toggles · bp_checkbox / bp_radio / bp_switch
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start;">
             <div style="display: flex; flex-direction: column; gap: 10px;">
-              <label class="form-checkbox">
-                <input type="checkbox" checked /> Checked
-              </label>
-              <label class="form-checkbox">
-                <input type="checkbox" /> Unchecked
-              </label>
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-checkbox</span>
+              <.bp_checkbox name="sg-checkbox-on" label="Checked" checked />
+              <.bp_checkbox name="sg-checkbox-off" label="Unchecked" />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_checkbox</span>
             </div>
-            <%!-- Radio — the .form-radio primitive the bp_radio kit component
-                  wraps; one-of-N choice, checked + unchecked, tokenized accent. --%>
+            <%!-- Radio — one-of-N choice, selected + unselected, tokenized accent. --%>
             <div style="display: flex; flex-direction: column; gap: 10px;">
-              <label class="form-radio">
-                <input type="radio" name="sg-radio" checked /> Selected
-              </label>
-              <label class="form-radio">
-                <input type="radio" name="sg-radio" /> Unselected
-              </label>
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-radio · bp_radio</span>
+              <.bp_radio name="sg-radio" value="on" checked>Selected</.bp_radio>
+              <.bp_radio name="sg-radio" value="off">Unselected</.bp_radio>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_radio</span>
             </div>
             <div style="display: flex; flex-direction: column; gap: 10px;">
-              <label class="form-switch">
-                <input type="checkbox" checked />
-                <span class="form-switch-track"></span>
-                <span class="form-switch-state">On</span>
-              </label>
-              <label class="form-switch">
-                <input type="checkbox" />
-                <span class="form-switch-track"></span>
-                <span class="form-switch-state">Off</span>
-              </label>
+              <.bp_switch name="sg-switch-on" checked on_label="On" off_label="Off" />
+              <.bp_switch name="sg-switch-off" on_label="On" off_label="Off" />
               <%!-- disabled paint comes from .form-switch:has(input:disabled) --%>
-              <label class="form-switch">
-                <input type="checkbox" checked disabled />
-                <span class="form-switch-track"></span>
-                <span class="form-switch-state">Disabled</span>
-              </label>
-              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-switch</span>
+              <.bp_switch name="sg-switch-disabled" checked disabled on_label="On" off_label="Off" />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">bp_switch · on / off / disabled</span>
             </div>
           </div>
         </div>
