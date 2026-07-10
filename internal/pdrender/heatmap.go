@@ -35,10 +35,13 @@ import (
 //	            base→peak interpolation. The new modes always dual-encode (shade glyph
 //	            UNDER GenHeatRamp colour) and ignore `ramp`.
 //	  - mode    "calendar" ⇒ a GitHub-style contribution calendar: cells are
-//	            day-rows × week-cols (≤7 rows, ≤38 weeks — 38 fits EXACTLY in 80 cols:
-//	            a 4-char day gutter + 38×2-char cells). colLabels are per-week month
-//	            labels stamped along the top; rowLabels are day letters in the gutter.
-//	            Narrower widths drop the OLDEST (leftmost) whole weeks, never squash.
+//	            day-rows × week-cols (≤7 rows). 38 weeks is the 80-col BUDGET POINT
+//	            (a 4-char day gutter + 38×2-char cells = 80); it is not a ceiling —
+//	            the calendar renders as many weeks as the snapshot carries and the
+//	            surface can hold (a full 53-week year fits at ≥110 cols). colLabels
+//	            are per-week month labels stamped along the top; rowLabels are day
+//	            letters in the gutter. Narrower widths drop the OLDEST (leftmost)
+//	            whole weeks, never squash.
 //	  - marginals  (matrix, opt-in) ⇒ append a Σ row of column sums and a Σ column of
 //	            row sums, with the grand total in the corner.
 //	  - values  (matrix, opt-in) ⇒ print the exact right-aligned cell value instead of
@@ -311,7 +314,7 @@ const heatZeroGlyph = "·"
 // owns the binning for BOTH the glyph ladder and the GenHeatRamp colour, so shade
 // and hue can never disagree about a cell's intensity.
 //
-// @canonical capability:heat-quantile-bin aka:quantile,binning,heat-ramp doc:docs/cards/tui.md
+// @canonical capability:heat-quantile-bin aka:quantile,binning,heat-ramp doc:docs/contracts/tui-render-doctrine.md
 func HeatQuantileBins(cells [][]float64) [][]int {
 	var nz []float64
 	for _, row := range cells {
@@ -386,7 +389,9 @@ func heatDualCell(bin, w int, ctx RenderCtx) string {
 // ── calendar mode ────────────────────────────────────────────────────────────
 
 // heatCalGutter is the fixed day-letter gutter for the calendar. 4 + 38×2 = 80,
-// so a full 38-week year lands EXACTLY on the 80-col budget with 2-col cells.
+// so 38 weeks is the 80-col BUDGET POINT with 2-col cells — not a ceiling: wider
+// terminals render up to what the snapshot carries (a full 53-week year at ≥110
+// cols), narrower ones drop the oldest whole weeks (see heatRenderCalendar).
 const heatCalGutter = 4
 
 // heatCalCellW is the per-week cell width (a 2-col contribution square).
