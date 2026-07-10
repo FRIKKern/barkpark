@@ -228,6 +228,46 @@ defmodule BarkparkWeb.AuthControllerTest do
              })
     end
 
+    test "a failed second factor at login emits auth/mfa_failed (context login)", %{token: token} do
+      {_secret, _codes} = enroll_totp!(token)
+
+      # Correct password, WRONG second factor → 401 mfa_required.
+      bad_code =
+        post_json(build_conn(), "/v1/auth/login", %{
+          email: "mfa@example.com",
+          password: @password,
+          totp_code: "000000"
+        })
+
+      assert json_response(bad_code, 401)["error"]["code"] == "mfa_required"
+
+      # The silent-failure gap this slice closes: the login second-factor failure
+      # must now be on the audit chain, tagged context "login" (distinct from the
+      # step-up failure site's context "step_up").
+      assert Repo.exists?(
+               from e in Event,
+                 where:
+                   e.category == "auth" and e.action == "mfa_failed" and
+                     fragment("?->>'context' = ?", e.metadata, "login")
+             )
+    end
+
+    test "DENY-PATH: a successful second factor at login emits NO mfa_failed", %{token: token} do
+      {secret, _codes} = enroll_totp!(token)
+
+      # Correct password AND a live TOTP → login succeeds.
+      assert login_token(build_conn(), "mfa@example.com", %{
+               totp_code: NimbleTOTP.verification_code(secret)
+             })
+
+      # A clean login must not fabricate a failure event — an ALLOW-only test is
+      # half a test, so assert the mfa_failed emitter did NOT fire.
+      refute Repo.exists?(
+               from e in Event,
+                 where: e.category == "auth" and e.action == "mfa_failed"
+             )
+    end
+
     test "MEDIUM-8: enroll + verify require the current password (re-auth)", %{token: token} do
       authed = fn -> build_conn() |> put_req_header("authorization", "Bearer #{token}") end
 
