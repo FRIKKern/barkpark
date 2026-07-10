@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "KPI cells — denominator"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "text": "stat-grid cells carry an optional dim denominator: the accent value reads as a share of a dim total (71/118). denom-less cells stay a bare big number, byte-identical to before."
+    },
+    {
+      "id": "grid1",
+      "type": "stats",
+      "items": [
+        { "value": 71, "denom": 118, "label": "tasks done" },
+        { "value": "92%", "label": "coverage" },
+        { "value": 14, "denom": 20, "label": "open PRs" },
+        { "value": "1.2k", "label": "stars" }
+      ]
+    },
+    {
+      "id": "stat-denom",
+      "type": "stat",
+      "value": 340,
+      "denom": 512,
+      "label": "storage used (MB)"
+    },
+    {
+      "id": "stat-plain",
+      "type": "stat",
+      "value": "4.7",
+      "label": "avg rating"
+    },
+    {
+      "id": "stat-bar",
+      "type": "stat",
+      "value": 71,
+      "max": 118,
+      "denom": 118,
+      "label": "quota used"
+    }
+  ]
+}
