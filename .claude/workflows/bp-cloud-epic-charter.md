@@ -1,188 +1,173 @@
-# Airdrop Grants — leak-seal wave charter (epic close-out)
+# Self-update: from nag to product — W5 charter (product-grade update pipeline)
 
 > NOTE ON THIS PATH: this filename is the epic-cycle charter slot and has carried earlier
-> epics. The **dispatch-frontier file-truth** charter formerly here is preserved verbatim at
-> `.claude/workflows/bp-dispatch-frontier-charter.md`. The **airdrop-grants** permanent
-> decision record lives at `.claude/workflows/bp-airdrop-grants-endgame-charter.md` — the
-> epic-complete Wave log entries land THERE (close-out slice), not here. This file is the
-> memory of the leak-seal wave only.
+> epics. The **airdrop-grants leak-seal** charter formerly here is preserved verbatim at
+> `.claude/workflows/bp-airdrop-grants-leakseal-charter.md`. This file is the memory of the
+> self-update epic's W5 wave onward.
 
-Epic anchor: bp task slug **`airdrop-grants`** (published, lifecycle open, claim null,
-26 children — 24 done, 2 open = the two confirmed leaks). Server: guerrilla.
+Epic anchor: bp task slug **`self-update-epic`** (published, lifecycle open, priority 1,
+3 done children W2–W4). Design paper: `self-update-from-nag-to-product` (Barkpark Paper —
+amend it, don't fork it). W3 runbook: `.claude/workflows/release-curator.md`. Server: guerrilla.
 
 ## Vision
 
-The endgame wave (#2145) merged the deny matrix and it did its job: it found TWO CONFIRMED
-grant-enforcement leaks — a grantee's SEARCH and BACKLINKS reads bypass Layer-2 grant
-narrowing. This wave seals both at their true choke points, flips the committed-skipped deny
-repros from documenting-the-hole to protecting-the-fix, and closes the epic with the full
-evidence trail. Finished state: a grantee's search/backlinks reads are indistinguishable from
-every other grant-narrowed read — same `Scope.scope_to_grants` union, fail-closed
-(`where: false` on undecidable), applied only when `grant_scoped: true` — while members,
-tokens, and anonymous stay byte-identical.
+A blessed release rides ONE train: the curator judges main → a GitHub Release exists → the
+**staging-channel instance** picks it up first via the ordinary self-update relay → it settles
+`current` (that IS the smoke) → the fleet rolls serial, health-gated, with a **fleet-wide
+operator kill switch**. An operator opens the cloud console or runs `bp cloud status` and sees
+honest per-instance update truth — running version, available version, channel, last check,
+pin/pause state — and can pin, pause, halt, and resume without SSH. The curator's daily
+judgment lands in a human inbox, not a run log. Pinning is honest: nothing (including the
+manual console Update button) updates past a pin without an explicit force.
 
 ## Non-negotiable operational facts (builders read FIRST)
 
-- **The local checkout is BEHIND origin/main** (#2145 = 602eb4a3 is on origin only). The deny
-  repros (`grant_search_deny_test.exs`, `grant_single_doc_deny_test.exs`) and
-  `test/support/access_fixtures.ex` exist ONLY on origin/main. `git fetch origin` then
-  worktree from **origin/main** or the fail-before command errors "no such file" instead of
-  producing RED.
-- Elixir local gates need a warm `_build/test` (build-borrow into fresh worktrees is broken —
-  lockfree-worktree-gate) and `CC=/usr/bin/clang`.
-- Both build slices are .ex → they WAIT for the Elixir Test CI gate. Claim BEFORE working.
+- guerrilla deploys ONLY via instance-deploy.sh (hook-suppressed law). cloud/** merges
+  briefly 503 the control plane. api/** auto-deploys on merge. .ex changes WAIT for the
+  Elixir Test CI gate. Worktrees from origin/main after `git fetch`. Claim BEFORE working.
   PR body carries `Task: <id>`.
+- Elixir local gate = targeted unit tests only (`CC=clang mix test <file>`), no DB-boot,
+  never prod compile. Cloud SPA gate = `node --check cloud/priv/static/app.js` +
+  `node cloud/priv/static/__app.test.mjs`. Go gate = `CC=clang go build ./... && go vet
+  ./internal/cli/... && go test ./internal/cli/...`.
+- staging.barkpark.cloud does NOT exist yet (box-provision is human-gated on the separate
+  Hetzner DNS token) — nothing in this wave may hard-depend on a live staging box.
 
 ## Decisions
 
-- **D1 — Search seal at the pipeline seam + retriever base query.** Add
-  `grant_scoped: Keyword.get(opts, :grant_scoped)` to `retriever_opts`
-  (query_pipeline.ex ~99-116). Apply grant narrowing ONCE in the Postgres
-  `DocumentsRetriever` base query right after `scope_to_owner` (documents_retriever.ex:59) —
-  that single point covers all three pipeline invocations (primary :130, try_drop_tokens :192,
-  try_typo_widen :207) AND count (:87) AND facets (:93), since all derive from `base`. This
-  seals every consumer of `Content.search_documents` at once (SearchController, SearchChannel,
-  federated) — no per-caller edits.
-- **D2 — Indx path: opts-threading + count seal.** Add `:grant_scoped` to the
-  `Keyword.take` in the Indx retriever's `scope_opts/1` (plugins/indx/retriever.ex:373);
-  `Content.Query.get_documents_by_ids` already gates (query.ex:1017-1018), so rows seal by
-  threading alone. The `total` (length(ranked) pre-hydration, retriever.ex:105) would still
-  over-count out-of-grant matches — for `grant_scoped` callers, recompute total as ONE
-  grant-narrowed Postgres count over the ranked candidate id set
-  (`Document |> where(id in ^ranked_ids) |> grant narrowing |> count`), fail-closed. A
-  reported total must never exceed grant-visible matches (SearchChannel defaults engine indx).
-- **D3 — Hoist ONE public wrapper, in the search slice.** Add public
-  `Content.Scope.maybe_scope_to_grants(query, opts)` beside `scope_to_grants/3`
-  (no-op unless `opts[:grant_scoped]`, pulls caller_context + workspace_id off opts); delete
-  the private copy in query.ex:128-138 (its `import ... Scope` already exists — add the name,
-  keep all 10 call sites working); consume it from DocumentsRetriever. No third/fourth private
-  copy, ever. Anchor-safe: no `@canonical` marker or docs-card anchor binds the private def.
-  Courtesy (non-gated): tenancy.md's "canonical scope helpers" prose gains one line.
-- **D4 — Backlinks seal INSIDE the shared graph helpers, not a backlinks-only wrapper.**
-  Opts-conditional `Scope.maybe_scope_to_grants` in (a) `resolve_doc/3`'s inline query
-  (graph.ex ~896-912) and (b) `scope_query/2` (graph.ex ~949-956, which serves `docs_by_id`,
-  `hydrate_nodes`, `fetch_doc`). This seals the HTTP backlinks cell, the scoped-route
-  backlinks (scoped_paper_controller.ex:72), AND the Studio PaneBuilder graph/blast-radius
-  pane for a grant-admitted socket (shared.ex:635 → pane_builder.ex:490-531 already threads
-  the flag; Graph just ignored it). Same conditional in `scoped_docs_query/1`
-  (orphans/dangling) as defense-in-depth — inert today (/v1/graph is :require_token, no grant
-  fold). Provable no-op for every caller without the flag (only AssignGrantScope,
-  ResolveWorkspace, LiveScope ever set it).
-- **D5 — Studio graph-pane protection is unit-level, not socket-level.** New
-  graph_test.exs cases prove `resolve_doc` / `reverse_referencers` / `traverse` grant-narrow
-  when opts carry `grant_scoped` + a grant-bearing caller_context (use
-  `Barkpark.AccessFixtures`), and stay byte-identical without the flag. No LiveView harness
-  this wave — the mechanism is shared, the unit tests protect it.
-- **D6 — RED-before evidence, unskip+fix in ONE PR.** The guards merged skipped in #2145, so
-  there is no guard+fix decoupling issue. Each slice: remove the `@tag skip:` line FIRST, run
-  the deny file on pre-fix code — expect EXACTLY 1 failure with the positive controls green
-  (non-vacuous RED) — stamp that output into the task evidence, then fix, re-run to 0
-  failures.
-- **D7 — Integration order: search → backlinks → close-out.** The hoist (D3) lands in the
-  search slice; the backlinks slice consumes `Scope.maybe_scope_to_grants/2` and merges
-  AFTER search. Backlinks may build in parallel from origin/main (files are otherwise
-  disjoint: graph.ex + graph_test.exs + grant_single_doc_deny_test.exs vs
-  query_pipeline.ex + documents_retriever.ex + scope.ex + query.ex + indx/retriever.ex +
-  grant_search_deny_test.exs) — write the two graph seams against
-  `Scope.scope_to_grants/3` behind `opts[:grant_scoped]` checks if the wrapper is not yet
-  on main, then swap to the public wrapper on the pre-PR rebase.
-- **D8 — Error-emitters sweep verdicts (recorded, no build needed).** Federated search is
-  bare `:api` — a grant is never admitted there, fails closed (deny test already green in
-  #2145). `search_local` is RequireLoopback-trusted, never threads scope_opts. Suggestions
-  returns query STRINGS from analytics, no Document rows — no narrowing surface. The
-  plugin-pane path rides Content.Query base_query → already gated. No other
-  `Content.search_documents` or Graph-read consumer needs its own seal.
-- **D9 — binary_id guard: N/A on both slices.** resolve_doc matches `doc_id` strings via
-  `where`, grant narrowing is field-equality — no raw-id `Repo.get` is introduced. Don't
-  invent a guard where no raw-id touch exists.
-- **D10 — Close-out mechanics (anchor has NO acceptance_criteria today).** Stamp criteria via
-  `POST /v1/data/mutate` patch (flat top-level `acceptance_criteria` in
-  {criterion,met,evidence} shape) then PUBLISH (the doc is published — an unpublished patch
-  strands a competing draft). Patch criteria BEFORE claiming, or set them IN the close call —
-  patching after claim trips the `doc_changed_since_claim` digest fence. Close needs a live
-  claim epoch (claim-by-id first). Verify via `bp doc get` (task projection hides
-  criteria/close_reason). Evidence trail: the 15 enforcement PRs #1303 #1339 #1353 #1372
-  #1398 #1431 #1432 #1434 #1442 #1451 #1491 #1504 #1521 #1527 #1538, endgame #2145, plus
-  this wave's two seal PRs.
-- **D11 — Wave-log debt: ADOPT the stranded #2145 retro, don't re-derive.** Commit 48a18f85
-  (branch `loop-epic/airdrop-grants-wave1-review-log`) drafted the endgame retro into THIS
-  slot file and was orphaned. Fold its content into
-  `bp-airdrop-grants-endgame-charter.md` § Wave log (currently EMPTY), corrected: the
-  authoritative test count is **6,348** (full battery, #2145 PR body) not the 1,982 partial
-  reviewer run; record the falsified write-side suspicion (writes were already gated per
-  event — the real leak was reads on a live socket) and the empirical discovery of BOTH
-  leaks. Then append the leak-seal epic-complete entry.
-- **D12 — Exactly ONE honest backlog task; standalone, not built.**
-  `broadcast_revoked/1` (access.ex:559-565) no-ops for grants without a bound
-  grantee_user_id. Blast radius today is ZERO: only a claimed grant (which HAS a bound user)
-  can mount a live desk; token/anonymous grantees read over HTTP which reloads active-only
-  grants per request. File as defense-in-depth for a hypothetical future surface that mounts
-  a session for an unbound grant — explicitly NOT a confirmed leak. Standalone (no parent —
-  the closed epic keeps zero open children), label proj:airdrop-grants, priority 3. The
-  parked UX items (grantor-own filter, grant history) and test-helper tidies stay parked —
-  not filed as leaks, not built.
+1. **Ledger truth over rebuild.** W1–W4 code is MERGED (#1195/#1197/#1199/#1230); the 0/9
+   unevidenced criteria are documentation lag. Attach PR evidence — do NOT reopen or
+   re-implement. Why: reopening duplicates merged code (per-tenant policy, settle gate,
+   per-instance pause all exist with tests — router_autoupdate_test.exs proves the policy path).
+2. **Cohort-of-1 is the ratified W4 canary design.** Re-word isu-w4 crit 1 to match the
+   shipped serial rollout; growing parallel cohorts stay an explicitly-deferred v2 (the
+   worker's own moduledoc says so, autoupdate_rollout_worker.ex:28-31). Why: the paper's
+   "cohort size" open decision was settled in code by #1230.
+3. **Canary = cohort-0 over the existing self-update relay — NOT the #2074 CLI seam.** The
+   control plane has no repo checkout and no operator SSH key; `bp cloud deploy` stays a
+   human, local, pre-merge verb. The autonomous train gets a `channel` column ("prod"
+   default, "staging") on registry barkparks: the worker advances the staging box first and
+   refuses to advance any prod box until a staging box is settled-current on the latest
+   release. Why: reuses the settle mechanism the worker already trusts
+   (settle_in_flight, worker.ex:60-97); bridging CP→SSH is a new capability this wave
+   doesn't need and must not drift into.
+4. **Staging gate fails OPEN when no staging-channel box is registered, CLOSED once one
+   exists.** Why: staging.barkpark.cloud is human-gated and doesn't exist yet; the wave must
+   ship without it and harden automatically the day the box lands.
+5. **Kill switch = persisted fleet-wide halt in the CP DB** (`autoupdate_halted`), exposed
+   via operator-gated routes `GET /v1/admin/autoupdate` → `{"halted": bool}` and
+   `POST /v1/admin/autoupdate/halt` / `POST /v1/admin/autoupdate/resume`, checked FIRST by
+   the worker every tick. Why: per-instance pause is a tenant affordance, not an operator
+   brake; "disable the Oban cron" is not a product.
+6. **Pin honesty: a pinned instance refuses non-forced triggers.** The CP trigger path
+   (console Update button relay + worker) rejects when `pinned_release` is set unless the
+   request carries `force:true`. Why: today the manual button silently bypasses a pin
+   (scripts/self-update.sh ff-merges to HEAD) — exactly the dishonesty the wish names.
+7. **Rollback v1 = surfaced pinning, not a rollback engine.** Pin-to-a-release is the honest
+   affordance that exists; the blue/green Caddy port-flip rollback API is a named W6
+   candidate (bp-cloud-console-charter OC10), not this wave. Why: no rollback capability
+   exists at any layer — surfacing a fake button would violate the epic's own thesis.
+8. **Bless policy (ratifies the paper's open decision):** agent-proposes/human-publishes
+   stays the default; autonomous tag-on-green is authorized ONLY on a fleet whose staging
+   gate is live (a staging-channel box exists and gates the rollout). Why: closes W3 crit 3
+   by written policy and resolves the "autonomous armed but unratified" governance gap — the
+   canary train is the safety argument that makes autonomy defensible.
+9. **Digest = plain-text Oban `DailyDigestWorker` in cloud/, recipients = platform-admin
+   users** (the `create_admin` operator model; the team-scoped exfiltration guard stays
+   intact). It is NOT a gui-premium "email type" — that system renders paper blocks and
+   never sends. Curator and digest are joined by the GitHub Release as the shared fact, not
+   a shared tick (the curator runs out-of-BEAM). Why: smallest true push-to-inbox; a rich
+   rendered digest would be cross-app (cloud has no PortableDoc renderer).
+10. **Contract pinned for parallel builders:** the fleet-list JSON (cloud router.ex ~5838)
+    ADDITIONALLY emits `autoupdate_enabled`, `autoupdate_paused`, `pinned_release`,
+    `channel`, `update_checked_at`; `PATCH /v1/barkparks/:id/autoupdate` additionally
+    accepts `channel`; fleet halt reads/writes the routes in D5. S3 (console) and S4 (CLI)
+    build against these names with fixtures; S2 owns the emission. If S2's final names
+    drift, S2's PR description must say so and the lead reconciles before merging S3/S4.
 
-## Roadmap — this wave (integration-ordered)
+## Roadmap
 
-1. **ag-search-grant-leak** (medium, priority 1) — D1+D2+D3. Files:
-   api/lib/barkpark/search/query_pipeline.ex, api/lib/barkpark/search/documents_retriever.ex,
-   api/lib/barkpark/plugins/indx/retriever.ex, api/lib/barkpark/content/scope.ex,
-   api/lib/barkpark/content/query.ex, api/test/barkpark_web/controllers/grant_search_deny_test.exs.
-2. **ag-backlinks-grant-leak** (medium, priority 1) — D4+D5, merges after 1 (D7). Files:
-   api/lib/barkpark/content/graph.ex, api/test/barkpark/content/graph_test.exs,
-   api/test/barkpark_web/controllers/grant_single_doc_deny_test.exs.
-3. **ag-epic-closeout** (small, priority 1, lead/reviewer work, after 1+2 merge) — D10+D11+D12.
-   Files: .claude/workflows/bp-airdrop-grants-endgame-charter.md + ledger acts via bp.
-
-After this wave: NOTHING. The epic is closed; the only residual is the D12 backlog task.
+- **W5-S1 (small)** `isu-w5-ledger-paper-reconcile` — attach real PR evidence to all W1–W4
+  criteria, re-word W4 crit 1 to the ratified design, fix the stale epic description, amend
+  the design paper (rev 2) with settled decisions + the W5 slices + the ratified bless policy.
+- **W5-S2 (large)** `isu-w5-canary-gated-fleet` — `channel` column + staging-green gate in
+  AutoupdateRolloutWorker + fleet-wide kill switch + pin-honest trigger. The spine.
+- **W5-S3 (medium)** `isu-w5-console-update-panel` — operator update panel in the cloud
+  console SPA: per-instance truth + pin/pause/resume writes + fleet halt switch. The face.
+- **W5-S4 (medium)** `isu-w5-cli-update-truth` — `bp cloud` decodes full update+policy
+  truth; `bp cloud autoupdate pin|unpin|pause|resume` + `bp cloud rollout halt|resume|status`.
+- **W5-S5 (medium)** `isu-w5-curator-digest-email` — daily plain-text fleet update digest
+  mailed to platform admins.
+- **W6 candidates (deliberately unfiled):** blue/green rollback verb (Caddy port-flip as an
+  API + console button — needs a Runner/script capability first); growing canary cohorts
+  (v2 per worker moduledoc); maintenance-window gate for the rollout worker; CP-driven
+  staging ref deploys (needs an operator SSH capability in the CP — decide deliberately,
+  don't drift into it).
 
 ## Wave log
 
-_(the epic-complete entry itself belongs in bp-airdrop-grants-endgame-charter.md per D11)_
+### Wave 2026-07-10 — W5, all five slices green
 
-### Wave 2026-07-10 — leak-seal (2 of 3 slices built; close-out correctly BLOCKED)
+**Landed (review-fixed branches, `-r` suffix = integrate these):**
 
-**Landed (review-fixed, gates green, RED-before independently re-proven):**
+- **S1 `isu-w5-ledger-paper-reconcile`** — no-code slice, all mutations server-side on
+  guerrilla and VERIFIED: isu-w2/w3/w4 all criteria met+evidenced+published, epic anchor
+  description current (W1–W4 PRs, five W5 slices, stale Remaining line gone), paper at
+  rev 2 with settled decisions + ratified bless policy (D8). Its own task honestly
+  in_progress with the lead-verify criterion open.
+- **S2 `loop-epic/w5-2-canary-gated-fleet-rollout-channel--1-r`** — channel column +
+  staging-green gate + fleet kill switch + pin-honest 409; 47/0 targeted + 250/0 adjacent.
+  Review added: (a) the 409 pin body now NAMES the pin (`error.pinned_release`) so the
+  console modal can say which release holds the box; (b) fleet JSON emits
+  `autoupdate_triggered_at` — without it S3's "Updating" in-flight badge could never fire.
+- **S3 `loop-epic/w5-3-console-operator-update-panel-per-i-2-r`** — operator update panel +
+  pin/pause/halt affordances; 383/0. Review fixed a REAL merge-blocking bug: the
+  fleet-rollout banner probe hit the worker-gated `/v1/admin/autoupdate` without
+  `noBounce`, so the 401 would clearSession() and LOG THE OPERATOR OUT on every fleet
+  render once S2 merges.
+- **S4 `loop-epic/w5-4-bp-cloud-update-truth-full-version--3-r`** — tolerant decode +
+  status columns + autoupdate/rollout verbs; full Go gate green. Review fixed vocabulary
+  honesty: channel is prod/staging (not the invented stable/canary), and the rollout
+  help/403 copy now says platform-operator (not team-admin — a refused operator would
+  chase the wrong fix).
+- **S5 `loop-epic/w5-5-curator-digest-email-daily-fleet-up-4-r`** — DailyDigestWorker +
+  DigestEmail + allowlist recipient resolution; 6/0 + notifications 26/0. Review: mix
+  format only.
 
-- **ag-search-grant-leak** — sealed per D1+D2+D3: `grant_scoped` threads through
-  `QueryPipeline.retriever_opts` (one point covers primary + drop-tokens + typo-widen);
-  the ONE public wrapper `Content.Scope.maybe_scope_to_grants/2` hoisted, private copy in
-  `Content.Query` deleted (call sites re-pointed via import); `DocumentsRetriever`
-  applies it once on `base` (results+count+facets, every route); Indx forwards the flag
-  (rows via `get_documents_by_ids`) and recomputes `total` via new grant-narrowed
-  `Content.count_documents_by_ids/3` (fail-closed, 2 new unit tests). Deny test un-skipped
-  in the same PR. Reviewer re-proved RED-before by reverting pipeline+retriever to main:
-  exactly 1 failure (the deny), positive control green; restored → 0. Gate: 659/0.
-  Reviewer fix: one `mix format` nit. **Final branch:
-  `loop-epic/seal-the-search-grant-leak-thread-grant--0-r`.**
-- **ag-backlinks-grant-leak** — sealed per D4+D5 inside the shared Graph helpers:
-  `resolve_doc/3`, `scope_query/2` (docs_by_id/hydrate_nodes/fetch_doc → HTTP backlinks,
-  scoped-route backlinks AND the Studio graph/blast-radius pane), `scoped_docs_query/1`
-  (defense-in-depth, inert today). Uncovered target → nil → `[]` backlinks (200, never
-  404). 4 new unit tests (resolve_doc / reverse_referencers / traverse hydration /
-  nil-ctx fail-closed) + un-skipped HTTP deny. Reviewer re-proved RED-before by reverting
-  graph.ex to main: 5 failures; restored → 31/0. Reviewer fixes: **performed the D7
-  pre-merge swap** (branch rebased onto the search -r branch; all three bridge
-  `if opts[:grant_scoped]` guards → `Scope.maybe_scope_to_grants/2`; wrapper doc +
-  tenancy.md consumer lists gain the Graph helpers) and refreshed the deny test's stale
-  "backlinks LEAKS" moduledoc. **Final branch:
-  `loop-epic/seal-the-backlinks-grant-leak-opts-condi-1-r` — STACKED on the search -r
-  branch; merge search first, then this (its PR diff collapses to graph-only once search
-  merges).** Combined suites on the stack: 813/0.
+**Open decisions the wave surfaced (lead / next wave):**
 
-**Stalled (honestly):** **ag-epic-closeout** — builder verified its precondition unmet
-(no seal PRs merged) and refused to fabricate a close; task left claimed + in_progress,
-all criteria unmet, zero code changes. Correct per the false-done finding. It
-pre-recovered the D11 inputs (stranded #2145 retro at commit 48a18f85; authoritative
-test count 6,348; D12 backlog framing for `broadcast_revoked/1`).
+1. **The kill switch is operator-honest but operator-unreachable.** The D5 routes are gated
+   by `require_worker` (the faceless WORKER token). Neither the console SPA (session token)
+   nor `bp cloud rollout` (cloud session token) can pass it — both degrade honestly (hidden
+   banner / clear refusal), but today halt/resume is curl-with-WORKER_TOKEN only.
+   Deliberate next step: either a platform-admin principal (S5 hit the same gap — there is
+   NO admin marker on User; it invented a `:platform_admin_emails` allowlist) or bless the
+   worker-token-only posture and say so in ops docs. Do NOT let two more surfaces invent
+   two more answers.
+2. **S5 recipient deviation, needs a nod:** the brief said "find the create_admin marker";
+   no such marker exists (roles are strictly per-team), so recipients = configured
+   `:platform_admin_emails` ∩ registered users, empty = logged no-op. Honest and safe, but
+   an unconfigured prod fleet sends NOTHING — wire `PLATFORM_ADMIN_EMAILS` into runtime.exs
+   (trivial follow-up, deliberately not wired this wave) and set it on the CP.
+3. **Multi-staging-box gate semantics:** `staging_gate_open?` is ANY-current-on-latest —
+   with several staging boxes, one green canary opens prod past a red sibling. Exact
+   single-canary behavior matches the charter; revisit only if a second staging box ever
+   exists.
 
-**Ledger:** all three wave tasks truthful (claims live, evidence stamped, merge-gated
-criteria left for the lead); anchor untouched (open, unclaimed, 0 criteria). No fixes
-needed.
+**Merge notes:** S2/S5 are .ex → wait for Elixir Test; both cloud/** (brief CP 503 on
+merge; migration on S2 — channel column + fleet_settings). S3 static-only, S4 Go-only —
+own gates. No file overlap between slices; any merge order works, but S2 first makes
+S3/S4 live truth immediately. Lead closes each task's merge-gated criterion + lifecycle
+on merge, and re-reads isu-w5-ledger-paper-reconcile before closing (its criteria were
+patched out-of-band → close may 409 doc_changed_since_claim, expected). NOTE: this
+charter file was an UNCOMMITTED working-copy file in the shared checkout and got
+clobbered mid-wave — the reviewer restored it verbatim (+ this wave log) on the S2 `-r`
+branch, and preserved the prior airdrop-grants slot content at
+`.claude/workflows/bp-airdrop-grants-leakseal-charter.md` per this file's own header note.
+Merging S2-r makes the charter durable; don't lose it again.
 
-**Next wave / lead:** merge search-r (Elixir Test gate — .ex waits for it), then
-backlinks-r; flip both merge-gated criteria; then re-run **ag-epic-closeout** exactly as
-specced (D10 stamp anchor, D11 wave-log debt in bp-airdrop-grants-endgame-charter.md,
-D12 file the ONE broadcast_revoked backlog task, close the anchor). Note the closeout
-claim (epoch 1) may lapse — re-claim before closing. After that: NOTHING remains on this
-epic.
+**Next wave (W6 candidates, from the charter + this wave's residue):** operator-principal
+decision (see #1 — it unblocks console halt/resume for real), runtime.exs
+PLATFORM_ADMIN_EMAILS + set it on the CP, provision the actual staging box (human-gated
+DNS token) so the canary train stops failing open, then the deliberately-unfiled charter
+W6 list (blue/green rollback verb, growing cohorts, maintenance windows).

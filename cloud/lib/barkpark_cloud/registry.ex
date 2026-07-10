@@ -34,6 +34,7 @@ defmodule BarkparkCloud.Registry do
     Barkpark,
     Deployment,
     EnvVar,
+    FleetSettings,
     Provider,
     ProvisionJob,
     Site,
@@ -2661,11 +2662,31 @@ defmodule BarkparkCloud.Registry do
   body degrades to `%{}` (the status alone is the verdict). Errors mirror
   `mint_studio_link/1`'s atoms: `:not_live` (no `url` yet), `:no_admin_token`,
   `:decrypt_failed`, `:instance_error` (transport failure — no response at all).
+
+  PIN HONESTY (isu-w5.2): a pinned instance (`pinned_release` set) is FROZEN on
+  its version, so an unforced trigger returns `{:error, :pinned}` — the router
+  relays that as 409 to the console Update button, telling the operator the box
+  is pinned. `force: true` overrides (an explicit "yes, update the pinned box").
+  The rollout worker never hits this — it already excludes pinned rows from its
+  candidate query — but the interactive relay must not silently no-op a pin.
   """
-  @spec trigger_self_update(Barkpark.t()) ::
+  @spec trigger_self_update(Barkpark.t(), keyword()) ::
           {:ok, non_neg_integer(), map()}
-          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
-  def trigger_self_update(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error | :pinned}
+  def trigger_self_update(bp, opts \\ [])
+
+  def trigger_self_update(%Barkpark{pinned_release: pin} = bp, opts)
+      when is_binary(pin) and pin != "" do
+    if Keyword.get(opts, :force, false) do
+      do_trigger_self_update(bp)
+    else
+      {:error, :pinned}
+    end
+  end
+
+  def trigger_self_update(bp, _opts), do: do_trigger_self_update(bp)
+
+  defp do_trigger_self_update(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
         {:error, :no_admin_token}
@@ -2694,7 +2715,7 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  def trigger_self_update(_), do: {:error, :not_live}
+  defp do_trigger_self_update(_), do: {:error, :not_live}
 
   ## Fleet autoupdate (isu-w4) — the control plane's OPT-OUT auto-rollout. The
   ## isu-6 machinery above already (a) mirrors each instance's own `behind`
@@ -2713,6 +2734,17 @@ defmodule BarkparkCloud.Registry do
   @spec set_autoupdate(Barkpark.t(), map()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def set_autoupdate(%Barkpark{} = bp, attrs) do
     bp |> Barkpark.autoupdate_changeset(attrs) |> Repo.update()
+  end
+
+  @doc """
+  Set an instance's rollout CHANNEL ("prod" | "staging") — a PLATFORM-OPERATOR
+  action (isu-w5.2), never team-facing: a tenant who could self-assign staging
+  (then pause or sit behind) would hold `staging_gate_open?/0` closed and brake
+  every prod-channel advancement fleet-wide. Narrow — can touch nothing else.
+  """
+  @spec set_channel(Barkpark.t(), binary()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def set_channel(%Barkpark{} = bp, channel) do
+    bp |> Barkpark.channel_changeset(%{channel: channel}) |> Repo.update()
   end
 
   @doc """
@@ -2742,21 +2774,87 @@ defmodule BarkparkCloud.Registry do
   set) · not billing-suspended · reporting `behind` · `autoupdate_enabled` · not
   paused · not pinned · not already in flight. Oldest-behind first (a stable,
   fair order), so the rollout drains the most-stale instances first.
+
+  With a `channel` ("prod" | "staging") the pick is confined to that channel —
+  the canary-gated rollout (isu-w5.2) advances staging boxes before prod. With
+  the default `nil`, the pick spans all channels.
   """
-  @spec next_autoupdate_candidate() :: Barkpark.t() | nil
-  def next_autoupdate_candidate do
-    from(b in Barkpark,
-      where: not is_nil(b.host) and b.host != "",
-      where: b.suspended == false,
-      where: b.update_state == "behind",
-      where: b.autoupdate_enabled == true,
-      where: b.autoupdate_paused == false,
-      where: is_nil(b.pinned_release),
-      where: is_nil(b.autoupdate_triggered_at),
-      order_by: [asc: b.update_checked_at],
-      limit: 1
-    )
+  @spec next_autoupdate_candidate(nil | binary()) :: Barkpark.t() | nil
+  def next_autoupdate_candidate(channel \\ nil) do
+    base =
+      from(b in Barkpark,
+        where: not is_nil(b.host) and b.host != "",
+        where: b.suspended == false,
+        where: b.update_state == "behind",
+        where: b.autoupdate_enabled == true,
+        where: b.autoupdate_paused == false,
+        where: is_nil(b.pinned_release),
+        where: is_nil(b.autoupdate_triggered_at),
+        order_by: [asc: b.update_checked_at],
+        limit: 1
+      )
+
+    base
+    |> maybe_filter_channel(channel)
     |> Repo.one()
+  end
+
+  defp maybe_filter_channel(query, nil), do: query
+  defp maybe_filter_channel(query, channel), do: where(query, [b], b.channel == ^channel)
+
+  @doc """
+  Is the canary staging gate GREEN — i.e. may prod-channel boxes advance?
+  (isu-w5.2). Fails OPEN: when NO staging-channel box is registered
+  (staging.barkpark.cloud does not exist yet), prod advances normally. When
+  staging boxes DO exist, the gate opens only once at least one of them has
+  settled `current` on the latest release (`update_state == "current"` and
+  `update_running_release == update_latest_release`). A staging box that is
+  behind, in-flight, or paused-after-failure leaves the gate closed — it blocks
+  every prod advancement until the canary proves the release clean.
+  """
+  @spec staging_gate_open?() :: boolean()
+  def staging_gate_open? do
+    staging = from(b in Barkpark, where: b.channel == "staging") |> Repo.all()
+
+    case staging do
+      [] ->
+        true
+
+      boxes ->
+        Enum.any?(boxes, fn b ->
+          b.update_state == "current" and not is_nil(b.update_running_release) and
+            b.update_running_release == b.update_latest_release
+        end)
+    end
+  end
+
+  @doc """
+  Is the fleet-wide autoupdate kill switch engaged? (isu-w5.2). When `true` the
+  rollout worker performs settle bookkeeping but ADVANCES no new instance until
+  an operator resumes. Reads-or-defaults the single `fleet_settings` row — an
+  unseeded fleet is NOT halted.
+  """
+  @spec autoupdate_halted?() :: boolean()
+  def autoupdate_halted? do
+    fleet_settings().autoupdate_halted
+  end
+
+  @doc """
+  Set (persist) the fleet-wide autoupdate kill switch. Upserts the single
+  `fleet_settings` row; returns the persisted row.
+  """
+  @spec set_autoupdate_halted(boolean()) ::
+          {:ok, FleetSettings.t()} | {:error, Ecto.Changeset.t()}
+  def set_autoupdate_halted(halted) when is_boolean(halted) do
+    fleet_settings()
+    |> FleetSettings.changeset(%{autoupdate_halted: halted})
+    |> Repo.insert_or_update()
+  end
+
+  # The single fleet_settings row, or an unpersisted default (autoupdate_halted
+  # false) when the fleet has never toggled it — so reads never need a seed.
+  defp fleet_settings do
+    Repo.one(from(f in FleetSettings, limit: 1)) || %FleetSettings{autoupdate_halted: false}
   end
 
   @doc "Stamp an instance as in-flight (a self-update was just triggered for it)."

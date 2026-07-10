@@ -48,11 +48,21 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
   def perform(%Oban.Job{}) do
     settle_in_flight()
 
-    # Re-read AFTER settling: the gate must see the post-settle truth, or a
-    # just-cleared instance would wrongly block this tick's advance.
-    case Registry.autoupdate_in_flight() do
-      [] -> advance()
-      _still_in_flight -> :ok
+    cond do
+      # (0) HALT — the fleet-wide kill switch (isu-w5.2). Settle bookkeeping above
+      # still ran (in-flight boxes keep resolving so state stays honest), but a
+      # halted fleet ADVANCES nothing until an operator resumes.
+      Registry.autoupdate_halted?() ->
+        Logger.info("autoupdate: fleet halted — settle-only, no advance")
+        :ok
+
+      # Re-read AFTER settling: the gate must see the post-settle truth, or a
+      # just-cleared instance would wrongly block this tick's advance.
+      Registry.autoupdate_in_flight() != [] ->
+        :ok
+
+      true ->
+        advance()
     end
   end
 
@@ -103,8 +113,13 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
   end
 
   # ── (3) advance: trigger the next eligible instance ───────────────────────
+  #
+  # CANARY GATE (isu-w5.2): staging-channel boxes advance FIRST. A prod box is
+  # eligible only when the staging gate is GREEN — either no staging box is
+  # registered (fail-OPEN) or a staging box has settled current on the latest
+  # release. A staging box that is behind/in-flight/paused blocks prod.
   defp advance do
-    case Registry.next_autoupdate_candidate() do
+    case next_gated_candidate() do
       nil ->
         :ok
 
@@ -139,5 +154,24 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
     e ->
       Logger.error("autoupdate: advance failed: #{Exception.message(e)}")
       :ok
+  end
+
+  # Staging first; prod only behind a green staging gate. A behind staging box is
+  # itself the next candidate (advanced ahead of prod); once no staging box is
+  # behind, prod may advance IFF the gate reports a settled-current canary (or no
+  # staging box exists at all — fail open).
+  defp next_gated_candidate do
+    case Registry.next_autoupdate_candidate("staging") do
+      %{} = staging ->
+        staging
+
+      nil ->
+        if Registry.staging_gate_open?() do
+          Registry.next_autoupdate_candidate("prod")
+        else
+          Logger.info("autoupdate: staging gate closed — prod advancement blocked")
+          nil
+        end
+    end
   end
 end

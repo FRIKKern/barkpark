@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
 
   @opts Router.init([])
   @password "correct-horse-battery"
+  @worker_token "worker-token-test-fixed"
 
   defp user_fixture do
     {:ok, user} =
@@ -50,6 +51,21 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     Router.call(conn, @opts)
   end
 
+  defp call(method, path, body, token) do
+    conn =
+      case body do
+        nil ->
+          conn(method, path)
+
+        b ->
+          conn(method, path, Jason.encode!(b))
+          |> put_req_header("content-type", "application/json")
+      end
+
+    conn = if token, do: put_req_header(conn, "authorization", "Bearer #{token}"), else: conn
+    Router.call(conn, @opts)
+  end
+
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
   test "team admin sets policy → 200; row updated; blank pin normalized to nil" do
@@ -69,7 +85,8 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     assert json_body(conn)["autoupdate"] == %{
              "enabled" => false,
              "paused" => true,
-             "pinned_release" => nil
+             "pinned_release" => nil,
+             "channel" => "prod"
            }
 
     reloaded = Registry.get_barkpark(bp.id)
@@ -122,5 +139,161 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
 
     conn = patch_autoupdate(bp.id, nil, %{"autoupdate_paused" => true})
     assert conn.status == 401
+  end
+
+  # ── isu-w5.2 (review): channel is an OPERATOR lever — never tenant-writable ─
+  # A tenant-writable channel would let any team admin park a behind staging box
+  # (or pause one) and close the canary gate (staging_gate_open?/0) for the
+  # WHOLE fleet — or jump the update queue ahead of it. The tenant PATCH ignores
+  # the key; the write lives on the worker-token surface tested below.
+  test "tenant PATCH ignores channel — echoed read-only, row untouched" do
+    {user, team} = user_with_team()
+    bp = barkpark_fixture(team)
+    {:ok, token} = Accounts.create_user_session_token(user)
+
+    conn = patch_autoupdate(bp.id, token, %{"channel" => "staging"})
+    # 200 per PATCH semantics (uncastable keys are ignored), but the channel
+    # did NOT move — the echo stays honest to the row
+    assert conn.status == 200
+    assert json_body(conn)["autoupdate"]["channel"] == "prod"
+    assert Registry.get_barkpark(bp.id).channel == "prod"
+  end
+
+  describe "PATCH /v1/admin/barkparks/:id/channel (operator channel lever)" do
+    test "worker token assigns staging → 200, row updated" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      conn =
+        call(
+          :patch,
+          "/v1/admin/barkparks/#{bp.id}/channel",
+          %{"channel" => "staging"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn) == %{"ok" => true, "id" => bp.id, "channel" => "staging"}
+      assert Registry.get_barkpark(bp.id).channel == "staging"
+    end
+
+    test "rejects an unknown channel → 422, row unchanged" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      conn =
+        call(
+          :patch,
+          "/v1/admin/barkparks/#{bp.id}/channel",
+          %{"channel" => "canary"},
+          @worker_token
+        )
+
+      assert conn.status == 422
+      assert Registry.get_barkpark(bp.id).channel == "prod"
+    end
+
+    test "fails CLOSED: no token → 401; a team-admin session token → 401" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      path = "/v1/admin/barkparks/#{bp.id}/channel"
+      assert call(:patch, path, %{"channel" => "staging"}, nil).status == 401
+      assert call(:patch, path, %{"channel" => "staging"}, token).status == 401
+      assert Registry.get_barkpark(bp.id).channel == "prod"
+    end
+
+    test "unknown / malformed id → 404" do
+      body = %{"channel" => "staging"}
+      missing = "/v1/admin/barkparks/#{Ecto.UUID.generate()}/channel"
+      assert call(:patch, missing, body, @worker_token).status == 404
+
+      assert call(:patch, "/v1/admin/barkparks/not-a-uuid/channel", body, @worker_token).status ==
+               404
+    end
+  end
+
+  # ── isu-w5.2: pin honesty on the console Update relay ──────────────────────
+  test "self-update on a PINNED box → 409 pinned (no force)" do
+    {user, team} = user_with_team()
+
+    bp =
+      barkpark_fixture(team) |> Ecto.Changeset.change(pinned_release: "v0.2.24") |> Repo.update!()
+
+    {:ok, token} = Accounts.create_user_session_token(user)
+
+    conn =
+      conn(:post, "/v1/barkparks/#{bp.id}/self-update", "{}")
+      |> put_req_header("content-type", "application/json")
+      |> put_req_header("authorization", "Bearer #{token}")
+      |> Router.call(@opts)
+
+    assert conn.status == 409
+    assert json_body(conn)["error"]["code"] == "pinned"
+    # the body NAMES the pin — the console conflict modal shows which release
+    # holds the box (S3 reads error.pinned_release)
+    assert json_body(conn)["error"]["pinned_release"] == "v0.2.24"
+  end
+
+  # ── isu-w5.2: fleet-wide kill switch (platform-operator gated) ─────────────
+  describe "GET/POST /v1/admin/autoupdate (kill switch)" do
+    test "worker token: GET reflects state, halt/resume toggle it" do
+      assert json_body(call(:get, "/v1/admin/autoupdate", nil, @worker_token))["halted"] == false
+
+      halt = call(:post, "/v1/admin/autoupdate/halt", %{}, @worker_token)
+      assert halt.status == 200
+      assert json_body(halt)["halted"] == true
+      assert json_body(call(:get, "/v1/admin/autoupdate", nil, @worker_token))["halted"] == true
+
+      resume = call(:post, "/v1/admin/autoupdate/resume", %{}, @worker_token)
+      assert resume.status == 200
+      assert json_body(resume)["halted"] == false
+      assert Registry.autoupdate_halted?() == false
+    end
+
+    test "fails CLOSED: no token → 401 on every route, state untouched" do
+      assert call(:get, "/v1/admin/autoupdate", nil, nil).status == 401
+      assert call(:post, "/v1/admin/autoupdate/halt", %{}, nil).status == 401
+      assert call(:post, "/v1/admin/autoupdate/resume", %{}, nil).status == 401
+      assert Registry.autoupdate_halted?() == false
+    end
+
+    test "fails CLOSED: a plain user session token is NOT a platform operator → 401" do
+      {user, _team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      assert call(:post, "/v1/admin/autoupdate/halt", %{}, token).status == 401
+      assert Registry.autoupdate_halted?() == false
+    end
+  end
+
+  # ── isu-w5.2: fleet-list JSON contract emission (Decision 10) ──────────────
+  test "GET /v1/barkparks emits autoupdate_enabled/paused, pinned_release, channel, update_checked_at" do
+    {user, team} = user_with_team()
+
+    _bp =
+      barkpark_fixture(team)
+      |> Ecto.Changeset.change(
+        autoupdate_enabled: false,
+        autoupdate_paused: true,
+        pinned_release: "v0.2.24",
+        channel: "staging",
+        update_checked_at: ~U[2026-07-10 12:00:00.000000Z],
+        autoupdate_triggered_at: ~U[2026-07-10 12:05:00.000000Z]
+      )
+      |> Repo.update!()
+
+    {:ok, token} = Accounts.create_user_session_token(user)
+    conn = call(:get, "/v1/barkparks", nil, token)
+    assert conn.status == 200
+
+    [row] = json_body(conn)["barkparks"]
+    assert row["autoupdate_enabled"] == false
+    assert row["autoupdate_paused"] == true
+    assert row["pinned_release"] == "v0.2.24"
+    assert row["channel"] == "staging"
+    assert row["update_checked_at"] == "2026-07-10T12:00:00.000000Z"
+    # the in-flight marker rides along — the console "Updating" badge reads it
+    assert row["autoupdate_triggered_at"] == "2026-07-10T12:05:00.000000Z"
   end
 end
