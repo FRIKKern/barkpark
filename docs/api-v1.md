@@ -176,7 +176,9 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 | `internal_error` | 500 | Unexpected server error |
 | `rate_limited` | 429 | Too many requests; retry after the `Retry-After` header value |
 
-Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer) · `webhook_not_found`/`event_not_found` 404.
+Additive: `halted` 409 (plugin-hook veto on mutate) · `forbidden_field` 422 (filter/order on an unreadable field) · `cors_forbidden`/`csrf_required` 403 (browser-origin / cookie-authed mutation guards) · bare `rev_mismatch` 409 (concurrent writer) · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (find-or-create gate; `details.similar`) · `schema_has_documents` 409 · `storage_unavailable` 503 / `unsupported_media_type` 422 / `payload_too_large` 413 (media).
+
+Emitted directly by specific v1 endpoints (also in the OpenAPI `Error.code` enum): papers ingest — `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets ops — `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media share — `share_expired` · access-grant / token / ticket-key — `invalid_grant`/`unprocessable` · step-up auth — `mfa_required`/`mfa_enrolment_required`. The single source is `Content.Errors.known_codes/0`; a contract test asserts every code a public endpoint emits is a member (operational endpoints outside the public v1 content contract — self-update, status incidents, pulse, GitHub webhooks/adopt — are an explicit off-spec exclusion, not part of this enum).
 
 ## 10. Legacy `/api/*` Routes
 
