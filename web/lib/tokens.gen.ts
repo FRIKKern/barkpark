@@ -23,3 +23,15 @@ export const matchQuality = [
   "hsl(130 90% 38%)",
   "hsl(162 95% 34%)",
 ] as const;
+
+/** Paper callout tone tints for portable-doc.tsx (design/tokens.json
+ *  color.paperCallout — the web twin of the paper-surface --bp-tone-* pairs).
+ *  {bg,fg} hex per tone, light + dark. NOT the status roles — never
+ *  substitute color.status for these. */
+export const paperCallout = {
+  success: { light: { bg: "#e7f2ec", fg: "#1e6b52" }, dark: { bg: "#12241c", fg: "#5fcf9c" } },
+  warning: { light: { bg: "#f7f0df", fg: "#8a6420" }, dark: { bg: "#2a2210", fg: "#e3b661" } },
+  danger: { light: { bg: "#f7e9e6", fg: "#a63a2e" }, dark: { bg: "#2a1614", fg: "#f08a80" } },
+  info: { light: { bg: "#e9eff7", fg: "#2d5e8f" }, dark: { bg: "#172032", fg: "#9db8ff" } },
+  neutral: { light: { bg: "#edf0ee", fg: "#4a544f" }, dark: { bg: "#23211e", fg: "#c9c2b6" } },
+} as const;

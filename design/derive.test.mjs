@@ -386,9 +386,9 @@ test("seam: color._convention survives verbatim (never a derive SLOT)", () => {
   assert.deepStrictEqual(tokens.color._convention, rawTokens.color._convention);
 });
 
-test("seam: all 13 D21 passthrough families survive verbatim in adapted tokens", () => {
-  assert.equal(PASSTHROUGH_FAMILIES.length, 13);
-  // 11 passthrough families live under color.* (presence/matchQuality/pdrenderChart/
+test("seam: all 14 D21 passthrough families survive verbatim in adapted tokens", () => {
+  assert.equal(PASSTHROUGH_FAMILIES.length, 14);
+  // 12 passthrough families live under color.* (presence/matchQuality/pdrenderChart/
   // pdrenderHeatmap/provider/…); lifecycle and instanceLifecycle are top-level tokens
   // families. derive() resolves none of them — each must survive verbatim wherever it
   // lives (color clone / top-level spread).
