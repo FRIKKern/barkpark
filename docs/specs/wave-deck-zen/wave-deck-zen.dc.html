@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..700;1,8..60,300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#0a0c10;overflow:hidden}
+*{box-sizing:border-box}
+a{color:#8b95a7;text-decoration:none}a:hover{color:#e9edf4}
+input::placeholder{color:#3a4150}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:#1c222c;border-radius:5px;border:2px solid #0a0c10}
+::-webkit-scrollbar-track{background:transparent}
+*{scrollbar-width:thin;scrollbar-color:#1c222c transparent}
+@keyframes zenA{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@keyframes zenB{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@keyframes zenBreath{0%,100%{transform:scale(1);opacity:.55}50%{transform:scale(1.5);opacity:1}}
+@keyframes zenPulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes zenLine{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+</style>
+</helmet>
+<div style="position:fixed;inset:0;background:#0a0c10;color:#e9edf4;font-family:'Source Serif 4',serif;overflow:hidden">
+  <div style="position:absolute;inset:0;background:radial-gradient(1100px 760px at 50% 42%,rgba(233,237,244,.04),transparent 62%);pointer-events:none"></div>
+
+  <sc-if value="{{ chromeOn }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="top whisper" style="position:absolute;top:26px;left:0;right:0;text-align:center;font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.3em;color:#333c49;pointer-events:none">{{ topLine }}</div>
+  </sc-if>
+
+  <div data-screen-label="scene" ref="{{ sceneRef }}" style="position:absolute;left:0;right:0;top:52px;bottom:126px;display:flex;overflow:auto;opacity:{{ sceneOp }};transition:opacity .75s ease;animation:{{ animName }} 1.1s cubic-bezier(.22,.61,.36,1) both">
+    <div style="max-width:780px;margin:auto;padding:16px 40px;text-align:center">
+
+      <sc-if value="{{ isTitle }}" hint-placeholder-val="{{ true }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.34em;color:#566072">CREATE EPIC</div>
+        <div style="margin-top:36px">
+          <input value="{{ wishVal }}" onChange="{{ onWish }}" onKeyDown="{{ onWishKey }}" placeholder="what should this epic achieve?" style="width:720px;max-width:92%;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.16);color:#e9edf4;font-family:'Source Serif 4',serif;font-style:italic;font-size:29px;line-height:1.4;text-align:center;padding:12px 0;outline:none">
+        </div>
+        <div style="font-size:13.5px;font-style:italic;color:#566072;margin-top:26px;text-wrap:pretty">one sentence. every phase and gate is checked against it.</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.26em;color:#3a4150;margin-top:30px">NEW EPIC · CHARTER + WAVE PAPER OPEN ON BEGIN</div>
+        <div style="margin-top:42px">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">READY TO START</div>
+          <div style="margin-top:10px;display:inline-block;text-align:left;width:600px;max-width:100%">
+            <sc-for list="{{ epics }}" as="e" hint-placeholder-count="3">
+              <div onClick="{{ e.pick }}" style="padding:10px 14px;border:1px solid {{ e.bd }};border-radius:8px;margin-top:8px;cursor:pointer" style-hover="border-color:rgba(255,255,255,.3)">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.14em;color:{{ e.sel }}">{{ e.name }}</div>
+                <div style="font-size:13.5px;font-style:italic;color:#8b95a7;margin-top:4px">“{{ e.wish }}”</div>
+              </div>
+            </sc-for>
+          </div>
+          <sc-if value="{{ epicSelOn }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;justify-content:center;gap:48px;margin-top:20px">
+              <button onClick="{{ onStartNow }}" style="background:transparent;border:none;cursor:pointer;font-family:'Source Serif 4',serif;padding:4px 2px;min-width:130px">
+                <span style="display:block;font-size:17px;color:#e9edf4">start →</span>
+                <span style="display:block;height:1px;background:#d9a45c;margin-top:10px"></span>
+              </button>
+              <button onClick="{{ onAdjust }}" style="background:transparent;border:none;cursor:pointer;font-family:'Source Serif 4',serif;padding:4px 2px;min-width:130px;opacity:.65" style-hover="opacity:1">
+                <span style="display:block;font-size:17px;color:#e9edf4">adjust first →</span>
+                <span style="display:block;height:1px;background:rgba(255,255,255,.12);margin-top:10px"></span>
+              </button>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isInter }}" hint-placeholder-val="{{ false }}">
+        <div style="position:relative;padding:30px 0">
+          <div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-56%);font-size:210px;font-weight:300;color:rgba(233,237,244,.04);pointer-events:none;line-height:1">{{ interNum }}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.34em;color:#566072">PHASE {{ interNum }}</div>
+          <div style="font-size:34px;font-weight:400;margin-top:22px;letter-spacing:.01em">{{ interName }}</div>
+          <div style="width:56px;height:1px;background:#3a4150;margin:26px auto 0;transform-origin:center;animation:zenLine 1.4s cubic-bezier(.22,.61,.36,1) both"></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.22em;color:#566072;margin-top:24px">{{ interSub }}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.14em;color:#3a4150;margin-top:30px;min-height:11px">{{ interEcho }}</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isStrat }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">01 · STRATEGIZE</div>
+        <div style="margin-top:6px;min-height:110px">
+          <sc-for list="{{ conv }}" as="m" hint-placeholder-count="1">
+            <div style="margin-top:{{ m.mt }};animation:zenA .8s cubic-bezier(.22,.61,.36,1) both">
+              <div style="font-family:{{ m.ff }};font-size:{{ m.fs }};letter-spacing:{{ m.ls }};color:{{ m.col }};line-height:1.65;text-wrap:pretty;max-width:600px;margin-left:auto;margin-right:auto">{{ m.text }}</div>
+            </div>
+          </sc-for>
+          <sc-if value="{{ typingOn }}" hint-placeholder-val="{{ false }}">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.3em;color:#566072;margin-top:26px;animation:zenPulse 1.4s infinite">WORKING ···</div>
+          </sc-if>
+        </div>
+        <sc-if value="{{ chipsOn }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;justify-content:center;gap:40px;margin-top:26px;flex-wrap:wrap">
+            <sc-for list="{{ chips }}" as="c" hint-placeholder-count="2">
+              <button onClick="{{ c.pick }}" style="background:transparent;border:none;cursor:pointer;padding:4px 2px;font-family:'Source Serif 4',serif;opacity:.8" style-hover="opacity:1">
+                <span style="display:block;font-size:16px;color:#e9edf4">{{ c.label }}</span>
+                <span style="display:block;height:1px;background:rgba(255,255,255,.14);margin-top:8px"></span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.22em;color:#3a4150;margin-top:22px">OR TYPE YOUR OWN ANSWER BELOW — IT LANDS IN THE PAPER</div>
+        </sc-if>
+        <sc-if value="{{ planOn2 }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:24px;display:inline-block;text-align:left;width:560px;max-width:100%">
+            <sc-for list="{{ qRows }}" as="q" hint-placeholder-count="8">
+              <div onClick="{{ q.toggle }}" title="{{ q.tip }}" style="display:flex;gap:14px;align-items:baseline;padding:6px 0;cursor:pointer;opacity:{{ q.op }};transition:opacity .3s ease" style-hover="opacity:1">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#3a4150;width:18px;flex:none">{{ q.n }}</span>
+                <span style="font-size:16px;color:{{ q.col }};text-decoration:{{ q.deco }};flex:1;line-height:1.5">{{ q.text }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:7.5px;letter-spacing:.2em;color:{{ q.tagCol }};flex:none">{{ q.tag }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:13px;font-style:italic;color:#566072;margin-top:16px">click to strike · type below to add. the survey starts automatically.</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#d9a45c;margin-top:26px;animation:zenPulse 1.4s infinite">{{ autoLine }}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.16em;color:#3a4150;margin-top:10px">{{ fleetLine }}</div>
+        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{ isSurvey }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">02 · SURVEY — IN FLIGHT</div>
+        <div style="position:relative;width:300px;height:230px;margin:26px auto 0">
+          <sc-for list="{{ surveyDots }}" as="d" hint-placeholder-count="8">
+            <span style="position:absolute;left:{{ d.x }};top:{{ d.y }};width:9px;height:9px;border-radius:50%;background:{{ d.bg }};animation:{{ d.anim }};transition:background 1s ease"></span>
+          </sc-for>
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.22em;color:#8b95a7;margin-top:8px">{{ surveyCount }}</div>
+        <div style="font-size:15px;font-style:italic;color:{{ surveyLineCol }};margin-top:22px;min-height:22px;transition:color 1s ease">{{ surveyLine }}</div>
+      </sc-if>
+
+      <sc-if value="{{ isCoverage }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">03 · DIGEST — THE COVERAGE MAP</div>
+        <div style="display:flex;justify-content:center;gap:64px;margin-top:36px">
+          <div style="opacity:{{ covO1 }};transition:opacity 1s ease"><div style="font-size:46px;font-weight:300">30</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.26em;color:#566072;margin-top:6px">FOUND</div></div>
+          <div style="opacity:{{ covO2 }};transition:opacity 1s ease"><div style="font-size:46px;font-weight:300;color:#e07a7a">12</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.26em;color:#8a5a5a;margin-top:6px">NOT FOUND</div></div>
+          <div style="opacity:{{ covO3 }};transition:opacity 1s ease"><div style="font-size:46px;font-weight:300;color:#8b95a7">3</div><div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.26em;color:#566072;margin-top:6px">CORNERS UNREACHED</div></div>
+        </div>
+        <div style="margin-top:38px">
+          <div style="font-size:19px;line-height:1.6;color:#dfe5ee;opacity:{{ covL1 }};transition:opacity 1.1s ease">the search index reads with no grant filter.</div>
+          <div style="font-size:19px;line-height:1.6;color:#dfe5ee;margin-top:10px;opacity:{{ covL2 }};transition:opacity 1.1s ease">no LiveView re-checks after mount — none.</div>
+          <div style="font-size:19px;line-height:1.6;color:#dfe5ee;margin-top:10px;opacity:{{ covL3 }};transition:opacity 1.1s ease">export sits outside the pipeline.</div>
+        </div>
+        <sc-if value="{{ covYourOn }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:15px;font-style:italic;color:#8b95a7;margin-top:22px;opacity:{{ covL3 }};transition:opacity 1.1s ease">your question — “{{ covYourQ }}” — answered in §survey digest.</div>
+        </sc-if>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.2em;color:#566072;margin-top:34px;opacity:{{ covR }};transition:opacity 1.1s ease">UNCHECKED: CHANNELS · JOBS · ADMIN</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.26em;color:#2b3340;margin-top:22px;opacity:{{ covR }};transition:opacity 1.1s ease">— DIGEST:WAVE</div>
+      </sc-if>
+
+      <sc-if value="{{ isGate }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.34em;color:#d9a45c">GATE {{ gN }} OF 5</div>
+        <div style="font-size:44px;font-weight:400;margin-top:30px;letter-spacing:.01em">{{ gQ }}</div>
+        <div style="font-size:15px;font-style:italic;color:#8b95a7;margin-top:18px;line-height:1.6;text-wrap:pretty">{{ gContext }}</div>
+        <div style="display:flex;justify-content:center;align-items:flex-start;gap:52px;margin-top:50px;flex-wrap:wrap">
+          <sc-for list="{{ gOpts }}" as="o" hint-placeholder-count="3">
+            <button onClick="{{ o.pick }}" style="background:transparent;border:none;cursor:pointer;padding:4px 2px;opacity:{{ o.op }};font-family:'Source Serif 4',serif;min-width:150px" style-hover="opacity:1">
+              <span style="display:block;font-size:19px;color:#e9edf4">{{ o.label }}</span>
+              <span style="display:block;font-family:'JetBrains Mono',monospace;font-size:8.5px;color:#566072;letter-spacing:.14em;margin-top:9px;line-height:1.7">{{ o.sub }}</span>
+              <span style="display:block;height:1px;background:rgba(255,255,255,.08);margin-top:14px;position:relative;overflow:hidden"><span style="position:absolute;left:0;top:0;height:1px;background:#d9a45c;width:{{ o.cdW }};transition:width .25s linear"></span></span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="margin-top:38px">
+          <input value="{{ noteVal }}" onChange="{{ onNote }}" placeholder="optional note — recorded with your choice" style="width:400px;max-width:86%;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.1);color:#e9edf4;font-family:'Source Serif 4',serif;font-style:italic;font-size:14.5px;text-align:center;padding:7px 0;outline:none">
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.2em;color:#3a4150;margin-top:26px">RECORDED IN THE PAPER</div>
+      </sc-if>
+
+      <sc-if value="{{ isVerify }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">04 · VERIFY — {{ pIdx }}</div>
+        <sc-if value="{{ proofMode }}" hint-placeholder-val="{{ true }}">
+          <div style="opacity:{{ pOp }};transition:opacity .4s ease;margin-top:34px">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#566072;letter-spacing:.04em">{{ pCmd }}</div>
+            <div style="font-size:25px;font-style:italic;line-height:1.5;margin-top:24px;color:#dfe5ee;text-wrap:pretty">{{ pLine }}</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.34em;margin-top:30px;color:{{ pvCol }}">{{ pVerdict }}</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ summaryMode }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:38px">
+            <div style="font-size:26px;font-weight:400;color:#dfe5ee">five claims settled.</div>
+            <div style="font-size:16px;font-style:italic;color:#d9a45c;margin-top:16px">one arrived without a proof — flagged, not hidden.</div>
+          </div>
+        </sc-if>
+      </sc-if>
+
+      <sc-if value="{{ isPlan }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">05 · DECIDE — FIVE SLICES, PUBLISHED</div>
+        <div style="font-size:15px;font-style:italic;color:#8b95a7;margin-top:26px;opacity:{{ planRev }};transition:opacity 1.1s ease">the cache slice died with its premise — verification overturned the direction.</div>
+        <div style="margin-top:28px;display:inline-block;text-align:left">
+          <sc-for list="{{ planRows }}" as="p" hint-placeholder-count="5">
+            <div style="display:flex;align-items:baseline;gap:18px;padding:9px 0;opacity:{{ p.op }};transition:opacity 1s ease">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#3a4150;width:20px">{{ p.tag }}</span>
+              <span style="font-size:19px;color:#dfe5ee;flex:1">{{ p.name }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.22em;color:{{ p.mCol }}">{{ p.m }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.2em;color:#3a4150;margin-top:28px;opacity:{{ planFoot }};transition:opacity 1s ease">EVERY SLICE IS A LIVE TASK IN THE LEDGER · FOUR MORE SEEDED TO THE BACKLOG</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.26em;color:#2b3340;margin-top:22px;opacity:{{ planFoot }};transition:opacity 1s ease">— DECIDE:WAVE</div>
+      </sc-if>
+
+      <sc-if value="{{ isBuild }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">06 · BUILD — {{ buildKick }}</div>
+        <div style="width:400px;margin:40px auto 0">
+          <sc-for list="{{ buildRows }}" as="b" hint-placeholder-count="5">
+            <div style="display:flex;align-items:center;gap:16px;padding:11px 0">
+              <span style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#3a4150;width:20px;text-align:left">{{ b.tag }}</span>
+              <span style="flex:1;height:1px;background:rgba(255,255,255,.08);position:relative"><span style="position:absolute;left:0;top:0;height:1px;background:{{ b.col }};width:{{ b.w }};transition:width .3s linear"></span></span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:8.5px;color:{{ b.rCol }};width:64px;text-align:right">{{ b.right }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:15px;font-style:italic;color:#d9a45c;margin-top:26px;min-height:22px;opacity:{{ buildNoteO }};transition:opacity 1s ease">{{ buildNote }}</div>
+      </sc-if>
+
+      <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">07 · REVIEW</div>
+        <div style="margin-top:30px">
+          <div style="font-size:17px;color:#b9c2d1;line-height:1.7;opacity:{{ revL1 }};transition:opacity 1s ease">S2 — the deny test came out of quarantine.</div>
+          <div style="font-size:17px;color:#b9c2d1;line-height:1.7;margin-top:6px;opacity:{{ revL2 }};transition:opacity 1s ease">S4 — a node-down purge case was added.</div>
+          <div style="font-size:17px;color:#b9c2d1;line-height:1.7;margin-top:6px;opacity:{{ revL3 }};transition:opacity 1s ease">the ledger told the truth — one stamp flagged.</div>
+        </div>
+        <div style="margin-top:34px;opacity:{{ gradeO }};transition:opacity 1.4s ease">
+          <div style="font-size:84px;font-weight:300;color:#57c99b;line-height:1">B+</div>
+          <div style="font-size:16px;font-style:italic;color:#8b95a7;line-height:1.65;margin-top:18px;max-width:480px;margin-left:auto;margin-right:auto;text-wrap:pretty">“Sealed every hole we proved; one slice parked with an honest note; the unreached corners are now the next wave's first questions.”</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.26em;color:#3a4150;margin-top:16px">GRADE WITH COMMENTARY</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.26em;color:#2b3340;margin-top:10px">— REVIEW:WAVE</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isDebrief }}" hint-placeholder-val="{{ false }}">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072">DEBRIEF</div>
+        <div style="font-size:26px;font-weight:400;line-height:1.55;margin-top:30px;color:#dfe5ee;text-wrap:pretty">The wish asked for deny to be real.<br>On every surface we proved, it now is.</div>
+        <div style="margin-top:30px;opacity:{{ dbHand }};transition:opacity 1.2s ease">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.26em;color:#566072">NEXT_WAVE HANDOFF</div>
+          <div style="font-size:16px;font-style:italic;color:#8b95a7;margin-top:12px;line-height:1.6">“Take the parked telemetry slice and the three corners nobody reached.”</div>
+        </div>
+        <div style="margin-top:28px;opacity:{{ dbLog }};transition:opacity 1.2s ease">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.26em;color:#566072">YOUR DECISIONS — IN THE PAPER</div>
+          <div style="margin-top:10px">
+            <sc-for list="{{ dlog }}" as="d" hint-placeholder-count="1">
+              <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#566072;line-height:2">{{ d.t }}</div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isEnd }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:34px;font-weight:400;color:#dfe5ee">{{ endTitle }}</div>
+        <div style="font-size:16px;font-style:italic;color:#8b95a7;margin-top:20px;line-height:1.6;max-width:480px;margin-left:auto;margin-right:auto">{{ endSub }}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.2em;color:#3a4150;margin-top:30px">{{ endLog }}</div>
+        <button onClick="{{ onRestart }}" style="background:transparent;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3em;color:#566072;margin-top:40px;padding:8px" style-hover="color:#e9edf4">↺ REPLAY</button>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <sc-if value="{{ chatOn }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="chat composer" style="position:absolute;bottom:68px;left:0;right:0;text-align:center">
+      <input value="{{ chatVal }}" onChange="{{ onChatVal }}" onKeyDown="{{ onChatKey }}" placeholder="{{ chatPh }}" style="width:660px;max-width:86%;background:transparent;border:none;border-bottom:1px solid rgba(255,255,255,.16);color:#e9edf4;font-family:'Source Serif 4',serif;font-size:17.5px;text-align:center;padding:11px 0;outline:none">
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ holdBtn }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;bottom:78px;left:0;right:0;text-align:center">
+      <button onClick="{{ onContinue }}" style="background:transparent;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.32em;color:#566072;padding:8px 14px;opacity:{{ contO }};transition:opacity 1.2s ease" style-hover="color:#e9edf4">{{ contLabel }}</button>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ chromeOn }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="phase dots" style="position:absolute;bottom:30px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:14px">
+      <sc-for list="{{ nodes }}" as="d" hint-placeholder-count="13">
+        <span onClick="{{ d.go }}" title="{{ d.tip }}" style="width:{{ d.size }};height:{{ d.size }};border-radius:{{ d.rad }};background:{{ d.bg }};cursor:pointer;animation:{{ d.anim }};transition:background .6s ease"></span>
+      </sc-for>
+    </div>
+    <div style="position:absolute;bottom:24px;right:26px;display:flex;gap:4px">
+      <button onClick="{{ onSpeed }}" style="background:transparent;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:9px;color:#3a4150;padding:4px 6px" style-hover="color:#e9edf4">{{ spdLabel }}</button>
+      <button onClick="{{ onSkip }}" title="skip ahead" style="background:transparent;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:9px;color:#3a4150;padding:4px 6px" style-hover="color:#e9edf4">⏭</button>
+      <button onClick="{{ onRestart }}" title="replay the wave" style="background:transparent;border:none;cursor:pointer;font-family:'JetBrains Mono',monospace;font-size:9px;color:#3a4150;padding:4px 6px" style-hover="color:#e9edf4">↺</button>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;gateCountdown&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:0,&quot;max&quot;:90,&quot;step&quot;:5,&quot;unit&quot;:&quot;s&quot;,&quot;default&quot;:0,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Gates&quot;},&quot;attended&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Gates&quot;},&quot;showChrome&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Chrome&quot;}}">
+class Component extends DCLogic {
+  state = { i:0, t:0, gateT:0, totalT:0, speed:1, log:[], struck:false, round2:false, ended:null, waveN:9, qStruck:{}, added:[], qVal:'', noteVal:'', stage:'intro', conv:[], pendMsg:null, pendAt:0, pendStage:'', typing:false, chatVal:'', wish:'', epicSel:null };
+
+  SCENES = [
+    {t:'title', ready:1.2},
+    {t:'inter',auto:true,dur:1.6,num:'01',name:'Strategize',sub:'ONE FABLE MIND · THE PLAN IS YOURS TO EDIT'},
+    {t:'strat'},
+    {t:'inter',auto:true,dur:1.6,num:'02',name:'Survey'},
+    {t:'survey',auto:true,dur:11},
+    {t:'inter',auto:true,dur:1.6,num:'03',name:'Digest',sub:'ONE FABLE FOLDS THE REPORTS'},
+    {t:'coverage',ready:6},
+    {t:'gate',g:1},
+    {t:'inter',auto:true,dur:1.6,num:'04',name:'Verify',sub:'FOUR SONNETS, TWO OPUS · PROOFS RUN AS CODE'},
+    {t:'verify',auto:true,dur:16},
+    {t:'gate',g:2},
+    {t:'inter',auto:true,dur:1.6,num:'05',name:'Decide',sub:'ONE FABLE · THE PLAN BECOMES PUBLISHED TASKS'},
+    {t:'plan',ready:4.5},
+    {t:'gate',g:3},
+    {t:'inter',auto:true,dur:1.6,num:'06',name:'Build'},
+    {t:'build',auto:true,dur:12.5},
+    {t:'inter',auto:true,dur:1.6,num:'07',name:'Review',sub:'ONE FABLE · FIXES IN PLACE, THEN THE GRADE'},
+    {t:'review',ready:4.5},
+    {t:'gate',g:4},
+    {t:'inter',auto:true,dur:1.6,num:'··',name:'Debrief',sub:'THE PAPER CLOSES OVER THE WAVE'},
+    {t:'debrief',ready:5},
+    {t:'gate',g:5},
+    {t:'end'}
+  ];
+
+  QS = [
+    'where do grants gate access today?',
+    'every search entry that returns granted rows',
+    'grant schema, revoke path, cache TTL',
+    'which LiveViews re-check after mount?',
+    'plug coverage for /api/v1/*',
+    'existing deny-path tests + fixtures',
+    'all callers of revoke_token/1',
+    'prior sealing waves + docs'
+  ];
+
+  GATES = {
+    1:{q:'Enough ground?', ctx:'one contradiction stands — “the cache purges on revoke” against stale rows served four minutes after.', opts:[
+      {c:'research',label:'research more ↺',sub:'ANOTHER SONNET ROUND · MINUTES'},
+      {c:'verify',label:'verify →',sub:'FIVE PROOFS RUN AS CODE',def:true},
+      {c:'skip',label:'skip ahead ⏩',sub:'THREE CLAIMS STAY UNPROVEN'}]},
+    2:{q:'Proven enough?', ctx:'five claims settled. oban stays a reading, not a fact — proceeding accepts it, logged.', opts:[
+      {c:'more',label:'verify more ↺',sub:'TARGET THE UNPROVEN'},
+      {c:'proceed',label:'proceed to decide →',sub:'ACCEPT ONE UNPROVEN · LOGGED',def:true}]},
+    3:{q:'Approve the wave?', ctx:'five slices published to the ledger. the cache slice died with its premise.', opts:[
+      {c:'build',label:'build →',sub:'FIVE MINDS · WORKTREE-ISOLATED',def:true},
+      {c:'trim',label:'trim S5 ✂',sub:'THE TASK STAYS FILED, HONEST'},
+      {c:'redirect',label:'redirect ↺',sub:'BACK TO DIGEST · EXPENSIVE'}]},
+    4:{q:'Land it?', ctx:'four branches green. one slice stalled with an honest note.', opts:[
+      {c:'land',label:'land →',sub:'MERGE FOUR · CLOSE THE GATED CRITERIA',def:true},
+      {c:'fix',label:'fix round ↺',sub:'NAMED ISSUES RETURN AS TASKS'},
+      {c:'park',label:'park ⏸',sub:'BRANCHES STAY · NOTES HONEST'}]},
+    5:{q:'Next wave?', ctx:'the handoff is written — telemetry, and the three corners nobody reached.', opts:[
+      {c:'fire',label:'fire wave 10 ↺',sub:'THE HANDOFF SEEDS ITS DIRECTION',def:true},
+      {c:'close',label:'close the epic ⏹',sub:'THE GRADE STANDS WITH ITS WORDS'}]}
+  };
+
+  PROOFS = [
+    {cmd:'$ mix test test/barkpark/access/grant_search_deny_test.exs', line:'1 test, 1 failure — got [%Row{id: 4412}]', v:'PROVEN — THE LEAK IS REAL', col:'#57c99b'},
+    {cmd:'$ curl -H "Bearer $REVOKED" :4000/api/v1/export', line:'200 OK — sixty-one rows for a revoked token.', v:'PROVEN — THE BYPASS IS REAL', col:'#57c99b'},
+    {cmd:'$ iex> Grants.revoke!(g); GrantsCache.get(g.id)', line:'nil — the purge lands under a millisecond.', v:'REFUTED — A BUILD SLICE JUST DIED', col:'#e07a7a'},
+    {cmd:'$ mix test test/barkpark_web/live/patch_recheck_repro_test.exs', line:'the mounted socket kept its rows after revoke.', v:'PROVEN — PATCH NEVER RE-CHECKS', col:'#57c99b'},
+    {cmd:'$ mix test test/support/fixtures_test.exs', line:'4 tests, 0 failures — the fixtures are honest.', v:'REFUTED — NOTHING WAS MASKED', col:'#e07a7a'},
+    {cmd:'(no runnable proof this round)', line:'“grant-blind” is a reading, not a fact.', v:'UNPROVEN — FLAGGED, NOT HIDDEN', col:'#d9a45c'}
+  ];
+
+  SLICES = [
+    {tag:'S1',name:'seal the index read',m:'OPUS',mCol:'#566072',doneAt:7,hash:'a3f19c2'},
+    {tag:'S2',name:'export into the pipeline',m:'OPUS',mCol:'#566072',doneAt:5.5,hash:'91be44d'},
+    {tag:'S3',name:'re-check on patch',m:'OPUS',mCol:'#566072',doneAt:8.5,hash:'c07d21a'},
+    {tag:'S4',name:'broadcast the revoke',m:'FABLE',mCol:'#8d78b8',doneAt:10,hash:'5fa9e03'},
+    {tag:'S5',name:'deny telemetry',m:'FABLE',mCol:'#8d78b8',stall:5}
+  ];
+
+  ACTS = ['rg "GrantGuard" lib — fourteen hits','reading grant_guard.ex','no grant filter in search_index.ex','reading search_live.ex — nothing re-checks on patch','the deny repro exists — and it is red today','eleven callers of revoke_token, traced'];
+
+  componentDidMount(){
+    this.lastTick=performance.now();
+    this.timer=setInterval(()=>this.tick(),100);
+    this.keyH=(e)=>{
+      const tag=e.target?e.target.tagName:'';
+      if(tag==='INPUT'||tag==='TEXTAREA') return;
+      const inStrat=this.SCENES[this.state.i]&&this.SCENES[this.state.i].t==='strat';
+      if(e.key==='ArrowRight'){ this.skip(); }
+      if((e.key==='Enter'||e.key===' ')&&!inStrat){ if(e.key===' ')e.preventDefault(); this.skip(); }
+      if(e.key==='ArrowLeft') this.setState({i:Math.max(0,this.state.i-1),t:0,gateT:0});
+    };
+    window.addEventListener('keydown',this.keyH);
+  }
+  componentWillUnmount(){ clearInterval(this.timer); window.removeEventListener('keydown',this.keyH); }
+
+  sceneRef = React.createRef();
+  componentDidUpdate(prevProps, prevState){
+    const sc=this.SCENES[this.state.i];
+    if(!sc||sc.t!=='strat') return;
+    const grew = prevState && (prevState.conv.length!==this.state.conv.length || prevState.typing!==this.state.typing || prevState.stage!==this.state.stage);
+    if(grew){
+      const el=this.sceneRef.current;
+      if(el) el.scrollTo({top:el.scrollHeight, behavior:'smooth'});
+    }
+  }
+
+  cd(){ return this.props.gateCountdown ?? 0; }
+  fleetN(){ const S=this.state; const struck=Object.keys(S.qStruck).filter(k=>S.qStruck[k]).length; return 8-struck+S.added.length+(S.round2?2:0); }
+
+  tick(){
+    const now=performance.now();
+    const raw=Math.min(0.5,(now-(this.lastTick||now))/1000);
+    this.lastTick=now;
+    const S=this.state, sc=this.SCENES[S.i];
+    if(!sc||sc.t==='end') return;
+    const dt=raw*S.speed;
+    if(sc.t==='gate'){
+      if(this.props.attended===false){ this.pick(sc.g,this.def(sc.g)); return; }
+      const cd=this.cd();
+      if(cd>0){
+        const g=S.gateT+dt;
+        if(g>=cd){ this.pick(sc.g,this.def(sc.g)); return; }
+        this.setState({gateT:g,totalT:S.totalT+dt});
+      } else this.setState({totalT:S.totalT+dt,t:Math.min(600,S.t+dt)});
+      return;
+    }
+    if(sc.t==='strat'){
+      const p={totalT:S.totalT+dt, t:Math.min(999,S.t+dt)};
+      if(S.stage==='intro'&&S.conv.length===0&&p.t>0.6){
+        p.conv=[{who:'sys',text:'CHARTER AND WISH READ · READY FOR INSTRUCTIONS'}];
+        p.stage='open';
+      }
+      if(S.pendMsg&&(S.totalT+dt)>=S.pendAt){
+        p.conv=(p.conv||S.conv).concat([S.pendMsg]);
+        p.pendMsg=null; p.typing=false; p.stage=S.pendStage;
+        if(S.pendStage==='auto') p.autoAt=S.totalT+dt;
+      }
+      if(S.stage==='auto'&&(S.totalT+dt)-(S.autoAt||0)>7){ this.setState({i:3,t:0,gateT:0,totalT:S.totalT+dt}); return; }
+      this.setState(p); return;
+    }
+    const t=S.t+dt;
+    if(sc.auto&&t>=sc.dur) this.setState({i:S.i+1,t:0,gateT:0,totalT:S.totalT+dt});
+    else this.setState({t:Math.min(999,t),totalT:S.totalT+dt});
+  }
+
+  stratReply(shown){
+    const S=this.state;
+    const conv=S.conv.concat([{who:'user',text:'YOU — “'+shown+'”'}]);
+    const isQ=/\?\s*$/.test(shown);
+    const reply= isQ
+      ? 'The deny path is central for HTTP; search index reads bypass it, and a red repro exists. Proposed survey plan below — strike or add while I work.'
+      : 'Understood — recorded in the Paper. Proposed survey plan below — strike or add while I work.';
+    this.setState({conv, typing:true, pendMsg:{who:'fable',text:reply}, pendAt:S.totalT+1.2, pendStage:'auto', chatVal:''});
+  }
+
+  chatSubmit(){
+    const S=this.state; const v=S.chatVal.trim(); if(!v) return;
+    if(S.stage==='open') this.stratReply(v);
+    else if(S.stage==='auto') this.setState({added:S.added.concat([v]),chatVal:''});
+  }
+
+  def(g){ return {1:'verify',2:'proceed',3:'build',4:'land',5:'fire'}[g]; }
+
+  pick(g,c){
+    const S=this.state;
+    const opt=this.GATES[g].opts.find(o=>o.c===c)||this.GATES[g].opts[0];
+    const tt=Math.round(S.totalT*20);
+    const at=Math.floor(tt/60)+':'+String(tt%60).padStart(2,'0');
+    const log=S.log.concat([{g,choice:opt.label,at,note:S.noteVal.trim()}]);
+    const p={log,t:0,gateT:0,noteVal:''};
+    if(g===1){ p.i = c==='research'?3 : c==='skip'?11 : 8; if(c==='research') p.round2=true; }
+    else if(g===2){ p.i = c==='more'?8:11; }
+    else if(g===3){ p.i = c==='redirect'?5:14; if(c==='trim') p.struck=true; }
+    else if(g===4){ p.i = c==='fix'?14 : c==='park'?22 : 19; if(c==='park') p.ended='parked'; }
+    else if(g===5){ if(c==='fire'){ p.i=1; p.waveN=S.waveN+1; p.round2=false; p.struck=false; p.ended=null; p.stage='intro'; p.conv=[]; p.pendMsg=null; p.typing=false; } else { p.i=22; p.ended='closed'; } }
+    this.setState(p);
+  }
+
+  skip(){
+    const sc=this.SCENES[this.state.i];
+    if(sc.t==='title'&&this.state.wish.trim().length<4) return;
+    if(sc.t==='gate') this.pick(sc.g,this.def(sc.g));
+    else if(sc.t==='strat') this.setState({i:3,t:0,gateT:0});
+    else if(sc.t!=='end') this.setState({i:this.state.i+1,t:0,gateT:0});
+  }
+  restart(){ this.setState({i:0,t:0,gateT:0,totalT:0,log:[],struck:false,round2:false,ended:null,waveN:9,qStruck:{},added:[],qVal:'',noteVal:'',stage:'intro',conv:[],pendMsg:null,pendAt:0,pendStage:'',typing:false,chatVal:'',wish:''}); }
+
+  renderVals(){
+    const S=this.state, sc=this.SCENES[S.i]||{t:'end'};
+    const t=S.t;
+    const op=(cond)=>cond?'1':'0';
+
+    const tt=Math.round(S.totalT*20);
+    const clock=Math.floor(tt/60)+':'+String(tt%60).padStart(2,'0');
+
+    const leaving = sc.auto && sc.dur!=null && (sc.dur - t < 0.75);
+    const sceneOp = leaving?'0':'1';
+    const animName = (S.i%2===0)?'zenA':'zenB';
+
+    let interSub=sc.sub||'';
+    if(sc.t==='inter'&&sc.name==='Survey') interSub=(S.round2?'ROUND TWO — ':'')+this.fleetN()+' SONNET MINDS · EACH QUESTION FLIES ALONE';
+    if(sc.t==='inter'&&sc.name==='Build') interSub=S.struck?'THREE OPUS, ONE FABLE · WORKTREES':'THREE OPUS, TWO FABLE · WORKTREES';
+    const lastE=S.log[S.log.length-1];
+    const interEcho=(sc.t==='inter'&&lastE)?('GATE '+lastE.g+' · '+lastE.choice.toUpperCase()+(lastE.note?(' — “'+lastE.note+'”'):'')+' · IN THE PAPER'):'';
+
+    const qRows=this.QS.map((q,idx)=>{
+      const st=!!S.qStruck[idx];
+      return {n:String(idx+1).padStart(2,'0'), text:q,
+        col:st?'#3a4150':'#dfe5ee', deco:st?'line-through':'none',
+        tag:st?'STRUCK':'', tagCol:'#3a4150', op:st?'.7':'.92',
+        tip:st?'restore this question':'strike this question',
+        toggle:()=>{ const m=Object.assign({},this.state.qStruck); m[idx]=!m[idx]; this.setState({qStruck:m}); }};
+    }).concat(S.added.map((q,idx)=>({n:'··', text:q, col:'#e9edf4', deco:'none', tag:'YOURS', tagCol:'#d9a45c', op:'1',
+      tip:'remove your question',
+      toggle:()=>{ const a=this.state.added.slice(); a.splice(idx,1); this.setState({added:a}); }})));
+    const fleetLine=this.fleetN()+' SONNETS · ONE PER QUESTION';
+
+    const n=this.fleetN();
+    const surveyDots=[]; let sdone=0,sfly=0,sdied=0;
+    for(let k=0;k<n;k++){
+      const start=0.2+k*(7/Math.max(n,1))*0.55, doneAt=4.2+k*(5.5/Math.max(n,1));
+      const dies=(k===7&&n>=8);
+      let st='queued';
+      if(sc.t==='survey'){
+        if(dies&&t>=6.5) st='died';
+        else if(t>=doneAt) st='done';
+        else if(t>=start) st='flying';
+      }
+      if(st==='done')sdone++; if(st==='flying')sfly++; if(st==='died')sdied++;
+      const ang=(k/n)*Math.PI*2-Math.PI/2;
+      surveyDots.push({
+        x:(46+38*Math.cos(ang))+'%', y:(46+40*Math.sin(ang))+'%',
+        bg: st==='queued'?'#232a35': st==='flying'?'#e9edf4': st==='done'?'#57c99b':'#e07a7a',
+        anim: st==='flying'?('zenBreath '+(2.6+(k%3)*0.5)+'s ease-in-out '+(-(k*0.4))+'s infinite'):'none'
+      });
+    }
+    const surveyCount= sdone+' REPORTED · '+sfly+' IN FLIGHT'+(sdied?' · 1 DIED':'');
+    const deathWindow = sc.t==='survey' && t>=6.5 && t<9.5 && n>=8;
+    const surveyLine = deathWindow ? 'survey:prior-art died — api 529 · nine files of notes lost, honestly.'
+      : this.ACTS[Math.floor(t/2.3)%this.ACTS.length];
+    const surveyLineCol = deathWindow?'#e07a7a':'#8b95a7';
+
+    const seg=2.4;
+    const k6=Math.min(5,Math.floor(t/seg));
+    const local=t-k6*seg;
+    const summaryMode = sc.t==='verify' && t>=6*seg;
+    const proofMode = sc.t==='verify' && !summaryMode;
+    const pr=this.PROOFS[k6]||this.PROOFS[0];
+    const pOp=(local<0.35||local>seg-0.55)?'0':'1';
+    const pIdx= summaryMode?'SETTLED':('PROOF '+(k6+1)+' / 6');
+
+    const planRows=this.SLICES.map((s,idx)=>({tag:s.tag,name:s.name,m:s.m,mCol:s.mCol,op:op(t>0.6+idx*0.5)}));
+
+    const buildDefs=S.struck?this.SLICES.slice(0,4):this.SLICES;
+    const buildRows=buildDefs.map(s=>{
+      const stall=s.stall!=null;
+      const done=!stall&&t>=s.doneAt;
+      const stalled=stall&&t>=s.stall;
+      const w=stall?Math.min(45,(t/s.stall)*45):Math.min(100,(t/s.doneAt)*100);
+      return {tag:s.tag, w:w.toFixed(1)+'%',
+        col: done?'#57c99b':(stalled?'#d9a45c':'#8b95a7'),
+        right: done?s.hash:(stalled?'stalled':''),
+        rCol: done?'#3f4a5c':(stalled?'#d9a45c':'#3a4150')};
+    });
+    const buildKick=S.struck?'FOUR MINDS IN WORKTREES':'FIVE MINDS IN WORKTREES';
+    const showNote=!S.struck&&sc.t==='build'&&t>5.5;
+    const buildNote=showNote?'“gate red: index warm-up flaky — investigating.” — stamped by the builder, live.':'';
+
+    const gd=sc.t==='gate'?this.GATES[sc.g]:null;
+    const cdOn=this.cd()>0;
+    const cdW=cdOn?Math.max(0,(1-S.gateT/this.cd())*100).toFixed(1)+'%':'100%';
+    const gOpts=gd?gd.opts.map(o=>({label:o.label,sub:o.sub,op:o.def?'1':'.55',
+      cdW:o.def?cdW:'0%', pick:()=>this.pick(sc.g,o.c)})):[];
+
+    let endTitle='The wave is closed.', endSub='“Sealed every hole we proved; one slice parked with an honest note.”';
+    if(S.ended==='parked'){ endTitle='The wave is parked.'; endSub='branches stay. tasks stay in_progress with honest notes. the debrief records why.'; }
+    if(S.ended==='closed'){ endTitle='The epic is closed.'; endSub='“Sealed every hole we proved; one slice parked with an honest note; the unreached corners are now the next wave’s first questions.” — B+'; }
+    const endLog=S.log.length?(S.log.length+' DECISIONS RECORDED'):'';
+
+    const dlog=S.log.map(e=>({t:'GATE '+e.g+' — '+e.choice+(e.note?(' — “'+e.note+'”'):'')}));
+
+    const NODES=[{s:1,tip:'Strategize'},{s:3,tip:'Survey'},{s:5,tip:'Digest'},{s:7,g:true,tip:'Gate 1'},{s:8,tip:'Verify'},{s:10,g:true,tip:'Gate 2'},{s:11,tip:'Decide'},{s:13,g:true,tip:'Gate 3'},{s:14,tip:'Build'},{s:16,tip:'Review'},{s:18,g:true,tip:'Gate 4'},{s:19,tip:'Debrief'},{s:21,g:true,tip:'Gate 5'}];
+    const nodes=NODES.map((nd,idx)=>{
+      const next=(idx<NODES.length-1)?NODES[idx+1].s:99;
+      const cur=S.i>=nd.s&&S.i<next;
+      const passed=S.i>=next;
+      const open=nd.g&&cur&&sc.t==='gate';
+      return {size:nd.g?'5px':'6px', rad:nd.g?'1px':'50%', tip:nd.tip,
+        bg: open?'#d9a45c':cur?'#e9edf4':passed?'#39424f':'#1c222c',
+        anim: open?'zenPulse 1.6s infinite':'none',
+        go:()=>this.setState({i:nd.s,t:0,gateT:0})};
+    });
+
+    const convView=S.conv.slice(S.stage==='auto'?-1:-3).map(m=>({text:m.text,
+      ff:m.who==='fable'?"'Source Serif 4',serif":"'JetBrains Mono',monospace",
+      fs:m.who==='fable'?'19px':(m.who==='user'?'10px':'8.5px'),
+      ls:m.who==='fable'?'0em':'.22em',
+      col:m.who==='fable'?'#dfe5ee':(m.who==='user'?'#d9a45c':'#3a4150'),
+      mt:m.who==='sys'?'22px':'26px'}));
+    const chipsOn=false;
+    const chips=[];
+    const chatPh= S.stage==='auto'?'add a question — enter to file':(S.stage==='open'?'what should this wave do?':'reading…');
+    const aEl=S.stage==='auto'?(S.totalT-(S.autoAt||S.totalT)):0;
+    const autoLine= aEl<2.4?'DRAFTING DIRECTION': aEl<4.8?'WRITING SURVEY PLAN':'STARTING SURVEY';
+
+    const EP=[{n:'airdrop-grants · close-out',w:'Revoked grants must actually deny — search, API, LiveView — proven red→green, landed on main.'},{n:'search-index · rebuild safety',w:'Index rebuilds never serve stale or unauthorized rows.'},{n:'onboarding · first-run',w:'A new workspace reaches its first successful task in under five minutes.'}];
+    const epics=EP.map((e,ix)=>({name:e.n, wish:e.w,
+      sel:S.epicSel===ix?'#e9edf4':'#8b95a7',
+      bd:S.epicSel===ix?'rgba(217,164,92,.5)':'rgba(255,255,255,.08)',
+      pick:()=>this.setState({epicSel:ix, wish:e.w})}));
+    const epicSelOn=S.epicSel!=null&&sc.t==='title';
+
+    const holdTypes={title:1,coverage:1,plan:1,review:1,debrief:1};
+    const holdBtn=!!holdTypes[sc.t];
+    const contLabel=sc.t==='title'?'BEGIN →':'CONTINUE →';
+    const contO=sc.t==='title'?op(S.wish.trim().length>=4):op(t>(sc.ready||1));
+
+    const out={
+      chromeOn:this.props.showChrome??true,
+      topLine:'WAVE '+S.waveN+(S.wish.trim()?(' — “'+(S.wish.trim().length>64?S.wish.trim().slice(0,64)+'…':S.wish.trim()).toUpperCase()+'”'):' — NO EPIC YET'),
+      wishVal:S.wish,
+      onWish:(e)=>this.setState({wish:e.target.value}),
+      onWishKey:(e)=>{ if(e.key==='Enter'&&this.state.wish.trim().length>=4){ e.stopPropagation(); this.skip(); } },
+      sceneOp, animName, clock, waveN:S.waveN,
+      interNum:sc.num||'', interName:sc.name||'', interSub, interEcho,
+      qRows,
+      onLaunch:()=>this.setState({i:3,t:0,gateT:0}),
+      fleetLine,
+      conv:convView, typingOn:S.typing, chipsOn, chips, planOn2:S.stage==='auto', autoLine,
+      chatOn:sc.t==='strat', chatVal:S.chatVal, chatPh, sceneRef:this.sceneRef,
+      onChatVal:(e)=>this.setState({chatVal:e.target.value}),
+      onChatKey:(e)=>{ if(e.key==='Enter'){ e.stopPropagation(); this.chatSubmit(); } },
+      surveyDots, surveyCount, surveyLine, surveyLineCol,
+      covO1:op(t>0.4), covO2:op(t>0.9), covO3:op(t>1.4),
+      covL1:op(t>2.2), covL2:op(t>3.2), covL3:op(t>4.2),
+      covR:op(t>5.2),
+      covYourOn:S.added.length>0, covYourQ:S.added[0]||'',
+      gN:sc.g||1, gQ:gd?gd.q:'', gContext:gd?gd.ctx:'', gOpts,
+      noteVal:S.noteVal, onNote:(e)=>this.setState({noteVal:e.target.value}),
+      pIdx, proofMode, summaryMode, pOp, pCmd:pr.cmd, pLine:pr.line, pVerdict:pr.v, pvCol:pr.col,
+      planRev:op(t>0.4), planRows, planFoot:op(t>3.4),
+      buildRows, buildKick, buildNote, buildNoteO:op(showNote),
+      revL1:op(t>0.6), revL2:op(t>1.4), revL3:op(t>2.2), gradeO:op(t>3.4),
+      dbHand:op(t>2), dbLog:op(t>3.2),
+      dlog, dlogEmpty:dlog.length===0,
+      endTitle, endSub, endLog,
+      nodes, holdBtn, contLabel, contO,
+      epics, epicSelOn,
+      onStartNow:()=>this.setState({i:2,t:0,gateT:0,stage:'auto',autoAt:this.state.totalT,conv:[{who:'sys',text:'EPIC LOADED · STARTING'}]}),
+      onAdjust:()=>this.skip(),
+      onContinue:()=>this.skip(),
+      spdLabel:S.speed+'×',
+      onSpeed:()=>this.setState({speed:this.state.speed===1?2:(this.state.speed===2?4:1)}),
+      onSkip:()=>this.skip(),
+      onRestart:()=>this.restart()
+    };
+    ['title','inter','strat','survey','coverage','gate','verify','plan','build','review','debrief','end'].forEach(ty=>{
+      out['is'+ty.charAt(0).toUpperCase()+ty.slice(1)]=(sc.t===ty);
+    });
+    return out;
+  }
+}
+</script>
+</body>
+</html>
