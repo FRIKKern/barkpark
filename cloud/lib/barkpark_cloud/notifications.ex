@@ -41,6 +41,7 @@ defmodule BarkparkCloud.Notifications do
     ChannelConfig,
     Channels,
     Delivery,
+    DigestEmail,
     EmailSettings,
     EventEmail,
     SafeUrl,
@@ -319,6 +320,70 @@ defmodule BarkparkCloud.Notifications do
       last_test_sent_at: DateTime.truncate(DateTime.utc_now(), :microsecond)
     })
     |> Repo.update()
+  end
+
+  ## ── Fleet digest (isu-w5, the operator push) ─────────────────────────────
+
+  @doc """
+  Deliver the daily FLEET-UPDATE digest to the platform's operator admins — the
+  "from nag to product" push that lands the release curator's daily judgment in a
+  human inbox instead of only a draft Release + a run log.
+
+  `barkparks` is the whole fleet (the caller, `DailyDigestWorker`, hands it
+  `Registry.all_barkparks/0`). Recipients are resolved by `platform_admin_emails/0`
+  — the platform-operator allowlist, intersected with REGISTERED users so the
+  digest can only reach real accounts (the exfiltration-guard analogue: this is a
+  fleet-wide operator report, never a per-team blast and never an open relay).
+  Zero resolved admins is a LOGGED no-op — never a crash and never a send.
+
+  The send rides the PLATFORM `Mailer` (like the transactional path); each
+  recipient's send is recorded as a `Delivery` row (kind `"transactional"`,
+  `team_id: nil` — a platform-operator email belongs to no team, exactly like the
+  user-scoped identity emails). Returns `{:ok, :no_admins}` or
+  `{:ok, %{sent: n, recipients: [...]}}`.
+  """
+  @spec deliver_fleet_digest([term()]) ::
+          {:ok, :no_admins} | {:ok, %{sent: non_neg_integer(), recipients: [String.t()]}}
+  def deliver_fleet_digest(barkparks) when is_list(barkparks) do
+    summary = DigestEmail.summary(barkparks)
+
+    case platform_admin_emails() do
+      [] ->
+        Logger.info(
+          "Notifications.deliver_fleet_digest: no platform admins configured/registered — " <>
+            "skipping the daily fleet digest (#{summary.total} instance(s))"
+        )
+
+        {:ok, :no_admins}
+
+      recipients ->
+        for recipient <- recipients do
+          email = DigestEmail.build(summary, recipient)
+          result = Mailer.deliver(email)
+          record_delivery(nil, recipient, "fleet_digest", "transactional", result)
+        end
+
+        {:ok, %{sent: length(recipients), recipients: recipients}}
+    end
+  end
+
+  # The platform-operator recipient set. There is NO platform-admin flag on a
+  # User today (roles are strictly per-team — owner/admin/member), so the operator
+  # names the admin account(s) `mix barkpark_cloud.create_admin` minted via the
+  # `:platform_admin_emails` config allowlist. Each configured address is resolved
+  # to a REGISTERED user (a typo or a gone account is dropped, never mailed) and
+  # de-duped; the canonical stored email is returned. Empty/unconfigured → `[]`,
+  # which callers treat as a no-op.
+  defp platform_admin_emails do
+    :barkpark_cloud
+    |> Application.get_env(:platform_admin_emails, [])
+    |> List.wrap()
+    |> Enum.map(&normalize_recipient/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&Accounts.get_user_by_email/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(& &1.email)
+    |> Enum.uniq()
   end
 
   ## ── Alert dispatch (the softer half) ─────────────────────────────────────

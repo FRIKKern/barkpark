@@ -223,7 +223,13 @@ config :barkpark_cloud, Oban,
        # >14d, dead agent_tokens >30d past revoked/expired, usage_samples >14d).
        # Runs off-peak at 03:30 so it never stampedes the on-the-hour sweeps; a
        # missed tick is harmless (max_attempts: 1 — the next day catches up).
-       {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker}
+       {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker},
+       # isu-w5: the daily fleet-update digest — one plain-text operator email
+       # summarizing where every instance stands against the newest release the
+       # fleet has seen (curator judgment → a human inbox). Runs at 06:00 (quiet,
+       # off every on-the-hour + off-peak sweep). max_attempts: 1 + unique daily —
+       # a missed tick is harmless and a double-enqueue must not double-send.
+       {"0 6 * * *", BarkparkCloud.Workers.DailyDigestWorker}
      ]}
   ]
 
@@ -239,6 +245,15 @@ config :barkpark_cloud, BarkparkCloud.Mailer, adapter: Swoosh.Adapters.Local
 config :barkpark_cloud, BarkparkCloud.Notifications,
   from_address: "noreply@barkpark.cloud",
   from_name: "Barkpark Cloud"
+
+# isu-w5: the platform-operator recipient allowlist for the daily fleet digest.
+# There is NO platform-admin flag on a User (roles are strictly per-team), so the
+# operator names the admin account(s) `mix barkpark_cloud.create_admin` minted
+# here; each entry is resolved to a REGISTERED user before it is ever mailed. Empty
+# by default → the digest worker is a logged no-op until an operator opts in.
+# runtime.exs overrides from PLATFORM_ADMIN_EMAILS (comma-separated) in prod;
+# unset/blank there keeps this honest [] no-op.
+config :barkpark_cloud, :platform_admin_emails, []
 
 # No HTTP-client dep for the SMTP/Local/Test adapters — only a hosted-API adapter
 # (Resend/SendGrid, deferred) would need one. Keeps the "no new HTTP dep" posture
