@@ -122,9 +122,10 @@ and close with the claim epoch — the same contract every other onramp teaches.
 
 ## The tools
 
-Five curated task tools ship by default (`--tools tasks`), each carrying the
+Six curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description: `task_ready`, `task_next` (claim +
-epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`.
+epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
+`task_prime` (one-call rehydration for a resuming agent).
 
 `--tools all` (`"args": ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as a tool (`bp_<noun>_<verb>`), auto-derived from the live
