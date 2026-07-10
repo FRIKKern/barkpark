@@ -11,12 +11,77 @@ defmodule BarkparkWeb.Telemetry do
     children = [
       # Telemetry poller will execute the given period measurements
       # every 10_000ms. Learn more here: https://hexdocs.pm/telemetry_metrics
-      {:telemetry_poller, measurements: periodic_measurements(), period: 10_000}
-      # Add reporters as children of your supervision tree.
-      # {Telemetry.Metrics.ConsoleReporter, metrics: metrics()}
+      {:telemetry_poller, measurements: periodic_measurements(), period: 10_000},
+
+      # PROD-REACHABLE reporter. `metrics/0` below is only ever consumed by
+      # LiveDashboard, which the router mounts behind `if dev_routes` — true
+      # ONLY in config/dev.exs. So in prod the whole metrics list was computed
+      # by nobody: no answer to "p95 Ecto query?", "which route is slow?", "is
+      # VM memory climbing?" (the last a real OOM scar). This Prometheus core
+      # aggregator attaches telemetry handlers to each event in
+      # `prometheus_metrics/0` and holds the running aggregates in ETS; the
+      # token-gated `GET /v1/instance/metrics` route scrapes them. It runs in
+      # EVERY env (not dev-gated) so the prod hole cannot reopen unnoticed.
+      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()}
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  @doc """
+  The Prometheus-exposed subset, one metric per NAMED production question.
+
+  `TelemetryMetricsPrometheus.Core` supports only counter/sum/last_value/
+  distribution (NOT `summary` — the type `metrics/0` uses for LiveDashboard), so
+  this is a deliberate, curated list rather than a reuse of `metrics/0`. Latency
+  questions use `distribution` (a Prometheus histogram: `histogram_quantile` over
+  the buckets yields p95); level questions use `last_value` (a gauge). Nothing
+  here is decorative — every metric answers a question the finding named.
+  """
+  def prometheus_metrics do
+    # Millisecond buckets shared by every latency histogram. Covers a fast
+    # in-pool query (<10ms) through a pathological multi-second request.
+    latency_buckets = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
+
+    [
+      # Q: "what is p95 Ecto query time?" — total_time is the wall-clock a caller
+      # actually waited (queue + query + decode). Its histogram is the headline.
+      distribution("barkpark.repo.query.total_time",
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "End-to-end Ecto query latency (queue+query+decode). p95 via histogram_quantile."
+      ),
+      # Q: "is the query slow because of the DB or a starved connection pool?" —
+      # queue_time isolates pool saturation (a distinct prod failure that
+      # masquerades as slow queries) from actual execution time.
+      distribution("barkpark.repo.query.queue_time",
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description: "Time waiting for a DB connection — climbs when the pool is saturated."
+      ),
+      # Q: "which route is slow?" — per-route request-handling histogram. The
+      # :route tag is the discriminator that answers *which* one.
+      distribution("phoenix.router_dispatch.stop.duration",
+        tags: [:route],
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description: "Per-route dispatch latency — tag :route identifies the slow endpoint."
+      ),
+      # Q: "is VM memory climbing?" — the documented OOM scar (codelist OOM kills
+      # the box). A gauge sampled every 10s by telemetry_poller; a climbing line
+      # is a leak caught before OOM instead of after.
+      last_value("vm.memory.total",
+        unit: {:byte, :kilobyte},
+        description: "Total BEAM memory — watch for a monotonic climb (leak → OOM)."
+      ),
+      # Q: "is the scheduler backing up?" — run-queue length is the twin health
+      # signal to memory; a sustained non-zero backlog means the box is overloaded
+      # before latency alone makes it obvious.
+      last_value("vm.total_run_queue_lengths.total",
+        description: "Total scheduler run-queue length — sustained >0 means the VM is saturated."
+      )
+    ]
   end
 
   def metrics do

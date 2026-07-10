@@ -1303,6 +1303,12 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     get("/instance/request-stats", RequestStatsController, :show)
+
+    # Prometheus scrape of the telemetry aggregates (p95 Ecto query, per-route
+    # latency, VM memory/run-queue). Same Bearer seam — NOT the public `/metrics`
+    # convention, because request-rate/latency/memory is instance-operational
+    # data. Served by TelemetryMetricsPrometheus.Core (BarkparkWeb.Telemetry).
+    get("/instance/metrics", MetricsController, :scrape)
   end
 
   # ── Federated discovery ─────────────────────────────────────────────────

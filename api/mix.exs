@@ -48,6 +48,11 @@ defmodule Barkpark.MixProject do
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
+      # Prometheus scrape aggregator (Core only — no bundled Cowboy server; we
+      # expose /v1/instance/metrics through our own token-gated pipeline). This
+      # is the prod-reachable reporter for BarkparkWeb.Telemetry — LiveDashboard
+      # is dev_routes-only, so without this every metric is computed by nobody.
+      {:telemetry_metrics_prometheus_core, "~> 1.1"},
       {:gettext, "~> 1.0"},
       {:jason, "~> 1.2"},
       # GFM markdown -> AST for chat replies rendered as PortableDoc blocks
