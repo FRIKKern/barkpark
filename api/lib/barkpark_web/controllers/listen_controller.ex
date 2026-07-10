@@ -179,7 +179,13 @@ defmodule BarkparkWeb.ListenController do
           # A `:drop` means the owner-row ACL denied this caller the live row
           # (an owner_scoped doc owned by another user) — skip emitting so the
           # frozen snapshot of that row never reaches a non-owner subscriber.
-          case redacted_result(msg, dataset, caller_context, scope) do
+          #
+          # `live_result/4` short-circuits the per-event `Content.get_document`
+          # round-trip for an ADMIN caller (both redaction gates are proven
+          # no-ops for admins — see its doc), forwarding the broadcast's
+          # already-in-hand `:internal` render; every redacting caller still
+          # re-derives visibility through `redacted_result/4` below.
+          case live_result(msg, dataset, caller_context, scope) do
             :drop ->
               listen_loop(conn, dataset, workspace_id, caller_context, scope)
 
@@ -270,6 +276,42 @@ defmodule BarkparkWeb.ListenController do
 
   defp env(key, default),
     do: Application.get_env(:barkpark, __MODULE__, [])[key] || default
+
+  # Live-leg result for a broadcast `msg`, with an admin fast-path that ELIDES
+  # the per-event `Content.get_document` round-trip `redacted_result/4` runs.
+  #
+  # EFFICIENCY (task-4469f80374b0bd24): the broadcast already carries
+  # `msg.document = Envelope.render(doc, nil, :internal)` — the UNREDACTED render
+  # of the just-committed doc (broadcast.ex), current as of THIS event. For an
+  # admin caller both gates `redacted_result/4` exists to enforce are provable
+  # no-ops:
+  #   * field visibility — `Envelope.render`/`redact` return the envelope
+  #     UNCHANGED for `is_admin: true` (envelope.ex), so re-rendering the fetched
+  #     doc yields bytes identical to the `:internal` snapshot already in hand
+  #     (the base envelope is schema/caller-independent); and
+  #   * owner-row ACL — `Content.Scope.scope_to_owner` leaves an admin query
+  #     UNTOUCHED (scope.ex), so `get_document` never denies an admin a present
+  #     row and the `:drop` leg is unreachable for an admin.
+  # So the fetch is pure overhead for admins: N subscribers × M mutations/s stops
+  # implying N*M redundant DB round-trips during a burst. Forward `msg.document`.
+  #
+  # FAIL CLOSED ([[field-visibility-read-paths]]): ONLY `is_admin: true` forwards.
+  # EVERY other caller — including a non-admin api_token that bypasses owner
+  # scoping but STILL redacts `private`/`owner_only` fields, plus every anonymous
+  # / user / nil caller — falls through to `redacted_result/4`'s re-render +
+  # re-seal path. When in doubt, re-fetch. This optimizes the LIVE leg only; the
+  # REPLAY leg keeps calling `redacted_result/4` directly so it still re-renders
+  # the CURRENT document (a privacy/content change since a replayed old event is
+  # honoured there, where the snapshot is NOT current-as-of-now).
+  #
+  # Public (`@doc false`) as a testing seam — the live `receive` loop is
+  # otherwise un-assertable, same convention as `redacted_result/4`,
+  # `format_event/2` and `forward_event?/2`.
+  @doc false
+  def live_result(msg, _dataset, %CallerContext{is_admin: true}, _scope), do: msg.document
+
+  def live_result(msg, dataset, caller_context, scope),
+    do: redacted_result(msg, dataset, caller_context, scope)
 
   # The field-visibility + row-ACL chokepoint for the SSE stream. `event` is
   # either a live broadcast `msg` or a stored `%MutationEvent{}` — both carry
