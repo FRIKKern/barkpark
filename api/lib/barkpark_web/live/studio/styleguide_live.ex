@@ -260,7 +260,9 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
             } style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px;">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <button type="button" class={cls}>Button</button>
-                <button type="button" class={cls} disabled style="opacity: .5; cursor: not-allowed;">
+                <%!-- disabled paint comes from the real .btn:disabled rule —
+                      the gallery shows the true rendering, no simulation --%>
+                <button type="button" class={cls} disabled>
                   Disabled
                 </button>
               </div>
@@ -269,16 +271,15 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
             <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px;">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <button type="button" class="btn btn-icon" aria-label="Icon button">
-                  <span aria-hidden="true">＋</span>
+                  <.icon name="plus" size={16} />
                 </button>
                 <button
                   type="button"
                   class="btn btn-icon"
                   aria-label="Icon button, disabled"
                   disabled
-                  style="opacity: .5; cursor: not-allowed;"
                 >
-                  <span aria-hidden="true">＋</span>
+                  <.icon name="plus" size={16} />
                 </button>
               </div>
               <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.btn .btn-icon</span>
@@ -345,7 +346,8 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
                 <span class="form-switch-track"></span>
                 <span class="form-switch-state">Off</span>
               </label>
-              <label class="form-switch" style="opacity: .5; cursor: not-allowed;">
+              <%!-- disabled paint comes from .form-switch:has(input:disabled) --%>
+              <label class="form-switch">
                 <input type="checkbox" checked disabled />
                 <span class="form-switch-track"></span>
                 <span class="form-switch-state">Disabled</span>
