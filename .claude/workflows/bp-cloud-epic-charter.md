@@ -138,5 +138,51 @@ After this wave: NOTHING. The epic is closed; the only residual is the D12 backl
 
 ## Wave log
 
-_(reviewer appends after the wave merges; the epic-complete entry itself belongs in
-bp-airdrop-grants-endgame-charter.md per D11)_
+_(the epic-complete entry itself belongs in bp-airdrop-grants-endgame-charter.md per D11)_
+
+### Wave 2026-07-10 — leak-seal (2 of 3 slices built; close-out correctly BLOCKED)
+
+**Landed (review-fixed, gates green, RED-before independently re-proven):**
+
+- **ag-search-grant-leak** — sealed per D1+D2+D3: `grant_scoped` threads through
+  `QueryPipeline.retriever_opts` (one point covers primary + drop-tokens + typo-widen);
+  the ONE public wrapper `Content.Scope.maybe_scope_to_grants/2` hoisted, private copy in
+  `Content.Query` deleted (call sites re-pointed via import); `DocumentsRetriever`
+  applies it once on `base` (results+count+facets, every route); Indx forwards the flag
+  (rows via `get_documents_by_ids`) and recomputes `total` via new grant-narrowed
+  `Content.count_documents_by_ids/3` (fail-closed, 2 new unit tests). Deny test un-skipped
+  in the same PR. Reviewer re-proved RED-before by reverting pipeline+retriever to main:
+  exactly 1 failure (the deny), positive control green; restored → 0. Gate: 659/0.
+  Reviewer fix: one `mix format` nit. **Final branch:
+  `loop-epic/seal-the-search-grant-leak-thread-grant--0-r`.**
+- **ag-backlinks-grant-leak** — sealed per D4+D5 inside the shared Graph helpers:
+  `resolve_doc/3`, `scope_query/2` (docs_by_id/hydrate_nodes/fetch_doc → HTTP backlinks,
+  scoped-route backlinks AND the Studio graph/blast-radius pane), `scoped_docs_query/1`
+  (defense-in-depth, inert today). Uncovered target → nil → `[]` backlinks (200, never
+  404). 4 new unit tests (resolve_doc / reverse_referencers / traverse hydration /
+  nil-ctx fail-closed) + un-skipped HTTP deny. Reviewer re-proved RED-before by reverting
+  graph.ex to main: 5 failures; restored → 31/0. Reviewer fixes: **performed the D7
+  pre-merge swap** (branch rebased onto the search -r branch; all three bridge
+  `if opts[:grant_scoped]` guards → `Scope.maybe_scope_to_grants/2`; wrapper doc +
+  tenancy.md consumer lists gain the Graph helpers) and refreshed the deny test's stale
+  "backlinks LEAKS" moduledoc. **Final branch:
+  `loop-epic/seal-the-backlinks-grant-leak-opts-condi-1-r` — STACKED on the search -r
+  branch; merge search first, then this (its PR diff collapses to graph-only once search
+  merges).** Combined suites on the stack: 813/0.
+
+**Stalled (honestly):** **ag-epic-closeout** — builder verified its precondition unmet
+(no seal PRs merged) and refused to fabricate a close; task left claimed + in_progress,
+all criteria unmet, zero code changes. Correct per the false-done finding. It
+pre-recovered the D11 inputs (stranded #2145 retro at commit 48a18f85; authoritative
+test count 6,348; D12 backlog framing for `broadcast_revoked/1`).
+
+**Ledger:** all three wave tasks truthful (claims live, evidence stamped, merge-gated
+criteria left for the lead); anchor untouched (open, unclaimed, 0 criteria). No fixes
+needed.
+
+**Next wave / lead:** merge search-r (Elixir Test gate — .ex waits for it), then
+backlinks-r; flip both merge-gated criteria; then re-run **ag-epic-closeout** exactly as
+specced (D10 stamp anchor, D11 wave-log debt in bp-airdrop-grants-endgame-charter.md,
+D12 file the ONE broadcast_revoked backlog task, close the anchor). Note the closeout
+claim (epoch 1) may lapse — re-claim before closing. After that: NOTHING remains on this
+epic.

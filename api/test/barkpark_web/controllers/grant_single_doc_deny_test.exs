@@ -9,16 +9,17 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
   id outside the grant ladder, with an unowned-token positive control that DOES
   see the out-of-scope material.
 
-  ## `show` ENFORCES; `backlinks` LEAKS (task `ag-backlinks-grant-leak`)
+  ## Both cells ENFORCE (backlinks sealed by `ag-backlinks-grant-leak`)
 
-  `show` is grant-narrowed correctly — `Content.get_document/4` applies
+  `show` was always grant-narrowed — `Content.get_document/4` applies
   `maybe_scope_to_grants`, so an uncovered dataset OR type 404s (proven live
-  below). `backlinks` is NOT: `reverse_referencers` → `resolve_doc` + `docs_by_id`
-  (graph.ex) apply only tenancy/owner scope, never `maybe_scope_to_grants`, so a
-  grantee reads referencers for an uncovered dataset. That fix is PRODUCT code
-  (out of scope for the test-only `ag-deny-matrix-gaps`), so the backlinks deny
-  is committed `@tag :skip` as an executable reproduction — its positive control
-  stays live. Remove the skip when `ag-backlinks-grant-leak` lands.
+  below). `backlinks` originally LEAKED: `reverse_referencers` → `resolve_doc`
+  + `docs_by_id` (graph.ex) applied only tenancy/owner scope, so a grantee read
+  referencers for an uncovered dataset — the deny below was committed
+  `@tag :skip` in #2145 as the executable reproduction. `ag-backlinks-grant-leak`
+  sealed the shared graph helpers (`resolve_doc`/`scope_query` now apply
+  `Scope.maybe_scope_to_grants/2`); the deny is un-skipped and LIVE, protecting
+  the fix.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -156,10 +157,10 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
       assert "in-scope referencer" in backlink_titles(resp)
     end
 
-    # SKIPPED: confirmed leak — backlinks bypasses grant Layer-2 narrowing. This
-    # is the executable reproduction; go green once ag-backlinks-grant-leak lands.
-    @tag skip:
-           "LEAK ag-backlinks-grant-leak: reverse_referencers (resolve_doc/docs_by_id) never applies maybe_scope_to_grants"
+    # ag-backlinks-grant-leak SEALED: reverse_referencers now grant-narrows via
+    # the shared graph helpers (resolve_doc/scope_query), so an uncovered-dataset
+    # target resolves to nil → [] backlinks. (Was committed @tag :skip in #2145 as
+    # the executable reproduction; unskipped + fixed in this PR.)
     test "out-of-scope target (uncovered dataset) returns empty backlinks", ctx do
       raw = grantee(ctx)
       resp = build_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@other_ds}/target-out")

@@ -54,7 +54,7 @@ Canonical scope helpers in `api/lib/barkpark/content/scope.ex`:
 - **`scope_to_workspace/3`** — **fail-closed**: a `nil` workspace_id compiles to `where: false` (zero rows), never a silent all-rows query. Binary id → `WHERE workspace_id = $1` (`AND project_id = $2` when given).
 - **`scope_to_workspace_global/1`** — explicit, greppable cross-tenant opt-in (replaced the old silent nil-passthrough); used by surfaces not yet path-scoped (some Studio LiveViews).
 - **`scope_to_workspace_or_global/3`** — back-compat bridge for flat routes: nil → global, binary → the fail-closed form.
-- **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read — the `Content.Query` sites, the Postgres search `DocumentsRetriever` base query, and the Indx hydration read + `count_documents_by_ids/3` — so no read forgets the gate.
+- **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read — the `Content.Query` sites, the Postgres search `DocumentsRetriever` base query, the Indx hydration read + `count_documents_by_ids/3`, and the `Content.Graph` helpers (backlinks + Studio graph pane) — so no read forgets the gate.
 
 When `multi_tenant?/0` is true, the content-edge projection path uses strict `scope_to_workspace/3`, not the `_or_global` bridge — preventing cross-tenant `content_edges` in multi-tenant installs.
 
