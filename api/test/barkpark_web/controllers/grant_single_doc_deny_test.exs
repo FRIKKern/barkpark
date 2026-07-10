@@ -156,10 +156,10 @@ defmodule BarkparkWeb.GrantSingleDocDenyTest do
       assert "in-scope referencer" in backlink_titles(resp)
     end
 
-    # SKIPPED: confirmed leak — backlinks bypasses grant Layer-2 narrowing. This
-    # is the executable reproduction; go green once ag-backlinks-grant-leak lands.
-    @tag skip:
-           "LEAK ag-backlinks-grant-leak: reverse_referencers (resolve_doc/docs_by_id) never applies maybe_scope_to_grants"
+    # ag-backlinks-grant-leak SEALED: reverse_referencers now grant-narrows via
+    # the shared graph helpers (resolve_doc/scope_query), so an uncovered-dataset
+    # target resolves to nil → [] backlinks. (Was committed @tag :skip in #2145 as
+    # the executable reproduction; unskipped + fixed in this PR.)
     test "out-of-scope target (uncovered dataset) returns empty backlinks", ctx do
       raw = grantee(ctx)
       resp = build_conn() |> auth(raw) |> get("/v1/data/backlinks/#{@other_ds}/target-out")
