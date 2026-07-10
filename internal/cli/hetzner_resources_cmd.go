@@ -592,6 +592,10 @@ FLEET (control plane — needs 'bp login')
             source is quiet, never a fake zero          (bp cloud usage -h)
   members   your team's seats + pending invitations, the console's Members
             panel in the terminal                       (bp cloud members -h)
+  autoupdate pin · unpin · pause · resume one instance's self-update policy
+                                                    (bp cloud autoupdate -h)
+  rollout   the fleet-wide autoupdate brake: status · halt · resume
+                                                        (bp cloud rollout -h)
 
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   providers registered + planned providers and the capabilities each honours
