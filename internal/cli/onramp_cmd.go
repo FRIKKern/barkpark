@@ -11,6 +11,9 @@ package cli
 //
 // Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli |
 // copilot.
+// agents-md. agents-md is the odd one out — not an MCP stanza but the ONE
+// canonical consumer AGENTS.md teach block (the ~23-tool convergence standard),
+// marker-wrapped, that the three wave-1 teach-layer wrappers now derive from.
 // windsurf and gemini-cli both reuse mcpJSONStanza verbatim (charter decision 7)
 // — zero new mechanism — differing only in destination path and env dialect, and
 // both print codex-style MERGE-the-mcpServers-key guidance (their files are
@@ -119,7 +122,7 @@ type onrampSpec struct {
 
 // onrampLocalTargets is the ordered set of targets the verb prints config for.
 func onrampLocalTargets() []string {
-	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot"}
+	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot", "agents-md"}
 }
 
 // onrampServer resolves the URL to bake into the env block: --server wins, else
@@ -241,6 +244,71 @@ func cursorCloudEnvironmentJSON() string {
 }`, onrampInstallLine)
 }
 
+// AGENTS.md managed-block markers. `bp onramp agents-md` wraps the canonical
+// teach text in these so a re-run (and, later, `--write`) can find its own block
+// and replace ONLY between them — never a consumer's surrounding content.
+const (
+	agentsMDMarkerBegin = "<!-- barkpark:onramp:begin -->"
+	agentsMDMarkerEnd   = "<!-- barkpark:onramp:end -->"
+)
+
+// agentsMDHeading is the section title the emitted AGENTS.md block carries — the
+// framing above the shared body inside the markers.
+const agentsMDHeading = "## Task tracking — Barkpark (bp)"
+
+// renderAgentsMDBody is the ONE consumer-facing Barkpark teach text, the SUPERSET
+// the three wave-1 wrappers converge on: the cursor/claude common body (keeping
+// `bp task prime`, the Conventions header, the parent_id nesting line, and the
+// 409 doc_changed_since_claim line that CODEX.md's rendering had dropped). The two
+// per-derivation lines are parameters: workerPrefix seeds the worker-id line
+// (`<tool>-…`, `cursor-…`, `claude-…`) and mcpDocRef seeds the MCP footer's
+// "see …" pointer. Every other line is invariant, so the three wrappers can only
+// differ in exactly those two spots — the drift the parity test guards.
+func renderAgentsMDBody(workerPrefix, mcpDocRef string) string {
+	workerLine := "- Worker id: `" + workerPrefix + "-<your-name-or-branch>` — pick one and keep it for claim/close symmetry."
+	mcpFooter := "MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `" + mcpDocRef + "`."
+	lines := []string{
+		"All task tracking uses Barkpark — never markdown TODO lists, never a TODO tool.",
+		"The `bp` CLI talks to the configured server (`~/.config/barkpark/`).",
+		"",
+		"- `bp task ready` — list available work",
+		"- `bp task next <worker>` — atomically claim the next ready task; claim FIRST — the claim returns the brief and an epoch",
+		"- `bp task get <id>` — task detail (carries children + child_count)",
+		"- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.",
+		"- `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)",
+		"- `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events",
+		"- `bp capabilities -o json` — the whole API manifest when unsure",
+		"",
+		"Conventions:",
+		workerLine,
+		"- `lifecycle_status` is the done-signal (`open` → `done`), not the claim record.",
+		"- Closing can mark acceptance criteria in the same atomic write:",
+		"  `--set 'criteria:=[{\"index\":0,\"met\":true,\"evidence\":\"...\"}]'`",
+		"- Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.",
+		"- If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.",
+		"",
+		mcpFooter,
+	}
+	return strings.Join(lines, "\n")
+}
+
+// agentsMDCanonicalBody is the emitted/canonical rendering: worker-id generalized
+// to `<tool>-…` and the MCP footer pointed at the onramp hub. This exact string is
+// what CODEX.md documents; the .cursor/.claude wrappers embed their own
+// per-tool renderings of the same body.
+var agentsMDCanonicalBody = renderAgentsMDBody("<tool>", "docs/setup/AGENT-ONRAMPS.md")
+
+// agentsMDBlock is the full marker-managed block `bp onramp agents-md` emits into
+// a consumer's ./AGENTS.md: begin marker, section heading, the canonical body,
+// end marker. The markers make the block idempotently findable so a re-run
+// replaces only itself.
+func agentsMDBlock() string {
+	return agentsMDMarkerBegin + "\n" +
+		agentsMDHeading + "\n\n" +
+		agentsMDCanonicalBody + "\n" +
+		agentsMDMarkerEnd
+}
+
 // buildOnrampSpec assembles the file set + verify step for a local target. ok is
 // false for an unknown target (the caller renders the valid-set usage error).
 func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
@@ -317,8 +385,28 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 			},
 			Verify: `run "MCP: List Servers" from the VS Code Command Palette — barkpark appears; its task tools show in Copilot agent mode's tool picker`,
 		}, true
+	case "agents-md":
+		// The tool-agnostic teach block for the ~23-tool AGENTS.md convergence
+		// standard — Codex, Aider, and every AGENTS.md-reading agent. It carries no
+		// server/token (it teaches the claim-first contract, not an MCP stanza), so
+		// server and token are ignored. Marker-wrapped so a re-run replaces only its
+		// own block, never a consumer's surrounding AGENTS.md content.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				{Path: "./AGENTS.md", Content: agentsMDBlock()},
+			},
+			Verify: "open a fresh agent session in this repo — it reads AGENTS.md and knows the claim-first task contract before touching the board",
+		}, true
 	}
 	return onrampSpec{}, false
+}
+
+// onrampTargetUsesServer reports whether a target bakes the resolved server URL
+// into its emission. agents-md is a pure teach block with no MCP stanza, so the
+// human print skips the `# server:` line for it.
+func onrampTargetUsesServer(target string) bool {
+	return target != "agents-md"
 }
 
 // runOnramp is the `bp onramp <target>` built-in. Prints the config by default;
@@ -399,7 +487,9 @@ func runOnramp(out *writer, g globals, args []string) int {
 // dialect reminder), and the verify + full-journey pointer.
 func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec) {
 	out.outf("# bp onramp %s — paste these by hand, or re-run with --write to merge them for you.", target)
-	out.outf("# server: %s", server)
+	if onrampTargetUsesServer(target) {
+		out.outf("# server: %s", server)
+	}
 	if token != "" {
 		out.outf("# token:  a literal from --token is baked in below (the default keeps the secret in your shell env).")
 	}
@@ -445,6 +535,15 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 		out.outf("# If the file already holds other servers, MERGE the \"barkpark\" entry into \"servers\" — don't overwrite it.")
 		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${env:BARKPARK_API_TOKEN} reads it (VS Code dialect, shared with Cursor).")
 		out.outf("# Prefer a typed prompt over a shell var? Add an \"inputs\" promptString and reference ${input:id} — see docs/setup/COPILOT.md.")
+	case "agents-md":
+		out.outf("# This is the ONE canonical teach block — the AGENTS.md standard that Codex,")
+		out.outf("# Aider, and every AGENTS.md-reading agent converge on. It bakes no token and")
+		out.outf("# no server URL: it teaches the claim-first task contract, not an MCP stanza.")
+		out.outf("# The barkpark:onramp markers make it a managed block — paste it into your")
+		out.outf("# repo-root ./AGENTS.md (or MERGE it in; keep the markers so a re-run updates")
+		out.outf("# only this block, never your surrounding content).")
+		out.outf("# The .cursor/rules/barkpark-tasks.mdc and .claude/CLAUDE-BARKPARK.md wrappers")
+		out.outf("# are the same body in each tool's native framing.")
 	}
 
 	out.outf("")
@@ -456,7 +555,7 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 
 // printOnrampHelp is the usage/help screen for `bp onramp`.
 func printOnrampHelp(out *writer) {
-	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot> [--write [--force]] [--server URL] [--token TOKEN]")
+	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot|agents-md> [--write [--force]] [--server URL] [--token TOKEN]")
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
 	out.outf("block(s), where they belong, and how to verify. With --write, merge just the")
@@ -470,6 +569,7 @@ func printOnrampHelp(out *writer) {
 	out.outf("  windsurf      ~/.codeium/mcp_config.json stanza (${env:BARKPARK_API_TOKEN}) + merge note")
 	out.outf("  gemini-cli    .gemini/settings.json stanza (${BARKPARK_API_TOKEN}) + global/merge note")
 	out.outf("  copilot       .vscode/mcp.json stanza (top-level `servers`, ${env:BARKPARK_API_TOKEN}) + inputs note")
+	out.outf("  agents-md     ./AGENTS.md marker-managed teach block (the AGENTS.md convergence standard — Codex, Aider, …)")
 	out.outf("")
 	out.outf("chatgpt / claude-ai are remote-agent onramps (no local config) — see docs/setup/REMOTE.md")
 	out.outf("")
