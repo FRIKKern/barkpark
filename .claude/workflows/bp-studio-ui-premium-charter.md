@@ -606,3 +606,50 @@ What comes after (the epic is at its finish line):
   for the byte-anchored token slice, documented in its task evidence).
 - session_html login + tmux polish were judged already-themed in the w2 census;
   nothing owed unless the pixel pack says otherwise.
+
+### Wave 4 — 2026-07-10 (desk structure consistency; reviewed; ready for the lead)
+
+**1 of 2 slices built green; the second is HONESTLY BLOCKED by design** (it is
+a post-merge evidence pack and the ladder has not merged). Ledger: both tasks
+published `in_progress`, claims held (epoch 1), evidence stamped, no false
+`met` flips anywhere.
+
+1. `sup-w4-row-state-ladder` — final branch
+   `loop-epic/desk-rows-speak-one-state-ladder-at-ever-0-r` (review carries ONE
+   follow-up commit). The D25 ladder, CSS-rule-level exactly per D26:
+   `a.pane-item.nav-plugin-entry` color:inherit → `--fg-muted` (+ a matching
+   `:hover → --fg` rule, needed because the entry's 0,2,1 specificity blocks the
+   shared `.pane-item:hover` lift — in-spirit, ratified here); `.pane-doc-title`
+   gains the explicit `--fg-muted` plain tier + hover lift to `--fg` + a
+   selected `--fg` override holding the AA fence; `.pane-item-chevron` adopts
+   hover-reveal and the `:plugin_link` branch emits the shared chevron span
+   (Projects gains the drill affordance); dead `.pane-doc-item` padding rule
+   removed. Part H +6 coupling rows (nav-plugin-entry on both pane grounds,
+   doc-title on the doc-sub ground set), revert→red proven by the builder.
+   Per-depth DOM pins: new `desk_row_ladder_test.exs` (structure/type/doc) +
+   plugin-link label+chevron pin in resolver_outputs_test.exs. REVIEW FIX
+   (coupling-law curation): the chevron's old `--surface` Part H row became a
+   PHANTOM co-occurrence once the glyph is opacity-0 at rest — replaced with
+   its real visible grounds `--bg-muted` (hover fill) / `--bg-accent` (selected
+   fill). Final gate state: check.mjs 27 pairings × 162 AA checks, 1439 tests /
+   0 failures, literal-check + link-lint green, format clean, tokens_gen.ex
+   byte-identical. Adversarial checks that came back CLEAN: plugin-link rows
+   can never carry `.selected` (class hardcoded) so the new 0,2,1 rule cannot
+   put a muted tier on `--bg-accent`; `pane_item`'s `:trailing` slot is only
+   ever the drill chevron (api_tester passes `:badge`), so hover-reveal hides
+   no content. origin/main moved to 602eb4a3 (#2145) AFTER the build — verified
+   merge-tree CLEAN and zero pane-rule overlap.
+2. `sup-w4-pixel-evidence` — NOT RUN, correctly: guerrilla footer still
+   `4fbce80a` (pre-ladder). The builder did NOT fabricate an AFTER pack;
+   instead it re-proved the D24e harness end-to-end and stamped a quantified
+   BEFORE baseline confirming the user's exact bug live (dark: Projects
+   rgb(242,242,242) vs sibling rgb(161,161,170); light: rgb(9,9,11) vs
+   rgb(110,110,119); no chevron on Projects). All criteria honestly met=false.
+
+MERGE TRAIN for the lead: merge `…-at-ever-0-r` (this branch, carries this log
+entry) after the Elixir Test gate; close the ladder task's crit 7 on merge.
+Then guerrilla auto-deploys → the pixel-evidence task unblocks: re-run the
+D24e harness (data-theme attr ONLY, screenshots via repo root then move),
+flip its criteria on the computed-style match, fold the before/after pack
+into the epic crit-4 human-gate material. That re-shoot + the user re-verdict
+are ALL that remain of this epic — no new code veins were found this wave.
