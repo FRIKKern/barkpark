@@ -142,9 +142,18 @@ defmodule Barkpark.Accounts.Webauthn do
   @doc "Delete one of `user`'s credentials by id (scoped — can't touch another user's)."
   @spec delete_credential(User.t(), binary()) :: :ok | {:error, :not_found}
   def delete_credential(%User{id: uid}, id) do
-    case Repo.get_by(WebauthnCredential, id: id, user_id: uid) do
-      nil -> {:error, :not_found}
-      cred -> Repo.delete(cred) |> then(fn {:ok, _} -> :ok end)
+    # Guard the :binary_id cast: a non-UUID :id (e.g. DELETE …/credentials/garbage)
+    # would raise Ecto.CastError → 500 inside get_by. A malformed id matches no
+    # row → not_found. Bind the CAST value, not the raw string.
+    case Repo.uuid_or_nil(id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
+        case Repo.get_by(WebauthnCredential, id: uuid, user_id: uid) do
+          nil -> {:error, :not_found}
+          cred -> Repo.delete(cred) |> then(fn {:ok, _} -> :ok end)
+        end
     end
   end
 end

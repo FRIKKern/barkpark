@@ -181,4 +181,13 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assert authed(token) |> delete("/v1/auth/webauthn/credentials/#{id}") |> json_response(200)
     assert authed(token) |> get("/v1/auth/webauthn/credentials") |> json_response(200) |> Map.fetch!("credentials") == []
   end
+
+  # Binary_id scar: a non-UUID :id must fold into not_found, NOT raise
+  # Ecto.CastError → 500 inside the id: get_by cast. Any authed user could
+  # trigger the 500 trivially by DELETEing a garbage id.
+  test "DELETE a non-UUID credential id → 404 not_found, never a CastError 500", %{token: token, user: user} do
+    assert authed(token) |> delete("/v1/auth/webauthn/credentials/not-a-uuid") |> json_response(404)
+    # context guard short-circuits before any Postgres cast
+    assert {:error, :not_found} == Webauthn.delete_credential(user, "not-a-uuid")
+  end
 end
