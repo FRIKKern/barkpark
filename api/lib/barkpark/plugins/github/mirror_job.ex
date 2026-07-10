@@ -329,12 +329,15 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
       {:ok, _} ->
         # Stamp the DESIRED fingerprint alongside the rev, so the next reconcile
         # compares the issue's future state against exactly what we just wrote.
-        case stamp(
-               doc_id,
-               dataset,
-               %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)},
-               opts
-             ) do
+        # ADVANCE an `adopted` link to `synced` here: the born create path stamps
+        # `synced` in after_create, but an intake→adopt task first reaches
+        # `synced` ONLY through this update PATCH — without it the state field
+        # lies `adopted` forever (task-eb5ac970477f9308).
+        stamp_fields =
+          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)}
+          |> advance_adopted_state(link)
+
+        case stamp(doc_id, dataset, stamp_fields, opts) do
           # Issue mirror converged (PATCH + stamp). NOW run the failure-isolated
           # Projects + relations projections — pass the ORIGINAL link so Projects
           # can diff its stored `projects_fingerprint` (D10 zero-write-when-unchanged).
@@ -472,15 +475,34 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp classify(
          %NetworkError{reason: {:http, status}} = _err,
          _mode,
-         _repo,
-         _num,
-         _doc_id,
-         _dataset,
+         repo,
+         num,
+         doc_id,
+         dataset,
          _opts
        )
        when status in 400..499 do
     # A permanent client error (422 validation, 400 bad request). Retrying it
-    # forever is pointless — dead-letter it (contract #3).
+    # forever is pointless — dead-letter it (contract #3). RECORD it FIRST so the
+    # dead-letter is VISIBLE (charter decision 3): a cancelled Oban job is
+    # invisible outside `oban_jobs.errors` and Health's queue counter excludes
+    # cancelled jobs. Reuse the `out_of_band_edit` kind (D14 no-new-kind law),
+    # discriminated by `detail.source` — the wave-6 slice-4 precedent. Guarded
+    # `is_integer(num)`: the create path passes nil (no issue to attach a row
+    # to). DB-only, dedups per {repo,issue,kind}, zero loop surface. Non-retry
+    # semantics unchanged — the cancel is returned exactly as before.
+    if is_integer(num) do
+      _ =
+        Conflicts.record(%{
+          repo: repo,
+          issue: num,
+          doc_id: doc_id,
+          dataset: dataset,
+          kind: "out_of_band_edit",
+          detail: %{"source" => "client_error", "status" => status}
+        })
+    end
+
     {:cancel, {:client_error, status}}
   end
 
@@ -594,6 +616,23 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   end
 
   defp issue_number(_), do: nil
+
+  # Advance an `adopted` link to `synced` on a successful mirror PATCH — the
+  # consent-moment first push is the only place an intake→adopt task reaches
+  # `synced` (the born create path stamps it in after_create). Keyed on the
+  # CURRENT state string, ONLY `adopted` advances: `detached` is never
+  # overwritten (and structurally never reaches patch — reconcile cancels a
+  # detached link before converge), a `synced` link needs no re-stamp (the
+  # Link.put merge preserves it), and the born create path passes a nil link.
+  # Fail-closed: any unknown/absent state is left exactly as it was.
+  defp advance_adopted_state(fields, link) when is_map(link) do
+    case Map.get(link, "state") do
+      "adopted" -> Map.put(fields, :state, "synced")
+      _ -> fields
+    end
+  end
+
+  defp advance_adopted_state(fields, _link), do: fields
 
   defp rev_of(%Document{rev: rev}), do: rev
 

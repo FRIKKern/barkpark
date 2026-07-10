@@ -481,6 +481,17 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       end)
 
       assert {:cancel, {:client_error, 422}} = MirrorJob.reconcile(id, @dataset, fast())
+
+      # The dead-letter is now VISIBLE (charter decision 3): a cancelled Oban job
+      # is invisible outside oban_jobs.errors, so the 4xx is RECORDED before the
+      # cancel — exactly ONE out_of_band_edit row (D14 reuses the kind), the
+      # client_error discriminated on detail.source + detail.status.
+      assert [conflict] = Conflicts.list(kind: "out_of_band_edit")
+      assert conflict.repo == @repo
+      assert conflict.issue == 8
+      assert conflict.doc_id == id
+      assert conflict.detail["source"] == "client_error"
+      assert conflict.detail["status"] == 422
     end
 
     test "429 with Retry-After → {:snooze, retry_after}", %{bypass: bypass, scope: scope} do
@@ -717,6 +728,11 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 20, state: "detached"}, scope)
 
       assert {:cancel, :detached} = MirrorJob.reconcile(id, @dataset, fast())
+
+      # Detached is NEVER advanced to synced (task-eb5ac970477f9308 guard): the
+      # link short-circuits before converge, so no PATCH and no state stamp ever
+      # touches it — the state stays exactly "detached".
+      assert Link.get(reload(id, scope))["state"] == "detached"
     end
 
     test "no mirror repo configured → {:cancel, :repo_unconfigured}, no HTTP", %{
@@ -755,17 +771,23 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert {:cancel, :intake} = MirrorJob.reconcile(id, @dataset, fast())
     end
 
-    test "adopted link with NO synced_rev still converges (consent-moment first push stays live)",
+    test "adopted link with NO synced_rev still converges + advances state to synced (intake→adopt→edit→mirror)",
          %{bypass: bypass, scope: scope} do
       # PROTECTIVE twin of the intake gate: `adopted` also lacks a synced_rev until its
       # first mirror. The gate keys on the STATE STRING, never synced_rev absence, so
       # the consent-moment first push MUST fire GET + PATCH and stamp synced_rev +
       # fingerprint. Keying on synced_rev absence would strand every just-adopted task.
+      #
+      # It ALSO advances github.state adopted→synced (task-eb5ac970477f9308): the born
+      # create path stamps `synced` in after_create, but an intake→adopt task first
+      # reaches `synced` only through THIS update PATCH. Before the fix patch/9 stamped
+      # only synced_rev/synced_fingerprint and the state field lied `adopted` forever.
       stub_token(bypass)
       id = uniq("gh")
       _task = mk_task!(id, %{"title" => "just adopted"}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 23, state: "adopted"}, scope)
       refute Link.get(reload(id, scope))["synced_rev"]
+      assert Link.get(reload(id, scope))["state"] == "adopted"
 
       stub_get(bypass, 23)
 
@@ -778,6 +800,10 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       gh = Link.get(reload(id, scope))
       assert is_binary(gh["synced_rev"])
       assert is_integer(gh["synced_fingerprint"])
+      # The state field no longer lies: the first mirror advanced adopted→synced.
+      assert gh["state"] == "synced"
+      # The issue number survives the merge.
+      assert gh["issue"] == 23
     end
 
     test "already-synced (synced_rev == _rev) → :ok, no HTTP", %{bypass: bypass, scope: scope} do
