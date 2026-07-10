@@ -51,20 +51,72 @@ defmodule Barkpark.Content.Errors do
     "webhook_not_found" =>
       "Check the webhook id and :dataset in the URL — the endpoint does not exist in this scope.",
     "event_not_found" =>
-      "Check the event id — GET /v1/webhooks/:dataset/:id/deliveries lists this endpoint's recent event ids."
+      "Check the event id — GET /v1/webhooks/:dataset/:id/deliveries lists this endpoint's recent event ids.",
+    # `duplicate_task` is BUILT below (find-or-create gate) but had no hint, so
+    # it was silently absent from known_codes/0 → the served enum omitted a code
+    # every task-create caller can receive. Registering the hint re-enters it.
+    "duplicate_task" =>
+      "This task duplicates an existing one — claim/extend the task in details.similar, or resend with distinct_from set to that id to confirm it is genuinely different."
   }
+
+  # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────
+  # These never pass through build/1 (the controller or plug writes the error
+  # envelope directly), yet they DO reach the wire on PUBLIC /v1 endpoints that a
+  # spec-generated SDK consumes. Registering them here keeps known_codes/0 — and
+  # therefore the OpenAPI `Error.code` enum (openapi.ex) and docs/api-v1.md §9 —
+  # a truthful SUPERSET of what public endpoints emit, so a generated client can
+  # never meet an undeclared enum variant and throw/drop the response. Each entry
+  # names its emitter. The subset invariant (every public-endpoint code ∈
+  # known_codes ∪ off-spec exclusions) is guarded by
+  # test/barkpark_web/contract/error_code_coverage_test.exs.
+  #
+  # These have no hint (the hint table is a fix-suggestion index for envelopes
+  # THIS module builds; the emitting controllers own their own messages), so they
+  # are kept separate from @hints rather than diluting it.
+  @public_inline_codes MapSet.new([
+                         # Papers ingest / block-ops / proposals — bulldocs_ingest_controller.ex
+                         "invalid_paper",
+                         "malformed_op",
+                         "invalid_op",
+                         "malformed_proposal",
+                         "invalid_proposal",
+                         "missing_source",
+                         "source_not_found",
+                         "constraint",
+                         # Sheets ops API — plugins/sheets/web/ops_controller.ex
+                         "malformed_ops",
+                         "batch_too_large",
+                         "session_unavailable",
+                         "invalid_request_id",
+                         # Media collection share link expired — v1/media_collections_controller.ex
+                         "share_expired",
+                         # Access-grant claim + token / ticket-key create (422) —
+                         # access_controller.ex, token_controller.ex, ticket_keys_controller.ex
+                         "invalid_grant",
+                         "unprocessable",
+                         # Step-up auth challenges — require_recent_mfa.ex,
+                         # require_org_mfa_enrolment.ex (an SDK must branch on these)
+                         "mfa_required",
+                         "mfa_enrolment_required"
+                       ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)
 
   @doc """
-  The set of stable `code` strings this module can emit — the canonical §9
-  error vocabulary (docs/api-v1.md). Each registered hint key is a code, so the
-  hint table doubles as the code index. `Barkpark.Api.OpenApi` reads this to
-  build the `Error.code` enum, and a test pins spec↔runtime parity so a code
-  added here without a spec regen fails CI.
+  The set of stable `code` strings the public v1 surface can emit — the
+  canonical §9 error vocabulary (docs/api-v1.md). It is the union of the @hints
+  keys (codes `build/1` produces, each with a fix-suggesting hint) and
+  @public_inline_codes (codes emitted directly by other v1 controllers/plugs).
+  `Barkpark.Api.OpenApi` reads this to build the `Error.code` enum, and a test
+  pins spec↔runtime parity so a code added here without a spec regen fails CI;
+  a second test (error_code_coverage_test.exs) pins the reverse — that every
+  code a public endpoint emits is a member here (or an explicit off-spec
+  exclusion) — so the vocabulary can never silently under-report reality again.
   """
   @spec known_codes() :: MapSet.t()
-  def known_codes, do: @hints |> Map.keys() |> MapSet.new()
+  def known_codes do
+    @hints |> Map.keys() |> MapSet.new() |> MapSet.union(@public_inline_codes)
+  end
 
   def to_envelope(reason, conn) do
     reason
