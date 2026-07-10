@@ -111,6 +111,7 @@
                   "forbidden",
                   "forbidden_field",
                   "halted",
+                  "idempotency_key_in_use",
                   "internal_error",
                   "invalid_filter",
                   "malformed",
