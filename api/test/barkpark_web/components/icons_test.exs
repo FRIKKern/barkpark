@@ -17,6 +17,19 @@ defmodule BarkparkWeb.IconsTest do
       assert Icons.icon_name("📂") == "folder"
     end
 
+    test "maps each desk-type emoji to its dedicated icon" do
+      assert Icons.icon_name("📰") == "newspaper"
+      assert Icons.icon_name("📊") == "table"
+      assert Icons.icon_name("🎫") == "ticket"
+      assert Icons.icon_name("🧩") == "puzzle"
+      assert Icons.icon_name("🗂") == "folder-tree"
+    end
+
+    test "remaps ✅ to check-square and 📑 to sticky-note (no longer shared glyphs)" do
+      assert Icons.icon_name("✅") == "check-square"
+      assert Icons.icon_name("📑") == "sticky-note"
+    end
+
     test "returns 'file' as default for unknown emoji" do
       assert Icons.icon_name("🚀") == "file"
       assert Icons.icon_name("") == "file"
@@ -43,6 +56,33 @@ defmodule BarkparkWeb.IconsTest do
       assert html =~ "<svg"
       # 'file' icon path
       assert html =~ "M15 2H6"
+    end
+
+    test "renders a distinct non-fallback path for every new desk/top-bar glyph" do
+      # {icon name, a path substring unique to that glyph and absent from 'file'}
+      cases = [
+        {"newspaper", "M18 14h-8"},
+        {"table", "M3 15h18"},
+        {"ticket", "M2 9a3 3"},
+        {"puzzle", "M15.39 4.39"},
+        {"folder-tree", "M3 5a2 2 0 0 0 2 2h3"},
+        {"columns", "M12 3v18"},
+        {"kanban", "M6 5v11"},
+        {"check-square", "M21 10.5V19"},
+        {"zap", "9.9-10.2"},
+        {"github", "M9 18c-4.51"},
+        {"clock", "12 6 12 12 16 14"},
+        {"sticky-note", "M15 21v-5"},
+        {"messages-square", "M20 9a2 2"}
+      ]
+
+      for {name, marker} <- cases do
+        html = render_component(&Icons.icon/1, name: name)
+        assert html =~ "<svg", "expected #{name} to render an svg"
+        assert html =~ marker, "expected #{name} to render its own path, got fallback"
+        # Prove it is NOT the 'file' fallback glyph.
+        refute html =~ "M15 2H6a2 2 0 0 0-2 2v16", "#{name} fell back to the 'file' glyph"
+      end
     end
 
     test "respects the size attribute" do

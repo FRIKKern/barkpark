@@ -686,10 +686,21 @@ const NEUTRAL_II = {
   "surface":       {                                 dark: { L: 0.095, C: 0.010 } },
 };
 const STUDIO_II = {
-  "bg-accent":    { light: { L: 0.936, C: 0.006 }, dark: { L: 0.166, C: 0.006 } },
-  "fg-dim":       { light: { L: 0.672, C: 0.008 }, dark: { L: 0.470, C: 0.010 } },
-  "fg-accent":    { light: { L: 0.220, C: 0.014 }                                },
-  "border-muted": {                                 dark: { L: 0.156, C: 0.006 } },
+  "bg-accent":     { light: { L: 0.936, C: 0.006 }, dark: { L: 0.166, C: 0.006 } },
+  // fg-dim L raised toward the ground on BOTH modes so contrast(--fg-dim,--bg)
+  // clears WCAG AA 4.5 for the native (ember/fjord) themes while staying the
+  // dimmest text tier (light L still > muted-text 0.520; dark L still < 0.686).
+  // Evergreen PINS its own fg-dim (zinc rung) — see themes/evergreen.json.
+  "fg-dim":        { light: { L: 0.550, C: 0.008 }, dark: { L: 0.605, C: 0.010 } },
+  "fg-accent":     { light: { L: 0.220, C: 0.014 }                                },
+  "border-muted":  {                                 dark: { L: 0.156, C: 0.006 } },
+  // surface-raised: an elevated panel/card fill that VISIBLY separates from --bg
+  // in dark (evergreen bg OKLCH L 0.141 → raised 0.210, a legible +0.069 step);
+  // light ≈ bg (near-white) since light-mode elevation rides border + shadow.
+  "surface-raised": { light: { L: 0.992, C: 0.004 }, dark: { L: 0.210, C: 0.010 } },
+  // border-subtle: a hairline sitting BETWEEN --border-muted and --bg (dark:
+  // bg 0.141 < subtle 0.185 < border-muted 0.223) — quieter than border-muted.
+  "border-subtle":  { light: { L: 0.960, C: 0.005 }, dark: { L: 0.185, C: 0.008 } },
 };
 const neutralII = (skin, mode, spec) => oklchHsl(spec.L, spec.C, accentHueOf(skin, mode));
 
@@ -810,6 +821,10 @@ function buildFormulas() {
   F["studioChrome.fg-dim.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["fg-dim"].dark);
   F["studioChrome.fg-accent.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["fg-accent"].light);
   F["studioChrome.fg-accent.dark"] = () => "var(--text)";
+  F["studioChrome.surface-raised.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["surface-raised"].light);
+  F["studioChrome.surface-raised.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["surface-raised"].dark);
+  F["studioChrome.border-subtle.light"] = (c) => neutralII(c.skin, "light", STUDIO_II["border-subtle"].light);
+  F["studioChrome.border-subtle.dark"] = (c) => neutralII(c.skin, "dark", STUDIO_II["border-subtle"].dark);
 
   // — onStatus: warm-white on every status chip; the two fills that don't clear
   // AA 4.5 on white (warn/info light) are the charter's known warn/info AA
@@ -926,7 +941,7 @@ export const SLOTS = (() => {
   for (const m of ["light", "dark"]) s.push(`cliCalloutNeutral.${m}`);
   for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`status.${r}.${m}`);
   for (const r of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) for (const m of ["light", "dark"]) s.push(`onStatus.${r}.${m}`);
-  for (const r of ["bg-accent", "border-muted", "fg-dim", "fg-accent"]) for (const m of ["light", "dark"]) s.push(`studioChrome.${r}.${m}`);
+  for (const r of ["bg-accent", "border-muted", "fg-dim", "fg-accent", "surface-raised", "border-subtle"]) for (const m of ["light", "dark"]) s.push(`studioChrome.${r}.${m}`);
   const cliHex = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-selection-bg", "chrome-selection-fg", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"];
   for (const r of cliHex) for (const m of ["light", "dark"]) s.push(`cliChrome.${r}.${m}`);
   for (const r of ["chrome-border", "chrome-border-active", "chrome-label", "chrome-primary-cta", "chrome-on-primary"]) s.push(`cliChrome.${r}`);

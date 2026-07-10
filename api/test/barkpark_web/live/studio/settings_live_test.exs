@@ -68,6 +68,56 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
   end
 
+  # studio-ui-premium sup-w1 — the Settings page is rebuilt on the tokenized
+  # StudioComponents.Controls kit: zero native/unthemed controls, no hardcoded
+  # font, deliberate card/section-header structure. These assertions are the
+  # before/after evidence for the "zero native controls" acceptance criterion.
+  describe "themed controls kit (studio-ui-premium sup-w1)" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @settings_path)
+      # Scope the assertions to the Settings page body only — the surrounding
+      # Studio chrome (top bar, layout) is not this slice's surface.
+      body = view |> element("div.settings-live") |> render()
+      {:ok, body: body}
+    end
+
+    test "no hardcoded native font — the page inherits the token font", %{body: body} do
+      refute body =~ "ui-sans-serif"
+      refute body =~ "ui-monospace"
+    end
+
+    test "every <select> is themed (.form-input) — no bare native dropdown", %{body: body} do
+      # There IS at least one select in the Settings body (the theme picker +
+      # per-plugin placement selects).
+      assert body =~ "<select"
+      # A <select> tag WITHOUT the tokenized .form-input class is a native
+      # control — there must be none.
+      refute body =~ ~r/<select\b(?![^>]*form-input)[^>]*>/
+    end
+
+    test "every checkbox is a themed switch — no bare native checkbox", %{body: body} do
+      checkboxes = length(Regex.scan(~r/type="checkbox"/, body))
+      switches = length(Regex.scan(~r/class="form-switch"/, body))
+      # Plugin toggles render as switches; each checkbox is wrapped by exactly
+      # one .form-switch, so the counts match (and there is at least one).
+      assert checkboxes > 0
+      assert checkboxes == switches
+    end
+
+    test "the tokenized primitives are present — card, section header, form-input, switch",
+         %{body: body} do
+      # Sections are .card surfaces with weighted .h2 headers.
+      assert body =~ ~s(class="card")
+      assert body =~ ~s(class="h2")
+      # Themed inputs + the switch anatomy.
+      assert body =~ "form-input"
+      assert body =~ ~s(class="form-switch")
+      assert body =~ ~s(class="form-switch-track")
+      assert body =~ ~s(class="form-switch-state")
+    end
+  end
+
   describe "workspace theme picker (ts-w4e)" do
     setup %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})

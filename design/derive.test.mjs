@@ -9,7 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   parseColor,
   passthrough,
@@ -533,4 +533,68 @@ test("ts-w5a: on-accent flip is exercised on BOTH primary-fg modes (D16)", () =>
   const darkFg = bare.values["primary-fg.dark"];
   assert.ok(contrast(`hsl(${darkFg})`, "160 42% 62%") >= contrast("0 0% 100%", "160 42% 62%"),
     "dark on-accent picked the higher-contrast foreground (the flip)");
+});
+
+// ── sup-w1: WCAG AA floor for the dim-text tiers across EVERY theme × mode ─────
+//    A future hue/lightness tweak that pushes --fg-dim or --muted-text below the
+//    4.5:1 readability floor must fail LOUDLY here. Enumerates design/themes/*.json
+//    (so a new theme is auto-covered) and asserts both dim tiers on their real
+//    ground: --fg-dim on --bg (settings hints / placeholders) and --muted-text on
+//    --muted-surface (muted panels). These two pairs were the AA holes sup-w1
+//    closed (fg-dim measured 2.53–3.90; evergreen-light muted-text 4.39).
+const ALL_THEMES = readdirSync(new URL("./themes/", import.meta.url))
+  .filter((f) => f.endsWith(".json"))
+  .map((f) => ({
+    name: f.replace(/\.json$/, ""),
+    theme: JSON.parse(readFileSync(new URL(`./themes/${f}`, import.meta.url), "utf8")),
+  }));
+
+test("sup-w1: dim-text tiers clear WCAG AA 4.5 in every theme × mode (fg-dim/bg, muted-text/muted-surface)", () => {
+  assert.ok(ALL_THEMES.length >= 1, "expected at least one authored theme in design/themes/");
+  const AA = 4.5;
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const fgDim = contrast(values[`studioChrome.fg-dim.${mode}`], values[`bg.${mode}`]);
+      assert.ok(
+        fgDim >= AA,
+        `${name} ${mode}: contrast(--fg-dim, --bg) = ${fgDim.toFixed(3)} < ${AA} — dim hint text fails WCAG AA`,
+      );
+      const muted = contrast(values[`muted-text.${mode}`], values[`muted-surface.${mode}`]);
+      assert.ok(
+        muted >= AA,
+        `${name} ${mode}: contrast(--muted-text, --muted-surface) = ${muted.toFixed(3)} < ${AA} — muted panel text fails WCAG AA`,
+      );
+    }
+  }
+});
+
+test("sup-w1: --fg-dim stays the DIMMEST text tier (lower contrast on --bg than --muted-text) per theme × mode", () => {
+  // fg-dim must clear AA yet remain visibly quieter than muted-text — the tier
+  // ordering the design intends. Compared on the shared --bg ground.
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const cDim = contrast(values[`studioChrome.fg-dim.${mode}`], values[`bg.${mode}`]);
+      const cMuted = contrast(values[`muted-text.${mode}`], values[`bg.${mode}`]);
+      assert.ok(
+        cDim <= cMuted,
+        `${name} ${mode}: --fg-dim (${cDim.toFixed(3)}) is not dimmer than --muted-text (${cMuted.toFixed(3)}) on --bg`,
+      );
+    }
+  }
+});
+
+test("sup-w1: --surface-raised is visibly elevated above --bg in dark for the shipped evergreen theme", () => {
+  // The elevation requirement: a raised card must separate from the page in dark.
+  // Measured as OKLCH lightness delta (perceptual), evergreen is the shipped skin.
+  const evergreen = ALL_THEMES.find((t) => t.name === "evergreen");
+  assert.ok(evergreen, "evergreen theme must exist");
+  const { values } = derive(evergreen.theme);
+  const bgL = srgbToOklch(values["bg.dark"]).L;
+  const raisedL = srgbToOklch(values["studioChrome.surface-raised.dark"]).L;
+  assert.ok(
+    raisedL - bgL >= 0.04,
+    `--surface-raised (L ${raisedL.toFixed(3)}) must sit >= 0.04 above --bg (L ${bgL.toFixed(3)}) in dark — got Δ${(raisedL - bgL).toFixed(3)}`,
+  );
 });

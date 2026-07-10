@@ -18,7 +18,7 @@ rule         #e4e4e7    #27272a
 code-fg      #be123c    #fda4af
 code-bg      #f4f4f5    #27272a
 terra        #a23925    #d98a6a
-label        #71717a    #a1a1aa
+label        #6e6e77    #a1a1aa
 
 reading tokens
 font stack:     "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif

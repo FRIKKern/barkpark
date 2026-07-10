@@ -43,7 +43,7 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       # active dataset rides the title trail as its slug. Markup-only
       # anchors — the page <style> block also mentions .scope-title*.
       assert html =~ ~s|phx-click="scope-menu-toggle"|
-      assert html =~ ~r|scope-title-trail">\s*[^<]+ / production\s*<|
+      assert html =~ ~r|scope-title-trail">\s*[^<]+ · production\s*<|
 
       # Nav tabs (Structure active for StudioLive) — hrefs are scoped (P3)
       assert html =~ ~s|<a href="#{scoped_studio("/d/production/studio")}"| and

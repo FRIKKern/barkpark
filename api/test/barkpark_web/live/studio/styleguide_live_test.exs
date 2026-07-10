@@ -97,6 +97,47 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
       for hex <- TokensGen.presence_palette(), do: assert(region =~ "background: #{hex}")
     end
 
+    # sup-w1 — the control-kit gallery: every interactive control-kit class from
+    # root.html.heex rendered as a labelled specimen, so the page doubles as the
+    # living control spec a human signs off on (light + dark).
+    test "Controls section renders the class-based control-kit specimens", %{region: region} do
+      # the section header + its anchor
+      assert region =~ ~s(data-test-id="sg-controls")
+      assert region =~ ">Controls</h2>"
+
+      # buttons — the variants, enabled + disabled
+      assert region =~ ~s(class="btn btn-primary")
+      assert region =~ ~s(class="btn btn-ghost")
+      assert region =~ ~s(class="btn btn-destructive")
+      assert region =~ ~s(class="btn btn-sm")
+      assert region =~ ~s(class="btn btn-icon")
+      assert region =~ "disabled"
+
+      # inputs — text AND select (the themed-chevron variant) AND textarea
+      assert region =~ ~s(type="text" class="form-input")
+      assert region =~ ~s(<select class="form-input")
+      assert region =~ ~s(<textarea class="form-input")
+
+      # toggles — checkbox + the labelled switch (track + on/off state)
+      assert region =~ ~s(class="form-checkbox")
+      assert region =~ ~s(class="form-switch")
+      assert region =~ ~s(class="form-switch-track")
+      assert region =~ "form-switch-state"
+
+      # card with its divided header
+      assert region =~ ~s(class="card")
+      assert region =~ ~s(class="card-header")
+
+      # badge family + the segmented perspective tabs
+      assert region =~ ~s(class="badge badge-published")
+      assert region =~ ~s(class="badge badge-active")
+      assert region =~ ~s(class="perspective-tabs")
+      assert region =~ ~s(class="perspective-tab active")
+
+      # every specimen is documented by its class name in muted mono
+      assert region =~ ~s(data-test-id="sg-control-group")
+    end
+
     # AC2 — the non-vacuous drift gate. Every hex that appears in an APPLIED style
     # attribute must be a generated CATEGORICAL value; a role colour painted with a
     # literal hex (instead of var(--…)) would land here and fail. Hex-as-CONTENT

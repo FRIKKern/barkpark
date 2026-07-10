@@ -133,7 +133,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       # The title shows the workspace name + the "project / dataset" trail
       # (dataset rides the trail as its SLUG).
       assert html =~ ~s{scope-title-ws">#{acme_ws.name}</span>}
-      assert html =~ ~r{scope-title-trail">\s*#{acme_blog.name} / #{@dataset}\s*<}
+      assert html =~ ~r{scope-title-trail">\s*#{acme_blog.name} · #{@dataset}\s*<}
 
       # Open the menu: BOTH member workspaces are offered.
       open = render_click(view, "scope-menu-toggle", %{})
@@ -211,7 +211,7 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
       assert assigns.current_project.slug == acme_blog.slug
 
       # The scope title now shows the new workspace's project in its trail.
-      assert render(view) =~ ~r{scope-title-trail">\s*#{acme_blog.name} / }
+      assert render(view) =~ ~r{scope-title-trail">\s*#{acme_blog.name} · }
     end
 
     test "switch-workspace to a NON-MEMBER workspace is REJECTED (scope unchanged)", %{

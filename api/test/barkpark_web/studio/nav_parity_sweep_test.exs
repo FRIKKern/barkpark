@@ -378,7 +378,11 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
     |> LazyHTML.query(~s([data-test-id="top-menu-tab"]))
     |> Enum.map(fn el ->
       frag = LazyHTML.from_fragment(LazyHTML.to_html(el))
-      label = frag |> LazyHTML.text() |> String.trim()
+      # Icons-only tabs (sup-w1): the human label rides aria-label; visible
+      # text is gone. Fall back to text so a future labelled tab still parses.
+      aria = frag |> LazyHTML.attribute("aria-label") |> List.first()
+      text = frag |> LazyHTML.text() |> String.trim()
+      label = if aria && aria != "", do: aria, else: text
       class = frag |> LazyHTML.attribute("class") |> List.first() || ""
       %{label: label, active: css_has_class?(class, "active")}
     end)
