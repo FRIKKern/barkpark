@@ -282,12 +282,13 @@ func gatherReport(cfg ReportConfig) Report {
 }
 
 // requestStatsPath is the instance route the ReqStatsProbe reads, served by the
-// sibling wave-5 slice (cloud-console-w5-instance-req-stats). It answers
+// sibling wave-5 slice (cloud-console-w5-instance-req-stats — mounted in
+// api/lib/barkpark_web/router.ex as GET /v1/instance/request-stats). It answers
 // 200 {"req_per_s": float, "p95_ms": int|null, "window_s": int} for a valid
 // bearer token; an instance built before that slice returns 404, which the probe
 // degrades to sentinels (version-skew honesty, D48/D51). This string is the
 // cross-slice contract — keep it in lockstep with the route the instance mounts.
-const requestStatsPath = "/v1/request-stats"
+const requestStatsPath = "/v1/instance/request-stats"
 
 // reqStatsTimeout bounds the per-beat RequestStats GET. It is short by design:
 // the stats read must never stall the whole report cycle, and a slow/hung box
