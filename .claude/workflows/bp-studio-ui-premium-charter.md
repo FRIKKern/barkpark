@@ -393,3 +393,95 @@ desk reads premium in pixels (anatomy + chrome + counts + dots all land) — the
 concern, and it is a token-value fix (`sup-w3-token-evenness`), NOT a pane-model
 gap. The amendment decision remains the reviewer's to ratify once elevation lands
 on ember/fjord dark; nothing in the QA pixels argues the pane MODEL is the problem.
+
+### Wave 3 — 2026-07-10 (reviewed; ready for the lead's merge train)
+
+**All five slices built green and reviewed; nothing stalled; ZERO review fixes
+needed** — the first wave where every slice survived adversarial review
+unchanged (D17's pre-named pins and the w2 lessons did their job). Ledger: all
+five tasks published `in_progress`, claims held (epoch 1), every criterion
+stamped with evidence, only the merge-gated criteria open for the lead.
+
+What landed (final branches, in integration order):
+
+1. `sup-w3-token-evenness` — `loop-epic/token-evenness-dark-mode-elevation-reads-0`.
+   `raisedDark(skin, dL, C)` in derive.mjs rebinds ONLY the dark rungs of
+   `--surface-raised` (+0.0695 OKLCH L over the theme's own dark bg) and
+   `--border-subtle` (+0.0445): elevation is now a CONSTANT step on every theme.
+   Evergreen byte-identity holds (Part F 160/160, frozen 82 overrides untouched);
+   only ember/fjord dark bytes moved, and both formerly-INVERTED hairlines
+   (below their 8% bg) now sit above it. Secondary scope (`--bg-accent`/
+   `--border-muted`) dropped with a written reason: they are evergreen PINNED
+   overrides — no fit anchor exists; fixing the ember/fjord selected-row
+   recession needs a deliberate reference-elevation decision (filed as a
+   follow-up candidate below).
+2. `sup-w3-api-tester-kit` — `loop-epic/api-tester-onto-the-controls-kit-inline--1`.
+   Playground onto bp_input/bp_select/bp_textarea (additive `class` +
+   `spellcheck` passthrough on bp_textarea); scenario-results + schema-browser
+   inline styles extracted to root.html.heex classes with all three fg-dim
+   sites escalated to `--muted-text`; 3 new Part H pairings (COUPLING LAW);
+   NEW playground pin test. The brief's "orphaned token-change handler" premise
+   was FALSE — the new render test caught the live top-bar Token field wiring
+   (layouts/studio.html.heex:61) and the handler is kept + pinned.
+3. `sup-w3-styleguide-kit-dom` — `loop-epic/styleguide-gallery-dom-becomes-the-spec--2`.
+   sg-controls renders the real kit components (bp_input/bp_select with prompt
+   AND optgroup/bp_textarea/bp_checkbox/bp_radio/bp_switch on/off/disabled) —
+   gallery DOM IS component DOM (D22); pins rewritten to kit attribute order,
+   :122-125 class pins pass unmodified; btn/card/badge/tabs stay class
+   primitives (no kit component exists). Does NOT depend on slice 2's
+   bp_textarea extension.
+4. `sup-w3-shares-modal-kit` — `loop-epic/shares-modal-surfaces-checkboxes-onto-bp-3`.
+   The last naked native control falls: shares_modal surfaces[] checkboxes →
+   bp_checkbox, name/value/checked byte-preserved; new pin test also re-proves
+   the surfaces[] list param through shares-add. `.shares-surfaces` is already
+   flex, so the w2 stacking lesson needed no CSS.
+5. `sup-w3-qa-closeout` — `loop-epic/whole-surface-qa-close-out-census-authen-4-r`
+   (-r carries only this wave-log entry). Census (48 raw hits → 47 exemptions +
+   1 owned-pending = the shares control, converging to ZERO when slice 4
+   merges), render census 1276 green, Part H completeness sweep found + fixed
+   the one legacy at-risk residual (`.bp-secondary-pane-readonly` fg-dim on
+   bg-muted 4.05–4.40 → muted-text, 16th pairing, revert→red), login-ticket
+   pixel harness proven on guerrilla with the D20 near-flat baseline quantified
+   (ember-dark 1.31% L). Epic criteria stamped; crit 4 = human gate.
+
+**DECISION — the D16-banked pane-model amendment is REJECTED.** This wave was
+the one licensed pane-model discussion; the evidence says no: the QA pixel pass
+on the deployed wave-2 build shows the desk reading premium (pane headers,
+row `:meta` subtitles, filtered counts, status dots, iconed empty states — the
+"unfinished dev tool" tells are gone), and the single remaining pixel defect
+(elevation near-flat on ember/fjord dark) is a token-VALUE bug that slice 1
+fixes, not a pane-model gap. Nested-tree exploration / resizable pane columns
+would be a rebuild of a working Sanity-style drill-down for no evidenced gain.
+D4's fence stays; reopening requires a fresh decide-phase amendment backed by
+post-merge pixel evidence.
+
+Cross-slice verification (reviewer): a scratch integration merge of all five
+final branches in the order above merged CLEAN (both check.mjs PAIRINGS
+additions coexist → 19 pairings × 114 AA checks green; root.html.heex 3-way
+merge clean) and ran `test/barkpark_web/live/studio/` +
+`test/barkpark_web/components/` = **1425 tests, 0 failures**, plus
+studio-literal-check (zero new lit-allows), studio-link-lint, and mix format
+clean on every touched file.
+
+MERGE TRAIN for the lead: token-evenness → api-tester → styleguide → shares →
+qa-closeout-r; the lead closes each task's merge-gated criterion on merge
+(token crit 6, api-tester crit 6, styleguide crit 4, shares crit 4, qa crit 5)
+and stamps the epic parent's crit 0–2 `met` once all five are in. KNOWN BENIGN
+DRIFT: the census register's styleguide_live.ex line refs snapshot post-#2088
+main — slice 3 rewrites those sites onto the kit, so the register's row-A count
+only shrinks (never a new naked control).
+
+What comes after (the epic is at its finish line):
+- POST-MERGE HUMAN GATE: guerrilla auto-deploys on merge — re-shoot the full
+  6-combo pixel pack via the proven login-ticket harness (desk MUST show
+  elevation reading on ember/fjord dark, D20 in pixels; sheet popovers, plugin
+  settings, airdrop + shares modals, org admin, styleguide, api tester) and
+  surface it for the user's re-verdict (epic crit 3).
+- Chat control sweep stays deferred until the studio-chat epic clears (D10);
+  it inherits token fixes automatically. This is the ONLY remaining code vein.
+- Follow-up candidate (small, needs a decide phase): `--bg-accent`/
+  `--border-muted` ember/fjord dark recession — requires a reference-elevation
+  decision that likely retires two evergreen pinned overrides (out of scope
+  for the byte-anchored token slice, documented in its task evidence).
+- session_html login + tmux polish were judged already-themed in the w2 census;
+  nothing owed unless the pixel pack says otherwise.
