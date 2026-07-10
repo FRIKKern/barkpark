@@ -3,69 +3,42 @@ package pdrender
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
-// m17TermProfile maps a pdrender Profile onto the termenv global lipgloss must be
-// pinned to for that profile to actually EMIT its escapes — so the strip-equality
-// proof below exercises REAL colour, not a silently-stripped no-op.
-func m17TermProfile(p Profile) termenv.Profile {
-	switch p {
-	case TrueColor:
-		return termenv.TrueColor
-	case ANSI256:
-		return termenv.ANSI256
-	default:
-		return termenv.Ascii
-	}
-}
-
-// renderM17 renders the M17 heat-family fixture at one width under one colour
-// profile, pinning BOTH ctx.Profile and the process-global lipgloss profile so a
-// colour-capable render emits real SGR (the inverted global the doctrine calls
-// for). Returns the RAW output with escapes intact; callers strip to compare.
-func renderM17(t *testing.T, width int, p Profile) string {
+// renderM17Fixture renders the M17 heat-family fixture with NoColor pinned so the
+// goldens are byte-stable in CI (same discipline as every milestone fixture).
+func renderM17Fixture(t *testing.T, name string, width int) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "sample_m17.json"))
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {
-		t.Fatalf("read fixture: %v", err)
+		t.Fatalf("read fixture %s: %v", name, err)
 	}
 	blocks, err := Decode(raw)
 	if err != nil {
-		t.Fatalf("decode: %v", err)
+		t.Fatalf("decode %s: %v", name, err)
 	}
-	old := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(m17TermProfile(p))
-	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
-	reg := DefaultRegistry(DarkTheme())
-	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: p}
-	return reg.RenderDoc(blocks, ctx)
+	reg := testRegistry() // pins lipgloss to Ascii (NoColor)
+	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
+	return ansi.Strip(reg.RenderDoc(blocks, ctx))
 }
 
-// TestGoldenM17 is the slate-2 heat family: the quantile dual-encoded calendar
-// (mode:"calendar") and the rows×cols matrix with Σ marginals + exact values. Two
-// proofs in one:
-//
-//  1. GOLDEN: the NoColor render is byte-stable at every width. At width 80 the
-//     calendar shows all 38 weeks; narrower widths drop the OLDEST whole weeks.
-//  2. STRIP-COMPLETE (the detail-ceiling readability line): stripping the ANSI256
-//     and TrueColor renders yields the EXACT SAME artifact as NoColor — the datum
-//     lives in the glyph/geometry, colour is pure reinforcement. Every profile
-//     survives an ANSI strip as a complete, readable grid.
-//
-// Regenerate the goldens with -update. (The inline strip-equality here stands in
-// for the shared assertStripComplete helper until pbp-slate2-doctrine-goldens
-// lands; it will dedupe onto that helper.)
+// TestGoldenM17 byte-locks the slate-2 heat family: the quantile dual-encoded
+// calendar (mode:"calendar") and the rows×cols matrix with Σ marginals + exact
+// values. The NoColor render is byte-stable at every width. At width 80 the
+// calendar shows all 38 weeks; narrower widths drop the OLDEST whole weeks (the
+// full-year >80-col path is proven by sample_m26). Regenerate with -update.
 func TestGoldenM17(t *testing.T) {
+	const fx = "sample_m17.json"
 	for _, w := range goldenWidths {
 		w := w
-		t.Run("sample_m17_w"+itoa(w), func(t *testing.T) {
-			got := ansi.Strip(renderM17(t, w, NoColor))
-			goldenPath := filepath.Join("testdata", "golden", "sample_m17_w"+itoa(w)+".txt")
+		name := strings.TrimSuffix(fx, ".json")
+		t.Run(name+"_w"+itoa(w), func(t *testing.T) {
+			got := renderM17Fixture(t, fx, w)
+			goldenPath := filepath.Join("testdata", "golden", name+"_w"+itoa(w)+".txt")
 			if *update {
 				if err := os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
 					t.Fatal(err)
@@ -83,15 +56,27 @@ func TestGoldenM17(t *testing.T) {
 				t.Errorf("M17 render mismatch at width %d\n--- got ---\n%s\n--- want ---\n%s",
 					w, got, string(want))
 			}
-			// Strip-complete: colour-capable profiles must strip to the SAME bytes.
-			for _, p := range []Profile{ANSI256, TrueColor} {
-				if s := ansi.Strip(renderM17(t, w, p)); s != got {
-					t.Errorf("M17 strip-equality at width %d, profile %v: stripped render differs from NoColor — colour is carrying the datum\n--- %v stripped ---\n%s\n--- NoColor ---\n%s",
-						w, p, p, s, got)
-				}
-			}
 		})
 	}
+}
+
+// TestM17StripComplete holds the detail-ceiling strip law on the M17 heat family
+// at all three colour profiles via the shared assertStripComplete helper: the
+// quantile shade glyphs and the exact Σ digits live in the geometry, so the
+// ANSI-stripped ANSI256 and TrueColor renders are byte-identical to NoColor.
+func TestM17StripComplete(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "sample_m17.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := DefaultRegistry(DarkTheme())
+	assertStripComplete(t, "heat_family_sample_m17", func(w int, p Profile) string {
+		return reg.RenderDoc(blocks, RenderCtx{Width: w, Theme: DarkTheme(), Profile: p})
+	})
 }
 
 // TestHeatQuantileBins pins the quantile binning contract: zero → -1 (the special

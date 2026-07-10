@@ -65,10 +65,11 @@ func TestGoldenM18(t *testing.T) {
 }
 
 // TestGaugeListProfileStripEquality is the acceptance proof that a gauge-list is a
-// COMPLETE artifact at all three profiles: the ANSI-stripped render is BYTE-
-// IDENTICAL under NoColor, ANSI256, and TrueColor. The meter never uses a
-// profile-only glyph (statBar's ▓/░ is universal), so colour is pure reinforcement
-// — strip it and the label + bar length + digits still carry the whole datum.
+// COMPLETE artifact at all three profiles: via the shared assertStripComplete
+// helper, the ANSI-stripped render is BYTE-IDENTICAL under NoColor, ANSI256, and
+// TrueColor at every golden width. The meter never uses a profile-only glyph
+// (statBar's ▓/░ is universal), so colour is pure reinforcement — strip it and the
+// label + bar length + digits still carry the whole datum.
 func TestGaugeListProfileStripEquality(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "sample_m18.json"))
 	if err != nil {
@@ -78,32 +79,10 @@ func TestGaugeListProfileStripEquality(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-
-	profiles := []struct {
-		name string
-		p    Profile
-		cp   termenv.Profile
-	}{
-		{"nocolor", NoColor, termenv.Ascii},
-		{"ansi256", ANSI256, termenv.ANSI256},
-		{"truecolor", TrueColor, termenv.TrueColor},
-	}
-
-	var stripped []string
-	for _, pr := range profiles {
-		old := lipgloss.ColorProfile()
-		lipgloss.SetColorProfile(pr.cp)
-		reg := DefaultRegistry(DarkTheme())
-		out := reg.RenderDoc(blocks, RenderCtx{Width: 80, Theme: DarkTheme(), Profile: pr.p})
-		stripped = append(stripped, ansi.Strip(out))
-		lipgloss.SetColorProfile(old)
-	}
-	for i := 1; i < len(stripped); i++ {
-		if stripped[i] != stripped[0] {
-			t.Errorf("profile %s strip diverges from nocolor:\n--- %s ---\n%s\n--- nocolor ---\n%s",
-				profiles[i].name, profiles[i].name, stripped[i], stripped[0])
-		}
-	}
+	reg := DefaultRegistry(DarkTheme())
+	assertStripComplete(t, "gauge_list_sample_m18", func(w int, p Profile) string {
+		return reg.RenderDoc(blocks, RenderCtx{Width: w, Theme: DarkTheme(), Profile: p})
+	})
 }
 
 // gaugeRender is a small helper: render one gauge-list block at NoColor and strip.

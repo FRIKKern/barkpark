@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "m24flow",
+      "type": "pipeline",
+      "title": "release pipeline",
+      "layout": { "mode": "flow" },
+      "nodes": [
+        { "kind": "stage", "title": "Draft" },
+        { "kind": "stage", "title": "Review" },
+        { "kind": "stage", "title": "Merge" },
+        { "kind": "stage", "title": "Deploy" }
+      ]
+    }
+  ]
+}

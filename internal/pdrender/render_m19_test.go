@@ -6,9 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 )
 
 // ── M19: stat KPI cell denominator ───────────────────────────────────────────
@@ -77,12 +75,13 @@ func TestGoldenM19(t *testing.T) {
 	}
 }
 
-// TestM19DenomStripParity is the detail-ceiling proof for the denom cell: the
-// ANSI-stripped render is byte-identical across all three colour profiles
-// (NoColor / ANSI256 / TrueColor), so the "71/118" datum survives with ZERO
-// colour — colour is reinforcement (the dim tone), never the carrier. It also
-// asserts the denom datum is structurally present and a denom-less cell grows no
-// spurious slash, so TestGoldenM19 can never pass vacuously.
+// TestM19DenomStripParity is the detail-ceiling proof for the denom cell: via the
+// shared assertStripComplete helper the ANSI-stripped render is byte-identical
+// across all three colour profiles (NoColor / ANSI256 / TrueColor) at every golden
+// width, so the "71/118" datum survives with ZERO colour — colour is reinforcement
+// (the dim tone), never the carrier. It also asserts the denom datum is
+// structurally present and a denom-less cell grows no spurious slash, so
+// TestGoldenM19 can never pass vacuously.
 func TestM19DenomStripParity(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("testdata", "sample_m19.json"))
 	if err != nil {
@@ -92,40 +91,20 @@ func TestM19DenomStripParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reg := DefaultRegistry(DarkTheme())
+	assertStripComplete(t, "stat_denom_sample_m19", func(w int, p Profile) string {
+		return reg.RenderDoc(blocks, RenderCtx{Width: w, Theme: DarkTheme(), Profile: p})
+	})
 
-	profiles := []struct {
-		name    string
-		profile Profile
-		enum    termenv.Profile
-	}{
-		{name: "NoColor", profile: NoColor, enum: termenv.Ascii},
-		{name: "ANSI256", profile: ANSI256, enum: termenv.ANSI256},
-		{name: "TrueColor", profile: TrueColor, enum: termenv.TrueColor},
-	}
-
-	const width = 80
-	var base string
-	for i, p := range profiles {
-		lipgloss.SetColorProfile(p.enum)
-		reg := DefaultRegistry(DarkTheme())
-		ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: p.profile}
-		stripped := ansi.Strip(reg.RenderDoc(blocks, ctx))
-		if i == 0 {
-			base = stripped
-			// Every denom datum is a complete artifact with zero colour applied.
-			for _, want := range []string{"71/118", "14/20", "340/512"} {
-				if !strings.Contains(base, want) {
-					t.Errorf("stripped render missing denom datum %q:\n%s", want, base)
-				}
-			}
-			// A denom-less cell shows the bare value — no stray trailing slash.
-			if strings.Contains(base, "92%/") || strings.Contains(base, "1.2k/") {
-				t.Errorf("denom-less cell grew a spurious slash:\n%s", base)
-			}
-		} else if stripped != base {
-			t.Errorf("profile %s strip differs from NoColor — colour leaked into the datum\n--- %s ---\n%s\n--- NoColor ---\n%s",
-				p.name, p.name, stripped, base)
+	// Non-vacuous anchors at width 80 (NoColor): every denom datum is a complete
+	// artifact, and a denom-less cell grows no spurious trailing slash.
+	base := renderM19Fixture(t, "sample_m19.json", 80)
+	for _, want := range []string{"71/118", "14/20", "340/512"} {
+		if !strings.Contains(base, want) {
+			t.Errorf("stripped render missing denom datum %q:\n%s", want, base)
 		}
 	}
-	lipgloss.SetColorProfile(termenv.Ascii) // restore so downstream tests stay NoColor
+	if strings.Contains(base, "92%/") || strings.Contains(base, "1.2k/") {
+		t.Errorf("denom-less cell grew a spurious slash:\n%s", base)
+	}
 }

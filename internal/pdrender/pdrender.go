@@ -365,5 +365,13 @@ func DefaultRegistry(theme Theme) *Registry {
 	// only under a TrueColor profile; ANSI-plain braille otherwise, byte-stable).
 	// W3 of the slate — the capstone (see chart.go).
 	r.blocks["chart"] = chartRenderer{}
+	// dashboard: a tabbed CONTAINER that composes the slate leaf blocks (chart /
+	// heatmap / stat-grid / gauge-list) into a Claude-Code-/usage-style cockpit —
+	// authored tabs + a heavy ━ active rail, the active tab's children laid out as
+	// a two-track grid through the shared Flex solver. It recurses child blocks
+	// through the registry, so it holds a back-reference like section/columns/card.
+	// The composition capstone of the slate (see dashboard.go); $span in a child
+	// query rides INERT (a future Elixir resolver wave reads it, never pdrender).
+	r.blocks["dashboard"] = dashboardRenderer{reg: r}
 	return r
 }

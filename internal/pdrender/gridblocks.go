@@ -160,6 +160,17 @@ func (pipelineRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 	}
 
+	// Linear flow path (opt-in via layout:{mode:"flow"}, flowOptIn): the kept nodes
+	// become a rect-box CHAIN over the mermaidflow engine — ──▶ boxes left-to-right,
+	// degrading to the TD ▼ stack when they can't fit. Extend-not-fork: the mmGraph
+	// is built directly (never re-parsed from synthesized text). Falls through to the
+	// legacy ↓ stack only for the empty case (nil).
+	if flowOptIn(b) {
+		if art := pipelineFlow(kept, ctx); art != nil {
+			return art
+		}
+	}
+
 	connector := ctx.Theme.Dim.Render("↓")
 	out := make([]string, 0)
 	for i, g := range groups {
