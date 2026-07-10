@@ -217,7 +217,7 @@ func rootCause(err error) error {
 // ResolveWorker computes the board's task-claim worker id: BARKPARK_WORKER_ID
 // when set, else "tui-<hostname>", else "tui-unknown" when the hostname is
 // unreadable. This mirrors the desk TUI's workerIdentity convention
-// (cmd/barkpark/tui-mutations.go) — copied rather than imported because
+// (cmd/barkpark/tui_mutations.go) — copied rather than imported because
 // cmd/barkpark is package main and cannot be depended on.
 func ResolveWorker() string {
 	if v := os.Getenv("BARKPARK_WORKER_ID"); v != "" {

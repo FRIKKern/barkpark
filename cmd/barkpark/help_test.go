@@ -46,7 +46,7 @@ func TestHelpOverlayCoversLoadBearingVerbs(t *testing.T) {
 		"duplicate",
 		"discard draft (twice to confirm)",
 		"editing happens in Studio",
-		"cycle pane focus / editor", // tab / S-tab pane cycling (tui-update.go)
+		"cycle pane focus / editor", // tab / S-tab pane cycling (tui_update.go)
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help overlay missing %q", want)
