@@ -21,7 +21,7 @@ var (
 	GenPrimary       = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
 	GenPrimaryFg     = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1e18"}
 	GenInk           = lipgloss.AdaptiveColor{Light: "#09090b", Dark: "#f2f2f2"}
-	GenDim           = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"}
+	GenDim           = lipgloss.AdaptiveColor{Light: "#6e6e77", Dark: "#a1a1aa"}
 	GenRule          = lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}
 	GenReadingAccent = lipgloss.AdaptiveColor{Light: "#a23925", Dark: "#d98a6a"}
 )
