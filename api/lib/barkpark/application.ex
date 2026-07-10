@@ -68,6 +68,10 @@ defmodule Barkpark.Application do
       [
         Barkpark.RateLimiter,
         BarkparkWeb.Telemetry,
+        # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
+        # (cloud-console W5). Up before the Endpoint so early traffic is counted;
+        # a pure ETS-backed window, no Repo dependency.
+        BarkparkWeb.RequestStats,
         Barkpark.Repo,
         Barkpark.Vault,
         # WI1: plugin registry — must come up before workers/endpoint so any

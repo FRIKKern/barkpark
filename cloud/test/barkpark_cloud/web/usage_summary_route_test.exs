@@ -99,7 +99,7 @@ defmodule BarkparkCloud.Web.UsageSummaryRouteTest do
     Fake.program(%{"/__any__" => {:error, {:http_client, :should_never_be_called}}})
   end
 
-  @meter_names ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)
+  @meter_names ~w(documents datasets webhooks db_size disk cpu ram req_per_s p95_ms seats instances api_requests bandwidth)
 
   describe "the cached fleet read — ZERO instance HTTP" do
     test "returns the latest sample's meters + measured_at per checkable instance" do

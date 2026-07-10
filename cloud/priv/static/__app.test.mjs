@@ -2903,11 +2903,13 @@ test("C10: the Usage + Members helpers are exported", () => {
     "invitationRowHtml", "membersPanelHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  // The fixed 9-meter vocabulary, in SPA render order — `instances` leads as the
-  // headline quota meter (order is surface-local; the fixture tripwire below binds
-  // only the name SET, not the order).
+  // The fixed 13-meter vocabulary, in SPA render order — `instances` leads as the
+  // headline quota meter, the machine meters (cpu/ram/req_per_s/p95_ms) group
+  // after disk in the host-capacity block, flow meters last (order is
+  // surface-local; the fixture tripwire below binds only the name SET, not order).
   assert.deepEqual([...hooks.usageMeters.map((m) => m.key)],
-    ["instances", "seats", "documents", "datasets", "webhooks", "db_size", "disk", "api_requests", "bandwidth"]);
+    ["instances", "seats", "documents", "datasets", "webhooks", "db_size", "disk",
+      "cpu", "ram", "req_per_s", "p95_ms", "api_requests", "bandwidth"]);
 });
 
 // ── the meter vocabulary is name-SET-pinned against the shared fixture ───────
@@ -2981,7 +2983,7 @@ test("C10: usageMetersHtml renders the full grid; metered vs unmetered chrome di
   const empty = hooks.usageMetersHtml({});
   // Every meter label present even with an empty payload — the grid is always full.
   for (const spec of hooks.usageMeters) assert.ok(empty.includes(hooks.esc(spec.label)), spec.label + " missing");
-  assert.equal((empty.match(/Not yet metered/g) || []).length, 9);
+  assert.equal((empty.match(/Not yet metered/g) || []).length, 13);
   const metered = hooks.usageMetersHtml({ documents: { value: 7, measured_at: null } });
   assert.match(metered, /<strong>7<\/strong>/);          // real value is bold
   assert.match(metered, /<span class="dim">Not yet metered<\/span>/); // still-empty meters stay dim
@@ -3048,6 +3050,76 @@ test("C10/OC7: usageMeterHtml — an unlimited meter renders byte-identically to
   const unlimited = hooks.usageMeterHtml(instSpec(), { value: 3, quota: null, measured_at: null });
   assert.ok(!unlimited.includes("usage-bar"), "no bar chrome when there is no ceiling");
   assert.match(unlimited, /<strong>3<\/strong>/); // the value renders exactly as a plain metered meter
+});
+
+// ── OC23/OC26 machine meters: units + over_at state, bar iff a quota ──────────
+const cpuSpec = () => usageSpec("cpu");
+const reqSpec = () => usageSpec("req_per_s");
+const p95Spec = () => usageSpec("p95_ms");
+
+test("OC26: c10FmtValue — ms + rate units", () => {
+  const req = hooks.usageMeterDisplay(reqSpec(), { value: 12.45, measured_at: null });
+  assert.equal(req.value, "12.5/s"); // one decimal, trimmed
+  const reqWhole = hooks.usageMeterDisplay(reqSpec(), { value: 200, measured_at: null });
+  assert.equal(reqWhole.value, "200/s"); // no trailing .0
+  const p95 = hooks.usageMeterDisplay(p95Spec(), { value: 143.6, measured_at: null });
+  assert.equal(p95.value, "144 ms"); // rounded ms
+  const cpu = hooks.usageMeterDisplay(cpuSpec(), { value: 63.4, measured_at: null });
+  assert.equal(cpu.value, "63%"); // percent, rounded
+});
+
+test("OC25: usageMeterDisplay — cpu reddens at over_at (90) BELOW its 100 bar ceiling", () => {
+  // 94% cpu: state over (>= over_at 90) even though the bar isn't full (94 < 100).
+  const hot = hooks.usageMeterDisplay(cpuSpec(), { value: 94, quota: 100, warn_at: 70, over_at: 90 });
+  assert.equal(hot.state, "over");
+  assert.equal(hot.bar.tone, "over");
+  assert.equal(hot.bar.pct, 94); // true 0-100 bar, not full
+  // 76% cpu: warn band (>= 70, < 90).
+  const warm = hooks.usageMeterDisplay(cpuSpec(), { value: 76, quota: 100, warn_at: 70, over_at: 90 });
+  assert.equal(warm.state, "warn");
+  assert.equal(warm.bar.tone, "warn");
+  // 40% cpu: ok — a threshold-bearing meter that has tripped none.
+  const cool = hooks.usageMeterDisplay(cpuSpec(), { value: 40, quota: 100, warn_at: 70, over_at: 90 });
+  assert.equal(cool.state, "ok");
+});
+
+test("OC25: usageMeterDisplay — a rate meter has state + tint but NO bar (quota nil)", () => {
+  // req_per_s over its red line (270): state over, but no bar to nowhere.
+  const over = hooks.usageMeterDisplay(reqSpec(), { value: 300, warn_at: 210, over_at: 270 });
+  assert.equal(over.state, "over");
+  assert.equal(over.bar, null); // no quota → no bar
+  // Between warn and over → warn.
+  const near = hooks.usageMeterDisplay(reqSpec(), { value: 250, warn_at: 210, over_at: 270 });
+  assert.equal(near.state, "warn");
+  assert.equal(near.bar, null);
+  // Under warn → ok.
+  assert.equal(hooks.usageMeterDisplay(reqSpec(), { value: 40, warn_at: 210, over_at: 270 }).state, "ok");
+});
+
+test("OC25: usageMeterHtml — a bar-less rate meter over its threshold tints the ROW, no Manage-plan", () => {
+  const over = hooks.usageMeterHtml(reqSpec(), { value: 300, warn_at: 210, over_at: 270 });
+  assert.match(over, /class="fleet-row usage-row usage-row--over"/); // the row tints
+  assert.ok(!over.includes("usage-bar"), "a rate meter draws no bar (no quota ceiling)");
+  assert.ok(!over.includes("#settings/billing"), "a capacity meter is not a billing dead-end");
+});
+
+test("OC25: usageMeterHtml — an over cpu meter tints red but carries NO Manage-plan link", () => {
+  // Only the billing quota meter (instances) routes to Manage plan; a physical
+  // meter over its wall is a capacity signal, tinted, with no billing action.
+  const cpu = hooks.usageMeterHtml(cpuSpec(), { value: 95, quota: 100, warn_at: 70, over_at: 90 });
+  assert.match(cpu, /usage-bar--over/); // the bar reddens
+  assert.ok(!cpu.includes("#settings/billing"), "cpu over 90% is not a billing dead-end");
+  // The instances billing meter over its ceiling DOES keep the one recovery action.
+  const inst = hooks.usageMeterHtml(instSpec(), { value: 12, quota: 10, warn_at: 8 });
+  assert.match(inst, /<a class="usage-bar-action" href="#settings\/billing">Manage plan<\/a>/);
+});
+
+test("OC25: usageMeterDisplay — an unmetered machine meter never reads a state (no fake alarm)", () => {
+  // req_per_s not yet reported: honest unmetered, no state, no bar — never a fake 0.
+  const dark = hooks.usageMeterDisplay(reqSpec(), { value: "unmetered", warn_at: 210, over_at: 270 });
+  assert.equal(dark.unmetered, true);
+  assert.equal(dark.state, null);
+  assert.equal(dark.bar, null);
 });
 
 // ── Wave 4 (OC19): Usage-tab sparklines — the 14-day history read path ────────
@@ -3214,6 +3286,9 @@ const fleetSummaryFixture = () => ({
         db_size: { value: 1048576, measured_at: fleetIso(20) },
         disk: { value: 37, measured_at: fleetIso(20) },
         seats: { value: 4, measured_at: fleetIso(20) },
+        // The armed machine beat — under its physical ceilings (live).
+        cpu: { value: 23, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
+        ram: { value: 58, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
       },
     },
     {
@@ -3234,14 +3309,18 @@ const fleetSummaryFixture = () => ({
   ],
 });
 
-test("W3 fleet strip: helpers exported + headline subset is exactly DOCS·DB·DISK·SEATS", () => {
+test("W3/W5 fleet strip: helpers exported + headline subset is DOCS·DB·DISK·SEATS·CPU·RAM", () => {
   for (const name of ["fleetStripModel", "fleetStripWorst", "fleetStripCellHtml", "fleetStripHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats"]);
-  // The subset keys must all be real meters in the shared vocabulary (no drift).
+  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats", "cpu", "ram"]);
+  // No drift: every headline key is a real meter in the shared vocabulary OR one
+  // of the wave-5 machine meters (cpu/ram land in the vocabulary via the
+  // machine-meters slice; the strip references them by their fixed names ahead of
+  // and independent of that spec — so this guard still catches an invented key).
   const known = new Set(hooks.usageMeters.map((m) => m.key));
-  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k), k + " must be a real usage meter");
+  const machine = new Set(["cpu", "ram"]);
+  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k) || machine.has(k), k + " must be a real usage meter");
 });
 
 test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shared spec", () => {
@@ -3254,6 +3333,8 @@ test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shar
   assert.equal(byKey.db_size.value, "1.0 MB");  // bytes (base-1024, shared fmt)
   assert.equal(byKey.disk.value, "37%");        // percent
   assert.equal(byKey.seats.value, "4");
+  assert.equal(byKey.cpu.value, "23%");     // machine capacity beat, percent fmt
+  assert.equal(byKey.ram.value, "58%");
   for (const c of fresh.cells) assert.equal(c.unmetered, false);
 });
 
@@ -3318,6 +3399,59 @@ test("W3 fleet strip: an absent / empty summary yields an empty, bar-less model"
   assert.equal(empty.teamState, null);
   const noTeam = hooks.fleetStripModel({ instances: [] });
   assert.equal(hooks.fleetStripHtml(noTeam).includes("usage-bar"), false);
+});
+
+// ── W5 machine meters: CPU/RAM headline cells + hot-box row accent (OC18/OC27/OC22)
+test("W5 fleet strip: a hot armed box paints CPU/RAM percent cells and lights its row accent", () => {
+  const iso = fleetIso(15);
+  const summary = {
+    team: null,
+    instances: [
+      {
+        id: "inst-hot", name: "Acme Prod", slug: "acme-prod", host: "acme.barkpark.cloud",
+        measured_at: iso,
+        meters: {
+          documents: { value: 412, measured_at: iso },
+          db_size: { value: 1048576, measured_at: iso },
+          disk: { value: 37, measured_at: iso },
+          seats: { value: 4, measured_at: iso },
+          // RAM pegged at its physical ceiling → over; CPU past its warn line.
+          cpu: { value: 88, quota: 100, warn_at: 70, measured_at: iso },
+          ram: { value: 100, quota: 100, warn_at: 70, measured_at: iso },
+        },
+      },
+      {
+        // An un-armed box: no cpu/ram meter → the honest dimmed cell, no accent.
+        id: "inst-bare", name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
+        measured_at: iso,
+        meters: { documents: { value: 5, measured_at: iso }, seats: { value: 1, measured_at: iso } },
+      },
+    ],
+  };
+  const model = hooks.fleetStripModel(summary);
+  const hot = model.rows.find((r) => r.id === "inst-hot");
+  const byKey = Object.fromEntries(hot.cells.map((c) => [c.key, c]));
+  assert.equal(byKey.cpu.value, "88%");        // percent fmt on the headline entry
+  assert.equal(byKey.ram.value, "100%");
+  assert.equal(byKey.cpu.unmetered, false);
+  // The physical ceiling lights the worst-state fold for free (OC22, no reimpl):
+  // RAM at 100 >= its quota → over.
+  assert.equal(hot.worstState, "over");
+
+  // The un-armed box keeps the honest dimmed em-dash capacity cells — never a
+  // fake zero — and no quota tone (nothing to accent).
+  const bare = model.rows.find((r) => r.id === "inst-bare");
+  const bareByKey = Object.fromEntries(bare.cells.map((c) => [c.key, c]));
+  assert.equal(bareByKey.cpu.value, "—");
+  assert.equal(bareByKey.cpu.unmetered, true);
+  assert.equal(bareByKey.ram.unmetered, true);
+  assert.equal(bare.worstState, null);
+
+  // The rendered strip carries the CPU/RAM cell labels and the lit over accent.
+  const html = hooks.fleetStripHtml(model);
+  assert.match(html, />CPU<\/span>/);
+  assert.match(html, />RAM<\/span>/);
+  assert.match(html, /fleet-usage-cell--over/);
 });
 
 // ════════════════════════════════════════════════════════════════════════════

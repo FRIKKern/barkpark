@@ -18,6 +18,11 @@ defmodule BarkparkCloud.Telemetry do
       %{
         disk: %{used_pct: number | nil},   # verbatim from the agent (int in practice)
         db_size: number | nil,
+        cpu: number | nil,        # host CPU busy % (agent `cpu_percent`, -1 verbatim)
+        mem: number | nil,        # used-memory % (agent `mem_used_percent`, -1 verbatim)
+        load1: number | nil,      # 1-minute load average (agent `load1`, -1 verbatim)
+        req_per_s: number | nil,  # request rate (instance-exposed; nil until it ships)
+        p95_ms: number | nil,     # p95 request latency ms (instance-exposed; nil until it ships)
         backup: %{ok: boolean | nil, detail: String.t() | nil},
         checks: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]},
         dirty_tree: boolean | nil,
@@ -60,6 +65,19 @@ defmodule BarkparkCloud.Telemetry do
     %{
       disk: %{used_pct: num_or_nil(Map.get(payload, "disk_used_percent"))},
       db_size: num_or_nil(Map.get(payload, "pg_size_bytes")),
+      # Machine vitals — the host's live resource pressure the agent beats every
+      # cycle (report.go: `cpu_percent` / `mem_used_percent` / `load1`, each `-1`
+      # when its probe was unwired) plus the request-load signals the instance
+      # exposes later (`req_per_s` / `p95_ms`; absent → nil until that runtime
+      # ships). num_or_nil like disk: a missing / non-numeric signal is nil, and
+      # the `-1` sentinel passes through verbatim — reinterpreting it (a negative
+      # is "not measured", never a fake 0) is the meter builder's view concern,
+      # not the normalizer's.
+      cpu: num_or_nil(Map.get(payload, "cpu_percent")),
+      mem: num_or_nil(Map.get(payload, "mem_used_percent")),
+      load1: num_or_nil(Map.get(payload, "load1")),
+      req_per_s: num_or_nil(Map.get(payload, "req_per_s")),
+      p95_ms: num_or_nil(Map.get(payload, "p95_ms")),
       backup: %{
         ok: bool_or_nil(Map.get(payload, "backup_ok")),
         detail: str_or_nil(Map.get(payload, "backup_detail"))

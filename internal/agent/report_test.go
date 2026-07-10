@@ -1,7 +1,11 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
@@ -48,14 +52,15 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	}
 
 	r := gatherReport(ReportConfig{
-		Runner:      git,
-		Checkout:    "/opt/barkpark",
-		DiskProbe:   func() (int, error) { return 42, nil },
-		CPUProbe:    func() (int, error) { return 73, nil },
-		MemProbe:    func() (int, error) { return 61, nil },
-		LoadProbe:   func() (float64, error) { return 1.25, nil },
-		PGSizeProbe: func() (int64, error) { return 1234567, nil },
-		BackupProbe: func() (bool, string, error) { return true, "last backup 2h ago", nil },
+		Runner:        git,
+		Checkout:      "/opt/barkpark",
+		DiskProbe:     func() (int, error) { return 42, nil },
+		CPUProbe:      func() (int, error) { return 73, nil },
+		MemProbe:      func() (int, error) { return 61, nil },
+		LoadProbe:     func() (float64, error) { return 1.25, nil },
+		PGSizeProbe:   func() (int64, error) { return 1234567, nil },
+		ReqStatsProbe: func() (float64, int, error) { return 12.5, 87, nil },
+		BackupProbe:   func() (bool, string, error) { return true, "last backup 2h ago", nil },
 
 		HealthBaseURL: "https://server.example.com",
 		runHealthGateFor: func(base, token string, opts setup.HealthGate) (setup.HealthReport, error) {
@@ -89,6 +94,12 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	}
 	if r.PGSizeBytes != 1234567 {
 		t.Errorf("PGSizeBytes = %d, want 1234567", r.PGSizeBytes)
+	}
+	if r.ReqPerS != 12.5 {
+		t.Errorf("ReqPerS = %v, want 12.5", r.ReqPerS)
+	}
+	if r.P95Ms != 87 {
+		t.Errorf("P95Ms = %d, want 87", r.P95Ms)
 	}
 	if !r.BackupOK || r.BackupDetail != "last backup 2h ago" {
 		t.Errorf("Backup = (%v, %q), want (true, last backup 2h ago)", r.BackupOK, r.BackupDetail)
@@ -131,6 +142,12 @@ func TestGatherReportHonestUnknowns(t *testing.T) {
 	}
 	if r.PGSizeBytes != -1 {
 		t.Errorf("PGSizeBytes = %d, want -1 (no probe)", r.PGSizeBytes)
+	}
+	if r.ReqPerS != -1 {
+		t.Errorf("ReqPerS = %v, want -1 (no probe)", r.ReqPerS)
+	}
+	if r.P95Ms != -1 {
+		t.Errorf("P95Ms = %d, want -1 (no probe)", r.P95Ms)
 	}
 	if r.HealthStatus != "unknown" {
 		t.Errorf("HealthStatus = %q, want unknown (no gate)", r.HealthStatus)
@@ -178,6 +195,172 @@ func TestGatherReportVitalsFailSoft(t *testing.T) {
 	r2 := gatherReport(ReportConfig{CPUProbe: func() (int, error) { return 0, nil }})
 	if r2.CPUUsedPercent != 0 {
 		t.Errorf("CPUUsedPercent = %d, want 0 (idle is real, not the -1 sentinel)", r2.CPUUsedPercent)
+	}
+}
+
+// TestGatherReportReqStatsWiring proves the ReqStatsProbe is fail-soft as one
+// unit: a probe error leaves BOTH req/s and p95 at the -1 sentinel (never a fake
+// 0), while a success with a null instance-side p95 lands req/s and keeps p95 at
+// -1. This is the version-skew / no-samples honesty the CP relies on.
+func TestGatherReportReqStatsWiring(t *testing.T) {
+	// Probe error → both sentinels.
+	rErr := gatherReport(ReportConfig{
+		ReqStatsProbe: func() (float64, int, error) { return 0, 0, errors.New("404") },
+	})
+	if rErr.ReqPerS != -1 {
+		t.Errorf("ReqPerS = %v, want -1 (probe errored, not a fake 0)", rErr.ReqPerS)
+	}
+	if rErr.P95Ms != -1 {
+		t.Errorf("P95Ms = %d, want -1 (probe errored, not a fake 0)", rErr.P95Ms)
+	}
+
+	// Success with null p95 → req/s lands, p95 stays the -1 sentinel.
+	rNull := gatherReport(ReportConfig{
+		ReqStatsProbe: func() (float64, int, error) { return 3.0, -1, nil },
+	})
+	if rNull.ReqPerS != 3.0 {
+		t.Errorf("ReqPerS = %v, want 3.0", rNull.ReqPerS)
+	}
+	if rNull.P95Ms != -1 {
+		t.Errorf("P95Ms = %d, want -1 (instance p95 null)", rNull.P95Ms)
+	}
+
+	// A real 0 req/s (idle box) is data, not the sentinel.
+	rIdle := gatherReport(ReportConfig{
+		ReqStatsProbe: func() (float64, int, error) { return 0, 0, nil },
+	})
+	if rIdle.ReqPerS != 0 {
+		t.Errorf("ReqPerS = %v, want 0 (idle is real, not the -1 sentinel)", rIdle.ReqPerS)
+	}
+	if rIdle.P95Ms != 0 {
+		t.Errorf("P95Ms = %d, want 0 (real 0 latency, not the -1 sentinel)", rIdle.P95Ms)
+	}
+}
+
+// TestNewReqStatsProbeHTTP exercises the production HTTP probe against a fake
+// instance RequestStats route: a 200 maps req/s + p95; a null p95 degrades to
+// the -1 sentinel; a 404 (old instance without the route), a non-200, and an
+// undecodable body all fail-soft with a non-nil error (so gatherReport keeps the
+// sentinels); the bearer token rides the SAME seam as the health gate.
+func TestNewReqStatsProbeHTTP(t *testing.T) {
+	t.Run("200 maps req/s and p95, token sent", func(t *testing.T) {
+		var gotAuth string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			gotAuth = req.Header.Get("Authorization")
+			if req.URL.Path != requestStatsPath {
+				t.Errorf("path = %q, want %q", req.URL.Path, requestStatsPath)
+			}
+			w.Write([]byte(`{"req_per_s": 42.5, "p95_ms": 128, "window_s": 60}`))
+		}))
+		defer srv.Close()
+
+		probe := NewReqStatsProbe(srv.URL, "sekret", nil)
+		if probe == nil {
+			t.Fatal("probe is nil, want a wired probe")
+		}
+		rps, p95, err := probe()
+		if err != nil {
+			t.Fatalf("probe error: %v", err)
+		}
+		if rps != 42.5 {
+			t.Errorf("req/s = %v, want 42.5", rps)
+		}
+		if p95 != 128 {
+			t.Errorf("p95 = %d, want 128", p95)
+		}
+		if gotAuth != "Bearer sekret" {
+			t.Errorf("Authorization = %q, want Bearer sekret", gotAuth)
+		}
+	})
+
+	t.Run("null p95 → -1 sentinel, req/s still lands", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 7.0, "p95_ms": null, "window_s": 60}`))
+		}))
+		defer srv.Close()
+
+		rps, p95, err := NewReqStatsProbe(srv.URL, "", nil)()
+		if err != nil {
+			t.Fatalf("probe error: %v", err)
+		}
+		if rps != 7.0 {
+			t.Errorf("req/s = %v, want 7.0", rps)
+		}
+		if p95 != -1 {
+			t.Errorf("p95 = %d, want -1 (instance reported null — no samples)", p95)
+		}
+	})
+
+	t.Run("404 (old instance) → error, sentinels via gatherReport", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "not found", http.StatusNotFound)
+		}))
+		defer srv.Close()
+
+		rps, p95, err := NewReqStatsProbe(srv.URL, "", nil)()
+		if err == nil {
+			t.Fatal("err = nil, want a non-nil error on 404")
+		}
+		if rps != -1 || p95 != -1 {
+			t.Errorf("(req/s, p95) = (%v, %d), want (-1, -1) on 404", rps, p95)
+		}
+		// And the sentinel actually reaches the Report through gatherReport.
+		r := gatherReport(ReportConfig{ReqStatsProbe: NewReqStatsProbe(srv.URL, "", nil)})
+		if r.ReqPerS != -1 || r.P95Ms != -1 {
+			t.Errorf("Report = (%v, %d), want (-1, -1) — an old instance degrades silently", r.ReqPerS, r.P95Ms)
+		}
+	})
+
+	t.Run("non-200 → error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer srv.Close()
+		if _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+			t.Error("err = nil, want a non-nil error on 500")
+		}
+	})
+
+	t.Run("undecodable body → error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`not json`))
+		}))
+		defer srv.Close()
+		if _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+			t.Error("err = nil, want a non-nil error on an undecodable body")
+		}
+	})
+
+	t.Run("transport error → error", func(t *testing.T) {
+		// A closed server's URL yields a connection-refused transport error.
+		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		url := srv.URL
+		srv.Close()
+		if _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
+			t.Error("err = nil, want a transport error against a closed server")
+		}
+	})
+
+	t.Run("empty base → nil probe (unwired)", func(t *testing.T) {
+		if NewReqStatsProbe("", "tok", nil) != nil {
+			t.Error("NewReqStatsProbe(\"\") != nil, want nil (unwired, mirrors the health gate)")
+		}
+	})
+}
+
+// TestReportJSONFieldNames pins the wire contract: the control plane stores the
+// beat payload verbatim, so the req_per_s / p95_ms JSON key strings ARE the
+// contract and must never drift.
+func TestReportJSONFieldNames(t *testing.T) {
+	blob, err := json.Marshal(gatherReport(ReportConfig{}))
+	if err != nil {
+		t.Fatalf("marshal Report: %v", err)
+	}
+	s := string(blob)
+	for _, key := range []string{`"req_per_s":`, `"p95_ms":`} {
+		if !strings.Contains(s, key) {
+			t.Errorf("Report JSON missing %s — the CP reads this key verbatim; payload=%s", key, s)
+		}
 	}
 }
 

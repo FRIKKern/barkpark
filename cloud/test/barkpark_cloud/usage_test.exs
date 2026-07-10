@@ -4,11 +4,12 @@ defmodule BarkparkCloud.UsageTest do
   (charter decision D48 — two honesty tiers). These tests exercise it directly,
   no DB, no HTTP:
 
-    * the meter vocabulary is FIXED and ALWAYS fully present (9 meters)
-    * every meter is the uniform `{value, quota, warn_at, source, measured_at}`
-      shape; quota/warn_at are nil for every meter WITHOUT an enforcement-backed
-      ceiling — all but `instances` (OC11), which carries the fleet's one honest
-      quota when the router resolves a real, subscription-backed limit
+    * the meter vocabulary is FIXED and ALWAYS fully present (13 meters)
+    * every meter is the uniform `{value, quota, warn_at, over_at, source,
+      measured_at}` shape; quota/warn_at/over_at are nil for a meter WITHOUT a
+      ceiling or threshold. `instances` (OC11) carries the fleet's one billing
+      quota; cpu/ram/disk carry the physical 100/70/90 ceiling; req_per_s/p95_ms
+      carry warn+over thresholds but no quota (OC23/OC25/OC26)
     * FLOW meters (api_requests, bandwidth) are ALWAYS "unmetered" — never a fake
       zero, whatever the input
     * inventory / telemetry / seats ship a real number when their source lands,
@@ -23,7 +24,14 @@ defmodule BarkparkCloud.UsageTest do
 
   alias BarkparkCloud.Usage
 
-  @meter_keys ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)a
+  @meter_keys ~w(documents datasets webhooks db_size disk cpu ram req_per_s p95_ms seats instances api_requests bandwidth)a
+
+  # Meters with NO ceiling and NO threshold — quota/warn_at/over_at all nil.
+  @no_ceiling_meters ~w(documents datasets webhooks db_size seats api_requests bandwidth)a
+  # Percent machine meters carrying the physical 100/70/90 ceiling on every branch.
+  @percent_ceiling_meters ~w(disk cpu ram)a
+  # Rate/latency meters carrying warn+over thresholds but NO quota bar.
+  @threshold_only_meters ~w(req_per_s p95_ms)a
 
   # A `Telemetry.normalize/1`-shaped envelope with a snapshot time.
   defp telemetry(overrides \\ %{}) do
@@ -31,6 +39,11 @@ defmodule BarkparkCloud.UsageTest do
       %{
         disk: %{used_pct: 42},
         db_size: 123_456_789,
+        cpu: 12,
+        mem: 34,
+        load1: 0.4,
+        req_per_s: 8,
+        p95_ms: 40,
         backup: %{ok: true, detail: "2h ago"},
         checks: %{pass: 3, total: 3, failing: []},
         dirty_tree: false,
@@ -43,28 +56,47 @@ defmodule BarkparkCloud.UsageTest do
   defp meters(inputs), do: Usage.compose(inputs).meters
 
   describe "envelope shape — fixed vocabulary, uniform meters" do
-    test "ALL nine meters are present, even on empty input" do
+    test "ALL thirteen meters are present, even on empty input" do
       m = meters(%{})
       assert Map.keys(m) |> Enum.sort() == Enum.sort(@meter_keys)
     end
 
-    test "every meter is the uniform shape; only instances may carry a quota" do
+    test "every meter is the uniform shape; ceilings/thresholds ride only their own meters" do
       m = meters(full_inputs())
 
       for {key, meter} <- m do
         assert Map.has_key?(meter, :value)
         assert Map.has_key?(meter, :quota)
         assert Map.has_key?(meter, :warn_at)
+        # over_at (OC25) is present on EVERY meter, nil by default.
+        assert Map.has_key?(meter, :over_at)
         assert is_binary(meter.source)
         assert match?(nil, meter.measured_at) or is_binary(meter.measured_at)
         # value is a number OR the literal "unmetered" — never anything else.
         assert is_number(meter.value) or meter.value == "unmetered"
 
-        # Every meter WITHOUT an enforcement-backed ceiling stays quota/warn_at
-        # nil — no invented limits (OC7). That is every meter but `instances`.
-        unless key == :instances do
-          assert meter.quota == nil
-          assert meter.warn_at == nil
+        cond do
+          # No ceiling, no threshold — the honest bar-less/tint-less state (OC7).
+          key in @no_ceiling_meters ->
+            assert meter.quota == nil
+            assert meter.warn_at == nil
+            assert meter.over_at == nil
+
+          # Percent machine meters carry the physical 100/70/90 ceiling always.
+          key in @percent_ceiling_meters ->
+            assert meter.quota == 100
+            assert meter.warn_at == 70
+            assert meter.over_at == 90
+
+          # Rate/latency meters carry warn+over but NO quota (no bar to nowhere).
+          key in @threshold_only_meters ->
+            assert meter.quota == nil
+            assert is_integer(meter.warn_at)
+            assert is_integer(meter.over_at)
+
+          # instances — the billing quota meter, ceiling resolved by the router.
+          key == :instances ->
+            :ok
         end
       end
     end
@@ -76,10 +108,68 @@ defmodule BarkparkCloud.UsageTest do
       assert m.webhooks.source == "instance.webhooks"
       assert m.db_size.source == "telemetry.pg_size_bytes"
       assert m.disk.source == "telemetry.disk_used_percent"
+      assert m.cpu.source == "telemetry.cpu_percent"
+      assert m.ram.source == "telemetry.mem_used_percent"
+      assert m.req_per_s.source == "telemetry.req_per_s"
+      assert m.p95_ms.source == "telemetry.p95_ms"
       assert m.seats.source == "control-plane.team_members"
       assert m.instances.source == "control-plane.team_instances"
       assert m.api_requests.source == "not-metered"
       assert m.bandwidth.source == "not-metered"
+    end
+  end
+
+  describe "machine meters — cpu/ram/req_per_s/p95_ms off the health beat (OC23/OC26)" do
+    test "cpu/ram render the telemetry percent + carry the beat's measured_at and 100/70/90 ceiling" do
+      m = meters(%{telemetry: telemetry(%{cpu: 63, mem: 71})})
+      assert m.cpu.value == 63
+      assert m.cpu.measured_at == "2026-07-03T10:00:00Z"
+      assert {m.cpu.quota, m.cpu.warn_at, m.cpu.over_at} == {100, 70, 90}
+      assert m.ram.value == 71
+      assert {m.ram.quota, m.ram.warn_at, m.ram.over_at} == {100, 70, 90}
+    end
+
+    test "req_per_s/p95_ms render their telemetry signal with warn+over thresholds, no quota" do
+      m = meters(%{telemetry: telemetry(%{req_per_s: 12, p95_ms: 120})})
+      assert m.req_per_s.value == 12
+      assert {m.req_per_s.quota, m.req_per_s.warn_at, m.req_per_s.over_at} == {nil, 210, 270}
+      assert m.p95_ms.value == 120
+      assert {m.p95_ms.quota, m.p95_ms.warn_at, m.p95_ms.over_at} == {nil, 500, 1000}
+    end
+
+    test "a -1 sentinel (probe unwired) degrades — never a fake 0, ceiling still rides" do
+      m = meters(%{telemetry: telemetry(%{cpu: -1, mem: -1, req_per_s: -1, p95_ms: -1})})
+      assert m.cpu.value == "unmetered"
+      assert m.cpu.quota == 100
+      assert m.ram.value == "unmetered"
+      assert m.req_per_s.value == "unmetered"
+      assert m.req_per_s.warn_at == 210
+      assert m.p95_ms.value == "unmetered"
+    end
+
+    test "absent machine signals (an agent-less box) → unmetered, thresholds still present" do
+      # No cpu/mem/req_per_s/p95_ms in the beat: honest unmetered, never a zero.
+      m = meters(%{telemetry: telemetry(%{cpu: nil, mem: nil, req_per_s: nil, p95_ms: nil})})
+
+      for key <- ~w(cpu ram req_per_s p95_ms)a,
+          do: assert(Map.fetch!(m, key).value == "unmetered")
+
+      assert m.cpu.over_at == 90
+      assert m.p95_ms.over_at == 1000
+    end
+
+    test "no telemetry at all → all four unmetered, measured_at nil" do
+      m = meters(%{})
+
+      for key <- ~w(cpu ram req_per_s p95_ms)a do
+        assert Map.fetch!(m, key).value == "unmetered"
+        assert Map.fetch!(m, key).measured_at == nil
+      end
+    end
+
+    test "a true zero cpu is a real 0, not the degrade" do
+      m = meters(%{telemetry: telemetry(%{cpu: 0})})
+      assert m.cpu.value == 0
     end
   end
 

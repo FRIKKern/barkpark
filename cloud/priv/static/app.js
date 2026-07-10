@@ -8264,6 +8264,13 @@
     { key: "webhooks", label: "Webhooks", fmt: "count" },
     { key: "db_size", label: "Database size", fmt: "bytes" },
     { key: "disk", label: "Disk used", fmt: "percent" },
+    // Machine meters (OC23/OC26): cpu/ram are percents with a true 0-100 bar;
+    // req_per_s / p95_ms are rate/latency signals — bar-less, tinted from OC25
+    // over_at. Grouped after disk (the host-capacity block), flow meters last.
+    { key: "cpu", label: "CPU", fmt: "percent" },
+    { key: "ram", label: "RAM", fmt: "percent" },
+    { key: "req_per_s", label: "Req/s", fmt: "rate" },
+    { key: "p95_ms", label: "p95 latency", fmt: "ms" },
     { key: "api_requests", label: "API requests", fmt: "count" },
     { key: "bandwidth", label: "Bandwidth", fmt: "bytes" }
   ];
@@ -8281,6 +8288,9 @@
   function c10FmtValue(fmt, value) {
     if (fmt === "bytes") return c10FmtBytes(value);
     if (fmt === "percent") return Math.round(value) + "%";
+    if (fmt === "ms") return Math.round(value) + " ms";
+    // rate: one decimal, trailing ".0" trimmed (12 → "12/s", 12.45 → "12.5/s").
+    if (fmt === "rate") return (Math.round(value * 10) / 10) + "/s";
     return String(value); // count
   }
 
@@ -8297,19 +8307,34 @@
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
+    // OC25 — the threshold state, computed independent of whether a bar draws.
+    // "over" when the value reaches over_at OR the quota ceiling (both inclusive,
+    // mirroring the create-time guard); "warn" once it crosses warn_at; "ok" for a
+    // metered meter that carries ANY threshold but has tripped none. A meter with
+    // no threshold at all (a plain count) has no state (null → no tint). This lets
+    // a bar-less rate/latency meter (req_per_s / p95_ms — quota nil, warn_at +
+    // over_at set) still tint the row, honestly, without a bar to nowhere.
+    var hasThreshold = typeof meter.over_at === "number" ||
+      typeof meter.warn_at === "number" ||
+      (typeof meter.quota === "number" && meter.quota > 0);
+    var state = null;
+    if (!unmetered && hasThreshold) {
+      var over = (typeof meter.over_at === "number" && meter.value >= meter.over_at) ||
+        (typeof meter.quota === "number" && meter.quota > 0 && meter.value >= meter.quota);
+      var warn = typeof meter.warn_at === "number" && meter.value >= meter.warn_at;
+      state = over ? "over" : warn ? "warn" : "ok";
+    }
     // OC7 — the quota bar model. A bar is drawn ONLY when a real ceiling is
     // present (numeric quota > 0) AND the meter reports a real number; a nil/zero
-    // quota is an honest "unlimited" — no bar, no fake ceiling. Tone: "over" once
-    // the value reaches the ceiling (inclusive, mirroring the create-time guard),
-    // "warn" once it crosses a numeric warn_at, else "ok". pct clamps at 100 so an
-    // over-limit meter fills the whole track rather than overflowing it.
+    // quota is an honest "unlimited" — no bar, no fake ceiling. cpu/ram/disk carry
+    // the physical 100 ceiling → a true 0-100 bar; req_per_s / p95_ms have no
+    // quota → no bar (their state still tints the row). pct clamps at 100 so an
+    // over-limit meter fills the whole track rather than overflowing it. The tone
+    // is the shared OC25 state.
     var bar = null;
     if (!unmetered && typeof meter.quota === "number" && meter.quota > 0) {
       var pct = Math.min(100, Math.round((meter.value / meter.quota) * 100));
-      var tone = meter.value >= meter.quota ? "over"
-        : (typeof meter.warn_at === "number" && meter.value >= meter.warn_at) ? "warn"
-          : "ok";
-      bar = { pct: pct, tone: tone, quota: c10FmtValue(spec.fmt, meter.quota), quotaText: value + " / " + c10FmtValue(spec.fmt, meter.quota) };
+      bar = { pct: pct, tone: state, quota: c10FmtValue(spec.fmt, meter.quota), quotaText: value + " / " + c10FmtValue(spec.fmt, meter.quota) };
     }
     // Wave 4 (OC19): the 14-day sparkline values, threaded in from /usage/history.
     // `spark` is the value|null array fed VERBATIM to sparklineSvg (a null is a
@@ -8320,7 +8345,7 @@
     var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
       ? history.slice()
       : null;
-    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, bar: bar, spark: spark };
+    return { key: spec.key, label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
   }
 
   function usageMeterHtml(spec, meter, history) {
@@ -8334,12 +8359,14 @@
     var sparkHtml = d.spark
       ? '<div class="usage-spark">' + sparklineSvg(d.spark, { width: 120, height: 32 }) + "</div>"
       : "";
-    // The quota bar (when present) lives under the meter name. The OVER state is a
-    // terminal one, so per D25 it carries exactly ONE recovery action — a "Manage
-    // plan" link to the Settings billing view (never a dead end).
+    // The quota bar (when present) lives under the meter name. Manage-plan is the
+    // ONE recovery action (D25) for the BILLING quota meter's over state — the
+    // instances ceiling routes to Settings billing. A physical meter over its
+    // wall (cpu/ram/disk at 90%+) is a capacity signal, not a billing dead-end, so
+    // it tints red without a "Manage plan" link that would do nothing for it.
     var barHtml = "";
     if (d.bar) {
-      var manage = d.bar.tone === "over"
+      var manage = d.bar.tone === "over" && d.key === "instances"
         ? '<a class="usage-bar-action" href="#settings/billing">Manage plan</a>'
         : "";
       var quotaCls = d.bar.tone === "ok" ? "usage-bar-quota dim" : "usage-bar-quota";
@@ -8352,7 +8379,11 @@
           manage +
         "</div>";
     }
-    return '<div class="fleet-row' + (d.bar ? " usage-row usage-row--" + d.bar.tone : "") + '">' +
+    // The row tint follows the OC25 state (not the bar) so a bar-less rate/latency
+    // meter over its threshold reddens the value badge too. "ok" carries no tint —
+    // only warn/over colour the row (a healthy meter reads neutral).
+    var rowTone = d.state === "warn" || d.state === "over" ? d.state : "";
+    return '<div class="fleet-row' + (rowTone ? " usage-row usage-row--" + rowTone : "") + '">' +
       '<div class="fleet-main"><div class="fleet-name">' + esc(d.label) + "</div>" +
       (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") +
       barHtml + "</div>" +
@@ -8479,20 +8510,40 @@
   // vocabulary (OC6/D2). Append-only: does not touch the C10 / Metrics regions.
   // ══════════════════════════════════════════════════════════════════════════
 
-  // The headline meters shown per instance cell (a subset of the nine), in the
-  // charter's order: DOCS · DB · DISK · SEATS. Labels are short for the compact
-  // cell; the number format is pulled from the shared USAGE_METERS spec so a
-  // formatting change can never drift between the strip and the Usage tab.
+  // The headline meters shown per instance cell (a subset of the meter set), in
+  // the charter's order: DOCS · DB · DISK · SEATS · CPU · RAM (OC18/OC27). The
+  // count/byte meters pull their number format from the shared USAGE_METERS spec
+  // so a formatting change can never drift between the strip and the Usage tab.
+  // The MACHINE meters (cpu/ram — the on-box agent's capacity beat) pin
+  // their own `fmt: "percent"` on the headline entry: they land in the shared
+  // vocabulary via the machine-meters slice, and the headline fmt keeps the strip
+  // formatting them correctly regardless of that spec's presence. An un-armed box
+  // (no agent) has no cpu/ram meter → the cell renders the honest dimmed "—", the
+  // same "never a fake zero" state a quiet pipe gets (4 of 5 fleet boxes carry no
+  // agent today — that dimmed cell is CORRECT, not a bug).
   var FLEET_STRIP_METERS = [
     { key: "documents", label: "Docs" },
     { key: "db_size", label: "DB" },
     { key: "disk", label: "Disk" },
-    { key: "seats", label: "Seats" }
+    { key: "seats", label: "Seats" },
+    { key: "cpu", label: "CPU", fmt: "percent" },
+    { key: "ram", label: "RAM", fmt: "percent" }
   ];
 
   function fleetStripSpecFor(key) {
     for (var i = 0; i < USAGE_METERS.length; i++) if (USAGE_METERS[i].key === key) return USAGE_METERS[i];
     return { key: key, label: key, fmt: "count" };
+  }
+
+  // Resolve the display spec for a headline ENTRY. The label/fmt come from the
+  // shared USAGE_METERS vocabulary, but a headline entry may PIN its own fmt (the
+  // machine meters carry fmt:"percent") — that wins, so the strip formats a
+  // percent meter correctly even independent of the vocab spec. The tone/quota
+  // math in usageMeterDisplay reads the envelope's quota/warn_at, so the physical
+  // ceilings the sampler stamps light the worst-state fold for free (OC22).
+  function fleetHeadlineSpec(h) {
+    var spec = fleetStripSpecFor(h.key);
+    return h.fmt ? { key: spec.key, label: spec.label, fmt: h.fmt } : spec;
   }
 
   // Fold the quota tones of a row's headline cells to the worst present:
@@ -8504,7 +8555,7 @@
     var order = { ok: 1, warn: 2, over: 3 };
     var worst = null;
     FLEET_STRIP_METERS.forEach(function (h) {
-      var d = usageMeterDisplay(fleetStripSpecFor(h.key), (meters || {})[h.key]);
+      var d = usageMeterDisplay(fleetHeadlineSpec(h), (meters || {})[h.key]);
       if (d.bar && (worst === null || order[d.bar.tone] > order[worst])) worst = d.bar.tone;
     });
     return worst;
@@ -8526,7 +8577,7 @@
       var measuredAt = inst.measured_at || null;
       var noSample = !measuredAt;
       var cells = FLEET_STRIP_METERS.map(function (h) {
-        var d = usageMeterDisplay(fleetStripSpecFor(h.key), meters[h.key]);
+        var d = usageMeterDisplay(fleetHeadlineSpec(h), meters[h.key]);
         // A compact cell shows a short em-dash for an unmetered meter rather than
         // the full "Not yet metered" sentence the Usage tab uses.
         return { key: h.key, label: h.label, value: d.unmetered ? "—" : d.value, unmetered: d.unmetered };
