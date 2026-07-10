@@ -108,6 +108,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
           scoped_liveview_path: scoped_liveview_path(paper)
         })
 
+      # M1 template halt (BlockOps.upsert_paper) — a locked-block / structure
+      # veto. The reason IS the human-readable violation; surface it VERBATIM
+      # with 409 rather than flattening it into the generic invalid_paper below.
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
       {:error, _changeset} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -144,6 +152,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # ADDITIVE (P4) — see scoped_liveview_path/1.
           scoped_liveview_path: scoped_liveview_path(paper)
         })
+
+      # M1 template halt — surface the veto reason VERBATIM (see the blocks path).
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
 
       {:error, _changeset} ->
         conn
@@ -261,6 +275,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_op", message: "an op could not be applied"}})
 
+          # M1 template halt — surface the veto reason VERBATIM with 409 rather
+          # than flattening it into the generic invalid_op below.
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
+
           {:error, _other} ->
             conn
             |> put_status(:unprocessable_entity)
@@ -322,6 +343,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
             conn
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+
+          # M1 template halt — surface the veto reason VERBATIM (see batch clause).
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
 
           {:error, _other} ->
             conn
