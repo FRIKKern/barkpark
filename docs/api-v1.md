@@ -186,4 +186,4 @@ Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE
 
 ## 11. Rate Limiting
 
-All `/v1/*` endpoints are rate-limited per token (or IP), separate read/write buckets per dataset. Defaults **300 read** / **60 write** req/min (`config :barkpark, :rate_limits`, or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9). Ticket keys use their own per-key write buckets (§8a).
+Per token (or IP), read/write buckets per dataset: **300r/60w** per min (`config :barkpark, :rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).
