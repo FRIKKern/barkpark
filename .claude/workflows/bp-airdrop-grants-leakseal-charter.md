@@ -137,6 +137,109 @@ tokens, and anonymous stay byte-identical.
 
 After this wave: NOTHING. The epic is closed; the only residual is the D12 backlog task.
 
+## Close-out wave decisions (Decide, 2026-07-10 evening — these supersede D10 where they conflict)
+
+*(Restored verbatim by the review pass: the close-out docs PR #2274 committed wave-log
+entries citing D13–D21 while this defining section existed only in the Decide session's
+uncommitted working copy — the references dangled on main until this commit.)*
+
+Verification round complete (6 verifiers, first-hand proofs). The seals the wish asks for are
+MERGED, FAITHFUL, and LIVE — this wave builds ZERO .ex. Its product is truth: an honest,
+evidence-rich epic death certificate plus a clean scene.
+
+- **D13 — Seal verified faithful; zero build slices.** #2177 implements D1–D5 with zero
+  drift (verified line-by-line by two surveyors). Both deny files pass **FIRST-HAND at merged
+  HEAD**: `CC=/usr/bin/clang mix test test/barkpark_web/controllers/grant_search_deny_test.exs
+  test/barkpark_web/controllers/grant_single_doc_deny_test.exs` → **8 tests, 0 failures**
+  (two seeds, all 8 named via --trace: denial cases + positive controls). Skip pattern
+  extinct across api/test. `maybe_scope_to_grants` has exactly ONE def repo-wide
+  (scope.ex:249). The two lanes no one had sealed on paper — federated search fan-out and
+  loopback `search_local` — were traced firsthand and HOLD (D8 upgraded from recorded to
+  proven): flat federated is bare `:api` (grant never folded, fails closed to Default scope,
+  contract test 1/0), scoped federated narrows via the same ResolveWorkspace seam, and
+  `search_local` is RequireLoopback-403 structurally unreachable by any grant principal.
+- **D14 — Crown evidence = the first-hand deny run, NOT a live smoke.** The hoped-for live
+  guerrilla grantee-denial smoke is IMPOSSIBLE with disposable resources, for two independent
+  deployed reasons: (a) flat `/v1/data` grant routes are hardwired to the seeded Default
+  workspace (assign_default_scope.ex:23) — a grant on an isolated throwaway workspace is
+  never admitted; (b) the ONLY HTTP grant→user bind (`POST /v1/access/claim`) requires a
+  confirmed-email account (claim_flow.ex:56/74) — a throwaway mailbox can't confirm.
+  NO closeout text may claim a live narrowed read was executed; it provably wasn't and can't
+  be. What WAS live-proven: grant mint/revoke, fail-closed claim, backlinks 200-not-404
+  shape, deploy liveness.
+- **D15 — CI honesty law.** #2177's required "Test (Elixir 1.18.1 / OTP 27.0)" check
+  concluded **FAILURE** — 9,599 tests, 10 failures, ALL pre-existing `ChatLiveTest` reds
+  identical on the base commit (repaired post-merge by #2192 ecff8270, already an ancestor of
+  main; tracked+closed as task-085b24d019427644). The PR body's "7084 tests, 0 failures"
+  claim is FALSE against the CI artifact. Nowhere may the ledger say "gate green" for #2177.
+  The deny files' pass is cited via the first-hand 8/0 run (D13), not CI elimination.
+  **ag-search-grant-leak criterion 6's stamped evidence is poisoned** (text asserts "gate
+  green", evidence never proves it) — it gets corrected this wave.
+- **D16 — One seal PR, not two.** No per-slice seal PRs ever existed: ONE integration PR,
+  **#2177** (`integrate/airdrop-seal`), whose body carries only `Task: ag-search-grant-leak`
+  (the backlinks slug was folded in without its own Task: line — say so plainly wherever the
+  evidence trail enumerates task→PR links). Every criterion/close text that said "two seal
+  PRs" / "both seal PRs" is reworded to "the single seal PR #2177".
+- **D17 — "A-/ship" provenance.** The phrase exists ONLY in PR #2145's own body,
+  author-self-declared; that PR has ZERO GitHub review objects and no grade appears anywhere
+  in git history or the ledger. The wave log records it as the PR author's self-description
+  ("judged A- / ship" — the author's own words), never as an external grade.
+- **D18 — Anchor remediation mechanics (supersedes D10's claim-then-close for the anchor).**
+  The anchor is ALREADY lifecycle done (patched directly at 16:50Z, bypassing ag-epic-closeout,
+  criteria empty). Remedy: **patch + publish `acceptance_criteria` onto the done anchor** —
+  mechanic PROVEN live on scratch task task-e2de78bb68847f03 (patch on a done task returns
+  200, publish flips it, lifecycle stays done; no terminal-state guard) — and **refresh the
+  anchor's close_reason** so its narrative is TRUE after this wave (single PR #2177, honest
+  CI note, D11 commit, D12 task id). Never attempt claim/close on the done anchor. The
+  claim/close cycle belongs to **ag-epic-closeout**: claim by explicit id (`bp task claim
+  ag-epic-closeout <worker>` — lapsed claim, epoch 2, worker null; NEVER `bp task next`),
+  read the fresh epoch from the claim response, close with criteria set IN the close call.
+  Verify every write via `bp doc get` by id (`--perspective drafts` is unreliable — always
+  echoes published).
+- **D19 — D12 residual filed AT DECIDE.** `ag-broadcast-revoked-residual` (standalone, no
+  parent, label proj:airdrop-grants, priority 3) is filed by the Decide phase itself, with
+  the framing SHARPENED per verification: token/anonymous CallerContexts never carry grants
+  AT ALL (from_token/1 and anonymous/0 never resolve grants; Grant binds exclusively to
+  grantee_user_id) — structurally nothing to go stale, stronger than "reloads per request".
+  The closeout slice verifies and cites it rather than filing it.
+- **D20 — Debris pruning (slice ag-debris-prune).** Safe to prune NOW (content-verified
+  absorbed/superseded by main, no PRs lost): `integrate/airdrop-seal` (+worktree wt-seal),
+  `integrate/airdrop-endgame` (+wt-ag), `loop-epic/seal-the-search-grant-leak-thread-grant--0`
+  and `-0-r`, `loop-epic/seal-the-backlinks-grant-leak-opts-condi-1` and `-1-r` (+their
+  wf_35e83e2f worktrees), `loop-epic/deny-matrix-gap-tests-shared-grant-fixtu-1`,
+  `loop-epic/plugin-pane-grantee-audit-grant-admitted-2` (+wf_9a68415a-061-9/-10, both clean),
+  the orphan detached worktree wf_9a68415a-061-14, the six merged `feat/ag-*` branches
+  (#1303/#1372/#1434/#1451/#1521/#1538) + their `/Volumes/SATECHI/github/bp-ag-*` worktrees,
+  and the origin copies of merged branches. **`loop-epic/airdrop-grants-wave1-review-log` is
+  deleted ONLY after the D11 retro text is verifiably on origin/main** — it is the sole copy
+  of commit 48a18f85 anywhere. Never `git add -A`; never touch other sessions' dirty files
+  in .claude/workflows/ (github-bridge charter + two untracked charters belong to concurrent
+  sessions).
+- **D21 — Expected reds, do not chase.** check-doc-budgets WILL fail on any md-touching PR
+  (tenancy.md 8821 > 8300B, pre-existing, owned by task-c9927aee99f5e965) — advisory here.
+  pr-task-gate requires the task claimed BEFORE the PR opens — claim ag-epic-closeout first;
+  PR body carries `Task: ag-epic-closeout`. The docs PR is md-only → it does NOT wait for the
+  Elixir Test gate (repo law: doc-only merges on its own gates).
+
+## Roadmap — close-out wave (integration-ordered, 2 slices, zero .ex)
+
+1. **ag-epic-closeout** (fable, small, priority 1) — execute D11 + D14–D19: correct the
+   poisoned evidence, pay the wave-log debt (docs PR), stamp + truth-up the anchor, verify
+   the residual, close itself. Files: .claude/workflows/bp-airdrop-grants-endgame-charter.md,
+   .claude/workflows/bp-airdrop-grants-leakseal-charter.md (commit both, explicit paths) +
+   ledger acts via bp.
+2. **ag-debris-prune** (opus, small, priority 2) — execute D20. Prunes the safe list
+   immediately; deletes the review-log branch only once the D11 text is on origin/main.
+
+Backlog filed at Decide (not this wave's build): `ag-broadcast-revoked-residual` (D19),
+`ag-deny-matrix-residual-coverage` (scoped-federated narrowing contract test + RequireLoopback
+403 contract test — the two unasserted cells verification flagged), `bp-drafts-perspective-bug`
+(`bp doc query/ls --perspective drafts|raw` silently ignored; drafts invisible except via
+`bp doc get` by exact id — burned a verifier, left 2 unreachable orphan drafts on guerrilla).
+
+After the close-out wave: NOTHING. The epic is closed; the only residual is the D19 backlog
+task.
+
 ## Wave log
 
 _(the epic-complete entry itself belongs in bp-airdrop-grants-endgame-charter.md per D11)_
@@ -188,6 +291,21 @@ D12 file the ONE broadcast_revoked backlog task, close the anchor). Note the clo
 claim (epoch 1) may lapse — re-claim before closing. After that: NOTHING remains on this
 epic.
 
+### Wave 2026-07-10 evening — close-out wave (Decide)
+
+Verification round (6 verifiers, first-hand proofs) established: the seals merged as ONE
+integration PR #2177 (not the two -r branch PRs the log above anticipated — they were folded
+into `integrate/airdrop-seal` and never surfaced as PRs), faithful to D1–D5, live on
+guerrilla; both deny files pass first-hand at merged HEAD (8/0, two seeds); federated +
+search_local lanes hold. THREE TRUTH CRACKS found and decided (D15–D18): #2177's Elixir CI
+check was FAILURE (pre-existing ChatLiveTest reds, fixed in #2192) and ag-search-grant-leak's
+"gate green" evidence is false; the anchor was flipped done directly at 16:50Z with empty
+criteria while ag-epic-closeout stayed open (false-done); the live grantee smoke is
+impossible with disposable resources (D14). Wave cut: 2 slices, zero .ex —
+**ag-epic-closeout** (fable) + **ag-debris-prune** (opus). Backlog filed:
+ag-broadcast-revoked-residual, ag-deny-matrix-residual-coverage, bp-drafts-perspective-bug.
+Wave Paper: `airdrop-grants-wave-2026-07-10-close`.
+
 ### Wave 2026-07-10 (evening) — seals merged, close-out executed, EPIC COMPLETE
 
 The lead deviated from D7's two-PR order: both seal branches integrated on ONE branch and
@@ -207,3 +325,41 @@ the authoritative 6,348 full-battery count + the epic-complete entry); the ancho
 `airdrop-grants` stamped with published acceptance_criteria carrying the full evidence
 trail and a truthful close_reason; residual `ag-broadcast-revoked-residual` verified
 published/standalone/priority 3 (D12). The epic is CLOSED — nothing remains.
+
+### Wave 2026-07-10 — close-out wave (reviewed; grade A-)
+
+**ag-epic-closeout** — SHIPPED, honest end to end. PR #2274 (squash 8032d5c8, doc-only,
+merged by the builder per repo law) pays the D11 debt exactly: adopted retro under "the
+endgame wave (reviewed)" with the 6,348 correction, plugin-pane NO-LEAK, falsified
+write-side suspicion, "A-/ship" attributed per D17; epic-complete entry carries #2177,
+first-hand 8/0, deploy run 29101630245, D14 impossibility, D15 CI-FAILURE truth. Ledger
+verified first-hand: anchor `airdrop-grants` done+published with 6 met criteria and zero
+"gate green"; ag-search-grant-leak criterion-5 evidence now states the FAILURE verdict;
+residual published standalone P3. The builder's pre-existing-red merge call ("Doc budgets +
+anchors", broken on main by #2273's bulldocs literal) was verified proven and filed
+(design-check-part-e-bulldocs-red). **Reviewer fix:** the committed wave-log entries cited
+D13–D21, but that defining Decide section lived only in the Decide session's uncommitted
+working copy — restored verbatim (plus the Decide wave-log entry) on
+`loop-epic/epic-close-out-correct-poisoned-evidence-0-r`; the stale working copy in the
+main checkout was backed up and reset to HEAD so `make update` stays unblocked.
+
+**ag-debris-prune** — SHIPPED, refs-only (no commit, correctly no branch). 14 enumerated
+branches + 14 worktrees + orphan + 8 origin copies of MERGED PRs pruned; per-worktree clean
+checks held; the 11 non-enumerated `feat/ag-*` branches with live bp-ag-* worktrees
+correctly untouched. The literal charter gate can NEVER pass — its `feat/ag-*` glob
+over-matches those 11 out-of-scope live branches (Decide-phase gate-authoring flaw); the
+builder reported the honest scoped gate instead of fabricating green — correct call. The
+D11 guard held at build time (retro not yet on origin/main → review-log branch left
+intact, stamped honestly). **Reviewer completion:** guard re-checked post-merge (grep -c =
+1 on origin/main) → `loop-epic/airdrop-grants-wave1-review-log` (48a18f85) deleted; D20
+now fully discharged; evidence appended to criterion 1 and re-published. The lead
+verification criterion (index 3) stays open for the lead.
+
+**Wave verdict:** the wish is fully served as merged — seals live, deny repros protective,
+epic closed on a truthful, evidence-dense trail. Deductions: the D13–D21 dangling
+references reached main (permanent-record defect, review-fixed) and the unpassable
+debris gate glob. After the -r branch merges: NOTHING remains on this epic. Residual
+backlog stands published: ag-broadcast-revoked-residual (P3),
+ag-deny-matrix-residual-coverage (P3), bp-drafts-perspective-bug (P2),
+design-check-part-e-bulldocs-red (P1, main's Doc budgets job is red for every PR until
+fixed — cross-epic, urgent for whoever owns docs CI).
