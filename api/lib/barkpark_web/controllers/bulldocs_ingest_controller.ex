@@ -108,9 +108,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
           scoped_liveview_path: scoped_liveview_path(paper)
         })
 
-      # M1 template halt (BlockOps.upsert_paper) — a locked-block / structure
-      # veto. The reason IS the human-readable violation; surface it VERBATIM
-      # with 409 rather than flattening it into the generic invalid_paper below.
+      # A server veto from BlockOps.upsert_paper arrives as {:halted, reason} —
+      # the M1 template halt (locked-block / structure) and the hollow-body
+      # quality gate (p-quality-gate) alike. The reason IS the human-readable
+      # violation; surface it VERBATIM with 409 rather than flattening it into
+      # the generic invalid_paper below.
       {:error, {:halted, reason}} ->
         conn
         |> put_status(:conflict)
@@ -153,7 +155,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
           scoped_liveview_path: scoped_liveview_path(paper)
         })
 
-      # M1 template halt — surface the veto reason VERBATIM (see the blocks path).
+      # Server veto (template / hollow-body gate) — surface the reason
+      # VERBATIM (see the blocks path).
       {:error, {:halted, reason}} ->
         conn
         |> put_status(:conflict)
@@ -275,8 +278,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_op", message: "an op could not be applied"}})
 
-          # M1 template halt — surface the veto reason VERBATIM with 409 rather
-          # than flattening it into the generic invalid_op below.
+          # Server veto ({:halted, reason} — hollow-body ratchet once
+          # p-hollow-gate-server lands at this seam) — surface the reason
+          # VERBATIM with 409 rather than flattening it into the generic
+          # invalid_op below.
           {:error, {:halted, reason}} ->
             conn
             |> put_status(:conflict)
@@ -344,7 +349,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
 
-          # M1 template halt — surface the veto reason VERBATIM (see batch clause).
+          # Server veto ({:halted, reason}) — surface the reason VERBATIM
+          # (see batch clause).
           {:error, {:halted, reason}} ->
             conn
             |> put_status(:conflict)
