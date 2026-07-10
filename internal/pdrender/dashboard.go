@@ -140,9 +140,12 @@ func (dr dashboardRenderer) renderBody(blocks []Block, w int, ctx RenderCtx) []s
 }
 
 // tabStrip draws the two-row selector: a labels row (inactive Dim, active
-// Accent+Bold) and a full-width rail row with a heavy ━ (Accent+Bold) under the
+// Accent+Bold) and a full-width rule row with a heavy ━ (Accent+Bold) under the
 // active tab and dim ─ elsewhere. The rail is placed by the active label's plain
-// column span so the heavy run sits exactly beneath it.
+// column span so the heavy run sits exactly beneath it. A many-tab strip that
+// outgrows the surface is clamped to width with the house … ellipsis (the rail
+// already clamps; the labels row must never be the one over-wide line a
+// dashboard emits).
 func (dr dashboardRenderer) tabStrip(tabs []dashTab, active, w int, ctx RenderCtx) []string {
 	const gap = 2 // blank columns between adjacent tab labels
 
@@ -166,7 +169,7 @@ func (dr dashboardRenderer) tabStrip(tabs []dashTab, active, w int, ctx RenderCt
 		col += lw
 	}
 
-	return []string{labels.String(), dr.tabRail(activeStart, activeWidth, w, ctx)}
+	return []string{truncateANSI(labels.String(), w), dr.tabRail(activeStart, activeWidth, w, ctx)}
 }
 
 // tabRail builds the full-width rule under the labels: dim ─ up to the active

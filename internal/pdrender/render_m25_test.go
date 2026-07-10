@@ -155,6 +155,32 @@ func TestM25HeightBudget(t *testing.T) {
 	}
 }
 
+// TestM25ManyTabsClampToWidth proves the labels row never overflows the surface:
+// a tab strip wider than the terminal is clamped to width with the house …
+// ellipsis (the rail row already clamps; without this the labels row would be the
+// one over-wide line a dashboard could emit).
+func TestM25ManyTabsClampToWidth(t *testing.T) {
+	tabs := make([]any, 0, 8)
+	for i := 0; i < 8; i++ {
+		tabs = append(tabs, map[string]any{
+			"label":  "A very long tab label " + itoa(i),
+			"blocks": []any{map[string]any{"type": "note", "text": "body"}},
+		})
+	}
+	block := Block{Type: "dashboard", Attrs: map[string]any{"tabs": tabs, "active": 7.0}}
+	reg := DefaultRegistry(DarkTheme())
+	const w = 40
+	out := reg.Render(block, RenderCtx{Width: w, Theme: DarkTheme(), Profile: NoColor})
+	for i, ln := range out {
+		if lw := ansi.StringWidth(ln); lw > w {
+			t.Errorf("dashboard line %d is %d cols wide, want ≤%d: %q", i, lw, w, ln)
+		}
+	}
+	if !strings.Contains(ansi.Strip(out[0]), "…") {
+		t.Errorf("over-wide labels row should clamp with the house … ellipsis, got %q", out[0])
+	}
+}
+
 // TestM25EmptyTabs proves the empty-state degrade: a dashboard with no tabs
 // renders one blank line, never panics.
 func TestM25EmptyTabs(t *testing.T) {
