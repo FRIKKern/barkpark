@@ -382,7 +382,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     # a new-chat empty state, the composer is enabled immediately, and NO
     # subprocess exists until the first send.
     test "mount is a new-chat state with an enabled composer and no subprocess", %{view: view} do
-      assert render(view) =~ "new chat"
+      assert render(view) =~ ~s(data-chat-status="new")
       refute has_element?(view, "input[name=message][disabled]")
       refute has_element?(view, "button[type=submit][disabled]")
       assert session_pid(view) == nil
@@ -792,7 +792,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       )
 
       html = render(view)
-      assert html =~ "ready"
+      assert html =~ ~s(data-chat-status="ready")
       assert html =~ "1.5s"
     end
 
@@ -867,7 +867,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # No init frame arrived → a nonzero exit reads as a doomed start (D54).
       send(view.pid, {:claude_chat_exit, 1, ""})
       html = render(view)
-      assert html =~ "offline"
+      assert html =~ ~s(data-chat-status="offline")
       assert html =~ "exit 1"
     end
 
@@ -880,7 +880,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_exit, 1, "error: unknown option '--nope'"})
       html = render(view)
 
-      assert html =~ "offline"
+      assert html =~ ~s(data-chat-status="offline")
       assert html =~ "failed to start"
       assert html =~ "unknown option"
       refute html =~ "Send a message to resume it"
@@ -1281,7 +1281,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # the old context-destroying respawn path is gone (charter D12).
       refute html =~ "New session started"
       assert session_pid(view) == pid_before
-      assert html =~ "ready"
+      assert html =~ ~s(data-chat-status="ready")
     end
 
     test "mode change with no live session just updates the selector", %{view: view} do
@@ -1453,7 +1453,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # …but it reads as an interrupt, never a failure, and the session lives on
       assert html =~ "Interrupted"
       refute html =~ "ended with an error"
-      assert html =~ "ready"
+      assert html =~ ~s(data-chat-status="ready")
       assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
@@ -1510,7 +1510,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "✗ canceled"
       refute has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-crash]))
       refute has_element?(view, ~s(button[phx-click=deny][phx-value-rid=req-crash]))
-      assert html =~ "offline"
+      assert html =~ ~s(data-chat-status="offline")
     end
 
     # ── control acks: the UI never lies about a mode switch (scc-w2/w3, D17/D23) ──
@@ -1702,13 +1702,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          }}
       )
 
-      assert render(view) =~ "ready"
+      assert render(view) =~ ~s(data-chat-status="ready")
 
       # let the (now stale) timer fire — it must NOT flip offline
       Process.sleep(180)
       html = render(view)
-      refute html =~ "offline"
-      assert html =~ "ready"
+      refute html =~ ~s(data-chat-status="offline")
+      assert html =~ ~s(data-chat-status="ready")
     end
 
     # ── extracted teardown is idempotent (scc-w2, D18) ────────────────────
@@ -1732,7 +1732,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       count = html |> String.split("Send a message to resume it") |> length() |> Kernel.-(1)
       assert count == 1
-      assert html =~ "offline"
+      assert html =~ ~s(data-chat-status="offline")
     end
 
     test "a bare process DOWN (no exit frame) runs the honest teardown", %{view: view} do
@@ -1755,7 +1755,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:DOWN, make_ref(), :process, pid, :killed})
       html = render(view)
 
-      assert html =~ "offline"
+      assert html =~ ~s(data-chat-status="offline")
       assert html =~ "ended unexpectedly"
       # the pending approval is force-canceled, never a dead button
       assert html =~ "✗ canceled"
