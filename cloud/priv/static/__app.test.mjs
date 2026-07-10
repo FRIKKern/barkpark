@@ -3286,6 +3286,9 @@ const fleetSummaryFixture = () => ({
         db_size: { value: 1048576, measured_at: fleetIso(20) },
         disk: { value: 37, measured_at: fleetIso(20) },
         seats: { value: 4, measured_at: fleetIso(20) },
+        // The armed machine beat — under its physical ceilings (live).
+        cpu: { value: 23, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
+        ram: { value: 58, quota: 100, warn_at: 70, measured_at: fleetIso(20) },
       },
     },
     {
@@ -3306,14 +3309,18 @@ const fleetSummaryFixture = () => ({
   ],
 });
 
-test("W3 fleet strip: helpers exported + headline subset is exactly DOCS·DB·DISK·SEATS", () => {
+test("W3/W5 fleet strip: helpers exported + headline subset is DOCS·DB·DISK·SEATS·CPU·RAM", () => {
   for (const name of ["fleetStripModel", "fleetStripWorst", "fleetStripCellHtml", "fleetStripHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats"]);
-  // The subset keys must all be real meters in the shared vocabulary (no drift).
+  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats", "cpu", "ram"]);
+  // No drift: every headline key is a real meter in the shared vocabulary OR one
+  // of the wave-5 machine meters (cpu/ram land in the vocabulary via the
+  // machine-meters slice; the strip references them by their fixed names ahead of
+  // and independent of that spec — so this guard still catches an invented key).
   const known = new Set(hooks.usageMeters.map((m) => m.key));
-  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k), k + " must be a real usage meter");
+  const machine = new Set(["cpu", "ram"]);
+  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k) || machine.has(k), k + " must be a real usage meter");
 });
 
 test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shared spec", () => {
@@ -3326,6 +3333,8 @@ test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shar
   assert.equal(byKey.db_size.value, "1.0 MB");  // bytes (base-1024, shared fmt)
   assert.equal(byKey.disk.value, "37%");        // percent
   assert.equal(byKey.seats.value, "4");
+  assert.equal(byKey.cpu.value, "23%");     // machine capacity beat, percent fmt
+  assert.equal(byKey.ram.value, "58%");
   for (const c of fresh.cells) assert.equal(c.unmetered, false);
 });
 
@@ -3390,6 +3399,59 @@ test("W3 fleet strip: an absent / empty summary yields an empty, bar-less model"
   assert.equal(empty.teamState, null);
   const noTeam = hooks.fleetStripModel({ instances: [] });
   assert.equal(hooks.fleetStripHtml(noTeam).includes("usage-bar"), false);
+});
+
+// ── W5 machine meters: CPU/RAM headline cells + hot-box row accent (OC18/OC27/OC22)
+test("W5 fleet strip: a hot armed box paints CPU/RAM percent cells and lights its row accent", () => {
+  const iso = fleetIso(15);
+  const summary = {
+    team: null,
+    instances: [
+      {
+        id: "inst-hot", name: "Acme Prod", slug: "acme-prod", host: "acme.barkpark.cloud",
+        measured_at: iso,
+        meters: {
+          documents: { value: 412, measured_at: iso },
+          db_size: { value: 1048576, measured_at: iso },
+          disk: { value: 37, measured_at: iso },
+          seats: { value: 4, measured_at: iso },
+          // RAM pegged at its physical ceiling → over; CPU past its warn line.
+          cpu: { value: 88, quota: 100, warn_at: 70, measured_at: iso },
+          ram: { value: 100, quota: 100, warn_at: 70, measured_at: iso },
+        },
+      },
+      {
+        // An un-armed box: no cpu/ram meter → the honest dimmed cell, no accent.
+        id: "inst-bare", name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
+        measured_at: iso,
+        meters: { documents: { value: 5, measured_at: iso }, seats: { value: 1, measured_at: iso } },
+      },
+    ],
+  };
+  const model = hooks.fleetStripModel(summary);
+  const hot = model.rows.find((r) => r.id === "inst-hot");
+  const byKey = Object.fromEntries(hot.cells.map((c) => [c.key, c]));
+  assert.equal(byKey.cpu.value, "88%");        // percent fmt on the headline entry
+  assert.equal(byKey.ram.value, "100%");
+  assert.equal(byKey.cpu.unmetered, false);
+  // The physical ceiling lights the worst-state fold for free (OC22, no reimpl):
+  // RAM at 100 >= its quota → over.
+  assert.equal(hot.worstState, "over");
+
+  // The un-armed box keeps the honest dimmed em-dash capacity cells — never a
+  // fake zero — and no quota tone (nothing to accent).
+  const bare = model.rows.find((r) => r.id === "inst-bare");
+  const bareByKey = Object.fromEntries(bare.cells.map((c) => [c.key, c]));
+  assert.equal(bareByKey.cpu.value, "—");
+  assert.equal(bareByKey.cpu.unmetered, true);
+  assert.equal(bareByKey.ram.unmetered, true);
+  assert.equal(bare.worstState, null);
+
+  // The rendered strip carries the CPU/RAM cell labels and the lit over accent.
+  const html = hooks.fleetStripHtml(model);
+  assert.match(html, />CPU<\/span>/);
+  assert.match(html, />RAM<\/span>/);
+  assert.match(html, /fleet-usage-cell--over/);
 });
 
 // ════════════════════════════════════════════════════════════════════════════

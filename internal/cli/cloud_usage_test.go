@@ -492,8 +492,9 @@ func agoStamp(d time.Duration) *string {
 	return &s
 }
 
-// freshFleetRow is a healthy sampled box: docs + telemetry + seats all metered,
-// sampled minutes ago.
+// freshFleetRow is a healthy, AGENT-ARMED sampled box: docs + telemetry + seats +
+// the machine capacity beat (cpu/ram, well under their physical ceilings) all
+// metered, sampled minutes ago.
 func freshFleetRow() map[string]any {
 	return map[string]any{
 		"id": testInstanceID, "name": "alpha", "slug": "alpha", "host": "alpha.bp.dev",
@@ -505,6 +506,8 @@ func freshFleetRow() map[string]any {
 			"db_size":      fMeter(4194304.0, "telemetry.pg_size_bytes"),
 			"disk":         fMeter(42.0, "telemetry.disk_used_percent"),
 			"seats":        fMeter(2.0, "control-plane.team_members"),
+			"cpu":          fMeterQuota(23.0, 100.0, 70.0, "agent.cpu_percent"),
+			"ram":          fMeterQuota(58.0, 100.0, 70.0, "agent.ram_percent"),
 			"api_requests": fMeter(unmeteredValue, "not-metered"),
 			"bandwidth":    fMeter(unmeteredValue, "not-metered"),
 			"instances":    fMeter(3.0, "control-plane.team_instances"),
@@ -547,11 +550,19 @@ func TestRunCloudFleetUsageFresh(t *testing.T) {
 		"128",              // docs
 		"4.0 MB",           // db_size
 		"42%",              // disk
+		"23%",              // cpu capacity beat
+		"58%",              // ram capacity beat
 		"5m ago",           // relative sample age
-		"live",             // healthy STATE
+		"live",             // healthy STATE — an armed box under its ceilings
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("fresh fleet render missing %q:\n%s", want, stdout)
+		}
+	}
+	// The CPU · RAM headline columns render for an armed box.
+	for _, col := range []string{"CPU", "RAM"} {
+		if !strings.Contains(stdout, col) {
+			t.Fatalf("fleet table must carry the %q headline column:\n%s", col, stdout)
 		}
 	}
 }
@@ -747,21 +758,44 @@ func TestRelativeAge(t *testing.T) {
 // outranks near_limit outranks unmetered outranks live; a partially-dark row is
 // unmetered, a healthy row is live, and a tripped headline meter wins.
 func TestFleetRowState(t *testing.T) {
+	// A fully-armed, healthy box: every headline meter metered and under its
+	// ceilings (the machine cpu/ram beat included) → live.
 	live := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 10.0}, "db_size": {Value: 100.0}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(live); got != "live" {
-		t.Errorf("all-metered row = %q, want live", got)
+		t.Errorf("all-metered armed row = %q, want live", got)
+	}
+	// An un-armed box (no agent → cpu/ram absent) rolls to unmetered even
+	// though its inventory meters are live — a box whose CAPACITY we can't see never
+	// reads fully healthy (the same honesty a dark inventory pipe gets, D51).
+	unarmed := map[string]cloudclient.UsageMeter{
+		"documents": {Value: 10.0}, "db_size": {Value: 100.0}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
+	}
+	if got := fleetRowState(unarmed); got != "unmetered" {
+		t.Errorf("un-armed row (no cpu/ram) = %q, want unmetered", got)
 	}
 	dark := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 10.0}, "db_size": {Value: "unmetered"}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(dark); got != "unmetered" {
 		t.Errorf("partially-dark row = %q, want unmetered", got)
 	}
+	// A hot machine meter (RAM past its warn line) ambers the row — the capacity
+	// beat contributes to the STATE fold exactly like an inventory quota.
+	hot := map[string]cloudclient.UsageMeter{
+		"documents": {Value: 10.0}, "db_size": {Value: 100.0}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 88.0, Quota: fp(100), WarnAt: fp(70)},
+	}
+	if got := fleetRowState(hot); got != "near_limit" {
+		t.Errorf("hot-RAM row = %q, want near_limit", got)
+	}
 	near := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 90.0, Quota: fp(100), WarnAt: fp(80)}, "db_size": {Value: "unmetered"},
 		"disk": {Value: 5.0}, "seats": {Value: 2.0},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(near); got != "near_limit" {
 		t.Errorf("near-limit-with-dark row = %q, want near_limit (near outranks unmetered)", got)
@@ -769,6 +803,7 @@ func TestFleetRowState(t *testing.T) {
 	over := map[string]cloudclient.UsageMeter{
 		"documents": {Value: 100.0, Quota: fp(100), WarnAt: fp(80)}, "db_size": {Value: 90.0, Quota: fp(100), WarnAt: fp(80)},
 		"disk": {Value: 5.0}, "seats": {Value: 2.0},
+		"cpu": {Value: 20.0, Quota: fp(100), WarnAt: fp(70)}, "ram": {Value: 35.0, Quota: fp(100), WarnAt: fp(70)},
 	}
 	if got := fleetRowState(over); got != "over_limit" {
 		t.Errorf("over-limit row = %q, want over_limit", got)

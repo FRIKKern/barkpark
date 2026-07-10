@@ -348,10 +348,15 @@ const EXPECTATIONS = {
   // the app writes to), so the async /v1/usage/summary fetch → render is fully
   // observable here: the over-quota team headline + Manage-plan recovery, the
   // fresh/stale "as of" stamps, and the honest no-sample cell all in one boot.
+  // Wave 5 (OC18/OC27): the per-instance CPU · RAM machine capacity cells, and a
+  // hot armed box (RAM at its ceiling) lighting its whole row accent (over).
   "fleet-usage": {
-    what: "the fleet usage strip paints team headline + per-instance sample cells",
+    what: "the fleet usage strip paints team headline + per-instance sample + CPU/RAM capacity cells",
     container: "overview-fleet-usage",
-    includes: ["Fleet usage", "usage-bar--over", ">Manage plan<", "fleet-usage-cell", "as of ", "No sample yet"],
+    includes: [
+      "Fleet usage", "usage-bar--over", ">Manage plan<", "fleet-usage-cell", "as of ", "No sample yet",
+      ">CPU</span>", ">RAM</span>", "100%", "fleet-usage-cell--over",
+    ],
     excludes: ["Loading fleet usage"],
   },
   // C8: the golden-path verify card renders from the events feed on Overview.

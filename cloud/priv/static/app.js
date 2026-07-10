@@ -8510,20 +8510,40 @@
   // vocabulary (OC6/D2). Append-only: does not touch the C10 / Metrics regions.
   // ══════════════════════════════════════════════════════════════════════════
 
-  // The headline meters shown per instance cell (a subset of the nine), in the
-  // charter's order: DOCS · DB · DISK · SEATS. Labels are short for the compact
-  // cell; the number format is pulled from the shared USAGE_METERS spec so a
-  // formatting change can never drift between the strip and the Usage tab.
+  // The headline meters shown per instance cell (a subset of the meter set), in
+  // the charter's order: DOCS · DB · DISK · SEATS · CPU · RAM (OC18/OC27). The
+  // count/byte meters pull their number format from the shared USAGE_METERS spec
+  // so a formatting change can never drift between the strip and the Usage tab.
+  // The MACHINE meters (cpu/ram — the on-box agent's capacity beat) pin
+  // their own `fmt: "percent"` on the headline entry: they land in the shared
+  // vocabulary via the machine-meters slice, and the headline fmt keeps the strip
+  // formatting them correctly regardless of that spec's presence. An un-armed box
+  // (no agent) has no cpu/ram meter → the cell renders the honest dimmed "—", the
+  // same "never a fake zero" state a quiet pipe gets (4 of 5 fleet boxes carry no
+  // agent today — that dimmed cell is CORRECT, not a bug).
   var FLEET_STRIP_METERS = [
     { key: "documents", label: "Docs" },
     { key: "db_size", label: "DB" },
     { key: "disk", label: "Disk" },
-    { key: "seats", label: "Seats" }
+    { key: "seats", label: "Seats" },
+    { key: "cpu", label: "CPU", fmt: "percent" },
+    { key: "ram", label: "RAM", fmt: "percent" }
   ];
 
   function fleetStripSpecFor(key) {
     for (var i = 0; i < USAGE_METERS.length; i++) if (USAGE_METERS[i].key === key) return USAGE_METERS[i];
     return { key: key, label: key, fmt: "count" };
+  }
+
+  // Resolve the display spec for a headline ENTRY. The label/fmt come from the
+  // shared USAGE_METERS vocabulary, but a headline entry may PIN its own fmt (the
+  // machine meters carry fmt:"percent") — that wins, so the strip formats a
+  // percent meter correctly even independent of the vocab spec. The tone/quota
+  // math in usageMeterDisplay reads the envelope's quota/warn_at, so the physical
+  // ceilings the sampler stamps light the worst-state fold for free (OC22).
+  function fleetHeadlineSpec(h) {
+    var spec = fleetStripSpecFor(h.key);
+    return h.fmt ? { key: spec.key, label: spec.label, fmt: h.fmt } : spec;
   }
 
   // Fold the quota tones of a row's headline cells to the worst present:
@@ -8535,7 +8555,7 @@
     var order = { ok: 1, warn: 2, over: 3 };
     var worst = null;
     FLEET_STRIP_METERS.forEach(function (h) {
-      var d = usageMeterDisplay(fleetStripSpecFor(h.key), (meters || {})[h.key]);
+      var d = usageMeterDisplay(fleetHeadlineSpec(h), (meters || {})[h.key]);
       if (d.bar && (worst === null || order[d.bar.tone] > order[worst])) worst = d.bar.tone;
     });
     return worst;
@@ -8557,7 +8577,7 @@
       var measuredAt = inst.measured_at || null;
       var noSample = !measuredAt;
       var cells = FLEET_STRIP_METERS.map(function (h) {
-        var d = usageMeterDisplay(fleetStripSpecFor(h.key), meters[h.key]);
+        var d = usageMeterDisplay(fleetHeadlineSpec(h), meters[h.key]);
         // A compact cell shows a short em-dash for an unmetered meter rather than
         // the full "Not yet metered" sentence the Usage tab uses.
         return { key: h.key, label: h.label, value: d.unmetered ? "—" : d.value, unmetered: d.unmetered };
