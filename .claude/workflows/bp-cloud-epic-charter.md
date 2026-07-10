@@ -1,141 +1,141 @@
-# Aesthetic unification — reconcile the ledger with the shipped lockstep (aesthetic-unification epic charter)
+# PortableDoc Everything-Editable — finish line (pd-everything-editable epic charter)
 
 > NOTE ON THIS PATH: this filename is the epic-cycle charter slot and has carried earlier
 > epics. Preserved verbatim: **self-update W5** at `bp-self-update-w5-charter.md`,
 > **gui-premium W5** at `bp-gui-premium-w5-charter.md`, **p-quality-gate** at
-> `bp-hollow-paper-gate-charter.md`, and **composition-doctrine** at
-> `bp-composition-doctrine-charter.md`. This file is now the memory of the
-> **aesthetic-unification** epic (reconciliation wave). The epic's ORIGINAL build history
-> lives in `bp-unified-aesthetic-endgame-charter.md` (W1–W3 endgame) — read it for how the
-> lockstep was built; read THIS file for how the epic closes.
+> `bp-hollow-paper-gate-charter.md`, **composition-doctrine** at
+> `bp-composition-doctrine-charter.md`, and **aesthetic-unification (reconciliation)** at
+> `bp-aesthetic-unification-reconciliation-charter.md`. This file is now the memory of
+> the **pd-everything-editable** finish-line epic.
 
-Epic anchor: bp task slug **`aesthetic-unification-epic`** ("Apply the cloud design profile
-to every Barkpark surface", published, priority 1, 55 children). Wave paper:
-`aesthetic-unification-epic-wave-2026-07-11`. Server: guerrilla.
+Epic anchor: bp task slug **`pd-everything-editable`** ("EPIC · PortableDoc Beta:
+everything editable, 1:1 with the reader", published, priority 1, 10 children +
+this wave's additions). Wave Paper: `pd-everything-editable-wave-2026-07-11`.
+Server: guerrilla. Sibling epic (named successor, NOT scope):
+`paper-edit-parity-endgame` (render-path unification).
 
 ## Vision
 
-The anchor's four criteria are either stamped met:true with file:line + PR + run-proof
-evidence, or carry a written split with a single named human-gated remainder — and the
-child ledger contains zero fabricated claims, zero superseded wishlist tasks, and exactly
-the honest remainder (visual-audit ratification, brand mark, reading typography) plus a
-small filed backlog. "Every Barkpark surface" is TRUE through one mechanism: the
-tokens.json → derive.mjs → emit.mjs lockstep (17 artifacts, check.mjs Parts A–H), whose
-Part E exemptions ledger is the COMPLETE registry of hand-stamped residue — nothing
-un-gated, nothing silently parallel.
+Every authorable PortableDoc block type is editable in the mainline (canvas-on) Studio
+editor, 1:1 with the reader — no block type reaches the "not editable yet" catch-all
+(paper_editor.ex:1339), every editable block byte-aligns with the reader render, and the
+nested-editing UX is proven in a live browser. The anchor closes only when all three of
+its criteria carry file:line/PR/run evidence — never on vacuous green (the 2026-07-08
+false-done cleanup is precedent). This wave: pay the bundle debt, fix the one real C2
+break (card chrome), close the one real C1 gap (5 DataViz types), and leave C3 honestly
+open with a packaged, unblockable checklist.
 
 ## Non-negotiable operational facts (builders read FIRST)
 
-- Tokens ONLY via the 3-file lockstep (design/tokens.json + derive.mjs + emit.mjs).
-  Go/Elixir tokens_gen files stay BYTE-STABLE unless a slice explicitly owns a regen —
-  this wave, NO slice does (preflight proved the web-only slices ripple into
-  web/app/globals.css + web/lib/tokens.gen.ts only).
-- check.mjs must stay green incl. Part F byte-identity + Part H AA; studio-literal-check
-  zero new lit-allows; a NEW color leaf must be registered in derive.mjs
-  PASSTHROUGH_FAMILIES (and derive.test.mjs's hardcoded count bumped) or Part F reds.
-- .ex/.heex changes WAIT for the Elixir Test CI gate before merge. Worktrees from
-  origin/main after `git fetch` (the shared checkout carries foreign in-flight edits —
-  a local check.mjs Part E red on root.html.heex 165→166 is another session's
-  uncommitted edit, not yours). Claim your bp task BEFORE working. PR body carries
-  `Task: <id>`. `cc` is a Claude wrapper — always `CC=/usr/bin/clang`.
-- doc-gates is a blocking CI STEP, not a GitHub-required check: main has NO branch
-  protection/rulesets (rulesets API `[]`, protection 404, re-proven 2026-07-11).
-  Reviewer discipline is the merge net.
+- Render-path unification law: ONE producer, never fork reader/editor paths. Server
+  paints non-prose blocks via `Render.render_block/2`; editor JS never hand-writes
+  reader fleet markup (§3 forbidden-literal gate).
+- .ex/.heex changes WAIT for the Elixir Test CI gate before merge. Goldens byte-unchanged
+  except owned regens. Worktrees from origin/main after `git fetch`. Claim your bp task
+  BEFORE working. PR body carries `Task: <id>`. `cc` is a Claude wrapper — always
+  `CC=/usr/bin/clang`.
+- D8 (below): every PR touching `api/assets/paper-editor/src/**` rebuilds AND commits
+  the bundle (`npm run build`, then commit the two artifacts under
+  api/priv/static/assets/). The build is deterministic — a dirty diff after your build
+  means the committed bundle was stale, not flake.
+- The hollow-paper gate cannot false-negative content-ADDING edits (ratchet only halts
+  the non-hollow→hollow edge) — a live-pass failure is a real editor bug, never gate
+  interference.
 
 ## Decisions
 
-- **D1 Reconciliation, not construction.** The 17-artifact lockstep is alive and green
-  (emit --check 17/17; check.mjs A–H incl. F byte-identity + H 162/162 AA; CI runs
-  29128797161 push + 29129285343 PR, and green on d655b753 = current origin/main). The
-  epic's gap was ledger-vs-reality, so this wave stamps evidence, cuts dead scope, and
-  builds only 3 surgical slices.
-- **D2 The wish's four suspected outside-surfaces DISSOLVED with file:line proof.**
-  Email is IN the lockstep (fleet `:email` renderers ← Palettes.email_skin ←
-  TokensGen artifact #11; one documented literal exception panels_email.ex:104-106;
-  tones via governed status-manifest.json). /activate + CP login ride the cloud SPA
-  artifact (router.ex:317-348 → index.html:14 → app.css, emit.mjs:1720). Marketing =
-  web/ (already in lockstep); js/docs is dormant/unwired — scope-cut per
-  docs/decisions/deferred.md:8. PDF/print = tokenized @media print blocks with one
-  frozen literal each (exemptions.json:13); no PDF pipeline exists — scope-cut.
-- **D3 C1 stamps only after Part E becomes the complete residue registry** (slice R1):
-  ledger styles.css / bp-paper-editor.css / paper-surface.css / the bp-graph.js mirror
-  pair with rationale, and teach Part E's LEDGER_MARKER to also blank
-  `GENERATED: paper-surface` and `GENERATED: status-tones` blocks. Why: today 329
-  ledgered vs ~646 un-ledgered literals makes "single source of color" materially false.
-- **D4 Adopt, don't just freeze, the two LIVE ungated surfaces** (slice R3): tokenize
-  inbox_live.ex (48 literals) + board_live.ex (32) and extend studio-literal-check.sh
-  beyond api/lib/barkpark_web to api/lib/barkpark/plugins. Why: live chrome with
-  parallel palettes that NO gate scans is the strongest C1 counterexample; both files
-  have targeted tests (102 green locally) so the change is provable.
-- **D5 bp-graph.js Canvas palette: exempt-with-rationale now, tokenize later** (backlog
-  au-r6). Why: Canvas fillStyle can't consume var() directly (Mermaid-JS-init class);
-  the pair is byte-frozen (5c10b76e) so it cannot drift while exempt.
-- **D6 Graph-canvas + paper-callout web adoption are ONE slice** (au-w3-graph-canvas-token,
-  widened). Why: both edit adjacent emit.mjs functions (webBlock ~551 / webTokensTs ~574)
-  — parallel builders would merge-conflict; and the callout palette must come from
-  color.paperCallout, NEVER color.status (tokens.json:229 forbids the substitution —
-  the digest's status-token idea was wrong). Preflight proved the 4-file shape:
-  tokens.json + emit.mjs + derive.mjs PASSTHROUGH_FAMILIES + derive.test.mjs count bump;
-  web-only byte ripple.
-- **D7 C3 wording law.** Stamp as: "blocking CI step in doc-gates.yml (no
-  continue-on-error), green on HEAD and on PR-event runs, team-enforced per
-  docs/ops/merge-gates.md — main has no GitHub ruleset or branch protection." NEVER
-  "GitHub-required check" (proven false).
-- **D8 C4 splits: generated TRUE / ratified FALSE.** The cross-surface instrument
-  coherence.html is real (#1397/#1718), token-fed, 7 S5 tests green (383/383 harness);
-  per-surface styleguides carry the sg-ratify gate (charter decision 27). But the
-  ratification EVENT never happened — `au-w6-visual-audit` is the single named
-  remainder (human-gated). coherence.html stays UNROUTED by design
-  (verify-via-standalone-harness doctrine; routing would expose the __preview__ subtree).
-- **D9 The W5.B component-block family is CUT** (10 unbuilt comp-* + view-remainder +
-  authoring + gate + comp-styleguide + task-authoring + revamp-tokenize +
-  figures-classes → closed `cancelled` with rationale). Why: composition-doctrine P2
-  (ratified 2026-07-07) kills the read-only/server-painted `_raw` tier these tasks
-  specify; rebuilding them would contradict shipped doctrine. Real content need
-  re-expresses as an editable widget under the composition-doctrine epic — never a
-  resurrection of these task ids. figures.ex is proven token-compliant (var() sourced
-  fallbacks), so its class-refactor task is tree-tidiness and earns nothing.
-- **D10 comp-chart closes on REAL evidence; comp-quote must not be laundered.** chart:
-  compose.ex:1139 → DataViz.chart_html (data_viz.ex:416, server SVG, shipped by #1600);
-  bars+line real, area deferred-with-record. quote: pullquote (compose.ex:262) carries
-  no attribution — closing quote onto it would be a fresh false-done; it is cut with
-  the family.
-- **D11 Fabrication scrub.** The 11 tasks carrying the byte-identical "459 render tests
-  green" summary get it replaced with honest text (comp-chart lacked even a
-  reopen_note); paper-components-view loses "(SHIPPED)"/"DONE."; paper-components-
-  authoring loses its "au-w5-comp-* all DONE" false premise. The 4 done styleguide
-  tasks (#1338/#1439/#1448/#1466 all MERGED) get criteria back-stamped from PR evidence,
-  marked PLAUSIBLE where not re-run.
-- **D12 pdrender-web-tokens splits.** Go half closes NOW on fresh run-proof
-  (build/vet/test -count=1 green; chart.go:421 + heatmap.go:384,674 consume Gen*; zero
-  stray draw-site literals) + PRs #1395/#1691/#1984 — with the "via semrole" wording
-  amended (pdrender may NEVER import semrole; the byte-identical sibling copy is the
-  documented architecture). Web half lives in the widened graph-canvas slice.
-- **D13 Honest remainder after this wave:** au-w6-visual-audit (ratification event,
-  human — unblocked by the paper-components-gate cut), au-w6-brand-mark (needs a
-  human-drawn mark; cloud/priv/static has NO favicon at all), au-w5-reading-typography
-  (spec §7 human gate), plus filed backlog au-r4 (web type ladder — W3.9 closed without
-  wiring TYPE_SCALE/HEADING to emitted --text-*), au-r5 (paperEmail "w3 reconciles"
-  dangling note — divergence #1e5347 vs #1e5243 is deliberate but unowned), au-r6
-  (bp-graph palette tokens via getComputedStyle).
-- **D14 Epic close condition.** Lead stamps C1 after R1+R3 merge, C2+C3 now, C4 as the
-  recorded split; the epic itself closes only when au-w6-visual-audit's human sign-off
-  is recorded (or a human explicitly waives it) — never before.
+- **D1 — Anchor stays OPEN this wave; close is a later ceremony.** C1 is factually FALSE
+  at HEAD: `stat`, `stats`, `stat-grid`, `heatmap`, `chart` (compose.ex:1115-1145) have
+  zero editor clauses (exhaustive grep of paper_editor.ex's 31 case heads), are absent
+  from @canvas_fleet_types (paper_canvas.ex:167) and from slash-insert — proven both
+  statically and by a live authored-paper round-trip on localhost. No close on unmet
+  criteria.
+- **D2 — C1 is scoped to the mainline canvas-on surface.** Classic (canvas-off) mode
+  intentionally routes all fleet types to the catch-all (view/delete/reorder); it is a
+  legacy opt-out, not the doctrine surface. The anchor's C1 text is updated to
+  ":1339, mainline canvas surface" (was stale ":1312", unscoped).
+- **D3 — DataViz editability ships via the server-paint fleet pattern, not hand-mirrored
+  node-views.** Blocks paint through `Render.render_block/2` (ONE producer, doctrine D8)
+  with edit islands for config — byte-parity with the reader by construction. Why: the
+  parity gate exists because hand-mirroring rots.
+- **D4 — DataViz types stay slash-UNinsertable in v1** (CANVAS_SLASH_TYPES stays 23,
+  lockstep smoke untouched). Why: data-bearing, API-authored blocks — an empty slash
+  insert is meaningless; same structural-exclusion precedent as sheet/embed.
+- **D5 — The card chrome break is C2-blocking and rides THIS wave by ADOPTING the
+  existing sibling task `parity2-bug-card-slot-chrome`** (stays parented under
+  paper-edit-parity-endgame; wave_paper stamped on it). Why: at HEAD the editor node-view
+  (card-node.js:264-300) emits model-A `bp-card__t/__d/__media/__action` chrome while the
+  reader's `card_html/2` (components.ex:349-381) is model-B bare-semantic (`<h2>`/`<p>` —
+  card_widget_test.exs:96-102, green, REFUTES the chrome) — WYSIWYG is broken on the very
+  widget #2398 grew. Dedup law: the bug is already owned; never double-file.
+- **D6 — Fix direction: the editor moves to model B. NEVER revert the reader to model
+  A.** Model B is the graduated cross-surface shape (web+email+TUI, PRs #1529/#1539).
+- **D7 — bp-card__ goes BACK into the §3 forbidden list + card gets a mounted-shape gate
+  (`__card_parity.test.mjs`, twin of `__section_parity.test.mjs`).** Why: the current §3
+  graduation (canvas_reader_parity_gate_test.exs:377-385) is a permit resting on a
+  now-false premise ("reader emits bp-card__*" — it no longer does); card parity is
+  otherwise invisible to CI.
+- **D8 — The bundle no-rebuild precedent (since #1984) is RESCINDED.** Every PR touching
+  `api/assets/paper-editor/src/**` rebuilds and commits the bundle (proven deterministic;
+  esbuild 0.24.2 pinned). A catch-up regen slice goes first this wave. Why:
+  paper-editor.yml has been red on main for 3 pushes at "Assert committed bundle is
+  fresh" — a permanently-red workflow erodes all CI signal. (Correction of record: it is
+  a persistent red, NOT a mechanical merge-blocker — no branch protection/ruleset
+  exists.)
+- **D9 — C3 stays open; pd-ee-live-verify is an infra-blocked agent task, not a human
+  mandate.** chrome-devtools MCP cannot launch any browser on this host (all instances
+  share one hardwired profile dir; the lock is held by another LIVE session —
+  do-not-clobber). App-side prerequisites are all green (local Studio 200 admin-open,
+  showcase holds every checklist type, LiveView JS served). The task brief now carries
+  the expanded checklist (+card slots from #2398, +hollow-ratchet probe) and the unblock
+  recipe (unique userDataDir). The infra defect is filed
+  (`pd-ee-chrome-mcp-userdatadir`).
+- **D10 — The 5 vacuous-done children get retro evidence stamps, not reopens.** Their
+  ledger rows (met:0, evidence:"") are a bookkeeping defect; the code claims are verified
+  TRUE at HEAD (PR #1233/845acf5f is a HEAD ancestor; action/figure/terminal node files
+  exist; __section_parity ran 11/11 live). Distinct from fabrication — evidence says so.
+- **D11 — Render-path unification is REFUSED as scope.** It is the sibling epic
+  `paper-edit-parity-endgame` (2 open tasks: S10 card chrome — adopted here per D5 —
+  and task-detail empty-state; S12-S17 remain charter-only backlog THERE, deliberately
+  not re-filed here).
+- **D12 — asciicast/form/questionnaire read-only is ratified scope-narrowing** under
+  pd-ee-fleet-config-decision (islands v1, "stay minimal"); no work owed by this epic.
+- **D13 — TUI is out of scope for this anchor.** All three criteria are web-worded;
+  #2398 added editing capability, not a new block type — no pdrender renderer owed.
+- **D14 — Honest C2 stamp language until the card slice merges:** "parity gates green at
+  HEAD (44 tests/0 failures at fc9665e4: view_edit_parity + canvas_reader_parity_gate +
+  card_widget; delta since proven-green CI run d655b753 diff-verified inert) MODULO
+  parity2-bug-card-slot-chrome." Never unconditional green.
 
 ## Roadmap
 
-Wave R (2026-07-11, reconciliation — 3 build slices + lead-executed ledger work):
+Wave 2026-07-11 (this wave, integration-ordered — S2/S3 share the bundle artifacts and
+the parity gate test file, so they sequence via file-truth collisions; S1 lands first):
 
-| id | slice | size | model |
-|---|---|---|---|
-| R0 | (lead, this phase) fabrication scrub, W5.B cuts, back-stamps, C2/C3 stamps, backlog filing | — | fable (Decide) |
-| R1 | `au-r1-ledger-extension` — Part E complete-registry + marker fix | S | opus |
-| R2 | `au-w3-graph-canvas-token` — web token adoption: graph-canvas + paper-callout | M | fable |
-| R3 | `au-r3-plugin-liveview-tokens` — tokenize inbox/board LiveViews + scan-root extension | M | fable |
+1. **S1 · pd-ee-bundle-regen** (small, opus) — catch-up rebuild+commit of
+   bp-paper-editor.bundle.js/.css; paper-editor.yml returns green on main. Pays the
+   ba893d5e/29176820/5dd34bbd debt under D8. No source changes.
+2. **S2 · parity2-bug-card-slot-chrome** (large, fable, ADOPTED from sibling epic) —
+   card-node.js node-view rewritten to model-B DOM byte-aligned with card_html/2;
+   dead editor CSS dropped; §3 graduation reverted (D7); __card_parity.test.mjs added;
+   bundle regen rides (D8).
+3. **S3 · pd-ee-dataviz-editors** (large, fable) — stat/stats/stat-grid/heatmap/chart
+   become canvas-editable via server-paint + edit islands (D3); painted_fleet rows +
+   forbidden literals added to the parity gate; no slash insert (D4); bundle regen rides.
 
-After wave R: lead stamps C1 (post-merge), closes R-slice tasks on merge. Remainder:
-au-w6-visual-audit (human ratification → epic close), au-w6-brand-mark,
-au-w5-reading-typography. Backlog: au-r4-web-type-ladder, au-r5-email-brand-reconcile,
-au-r6-graph-palette-tokens.
+Later waves / backlog (filed as published children of the anchor):
+- **pd-ee-live-verify** (open, carries C3) — execute the live browser checklist the
+  moment a free Chrome profile exists; evidence = screenshots + console messages +
+  reload-persistence per step.
+- **pd-ee-chrome-mcp-userdatadir** (p2) — host infra: per-session userDataDir for
+  chrome-devtools-mcp so agent browser passes stop deadlocking on one shared profile.
+- **pd-ee-dataviz-structured-editors** (p3) — v2 structured UIs (heatmap 2D grid editor
+  covering its 3 render modes; chart series/axes forms) replacing the v1 JSON islands.
+- **pd-ee-sheet-embed-audit** (p3) — sheet/embed editability audit (reached by no
+  surveyor this wave).
+- **pd-ee-reader-stale-cache** (p3) — a deleted paper kept serving HTTP 200 on the
+  public reader route after a confirmed DB delete; find and fix the stale cache layer.
+- **Close ceremony** (after S1-S3 merge + C3 unblocks): stamp C1/C2/C3 with evidence,
+  final audit, close the anchor.
 
 ## Wave log
