@@ -1,0 +1,12 @@
+pdrender parity — dependency tree                                                                                       
+⠋ 4 in flight   ○ 1 ready   ✓ 3 done   33%                                                                              
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
+⠋ Epic: pdrender block parity                                                                                   lead  P0
+├─ ✓ Wave 1 — heat family                                                                                       ada   P1
+│  ├─ ✓ Heat ramp tokens                                                                                        ada   P1
+│  └─ ✓ Quantile dual-encode bins                                                                               grace P2
+├─ ⠋ Wave 2 — charts and structure                                                                              opus  P1
+│  ├─ ○ Junction crossing policy                                                                                ada   P2
+│  ├─ ⠋ Typed table columns                                                                                     grace P1
+│  └─ ⠋ Tasks layout tree rails                                                                                 opus  P0
+└─ ○ Wave 3 — dashboard container                                                                                     P2

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "m23tree",
+      "type": "task-list",
+      "title": "pdrender parity — dependency tree",
+      "layout": { "mode": "tree" },
+      "query": "SELECT * FROM tasks WHERE parent_id = 'pdrender-block-parity' ORDER BY depth",
+      "snapshot": [
+        { "title": "Epic: pdrender block parity", "status": "in_progress", "worker": "lead", "priority": "0", "depth": 0 },
+        { "title": "Wave 1 — heat family", "status": "done", "worker": "ada", "priority": "1", "depth": 1 },
+        { "title": "Heat ramp tokens", "status": "done", "worker": "ada", "priority": "1", "depth": 2 },
+        { "title": "Quantile dual-encode bins", "status": "done", "worker": "grace", "priority": "2", "depth": 2 },
+        { "title": "Wave 2 — charts and structure", "status": "in_progress", "worker": "opus", "priority": "1", "depth": 1 },
+        { "title": "Junction crossing policy", "status": "ready", "worker": "ada", "priority": "2", "depth": 2 },
+        { "title": "Typed table columns", "status": "in_progress", "worker": "grace", "priority": "1", "depth": 2 },
+        { "title": "Tasks layout tree rails", "status": "in_progress", "worker": "opus", "priority": "0", "depth": 2 },
+        { "title": "Wave 3 — dashboard container", "status": "open", "priority": "2", "depth": 1 }
+      ]
+    }
+  ]
+}
