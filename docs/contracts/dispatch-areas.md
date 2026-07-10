@@ -1,4 +1,4 @@
-<!-- doc-tier: agent | canonical-for: dispatch-area-vocabulary | budget: 700tok -->
+<!-- doc-tier: agent | canonical-for: dispatch-area-vocabulary | budget: 1400tok -->
 # Dispatch areas — `area:` vocabulary & `~`phase-band derivation
 
 The dispatch frontier (`bp task frontier`; the task board's `Board.IndependentReady`)
@@ -65,5 +65,48 @@ A task with **no authored `area:`** can still contribute a surface, derived
   provably-disjoint `isolated` class; a task resting on derived-only `~` surfaces is
   batched more conservatively.
 
+## `files:` — path-precise blast radius (df-file-edge)
+
+`area:` is a coarse surface bucket; `files:` is the exact answer. A task declares
+the files it will touch as `files:<repo-relative-path>` labels — **one path per
+label** (labels are single tokens, so a space-separated list is not allowed):
+
+```
+files:internal/taskboard/frontier.go   # one exact file
+files:internal/cli/                    # a whole directory subtree (trailing /)
+```
+
+**Syntax & normalization** (`FilesOf` in `frontier.go`):
+
+- One path per label. Repo-relative — a leading `./` or `/` is stripped, and
+  surrounding whitespace is trimmed, so `files: ./internal/x.go` ≡
+  `files:internal/x.go`.
+- A **trailing `/`** marks a **directory prefix**: `files:internal/cli/` matches
+  every path under `internal/cli/`. No globs (`*`, `**`) — a `/`-suffixed dir is
+  the only wildcard.
+- An empty or whitespace-only value is ignored. A task with no `files:` label is
+  **undeclared** (the empty set).
+
+**Intersection** — two declared radii collide on **exact path equality** OR
+**directory containment** (one path ends `/` and the other lives under it). The
+shared path is named in the frontier's displaced reason (`files internal/cli/x.go`).
+
+**The abstain rule** — file truth is authoritative *only when BOTH tasks declare
+it*:
+
+| task A | task B | frontier verdict |
+|---|---|---|
+| files intersect | — | **HARD conflict** — overrides even disjoint `area:` labels |
+| files disjoint | — | **cleared** — overrides an `area:` overlap AND the neighborhood proxy |
+| declared | **undeclared** | **abstain** — fall through to `area:`/neighborhood, unchanged |
+
+Undeclared is never silently safe: a task that names no files stays as unproven as
+its `area:` and neighborhood signals make it. A pick that declares files and is
+path-disjoint from every co-admitted pick earns the strongest risk tag,
+`file-isolated` (counted "proven"). Claims already **in flight** that share a
+declared file (or authored `area:`) surface as an `OVERLAP` section on
+`bp task frontier` — a collision seen now, not at merge time.
+
 ## Code anchors
-- internal/taskboard/frontier.go — areasOf resolves the footprint; phaseBandArea is the closed derivation map; phaseBandSlug strips the leading band
+- internal/taskboard/frontier.go — areasOf resolves the footprint; phaseBandArea is the closed derivation map; phaseBandSlug strips the leading band; FilesOf parses files: labels; interferes folds the file edge; classifyRisk stamps file-isolated
+- internal/taskboard/overlaps.go — ClaimOverlaps reports in-flight claim collisions (files: then authored area:)

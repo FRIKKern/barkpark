@@ -67,38 +67,58 @@ func TestInterferesTruthTable(t *testing.T) {
 	// A real cross-root block edge between bareIDs "a" and "b" (slice-2).
 	blockAB := buildCrossAdj(map[string][]string{"a": {"b"}})
 
+	// df-file-edge: declared file blast radii. fileX/fileY are disjoint files,
+	// fileDir is a directory prefix that CONTAINS fileX.
+	fileX := map[string]bool{"internal/cli/x.go": true}
+	fileY := map[string]bool{"internal/cli/y.go": true}
+	fileDir := map[string]bool{"internal/cli/": true}
+
 	cases := []struct {
 		name        string
 		ai, bi      areaInfo
+		fa, fb      map[string]bool
 		nkA, nkB    string
 		cross       crossAdj
 		containment bool
 		want        interfereTier
 	}{
-		{"area overlap → HARD", studio, studioApi, "proj:x", "proj:y", nil, false, tierHard},
-		{"area disjoint → NONE", studio, cli, "proj:x", "proj:y", nil, false, tierNone},
-		{"area disjoint same nbhd → NONE (intra-epic parallel)", studio, cli, "root:e", "root:e", nil, false, tierNone},
-		{"one area-less, same nbhd → HARD", studio, none, "root:e", "root:e", nil, false, tierHard},
-		{"one area-less, diff nbhd → UNKNOWN", studio, none, "proj:x", "proj:y", nil, false, tierUnknown},
-		{"both area-less, same nbhd → HARD", none, none, "root:e", "root:e", nil, false, tierHard},
-		{"both area-less, diff nbhd → UNKNOWN (strangers)", none, none, "proj:x", "proj:y", nil, false, tierUnknown},
+		{"area overlap → HARD", studio, studioApi, nil, nil, "proj:x", "proj:y", nil, false, tierHard},
+		{"area disjoint → NONE", studio, cli, nil, nil, "proj:x", "proj:y", nil, false, tierNone},
+		{"area disjoint same nbhd → NONE (intra-epic parallel)", studio, cli, nil, nil, "root:e", "root:e", nil, false, tierNone},
+		{"one area-less, same nbhd → HARD", studio, none, nil, nil, "root:e", "root:e", nil, false, tierHard},
+		{"one area-less, diff nbhd → UNKNOWN", studio, none, nil, nil, "proj:x", "proj:y", nil, false, tierUnknown},
+		{"both area-less, same nbhd → HARD", none, none, nil, nil, "root:e", "root:e", nil, false, tierHard},
+		{"both area-less, diff nbhd → UNKNOWN (strangers)", none, none, nil, nil, "proj:x", "proj:y", nil, false, tierUnknown},
 		// slice-2: a cross-root block edge overrides even disjoint proven areas.
-		{"cross edge overrides disjoint areas → HARD", studio, cli, "proj:x", "proj:y", blockAB, false, tierHard},
-		{"cross edge overrides area-less diff nbhd → HARD", none, none, "proj:x", "proj:y", blockAB, false, tierHard},
+		{"cross edge overrides disjoint areas → HARD", studio, cli, nil, nil, "proj:x", "proj:y", blockAB, false, tierHard},
+		{"cross edge overrides area-less diff nbhd → HARD", none, none, nil, nil, "proj:x", "proj:y", blockAB, false, tierHard},
 		// df-exclude-epic-roots: a parent↔own-descendant pair in the SAME nbhd is
 		// containment, so the area-less proxy is LIFTED (root never displaces child).
-		{"area-less parent↔child same nbhd → UNKNOWN (containment lifts)", studio, none, "root:e", "root:e", nil, true, tierUnknown},
-		{"both area-less parent↔child same nbhd → UNKNOWN (containment lifts)", none, none, "root:e", "root:e", nil, true, tierUnknown},
+		{"area-less parent↔child same nbhd → UNKNOWN (containment lifts)", studio, none, nil, nil, "root:e", "root:e", nil, true, tierUnknown},
+		{"both area-less parent↔child same nbhd → UNKNOWN (containment lifts)", none, none, nil, nil, "root:e", "root:e", nil, true, tierUnknown},
 		// …but a REAL cross-root block edge still hard-conflicts even under containment.
-		{"cross edge beats containment → HARD", none, none, "root:e", "root:e", blockAB, true, tierHard},
+		{"cross edge beats containment → HARD", none, none, nil, nil, "root:e", "root:e", blockAB, true, tierHard},
+		// df-file-edge: both declare + intersecting files ⇒ HARD, overriding
+		// disjoint proven areas.
+		{"declared intersecting files override disjoint areas → HARD", studio, cli, fileX, fileX, "proj:x", "proj:y", nil, false, tierHard},
+		// both declare + DISJOINT files ⇒ NONE, overriding a same-neighborhood
+		// area-less proxy that would otherwise be HARD.
+		{"declared disjoint files same nbhd → NONE (file truth overrides proxy)", none, none, fileX, fileY, "root:e", "root:e", nil, false, tierNone},
+		// both declare + disjoint files ⇒ NONE, overriding an AREA overlap too.
+		{"declared disjoint files override area overlap → NONE", studio, studio, fileX, fileY, "proj:x", "proj:y", nil, false, tierNone},
+		// dir-prefix containment counts as an intersection.
+		{"declared dir-prefix contains file → HARD", none, none, fileDir, fileX, "proj:x", "proj:y", nil, false, tierHard},
+		// one side undeclared ⇒ ABSTAIN: fall through to the neighborhood proxy
+		// (same nbhd, area-less ⇒ HARD) — undeclared is never silently safe.
+		{"one side files-undeclared same nbhd → HARD (abstain, proxy governs)", none, none, fileX, nil, "root:e", "root:e", nil, false, tierHard},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := interferes(c.ai, c.bi, c.nkA, c.nkB, "a", "b", c.cross, c.containment); got != c.want {
+			if got := interferes(c.ai, c.bi, c.fa, c.fb, c.nkA, c.nkB, "a", "b", c.cross, c.containment); got != c.want {
 				t.Errorf("interferes = %v, want %v", got, c.want)
 			}
 			// symmetry — the predicate must not depend on argument order
-			if got := interferes(c.bi, c.ai, c.nkB, c.nkA, "b", "a", c.cross, c.containment); got != c.want {
+			if got := interferes(c.bi, c.ai, c.fb, c.fa, c.nkB, c.nkA, "b", "a", c.cross, c.containment); got != c.want {
 				t.Errorf("interferes (swapped) = %v, want %v", got, c.want)
 			}
 		})
@@ -441,10 +461,10 @@ func TestFrontierEpicRootDoesNotDisplaceChildren(t *testing.T) {
 	// containment (the mechanism that displaced children) and tierUnknown with it.
 	byBare := frontierByBare(tasks)
 	rootAI, kidAI := areasOf(tasks[0]), areasOf(tasks[1])
-	if got := interferes(rootAI, kidAI, "root:epic", "root:epic", "epic", "s", nil, false); got != tierHard {
+	if got := interferes(rootAI, kidAI, nil, nil, "root:epic", "root:epic", "epic", "s", nil, false); got != tierHard {
 		t.Fatalf("precondition: root↔child WITHOUT containment = %v, want tierHard (the bug)", got)
 	}
-	if got := interferes(rootAI, kidAI, "root:epic", "root:epic", "epic", "s", nil, true); got != tierUnknown {
+	if got := interferes(rootAI, kidAI, nil, nil, "root:epic", "root:epic", "epic", "s", nil, true); got != tierUnknown {
 		t.Fatalf("fix: root↔child WITH containment = %v, want tierUnknown (no displacement)", got)
 	}
 	if !isAncestorBare(byBare, "epic", "s") {
@@ -503,5 +523,120 @@ func TestFrontierEqualsIndependentReady(t *testing.T) {
 	}
 	if b.IndependentReady != 2 {
 		t.Errorf("IndependentReady = %d, want 2 (two epics, one pick each)", b.IndependentReady)
+	}
+}
+
+// TestFilesOf — the files: label parser (df-file-edge): one path per label,
+// leading "./" and "/" and whitespace normalized, trailing "/" preserved as the
+// dir-prefix marker, undeclared ⇒ empty set.
+func TestFilesOf(t *testing.T) {
+	cases := []struct {
+		name   string
+		labels []string
+		want   []string
+	}{
+		{"none", nil, nil},
+		{"one", []string{"files:internal/cli/x.go"}, []string{"internal/cli/x.go"}},
+		{"two", []string{"files:a.go", "files:b.go"}, []string{"a.go", "b.go"}},
+		{"dir prefix preserved", []string{"files:internal/taskboard/"}, []string{"internal/taskboard/"}},
+		{"leading ./ stripped", []string{"files:./internal/x.go"}, []string{"internal/x.go"}},
+		{"leading / stripped", []string{"files:/internal/x.go"}, []string{"internal/x.go"}},
+		{"whitespace trimmed", []string{"files: internal/x.go "}, []string{"internal/x.go"}},
+		{"empty label ignored", []string{"files:"}, nil},
+		{"non-files labels ignored", []string{"area:cli", "phase:2-cli"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := FilesOf(Task{Labels: c.labels})
+			if len(got) != len(c.want) {
+				t.Fatalf("FilesOf = %v, want %v", got, c.want)
+			}
+			for _, p := range c.want {
+				if !got[p] {
+					t.Errorf("missing %q in %v", p, got)
+				}
+			}
+		})
+	}
+}
+
+// TestFilesIntersect — exact equality and dir-prefix containment both intersect
+// and name the shared path; unrelated paths do not.
+func TestFilesIntersect(t *testing.T) {
+	cases := []struct {
+		name       string
+		a, b       map[string]bool
+		wantShared string
+		wantHit    bool
+	}{
+		{"exact", map[string]bool{"a.go": true}, map[string]bool{"a.go": true}, "a.go", true},
+		{"disjoint", map[string]bool{"a.go": true}, map[string]bool{"b.go": true}, "", false},
+		{"dir contains file", map[string]bool{"internal/cli/": true}, map[string]bool{"internal/cli/x.go": true}, "internal/cli/", true},
+		{"file under dir (swapped)", map[string]bool{"internal/cli/x.go": true}, map[string]bool{"internal/cli/": true}, "internal/cli/", true},
+		{"sibling dir no match", map[string]bool{"internal/cli/": true}, map[string]bool{"internal/tui/x.go": true}, "", false},
+		{"prefix-but-not-dir no match", map[string]bool{"internal/cli": true}, map[string]bool{"internal/cli/x.go": true}, "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			shared, hit := filesIntersect(c.a, c.b)
+			if hit != c.wantHit || shared != c.wantShared {
+				t.Errorf("filesIntersect = (%q, %v), want (%q, %v)", shared, hit, c.wantShared, c.wantHit)
+			}
+		})
+	}
+}
+
+// TestFrontierFileEdgeOnrampsDenyPath — the onramps-w2 collision reconstructed
+// (provenance: merge 56b144f6, bp-agent-onramps-w2-charter.md:48). Three ready
+// tasks in THREE DIFFERENT epic roots, NO area: labels, each declaring
+// files:internal/cli/onramp_cmd.go. The file edge is the SOLE catcher: the
+// frontier admits exactly ONE and every displaced reason names the shared file.
+// The CONTROL (same trio WITHOUT files: labels) co-admits all three — deleting
+// the file edge turns THIS test red.
+func TestFrontierFileEdgeOnrampsDenyPath(t *testing.T) {
+	mk := func(withFiles bool) []Task {
+		var labels []string
+		if withFiles {
+			labels = []string{"files:internal/cli/onramp_cmd.go"}
+		}
+		return []Task{
+			{DocID: "hub-root", Kind: kindGoal, Lifecycle: lifeOpen},
+			{DocID: "verb-root", Kind: kindGoal, Lifecycle: lifeOpen},
+			{DocID: "doc-root", Kind: kindGoal, Lifecycle: lifeOpen},
+			{DocID: "hub", Title: "onramp hub", ParentID: "hub-root", Lifecycle: lifeReady, Priority: "0", Labels: labels},
+			{DocID: "verb", Title: "onramp verb", ParentID: "verb-root", Lifecycle: lifeReady, Priority: "1", Labels: labels},
+			{DocID: "doc", Title: "onramp docs", ParentID: "doc-root", Lifecycle: lifeReady, Priority: "2", Labels: labels},
+		}
+	}
+
+	picks := Frontier(Snapshot{Tasks: mk(true)}, nil, nil, refNow, FrontierOpts{})
+	if len(picks) != 1 {
+		t.Fatalf("file-edge frontier = %d picks, want 1 (all three share onramp_cmd.go)", len(picks))
+	}
+	if picks[0].Task.DocID != "hub" {
+		t.Errorf("winner = %q, want hub (P0 beats P1/P2)", picks[0].Task.DocID)
+	}
+	if len(picks[0].Displaced) != 2 {
+		t.Fatalf("displaced = %d, want 2", len(picks[0].Displaced))
+	}
+	for _, d := range picks[0].Displaced {
+		if d.Reason != "files internal/cli/onramp_cmd.go" {
+			t.Errorf("displaced reason = %q, want %q (must name the shared file)", d.Reason, "files internal/cli/onramp_cmd.go")
+		}
+	}
+	// the admitted pick is file-proven isolated (strongest tag), so it is proven.
+	if picks[0].Risk != RiskFileIsolated {
+		t.Errorf("risk = %s, want file-isolated", picks[0].Risk)
+	}
+	if !picks[0].Proven() {
+		t.Errorf("a file-isolated pick must count as proven")
+	}
+
+	// CONTROL: strip the files: labels — three area-less strangers in three roots
+	// are unproven independents, so ALL THREE co-admit. This proves the file edge
+	// is the SOLE catcher.
+	ctrl := Frontier(Snapshot{Tasks: mk(false)}, nil, nil, refNow, FrontierOpts{})
+	if len(ctrl) != 3 {
+		t.Fatalf("control (no files:) = %d picks, want 3 — the file edge is the sole catcher", len(ctrl))
 	}
 }
