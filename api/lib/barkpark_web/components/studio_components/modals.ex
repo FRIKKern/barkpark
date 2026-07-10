@@ -136,15 +136,13 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <div class="shares-field">
               <span class="shares-field-label">Surfaces</span>
               <div class="shares-surfaces">
-                <label :for={surface <- ~w(papers docs media)}>
-                  <input
-                    type="checkbox"
-                    name="surfaces[]"
-                    value={surface}
-                    checked={surface in @prefill_surfaces}
-                  />
-                  <%= String.capitalize(surface) %>
-                </label>
+                <.bp_checkbox
+                  :for={surface <- ~w(papers docs media)}
+                  name="surfaces[]"
+                  value={surface}
+                  label={String.capitalize(surface)}
+                  checked={surface in @prefill_surfaces}
+                />
               </div>
             </div>
             <p class="shares-note">

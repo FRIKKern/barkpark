@@ -771,10 +771,20 @@ const PAIRINGS = [
   { sel: ".pane-item",                             surface: "--surface-raised", kind: "text",    where: "root.html.heex .pane-item — nav row on the .pane-column--last focus pane" },
   { sel: ".pane-item.selected",                    surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-item.selected — selected-row-on-bg-accent" },
   { sel: ".pane-item-chevron",                     surface: "--surface",        kind: "nontext", where: "root.html.heex .pane-item-chevron — drill glyph on surface" },
+  // Secondary (detail) pane read-only note — its own --bg-muted fill. Caught by
+  // the sup-w3 QA sweep as fg-dim-on-bg-muted (4.05–4.40, sub-AA), the identical
+  // D15 defect .pane-doc-badge had; escalated fg-dim→muted-text at the site.
+  { sel: ".bp-secondary-pane-readonly",            surface: "--bg-muted",       kind: "text",    where: "root.html.heex .bp-secondary-pane-readonly — read-only note paints its own --bg-muted fill (editor detail pane)" },
   // Compact scope chip — surface-raised trigger fill.
   { sel: ".scope-title-caret",                     surface: "--surface-raised", kind: "nontext", where: "root.html.heex .scope-title-caret — glyph on .scope-title --surface-raised" },
   { sel: ".scope-title-trail",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-trail — trail text on .scope-title --surface-raised" },
   { sel: ".scope-title-ws",                        surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-ws — workspace name on .scope-title --surface-raised" },
+  // API-tester scenario results (sup-w3): rows ride the Response focus pane
+  // (.pane-column--last → --surface-raised); the category header paints its own
+  // --bg-muted fill. All three escalate fg-dim → --muted-text at the pairing site.
+  { sel: ".scenario-cat-header",                   surface: "--bg-muted",       kind: "text",    where: "root.html.heex .scenario-cat-header — category label paints its own --bg-muted fill" },
+  { sel: ".scenario-endpoint",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scenario-endpoint — endpoint label on the .pane-column--last Response pane" },
+  { sel: ".scenario-duration",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scenario-duration — mono duration on the .pane-column--last Response pane" },
 ];
 
 const AA_THRESH = { text: 4.5, nontext: 3.0 };

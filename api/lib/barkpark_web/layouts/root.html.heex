@@ -272,8 +272,8 @@
       --border-muted: hsl(26.85 18.63% 4.74%);
       --fg-dim: hsl(26.68 4.19% 50.59%);
       --fg-accent: var(--text);
-      --surface-raised: hsl(26.91 17.03% 9.31%);
-      --border-subtle: hsl(26.87 17.17% 7.16%);
+      --surface-raised: hsl(26.83 11.77% 14.26%);
+      --border-subtle: hsl(26.8 10.94% 11.97%);
     }
     html[data-bp-theme="fjord"] {
       --primary: hsl(222 58% 44%);
@@ -330,8 +330,8 @@
       --border-muted: hsl(213.45 16.74% 5.03%);
       --fg-dim: hsl(213.51 4.04% 51.25%);
       --fg-accent: var(--text);
-      --surface-raised: hsl(213.42 15.38% 9.82%);
-      --border-subtle: hsl(213.43 15.5% 7.55%);
+      --surface-raised: hsl(213.44 11.44% 13.84%);
+      --border-subtle: hsl(213.46 10.78% 11.46%);
     }
     /* END GENERATED: tokens */
 
@@ -2515,7 +2515,11 @@
     }
     .bp-secondary-pane-readonly {
       margin-top: 18px; padding: 8px 10px;
-      font-size: 11px; color: var(--fg-dim); font-style: italic;
+      /* fg-dim on its own --bg-muted fill is 4.05–4.40 (sub-AA on evergreen
+         light+dark, ember/fjord light) — the exact fg-dim-on-bg-muted defect
+         D15 caught for .pane-doc-badge. Escalate to --muted-text (4.57–6.88,
+         AA everywhere). Locked by Part H in design/check.mjs (revert → red). */
+      font-size: 11px; color: var(--muted-text); font-style: italic;
       background: var(--bg-muted); border-radius: 4px;
     }
 
@@ -4753,6 +4757,39 @@
     html[data-theme="light"] .sheet-filter-error { color: #dc2626; }
     .sheet-filter-actions { display: flex; justify-content: space-between; gap: 6px; }
     /* studio-literal-check: skip-end */
+
+    /* API-tester scenario results (sup-w3-api-tester-kit). Extracted from inline
+       styles in api_tester_live.ex so the fg×surface pairings become visible to
+       design/check.mjs Part H. The rows ride the Response focus pane
+       (.pane-column--last → --surface-raised); the category header paints its own
+       --bg-muted fill. Every dim text ESCALATES fg-dim → --muted-text — inline
+       fg-dim on these grounds measured 4.05–4.27 (sub-AA) and was invisible to
+       the machine gate because it lived in a style="" attribute. */
+    .scenario-scroll { overflow-y: auto; max-height: calc(100vh - 140px); }
+    .scenario-cat-header {
+      padding: 4px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase;
+      color: var(--muted-text); border-bottom: 1px solid var(--border-muted);
+      background: var(--bg-muted);
+    }
+    .scenario-row {
+      padding: 6px 12px; border-bottom: 1px solid var(--border-muted);
+      display: flex; justify-content: space-between; align-items: center; font-size: 13px;
+    }
+    /* Dynamic verdict fill — the fail row tints its ground; the endpoint/duration
+       text is gated against the base --surface-raised (the 5% overlay barely
+       shifts luminance, so surface-raised is the honest AA baseline). */
+    .scenario-row--fail { background: hsl(var(--danger-hsl) / 0.05); }
+    .scenario-endpoint { color: var(--muted-text); }
+    .scenario-label { margin-left: 6px; }
+    .scenario-verdict { display: flex; align-items: center; gap: 8px; }
+    .scenario-duration { font-size: 11px; color: var(--muted-text); font-family: var(--font-mono); }
+
+    /* Schema browser cards (sup-w3-api-tester-kit) — extraction only. Text uses
+       the existing utility classes; these rules are pure geometry, not AA-critical. */
+    .api-schema-card { margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+    .api-schema-summary { display: flex; gap: 12px; align-items: center; cursor: pointer; }
+    .api-schema-fields { margin-top: 8px; }
+    .api-schema-json { font-size: 11px; }
   </style>
 </head>
 <body>
