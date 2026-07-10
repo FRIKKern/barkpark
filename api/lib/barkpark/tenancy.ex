@@ -71,18 +71,168 @@ defmodule Barkpark.Tenancy do
   Set (or clear) an organization's org-wide MFA requirement
   (era-w2-org-require-mfa). Opt-in: with the flag false everywhere the auth
   surface is byte-identical to before the feature existed.
+
+  The change lands on the tamper-evident audit trail (`auth` category,
+  `require_mfa_changed`) — era-w8 added this; the setter was previously silent.
+  `opts` may carry `:actor_id` / `:actor_type` (defaults `"admin"`).
   """
-  @spec set_organization_require_mfa(binary(), boolean()) ::
+  @spec set_organization_require_mfa(binary(), boolean(), keyword()) ::
           {:ok, Organization.t()} | {:error, Ecto.Changeset.t() | :not_found}
-  def set_organization_require_mfa(organization_id, require?)
+  def set_organization_require_mfa(organization_id, require?, opts \\ [])
       when is_binary(organization_id) and is_boolean(require?) do
     with {:ok, _} <- Ecto.UUID.cast(organization_id),
          %Organization{} = org <- Repo.get(Organization, organization_id) do
-      org
-      |> Ecto.Changeset.change(require_mfa: require?)
-      |> Repo.update()
+      result =
+        org
+        |> Ecto.Changeset.change(require_mfa: require?)
+        |> Repo.update()
+
+      with {:ok, _updated} <- result do
+        audit_org_auth_change(org, "require_mfa_changed", %{"require_mfa" => require?}, opts)
+      end
+
+      result
     else
       _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Set (or clear) an organization's org-wide SESSION POLICY
+  (era-w8-org-session-policy). Mirrors `set_organization_require_mfa/3`:
+  UUID-guarded, `:not_found` on an unknown/malformed id, and the change is
+  audited on the tamper-evident trail (`auth` / `session_policy_changed`).
+
+  `policy` is a map carrying either/both of `:idle_timeout_seconds` and
+  `:absolute_lifetime_seconds` (atom OR string keys). A value must be a
+  positive integer (a bound, in seconds) or `nil` (clear the bound → no
+  limit). An absent key leaves that axis untouched; a non-positive / non-integer
+  value returns `{:error, :invalid_policy}` without touching the DB. With both
+  axes NULL the session-auth surface is byte-identical to the hardcoded default.
+
+  `opts` may carry `:actor_id` / `:actor_type` (defaults `"admin"`).
+  """
+  @spec set_organization_session_policy(binary(), map(), keyword()) ::
+          {:ok, Organization.t()} | {:error, Ecto.Changeset.t() | :not_found | :invalid_policy}
+  def set_organization_session_policy(organization_id, policy, opts \\ [])
+      when is_binary(organization_id) and is_map(policy) do
+    with {:ok, _} <- Ecto.UUID.cast(organization_id),
+         {:ok, changes} <- session_policy_changes(policy),
+         %Organization{} = org <- Repo.get(Organization, organization_id) do
+      result =
+        org
+        |> Ecto.Changeset.change(changes)
+        |> Repo.update()
+
+      with {:ok, _updated} <- result do
+        metadata = Map.new(changes, fn {k, v} -> {Atom.to_string(k), v} end)
+        audit_org_auth_change(org, "session_policy_changed", metadata, opts)
+      end
+
+      result
+    else
+      :error -> {:error, :not_found}
+      nil -> {:error, :not_found}
+      {:error, :invalid_policy} = err -> err
+    end
+  end
+
+  # Fold a caller-supplied policy map into a validated column-change map. Only
+  # present keys land; each value is nil (clear) or a positive integer. Any other
+  # value short-circuits to {:error, :invalid_policy} (the DB is never touched).
+  defp session_policy_changes(policy) do
+    axes = [
+      {:session_idle_timeout_seconds, [:idle_timeout_seconds, "idle_timeout_seconds"]},
+      {:session_absolute_lifetime_seconds,
+       [:absolute_lifetime_seconds, "absolute_lifetime_seconds"]}
+    ]
+
+    Enum.reduce_while(axes, {:ok, %{}}, fn {col, aliases}, {:ok, acc} ->
+      case fetch_policy_value(policy, aliases) do
+        :absent -> {:cont, {:ok, acc}}
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, col, value)}}
+        :invalid -> {:halt, {:error, :invalid_policy}}
+      end
+    end)
+  end
+
+  defp fetch_policy_value(policy, aliases) do
+    case Enum.find(aliases, &Map.has_key?(policy, &1)) do
+      nil ->
+        :absent
+
+      key ->
+        case Map.get(policy, key) do
+          nil -> {:ok, nil}
+          value when is_integer(value) and value > 0 -> {:ok, value}
+          _ -> :invalid
+        end
+    end
+  end
+
+  # era-w8: org auth-policy changes land on the tamper-evident audit trail
+  # (`auth` category). Best-effort AFTER the write commits — an audit hiccup must
+  # never fail a policy write that already succeeded; `Audit.emit/1` runs in its
+  # own savepointed transaction so it rolls back only itself.
+  defp audit_org_auth_change(%Organization{} = org, action, metadata, opts) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: action,
+      subject: org.id,
+      actor_type: Keyword.get(opts, :actor_type, "admin"),
+      actor_id: Keyword.get(opts, :actor_id),
+      metadata: Map.merge(%{"organization_id" => org.id, "org_slug" => org.slug}, metadata)
+    })
+
+    :ok
+  end
+
+  @doc """
+  Resolve the STRICTEST session policy GOVERNING this user across every
+  organization reachable through their `principal_type: "user"` workspace
+  memberships (era-w8-org-session-policy).
+
+  Mirrors `org_requires_mfa_for_user?/1`'s governing model: any governing org
+  can tighten the bound, and a laxer org grants no escape. Strictest-wins per
+  axis independently — the SMALLEST positive bound across the governing orgs
+  (a `nil`/absent bound imposes no limit and is ignored). Returns
+  `%{idle_timeout_seconds: pos_integer | nil, absolute_lifetime_seconds:
+  pos_integer | nil}`; both `nil` (the default: no governing org sets a bound)
+  means no limit — the byte-identical zero-tax path.
+  """
+  @spec org_session_policy_for_user(binary()) :: %{
+          idle_timeout_seconds: pos_integer() | nil,
+          absolute_lifetime_seconds: pos_integer() | nil
+        }
+  def org_session_policy_for_user(user_id) when is_binary(user_id) do
+    rows =
+      Repo.all(
+        from m in Membership,
+          join: w in Workspace,
+          on: w.id == m.workspace_id,
+          join: o in Organization,
+          on: o.id == w.organization_id,
+          where: m.principal_type == "user" and m.principal_id == ^user_id,
+          select: {o.session_idle_timeout_seconds, o.session_absolute_lifetime_seconds}
+      )
+
+    %{
+      idle_timeout_seconds: strictest_bound(Enum.map(rows, &elem(&1, 0))),
+      absolute_lifetime_seconds: strictest_bound(Enum.map(rows, &elem(&1, 1)))
+    }
+  end
+
+  def org_session_policy_for_user(_),
+    do: %{idle_timeout_seconds: nil, absolute_lifetime_seconds: nil}
+
+  # Strictest bound = smallest POSITIVE value; nil/non-positive bounds impose no
+  # limit and drop out. All-nil (or empty) → nil = no limit.
+  defp strictest_bound(values) do
+    values
+    |> Enum.filter(&(is_integer(&1) and &1 > 0))
+    |> case do
+      [] -> nil
+      positives -> Enum.min(positives)
     end
   end
 
