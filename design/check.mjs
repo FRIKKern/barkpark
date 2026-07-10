@@ -12,7 +12,7 @@ import {
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
-import { derive, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
+import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -696,6 +696,111 @@ if (d25Clean && failed === failedBeforeG)
 
 if (failed === failedBeforeG)
   console.log("  ok   Part G PASS — every attribute surface carries a [data-bp-theme] block; identity ⟂ mode; no passthrough leak.");
+
+// ── Part H: WCAG-AA fg×surface contrast gate (studio-ui-premium D15/D8) ───────
+// derive.mjs already ships the WCAG contrast() (Part I); this part makes AA a
+// PERMANENT machine gate. It DERIVES every committed theme (ember/fjord author
+// only {bg,ink,accent} — the chrome tokens are FORMULA-derived, so a per-theme
+// derive is REQUIRED to know each theme's real --fg-dim/--bg-accent/… bytes; a
+// theme whose derive() throws is skipped LOUDLY, never crashing the whole check)
+// and asserts a CURATED table of pairings that ACTUALLY co-occur in the Studio
+// DOM. Each entry names the CSS selector whose `color` is the foreground — READ
+// LIVE out of the committed root.html.heex, so reverting a pairing fix reds this
+// gate — and the surface token it renders on (CURATED: the co-occurrence a
+// cartesian product would fabricate, e.g. --fg-dim on --bg-accent happens ONLY on
+// a selected row). kind "text" needs AA 4.5; "nontext" (icons/carets) needs 3.0.
+console.log("\ndesign/check.mjs — Part H: WCAG-AA fg×surface contrast (curated Studio pairings)");
+const failedBeforeH = failed;
+
+// DOM CSS var → derive SLOTS slot (mode appended per pairing). Aliases collapse
+// per root.html.heex:359-366 (--bg-muted→muted-surface, --fg-muted→muted-text,
+// --fg→text, --bg-card→surface).
+const TOKEN_SLOT = {
+  "--bg": "bg", "--surface": "surface", "--bg-card": "surface",
+  "--muted-surface": "muted-surface", "--bg-muted": "muted-surface",
+  "--muted-text": "muted-text", "--fg-muted": "muted-text",
+  "--text": "text", "--fg": "text",
+  "--fg-dim": "studioChrome.fg-dim",
+  "--bg-accent": "studioChrome.bg-accent",
+  "--surface-raised": "studioChrome.surface-raised",
+};
+
+// Derive every committed theme once (a THROW is skipped loudly, not fatal).
+const contrastThemes = {};
+for (const f of themeFiles) {
+  const theme = themeCache[f];
+  if (!theme) continue;
+  const name = theme.name || f.replace(/\.json$/, "");
+  try { contrastThemes[name] = derive(theme).values; }
+  catch (e) { console.error(`  Part H SKIP: derive(${name}) threw — ${e.message} (theme skipped, non-fatal)`); }
+}
+
+// The SHIPPED root layout, straight from disk (build() emits only the generated
+// block; these pane/scope rules are hand-authored, so we read the committed file).
+const studioCss = readFileSync(join(repoRoot, "api/lib/barkpark_web/layouts/root.html.heex"), "utf8");
+
+// Read the shipped foreground token out of a selector's rule body (revert→red).
+// The selector is anchored to line start so a base rule (`.pane-doc-id {`) is never
+// confused with a descendant rule (`.pane-doc-item.selected .pane-doc-id {`).
+function ruleColor(sel) {
+  const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = studioCss.match(new RegExp(`(?:^|\\n)[ \\t]*${esc}[ \\t]*\\{([\\s\\S]*?)\\}`));
+  if (!m) return { err: `rule not found: ${sel}` };
+  const c = m[1].match(/color:\s*var\((--[\w-]+)(?:\s*,[^)]*)?\)/);
+  if (!c) return { err: `no "color: var(--…)" in rule ${sel}` };
+  return { token: c[1] };
+}
+
+// Curated table — every (fg-site, surface) is a REAL co-occurrence. `where` cites
+// the mirrored CSS rule. NOT a cartesian product.
+const PAIRINGS = [
+  // Pane document rows — the live sub-AA defects this slice fixes at the pairing site.
+  { sel: ".pane-doc-badge",                        surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-badge — pill paints its own --bg-muted fill" },
+  { sel: ".pane-doc-item:hover .pane-doc-id",      surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover row fill" },
+  { sel: ".pane-doc-item:hover .pane-doc-meta",    surface: "--bg-muted",       kind: "text",    where: "root.html.heex .pane-doc-item:hover — hover row fill" },
+  { sel: ".pane-doc-item.selected .pane-doc-id",   surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected row fill" },
+  { sel: ".pane-doc-item.selected .pane-doc-meta", surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-doc-item.selected — selected row fill" },
+  { sel: ".pane-doc-id",                           surface: "--surface",        kind: "text",    where: "root.html.heex .pane-doc-id — normal row on .pane-column --bg-card(=surface)" },
+  { sel: ".pane-doc-meta",                         surface: "--surface",        kind: "text",    where: "root.html.heex .pane-doc-meta — normal row on .pane-column surface" },
+  // Pane navigation items.
+  { sel: ".pane-item",                             surface: "--surface",        kind: "text",    where: "root.html.heex .pane-item — nav row on .pane-column surface" },
+  { sel: ".pane-item.selected",                    surface: "--bg-accent",      kind: "text",    where: "root.html.heex .pane-item.selected — selected-row-on-bg-accent" },
+  { sel: ".pane-item-chevron",                     surface: "--surface",        kind: "nontext", where: "root.html.heex .pane-item-chevron — drill glyph on surface" },
+  // Compact scope chip — surface-raised trigger fill.
+  { sel: ".scope-title-caret",                     surface: "--surface-raised", kind: "nontext", where: "root.html.heex .scope-title-caret — glyph on .scope-title --surface-raised" },
+  { sel: ".scope-title-trail",                     surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-trail — trail text on .scope-title --surface-raised" },
+  { sel: ".scope-title-ws",                        surface: "--surface-raised", kind: "text",    where: "root.html.heex .scope-title-ws — workspace name on .scope-title --surface-raised" },
+];
+
+const AA_THRESH = { text: 4.5, nontext: 3.0 };
+let pairChecks = 0;
+for (const p of PAIRINGS) {
+  const fg = ruleColor(p.sel);
+  if (fg.err) { fail(`  Part H FAIL: ${p.sel} — ${fg.err}`); continue; }
+  const fgSlot = TOKEN_SLOT[fg.token];
+  const bgSlot = TOKEN_SLOT[p.surface];
+  if (!fgSlot) { fail(`  Part H FAIL: ${p.sel} — fg token ${fg.token} has no TOKEN_SLOT mapping`); continue; }
+  if (!bgSlot) { fail(`  Part H FAIL: ${p.sel} — surface token ${p.surface} has no TOKEN_SLOT mapping`); continue; }
+  const need = AA_THRESH[p.kind];
+  for (const [name, values] of Object.entries(contrastThemes)) {
+    for (const mode of ["light", "dark"]) {
+      const fgv = values[`${fgSlot}.${mode}`];
+      const bgv = values[`${bgSlot}.${mode}`];
+      if (fgv === undefined || bgv === undefined) {
+        fail(`  Part H FAIL: ${p.sel} — ${name}/${mode} missing slot (${fgSlot}=${fgv}, ${bgSlot}=${bgv})`);
+        continue;
+      }
+      let ratio;
+      try { ratio = contrast(fgv, bgv); }
+      catch (e) { fail(`  Part H FAIL: ${p.sel} — ${name}/${mode} contrast() threw (${e.message}); a var() passthrough cannot be a contrast operand`); continue; }
+      pairChecks++;
+      if (ratio < need - 1e-9)
+        fail(`  Part H FAIL: ${p.sel} (${fg.token} on ${p.surface}, ${p.kind}) = ${ratio.toFixed(2)} < ${need} in ${name}/${mode} — ${p.where}`);
+    }
+  }
+}
+if (failed === failedBeforeH)
+  console.log(`  ok   ${PAIRINGS.length} curated pairings × ${Object.keys(contrastThemes).length} themes × 2 modes = ${pairChecks} checks, all ≥ AA (text 4.5 / nontext 3.0)`);
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {
