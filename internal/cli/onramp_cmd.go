@@ -80,10 +80,15 @@ const onrampServerKey = "barkpark"
 
 // mcpServerFile / serversFile / flatFile / tomlFile stamp the merge metadata for
 // each shape so --write never hardcodes a key. mcpServerFile covers the
-// `mcpServers` map every stdio target uses; serversFile is reserved for copilot's
-// `.vscode/mcp.json` (top-level `servers`) once that target lands.
+// `mcpServers` map every stdio target uses; serversFile covers copilot's
+// `.vscode/mcp.json` (top-level `servers`) — wrap that target's file literal in
+// it when the copilot slice lands.
 func mcpServerFile(path, content string) onrampFile {
 	return onrampFile{Path: path, Content: content, MergeKind: mergeServerMap, TopKey: "mcpServers", ServerKey: onrampServerKey}
+}
+
+func serversFile(path, content string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeServerMap, TopKey: "servers", ServerKey: onrampServerKey}
 }
 
 func flatFile(path, content, topKey string) onrampFile {

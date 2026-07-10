@@ -173,6 +173,80 @@ func TestOnrampWriteAddsAbsentKey(t *testing.T) {
 	}
 }
 
+// TestOnrampWriteServersShape drives the third server-map parametrization — the
+// top-level `servers` key copilot's .vscode/mcp.json uses (VS Code's shape, NOT
+// mcpServers) — end-to-end through the same engine: create, merge-into-existing
+// with a foreign server preserved, and idempotent re-run. The copilot target
+// wraps its file in serversFile once it lands; this proves the TopKey
+// parametrization is real, not theoretical.
+func TestOnrampWriteServersShape(t *testing.T) {
+	dir := t.TempDir()
+	stanza := `{
+  "servers": {
+    "barkpark": {
+      "type": "stdio",
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${env:BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}`
+	path := filepath.Join(dir, ".vscode", "mcp.json")
+
+	// Merge into an existing file holding a foreign server under `servers`.
+	existing := `{
+  "servers": {
+    "playwright": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp"]}
+  }
+}
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := serversFile(path, stanza)
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("servers merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (barkpark absent under servers)", act.Action)
+	}
+	result := mustRead(t, path)
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(result, &top); err != nil {
+		t.Fatalf("result not valid JSON: %v", err)
+	}
+	if _, ok := top["mcpServers"]; ok {
+		t.Errorf("merge leaked a sibling mcpServers key — copilot's shape is top-level servers")
+	}
+	servers := map[string]json.RawMessage{}
+	if err := json.Unmarshal(top["servers"], &servers); err != nil {
+		t.Fatalf("servers key not an object: %v", err)
+	}
+	if _, ok := servers["playwright"]; !ok {
+		t.Errorf("foreign playwright server lost when adding barkpark under servers")
+	}
+	if _, ok := servers["barkpark"]; !ok {
+		t.Errorf("barkpark entry not added under servers")
+	}
+
+	// Idempotent re-run.
+	act, err = mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("servers re-run: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("servers re-run action = %q, want unchanged", act.Action)
+	}
+}
+
 // TestOnrampWriteFlatCursorCloud: the flat `install` key merge (environment.json)
 // creates then reports 'unchanged'.
 func TestOnrampWriteFlatCursorCloud(t *testing.T) {

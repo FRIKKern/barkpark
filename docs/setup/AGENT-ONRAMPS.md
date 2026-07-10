@@ -105,11 +105,11 @@ Every target with a local shell registers the same server: `bp mcp serve` (stdio
 
 ## One-step onramp — `bp onramp <target>`
 
-`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default (nothing is written). Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli` (`chatgpt` / `claude-ai` are remote — see [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` env placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
+`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default (nothing is written). Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli`, `copilot` (`chatgpt` / `claude-ai` are remote — see [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` env placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
 
 ### `--write` — merge it for you
 
-`bp onramp <target> --write` does the work: it merges **only** the `barkpark` entry into the target's JSON config and touches nothing else. Every other MCP server and every unrelated top-level key survives byte-for-byte (JSON is re-parsed and only the barkpark key is swapped). Writes are **atomic** (temp file + rename, so a crash never leaves a half-written config) and land at mode `0644` / dir `0755` — these are project-committed configs holding a `${env:}` placeholder, not secrets.
+`bp onramp <target> --write` does the work: it merges **only** the `barkpark` entry into the target's JSON config and touches nothing else. Every other MCP server and every unrelated top-level key survives verbatim — only the barkpark key is swapped (a merge re-emits the file in canonical 2-space form, so unusual whitespace or key order is normalised; values are never altered, and a fresh `created` file is the doc stanza byte-for-byte). Writes are **atomic** (temp file + rename, so a crash never leaves a half-written config) and land at mode `0644` / dir `0755` — these are project-committed configs holding a `${env:}` placeholder, not secrets.
 
 It is **idempotent** and honest per file:
 
