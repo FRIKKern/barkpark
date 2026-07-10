@@ -15,7 +15,7 @@ import (
 //
 // CONTRACT (ratified, pbp-tui-creative-slate §3):
 //
-//	stat:  {value, max?, label?, spark?:[n…]}
+//	stat:  {value, max?, denom?, label?, spark?:[n…]}
 //
 //	- value  the headline datum. Rendered as a DISPLAY string (the slate stamps
 //	         pre-formatted values like "1.24M", "$42.10", "73%"), so it is read
@@ -25,6 +25,12 @@ import (
 //	         drawn above the value (value AND max are coerced numeric for the
 //	         proportion). ABSENT → BIG-NUMBER mode: the value stands alone,
 //	         prominent.
+//	- denom  optional KPI denominator (the value's total). Present → a dim
+//	         "/<denom>" rides immediately after the value: the accent value keeps
+//	         its bold tone while the total recedes — the "71/118" KPI read. ALWAYS
+//	         ctx.Theme.Dim (never Faint); absent/blank → the value stands alone,
+//	         BYTE-IDENTICAL to before. Shared by the singular `stat` and every
+//	         `stats`-grid cell (one statCell body).
 //	- label  optional caption under the number/bar (dim).
 //	- spark  optional numeric array → an eighth-block sparkline row beneath the
 //	         stat, through the reusable primitive.
@@ -162,7 +168,19 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 
 	value := sanitizeText(strings.TrimSpace(attrStr(m, "value")))
 	label := sanitizeText(strings.TrimSpace(attrStr(m, "label")))
+	denom := sanitizeText(strings.TrimSpace(attrStr(m, "denom")))
 	w := clampWidth(ctx.Width)
+
+	// The KPI denominator: a dim "/<denom>" that rides beside the value so the
+	// accent value reads as a share of a dim total ("71/118"). ALWAYS dim (never
+	// Faint). Absent/blank → both parts are empty strings, so a denom-less stat is
+	// BYTE-IDENTICAL to before: the styled suffix is a no-op append and denomPlain
+	// contributes 0 to the bar's width reservation.
+	denomPlain, denomSuffix := "", ""
+	if denom != "" {
+		denomPlain = "/" + denom
+		denomSuffix = ctx.Theme.Dim.Render(denomPlain)
+	}
 
 	var out []string
 
@@ -174,22 +192,23 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 			if v, ok := toFloat(m["value"]); ok {
 				proportion = v / maxVal
 			}
-			// Reserve room for the trailing value label; the bar fills the rest of
-			// the cell. This is a FILL computation over the cell width the Flex
-			// solver already resolved — not an N-up divide.
+			// Reserve room for the trailing value label (plus the dim denom, if
+			// any); the bar fills the rest of the cell. This is a FILL computation
+			// over the cell width the Flex solver already resolved — not an N-up
+			// divide.
 			valuePart := "  " + value
-			barW := w - runeWidth(valuePart)
+			barW := w - runeWidth(valuePart+denomPlain)
 			if barW < 1 {
 				barW = 1
 			}
-			out = append(out, statBar(proportion, barW, ctx)+ctx.Theme.Body.Render(valuePart))
+			out = append(out, statBar(proportion, barW, ctx)+ctx.Theme.Body.Render(valuePart)+denomSuffix)
 		} else {
 			// max present but non-positive → degrade to a plain prominent value.
-			out = append(out, ctx.Theme.Body.Bold(true).Render(value))
+			out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix)
 		}
 	} else {
 		// Big-number: the value stands alone, prominent.
-		out = append(out, ctx.Theme.Body.Bold(true).Render(value))
+		out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix)
 	}
 
 	// Caption under the number/bar.
