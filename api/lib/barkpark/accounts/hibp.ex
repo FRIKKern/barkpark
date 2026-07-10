@@ -68,9 +68,16 @@ defmodule Barkpark.Accounts.Hibp do
     @moduledoc false
     @behaviour Barkpark.Accounts.Hibp
 
+    @default_base "https://api.pwnedpasswords.com"
+
+    # Overridable base URL so the real transport + status→error mapping is
+    # testable against a local Bypass endpoint (same seam as the github /
+    # bokbasen HTTP clients). Production keeps the canonical HIBP host.
+    defp base_url, do: Application.get_env(:barkpark, :hibp_base_url, @default_base)
+
     @impl true
     def range(prefix) do
-      case Req.get("https://api.pwnedpasswords.com/range/#{prefix}",
+      case Req.get("#{base_url()}/range/#{prefix}",
              headers: [{"add-padding", "true"}],
              retry: false,
              receive_timeout: 3_000
