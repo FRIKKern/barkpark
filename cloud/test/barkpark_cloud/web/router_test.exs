@@ -1981,4 +1981,94 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert json_body(conn)["error"] == "forbidden"
     end
   end
+
+  # bp-login-ux-w2-front-door-plug: the two plug-level fixes at the pipeline seam
+  # — www→apex 308 canonicalization (device-link ?code= must survive) and real
+  # client-IP recovery behind the Caddy loopback front.
+  describe "front door: www→apex 308 canonicalization" do
+    # :dashboard_url is https://barkpark.cloud in every env (config.exs), so the
+    # www host under test is www.barkpark.cloud.
+    test "www.<dashboard-host> → 308 to the apex, path + ?code= query preserved" do
+      conn = Router.call(conn(:get, "https://www.barkpark.cloud/activate?code=TEST-1234"), @opts)
+
+      assert conn.status == 308
+
+      assert get_resp_header(conn, "location") == [
+               "https://barkpark.cloud/activate?code=TEST-1234"
+             ]
+
+      # halted before :match, so no route body was rendered.
+      assert conn.halted
+    end
+
+    test "www 308 preserves a bare path with no query string (no dangling '?')" do
+      conn = Router.call(conn(:get, "https://www.barkpark.cloud/dashboard"), @opts)
+
+      assert conn.status == 308
+      assert get_resp_header(conn, "location") == ["https://barkpark.cloud/dashboard"]
+    end
+
+    test "apex itself is NOT redirected (no loop)" do
+      conn = Router.call(conn(:get, "https://barkpark.cloud/up"), @opts)
+      assert conn.status == 200
+    end
+
+    test "localhost /up stays 200 un-redirected (blue/green health gate safe)" do
+      conn = Router.call(conn(:get, "http://localhost:4100/up"), @opts)
+      assert conn.status == 200
+      refute conn.status == 308
+    end
+
+    test "raw-IP health probe (no X-Forwarded-Host) is not redirected" do
+      conn = Router.call(conn(:get, "http://127.0.0.1:4101/up"), @opts)
+      assert conn.status == 200
+    end
+
+    test "api.barkpark.cloud passes through untouched" do
+      conn = Router.call(conn(:get, "https://api.barkpark.cloud/up"), @opts)
+      assert conn.status == 200
+    end
+
+    test "lookalike hosts pass through untouched (no accidental canonicalization)" do
+      for host <- [
+            "https://www.barkpark.cloud.evil.com/up",
+            "https://wwwbarkpark.cloud/up",
+            "https://www.api.barkpark.cloud/up"
+          ] do
+        conn = Router.call(conn(:get, host), @opts)
+        assert conn.status == 200, "expected passthrough for #{host}, got #{conn.status}"
+      end
+    end
+  end
+
+  describe "front door: real client IP behind the Caddy loopback front" do
+    # Router.call runs the full pipeline; :trust_forwarded_ip sets conn.remote_ip
+    # early and nothing downstream resets it, so the returned conn carries the
+    # resolved IP — the same value peer_ip/1 hands the start:<ip> rate bucket and
+    # session_opts.
+    test "X-Forwarded-For honored when the peer is loopback" do
+      # Plug.Test defaults remote_ip to {127,0,0,1} — a trusted loopback peer.
+      conn =
+        conn(:get, "http://localhost:4100/up")
+        |> put_req_header("x-forwarded-for", "203.0.113.5")
+        |> Router.call(@opts)
+
+      assert conn.remote_ip == {203, 0, 113, 5}
+    end
+
+    test "X-Forwarded-For IGNORED when the peer is NOT loopback (no bucket forgery)" do
+      conn =
+        %{conn(:get, "http://localhost:4100/up") | remote_ip: {198, 51, 100, 9}}
+        |> put_req_header("x-forwarded-for", "203.0.113.5")
+        |> Router.call(@opts)
+
+      # A directly-reachable client cannot move remote_ip with a spoofed header.
+      assert conn.remote_ip == {198, 51, 100, 9}
+    end
+
+    test "no X-Forwarded-For → loopback peer is left as-is" do
+      conn = Router.call(conn(:get, "http://localhost:4100/up"), @opts)
+      assert conn.remote_ip == {127, 0, 0, 1}
+    end
+  end
 end

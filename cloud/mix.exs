@@ -72,6 +72,14 @@ defmodule BarkparkCloud.MixProject do
       # pure-Elixir HTTP server; Plug supplies the router + JSON body parsing.
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.5"},
+      # bp-login-ux-w2: recover the REAL client IP behind the Caddy TLS front.
+      # The app listens plain on loopback :410x, so conn.remote_ip is always the
+      # loopback hop — collapsing the device-auth `start:<ip>` rate bucket into one
+      # global bucket and stamping 127.0.0.1 on every minted session. RemoteIp
+      # resolves the client from X-Forwarded-For, but ONLY when the actual peer is
+      # a trusted loopback proxy (see :trust_forwarded_ip in web/router.ex) so a
+      # spoofed header from a directly-reachable client can never forge a bucket.
+      {:remote_ip, "~> 1.2"},
       # oban-substrate: the cloud control plane's background-job + cron engine.
       # Same major as api/mix.exs's `{:oban, "~> 2.17"}` dep so both apps
       # share one Oban mental model. Postgres-backed — it reuses
