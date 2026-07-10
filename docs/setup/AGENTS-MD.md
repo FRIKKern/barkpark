@@ -42,12 +42,12 @@ A Go parity test (`internal/cli/onramp_cmd_test.go` · `TestOnrampAgentsMdWrappe
 
 `bp onramp agents-md --write` rides the shared onramp writer seam and merges into `./AGENTS.md`:
 
-- **no file** → create it with the block.
-- **file, no markers** → *append* the block; your existing content is never rewritten.
-- **markers present** → replace only the text between them.
+- **no file** → create it with the block (`created`).
+- **file, no markers** → *append* the block (`updated`); your existing content is never rewritten.
+- **markers present** → replace only the text between them (`updated`).
 - **identical** → report `unchanged`, exit 0.
 
-Every run prints a per-file action (`created` / `appended` / `updated` / `unchanged`), in text and under `-o json`. Until that ships, use the print-only path above.
+Every run prints a per-file action (`created` / `updated` / `unchanged`), in text and under `-o json` — the same action vocabulary as the JSON `--write` targets ([Agent Onramps hub](AGENT-ONRAMPS.md)). Until that ships, use the print-only path above.
 
 ## See also
 
