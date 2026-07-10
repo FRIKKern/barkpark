@@ -4638,3 +4638,229 @@ test("paletteRegistry with no data is the static slate — the instant-open guar
   assert.equal(reg.length, staticCount); // nav + actions only, no instance/site rows
   assert.ok(!reg.some((i) => i.group === "Instances" || i.group === "Sites"));
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// bp-login-ux W3 — shared two-factor challenge card (charter decision 39)
+// ════════════════════════════════════════════════════════════════════════════
+// The control plane's login is two-phase for TOTP accounts: POST /v1/auth/login
+// → 200 {two_factor_required:true, challenge_token}; POST /v1/auth/two-factor-
+// challenge {challenge_token, code|recovery_code} → 200 {token, team_id} | 401
+// invalid_code | 429 rate_limited. ONE shared card renders at every submit site.
+// The server is HTTP-tested (router_two_factor_test.exs); here we pin the SPA's
+// pure classifiers, the card markup, honest 401/429 copy, the closure-only
+// secret handling, and the mount → challenge → onDone path via a stubbed fetch.
+
+// A richer fake root than fakeNode(): stable per-selector child stubs (so a
+// re-paint re-wires the SAME node), a value map, handler capture + _fire, and a
+// settable innerHTML. Mirrors the mountTimelineTab wiring-smoke style.
+function fake2faRoot(values) {
+  const nodes = {};
+  function nodeFor(sel) {
+    if (!nodes[sel]) {
+      const handlers = {};
+      nodes[sel] = {
+        value: (values && values[sel]) || "",
+        disabled: false, textContent: "", hidden: false,
+        _handlers: handlers,
+        addEventListener(ev, fn) { handlers[ev] = fn; },
+        removeEventListener() {}, setAttribute() {}, getAttribute() { return null; },
+        focus() {}, classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
+        querySelector() { return null; }, querySelectorAll() { return []; },
+      };
+    }
+    return nodes[sel];
+  }
+  const root = {
+    _html: "",
+    get innerHTML() { return root._html; },
+    set innerHTML(v) { root._html = String(v); },
+    querySelector(sel) { return nodeFor(sel); },
+    querySelectorAll() { return []; },
+    _fire(sel, ev) { const n = nodes[sel]; if (n && n._handlers[ev]) return n._handlers[ev]({ preventDefault() {} }); },
+    _node(sel) { return nodeFor(sel); },
+  };
+  return root;
+}
+
+test("W3 2FA: the shared-card helpers are exported through the ONE hook", () => {
+  for (const name of ["loginResponseKind", "twoFactorChallengeOutcome",
+    "twoFactorCardHtml", "twoFactorErrorCopy", "mountTwoFactorCard"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.equal(typeof hooks.twoFactorRateWaitS, "number");
+});
+
+test("W3 2FA: loginResponseKind routes session / two_factor / error", () => {
+  assert.equal(hooks.loginResponseKind({ ok: true, data: { token: "t", team_id: "x" } }), "session");
+  assert.equal(hooks.loginResponseKind({ ok: true, data: { two_factor_required: true, challenge_token: "CT" } }), "two_factor");
+  // two_factor_required WITHOUT a challenge_token is not a valid challenge → error.
+  assert.equal(hooks.loginResponseKind({ ok: true, data: { two_factor_required: true } }), "error");
+  assert.equal(hooks.loginResponseKind({ ok: false, status: 401, data: { error: "invalid_credentials" } }), "error");
+  assert.equal(hooks.loginResponseKind(null), "error");
+});
+
+test("W3 2FA: twoFactorChallengeOutcome maps 200/401/429/other honestly", () => {
+  // Field-by-field: the outcome object is built inside the vm realm, so its
+  // prototype ≠ node's Object.prototype and deepStrictEqual would reject it.
+  const ok = hooks.twoFactorChallengeOutcome({ ok: true, status: 200, data: { token: "sess", team_id: "team-9" } });
+  assert.equal(ok.state, "success");
+  assert.equal(ok.token, "sess");
+  assert.equal(ok.team_id, "team-9");
+  // 200 with a null team_id still succeeds (team_id normalises to null).
+  const ok2 = hooks.twoFactorChallengeOutcome({ ok: true, status: 200, data: { token: "sess" } });
+  assert.equal(ok2.state, "success");
+  assert.equal(ok2.team_id, null);
+  assert.equal(hooks.twoFactorChallengeOutcome({ ok: false, status: 401, data: { error: "invalid_code" } }).state, "invalid_code");
+  assert.equal(hooks.twoFactorChallengeOutcome({ ok: false, status: 429, data: { error: "rate_limited" } }).state, "rate_limited");
+  assert.equal(hooks.twoFactorChallengeOutcome({ ok: false, status: 500, data: {} }).state, "error");
+  assert.equal(hooks.twoFactorChallengeOutcome(null).state, "error");
+});
+
+test("W3 2FA: invalid_code and rate_limited get DISTINCT honest copy", () => {
+  const invalid = hooks.friendly({ error: "invalid_code" });
+  const rate = hooks.friendly({ error: "rate_limited" });
+  assert.match(invalid, /didn't match/);
+  assert.match(rate, /Too many attempts/);
+  assert.notEqual(invalid, rate); // a 401 must never read like a 429
+  // The card's own copy helper agrees with the ERRORS entry for invalid_code.
+  assert.equal(hooks.twoFactorErrorCopy("invalid_code"), invalid);
+  assert.match(hooks.twoFactorErrorCopy("empty", false), /6-digit code/);
+  assert.match(hooks.twoFactorErrorCopy("empty", true), /recovery code/);
+});
+
+test("W3 2FA: the card markup is tokens-only OTP by default, recovery on toggle", () => {
+  const otp = hooks.twoFactorCardHtml({ mode: "otp" });
+  assert.match(otp, /id="tfa-form"/);
+  assert.match(otp, /id="tfa-code"/);
+  assert.match(otp, /inputmode="numeric"/);      // valid inputmode (not the old "latin")
+  assert.match(otp, /autocomplete="one-time-code"/);
+  assert.match(otp, /id="tfa-alt"/);             // "use a recovery code"
+  assert.match(otp, /Use a recovery code/);
+  assert.doesNotMatch(otp, /<select|type="checkbox"|type="radio"/); // no native controls
+
+  const rec = hooks.twoFactorCardHtml({ mode: "recovery" });
+  assert.match(rec, /Recovery code/);
+  assert.match(rec, /Use a 6-digit code/);
+  assert.doesNotMatch(rec, /inputmode="numeric"/); // recovery codes are alphanumeric
+});
+
+test("W3 2FA: the 429 card is a PAUSED disabled-countdown, no instant re-fire", () => {
+  const html = hooks.twoFactorCardHtml({ mode: "otp", rateLimited: true });
+  assert.match(html, /id="tfa-submit"/);
+  assert.match(html, /disabled/);
+  assert.match(html, /Try again in \d+s/);
+  assert.doesNotMatch(html, /id="tfa-form"/);   // no live form to submit while paused
+  assert.match(html, /Too many attempts/);
+});
+
+test("W3 2FA: mount → valid code → challenge endpoint → onDone(session)", async () => {
+  const root = fake2faRoot({ "#tfa-code": "123456" });
+  let done = null;
+  const realFetch = sandbox.fetch;
+  const calls = [];
+  sandbox.fetch = (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return Promise.resolve({
+      ok: true, status: 200,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve({ token: "sess-1", team_id: "team-9" }),
+    });
+  };
+  try {
+    hooks.mountTwoFactorCard(root, { challengeToken: "CT-xyz", onDone: (s) => { done = s; } });
+    assert.match(root.innerHTML, /id="tfa-form"/);        // painted synchronously
+    root._fire("#tfa-form", "submit");
+    assert.equal(root._node("#tfa-submit").disabled, true); // immediate feedback
+    for (let i = 0; i < 10; i++) await Promise.resolve();   // flush the promise chain
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].url, /two-factor-challenge/);
+    assert.equal(calls[0].body.challenge_token, "CT-xyz");  // token from the closure
+    assert.equal(calls[0].body.code, "123456");
+    assert.ok(done);
+    assert.equal(done.token, "sess-1");
+    assert.equal(done.team_id, "team-9");
+  } finally { sandbox.fetch = realFetch; }
+});
+
+test("W3 2FA: a 401 repaints invalid-code copy, re-enables the form, no onDone", async () => {
+  const root = fake2faRoot({ "#tfa-code": "000000" });
+  let done = false;
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = () => Promise.resolve({
+    ok: false, status: 401,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve({ error: "invalid_code" }),
+  });
+  try {
+    hooks.mountTwoFactorCard(root, { challengeToken: "CT", onDone: () => { done = true; } });
+    root._fire("#tfa-form", "submit");
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(done, false);                            // wrong code is NOT success
+    assert.match(root.innerHTML, /rotate every 30 seconds/); // honest inline copy (apostrophe HTML-escaped)
+    assert.match(root.innerHTML, /id="tfa-form"/);        // form is back — retry in place
+  } finally { sandbox.fetch = realFetch; }
+});
+
+test("W3 2FA: a 429 paints the paused-countdown state, no onDone", async () => {
+  const root = fake2faRoot({ "#tfa-code": "123456" });
+  let done = false;
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = () => Promise.resolve({
+    ok: false, status: 429,
+    headers: { get: () => "application/json" },
+    json: () => Promise.resolve({ error: "rate_limited" }),
+  });
+  try {
+    hooks.mountTwoFactorCard(root, { challengeToken: "CT", onDone: () => { done = true; } });
+    root._fire("#tfa-form", "submit");
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(done, false);
+    assert.match(root.innerHTML, /Too many attempts/);
+    assert.match(root.innerHTML, /Try again in \d+s/);
+    assert.equal(root._node("#tfa-submit").disabled, true);
+  } finally { sandbox.fetch = realFetch; }
+});
+
+test("W3 2FA: the recovery toggle switches the submit to recovery_code", async () => {
+  const root = fake2faRoot({ "#tfa-code": "abcd-efgh" });
+  const realFetch = sandbox.fetch;
+  let body = null;
+  sandbox.fetch = (url, init) => { body = JSON.parse(init.body); return Promise.resolve({
+    ok: true, status: 200, headers: { get: () => "application/json" },
+    json: () => Promise.resolve({ token: "s", team_id: "t" }),
+  }); };
+  try {
+    hooks.mountTwoFactorCard(root, { challengeToken: "CT", onDone: () => {} });
+    root._fire("#tfa-alt", "click"); // OTP → recovery
+    assert.match(root.innerHTML, /Recovery code/);
+    root._fire("#tfa-form", "submit");
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.equal(body.recovery_code, "abcd-efgh");
+    assert.equal(body.code, undefined); // recovery mode sends recovery_code, not code
+  } finally { sandbox.fetch = realFetch; }
+});
+
+test("W3 2FA: the challenge_token is NEVER written to storage (closure-only)", async () => {
+  const root = fake2faRoot({ "#tfa-code": "123456" });
+  const realFetch = sandbox.fetch;
+  const realLocal = sandbox.localStorage;
+  const realSession = sandbox.sessionStorage;
+  const writes = [];
+  const spy = { getItem: () => null, removeItem: () => {}, setItem: (k, v) => writes.push([k, v]) };
+  sandbox.localStorage = spy;
+  sandbox.sessionStorage = spy;
+  sandbox.fetch = (url, init) => Promise.resolve({
+    ok: true, status: 200, headers: { get: () => "application/json" },
+    json: () => Promise.resolve({ token: "s", team_id: "t" }),
+  });
+  try {
+    hooks.mountTwoFactorCard(root, { challengeToken: "CT-secret-xyz", onDone: () => {} });
+    root._fire("#tfa-form", "submit");
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    for (const [k, v] of writes) {
+      assert.doesNotMatch(String(v), /CT-secret-xyz/, "challenge_token must never hit storage (" + k + ")");
+    }
+  } finally {
+    sandbox.fetch = realFetch; sandbox.localStorage = realLocal; sandbox.sessionStorage = realSession;
+  }
+});
