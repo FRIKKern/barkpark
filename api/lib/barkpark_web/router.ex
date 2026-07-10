@@ -1255,6 +1255,16 @@ defmodule BarkparkWeb.Router do
     get("/capabilities", CapabilitiesController, :index)
   end
 
+  # ── Instance machine meter: rolling req/s + p95 window (cloud-console W5) ──
+  # Authed with the SAME Bearer-token seam the agent health gate probes
+  # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24:
+  # {"req_per_s": float, "p95_ms": int|null, "window_s": int}.
+  scope "/v1", BarkparkWeb do
+    pipe_through([:api, :require_token])
+
+    get("/instance/request-stats", RequestStatsController, :show)
+  end
+
   # ── Federated discovery ─────────────────────────────────────────────────
   scope "/v1", BarkparkWeb do
     pipe_through(:api)
