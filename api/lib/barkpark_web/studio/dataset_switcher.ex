@@ -19,8 +19,12 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
     ~H"""
     <label class="dataset-switcher">
       <span class="dataset-switcher-label">Dataset</span>
+      <%!-- `form-input` gives the select the themed chrome (appearance:none,
+            token border/bg/text, the custom caret, the focus ring) so no
+            native unthemed dropdown leaks; `dataset-switcher-select` layers
+            the compact top-bar sizing on top (sup-w1 PART C). --%>
       <select
-        class="dataset-switcher-select"
+        class="dataset-switcher-select form-input"
         onchange={"window.location = '/studio/' + encodeURIComponent(this.value) + #{section_suffix(@current_section)}"}
       >
         <%= for ds <- @datasets do %>
