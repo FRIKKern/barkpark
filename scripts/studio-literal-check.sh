@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # studio-literal-check.sh — the Studio literal-color gate (unified-aesthetic W2.6).
 #
-# Studio chrome (api/lib/barkpark_web/ heex + ex) must consume the emitted design
-# tokens via var(--…) — never a copied hex / hsl() channel literal. After the W2.6
-# sweep every chrome color literal was repointed onto a role/status token; this
-# gate keeps it that way: it FAILS when a NEW inline `hsl(<digit> …)` or `#hex`
+# Studio chrome — api/lib/barkpark_web/ AND the plugin-owned Studio surfaces
+# under api/lib/barkpark/plugins/ (heex + ex; au-r3 closed that blind spot:
+# plugin LiveViews like the tickets inbox and the /admin/projects board are
+# LIVE chrome too) — must consume the emitted design tokens via var(--…),
+# never a copied hex / hsl() channel literal. After the W2.6 sweep every
+# chrome color literal was repointed onto a role/status token; this gate
+# keeps it that way: it FAILS when a NEW inline `hsl(<digit> …)` or `#hex`
 # color literal appears in a scanned file.
 #
 # It is deliberately narrow — colour literals only. It strips comments (so PR-refs
@@ -21,7 +24,11 @@
 #   • --st-* — the paper-surface status manifest, redefined in the doc sidebar
 #   • a line carrying a `lit-allow:` annotation — a documented per-line resister
 #     (on-color white foregrounds, bespoke shadcn zinc ladder shades with no exact
-#     token — each earmarked for a follow-up token)
+#     token — each earmarked for a follow-up token). In .ex code, `mix format`
+#     relocates trailing comments, so a `lit-allow-next-line:` comment on the
+#     line DIRECTLY ABOVE allows exactly the one line below it (au-r3 — used for
+#     hex-looking STRING data like "#rrggbb" error examples and "PR #123" help
+#     text, which are not colors at all)
 #   • a `studio-literal-check: skip-begin … skip-end` region — a large contiguous
 #     out-of-scope block (the paper surface/editor + Sheets grid CSS in
 #     root.html.heex live under their own token systems and follow-ups)
@@ -34,14 +41,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WEB="$ROOT/api/lib/barkpark_web"
+LIB="$ROOT/api/lib"
 
-python3 - "$WEB" <<'PY'
+python3 - "$LIB" <<'PY'
 import os, re, sys
 
-web = sys.argv[1]
+lib = sys.argv[1]
 
-# Files skipped entirely, each with the lead-approved reason.
+# The scanned chrome roots, relative to api/lib. barkpark/plugins joined in
+# au-r3 (plugin-owned Studio LiveViews are live chrome no other gate scanned).
+SCAN_ROOTS = ["barkpark_web", "barkpark/plugins"]
+
+# Files skipped entirely (api/lib-relative), each with the lead-approved reason.
 EXEMPT = {
     # NOTE: the four self-contained pages (session_html.ex login, error_html.ex,
     # status_controller.ex, sheets.html.heex reader) were REMOVED from this list
@@ -53,20 +64,29 @@ EXEMPT = {
     # The GENERATED categorical token artifact itself — design/emit.mjs owns
     # these hex value lists (the single source presence_state.ex + sheet_grid.ex
     # now consume). Analogous to the BEGIN/END GENERATED CSS block exemption.
-    "studio/tokens_gen.ex",
-    "components/studio_components/modals.ex",   # color-picker swatch palette
+    "barkpark_web/studio/tokens_gen.ex",
+    "barkpark_web/components/studio_components/modals.ex",  # color-picker swatch palette
     # color-picker DATA — a <input type=color> default value, not chrome theming.
-    "components/field_inputs.ex",
+    "barkpark_web/components/field_inputs.ex",
     # Out of scope — the paper surface / paper editor (its own token system).
-    "layouts/bulldocs.html.heex",
-    "controllers/paper_tasks.ex",
-    "controllers/paper_backlinks.ex",
-    "live/studio/studio_live/shared/paper.ex",
-    "live/studio/studio_live/paper_canvas.ex",
-    "live/studio/studio_live/components/paper_editor.ex",
-    "live/studio/studio_live/blocks.ex",         # field-color block default value
+    "barkpark_web/layouts/bulldocs.html.heex",
+    "barkpark_web/controllers/paper_tasks.ex",
+    "barkpark_web/controllers/paper_backlinks.ex",
+    "barkpark_web/live/studio/studio_live/shared/paper.ex",
+    "barkpark_web/live/studio/studio_live/paper_canvas.ex",
+    "barkpark_web/live/studio/studio_live/components/paper_editor.ex",
+    "barkpark_web/live/studio/studio_live/blocks.ex",  # field-color block default value
     # Terminal emulator — a terminal background is literally black.
-    "live/studio/tmux_live.ex",
+    "barkpark_web/live/studio/tmux_live.ex",
+    # Sheets conditional-format bg sanitizer — user color DATA (sanitize_bg/
+    # valid_bg?) whose doctest examples are hex strings by definition, not
+    # chrome theming. Analogous to the field_inputs.ex color-picker DATA.
+    "barkpark/plugins/sheets/cond_format.ex",
+    # The standalone sheet HTML EXPORT — a self-contained downloaded artifact:
+    # the root layout's token vars never cascade into it, and its body colors
+    # are the paper-surface reader family (its own token system, out of this
+    # gate's scope). Analogous to the bulldocs.html.heex paper-surface entry.
+    "barkpark/plugins/sheets/html.ex",
 }
 
 LITERAL = re.compile(r"hsl\(\s*[0-9]|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
@@ -84,6 +104,12 @@ def blank(m):
 # own lit-allow (rgba function values themselves never match LITERAL).
 ALLOW_LINE = re.compile(
     r"lit-allow|--paper|\.bp-paper|\.bp-canvas|--sheet|\.sheet-|--st-")
+
+# `mix format` moves a trailing comment onto its own line, so .ex code can't
+# carry a same-line `lit-allow:`. A `lit-allow-next-line:` marker allows
+# exactly the ONE line directly below it (never a region — that's skip-begin/
+# skip-end's job).
+ALLOW_NEXT = "lit-allow-next-line"
 
 SKIP_BEGIN = "studio-literal-check: skip-begin"
 SKIP_END = "studio-literal-check: skip-end"
@@ -135,22 +161,25 @@ def scan(path, rel):
             continue
         if ALLOW_LINE.search(rawline):
             continue
+        if i >= 2 and ALLOW_NEXT in raw_lines[i - 2]:
+            continue
         hits.append((i, rawline.strip()))
     return hits
 
 failures = []
 scanned = 0
-for dirpath, _dirs, files in os.walk(web):
-    for fn in sorted(files):
-        if not (fn.endswith(".ex") or fn.endswith(".heex")):
-            continue
-        path = os.path.join(dirpath, fn)
-        rel = os.path.relpath(path, web)
-        if rel in EXEMPT:
-            continue
-        scanned += 1
-        for ln, text in scan(path, rel):
-            failures.append((rel, ln, text))
+for scan_root in SCAN_ROOTS:
+    for dirpath, _dirs, files in os.walk(os.path.join(lib, scan_root)):
+        for fn in sorted(files):
+            if not (fn.endswith(".ex") or fn.endswith(".heex")):
+                continue
+            path = os.path.join(dirpath, fn)
+            rel = os.path.relpath(path, lib)
+            if rel in EXEMPT:
+                continue
+            scanned += 1
+            for ln, text in scan(path, rel):
+                failures.append((rel, ln, text))
 
 if not failures:
     print(f"studio-literal-check: PASS — {scanned} Studio chrome file(s) scanned, "
@@ -163,7 +192,8 @@ for rel, ln, text in failures:
 print("\n  Consume an emitted token instead: var(--primary|--primary-soft|--ok-soft|")
 print("  --warn|--danger-soft|--info|--bg|--text|--border|--muted-surface|…), or")
 print("  hsl(var(--<role>-hsl) / <alpha>) for a custom-alpha tint. See design/tokens.json.")
-print("  Genuinely un-tokenizable? Add a `lit-allow: <reason>` comment on the line, or")
+print("  Genuinely un-tokenizable? Add a `lit-allow: <reason>` comment on the line")
+print("  (`lit-allow-next-line: <reason>` on the line above, in formatted .ex code), or")
 print("  add the file to EXEMPT in scripts/studio-literal-check.sh with a justification.")
 sys.exit(1)
 PY

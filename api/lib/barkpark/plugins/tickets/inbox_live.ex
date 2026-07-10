@@ -432,76 +432,84 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
     ~H"""
     <div class="bp-tickets">
       <style>
-        .bp-tickets { display:flex; flex-direction:column; min-height:0; flex:1; font-family:var(--font,ui-sans-serif,system-ui); }
-        .bp-tk-topbar { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid var(--border-muted,#2a2a2a); }
+        /* Painted ENTIRELY with the emitted Studio token vocabulary
+           (design/tokens.json → the root layout's GENERATED block:
+           --bg/--surface/--text/--muted-text/--fg-dim/--border/--border-muted/
+           --bg-accent/--primary/--ring/--ok/--warn/--danger/--info + -soft/-hsl
+           twins, --radius-*, --font). No hex/hsl-channel literals: custom-alpha
+           tints ride hsl(var(--<role>-hsl) / a) per the studio-literal-check
+           contract (au-r3 — this file used to carry a hand-rolled dark palette
+           in dead var(--x,#hex) fallbacks; ssp-w1 purged that anti-pattern). */
+        .bp-tickets { display:flex; flex-direction:column; min-height:0; flex:1; font-family:var(--font); }
+        .bp-tk-topbar { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid var(--border-muted); }
         .bp-tk-topbar-left { display:flex; align-items:center; gap:12px; }
         .bp-tk-topbar-right { display:flex; align-items:center; gap:8px; }
-        .bp-tk-badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:600; background:hsl(38 92% 50% / 0.14); color:var(--warning,#e0a11a); }
+        .bp-tk-badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:600; background:var(--warn-soft); color:var(--warn); }
         .bp-tk-body { flex:1; overflow-y:auto; padding:20px 24px; }
         .bp-tk-banner { padding:10px 24px; font-size:13px; }
-        .bp-tk-banner-ok { background:var(--success-bg,#10311d); color:var(--success,#2fbf5e); }
-        .bp-tk-banner-error { background:var(--destructive-bg,#3a1414); color:var(--destructive,#e5484d); }
+        .bp-tk-banner-ok { background:var(--ok-soft); color:var(--ok); }
+        .bp-tk-banner-error { background:var(--danger-soft); color:var(--danger); }
 
         .bp-tk-partition { margin-bottom:22px; }
-        .bp-tk-partition-title { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--fg-muted,#9a9a9a); margin-bottom:8px; }
-        .bp-tk-count { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-accent,#222); color:var(--fg-muted,#9a9a9a); }
+        .bp-tk-partition-title { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted-text); margin-bottom:8px; }
+        .bp-tk-count { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-accent); color:var(--muted-text); }
         .bp-tk-partition-empty { font-size:13px; padding:6px 2px; }
         .bp-tk-rows { display:flex; flex-direction:column; gap:6px; }
 
-        .bp-tk-row { display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:10px 14px; border-radius:var(--radius-sm,7px); border:1px solid var(--border-muted,#2a2a2a); background:var(--bg-card,#161616); color:var(--fg,#eee); transition:background .12s,border-color .12s; }
-        .bp-tk-row:hover { background:var(--bg-accent,#222); }
+        .bp-tk-row { display:flex; align-items:center; gap:12px; width:100%; text-align:left; padding:10px 14px; border-radius:var(--radius-sm); border:1px solid var(--border-muted); background:var(--surface); color:var(--text); transition:background .12s,border-color .12s; }
+        .bp-tk-row:hover { background:var(--bg-accent); }
         /* Needs-answer rows are visually primary — amber/warn tint + left accent. */
-        .bp-tk-tone-warn.bp-tk-row { border-left:3px solid var(--warning,#e0a11a); background:hsl(38 92% 50% / 0.05); }
-        .bp-tk-tone-warn.bp-tk-row:hover { background:hsl(38 92% 50% / 0.1); }
-        .bp-tk-tone-info.bp-tk-row { border-left:3px solid var(--primary,#3b82f6); }
+        .bp-tk-tone-warn.bp-tk-row { border-left:3px solid var(--warn); background:hsl(var(--warn-hsl) / 0.05); }
+        .bp-tk-tone-warn.bp-tk-row:hover { background:hsl(var(--warn-hsl) / 0.1); }
+        .bp-tk-tone-info.bp-tk-row { border-left:3px solid var(--info); }
         .bp-tk-tone-dim.bp-tk-row { opacity:0.72; }
 
-        .bp-tk-keypill { display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-accent,#222); color:var(--fg,#eee); white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
-        .bp-tk-oppill { background:hsl(217 91% 60% / 0.16); color:var(--primary,#3b82f6); }
+        .bp-tk-keypill { display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-accent); color:var(--text); white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+        .bp-tk-oppill { background:hsl(var(--info-hsl) / 0.16); color:var(--info); }
         .bp-tk-subject { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:500; }
         .bp-tk-clip { font-size:13px; opacity:0.8; }
-        .bp-tk-msgs { font-size:12px; color:var(--fg-muted,#9a9a9a); white-space:nowrap; }
-        .bp-tk-age { font-size:12px; font-weight:600; color:var(--fg-muted,#9a9a9a); font-variant-numeric:tabular-nums; min-width:34px; text-align:right; }
+        .bp-tk-msgs { font-size:12px; color:var(--muted-text); white-space:nowrap; }
+        .bp-tk-age { font-size:12px; font-weight:600; color:var(--muted-text); font-variant-numeric:tabular-nums; min-width:34px; text-align:right; }
         .bp-tk-seen { font-size:11px; font-weight:500; white-space:nowrap; }
-        .bp-tk-seen-yes { color:var(--success,#2fbf5e); }
-        .bp-tk-seen-no { color:var(--fg-dim,#6b6b6b); }
+        .bp-tk-seen-yes { color:var(--ok); }
+        .bp-tk-seen-no { color:var(--fg-dim); }
 
         .bp-tk-closed { margin-top:8px; }
-        .bp-tk-closed-summary { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; font-weight:600; color:var(--fg-muted,#9a9a9a); padding:6px 2px; }
+        .bp-tk-closed-summary { display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; font-weight:600; color:var(--muted-text); padding:6px 2px; }
 
-        .bp-tk-empty { text-align:center; padding:64px 24px; color:var(--fg-muted,#9a9a9a); }
-        .bp-tk-empty-mark { font-size:40px; color:var(--success,#2fbf5e); margin-bottom:8px; }
+        .bp-tk-empty { text-align:center; padding:64px 24px; color:var(--muted-text); }
+        .bp-tk-empty-mark { font-size:40px; color:var(--ok); margin-bottom:8px; }
 
         /* Thread detail — full-width timeline rows, NOT chat bubbles. */
         .bp-tk-thread { max-width:820px; }
-        .bp-tk-thread-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding-bottom:14px; margin-bottom:14px; border-bottom:1px solid var(--border-muted,#2a2a2a); }
+        .bp-tk-thread-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding-bottom:14px; margin-bottom:14px; border-bottom:1px solid var(--border-muted); }
         .bp-tk-thread-subject { margin-top:6px; }
         .bp-tk-timeline { display:flex; flex-direction:column; }
-        .bp-tk-event { padding:14px 0; border-bottom:1px solid var(--border-muted,#2a2a2a); }
+        .bp-tk-event { padding:14px 0; border-bottom:1px solid var(--border-muted); }
         .bp-tk-event-operator { padding-left:0; }
         .bp-tk-event-meta { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px; }
-        .bp-tk-event-time { font-size:11px; color:var(--fg-dim,#6b6b6b); font-variant-numeric:tabular-nums; }
+        .bp-tk-event-time { font-size:11px; color:var(--fg-dim); font-variant-numeric:tabular-nums; }
         .bp-tk-event-body { font-size:14px; line-height:1.55; white-space:pre-wrap; word-break:break-word; }
         .bp-tk-attachments { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
-        .bp-tk-attachment { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:3px 8px; border-radius:var(--radius-sm,7px); border:1px solid var(--border,#333); color:var(--fg-muted,#9a9a9a); }
-        .bp-tk-attachment:hover { color:var(--fg,#eee); border-color:var(--primary,#3b82f6); }
+        .bp-tk-attachment { display:inline-flex; align-items:center; gap:4px; font-size:12px; padding:3px 8px; border-radius:var(--radius-sm); border:1px solid var(--border); color:var(--muted-text); }
+        .bp-tk-attachment:hover { color:var(--text); border-color:var(--ring); }
 
         .bp-tk-composer { margin-top:18px; }
-        .bp-tk-textarea, .bp-tk-input { width:100%; font-family:inherit; font-size:14px; padding:10px 12px; border-radius:var(--radius-sm,7px); border:1px solid var(--border,#333); background:var(--bg,#0d0d0d); color:var(--fg,#eee); resize:vertical; }
-        .bp-tk-textarea:focus, .bp-tk-input:focus { outline:none; border-color:var(--primary,#3b82f6); }
+        .bp-tk-textarea, .bp-tk-input { width:100%; font-family:inherit; font-size:14px; padding:10px 12px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--bg); color:var(--text); resize:vertical; }
+        .bp-tk-textarea:focus, .bp-tk-input:focus { outline:none; border-color:var(--ring); }
         .bp-tk-composer-actions { display:flex; align-items:center; gap:8px; margin-top:10px; }
         .bp-tk-spacer { flex:1; }
 
         /* Key management */
         .bp-tk-keys { max-width:760px; }
-        .bp-tk-handoff { border:1px solid var(--primary,#3b82f6); border-radius:var(--radius-lg,10px); padding:14px 16px; margin-bottom:18px; background:hsl(217 91% 60% / 0.06); }
+        .bp-tk-handoff { border:1px solid var(--primary); border-radius:var(--radius-lg); padding:14px 16px; margin-bottom:18px; background:hsl(var(--primary-hsl) / 0.06); }
         .bp-tk-handoff-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
-        .bp-tk-secret { font-family:ui-monospace,SFMono-Regular,monospace; font-size:13px; padding:10px 12px; border-radius:var(--radius-sm,7px); background:var(--bg,#0d0d0d); border:1px solid var(--border,#333); color:var(--fg,#eee); overflow-x:auto; user-select:all; margin:8px 0; }
+        .bp-tk-secret { font-family:var(--font-mono,ui-monospace,monospace); font-size:13px; padding:10px 12px; border-radius:var(--radius-sm); background:var(--bg); border:1px solid var(--border); color:var(--text); overflow-x:auto; user-select:all; margin:8px 0; }
         .bp-tk-mint { display:flex; gap:8px; margin-bottom:18px; }
         .bp-tk-mint .bp-tk-input { flex:1; }
         .bp-tk-keytable { width:100%; border-collapse:collapse; font-size:13px; }
-        .bp-tk-keytable th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--fg-dim,#6b6b6b); padding:6px 10px; border-bottom:1px solid var(--border-muted,#2a2a2a); }
-        .bp-tk-keytable td { padding:10px; border-bottom:1px solid var(--border-muted,#2a2a2a); vertical-align:middle; }
+        .bp-tk-keytable th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.05em; color:var(--fg-dim); padding:6px 10px; border-bottom:1px solid var(--border-muted); }
+        .bp-tk-keytable td { padding:10px; border-bottom:1px solid var(--border-muted); vertical-align:middle; }
         .bp-tk-keyname { font-weight:600; }
         .bp-tk-keyactions-h { text-align:right; }
         .bp-tk-keyactions { display:flex; gap:6px; justify-content:flex-end; }
