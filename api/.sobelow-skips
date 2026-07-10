@@ -97,3 +97,5 @@ Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/i
 XSS.Raw: XSS,lib/barkpark_web/controllers/error_html.ex:25,6380E04
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/media.ex:61,28E547D
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:255,2D76706
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1966,2C0C16C
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:3571,4E6DAA4
