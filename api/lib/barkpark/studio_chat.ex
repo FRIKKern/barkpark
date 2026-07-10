@@ -159,6 +159,27 @@ defmodule Barkpark.StudioChat do
     |> Repo.all()
   end
 
+  @doc """
+  List the LAST `limit` messages of a session, still in ascending `seq` order.
+
+  The transcript reopen path (`ChatLive`) caps the socket to a bounded window
+  (task-9e21c3f285b3d7d0), so a multi-hundred-turn session no longer loads its
+  entire history into memory just to display the tail. The DB `LIMIT` bounds
+  both the query result and the initial socket heap; the durable store is
+  untouched. A non-positive/absent `limit` falls back to the full list.
+  """
+  @spec list_messages(String.t(), pos_integer()) :: [Message.t()]
+  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
+    Message
+    |> where([m], m.session_id == ^session_id)
+    |> order_by([m], desc: m.seq)
+    |> limit(^limit)
+    |> Repo.all()
+    |> Enum.reverse()
+  end
+
+  def list_messages(session_id, _limit), do: list_messages(session_id)
+
   # ---------------------------------------------------------------------------
   # lifecycle: archive + delete (wave 2 — the sidebar as a managed resource list)
   # ---------------------------------------------------------------------------
