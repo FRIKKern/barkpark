@@ -376,6 +376,12 @@ func TestUsageStateToken(t *testing.T) {
 		{"over_limit wins when past both lines", true, cloudclient.UsageMeter{Value: 1000.0, Quota: fp(1000), WarnAt: fp(500)}, "over_limit"},
 		{"warn_at alone (no quota) → near_limit", true, cloudclient.UsageMeter{Value: 90.0, WarnAt: fp(80)}, "near_limit"},
 		{"quota alone (no warn) at ceiling → over_limit", true, cloudclient.UsageMeter{Value: 100.0, Quota: fp(100)}, "over_limit"},
+		// OC25 over_at — the red line fires with or without a quota, and BEFORE it.
+		{"over_at crossed, no quota (a rate meter) → over_limit", true, cloudclient.UsageMeter{Value: 300.0, WarnAt: fp(210), OverAt: fp(270)}, "over_limit"},
+		{"over_at crossed, BELOW the bar ceiling (cpu 95<100) → over_limit", true, cloudclient.UsageMeter{Value: 95.0, Quota: fp(100), WarnAt: fp(70), OverAt: fp(90)}, "over_limit"},
+		{"between warn_at and over_at → near_limit", true, cloudclient.UsageMeter{Value: 80.0, Quota: fp(100), WarnAt: fp(70), OverAt: fp(90)}, "near_limit"},
+		{"under warn_at with thresholds present → live", true, cloudclient.UsageMeter{Value: 40.0, WarnAt: fp(210), OverAt: fp(270)}, "live"},
+		{"at over_at exactly (inclusive) → over_limit", true, cloudclient.UsageMeter{Value: 90.0, Quota: fp(100), WarnAt: fp(70), OverAt: fp(90)}, "over_limit"},
 	}
 	for _, c := range cases {
 		if got := usageStateToken(c.meter, c.present); got != c.want {
@@ -989,3 +995,77 @@ func TestHumanBytes(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatMeterValueMachineMeters pins the machine-meter unit formats (OC26):
+// cpu/ram/disk render as percents, req_per_s as a rate, p95_ms as a latency, and
+// a plain count meter stays bare.
+func TestFormatMeterValueMachineMeters(t *testing.T) {
+	cases := []struct {
+		name string
+		n    float64
+		want string
+	}{
+		{"cpu", 63, "63%"},
+		{"ram", 71.5, "71.5%"},
+		{"disk", 42, "42%"},
+		{"req_per_s", 12.4, "12.4/s"},
+		{"req_per_s", 200, "200/s"},
+		{"p95_ms", 140, "140 ms"},
+		{"documents", 812, "812"}, // a plain count is unchanged
+	}
+	for _, c := range cases {
+		if got := formatMeterValue(c.name, c.n); got != c.want {
+			t.Errorf("formatMeterValue(%q, %v) = %q, want %q", c.name, c.n, got, c.want)
+		}
+	}
+}
+
+// TestRunCloudUsageMachineMetersRender proves the four new meters render in the
+// per-instance table with their units + OC25 quota states off a live envelope:
+// cpu over (94 ≥ over_at 90) reads over_limit, ram near (76 ≥ warn 70) reads
+// near_limit, req_per_s renders its rate unit, and an unreported p95_ms is the
+// honest unmetered dash — never a fake zero.
+func TestRunCloudUsageMachineMetersRender(t *testing.T) {
+	newUsageServer(t, 200, usageMachineEnvelope)
+	stdout, _, code := runUsage(t, "table", false, testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+
+	cpu := usageTestRow(t, stdout, "CPU")
+	if !strings.Contains(cpu, "94%") || !strings.Contains(cpu, "over_limit") {
+		t.Fatalf("cpu at 94%% must read 94%% + over_limit:\n%s", cpu)
+	}
+	ram := usageTestRow(t, stdout, "RAM")
+	if !strings.Contains(ram, "76%") || !strings.Contains(ram, "near_limit") {
+		t.Fatalf("ram at 76%% must read 76%% + near_limit:\n%s", ram)
+	}
+	req := usageTestRow(t, stdout, "Req/s")
+	if !strings.Contains(req, "250/s") || !strings.Contains(req, "near_limit") {
+		t.Fatalf("req_per_s at 250 must read 250/s + near_limit:\n%s", req)
+	}
+	p95 := usageTestRow(t, stdout, "p95 latency")
+	if !strings.Contains(p95, "unmetered") {
+		t.Fatalf("an unreported p95 latency must stay unmetered, never a fake zero:\n%s", p95)
+	}
+}
+
+// usageMachineEnvelope is a live box reporting the machine meters (OC26): cpu OVER
+// its red line (94 ≥ over_at 90, still below the 100 bar ceiling), ram in the warn
+// band (76 ≥ warn 70), req_per_s near its rate warn line (250 ≥ 210, no quota),
+// and p95_ms not yet reported by the instance runtime (honest unmetered). The
+// legacy meters ride along unmetered so the row set stays whole.
+const usageMachineEnvelope = `{"usage":{"meters":{` +
+	`"documents":{"value":"unmetered","quota":null,"warn_at":null,"over_at":null,"source":"instance.documents","measured_at":null},` +
+	`"datasets":{"value":"unmetered","quota":null,"warn_at":null,"over_at":null,"source":"instance.datasets","measured_at":null},` +
+	`"webhooks":{"value":"unmetered","quota":null,"warn_at":null,"over_at":null,"source":"instance.webhooks","measured_at":null},` +
+	`"db_size":{"value":"unmetered","quota":null,"warn_at":null,"over_at":null,"source":"telemetry.pg_size_bytes","measured_at":null},` +
+	`"disk":{"value":42,"quota":100,"warn_at":70,"over_at":90,"source":"telemetry.disk_used_percent","measured_at":"2026-07-10T04:00:00Z"},` +
+	`"cpu":{"value":94,"quota":100,"warn_at":70,"over_at":90,"source":"telemetry.cpu_percent","measured_at":"2026-07-10T04:00:00Z"},` +
+	`"ram":{"value":76,"quota":100,"warn_at":70,"over_at":90,"source":"telemetry.mem_used_percent","measured_at":"2026-07-10T04:00:00Z"},` +
+	`"req_per_s":{"value":250,"quota":null,"warn_at":210,"over_at":270,"source":"telemetry.req_per_s","measured_at":"2026-07-10T04:00:00Z"},` +
+	`"p95_ms":{"value":"unmetered","quota":null,"warn_at":500,"over_at":1000,"source":"telemetry.p95_ms","measured_at":null},` +
+	`"seats":{"value":2,"quota":null,"warn_at":null,"over_at":null,"source":"control-plane.team_members","measured_at":null,"pending_invitations":0},` +
+	`"api_requests":{"value":"unmetered","quota":null,"warn_at":null,"over_at":null,"source":"not-metered","measured_at":null},` +
+	`"bandwidth":{"value":"unmetered","quota":null,"warn_at":null,"over_at":null,"source":"not-metered","measured_at":null},` +
+	`"instances":{"value":3,"quota":null,"warn_at":null,"over_at":null,"source":"control-plane.team_instances","measured_at":null}}}}`

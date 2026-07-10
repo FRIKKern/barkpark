@@ -159,17 +159,40 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
 
       assert Enum.sort(Map.keys(m)) ==
                Enum.sort(
-                 ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)
+                 ~w(documents datasets webhooks db_size disk cpu ram req_per_s p95_ms seats instances api_requests bandwidth)
                )
 
-      for {name, meter} <- m do
+      for {_name, meter} <- m do
         assert Map.has_key?(meter, "value")
         assert is_binary(meter["source"])
+        assert Map.has_key?(meter, "over_at")
+      end
 
-        # No meter invents a ceiling — and this team has no subscription, so even
-        # `instances` (the ONE quota-bearing meter) resolves quota nil here.
-        assert meter["quota"] == nil, "#{name} should carry no quota for an unsubscribed team"
-        assert meter["warn_at"] == nil
+      # The BILLING quota meter (instances) resolves quota nil for an unsubscribed
+      # team — its ceiling is subscription-gated, never invented.
+      assert m["instances"]["quota"] == nil
+      assert m["instances"]["warn_at"] == nil
+
+      # The physical machine meters (OC23/OC25) carry a FIXED 100/70/90 ceiling —
+      # not a billing quota, so it's present regardless of subscription.
+      for name <- ~w(cpu ram disk) do
+        assert m[name]["quota"] == 100, "#{name} carries the physical 100 ceiling"
+        assert m[name]["warn_at"] == 70
+        assert m[name]["over_at"] == 90
+      end
+
+      # Rate/latency meters carry warn+over thresholds but NO quota (no bar).
+      for name <- ~w(req_per_s p95_ms) do
+        assert m[name]["quota"] == nil
+        assert is_integer(m[name]["warn_at"])
+        assert is_integer(m[name]["over_at"])
+      end
+
+      # The inventory / flow / seats meters invent nothing.
+      for name <- ~w(documents datasets webhooks db_size seats api_requests bandwidth) do
+        assert m[name]["quota"] == nil, "#{name} should carry no ceiling"
+        assert m[name]["warn_at"] == nil
+        assert m[name]["over_at"] == nil
       end
     end
 
@@ -652,7 +675,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
 
   # ── GET /v1/barkparks/:id/usage/history — the sparkline series (wave 4) ───────
 
-  @meter_names ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)
+  @meter_names ~w(documents datasets webhooks db_size disk cpu ram req_per_s p95_ms seats instances api_requests bandwidth)
 
   defp seed_sample(bp, envelope, measured_at) do
     {:ok, sample} =
