@@ -100,6 +100,12 @@ defmodule Barkpark.Quiz.BridgeTest do
     Quiz.bind_quiz(pin_prod, qid, "production")
     Quiz.bind_quiz(pin_stag, qid, "staging")
 
+    # Subscribe to each room's live topic BEFORE the broadcast so no reload signal
+    # is missed. Both rooms already applied their bind-time question, so the mailbox
+    # holds no stale {:question_updated} for these topics.
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin_prod))
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin_stag))
+
     # A publish on production reloads BOTH pins bound to this quiz_id — each must
     # reload from ITS OWN dataset, never inject production's content into staging.
     Phoenix.PubSub.broadcast(
@@ -108,7 +114,15 @@ defmodule Barkpark.Quiz.BridgeTest do
       {:document_changed, %{type: "quiz", doc_id: qid}}
     )
 
-    Process.sleep(200)
+    # Await the reload's OWN signal, not a fixed sleep: the Bridge re-applies each
+    # pin's question (Room.apply_question), which re-broadcasts {:question_updated}
+    # on that room's topic. Under CI scheduler load the async reload can take >200ms,
+    # so a fixed Process.sleep(200) races it → false-red. assert_receive proceeds the
+    # instant each reload lands and only fails if it genuinely never does. The staging
+    # message carrying "STAGING CONTENT" (never "PROD CONTENT") is the deterministic
+    # proof of no cross-injection.
+    assert_receive {:quiz, ^pin_prod, {:question_updated, %{prompt: "PROD CONTENT"}}}, 2000
+    assert_receive {:quiz, ^pin_stag, {:question_updated, %{prompt: "STAGING CONTENT"}}}, 2000
 
     assert Quiz.state(pin_prod).question.prompt == "PROD CONTENT"
     assert Quiz.state(pin_stag).question.prompt == "STAGING CONTENT"
