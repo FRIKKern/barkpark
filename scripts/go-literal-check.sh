@@ -30,7 +30,7 @@
 # narrow internal/cli/setup subtree to the whole internal/cli tree, the tree was
 # audited to ZERO semantic colour literals — nothing to thread onto a role, no
 # resisters, EXCEPT one color-field DATA default (seed_cmd.go's `color` fake
-# value, a field value not chrome — lit-allow'd, same class as tui-render.go's
+# value, a field value not chrome — lit-allow'd, same class as tui_render.go's
 # color-picker default). Recorded here as honest evidence: the extension is a
 # genuine "audited → clean" broaden, NOT a silent blanket dir exemption.
 # (The `bp style` design-token sheet, internal/cli/style_cmd.go — W4.11 — is now
@@ -39,7 +39,7 @@
 # ALLOWLIST — the lead-approved chrome resisters (styles.go highlight/dim/borders/
 # ink/title/selection/toolbar/breadcrumb/publishBtn primary-CTA; the wizard chrome
 # wzTitle/wzDim/wzSel/wzLabel/wzBorder; paper.go code fg/bg + ingress; the
-# tui-render color-picker DATA default; the taskboard neutral/dim/title chrome) each
+# tui_render color-picker DATA default; the taskboard neutral/dim/title chrome) each
 # carry a `lit-allow:` annotation pointing at the au-w4-cli-chrome-tokens follow-up.
 # These are the honest-floor residual — colours with no generated Go twin (yet).
 #
