@@ -207,6 +207,11 @@ const (
 	labelProjPrefix  = "proj:"
 	labelAreaPrefix  = "area:"
 	labelPhasePrefix = "phase:"
+	// labelFilesPrefix declares a task's file blast radius (df-file-edge): one
+	// repo-relative path per label, a trailing "/" marking a directory prefix.
+	// Consumed by FilesOf in frontier.go; documented in
+	// docs/contracts/dispatch-areas.md.
+	labelFilesPrefix = "files:"
 	clusterShareMin  = 3 // a plain (non-proj/area) label must be this common to key
 	clusterMemberMin = 2 // a key needs this many members to form a Cluster
 )

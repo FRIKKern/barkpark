@@ -64,9 +64,14 @@ type FrontierOpts struct {
 type RiskClass string
 
 const (
+	// RiskFileIsolated — declares an explicit `files:` blast radius and is
+	// file-disjoint from every co-admitted pick (df-file-edge). The STRONGEST
+	// isolation tag: the surface is named path-precisely, not inferred. Counted
+	// "proven" and emitted by ProvenOnly.
+	RiskFileIsolated RiskClass = "file-isolated"
 	// RiskIsolated — carries an authored `area:` label and is provably disjoint
-	// from every other admitted pick. Batch freely. The only class ProvenOnly
-	// emits, and the only class counted "proven".
+	// from every other admitted pick. Batch freely. Counted "proven" and emitted
+	// by ProvenOnly.
 	RiskIsolated RiskClass = "isolated"
 	// RiskNeighborhood — no authored `area:`; admitted as its neighborhood's
 	// sole representative (it suppressed ≥1 same-neighborhood sibling). Safe by
@@ -104,9 +109,10 @@ type Pick struct {
 	Displaced       []Displaced // what this pick displaced (its blast-radius cost)
 }
 
-// Proven reports whether the pick's surface disjointness is PROVEN (an
-// authored `area:` label), the footer's proven/unproven tally key.
-func (p Pick) Proven() bool { return p.Risk == RiskIsolated }
+// Proven reports whether the pick's surface disjointness is PROVEN — an authored
+// `area:` label (RiskIsolated) or an explicit path-precise `files:` declaration
+// (RiskFileIsolated). The footer's proven/unproven tally key.
+func (p Pick) Proven() bool { return p.Risk == RiskIsolated || p.Risk == RiskFileIsolated }
 
 // phaseBandArea maps a phase-band slug (`phase:<n>-<slug>`) to the code surface
 // it implies (§2 of the design). It lets a broad epic whose bands already NAME
@@ -212,6 +218,89 @@ func AreaLintOf(t Task) AreaLint {
 		HasAny:   !ai.empty(),
 		Display:  ai.display,
 	}
+}
+
+// FilesOf resolves a task's declared file blast radius (df-file-edge): the set
+// of repo-relative paths carried on its `files:<path>` labels (one path per
+// label). A trailing "/" marks a directory prefix; paths are normalized (leading
+// "./" and stray whitespace stripped). The empty set means UNDECLARED — the
+// frontier never treats undeclared as safe, it abstains (see interferes). This
+// exact signature is a contract: cb-next-frontier-claim (slice 2) compiles
+// against it — do not rename.
+func FilesOf(t Task) map[string]bool {
+	files := map[string]bool{}
+	for _, l := range t.Labels {
+		if !strings.HasPrefix(l, labelFilesPrefix) {
+			continue
+		}
+		p := normalizeFilePath(strings.TrimPrefix(l, labelFilesPrefix))
+		if p == "" {
+			continue
+		}
+		files[p] = true
+	}
+	return files
+}
+
+// normalizeFilePath trims whitespace and a leading "./" or "/" so
+// "files: ./internal/x.go" and "files:internal/x.go" resolve to the same
+// repo-relative path. A trailing "/" (the dir-prefix marker) is preserved.
+func normalizeFilePath(p string) string {
+	p = strings.TrimSpace(p)
+	for strings.HasPrefix(p, "./") {
+		p = p[2:]
+	}
+	p = strings.TrimPrefix(p, "/")
+	return p
+}
+
+// pathsOverlap reports whether two declared paths touch the same code and, if so,
+// the shared path for a reason string. They overlap on exact equality, or when
+// one is a directory prefix (ends "/") and the other lives under it. No globs.
+func pathsOverlap(a, b string) (string, bool) {
+	if a == b {
+		return a, true
+	}
+	if strings.HasSuffix(a, "/") && strings.HasPrefix(b, a) {
+		return a, true
+	}
+	if strings.HasSuffix(b, "/") && strings.HasPrefix(a, b) {
+		return b, true
+	}
+	return "", false
+}
+
+// filesIntersect reports whether two file sets share any path and returns the
+// shared path (the first in sorted order, for deterministic reason strings).
+func filesIntersect(a, b map[string]bool) (string, bool) {
+	as := make([]string, 0, len(a))
+	for p := range a {
+		as = append(as, p)
+	}
+	bs := make([]string, 0, len(b))
+	for p := range b {
+		bs = append(bs, p)
+	}
+	sort.Strings(as)
+	sort.Strings(bs)
+	for _, pa := range as {
+		for _, pb := range bs {
+			if shared, ok := pathsOverlap(pa, pb); ok {
+				return shared, true
+			}
+		}
+	}
+	return "", false
+}
+
+// filesOverlapReason returns the shared path ONLY when BOTH sides declare files
+// and they intersect — the both-declared precondition the file edge rides on.
+// Either side undeclared ⇒ no reason (the model abstains).
+func filesOverlapReason(a, b map[string]bool) (string, bool) {
+	if len(a) == 0 || len(b) == 0 {
+		return "", false
+	}
+	return filesIntersect(a, b)
 }
 
 // phaseBandSlug extracts the surface slug from a `phase:<n>-<slug>` label:
@@ -349,10 +438,22 @@ func (c crossAdj) has(a, b string) bool {
 // descendant this way. Only the same-tree proxy conflict is lifted; a real
 // cross-root BLOCKS edge (consulted first) and a genuine area overlap still
 // hard-conflict, and peers (non-ancestor pairs) keep the conservative proxy.
-func interferes(ai, bi areaInfo, nkA, nkB, idA, idB string, cross crossAdj, containment bool) interfereTier {
+func interferes(ai, bi areaInfo, fa, fb map[string]bool, nkA, nkB, idA, idB string, cross crossAdj, containment bool) interfereTier {
 	// A real cross-root block edge trumps everything below.
 	if cross.has(idA, idB) {
 		return tierHard
+	}
+	// File truth (df-file-edge): when BOTH tasks declare a `files:` blast radius
+	// that declaration is AUTHORITATIVE — it overrides the area test AND the
+	// area-less neighborhood proxy below. Intersecting files ⇒ HARD (named path);
+	// disjoint files ⇒ cleared even where an area overlap or a same-neighborhood
+	// proxy would otherwise conflict. If EITHER side is undeclared the model
+	// ABSTAINS — undeclared is never silently safe, so it falls through unchanged.
+	if len(fa) > 0 && len(fb) > 0 {
+		if _, ok := filesIntersect(fa, fb); ok {
+			return tierHard
+		}
+		return tierNone
 	}
 	if !ai.empty() && !bi.empty() {
 		// both self-declare a surface (authored or derived) — PRECISE test
@@ -379,7 +480,8 @@ func interferes(ai, bi areaInfo, nkA, nkB, idA, idB string, cross crossAdj, cont
 type admitted struct {
 	pick       Pick
 	ai         areaInfo
-	suppressed int // same-neighborhood candidates this pick knocked out
+	files      map[string]bool // declared file blast radius (df-file-edge)
+	suppressed int             // same-neighborhood candidates this pick knocked out
 }
 
 // Frontier is the dispatch-frontier model: the maximal set of ready tasks that
@@ -421,6 +523,7 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 		reason string
 		nk     string
 		ai     areaInfo
+		files  map[string]bool
 	}
 	var cands []cand
 	for _, t := range s.Tasks {
@@ -434,6 +537,7 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 			reason: why,
 			nk:     neighborhoodKey(t, byBare, details),
 			ai:     areasOf(t),
+			files:  FilesOf(t),
 		})
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
@@ -460,7 +564,7 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 			if parents[cID] || parents[wID] {
 				containment = isAncestorBare(byBare, cID, wID) || isAncestorBare(byBare, wID, cID)
 			}
-			if interferes(c.ai, picks[k].ai, c.nk, picks[k].pick.NeighborhoodKey, cID, wID, cross, containment) == tierHard {
+			if interferes(c.ai, picks[k].ai, c.files, picks[k].files, c.nk, picks[k].pick.NeighborhoodKey, cID, wID, cross, containment) == tierHard {
 				winner = k // first hard conflict owns the displacement
 				break
 			}
@@ -468,14 +572,18 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 		if winner >= 0 {
 			w := picks[winner]
 			wID := bareID(w.pick.Task.DocID)
-			// The hard conflict is a cross-root block edge, an area overlap (both
-			// self-declare a surface), or a same-neighborhood collision — in that
-			// priority. A cross-edge conflict does NOT cap a neighborhood, so it
-			// never bumps `suppressed`.
+			// The hard conflict is a cross-root block edge, a declared-file overlap
+			// (both name intersecting paths), an area overlap (both self-declare a
+			// surface), or a same-neighborhood collision — in that priority. Only
+			// the neighborhood proxy caps a neighborhood, so only it bumps
+			// `suppressed`; the three precise signals do not.
+			fileShared, fileHit := filesOverlapReason(c.files, w.files)
 			var reason string
 			switch {
 			case cross.has(cID, wID):
 				reason = "blocks edge " + wID
+			case fileHit:
+				reason = "files " + fileShared
 			case !c.ai.empty() && !w.ai.empty():
 				reason = "shared surface " + areaOverlapLabel(c.ai, w.ai)
 			default:
@@ -497,19 +605,20 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 				NeighborhoodKey: c.nk,
 				Areas:           c.ai.display,
 			},
-			ai: c.ai,
+			ai:    c.ai,
+			files: c.files,
 		})
 	}
 
 	// Classify risk (§4) now that the admitted set is known.
 	for _, a := range picks {
-		classifyRisk(a)
+		classifyRisk(a, picks)
 	}
 
 	// Assemble, honoring ProvenOnly (the safe set) then Max (a display cap).
 	out := make([]Pick, 0, len(picks))
 	for _, a := range picks {
-		if opts.ProvenOnly && a.pick.Risk != RiskIsolated {
+		if opts.ProvenOnly && !a.pick.Proven() {
 			continue
 		}
 		out = append(out, a.pick)
@@ -520,12 +629,18 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 	return out
 }
 
-// classifyRisk stamps one admitted pick with its risk class (§4). A broad epic
-// (≥3 surfaces) is solo; an authored-area pick that survived admission is
-// isolated (disjointness is guaranteed — an area overlap would have been HARD);
-// an area-less pick that suppressed a sibling represents its neighborhood; a
-// lone area-less stranger is unproven.
-func classifyRisk(a *admitted) {
+// classifyRisk stamps one admitted pick with its risk class (§4). A declared
+// file radius that is disjoint from every co-admitted pick is the STRONGEST tag,
+// file-isolated (df-file-edge) — path-precise beats the coarse area/count proxies
+// below. Then: a broad epic (≥3 surfaces) is solo; an authored-area pick that
+// survived admission is isolated (disjointness is guaranteed — an area overlap
+// would have been HARD); an area-less pick that suppressed a sibling represents
+// its neighborhood; a lone area-less stranger is unproven.
+func classifyRisk(a *admitted, all []*admitted) {
+	if len(a.files) > 0 && fileDisjointFromAll(a, all) {
+		a.pick.Risk = RiskFileIsolated
+		return
+	}
 	switch {
 	case len(a.ai.bare) >= 3:
 		a.pick.Risk = RiskSharedSurface
@@ -537,6 +652,23 @@ func classifyRisk(a *admitted) {
 	default:
 		a.pick.Risk = RiskUnproven
 	}
+}
+
+// fileDisjointFromAll reports whether a's declared files touch NO other admitted
+// pick's declared files. Admission already guarantees no two file-declaring
+// picks with intersecting paths co-exist, so this holds by construction for an
+// admitted file-declaring pick — the explicit check keeps the invariant honest
+// (and covers any future non-greedy admitter).
+func fileDisjointFromAll(a *admitted, all []*admitted) bool {
+	for _, o := range all {
+		if o == a || len(o.files) == 0 {
+			continue
+		}
+		if _, ok := filesIntersect(a.files, o.files); ok {
+			return false
+		}
+	}
+	return true
 }
 
 // GraphEdge is one block edge as fetched from GET /v1/graph/:id (slice-2),
