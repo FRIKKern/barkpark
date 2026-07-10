@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -122,6 +123,43 @@ func TestDistributeSegments(t *testing.T) {
 	}
 	if got := distributeSegments(10, 0); got != nil {
 		t.Errorf("distributeSegments(10,0) = %v, want nil", got)
+	}
+}
+
+// TestRoadmapLeftWidthPreSpanStart pins the clamped-left subtraction in
+// roadmapLeftWidth (24a6779d): a row whose start PREDATES the block span clamps
+// left to 0 and its bar still ENDS at the row-end's true position — the width is
+// dateToPct(rowEnd), never inflated by the out-of-span overshoot (subtracting
+// the raw negative left would stretch the bar ~34pct past the row's end here).
+func TestRoadmapLeftWidthPreSpanStart(t *testing.T) {
+	span := func(s string) time.Time {
+		d, ok := parseISODate(s)
+		if !ok {
+			t.Fatalf("parseISODate(%q) failed", s)
+		}
+		return d
+	}
+	start, end := span("2026-01-01"), span("2026-07-01")
+
+	// Pre-span start: 2025-11-01 → raw pct ≈ -33.7, clamps to the left edge.
+	row := map[string]any{"start": "2025-11-01", "end": "2026-03-01"}
+	left, width := roadmapLeftWidth(row, start, end, true)
+	if left != 0 {
+		t.Errorf("pre-span row start: left = %v, want 0 (clamped to track edge)", left)
+	}
+	wantWidth := dateToPct(span("2026-03-01"), start, end) // ≈ 32.6 — the row-end's true position
+	if width != wantWidth {
+		t.Errorf("pre-span row start: width = %v, want %v (bar must end at the row-end's position, not stretch by the overshoot)", width, wantWidth)
+	}
+
+	// In-span row: clampPct is the identity, so both subtractions agree — the
+	// clamped-left fix is byte-neutral for every in-span lane.
+	inRow := map[string]any{"start": "2026-02-01", "end": "2026-04-01"}
+	inLeft, inWidth := roadmapLeftWidth(inRow, start, end, true)
+	wantLeft := dateToPct(span("2026-02-01"), start, end)
+	wantIn := dateToPct(span("2026-04-01"), start, end) - wantLeft
+	if inLeft != wantLeft || inWidth != wantIn {
+		t.Errorf("in-span row: (left,width) = (%v,%v), want (%v,%v)", inLeft, inWidth, wantLeft, wantIn)
 	}
 }
 
