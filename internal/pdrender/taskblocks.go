@@ -846,9 +846,12 @@ func roadmapLeftWidth(r map[string]any, start, end time.Time, haveSpan bool) (le
 		rs, ok1 := parseISODate(attrStr(r, "start"))
 		re, ok2 := parseISODate(attrStr(r, "end"))
 		if ok1 && ok2 {
-			l := dateToPct(rs, start, end)
-			left = clampPct(l)
-			width = clampBarWidth(dateToPct(re, start, end)-l, left)
+			// Subtract the CLAMPED left, not the raw pct: a row whose start
+			// predates the block span clamps to the track's left edge, and its
+			// bar must still END at the row-end's true position — subtracting
+			// the raw (negative) left would inflate the width past that end.
+			left = clampPct(dateToPct(rs, start, end))
+			width = clampBarWidth(dateToPct(re, start, end)-left, left)
 			return left, width
 		}
 	}
