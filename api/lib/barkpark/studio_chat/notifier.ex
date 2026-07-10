@@ -234,7 +234,13 @@ defmodule Barkpark.StudioChat.Notifier do
         {:reply, {:skipped, :debounced}, state}
 
       _ ->
-        {:reply, :ok, put_in(state.sent[session_id], now)}
+        # Prune entries older than the quiet period while we're here — an
+        # expired stamp can never debounce again, so keeping it would only
+        # grow the ledger by one dead entry per session id, forever.
+        sent =
+          for {sid, ts} <- state.sent, now - ts < quiet, into: %{}, do: {sid, ts}
+
+        {:reply, :ok, %{state | sent: Map.put(sent, session_id, now)}}
     end
   end
 
