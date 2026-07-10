@@ -167,6 +167,72 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     """
   end
 
+  @doc """
+  Environment-identity strip (staging-barkpark). A slim, high-contrast,
+  full-width band pinned above the topbar so a human can never mistake a
+  non-production Studio for prod. Reads the instance-identity tag straight
+  from `Application.get_env(:barkpark, :instance_env)` — set from
+  `BARKPARK_ENV` in `runtime.exs`, an IDENTITY label (which box am I?), NOT
+  `MIX_ENV` — so there is no assign to plumb through every LiveView.
+
+  Rendering contract:
+
+    * `nil`, `"prod"`, `"production"` (and empty) → nothing at all, so
+      production and dev Studios stay byte-identical to before.
+    * `"staging"` → the canary strip with fixed copy.
+    * any other non-empty tag → a generic strip carrying the uppercased tag,
+      so a future `"preview"`/`"qa"` box self-labels without a code change.
+
+  Colors are theme tokens only (`--warn` / `--warn-fg` / `--warn-strong`) —
+  no hex literals, so `studio-literal-check` stays green — which also means
+  the strip retints correctly in every Studio theme. Like the update bar it
+  lives in the layout OUTSIDE the LiveView diff; it takes no attrs.
+  """
+  def studio_env_banner(assigns) do
+    assigns = assign(assigns, :env, env_banner_content())
+
+    ~H"""
+    <%= if @env do %>
+      <div
+        class="bp-env-banner"
+        data-env={@env.tag}
+        role="status"
+        aria-label={@env.aria_label}
+        style="flex: none; padding: 3px 16px; text-align: center; font-size: 11px; font-weight: 600; letter-spacing: 0.03em; line-height: 1.4; background: var(--warn); color: var(--warn-fg); border-bottom: 1px solid var(--warn-strong);"
+      >
+        <%= @env.message %>
+      </div>
+    <% end %>
+    """
+  end
+
+  # Normalize the raw identity tag into either nil (render nothing) or a small
+  # map the strip renders. Trims + downcases defensively so the component is
+  # robust to whatever landed in config, independent of runtime.exs.
+  defp env_banner_content do
+    case Application.get_env(:barkpark, :instance_env) do
+      tag when is_binary(tag) ->
+        case tag |> String.trim() |> String.downcase() do
+          env when env in ["", "prod", "production"] ->
+            nil
+
+          "staging" ->
+            %{
+              tag: "staging",
+              message: "STAGING — canary for Barkpark builds; data is disposable",
+              aria_label: "Staging environment — data is disposable"
+            }
+
+          other ->
+            label = String.upcase(other)
+            %{tag: other, message: label, aria_label: "#{label} environment"}
+        end
+
+      _ ->
+        nil
+    end
+  end
+
   # `SelfUpdate.status/0` is contract-bound to never raise, but the banner
   # is chrome on EVERY Studio surface — belt-and-braces fail-closed here
   # mirrors the `studio_tabs/1` registry guard.

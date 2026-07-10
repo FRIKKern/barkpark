@@ -8,6 +8,12 @@
     api_token_raw={assigns[:api_token_raw]}
   />
 
+  <%!-- Environment-identity strip (staging-barkpark): an unmissable band on
+        any non-production instance (staging = canary for Barkpark's own
+        builds). Reads :instance_env from config internally, so no assign to
+        plumb; renders nothing on prod/dev. Layout chrome, outside the diff. --%>
+  <BarkparkWeb.StudioComponents.Nav.studio_env_banner />
+
   <.studio_topbar>
     <:brand>
       <div class="studio-bar-brand">
