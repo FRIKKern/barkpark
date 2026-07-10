@@ -36,7 +36,9 @@ defmodule BarkparkWeb.Studio.Caps do
     * `:none` — safe nav / read / local-UI events (explicit allowlist).
     * `:read` — held-cap-gated share flows (the airdrop sheet; the handler +
       `Access.mint/2` re-check no-escalation).
-    * `:write` — every mutation (save/publish/delete/paper-ops/…).
+    * `:write` — every mutation (save/publish/delete/paper-ops/…), incl.
+      `access-revoke` (the Access panel's one-click revoke; `Access.revoke/2`
+      re-authorizes grantor-or-admin server-side regardless of this gate).
     * `:admin` — share / item-share (tenant-control) events.
     * `:deny` — the DEFAULT for any event not in a set above → require `admin`.
 
@@ -81,6 +83,7 @@ defmodule BarkparkWeb.Studio.Caps do
     task-preview-refresh paper-valueref-inspect valueref-writeback-close
     paper-toggle-edit bulk-clear shares-close item-share-close
     airdrop-close airdrop-suggest
+    access-open access-close
   )
 
   # Held-capability share flows — the handler + Access.mint/2 re-check
@@ -108,6 +111,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-materialize-slot paper-slash-insert paper-add-property
     paper-unbind-property paper-delete-block paper-move-block
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
+    access-revoke
   )
 
   @doc """

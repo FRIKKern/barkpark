@@ -453,6 +453,167 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   end
 
   @doc """
+  ACCESS panel (airdrop-grants slice 3 UI) — the read/revoke sibling of
+  `airdrop_sheet`. An HONEST, live-active view of scoped access, in two sections:
+
+    * **Your access** (`@own_grants`, from the `:access_grants` assign) — the
+      caller's own inbound grants: scope + capability chips + a live expiry
+      countdown chip (client-side `ExpiryCountdown` hook on `data-expires-at`).
+    * **Active grants in this workspace** (`@workspace_grants`) — rendered ONLY
+      when `@workspace_view` (the caller is a workspace member, membership-gated
+      exactly like `AccessController.index`): each row carries grantee, scope,
+      an expiry chip, and a one-click **Revoke** (`access-revoke` → server-
+      authorized `Access.revoke/2`).
+
+  A revoked/expired row VANISHES on the next re-list (the active predicate lives
+  in-query): this is a live-active view, not a history log. Distinct from
+  `shares_modal` (P6 network shares) and `item_share_popover` (`/s/` links) —
+  those are different features and are NOT touched here.
+
+  Events bubble to StudioLive: access-close, access-revoke.
+  """
+  attr :show, :boolean, default: false
+  attr :own_grants, :list, default: []
+  attr :workspace_view, :boolean, default: false
+  attr :workspace_grants, :list, default: []
+  attr :error, :string, default: nil
+
+  def access_panel(assigns) do
+    ~H"""
+    <%= if @show do %>
+      <div class="image-picker-overlay" phx-click="access-close"></div>
+      <div
+        class="image-picker access-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="access-panel-title"
+        phx-window-keydown="access-close"
+        phx-key="escape"
+      >
+        <div class="image-picker-header">
+          <span id="access-panel-title" style="font-weight: 600; font-size: 14px;">Access</span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="access-close" aria-label="Close">×</button>
+        </div>
+
+        <div class="access-panel-body" data-test-id="access-panel">
+          <p :if={@error} class="shares-error" data-test-id="access-error"><%= @error %></p>
+
+          <%!-- ── Your access — the caller's own inbound grants ── --%>
+          <section class="access-section" data-test-id="access-your">
+            <h3 class="access-section-title">Your access</h3>
+            <%= if @own_grants == [] do %>
+              <p class="shares-note" data-test-id="access-your-empty">
+                You have no scoped access grants right now.
+              </p>
+            <% else %>
+              <ul class="access-list">
+                <li :for={g <- @own_grants} class="access-row" data-test-id="access-your-row">
+                  <div class="access-row-main">
+                    <span class="access-scope"><%= grant_scope_label(g) %></span>
+                    <span class="access-caps"><%= grant_caps_label(g) %></span>
+                  </div>
+                  <.expiry_chip grant={g} />
+                </li>
+              </ul>
+            <% end %>
+          </section>
+
+          <%!-- ── Active grants in this workspace — members only ── --%>
+          <section :if={@workspace_view} class="access-section" data-test-id="access-workspace">
+            <h3 class="access-section-title">Active grants in this workspace</h3>
+            <%= if @workspace_grants == [] do %>
+              <p class="shares-note" data-test-id="access-workspace-empty">
+                No active grants in this workspace.
+              </p>
+            <% else %>
+              <ul class="access-list">
+                <li :for={g <- @workspace_grants} class="access-row" data-test-id="access-workspace-row">
+                  <div class="access-row-main">
+                    <span class="access-grantee"><%= g.grantee_email %></span>
+                    <span class="access-scope"><%= grant_scope_label(g) %></span>
+                    <span class="access-caps"><%= grant_caps_label(g) %></span>
+                  </div>
+                  <.expiry_chip grant={g} />
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    phx-click="access-revoke"
+                    phx-value-id={g.id}
+                    data-test-id="access-revoke"
+                    aria-label={"Revoke access for #{g.grantee_email}"}
+                  >
+                    <.icon name="trash-2" size={14} /> Revoke
+                  </button>
+                </li>
+              </ul>
+            <% end %>
+          </section>
+        </div>
+      </div>
+    <% end %>
+    """
+  end
+
+  # Live expiry countdown chip. A grant WITH an expiry mounts the client-side
+  # `ExpiryCountdown` hook on `data-expires-at` (per-second visual only — the
+  # server tick already DROPS access at expiry, so this is presentation, not
+  # enforcement). A no-expiry grant renders a static "No expiry" chip.
+  attr :grant, :map, required: true
+
+  defp expiry_chip(assigns) do
+    ~H"""
+    <%= if @grant.expires_at do %>
+      <span
+        id={"access-exp-#{@grant.id}"}
+        class="access-chip access-chip-expiry"
+        phx-hook="ExpiryCountdown"
+        phx-update="ignore"
+        data-expires-at={DateTime.to_iso8601(@grant.expires_at)}
+        data-test-id="access-countdown"
+      >
+        expiring…
+      </span>
+    <% else %>
+      <span class="access-chip" data-test-id="access-no-expiry">No expiry</span>
+    <% end %>
+    """
+  end
+
+  # A readable scope label down the grant ladder. `workspace_id`/`project_id`
+  # are opaque UUIDs (not shown); `dataset`/`type`/`doc_id` are author-readable.
+  # A workspace-only grant (all narrows NULL) reads "Workspace".
+  defp grant_scope_label(grant) do
+    narrows =
+      [
+        grant.dataset && "dataset: #{grant.dataset}",
+        grant.type && "type: #{grant.type}",
+        grant.doc_id && "doc: #{grant.doc_id}"
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    project = if grant.project_id, do: "project", else: nil
+
+    case Enum.reject([project | narrows], &is_nil/1) do
+      [] -> "Workspace"
+      parts -> "Workspace · " <> Enum.join(parts, " · ")
+    end
+  end
+
+  # Human capability chips: read → View, write → Edit, admin → Admin.
+  defp grant_caps_label(%{capabilities: caps}) when is_list(caps) do
+    caps
+    |> Enum.map(fn
+      "read" -> "View"
+      "write" -> "Edit"
+      "admin" -> "Admin"
+      other -> other
+    end)
+    |> Enum.join(", ")
+  end
+
+  defp grant_caps_label(_), do: ""
+
+  @doc """
   Reference-picker modal, formerly a legacy inline block in StudioLive, now
   aggregated by `studio_modals/1`. Shares the `.image-picker` overlay styling
   (deliberate — same modal chrome). Caller pre-filters candidates via

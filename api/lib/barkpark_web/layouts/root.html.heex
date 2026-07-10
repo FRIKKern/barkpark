@@ -1463,6 +1463,20 @@
     .item-share-revoke { color: var(--destructive); }
     .item-share-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
 
+    /* Access panel (airdrop-grants slice 3) — read/revoke view of scoped grants. */
+    .access-panel { width: 560px; max-height: 82vh; }
+    .access-panel-body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
+    .access-section { display: flex; flex-direction: column; gap: 8px; }
+    .access-section-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
+    .access-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .access-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-muted); border-radius: var(--radius-sm); }
+    .access-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+    .access-grantee { font-size: 13px; font-weight: 600; word-break: break-all; }
+    .access-scope { font-size: 12px; }
+    .access-caps { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .access-chip { flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+    .access-chip-expiry[data-expired="true"] { color: var(--destructive); }
+
     /* bp-asset-browser — native mediaAsset modal */
     .bp-ab-overlay {
       position: fixed; inset: 0; z-index: 60;
@@ -5097,6 +5111,38 @@
       mounted() { this._apply(); },
       updated() { this._apply(); },
       destroyed() { delete document.documentElement.dataset.editorFocus; }
+    };
+
+    // ExpiryCountdown — the Access panel's live expiry chip (airdrop-grants
+    // slice 3). Reads data-expires-at (an ISO8601 instant) and rewrites its own
+    // text once a second with the remaining time (compact: "2d 3h", "45m 12s",
+    // "8s"). PURELY presentational — the server's :access_expiry_tick already
+    // DROPS access at expiry; this never touches enforcement. The element is
+    // phx-update="ignore" so LiveView diffs don't clobber the hook-owned text.
+    // On reaching zero it shows "Expired" and stops the timer.
+    Hooks.ExpiryCountdown = {
+      _fmt(ms) {
+        if (ms <= 0) return "Expired";
+        var s = Math.floor(ms / 1000);
+        var d = Math.floor(s / 86400); s -= d * 86400;
+        var h = Math.floor(s / 3600);  s -= h * 3600;
+        var m = Math.floor(s / 60);    s -= m * 60;
+        if (d > 0) return d + "d " + h + "h";
+        if (h > 0) return h + "h " + m + "m";
+        if (m > 0) return m + "m " + s + "s";
+        return s + "s";
+      },
+      _tick() {
+        var iso = this.el.dataset.expiresAt;
+        var target = iso ? Date.parse(iso) : NaN;
+        if (isNaN(target)) { this.el.textContent = ""; return; }
+        var ms = target - Date.now();
+        this.el.textContent = this._fmt(ms);
+        this.el.dataset.expired = ms <= 0 ? "true" : "false";
+        if (ms <= 0 && this._timer) { clearInterval(this._timer); this._timer = null; }
+      },
+      mounted() { this._tick(); this._timer = setInterval(() => this._tick(), 1000); },
+      destroyed() { if (this._timer) clearInterval(this._timer); }
     };
 
     // SgTheme — mirrors the /studio/styleguide wrapper's server-driven
