@@ -101,9 +101,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{suffix}.sh")
     marker = Path.join(System.tmp_dir!(), "bp-argv-marker-#{suffix}.txt")
 
+    # Write-then-RENAME so read_marker/2 (which returns as soon as the file
+    # exists) can never observe a half-written argv. The argv has grown past
+    # one atomic pipe write (mcp flags + the system-prompt appendix), so a
+    # bare `> marker` raced the reader into truncated reads (seen: argv cut
+    # mid-appendix, --resume missing).
     File.write!(path, """
     #!/bin/sh
-    printf '%s\\n' "$@" > #{marker}
+    printf '%s\\n' "$@" > #{marker}.tmp && mv #{marker}.tmp #{marker}
     cat
     """)
 
