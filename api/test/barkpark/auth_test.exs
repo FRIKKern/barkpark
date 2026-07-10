@@ -105,6 +105,16 @@ defmodule Barkpark.AuthTest do
     test "unknown id → {:error, :not_found}" do
       assert Auth.revoke_token(Ecto.UUID.generate()) == {:error, :not_found}
     end
+
+    test "emits a token/token_revoked audit event" do
+      token = insert_token("rt-audit-" <> Ecto.UUID.generate())
+      assert {:ok, revoked} = Auth.revoke_token(token)
+
+      import Ecto.Query
+      ev = Barkpark.Repo.one(from e in Barkpark.Audit.Event, where: e.action == "token_revoked")
+      assert ev.category == "token"
+      assert ev.subject == revoked.id
+    end
   end
 
   # nil-permissions guard (omhr). has_permission?/2 evaluated `permission in

@@ -18,6 +18,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
 
   import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures
+  import Ecto.Query
 
   alias Barkpark.Access
   alias Barkpark.Accounts
@@ -222,6 +223,18 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
 
       {:ok, resolved} = Auth.verify_token(raw)
       assert resolved.owner_user_id == user_a.id
+
+      # era-w8: minting a standing credential emits a token/personal_access_token_minted
+      # audit event (subject = token id, actor = the session user).
+      ev =
+        Repo.one(
+          from(e in Barkpark.Audit.Event,
+            where: e.action == "personal_access_token_minted" and e.subject == ^pat["id"]
+          )
+        )
+
+      assert ev.category == "token"
+      assert ev.actor_id == user_a.id
     end
   end
 

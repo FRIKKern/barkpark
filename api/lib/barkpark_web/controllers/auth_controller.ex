@@ -212,6 +212,16 @@ defmodule BarkparkWeb.AuthController do
            owner_user_id: user.id
          ) do
       {:ok, {raw, token}} ->
+        # Minting a standing credential is an audit-worthy lifecycle event.
+        Audit.emit(%{
+          category: "token",
+          action: "personal_access_token_minted",
+          subject: token.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"name" => token.name, "permissions" => token.permissions}
+        })
+
         conn
         |> put_status(:created)
         |> json(%{
