@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Chart — compact units + max-2-series"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "text": "The y-axis learns compact units (45.5M) so a large-value chart keeps a narrow gutter, and a chart renders at most the first two series — the third is dropped from the plot, the legend, AND the auto-scale."
+    },
+    {
+      "id": "chart1",
+      "type": "chart",
+      "caption": "Revenue vs cost over six weeks (NOK)",
+      "series": [
+        {
+          "label": "revenue",
+          "points": [12500000, 21000000, 33000000, 28000000, 45500000, 41000000]
+        },
+        {
+          "label": "cost",
+          "points": [8000000, 11000000, 14000000, 19000000, 22000000, 30000000]
+        },
+        {
+          "label": "forecast",
+          "points": [5000000, 9000000, 15000000, 20000000, 35000000, 50000000]
+        }
+      ],
+      "axes": {
+        "xLabels": ["W1", "W6"]
+      }
+    }
+  ]
+}
