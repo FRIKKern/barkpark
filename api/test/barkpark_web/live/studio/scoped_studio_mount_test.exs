@@ -22,6 +22,7 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
 
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
+  import Barkpark.AccessFixtures
 
   alias Barkpark.Access.Grant
   alias Barkpark.Accounts
@@ -763,42 +764,10 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
     {user, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
   end
 
-  # Insert a grant CLAIMED by `user` (so list_active_grants_for_grantee loads
-  # it). `overrides` set the scope ladder / capabilities / expiry / revocation.
-  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
-  # member of `ws` holding read+write+admin, so a grant it mints still confers
-  # (a grant only admits while its grantor still holds the capability).
-  defp grant_authority!(ws) do
-    {:ok, token} =
-      %Barkpark.Auth.ApiToken{}
-      |> Barkpark.Auth.ApiToken.changeset(%{
-        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
-        label: "ag-grantor",
-        dataset: @dataset,
-        permissions: ["read", "write", "admin"]
-      })
-      |> Repo.insert()
-
-    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
-    token
-  end
-
-  defp bind_grant!(ws, user, overrides) do
-    attrs =
-      %{
-        grantor_id: grant_authority!(ws).id,
-        grantee_email: user.email,
-        grantee_user_id: user.id,
-        claimed_at: DateTime.utc_now(),
-        workspace_id: ws.id,
-        capabilities: ["read"],
-        link_token_hash: "hash-" <> Ecto.UUID.generate()
-      }
-      |> Map.merge(overrides)
-
-    {:ok, grant} = %Grant{} |> Grant.changeset(attrs) |> Repo.insert()
-    grant
-  end
+  # `grant_authority!/1` + `bind_grant!/3` moved to `Barkpark.AccessFixtures`
+  # (imported above) — shared byte-identically across the four enforcement suites.
+  # (The grantor api_token's `dataset` field is inert to enforcement, so the
+  # shared default "test" is behaviourally identical to the former `@dataset`.)
 
   # The denied patch surfaces as a redirect — either raised by render_patch
   # (LiveViewTest re-raises server redirects) or readable via assert_redirect.
