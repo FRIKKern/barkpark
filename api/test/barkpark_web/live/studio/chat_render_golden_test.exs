@@ -203,8 +203,12 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
   # LiveView file-upload input mints a fresh `data-phx-upload-ref` per mount (the
   # one nondeterminism source in this stretch — a random ref, not a clock). The
   # sidebar (the file's other clock/randomness surface) sits BEFORE the transcript
-  # and is excluded by construction. What remains — Claude's rendered transcript
-  # body + the mission-control rail — is fully deterministic across mounts.
+  # and is excluded by construction. The studio-shell FOOTER, which trails the
+  # rail, is sliced OUT too: `#bp-build-version` embeds compile-time git data
+  # (version · commit SHA), so a golden that swallows it goes red on every new
+  # commit — the SHA is build provenance, not Claude's render (reviewer fix,
+  # wave 12). What remains — Claude's rendered transcript body + the
+  # mission-control rail — is fully deterministic across mounts AND commits.
   defp scope(html) do
     transcript =
       html
@@ -213,7 +217,12 @@ defmodule BarkparkWeb.Studio.ChatRenderGoldenTest do
       |> String.split(~s(<div class="bp-composer"))
       |> List.first()
 
-    rail = html |> String.split(~s(data-role="agents-rail")) |> List.last()
+    rail =
+      html
+      |> String.split(~s(data-role="agents-rail"))
+      |> List.last()
+      |> String.split(~s(<div class="studio-footer"))
+      |> List.first()
 
     transcript <> "\n<!--rail-->\n" <> rail
   end
