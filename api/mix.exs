@@ -40,11 +40,15 @@ defmodule Barkpark.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
-      {:phoenix, "~> 1.8.5"},
+      # Floored to 1.8.6: 1.8.5 carries GHSA-628h-q48j-jr6q (long-poll NDJSON
+      # body-splitting DoS); 1.8.6 is the first patched 1.8.x.
+      {:phoenix, "~> 1.8.6"},
       {:phoenix_live_view, "~> 1.0"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
-      {:postgrex, ">= 0.0.0"},
+      # Floored to 0.22.2: earlier releases carry GHSA-r73h-97w8-m54h (HIGH —
+      # channel-name SQL injection in Postgrex.Notifications.listen/3).
+      {:postgrex, ">= 0.22.2"},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
