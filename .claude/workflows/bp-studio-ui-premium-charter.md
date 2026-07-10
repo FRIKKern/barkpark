@@ -279,6 +279,70 @@ weighted section headers, aligned label/control columns. Settings is the flagshi
   resolver_outputs_test.exs:237` (charter had a wrong path); EXTRA pin not in the D17
   list: studio_live_empty_pane_test.exs (pane_empty no-documents hint).
 
+### Wave-4 decisions (2026-07-10 — desk structure consistency; user directive: "styling is a bit weird — Projects on first pane has more opacity than others")
+
+- **D25 — THE DESK ROW-STATE LADDER (ratified; every pane depth obeys it identically).**
+  The user's bug is confirmed in code AND live pixels: `a.pane-item.nav-plugin-entry
+  { color: inherit }` (root.html.heex:1005-1010, specificity 0,2,1) beats `.pane-item
+  { color: var(--fg-muted) }` (:953, specificity 0,1,0) and resolves up to `body
+  { color: var(--fg) }` (:409) — plugin-link rows (Projects) paint at full `--fg` while
+  sibling rows sit at `--fg-muted` (measured live on guerrilla: rgb(242,242,242) vs
+  rgb(161,161,170) dark; inverted in light). More broadly, THREE base-color mechanisms
+  coexist (explicit fg-muted / inherit-to-body / uncolored doc titles). The ladder:
+  - **Plain**: row label/title `--fg-muted`, weight 500 (`.pane-doc-title` gains explicit
+    `color: var(--fg-muted)` — today it inherits body `--fg`; AA pre-verified 4.57–5.02
+    on all grounds). Doc subtitle stays `--fg-muted`. Chevron hidden (opacity 0).
+  - **Hover**: `--bg-muted` fill + ONE tier color lift → label/title `--fg` (doc rows
+    ADOPT the lift — today fill-only; nav rows already do this). Subtitle stays muted.
+    Chevron revealed (opacity 1).
+  - **Selected** (leaf AND trail): `--bg-accent` fill + `--primary` border-left bar +
+    text `--fg` (subtitle escalates to `--fg` per :1049). **AA FENCE: no muted tier ever
+    sits on `--bg-accent`** — measured 4.16 evergreen-light, sub-AA; shipped code already
+    obeys, the ladder must never regress it.
+  - **Active-trail IS `.selected` on an ancestor pane — same class, same treatment;
+    the pane ground (bg-card ancestor vs surface-raised focus pane) is the ONLY
+    differentiator, and that is DELIBERATE.** No new trail state/class, no
+    `:not(--last)` scoped calmer variant — exploration proved this is already the live
+    mechanism and the ground separation reads. Revisiting requires pixel evidence.
+  - **Link rows are not a visual state**: `a.pane-item.nav-plugin-entry` gets explicit
+    `color: var(--fg-muted)` (the one-rule fix). The `nav-plugin-entry` class STAYS
+    (resolver_outputs_test.exs:245 pins its presence). Hover/selected ride `.pane-item`
+    rules unchanged.
+  - **Chevrons: hover-reveal is the ONE vocabulary (w2/D16)**: `.pane-item-chevron`
+    adopts `opacity: 0` → 1 on hover/selected (CSS-only; markup + ordering pins at
+    studio_components_pane_test.exs:220-223 preserved). Plugin-link rows GAIN the same
+    chevron span in the `:plugin_link` branch (components.ex:655-665) — live pixels
+    showed Projects missing the affordance its siblings have.
+  - **Padding is a deliberate anatomy difference, not drift**: single-line nav rows
+    8px 16px; two-line doc rows 10px 16px (via `.bp-doc-row-body`). The DEAD
+    `.pane-doc-item { padding: 10px 14px }` rule (root:1013, overridden by
+    `padding: 0` at :2455) is REMOVED.
+- **D26 — Wave-4 implementation fence: CSS-rule-level only; class names and pane model
+  frozen.** Keep `.pane-item` / `.pane-doc-item` / `.selected` / `.nav-plugin-entry` /
+  `.pane-item-chevron` / `.pane-doc-chevron` names and markup order — the component pin
+  block studio_components_pane_test.exs:176-238 (incl. :192 exact `class="pane-item
+  selected"`) and resolver_outputs_test.exs:237+:245 stay green by construction. NO
+  shared-base class rename (an additive shared rule is allowed, replacement is not).
+  pane_builder selection computation (`selected: Enum.at(rest, 0)` at :68/:240/:267/:319),
+  walk_path, and the single render loop are untouched (D4/D19 permanent). ZERO token
+  changes: tokens_gen.ex byte-stable, no lockstep run, no new lit-allows. Part H
+  COUPLING LAW rows land in the SAME PR: `a.pane-item.nav-plugin-entry` on both pane
+  grounds (gating the fixed color against regression) + `.pane-doc-title` on the same
+  ground set as the existing `.pane-doc-sub` rows. NOTE: `--primary`/`--primary-fg`
+  TOKEN_SLOT mappings ALREADY EXIST (added by #2138, check.mjs:723) — the selected ▎bar
+  is a border, which Part H does not gate; no new slot work.
+- **D27 — Wave-4 evidence protocol + D24e harness corrections.** Pinning tests land in
+  the ladder PR itself (D17): DOM assertions that the unified state classes/colors hold
+  per pane depth (structure pane, type pane, doc pane). BEFORE pixels are already
+  captured (wave-4 exploration, scratchpad shots: Projects near-white among gray
+  siblings, dark+light). AFTER pixels are a separate post-merge slice on guerrilla via
+  the D24e login-ticket harness, verifying by COMPUTED STYLE (not eyeball alone) that
+  Projects' color equals its siblings'. D24e corrections learned live: (a) set ONLY
+  `document.documentElement.setAttribute('data-theme', 'light'|'dark')` — ALSO setting
+  `dataset.bpTheme` leaves the cascade half-applied (body color resolves wrong);
+  (b) chrome-devtools `take_screenshot` refuses the /private/tmp scratchpad path —
+  save under the repo root, then move (leave the repo clean).
+
 ## Roadmap
 
 Wave 1 (this wave — integration order as listed):
@@ -323,6 +387,20 @@ primary checkout is BEHIND and rebuilds pre-#2088 markup):
 Dropped from the old wave-3 sketch, with reasons: chat sweep (leaves the epic — D23),
 session_html login pass (at-bar — D23), tmux polish (no controls — D21), pane-model
 amendment (REJECTED — D19).
+
+Wave 4 (this wave — desk structure consistency; deliberately SMALL, the epic is at its
+finish line awaiting the crit-4 human re-verdict; ALL worktrees cut from origin/main
+(4fbce80a / #2138 or later) after `git fetch` per D12 — the local primary checkout is
+one commit BEHIND and rebuilds pre-scope-chip-v2 markup):
+1. `sup-w4-row-state-ladder` — the D25 ladder applied identically at every pane depth:
+   nav-plugin-entry color fix + doc-title/hover unification + hover-reveal chevrons
+   everywhere (plugin rows gain the span) + dead-rule removal + Part H coupling rows +
+   per-depth DOM pin tests, one PR (D26/D27). **medium**
+2. `sup-w4-pixel-evidence` — post-merge before/after authenticated pixel pack on
+   guerrilla via the D24e harness (with D27 corrections), computed-style proof that
+   Projects matches its siblings in both modes; evidence stamped into the ledger and
+   into the crit-4 human-gate pack. Runs AFTER slice 1 merges + guerrilla redeploys.
+   **small**
 
 ## Wave log
 

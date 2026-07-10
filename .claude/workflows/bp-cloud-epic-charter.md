@@ -1,169 +1,142 @@
-# Dispatch Frontier — file-truth wave charter
+# Airdrop Grants — leak-seal wave charter (epic close-out)
 
 > NOTE ON THIS PATH: this filename is the epic-cycle charter slot and has carried earlier
-> epics. The **airdrop-grants enforcement-endgame** charter formerly here is preserved
-> verbatim at `.claude/workflows/bp-airdrop-grants-endgame-charter.md`. This file is now
-> the memory of the **dispatch-frontier file-truth** wave.
+> epics. The **dispatch-frontier file-truth** charter formerly here is preserved verbatim at
+> `.claude/workflows/bp-dispatch-frontier-charter.md`. The **airdrop-grants** permanent
+> decision record lives at `.claude/workflows/bp-airdrop-grants-endgame-charter.md` — the
+> epic-complete Wave log entries land THERE (close-out slice), not here. This file is the
+> memory of the leak-seal wave only.
 
-Epic anchor: bp task slug **`dispatch-frontier-goal`** (UUID 1ab62264-5daa-4adb-b72d-c69819686e47 —
-`bp task get` resolves the SLUG, 404s the UUID). 10 children; 8 df-* done, cmux-bridge-goal is a
-nested sub-goal. Server: guerrilla.
+Epic anchor: bp task slug **`airdrop-grants`** (published, lifecycle open, claim null,
+26 children — 24 done, 2 open = the two confirmed leaks). Server: guerrilla.
 
 ## Vision
 
-Answer "how many agents can run at once without colliding" with CODE, not vibes. The frontier QUERY
-already exists and is good (`taskboard.Frontier` + `bp task frontier` + `bp cmux dispatch`, PR #1191
-and the df-* children). What it lacks is TRUTH (0 authored `area:` labels across the ~67-task live
-ready corpus — the frontier is honest but starved) and TEETH (the frontier predicts; nothing enforces
-at claim time). This wave finishes the vein:
+The endgame wave (#2145) merged the deny matrix and it did its job: it found TWO CONFIRMED
+grant-enforcement leaks — a grantee's SEARCH and BACKLINKS reads bypass Layer-2 grant
+narrowing. This wave seals both at their true choke points, flips the committed-skipped deny
+repros from documenting-the-hole to protecting-the-fix, and closes the epic with the full
+evidence trail. Finished state: a grantee's search/backlinks reads are indistinguishable from
+every other grant-narrowed read — same `Scope.scope_to_grants` union, fail-closed
+(`where: false` on undecidable), applied only when `grant_scoped: true` — while members,
+tokens, and anonymous stay byte-identical.
 
-- **File truth**: tasks declare their file blast radius as `files:` labels; `interferes()` gains its
-  strongest surface edge — intersecting declared file sets are NEVER co-dispatched; disjoint declared
-  sets upgrade to "file-proven isolated". Undeclared stays unproven — missing metadata buys less
-  parallelism, never more.
-- **Atomic frontier claim**: `bp task next <worker> --frontier` — compute the frontier, claim the top
-  pick by id via the existing epoch-CAS claim, on a lost race recompute and try the next non-colliding
-  pick. The claim carries declared files as `resources`, so the server's existing resource fence
-  rejects intersecting concurrent claims. N workers running this concurrently each land on a mutually
-  non-colliding task — the executable answer to the headline question.
-- **Honest overlap report**: when two in_progress claims share declared files, `bp task frontier`
-  names the pair and the shared surface — the lead learns at claim time, not merge time.
-- **The number everywhere**: `bp task ready` (the most-used verb) grows the one-line
-  `FRONTIER · N independent` header.
+## Non-negotiable operational facts (builders read FIRST)
 
-Yardstick collision: the agent-onramps w2 3-way clause-stack pile-up on `internal/cli/onramp_cmd.go`
-(merge 56b144f6, resolved by hand — bp-agent-onramps-w2-charter.md:48). Every collision slice ships a
-deny-path test that encodes that trio and proves the NEW edge catches it.
+- **The local checkout is BEHIND origin/main** (#2145 = 602eb4a3 is on origin only). The deny
+  repros (`grant_search_deny_test.exs`, `grant_single_doc_deny_test.exs`) and
+  `test/support/access_fixtures.ex` exist ONLY on origin/main. `git fetch origin` then
+  worktree from **origin/main** or the fail-before command errors "no such file" instead of
+  producing RED.
+- Elixir local gates need a warm `_build/test` (build-borrow into fresh worktrees is broken —
+  lockfree-worktree-gate) and `CC=/usr/bin/clang`.
+- Both build slices are .ex → they WAIT for the Elixir Test CI gate. Claim BEFORE working.
+  PR body carries `Task: <id>`.
 
 ## Decisions
 
-- **D1 — `files:` label is the scope source, not the blast-radius tooling.** `tooling/blast-radius/index.json`
-  and `tooling/barkpark-sync/nodes.json` are gitignored Node-built caches no Go code reads; consuming them
-  at frontier time breaks Go-only + clone-freshness. Labels are already decoded end-to-end
-  (fetch.go:202 → Task.Labels); a `files:` prefix sits beside `area:`/`phase:`/`proj:` (board.go:207-209).
-  Tooling may SEED labels out of band; the runtime never depends on that having happened.
-- **D2 — one repo-relative path per label; trailing `/` = directory prefix; no globs in v1.** Exact-path
-  + dir-prefix intersection covers the real collisions; globs risk false confidence. Paths normalized
-  (no leading `./`, no trailing whitespace) because the server resource fence is exact-string match —
-  dir-prefix entries fence only against identical strings server-side (accepted v1 looseness; the
-  client-side frontier does the prefix logic).
-- **D3 — file edge is the strongest SURFACE edge: checked after cross-root block edges, before area.**
-  Both declare + intersect → hard conflict naming the shared path. Both declare + disjoint → cleared
-  (file truth trumps coarse `area:` buckets and the neighborhood proxy) with new risk class
-  "file-proven isolated". Either undeclared → ABSTAIN, fall through to today's area/neighborhood logic.
-  Dependency (block) edges still trump everything — ordering is not a file question.
-- **D4 — deny-path fixtures must defeat the existing proxies or they are vacuous green.** The onramps trio
-  shared an epic root and would share `area:cli` — either proxy already hard-conflicts them. The fixture
-  puts three tasks in DIFFERENT roots with NO area labels so intersecting `files:internal/cli/onramp_cmd.go`
-  is the SOLE catcher; a control asserts the trio is co-admitted without the labels. Delete the file
-  edge → the test goes red.
-- **D5 — slice 2 ADOPTS cb-next-frontier-claim (re-briefed reserved→build); df-next-frontier closed as
-  superseded.** Two reserved markers described the same claim-before-spawn vein — one owner. It stays
-  parented under cmux-bridge-goal (itself a child of dispatch-frontier-goal): "under 1ab62264" holds
-  transitively and the cmux lineage is preserved.
-- **D6 — `--frontier` is a client-side intercept over claim-by-id; the queue endpoint is untouched.**
-  Bare `bp task next` is the server queue claim `POST /v1/tasks/claim` (not frontier-aware; extending it
-  would force the Elixir gate + openapi regen). `POST /v1/tasks/:doc_id/claim` already exists, is atomic
-  (per-doc advisory lock + FOR UPDATE, claim.ex:69-75,139), and already accepts `resources`. A lost race
-  returns `not_ready` (NOT `already_claimed`, claim.ex:154-157) — the loop treats it as skip-and-try-next,
-  never task-gone. Epoch<=0 in a claim response is a hard failure (client.go:957-959).
-- **D7 — claims carry declared files as `resources` (Go client change only).** The server fence
-  (`check_resources_free`: global `task-resources` advisory lock, jsonb overlap scan, 409
-  `resource_conflict` + holders — claim.ex:77-79,194-227) already shipped as the Beads file-claim
-  successor; the Go client just never sent resources and drops the `conflicts` holders array
-  (client.go:870-875) — both fixed client-side. Query predicts (ready set), claim enforces (in_progress
-  set): complementary, never conflated.
-- **D8 — overlap report lives on `bp task frontier` output fed by `board.Now`, NOT `bp cmux status`.**
-  cmux status is per-pane (one `BARKPARK_TASK`); `board.Now` is the full in_progress claim set with
-  labels already fetched (board.go:329-334) — a pure `ClaimOverlaps` costs zero new requests.
-- **D9 — the TUI NOW/NEXT band stays retired.** Commit 92a618f8 removed it deliberately ("the spine is
-  the whole board"); do not resurrect. The number's homes: `bp task frontier` (exists) + a new
-  `bp task ready` header. `ready` is manifest-dispatched with no intercept today (cli.go:146 case "task"
-  intercepts only frontier/lint/create) — the header needs a real intercept, table/human output only,
-  `-o json` byte-untouched.
-- **D10 — ledger truth stamped in the decide phase.** Goal criteria C1/C2 were satisfied by merged
-  PR #1191 but sat met:false with empty evidence (earned-but-unstamped drift); stamped now via doc patch.
-  C3 stays open for wave review since this wave upgrades the design of record from area-aware to file-aware.
-- **D11 — adoption is the bottleneck, so lint nudges it.** files: coverage starts at 0%; `bp task lint`
-  (df-lint-area-nudge precedent, tasks_lint_cmd.go) grows a files: nudge + measurable files-less count.
-  Epic-cycle decide phases author `files:` labels on wave tasks from now on — this wave's own tasks
-  carry them (dogfood).
+- **D1 — Search seal at the pipeline seam + retriever base query.** Add
+  `grant_scoped: Keyword.get(opts, :grant_scoped)` to `retriever_opts`
+  (query_pipeline.ex ~99-116). Apply grant narrowing ONCE in the Postgres
+  `DocumentsRetriever` base query right after `scope_to_owner` (documents_retriever.ex:59) —
+  that single point covers all three pipeline invocations (primary :130, try_drop_tokens :192,
+  try_typo_widen :207) AND count (:87) AND facets (:93), since all derive from `base`. This
+  seals every consumer of `Content.search_documents` at once (SearchController, SearchChannel,
+  federated) — no per-caller edits.
+- **D2 — Indx path: opts-threading + count seal.** Add `:grant_scoped` to the
+  `Keyword.take` in the Indx retriever's `scope_opts/1` (plugins/indx/retriever.ex:373);
+  `Content.Query.get_documents_by_ids` already gates (query.ex:1017-1018), so rows seal by
+  threading alone. The `total` (length(ranked) pre-hydration, retriever.ex:105) would still
+  over-count out-of-grant matches — for `grant_scoped` callers, recompute total as ONE
+  grant-narrowed Postgres count over the ranked candidate id set
+  (`Document |> where(id in ^ranked_ids) |> grant narrowing |> count`), fail-closed. A
+  reported total must never exceed grant-visible matches (SearchChannel defaults engine indx).
+- **D3 — Hoist ONE public wrapper, in the search slice.** Add public
+  `Content.Scope.maybe_scope_to_grants(query, opts)` beside `scope_to_grants/3`
+  (no-op unless `opts[:grant_scoped]`, pulls caller_context + workspace_id off opts); delete
+  the private copy in query.ex:128-138 (its `import ... Scope` already exists — add the name,
+  keep all 10 call sites working); consume it from DocumentsRetriever. No third/fourth private
+  copy, ever. Anchor-safe: no `@canonical` marker or docs-card anchor binds the private def.
+  Courtesy (non-gated): tenancy.md's "canonical scope helpers" prose gains one line.
+- **D4 — Backlinks seal INSIDE the shared graph helpers, not a backlinks-only wrapper.**
+  Opts-conditional `Scope.maybe_scope_to_grants` in (a) `resolve_doc/3`'s inline query
+  (graph.ex ~896-912) and (b) `scope_query/2` (graph.ex ~949-956, which serves `docs_by_id`,
+  `hydrate_nodes`, `fetch_doc`). This seals the HTTP backlinks cell, the scoped-route
+  backlinks (scoped_paper_controller.ex:72), AND the Studio PaneBuilder graph/blast-radius
+  pane for a grant-admitted socket (shared.ex:635 → pane_builder.ex:490-531 already threads
+  the flag; Graph just ignored it). Same conditional in `scoped_docs_query/1`
+  (orphans/dangling) as defense-in-depth — inert today (/v1/graph is :require_token, no grant
+  fold). Provable no-op for every caller without the flag (only AssignGrantScope,
+  ResolveWorkspace, LiveScope ever set it).
+- **D5 — Studio graph-pane protection is unit-level, not socket-level.** New
+  graph_test.exs cases prove `resolve_doc` / `reverse_referencers` / `traverse` grant-narrow
+  when opts carry `grant_scoped` + a grant-bearing caller_context (use
+  `Barkpark.AccessFixtures`), and stay byte-identical without the flag. No LiveView harness
+  this wave — the mechanism is shared, the unit tests protect it.
+- **D6 — RED-before evidence, unskip+fix in ONE PR.** The guards merged skipped in #2145, so
+  there is no guard+fix decoupling issue. Each slice: remove the `@tag skip:` line FIRST, run
+  the deny file on pre-fix code — expect EXACTLY 1 failure with the positive controls green
+  (non-vacuous RED) — stamp that output into the task evidence, then fix, re-run to 0
+  failures.
+- **D7 — Integration order: search → backlinks → close-out.** The hoist (D3) lands in the
+  search slice; the backlinks slice consumes `Scope.maybe_scope_to_grants/2` and merges
+  AFTER search. Backlinks may build in parallel from origin/main (files are otherwise
+  disjoint: graph.ex + graph_test.exs + grant_single_doc_deny_test.exs vs
+  query_pipeline.ex + documents_retriever.ex + scope.ex + query.ex + indx/retriever.ex +
+  grant_search_deny_test.exs) — write the two graph seams against
+  `Scope.scope_to_grants/3` behind `opts[:grant_scoped]` checks if the wrapper is not yet
+  on main, then swap to the public wrapper on the pre-PR rebase.
+- **D8 — Error-emitters sweep verdicts (recorded, no build needed).** Federated search is
+  bare `:api` — a grant is never admitted there, fails closed (deny test already green in
+  #2145). `search_local` is RequireLoopback-trusted, never threads scope_opts. Suggestions
+  returns query STRINGS from analytics, no Document rows — no narrowing surface. The
+  plugin-pane path rides Content.Query base_query → already gated. No other
+  `Content.search_documents` or Graph-read consumer needs its own seal.
+- **D9 — binary_id guard: N/A on both slices.** resolve_doc matches `doc_id` strings via
+  `where`, grant narrowing is field-equality — no raw-id `Repo.get` is introduced. Don't
+  invent a guard where no raw-id touch exists.
+- **D10 — Close-out mechanics (anchor has NO acceptance_criteria today).** Stamp criteria via
+  `POST /v1/data/mutate` patch (flat top-level `acceptance_criteria` in
+  {criterion,met,evidence} shape) then PUBLISH (the doc is published — an unpublished patch
+  strands a competing draft). Patch criteria BEFORE claiming, or set them IN the close call —
+  patching after claim trips the `doc_changed_since_claim` digest fence. Close needs a live
+  claim epoch (claim-by-id first). Verify via `bp doc get` (task projection hides
+  criteria/close_reason). Evidence trail: the 15 enforcement PRs #1303 #1339 #1353 #1372
+  #1398 #1431 #1432 #1434 #1442 #1451 #1491 #1504 #1521 #1527 #1538, endgame #2145, plus
+  this wave's two seal PRs.
+- **D11 — Wave-log debt: ADOPT the stranded #2145 retro, don't re-derive.** Commit 48a18f85
+  (branch `loop-epic/airdrop-grants-wave1-review-log`) drafted the endgame retro into THIS
+  slot file and was orphaned. Fold its content into
+  `bp-airdrop-grants-endgame-charter.md` § Wave log (currently EMPTY), corrected: the
+  authoritative test count is **6,348** (full battery, #2145 PR body) not the 1,982 partial
+  reviewer run; record the falsified write-side suspicion (writes were already gated per
+  event — the real leak was reads on a live socket) and the empirical discovery of BOTH
+  leaks. Then append the leak-seal epic-complete entry.
+- **D12 — Exactly ONE honest backlog task; standalone, not built.**
+  `broadcast_revoked/1` (access.ex:559-565) no-ops for grants without a bound
+  grantee_user_id. Blast radius today is ZERO: only a claimed grant (which HAS a bound user)
+  can mount a live desk; token/anonymous grantees read over HTTP which reloads active-only
+  grants per request. File as defense-in-depth for a hypothetical future surface that mounts
+  a session for an unbound grant — explicitly NOT a confirmed leak. Standalone (no parent —
+  the closed epic keeps zero open children), label proj:airdrop-grants, priority 3. The
+  parked UX items (grantor-own filter, grant history) and test-helper tidies stay parked —
+  not filed as leaks, not built.
 
-## Roadmap
+## Roadmap — this wave (integration-ordered)
 
-Shipped before this wave (context, all merged):
-- df-frontier-fn / df-independentready-switch / df-cli-frontier-verb (PR #1191) — Frontier model + verb, one shared count
-- df-area-vocabulary (#1309), df-lint-area-nudge (#1315), df-graph-crossdep (#1308), df-seed-area-labels,
-  df-exclude-epic-roots-from-hard-conflict (#1348)
-- cmux-bridge-goal wave 1 (#1200, #2134) — `bp cmux dispatch` consumes Frontier; hooks/status/install
+1. **ag-search-grant-leak** (medium, priority 1) — D1+D2+D3. Files:
+   api/lib/barkpark/search/query_pipeline.ex, api/lib/barkpark/search/documents_retriever.ex,
+   api/lib/barkpark/plugins/indx/retriever.ex, api/lib/barkpark/content/scope.ex,
+   api/lib/barkpark/content/query.ex, api/test/barkpark_web/controllers/grant_search_deny_test.exs.
+2. **ag-backlinks-grant-leak** (medium, priority 1) — D4+D5, merges after 1 (D7). Files:
+   api/lib/barkpark/content/graph.ex, api/test/barkpark/content/graph_test.exs,
+   api/test/barkpark_web/controllers/grant_single_doc_deny_test.exs.
+3. **ag-epic-closeout** (small, priority 1, lead/reviewer work, after 1+2 merge) — D10+D11+D12.
+   Files: .claude/workflows/bp-airdrop-grants-endgame-charter.md + ledger acts via bp.
 
-This wave (integration-ordered — merge 1 before 2; 3 is independent):
-1. **df-file-edge** (large) — `files:` label convention + exported `taskboard.FilesOf` + file edge in
-   `interferes()` + file-proven risk class + `taskboard.ClaimOverlaps` + OVERLAP section in
-   `bp task frontier` + dispatch-areas.md contract + onramps deny-path fixture.
-   Files: internal/taskboard/{frontier.go,frontier_test.go,board.go,overlaps.go,overlaps_test.go},
-   internal/cli/tasks_frontier_cmd.go(+test), docs/contracts/dispatch-areas.md.
-2. **cb-next-frontier-claim** (large, ADOPTED) — `bp task next <worker> --frontier` client intercept
-   (claim-by-id retry loop, resources-carrying claims, conflicts holders decoded) +
-   `bp cmux dispatch --claim` claim-before-spawn + `bp task ready` FRONTIER header.
-   Files: internal/cli/{cli.go,tasks_next_cmd.go(new)+test,cmux_dispatch.go(+test)},
-   internal/apiclient/client.go(+task_claim_test.go).
-   Compile-depends on `taskboard.FilesOf` from slice 1 (contract pinned in the brief; rebase after 1 merges).
-3. **df-lint-files-nudge** (small) — `bp task lint` nudges workable leaves missing `files:` labels;
-   files-less count in JSON so adoption is measurable.
-   Files: internal/cli/tasks_lint_cmd.go(+test).
-
-Later (not this wave): out-of-band files: seeding across live epics (scope.mjs-assisted hygiene);
-optional board/TUI overlap surfacing; glob semantics only if real briefs demand them; server-side
-resource fence on the queue endpoint only if a consumer materializes (Elixir gate + openapi).
-
-Ledger hygiene done in decide phase: goal C1/C2 evidence stamped (PR #1191); df-next-frontier closed
-as superseded by cb-next-frontier-claim.
+After this wave: NOTHING. The epic is closed; the only residual is the D12 backlog task.
 
 ## Wave log
 
-### Wave 2026-07-10 — file truth + atomic frontier claim (3/3 built, reviewed, integration-proven)
-
-All three slices green, reviewed at the bar, ledger honest. Merge order 1 → 2 → 3.
-
-1. **df-file-edge** — merge `loop-epic/frontier-learns-file-truth-files-label-e-0` (unchanged by
-   review). FilesOf + file edge in interferes() (after cross edges, before area; abstain when either
-   side undeclared) + RiskFileIsolated (counted proven, emitted by --proven-only) + ClaimOverlaps
-   OVERLAP section on `bp task frontier` + dispatch-areas.md contract. Deny-path is REAL (D4 held):
-   the onramps trio fixture co-admits without labels, admits exactly 1 with them, and the builder
-   mutation-probed both tests red with the edge deleted. Two policy calls the lead should know, both
-   defensible: ClaimOverlaps requires BOTH sides authored for an area pair (derived ~bands stay
-   silent — quieter than interferes, honesty over noise); RiskFileIsolated outranks SOLO, so a broad
-   epic that also declares files loses its solo flag (path truth beats the ≥3-areas proxy).
-   dispatch-areas.md self-raised its advisory budget 700→1400tok — the file is NOT in
-   check-doc-budgets.sh (both doc gates pass); flagged because the doc contract says caps never rise.
-2. **cb-next-frontier-claim** — merge `loop-epic/bp-task-next-frontier-frontier-aware-ato-1-r`
-   (NOT the original: the -r branch merges slice 1 and does the brief's planned rebase step —
-   retired the frontierFilesOf shim, whose normalization drifted from taskboard.FilesOf (no ./ or /
-   stripping ⇒ claim resources could miss the exact-string server fence), and pinned the
-   bounded-rounds exhaustion deny-path the builder left untested). TaskClaimResources rides the
-   existing epoch-CAS claim + shipped check_resources_free fence; conflicts holders decoded; bare
-   `bp task next`, default dispatch, and `-o json` byte-unchanged (tests assert all three).
-   Residual risks (accepted): server conflicts[] shape taken from claim.ex on trust — httptest
-   proves OUR decode only, so live-smoke one `--frontier` claim + one resource_conflict after merge;
-   cmux pane-env lease precedence (BARKPARK_WORKER_ID tier-1) not eyeballed in a real pane; `bp task
-   ready` now pays a snapshot fetch per human invocation (best-effort, json untouched) — watch for
-   latency complaints on the most-used verb.
-3. **df-lint-files-nudge** — merge `loop-epic/bp-task-lint-nudges-missing-files-declar-2`
-   (unchanged by review). files: nudge beside the area nudge, files_less/files_findings in JSON
-   (area "findings" key preserved), always exit 0, deny-path proves the known files-less leaf fires
-   while path- and dir-declared leaves stay silent.
-
-Cross-slice: a merge of all three was gate-run green by the reviewer; no shared-helper dupes
-remain after the shim swap. The wave dogfooded itself — all three tasks carry files: labels and
-their declared sets are mutually disjoint. Ledger: all three in_progress, epoch-1 claims intact,
-only "PR merged" criteria open (lead closes on merge; df-file-edge's builder criteria-stamped via
-doc patch, so the close will 409 doc_changed_since_claim — re-read before closing, per contract).
-
-Next wave: (a) SEED adoption — files: labels across the live ready corpus (scope.mjs-assisted,
-out-of-band per D1) so the frontier's file edge has truth to eat; measure via `bp task lint`
-files_less; (b) live-smoke the server fence contract (claim with resources on guerrilla, force a
-resource_conflict, confirm conflicts[] names holders) and the cmux pane lease in a real terminal;
-(c) stamp goal C3 (design of record is now file-aware) once these PRs merge, then judge whether
-dispatch-frontier-goal is at its natural close — remaining roadmap (glob semantics, queue-endpoint
-fence, board/TUI overlap surfacing) is demand-gated, not scheduled.
+_(reviewer appends after the wave merges; the epic-complete entry itself belongs in
+bp-airdrop-grants-endgame-charter.md per D11)_
