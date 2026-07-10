@@ -326,9 +326,9 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
         "additionalProperties": false,
         "required": ["tag", "strength", "rationale"],
         "properties": {
-          "tag": { "type": "string", "description": "The label." },
+          "tag": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "The label — lowercase letters, digits and hyphens only." },
           "strength": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Weight 1-100; distinct across tags, one unique max." },
-          "rationale": { "type": "string", "description": "Why this label applies." }
+          "rationale": { "type": "string", "minLength": 20, "description": "Why this label earns its strength (at least 20 characters)." }
         }
       }
     },
