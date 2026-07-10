@@ -124,45 +124,110 @@ type graphShower interface {
 	GraphShow(id string) (*apiclient.GraphResult, error)
 }
 
+// Bounds for the cross-edge fan-out (charter D12). GET /v1/graph/:root can be
+// pathologically slow live (~10s/call), and a board can span dozens of ready
+// roots — an unbounded sequential fan-out stalled the CLI for minutes. The
+// enrichment therefore runs on a small concurrent worker pool under ONE total
+// wall-clock deadline; whatever arrived by the deadline is used, the rest is
+// dropped. Fewer cross edges only costs cross-root PRECISION (the frontier
+// keeps its slice-1 proxies), never correctness.
+const (
+	crossEdgeWorkers  = 8
+	crossEdgeDeadline = 4 * time.Second
+)
+
 // fetchCrossEdges enriches the dispatch frontier with REAL cross-root `blocks`
 // edges (df-graph-crossdep). The ZERO-FETCH GUARD: it makes NO GraphShow calls
 // unless the ready set spans ≥2 roots — a single-root ready set can carry no
 // cross-ROOT dependency, so there is nothing to fetch. When it does fetch, it
-// pulls graph.show once per candidate root, keeps the `blocks` edges (resolving
-// each endpoint from node-id space into doc_id space), and folds them into the
+// pulls graph.show once per candidate root (bounded pool + total deadline, see
+// fetchCrossEdgesBounded), keeps the `blocks` edges (resolving each endpoint
+// from node-id space into doc_id space), and folds them into the
 // FrontierOpts.CrossEdges shape via taskboard.CrossRootBlockEdges (which drops
 // same-root and non-candidate edges). Best-effort: a per-root fetch error is
 // skipped, never fatal — the frontier simply keeps its slice-1 precision.
 func fetchCrossEdges(gs graphShower, snap taskboard.Snapshot) map[string][]string {
+	return fetchCrossEdgesBounded(gs, snap, crossEdgeWorkers, crossEdgeDeadline)
+}
+
+// fetchCrossEdgesBounded is fetchCrossEdges with the pool width and the TOTAL
+// wall-clock deadline injectable (tests use a short deadline against a blocking
+// fake). On deadline it returns the edges collected so far — never an error,
+// never a hang. A worker still stuck inside a hung GraphShow when the deadline
+// fires is abandoned; its eventual send lands in the buffered results channel
+// (capacity = all roots), so no goroutine ever blocks forever on a send.
+func fetchCrossEdgesBounded(gs graphShower, snap taskboard.Snapshot, workers int, deadline time.Duration) map[string][]string {
 	roots := taskboard.ReadyRootSpan(snap)
 	if len(roots) < 2 {
 		return nil // no cross-root dependency possible → zero graph.show calls
 	}
-	var edges []taskboard.GraphEdge
+
+	jobs := make(chan string, len(roots))
 	for _, root := range roots {
-		res, err := gs.GraphShow(root)
-		if err != nil || res == nil {
-			continue // best-effort — a missing root just under-enriches
-		}
-		id2doc := make(map[string]string, len(res.Nodes))
-		for _, n := range res.Nodes {
-			id2doc[n.ID] = n.DocID
-		}
-		for _, e := range res.Edges {
-			if e.Kind != "blocks" {
-				continue
+		jobs <- root
+	}
+	close(jobs)
+	results := make(chan *apiclient.GraphResult, len(roots))
+	if workers > len(roots) {
+		workers = len(roots)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	for i := 0; i < workers; i++ {
+		go func() {
+			for root := range jobs {
+				res, err := gs.GraphShow(root)
+				if err != nil {
+					res = nil // best-effort — a missing root just under-enriches
+				}
+				results <- res
 			}
-			from, to := e.FromID, e.ToID
-			if d := id2doc[from]; d != "" {
-				from = d
-			}
-			if d := id2doc[to]; d != "" {
-				to = d
-			}
-			edges = append(edges, taskboard.GraphEdge{From: from, To: to})
+		}()
+	}
+
+	timer := time.NewTimer(deadline)
+	defer timer.Stop()
+	var edges []taskboard.GraphEdge
+	for done := 0; done < len(roots); {
+		select {
+		case res := <-results:
+			done++
+			edges = append(edges, blockEdgesOf(res)...)
+		case <-timer.C:
+			// Total deadline hit: fold what arrived, drop the rest.
+			return taskboard.CrossRootBlockEdges(snap, edges)
 		}
 	}
 	return taskboard.CrossRootBlockEdges(snap, edges)
+}
+
+// blockEdgesOf extracts one graph result's `blocks` edges, resolving each
+// endpoint from node-id space into doc_id space. Nil-safe (a failed fetch
+// contributes nothing).
+func blockEdgesOf(res *apiclient.GraphResult) []taskboard.GraphEdge {
+	if res == nil {
+		return nil
+	}
+	id2doc := make(map[string]string, len(res.Nodes))
+	for _, n := range res.Nodes {
+		id2doc[n.ID] = n.DocID
+	}
+	var edges []taskboard.GraphEdge
+	for _, e := range res.Edges {
+		if e.Kind != "blocks" {
+			continue
+		}
+		from, to := e.FromID, e.ToID
+		if d := id2doc[from]; d != "" {
+			from = d
+		}
+		if d := id2doc[to]; d != "" {
+			to = d
+		}
+		edges = append(edges, taskboard.GraphEdge{From: from, To: to})
+	}
+	return edges
 }
 
 // frontierTally counts proven (isolated) vs the metadata-thin remainder across
