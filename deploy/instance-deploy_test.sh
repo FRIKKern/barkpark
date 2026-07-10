@@ -8,7 +8,13 @@
 #   - an unhealthy new slot is stopped, NO flip, active slot never touched
 #   - the maintenance-page arming is injected once, idempotently, and does not
 #     confuse the ACTIVE_PORT grep or the port-flip sed
-# Never touches a real server. Run: bash deploy/instance-deploy_test.sh
+#   - the channel seam: a production box (no $APP/.staging) fast-forwards main
+#     only and REFUSES a non-main DEPLOY_REF (exit 11); a staging box (.staging
+#     present) fetch+hard-resets ANY ref (branch or PR pull/<n>/head) and flips
+#   - the coalesce no-op stays a no-op; rm-ing the STATE file forces a rebuild
+# The fake git records every invocation to $GITLOG so the channel asserts can
+# see which git verb ran. Never touches a real server.
+# Run: bash deploy/instance-deploy_test.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT="$HERE/instance-deploy.sh"
@@ -23,9 +29,18 @@ make_fakes() {
   local dir="$1"; mkdir -p "$dir"
   cat > "$dir/git" <<'EOF'
 #!/usr/bin/env bash
-for a in "$@"; do
-  [ "$a" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }
+# Fake git: record the invocation, honor refs. Skip leading -c KV / -C PATH
+# option pairs to find the subcommand (the script calls e.g.
+# `git -c core.hooksPath=/dev/null fetch origin <ref>`).
+[ -n "${GITLOG:-}" ] && echo "git $*" >> "$GITLOG"
+args=("$@"); i=0; sub=""
+while [ "$i" -lt "${#args[@]}" ]; do
+  case "${args[$i]}" in
+    -c|-C) i=$((i + 2)); continue ;;
+    *) sub="${args[$i]}"; break ;;
+  esac
 done
+[ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeef}"; exit 0; }
 exit 0
 EOF
   cat > "$dir/mix" <<'EOF'
@@ -68,15 +83,16 @@ setup_case() {
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   CADDY="$TMP/Caddyfile"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$CADDY"
-  export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log"
-  : > "$MIXLOG"; : > "$SYSCTLLOG"
+  export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log"
+  : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
 }
 
-run_deploy() { # $1=health code  $2=fake sha
+run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE from env)
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
+    DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     bash "$SCRIPT" > "$TMP/out.log" 2>&1
   echo $?
 }
@@ -99,9 +115,11 @@ check "maintenance handler armed once"    "[ \"\$(grep -c 'handle_errors {' '$CA
 check "old slot + legacy unit retired"    "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG' && grep -q 'disable --now barkpark' '$SYSCTLLOG'"
 check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"
+check "prod channel: ff-only pull of origin main" "grep -q 'pull --ff-only origin main' '$GITLOG'"
+check "prod channel: no staging fetch/reset"       "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
 
 echo "== Case 2: green active (:4001) -> healthy deploy flips back to blue =="
-: > "$MIXLOG"; : > "$SYSCTLLOG"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
 rc="$(run_deploy 200 newsha2)"
 check "exit 0"                            "[ '$rc' = '0' ]"
 check "blue root built this time"         "[ -f '$APP/api/_build_blue/prod/MARKER' ]"
@@ -124,6 +142,66 @@ check "legacy unit not touched on failure" "! grep -qE 'disable --now barkpark($
 check "no enable of the failed slot"      "! grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file NOT advanced"           "[ ! -f '$APP/.instance-deploy-last' ]"
 check "no recompile after failure (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
+rm -rf "$TMP"
+
+echo "== Case 4: production box (no .staging) REFUSES a non-main DEPLOY_REF =="
+setup_case   # no $APP/.staging marker
+rc="$(DEPLOY_REF=feature-x run_deploy 200 refusesha)"
+check "exit 11"                           "[ '$rc' = '11' ]"
+check "no fetch of the branch"            "! grep -q 'fetch' '$GITLOG'"
+check "no hard reset to FETCH_HEAD"       "! grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "no pull either (refused first)"    "! grep -q 'pull --ff-only' '$GITLOG'"
+check "no build attempted"               "[ ! -e '$APP/api/_build_green' ] && [ ! -e '$APP/api/_build_blue' ]"
+check "no slot booted"                    "! grep -q 'restart barkpark-slot' '$SYSCTLLOG'"
+check "Caddy upstream unchanged (:4000)"  "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+check "state file NOT written"            "[ ! -f '$APP/.instance-deploy-last' ]"
+rm -rf "$TMP"
+
+echo "== Case 5: production box, default ref -> unchanged guerrilla ff-only path =="
+setup_case
+rc="$(run_deploy 200 defaultsha)"   # DEPLOY_REF unset -> main
+check "exit 0"                            "[ '$rc' = '0' ]"
+check "ff-only pull of origin main"       "grep -q 'pull --ff-only origin main' '$GITLOG'"
+check "artifact-discard checkout ran"     "grep -q 'checkout -- .' '$GITLOG'"
+check "no staging fetch/reset on prod"    "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
+check "healthy full flip to :4001"        "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+rm -rf "$TMP"
+
+echo "== Case 6: staging box (.staging) deploys a branch, then a PR ref, full flip each =="
+setup_case
+touch "$APP/.staging"
+rc="$(DEPLOY_REF=feature-x run_deploy 200 branchsha)"
+check "branch exit 0"                     "[ '$rc' = '0' ]"
+check "fetched origin feature-x"          "grep -q 'fetch origin feature-x' '$GITLOG'"
+check "hard reset to FETCH_HEAD"          "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "staging skips ff-only pull"        "! grep -q 'pull --ff-only' '$GITLOG'"
+check "staging skips artifact checkout"   "! grep -q 'checkout -- .' '$GITLOG'"
+check "green root built (full flip)"      "[ -f '$APP/api/_build_green/prod/MARKER' ]"
+check "Caddy flipped to :4001"            "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(DEPLOY_REF=pull/123/head run_deploy 200 prsha)"
+check "PR-ref exit 0"                     "[ '$rc' = '0' ]"
+check "fetched origin pull/123/head"      "grep -q 'fetch origin pull/123/head' '$GITLOG'"
+check "PR hard reset to FETCH_HEAD"       "grep -q 'reset --hard FETCH_HEAD' '$GITLOG'"
+check "blue root built this time"         "[ -f '$APP/api/_build_blue/prod/MARKER' ]"
+check "Caddy flipped back to :4000"       "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+rm -rf "$TMP"
+
+echo "== Case 7: coalesce no-op, then rm STATE forces a rebuild =="
+setup_case
+run_deploy 200 coalsha >/dev/null        # first healthy deploy writes STATE=coalsha
+check "state file = coalsha"              "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'coalsha' ]"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(run_deploy 200 coalsha)"           # same HEAD, STATE matches -> no-op
+check "coalesce exit 0"                   "[ '$rc' = '0' ]"
+check "coalesce: no build"                "[ \"\$(grep -c compile '$MIXLOG')\" = '0' ]"
+check "coalesce: no slot restart"         "! grep -q 'restart barkpark-slot' '$SYSCTLLOG'"
+rm -f "$APP/.instance-deploy-last"        # the force-rebuild lever
+: > "$MIXLOG"; : > "$SYSCTLLOG"
+rc="$(run_deploy 200 coalsha)"
+check "rebuild after rm STATE: exit 0"    "[ '$rc' = '0' ]"
+check "rebuild recompiled (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
+check "state file re-written = coalsha"   "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'coalsha' ]"
 rm -rf "$TMP"
 
 echo

@@ -16,8 +16,20 @@
 # downtime. Consequence: migrations must be backward-compatible
 # (expand/contract) for the minute both slots overlap.
 #
-# The pull suppresses the repo's post-merge hook (core.hooksPath=.githooks on
-# the box): that hook nukes the live _build and restarts the legacy `barkpark`
+# TWO CHANNELS, ONE SCRIPT — the git step is channel-gated on a $APP/.staging
+# marker (fail-closed: absent => production channel):
+#   * production (no .staging): strict `pull --ff-only origin main`, exactly as
+#     before. A non-main DEPLOY_REF is REFUSED (exit 11) — a prod content box
+#     only ever fast-forwards main; it can never be pushed to a branch or PR.
+#   * staging (.staging present): deploy ANY ref — DEPLOY_REF (default main),
+#     DEPLOY_REMOTE (default origin) — via `fetch $DEPLOY_REMOTE $DEPLOY_REF`
+#     then `reset --hard FETCH_HEAD`. This is the pre-merge proving path: try a
+#     branch or a PR (DEPLOY_REF=pull/<n>/head) BEFORE it rides the auto-deploy
+#     merge train. The hard reset also discards committed build artifacts,
+#     subsuming the `git checkout -- .` the prod path still needs to clear the
+#     go.sum/bin churn that blocks --ff-only.
+# EVERY git path suppresses the repo's post-merge hook (core.hooksPath=.githooks
+# on the box): that hook nukes the live _build and restarts the legacy `barkpark`
 # unit — exactly the outage this script exists to prevent.
 set -uo pipefail
 
@@ -47,10 +59,27 @@ STATE="$APP/.instance-deploy-last"   # commit of the last HEALTHY deploy
 OLD="$(git rev-parse HEAD)"
 log "current=$OLD"
 
-# Built artifacts (committed bin/, go.sum churn) block --ff-only; discard them.
-git checkout -- . 2>/dev/null || true
-log "git pull (post-merge hook suppressed — this script IS the deploy)"
-git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
+# ---- Channel-gated git step (see header). Fail-closed on the $APP/.staging
+# marker: absent => production (strict ff-only main, non-main ref REFUSED);
+# present => staging (fetch + hard-reset ANY ref, incl. a PR pull/<n>/head).
+DEPLOY_REF="${DEPLOY_REF:-main}"
+DEPLOY_REMOTE="${DEPLOY_REMOTE:-origin}"
+if [ -f "$APP/.staging" ]; then
+  log "staging channel: deploying ref '$DEPLOY_REF' from '$DEPLOY_REMOTE' (post-merge hook suppressed)"
+  git -c core.hooksPath=/dev/null fetch "$DEPLOY_REMOTE" "$DEPLOY_REF" || { log "fetch $DEPLOY_REMOTE $DEPLOY_REF failed"; exit 11; }
+  # Hard reset to the fetched ref — also discards committed build artifacts,
+  # subsuming the prod path's `git checkout -- .`.
+  git -c core.hooksPath=/dev/null reset --hard FETCH_HEAD || { log "reset --hard FETCH_HEAD failed"; exit 11; }
+else
+  if [ "$DEPLOY_REF" != "main" ]; then
+    log "refusing DEPLOY_REF '$DEPLOY_REF' on a production box (no $APP/.staging marker) — prod only fast-forwards main"
+    exit 11
+  fi
+  # Built artifacts (committed bin/, go.sum churn) block --ff-only; discard them.
+  git checkout -- . 2>/dev/null || true
+  log "git pull (post-merge hook suppressed — this script IS the deploy)"
+  git -c core.hooksPath=/dev/null pull --ff-only origin main || { log "pull failed"; exit 11; }
+fi
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
 
