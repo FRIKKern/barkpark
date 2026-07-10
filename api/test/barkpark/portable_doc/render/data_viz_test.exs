@@ -164,6 +164,256 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
              "bp-dataviz--empty"
   end
 
+  # ── slate-2: stat denominator ────────────────────────────────────────────────
+
+  test "stat denom renders a dim /denom suffix riding the value; absent denom is byte-identical" do
+    with_denom =
+      DataViz.stat_html(%{
+        "type" => "stat",
+        "value" => 71,
+        "denom" => 118,
+        "label" => "tasks done"
+      })
+
+    assert with_denom =~ ~s|>71<span class="bp-stat__denom">/118</span></div>|
+
+    without =
+      DataViz.stat_html(%{"type" => "stat", "value" => 71, "label" => "tasks done"})
+
+    refute without =~ "bp-stat__denom"
+    # denom-less output is the with-denom output minus EXACTLY the suffix span —
+    # every other byte identical (stat.go's "byte-identical to before" law).
+    assert without ==
+             String.replace(with_denom, ~s|<span class="bp-stat__denom">/118</span>|, "")
+  end
+
+  test "stat denom joins bullet-bar mode and is escaped" do
+    html =
+      DataViz.stat_html(%{"type" => "stat", "value" => 71, "max" => 118, "denom" => 118})
+
+    assert html =~ "bp-stat__bar"
+    assert html =~ ~s|<span class="bp-stat__denom">/118</span>|
+
+    evil = DataViz.stat_html(%{"type" => "stat", "value" => "1", "denom" => "<x>"})
+    refute evil =~ "<x>"
+    assert evil =~ "/&lt;x&gt;"
+  end
+
+  # ── slate-2: heatmap calendar mode ───────────────────────────────────────────
+
+  # nz = [1,3,3,3,4,5,7,7,38] → nearest-rank quartiles q1=3, q2=4, q3=7:
+  # 38 lands in bin 3, 4 in bin 1, 5/7 in bin 2, 1/3 in bin 0, zeros in --z.
+  @cal_block %{
+    "type" => "heatmap",
+    "mode" => "calendar",
+    "rowLabels" => ["M", "", "W"],
+    "colLabels" => ["Jan", "", "", "", "Feb"],
+    "cells" => [[3, 5, 0, 7, 1], [0, 3, 0, 0, 3], [0, 7, 0, 4, 38]]
+  }
+
+  test "heatmap calendar renders day-rows x week-cols in a scrollable container with ALL weeks" do
+    html = DataViz.heatmap_html(@cal_block)
+
+    assert html =~ ~s|class="bp-heat bp-heat--cal"|
+    assert html =~ ~s|class="bp-heat__scroll"|
+    # all 5 weeks render at a fixed track — the web scrolls, never width-drops
+    assert html =~ "repeat(5,12px)"
+    # month labels along the top, day letters in the gutter
+    assert html =~ ~s|<span class="bp-heat__ml">Jan</span>|
+    assert html =~ ~s|<span class="bp-heat__rl">M</span>|
+    # 15 data cells + 4 legend swatches, all bin-classed
+    assert 19 ==
+             html |> String.split(~s|class="bp-heat__c bp-heat__c--|) |> length() |> Kernel.-(1)
+  end
+
+  test "heatmap calendar quantile-bins by nonzero quartiles and dual-encodes every bin" do
+    html = DataViz.heatmap_html(@cal_block)
+
+    # the spike owns bin 3 alone — quantile binning spreads the rest instead of
+    # flattening months of ordinary activity off one spike (HeatQuantileBins law)
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--b3" title="38"></i>|
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--b2" title="7"></i>|
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--b1" title="4"></i>|
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--b0" title="3"></i>|
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--z" title="0"></i>|
+    # ragged rows keep the calendar shape: missing weeks read as zero cells
+    ragged =
+      DataViz.heatmap_html(%{"type" => "heatmap", "mode" => "calendar", "cells" => [[1, 2], [3]]})
+
+    assert ragged =~ "repeat(2,12px)"
+    assert ragged =~ ~s|bp-heat__c--z" title="0"|
+  end
+
+  test "slate-2 modes ride the ONE article emitter through compose; the email variant is untouched" do
+    %{"kind" => "_raw", "html" => article} = Compose.compose_block(@cal_block, :article)
+    assert article =~ "bp-heat--cal"
+
+    # the gate-locked email emitter ignores the new mode: same inline table read
+    %{"kind" => "_raw", "html" => email} = Compose.compose_block(@cal_block, :email)
+    assert email =~ "<table"
+    refute email =~ ~s(class="bp-)
+  end
+
+  test "a uniform grid is genuinely uniform — single distinct value puts every nonzero cell in bin 0" do
+    html =
+      DataViz.heatmap_html(%{
+        "type" => "heatmap",
+        "mode" => "calendar",
+        "cells" => [[5, 5], [0, 5]]
+      })
+
+    [grid_part | _] = String.split(html, "bp-heat__legend")
+    assert grid_part =~ "bp-heat__c--b0"
+    refute grid_part =~ "bp-heat__c--b1"
+    refute grid_part =~ "bp-heat__c--b2"
+    refute grid_part =~ "bp-heat__c--b3"
+  end
+
+  # ── slate-2: heatmap matrix marginals / values ───────────────────────────────
+
+  test "heatmap values:true prints the exact value with the bin class on the SAME cell (dual-encode)" do
+    html =
+      DataViz.heatmap_html(%{
+        "type" => "heatmap",
+        "marginals" => true,
+        "values" => true,
+        "rowLabels" => ["Ada", "Lin", "Sam", "Ravi"],
+        "colLabels" => ["Expl", "Buil", "Rev", "Ship", "Docs"],
+        "cells" => [[12, 34, 6, 9, 3], [4, 18, 2, 21, 0], [0, 7, 11, 4, 8], [9, 2, 0, 15, 1]]
+      })
+
+    assert html =~ ~s|class="bp-heat bp-heat--mtx"|
+    # bin class + exact value TEXT together on one cell — the two channels can
+    # never disagree because one quantile_bins call drives both
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--b3 bp-heat__c--v" title="34">34</i>|
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--z bp-heat__c--v" title="0">0</i>|
+    # Σ marginals: row sums, col sums, grand total, headers
+    assert html =~ ~s|<span class="bp-heat__cl bp-heat__cl--sum">Σ</span>|
+    assert html =~ ~s|<span class="bp-heat__rl">Σ</span>|
+    assert html =~ ~s|<span class="bp-heat__sum">64</span>|
+    assert html =~ ~s|<span class="bp-heat__sum">25</span>|
+    assert html =~ ~s|<span class="bp-heat__sum bp-heat__sum--grand">166</span>|
+    assert html =~ ~s|<span class="bp-heat__rl">Ada</span>|
+  end
+
+  test "heatmap marginals without values keeps shade cells and still sums" do
+    html =
+      DataViz.heatmap_html(%{
+        "type" => "heatmap",
+        "marginals" => true,
+        "rowLabels" => ["Q1", "Q2", "Q3"],
+        "colLabels" => ["Web", "API", "CLI", "TUI"],
+        "cells" => [[3, 9, 0, 14], [7, 2, 11, 1], [0, 5, 4, 20]]
+      })
+
+    # cells stay pure shade (no --v, no text) — the bin marker is the 2nd channel
+    assert html =~ ~s|<i class="bp-heat__c bp-heat__c--b3" title="20"></i>|
+    refute html =~ "bp-heat__c--v"
+    assert html =~ ~s|<span class="bp-heat__sum">26</span>|
+    assert html =~ ~s|<span class="bp-heat__sum">35</span>|
+    assert html =~ ~s|<span class="bp-heat__sum bp-heat__sum--grand">76</span>|
+  end
+
+  # ── slate-2: byte-stability of the untouched paths ───────────────────────────
+
+  test "heatmap without mode/flags renders the legacy grid byte-for-byte (pinned)" do
+    assert DataViz.heatmap_html(%{"type" => "heatmap", "cells" => [[1, 0]]}) ==
+             ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:repeat(2,minmax(10px,28px))">| <>
+               ~s|<i class="bp-heat__c" style="--i:1.000" title="1"></i>| <>
+               ~s|<i class="bp-heat__c" style="--i:0.000" title="0"></i>| <>
+               ~s|</div><div class="bp-heat__legend">less | <>
+               ~s|<i class="bp-heat__c" style="--i:0.150"></i>| <>
+               ~s|<i class="bp-heat__c" style="--i:0.350"></i>| <>
+               ~s|<i class="bp-heat__c" style="--i:0.550"></i>| <>
+               ~s|<i class="bp-heat__c" style="--i:0.750"></i>| <>
+               ~s|<i class="bp-heat__c" style="--i:1.000"></i>| <>
+               " more</div></div>"
+  end
+
+  test "explicit false flags and unknown modes stay on the legacy grid" do
+    for block <- [
+          %{"type" => "heatmap", "cells" => [[2, 4]], "marginals" => false, "values" => false},
+          %{"type" => "heatmap", "cells" => [[2, 4]], "mode" => "grid"}
+        ] do
+      html = DataViz.heatmap_html(block)
+      assert html =~ "--i:"
+      refute html =~ "bp-heat--cal"
+      refute html =~ "bp-heat__c--b"
+    end
+  end
+
+  # ── slate-2: compact chart ticks ─────────────────────────────────────────────
+
+  test "chart y-ticks compact to k/M/B at abs >= 10000, trailing .0 trimmed, sign preserved" do
+    forty_k =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"points" => [0, 40_000]}],
+        "axes" => %{"min" => 0, "max" => 40_000}
+      })
+
+    assert forty_k =~ ">40k</text>"
+    assert forty_k =~ ">26.7k</text>"
+    assert forty_k =~ ">13.3k</text>"
+    assert forty_k =~ ">0</text>"
+
+    millions =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"points" => [0, 45_500_000]}],
+        "axes" => %{"min" => 0, "max" => 45_500_000}
+      })
+
+    assert millions =~ ">45.5M</text>"
+    assert millions =~ ">30.3M</text>"
+
+    billions =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"points" => [0, 2_000_000_000]}],
+        "axes" => %{"min" => 0, "max" => 2_000_000_000}
+      })
+
+    assert billions =~ ">2B</text>"
+
+    negative =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"points" => [-45_500_000, 0]}],
+        "axes" => %{"min" => -45_500_000, "max" => 0}
+      })
+
+    assert negative =~ ">-45.5M</text>"
+  end
+
+  test "chart y-ticks below 10000 are byte-identical to before and series keep the web 4-ceiling" do
+    below =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [%{"points" => [0, 9_999]}],
+        "axes" => %{"min" => 0, "max" => 9_999}
+      })
+
+    assert below =~ ">9999</text>"
+    refute below =~ "k</text>"
+
+    # web keeps up-to-4 series — the TUI's 2-cap is a terminal-legibility
+    # ceiling, never a block contract (charter D4, ratified divergence)
+    four =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => [
+          %{"points" => [1, 2]},
+          %{"points" => [2, 3]},
+          %{"points" => [3, 4]},
+          %{"points" => [4, 5]}
+        ]
+      })
+
+    assert 4 == four |> String.split("<polyline") |> length() |> Kernel.-(1)
+    assert four =~ "bp-chart__s3"
+  end
+
   # ── compose dispatch + escaping ──────────────────────────────────────────────
 
   test "compose_block routes all four slate types to DataViz as _raw" do
