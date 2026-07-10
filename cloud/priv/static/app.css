@@ -2825,3 +2825,16 @@ select.form-input {
   border-radius: 4px;
   background: var(--muted-surface);
 }
+
+/* ── Wave 4 (OC19): Usage-tab sparklines ──────────────────────────────────────
+   Each meter row's quiet 14-day trend, painted by the shared sparklineSvg (which
+   owns the shape: null-is-gap runs, isolated-point dots, empty-frame honesty). This
+   block only sizes and TINTS it — currentColor inherits the row's quota tone so an
+   over-limit meter's trend reads danger, a warn meter amber, and an ok/plain meter
+   stays muted ink. ~120×32 keeps it subordinate to the value on a row already
+   carrying name + freshness + quota bar. Append-only; no token-block/index/styleguide
+   edits, no Overview-strip fetch (OC19 cut), no worst-state accents (OC22). */
+.usage-spark { display: inline-flex; align-items: center; flex: 0 0 auto; color: var(--muted-text); }
+.usage-spark .spark { display: block; width: 120px; height: 32px; }
+.usage-row--warn .usage-spark { color: var(--warn); }
+.usage-row--over .usage-spark { color: var(--danger); }
