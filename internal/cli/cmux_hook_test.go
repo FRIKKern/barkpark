@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -130,9 +131,12 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 	t.Run("all met → re-claim then close with the live epoch", func(t *testing.T) {
 		srv, rec := newHookServer(t, []bool{true, true}, 7)
 		ctx := hookHarness(t, srv.URL, "task-done", "S", `{}`)
-		_, _, code := runHook(t, ctx, globals{}, "Stop")
+		so, _, code := runHook(t, ctx, globals{}, "Stop")
 		if code != exitOK {
 			t.Fatalf("exit = %d, want 0", code)
+		}
+		if so != "" {
+			t.Errorf("close-path wrote to stdout: %q (must be empty)", so)
 		}
 		if rec.gets != 2 {
 			// One read to prove acceptance, a second for the FRESH rev after the
@@ -159,9 +163,12 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 	t.Run("one unmet → no mutation, leave for resume", func(t *testing.T) {
 		srv, rec := newHookServer(t, []bool{true, false}, 7)
 		ctx := hookHarness(t, srv.URL, "task-wip", "S", `{}`)
-		_, _, code := runHook(t, ctx, globals{}, "Stop")
+		so, _, code := runHook(t, ctx, globals{}, "Stop")
 		if code != exitOK {
 			t.Fatalf("exit = %d, want 0", code)
+		}
+		if so != "" {
+			t.Errorf("unmet-criteria path wrote to stdout: %q (must be empty)", so)
 		}
 		if rec.closes != 0 || rec.claims != 0 {
 			t.Errorf("unmet criteria mutated: claims=%d closes=%d, want 0/0", rec.claims, rec.closes)
@@ -171,9 +178,12 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 	t.Run("no criteria at all → cannot prove doneness, no mutation", func(t *testing.T) {
 		srv, rec := newHookServer(t, nil, 7)
 		ctx := hookHarness(t, srv.URL, "task-thin", "S", `{}`)
-		_, _, code := runHook(t, ctx, globals{}, "Stop")
+		so, _, code := runHook(t, ctx, globals{}, "Stop")
 		if code != exitOK {
 			t.Fatalf("exit = %d, want 0", code)
+		}
+		if so != "" {
+			t.Errorf("criteria-less path wrote to stdout: %q (must be empty)", so)
 		}
 		if rec.closes != 0 || rec.claims != 0 {
 			t.Errorf("criteria-less task mutated: claims=%d closes=%d, want 0/0", rec.claims, rec.closes)
@@ -197,16 +207,25 @@ func TestHookPreToolUseThrottle(t *testing.T) {
 	userConfigDir = func() (string, error) { return dir, nil }
 	ctx := manifest.Context{Server: srv.URL, Token: "t", Workspace: "default", Project: "default", Dataset: "production"}
 
-	// First fire: no stamp → renews.
-	if code := runCmuxHook(&writer{stdout: io.Discard, stderr: io.Discard, output: "table"}, globals{}, ctx, []string{"PreToolUse"}); code != exitOK {
+	// First fire: no stamp → renews. Real buffers (not io.Discard) so the
+	// fail-safe "empty stdout" invariant is actually asserted on the renew path.
+	var so1, se1 bytes.Buffer
+	if code := runCmuxHook(&writer{stdout: &so1, stderr: &se1, output: "table"}, globals{}, ctx, []string{"PreToolUse"}); code != exitOK {
 		t.Fatalf("first PreToolUse exit = %d", code)
+	}
+	if so1.Len() != 0 {
+		t.Errorf("first PreToolUse wrote to stdout: %q (must be empty)", so1.String())
 	}
 	if rec.claims != 1 {
 		t.Fatalf("first PreToolUse claims = %d, want 1 (renew)", rec.claims)
 	}
 	// Second fire immediately: within the throttle window → no request.
-	if code := runCmuxHook(&writer{stdout: io.Discard, stderr: io.Discard, output: "table"}, globals{}, ctx, []string{"PreToolUse"}); code != exitOK {
+	var so2, se2 bytes.Buffer
+	if code := runCmuxHook(&writer{stdout: &so2, stderr: &se2, output: "table"}, globals{}, ctx, []string{"PreToolUse"}); code != exitOK {
 		t.Fatalf("second PreToolUse exit = %d", code)
+	}
+	if so2.Len() != 0 {
+		t.Errorf("second PreToolUse wrote to stdout: %q (must be empty)", so2.String())
 	}
 	if rec.claims != 1 {
 		t.Errorf("second PreToolUse claims = %d, want still 1 (throttled)", rec.claims)
@@ -252,10 +271,17 @@ func TestHookFailSafeExitZero(t *testing.T) {
 		{"unreachable server", "task-x", "SessionStart", "http://127.0.0.1:1", `{}`},
 		{"malformed stdin", "task-x", "SessionStart", "http://127.0.0.1:1", `{not json at all`},
 		{"hung server within timeout", "task-x", "SessionStart", hang.URL, `{}`},
+		// PreToolUse is the renew path (re-claim, throttled). Its failure surface
+		// must be just as inert as SessionStart's.
+		{"PreToolUse unreachable server", "task-x", "PreToolUse", "http://127.0.0.1:1", `{}`},
+		{"PreToolUse hung server", "task-x", "PreToolUse", hang.URL, `{}`},
+		// Oversized stdin (> the 1 MiB io.LimitReader at cmux_hook.go:257): the
+		// drain must stay bounded — read a bounded prefix and no-op, never hang.
+		{"oversized stdin bounded", "task-x", "SessionStart", "http://127.0.0.1:1", strings.Repeat("a", 1<<20+4096)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Shorten the hook network timeout so the hung-server case is quick.
+			// Shorten the hook network timeout so the hung-server cases are quick.
 			old := hookTimeout
 			hookTimeout = 150 * time.Millisecond
 			defer func() { hookTimeout = old }()
@@ -271,8 +297,11 @@ func TestHookFailSafeExitZero(t *testing.T) {
 			if so.Len() != 0 {
 				t.Errorf("stdout = %q, want empty on the hook path", so.String())
 			}
-			if tc.name == "hung server within timeout" && time.Since(start) > time.Second {
-				t.Errorf("hook took %v — network timeout not honored", time.Since(start))
+			// EVERY row must return promptly: a hung server is bounded by the
+			// (shortened) network timeout, an oversized stdin by the LimitReader,
+			// a refused connection is immediate. None may stall the agent's turn.
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Errorf("hook took %v — a fail-safe path must never stall the turn", elapsed)
 			}
 		})
 	}
@@ -296,6 +325,199 @@ func TestHookPanicRecovers(t *testing.T) {
 	}
 	if so.Len() != 0 {
 		t.Errorf("stdout = %q, want empty", so.String())
+	}
+}
+
+// hookFailCfg configures the Stop-path matrix server to fail at a chosen step so
+// each of hookStopClose's up-to-four sequential calls (acceptance GET → re-claim
+// POST → fresh-rev GET → close POST) can be broken in isolation.
+type hookFailCfg struct {
+	met         []bool // acceptance states (all true reaches the mutation path)
+	claimEpoch  int
+	claimStatus int // non-zero → /claim answers this HTTP status (e.g. 409 fence)
+	closeStatus int // non-zero → /close answers this HTTP status (e.g. 409 fence)
+	getFailAt   int // >0 → the Nth GET (1-based) answers 500 (2 = fresh-rev fails)
+}
+
+// newHookMatrixServer is newHookServer with per-endpoint fault injection. It
+// records calls into the same hookRec so a subtest can assert both the exit/
+// stdout invariant AND that the failing step was actually reached.
+func newHookMatrixServer(t *testing.T, cfg hookFailCfg) (*httptest.Server, *hookRec) {
+	t.Helper()
+	rec := &hookRec{}
+	crit := make([]map[string]any, len(cfg.met))
+	for i, m := range cfg.met {
+		crit[i] = map[string]any{"criterion": "c", "met": m}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		switch {
+		case strings.HasSuffix(p, "/claim"):
+			rec.claims++
+			if cfg.claimStatus != 0 {
+				w.WriteHeader(cfg.claimStatus)
+				_, _ = w.Write([]byte(`{"ok":false,"reason":"fenced_off"}`))
+				return
+			}
+			var body struct {
+				Worker string `json:"worker_id"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			rec.lastWkr = body.Worker
+			_, _ = w.Write([]byte(`{"ok":true,"doc":{"claim":{"epoch":` + itoaT(cfg.claimEpoch) + `}}}`))
+		case strings.HasSuffix(p, "/close"):
+			rec.closes++
+			if cfg.closeStatus != 0 {
+				w.WriteHeader(cfg.closeStatus)
+				_, _ = w.Write([]byte(`{"ok":false,"reason":"fenced_off"}`))
+				return
+			}
+			var body struct {
+				Worker string `json:"worker_id"`
+				Epoch  int    `json:"observed_epoch"`
+				Rev    string `json:"observed_rev"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(raw, &body)
+			rec.lastWkr = body.Worker
+			rec.lastEp = body.Epoch
+			rec.lastRev = body.Rev
+			_, _ = w.Write([]byte(`{"ok":true,"doc":{}}`))
+		case strings.Contains(p, "/v1/data/doc/") && strings.Contains(p, "/task/"):
+			rec.gets++
+			if cfg.getFailAt != 0 && rec.gets == cfg.getFailAt {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			env := map[string]any{"result": map[string]any{
+				"_id":                 "task-x",
+				"rev":                 "r-fresh-1",
+				"lifecycle_status":    "in_progress",
+				"acceptance_criteria": crit,
+			}}
+			_ = json.NewEncoder(w).Encode(env)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, p)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, rec
+}
+
+// TestHookStopFailSafeExitZero is the Stop-path (close) failure matrix — the
+// branch-heaviest hook path (acceptance GET → re-claim → fresh-rev GET → close).
+// EVERY server fault must still exit 0 with EMPTY stdout, and each row also
+// asserts the failing step was reached (anti-vacuous: a green here must mean the
+// path was exercised, not skipped).
+func TestHookStopFailSafeExitZero(t *testing.T) {
+	// A server that hangs past the (shortened) hook timeout on every request.
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+	}))
+	t.Cleanup(hang.Close)
+
+	t.Run("unreadable task (dead server)", func(t *testing.T) {
+		old := hookTimeout
+		hookTimeout = 150 * time.Millisecond
+		defer func() { hookTimeout = old }()
+		ctx := hookHarness(t, "http://127.0.0.1:1", "task-x", "S", `{}`)
+		var so, se bytes.Buffer
+		code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"Stop"})
+		assertHookInert(t, code, so.String())
+	})
+
+	t.Run("re-claim for epoch fails (409 on /claim)", func(t *testing.T) {
+		srv, rec := newHookMatrixServer(t, hookFailCfg{met: []bool{true, true}, claimStatus: 409})
+		ctx := hookHarness(t, srv.URL, "task-x", "S", `{}`)
+		var so, se bytes.Buffer
+		code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"Stop"})
+		assertHookInert(t, code, so.String())
+		if rec.claims != 1 {
+			t.Errorf("claims = %d, want 1 (the re-claim was attempted)", rec.claims)
+		}
+		if rec.closes != 0 {
+			t.Errorf("closes = %d, want 0 (a fenced re-claim must not close — no theft)", rec.closes)
+		}
+	})
+
+	t.Run("close rejected/fenced (409 on /close)", func(t *testing.T) {
+		srv, rec := newHookMatrixServer(t, hookFailCfg{met: []bool{true, true}, claimEpoch: 7, closeStatus: 409})
+		ctx := hookHarness(t, srv.URL, "task-x", "S", `{}`)
+		var so, se bytes.Buffer
+		code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"Stop"})
+		assertHookInert(t, code, so.String())
+		if rec.closes != 1 {
+			t.Errorf("closes = %d, want 1 (the close was attempted and rejected)", rec.closes)
+		}
+	})
+
+	t.Run("fresh-rev read fails → plain DoClose fallback", func(t *testing.T) {
+		// getFailAt=2: acceptance GET succeeds, the post-claim fresh-rev GET 500s,
+		// so hookStopClose falls back to a rev-less close (cmux_hook.go:192-195).
+		srv, rec := newHookMatrixServer(t, hookFailCfg{met: []bool{true, true}, claimEpoch: 9, getFailAt: 2})
+		ctx := hookHarness(t, srv.URL, "task-x", "S", `{}`)
+		var so, se bytes.Buffer
+		code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"Stop"})
+		assertHookInert(t, code, so.String())
+		if rec.closes != 1 {
+			t.Fatalf("closes = %d, want 1 (fallback close still fires)", rec.closes)
+		}
+		if rec.lastRev != "" {
+			t.Errorf("close observed_rev = %q, want empty (fresh-rev unreadable → plain close)", rec.lastRev)
+		}
+		if rec.lastEp != 9 {
+			t.Errorf("close observed_epoch = %d, want the re-claimed 9", rec.lastEp)
+		}
+	})
+
+	t.Run("hung server", func(t *testing.T) {
+		old := hookTimeout
+		hookTimeout = 150 * time.Millisecond
+		defer func() { hookTimeout = old }()
+		ctx := hookHarness(t, hang.URL, "task-x", "S", `{}`)
+		var so, se bytes.Buffer
+		start := time.Now()
+		code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"Stop"})
+		assertHookInert(t, code, so.String())
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Errorf("Stop took %v against a hung server — network timeout not honored", elapsed)
+		}
+	})
+}
+
+// TestHookRenewStampWriteFailSafe proves the on-disk renew-stamp write
+// (writeRenewStamp, cmux_hook.go:305-318) failing does not break the hook: the
+// claim still succeeds and the hook exits 0 with empty stdout. We make MkdirAll
+// fail by pointing the config dir at a regular FILE, so joining barkpark/cmux/…
+// beneath it cannot be created.
+func TestHookRenewStampWriteFailSafe(t *testing.T) {
+	srv, rec := newHookServer(t, []bool{false}, 3)
+	ctx := hookHarness(t, srv.URL, "task-x", "S", `{}`)
+	// hookHarness set userConfigDir to a temp dir; override it AFTER to a file
+	// path so writeRenewStamp's MkdirAll fails.
+	f := t.TempDir() + "/not-a-dir"
+	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	userConfigDir = func() (string, error) { return f, nil }
+	var so, se bytes.Buffer
+	code := runCmuxHook(&writer{stdout: &so, stderr: &se, output: "table"}, globals{}, *ctx, []string{"SessionStart"})
+	assertHookInert(t, code, so.String())
+	if rec.claims != 1 {
+		t.Errorf("claims = %d, want 1 (claim succeeds; only the stamp write fails)", rec.claims)
+	}
+}
+
+// assertHookInert is the shared fail-safe assertion: exit 0 AND empty stdout.
+func assertHookInert(t *testing.T, code int, stdout string) {
+	t.Helper()
+	if code != exitOK {
+		t.Errorf("exit = %d, want 0 (a hook must never break the agent)", code)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty on every hook path", stdout)
 	}
 }
 
