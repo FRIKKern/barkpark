@@ -577,6 +577,8 @@
     .badge-public { background: var(--ok-soft); color: var(--success); }
     .badge-private { background: var(--warn-soft); color: var(--warning); }
     .badge-active { background: var(--primary-soft); color: var(--primary); }
+    /* Neutral "off/none" badge — a dimmed pill for an inactive status. */
+    .badge-muted { background: var(--bg-muted); color: var(--fg-muted); }
     /* Studio Claude chat — session lifecycle pills (studio-claude-chat w1/w2).
        Tokenized so the sidebar honors the same evergreen palette as the rest
        of Studio; precedence is PendingApproval > Working > idle > offline. The
@@ -590,6 +592,22 @@
       content: ''; width: 6px; height: 6px; border-radius: 50%;
       background: currentColor;
     }
+
+    /* Org-admin one-time SCIM token reveal — a mono box on the raised surface. */
+    .org-admin-token {
+      margin-top: 8px; padding: 8px 12px; border-radius: var(--radius-sm);
+      background: var(--surface-raised); border: 1px solid var(--border-subtle);
+      font-family: var(--font-mono); font-size: 12px; color: var(--fg);
+      word-break: break-all; line-height: 1.5;
+    }
+    .org-admin-status { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; }
+    .org-admin-status-group { display: flex; align-items: center; gap: 8px; }
+    .org-admin-status-label { font-size: 12px; font-weight: 600; color: var(--fg); }
+    .org-admin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .org-admin-audit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+    .org-admin-audit li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .org-admin-audit-action { font-family: var(--font-mono); color: var(--fg); }
+    .org-admin-audit-actor { color: var(--fg-muted); }
 
     /* ── Document list ────────────────────────────────────────────────── */
     .doc-list-item {
@@ -876,17 +894,25 @@
     .pane-layout { display: flex; flex: 1; overflow: hidden; }
     .pane-column {
       width: 260px; min-width: 200px; flex-shrink: 0;
-      border-right: 1px solid var(--border-muted);
+      border-right: 1px solid var(--border-subtle);
       display: flex; flex-direction: column;
       background: var(--bg-card);
     }
-    .pane-column--last { border-right: none; }
+    /* The rightmost (focus/active) pane rides the raised surface so the drilled-to
+       column reads as the elevated plane — visible depth, not decoration. */
+    .pane-column--last { border-right: none; background: var(--surface-raised); }
     .pane-header {
       height: 42px; min-height: 42px;
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 14px; border-bottom: 1px solid var(--border-muted);
+      padding: 0 16px; border-bottom: 1px solid var(--border-subtle);
     }
-    .pane-header-title { font-size: 13px; font-weight: 600; }
+    .pane-header-titlewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .pane-header-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Dimmed doc count next to a pane title (only :doc items counted). */
+    .pane-header-count {
+      flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--fg-muted);
+      background: var(--bg-muted); border-radius: 999px; padding: 1px 7px;
+    }
     .pane-header-actions { display: flex; align-items: center; gap: 6px; }
     .pane-add-btn {
       width: 24px; height: 24px; border-radius: 6px; border: none;
@@ -923,7 +949,7 @@
 
     .pane-item {
       display: flex; align-items: center; gap: 10px;
-      padding: 9px 14px; cursor: pointer;
+      padding: 8px 16px; cursor: pointer;
       border-left: 3px solid transparent; color: var(--fg-muted);
       transition: all 0.1s; font-size: 13px;
     }
@@ -935,13 +961,17 @@
 
     .pane-section-header {
       display: flex; align-items: center; gap: 6px;
-      padding: 14px 14px 6px; font-size: 11px; font-weight: 600;
+      padding: 16px 16px 8px; font-size: 11px; font-weight: 600;
       color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;
       background: none; border: 0; width: 100%; text-align: left;
       font-family: inherit; cursor: default;
     }
     button.pane-section-header { cursor: pointer; }
     button.pane-section-header:hover { color: var(--fg-muted); }
+    /* WCAG-AA (design/check.mjs Part H): --fg-dim clears 4.5:1 on --surface
+       (≥4.69) but NOT on the raised focus pane (--surface-raised,
+       evergreen-dark 4.28) — section headers there escalate one tier. */
+    .pane-column--last .pane-section-header { color: var(--muted-text); }
     .pane-section-header-chevron {
       display: inline-flex; align-items: center; justify-content: center;
       width: 10px; height: 10px;
@@ -992,11 +1022,17 @@
     .pane-doc-dot.active { background: var(--primary); }
     .pane-doc-dot.completed { background: var(--success); }
     .pane-doc-dot.planning { background: var(--fg-dim); }
-    .pane-doc-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); margin-top: 2px; margin-left: 15px; }
+    /* Real subtitle line under the title — a declared/manifest summary or a
+       humanized "updated" time (never a bare mono id). fg-muted keeps it a
+       legible secondary tier (AA), truncating on overflow. */
+    .pane-doc-sub {
+      font-size: 12px; color: var(--fg-muted); margin-top: 2px; margin-left: 15px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     /* Generic list_preview row extras (schema-declared, host-rendered):
-       right-aligned value badge + dimmed inline suffix. The
-       .pane-doc-badge--<slug> modifier is emitted per value for optional
-       theming; the host defines only the neutral base. */
+       right-aligned value badge. The .pane-doc-badge--<slug> modifier is
+       emitted per value for optional theming; the host defines only the
+       neutral base. */
     .pane-doc-badge {
       margin-left: auto; flex-shrink: 0;
       padding: 1px 7px; border-radius: 999px;
@@ -1004,17 +1040,13 @@
       background: var(--bg-muted); color: var(--muted-text);
       border: 1px solid var(--border-muted);
     }
-    .pane-doc-meta { font-size: 11px; color: var(--fg-dim); flex-shrink: 0; }
-    /* WCAG-AA: --fg-dim is the dimmest text tier and clears 4.5:1 only on the
-       page/card ground (--surface). On the RAISED row fills it drops sub-AA
-       (evergreen 3.89–4.27), so the secondary id/meta escalate one tier per the
-       row's prominence — muted-text on the --bg-muted hover fill, full --fg on the
-       --bg-accent selected fill (mirrors .pane-item.selected). Pairing-site fix,
-       no token nudge; asserted by design/check.mjs Part H. */
-    .pane-doc-item:hover .pane-doc-id { color: var(--muted-text); }
-    .pane-doc-item:hover .pane-doc-meta { color: var(--muted-text); }
-    .pane-doc-item.selected .pane-doc-id { color: var(--fg); }
-    .pane-doc-item.selected .pane-doc-meta { color: var(--fg); }
+    /* WCAG-AA at the pairing site (design/check.mjs Part H): the subtitle's
+       --fg-muted clears 4.5:1 on both pane grounds (--surface ≥5.02,
+       --surface-raised ≥4.91) and on the --bg-muted hover fill (≥4.57), but
+       NOT on the --bg-accent selected fill (evergreen-light 4.16) — so the
+       selected subtitle escalates to full --fg (mirrors .pane-item.selected).
+       Pairing-site fix, no token nudge. */
+    .pane-doc-item.selected .pane-doc-sub { color: var(--fg); }
 
     /* Collapsed pane: narrow strip shown when the user has drilled past
        this pane and needs the viewport for the rightmost focus pane.
@@ -2408,7 +2440,18 @@
        assign is non-empty), so the CSS only needs to style the visible
        states. ─────────────────────────────────────────────────────────── */
     .pane-doc-item { display: flex; align-items: flex-start; }
-    .bp-doc-row-body { flex: 1; min-width: 0; cursor: pointer; padding: 10px 14px; }
+    .bp-doc-row-body {
+      flex: 1; min-width: 0; cursor: pointer; padding: 10px 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .pane-doc-main { flex: 1; min-width: 0; }
+    /* Drill chevron, revealed on row hover (structure rows already show one). */
+    .pane-doc-chevron {
+      flex-shrink: 0; display: inline-flex; align-items: center;
+      color: var(--fg-dim); opacity: 0; transition: opacity 0.1s;
+    }
+    .pane-doc-item:hover .pane-doc-chevron,
+    .pane-doc-item.selected .pane-doc-chevron { opacity: 1; }
     .pane-doc-item { padding: 0; }  /* row padding moves to body for click target */
     .pane-doc-item.is-bulk-checked { background: hsl(var(--primary-hsl) / 0.07); }
     .bp-doc-checkbox {

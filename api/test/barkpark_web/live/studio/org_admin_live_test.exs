@@ -51,7 +51,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
       # no SSO configured yet
       assert html =~ ~s(data-oidc="false")
       assert html =~ ~s(data-saml="false")
-      assert html =~ "SCIM tokens:"
+      assert html =~ "SCIM tokens"
     end
 
     test "reflects a configured OIDC connection", %{conn: conn} do

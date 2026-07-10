@@ -576,9 +576,34 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
-        meta: row_meta(doc, Map.get(preview, "meta"))
+        # `:meta` stays the pure preview-contract value (Go TUI rowMeta parity —
+        # nil when no declaration/manifest). `:updated` is the Studio-only
+        # subtitle fallback so a row is never a bare mono id; the render picks
+        # `meta || updated`. Threading updated_at only READS a field already on
+        # every Document — no /v1/structure wire change.
+        meta: row_meta(doc, Map.get(preview, "meta")),
+        updated: relative_updated(doc)
       }
     end)
+  end
+
+  # Humanized "Updated N ago" subtitle fallback. The timestamp is already on
+  # every Document struct (`content/query.ex` orders by updated_at_desc); this
+  # only READS it — nothing here touches the /v1/structure node wire the Go TUI
+  # shares. nil when a row somehow carries no usable timestamp.
+  defp relative_updated(%{updated_at: %DateTime{} = ts}), do: "Updated " <> ago(ts)
+  defp relative_updated(_), do: nil
+
+  defp ago(%DateTime{} = ts) do
+    secs = max(DateTime.diff(DateTime.utc_now(), ts, :second), 0)
+
+    cond do
+      secs < 60 -> "just now"
+      secs < 3_600 -> "#{div(secs, 60)}m ago"
+      secs < 86_400 -> "#{div(secs, 3_600)}h ago"
+      secs < 2_592_000 -> "#{div(secs, 86_400)}d ago"
+      true -> "#{div(secs, 2_592_000)}mo ago"
+    end
   end
 
   # A declared list_preview meta spec WINS; only spec-less docs (block docs —
