@@ -175,23 +175,86 @@ func rankBarkparks(list []cloudclient.Barkpark) []rankedBarkpark {
 }
 
 // rankedBarkparkRow is the flat JSON/YAML shape of one ranked row — self-
-// describing so `-o json` output is stable and scriptable.
+// describing so `-o json` output is stable and scriptable. The self-update TRUTH
+// fields (isu-w5) ride here too: the running/latest release, when the verdict was
+// checked, the full autoupdate policy, and the channel. autoupdate_enabled is a
+// tri-state — true/false when the control plane reported it, absent entirely when
+// it didn't (an older CP) so a script never mistakes "unknown" for "off".
 func rankedBarkparkRow(r rankedBarkpark) map[string]any {
-	return map[string]any{
-		"name":          r.BP.Name,
-		"slug":          r.BP.Slug,
-		"id":            r.BP.ID,
-		"host":          r.BP.Host,
-		"url":           r.BP.URL,
-		"status":        r.Status,
-		"bucket":        r.Bucket,
-		"rank":          r.Rank,
-		"detail":        r.Detail,
-		"health_status": r.BP.HealthStatus,
-		"agent_status":  r.BP.AgentStatus,
-		"update_state":  r.BP.UpdateState,
-		"suspended":     r.BP.Suspended,
+	row := map[string]any{
+		"name":                   r.BP.Name,
+		"slug":                   r.BP.Slug,
+		"id":                     r.BP.ID,
+		"host":                   r.BP.Host,
+		"url":                    r.BP.URL,
+		"status":                 r.Status,
+		"bucket":                 r.Bucket,
+		"rank":                   r.Rank,
+		"detail":                 r.Detail,
+		"health_status":          r.BP.HealthStatus,
+		"agent_status":           r.BP.AgentStatus,
+		"update_state":           r.BP.UpdateState,
+		"suspended":              r.BP.Suspended,
+		"update_running_release": r.BP.UpdateRunningRelease,
+		"update_latest_release":  r.BP.UpdateLatestRelease,
+		"update_checked_at":      r.BP.UpdateCheckedAt,
+		"autoupdate_paused":      r.BP.AutoupdatePaused,
+		"pinned_release":         r.BP.PinnedRelease,
+		"channel":                r.BP.Channel,
 	}
+	// Tri-state: only emit autoupdate_enabled when the CP actually reported it, so
+	// -o json is as honest as the table (nil = policy unknown, never a fake false).
+	if r.BP.AutoupdateEnabled != nil {
+		row["autoupdate_enabled"] = *r.BP.AutoupdateEnabled
+	}
+	return row
+}
+
+// updateCell renders the "running → latest" version pair for the UPDATE column.
+// When the box is behind (the releases differ, or the coarse verdict says so),
+// the arrow form IS the behind marker; a current box shows just its running
+// release; a box the control plane hasn't versioned yet (older CP) yields "" so
+// the column collapses out entirely. Never fabricates a version it wasn't told.
+func updateCell(b cloudclient.Barkpark) string {
+	running := strings.TrimSpace(b.UpdateRunningRelease)
+	latest := strings.TrimSpace(b.UpdateLatestRelease)
+	if running == "" && latest == "" {
+		return ""
+	}
+	behind := (running != "" && latest != "" && running != latest) || b.UpdateState == "behind"
+	if behind && latest != "" {
+		from := running
+		if from == "" {
+			from = "?"
+		}
+		return sanitizeCell(from) + " → " + sanitizeCell(latest)
+	}
+	if running != "" {
+		return sanitizeCell(running)
+	}
+	return sanitizeCell(latest)
+}
+
+// policyCell collapses the autoupdate policy into ONE compact flag for the POLICY
+// column, most-specific first: a pin wins ("pin@<tag>", the freeze), then a hold
+// ("paused"), then an explicit opt-out ("off"), then the auto-ride default
+// ("auto"). A control plane that reported no policy at all (autoupdate_enabled
+// nil, not paused, unpinned) yields "" so the row shows a dash rather than
+// claiming a state the CP never sent — the older-CP honesty rule.
+func policyCell(b cloudclient.Barkpark) string {
+	if pin := strings.TrimSpace(b.PinnedRelease); pin != "" {
+		return "pin@" + sanitizeCell(pin)
+	}
+	if b.AutoupdatePaused {
+		return "paused"
+	}
+	if b.AutoupdateEnabled != nil {
+		if *b.AutoupdateEnabled {
+			return "auto"
+		}
+		return "off"
+	}
+	return ""
 }
 
 // bucketCounts tallies a ranked fleet into the three buckets.
@@ -298,34 +361,73 @@ func statusDash(s string) string {
 // Widths are measured on BARE strings; each cell is then painted via
 // out.paintCell (a no-op when color is off), so alignment is exact and
 // --no-color / piped output carries no ANSI. STATUS/HEALTH/AGENT paint by their
-// role; NAME/URL/DETAIL match no role and stay plain. The DETAIL column (the
-// control plane's own reason for a failure/suspension) appears only when at
-// least one row in the bucket has one — a healthy bucket never pays for it.
+// role; NAME/URL/DETAIL and the self-update cells match no role and stay plain.
+//
+// Four columns are CONDITIONAL — each appears only when at least one row in the
+// bucket has something to say in it, so a bucket never pays width for a column it
+// doesn't use and an older control plane (which emits none of the isu-w5 truth)
+// renders byte-identical to before:
+//
+//   - UPDATE  running → latest (the behind marker) — only when versions are known
+//   - CHANNEL the release channel (stable/canary) — only when the CP emits it
+//   - POLICY  compact autoupdate flag (pin@tag / paused / off / auto)
+//   - DETAIL  the control plane's own reason for a failure/suspension
+//
+// Column order keeps the urgent identity left (STATUS · NAME · UPDATE · CHANNEL ·
+// HEALTH · AGENT · POLICY) and the long URL + optional DETAIL last, so the common
+// case stays readable at 80 columns.
 func renderStatusRows(out *writer, rows []rankedBarkpark) {
-	headers := []string{"STATUS", "NAME", "HEALTH", "AGENT", "URL"}
-	withDetail := false
+	// Decide which conditional columns this bucket needs.
+	withUpdate, withChannel, withPolicy, withDetail := false, false, false, false
 	for _, r := range rows {
+		if updateCell(r.BP) != "" {
+			withUpdate = true
+		}
+		if strings.TrimSpace(r.BP.Channel) != "" {
+			withChannel = true
+		}
+		if policyCell(r.BP) != "" {
+			withPolicy = true
+		}
 		if r.Detail != "" {
 			withDetail = true
-			break
 		}
 	}
+
+	headers := []string{"STATUS", "NAME"}
+	if withUpdate {
+		headers = append(headers, "UPDATE")
+	}
+	if withChannel {
+		headers = append(headers, "CHANNEL")
+	}
+	headers = append(headers, "HEALTH", "AGENT")
+	if withPolicy {
+		headers = append(headers, "POLICY")
+	}
+	headers = append(headers, "URL")
 	if withDetail {
 		headers = append(headers, "DETAIL")
 	}
+
 	cells := make([][]string, 0, len(rows))
 	for _, r := range rows {
 		url := r.BP.URL
 		if strings.TrimSpace(url) == "" {
 			url = r.BP.Host
 		}
-		row := []string{
-			r.Status,
-			statusDash(r.BP.Name),
-			statusDash(r.BP.HealthStatus),
-			statusDash(r.BP.AgentStatus),
-			statusDash(url),
+		row := []string{r.Status, statusDash(r.BP.Name)}
+		if withUpdate {
+			row = append(row, statusDash(updateCell(r.BP)))
 		}
+		if withChannel {
+			row = append(row, statusDash(r.BP.Channel))
+		}
+		row = append(row, statusDash(r.BP.HealthStatus), statusDash(r.BP.AgentStatus))
+		if withPolicy {
+			row = append(row, statusDash(policyCell(r.BP)))
+		}
+		row = append(row, statusDash(url))
 		if withDetail {
 			row = append(row, statusDash(r.Detail))
 		}
@@ -368,6 +470,16 @@ WHAT IT SHOWS
   green = ok) on a tty; piped or --no-color output is plain text. Requires
   'bp login'. The states, ranks and colors are the cloud dashboard's own
   (charter decision 32) — one triage vocabulary, two surfaces.
+
+  When the control plane reports self-update truth, three more columns light up
+  (each only when a row uses it, so the table stays lean):
+
+    UPDATE    the running → latest release (the arrow is the "behind" marker)
+    CHANNEL   the release channel the box rides (stable / canary)
+    POLICY    the autoupdate policy, compact: pin@<tag> · paused · off · auto
+
+  Manage the policy with 'bp cloud autoupdate' and the fleet rollout with
+  'bp cloud rollout'.
 
 OUTPUT
   -o table   ranked, bucketed, colored (default on a tty)

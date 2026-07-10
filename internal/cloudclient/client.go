@@ -99,6 +99,36 @@ type Barkpark struct {
 	ProvisionError    string `json:"provision_error"`
 	DeprovisionStatus string `json:"deprovision_status"`
 	DeprovisionError  string `json:"deprovision_error"`
+
+	// Self-update TRUTH (isu-w5) — the full version + policy the control plane
+	// mirrors from each instance's own update verdict and the team's autoupdate
+	// policy. These are purely ADDITIVE and DECODED TOLERANTLY: the emission ships
+	// in the sibling isu-w5-canary-gated-fleet slice, so an older control plane
+	// omits some or all of them and they decode to their zero value — never an
+	// error. `UpdateState` (above) is the coarse verdict (current|behind|unknown);
+	// these carry the detail behind it:
+	//
+	//   - UpdateRunningRelease / UpdateLatestRelease — the version the box is on
+	//     and the newest blessed release (the "running → latest" the status view
+	//     paints, with a behind marker when they differ). Empty until the CP
+	//     emits them.
+	//   - UpdateCheckedAt — when the CP last refreshed this instance's verdict
+	//     (RFC3339). Empty on an older CP.
+	//   - AutoupdateEnabled — a POINTER on purpose: nil means the CP said nothing
+	//     (policy unknown — an older CP), so the status view shows no policy for
+	//     the row instead of lying "off". A present false is a real opt-out; a
+	//     present true is the auto-ride default. AutoupdatePaused is the temporary
+	//     hold (absent → false, an honest "not paused"). PinnedRelease freezes the
+	//     box at a version (empty → unpinned).
+	//   - Channel — the release channel the box rides (e.g. "stable" / "canary").
+	//     Empty until the CP emits it.
+	UpdateRunningRelease string `json:"update_running_release"`
+	UpdateLatestRelease  string `json:"update_latest_release"`
+	UpdateCheckedAt      string `json:"update_checked_at"`
+	AutoupdateEnabled    *bool  `json:"autoupdate_enabled"`
+	AutoupdatePaused     bool   `json:"autoupdate_paused"`
+	PinnedRelease        string `json:"pinned_release"`
+	Channel              string `json:"channel"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane
@@ -1531,4 +1561,101 @@ func (c *Client) TeamInvitations(ctx context.Context, teamID string) (Invitation
 	var invitations []TeamInvitation
 	_ = json.Unmarshal(env.Invitations, &invitations)
 	return InvitationsResult{Raw: env.Invitations, Invitations: invitations}, nil
+}
+
+// AutoupdatePolicy is the isu-w4 fleet-autoupdate POLICY the control plane echoes
+// back from PATCH /v1/barkparks/:id/autoupdate: whether the instance rides new
+// blessed releases (Enabled, the opt-out master), a temporary hold (Paused), and
+// a version freeze (PinnedRelease, empty = unpinned). The three team-facing
+// levers `bp cloud autoupdate` drives, reflected as they landed.
+//
+// Honest limit (charter OC10, spike-resolved): pinning HOLDS an instance at or
+// above its current version — it does not roll back. The CLI's receipts say so;
+// the pin is a freeze flag, not a downgrade target.
+type AutoupdatePolicy struct {
+	Enabled       bool   `json:"enabled"`
+	Paused        bool   `json:"paused"`
+	PinnedRelease string `json:"pinned_release"`
+}
+
+// SetAutoupdate PATCHes an instance's autoupdate policy via
+// PATCH /v1/barkparks/:id/autoupdate (Bearer, team-admin-gated). `patch` carries
+// ONLY the levers the caller is changing — the route is a partial update, so
+// absent keys are left untouched server-side. The narrow set the route accepts
+// (and this client sends): `autoupdate_enabled`, `autoupdate_paused`,
+// `pinned_release` (a blank pin normalises to unpinned on the server). A 200
+// decodes the resulting {ok, autoupdate:{enabled,paused,pinned_release}}; a 404
+// (wrong team / no such id — the SAME no-leak 404) surfaces as
+// *CloudRouteError{Code:"not_found"}, a 422 as *CloudRouteError{Code:"invalid"}.
+func (c *Client) SetAutoupdate(ctx context.Context, id string, patch map[string]any) (AutoupdatePolicy, error) {
+	status, body, err := c.do(ctx, "PATCH", "/v1/barkparks/"+esc(id)+"/autoupdate", true, patch)
+	if err != nil {
+		return AutoupdatePolicy{}, err
+	}
+	if !ok(status) {
+		return AutoupdatePolicy{}, routeError(status, body)
+	}
+	var env struct {
+		Autoupdate AutoupdatePolicy `json:"autoupdate"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return AutoupdatePolicy{}, fmt.Errorf("decode autoupdate response: %w", err)
+	}
+	return env.Autoupdate, nil
+}
+
+// RolloutState is the FLEET-WIDE autoupdate rollout the admin route governs
+// (GET/POST /v1/admin/autoupdate*, isu-w5). `Halted` is the one lever
+// halt/resume toggle — the global stop that pauses the AutoupdateRolloutWorker
+// from advancing ANY instance (the emergency brake when a blessed release turns
+// out bad). The counters are POINTERS so the CLI renders only what the control
+// plane actually reported: an older CP (or one that ships a leaner envelope from
+// the sibling emission slice) omits them and they stay nil — an honest "not
+// reported", never a fabricated zero. Raw is the envelope bytes verbatim so
+// `-o json` re-emits the contract without this client becoming a second,
+// drifting definition of it.
+type RolloutState struct {
+	Raw      []byte `json:"-"`
+	Halted   bool   `json:"halted"`
+	InFlight *int   `json:"in_flight"`
+	Behind   *int   `json:"behind"`
+	Eligible *int   `json:"eligible"`
+}
+
+// rolloutRequest issues one admin-autoupdate call (the shared GET status / POST
+// halt / POST resume core) and decodes the RolloutState, keeping the raw bytes.
+// A non-2xx surfaces through routeError so a 404 (an older control plane without
+// the rollout route) is a *CloudRouteError the CLI can degrade honestly and a
+// 401 keeps its "unauthorized:" prefix.
+func (c *Client) rolloutRequest(ctx context.Context, method, path string) (RolloutState, error) {
+	status, body, err := c.do(ctx, method, path, true, nil)
+	if err != nil {
+		return RolloutState{}, err
+	}
+	if !ok(status) {
+		return RolloutState{}, routeError(status, body)
+	}
+	res := RolloutState{Raw: body}
+	if err := json.Unmarshal(body, &res); err != nil {
+		return RolloutState{}, fmt.Errorf("decode rollout envelope: %w", err)
+	}
+	return res, nil
+}
+
+// RolloutStatus reads the fleet rollout state via GET /v1/admin/autoupdate
+// (Bearer, admin). Read-only — it never advances or halts anything.
+func (c *Client) RolloutStatus(ctx context.Context) (RolloutState, error) {
+	return c.rolloutRequest(ctx, "GET", "/v1/admin/autoupdate")
+}
+
+// RolloutHalt stops the fleet rollout via POST /v1/admin/autoupdate/halt
+// (Bearer, admin) — the global brake. Returns the resulting (halted) state.
+func (c *Client) RolloutHalt(ctx context.Context) (RolloutState, error) {
+	return c.rolloutRequest(ctx, "POST", "/v1/admin/autoupdate/halt")
+}
+
+// RolloutResume restarts a halted fleet rollout via
+// POST /v1/admin/autoupdate/resume (Bearer, admin). Returns the resulting state.
+func (c *Client) RolloutResume(ctx context.Context) (RolloutState, error) {
+	return c.rolloutRequest(ctx, "POST", "/v1/admin/autoupdate/resume")
 }
