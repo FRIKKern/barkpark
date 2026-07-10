@@ -26,8 +26,11 @@ var goldenWidths = []int{40, 60, 80, 120}
 // AdaptiveColor resolution is stable regardless of the host terminal.
 func testRegistry() *Registry {
 	// lipgloss color profile is process-global; pin it to Ascii (no color) so
-	// styles render as plain text and goldens are byte-stable in CI.
-	lipgloss.SetColorProfile(0) // termenv.Ascii == 0 → strips all color/style
+	// styles render as plain text and goldens are byte-stable in CI. The termenv
+	// enum is INVERTED (TrueColor=0, ANSI256=1, ANSI=2, Ascii=3) — Ascii is 3, NOT
+	// 0. (The old `SetColorProfile(0)` here was TrueColor; goldens stayed stable
+	// only because renderFixture ansi.Strips the output regardless.)
+	lipgloss.SetColorProfile(3) // termenv.Ascii == 3 → strips all color/style
 	return DefaultRegistry(DarkTheme())
 }
 
