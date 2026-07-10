@@ -7,8 +7,9 @@
 > epic-complete Wave log entries land THERE (close-out slice), not here. This file is the
 > memory of the leak-seal wave only.
 
-Epic anchor: bp task slug **`airdrop-grants`** (published, lifecycle open, claim null,
-26 children — 24 done, 2 open = the two confirmed leaks). Server: guerrilla.
+Epic anchor: bp task slug **`airdrop-grants`** — CLOSED 2026-07-10 (lifecycle done, honest
+acceptance_criteria stamped; all children done; sole residual = standalone
+`ag-broadcast-revoked-residual`). Server: guerrilla.
 
 ## Vision
 
@@ -186,3 +187,23 @@ specced (D10 stamp anchor, D11 wave-log debt in bp-airdrop-grants-endgame-charte
 D12 file the ONE broadcast_revoked backlog task, close the anchor). Note the closeout
 claim (epoch 1) may lapse — re-claim before closing. After that: NOTHING remains on this
 epic.
+
+### Wave 2026-07-10 (evening) — seals merged, close-out executed, EPIC COMPLETE
+
+The lead deviated from D7's two-PR order: both seal branches integrated on ONE branch and
+merged as the **single PR #2177** (`integrate/airdrop-seal`, squash 989a9c75,
+2026-07-10T14:54:45Z) — there were never two seal PRs (D10's "two seal PRs" line is
+superseded; the PR body carries only `Task: ag-search-grant-leak`). Deploy run 29101630245
+green → live on guerrilla. First-hand proof at merged HEAD: both deny files → **8 tests,
+0 failures**. CI honesty (D15): #2177's required Elixir check concluded FAILURE — 10
+pre-existing ChatLiveTest reds identical on base, repaired post-merge by #2192 (ecff8270);
+never recorded as "gate green". A live guerrilla grantee-denial smoke was proven IMPOSSIBLE
+with disposable resources (D14) and never executed.
+
+**ag-epic-closeout** then ran as specced: poisoned criterion-5 evidence on
+`ag-search-grant-leak` corrected to the honest CI story + first-hand 8/0; the D11 wave-log
+debt paid in `bp-airdrop-grants-endgame-charter.md` (adopted 48a18f85 retro corrected to
+the authoritative 6,348 full-battery count + the epic-complete entry); the anchor
+`airdrop-grants` stamped with published acceptance_criteria carrying the full evidence
+trail and a truthful close_reason; residual `ag-broadcast-revoked-residual` verified
+published/standalone/priority 3 (D12). The epic is CLOSED — nothing remains.
