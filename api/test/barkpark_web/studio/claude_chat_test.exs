@@ -188,6 +188,115 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # Charter D63/D64 — the loopback flags, proven through the PURE seam (D9):
+  # Session.init writes the temp config file; build_args only references it.
+  describe "mcp loopback args (charter D63/D64, pure D9 seam)" do
+    @cfg "/tmp/barkpark-claude-x.mcp.json"
+
+    test "an mcp config path rides as --mcp-config <path> --strict-mcp-config" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid, mcp_config_path: @cfg})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--mcp-config", @cfg])
+      # strict: ours is the ONLY server — the host's saved MCP config (whose
+      # bp inherits host ADMIN, proven live) must never merge in.
+      assert "--strict-mcp-config" in args
+    end
+
+    test "absent mcp config ⇒ neither flag (back-compat)" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid})
+      refute "--mcp-config" in args
+      refute "--strict-mcp-config" in args
+    end
+
+    test "mcp_config/1 shape: bp mcp serve --tools all + a COMPLETE env block" do
+      config = ClaudeChat.mcp_config("bpcs_secret")
+      assert %{"mcpServers" => %{"barkpark" => server}} = config
+      assert server["command"] == "bp"
+      assert server["args"] == ["mcp", "serve", "--tools", "all"]
+      # BOTH url and token pinned: the child bp never falls back to the
+      # host's saved credentials (no admin inheritance — D63).
+      assert %{"BARKPARK_API_URL" => url, "BARKPARK_API_TOKEN" => "bpcs_secret"} =
+               server["env"]
+
+      assert is_binary(url) and url != ""
+    end
+
+    test "plan mode road-blocks Workflow (D65/D68 fail-closed until S3's verdict)" do
+      args = ClaudeChat.build_args("plan", %{session_id: @uuid})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--disallowedTools", "Workflow"])
+    end
+
+    test "an UNARMED bypass falls back to plan and carries the road-block too" do
+      args = ClaudeChat.build_args("bypassPermissions", %{session_id: @uuid})
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--permission-mode", "plan"])
+      assert Enum.chunk_every(args, 2, 1) |> Enum.member?(["--disallowedTools", "Workflow"])
+    end
+
+    test "asking modes do NOT road-block Workflow (their asks reach the human)" do
+      for mode <- ["acceptEdits", "auto", "dontAsk", "manual"] do
+        args = ClaudeChat.build_args(mode, %{session_id: @uuid})
+        refute "--disallowedTools" in args, "#{mode} unexpectedly disallows tools"
+      end
+    end
+  end
+
+  # Charter D64/D65 — the loopback tool vocabulary (fail-closed allowlist).
+  describe "loopback tool vocabulary (charter D64/D65)" do
+    test "mcp_tool?/1 matches ONLY our server's prefix" do
+      assert ClaudeChat.mcp_tool?("mcp__barkpark__task_ready")
+      assert ClaudeChat.mcp_tool?("mcp__barkpark__bp_search_query")
+      refute ClaudeChat.mcp_tool?("Bash")
+      refute ClaudeChat.mcp_tool?("mcp__github__get_issue")
+      refute ClaudeChat.mcp_tool?(nil)
+    end
+
+    test "mcp_tool_name/1 strips our prefix; nil for everything else" do
+      assert ClaudeChat.mcp_tool_name("mcp__barkpark__task_ready") == "task_ready"
+      assert ClaudeChat.mcp_tool_name("mcp__barkpark__bp_doc_get") == "bp_doc_get"
+      assert ClaudeChat.mcp_tool_name("Read") == nil
+      assert ClaudeChat.mcp_tool_name("mcp__github__x") == nil
+    end
+
+    test "read-only loopback tools auto-approve (D65)" do
+      for tool <- ~w(task_ready task_show task_prime bp_task_get bp_doc_get
+                     bp_doc_ls bp_doc_query bp_search_query) do
+        assert ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
+               "#{tool} should auto-approve"
+      end
+    end
+
+    test "mutating (and merely unlisted) tools NEVER auto-approve — fail closed" do
+      # task_next CLAIMS a task; create/close/publish write; auth_* mutate
+      # credentials; anything unknown fails closed onto the approval card.
+      for tool <- ~w(task_next task_create task_close bp_doc_create bp_doc_patch
+                     bp_doc_publish bp_auth_login bp_secret_get bp_never_heard_of_it) do
+        refute ClaudeChat.mcp_auto_approved?("mcp__barkpark__#{tool}"),
+               "#{tool} must NOT auto-approve"
+      end
+
+      refute ClaudeChat.mcp_auto_approved?("Bash")
+      refute ClaudeChat.mcp_auto_approved?("mcp__github__get_issue")
+      refute ClaudeChat.mcp_auto_approved?(nil)
+    end
+
+    test "mcp_connected?/1 derives the Capabilities.mcp_tools truth off the init frame" do
+      assert ClaudeChat.mcp_connected?(%{
+               "mcp_servers" => [%{"name" => "barkpark", "status" => "connected"}]
+             })
+
+      refute ClaudeChat.mcp_connected?(%{
+               "mcp_servers" => [%{"name" => "barkpark", "status" => "failed"}]
+             })
+
+      refute ClaudeChat.mcp_connected?(%{
+               "mcp_servers" => [%{"name" => "github", "status" => "connected"}]
+             })
+
+      refute ClaudeChat.mcp_connected?(%{"mcp_servers" => []})
+      refute ClaudeChat.mcp_connected?(%{})
+      refute ClaudeChat.mcp_connected?(nil)
+    end
+  end
+
   describe "permission bridge (control protocol)" do
     @can_use_tool ~s({"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/tmp/x"},"title":"Claude wants to write /tmp/x"}})
 

@@ -115,11 +115,15 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   """
   @spec build_args(String.t(), map()) :: [String.t()]
   def build_args(mode, session_opts \\ %{}) do
-    default_args(permission_mode(mode, session_opts)) ++
+    effective_mode = permission_mode(mode, session_opts)
+
+    default_args(effective_mode) ++
+      disallowed_args(effective_mode) ++
       bypass_args(mode, session_opts) ++
       session_args(session_opts) ++
       model_args(session_opts) ++
-      effort_args(session_opts)
+      effort_args(session_opts) ++
+      mcp_args(session_opts)
   end
 
   # The permission mode that actually reaches `--permission-mode`. bypassPermissions
@@ -137,6 +141,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     do: ["--allow-dangerously-skip-permissions"]
 
   defp bypass_args(_mode, _opts), do: []
+
+  # Plan mode is fail-closed for WRITES (charter D65/D68): the Workflow tool
+  # can launch a whole epic-cycle — a write-heavy act — and the wave-12 probes
+  # found post-plan permissionMode still "default" on 2.1.206. Until S3's
+  # scripted-deny verdict PROVES plan mode gates Skill/Workflow under real
+  # argv, plan spawns road-block the tool outright. Applied to the EFFECTIVE
+  # mode, so an unarmed bypass (which falls back to plan) is covered too.
+  defp disallowed_args("plan"), do: ["--disallowedTools", "Workflow"]
+  defp disallowed_args(_), do: []
+
+  # The loopback MCP config flags (charter D64). Session.init WRITES the
+  # per-session temp config file (impure — its job); build_args stays PURE
+  # (D9) and merely references the path. `--strict-mcp-config` makes ours the
+  # ONLY server: the CLI must never merge the host's saved MCP config, whose
+  # `bp` would inherit the host's ADMIN credentials (proven live, wave-12 V1).
+  defp mcp_args(%{mcp_config_path: path}) when is_binary(path),
+    do: ["--mcp-config", path, "--strict-mcp-config"]
+
+  defp mcp_args(_), do: []
 
   # A chosen reasoning-effort tier rides the spawn (`--effort <tier>`); absent =
   # the CLI's own default. Allowlisted tiers only — an unknown value omits the
@@ -197,6 +220,109 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def normalize_mode(mode) when mode in @normalizable_modes, do: mode
   def normalize_mode(_), do: @default_mode
 
+  # ── loopback MCP server (charter D63/D64/D65) ─────────────────────────────
+
+  # Our MCP server registers as "barkpark", so every loopback tool arrives on
+  # the wire as `mcp__barkpark__<tool>` — dispatching on OUR server's names is
+  # a narrow, deliberate D38 exception.
+  @mcp_tool_prefix "mcp__barkpark__"
+
+  # The read-only loopback tools that AUTO-APPROVE at the ask seam (charter
+  # D65) — in EVERY mode, plan included. A tight full-name allowlist, FAIL
+  # CLOSED: anything not listed (task_next CLAIMS, task_create/doc_create
+  # WRITE, and the `bp_auth_*` verbs mutate credentials even where the
+  # manifest marks them non-writing) surfaces the D31 approval card instead.
+  # Curated task reads + the bridged task/doc/search reads (`bp_<noun>_<verb>`
+  # per mcp_bridge.go's naming).
+  @mcp_auto_approve_tools ~w(
+    task_ready task_show task_prime
+    bp_task_get bp_task_ready bp_task_prime
+    bp_doc_get bp_doc_ls bp_doc_query bp_doc_backlinks bp_doc_history bp_doc_revision
+    bp_search_query
+  )
+
+  @doc "True when `name` is one of OUR loopback server's tools (charter D64)."
+  @spec mcp_tool?(term()) :: boolean()
+  def mcp_tool?(name) when is_binary(name), do: String.starts_with?(name, @mcp_tool_prefix)
+  def mcp_tool?(_), do: false
+
+  @doc "The bare tool behind OUR server prefix (`nil` for any other tool)."
+  @spec mcp_tool_name(term()) :: String.t() | nil
+  def mcp_tool_name(@mcp_tool_prefix <> tool), do: tool
+  def mcp_tool_name(_), do: nil
+
+  @doc """
+  D65 permission policy, decided at the single D31 ask-routing seam: a
+  READ-ONLY loopback tool auto-approves in every mode; everything else —
+  every mutating loopback tool, every non-loopback tool — falls through to
+  the honest approval card (that ping IS the workday demo). Fail-closed
+  full-name allowlist; plan mode never auto-approves a write.
+  """
+  @spec mcp_auto_approved?(term()) :: boolean()
+  def mcp_auto_approved?(@mcp_tool_prefix <> tool), do: tool in @mcp_auto_approve_tools
+  def mcp_auto_approved?(_), do: false
+
+  @doc """
+  Whether a `system/init` frame reports OUR loopback server connected — the
+  derivation `%Capabilities{}` (scc-w12-capabilities) reads for its
+  `mcp_tools` flag. Pure over the frame; false for anything else, including a
+  server that is present but failed.
+  """
+  @spec mcp_connected?(term()) :: boolean()
+  def mcp_connected?(%{"mcp_servers" => servers}) when is_list(servers) do
+    Enum.any?(servers, fn
+      %{"name" => "barkpark", "status" => "connected"} -> true
+      _ -> false
+    end)
+  end
+
+  def mcp_connected?(_), do: false
+
+  @doc """
+  The per-session MCP config map (charter D63/D64) — `Session.init` serializes
+  it into a temp file that `--mcp-config` references. ONE server: Barkpark
+  itself, through `bp mcp serve --tools all` (`all` because the paper + search
+  legs need the bridged verbs, not just the curated task six). The env block
+  is the credential seam: BOTH `BARKPARK_API_URL` and `BARKPARK_API_TOKEN` are
+  set so the child `bp` NEVER falls back to the host's saved config — the
+  host's credential is typically ADMIN (proven live, wave-12 V1), and the
+  short-lived minted session token is the whole point. Pure (data in, data
+  out) so the shape is unit-testable without a session.
+  """
+  @spec mcp_config(String.t()) :: map()
+  def mcp_config(raw_token) when is_binary(raw_token) do
+    %{
+      "mcpServers" => %{
+        "barkpark" => %{
+          "command" => Keyword.get(config(), :bp_binary, "bp"),
+          "args" => ["mcp", "serve", "--tools", "all"],
+          "env" => %{
+            "BARKPARK_API_URL" => mcp_api_url(),
+            "BARKPARK_API_TOKEN" => raw_token
+          }
+        }
+      }
+    }
+  end
+
+  @doc """
+  The API URL the loopback `bp mcp serve` child talks to. Config
+  `:mcp_api_url` when set; otherwise the LOCAL listener
+  (`http://127.0.0.1:<endpoint port>`) — the child runs on this host, so the
+  loopback address skips the public proxy and works before any DNS/TLS exists.
+  """
+  @spec mcp_api_url() :: String.t()
+  def mcp_api_url do
+    Keyword.get(config(), :mcp_api_url) || default_mcp_api_url()
+  end
+
+  defp default_mcp_api_url do
+    http = :barkpark |> Application.get_env(BarkparkWeb.Endpoint, []) |> Keyword.get(:http)
+    port = if is_list(http), do: Keyword.get(http, :port, 4000), else: 4000
+    port = if is_integer(port), do: port, else: 4000
+    "http://127.0.0.1:#{port}"
+  end
+
   defp default_args(mode) do
     [
       "--print",
@@ -247,6 +373,15 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     Prefer a chart or stats block over a markdown table of numbers; prefer a \
     callout for warnings and key takeaways. Keep JSON valid — malformed \
     fences degrade to a raw code block.
+
+    When your Barkpark tools (mcp__barkpark__*) are connected, use them to \
+    read and file bp tasks, create and edit Papers, and search content — \
+    read tools run without asking; writes surface an approval card to the \
+    human. To plan AND execute a feature end-to-end, launch the epic cycle: \
+    invoke the bp-epic-cycle skill via the Skill tool with the wish as its \
+    argument — Skill(skill: "bp-epic-cycle", args: "<the user's one-sentence \
+    wish>"); the workflow reads it as args.wish. Track follow-up work as bp \
+    tasks, never as markdown TODO lists.
     """
   end
 
@@ -521,11 +656,30 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def init(%{sink: sink} = opts) do
-      {exe, args} =
-        ClaudeChat.command(Map.get(opts, :mode, "plan"), Map.get(opts, :session_opts, %{}))
+      session_opts = Map.get(opts, :session_opts, %{})
+
+      # Give the subprocess its hands BEFORE the argv is assembled (charter
+      # D63/D64): mint the session-scoped token and write the per-session temp
+      # mcp-config here — init owns the impure work; `build_args/2` stays pure
+      # (D9) and merely references the path. Fail-closed AND fail-soft: no
+      # minter, a refused mint, or a failed write ⇒ the chat spawns exactly as
+      # before, without loopback hands — never a dead chat, never
+      # host-credential inheritance.
+      mcp = setup_mcp(opts, session_opts)
+
+      session_opts =
+        case mcp do
+          %{config_path: path} -> Map.put(session_opts, :mcp_config_path, path)
+          _ -> session_opts
+        end
+
+      {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"), session_opts)
 
       case System.find_executable(exe) do
         nil ->
+          # An init-time stop skips terminate/2 — release the minted credential
+          # + temp config inline so neither outlives a spawn that never was.
+          cleanup_mcp(%{mcp_token: mcp[:token], mcp_config_path: mcp[:config_path]})
           {:stop, :binary_not_found}
 
         path ->
@@ -564,6 +718,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
              sink: sink,
              sink_ref: sink_ref,
              stderr_path: stderr_path,
+             # The loopback credential + temp config (charter D63/D64): revoked
+             # and removed in BOTH terminate clauses; the token's short TTL is
+             # the crash backstop. The STRUCT rides state (for revocation) —
+             # never the raw secret, which exists only inside the config file.
+             mcp_token: mcp[:token],
+             mcp_config_path: mcp[:config_path],
              buffer: "",
              pending_controls: %{},
              # request_id → the ORIGINAL ask input, tracked so a plain `:allow`
@@ -701,6 +861,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       # Closing the Port closes the subprocess's stdin; the CLI exits on EOF.
       if port in Port.list(), do: Port.close(port)
       cleanup_stderr(state)
+      cleanup_mcp(state)
       :ok
     rescue
       _ -> :ok
@@ -708,6 +869,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     def terminate(_reason, state) do
       cleanup_stderr(state)
+      cleanup_mcp(state)
       :ok
     end
 
@@ -715,6 +877,109 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # it on every teardown path (clean close, exit, crash). Best-effort.
     defp cleanup_stderr(%{stderr_path: path}) when is_binary(path), do: File.rm(path)
     defp cleanup_stderr(_), do: :ok
+
+    # The loopback credential + temp config must not outlive the session
+    # (charter D63): revoke the token (idempotent — a re-revoke merely
+    # re-stamps `revoked_at`) and remove the config file on EVERY teardown
+    # path, mirroring cleanup_stderr. Total and best-effort: a dead Repo at
+    # teardown must never turn a normal stop into a crash — the token's short
+    # TTL is the crash backstop.
+    defp cleanup_mcp(%{mcp_token: token} = state) when not is_nil(token) do
+      safe_revoke(token)
+      cleanup_mcp_file(state)
+    end
+
+    defp cleanup_mcp(state) when is_map(state), do: cleanup_mcp_file(state)
+    defp cleanup_mcp(_), do: :ok
+
+    defp cleanup_mcp_file(%{mcp_config_path: path}) when is_binary(path), do: File.rm(path)
+    defp cleanup_mcp_file(_), do: :ok
+
+    # Revoke BY ID, never by the held struct: a row that vanished under us
+    # (a test sandbox rollback; an operator hard-delete) is a clean
+    # `:not_found` on the id path — a struct changeset would raise
+    # StaleEntryError. `catch` covers DB exits (a Repo already shut down at
+    # teardown) as well as exceptions: teardown never crashes over cleanup.
+    # Sandbox-teardown races (the ownership process died WITH the session —
+    # the row was rolled back with it) log at debug; anything else warns, and
+    # the token's short TTL backstops a genuinely unreachable Repo.
+    defp safe_revoke(%{id: token_id}) when is_binary(token_id) do
+      _ = Barkpark.Auth.revoke_token(token_id)
+      :ok
+    rescue
+      e in DBConnection.OwnershipError ->
+        Logger.debug("claude chat: mcp token revoke skipped (sandbox gone): #{inspect(e)}")
+        :ok
+
+      e ->
+        Logger.warning("claude chat: mcp token revoke failed: #{inspect(e)}")
+        :ok
+    catch
+      :exit, reason ->
+        Logger.debug("claude chat: mcp token revoke skipped (repo down): #{inspect(reason)}")
+        :ok
+    end
+
+    defp safe_revoke(_), do: :ok
+
+    # Mint the loopback credential + write the per-session mcp-config (charter
+    # D63/D64). Only a session that carries a `:minter` principal — the chat
+    # admin's api_token/user, threaded from the socket — gets hands, and never
+    # more rights than that human holds (`Auth.create_claude_session_token/3`
+    # authorizes the mint up front via Tenancy.Auth.authorize/3). The raw
+    # token exists ONLY inside the temp file's env block; the returned map
+    # carries the STRUCT (for revocation), never the secret. Any failure logs
+    # and returns nil — the chat spawns without loopback, never dead.
+    defp setup_mcp(opts, %{minter: minter}) when not is_nil(minter) do
+      session_id = pinned_session_id(opts) || "anonymous"
+
+      case Barkpark.Auth.create_claude_session_token(minter, session_id) do
+        {:ok, {raw, token}} ->
+          path = mcp_config_path(opts)
+          json = Jason.encode!(ClaudeChat.mcp_config(raw))
+
+          # 0600 BEFORE the secret lands: create empty, clamp perms, then write.
+          with :ok <- File.touch(path),
+               :ok <- File.chmod(path, 0o600),
+               :ok <- File.write(path, json) do
+            %{token: token, config_path: path}
+          else
+            {:error, reason} ->
+              Logger.warning(
+                "claude chat: mcp config write failed (#{inspect(reason)}) — spawning without loopback"
+              )
+
+              safe_revoke(token)
+              _ = File.rm(path)
+              nil
+          end
+
+        {:error, reason} ->
+          Logger.warning(
+            "claude chat: mcp token mint refused (#{inspect(reason)}) — spawning without loopback"
+          )
+
+          nil
+      end
+    rescue
+      e ->
+        Logger.warning("claude chat: mcp setup crashed (#{inspect(e)}) — spawning without loopback")
+        nil
+    end
+
+    defp setup_mcp(_opts, _session_opts), do: nil
+
+    # The per-session temp mcp-config file — the stderr_path keying pattern
+    # (pinned session id, or a unique anon token); removed on every teardown.
+    defp mcp_config_path(opts) do
+      token =
+        case pinned_session_id(opts) do
+          id when is_binary(id) -> id
+          _ -> "anon-#{System.unique_integer([:positive])}-#{System.system_time(:nanosecond)}"
+        end
+
+      Path.join(System.tmp_dir!(), "barkpark-claude-#{token}.mcp.json")
+    end
 
     # A per-session file for the child's stderr. Keyed by the pinned session id
     # (stable across a resume respawn) or a unique token for an anonymous chat;
