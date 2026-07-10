@@ -2,6 +2,7 @@ defmodule Barkpark.Auth do
   @moduledoc "Context for API token authentication."
 
   import Ecto.Query
+  alias Barkpark.Audit
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Auth.LoginTicket
@@ -200,6 +201,27 @@ defmodule Barkpark.Auth do
     token
     |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
     |> Repo.update()
+    |> case do
+      {:ok, revoked} = ok ->
+        # A revoke is a standing-credential lifecycle event — audit it. `subject`
+        # is the token id; `owner_user_id` distinguishes a user PAT from a
+        # machine/share token for the audit reader.
+        Audit.emit(%{
+          category: "token",
+          action: "token_revoked",
+          subject: revoked.id,
+          actor_type: "system",
+          metadata: %{
+            "owner_user_id" => revoked.owner_user_id,
+            "share_scope" => revoked.share_scope
+          }
+        })
+
+        ok
+
+      err ->
+        err
+    end
   end
 
   def revoke_token(token_id) when is_binary(token_id) do

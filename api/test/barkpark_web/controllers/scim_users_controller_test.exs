@@ -2,7 +2,8 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
   @moduledoc "SCIM 2.0 /scim/v2/Users — provision + instant deprovision (era-w4-scim-users)."
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Accounts, Repo, Scim, Tenancy}
+  alias Barkpark.{Accounts, Auth, Repo, Scim, Tenancy}
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Audit.Event
   alias Barkpark.Tenancy.Membership
   import Ecto.Query
@@ -109,6 +110,100 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
 
       # soft: the user row survives
       assert Accounts.get_user(user.id)
+    end
+  end
+
+  # era-w8: a killed session was not enough — a deprovisioned user who minted a
+  # Personal Access Token (owner_user_id == user.id) kept a LIVE bearer, because
+  # verify_token/1 never reads owner_user_id. Deprovision now stamps revoked_at on
+  # every owner-bound PAT, BEFORE the hard-delete nilifies owner_user_id.
+  describe "deprovision revokes owner-bound PATs (era-w8 runtime leak)" do
+    # Mint a PAT hard-bound to `user` in `ws` (the session-gated self-mint shape).
+    defp owner_pat(user, ws) do
+      {:ok, {raw, token}} =
+        Auth.create_personal_access_token("device", ["read"],
+          role: "member",
+          workspace_id: ws.id,
+          owner_user_id: user.id
+        )
+
+      {raw, token}
+    end
+
+    test "DELETE (hard) revokes the PAT — verify_token → {:error, :unauthorized}" do
+      %{token: scim_token, ws: ws} = org_with_ws("pat-hard")
+      provision(scim_token, "hard@pat-hard.com") |> json_response(201)
+      user = Accounts.get_user_by_email("hard@pat-hard.com")
+      {raw, pat} = owner_pat(user, ws)
+
+      # LIVE before deprovision (the leak precondition).
+      assert {:ok, %ApiToken{id: pat_id}} = Auth.verify_token(raw)
+      assert pat_id == pat.id
+
+      assert scim(scim_token) |> delete("/scim/v2/Users/#{user.id}") |> response(204)
+
+      # DENY-PATH: the raw PAT is dead the instant the user is deprovisioned.
+      assert {:error, :unauthorized} = Auth.verify_token(raw)
+      # revoked_at stamped BEFORE the FK nilified owner_user_id.
+      assert %ApiToken{revoked_at: %DateTime{}} = Repo.get(ApiToken, pat.id)
+    end
+
+    test "PATCH active:false (soft) revokes the PAT — verify_token → {:error, :unauthorized}" do
+      %{token: scim_token, ws: ws} = org_with_ws("pat-soft")
+      provision(scim_token, "soft@pat-soft.com") |> json_response(201)
+      user = Accounts.get_user_by_email("soft@pat-soft.com")
+      {raw, _pat} = owner_pat(user, ws)
+
+      assert {:ok, %ApiToken{}} = Auth.verify_token(raw)
+
+      body =
+        Jason.encode!(%{
+          "Operations" => [%{"op" => "replace", "path" => "active", "value" => false}]
+        })
+
+      assert scim(scim_token) |> patch("/scim/v2/Users/#{user.id}", body) |> json_response(200)
+
+      # DENY-PATH: soft deprovision (row survives) still kills the PAT.
+      assert {:error, :unauthorized} = Auth.verify_token(raw)
+      assert Accounts.get_user(user.id)
+    end
+
+    test "the revoke is owner-scoped — a NON-owner (machine) token survives" do
+      %{token: scim_token, ws: ws} = org_with_ws("pat-scoped")
+      provision(scim_token, "keep@pat-scoped.com") |> json_response(201)
+      user = Accounts.get_user_by_email("keep@pat-scoped.com")
+      {owner_raw, _} = owner_pat(user, ws)
+
+      # A machine token (owner_user_id NULL) — the shape a share-edit token also
+      # takes (scope-keyed, never owner-bound). It must NOT be swept.
+      {:ok, machine} =
+        %ApiToken{}
+        |> ApiToken.changeset(%{
+          token_hash: ApiToken.hash_token("machine-raw-token"),
+          permissions: ["read"],
+          dataset: "production"
+        })
+        |> Repo.insert()
+
+      assert scim(scim_token) |> delete("/scim/v2/Users/#{user.id}") |> response(204)
+
+      assert {:error, :unauthorized} = Auth.verify_token(owner_raw)
+      # The non-owner token is untouched: WHERE owner_user_id == user.id is precise.
+      assert is_nil(Repo.get(ApiToken, machine.id).revoked_at)
+    end
+
+    test "audits the token revocation (token/user_tokens_revoked)" do
+      %{token: scim_token, ws: ws} = org_with_ws("pat-audit")
+      provision(scim_token, "aud@pat-audit.com") |> json_response(201)
+      user = Accounts.get_user_by_email("aud@pat-audit.com")
+      owner_pat(user, ws)
+
+      assert scim(scim_token) |> delete("/scim/v2/Users/#{user.id}") |> response(204)
+
+      ev = Repo.one(from e in Event, where: e.action == "user_tokens_revoked")
+      assert ev.category == "token"
+      assert ev.subject == user.id
+      assert ev.metadata["tokens_revoked"] == 1
     end
   end
 

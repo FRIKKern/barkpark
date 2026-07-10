@@ -20,4 +20,25 @@ defmodule Barkpark.ScimMintAuditTest do
     # the emit is in the context, so it fires regardless of caller (portal or API)
     assert :ok == Audit.verify_chain(nil)
   end
+
+  test "create_group / delete_group emit membership lifecycle audit events" do
+    {:ok, org} = Tenancy.create_organization(%{slug: "grpaudit", name: "Group Audit"})
+
+    assert {:ok, group} =
+             Scim.create_group(org, %{"displayName" => "Editors", "role" => "member"})
+
+    created = Repo.one(from e in Event, where: e.action == "scim_group_created")
+    assert created.category == "membership"
+    assert created.subject == group.id
+    assert created.metadata["group"] == "Editors"
+    assert created.metadata["role"] == "member"
+
+    assert {:ok, 1} = Scim.delete_group(org, group)
+
+    deleted = Repo.one(from e in Event, where: e.action == "scim_group_deleted")
+    assert deleted.category == "membership"
+    assert deleted.subject == group.id
+
+    assert :ok == Audit.verify_chain(nil)
+  end
 end

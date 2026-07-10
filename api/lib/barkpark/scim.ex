@@ -16,6 +16,7 @@ defmodule Barkpark.Scim do
 
   alias Barkpark.{Accounts, Audit, Repo, Tenancy}
   alias Barkpark.Accounts.User
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Scim.{Group, Token}
   alias Barkpark.Tenancy.{Membership, Organization, Role, Workspace}
 
@@ -103,9 +104,24 @@ defmodule Barkpark.Scim do
   end
 
   @doc """
-  Deprovision `user` from `org`: revoke ALL sessions, drop every membership in
-  the org's workspaces, and (when `hard: true`, the SCIM DELETE) remove the user
-  row. Emits a `user_deprovisioned` audit event. Returns a summary.
+  Deprovision `user` from `org`: revoke ALL sessions, revoke every owner-bound
+  Personal Access Token, drop every membership in the org's workspaces, and
+  (when `hard: true`, the SCIM DELETE) remove the user row. Emits a
+  `user_deprovisioned` audit event. Returns a summary.
+
+  ## Why the PAT revoke lives INSIDE this transaction, BEFORE the hard-delete
+
+  A killed session is not enough: a deprovisioned user who minted a PAT
+  (`owner_user_id == user.id`) would otherwise keep a LIVE bearer even after
+  their session dies — `Auth.verify_token/1` never reads `owner_user_id`, so a
+  soft deprovision leaves the token resolving. We therefore stamp `revoked_at`
+  on every live owner-bound token here.
+
+  Sequencing is load-bearing: the `owner_user_id` FK is `on_delete: :nilify_all`,
+  so once `Repo.delete!(user)` runs the column is nilified and NO key remains to
+  find the tokens. The revoke MUST precede the hard-delete. Share-edit tokens
+  are scope-keyed (`share_scope`, `owner_user_id` NULL) and are deliberately
+  untouched — they are revoked with their share, not their minter.
   """
   @spec deprovision_user(Organization.t(), User.t(), keyword()) :: {:ok, map()}
   def deprovision_user(%Organization{} = org, %User{} = user, opts \\ []) do
@@ -123,12 +139,48 @@ defmodule Barkpark.Scim do
                 m.workspace_id in ^ws_ids
         )
 
-      audit(org, user, "user_deprovisioned", %{"hard" => hard, "memberships_dropped" => dropped})
+      # BEFORE the hard-delete nilifies owner_user_id (FK on_delete: :nilify_all).
+      tokens_revoked = revoke_owner_tokens(user)
+
+      audit(org, user, "user_deprovisioned", %{
+        "hard" => hard,
+        "memberships_dropped" => dropped,
+        "tokens_revoked" => tokens_revoked
+      })
 
       if hard, do: Repo.delete!(user)
 
-      %{memberships_dropped: dropped, hard: hard}
+      %{memberships_dropped: dropped, tokens_revoked: tokens_revoked, hard: hard}
     end)
+  end
+
+  # Stamp `revoked_at` on every LIVE api_token owned by this user, so
+  # `Auth.verify_token/1` rejects it immediately. Owner-bound PATs ONLY: share
+  # tokens (`share_scope` set, `owner_user_id` NULL) never match this WHERE and
+  # are left alone. Emits a `token/user_tokens_revoked` audit event when any
+  # token was killed (a standing credential lifecycle event).
+  defp revoke_owner_tokens(%User{id: user_id} = user) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    {n, _} =
+      Repo.update_all(
+        from(t in ApiToken,
+          where: t.owner_user_id == ^user_id and is_nil(t.revoked_at)
+        ),
+        set: [revoked_at: now]
+      )
+
+    if n > 0 do
+      Audit.emit(%{
+        category: "token",
+        action: "user_tokens_revoked",
+        subject: user.id,
+        actor_type: "scim",
+        metadata: %{"tokens_revoked" => n}
+      })
+    end
+
+    n
   end
 
   # ── Org-scoped reads ───────────────────────────────────────────────────────
@@ -241,6 +293,14 @@ defmodule Barkpark.Scim do
           external_id: attrs["externalId"]
         })
         |> Repo.insert()
+        |> case do
+          {:ok, group} = ok ->
+            audit_group_lifecycle(org, group, "scim_group_created")
+            ok
+
+          err ->
+            err
+        end
     end
   end
 
@@ -270,9 +330,13 @@ defmodule Barkpark.Scim do
   Returns `{:ok, deleted_count}` (0 when the group is not in this org).
   """
   @spec delete_group(Organization.t(), Group.t()) :: {:ok, non_neg_integer()}
-  def delete_group(%Organization{id: oid}, %Group{} = group) do
+  def delete_group(%Organization{id: oid} = org, %Group{} = group) do
     {n, _} =
       Repo.delete_all(from g in Group, where: g.id == ^group.id and g.organization_id == ^oid)
+
+    # Only audit a delete that actually removed the org's own group (n > 0) — a
+    # cross-org delete attempt matches nothing and is a no-op, not a lifecycle event.
+    if n > 0, do: audit_group_lifecycle(org, group, "scim_group_deleted")
 
     {:ok, n}
   end
@@ -330,6 +394,23 @@ defmodule Barkpark.Scim do
   end
 
   defp known_role?(_org, _), do: false
+
+  # Group create/delete lifecycle audit (membership category — a SCIM group maps
+  # to a Barkpark role grant). Subject is the group id; metadata names the org,
+  # display name and mapped role for the audit reader.
+  defp audit_group_lifecycle(org, %Group{} = group, action) do
+    Audit.emit(%{
+      category: "membership",
+      action: action,
+      subject: group.id,
+      actor_type: "scim",
+      metadata: %{
+        "organization_id" => org.id,
+        "group" => group.display_name,
+        "role" => group.role_name
+      }
+    })
+  end
 
   defp audit_group(org, user_id, group, action, role_name) do
     Audit.emit(%{
