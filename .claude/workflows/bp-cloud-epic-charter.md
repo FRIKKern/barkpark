@@ -1,162 +1,155 @@
-# Parity Page — recreate cfd0e75b in PortableDoc (parity-page epic charter)
+# PD-Layout-Engine + Doctrine Drafts — Ledger Reconcile (epic charter)
 
 > NOTE ON THIS PATH: this filename is the epic-cycle charter slot and has carried earlier
-> epics. Preserved verbatim: **pd-everything-editable** at
-> `bp-pd-everything-editable-charter.md` (plus the earlier occupants it names in its own
-> header note). This file is now the memory of the **parity-page** epic.
+> epics. Preserved verbatim: **parity-page** at `bp-parity-page-charter.md` (plus the
+> earlier occupants it names in its own header note). This file is now the memory of the
+> **pd-layout-engine ledger-reconcile** epic.
 
-Epic anchor: bp task slug **`parity-page`** ("Recreate the GUI↔TUI parity page (cfd0e75b)
-fully in PortableDoc", published, priority 1, GitHub #1438). Wave Paper:
-`parity-page-wave-2026-07-11`. Server: guerrilla. Flagship deliverable slug:
-**`gui-tui-parity-page`**.
+Epic anchor: bp task slug **`pd-layout-engine`** (published, GitHub #1425). Wave Paper:
+`pd-layout-engine-wave-2026-07-11`. Server: guerrilla. This is a **LEDGER wave**: the
+deliverable is truth — three stale-open ready anchors (`pd-layout-engine`,
+`drafts.pd-doctrine`, `drafts.pdd-m1`) closed on file:line + merged-PR + fresh-test-run
+evidence, every honest remainder parked as a live, well-named task. One small code slice
+exists only because verification proved two doc-notes false and one tripwire narrower
+than its claim.
 
 ## Vision
 
-One flagship PortableDoc paper on guerrilla, `gui-tui-parity-page`, that IS the GUI↔TUI
-parity page: eight sections mirroring the design-language spec, built entirely from
-native blocks — glyph rows as real shared-vocabulary text, board/detail side-by-sides as
-`section{layout:{mode:grid,tracks:2}}` grids of terminal/card/task blocks, the momentum
-header as the task-list's own derived tally, the white ladder as the zero-input
-`status-legend` block. Zero screenshots, zero code changes (none were needed — every
-block type renders on web + TUI + WASM today). The page doesn't depict parity; it renders
-through the very parity spine it documents. The 7 `parity-sN` children (+ new
-`parity-s8-goal`) close against SECTIONS of the one paper; the anchor closes with the
-live URL as evidence.
+None of the three anchors appear in `bp task ready`; each closed criterion carries
+evidence a stranger can re-run. The layout engine epic closes on its four merged waves
+(#1435/#1445/#1454/#1461) with its two open children honestly resolved — one
+superseded-by-decision with a named open successor, one answered by a per-block-type
+arbiter with the cards divergence ratified. The content-first doctrine tree stops being a
+false-done pocket: every rebrander hollow-close is retro-stamped with HEAD-verified
+evidence (REOPEN NOTHING that code proves), the corpus-APPLY human gate stays open with
+an executable recipe, and the three genuine coverage gaps live as filed backlog, not
+silence.
 
-## Non-negotiable operational facts (builders read FIRST)
+## Operational facts (builders read FIRST)
 
-- **Write law (proven live on `parity-page-probe-w1`):** `bp bulldocs publish <slug> -f
-  paper.json -s guerrilla --yes` ONCE with the full block skeleton (full replace, NO
-  CAS — never republish mid-build). Every subsequent edit: `bp doc get paper <slug> -s
-  guerrilla -o json` → read the top-level INTEGER `rev` (NOT the `_rev` hash) → `bp
-  bulldocs patch <slug> -f ops.json -s guerrilla --yes` where ops.json embeds
-  `"ifRev": <int>` in the body head. `--if-rev` alongside `-f` is silently dropped
-  (run.go:445). Stale ifRev 412s and applies nothing — that is correct behavior, re-read
-  and retry. Op vocabulary: append-block, insert-after, patch-block, replace-block,
-  remove-block, move-block.
-- **Env gotcha:** `BARKPARK_URL` in this environment points at api.barkpark.cloud —
-  pass `-s guerrilla` explicitly on EVERY bp command.
-- **Proven block shapes:** lift verbatim from `/tmp/probe_paper.json` +
-  `/tmp/probe_ops.json` (wave-1 probe) and the live `portabledoc-showcase` paper
-  (101 blocks; e.g. card slots fd-049, terminal fd-059, section grid fd-013, stat
-  fd-071). Paragraphs are `content:[{type:text,value:…}]` — never a bare `text` key.
-- **Momentum header is NOT a block type:** it renders automatically inside any
-  task-list whose static `snapshot` is non-empty (components.ex:57,643). Never author a
-  separate stat block for it. TUI shows one static spinner frame — caption it as a
-  static snapshot, never claim animation.
-- **status-legend takes ZERO input** (`{"type":"status-legend"}`) — rows derive from
-  design/status-manifest.json via StatusVocab. Never hand-type glyphs.
-- **task-list / task-board: static author-pinned `snapshot` rows** (offline-safe,
-  proven). Row shape: {title,status,priority,worker,criteria:{met,total},phase}. Valid
-  statuses: open, ready, in_progress, blocked, done, closed, cancelled.
-- **roadmap: NEVER a live query** — the resolver emits rows without left/width, so a
-  query-driven roadmap degrades to overlapping full-width bars. Author static rows with
-  `left`/`width` (0–100).
-- **Side-by-side = `{"type":"section","layout":{"mode":"grid","tracks":2},"blocks":[…]}`**
-  — golden-proven side-by-side at 80 cols (cellW=39), degrades to stack at 40. Children
-  nest under `blocks` (decode.go maps it to Children for the TUI too).
-- **Verification is offline-first, never a dev server:**
-  - TUI: `CC=/usr/bin/clang go run ./internal/pdrender/cmd/dump <blocks.json> 80` — a
-    pure local-file renderer (no HTTP path exists in it), proven to reproduce the
-    section-grid goldens from a script. Also run at 40 to see the stack degrade.
-  - Reader HTML: `cd api && SHOWCASE_BLOCKS=<blocks.json> OUT_DIR=<dir> mix run
-    --no-start scripts/pass2_audit_harness.exs` (harness dedups first-block-per-type —
-    run variants in separate files if that matters).
-  - Live (after publish): `curl -s https://guerrilla.barkpark.cloud/papers/<slug>` +
-    `bp paper view <slug> --width 80 -s guerrilla`. Do NOT assert exact
-    `bp-section__grid` counts in reader HTML (known benign doubling).
-  - Edit canvas: forked static harness (pattern:
-    `api/assets/paper-editor/src/canvas/__harness.html`, `BP_PAPER_EDITOR_NO_INJECT`,
-    relative bundle paths) + headless Chromium; playwright is vendored at
-    `js/node_modules/.pnpm/playwright@1.59.1/node_modules/playwright` (avoids the
-    shared chrome-devtools-MCP profile contention). Fleet blocks (status-legend,
-    task-*) degrade to `bp-canvas-readonly-chip` offline — documented, expected, not
-    a failure.
-- **Bundle freshness:** the staleness found during verification (post-#2398) was paid
-  mid-wave by the pd-everything-editable epic — PR **#2446** (merged 2026-07-11,
-  1ac1122b regenerates api/priv/static/assets/bp-paper-editor.*). Canvas verification
-  runs `git log -1 -- api/priv/static/assets/bp-paper-editor.bundle.js` vs
-  `git log -1 -- api/assets/paper-editor/src/` FIRST; if src is newer again, rebuild in
-  a WORKTREE for harness use only (never `npm run build` in the main checkout).
-- **Main checkout stays on main.** Any code/asset commit goes through a worktree + PR
-  with `Task: <id>` in the body; api-assets changes wait for the Elixir Test gate. Pure
-  paper authoring is PR-less — the live render is the evidence.
+- **`bp task stamp` is NOT live on guerrilla** (route 404s; task-79d71bc80427f0e4 awaits
+  merge). Stamping mechanics this wave:
+  - OPEN task you are closing: `bp task claim <id> <worker>` → `bp task close <id>
+    <worker> <epoch> done "<reason>" --set 'criteria:=[{"index":N,"met":true,"evidence":"…","criterion":"<text-guard>"}]'`
+    — index-merge rides the same rev-CAS write (close.ex:276-365). Supply the
+    `criterion` text-guard on every entry.
+  - ALREADY-DONE task you are retro-stamping: `bp task get <id> -o json` → rewrite the
+    FULL acceptance_criteria array → `bp doc patch task <doc_id> --set
+    'acceptance_criteria:=[…full array…]'` → `bp doc publish task <bare-id> --yes`.
+    Patch replaces the whole flat field — never send a partial array.
+- **Publish-collapse every drafts.\* task you touch**: close/patch writes in place on the
+  draft row (fine for ready-derivation), but publish afterward so no future edit forks a
+  twin. Publish copies + deletes the draft; it never touches lifecycle_status.
+- **Unmet criteria never block a close** (soft warning only) — an honest met:false with
+  an explaining evidence string is the CORRECT ledger state for a waived/residue
+  criterion.
+- **No layer gates an epic close on open children** (verified: close.ex, board.ex,
+  fence.ex, CI). Honesty is the only guardrail — the epic anchor is closed by the LEAD at
+  Review, never by a builder slice.
+- **Go toolchain**: always `CC=clang` (the bare `cc` is a Claude wrapper, not clang).
+- **Never run `mix barkpark.paper.doctrine_backfill --apply`** anywhere this wave — the
+  corpus APPLY is a human gate (drafts.pdd-t5-migrate), parked with a recipe.
 
 ## Decisions
 
-- **D1 — BUILD the page; "already exists" does not apply.** cfd0e75b is an unrecoverable
-  external Claude Artifact (not a git object; not in the 108-paper corpus); the
-  parity-state gap-map's "Recreate the page — done" is a FALSE POSITIVE meaning the 11
-  component block TYPES shipped. Three surveyors + corpus enumeration converged.
-- **D2 — One flagship paper, slug `gui-tui-parity-page`, style=article, EIGHT sections.**
-  Spec→section map: §0+§2→s1(alive), §1→s2(glyphs), §3 body→s3(board), §3
-  detail→s4(detail), §3 TUI rules→s5(tui), §5→s6(quality), §6→s7(identical), and orphan
-  §4 "THE GOAL — plans are living documents" becomes section 8 (new child
-  `parity-s8-goal`) — it is the spec's most consequential section and deserves a home.
-  Orphan §7 (open decisions) + the cross-reference footer fold into a short closing
-  colophon block, no child: decision-log meta, not durable design content.
-- **D3 — Source of truth = `.claude/workflows/bp-task-design-language-spec.md`; spec wins
-  on divergence.** The artifact's own HTML is unrecoverable; the "§15" citation in
-  s4/components.ex proves the spec is a compressed retelling — artifact-only extras are
-  gone and are NOT owed.
-- **D4 — Anchor criteria amended to match reality.** c1 → sections of the ONE paper
-  (8 sections); c2 → native blocks matching the spec (one-paper reading — zero
-  component-leaf grandchildren exist and none are owed); c3 → the real proven spine
-  (guerrilla reader + real pdrender TUI at 80 cols + edit-canvas mount + golden gates
-  green) replacing the unsourced "9 renderers" count, which is defined nowhere.
-- **D5 — s4 owns the nav-stack/detail-model content; s5 references it** (the two briefs
-  overlapped; one owner prevents drift inside the paper itself).
-- **D6 — Offline-first verification with cmd/dump is CANON.** The "no offline TUI path"
-  claim was refuted by running the tool; author → verify offline (cmd/dump 80+40, pass2
-  harness) → publish → verify live (curl + bp paper view) → canvas leg.
-- **D7 — The planned bundle-regen slice was DROPPED at Decide:** while this wave
-  verified the staleness, the pd-everything-editable epic shipped the regen in #2446
-  (merged before our builders flew). Never build what a sibling epic already merged;
-  the canvas slice re-checks freshness instead of assuming.
-- **D8 — Ledger truth is wave work:** reword parity-state's ws-012 "Recreate the page"
-  card to cite the real recreation; annotate the three false-done stub tasks
-  (p-retheme, p-live-plans, p-white-ladder — real capabilities, zero-evidence docs);
-  delete the wave-1 scratch paper `parity-page-probe-w1` after verification.
-- **D9 — Out of scope:** Next.js demo ignores section layout (already filed, cd-11); any
-  code change (no render gap found across all 20 needed block types); the momentum
-  spinner animating in TUI (pre-authorized static frame).
-- **D10 — Backlog filed, not built:** cmd/dump harness wiring, branch-protection audit
-  (#2398 merged over a red required-named freshness check — the debt got paid by #2446
-  but the gate-bypass hazard remains), generic parametrized canvas harness,
-  offline-degrade polish (task-detail empty string; roadmap query trap), spec/code
-  cross-ref staleness (§15 comment, spec's stale status-legend row).
+- **D1 — pd-le-dashboard-pipeline-blocks closes as SUPERSEDED-BY-DECISION, not done.**
+  Slate-2 charter D21 (pipeline `layout:{mode:"flow"}` Go-only, additive, honest
+  degrade) and D22 (dashboard Go-only, "NO Elixir twin… an ACCEPTED, conscious
+  ⊆-projection divergence") consciously override the task's cross-surface criterion;
+  PR #2110 MERGED 2026-07-10. The cross-surface residue is NOT dropped: open successor
+  **tr-agg-resolver-wave** (parent pdrender-block-parity, GH #2113) already scopes
+  dashboard+gauge Elixir twins — cite it in the close, file nothing new (dedup law).
+  GH issue #1455 gets closed/annotated in the same slice.
+- **D2 — The fullbleed arbiter is answered PER-BLOCK-TYPE; the binary premise is
+  refuted.** At HEAD the web reader: cards STRETCH (portable-doc.tsx:925 grid
+  sm:grid-cols-2, 1fr tracks), notes container-stretch/content-left (:881/:885/:889),
+  pipeline LEFT-PACKS (:985 flex-wrap flex-start). One verdict for the triplet does not
+  exist; pd-le-compose-fullbleed-parity closes on the matrix, not the coin flip.
+- **D3 — Cards' web-grid-stretch vs TUI-left-pack is RATIFIED as an accepted per-surface
+  divergence.** Same family as gauge-list/dashboard/pipeline-flow (TUI canvas-economy
+  left-pack; slate-2 precedent). No Path-A right-padding, no boxFixtures entry for
+  cards. Mandatory correction rides with the ratification: align_test.go:20-30 must stop
+  claiming "notes/cards/pipeline LEFT-PACK" as reader-parity (false for cards), and
+  dashboard.go:20 must cite **D22**, not the loose "charter-D12".
+- **D4 — Widen the divide-formula tripwire to the module root.** Verification proved
+  TestNoInlineDivideFormulaOutsideSolver greps only internal/pdrender (go test cwd), so
+  "one solver repo-wide" was manually-asserted, not CI-enforced. The test now walks up to
+  go.mod and greps from there; the epic-close evidence may then honestly say repo-wide.
+- **D5 — Retro-stamp doctrine (sp-w2/storm-t8 precedent): verify-at-HEAD, stamp, REOPEN
+  NOTHING code proves.** The rebrander bulk-close (2026-07-05/06) left 10+ done tasks at
+  0/N with empty evidence in both draft and published copies; the code is the arbiter and
+  it confirms the work. Every stamp carries file:line + PR/sha + a fresh test-run count.
+- **D6 — pdd-t14's calm no-op is RATIFIED over caret-lands-in-body.** The real PM Plugin
+  (index.js:531-556 filterTransaction) drops the tx — no flash, no divergence — which is
+  cleaner than the task's imagined caret move. Crit "caret lands in the body" stamps met
+  with this ratification cited; the jsdom mounted-editor test gap (crit 3) stays honestly
+  met:false with residue task **pdd-t14-jsdom-residue** filed (the editorProp-ignored
+  regression class is uncatchable by pure predicates).
+- **D7 — pdd-t15's C2 is AMENDED to name the real gate.** The t10 corpus is fleet-only by
+  design; title/h1 parity is pinned by render_test.exs:772 (bare `<h1>`) +
+  view_edit_parity_test.exs:57 (h1 in @parity_elements) + the byte-equal render proof.
+  Amend the criterion text in the same doc-patch that stamps it; never stamp met:true
+  over the obsolete literal wording.
+- **D8 — pdd-t12's a11y criterion stays met:false; browser eyeball is a parked human
+  gate.** Helpers are unit-proven (__one_surface.test.mjs) but the node-view DOM wiring
+  is browser-only on the PR's own manual-verify list. Residue task
+  **pdd-t12-a11y-eyeball** carries the recipe.
+- **D9 — pdd-m1 closes on its 3 proven criteria; drafts.pdd-t5-migrate stays OPEN as the
+  corpus-APPLY human gate.** 111 prod papers: 2 conforming / 90 unmigrated / 19
+  html-exempt; the DoctrineBackfill mix task exists, tested, never run. The park patches
+  the 6-step recipe (dry-run → human review → staging snapshot+idempotence → --apply →
+  visual sample → stamp+publish) into the task. An open child under a done parent is
+  correct here — ready-derivation has no parent gate.
+- **D10 — pd-doctrine's "Doctrine paper reflects shipped reality" is read as the
+  ledger-mirror it is.** The portabledoc-doctrine paper renders the live task tree; once
+  this wave's stamps land, the tree reads true (M1 done with t5 visibly open = shipped
+  reality). Evidence cites this reading explicitly.
+- **D11 — Cross-epic evidence is cited by task id + PR sha, never assumed by nesting.**
+  #2283 (p-quality-gate children) and #2446 (pd-everything-editable) prove doctrine
+  criteria but live under sibling epics.
+- **D12 — The epic anchor `pd-layout-engine` is closed by the LEAD at Review**, after S1
+  merges and S2 lands: close reason cites W1-W4 PRs (#1435/#1445/#1454/#1461, all
+  MERGED), the repo-wide tripwire (post-D4), fresh `go test ./internal/pdrender/...
+  -count=1` PASS, and the two children's resolution (D1-D3) with successor link.
+- **D13 — t16's Writer-path pin gap is backlog, not a blocker.** Core helpers are tested
+  (template_test.exs:16-17/42/25-27/78); no test drives POST /v1/data/mutate → Writer
+  create end-to-end. Residue task **pdd-t16-writer-path-test** filed; t16 stamps 3/3 with
+  the pin gap named in the evidence string.
 
 ## Roadmap
 
-### Wave 1 (this wave — 3 slices, integration-ordered)
+### Wave 1 (this wave — 5 slices, integration-ordered)
 
-1. **pp-w1-author-flagship** (large, fable, PR-less) — author `gui-tui-parity-page`
-   (8 sections) as blocks JSON, verify offline (cmd/dump 80+40 + pass2 harness), publish
-   once, patch with ifRev thereafter, verify live (reader HTML + bp paper view 80).
-   Produces the content that closes every parity-sN section child.
-2. **pp-w1-canvas-verify** (medium, opus, PR-less) — check bundle freshness at HEAD
-   (post-#2446), fork the static canvas harness over the LIVE paper's real blocks;
-   prove clean mount, round-trip id order, one-op edit, `.bp-section__grid` present;
-   fleet chips expected offline.
-3. **pp-w1-ledger-truth** (small, opus, PR-less) — parity-state ws-012 card corrected via
-   replace-block+ifRev; false-done stubs annotated; probe paper deleted.
+1. **pdle-r1-pdrender-doc-truth** (small, opus, code+PR) — dashboard.go D22 citation,
+   align_test.go doc-note reframe per D2/D3, tripwire widened to module root per D4.
+   Gate: `CC=clang go build ./... && CC=clang go vet ./internal/pdrender/ && CC=clang go
+   test ./internal/pdrender/ -count=1`.
+2. **pdle-r2-le-children-close** (medium, opus, ledger) — D1 supersede-close of
+   dashboard-pipeline-blocks (+ GH #1455 sync), D2/D3 matrix-close of
+   compose-fullbleed-parity citing the r1 PR. Epic itself NOT closed (D12).
+3. **pdle-r3-m1-closeout** (medium, opus, ledger) — retro-stamp t1/t2/t3/t4/t13, stamp +
+   close + publish-collapse drafts.pdd-m1, park t5 with the D9 recipe.
+4. **pdle-r4-doctrine-stamps** (large, opus, ledger) — retro-stamp the ten hollow-done
+   pd-doctrine children (t6/t9/t10/t11/t12/t14/t15/t16/t17/t19) per D5-D8/D13 with
+   paste-ready evidence; publish-collapse every draft.
+5. **pdle-r5-doctrine-anchor-close** (medium, fable, ledger) — stamp m2/m3 rollups from
+   child evidence, then stamp + close + publish-collapse drafts.pd-doctrine per D10/D11.
+   Runs after r3+r4.
 
-Then (lead, at review): flip section-children criteria with live-URL evidence, close
-s1–s8 + the anchor, log the wave.
+Then (lead, at Review): close `pd-layout-engine` per D12; verify all three anchors gone
+from `bp task ready`; wave log.
 
-### Backlog (filed as published children of parity-page)
+### Backlog (filed as published children of pd-doctrine — residue under its anchor)
 
-- **pp-b-dump-harness** (P3) — wire cmd/dump into a documented script; today it is real,
-  working, and referenced by nothing.
-- **pp-b-branch-protection** (P2) — #2398 merged over a failing non-advisory-named
-  check; audit required-check config so freshness reds actually block.
-- **pp-b-canvas-harness-generic** (P3) — parametrize the canvas harness (RUN via fetched
-  JSON) instead of forking per verification.
-- **pp-b-offline-degrade** (P3) — task-detail renders 0B offline (should be an explicit
-  placeholder like its siblings); roadmap-from-query silently produces overlapping bars
-  (synthesize positions or warn).
-- **pp-b-crossref-staleness** (P4) — components.ex:67 cites a nonexistent "spec §15";
-  the spec's block-status table still marks status-legend "▫ next" though it shipped.
+- **pdd-t14-jsdom-residue** (P2) — jsdom mounted-editor test for the locked-Enter veto;
+  pins the D6 calm no-op (the editorProp-silently-ignored regression class needs a
+  mounted editor to catch).
+- **pdd-t12-a11y-eyeball** (P2, human gate) — live browser keyboard/screen-reader pass
+  over the one-surface canvas (tabindex/role/aria + Enter/Space→NodeSelection wiring is
+  on the shipping PR's manual-verify list; unit helpers alone can't prove it).
+- **pdd-t16-writer-path-test** (P3) — integration test: POST /v1/data/mutate create with
+  blocks:[] → template seeded + title derived (writer.ex:191 regression currently
+  uncaught by the suite).
 
 ## Wave log
 
