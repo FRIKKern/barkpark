@@ -312,8 +312,9 @@ const agentsMDHeading = "## Task tracking — Barkpark (bp)"
 
 // renderAgentsMDBody is the ONE consumer-facing Barkpark teach text, the SUPERSET
 // the three wave-1 wrappers converge on: the cursor/claude common body (keeping
-// `bp task prime`, the Conventions header, the parent_id nesting line, and the
-// 409 doc_changed_since_claim line that CODEX.md's rendering had dropped). The two
+// `bp task prime`, the mid-claim `bp task stamp`/`bp task pulse` pair, the
+// Conventions header, the parent_id nesting line, and the 409
+// doc_changed_since_claim line that CODEX.md's rendering had dropped). The two
 // per-derivation lines are parameters: workerPrefix seeds the worker-id line
 // (`<tool>-…`, `cursor-…`, `claude-…`) and mcpDocRef seeds the MCP footer's
 // "see …" pointer. Every other line is invariant, so the three wrappers can only
@@ -331,6 +332,8 @@ func renderAgentsMDBody(workerPrefix, mcpDocRef string) string {
 		"- `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.",
 		"- `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)",
 		"- `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events",
+		"- `bp task stamp <id> <worker> <epoch> --criterion N --met --evidence \"…\"` — record evidence on ONE criterion mid-claim (`--miss --note \"…\"` logs an honest attempt without flipping the lock)",
+		"- `bp task pulse <id> <worker> --now \"…\"` — write the now-line and renew the lease in one write (no epoch arg — it bumps the claim epoch)",
 		"- `bp capabilities -o json` — the whole API manifest when unsure",
 		"",
 		"Conventions:",

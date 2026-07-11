@@ -380,9 +380,10 @@ func printMCPServeHelp(out *writer) {
 
 flags:
   --tools tasks|all   Which tools to expose. "tasks" (default) is the curated
-                      six — task_ready, task_next, task_show, task_close,
-                      task_create, task_prime. "all" additionally bridges every
-                      other bp capability into a generic tool.
+                      eight — task_ready, task_next, task_show, task_close,
+                      task_create, task_prime, task_stamp, task_pulse. "all"
+                      additionally bridges every other bp capability into a
+                      generic tool.
   --http <addr>       Serve Streamable HTTP on <addr> (e.g. 127.0.0.1:4010)
                       instead of stdio, for REMOTE MCP clients. Forward-through
                       auth: each request's "Authorization: Bearer <token>" is

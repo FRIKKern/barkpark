@@ -151,6 +151,8 @@ The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
 - `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.
 - `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)
 - `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events
+- `bp task stamp <id> <worker> <epoch> --criterion N --met --evidence "…"` — record evidence on ONE criterion mid-claim (`--miss --note "…"` logs an honest attempt without flipping the lock)
+- `bp task pulse <id> <worker> --now "…"` — write the now-line and renew the lease in one write (no epoch arg — it bumps the claim epoch)
 - `bp capabilities -o json` — the whole API manifest when unsure
 
 Conventions:
@@ -171,10 +173,11 @@ and `.claude/CLAUDE-BARKPARK.md` carry in each tool's native framing. See
 
 ## The tools
 
-Six curated task tools ship by default (`--tools tasks`), each carrying the
+Eight curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description: `task_ready`, `task_next` (claim +
 epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
-`task_prime` (one-call rehydration for a resuming agent).
+`task_prime` (one-call rehydration for a resuming agent), `task_stamp`
+(criterion evidence mid-claim), `task_pulse` (now-line + lease renewal).
 
 `--tools all` (`args = ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as a tool (`bp_<noun>_<verb>`), auto-derived from the live
