@@ -106,6 +106,44 @@ defmodule BarkparkWeb.TasksController do
     json(conn, maybe_put_notices(base, prime_notices(in_progress)))
   end
 
+  # ─── GET /v1/tasks/events ───────────────────────────────────────────────
+  # The task-events feed — a keyset replay over the `mutation_events` backlog
+  # (`Barkpark.Tasks.Events`). ONE event stream every surface polls: pass the
+  # last `id` you saw as `?since=` and get every task mutation after it, in
+  # commit order (id ASC). A THIN projection over the existing table — no new
+  # store, no migration (D10). Poll fallback for the chat/statusline/deck/TUI;
+  # SSE is a later wave.
+  #
+  # NOTE: this action is route-mounted ABOVE `/tasks/:doc_id` (see
+  # `Barkpark.Plugins.Tasks.register_routes/1`, the prime precedent) so
+  # `/v1/tasks/events` never resolves as `:doc_id = "events"`.
+  #
+  # Response: `{ok, events: [%{id, event, doc_id, rev, at}], cursor, has_more}`.
+  # `cursor` is the id to resume from on the next poll (the last event's id, or
+  # the caller's own `since` when the page was empty); `has_more` is true when a
+  # full page came back, so the caller polls again immediately instead of
+  # waiting for the next tick.
+  def events(conn, params) do
+    dataset = request_dataset(conn)
+    since = Params.parse_int(params["since"], 0)
+
+    limit =
+      Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
+
+    workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
+
+    rows =
+      Tasks.Events.replay_since(dataset, since, limit: limit, workspace_id: workspace_id)
+
+    cursor =
+      case rows do
+        [] -> max(since, 0)
+        _ -> List.last(rows).id
+      end
+
+    json(conn, %{ok: true, events: rows, cursor: cursor, has_more: length(rows) == limit})
+  end
+
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
   # w7-08c (paper-y1c): list-all endpoint. Returns every task doc in the
   # caller's tenant, optionally narrowed by `kind`, `lifecycle_status`, or

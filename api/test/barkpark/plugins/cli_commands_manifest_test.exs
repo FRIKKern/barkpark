@@ -38,6 +38,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks",
                  "/v1/tasks/ready",
                  "/v1/tasks/prime",
+                 "/v1/tasks/events",
                  "/v1/tasks/claim",
                  "/v1/tasks/:doc_id",
                  "/v1/tasks/:doc_id/claim",
@@ -85,13 +86,14 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the ten task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the eleven task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
       assert "task.ls" in ids
       assert "task.ready" in ids
       assert "task.prime" in ids
+      assert "task.events" in ids
       assert "task.get" in ids
       assert "task.claim" in ids
       assert "task.close" in ids
@@ -104,7 +106,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 10
+      assert length(cmds) == 11
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not

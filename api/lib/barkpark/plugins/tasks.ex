@@ -29,7 +29,7 @@ defmodule Barkpark.Plugins.Tasks do
       `tasks_compact` queue declarations stay in config — only the worker
       *scheduling* moves here.
 
-    * `register_routes/1` — the twelve `/v1/tasks` endpoints the `bp task` CLI
+    * `register_routes/1` — the `/v1/tasks` endpoints the `bp task` CLI
       consumes, declared with `auth: :token_root` so the dormant
       host-level `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)`
       wrapper mounts them at `/v1/tasks/*` behind the `[:api, :require_token]`
@@ -37,9 +37,9 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
-    * `cli_commands/0` — the ten `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
-      `claim`, `close`, `stamp`, `pulse`, `next`, `move`) the `/v1/capabilities`
-      manifest exposes. Five
+    * `cli_commands/0` — the eleven `task.*` CLI verbs (`ls`, `ready`, `prime`,
+      `events`, `get`, `claim`, `close`, `stamp`, `pulse`, `next`, `move`) the
+      `/v1/capabilities` manifest exposes. Five
       moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry;
       `next` (the queue-based atomic claim), `stamp` (criterion-level mid-claim
       evidence) and `pulse` (now-line heartbeat + lease renewal) were added later. `task` is no
@@ -313,9 +313,9 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   @doc """
-  The thirteen `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
+  The fourteen `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
   order-preserving — the `scope "/v1/tasks"` block this replaced in `router.ex`
-  (C4-3b), plus later verb additions (stamp, pulse). Every spec carries
+  (C4-3b), plus later verb additions (stamp, pulse, events). Every spec carries
   `auth: :token_root`, so the dormant host-level
   `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)` wrapper
   mounts them at `/v1/tasks/*` behind the `[:api, :require_token]` pipeline
@@ -334,6 +334,10 @@ defmodule Barkpark.Plugins.Tasks do
       {:get, "/tasks/ready", BarkparkWeb.TasksController, :ready, auth: :token_root},
       # prime must mount BEFORE /tasks/:doc_id or it resolves as a doc id.
       {:get, "/tasks/prime", BarkparkWeb.TasksController, :prime, auth: :token_root},
+      # events (the keyset task-events feed) must ALSO mount BEFORE
+      # /tasks/:doc_id — same precedent as prime, or `/v1/tasks/events` resolves
+      # as `:doc_id = "events"`.
+      {:get, "/tasks/events", BarkparkWeb.TasksController, :events, auth: :token_root},
       {:post, "/tasks/claim", BarkparkWeb.TasksController, :claim, auth: :token_root},
       {:post, "/tasks/edges", BarkparkWeb.TasksController, :add_edge, auth: :token_root},
       {:get, "/tasks/:doc_id", BarkparkWeb.TasksController, :show, auth: :token_root},
@@ -370,12 +374,15 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Ten verbs over ten routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Eleven verbs over eleven routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
   not document mutations):
 
     * `ls` — `GET /v1/tasks` (paginated). READ, table.
     * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
+    * `events` — `GET /v1/tasks/events?since=<id>` (keyset replay over
+      `mutation_events`, id-ASC; the response carries the next `cursor` +
+      `has_more`). READ, json.
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
@@ -446,6 +453,42 @@ defmodule Barkpark.Plugins.Tasks do
             summary: "Narrow in_progress to this worker's claims."
           },
           %{name: "limit", type: "int", summary: "Ready-head and event-window size.", default: 10}
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "json",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.events",
+        noun: "task",
+        verb: "events",
+        summary:
+          "Replay task events since a cursor — a keyset stream over mutation_events, id-ASC. Pass --since <id> (the last event id you saw); the response carries the next `cursor` + `has_more`. The one poll feed every surface reads; omit --since to replay from the start.",
+        http: %{method: "GET", path_template: "/v1/tasks/events"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{
+            name: "since",
+            type: "int",
+            summary:
+              "Resume cursor: return only events whose id is greater than this (the last event id you saw). Omit to replay from the start of the backlog.",
+            default: 0
+          },
+          %{
+            name: "limit",
+            type: "int",
+            summary: "Max events to return per call (1–500).",
+            default: 500
+          },
+          %{
+            name: "dataset",
+            type: "string",
+            summary: "Dataset to read task events from (defaults to production)."
+          }
         ],
         writes: false,
         batch: false,
