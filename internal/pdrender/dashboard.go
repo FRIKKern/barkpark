@@ -15,10 +15,13 @@ import (
 // is the composition capstone of the TUI creative slate — every slate block is a
 // leaf; the dashboard is the one container that arranges them into a single screen.
 //
-// This is a Go-only container renderer (charter-D12): the web/Studio reader draws
-// its own tabbed dashboard, and until the Elixir compose seam gains a `dashboard`
-// case the web reader falls back to its unknown-block box — an ACCEPTED divergence
-// (the gauge-list precedent: a registered Go block ahead of its Elixir sibling).
+// This is a Go-only container renderer (charter-D22, pbp-tui-slate-2-charter.md:47
+// — dashboard ships Go-only, NO Elixir twin): the web/Studio reader draws its own
+// tabbed dashboard, and until the Elixir compose seam gains a `dashboard` case the
+// web reader falls back to its unknown-block box — an ACCEPTED, conscious
+// ⊆-projection divergence (the gauge-list precedent: a registered Go block ahead of
+// its Elixir sibling). D12 is the wave-process rule (Go gate, worktrees mandatory);
+// D22 is the per-block ratification that actually owns this divergence.
 //
 // Import discipline holds: only lipgloss + the stdlib, styles come from the
 // injected Theme, every document-controlled string passes through sanitizeText
