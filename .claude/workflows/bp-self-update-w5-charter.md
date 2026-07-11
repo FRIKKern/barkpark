@@ -346,3 +346,54 @@ rollback + deny cases (the D26 recipe; the one gap between proven-offline and pr
 (2) operator-principal decision (W5 carry — unblocks console halt/resume + the require_worker
 reachability bug); (3) CI-wire the 99-check deploy harness (D25 backlog); (4) charter residue:
 growing cohorts, maintenance windows.
+
+### Wave 2026-07-11 — W7 final ledger reconcile (Review debrief; Paper self-update-epic-wave-2026-07-11-reconcile)
+
+**EPIC CLOSED. Grade A-.** Zero build slices (D12 held — the regression probe + 7-report
+verify fleet found nothing broken at 703c5406); six ledger/paper slices, all substance
+verified true at Review. Landed (branches are empty ledger markers — merging optional):
+
+- **S1 `isu-reconcile-epic-close`** → `loop-epic/epic-close-out-self-update-epic-reads-as-0`.
+  self-update-epic CLOSED as the W1–W6 story (#1195 #1197 #1199 #1230 #2227 #2514), exactly
+  two blessed open remainders (live-smoke recipe now stranger-grade with the :259/--resolve
+  lie corrected — re-proven against instance-deploy.sh at HEAD; operator-principal inlines
+  W5 open-decision #1 verbatim), five non-blessed children re-homed top-level with
+  provenance, GH 2181 closed + 2485/2486 mirrored. Builder proved a real bug in its own
+  literal gate: the tasks API emits `children` as a SIBLING of `doc`
+  (tasks_controller.ex ~257-264) — gate authors read children from the response root.
+- **S2 `isu-reconcile-nag-paper`** — paper `self-update-from-nag-to-product` now
+  style=article Rev 3, renders in `bp paper view`, full W1–W6 arc, body_html cleared.
+- **S3 `dwb-reconcile-stamp-pack`** → `loop-epic/dwb-stamp-pack-six-done-with-0-n-childre-2`.
+  dwb-14/15/16/17/19/20 stamped from the verifier pack, dwb-6 closed shipped (#773, its
+  criteria are dwb-2-independent — mutate-close sanctioned), dwb-9 split-stamped, #936 on
+  the auth task. Review re-ran SPA 388/388 + cp-deploy 7/7; dwb-9 evidence byte-exact at HEAD.
+- **S4 `dwb-reconcile-evidence-backfill`** — nine zero-evidence done children carry real PR
+  trails (spot-verified: gh-2=#814 gh-3=#821 gh-4=#818 gh-5=#815 dwb-1=#722 dwb-8→#724);
+  lvd-t5-task re-homed. **Review FIX:** the builder hit the `bp task stamp --criterion`
+  0-vs-1-indexed trap — every evidence string shifted one slot down and the MERGE-GATE
+  criterion was falsely met; reviewer realigned the array (4/5, merge-gate honestly open).
+- **S5 `dwb-reconcile-human-gate-parks`** → `loop-epic/dwb-parks-honestly-vercel-token-gate-get-4`.
+  dwb-vercel-token-gate authored (first VERCEL_PLATFORM_TOKEN recipe), gh-1 thickened
+  (compose GITHUB_APP_* passthrough gap), dwb parent = six-part parked story (D34 split
+  held), deploy-with-barkpark paper carries Parked-remainders. This builder's off-by-one
+  warning led review straight to S4's mis-stamp.
+- **S6 `dwb-reconcile-publish-collapse`** — stalled honestly (dispatched while two
+  predecessors were mid-write on its worklist; builder held the sweep, recorded --miss).
+  **Reviewer completed it post-settle:** 8 residual publishes, 32/32 bare-200/drafts-404,
+  zero drafts.* in the parent_id==dwb raw query; criteria 0-2 stamped with reviewer
+  attribution. Dispatch lesson: RUNS-LAST slices must not enter the frontier until
+  predecessors report built.
+
+Review also fixed the wave Paper itself: raw-mutate had written body.blocks with no
+top-level `blocks` mirror (bp paper view refused it) and the status line still said
+SURVEYING — re-upserted via bulldocs publish with a dated correction note. Paper writers:
+set `blocks` top-level or use the bulldocs path.
+
+**Lead closes on merge:** the six merge-gate criteria (S1 c5, S2 c4, S3 c6, S4 c4, S5 c5,
+S6 c3); expect 409 doc_changed_since_claim where criteria were patched out-of-band — re-claim
+resolves. Stamp trap for every future wave: `bp task stamp --criterion N` is 0-INDEXED.
+
+**Next:** nothing is owed on this epic until a gate opens — the two blessed remainders
+(D26 live smoke; operator-principal decision GH 2485), the dwb human gates (gh-1 App
+registration + compose passthrough; dwb-vercel-token-gate), then harness CI wiring,
+growing cohorts, maintenance windows.
