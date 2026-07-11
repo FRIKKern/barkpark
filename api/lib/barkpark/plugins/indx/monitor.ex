@@ -34,7 +34,7 @@ defmodule Barkpark.Plugins.Indx.Monitor do
   The table accrues up to 3 permanent rows per distinct scope
   (`{scope, :success}`, `{scope, :fallback}`, `{scope, :last_error}`) and
   never evicts on its own — an unbounded, tenant-driven growth vein.
-  Following the RateLimiter (#790) and DEK-cache (#792) fix, every write
+  Following the RateLimiter (PR 790) and DEK-cache (PR 792) fix, every write
   path that can create a NEW key first checks capacity and, when the table
   is at `@max_rows`, wipes it wholesale (`:ets.delete_all_objects/1`).
   This is lossy operational telemetry (counters + last-error stamps), so a

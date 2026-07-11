@@ -23,11 +23,11 @@
 #     web analog of the Studio elevation/shadow exemption. Follow-up: an
 #     --overlay/--scrollbar token. A hex/hsl sharing a line with an rgba() is
 #     NOT masked by it — it needs its own lit-allow.
-#   • a line carrying a `lit-allow:` annotation — a documented per-line resister
-#     (the always-dark Obsidian graph canvas — earmarked for a follow-up token).
-#     (The finder match-quality spectrum legend was resolved in au-w3-finder-
-#     spectrum: it now consumes the emitted color.matchQuality token.) A hex
-#     shown as displayed
+#   • a line carrying a `lit-allow:` annotation — a documented per-line resister.
+#     Currently ZERO remain: the finder match-quality spectrum legend was
+#     resolved in au-w3-finder-spectrum (emitted color.matchQuality token) and
+#     the always-dark Obsidian graph canvas in au-w3-graph-canvas-token (emitted
+#     color.graphCanvas → bg-graph-canvas). A hex shown as displayed
 #     CONTENT (documenting a token value in the styleguide) is allowed the same
 #     way: annotate it `lit-allow`; an applied-style hex is not.
 #

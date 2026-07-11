@@ -253,6 +253,7 @@ for (const { type, project } of S2_CASES) {
 import { register } from "node:module";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Block } from "../lib/papers.ts";
+import { paperCallout } from "../lib/tokens.gen.ts";
 
 register("./support/tsx-loader.mjs", import.meta.url);
 const { renderBlock } = await import("../components/portable-doc.tsx");
@@ -341,14 +342,15 @@ test("web cards RENDER realizes every card (title · text · tone stripe)", () =
   }
 });
 
-/** The card tone accent → its distinctive tint class in the rendered card div
- * (mirrors portable-doc.tsx `tint = tone==="ok" ? calloutTone.success :
- * calloutTone[tone]`). A tone drop in the render loses this class and reds. */
+/** The card tone accent → its distinctive paperCallout token bg (au-w3: the
+ * tint rides in as CSS custom properties from web/lib/tokens.gen.ts, mirroring
+ * portable-doc.tsx `resolveCalloutTone` — `ok` folds to success, `warn` to
+ * warning). A tone drop in the render loses the style vars and reds. */
 const CARD_TONE_TINT: Record<string, string> = {
-  info: "border-blue-300/70",
-  ok: "border-emerald-300/70",
-  warn: "border-amber-300/70",
-  danger: "border-red-300/70",
+  info: paperCallout.info.light.bg,
+  ok: paperCallout.success.light.bg,
+  warn: paperCallout.warning.light.bg,
+  danger: paperCallout.danger.light.bg,
 };
 
 /** The authored render marker for one card slot, DERIVED from the fixture input
