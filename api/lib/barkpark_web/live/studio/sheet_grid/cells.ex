@@ -10,10 +10,19 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
-  # Engine error markers — a cell whose computed `"v"` is one of these gets
-  # the `sheet-err` marker class. Single-sourced from the engine's own
-  # vocabulary (`Engine.error_values/0`) so a new code can't drift out of sync.
-  @engine_errors Barkpark.Plugins.Sheets.Engine.error_values()
+  # Engine error markers — a cell whose computed `"v"` is one of these gets the
+  # `sheet-err` marker class. Mirrored LOCALLY (no compile-time edge into the
+  # Sheets plugin namespace, so an engine touch no longer forces this module to
+  # recompile). The canonical owner stays `Barkpark.Plugins.Sheets.Engine.
+  # error_values/0` (@canonical engine-error-vocabulary); a drift-guard test
+  # (sheets_parity_test) asserts THIS mirror EQUALS that list, so a new code
+  # can't silently fork.
+  @engine_errors ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
+
+  # @doc false accessor — exists ONLY so the drift-guard test can assert this
+  # local mirror equals `Barkpark.Plugins.Sheets.Engine.error_values/0`.
+  @doc false
+  def error_vocab, do: @engine_errors
 
   def bar_value(cells, active),
     do: raw_of(Map.get(cells, Barkpark.Plugins.Sheets.Core.format_ref(active)))
