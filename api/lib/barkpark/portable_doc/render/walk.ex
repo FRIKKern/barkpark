@@ -62,11 +62,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # local attr keeps portable_doc decoupled from the plugin namespace.
   @merge_area_cap 10_000
 
-  # Engine error vocabulary, single-sourced from the sheet engine (never a
-  # copied literal) so a new code lights up the paper embed's red marking in
-  # lockstep with Studio's `sheet-err`. A cell whose plain string is in this
-  # set renders red/bold in BOTH palettes.
-  @error_values Barkpark.Plugins.Sheets.Engine.error_values()
+  # Engine error vocabulary, mirrored LOCALLY so CORE render carries NO
+  # compile-time edge into the Sheets PLUGIN namespace — same reason (and same
+  # shape) as `@merge_area_cap` right above: PortableDoc render must compile with
+  # the sheet plugin absent (fresh-install invariant), and a compile-time
+  # `Barkpark.Plugins.Sheets.Engine.error_values()` here would both break that
+  # and force a walk recompile on every engine touch. The canonical owner stays
+  # `Barkpark.Plugins.Sheets.Engine.error_values/0` (@canonical
+  # engine-error-vocabulary); a drift-guard test (sheets_parity_test) asserts
+  # THIS mirror EQUALS that list, so the two are a CHECKED invariant, not a
+  # silent fork. A cell whose plain string is in this set renders red/bold in
+  # BOTH palettes.
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
+
+  # @doc false accessor — exists ONLY so the drift-guard test can assert this
+  # local mirror equals `Barkpark.Plugins.Sheets.Engine.error_values/0`.
+  @doc false
+  def error_vocab, do: @error_values
 
   # A sheet cell whose ENTIRE value is an http(s) URL renders as a clickable
   # anchor in the paper embed (and thus the .html export). The regex pins

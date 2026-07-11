@@ -493,9 +493,26 @@ defmodule Barkpark.SheetsParityTest do
            "web/__tests__/fixtures/engine-errors.json drifted from Engine.error_values/0 — regenerate it from the engine list"
   end
 
-  # Studio's `sheet-err` class (Cells) is likewise single-sourced from the
-  # engine — it consumes `Engine.error_values/0` at compile time, so this just
-  # certifies the vocabulary a surface would mark is the engine's own list.
+  # DRIFT GUARD — CORE PortableDoc render (walk.ex) and Studio's sheet grid
+  # (cells.ex) no longer read `Engine.error_values/0` at COMPILE time (that was a
+  # core→plugin compile edge that broke the fresh-install invariant and forced a
+  # recompile on every engine touch). Each now mirrors the vocabulary LOCALLY.
+  # These two assertions lock each mirror EQUAL to the canonical engine list, so
+  # a code added to / removed from the engine that the mirror doesn't follow
+  # reds HERE — the duplication is a CHECKED invariant, never a silent fork.
+  test "walk.ex error-vocab mirror equals Engine.error_values/0" do
+    assert Barkpark.PortableDoc.Render.Walk.error_vocab() == Engine.error_values(),
+           "walk.ex @error_values drifted from Engine.error_values/0 — update the local mirror"
+  end
+
+  test "cells.ex error-vocab mirror equals Engine.error_values/0" do
+    assert BarkparkWeb.Studio.SheetGrid.Cells.error_vocab() == Engine.error_values(),
+           "cells.ex @engine_errors drifted from Engine.error_values/0 — update the local mirror"
+  end
+
+  # Behavioural half of the same lock: the marks each surface actually stamps
+  # (walk.ex → red/bold inline; cells.ex → `sheet-err` class) cover exactly the
+  # engine vocabulary. This proves the mirror is WIRED, not merely present.
   test "cells.ex marks exactly the engine's error vocabulary" do
     for code <- Engine.error_values() do
       cell = %{"v" => code}
@@ -505,5 +522,26 @@ defmodule Barkpark.SheetsParityTest do
 
     refute BarkparkWeb.Studio.SheetGrid.Cells.cell_class(nil, nil, nil, {0, 0}, %{"v" => "plain"}) =~
              "sheet-err"
+  end
+
+  test "walk.ex renders every engine error code red/bold and leaves plain text unmarked" do
+    for code <- Engine.error_values() do
+      html =
+        Barkpark.PortableDoc.Render.render_html(
+          %{"kind" => "PdSheet", "rows" => [[code]]},
+          %{doctype: false}
+        )
+
+      assert html =~ "color:#dc2626;font-weight:bold",
+             "walk.ex failed to mark engine error #{code} red/bold"
+    end
+
+    plain =
+      Barkpark.PortableDoc.Render.render_html(
+        %{"kind" => "PdSheet", "rows" => [["plain"]]},
+        %{doctype: false}
+      )
+
+    refute plain =~ "color:#dc2626;font-weight:bold"
   end
 end
