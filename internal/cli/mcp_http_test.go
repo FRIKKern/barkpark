@@ -216,7 +216,7 @@ func TestMCPHTTPForwardThroughBearer(t *testing.T) {
 	cs := connectMCPHTTPClient(t, endpoint, mcpHTTPGoodToken)
 	bg := context.Background()
 
-	// tools/list — the same curated six the stdio transport serves.
+	// tools/list — the same curated eight the stdio transport serves.
 	lt, err := cs.ListTools(bg, nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)

@@ -5,7 +5,7 @@ package cli_test
 // in-memory transport tests in mcp-w1-core never touch the REAL process channel.
 // Only an exec'd binary proves it — this file builds bp, drives a scripted
 // JSON-RPC session over actual pipes, and asserts the stdout stream is BYTE-PURE
-// newline-delimited JSON-RPC with exactly the six curated task tools.
+// newline-delimited JSON-RPC with exactly the eight curated task tools.
 //
 // Framing note: verified against github.com/modelcontextprotocol/go-sdk@v1.6.1
 // mcp/transport.go — stdio is newline-delimited JSON (ndjson: one JSON value per
@@ -205,7 +205,7 @@ func mcpSmokeExitCode(err error) int {
 }
 
 // TestMCPServeStdioSmoke builds the real bp binary and drives `mcp serve` over
-// actual process stdio, asserting byte-pure JSON-RPC stdout and exactly the six
+// actual process stdio, asserting byte-pure JSON-RPC stdout and exactly the eight
 // curated tools. No network: the manifest comes from the committed fixture via
 // the BARKPARK_MANIFEST file-override seam (load.go), the API URL/token are
 // stubs, and the driven session stops at tools/list (which never dials the API).

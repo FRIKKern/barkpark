@@ -104,7 +104,7 @@ bp paper view hello
 
 ## MCP
 
-Every target with a local shell registers the same server: `bp mcp serve` (stdio) turns the capability manifest into a tool catalog the agent calls directly — claim, read the brief, close with epoch-CAS, no shell. The default `--tools tasks` ships six curated task tools (task_ready · task_next · task_show · task_close · task_create · task_prime); `--tools all` is expert-only (Cursor hard-caps 40 tools vs ~107 manifest commands). The server **fails fast** if the target Barkpark has the Tasks plugin disabled — point it at one with Tasks enabled. Registration stanza per surface: each target doc above.
+Every target with a local shell registers the same server: `bp mcp serve` (stdio) turns the capability manifest into a tool catalog the agent calls directly — claim, read the brief, close with epoch-CAS, no shell. The default `--tools tasks` ships eight curated task tools (task_ready · task_next · task_show · task_close · task_create · task_prime · task_stamp · task_pulse); `--tools all` is expert-only (Cursor hard-caps 40 tools vs ~107 manifest commands). The server **fails fast** if the target Barkpark has the Tasks plugin disabled — point it at one with Tasks enabled. Registration stanza per surface: each target doc above.
 
 ## One-step onramp — `bp onramp <target>`
 

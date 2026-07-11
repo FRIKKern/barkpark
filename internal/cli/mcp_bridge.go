@@ -25,7 +25,7 @@ import (
 //
 // Opt-in rationale: Cursor hard-caps 40 MCP tools across ALL enabled servers and
 // silently drops the excess, while a live guerrilla manifest is ~107 commands.
-// So `--tools all` is deliberate, and the curated six (mcp_tasks.go) stay the
+// So `--tools all` is deliberate, and the curated eight (mcp_tasks.go) stay the
 // default. Where the curated overlay already covers a command, the bridge
 // SHADOWS its twin (see bridgeShadowedIDs) so the same capability is not exposed
 // twice under two names.
@@ -46,7 +46,7 @@ import (
 // task.claim is NOT shadowed: the curated task_next is the ATOMIC queue-claim,
 // whereas task.claim claims a SPECIFIC id — a distinct capability, so
 // bp_task_claim generates. doc.create is likewise not covered by the curated
-// six and generates as bp_doc_create. (task_create has no manifest verb at all,
+// eight and generates as bp_doc_create. (task_create has no manifest verb at all,
 // so there is no twin to shadow.)
 //
 // This set is kept here next to the bridge because the bridge is what consults
