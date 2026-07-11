@@ -5,17 +5,36 @@ defmodule Barkpark.SupervisionIsolationTest do
 
   It reproduces the NAMED failure mode on a replica of the OLD flat topology and
   proves the NEW tiered topology contains it — using the exact scenario the audit
-  named: "several workers each crashing ONCE inside the same 5s window during a
-  Postgres blip" breaching the shared 3-restarts-in-5s budget.
+  named: "several workers each crashing ONCE during a Postgres blip" breaching a
+  shared restart-intensity budget.
 
-  Under the FLAT replica (all children direct, one default budget) the burst of
-  independent single-crashes exceeds the budget and the WHOLE supervisor
-  terminates — the critical "Repo/Endpoint" sentinel dies with it.
+  Under the FLAT replica (all children direct, one shared budget) the burst of
+  independent single-crashes exceeds the intensity budget and the WHOLE
+  supervisor terminates — the critical "Repo/Endpoint" sentinel dies with it.
 
   Under the TIERED replica (the volatile workers wrapped in their own supervisor
-  with its own budget, mirroring `Barkpark.Plugins.Supervisor` at 5/10s) the same
-  burst is absorbed by the sub-supervisor, the top supervisor sees zero child
-  deaths, and the critical sentinel stays up on its original pid.
+  with its own budget, mirroring `Barkpark.Plugins.Supervisor`) the same burst is
+  absorbed by the sub-supervisor, the top supervisor sees zero child deaths, and
+  the critical sentinel stays up on its original pid.
+
+  ## Determinism (why this used to flake, task-d7787d0a0260f95d)
+
+  OTP's restart-intensity is a rolling WALL-CLOCK window (`max_seconds`): a burst
+  breaches only if `max_restarts + 1` restarts all land inside ONE window. The
+  original replica used a 5s window, so on a loaded CI box the 4 restarts could
+  spread past 5s — the earliest aged out before the last landed, `count` never
+  exceeded the budget, and the "tree terminates" assertion falsely reds (confirmed
+  flaky: passed on #2403, failed on #2431, same code).
+
+  The fix keeps the audit's exact scenario — a burst of 4 single-crashes breaching
+  an intensity budget of 3 — but sets `max_seconds` to `@intensity_window_s`, a
+  window no test run can outlast. The crash COUNT is already deterministic: the
+  ETS counter makes each worker crash EXACTLY once and `restart: :permanent`
+  guarantees exactly one restart per crash, so exactly 4 restarts occur. With a
+  window wide enough that none age out, `4 > 3` holds on every run regardless of
+  wall-clock scheduling. Intensity, not timing, decides the outcome — the FLAT
+  supervisor now always escalates and the TIERED sub-supervisor (budget 5, so
+  `4 <= 5`) always absorbs.
   """
   use ExUnit.Case, async: true
 
@@ -52,10 +71,23 @@ defmodule Barkpark.SupervisionIsolationTest do
     def init(:ok), do: {:ok, :ok}
   end
 
-  # 4 blip workers: 4 runtime restarts in the same instant window — strictly more
-  # than the default budget of 3 (flat topology escalates), but within the
-  # volatile tier's 5/10s budget (tiered topology absorbs).
+  # 4 blip workers: 4 runtime restarts — strictly more than the flat budget of 3
+  # (flat topology escalates), but within the volatile tier's budget of 5 (tiered
+  # topology absorbs).
   @blip_count 4
+
+  # Restart-intensity budgets. The top budget is IDENTICAL in both topologies so
+  # the ONLY variable under test is the topology (flat vs tiered).
+  @top_max_restarts 3
+  @tier_max_restarts 5
+
+  # A restart-intensity window (`max_seconds`) wide enough that no test run can
+  # outlast it. This decouples the 4-restart intensity breach from wall-clock
+  # scheduling: all 4 restarts are always counted inside one window, so `4 > 3`
+  # holds deterministically even on a starved CI box. (The original 5s window was
+  # the sole source of the flake — a loaded box could spread the restarts past
+  # it.) `max_seconds` must be a positive integer.
+  @intensity_window_s 3600
 
   setup do
     table = :ets.new(:blip_counters, [:public, :set])
@@ -83,8 +115,8 @@ defmodule Barkpark.SupervisionIsolationTest do
     {:ok, sup} =
       Supervisor.start_link(children,
         strategy: :one_for_one,
-        max_restarts: 3,
-        max_seconds: 5
+        max_restarts: @top_max_restarts,
+        max_seconds: @intensity_window_s
       )
 
     [{:sentinel, sentinel_pid, _, _}] =
@@ -94,16 +126,20 @@ defmodule Barkpark.SupervisionIsolationTest do
     sentinel_ref = Process.monitor(sentinel_pid)
 
     # Escalation: the top supervisor terminates, taking the critical sentinel
-    # sibling with it (total-outage repro).
-    assert_receive {:DOWN, ^sup_ref, :process, ^sup, _reason}, 2_000
-    assert_receive {:DOWN, ^sentinel_ref, :process, ^sentinel_pid, _}, 2_000
+    # sibling with it (total-outage repro). The outcome is deterministic (4 > 3
+    # in a window nothing outlasts); the generous timeout only bounds patience on
+    # a scheduler-starved box — it never masks a regression (a tree that fails to
+    # die just times out here and reds).
+    assert_receive {:DOWN, ^sup_ref, :process, ^sup, _reason}, 5_000
+    assert_receive {:DOWN, ^sentinel_ref, :process, ^sentinel_pid, _}, 5_000
   end
 
   test "TIERED topology: the same burst is contained to the volatile sub-supervisor; the critical sentinel survives",
        %{table: table} do
     Process.flag(:trap_exit, true)
 
-    # Volatile tier mirrors Barkpark.Plugins.Supervisor: own budget 5/10s.
+    # Volatile tier mirrors Barkpark.Plugins.Supervisor: its OWN budget, wide
+    # enough (5 restarts) to absorb the 4-crash burst.
     volatile_tier =
       %{
         id: :volatile_tier,
@@ -112,17 +148,22 @@ defmodule Barkpark.SupervisionIsolationTest do
           {Supervisor, :start_link,
            [
              blip_children(table),
-             [strategy: :one_for_one, max_restarts: 5, max_seconds: 10]
+             [
+               strategy: :one_for_one,
+               max_restarts: @tier_max_restarts,
+               max_seconds: @intensity_window_s
+             ]
            ]}
       }
 
     sentinel_spec = Supervisor.child_spec({Sentinel, []}, id: :sentinel)
 
+    # Top budget is IDENTICAL to the FLAT test — topology is the only variable.
     {:ok, sup} =
       Supervisor.start_link([sentinel_spec, volatile_tier],
         strategy: :one_for_one,
-        max_restarts: 3,
-        max_seconds: 5
+        max_restarts: @top_max_restarts,
+        max_seconds: @intensity_window_s
       )
 
     [{:sentinel, sentinel_pid, _, _}] =
