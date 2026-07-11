@@ -81,8 +81,44 @@ After wave 3 the epic is CLOSED. Anything MCP-flavored beyond it belongs to viab
 
 **Next wave (charter future list, remaining):** (1) manifest hot-refresh on ETag change — the last unbuilt item from the wave-1 list (server restart is currently the only way a new plugin's verbs appear mid-session; the SDK supports `listChanged`). (2) Resources depth: `resources/list` is a single 200-cap page and titles come from a full-document list response — consider a lighter projection or `--all` pagination if paper corpora grow; also consider `resources/subscribe` off the listen SSE feed. (3) An optional real driven-Cursor screenshot remains garnish (GUI calls are LLM-mediated — the transcript is the proof). (4) DestructiveHint on additive creates is conservatively true — revisit only if a manifest write-kind signal ever exists. The epic's charter roadmap is otherwise MINED OUT — consider closing the epic after this merge.
 
-### Wave 2026-07-11 (wave 3 — reconcile and close) — IN FLIGHT
+### Wave 2026-07-11 (wave 3 — reconcile and close, REVIEWED — grade A, THE EPIC IS SEALED)
 
-Paper: `bp-mcp-serve-epic-wave-2026-07-11`. Decisions 12-21 above are this wave's ratified choices. Verification highlights (fresh, at HEAD cbef2af2): full unfiltered Go gate green (`ok internal/cli 10.778s`); live guerrilla `/mcp` authenticated `tools/call task_ready` returned real ledger docs and the deny path failed closed both ways (isError:true, unauthorized — NOT an HTTP 401); live `tools/list` = exactly the 8 registered names; epic unclaimed (claim=null) so the epoch-0 close holds; D18 provenance pinned to viable-everywhere's charter (05c42173), distinct from this epic's own mcp-w2-resources degrade.
+Paper: `bp-mcp-serve-epic-wave-2026-07-11` (debrief appended, published). Decisions 12-21 above
+were this wave's ratified choices; both slices landed green.
 
-Slices: `mcp-close-doc-truth` (opus, docs+comments truth refresh) → `mcp-epic-close-stamp` (fable, close story + seal). Review rewrites this entry with outcomes.
+- `mcp-close-doc-truth` — merge **`loop-epic/doc-truth-refresh-every-mcp-surface-says-0-r`**
+  (NOT the base branch): every MCP surface now says EIGHT curated task tools — 9 onramp docs
+  + in-binary help + 7 stale source comments (2 beyond the brief: 'curated'/'six' split across
+  a newline in mcp_bridge.go:49 and mcp_stdio_smoke_test.go:208) + @canonical aka list (full 8,
+  marker still adjacent to registerTaskTools) + validation.md truth refresh (eight; '(401)' →
+  tool-result error isError:true/unauthorized inside HTTP 200; 'transcript pending' → the dated
+  2026-07-11 redacted live-smoke addendum, zero token bytes). The stamp/pulse verb lines were
+  added at the canonical renderAgentsMDBody source so all three embeds (.mdc,
+  CLAUDE-BARKPARK.md, CODEX.md AGENTS block) + the golden stay byte-parity — 20 files, the 3
+  extra mechanically forced by TestOnrampAgentsMdWrapperParity. Reviewer fix on the -r branch
+  (dc7371c7): validation.md's "Still owed: the live remote smoke" pointer was left
+  contradicting the new addendum 30 lines below — retired with a see-below pointer. Historical
+  numeral run-logs (5-tool/6-tool snapshots) deliberately preserved as honest point-in-time
+  records. Full slice gate re-run green on the -r branch (build/vet/test + zero six-hits +
+  anchors-check PASS + budgets PASS).
+- `mcp-epic-close-stamp` — ledger-only, zero repo commits (branch
+  `loop-epic/epic-close-out-bp-mcp-serve-epic-sealed--1` is empty vs main; nothing to merge).
+  **`bp-mcp-serve-epic` is CLOSED**: description rewritten into the PR-cited close story
+  (anchor→evidence clause map at cbef2af2; #1790=cac9b43d, #1791=398612d2, #1993=94efd1f5,
+  Path A d49b7c40; cross-epic corroboration #2588=304e45fb + #2580=46f7ea5d cited as other
+  epics' deliverables; D18 attributed to viable-everywhere 05c42173; OAuth disclaimed as
+  ve-w3-oauth-as; live proof scoped read+fail-closed; doc-truth named the blessed open child;
+  original anchor preserved verbatim), draft collapsed, sealed via the close verb only at
+  epoch 0 (epic was unclaimed). Reviewer re-verified every file:line anchor via
+  `git show cbef2af2` and all seven shas — all real; 47/47 child-criteria arithmetic checks.
+
+**Lead closes on merge:** merge doc-truth's -r branch, then close its criterion 5 (MERGE-GATE);
+on mcp-epic-close-stamp close criterion 5 (LEAD GATE — reviewer already verified the stamp
+trail honest but the builder's lease was still live at review, so the close needs a re-claim
+after it lapses; worker epic-builder-epic-close-out-bp-mcp-serve-epic-sealed-, epoch 6 at
+review time). No other residue: backlog none, drafts none, downstream consumers cited not
+re-homed.
+
+**Next wave:** none — the epic is sealed and its roadmap mined out. Anything MCP-flavored
+beyond this belongs to viable-everywhere (remote OAuth = ve-w3-oauth-as, ingest-ambient) or
+studio-claude-chat (toolset consumer).

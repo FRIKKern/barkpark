@@ -132,7 +132,7 @@ is closed on the board — no markdown TODO lists.
 
 ## The tools
 
-Six curated task tools ship by default (`--tools tasks`), each carrying the
+Eight curated task tools ship by default (`--tools tasks`), each carrying the
 claim-first contract in its own description:
 
 - **`task_ready`** — list ready (unblocked) tasks in priority order.
@@ -144,6 +144,11 @@ claim-first contract in its own description:
 - **`task_create`** — file new work (injects `kind` + `lifecycle_status`).
 - **`task_prime`** — one-call rehydration for a resuming agent: in-progress
   claims (with close-ready epochs), ready head, recent events, counts.
+- **`task_stamp`** — record evidence on ONE acceptance criterion mid-claim;
+  `--met` needs non-empty evidence, `--miss` logs an honest attempt without
+  flipping the lock (holder + epoch-gated).
+- **`task_pulse`** — write the now-line and renew the lease in one write (no
+  epoch arg — it bumps the claim epoch, so re-read it before the next close).
 
 ### `--tools all` (expert only)
 

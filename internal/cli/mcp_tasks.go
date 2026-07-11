@@ -72,7 +72,7 @@ import (
 // task_stamp / task_pulse have no such divergence — they map straight onto
 // task.stamp / task.pulse.
 //
-// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close,task_prime,task_stamp,task_pulse doc:docs/cards/cli.md
+// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_show,task_close,task_create,task_prime,task_stamp,task_pulse doc:docs/cards/cli.md
 func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
 	tree := m.Tree()
 

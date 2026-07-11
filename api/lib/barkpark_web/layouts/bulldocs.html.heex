@@ -899,12 +899,15 @@
       <div class="bp-term-body" id="bp-tui-out"></div>
     </div>
   </div>
+  <%!-- CSP layer-2 (csp-paper-reader): the click handler is bound via
+        addEventListener inside the nonced toggle IIFE below, NOT an inline
+        onclick — an enforcing script-src without 'unsafe-inline' blocks inline
+        handlers (which is what neutralises an injected onerror=). --%>
   <button
     type="button"
     class="bp-view-toggle"
     aria-pressed="false"
     aria-label="Toggle terminal (TUI) view"
-    onclick="window.__bpToggleTui && window.__bpToggleTui()"
   >
     <span class="bp-vt-dot" aria-hidden="true"></span>
     <span class="bp-vt-label">TUI view</span>
@@ -966,17 +969,18 @@
       <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">View in browser ↗</a>
     </div>
   </div>
+  <%!-- CSP layer-2: bound via addEventListener in the nonced IIFE below (see
+        the TUI toggle above), not an inline onclick. --%>
   <button
     type="button"
     class="bp-view-toggle bp-view-toggle--email"
     aria-pressed="false"
     aria-label="Toggle email view"
-    onclick="window.__bpToggleEmail && window.__bpToggleEmail()"
   >
     <span class="bp-vt-dot" aria-hidden="true"></span>
     <span class="bp-vt-label">Email view</span>
   </button>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     (function () {
       var KEY = "bp-paper-view"; // "reader" | "tui" | "email" — one mode at a time
       var btn = document.querySelector(".bp-view-toggle:not(.bp-view-toggle--email)");
@@ -1163,6 +1167,13 @@
       window.__bpToggleEmail = function () {
         setMode(document.body.classList.contains("bp-email") ? "reader" : "email");
       };
+
+      // CSP layer-2: bind the toggle buttons here instead of inline onclick
+      // attributes (blocked by the enforcing script-src). `btn`/`emailBtn` are
+      // the same elements resolved at the top of this IIFE; the script tag sits
+      // after both buttons in the DOM, so they always exist by now.
+      if (btn) btn.addEventListener("click", window.__bpToggleTui);
+      if (emailBtn) emailBtn.addEventListener("click", window.__bpToggleEmail);
     })();
   </script>
 
@@ -1178,7 +1189,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/asciinema-player@3.8.0/dist/bundle/asciinema-player.min.js"></script>
   <script src="/assets/phoenix.js"></script>
   <script src="/assets/phoenix_live_view.js"></script>
-  <script>
+  <script nonce={assigns[:csp_nonce]}>
     // PaperMermaid: run Mermaid over any unprocessed `pre.mermaid` inside this
     // hook's element. Registered on the streamed <article>, so its mounted()
     // fires once and updated() fires on every stream delta — exactly when a new

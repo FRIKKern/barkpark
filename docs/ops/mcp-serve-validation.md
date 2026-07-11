@@ -142,7 +142,7 @@ Hermetic coverage lands with the slice (`internal/cli/mcp_http_test.go`), all
 driving a **real MCP client over real HTTP** against the production handler:
 
 - `TestMCPHTTPForwardThroughBearer` — the client's bearer reaches the backing
-  API verbatim, per request; the curated six tools list identically to stdio;
+  API verbatim, per request; the curated eight tools list identically to stdio;
   zero bytes on stdout.
 - `TestMCPHTTPDenyPathsFailClosed` — missing AND bogus bearer each return the
   downstream 401 envelope as `isError`, with zero write side effects, and the
@@ -151,9 +151,11 @@ driving a **real MCP client over real HTTP** against the production handler:
 - `TestMCPHTTPPaperResourcesTemplateOnly` — HTTP mode registers only the
   `barkpark://papers/{id}` read template; the enumeration GET fires zero times.
 
-Still owed (NOT this slice): the live remote smoke against
-`https://guerrilla.barkpark.cloud/mcp` — that is the close criterion of the
-deploy slice (`ve-w2-mcp-deploy`), which owns the systemd unit + Caddy route.
+Owed at the time of the transport slice, since paid: the live remote smoke
+against `https://guerrilla.barkpark.cloud/mcp` — the close criterion of the
+deploy slice (`ve-w2-mcp-deploy`), which owns the systemd unit + Caddy route —
+is recorded below (see "Live smoke — guerrilla remote, 2026-07-11").
+
 ## Remote endpoint (Streamable HTTP) — deploy shape + smoke recipe
 
 The remote path (viable-everywhere charter D18/D19) exposes the SAME server at
@@ -178,11 +180,34 @@ box (transcript to be appended here, redacted, same rules as above):
 claude mcp add --transport http bp-remote https://guerrilla.barkpark.cloud/mcp \
   --header "Authorization: Bearer $TOKEN"
 # drive task_ready (read-only), then the deny path:
-#   same call with a bogus bearer MUST fail closed (401), never a tool result
+#   same call with a bogus bearer MUST fail closed — a tool-result error
+#   (isError:true, code unauthorized) inside HTTP 200, never a successful result
 ```
 
-**Status: transcript pending** — the smoke is the close criterion of task
-`ve-w2-mcp-deploy` and cannot honestly run before both slices deploy.
+## Live smoke — guerrilla remote, 2026-07-11 (transcript no longer pending)
+
+Endpoint: `https://guerrilla.barkpark.cloud/mcp` (Streamable-HTTP). Binary HEAD
+`cbef2af2`. Admin token from `~/.config/barkpark/config.json`
+`known_servers[guerrilla]`, passed as `Authorization: Bearer <REDACTED>`; no
+token byte appears below.
+
+- **initialize** (authenticated) → HTTP 200:
+  `{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"logging":{},"resources":{"listChanged":true},"tools":{"listChanged":true}},"protocolVersion":"2025-06-18","serverInfo":{"name":"barkpark-tasks","title":"Barkpark Tasks","version":"dev"}}}`
+- **tools/list** (authenticated) → HTTP 200, **8 tools**: `task_close`,
+  `task_create`, `task_next`, `task_prime`, `task_pulse`, `task_ready`,
+  `task_show`, `task_stamp`.
+- **tools/call `task_ready` `{"limit":2}`** (authenticated) → HTTP 200, result
+  (NOT isError), real task JSON:
+  `{"ok":true,"docs":[{"doc_id":"task-96a908af98698118",…},{"doc_id":"isu-reconcile-epic-close",…}]}`
+- **DENY PATH** — the same `tools/call` with no bearer AND with a bogus bearer →
+  HTTP 200, `isError:true`, no data:
+  `{"jsonrpc":"2.0","id":4,"result":{"content":[{"type":"text","text":"{\"error\":{\"code\":\"unauthorized\",\"message\":\"missing or invalid token\",…}}"}],"isError":true}}`
+
+The transport answers HTTP 200; the refusal is a JSON-RPC tool-result error
+(`isError:true`, code `unauthorized`), not an HTTP 401. The server fails CLOSED —
+no task data crosses without a valid dataset-scoped token. This smoke is the
+close criterion of task `ve-w2-mcp-deploy`, which recorded its own live smoke
+green 2026-07-11 ~14:32Z.
 
 ## Post-catalog re-run (2026-07-09, reviewer, wave-2 integrated)
 

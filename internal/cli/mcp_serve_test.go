@@ -42,7 +42,7 @@ const mcpTestManifest = `{
 // would — initialize handshake, tools/list, tools/call — over an in-memory
 // transport (the SDK's StdioTransport hardcodes os.Stdout, so a stdio test would
 // fight the real stdout; NewInMemoryTransports is the SDK's own test seam). It
-// asserts the curated six tools are advertised, that a call returns the backing
+// asserts the curated eight tools are advertised, that a call returns the backing
 // HTTP response as content, that the empty-queue 200 is NOT flagged an error,
 // that an HTTP >= 400 IS, and that bp's server code writes ZERO bytes to
 // os.Stdout (the invariant that keeps a real stdio session's protocol stream
@@ -130,7 +130,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 	defer cs.Close()
 
-	// tools/list — exactly the curated six, by name.
+	// tools/list — exactly the curated eight, by name.
 	lt, err := cs.ListTools(bg, nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
