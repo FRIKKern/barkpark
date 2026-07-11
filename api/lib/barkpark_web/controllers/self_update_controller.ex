@@ -24,21 +24,10 @@ defmodule BarkparkWeb.SelfUpdateController do
         |> json(%{ok: true, status: render_status(Runner.status())})
 
       {:error, :already_running} ->
-        conn
-        |> put_status(:conflict)
-        |> json(%{error: %{code: "already_running", message: "an update is already running"}})
+        already_running(conn)
 
       {:error, :disabled} ->
-        conn
-        |> put_status(:service_unavailable)
-        |> json(%{
-          error: %{
-            code: "feature_not_configured",
-            message:
-              "self-update apply is not enabled on this instance " <>
-                "(set BARKPARK_SELF_UPDATE_APPLY=1)"
-          }
-        })
+        feature_not_configured(conn)
 
       {:error, :start_failed} ->
         # Distinct from :disabled — the feature IS enabled but the runner
@@ -50,6 +39,89 @@ defmodule BarkparkWeb.SelfUpdateController do
           error: %{
             code: "runner_start_failed",
             message: "self-update runner failed to start — check the server logs"
+          }
+        })
+    end
+  end
+
+  @doc """
+  Trigger an instance rollback to the idle blue/green slot's recorded sha.
+
+  Fail-closed on the SAME `BARKPARK_SELF_UPDATE_APPLY` gate as self-update
+  (503 `feature_not_configured`). The rollback preflight is run SYNCHRONOUSLY
+  and read-only so the control plane learns the target sha before anything
+  mutates and gets a typed refusal on a bad box; only on a clear preflight is
+  the mutating `--rollback` spawned as an async `Port`, sharing the Runner's
+  single run slot with self-update. Typed refusals: 409 `no_previous_slot`
+  (no idle slot to return to), 409 `not_supported` (box has no `.slots`
+  machinery), 409 `already_running` (a run is in flight either direction),
+  500 `rollback_preflight_failed` (preflight could not clear it → FAIL CLOSED,
+  never flip to garbage). Success answers 202 `{status:"started",target_sha}`.
+  """
+  def rollback(conn, _params) do
+    cond do
+      not Runner.enabled?() ->
+        feature_not_configured(conn)
+
+      # Shared single-flight: refuse a colliding rollback before spending a
+      # preflight subprocess. The GenServer trigger stays the authoritative
+      # gate for the check→spawn race.
+      Runner.running?() ->
+        already_running(conn)
+
+      true ->
+        do_rollback(conn)
+    end
+  end
+
+  defp do_rollback(conn) do
+    case Runner.preflight_rollback() do
+      {:ok, target_sha} ->
+        start_rollback(conn, target_sha)
+
+      {:error, :no_previous_slot} ->
+        conflict(conn, "no_previous_slot", "no previous slot to roll back to")
+
+      {:error, :not_supported} ->
+        conflict(conn, "not_supported", "rollback is not supported on this instance")
+
+      {:error, :already_running} ->
+        already_running(conn)
+
+      {:error, {:preflight_failed, _reason}} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{
+          error: %{
+            code: "rollback_preflight_failed",
+            message:
+              "rollback preflight could not determine a safe target — check the server logs"
+          }
+        })
+    end
+  end
+
+  defp start_rollback(conn, target_sha) do
+    case Runner.trigger_rollback() do
+      {:ok, :started} ->
+        conn
+        |> put_status(:accepted)
+        |> json(%{status: "started", target_sha: target_sha})
+
+      # A self-update/rollback slipped in between preflight and the spawn.
+      {:error, :already_running} ->
+        already_running(conn)
+
+      {:error, :disabled} ->
+        feature_not_configured(conn)
+
+      {:error, :start_failed} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{
+          error: %{
+            code: "runner_start_failed",
+            message: "rollback runner failed to start — check the server logs"
           }
         })
     end
@@ -67,10 +139,40 @@ defmodule BarkparkWeb.SelfUpdateController do
     )
   end
 
-  # Whitelist-render: state/exit_code/log/timestamps only — never the command.
+  # Shared typed-error responses (self-update + rollback speak the same
+  # vocabulary — charter W6 D23).
+  defp already_running(conn) do
+    conn
+    |> put_status(:conflict)
+    |> json(%{error: %{code: "already_running", message: "an update is already running"}})
+  end
+
+  defp conflict(conn, code, message) do
+    conn
+    |> put_status(:conflict)
+    |> json(%{error: %{code: code, message: message}})
+  end
+
+  defp feature_not_configured(conn) do
+    conn
+    |> put_status(:service_unavailable)
+    |> json(%{
+      error: %{
+        code: "feature_not_configured",
+        message:
+          "self-update apply is not enabled on this instance " <>
+            "(set BARKPARK_SELF_UPDATE_APPLY=1)"
+      }
+    })
+  end
+
+  # Whitelist-render: state/mode/exit_code/log/timestamps only — never the
+  # command. `mode` (self_update | rollback) tells a surface which verb the
+  # current/last run is.
   defp render_status(status) do
     %{
       state: Atom.to_string(status.state),
+      mode: Atom.to_string(status.mode),
       exit_code: status.exit_code,
       log: status.log,
       started_at: iso(status.started_at),
