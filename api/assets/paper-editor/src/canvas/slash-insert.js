@@ -39,6 +39,13 @@ import { runToTiptap } from "./run-convert.js";
 //                              — article-chrome blocks with no canvas node-view (bpOpaque).
 //   * field-image / field-reference
 //                              — PICKER fields; need the upload/reference picker (bpOpaque).
+//   * stat / stats / stat-grid / heatmap / chart
+//                              — DATA-BEARING, API-authored data-viz blocks (charter D4,
+//                                pd-ee-dataviz-editors). Canvas-EDITABLE (bpFleet server
+//                                paint + JSON config island) but an EMPTY slash insert is
+//                                meaningless — there is no useful minimal default for a
+//                                chart with no series or a heatmap with no cells; the
+//                                same structural-exclusion precedent as sheet/embed.
 export const CANVAS_SLASH_TYPES = new Set([
   "paragraph",
   "heading",

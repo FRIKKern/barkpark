@@ -266,6 +266,27 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # stay in lockstep with run-convert.js (isCanvasStage*) and stage-node.js.
   @canvas_widget_types ~w(card stage)
 
+  # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds the canvas handles as
+  # SERVER-PAINTED atoms — the SAME bpFleet node + `bp:block-html` paint channel the
+  # component fleet rides (run-convert.js CANVAS_DATAVIZ_TYPES → bpFleet; display HTML
+  # is `Render.render_block(block, %{style: :article})` → the Render.DataViz emitters,
+  # ONE producer, byte-parity by construction). Authored config is edited in the
+  # bpFleet node-view's JSON edit island (embed-node.js FLEET_CONFIG_EDITORS /
+  # FLEET_ITEM_EDITORS) → ONE patch-block → server repaint.
+  #
+  # A PARALLEL set, deliberately NOT folded into @canvas_fleet_types: that set rides
+  # a 4-way lockstep with paper_editor.ex @fleet_preview_types (the classic-mode
+  # boundary widget), and DataViz must stay OUT of the classic boundary paint —
+  # classic (canvas-off) mode keeps the read-only catch-all for these kinds (charter
+  # D2: C1 is scoped to the mainline canvas surface). `stat-grid` is the accepted
+  # alias of `stats` (compose.ex); both are enumerated.
+  #
+  # MUST stay in LOCKSTEP with run-convert.js CANVAS_DATAVIZ_TYPES and
+  # shared/paper.ex @dataviz_render_types (5 kinds in every one). D4: these kinds are
+  # deliberately ABSENT from slash-insert.js CANVAS_SLASH_TYPES (data-bearing,
+  # API-authored — an empty slash insert is meaningless).
+  @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
@@ -295,7 +316,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_figure_types ++
                   @canvas_task_list_types ++
                   @canvas_container_types ++
-                  @canvas_widget_types
+                  @canvas_widget_types ++
+                  @canvas_dataviz_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**
