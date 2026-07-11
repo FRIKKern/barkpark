@@ -1197,7 +1197,7 @@ func TestBuildBoardCriteriaTally(t *testing.T) {
 		{DocID: "a", Lifecycle: "in_progress", Criteria: &Criteria{Met: 2, Total: 5}},
 		{DocID: "b", Lifecycle: "done", Criteria: &Criteria{Met: 3, Total: 3}},
 		{DocID: "c", Lifecycle: "cancelled", Criteria: &Criteria{Met: 1, Total: 4}}, // excluded
-		{DocID: "d", Lifecycle: "open"}, // no criteria — costs nothing
+		{DocID: "d", Lifecycle: "open"},                                             // no criteria — costs nothing
 	}}
 	b := BuildBoard(s, RepoContext{}, fixedNow)
 	if b.CriteriaMet != 5 || b.CriteriaTotal != 8 {
