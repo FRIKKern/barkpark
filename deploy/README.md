@@ -38,7 +38,22 @@ seamless, this covers crashes/restarts outside deploys. Baked into the renderers
 armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
 auto-reverting; port-flip-safe). Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script (slot selection, flip, failure semantics): `deploy/instance-deploy_test.sh`.
+script (99 checks: slot selection, flip, failure semantics, channel seam,
+coalesce, rollback happy flip-back + typed refusals + unhealthy fail-closed):
+`deploy/instance-deploy_test.sh`.
+
+**Rollback (W6).** Every deploy stamps `.slots/<target>.sha` so the box knows
+what its idle slot holds. `instance-deploy.sh --rollback-preflight` (read-only)
+answers whether a rollback is possible: exit 0 prints `TARGET_SLOT=`/
+`TARGET_SHA=`; typed refusals — 21 `no_previous_slot`, 22 `not_supported`
+(pre-stamp box), 23 deploy lock held. `instance-deploy.sh --rollback` flips to
+the idle slot at its recorded sha: `git reset --hard <stamp>` first (a bare
+port flip lies — both slots share ONE checkout, so a slot restart would
+recompile NEW source into the old build root), reboot the slot, health-gate it
+on its own port, flip Caddy only on green, rewrite `.instance-deploy-last`.
+Unhealthy = fail closed: slot re-disabled, Caddy untouched, checkout reset
+back, exit 24. Schema stays forward — rolling back code does NOT undo a
+migration; write a compensating one.
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
