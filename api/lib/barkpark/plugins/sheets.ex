@@ -248,6 +248,7 @@ defmodule Barkpark.Plugins.Sheets do
     if CondFormat.valid_bg?(color) do
       []
     else
+      # lit-allow-next-line: example hex in a user-facing error STRING (color DATA, not chrome)
       ["tab #{idx}: invalid color #{inspect(color)} (expected #rrggbb, e.g. #1a2b3c)"]
     end
   end

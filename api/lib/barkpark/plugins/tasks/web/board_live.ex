@@ -2010,20 +2010,24 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-peek-log .bp-age { margin-left: auto; padding-left: 8px; }
 
       /* ── §1 white-ladder glyph vocabulary ────────────────────────────── */
+      /* Lifecycle hues are the GOVERNED --life-* role tokens (design/
+         status-manifest.json → tokens.json → the root layout's GENERATED
+         block), which flip on html[data-theme="dark"] — never a hand-copied
+         hex per theme (au-r3). */
       .gi {
         display: inline-block; width: 1.1em; text-align: center;
         font-family: var(--font-mono, monospace); line-height: 1.3;
       }
       .gi--open { color: currentColor; opacity: 0.5; }      /* backlog: dim ○ */
       .gi--ready { color: currentColor; opacity: 1; }       /* unchecked: bright ○ */
-      .gi--blocked { color: #d97706; font-weight: 700; }    /* amber ! */
-      .gi--done { color: #0d9488; }                          /* teal ✓ */
-      .gi--cancelled { color: #a1a1aa; }
+      .gi--blocked { color: var(--life-blocked); font-weight: 700; }  /* amber ! */
+      .gi--done { color: var(--life-done); }                          /* teal ✓ */
+      .gi--cancelled { color: var(--life-cancelled); }
 
       /* in_progress: pure-CSS Braille spinner, TUI-identical 10 frames,
          ~80ms/frame (800ms cycle). The glyph is supplied entirely by ::before
          so the frame-cycle needs no JS and survives a static render. */
-      .gi--in_progress { color: #2563eb; }
+      .gi--in_progress { color: var(--life-in_progress); }
       .gi--in_progress::before { content: "⠋"; animation: bp-braille 800ms steps(1) infinite; }
       @keyframes bp-braille {
         0%   { content: "⠋"; }
@@ -2048,29 +2052,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       }
       .bp-gh:hover { color: var(--text); border-color: var(--ring); }
       .bp-gh-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
-      .bp-gh-dot.is-synced { background: #2dd4bf; }
-      .bp-gh-dot.is-detached { background: #d97706; }
+      /* Sync health rides the same governed lifecycle roles: synced = the
+         done teal, detached = the blocked amber (theme-aware, au-r3). */
+      .bp-gh-dot.is-synced { background: var(--life-done); }
+      .bp-gh-dot.is-detached { background: var(--life-blocked); }
       .bp-gh-state { opacity: 0.65; }
 
-      /* Dark-scheme §1 hexes (lighter, higher-contrast on dark surfaces) —
-         keyed off the Studio theme attribute, with the media query as the
-         pre-hydration fallback. */
+      /* Dark-surface elevation shadows — keyed off the Studio theme attribute,
+         with the media query as the pre-hydration fallback. The §1 lifecycle
+         hues need no fork here anymore: the --life-* role tokens flip with the
+         theme at the root layout. */
       @media (prefers-color-scheme: dark) {
-        .gi--blocked { color: #fbbf24; }
-        .gi--done { color: #2dd4bf; }
-        .gi--cancelled { color: #71717a; }
-        .gi--in_progress { color: #60a5fa; }
         .bp-card:hover { box-shadow: 0 2px 10px rgb(0 0 0 / 0.35); }
         .bp-seg-opt.is-active { box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
       }
-      html[data-theme="light"] .gi--blocked { color: #d97706; }
-      html[data-theme="light"] .gi--done { color: #0d9488; }
-      html[data-theme="light"] .gi--cancelled { color: #a1a1aa; }
-      html[data-theme="light"] .gi--in_progress { color: #2563eb; }
-      html[data-theme="dark"] .gi--blocked { color: #fbbf24; }
-      html[data-theme="dark"] .gi--done { color: #2dd4bf; }
-      html[data-theme="dark"] .gi--cancelled { color: #71717a; }
-      html[data-theme="dark"] .gi--in_progress { color: #60a5fa; }
       html[data-theme="dark"] .bp-card:hover { box-shadow: 0 2px 10px rgb(0 0 0 / 0.35); }
       html[data-theme="dark"] .bp-phone:hover { box-shadow: 0 10px 30px rgb(0 0 0 / 0.45); }
 

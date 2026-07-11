@@ -553,7 +553,7 @@ defmodule Barkpark.Plugins.Tasks do
             summary:
               "Extra close-body fields as key=value (key:=json for typed). The expectation " <>
                 "close-out (task-proves-paper): --set 'criteria:=[{\"index\":0,\"met\":true," <>
-                "\"evidence\":\"PR #123\"}]' flips acceptance_criteria met/evidence atomically " <>
+                "\"evidence\":\"PR #1234\"}]' flips acceptance_criteria met/evidence atomically " <>
                 "with the close (same rev CAS — no separate racing mutation). Optional " <>
                 "\"criterion\" per entry text-guards against a reordered/edited list (409 " <>
                 "criteria_mismatch). Unmet criteria never block a close (soft warning only). " <>

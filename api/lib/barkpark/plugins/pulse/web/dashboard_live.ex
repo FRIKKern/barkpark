@@ -149,7 +149,7 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
       </p>
 
       <section data-role="pulse-cost"
-               style="border: 1px solid var(--muted-border-color, #ccc); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
+               style="border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
         <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
           <strong>what the storm costs right now</strong>
           <span style="text-align:right; font-variant-numeric: tabular-nums;">
@@ -185,7 +185,7 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
       </div>
 
       <div :for={row <- @rows} data-role="pulse-channel" data-channel={row.name}
-           style="border: 1px solid var(--muted-border-color, #ccc); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
+           style="border: 1px solid var(--border); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
         <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
           <strong style="font-size:1.1rem;"><%= row.name %></strong>
           <span data-role="pulse-total" style="font-size:2.4rem; font-weight:700; font-variant-numeric: tabular-nums;">

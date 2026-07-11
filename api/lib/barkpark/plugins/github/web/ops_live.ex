@@ -77,7 +77,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
       </p>
 
       <div :if={not @health.active} data-role="github-health-inactive"
-           style="border:1px solid #b45309; background:rgba(180,83,9,0.10); border-radius:8px; padding:0.8rem 1rem; margin:1rem 0;">
+           style="border:1px solid var(--warn); background:hsl(var(--warn-hsl) / 0.10); border-radius:8px; padding:0.8rem 1rem; margin:1rem 0;">
         <strong>Plugin not provisioned.</strong>
         <span style="opacity:0.85;">
           The GitHub App credentials are missing or blank — the bridge is dark.
@@ -100,7 +100,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
             </thead>
             <tbody>
               <tr :for={ds <- @health.datasets} data-role="github-dataset" data-dataset={ds.dataset}
-                  style="border-top:1px solid var(--muted-border-color, #ccc);">
+                  style="border-top:1px solid var(--border);">
                 <td style="padding:0.35rem 0.7rem;"><strong><%= ds.dataset %></strong></td>
                 <td style="padding:0.35rem 0.7rem;"><%= ds.cursor %></td>
                 <td style="padding:0.35rem 0.7rem;"><%= ds.head %></td>
@@ -158,7 +158,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
                 </thead>
                 <tbody>
                   <tr :for={row <- rows} data-role="github-conflict-row" data-conflict-id={row.id}
-                      style="border-top:1px solid var(--muted-border-color, #ccc);">
+                      style="border-top:1px solid var(--border);">
                     <td style="padding:0.35rem 0.7rem;"><%= issue_ref(row) %></td>
                     <td style="padding:0.35rem 0.7rem;"><%= row.doc_id || "—" %></td>
                     <td style="padding:0.35rem 0.7rem;"><%= fmt(row.inserted_at) %></td>
