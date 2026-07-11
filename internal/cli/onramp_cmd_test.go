@@ -290,6 +290,66 @@ func TestOnrampCopilotGolden(t *testing.T) {
 	}
 }
 
+// TestOnrampZedGolden asserts the Zed emission is byte-compatible with the stanza
+// docs/setup/ZED.md:59-67 publishes. Zed's context_servers entry is a serde-
+// UNTAGGED enum (crates/settings_content/src/project.rs:392) — the discriminating
+// leak-guards are structural: the top-level key is `context_servers`, there is NO
+// `source` key, no sibling `mcpServers`/`servers` map, and — because Zed has no
+// ${env:} interpolation (charter D21) — NO env-interpolation placeholder of any
+// dialect. The credential rides bp's saved config, so the credential-doctrine note
+// (~/.config/barkpark/) must appear and no `# server:` URL line is printed.
+func TestOnrampZedGolden(t *testing.T) {
+	out, _, code := onrampRun(t, globals{server: guerrilla}, "zed")
+	if code != exitOK {
+		t.Fatalf("zed exit = %d, want %d", code, exitOK)
+	}
+	// BYTE-IDENTICAL to the json block docs/setup/ZED.md:59-67 publishes (decision
+	// 14: doc == verb). FLAT entry, no `source` key, EMPTY env {}.
+	wantStanza := `{
+  "context_servers": {
+    "barkpark": {
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {}
+    }
+  }
+}`
+	if !strings.Contains(out, wantStanza) {
+		t.Errorf("zed output missing the exact ZED.md stanza.\n--- got ---\n%s", out)
+	}
+	if !strings.Contains(out, `"context_servers"`) {
+		t.Errorf("zed output must use the top-level \"context_servers\" key")
+	}
+	// Structural leak-guards: no sibling map key, no `source` discriminator, and no
+	// env-interpolation form in ANY dialect (Zed has none — token via bp config).
+	for _, leak := range []string{
+		`"mcpServers"`,              // stdio siblings' map key
+		`"servers"`,                 // copilot's VS Code map key
+		`"source"`,                  // the internal tagged shape Zed does NOT use
+		"${env:BARKPARK_API_TOKEN}", // Cursor/Copilot dialect
+		"${BARKPARK_API_TOKEN}",     // Claude Code / Gemini dialect
+		"env_vars",                  // Codex shell-forward whitelist
+	} {
+		if strings.Contains(out, leak) {
+			t.Errorf("zed output leaked %q — it must be a flat context_servers entry with empty env, credential via bp saved config", leak)
+		}
+	}
+	for _, want := range []string{
+		"~/.config/zed/settings.json", // destination path
+		"~/.config/barkpark",          // credential-doctrine note
+		"context_servers",             // merge note names the key
+		"docs/setup/AGENT-ONRAMPS.md", // full-journey pointer
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("zed output missing %q", want)
+		}
+	}
+	// No server URL is baked into Zed's stanza (empty env), so no `# server:` line.
+	if strings.Contains(out, "# server:") {
+		t.Errorf("zed must not print a server line (its env is {} — bp reads the server from saved config)")
+	}
+}
+
 // TestOnrampAgentsMdGolden asserts `bp onramp agents-md` emits the canonical
 // marker-managed AGENTS.md block, byte-identical to the checked-in golden, and
 // that the block keeps every item CODEX.md's wave-1 rendering had dropped.
