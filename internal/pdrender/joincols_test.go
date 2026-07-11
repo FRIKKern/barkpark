@@ -1,7 +1,9 @@
 package pdrender
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -133,27 +135,71 @@ func TestFlexFits(t *testing.T) {
 	}
 }
 
-// TestNoInlineDivideFormulaOutsideSolver is the "one solver" tripwire: after the
-// refactor NO renderer outside joincols.go may re-inline the per-cell width
-// divide-formula assignment. joincols.go is the single owner; a copy reappearing
-// elsewhere reds this test.
+// moduleRootFrom walks up from the test's cwd to the directory that owns go.mod.
+// The tripwire below must grep the WHOLE module (single-module repo, verified), not
+// just the pdrender package dir — a divide-formula copy planted in internal/cli/ or
+// anywhere else must red the test, and a grep rooted at the package dir structurally
+// cannot see it.
+func moduleRootFrom(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found walking up from the test cwd — cannot root the divide-formula grep")
+		}
+		dir = parent
+	}
+}
+
+// TestNoInlineDivideFormulaOutsideSolver is the "one solver" tripwire: NO renderer
+// anywhere in the module may re-inline the per-cell width divide-formula assignment.
+// joincols.go is the single owner (and joincols_test.go carries the pattern as data);
+// a copy reappearing in any other .go file — a fresh renderer, internal/cli/, a web
+// helper — reds this test. Rooted at the module (go.mod walk-up) so the guard has
+// repo-wide reach, not just package-dir reach.
 func TestNoInlineDivideFormulaOutsideSolver(t *testing.T) {
-	out, err := exec.Command("grep", "-rn", "cellW *:=.*[Gg]utter", ".").CombinedOutput()
-	// grep exit status 1 == no matches at all (also acceptable — zero copies).
+	root := moduleRootFrom(t)
+	cmd := exec.Command("grep", "-rn", "--include=*.go", "cellW *:=.*[Gg]utter", ".")
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	// grep exit status 1 == no matches at all; any OTHER failure (status 2, missing
+	// binary, unreadable root) must red the test rather than pass vacuously.
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			t.Fatalf("divide-formula grep failed (tripwire cannot run): %v\n%s", err, out)
+		}
+	}
 	lines := []string{}
+	ownerSeen := false
 	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if ln == "" {
 			continue
 		}
-		if strings.HasPrefix(ln, "./joincols.go:") {
-			continue // the solver itself is the one allowed owner
+		path := strings.TrimPrefix(ln, "./")
+		// The solver itself is the one allowed OWNER; its test file legitimately
+		// carries the pattern as the grep string / measured fixtures.
+		if strings.HasPrefix(path, "internal/pdrender/joincols.go:") ||
+			strings.HasPrefix(path, "internal/pdrender/joincols_test.go:") {
+			ownerSeen = true
+			continue
 		}
 		lines = append(lines, ln)
 	}
-	if len(lines) > 0 {
-		t.Errorf("inline divide-formula copies remain outside joincols.go:\n%s", strings.Join(lines, "\n"))
+	// Liveness self-check: the solver ALWAYS carries the formula. Zero allowlisted
+	// hits means the pattern drifted from the code and the tripwire is dead.
+	if !ownerSeen {
+		t.Fatal("divide-formula pattern matched nothing in the joincols solver — the tripwire regex has drifted and guards nothing")
 	}
-	_ = err
+	if len(lines) > 0 {
+		t.Errorf("inline divide-formula copies remain outside the joincols solver:\n%s", strings.Join(lines, "\n"))
+	}
 }
 
 // bpEntry is a single {minWidth, tracks} breakpoint as it decodes from JSON
