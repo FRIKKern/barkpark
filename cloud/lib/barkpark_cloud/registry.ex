@@ -2686,7 +2686,37 @@ defmodule BarkparkCloud.Registry do
 
   def trigger_self_update(bp, _opts), do: do_trigger_self_update(bp)
 
-  defp do_trigger_self_update(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+  defp do_trigger_self_update(bp), do: relay_admin_post(bp, "/v1/admin/self-update")
+
+  @doc """
+  Trigger a blue/green ROLLBACK run on a live instance: `POST
+  <instance>/v1/admin/rollback` server-side with the stored admin token — the
+  exact `trigger_self_update/2` relay seam (isu-w6).
+
+  Returns `{:ok, http_status, decoded_body_map}` on ANY instance response —
+  the instance's semantics travel intact to the router, which relays them
+  (202 `{status:"started",target_sha}` | 409 no_previous_slot /
+  already_running / not_supported | 503 feature_not_configured). Errors
+  mirror `trigger_self_update/2`'s atoms: `:not_live`, `:no_admin_token`,
+  `:decrypt_failed`, `:instance_error`.
+
+  NO PIN PRECONDITION (isu-w6 D16) — the one deliberate difference from the
+  update trigger: a pinned instance is NOT refused. Rollback RE-PINS by
+  design (the router atomically writes `pinned_release = <instance-reported
+  target_sha>` on 202), so the operator's explicit rollback wins over the
+  stale pin. An unpinned rollback would be undone within one rollout tick —
+  a lie.
+  """
+  @spec trigger_rollback(Barkpark.t(), keyword()) ::
+          {:ok, non_neg_integer(), map()}
+          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+  def trigger_rollback(bp, _opts \\ []), do: relay_admin_post(bp, "/v1/admin/rollback")
+
+  # The shared instance-admin relay: reveal the stored admin token, POST an
+  # empty object to <instance_url><path>, hand back the instance's verdict
+  # with its semantics intact (undecodable body degrades to %{} — the status
+  # alone is the verdict). Both admin triggers ride this one seam.
+  defp relay_admin_post(%Barkpark{url: url} = bp, path) when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
         {:error, :no_admin_token}
@@ -2697,7 +2727,7 @@ defmodule BarkparkCloud.Registry do
       {:ok, admin_token} ->
         request = %{
           method: :post,
-          url: String.trim_trailing(url, "/") <> "/v1/admin/self-update",
+          url: String.trim_trailing(url, "/") <> path,
           headers: instance_headers(admin_token),
           body: "{}"
         }
@@ -2715,7 +2745,7 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  defp do_trigger_self_update(_), do: {:error, :not_live}
+  defp relay_admin_post(_bp, _path), do: {:error, :not_live}
 
   ## Fleet autoupdate (isu-w4) — the control plane's OPT-OUT auto-rollout. The
   ## isu-6 machinery above already (a) mirrors each instance's own `behind`
