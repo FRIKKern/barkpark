@@ -5215,6 +5215,9 @@ test("isu-w6: rollbackConflictCopy maps the full W6 refusal vocabulary (D23), no
   assert.match(notEnabled.body, /BARKPARK_SELF_UPDATE_APPLY=1/);
   assert.deepEqual(plain(notConfigured), plain(notEnabled));
 
+  // not_live (409 while provisioning) gets the same honest copy as the w5 update trio
+  assert.match(hooks.rollbackConflictCopy("not_live").title, /isn't live yet/);
+
   assert.match(hooks.rollbackConflictCopy("instance_unreachable").title, /Couldn't reach the instance/);
   assert.match(hooks.rollbackConflictCopy("instance_error").title, /rejected the rollback/);
 
@@ -5223,7 +5226,7 @@ test("isu-w6: rollbackConflictCopy maps the full W6 refusal vocabulary (D23), no
   assert.match(hooks.rollbackConflictCopy("wat", null).title, /Couldn't start the rollback/);
 
   // NO force affordance on any branch — a rollback refusal is always terminal
-  for (const code of ["no_previous_slot", "already_running", "not_supported",
+  for (const code of ["no_previous_slot", "already_running", "not_supported", "not_live",
     "not_enabled", "feature_not_configured", "instance_unreachable", "instance_error", "wat"]) {
     assert.equal(hooks.rollbackConflictCopy(code).forceLabel, undefined, code + " must not offer force");
   }

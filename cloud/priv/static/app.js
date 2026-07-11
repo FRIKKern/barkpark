@@ -3437,6 +3437,8 @@
       case "not_enabled":
       case "feature_not_configured":
         return { title: "Rollback is not enabled on this instance", body: "Set BARKPARK_SELF_UPDATE_APPLY=1 on the box to allow one-click rollback." };
+      case "not_live":
+        return { title: "This instance isn't live yet", body: "Wait until it finishes provisioning." };
       case "instance_unreachable":
         return { title: "Couldn't reach the instance", body: "The box didn't answer. Give it a moment and try again." };
       case "instance_error":
