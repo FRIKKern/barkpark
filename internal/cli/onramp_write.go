@@ -52,21 +52,27 @@ type onrampAction struct {
 }
 
 // onrampWriteResult is the single structured document `bp onramp <t> --write -o
-// json` emits: the resolved target and the per-file actions.
+// json` emits: the resolved target and the per-file actions. DryRun is true when
+// the global --dry-run was set — the actions are computed identically but NOT a
+// single byte was written (omitempty so a real write emits no noise).
 type onrampWriteResult struct {
 	Target  string         `json:"target"`
 	Actions []onrampAction `json:"actions"`
+	DryRun  bool           `json:"dryRun,omitempty"`
 }
 
 // runOnrampWrite performs the safe JSON merge for every file in the spec and
 // reports per file. It is honest: a merge error stops the run (nothing after it
 // is written) with exitGeneric, and the report shows exactly what was done up to
-// the failure — never a partial-success lie.
-func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
+// the failure — never a partial-success lie. When dryRun is set (the global
+// --dry-run), every action is computed exactly as a real run would but NOT a
+// single byte reaches disk — the report is byte-identical apart from the dry-run
+// marker.
+func runOnrampWrite(out *writer, spec onrampSpec, force, dryRun bool) int {
 	var actions []onrampAction
 	var failed error
 	for _, f := range spec.Files {
-		act, err := mergeOnrampFile(f, force)
+		act, err := mergeOnrampFile(f, force, dryRun)
 		if err != nil {
 			failed = err
 			actions = append(actions, onrampAction{Path: f.Path, Action: "error", Note: err.Error()})
@@ -76,7 +82,7 @@ func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
 	}
 
 	if out.machineOut() {
-		out.renderJSON(onrampWriteResult{Target: spec.Target, Actions: actions})
+		out.renderJSON(onrampWriteResult{Target: spec.Target, Actions: actions, DryRun: dryRun})
 		if failed != nil {
 			return exitGeneric
 		}
@@ -85,6 +91,9 @@ func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
 
 	// Human report — one aligned line per file, then the verify pointer.
 	out.outf("# bp onramp %s --write", spec.Target)
+	if dryRun {
+		out.outf("# DRY RUN — nothing was written; this is exactly what --write would do.")
+	}
 	out.outf("")
 	for _, a := range actions {
 		line := fmt.Sprintf("  %-9s %s", a.Action, a.Path)
@@ -101,6 +110,10 @@ func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
 	if onrampAnySkipped(actions) {
 		out.outf("")
 		out.outf("# some files were left as-is — re-run with --force to overwrite the existing barkpark entry.")
+	}
+	if dryRun {
+		out.outf("")
+		out.outf("# dry run — re-run without --dry-run to apply these changes.")
 	}
 	out.outf("")
 	out.outf("# verify: %s", spec.Verify)
@@ -119,13 +132,15 @@ func onrampAnySkipped(actions []onrampAction) bool {
 	return false
 }
 
-// mergeOnrampFile dispatches one file by its stamped merge kind.
-func mergeOnrampFile(f onrampFile, force bool) (onrampAction, error) {
+// mergeOnrampFile dispatches one file by its stamped merge kind. dryRun (the
+// global --dry-run) is threaded to every merge function so the actions are
+// computed identically while no byte reaches disk.
+func mergeOnrampFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 	switch f.MergeKind {
 	case mergeServerMap:
-		return mergeServerMapFile(f, force)
+		return mergeServerMapFile(f, force, dryRun)
 	case mergeFlat:
-		return mergeFlatFile(f, force)
+		return mergeFlatFile(f, force, dryRun)
 	case mergeTOML:
 		return onrampAction{
 			Path:   f.Path,
@@ -142,8 +157,9 @@ func mergeOnrampFile(f onrampFile, force bool) (onrampAction, error) {
 }
 
 // mergeServerMapFile inserts/updates ONLY data[TopKey][ServerKey], preserving
-// every other server and top-level key verbatim.
-func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
+// every other server and top-level key verbatim. dryRun computes the same action
+// without touching disk.
+func mergeServerMapFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 	path, err := expandOnrampPath(f.Path)
 	if err != nil {
 		return onrampAction{}, err
@@ -157,7 +173,7 @@ func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
 	if os.IsNotExist(readErr) {
 		// Fresh file — write the doc-shaped stanza verbatim (byte-identical to what
 		// `bp onramp <target>` prints), which round-trips cleanly to 'unchanged'.
-		if err := atomicWriteFile(path, withTrailingNewline([]byte(f.Content))); err != nil {
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(f.Content))); err != nil {
 			return onrampAction{}, err
 		}
 		return onrampAction{Path: f.Path, Action: "created"}, nil
@@ -200,7 +216,7 @@ func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
 	if err != nil {
 		return onrampAction{}, err
 	}
-	if err := atomicWriteFile(path, withTrailingNewline(merged)); err != nil {
+	if err := writeOnrampFile(dryRun, path, withTrailingNewline(merged)); err != nil {
 		return onrampAction{}, err
 	}
 	return onrampAction{Path: f.Path, Action: "updated"}, nil
@@ -208,7 +224,8 @@ func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
 
 // mergeFlatFile inserts/updates ONLY the top-level data[TopKey], preserving every
 // other top-level key verbatim (cursor-cloud's .cursor/environment.json install).
-func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
+// dryRun computes the same action without touching disk.
+func mergeFlatFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 	path, err := expandOnrampPath(f.Path)
 	if err != nil {
 		return onrampAction{}, err
@@ -224,7 +241,7 @@ func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
 
 	existing, readErr := os.ReadFile(path)
 	if os.IsNotExist(readErr) {
-		if err := atomicWriteFile(path, withTrailingNewline([]byte(f.Content))); err != nil {
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(f.Content))); err != nil {
 			return onrampAction{}, err
 		}
 		return onrampAction{Path: f.Path, Action: "created"}, nil
@@ -255,7 +272,7 @@ func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
 	if err != nil {
 		return onrampAction{}, err
 	}
-	if err := atomicWriteFile(path, withTrailingNewline(merged)); err != nil {
+	if err := writeOnrampFile(dryRun, path, withTrailingNewline(merged)); err != nil {
 		return onrampAction{}, err
 	}
 	return onrampAction{Path: f.Path, Action: "updated"}, nil
@@ -352,6 +369,21 @@ func withTrailingNewline(b []byte) []byte {
 		return append(b, '\n')
 	}
 	return b
+}
+
+// writeOnrampFile is the single dry-run seam every merge function writes through:
+// with dryRun set (the global --dry-run) it is a no-op — the caller has already
+// computed the honest action, and NOT one byte reaches disk — otherwise it
+// performs the real atomic write. Guarding here (not at each call site) keeps the
+// merge functions readable and guarantees no atomicWriteFile path can slip the
+// dry-run contract. The AGENTS.md/codex mergers landing this same wave route
+// their atomic writes through here too, so the lead's union guard is this one
+// function (charter D15/D7).
+func writeOnrampFile(dryRun bool, path string, data []byte) error {
+	if dryRun {
+		return nil
+	}
+	return atomicWriteFile(path, data)
 }
 
 // atomicWriteFile writes data to path via a same-directory temp file + rename, so

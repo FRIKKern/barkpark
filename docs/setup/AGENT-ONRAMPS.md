@@ -127,9 +127,12 @@ Re-running `--write` is always safe: an already-correct config reports `unchange
 
 `--write -o json` emits one document, `{target, actions:[{path,action,note}]}`; human progress stays on stderr so stdout is a single parseable report.
 
+Add the global `--dry-run` to preview: `--write --dry-run` computes and reports the exact per-file actions (`created` / `updated` / `skipped` / `unchanged`) and writes **nothing** — not one byte, not even the parent directory. The JSON report carries `"dryRun": true`; the human report is marked `DRY RUN`. It is the honest doctor mode — re-run without `--dry-run` to apply.
+
 ```bash
 bp onramp cursor --write            # merge barkpark into .cursor/mcp.json
 bp onramp cursor --write --force    # overwrite an existing, differing barkpark entry
+bp onramp cursor --write --dry-run  # report what --write would do; write nothing
 bp onramp cursor-cloud --write      # both .cursor/environment.json + .cursor/mcp.json, per file
 bp onramp codex --write             # skipped — Codex TOML is wave 3; paste the block by hand
 ```

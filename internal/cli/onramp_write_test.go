@@ -32,7 +32,7 @@ func TestOnrampWriteCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("create merge: %v", err)
 	}
@@ -66,7 +66,7 @@ func TestOnrampWriteCreatesFile(t *testing.T) {
 	}
 
 	// Idempotent: a second run is 'unchanged' and leaves the bytes untouched.
-	act2, err := mergeOnrampFile(f, false)
+	act2, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestOnrampWriteSkipAndForce(t *testing.T) {
 	f := serverMapFileAt(t, "cursor", dir, "mcp.json")
 
 	// No --force: a differing barkpark entry is skipped and the file is UNTOUCHED.
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("skip merge: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestOnrampWriteSkipAndForce(t *testing.T) {
 	}
 
 	// --force: barkpark is overwritten; foreign server + unrelated key survive.
-	act, err = mergeOnrampFile(f, true)
+	act, err = mergeOnrampFile(f, true, false)
 	if err != nil {
 		t.Fatalf("force merge: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestOnrampWriteAddsAbsentKey(t *testing.T) {
 	}
 	f := serverMapFileAt(t, "cursor", dir, "mcp.json")
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestOnrampWriteServersShape(t *testing.T) {
 	}
 
 	f := serversFile(path, stanza)
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("servers merge: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestOnrampWriteServersShape(t *testing.T) {
 	}
 
 	// Idempotent re-run.
-	act, err = mergeOnrampFile(f, false)
+	act, err = mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("servers re-run: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestOnrampWriteFlatCursorCloud(t *testing.T) {
 	}
 	flat.Path = filepath.Join(dir, "environment.json")
 
-	act, err := mergeOnrampFile(flat, false)
+	act, err := mergeOnrampFile(flat, false, false)
 	if err != nil {
 		t.Fatalf("flat create: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestOnrampWriteFlatCursorCloud(t *testing.T) {
 	if !bytes.Contains(mustRead(t, flat.Path), []byte("install")) {
 		t.Errorf("environment.json missing the install key")
 	}
-	act, err = mergeOnrampFile(flat, false)
+	act, err = mergeOnrampFile(flat, false, false)
 	if err != nil {
 		t.Fatalf("flat re-run: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestOnrampWriteCodexSkipped(t *testing.T) {
 	if !ok {
 		t.Fatal("codex spec not ok")
 	}
-	act, err := mergeOnrampFile(spec.Files[0], false)
+	act, err := mergeOnrampFile(spec.Files[0], false, false)
 	if err != nil {
 		t.Fatalf("codex merge: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestOnrampWriteJSONReport(t *testing.T) {
 	var so, se bytes.Buffer
 	w := newWriter(&so, &se)
 	w.output = "json"
-	if code := runOnrampWrite(w, spec, false); code != exitOK {
+	if code := runOnrampWrite(w, spec, false, false); code != exitOK {
 		t.Fatalf("write exit = %d, want %d; stderr=%s", code, exitOK, se.String())
 	}
 	var got onrampWriteResult
@@ -341,7 +341,7 @@ func TestOnrampWriteHumanReport(t *testing.T) {
 
 	var so, se bytes.Buffer
 	w := newWriter(&so, &se)
-	if code := runOnrampWrite(w, spec, false); code != exitOK {
+	if code := runOnrampWrite(w, spec, false, false); code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
 	out := so.String()
@@ -364,7 +364,7 @@ func TestOnrampWriteZedCreatesAndIdempotent(t *testing.T) {
 		t.Fatalf("zed merge TopKey = %q, want context_servers", f.TopKey)
 	}
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("create merge: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestOnrampWriteZedCreatesAndIdempotent(t *testing.T) {
 		t.Errorf("created settings.json not byte-identical to the printed stanza.\n--- got ---\n%s", mustRead(t, f.Path))
 	}
 
-	act, err = mergeOnrampFile(f, false)
+	act, err = mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("idempotent merge: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestOnrampWriteZedPreservesForeign(t *testing.T) {
 	}
 	f := serverMapFileAt(t, "zed", dir, "settings.json")
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 
 	// No --force: a differing barkpark entry is skipped and the file is UNTOUCHED.
 	before := mustRead(t, path)
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("skip merge: %v", err)
 	}
@@ -475,7 +475,7 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 	}
 
 	// --force: the stale entry is overwritten with the fresh flat stanza.
-	act, err = mergeOnrampFile(f, true)
+	act, err = mergeOnrampFile(f, true, false)
 	if err != nil {
 		t.Fatalf("force merge: %v", err)
 	}
@@ -484,6 +484,166 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 	}
 	if bytes.Contains(mustRead(t, path), []byte("STALE-bp")) {
 		t.Errorf("stale barkpark command survived the force overwrite")
+	}
+}
+
+// TestOnrampWriteDryRunCreatesNothing: `--write --dry-run` on a fresh dir reports
+// 'created' (the exact action a real write would) but leaves NO file on disk — the
+// honest doctor mode the global --dry-run promises (charter D15).
+func TestOnrampWriteDryRunCreatesNothing(t *testing.T) {
+	dir := t.TempDir()
+	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
+
+	act, err := mergeOnrampFile(f, false, true)
+	if err != nil {
+		t.Fatalf("dry-run create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("dry-run action = %q, want created", act.Action)
+	}
+	if _, err := os.Stat(f.Path); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create the file, but %s exists (err=%v)", f.Path, err)
+	}
+	// The parent directory must not be created either — a dry run touches nothing.
+	if _, err := os.Stat(filepath.Dir(f.Path)); !os.IsNotExist(err) {
+		t.Errorf("dry-run created the parent dir %s", filepath.Dir(f.Path))
+	}
+}
+
+// TestOnrampWriteDryRunSkipAndForceUntouched: on an EXISTING differing barkpark
+// entry, `--dry-run` reports 'skipped' without --force and 'updated' with --force
+// — but in BOTH cases the file's bytes are left exactly as they were. Proves the
+// dry-run guard covers the update path, not just create.
+func TestOnrampWriteDryRunSkipAndForceUntouched(t *testing.T) {
+	dir := t.TempDir()
+	fixture, err := os.ReadFile("testdata/onramp_mcp_foreign.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	path := filepath.Join(dir, "mcp.json")
+	if err := os.WriteFile(path, fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := serverMapFileAt(t, "cursor", dir, "mcp.json")
+
+	// dry-run, no --force: reports skipped, file untouched.
+	act, err := mergeOnrampFile(f, false, true)
+	if err != nil {
+		t.Fatalf("dry-run skip merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("dry-run action = %q, want skipped", act.Action)
+	}
+	if after := mustRead(t, path); !bytes.Equal(fixture, after) {
+		t.Errorf("dry-run skip touched the file")
+	}
+
+	// dry-run, --force: reports the 'updated' action a real force write would, but
+	// the file on disk is STILL the original fixture — not one byte written.
+	act, err = mergeOnrampFile(f, true, true)
+	if err != nil {
+		t.Fatalf("dry-run force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("dry-run force action = %q, want updated", act.Action)
+	}
+	if after := mustRead(t, path); !bytes.Equal(fixture, after) {
+		t.Errorf("dry-run --force wrote to the file — the stale entry should still be present.\n--- got ---\n%s", after)
+	}
+	if !bytes.Contains(mustRead(t, path), []byte("STALE.example.old")) {
+		t.Errorf("dry-run --force overwrote the stale barkpark URL")
+	}
+}
+
+// TestOnrampRunWriteDryRunEndToEnd drives the whole command path — runOnramp reads
+// g.dryRun, threads it through runOnrampWrite, and the -o json envelope carries
+// "dryRun":true — while the cwd-relative target (.cursor/mcp.json) is never
+// created. cd into a tempdir: HOME-only sandboxing does NOT isolate a
+// cwd-relative target (charter D15 test law).
+func TestOnrampRunWriteDryRunEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	code := runOnramp(w, globals{server: guerrilla, dryRun: true}, []string{"cursor", "--write"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%s", code, exitOK, se.String())
+	}
+
+	var got onrampWriteResult
+	if err := json.Unmarshal(so.Bytes(), &got); err != nil {
+		t.Fatalf("json report did not decode: %v\n%s", err, so.String())
+	}
+	if !got.DryRun {
+		t.Errorf("report DryRun = false, want true")
+	}
+	if len(got.Actions) != 1 || got.Actions[0].Action != "created" {
+		t.Fatalf("actions = %+v, want one created", got.Actions)
+	}
+	// The cwd-relative target must NOT exist — the dry run wrote nothing.
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("dry-run end-to-end created .cursor/mcp.json (err=%v)", err)
+	}
+}
+
+// TestOnrampRunWriteHonorsRealWrite is the paired positive: WITHOUT --dry-run the
+// same command actually writes the file — so the dry-run test above proves a real
+// suppression, not a path that never writes (a guard that never lets a write
+// through is vacuous). It also asserts a real write's JSON omits the dryRun field.
+func TestOnrampRunWriteHonorsRealWrite(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	if code := runOnramp(w, globals{server: guerrilla}, []string{"cursor", "--write"}); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%s", code, se.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "mcp.json")); err != nil {
+		t.Errorf("real --write did not create .cursor/mcp.json: %v", err)
+	}
+	if bytes.Contains(so.Bytes(), []byte("dryRun")) {
+		t.Errorf("a real (non-dry-run) write leaked the dryRun field:\n%s", so.String())
+	}
+}
+
+// TestOnrampWriteDryRunHumanMarker: the human report marks a dry run clearly and
+// still prints the per-file action + verify pointer, writing nothing.
+func TestOnrampWriteDryRunHumanMarker(t *testing.T) {
+	dir := t.TempDir()
+	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
+	spec := onrampSpec{Target: "cursor", Files: []onrampFile{f}, Verify: "reload MCP servers"}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	if code := runOnrampWrite(w, spec, false, true); code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	out := so.Bytes()
+	for _, want := range []string{"DRY RUN", "created", "verify:"} {
+		if !bytes.Contains(out, []byte(want)) {
+			t.Errorf("dry-run human report missing %q\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(f.Path); !os.IsNotExist(err) {
+		t.Errorf("dry-run human path wrote the file")
 	}
 }
 
