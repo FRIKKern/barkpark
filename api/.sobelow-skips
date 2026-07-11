@@ -112,3 +112,12 @@ XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/plugs/idempotency.ex:79,6F2CFF
 Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:217,72AA425
 Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1975,223DD4C
 CI.System: Command Injection via `System` function,lib/barkpark/self_update/runner.ex:114,AFDFBA
+Traversal.FileModule: Directory Traversal in `File.open`,lib/barkpark_web/studio/claude_chat.ex:1188,3E6E1AC
+CI.System: Command Injection via `System` function,lib/barkpark/studio_chat/probe.ex:197,4E142E6
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark_web/studio/claude_chat.ex:1136,67D056E
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1060,730B471
+Traversal.FileModule: Directory Traversal in `File.chmod`,lib/barkpark_web/studio/claude_chat.ex:1135,748BDE
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:3855,7AB2C04
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:837,7FCC742
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1144,E7AF58
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1043,F22D3
