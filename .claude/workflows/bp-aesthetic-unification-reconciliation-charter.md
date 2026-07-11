@@ -139,3 +139,46 @@ au-w5-reading-typography. Backlog: au-r4-web-type-ladder, au-r5-email-brand-reco
 au-r6-graph-palette-tokens.
 
 ## Wave log
+
+### Wave 2026-07-11 (wave R — reconciliation; reviewed, grade A-)
+
+All 3 slices built green and reviewed; zero code fixes needed. **R1
+`au-r1-ledger-extension`** (branch `loop-epic/part-e-becomes-the-complete-residue-regi-0`):
+Part E LEDGER_MARKER generalized to any `BEGIN/END GENERATED:<name>` block via a
+captured-name backreference (abutting status-tones+tokens blocks in paper-surface.css each
+strip cleanly — verified against the real markers); the 5 un-gated files ledgered with
+measured counts (styles.css 57, bp-paper-editor.css 107, paper-surface.css 35,
+bp-graph.js 91×2) + honest rationales; au-r6 backlog filed. **R2
+`au-w3-graph-canvas-token`** (`…web-token-adoption-graph-canvas-surface--1`):
+color.graphCanvas through the full 4-file lockstep shape (tokens.json + emit webBlock +
+derive PASSTHROUGH 13→14 + test bump), web now ZERO lit-allows; paperCallout emitted into
+web/lib/tokens.gen.ts and portable-doc.tsx repainted via CSS custom props + static class
+strings — reviewer re-ran 232/232 web tests + tsc and tamper-proved the card-tone parity
+leg non-vacuous (dropping the style vars reds exactly 1 test). **R3
+`au-r3-plugin-liveview-tokens`** (`…tokenize-the-two-un-gated-plugin-livevie-2`):
+inbox_live + board_live fully tokenized (dead var(--x,#hex) dark palette → the emitted
+Studio vocabulary; the 12-line per-theme glyph fork deleted — --life-* flips at the root;
+`layout: {Layouts,:studio}` verified via router.ex:768); scan root extended to
+api/lib/barkpark/plugins (347 files) with zero new allowlist entries for the targets;
+reviewer re-ran 104/104 targeted Elixir tests + mix format + a live tamper-probe red.
+
+**Cross-slice:** an integration trial merge of all three onto origin/main (a4b14a2a) is
+conflict-free with every gate green (check.mjs A–H, emit --check 17/17, derive 61/61,
+web+studio literal checks, web 232/232). R1 and R2 carry a byte-identical root.html.heex
+fix for the committed upstream Part E regression (2afbe5fc, 165→166) — identical changes
+merge cleanly. Correction of record: Decide called that red "another session's
+uncommitted edit"; it was in fact COMMITTED to main. **Merge order: R1 → R2 → R3** (R3's
+branch alone still sees the upstream red; each later merge is a no-op on the shared
+line). R1+R2 touch .heex → WAIT for Elixir Test CI. Lead closes merge-gated criteria on
+merge, then stamps epic C1 per D3/D14.
+
+Ledger fixes this review: r3 criteria 1–3 flipped met:true (proven locally,
+non-merge-gated, reviewer re-verified). Backlog filed:
+`au-r7-web-dark-variant-binding` (web `dark:` classes follow prefers-color-scheme while
+the emitted --color-* vars follow the data-theme toggle — pre-existing split, now
+touching token values via the callout classes).
+
+**Next wave:** this was the LAST agent-buildable wave. Remainder per D13/D14:
+au-w6-visual-audit (human ratification event → epic close), au-w6-brand-mark,
+au-w5-reading-typography; backlog au-r4/r5/r6/r7. Nothing stands between these merges
+and the close ceremony except the human sign-off.
