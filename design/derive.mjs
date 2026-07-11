@@ -969,7 +969,8 @@ export const SLOTS = (() => {
 export const PASSTHROUGH_FAMILIES = [
   "presence", "sheetCf", "matchQuality", "pdrenderChart", "pdrenderHeatmap",
   "provider", "statusHealth", "statusChrome",
-  "errorPage", "readerInfo", "lifecycle", "instanceLifecycle", "authButton",
+  "errorPage", "graphCanvas", "readerInfo", "lifecycle", "instanceLifecycle",
+  "authButton",
 ];
 
 // ── derive(theme) — the characterization compiler ────────────────────────────

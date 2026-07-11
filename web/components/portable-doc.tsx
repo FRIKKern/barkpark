@@ -1,9 +1,10 @@
-import type { ReactNode, Key } from "react";
+import type { ReactNode, Key, CSSProperties } from "react";
 import { valuerefState, type Block, type Inline } from "@/lib/papers";
 import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
 import { PaperEditorMount } from "@/components/paper-editor-mount";
 import { safeHref } from "@/lib/safe-href";
 import { markHref } from "@/lib/mark-href";
+import { paperCallout } from "@/lib/tokens.gen";
 import {
   taskBoardColumns,
   TASK_BOARD_COLUMN_ORDER,
@@ -253,19 +254,47 @@ const HEADING = {
   3: "mt-6 text-xl font-semibold tracking-tight",
 } as const;
 
-const calloutTone: Record<string, string> = {
-  info: "border-blue-300/70 bg-blue-50 dark:border-blue-900/60 dark:bg-blue-950/30",
-  // `warn` is the legacy key; `warning` is the server/shorthand canonical tone.
-  warn: "border-amber-300/70 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30",
-  warning:
-    "border-amber-300/70 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30",
-  success:
-    "border-emerald-300/70 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30",
-  danger:
-    "border-red-300/70 bg-red-50 dark:border-red-900/60 dark:bg-red-950/30",
-  neutral:
-    "border-zinc-300/70 bg-zinc-50 dark:border-zinc-800/60 dark:bg-zinc-900/40",
-};
+/* Callout tone paint — from the emitted paperCallout token (design/tokens.json
+ * color.paperCallout via web/lib/tokens.gen.ts), the web twin of the paper
+ * surface's --bp-tone-* pairs. The {bg,fg} hex pairs ride in as CSS custom
+ * properties (inline style) and the STATIC class strings below read them back
+ * — never a computed utility-class string (Tailwind JIT only keeps classes it
+ * can see verbatim in the source). */
+
+type CalloutToneName = keyof typeof paperCallout;
+
+/** Canonical paperCallout tone for a block's `tone` string. Legacy aliases fold
+ * in (`warn` → warning, card's `ok` → success); unknown/absent → undefined so
+ * each caller picks its own default (callout: info; card: no accent). */
+function resolveCalloutTone(tone: string): CalloutToneName | undefined {
+  if (tone === "warn") return "warning";
+  if (tone === "ok") return "success";
+  return Object.hasOwn(paperCallout, tone) ? (tone as CalloutToneName) : undefined;
+}
+
+/** The tone's token pairs as custom properties; `-d` = dark scheme. The soft
+ * card border is fg at 40% (8-digit hex) — the component composes the alpha
+ * variant itself, like the listings-map canvas tints. */
+function calloutToneVars(tone: CalloutToneName): CSSProperties {
+  const t = paperCallout[tone];
+  return {
+    "--bp-co-bg": t.light.bg,
+    "--bp-co-fg": t.light.fg,
+    "--bp-co-border": `${t.light.fg}66`,
+    "--bp-co-bg-d": t.dark.bg,
+    "--bp-co-fg-d": t.dark.fg,
+    "--bp-co-border-d": `${t.dark.fg}66`,
+  } as CSSProperties;
+}
+
+/* Static literal class strings (Tailwind sees these verbatim). The callout
+ * mirrors the canonical .bp-callout paint (paper-surface.css): tinted bg, toned
+ * text, full-strength fg left accent. The card keeps its four-sided outline:
+ * soft fg-alpha border + tinted bg, contents' text untouched. */
+const CALLOUT_TONE_CLASS =
+  "border-l-4 border-[var(--bp-co-fg)] bg-[var(--bp-co-bg)] text-[var(--bp-co-fg)] dark:border-[var(--bp-co-fg-d)] dark:bg-[var(--bp-co-bg-d)] dark:text-[var(--bp-co-fg-d)]";
+const CARD_TONE_CLASS =
+  "border-[var(--bp-co-border)] bg-[var(--bp-co-bg)] dark:border-[var(--bp-co-border-d)] dark:bg-[var(--bp-co-bg-d)]";
 
 function toneLabel(tone: string): string {
   switch (tone) {
@@ -464,10 +493,9 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       );
     }
     case "callout": {
-      const tone = str(block.tone) || "info";
-      const toneClass = `rounded-lg border px-4 py-3 text-sm leading-6 text-zinc-700 dark:text-zinc-200 ${
-        calloutTone[tone] ?? calloutTone.info
-      }`;
+      const tone = resolveCalloutTone(str(block.tone)) ?? "info";
+      const toneClass = `rounded-lg px-4 py-3 text-sm leading-6 ${CALLOUT_TONE_CLASS}`;
+      const toneStyle = calloutToneVars(tone);
       const title = str(block.title);
       const body = <div>{renderInlines(inlineArr(block.content))}</div>;
 
@@ -475,7 +503,12 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       // read-only web reader (resets on reload). Title or tone label as summary.
       if (block.collapsible === true) {
         return (
-          <details key={key} className={toneClass} open={block.collapsed !== true}>
+          <details
+            key={key}
+            className={toneClass}
+            style={toneStyle}
+            open={block.collapsed !== true}
+          >
             <summary className="cursor-pointer font-medium">
               {title || toneLabel(tone)}
             </summary>
@@ -485,7 +518,7 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       }
 
       return (
-        <aside key={key} className={toneClass}>
+        <aside key={key} className={toneClass} style={toneStyle}>
           {title ? <p className="mb-1 font-medium">{title}</p> : null}
           {body}
         </aside>
@@ -928,17 +961,17 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       const slots = (block.slots ?? {}) as Record<string, unknown>;
       const slotKids = (name: string): Block[] =>
         Array.isArray(slots[name]) ? (slots[name] as Block[]) : [];
-      // Card tone vocab → the shared callout tint. `ok` has no callout key, so it
-      // maps to `success`; an unknown/absent tone gets no accent.
-      const tone = str(block.tone);
-      const tint = tone === "ok" ? calloutTone.success : (calloutTone[tone] ?? "");
+      // Card tone vocab → the shared paperCallout tint (`ok` folds to
+      // `success` in resolveCalloutTone); an unknown/absent tone gets no accent.
+      const tone = resolveCalloutTone(str(block.tone));
       const order = ["media", "title", "body", "action"] as const;
       return (
         <div
           key={key}
-          className={`flex flex-col gap-3 rounded-md p-3${
-            tint ? ` border ${tint}` : " border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40"
+          className={`flex flex-col gap-3 rounded-md border p-3 ${
+            tone ? CARD_TONE_CLASS : "border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40"
           }`}
+          style={tone ? calloutToneVars(tone) : undefined}
         >
           {order.flatMap((name) =>
             slotKids(name).map((b, i) => renderBlock(b, `${name}-${i}`)),
