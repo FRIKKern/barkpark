@@ -1004,6 +1004,9 @@ func TestOnrampWriteAgentsMdMalformedSkipped(t *testing.T) {
 		if !bytes.Equal([]byte(broken), mustRead(t, "AGENTS.md")) {
 			t.Errorf("malformed skip must not touch the file (force=%v)", force)
 		}
+	}
+}
+
 // runOnrampWriteJSON drives `bp onramp <args...> --write -o json` through the REAL
 // command entry point (runOnramp → buildOnrampSpec → runOnrampWrite) and decodes
 // the structured report. Server is pinned to guerrilla so the emission is
