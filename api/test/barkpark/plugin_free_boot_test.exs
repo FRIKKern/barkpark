@@ -11,9 +11,13 @@ defmodule Barkpark.PluginFreeBootTest do
     3. `GET /api/schemas` returns exactly the 8 seed schema names.
     4. Studio HTML contains no plugin-specific tokens
        (`OnixEdit`, `Bokbasen`, `book`).
-    5. Host code under `lib/barkpark` + `lib/barkpark_web` does not
-       reference `Barkpark.Plugins.OnixEdit` by name (paths under
-       `plugins/onixedit/` excluded).
+    5. Host code under `lib/barkpark` + `lib/barkpark_web` couples to a
+       REMOVABLE plugin (every namespace in `priv/plugins/*/plugin.json`,
+       not just OnixEdit) only within the reviewed allowlist
+       `@sanctioned_host_plugin_coupling`. Detection is AST-based (real
+       `__aliases__` references, not text — a `@moduledoc`/comment mention is
+       not a coupling); the detected set must EQUAL the allowlist, so a NEW
+       core→disabled-plugin reach reds the gate.
 
   Tagged `:boot_test` — excluded from the default `mix test` run. Invoke
   explicitly:
@@ -39,6 +43,94 @@ defmodule Barkpark.PluginFreeBootTest do
   @endpoint BarkparkWeb.Endpoint
 
   @expected_seed_schemas ~w(post page author category project siteSettings navigation colors)
+
+  # ── Tier-5 allowlist: sanctioned host→removable-plugin code coupling ──────
+  #
+  # Baseline measured 2026-07-11 (felix, task-2bfe34a98d53be8a) by AST scan of
+  # every host `.ex` under lib/barkpark + lib/barkpark_web (excluding
+  # lib/barkpark/plugins/) for real `__aliases__` references to a REMOVABLE
+  # plugin namespace (the modules registered in priv/plugins/*/plugin.json).
+  #
+  # Each entry is `{plugin_module, host_file}`. The groups below record WHY
+  # each coupling is legitimate — the difference between an enforced invariant
+  # and a decorative one. Tier 5 asserts the AST-detected coupling set EQUALS
+  # the union of these groups: a NEW reference reds as an unreviewed coupling;
+  # a removed one reds as a stale entry (prune it).
+  #
+  # Namespaces with ZERO sanctioned host coupling (OnixEdit, Frt, Pulse, Quiz)
+  # are deliberately absent — any host reference to them reds immediately.
+
+  # host-owns-ALL-Studio-UI: a plugin ships no UI (same contract), so the
+  # host's SheetGrid family + studio_live necessarily name Sheets.* render /
+  # session helpers. Inherent Studio coupling, not a runtime reach.
+  @coupling_studio_ui [
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/cells.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/filter.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/geometry.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/grid_data.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/ops.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/shared.ex"}
+  ]
+
+  # host owns the public reader LiveView (the Bulldocs reader at /papers/:slug
+  # renders `Barkpark.Plugins.Bulldocs.Events`).
+  @coupling_public_reader_ui [
+    {"Barkpark.Plugins.Bulldocs", "lib/barkpark_web/live/bulldocs_live.ex"}
+  ]
+
+  # core-static, always present: application.ex declares the Sheets session
+  # supervisor as a static child. Per api/CLAUDE.md the Sheets session runtime
+  # is CORE, plugin-independent — it does NOT vanish under :plugins [].
+  @coupling_core_static [
+    {"Barkpark.Plugins.Sheets", "lib/barkpark/application.ex"}
+  ]
+
+  # plugin HTTP wiring: host controllers/plugs that back a plugin's
+  # `register_routes/1` surface. They execute ONLY when that plugin mounted its
+  # routes (e.g. the `:ticket_key` / `:github_webhook` pipelines carry only
+  # `plugin_routes(...)`), so they never run under :plugins []. Audit felix-d03
+  # confirmed the Github & Tickets reaches are guarded — no crash under the
+  # kill switch.
+  @coupling_plugin_http [
+    {"Barkpark.Plugins.Bulldocs", "lib/barkpark_web/controllers/bulldocs_intents_controller.ex"},
+    {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_adopt_controller.ex"},
+    {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_status_controller.ex"},
+    {"Barkpark.Plugins.Github", "lib/barkpark_web/controllers/github_webhook_controller.ex"},
+    {"Barkpark.Plugins.Github", "lib/barkpark_web/plugs/github_webhook_signature.ex"},
+    {"Barkpark.Plugins.Tickets", "lib/barkpark_web/controllers/ticket_keys_controller.ex"},
+    {"Barkpark.Plugins.Tickets", "lib/barkpark_web/controllers/tickets_attachments_controller.ex"},
+    {"Barkpark.Plugins.Tickets", "lib/barkpark_web/controllers/tickets_controller.ex"},
+    {"Barkpark.Plugins.Tickets", "lib/barkpark_web/plugs/require_ticket_key.ex"}
+  ]
+
+  # guarded runtime reaches: core code that MAY call a plugin, but only behind
+  # a data-existence check / documented no-op for non-matching docs. The
+  # monorepo keeps the module compiled, so there is no UndefinedFunctionError;
+  # audit felix-d03 confirmed no crash under :plugins []. These are the
+  # accidental-class couplings the broadened guard now TRACKS so a NEW one
+  # gets review. `render/walk.ex` is the compile-time Sheets error-vocabulary
+  # edge (finding F2, filed task-b88cd354c8ccaca3 — fixed separately).
+  @coupling_guarded_runtime [
+    {"Barkpark.Plugins.Media", "lib/barkpark/media.ex"},
+    {"Barkpark.Plugins.Media", "lib/barkpark/media/delivery/asset_response.ex"},
+    {"Barkpark.Plugins.Media", "lib/barkpark/media/processing.ex"},
+    {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/checkout.ex"},
+    {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/collections.ex"},
+    {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/relations.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark/content/sheets.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark/portable_doc/render/walk.ex"},
+    {"Barkpark.Plugins.Bulldocs", "lib/barkpark/content/papers/block_ops.ex"},
+    {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/backfill.ex"},
+    {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/projector_worker.ex"},
+    {"Barkpark.Plugins.Github", "lib/barkpark/tasks/board.ex"}
+  ]
+
+  @sanctioned_host_plugin_coupling @coupling_studio_ui ++
+                                     @coupling_public_reader_ui ++
+                                     @coupling_core_static ++
+                                     @coupling_plugin_http ++
+                                     @coupling_guarded_runtime
 
   # `:persistent_term` keys that the plugin layer writes during a normal
   # boot. They survive `Application.stop` because persistent_term is
@@ -429,25 +521,52 @@ defmodule Barkpark.PluginFreeBootTest do
              "expected the core `graph` noun in the read-tier manifest under :plugins []"
     end
 
-    test "host code in lib/ does not reference Barkpark.Plugins.OnixEdit by name" do
-      api_root = File.cwd!()
-      paths = ["lib/barkpark", "lib/barkpark_web"]
+    # ── Tier 5: host code couples to a REMOVABLE plugin only within the
+    #    reviewed allowlist (broadened from the OnixEdit-only grep) ───────────
+    #
+    # NAMED FAILURE MODE (scar: guard-that-doesn't-guard / vacuous green). The
+    # prior tier-5 checked ONE plugin (OnixEdit), so a NEW unconditional
+    # core→removable-plugin reach — e.g. core calling `Github.Link` on a path
+    # that runs with Github disabled — shipped GREEN: the grep never saw it,
+    # and the monorepo keeps the module compiled so no UndefinedFunctionError
+    # surfaces at runtime to catch it.
+    #
+    # This sweep covers EVERY registered (== removable) plugin namespace,
+    # derived from priv/plugins/*/plugin.json so a newly added plugin is
+    # covered automatically. It uses AST detection of real module references,
+    # NOT text grep: a mention of a plugin in a `@moduledoc` or comment is not
+    # a coupling and must not count (grep matched prose — e.g. Pulse/Quiz are
+    # named ONLY in docstrings and correctly do not appear here).
+    #
+    # The detected coupling set must EQUAL @sanctioned_host_plugin_coupling.
+    test "host code couples to removable plugins only within the reviewed allowlist" do
+      detected = detect_host_plugin_couplings()
+      allowed = MapSet.new(@sanctioned_host_plugin_coupling)
 
-      {output, _exit_code} =
-        System.cmd(
-          "grep",
-          ["-r", "-l", "Barkpark.Plugins.OnixEdit" | paths],
-          cd: api_root,
-          stderr_to_stdout: true
-        )
+      new_couplings = MapSet.difference(detected, allowed) |> Enum.sort()
+      stale_entries = MapSet.difference(allowed, detected) |> Enum.sort()
 
-      offenders =
-        output
-        |> String.split("\n", trim: true)
-        |> Enum.reject(&plugin_internal_path?/1)
+      assert new_couplings == [],
+             """
+             NEW host→removable-plugin coupling outside the allowlist \
+             (fresh-install invariant, plugin.ex §Fresh-install invariant):
+               #{format_couplings(new_couplings)}
+             If this coupling is legitimate — host-owned Studio UI, always-present \
+             core-static runtime, or a host module backing a plugin's \
+             register_routes/1 surface — add it to \
+             @sanctioned_host_plugin_coupling under the matching group WITH a \
+             justification. If it is an accidental core→plugin reach on a path \
+             that runs while the plugin is disabled, that is exactly the bug \
+             this guard exists to catch — remove the reach.
+             """
 
-      assert offenders == [],
-             "host code references Barkpark.Plugins.OnixEdit: #{inspect(offenders)}"
+      assert stale_entries == [],
+             """
+             Stale @sanctioned_host_plugin_coupling entries — no longer present \
+             in host code:
+               #{format_couplings(stale_entries)}
+             Remove them so the allowlist stays an accurate map of real coupling.
+             """
     end
   end
 
@@ -481,10 +600,76 @@ defmodule Barkpark.PluginFreeBootTest do
     String.contains?(s, "OnixEdit") or String.contains?(s, "Bokbasen")
   end
 
-  # Files inside the plugin's own directory are allowed to mention
-  # `Barkpark.Plugins.OnixEdit` — the violation is host code (anything
-  # OUTSIDE that subtree) reaching for the plugin module by name.
-  defp plugin_internal_path?(path) do
-    String.contains?(path, "plugins/onixedit") or String.contains?(path, "Plugins/OnixEdit")
+  # ── Tier-5 sweep: AST detection of host→removable-plugin coupling ─────────
+
+  # Every registered plugin is REMOVABLE (`config :barkpark, :plugins, []`
+  # unloads it). Deriving the sweep list from the manifests on disk means a
+  # newly added plugin is covered automatically — the OnixEdit-only gap that
+  # made this guard vacuous cannot recur. Returns each namespace as its atom
+  # parts, e.g. `[:Barkpark, :Plugins, :Sheets]`. (Indx is deliberately NOT
+  # here: it is not a registered plugin — no priv/plugins/indx — it is
+  # declared core-static in application.ex and is always present, so naming it
+  # never breaks the fresh-install invariant.)
+  defp removable_plugin_module_parts do
+    "priv/plugins/*/plugin.json"
+    |> Path.wildcard()
+    |> Enum.map(fn path ->
+      path
+      |> File.read!()
+      |> Jason.decode!()
+      |> Map.fetch!("module")
+      |> String.split(".")
+      |> Enum.map(&String.to_atom/1)
+    end)
+  end
+
+  # Set of `{plugin_module_string, host_file}` couplings — a real code
+  # reference (compile-time `__aliases__` node), not a docstring/comment
+  # mention. Files under `lib/barkpark/plugins/` are the plugins' own tree and
+  # excluded; only HOST code is swept.
+  defp detect_host_plugin_couplings do
+    removable = removable_plugin_module_parts()
+
+    host_files =
+      ["lib/barkpark", "lib/barkpark_web"]
+      |> Enum.flat_map(&Path.wildcard(Path.join(&1, "**/*.ex")))
+      |> Enum.reject(&String.contains?(&1, "/plugins/"))
+
+    for path <- host_files,
+        module <- file_plugin_refs(path, removable),
+        into: MapSet.new() do
+      {module, path}
+    end
+  end
+
+  # Real plugin-namespace references in one file. Parses to AST (so text inside
+  # strings/`@moduledoc`/comments is never matched) and collects every
+  # `__aliases__` whose leading atoms are one of the removable namespaces —
+  # `Barkpark.Plugins.Sheets`, `...Sheets.Engine`, `...Sheets.unquote(x)` all
+  # fold to the top namespace `"Barkpark.Plugins.Sheets"`.
+  defp file_plugin_refs(path, removable) do
+    ast = path |> File.read!() |> Code.string_to_quoted!()
+
+    {_ast, refs} =
+      Macro.prewalk(ast, [], fn
+        {:__aliases__, _meta, parts} = node, acc when is_list(parts) ->
+          case Enum.find(removable, fn ns -> Enum.take(parts, length(ns)) == ns end) do
+            nil -> {node, acc}
+            ns -> {node, [Enum.join(ns, ".") | acc]}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    Enum.uniq(refs)
+  end
+
+  defp format_couplings([]), do: "(none)"
+
+  defp format_couplings(pairs) do
+    pairs
+    |> Enum.map(fn {module, file} -> "  - #{module}  ←  #{file}" end)
+    |> Enum.join("\n")
   end
 end
