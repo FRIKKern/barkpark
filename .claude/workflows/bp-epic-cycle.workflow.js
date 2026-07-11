@@ -56,7 +56,7 @@ const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every pha
 - Acceptance criteria to the authoring rubric: concrete, evidence-bearing, one per real proof obligation — {criterion, met, evidence}.
 - DECIDE phases: author \`files:\` labels on each wave slice — the exact paths it will touch (one repo-relative path per label; trailing \`/\` = directory prefix; no globs). This feeds the dispatch frontier's file-truth collision check so slices with disjoint file sets dispatch in parallel. Grammar + semantics: docs/contracts/dispatch-areas.md.
 - Claim BEFORE working: \`bp task claim <task-id> <worker>\` — the claim epoch is at doc.claim.epoch in the JSON response.
-- Stamp progress INTO the task as you work (close-time criteria flip): \`bp task close <task-id> <worker> <epoch> done "reason" --set 'criteria:=[{"index":N,"met":true,"evidence":"..."}]'\`.
+- Stamp each criterion the MOMENT it is proven (mid-claim, never batched): \`bp task stamp <task-id> <worker> <epoch> --criterion N (--met --evidence "…" | --miss --note "…")\` — \`--met\` REQUIRES non-empty \`--evidence\` (a met flip without proof is rejected); \`--miss\` records an honest attempt as a note WITHOUT flipping the lock. Close stays the SEAL, validating the full set: \`bp task close <task-id> <worker> <epoch> done "reason" --set 'criteria:=[{"index":N,"met":true,"evidence":"..."}]'\`.
   Builders do NOT close merge-gated criteria ("PR merged") — the LEAD closes those on merge. A builder whose work is done but unmerged leaves lifecycle in_progress with evidence stamped.
 - Never TodoWrite, never markdown TODO lists. If a slice has no published, claimable bp task, that slice does not exist.`
 
@@ -69,6 +69,7 @@ const PAPER_BLOCK = `THE WAVE PAPER (the wave's living story — one Barkpark Pa
 const LIVENESS_BLOCK = `LEDGER LIVENESS (the board must read like a LIVE system, never an afterthought):
 - Stamp state changes the MOMENT they happen — claim when you start, evidence the second a criterion is proven, a note the second you deviate or stall. Never batch honesty to the end of your run.
 - The epic parent task carries a flat \`wave_status\` field — the heartbeat. Fable phases update it on entry and exit (e.g. "wave: digesting survey", "wave: building 6 slices", "wave: complete — debrief <paper-id>") via bp patch + publish (bp doc patch if this binary has it, else HTTP /v1/data/mutate — \`bp capabilities -o json\` shows what exists). Skip silently only if the epic task does not exist yet.
+- Your CLAIMED task carries a claim-scoped now-line — pulse it so every board moves while you work: \`bp task pulse <task-id> <worker> --now "…" [--criterion N]\` (no epoch arg — one atomic write that refreshes the now-line AND renews your lease; it survives fences). Pulse right after you claim and at each phase boundary. This is DISTINCT from the epic-level \`wave_status\` heartbeat above: pulse = per-claim ("what THIS worker is doing right now"), wave_status = per-epic ("what phase the whole wave is in"). Never conflate them — pulse is a task write, wave_status is an epic-task patch.
 - Work discovered but NOT taken this wave gets filed NOW as a published child task (honest description, sane priority) — the visible backlog is part of the system being alive.
 - Patches to tasks go through /v1/data/mutate semantics: fields FLAT, patch merges into content, re-publish after mutating (boards read the published ledger only).`
 
@@ -240,7 +241,7 @@ const BUILD_SCHEMA = {
     gate_passed: { type: 'boolean' },
     review: { type: 'string', description: 'honest self-review: what could break, blind spots' },
     files_changed: { type: 'array', items: { type: 'string' } },
-    ledger_stamps: { type: 'string', description: 'the task mutations you made DURING the build (claim, per-criterion evidence, deviation notes) — proof the ledger stayed live' },
+    ledger_stamps: { type: 'string', description: 'the task mutations you made DURING the build — the claim, each `bp task stamp` (per-criterion --met evidence + honest --miss notes), each `bp task pulse` now-line at claim/phase boundaries, and deviation notes — proof the ledger stayed live and the now-line moved' },
   },
 }
 
@@ -461,7 +462,7 @@ GATE (must pass before you commit): ${item.gate}
 Steps — task first, code second, and the ledger stays LIVE throughout:
 1. CLAIM your task before touching code: bp task claim ${item.task_id} epic-builder-${slug(item.title)} — read the brief it carries; the task, not this prompt, is the contract of record. If the claim fails, STOP and report ok:false task_claimed:false with the error.
 2. Build it properly — this may be a real feature slice, not just a patch. Match surrounding code style. Quality bar: Kinsta/Vercel — honest states (loading/empty/error), safe actions, immediate feedback.
-3. STAMP AS YOU GO: the moment a criterion is actually proven (gate output, test name, behavior observed), stamp its evidence into the task — do not batch to the end. If you deviate from the brief or hit a wall, stamp a note the moment it happens. Record everything you stamped in ledger_stamps.
+3. STAMP AS YOU GO: the moment a criterion is actually proven (gate output, test name, behavior observed), invoke \`bp task stamp ${item.task_id} epic-builder-${slug(item.title)} <epoch> --criterion N --met --evidence "…"\` (epoch from your claim response, doc.claim.epoch) — do not batch to the end; a criterion you attempted but could not meet gets \`--miss --note "…"\` (honest, no flip). And PULSE the now-line so the board moves during your run: \`bp task pulse ${item.task_id} epic-builder-${slug(item.title)} --now "…" [--criterion N]\` right after you claim and at each phase boundary (building → gating → committing). If you deviate from the brief or hit a wall, stamp a note the moment it happens. Record every stamp AND pulse in ledger_stamps.
 4. JS SDK public API change ⇒ add a js/.changeset/ entry (correctness gate, never skip).
 5. Run the gate. Fix until it passes; if it truly cannot, STOP without committing and report ok:false with why (leave the task claimed + in_progress with a stamped note explaining the stall).
 6. Honest self-review: what could break, what you didn't cover, blind spots.
