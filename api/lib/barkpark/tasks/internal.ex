@@ -18,6 +18,123 @@ defmodule Barkpark.Tasks.Internal do
   def current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
   def current_epoch(_), do: 0
 
+  # Holder check shared by the holder-gated write paths (release, stamp, pulse):
+  # the caller must BE the lease holder — `claim.worker` must equal `worker_id`
+  # — or the write is `{:error, :not_holder}`. A task with no claim at all also
+  # fails (nil ≠ worker_id): there is no lease to act on. Extracted from
+  # `Tasks.Release` (D7, expressive-agent-loops) so every new holder-only verb
+  # reuses one definition instead of growing its own subtly-different copy.
+  def check_holder(%Document{content: content}, worker_id) do
+    case get_in(content, ["claim", "worker"]) do
+      ^worker_id -> :ok
+      _ -> {:error, :not_holder}
+    end
+  end
+
+  # ─── Acceptance-criteria merge (shared by Close and Stamp) ────────────────
+  #
+  # Applies `[%{"index" => i, ...}]` updates onto content["acceptance_criteria"].
+  # Two update shapes, discriminated by the presence of an `"attempt"` key:
+  #
+  #   * met/evidence (close + `stamp --met`): `met` defaults to true —
+  #     CLOSE-TIME semantics, you are proving the expectation. Callers that
+  #     must never flip a lock implicitly (stamp) always pass `met`
+  #     EXPLICITLY; the default exists for the close body's back-compat.
+  #     `evidence` is written only when a non-empty string.
+  #   * miss (`stamp --miss`): `"attempt" => %{"note","ts","worker"}` appends
+  #     to the entry's `attempts` list, bounded to the @attempts_bound most
+  #     recent, and PINS `met` to its current stored value — explicitly
+  #     written, never inherited from the met→true default above, which would
+  #     flip a lock on an honest miss (the proven footgun D8 names).
+  #
+  # The stored `criterion` text is never touched. The optional `"criterion"`
+  # guard is a CAS at criteria grain: when given, it must equal the stored
+  # text at that index or the whole write aborts with :criteria_mismatch (the
+  # caller's view of the list is stale — rows reordered/edited since read).
+  # Conflicts (index out of range, guard mismatch) abort the CALLER's whole
+  # transaction — deliberate race handling, not silent partial state.
+  @attempts_bound 5
+
+  def merge_criteria(content, []), do: {:ok, content}
+
+  def merge_criteria(content, updates) when is_list(updates) do
+    existing =
+      case Map.get(content, "acceptance_criteria") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    updates
+    |> Enum.reduce_while({:ok, existing}, fn update, {:ok, acc} ->
+      case apply_criteria_update(acc, update) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, merged} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def merge_criteria(_content, _other), do: {:error, :invalid_criteria}
+
+  defp apply_criteria_update(list, %{"index" => index} = update)
+       when is_integer(index) and index >= 0 do
+    case Enum.at(list, index) do
+      %{} = entry ->
+        guard = Map.get(update, "criterion")
+
+        if is_binary(guard) and guard != Map.get(entry, "criterion") do
+          {:error, :criteria_mismatch}
+        else
+          with {:ok, entry} <- apply_entry_update(entry, update) do
+            {:ok, List.replace_at(list, index, entry)}
+          end
+        end
+
+      _ ->
+        {:error, :criteria_index_out_of_range}
+    end
+  end
+
+  defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
+
+  # Miss path: append the attempt, bound the list, PIN met explicitly to its
+  # current stored value (normalized to a boolean — only a stored `true` is
+  # met; absent/malformed pins `false`). A miss NEVER flips a lock.
+  defp apply_entry_update(entry, %{"attempt" => %{} = attempt}) do
+    attempts =
+      case Map.get(entry, "attempts") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    {:ok,
+     entry
+     |> Map.put("met", Map.get(entry, "met") == true)
+     |> Map.put("attempts", Enum.take(attempts ++ [attempt], -@attempts_bound))}
+  end
+
+  # Met/evidence path (close-time semantics — see merge_criteria/2 above).
+  defp apply_entry_update(entry, update) do
+    met = Map.get(update, "met", true)
+
+    if is_boolean(met) do
+      entry = Map.put(entry, "met", met)
+
+      entry =
+        case Map.get(update, "evidence") do
+          e when is_binary(e) and e != "" -> Map.put(entry, "evidence", e)
+          _ -> entry
+        end
+
+      {:ok, entry}
+    else
+      {:error, :invalid_criteria}
+    end
+  end
+
   # Mutation-events insert. The existing `mutation_events` schema (used by the
   # document spine) is reused verbatim — the `mutation` text column carries our
   # `task.claimed` / `task.closed` / `task.mutated` kinds, the `document` map

@@ -42,6 +42,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id",
                  "/v1/tasks/:doc_id/claim",
                  "/v1/tasks/:doc_id/close",
+                 "/v1/tasks/:doc_id/stamp",
                  "/v1/tasks/:doc_id/move"
                ])
 
@@ -83,7 +84,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the eight task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the nine task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -93,6 +94,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.get" in ids
       assert "task.claim" in ids
       assert "task.close" in ids
+      assert "task.stamp" in ids
       assert "task.next" in ids
       assert "task.move" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
@@ -100,7 +102,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 8
+      assert length(cmds) == 9
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
@@ -147,6 +149,25 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert close_set, "task.close must declare the set flag"
       assert close_set.repeatable
       assert close_set.summary =~ "criteria"
+
+      # task.stamp (expressive-agent-loops D8): the pinned CLI shape —
+      # `bp task stamp <id> <worker> <epoch> --criterion N
+      #   (--met --evidence "…" | --miss --note "…")`.
+      stamp = Enum.find(cmds, &(&1.id == "task.stamp"))
+      assert stamp.writes
+      assert stamp.default_output == "minimal"
+      assert stamp.http.path_template == "/v1/tasks/:doc_id/stamp"
+
+      stamp_arg_names = Enum.map(stamp.args, & &1.name)
+      assert stamp_arg_names == ["doc_id", "worker_id", "observed_epoch"]
+      assert Enum.all?(stamp.args, & &1.required)
+
+      stamp_flags = Map.new(stamp.flags, &{&1.name, &1})
+      assert stamp_flags["criterion"].type == "int"
+      assert stamp_flags["met"].type == "bool"
+      assert stamp_flags["miss"].type == "bool"
+      assert stamp_flags["evidence"].type == "string"
+      assert stamp_flags["note"].type == "string"
 
       # task.next is the queue-based atomic claim (POST /v1/tasks/claim):
       # worker_id required, phase_id optional — both body args (no path

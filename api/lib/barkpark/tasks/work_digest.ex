@@ -15,6 +15,15 @@ defmodule Barkpark.Tasks.WorkDigest do
   # Only a change to the actual work definition does. The digest only ever
   # compares against itself, so the canonical encoding just has to be
   # deterministic (map key order, JSON round-trips), not portable.
+  #
+  # D5 (expressive-agent-loops): within `acceptance_criteria`, only each
+  # entry's `criterion` TEXT is work-defining. Progress subfields — `met`,
+  # `evidence`, `attempts`, anything a mid-claim `stamp` writes now or later —
+  # are the worker's OWN progress record, so they are reduced away before
+  # hashing (see `criteria_texts/1`). Without this, stamping a criterion under
+  # a claim would make the worker's own default-path close 409
+  # `doc_changed_since_claim`. Editing/adding/removing/REORDERING criterion
+  # text still trips the fence (the list keeps its order and length).
 
   # The work-defining fields, in the order `changed_fields/3` reports them.
   @fields ~w(title description acceptance_criteria)
@@ -29,7 +38,7 @@ defmodule Barkpark.Tasks.WorkDigest do
     %{
       "title" => hash(title),
       "description" => hash(Map.get(content, "description")),
-      "acceptance_criteria" => hash(Map.get(content, "acceptance_criteria"))
+      "acceptance_criteria" => hash(criteria_texts(Map.get(content, "acceptance_criteria")))
     }
   end
 
@@ -66,6 +75,21 @@ defmodule Barkpark.Tasks.WorkDigest do
   end
 
   def changed_fields(_stored, _title, _content), do: @fields
+
+  # D5: reduce each acceptance_criteria entry to its `criterion` string before
+  # hashing. Order and length are preserved (reorder/add/remove still trip);
+  # every OTHER key on an entry — met/evidence/attempts and any future progress
+  # subfield — vanishes from the digest by construction. Non-map entries and a
+  # non-list value pass through untouched (the digest self-compares, so a
+  # malformed shape just has to hash deterministically).
+  defp criteria_texts(list) when is_list(list) do
+    Enum.map(list, fn
+      %{} = entry -> Map.get(entry, "criterion")
+      other -> other
+    end)
+  end
+
+  defp criteria_texts(other), do: other
 
   # sha256 over a canonical binary of the normalized term, truncated to the
   # first 16 hex chars — short enough to be cheap in the claim JSON, wide enough
