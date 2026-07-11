@@ -991,9 +991,11 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
 }
 /* Shared with the card slot's primary button (folded here so the one
-   hand-stamped on-accent white stays a single exempted literal). */
-.bp-canvas-action .bp-button--primary,
-.bp-paper-editor-body .bp-card .bp-button--primary {
+   hand-stamped on-accent white stays a single exempted literal). The
+   .bp-canvas-action selector stays immediately before the brace — the
+   paper_canvas_test parity gate greps `selector {` verbatim. */
+.bp-paper-editor-body .bp-card .bp-button--primary,
+.bp-canvas-action .bp-button--primary {
   border: none; background: var(--paper-accent); color: #ffffff;
 }
 .bp-canvas-action-controls {
