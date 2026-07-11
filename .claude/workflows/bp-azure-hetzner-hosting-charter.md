@@ -1430,3 +1430,47 @@ hazard again) — reviewer patched all four to in_progress + republished;
   provisioner — Console-minted S3 creds are the human gate). Then S8
   hetzner-native cutover, S11c infra tab, S15 styleguide completeness, S16
   hetzner journey polish.
+
+### Wave 2026-07-11 (live-smoke wave — DECIDED, building)
+
+Wave Paper: `azure-hetzner-hosting-epic-wave-2026-07-11`. Full wave charter (decisions
+D49–D59, operational facts, roadmap) lives in the epic-cycle slot file
+`.claude/workflows/bp-cloud-epic-charter.md` — mirrored here so this canonical memory
+never forks:
+
+- **D49** w8 = same-provider spec-hint consumption in internal/provisioner only
+  (BundleManifest Spec carrier; translateResurrect copies m.Spec; CreateHost precedence
+  pin > archived hint > provider default, gated job.Kind == manifest.SourceProvider,
+  refute-test: a DIFFERING pin still wins).
+- **D50** Cross-provider size mapping DEFERRED, ratified — explicit operator pin required
+  for cross-provider resurrects until real demand (answers w8 ac[3]).
+- **D51** "archived sha" = loose wording for BundleSpec{Region,ServerType}; no sha field.
+- **D52** w8 proven by refute-tests at merge, not live — bundle path is gated on the 4
+  Console-minted S3 vars (= the go-live human gate; DEGRADED journal line + env grep
+  proof); deploy.yml's cp flag never fires on internal/-only merges, so the live proof
+  rides the gate task's recipe (manual cp-deploy.sh).
+- **D53** w7's agent-drivable leg = `--fast` snapshot archive→resurrect→decommission
+  round-trip on a disposable box, HCLOUD_TOKEN only; proves lifecycle live, proves
+  NOTHING about w8 (--fast bypasses bundles) — evidence must say so.
+- **D54** Bundle legs + Azure leg parked on ONE task `azh-go-live-human-gate` with
+  copy-paste recipes (S3 4-tuple; Azure SP 4-tuple — live az session structurally
+  unusable by ClientSecretCredential-only code).
+- **D55** w6 recipe: bp signup (self-serve) → grant_forever (trial-burn firewall;
+  go-live auto-starts the one-ever trial and nothing unwinds it) → go-live → journal
+  negative-grep beat proof → both stale clocks (Metrics >180s read-time ~184s; fleet
+  pill Oban 2-tick ~300s) → browser DOM pass → product-path DELETE teardown →
+  two-token audit matches baseline (servers:6, archives:4, 7 known findings).
+- **D56** Azure SSH-user defect (runner root vs azure-only `barkpark` admin) fixed THIS
+  wave (azh-azure-ssh-user-fix) so the human's one Azure shot isn't wasted.
+- **D57** azh-s14d-azure-base-install-live-smoke closed `cancelled` as duplicate of w7.
+- **D58** "Closed to one human gate" scoped to the live-smoke axis; S8/S11c/S15/S16
+  filed as visible backlog rollup `azh-roadmap-tail-s8-s11c-s15-s16`; w3-pricing stays
+  open (public API, likely agent-drivable).
+- **D59** audit zone-404 = misconfig not bug (zone in separate Hetzner project); UX hint
+  slice filed as backlog `azh-audit-dns-token-hint`.
+
+Wave slices: azh-w8-consume-spec-hints (opus), azh-azure-ssh-user-fix (opus, sequenced
+after w8 — shared internal/provisioner/restore_driver.go), azh-w6-live-agent-smoke
+(fable, evidence), azh-w7-live-resurrect-smoke (fable, evidence). Backlog filed:
+azh-go-live-human-gate (p1, sole remainder), azh-audit-dns-token-hint,
+azh-cp-registry-inventory-hygiene, azh-roadmap-tail-s8-s11c-s15-s16.
