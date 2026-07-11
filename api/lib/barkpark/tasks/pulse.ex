@@ -90,6 +90,10 @@ defmodule Barkpark.Tasks.Pulse do
         # must be held before the row state we gate on is read, or a reap
         # committing between our read and our write could race the holder
         # check. doc_id is immutable, so the pre-lock read is safe for keying.
+        # Tenancy was resolved at the controller (doc_id -> task.id); the
+        # holder check below binds the caller to this exact row (same
+        # accepted posture as Claim.do_renew and Close's re-read).
+        # global-read: by-PK read for the renewal-family lock key
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
@@ -97,6 +101,7 @@ defmodule Barkpark.Tasks.Pulse do
           %Document{doc_id: doc_id} ->
             _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
 
+            # global-read: in-lock re-read of the same PK row (see above)
             doc = Repo.get!(Document, task_id)
 
             with :ok <- check_live(doc),

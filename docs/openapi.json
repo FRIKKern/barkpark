@@ -3233,6 +3233,75 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/tasks/{doc_id}/pulse": {
+      "post": {
+        "operationId": "task.pulse",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: worker_id.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Heartbeat a held claim: write the now-line (what you're doing right now) AND renew the lease (epoch bump + ts refresh) in one atomic write. No epoch arg — pulse survives fence bumps; a lost lease (reaped/released/closed) is 409 not_holder, never a silent re-claim. Boards render claim.now with its ts so a stale pulse reads stale.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections/{id}/members/{asset_id}": {
       "delete": {
         "operationId": "media.remove-member.scoped",
