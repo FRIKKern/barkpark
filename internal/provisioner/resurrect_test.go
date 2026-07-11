@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,6 +49,25 @@ func (r *restoreRunner) RunFeed(_ context.Context, title, script string, stdin i
 var _ cloud.StepRunner = (*restoreRunner)(nil)
 var _ cloud.StdinStepRunner = (*restoreRunner)(nil)
 
+// stubWarmImage keeps tests that reach CloudRestoreDriver.CreateHost hermetic:
+// the driver resolves the box IMAGE via cloud.FreshSpec (same as the provision
+// path), whose hetzner leg shells `hcloud image list` for the newest warm-image
+// snapshot. Stub the lister to fail fast so no test ever leaves the process —
+// the image then falls to DefaultSpec's env-pinned fallback (always non-empty
+// for hetzner), which is exactly the production no-snapshot behavior.
+func stubWarmImage(t *testing.T) {
+	t.Helper()
+	prev := cloud.WarmImageLister
+	cloud.WarmImageLister = func(context.Context) (string, error) {
+		return "", errors.New("hermetic test: no hcloud")
+	}
+	cloud.ResetWarmImageCache()
+	t.Cleanup(func() {
+		cloud.WarmImageLister = prev
+		cloud.ResetWarmImageCache()
+	})
+}
+
 // writeTestBundle seals a real bp-bundle-v1 into a fake store under kek and returns
 // the store + the bundle prefix (bundle_ref). The db.dump/media bytes are arbitrary
 // (the recording runner never executes them); the identity secrets are sealed for
@@ -66,9 +86,9 @@ func writeTestBundle(t *testing.T, kek, fqdn, dbName string) (*cloud.FakeBundleS
 		// the resurrect round-trips it (charter D49). Deliberately NOT the warm-pool
 		// default (cloud.DefaultSpec hetzner = nbg1/cx23) so a test asserting the hint
 		// was consumed can tell it apart from the provider default.
-		Spec: cloud.BundleSpec{Region: "hel1", ServerType: "cx33"},
-		DB:             strings.NewReader("PGDMP-fake-custom-format-dump"),
-		Media:          strings.NewReader("fake-media-tar-bytes"),
+		Spec:  cloud.BundleSpec{Region: "hel1", ServerType: "cx33"},
+		DB:    strings.NewReader("PGDMP-fake-custom-format-dump"),
+		Media: strings.NewReader("fake-media-tar-bytes"),
 		Secrets: map[string]string{
 			"SECRET_KEY_BASE":       strings.Repeat("A", 64),
 			"BARKPARK_CLOAK_KEY":    "Y2xvYWtrZXl2YWx1ZQ==",
@@ -148,6 +168,7 @@ func TestResurrectDrainRoundTripFiresEndToEnd(t *testing.T) {
 		dbName = "barkpark_prod"
 	)
 	store, prefix := writeTestBundle(t, kek, fqdn, dbName)
+	stubWarmImage(t)
 
 	prov := cloud.NewFakeProvider()
 	dns := cloud.NewFakeDNS()
@@ -209,6 +230,22 @@ func TestResurrectDrainRoundTripFiresEndToEnd(t *testing.T) {
 	}
 	if cp.succeededIP != servers[0].IP {
 		t.Fatalf("succeed reported ip %q, want the created box's %q", cp.succeededIP, servers[0].IP)
+	}
+
+	// The spec that reached the PROVIDER boundary carried the claim's PIN
+	// (nbg1/cax11 — a pin always beats the bundle's hel1/cx33 hint, D49) and a
+	// CONCRETE image (the FreshSpec fill — a blank image would have failed every
+	// real hcloud create). This pins the precedence through the full create
+	// chain, not just resolveRestoreBase in isolation.
+	created := prov.CreatedSpecs()
+	if len(created) != 1 {
+		t.Fatalf("want exactly 1 provider create, got %d", len(created))
+	}
+	if created[0].Region != "nbg1" || created[0].ServerType != "cax11" {
+		t.Fatalf("created spec = %+v, want the claim pin {nbg1 cax11} (pin > hint)", created[0])
+	}
+	if created[0].Image == "" {
+		t.Fatal("created spec has a blank image — the resurrect create must resolve one (FreshSpec fill)")
 	}
 
 	// The box got its fqdn identity label (so a later Remove can find it).
@@ -297,6 +334,7 @@ func TestResurrectMissingBundleEnvFailsJobHonestly(t *testing.T) {
 // blind to it), and the control plane never learned it exists.
 func TestResurrectMidChainFailureTearsDownTheBox(t *testing.T) {
 	store, prefix := writeTestBundle(t, "the-real-kek", "acme.barkpark.cloud", "barkpark_prod")
+	stubWarmImage(t)
 
 	prov := cloud.NewFakeProvider()
 	dns := cloud.NewFakeDNS()
@@ -344,6 +382,19 @@ func TestResurrectMidChainFailureTearsDownTheBox(t *testing.T) {
 	}
 	if servers, _ := prov.List(context.Background()); len(servers) != 0 {
 		t.Fatalf("the half-restored box must be torn down (no unlabeled billed orphan); got %d boxes", len(servers))
+	}
+
+	// This claim is UNPINNED (no region/server_type keys — blanks genuinely reach
+	// the Go boundary) and the bundle is same-provider, so the create that DID
+	// happen must have carried the archive-time hint hel1/cx33 (D49's hint tier),
+	// proven at the actual provider.Create call frame — the full-chain complement
+	// of TestResolveRestoreBasePrecedence's unit matrix.
+	created := prov.CreatedSpecs()
+	if len(created) != 1 {
+		t.Fatalf("want exactly 1 provider create before the teardown, got %d", len(created))
+	}
+	if created[0].Region != "hel1" || created[0].ServerType != "cx33" {
+		t.Fatalf("unpinned same-provider create = %+v, want the bundle hint {hel1 cx33}", created[0])
 	}
 }
 
