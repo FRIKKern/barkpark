@@ -1004,6 +1004,127 @@ func TestOnrampWriteAgentsMdMalformedSkipped(t *testing.T) {
 		if !bytes.Equal([]byte(broken), mustRead(t, "AGENTS.md")) {
 			t.Errorf("malformed skip must not touch the file (force=%v)", force)
 		}
+// runOnrampWriteJSON drives `bp onramp <args...> --write -o json` through the REAL
+// command entry point (runOnramp → buildOnrampSpec → runOnrampWrite) and decodes
+// the structured report. Server is pinned to guerrilla so the emission is
+// deterministic (short-circuits activeSavedServer / disk config). This is the
+// wired-path driver the isolation-only merge tests lack — it exercises the exact
+// arm buildOnrampSpec stamps, catching a dropped merge-metadata helper (the #2129
+// copilot bare-literal regression) that a hand-built onrampFile would mask.
+func runOnrampWriteJSON(t *testing.T, args ...string) onrampWriteResult {
+	t.Helper()
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	full := append(append([]string{}, args...), "--write")
+	if code := runOnramp(w, globals{server: guerrilla}, full); code != exitOK {
+		t.Fatalf("runOnramp %v exit = %d; stderr=%s", full, code, se.String())
+	}
+	var res onrampWriteResult
+	if err := json.Unmarshal(so.Bytes(), &res); err != nil {
+		t.Fatalf("json report did not decode into onrampWriteResult: %v\n%s", err, so.String())
+	}
+	return res
+}
+
+// TestOnrampWriteCopilotWiredPath drives `bp onramp copilot --write` end-to-end
+// through the REAL command (cd'd into a tempdir so the cwd-relative
+// .vscode/mcp.json resolves there, not the repo — HOME sandboxing alone would not
+// isolate it, charter D15). It is the wired-path guard the isolation-only
+// TestOnrampWriteServersShape lacked: the #2129 bare-literal regression made this
+// path a SILENT NO-OP (buildOnrampSpec's copilot arm dropped serversFile, so
+// mergeOnrampFile fell to default and reported skipped, zero files). Here the
+// action must be created — then unchanged on a clean re-run, bytes untouched
+// (charter D14).
+func TestOnrampWriteCopilotWiredPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	res := runOnrampWriteJSON(t, "copilot")
+	if len(res.Actions) != 1 {
+		t.Fatalf("copilot --write actions = %+v, want exactly one", res.Actions)
+	}
+	if got := res.Actions[0].Action; got != "created" {
+		t.Fatalf("copilot --write action = %q, want created (the bare-literal regression reports skipped and writes nothing)", got)
+	}
+	if res.Actions[0].Path != ".vscode/mcp.json" {
+		t.Errorf("action path = %q, want .vscode/mcp.json", res.Actions[0].Path)
+	}
+
+	// The file exists under cwd, byte-identical to the printed copilot stanza.
+	written := mustRead(t, filepath.Join(dir, ".vscode", "mcp.json"))
+	spec, ok := buildOnrampSpec("copilot", guerrilla, "")
+	if !ok {
+		t.Fatal("buildOnrampSpec(copilot) not ok")
+	}
+	if !bytes.Equal(written, withTrailingNewline([]byte(spec.Files[0].Content))) {
+		t.Errorf("written .vscode/mcp.json is not byte-identical to the printed stanza:\n--- got ---\n%s", written)
+	}
+	// Top-level key is `servers` (VS Code's shape), never mcpServers.
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(written, &top); err != nil {
+		t.Fatalf("written file not valid JSON: %v", err)
+	}
+	if _, ok := top["servers"]; !ok {
+		t.Errorf("copilot file missing the top-level servers key")
+	}
+	if _, ok := top["mcpServers"]; ok {
+		t.Errorf("copilot file leaked a sibling mcpServers key — VS Code's shape is servers")
+	}
+
+	// Re-run: unchanged, exit clean, bytes untouched.
+	res = runOnrampWriteJSON(t, "copilot")
+	if got := res.Actions[0].Action; got != "unchanged" {
+		t.Fatalf("copilot re-run action = %q, want unchanged", got)
+	}
+	if !bytes.Equal(written, mustRead(t, filepath.Join(dir, ".vscode", "mcp.json"))) {
+		t.Errorf("idempotent re-run changed the file bytes")
+	}
+}
+
+// TestOnrampWriteCopilotWiredPreservesForeign proves the wired copilot --write
+// merges into an existing .vscode/mcp.json without clobbering it: a foreign server
+// under `servers` and an unrelated top-level key both survive, and barkpark is
+// added (updated, key absent).
+func TestOnrampWriteCopilotWiredPreservesForeign(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".vscode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{
+  "inputs": [{"id": "token", "type": "promptString"}],
+  "servers": {
+    "playwright": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp"]}
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, ".vscode", "mcp.json"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runOnrampWriteJSON(t, "copilot")
+	if got := res.Actions[0].Action; got != "updated" {
+		t.Fatalf("copilot merge action = %q, want updated (barkpark absent under servers)", got)
+	}
+
+	result := mustRead(t, filepath.Join(dir, ".vscode", "mcp.json"))
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(result, &top); err != nil {
+		t.Fatalf("result not valid JSON: %v", err)
+	}
+	if _, ok := top["inputs"]; !ok {
+		t.Errorf("foreign top-level \"inputs\" key lost on merge")
+	}
+	servers := map[string]json.RawMessage{}
+	if err := json.Unmarshal(top["servers"], &servers); err != nil {
+		t.Fatalf("servers key not an object: %v", err)
+	}
+	if _, ok := servers["playwright"]; !ok {
+		t.Errorf("foreign playwright server lost when adding barkpark")
+	}
+	if _, ok := servers["barkpark"]; !ok {
+		t.Errorf("barkpark entry not added under servers")
 	}
 }
 
