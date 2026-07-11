@@ -1659,3 +1659,113 @@ func (c *Client) RolloutHalt(ctx context.Context) (RolloutState, error) {
 func (c *Client) RolloutResume(ctx context.Context) (RolloutState, error) {
 	return c.rolloutRequest(ctx, "POST", "/v1/admin/autoupdate/resume")
 }
+
+// RollbackResult is a STARTED instance rollback (isu-w6, charter W6 D15/D16): the
+// control plane ran the box's SYNCHRONOUS slot preflight, recovered the previous
+// blue/green slot's recorded sha, ATOMICALLY PINNED the instance at that target
+// (so the 5-minute rollout worker can never silently re-update past the operator —
+// an unpinned rollback is undone within one tick, a lie), and spawned the async
+// slot flip (git reset → reboot the idle slot → health-gate it on its own port →
+// flip Caddy ONLY on green). Raw is the 202 envelope BYTES verbatim so `-o json`
+// re-emits the control plane's contract without reshaping (the verify/rollout
+// idiom — the envelope IS the contract, so this client never becomes a second,
+// drifting definition of it). The scalar fields are POINTERS on purpose: a
+// leaner/older control plane that omits one decodes to nil (an honest "not
+// reported"), never a fabricated empty string.
+type RollbackResult struct {
+	Raw           []byte  `json:"-"`
+	Status        *string `json:"status"`
+	TargetSHA     *string `json:"target_sha"`
+	PinnedRelease *string `json:"pinned_release"`
+}
+
+// RollbackError is a rollback the control plane REFUSED — a typed contract code
+// the CLI maps onto one human sentence and a stable exit. HTTPStatus drives the
+// exit FAMILY (charter W6 D23: 409 → conflict, 404 → not-found, 5xx → server, auth
+// → auth); Code is the specific refusal used for the message; Detail is the
+// server's optional elaboration. A 401 is deliberately NOT a RollbackError — it
+// stays a cloudError so it keeps the "unauthorized:" prefix contract cloudFail
+// keys on (a dead session and a missing one become the same `bp login` hint).
+type RollbackError struct {
+	HTTPStatus int
+	Code       string
+	Detail     string
+}
+
+func (e *RollbackError) Error() string {
+	if e.Detail != "" {
+		return e.Code + ": " + e.Detail
+	}
+	return e.Code
+}
+
+// Rollback rolls ONE managed instance back to its previous blue/green slot via
+// POST /v1/barkparks/:id/rollback (Bearer, team-admin-gated — charter W6 D16). The
+// control plane runs the box's slot preflight with the STORED admin token (the
+// token never reaches this client), pins the instance at the recovered target, and
+// starts the async flip. A 202 is a STARTED run (read result.TargetSHA /
+// PinnedRelease); a contract refusal surfaces as *RollbackError; a 401 (and
+// anything else outside the contract) via cloudError so auth handling stays shared.
+func (c *Client) Rollback(ctx context.Context, id string) (RollbackResult, error) {
+	// The route is SYNCHRONOUS on the box's slot preflight (the control plane runs
+	// --rollback-preflight inline before it returns 202), so give it the same
+	// headroom past DefaultTimeout as VerifyInstance. An injected HTTP client
+	// (tests) is honored untouched; only the lazily-built fallback is widened.
+	rc := *c
+	if rc.HTTP == nil {
+		rc.HTTP = &http.Client{Timeout: VerifyTimeout}
+	}
+	status, raw, err := rc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/rollback", true, nil)
+	if err != nil {
+		return RollbackResult{}, err
+	}
+	if !ok(status) {
+		// A 401 keeps the shared cloudError "unauthorized:" contract; every other
+		// refusal is a typed *RollbackError the CLI exit-maps by status family. The
+		// control plane speaks TWO error shapes on this route — the nested
+		// {"error":{"code","detail"}} the relay emits for instance-relayed refusals,
+		// and the flat {"error":"not_found"} its top-level team guard emits — so the
+		// decode tolerates whichever arrived; an unrecognisable body falls through to
+		// cloudError so nothing is ever swallowed.
+		if status == http.StatusUnauthorized {
+			return RollbackResult{}, cloudError(status, raw)
+		}
+		if code, detail := decodeRollbackError(raw); code != "" {
+			return RollbackResult{}, &RollbackError{HTTPStatus: status, Code: code, Detail: detail}
+		}
+		return RollbackResult{}, cloudError(status, raw)
+	}
+	res := RollbackResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return RollbackResult{}, fmt.Errorf("decode rollback envelope: %w", err)
+	}
+	return res, nil
+}
+
+// decodeRollbackError extracts (code, detail) from a rollback refusal body,
+// tolerating BOTH shapes the route emits: the nested
+// {"error":{"code":"…","detail":"…"}} the relay uses for instance-relayed refusals
+// and the flat {"error":"not_found"} its top-level team guard uses. It returns ""
+// when neither shape carries a code (the caller then falls back to cloudError).
+func decodeRollbackError(body []byte) (code, detail string) {
+	var env struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Error) == 0 {
+		return "", ""
+	}
+	// Nested object shape first ({"error":{"code","detail"}}).
+	var obj struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	if json.Unmarshal(env.Error, &obj) == nil && obj.Code != "" {
+		return obj.Code, obj.Detail
+	}
+	// Flat string shape fallback ({"error":"not_found"}).
+	var s string
+	if json.Unmarshal(env.Error, &s) == nil {
+		return s, ""
+	}
+	return "", ""
+}
