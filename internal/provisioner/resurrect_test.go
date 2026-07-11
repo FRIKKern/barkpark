@@ -62,6 +62,11 @@ func writeTestBundle(t *testing.T, kek, fqdn, dbName string) (*cloud.FakeBundleS
 		TeamID:         "team-1",
 		SourceProvider: "hetzner",
 		DBName:         dbName,
+		// A real archive-time shape hint — the source box's region + server_type — so
+		// the resurrect round-trips it (charter D49). Deliberately NOT the warm-pool
+		// default (cloud.DefaultSpec hetzner = nbg1/cx23) so a test asserting the hint
+		// was consumed can tell it apart from the provider default.
+		Spec: cloud.BundleSpec{Region: "hel1", ServerType: "cx33"},
 		DB:             strings.NewReader("PGDMP-fake-custom-format-dump"),
 		Media:          strings.NewReader("fake-media-tar-bytes"),
 		Secrets: map[string]string{
@@ -374,6 +379,11 @@ func TestTranslateResurrectMapsManifestFieldByField(t *testing.T) {
 	}
 	if m.ArchivedAt == "" {
 		t.Fatal("ArchivedAt should map from the manifest CreatedAt")
+	}
+	// The archive-time shape hint survives the translate boundary (charter D49) —
+	// previously it was dropped here (the whole point of w8).
+	if m.Spec.Region != "hel1" || m.Spec.ServerType != "cx33" {
+		t.Fatalf("Spec hint must carry through translate; got %+v, want {hel1 cx33}", m.Spec)
 	}
 }
 

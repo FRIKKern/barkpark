@@ -128,6 +128,10 @@ func translateResurrect(ctx context.Context, spec resurrectClaimSpec, deps Resur
 		Fqdn:           m.FQDN,
 		DBName:         m.DBName,
 		ArchivedAt:     m.CreatedAt.UTC().Format(time.RFC3339),
+		// Carry the archive-time shape hint through the translate boundary (charter
+		// D49) — it was captured at archive time and, until now, dropped here. The
+		// consumer (CloudRestoreDriver.CreateHost) applies it same-provider only.
+		Spec: BundleSpec{Region: m.Spec.Region, ServerType: m.Spec.ServerType},
 		// MediaPaths + SchemaVersion have no source in the pinned bp-bundle-v1 manifest
 		// (D44) — left zero; the restore names its media member by the fixed constant.
 	}
@@ -169,14 +173,66 @@ type CloudRestoreDriver struct {
 	VerifyTotalBudget  time.Duration
 }
 
-// CreateHost cold-creates the fresh box (D40 — never warm-assigns).
+// CreateHost cold-creates the fresh box (D40 — never warm-assigns). It resolves the
+// box's shape under the precedence pin > archived hint > provider default (D49) via
+// resolveRestoreBase, so cloud.CreateHost receives an ALREADY-RESOLVED base.
 func (d *CloudRestoreDriver) CreateHost(ctx context.Context, job JobSpec) (string, error) {
-	base := cloud.ServerSpec{Region: job.Region, ServerType: job.ServerType}
+	base := resolveRestoreBase(job)
 	fqdn := ""
 	if job.BundleRef != nil {
 		fqdn = job.BundleRef.Manifest.Fqdn
 	}
 	return d.Exec.CreateHost(ctx, job.Kind, job.Credentials, base, fqdn)
+}
+
+// restoreKind normalizes a claim's Kind to a provider slug: an empty Kind is the
+// Hetzner path (an old control plane omits the key — the zero value MUST route
+// Hetzner, mirroring provisionRestore's own normalization).
+func restoreKind(kind string) string {
+	if kind == "" {
+		return cloud.ProviderHetzner
+	}
+	return kind
+}
+
+// resolveRestoreBase resolves the fresh box's ServerSpec for a resurrect under the
+// precedence pin > archived hint > provider default (charter D49), FIELD BY FIELD so
+// a claim that pins only one of region/server_type still takes the hint (or default)
+// for the other:
+//
+//   - PIN — the claim's Region/ServerType (job.Region/job.ServerType). An operator/
+//     control-plane choice always wins. An UNPINNED resurrect claim arrives here with
+//     these blank (the router stores them nil-honest; TestResurrectMidChainFailure...
+//     drives exactly that), which is the seam where a lower tier becomes detectable.
+//   - ARCHIVED HINT — the bundle's captured shape (BundleRef.Manifest.Spec), applied
+//     ONLY when the pin's corresponding field is blank AND the resurrect is
+//     SAME-PROVIDER (restoreKind(job.Kind) == Manifest.SourceProvider). Cross-provider
+//     size mapping is DEFERRED (D50) — a Hetzner hint is meaningless to Azure and no
+//     heuristic is guessed, so a cross-provider job ignores the hint entirely.
+//   - PROVIDER DEFAULT — cloud.DefaultSpec fills any field still blank (an unpinned,
+//     hint-less, or cross-provider claim), so the base handed to cloud.CreateHost is
+//     concrete rather than a blank the fallback ladder has to paper over.
+func resolveRestoreBase(job JobSpec) cloud.ServerSpec {
+	base := cloud.ServerSpec{Region: job.Region, ServerType: job.ServerType}
+
+	if job.BundleRef != nil && restoreKind(job.Kind) == job.BundleRef.Manifest.SourceProvider {
+		hint := job.BundleRef.Manifest.Spec
+		if base.Region == "" {
+			base.Region = hint.Region
+		}
+		if base.ServerType == "" {
+			base.ServerType = hint.ServerType
+		}
+	}
+
+	def := cloud.DefaultSpec(restoreKind(job.Kind))
+	if base.Region == "" {
+		base.Region = def.Region
+	}
+	if base.ServerType == "" {
+		base.ServerType = def.ServerType
+	}
+	return base
 }
 
 // Freshen brings the box to a runnable Barkpark (warm-image on hetzner, base

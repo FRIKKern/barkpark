@@ -217,6 +217,15 @@ type BundleManifest struct {
 	// DBName is the database the restore DROPs + CREATEs + pg_restores into. Named by
 	// the MANIFEST (not re-derived on the box) so the restore lands in the right place.
 	DBName string `json:"db_name"`
+	// Spec is the archive-time SHAPE hint — the region + server_type the source box
+	// ran on (mirrored from cloud.BundleSpec). It lets a SAME-PROVIDER resurrect
+	// rebuild the box to its prior size when the claim did not pin one, under the
+	// precedence pin > archived hint > provider default (CloudRestoreDriver.CreateHost,
+	// charter D49). The hint tier is same-provider ONLY (job.Kind == SourceProvider):
+	// cross-provider size mapping is DEFERRED until real demand (D50 — no heuristic is
+	// guessed). Both fields may be blank (an unpinned archive stamps ""), and it is a
+	// SHAPE, never a content sha — no sha field exists in the bundle pipeline (D51).
+	Spec BundleSpec `json:"spec"`
 	// MediaPaths are the media roots the restore unpacks from the bundle.
 	MediaPaths []string `json:"media_paths,omitempty"`
 	// ArchivedAt is the RFC3339 instant the bundle was cut (audit + newest-selection).
@@ -224,6 +233,17 @@ type BundleManifest struct {
 	// SchemaVersion pins the schema the dump was taken at, so the restore's best-effort
 	// migrate knows whether it is catching up.
 	SchemaVersion int `json:"schema_version,omitempty"`
+}
+
+// BundleSpec is the archive-time shape hint mirrored from cloud.BundleSpec: the
+// region + server_type the source box ran on. It is carried on BundleManifest.Spec
+// so a same-provider resurrect can rebuild the box to match (charter D49). Both
+// fields are always present in the pinned manifest wire bytes — an unpinned archive
+// stamps "" (a legitimate blank), never an omission — so a reader distinguishes "no
+// hint" (blank) from a real one by value, not presence.
+type BundleSpec struct {
+	Region     string `json:"region"`
+	ServerType string `json:"server_type"`
 }
 
 // ProvisionFunc runs the warm-pool provisioning for one claimed job and returns
