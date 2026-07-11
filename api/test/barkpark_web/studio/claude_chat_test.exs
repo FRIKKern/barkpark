@@ -92,7 +92,12 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
       # The honest frame: same subtype, no error facts → a real success.
       assert ClaudeChat.result_success?(%{"type" => "result", "subtype" => "success"})
-      refute ClaudeChat.result_success?(%{"type" => "result", "subtype" => "error_during_execution"})
+
+      refute ClaudeChat.result_success?(%{
+               "type" => "result",
+               "subtype" => "error_during_execution"
+             })
+
       refute ClaudeChat.result_success?(%{"type" => "assistant"})
     end
 
@@ -606,7 +611,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.stderr")
 
       put_chat_config(command: {"cat", []})
-      {:ok, session} = ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
       ref = Process.monitor(session)
 
       ClaudeChat.close(session)
@@ -1353,6 +1361,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   describe "build_args/2 effort choice (wave 9, charter D48)" do
     test "a chosen effort tier rides the spawn as --effort" do
       args = ClaudeChat.build_args("plan", %{session_id: "u-1", effort: "high"})
+
       assert ["--effort", "high"] ==
                Enum.slice(args, Enum.find_index(args, &(&1 == "--effort")), 2)
 
@@ -1362,7 +1371,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     test "a resume carries the effort too" do
       args = ClaudeChat.build_args("plan", %{session_id: "u-1", resume: true, effort: "xhigh"})
       assert "--resume" in args
-      assert ["--effort", "xhigh"] == Enum.slice(args, Enum.find_index(args, &(&1 == "--effort")), 2)
+
+      assert ["--effort", "xhigh"] ==
+               Enum.slice(args, Enum.find_index(args, &(&1 == "--effort")), 2)
     end
 
     test "absent or nil effort emits NO --effort flag" do
