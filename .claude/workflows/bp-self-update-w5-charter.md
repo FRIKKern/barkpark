@@ -171,3 +171,141 @@ decision (see #1 — it unblocks console halt/resume for real), runtime.exs
 PLATFORM_ADMIN_EMAILS + set it on the CP, provision the actual staging box (human-gated
 DNS token) so the canary train stops failing open, then the deliberately-unfiled charter
 W6 list (blue/green rollback verb, growing cohorts, maintenance windows).
+
+---
+
+# W6 — rollback becomes real (decided 2026-07-11)
+
+Wave Paper: `self-update-epic-wave-2026-07-11`. Two exploration rounds + a 6-report verify
+fleet ran before these decisions; every load-bearing claim below carries actually-run proof
+(mix-staleness probe, live guerrilla ground truth, harness baseline, gate dry-runs).
+
+## W6 Vision
+
+An operator staring at a bad release clicks **Rollback** in the console or runs
+`bp cloud rollback <instance>`; the instance resets its shared checkout to the idle slot's
+recorded sha, reboots that slot, health-gates it on its own port, flips Caddy ONLY on
+green, rewrites deploy STATE, and the CP atomically pins the instance at the rolled-back
+version so the 5-minute rollout worker can never silently undo the operator. Every refusal
+is typed and honest: no previous slot → says so; old slot boots dead → fail closed, Caddy
+untouched, says so. One honest path, zero new capabilities — the verb is a mode of the
+sanctioned deploy machinery riding the exact W5 relay seam.
+
+## W6 Decisions (numbering continues from W5's D10)
+
+11. **Flip+reset, never flip-only.** The mix-staleness probe REFUTED bare port-flip: a slot
+    restart runs `mix phx.server` against the ONE shared checkout, and a stale build root
+    recompiles NEW source (`Compiling 1 file… :V2_NEW_CODE`, beam sha flipped). The script's
+    own "instant manual rollback" comment (instance-deploy.sh:264-265) is a lie for the beam.
+    `git reset --hard <slot-sha>` restores OLD code byte-identically (probe: sha returned
+    exactly to original, second run stable no-recompile) and is the script's own sanctioned
+    failure-path idiom (:200-205,241,252,258). Why: proven restore, zero new capability.
+12. **Per-slot version stamp, refuse without it.** Every deploy writes
+    `.slots/<target>.sha` = $NEW when it writes the slot env files. Rollback reads
+    `.slots/<other>.sha` and refuses `no_previous_slot` when the stamp OR a complete
+    `_build_<other>/prod` is missing. Why: amnesia proven LIVE on guerrilla — STATE is one
+    global sha, slot envs carry only port+build-root, and an auto-deploy was caught
+    recycling the previous live slot ~8 minutes after retirement.
+13. **Rollback lives IN instance-deploy.sh** as `--rollback` + `--rollback-preflight`
+    modes sharing the SAME flock (:49-53). Preflight is synchronous and read-only: typed
+    exit codes + prints `TARGET_SLOT=`/`TARGET_SHA=`. Why: one script owns slot truth; the
+    lock makes rollback-vs-deploy a queue, never a race.
+14. **Real health gate only.** Rollback reuses the BLOCKING pre-flip curl loop against the
+    resurrected slot's own port (mirror :232-243); on unhealthy: slot disabled, Caddy
+    untouched, checkout reset back to the live slot's sha, typed exit. The post-flip public
+    curl (:260) is LOG-ONLY and must never be copied as a gate. Health gate proves
+    boot+shallow endpoint, NOT schema compatibility — the copy says so.
+15. **Instance API = POST /v1/admin/rollback** (same `require_admin` pipeline as
+    self-update). Controller runs preflight synchronously → `202 {status:"started",
+    target_sha}` then spawns the async Port (Runner single-flight SHARED with self-update —
+    one run slot for both verbs); typed refusals: 409 `no_previous_slot`, 409
+    `already_running`, 409 `not_supported` (no `.slots` box), 503 `feature_not_configured`
+    (same BARKPARK_SELF_UPDATE_APPLY gate). Why: sync preflight hands the CP the pin value;
+    async Port keeps the CP's 15s :httpc shape.
+16. **CP relay = POST /v1/barkparks/:id/rollback, gated `require_primary_team_admin`** —
+    the ONE gate reachable from a console session AND `bp login` (require_worker routes are
+    operator-unreachable in prod, a pre-existing kill-switch bug filed to backlog, not
+    repeated here). `Registry.trigger_rollback/2` (sibling of trigger_self_update) does NOT
+    block on `pinned_release` — rollback re-pins by design; on instance 202 it atomically
+    writes `pinned_release = <instance-reported target>` (never operator free-text), then
+    enqueues UpdateStatusWorker `schedule_in: 60` + `push_event("fleet")` exactly like the
+    update trigger. Why: an unpinned rollback is undone within one 5-min tick — a lie; a
+    pinned one is immune with ZERO new worker logic.
+17. **Pin-after-202 ordering, freeze-only semantics.** If the async run later fails closed,
+    the pin stays at the intended target while status truth (BuildInfo via the refreshed
+    UpdateStatusWorker) shows reality — a frozen box with an honest status beats an
+    unpinned box that silently re-updates. pinned_release remains bookkeeping (OC10 law:
+    a pin freezes, it never downgrades).
+18. **Fleet halt does NOT suppress manual rollback.** The halt is the autonomous-rollout
+    brake; the interactive update trigger already ignores it, rollback matches. Why: human
+    override wins; two surfaces must not invent two answers.
+19. **Schema stays forward.** Rollback is app-level only; its copy quotes the PROD_OPS law
+    ("rolling back code does NOT undo the schema; write a compensating migration").
+    Expand/contract remains a 3-place comment law scoped to the swap window — enforcement
+    is backlog, not this wave.
+20. **Shared-static accepted with healing.** git-reset heals the 31 git-tracked static
+    files; `make wasm` re-runs at the OLD sha (non-fatal, degrades to fallback — existing
+    precedent). Residual: priv is ONE shared symlinked dir (proven on guerrilla — both
+    slots' priv readlink to /opt/barkpark/api/priv), so brief skew during the window and a
+    functionally-equivalent (not byte-identical) wasm are documented v1 limitations. No
+    per-slot priv snapshot (that's a new capability — out).
+21. **STATE coherence.** `--rollback` rewrites `.instance-deploy-last` to the rolled-back
+    sha. With the git reset this makes agent `git_commit`, coalesce logic, and the next
+    deploy's OLD baseline all truthful; barkpark-agent's would-be lie fixes itself for free.
+22. **OC10 does NOT disprove this design.** OC10 rejected PIN-DOWNGRADE via the git
+    ff-only update path — a sibling dead end. Port-flip rollback flips to an already-built
+    slot and moves the checkout with the sanctioned `reset --hard`, never a backward merge.
+23. **Refusal vocabulary:** reuse `already_running` / `not_supported` /
+    `feature_not_configured` / `no_admin_token` / `decrypt_failed` / `instance_error` /
+    `instance_unreachable` verbatim; ADD `no_previous_slot` (409). Async unhealthy failure
+    = script exit 24 `unhealthy_fail_closed`, surfaced through the status/log endpoint.
+    CLI exit mapping: 409-family → exitConflict(6), 404 → exitNotFound(4), 502 →
+    exitServer(8), auth → 3.
+24. **Naming: "instance rollback".** Route lives under /v1/barkparks/:id (instances);
+    console+test helpers use the `isu-w6` prefix. Explicitly distinct from the D7/D25
+    SITE-deployment "Roll back to this" promote feature in app.js:5139-5175 and from
+    Ecto `Repo.rollback` noise.
+25. **Gate hygiene (stale figures corrected):** the offline harness has **68** checks
+    today, not 49 — acceptance criteria use the real count; the harness is NOT CI-wired
+    (backlog). ALL Go gate invocations carry `CC=clang` (the cc-alias landmine reds vet/
+    test otherwise). cloud/ mix tests need Postgres reachable+migrated (`mix ecto.create &&
+    mix ecto.migrate` on a fresh box) — there is no DB-free mix test in cloud/.
+    `test/barkpark_cloud/registry/barkpark_test.exs` does not exist — never cite it.
+26. **Live smoke PARKED as a recipe** (backlog task carries it): disposable box hand-minted
+    from the warm image (staging-barkpark D2 recipe), Caddy `tls internal`, no real DNS
+    (`curl --resolve`), TWO forward deploys to populate both slots, then rollback + deny
+    cases. guerrilla is production AND the task ledger — never the first flip.
+
+## W6 Contract pinned for parallel builders
+
+- **Script:** `instance-deploy.sh --rollback-preflight` → exit 0 prints
+  `TARGET_SLOT=<blue|green>` + `TARGET_SHA=<40-hex>`; exit 21 `no_previous_slot`;
+  exit 22 `not_supported`; exit 23 lock-held (`already_running`). `--rollback` → exit 0
+  success; exit 24 `unhealthy_fail_closed`; preflight codes apply. Deploy additionally
+  writes `.slots/<target>.sha` on every run.
+- **Instance:** `POST /v1/admin/rollback` → `202 {"status":"started","target_sha":"…"}` |
+  `409 {"error":{"code":"no_previous_slot"|"already_running"|"not_supported"}}` |
+  `503 {"error":{"code":"feature_not_configured"}}`.
+- **CP:** `POST /v1/barkparks/:id/rollback` → `202 {"status":"started","target_sha":"…",
+  "pinned_release":"…"}` | relays instance 409 codes verbatim | 404 team-scoped (no
+  existence leak) | 404 `no_admin_token` | 500 `decrypt_failed` | 502
+  `instance_unreachable`/`instance_error`. On 202 the CP has ALREADY pinned.
+  If a builder's final names drift, the PR body says so and the lead reconciles.
+
+## W6 Roadmap
+
+- **W6-S1 (large, fable)** `isu-w6-rollback-script-stamp` — per-slot sha stamp +
+  `--rollback`/`--rollback-preflight` in instance-deploy.sh + harness rollback cases
+  (happy flip, no-previous-slot, unhealthy-fail-closed). The heart.
+- **W6-S2 (medium, opus)** `isu-w6-instance-rollback-api` — instance route/controller/
+  Runner rollback trigger (async Port, shared single-flight).
+- **W6-S3 (medium, fable)** `isu-w6-cp-rollback-relay` — CP route + trigger_rollback +
+  atomic pin write + status refresh + tests. The pin-atomicity slice.
+- **W6-S4 (medium, opus)** `isu-w6-console-rollback-button` — console Rollback button in
+  the isu-w5 update panel, typed conflict copy, escaping tests.
+- **W6-S5 (medium, opus)** `isu-w6-cli-rollback-verb` — `bp cloud rollback <instance>` +
+  cloudclient method, verify-style raw envelope, typed exit codes.
+
+## W6 Wave log
+
+_(Review closes this wave — entries land here at debrief.)_
