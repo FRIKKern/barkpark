@@ -131,6 +131,36 @@ that writes one frame, reads its response, then sends the next. Stay read-only:
 `task_ready` / `task_show` only — never `task_next` / `task_close` /
 `task_create` against a real board.
 
+## Remote endpoint (Streamable HTTP) — deploy shape + smoke recipe
+
+The remote path (viable-everywhere charter D18/D19) exposes the SAME server at
+`https://guerrilla.barkpark.cloud/mcp`: `deploy/instance-deploy.sh` arms an
+idempotent `/mcp` Caddy route → `127.0.0.1:4010` where
+`deploy/systemd/barkpark-mcp.service` runs `bp mcp serve --http`. The unit is
+install-GUARDED (enabled only once the built binary advertises `--http`) and
+holds **no API token** — forward-through: each caller's own
+`Authorization: Bearer` rides through to the downstream API, so a missing or
+bogus bearer fails closed with the downstream 401.
+
+Honest scope (charter D20): this endpoint does **not** self-serve-unlock
+Claude.ai — bearer/header auth for Claude.ai custom connectors is still
+invite-gated. Live bearer targets today: ChatGPT Developer Mode (Plus/Pro
+read), Perplexity (Pro+), Grok (SuperGrok), Mistral Vibe (all plans).
+
+Live smoke, run AFTER both the transport slice and the deploy slice are on the
+box (transcript to be appended here, redacted, same rules as above):
+
+```bash
+# TOKEN from ~/.config/barkpark/config.json known_servers[guerrilla] — never echo it
+claude mcp add --transport http bp-remote https://guerrilla.barkpark.cloud/mcp \
+  --header "Authorization: Bearer $TOKEN"
+# drive task_ready (read-only), then the deny path:
+#   same call with a bogus bearer MUST fail closed (401), never a tool result
+```
+
+**Status: transcript pending** — the smoke is the close criterion of task
+`ve-w2-mcp-deploy` and cannot honestly run before both slices deploy.
+
 ## Post-catalog re-run (2026-07-09, reviewer, wave-2 integrated)
 
 Re-driven against live guerrilla with the full wave-2 branch (catalog +

@@ -38,9 +38,21 @@ seamless, this covers crashes/restarts outside deploys. Baked into the renderers
 armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
 auto-reverting; port-flip-safe). Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script (99 checks: slot selection, flip, failure semantics, channel seam,
-coalesce, rollback happy flip-back + typed refusals + unhealthy fail-closed):
+script (121 checks: slot selection, flip, failure semantics, channel seam,
+coalesce, rollback happy flip-back + typed refusals + unhealthy fail-closed,
+/mcp route idempotence + the barkpark-mcp install guard):
 `deploy/instance-deploy_test.sh`.
+
+**Remote MCP endpoint (`/mcp`).** `instance-deploy.sh` arms an idempotent
+path-based Caddy route (`handle /mcp /mcp/*` → `localhost:4010`, marker
+`BARKPARK_MCP_ROUTE`) on the existing public site and — GUARDED, non-fatal —
+installs/enables `deploy/systemd/barkpark-mcp.service` (`bp mcp serve --http`)
+only when the just-built binary advertises `--http`, so the deploy step ships
+independently of the bearer transport slice. Forward-through auth: the unit and
+`/etc/barkpark/mcp.env` hold NO token; the caller's own bearer is the only
+credential and a bogus one fails closed downstream. Port 4010 is deliberately
+outside the blue/green slot ports — the flip sed and ACTIVE_PORT greps match
+slot ports exactly and pass over it.
 
 **Rollback (W6).** Every deploy stamps `.slots/<target>.sha` so the box knows
 what its idle slot holds. `instance-deploy.sh --rollback-preflight` (read-only)

@@ -1,0 +1,42 @@
+# barkpark-mcp — the remote MCP endpoint (viable-everywhere charter D18/D19).
+# Runs the built bp binary as `bp mcp serve --http` on a loopback port; the
+# host Caddy exposes it path-based as https://<host>/mcp (route armed by
+# deploy/instance-deploy.sh arm_caddy_mcp_route — port 4010 sits deliberately
+# OUTSIDE the blue/green slot ports {4000,4001} so the deploy port-flip sed
+# passes over it).
+#
+# PLAIN unit on purpose — never the barkpark-slot@ template (that one is
+# Elixir-build-root specific). Modeled on barkpark-agent.service: the box-local
+# knobs live in an EnvironmentFile written by instance-deploy.sh, NOT baked
+# into ExecStart, so the SAME committed unit re-installs on every self-update:
+#   /etc/barkpark/mcp.env — BARKPARK_API_URL (the downstream Barkpark server,
+#       ALWAYS the stable public front, e.g. https://guerrilla.barkpark.cloud —
+#       never a raw slot port: blue/green flips 4000/4001 under us) and
+#       BARKPARK_MCP_HTTP_ADDR (the loopback listen address, 127.0.0.1:4010).
+#
+# FORWARD-THROUGH auth (charter D18): this unit holds NO API token — not here,
+# not in mcp.env. Each caller's own `Authorization: Bearer` rides through to
+# the downstream API, and a missing/bogus bearer fails closed with the
+# downstream 401. Do not add a token line; that would mint an ambient
+# credential the design explicitly rejects.
+#
+# Installed + enabled by deploy/instance-deploy.sh, GUARDED: only when the
+# just-built binary advertises `--http` (so a box running a pre-bearer bp
+# never crash-loops on an unknown flag).
+[Unit]
+Description=Barkpark remote MCP endpoint (bp mcp serve --http)
+Documentation=file:///opt/barkpark/deploy/systemd/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Fail cleanly (not restart-looping) if the deploy has not written this yet.
+EnvironmentFile=/etc/barkpark/mcp.env
+ExecStart=/usr/local/bin/barkpark-mcp mcp serve --http ${BARKPARK_MCP_HTTP_ADDR}
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
