@@ -37,6 +37,23 @@ type Claim struct {
 	Worker    string
 	Epoch     int
 	ClaimedAt time.Time
+	// Now is the worker's live now-line pulse (charter D9): content.claim.now,
+	// written atomically with the lease renewal by `bp task pulse`. Nil when the
+	// claim carries no pulse (every claim written before the pulse verb shipped).
+	Now *ClaimPulse
+}
+
+// ClaimPulse is the decoded content.claim.now — {"text","ts","criterion"?}
+// (charter D9, the pinned wire shape). Criterion is the acceptance_criteria
+// index the pulse names (the criterion the worker is on RIGHT NOW — the board
+// spins exactly that ladder rung while the pulse is live), -1 when the pulse
+// names none. Staleness is derived from At against the claim lease TTL — a
+// pulse is a statement about NOW, so an old one must visibly decay, never
+// masquerade as current activity.
+type ClaimPulse struct {
+	Text      string
+	At        time.Time
+	Criterion int
 }
 
 type Criteria struct{ Met, Total int }
@@ -45,7 +62,27 @@ type Criteria struct{ Met, Total int }
 type CriterionItem struct {
 	Criterion string
 	Met       bool
+	// Attempts is the honest-miss trail (charter D8): `bp task stamp --miss`
+	// appends {note,ts,worker} WITHOUT flipping met, bounded server-side to the
+	// 5 most recent. A recorded attempt on an unmet criterion is what turns its
+	// ladder rung amber — the board shows the honest miss, not just the seal.
+	Attempts []CriterionAttempt
 }
+
+// CriterionAttempt is one recorded miss on a criterion (charter D8's
+// attempts[] entry): who tried, when, and the honest note about what fell
+// short. It never counts toward met — stamp records progress, close seals.
+type CriterionAttempt struct {
+	Note   string
+	At     time.Time
+	Worker string
+}
+
+// Missed reports whether the criterion carries a recorded attempt without the
+// met seal — the amber "!" rung on the board's criteria ladder. A met
+// criterion is never "missed" (the seal supersedes the trail), and an
+// untouched one (no attempts) stays the dim ○.
+func (c CriterionItem) Missed() bool { return !c.Met && len(c.Attempts) > 0 }
 
 // Event is one recent task.% mutation from prime.
 type Event struct {
@@ -151,8 +188,15 @@ type Board struct {
 	// root neighborhoods hold ready work right now — the number of agents that
 	// could run in parallel without stepping on each other's blast radius.
 	IndependentReady int
-	Counts           map[string]int
-	Events           []Event
+	// CriteriaMet/CriteriaTotal is the corpus-wide acceptance-criteria tally
+	// (charter D11: the momentum header counts criteria, not just tasks) —
+	// summed over every fetched task's criteria_progress, excluding cancelled
+	// work (the same denominator law as progressPct). Total 0 = no criteria in
+	// the corpus, and the momentum header shows no criteria segment at all.
+	CriteriaMet   int
+	CriteriaTotal int
+	Counts        map[string]int
+	Events        []Event
 }
 
 type Epic struct {

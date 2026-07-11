@@ -78,7 +78,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 func bottomChrome(b Board, st UIState, width int, now time.Time) []string {
 	var chrome []string
 	chrome = append(chrome, renderStatusFooter(b, st, width)...)
-	chrome = append(chrome, renderTicker(b.Events, width, now)...)
+	chrome = append(chrome, renderTicker(b, st, width, now)...)
 	// The action strip sits directly above the footer, and only when there is
 	// something to say — an empty strip costs no line.
 	if strip := renderActionStrip(st.Strip, width); strip != "" {
@@ -278,9 +278,14 @@ func firstDNSLabel(server string) string {
 }
 
 // momentumLine is the spec §0 aggregate: `⟨spinner⟩ N in flight · ○ N ready ·
-// ✓ N done[ · N stale]   NN%`. The spinner rides the same heartbeat frame as the
-// board (D38), done is teal, the stale count (when > 0) is the warn instrument,
-// and the % is right-aligned. Icons carry state; the counts stay dim.
+// ✓ N done[ · N/M criteria][ · N stale]   NN%`. The spinner rides the same
+// heartbeat frame as the board (D38), done is teal, the criteria tally counts
+// the corpus's acceptance criteria (charter D11 — momentum at criterion
+// granularity, not just tasks; absent when the corpus has none), the stale
+// count (when > 0) is the warn instrument, and the % is right-aligned. Icons
+// carry state; the counts stay dim. On a tight pane the criteria segment sheds
+// first — the task counts + % are the primary instruments and must never be
+// mid-token truncated to make room for the richer tally.
 func momentumLine(b Board, st UIState, width int) string {
 	spin := infoStyle.Render(spinnerGlyph(st.Frame))
 	segs := []string{
@@ -288,11 +293,23 @@ func momentumLine(b Board, st UIState, width int) string {
 		readyStyle.Render("○") + " " + dimStyle.Render(fmt.Sprintf("%s ready", readyCountLabel(b))),
 		doneStyle.Render("✓") + " " + dimStyle.Render(fmt.Sprintf("%d done", b.Counts["done"])),
 	}
-	leftPart := strings.Join(segs, dimStyle.Render(" · "))
-	if b.Stale > 0 {
-		leftPart += dimStyle.Render(" · ") + warnStyle.Render(fmt.Sprintf("%d stale", b.Stale))
-	}
 	right := boldStyle.Render(fmt.Sprintf("%d%%", progressPct(b)))
+	assemble := func(withCriteria bool) string {
+		parts := segs
+		if withCriteria && b.CriteriaTotal > 0 {
+			parts = append(append([]string{}, segs...),
+				dimStyle.Render(fmt.Sprintf("%d/%d criteria", b.CriteriaMet, b.CriteriaTotal)))
+		}
+		left := strings.Join(parts, dimStyle.Render(" · "))
+		if b.Stale > 0 {
+			left += dimStyle.Render(" · ") + warnStyle.Render(fmt.Sprintf("%d stale", b.Stale))
+		}
+		return left
+	}
+	leftPart := assemble(true)
+	if disp(leftPart)+disp(right)+1 > width {
+		leftPart = assemble(false) // shed the criteria tally before anything clips
+	}
 	return leftRight(leftPart, right, width)
 }
 
@@ -710,18 +727,92 @@ func windowSpine(lines []string, top, avail, width int) []string {
 
 // ── Ticker + footer (pinned bottom) ──────────────────────────────────────────
 
-// renderTicker draws the fixed event tail: a rule, then ONE dim last-event line
-// (the calm-board subtraction, charter D14 — the three-line ticker and its
-// verb-cycling working line are retired; the queue breathes through the NOW
-// band's ticking claims and flash-on-change, not a personality line). At rest
-// with no events it reads the honest quiet "no recent activity"; otherwise it
-// shows the single freshest event. Always exactly two lines tall.
-func renderTicker(events []Event, width int, now time.Time) []string {
+// renderTicker draws the fixed activity tail: a rule, then the NOW-LINE (the
+// freshest live claim's now-pulse, charter D9 — present only when a claim
+// carries one), then ONE dim last-event line (the calm-board subtraction,
+// charter D14 — the three-line verb-cycling ticker stays retired; the
+// now-line is a worker's own words, not a personality line). At rest with no
+// events it reads the honest quiet "no recent activity"; otherwise it shows
+// the single freshest event. Two lines tall at rest, three while a pulse
+// exists — an absent pulse costs no line.
+func renderTicker(b Board, st UIState, width int, now time.Time) []string {
 	lines := []string{dimStyle.Render(strings.Repeat("─", width))}
-	if len(events) == 0 {
+	if t, p := freshestPulse(b); p != nil {
+		lines = append(lines, pulseLine(t, p, st.Frame, width, now))
+	}
+	if len(b.Events) == 0 {
 		return append(lines, dimStyle.Render("no recent activity"))
 	}
-	return append(lines, dimStyle.Render(truncate(eventSentence(events[0], now), width)))
+	return append(lines, dimStyle.Render(truncate(eventSentence(b.Events[0], now), width)))
+}
+
+// freshestPulse picks the newest claim.now pulse across the NOW band's live
+// claims — the board's ONE now-line (many agents may pulse; the line shows
+// whoever spoke last, and the per-row ladders carry the rest). Nil when no
+// live claim carries a pulse. Board.Now is the honest source: a swept lease
+// clears the worker and the task falls out of NOW, taking its dead pulse with
+// it.
+func freshestPulse(b Board) (Task, *ClaimPulse) {
+	var best *ClaimPulse
+	var bt Task
+	for _, t := range b.Now {
+		if t.Claim == nil || t.Claim.Now == nil || strings.TrimSpace(t.Claim.Now.Text) == "" {
+			continue
+		}
+		if best == nil || t.Claim.Now.At.After(best.At) {
+			best, bt = t.Claim.Now, t
+		}
+	}
+	return bt, best
+}
+
+// pulseLine renders the now-line — `⠹ worker · pulse text · 30s` — with the
+// TTL decay visibly honest (charter D9: stale never lies fresh):
+//
+//	fresh   (< 70% of the lease)  blue spinner, the text at full weight
+//	leaning (70%…TTL)             amber spinner, the text recedes to dim
+//	stale   (past the lease TTL)  NO spinner (motion is liveness and this
+//	                              pulse is not live) — a dim · lead, the whole
+//	                              line dim, and an explicit "stale" before the
+//	                              age
+//
+// The grading is claimRole — the same lease arithmetic the claim glyph burns
+// through, so the pulse and its row can never disagree about freshness. The
+// spinner rides the board heartbeat frame (0 at rest / reduced-motion / cold
+// paints, so goldens stay deterministic); every glyph is existing vocabulary.
+func pulseLine(t Task, p *ClaimPulse, frame, width int, now time.Time) string {
+	worker := ""
+	if t.Claim != nil {
+		worker = t.Claim.Worker
+	}
+	age := AgeBadge(p.At, now)
+	role := claimRole(p.At, now)
+
+	if role == RoleDanger { // past the lease TTL: visibly stale, never fresh
+		s := "· "
+		if worker != "" {
+			s += worker + " · "
+		}
+		s += p.Text + " · stale"
+		if age != "" {
+			s += " " + age
+		}
+		return dimStyle.Render(truncate(s, width))
+	}
+
+	line := roleStyle(role).Render(spinnerGlyph(frame)) + " "
+	if worker != "" {
+		line += infoStyle.Render(worker) + dimStyle.Render(" · ")
+	}
+	textStyle := neutralStyle
+	if role == RoleWarn { // the lease is leaning — the words start to fade
+		textStyle = dimStyle
+	}
+	line += textStyle.Render(p.Text)
+	if age != "" {
+		line += dimStyle.Render(" · " + age)
+	}
+	return truncate(line, width)
 }
 
 func eventSentence(e Event, now time.Time) string {

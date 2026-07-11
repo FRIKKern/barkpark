@@ -330,8 +330,108 @@ func TestDecodeAcceptanceCriteria(t *testing.T) {
 		t.Fatalf("decoded %d items, want %d: %+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if got[i].Criterion != want[i].Criterion || got[i].Met != want[i].Met {
 			t.Errorf("item[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+		if got[i].Attempts != nil {
+			t.Errorf("item[%d] decoded attempts from nothing: %+v", i, got[i].Attempts)
+		}
+	}
+}
+
+// TestDecodeCriterionAttempts pins the D8 attempts[] decode: well-formed
+// {note,ts,worker} entries land as the honest-miss trail (Missed() true on an
+// unmet criterion), a met criterion is never "missed" whatever its trail, and
+// junk — a non-list attempts, non-map entries, an all-junk list — decodes to
+// nothing so garbage can never fake a recorded miss.
+func TestDecodeCriterionAttempts(t *testing.T) {
+	body := []byte(`{"docs":[{"doc_id":"x","content":{"acceptance_criteria":[
+		{"criterion":"A","met":false,"attempts":[
+			{"note":"gate red: TestFoo","ts":"2026-07-10T10:00:00Z","worker":"opus-1"},
+			{"note":"still red","worker":"opus-1"},
+			"junk-entry",
+			42
+		]},
+		{"criterion":"B","met":true,"attempts":[{"note":"early miss","worker":"w"}]},
+		{"criterion":"C","met":false,"attempts":"not-a-list"},
+		{"criterion":"D","met":false,"attempts":["junk",7,null]}
+	]}}]}`)
+	tasks, err := decodeTaskList(body)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	items := tasks[0].CriteriaItems
+	if len(items) != 4 {
+		t.Fatalf("decoded %d items, want 4", len(items))
+	}
+	a := items[0]
+	if len(a.Attempts) != 2 {
+		t.Fatalf("A attempts = %+v, want the 2 map entries (junk skipped)", a.Attempts)
+	}
+	if a.Attempts[0].Note != "gate red: TestFoo" || a.Attempts[0].Worker != "opus-1" ||
+		a.Attempts[0].At != mustParse(t, "2026-07-10T10:00:00Z") {
+		t.Errorf("A attempt[0] = %+v", a.Attempts[0])
+	}
+	if !a.Attempts[1].At.IsZero() {
+		t.Errorf("A attempt[1] missing ts should decode to zero time, got %v", a.Attempts[1].At)
+	}
+	if !a.Missed() {
+		t.Errorf("A (unmet + attempts) should read as Missed")
+	}
+	if items[1].Missed() {
+		t.Errorf("B is met — the seal supersedes the trail, never Missed")
+	}
+	if items[2].Attempts != nil || items[2].Missed() {
+		t.Errorf("C non-list attempts should decode to nil, got %+v", items[2].Attempts)
+	}
+	if items[3].Attempts != nil || items[3].Missed() {
+		t.Errorf("D all-junk attempts should decode to nil, got %+v", items[3].Attempts)
+	}
+}
+
+// TestDecodeClaimPulse pins the D9 claim.now decode: the pinned
+// {"text","ts","criterion"?} shape lands as a ClaimPulse; a missing/null/
+// non-integer criterion reads -1 (the pulse names no rung); an absent, null,
+// malformed or empty-text now decodes to NO pulse; a malformed ts decodes to
+// the zero time (maximally stale — an undatable pulse must never read fresh).
+func TestDecodeClaimPulse(t *testing.T) {
+	body := []byte(`{"docs":[
+		{"doc_id":"full","claim":{"worker":"w","epoch":2,"ts_iso":"2026-07-10T10:00:00Z",
+			"now":{"text":"wiring the decoder","ts":"2026-07-10T10:03:00Z","criterion":1}}},
+		{"doc_id":"nocrit","claim":{"worker":"w","epoch":1,"now":{"text":"reading code","ts":"2026-07-10T10:03:00Z"}}},
+		{"doc_id":"badcrit","claim":{"worker":"w","epoch":1,"now":{"text":"x","ts":"2026-07-10T10:03:00Z","criterion":"two"}}},
+		{"doc_id":"negcrit","claim":{"worker":"w","epoch":1,"now":{"text":"x","ts":"2026-07-10T10:03:00Z","criterion":-3}}},
+		{"doc_id":"badts","claim":{"worker":"w","epoch":1,"now":{"text":"x","ts":12345}}},
+		{"doc_id":"nulled","claim":{"worker":"w","epoch":1,"now":null}},
+		{"doc_id":"emptytext","claim":{"worker":"w","epoch":1,"now":{"text":"  ","ts":"2026-07-10T10:03:00Z"}}},
+		{"doc_id":"absent","claim":{"worker":"w","epoch":1}},
+		{"doc_id":"garbage","claim":{"worker":"w","epoch":1,"now":"doing stuff"}}
+	]}`)
+	tasks, err := decodeTaskList(body)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	byID := map[string]Task{}
+	for _, tk := range tasks {
+		byID[tk.DocID] = tk
+	}
+	full := byID["full"].Claim.Now
+	if full == nil || full.Text != "wiring the decoder" || full.Criterion != 1 ||
+		full.At != mustParse(t, "2026-07-10T10:03:00Z") {
+		t.Errorf("full pulse = %+v", full)
+	}
+	for id, wantCrit := range map[string]int{"nocrit": -1, "badcrit": -1, "negcrit": -1} {
+		p := byID[id].Claim.Now
+		if p == nil || p.Criterion != wantCrit {
+			t.Errorf("%s pulse = %+v, want criterion %d", id, p, wantCrit)
+		}
+	}
+	if p := byID["badts"].Claim.Now; p == nil || !p.At.IsZero() {
+		t.Errorf("badts pulse should keep a zero (stale) time, got %+v", p)
+	}
+	for _, id := range []string{"nulled", "emptytext", "absent", "garbage"} {
+		if p := byID[id].Claim.Now; p != nil {
+			t.Errorf("%s should decode to NO pulse, got %+v", id, p)
 		}
 	}
 }

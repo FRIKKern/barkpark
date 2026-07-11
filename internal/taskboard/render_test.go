@@ -427,16 +427,26 @@ func TestRenderAtRestGolden(t *testing.T) {
 
 // motionBoard is the in-flight scene the motion goldens pin: one claim running
 // in place as a spinner row inside its epic (charter D56 — the pinned band is
-// retired), a just-created ready row and a settled (unchanged) row.
-// motionUIState marks the claim as a level-2 (bright) flash and the
-// just-created row as a level-1 (fading) flash at Frame 4.
+// retired) wearing the full criteria ladder — a met ✓, a live-pulsed spinner
+// rung (the claim's now-pulse names criterion 1), an honest recorded miss on
+// criterion 2 — plus the now-line the pulse feeds the ticker, a just-created
+// ready row and a settled (unchanged) row. motionUIState marks the claim as a
+// level-2 (bright) flash and the just-created row as a level-1 (fading) flash
+// at Frame 4.
 func motionBoard() Board {
 	claimed := fixedNow.Add(-(4*time.Minute + 30*time.Second))
-	claim := &Claim{Worker: "opus-3", Epoch: 4, ClaimedAt: claimed}
+	claim := &Claim{Worker: "opus-3", Epoch: 4, ClaimedAt: claimed,
+		Now: &ClaimPulse{Text: "debouncing the refetch loop", At: fixedNow.Add(-90 * time.Second), Criterion: 1}}
+	items := []CriterionItem{
+		{Criterion: "Bridge reconnects after a drop", Met: true},
+		{Criterion: "Refetch debounced to 750ms"},
+		{Criterion: "Events dedup across reconnects",
+			Attempts: []CriterionAttempt{{Note: "dedup flaky under load", At: fixedNow.Add(-3 * time.Minute), Worker: "opus-3"}}},
+	}
 	return Board{
 		Now: []Task{{
 			DocID: "flash-now", Title: "Ship the live bridge", Lifecycle: "in_progress",
-			ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3},
+			ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3}, CriteriaItems: items,
 			Claim: claim, UpdatedAt: claimed,
 		}},
 		Epics: []Epic{{
@@ -446,7 +456,7 @@ func motionBoard() Board {
 			// D56 — the retired band was the only other home it ever had).
 			Children: []Task{
 				{DocID: "flash-now", Title: "Ship the live bridge", Lifecycle: "in_progress",
-					ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3},
+					ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3}, CriteriaItems: items,
 					Claim: claim, UpdatedAt: claimed},
 				{DocID: "flash-spine", Title: "Reticulate the splines", Lifecycle: "ready",
 					ParentID: "motion-epic", Priority: "P2", UpdatedAt: fixedNow.Add(-2 * time.Second)},
@@ -1052,5 +1062,145 @@ func TestSlideTopMinimalScroll(t *testing.T) {
 			t.Errorf("%s: slideTop(%d,%d,%d,%d) = %d, want %d",
 				tc.name, tc.prev, tc.cursorLine, tc.avail, tc.n, got, tc.want)
 		}
+	}
+}
+
+// --- expressive-agent-loops: the now-line + criteria momentum (D9/D11) -------
+
+// pulseBoard is a minimal board with one live claim carrying a now-pulse dated
+// `at`, for the ticker decay tests.
+func pulseBoard(at time.Time) Board {
+	return Board{
+		Now: []Task{{
+			DocID: "pulse-task", Title: "Pulse task", Lifecycle: "in_progress",
+			Claim: &Claim{Worker: "opus-7", Epoch: 3, ClaimedAt: at,
+				Now: &ClaimPulse{Text: "wiring the decoder", At: at, Criterion: 0}},
+			UpdatedAt: at,
+		}},
+		Counts: map[string]int{"in_progress": 1},
+		Events: []Event{{Mutation: "task.claimed", DocID: "pulse-task", At: at}},
+	}
+}
+
+// TestRenderTickerNowLine proves the now-line: a live pulse paints the
+// worker's own words above the event tail; a board without a pulse paints no
+// extra line at all (an absent pulse costs nothing).
+func TestRenderTickerNowLine(t *testing.T) {
+	st := UIState{Conn: ConnLive, LastSync: fixedNow}
+	frame := ansi.Strip(Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow))
+	if !strings.Contains(frame, "opus-7 · wiring the decoder · 1m") {
+		t.Errorf("frame missing the now-line:\n%s", frame)
+	}
+
+	// Without a pulse the ticker is the classic two lines: rule + event.
+	bare := pulseBoard(fixedNow.Add(-time.Minute))
+	bare.Now[0].Claim.Now = nil
+	frameBare := ansi.Strip(Render(bare, st, 80, 20, fixedNow))
+	if strings.Contains(frameBare, "wiring the decoder") {
+		t.Errorf("pulse-less board still paints a now-line:\n%s", frameBare)
+	}
+}
+
+// TestRenderTickerPulseDecay pins "stale never lies fresh" (charter D9): a
+// fresh pulse wears the live spinner; once the pulse outlives the lease TTL
+// the spinner is withheld, the line dims and says "stale" outright — visible
+// even ANSI-stripped, so no terminal can render a dead pulse as current.
+func TestRenderTickerPulseDecay(t *testing.T) {
+	st := UIState{Conn: ConnLive, LastSync: fixedNow}
+
+	fresh := ansi.Strip(Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow))
+	if !strings.Contains(fresh, "⠋ opus-7 · wiring the decoder") {
+		t.Errorf("fresh pulse missing its live spinner:\n%s", fresh)
+	}
+	if strings.Contains(fresh, "stale") {
+		t.Errorf("fresh pulse dishonestly reads stale:\n%s", fresh)
+	}
+
+	stale := ansi.Strip(Render(pulseBoard(fixedNow.Add(-12*time.Minute)), st, 80, 20, fixedNow))
+	if !strings.Contains(stale, "· opus-7 · wiring the decoder · stale 12m") {
+		t.Errorf("stale pulse missing the explicit decay:\n%s", stale)
+	}
+	if strings.Contains(stale, "⠋ opus-7") {
+		t.Errorf("stale pulse still wears the live spinner — motion is liveness:\n%s", stale)
+	}
+
+	// The styled frame grades the decay by the SAME lease arithmetic as claim
+	// tints: fresh spins blue (info), a leaning pulse (past 70% of the lease)
+	// amber (warn), and a stale one is dim end to end.
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+	leanFrame := Render(pulseBoard(fixedNow.Add(-4*time.Minute)), st, 80, 20, fixedNow)
+	if !strings.Contains(leanFrame, warnStyle.Render(spinnerGlyph(0))) {
+		t.Errorf("a leaning pulse (4m of a 5m lease) should wear the warn spinner")
+	}
+	freshFrame := Render(pulseBoard(fixedNow.Add(-time.Minute)), st, 80, 20, fixedNow)
+	if !strings.Contains(freshFrame, infoStyle.Render(spinnerGlyph(0))) {
+		t.Errorf("a fresh pulse should wear the info (blue) spinner")
+	}
+}
+
+// TestRenderTickerFreshestPulseWins — with several live claims pulsing, the
+// one now-line belongs to whoever spoke last.
+func TestRenderTickerFreshestPulseWins(t *testing.T) {
+	b := pulseBoard(fixedNow.Add(-3 * time.Minute))
+	b.Now = append(b.Now, Task{
+		DocID: "louder", Title: "Louder task", Lifecycle: "in_progress",
+		Claim: &Claim{Worker: "opus-9", Epoch: 1, ClaimedAt: fixedNow.Add(-time.Minute),
+			Now: &ClaimPulse{Text: "regenerating the goldens", At: fixedNow.Add(-time.Minute)}},
+	})
+	frame := ansi.Strip(Render(b, UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 20, fixedNow))
+	if !strings.Contains(frame, "opus-9 · regenerating the goldens") {
+		t.Errorf("the freshest pulse did not win the now-line:\n%s", frame)
+	}
+	if strings.Contains(frame, "wiring the decoder") {
+		t.Errorf("two now-lines painted — the board has exactly one:\n%s", frame)
+	}
+}
+
+// TestMomentumCountsCriteria — the momentum header carries the corpus criteria
+// tally (charter D11), sheds it FIRST on a tight pane (the task counts + % are
+// the primary instruments), and omits it entirely when the corpus has no
+// criteria.
+func TestMomentumCountsCriteria(t *testing.T) {
+	b := Board{
+		Counts:        map[string]int{"in_progress": 2, "done": 5},
+		CriteriaMet:   7,
+		CriteriaTotal: 19,
+	}
+	st := UIState{Conn: ConnLive, LastSync: fixedNow}
+	frame := ansi.Strip(Render(b, st, 80, 20, fixedNow))
+	if !strings.Contains(frame, "7/19 criteria") {
+		t.Errorf("momentum header missing the criteria tally:\n%s", frame)
+	}
+
+	// Tight pane: the tally sheds whole, never mid-token truncates.
+	narrow := ansi.Strip(momentumLine(b, st, 46))
+	if strings.Contains(narrow, "criteria") || strings.Contains(narrow, "7/19") {
+		t.Errorf("a tight momentum line should shed the criteria tally whole: %q", narrow)
+	}
+	if !strings.Contains(narrow, "in flight") {
+		t.Errorf("the primary instruments must survive the shed: %q", narrow)
+	}
+
+	// No criteria in the corpus: no segment at all.
+	b.CriteriaMet, b.CriteriaTotal = 0, 0
+	if f := ansi.Strip(Render(b, st, 80, 20, fixedNow)); strings.Contains(f, "criteria") {
+		t.Errorf("criteria-less corpus still shows a tally:\n%s", f)
+	}
+}
+
+// TestBuildBoardCriteriaTally — BuildBoard sums criteria_progress across the
+// fetched corpus, excluding cancelled work (the progressPct denominator law).
+func TestBuildBoardCriteriaTally(t *testing.T) {
+	s := Snapshot{Tasks: []Task{
+		{DocID: "a", Lifecycle: "in_progress", Criteria: &Criteria{Met: 2, Total: 5}},
+		{DocID: "b", Lifecycle: "done", Criteria: &Criteria{Met: 3, Total: 3}},
+		{DocID: "c", Lifecycle: "cancelled", Criteria: &Criteria{Met: 1, Total: 4}}, // excluded
+		{DocID: "d", Lifecycle: "open"},                                             // no criteria — costs nothing
+	}}
+	b := BuildBoard(s, RepoContext{}, fixedNow)
+	if b.CriteriaMet != 5 || b.CriteriaTotal != 8 {
+		t.Errorf("criteria tally = %d/%d, want 5/8 (cancelled excluded)", b.CriteriaMet, b.CriteriaTotal)
 	}
 }

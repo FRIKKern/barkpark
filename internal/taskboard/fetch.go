@@ -236,6 +236,10 @@ type claimWire struct {
 	// are detail fields and ride the frozen tolerance contract.
 	PreviousWorker json.RawMessage `json:"previous_worker"`
 	ExpiredAt      json.RawMessage `json:"expired_at"`
+	// Now is the D9 pulse — content.claim.now {"text","ts","criterion"?}.
+	// RawMessage + decodePulse's tolerance so a malformed pulse degrades to
+	// no-pulse instead of failing the whole list decode.
+	Now json.RawMessage `json:"now"`
 }
 
 type criteriaWire struct {
@@ -268,7 +272,8 @@ func (w taskWire) toTask() Task {
 		if at.IsZero() {
 			at = w.Claim.ClaimedAt
 		}
-		t.Claim = &Claim{Worker: w.Claim.Worker, Epoch: w.Claim.Epoch, ClaimedAt: at}
+		t.Claim = &Claim{Worker: w.Claim.Worker, Epoch: w.Claim.Epoch, ClaimedAt: at,
+			Now: decodePulse(w.Claim.Now)}
 	}
 	// criteria_progress is OMITTED when absent (wire contract), so a nil
 	// pointer stays a nil Criteria — never a misleading 0/0.
@@ -310,14 +315,71 @@ func decodeAcceptanceCriteria(content json.RawMessage) []CriterionItem {
 // Only a JSON object with a string "criterion" and "met" === true reads as a
 // met, titled item; anything else (a bare string/number, a null, a map without
 // "criterion", a "met" of "yes"/1/absent) keeps its slot as unmet with empty
-// text — the exact tolerance of Barkpark.Tasks.Criteria's met?/1.
+// text — the exact tolerance of Barkpark.Tasks.Criteria's met?/1. The D8
+// attempts trail rides along, decoded with the same tolerance.
 func decodeCriterion(raw json.RawMessage) CriterionItem {
 	var m map[string]any
 	if json.Unmarshal(raw, &m) != nil || m == nil {
 		return CriterionItem{}
 	}
 	crit, _ := m["criterion"].(string)
-	return CriterionItem{Criterion: crit, Met: m["met"] == true}
+	return CriterionItem{Criterion: crit, Met: m["met"] == true, Attempts: decodeAttempts(m["attempts"])}
+}
+
+// decodeAttempts reads a criterion's honest-miss trail — the D8 attempts[]
+// list of {"note","ts","worker"} entries `bp task stamp --miss` appends
+// (server-bounded to the 5 most recent). Tolerant at every layer: a non-list
+// value or a non-map entry decodes to nothing, and a map entry keeps whatever
+// fields parse (a missing note/ts/worker degrades to its zero value). The
+// presence of at least one well-formed attempt is what turns a board rung
+// amber, so junk can never fake a recorded miss.
+func decodeAttempts(v any) []CriterionAttempt {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]CriterionAttempt, 0, len(list))
+	for _, e := range list {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		a := CriterionAttempt{At: timeField(m, "ts")}
+		a.Note = strField(m, "note")
+		a.Worker = strField(m, "worker")
+		out = append(out, a)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// decodePulse turns content.claim.now into a ClaimPulse (charter D9's pinned
+// {"text","ts","criterion"?} shape). Tolerance contract: absent/null/malformed
+// or an empty text → nil (no pulse — an empty now-line says nothing, so it
+// renders nothing); a missing/`null`/non-integer criterion → -1 (the pulse
+// names no criterion, so no ladder rung spins); a malformed ts → zero time
+// (which renders as maximally stale — an undatable pulse must never read
+// fresh).
+func decodePulse(raw json.RawMessage) *ClaimPulse {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var w struct {
+		Text      string          `json:"text"`
+		Ts        json.RawMessage `json:"ts"`
+		Criterion json.RawMessage `json:"criterion"`
+	}
+	if json.Unmarshal(raw, &w) != nil || strings.TrimSpace(w.Text) == "" {
+		return nil
+	}
+	p := &ClaimPulse{Text: w.Text, At: rawTime(w.Ts), Criterion: -1}
+	var idx int
+	if json.Unmarshal(w.Criterion, &idx) == nil && idx >= 0 {
+		p.Criterion = idx
+	}
+	return p
 }
 
 // coercePriority renders content.priority (a JSON number, a string, or null)

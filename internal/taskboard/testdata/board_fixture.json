@@ -35,7 +35,12 @@
       "Claim": {
         "Worker": "opus-3",
         "Epoch": 4,
-        "ClaimedAt": "2026-07-03T11:56:00Z"
+        "ClaimedAt": "2026-07-03T11:56:00Z",
+        "Now": {
+          "Text": "wiring the SSE reconnect backoff",
+          "At": "2026-07-03T11:58:00Z",
+          "Criterion": 2
+        }
       },
       "Criteria": {
         "Met": 2,
@@ -92,7 +97,14 @@
             },
             {
               "Criterion": "Reconcile onto the landed #979 seam",
-              "Met": false
+              "Met": false,
+              "Attempts": [
+                {
+                  "Note": "seam compiles but the theme goldens diverge",
+                  "At": "2026-07-03T11:20:00Z",
+                  "Worker": "opus-2"
+                }
+              ]
             }
           ],
           "DependencyCount": 1,
@@ -250,6 +262,8 @@
     }
   ],
   "Stale": 2,
+  "CriteriaMet": 3,
+  "CriteriaTotal": 5,
   "Counts": {
     "in_progress": 3,
     "blocked": 4,

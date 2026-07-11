@@ -73,7 +73,7 @@ barkpark · tasks                                ⇄ guerrilla  ● live · 1m
 
 
 
-⠋ 2 in flight · ○ 8 ready · ✓ 30 done · 1 stale                      55%
+⠋ 2 in flight · ○ 8 ready · ✓ 30 done · 3/18 criteria · 1 stale      55%
 ███████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ────────────────────────────────────────────────────────────────────────
 ⠋ claimed 'auth-w1-claim' · 5m
