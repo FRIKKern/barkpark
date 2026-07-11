@@ -370,3 +370,152 @@ func TestTruncateMiddleHonorsWantTailForRealUUIDs(t *testing.T) {
 		t.Errorf("fallback lost the elision marker: %q", got)
 	}
 }
+
+// --- expressive-agent-loops: the criteria lock ladder (charter D11) ----------
+
+// ladderTask builds a task carrying the full rung vocabulary: a met seal, an
+// untouched criterion, and an honest recorded miss.
+func ladderTask() Task {
+	return Task{
+		DocID: "lad", Title: "Ladder task", Lifecycle: "in_progress",
+		Claim:    &Claim{Worker: "opus-1", ClaimedAt: testNow.Add(-time.Minute)},
+		Criteria: &Criteria{Met: 1, Total: 3},
+		CriteriaItems: []CriterionItem{
+			{Criterion: "sealed", Met: true},
+			{Criterion: "untouched"},
+			{Criterion: "missed",
+				Attempts: []CriterionAttempt{{Note: "gate red", At: testNow.Add(-2 * time.Minute), Worker: "opus-1"}}},
+		},
+	}
+}
+
+// TestCriteriaLadderRungs pins the rung vocabulary and its precedence: ✓ for
+// met, ○ for untouched, ! for a recorded miss — and every rune already in the
+// board's closed glyph set (zero new glyphs, charter D11).
+func TestCriteriaLadderRungs(t *testing.T) {
+	plain, _ := criteriaLadder(ladderTask(), testNow, 0)
+	if plain != "✓○!" {
+		t.Fatalf("ladder = %q, want %q", plain, "✓○!")
+	}
+}
+
+// TestCriteriaLadderPulseSpinsExactlyTheNamedRung — the braille spinner marks
+// ONLY the criterion a LIVE pulse names (claim.now.criterion within the lease
+// TTL). A met rung outranks the pulse (sealed is truer than "being worked"),
+// and a STALE pulse spins nothing — motion is liveness, and a dead pulse must
+// not animate.
+func TestCriteriaLadderPulseSpinsExactlyTheNamedRung(t *testing.T) {
+	task := ladderTask()
+	task.Claim.Now = &ClaimPulse{Text: "working the untouched one", At: testNow.Add(-30 * time.Second), Criterion: 1}
+	plain, _ := criteriaLadder(task, testNow, 0)
+	if plain != "✓⠋!" {
+		t.Fatalf("live pulse ladder = %q, want %q (rung 1 spins)", plain, "✓⠋!")
+	}
+	// The spinner rides the heartbeat frame.
+	if p, _ := criteriaLadder(task, testNow, 2); p != "✓⠹!" {
+		t.Errorf("frame 2 ladder = %q, want %q", p, "✓⠹!")
+	}
+	// A pulse naming a MET criterion never overrides the seal.
+	task.Claim.Now.Criterion = 0
+	if p, _ := criteriaLadder(task, testNow, 0); p != "✓○!" {
+		t.Errorf("pulse on a met rung = %q, want the seal kept: %q", p, "✓○!")
+	}
+	// A pulse on the MISSED rung outranks the miss — the miss is history, the
+	// pulse is now.
+	task.Claim.Now.Criterion = 2
+	if p, _ := criteriaLadder(task, testNow, 0); p != "✓○⠋" {
+		t.Errorf("pulse on the missed rung = %q, want %q", p, "✓○⠋")
+	}
+	// A STALE pulse (older than the lease TTL) spins nothing.
+	task.Claim.Now = &ClaimPulse{Text: "long gone", At: testNow.Add(-leaseTTL), Criterion: 1}
+	if p, _ := criteriaLadder(task, testNow, 0); p != "✓○!" {
+		t.Errorf("stale pulse ladder = %q, want no spinner: %q", p, "✓○!")
+	}
+	// A swept claim (worker cleared) never spins either.
+	task.Claim.Now = &ClaimPulse{Text: "orphaned", At: testNow, Criterion: 1}
+	task.Claim.Worker = ""
+	if p, _ := criteriaLadder(task, testNow, 0); p != "✓○!" {
+		t.Errorf("swept-claim ladder = %q, want no spinner: %q", p, "✓○!")
+	}
+}
+
+// TestCriteriaLadderCapsAndAbsence — no decoded checklist means no ladder (the
+// row keeps the bare fraction), and past ladderMaxRungs the ladder withdraws
+// rather than eating the title budget.
+func TestCriteriaLadderCapsAndAbsence(t *testing.T) {
+	if p, _ := criteriaLadder(Task{Criteria: &Criteria{Met: 1, Total: 2}}, testNow, 0); p != "" {
+		t.Errorf("no checklist should mean no ladder, got %q", p)
+	}
+	big := Task{}
+	for i := 0; i < ladderMaxRungs+1; i++ {
+		big.CriteriaItems = append(big.CriteriaItems, CriterionItem{Criterion: "c"})
+	}
+	if p, _ := criteriaLadder(big, testNow, 0); p != "" {
+		t.Errorf("%d rungs should exceed the cap and render no ladder, got %q", ladderMaxRungs+1, p)
+	}
+}
+
+// TestTaskRowLadderAndFraction — the row's criteria token is ladder + fraction
+// ("✓○! 1/3") when the row has room, and the fraction is derived from the
+// checklist when the envelope carried no criteria_progress (a ladder never
+// paints without its fraction).
+func TestTaskRowLadderAndFraction(t *testing.T) {
+	line := ansi.Strip(TaskRow(ladderTask(), false, false, 0, false, 100, 0, testNow)[0])
+	if !strings.Contains(line, "✓○! 1/3") {
+		t.Errorf("row missing the ladder+fraction token: %q", line)
+	}
+	derived := ladderTask()
+	derived.Criteria = nil
+	line = ansi.Strip(TaskRow(derived, false, false, 0, false, 100, 0, testNow)[0])
+	if !strings.Contains(line, "✓○! 1/3") {
+		t.Errorf("fraction should derive from the checklist when criteria_progress is absent: %q", line)
+	}
+}
+
+// TestTaskRowLadderShedsToFraction pins the width-shed ladder: on a pane too
+// tight for the full meta the criteria token DEGRADES to the bare fraction
+// (the pre-ladder form) before any token is shed — the fraction, worker and
+// age outlive the rungs.
+func TestTaskRowLadderShedsToFraction(t *testing.T) {
+	// A meta-heavy row: severity, an 8-rung ladder and a long agent worker name —
+	// the realistic epic-builder shape that outgrows a tight pane's meta budget.
+	task := Task{
+		DocID: "shed", Title: "A long enough title that the meta cannot keep every cell",
+		Lifecycle: "in_progress", Priority: "P1",
+		Claim:    &Claim{Worker: "epic-builder-tui-locks", ClaimedAt: testNow.Add(-time.Minute)},
+		Criteria: &Criteria{Met: 4, Total: 8},
+		CriteriaItems: []CriterionItem{
+			{Criterion: "a", Met: true}, {Criterion: "b", Met: true},
+			{Criterion: "c", Met: true}, {Criterion: "d", Met: true},
+			{Criterion: "e"}, {Criterion: "f"}, {Criterion: "g"},
+			{Criterion: "h",
+				Attempts: []CriterionAttempt{{Note: "gate red", At: testNow.Add(-2 * time.Minute), Worker: "w"}}},
+		},
+	}
+	// Find a width where the row shows the fraction but no ladder rungs: walk
+	// down from wide and assert the degrade order (rungs vanish before digits).
+	sawFull, sawBare := false, false
+	for width := 100; width >= dropMetaBelow; width-- {
+		line := ansi.Strip(TaskRow(task, false, false, 0, false, width, 0, testNow)[0])
+		hasLadder := strings.Contains(line, "✓✓✓✓○○○!")
+		hasFraction := strings.Contains(line, "4/8")
+		if hasLadder && !hasFraction {
+			t.Fatalf("width %d: ladder without fraction: %q", width, line)
+		}
+		if hasLadder {
+			sawFull = true
+			if sawBare {
+				t.Fatalf("width %d: the ladder came BACK below a width that had shed it: %q", width, line)
+			}
+		}
+		if !hasLadder && hasFraction {
+			sawBare = true
+		}
+	}
+	if !sawFull {
+		t.Errorf("no width painted the full ladder — the token never renders")
+	}
+	if !sawBare {
+		t.Errorf("no width degraded to the bare fraction — the narrow fallback never engages")
+	}
+}

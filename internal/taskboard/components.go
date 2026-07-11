@@ -165,6 +165,97 @@ func criteriaFraction(c *Criteria) string {
 	return fmt.Sprintf("%d/%d", c.Met, c.Total)
 }
 
+// rowCriteriaFraction is the fraction a task row shows: the server's
+// criteria_progress when present (the authoritative count), else derived from
+// the decoded checklist — so a ladder can never paint without its fraction.
+// "" when the task has no criteria at all.
+func rowCriteriaFraction(t Task) string {
+	if f := criteriaFraction(t.Criteria); f != "" {
+		return f
+	}
+	if len(t.CriteriaItems) == 0 {
+		return ""
+	}
+	met := 0
+	for _, it := range t.CriteriaItems {
+		if it.Met {
+			met++
+		}
+	}
+	return fmt.Sprintf("%d/%d", met, len(t.CriteriaItems))
+}
+
+// ladderMaxRungs caps the criteria ladder's rung count. Past it the row keeps
+// the bare fraction — a 20-criterion task would otherwise paint a 20-rune run
+// that eats the title on the 80-col budget, and past a handful of rungs the
+// individual locks stop being glanceable anyway (the rubric's 7-factor tasks
+// all fit).
+const ladderMaxRungs = 8
+
+// livePulseCriterion is the acceptance-criteria index a LIVE pulse names on
+// this task's claim, or -1: the claim must be worker-held, carry a now-pulse
+// naming a criterion, and the pulse must still be within the lease TTL
+// (charter D9 — staleness derives from claim.now.ts vs the lease). Exactly ONE
+// rung may spin, and only while the pulse is genuinely live — a stale pulse
+// spins nothing (motion is liveness; a dead pulse must not animate).
+func livePulseCriterion(t Task, now time.Time) int {
+	if t.Claim == nil || t.Claim.Worker == "" || t.Claim.Now == nil {
+		return -1
+	}
+	p := t.Claim.Now
+	if p.Criterion < 0 || p.At.IsZero() || now.Sub(p.At) >= leaseTTL {
+		return -1
+	}
+	return p.Criterion
+}
+
+// criteriaLadder renders the per-criterion lock ladder (charter D11): one rung
+// per acceptance criterion, in checklist order —
+//
+//	✓ teal   met (the seal)
+//	⠹ blue   the ONE criterion a live pulse names (claim.now.criterion, spinning
+//	         on the board heartbeat while the pulse is within the lease TTL)
+//	! amber  an honest recorded miss (attempts without the met seal)
+//	○ dim    untouched
+//
+// Every rune is existing board vocabulary (GenLifecycle glyphs + the braille
+// spinner — ZERO new glyphs, so the glyph-budget allowlist is untouched), and
+// each rung goes through StatusGlyph/spinnerGlyph so the ASCII escape hatch
+// degrades the whole ladder for free. Returns ("","") when the task has no
+// decoded checklist or it exceeds ladderMaxRungs — the row then keeps today's
+// bare fraction. A met rung outranks a pulse naming it (sealed is truer than
+// "being worked"), and the pulse rung outranks a recorded miss (the miss is
+// history; the pulse is now).
+func criteriaLadder(t Task, now time.Time, frame int) (plain, styled string) {
+	items := t.CriteriaItems
+	if len(items) == 0 || len(items) > ladderMaxRungs {
+		return "", ""
+	}
+	live := livePulseCriterion(t, now)
+	var pp, ss strings.Builder
+	for i, it := range items {
+		switch {
+		case it.Met:
+			g := StatusGlyph(lifeDone)
+			pp.WriteString(g)
+			ss.WriteString(doneStyle.Render(g))
+		case i == live:
+			g := spinnerGlyph(frame)
+			pp.WriteString(g)
+			ss.WriteString(infoStyle.Render(g))
+		case it.Missed():
+			g := StatusGlyph(lifeBlocked)
+			pp.WriteString(g)
+			ss.WriteString(warnStyle.Render(g))
+		default:
+			g := StatusGlyph(lifeOpen)
+			pp.WriteString(g)
+			ss.WriteString(openStyle.Render(g))
+		}
+	}
+	return pp.String(), ss.String()
+}
+
 // (epicProgress — the old done/total tally — was retired with the ▰▱ bar and the
 // done/total header token; the claim-forward rail below is sectionHint's job.)
 
@@ -325,8 +416,14 @@ func titleStyleFor(lifecycle string) lipgloss.Style {
 }
 
 // metaToken is one right-meta cell: the plain text (for width math) plus its
-// styled render (same display width).
-type metaToken struct{ plain, styled string }
+// styled render (same display width). A token may carry an optional NARROW
+// fallback (the criteria ladder's bare fraction): fitRowMeta swaps to it
+// before shedding any token, so a tight row degrades its richest cell first
+// instead of dropping information outright.
+type metaToken struct {
+	plain, styled             string
+	narrowPlain, narrowStyled string
+}
 
 // priorityLabel normalizes the wire's priority to a `P<n>` token, or "" when
 // absent. The live corpus stores a bare digit ("0".."4"); a lone "0" reads as
@@ -354,54 +451,81 @@ func blockerCause(t Task) string { return "blocked" }
 // richRowMeta builds the spec §3 right-meta tokens for a task row, in display
 // order (priority · criteria · worker · age), split into DROPPABLE tokens (shed
 // right→left when the row is tight) and a STICKY blocker badge (amber, sheds
-// LAST — most load-bearing). Priority is color-severity; criteria a bare
-// tabular fraction; worker rides a claimed in_progress row in blue; a rotting
-// non-terminal row wears its stale day-age, a terminal row its resolved age.
-func richRowMeta(t Task, now time.Time) (drop []metaToken, sticky metaToken) {
+// LAST — most load-bearing). Priority is color-severity; criteria the lock
+// ladder + fraction ("✓✓!○ 2/4" — degrading to the bare fraction when the row
+// is tight, see fitRowMeta); worker rides a claimed in_progress row in blue; a
+// rotting non-terminal row wears its stale day-age, a terminal row its
+// resolved age. frame drives the ladder's live-pulse spinner rung (0 at rest).
+func richRowMeta(t Task, now time.Time, frame int) (drop []metaToken, sticky metaToken) {
 	terminal := isTerminal(t.Lifecycle)
 	if !terminal {
 		if lbl := priorityLabel(t.Priority); lbl != "" {
-			drop = append(drop, metaToken{lbl, priorityStyle(t.Priority).Render(lbl)})
+			drop = append(drop, metaToken{plain: lbl, styled: priorityStyle(t.Priority).Render(lbl)})
 		}
 	}
-	if f := criteriaFraction(t.Criteria); f != "" {
-		drop = append(drop, metaToken{f, dimStyle.Render(f)})
+	if f := rowCriteriaFraction(t); f != "" {
+		tok := metaToken{plain: f, styled: dimStyle.Render(f)}
+		if lp, ls := criteriaLadder(t, now, frame); lp != "" {
+			// The rich form is ladder + fraction; the bare fraction stays as the
+			// narrow fallback a tight row degrades to before any token is shed.
+			tok.narrowPlain, tok.narrowStyled = tok.plain, tok.styled
+			tok.plain = lp + " " + f
+			tok.styled = ls + " " + dimStyle.Render(f)
+		}
+		drop = append(drop, tok)
 	}
 	if t.Lifecycle == lifeInProgress && t.Claim != nil && t.Claim.Worker != "" {
-		drop = append(drop, metaToken{t.Claim.Worker, infoStyle.Render(t.Claim.Worker)})
+		drop = append(drop, metaToken{plain: t.Claim.Worker, styled: infoStyle.Render(t.Claim.Worker)})
 	}
 	if terminal {
 		if age := AgeBadge(t.UpdatedAt, now); age != "" {
-			drop = append(drop, metaToken{age, dimStyle.Render(age)})
+			drop = append(drop, metaToken{plain: age, styled: dimStyle.Render(age)})
 		}
 	} else if p, s := staleBadge(t, now); p != "" {
-		drop = append(drop, metaToken{p, s})
+		drop = append(drop, metaToken{plain: p, styled: s})
 	}
 	if t.Lifecycle == lifeBlocked {
 		cause := blockerCause(t)
-		sticky = metaToken{cause, warnStyle.Render(cause)}
+		sticky = metaToken{plain: cause, styled: warnStyle.Render(cause)}
 	}
 	return drop, sticky
 }
 
-// fitRowMeta assembles the right-meta within titleBudget, shedding droppable
-// tokens from the right until the title keeps at least minTitleCols columns; the
-// sticky blocker badge is kept until nothing else fits, then dropped last. It
-// returns the styled meta (or "") and the title budget left after reserving it.
+// fitRowMeta assembles the right-meta within titleBudget in two phases: first
+// every token in its FULL form (the criteria ladder's rungs paint when the row
+// has room for everything); when that does not fit, tokens carrying a narrow
+// fallback DEGRADE to it (ladder → bare fraction) and the set then sheds
+// right→left until the title keeps at least minTitleCols columns — so a tight
+// row loses the ladder's rungs before it loses the fraction, the worker or the
+// age. The sticky blocker badge is kept until nothing else fits, then dropped
+// last. It returns the styled meta (or "") and the title budget left after
+// reserving it. Tokens without a narrow form behave exactly as before.
 func fitRowMeta(drop []metaToken, sticky metaToken, titleBudget int) (metaStyled string, titleLeft int) {
 	const minTitleCols = 8
-	build := func(keep int) (string, string) {
+	build := func(toks []metaToken, keep int) (string, string) {
 		var pp, ss []string
-		for i := 0; i < keep && i < len(drop); i++ {
-			pp, ss = append(pp, drop[i].plain), append(ss, drop[i].styled)
+		for i := 0; i < keep && i < len(toks); i++ {
+			pp, ss = append(pp, toks[i].plain), append(ss, toks[i].styled)
 		}
 		if sticky.plain != "" {
 			pp, ss = append(pp, sticky.plain), append(ss, sticky.styled)
 		}
 		return strings.Join(pp, " "), strings.Join(ss, " ")
 	}
-	for keep := len(drop); ; keep-- {
-		plain, styled := build(keep)
+	// Phase 1: the full forms, everything kept.
+	if plain, styled := build(drop, len(drop)); plain != "" && titleBudget-disp(plain)-2 >= minTitleCols {
+		return styled, titleBudget - disp(plain) - 2
+	}
+	// Phase 2: degrade narrow-capable tokens, then shed right→left.
+	narrowed := make([]metaToken, len(drop))
+	for i, tk := range drop {
+		if tk.narrowPlain != "" {
+			tk.plain, tk.styled = tk.narrowPlain, tk.narrowStyled
+		}
+		narrowed[i] = tk
+	}
+	for keep := len(narrowed); ; keep-- {
+		plain, styled := build(narrowed, keep)
 		if plain == "" {
 			return "", titleBudget
 		}
@@ -443,7 +567,8 @@ const dropMetaBelow = 52
 // dim-white / ready ○ full-foreground / in_progress the blue Braille spinner at
 // `frame` / blocked ! amber / done ✓ teal / cancelled ✕ dim); the title stays
 // monochrome (done recedes, in_progress bolds); the right-meta is color-severity
-// priority + bare criteria + blue worker, with an amber blocker badge that sheds
+// priority + the criteria lock ladder with its fraction (degrading to the bare
+// fraction when tight) + blue worker, with an amber blocker badge that sheds
 // LAST. depth nests the row by `depth` indent levels; `guide` draws the ↳
 // subtask cue (decoupled from depth so a phase band's DIRECT child indents one
 // level WITHOUT a spurious guide — charter wave-10 W10-A). Everything is
@@ -479,7 +604,7 @@ func TaskRow(t Task, selected, opened bool, depth int, guide bool, width, frame 
 		// Narrow degrade: glyph + title only (no meta).
 		return []string{lead + tStyle.Render(truncate(titleText, width-leadW))}
 	}
-	drop, sticky := richRowMeta(t, now)
+	drop, sticky := richRowMeta(t, now, frame)
 	metaStyled, titleBudget := fitRowMeta(drop, sticky, width-leadW)
 	title := truncate(titleText, titleBudget)
 	left := lead + tStyle.Render(title)

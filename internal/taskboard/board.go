@@ -320,6 +320,18 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 		byID[t.DocID] = t
 	}
 
+	// Corpus criteria tally (charter D11: the momentum header counts criteria,
+	// not just tasks). Cancelled work leaves both sides — the same denominator
+	// law as progressPct (abandoned criteria are not open work) — and a task
+	// without criteria_progress costs nothing.
+	for _, t := range s.Tasks {
+		if t.Lifecycle == lifeCancelled || t.Criteria == nil {
+			continue
+		}
+		board.CriteriaMet += t.Criteria.Met
+		board.CriteriaTotal += t.Criteria.Total
+	}
+
 	// evAt indexes the freshest prime event per (bareID) task — the third recency
 	// signal lastActivity/sectionActivity fold in (charter D49). Built once here so
 	// the per-section recency clock is a map lookup, not a scan of s.Events.
