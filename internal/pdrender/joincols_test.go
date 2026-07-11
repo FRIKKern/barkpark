@@ -168,10 +168,16 @@ func TestNoInlineDivideFormulaOutsideSolver(t *testing.T) {
 	root := moduleRootFrom(t)
 	cmd := exec.Command("grep", "-rn", "--include=*.go", "cellW *:=.*[Gg]utter", ".")
 	cmd.Dir = root
-	out, _ := cmd.CombinedOutput()
-	// grep exit status 1 == no matches at all (also acceptable — zero copies);
-	// status 0 with only allowlisted paths is the steady-state HEAD.
+	out, err := cmd.CombinedOutput()
+	// grep exit status 1 == no matches at all; any OTHER failure (status 2, missing
+	// binary, unreadable root) must red the test rather than pass vacuously.
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			t.Fatalf("divide-formula grep failed (tripwire cannot run): %v\n%s", err, out)
+		}
+	}
 	lines := []string{}
+	ownerSeen := false
 	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if ln == "" {
 			continue
@@ -181,9 +187,15 @@ func TestNoInlineDivideFormulaOutsideSolver(t *testing.T) {
 		// carries the pattern as the grep string / measured fixtures.
 		if strings.HasPrefix(path, "internal/pdrender/joincols.go:") ||
 			strings.HasPrefix(path, "internal/pdrender/joincols_test.go:") {
+			ownerSeen = true
 			continue
 		}
 		lines = append(lines, ln)
+	}
+	// Liveness self-check: the solver ALWAYS carries the formula. Zero allowlisted
+	// hits means the pattern drifted from the code and the tripwire is dead.
+	if !ownerSeen {
+		t.Fatal("divide-formula pattern matched nothing in the joincols solver — the tripwire regex has drifted and guards nothing")
 	}
 	if len(lines) > 0 {
 		t.Errorf("inline divide-formula copies remain outside the joincols solver:\n%s", strings.Join(lines, "\n"))
