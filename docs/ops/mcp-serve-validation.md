@@ -131,6 +131,30 @@ that writes one frame, reads its response, then sends the next. Stay read-only:
 `task_ready` / `task_show` only — never `task_next` / `task_close` /
 `task_create` against a real board.
 
+## HTTP transport (2026-07-11, `ve-w2-remote-mcp-bearer`)
+
+`bp mcp serve --http <addr>` adds a Streamable-HTTP (stateless) transport with
+**forward-through bearer** auth: the per-request `Authorization: Bearer` is the
+only credential — the process holds none, and downstream token verification is
+the single choke point (fail closed with the API's 401 envelope).
+
+Hermetic coverage lands with the slice (`internal/cli/mcp_http_test.go`), all
+driving a **real MCP client over real HTTP** against the production handler:
+
+- `TestMCPHTTPForwardThroughBearer` — the client's bearer reaches the backing
+  API verbatim, per request; the curated six tools list identically to stdio;
+  zero bytes on stdout.
+- `TestMCPHTTPDenyPathsFailClosed` — missing AND bogus bearer each return the
+  downstream 401 envelope as `isError`, with zero write side effects, and the
+  ambient token (base context + `BARKPARK_API_TOKEN` env) provably never rides
+  a downstream request.
+- `TestMCPHTTPPaperResourcesTemplateOnly` — HTTP mode registers only the
+  `barkpark://papers/{id}` read template; the enumeration GET fires zero times.
+
+Still owed (NOT this slice): the live remote smoke against
+`https://guerrilla.barkpark.cloud/mcp` — that is the close criterion of the
+deploy slice (`ve-w2-mcp-deploy`), which owns the systemd unit + Caddy route.
+
 ## Post-catalog re-run (2026-07-09, reviewer, wave-2 integrated)
 
 Re-driven against live guerrilla with the full wave-2 branch (catalog +

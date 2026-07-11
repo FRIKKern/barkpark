@@ -1,10 +1,11 @@
 <!-- doc-tier: human | canonical-for: remote-agent-onramp | budget: 1600tok -->
-# Barkpark for remote agents — ChatGPT & Claude.ai
+# Barkpark for remote agents — ChatGPT, Claude.ai & remote MCP
 
-These two surfaces run in someone else's cloud, so they cannot shell out to a
-local `bp`. The onramp is different for each, and honest about what ships
-today: **ChatGPT has a real, zero-code path; Claude.ai's connector waits on a
-remote endpoint we haven't shipped yet** (`ve-w2-remote-mcp-bearer`). The
+These surfaces run in someone else's cloud, so they cannot shell out to a
+local `bp`. The onramp differs per surface, and is honest about what ships
+today: **ChatGPT has a real, zero-code path; the remote-MCP bearer transport
+ships in the CLI (`bp mcp serve --http`); Claude.ai still needs OAuth**
+(`ve-w3-oauth-as` — bearer auth for Claude.ai connectors is invite-gated). The
 overview for CLI-capable agents (Claude Code, Codex, Cursor) lives in
 [Agent Onramps](AGENT-ONRAMPS.md).
 
@@ -61,21 +62,33 @@ Caveats, stated honestly:
   Business/Enterprise/Edu. So for a Plus/Pro individual, **Actions are the only
   WRITE path** — and they need none of that gating.
 
-## Claude.ai — the honest story
+## Remote MCP — what the bearer transport unlocks (and what it doesn't)
 
-Claude.ai custom connectors are **GA on every plan, including Free** — the gap
-is on OUR side, not Anthropic's. A connector needs a **remote-MCP** endpoint: a
-public Streamable HTTP (SSE) server, plus OAuth 2.1 / PKCE for protected
-servers. The shipped `bp mcp serve` is a **stdio** MCP server — it cannot be
-registered as a Claude.ai connector. Shipping the remote one is exactly what
-`ve-w2-remote-mcp-bearer` does (it supersedes the cancelled
-`ao-backlog-remote-mcp` backlog task).
+The remote transport is **shipped, Go-side**: `bp mcp serve --http <addr>`
+serves Streamable HTTP from the exact same tool registration as stdio (the
+transport swap point is `internal/cli/mcp_serve.go:120`). Auth is
+**forward-through**: each request's `Authorization: Bearer` is forwarded to
+the Barkpark API as that request's credential — the serving process holds no
+token, and a missing or bogus bearer fails closed with the API's own 401.
+Bind it loopback behind a TLS proxy; the hosted public endpoint is the deploy
+slice (`ve-w2-mcp-deploy`).
 
-That endpoint builds **Go-side**, not Phoenix: the vendored go-sdk v1.6.1
-already backing `bp mcp serve` ships `NewStreamableHTTPHandler` +
-`auth.RequireBearerToken`, which swap in for the stdio transport at
-`internal/cli/mcp_serve.go:101` and reuse the identical tool registration.
-Until it lands, use the manual HTTP path.
+A bearer-authed remote MCP endpoint unlocks today (checked 2026-07-11):
+**Mistral Vibe** (formerly Le Chat, renamed 2026-06-05 — the cheapest target:
+plain HTTP Bearer auto-detected, all plans), **ChatGPT Developer Mode**
+(Plus/Pro **read-only**; write connectors stay a Business/Enterprise/Edu
+beta — Actions above remain the Plus/Pro write path), **Perplexity** (Pro and
+up), and **Grok** (SuperGrok-gated).
+
+### Claude.ai — the honest story
+
+Claude.ai custom connectors are **GA on every plan, including Free**, but
+**bearer/header auth is still beta and invite-gated** ("contact Anthropic for
+early access", checked 2026-07-11) — so the bearer endpoint does NOT deliver
+self-serve Claude.ai. That takes **OAuth 2.1**, which Claude.ai supports out
+of the box for connectors and is exactly what `ve-w3-oauth-as` builds. The
+stdio `bp mcp serve` still cannot be registered as a Claude.ai connector.
+Until the OAuth slice lands, use the manual HTTP path.
 
 <a id="claudeai-manual-http"></a>
 ### Manual path — direct HTTP with a scoped token

@@ -270,27 +270,33 @@ func mcpContentText(res *mcp.CallToolResult) string {
 	return b.String()
 }
 
-// TestParseMCPServeArgs covers the --tools selector parsing.
+// TestParseMCPServeArgs covers the --tools selector and --http transport parsing.
 func TestParseMCPServeArgs(t *testing.T) {
 	cases := []struct {
-		in      []string
-		want    string
-		wantErr bool
+		in       []string
+		want     string
+		wantHTTP string
+		wantErr  bool
 	}{
-		{nil, "tasks", false},
-		{[]string{"--tools", "tasks"}, "tasks", false},
-		{[]string{"--tools", "all"}, "all", false},
-		{[]string{"--tools=all"}, "all", false},
-		{[]string{"--tools", "bogus"}, "", true},
-		{[]string{"--tools"}, "", true},
-		{[]string{"--nope"}, "", true},
-		{[]string{"stray"}, "", true},
+		{nil, "tasks", "", false},
+		{[]string{"--tools", "tasks"}, "tasks", "", false},
+		{[]string{"--tools", "all"}, "all", "", false},
+		{[]string{"--tools=all"}, "all", "", false},
+		{[]string{"--http", "127.0.0.1:4010"}, "tasks", "127.0.0.1:4010", false},
+		{[]string{"--http=127.0.0.1:4010"}, "tasks", "127.0.0.1:4010", false},
+		{[]string{"--tools", "all", "--http", ":4010"}, "all", ":4010", false},
+		{[]string{"--http"}, "", "", true},  // missing addr
+		{[]string{"--http="}, "", "", true}, // empty addr
+		{[]string{"--tools", "bogus"}, "", "", true},
+		{[]string{"--tools"}, "", "", true},
+		{[]string{"--nope"}, "", "", true},
+		{[]string{"stray"}, "", "", true},
 	}
 	for _, c := range cases {
-		got, err := parseMCPServeArgs(c.in)
+		got, gotHTTP, err := parseMCPServeArgs(c.in)
 		if c.wantErr {
 			if err == nil {
-				t.Errorf("parseMCPServeArgs(%v) = %q, want error", c.in, got)
+				t.Errorf("parseMCPServeArgs(%v) = %q,%q, want error", c.in, got, gotHTTP)
 			}
 			continue
 		}
@@ -298,8 +304,8 @@ func TestParseMCPServeArgs(t *testing.T) {
 			t.Errorf("parseMCPServeArgs(%v) unexpected error: %v", c.in, err)
 			continue
 		}
-		if got != c.want {
-			t.Errorf("parseMCPServeArgs(%v) = %q, want %q", c.in, got, c.want)
+		if got != c.want || gotHTTP != c.wantHTTP {
+			t.Errorf("parseMCPServeArgs(%v) = %q,%q, want %q,%q", c.in, got, gotHTTP, c.want, c.wantHTTP)
 		}
 	}
 }
