@@ -325,6 +325,27 @@ const CANVAS_FLEET_TYPES = new Set([
 ]);
 const CANVAS_FLEET_NODE_NAME = "bpFleet";
 
+// pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds (reader emitters in
+// render/data_viz.ex; `stat-grid` is the accepted alias of `stats`). They ride the
+// SAME bpFleet node + server-paint channel as CANVAS_FLEET_TYPES — the whole block
+// verbatim on bpBlock, display HTML pushed on bp:block-html (ONE producer, D8) —
+// with their authored config edited in the bpFleet JSON edit island (embed-node.js
+// FLEET_CONFIG_EDITORS / FLEET_ITEM_EDITORS). A PARALLEL set, deliberately NOT
+// folded into CANVAS_FLEET_TYPES: that set is 4-way-lockstepped with
+// paper_editor.ex @fleet_preview_types (the classic-mode boundary widget), and
+// DataViz stays OUT of the classic paint (charter D2 — classic keeps its read-only
+// catch-all for these kinds). D4: deliberately ABSENT from slash-insert.js
+// CANVAS_SLASH_TYPES (data-bearing, API-authored).
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_dataviz_types and
+// shared/paper.ex @dataviz_render_types (5 kinds in every one).
+const CANVAS_DATAVIZ_TYPES = new Set([
+  "stat",
+  "stats",
+  "stat-grid",
+  "heatmap",
+  "chart",
+]);
+
 // editable-figure: the `figure` block the canvas handles as a SERVER-PAINTED
 // read-only-CHILD + editable-CAPTION ATOM (`bpFigure`; figure-node.js). A figure
 // wraps ONE child block + a caption. Structurally it is a HYBRID of the fleet atom
@@ -518,7 +539,9 @@ function isCanvasReadOnlyAtomNode(nodeType) {
 // read-only atoms carrying the whole block verbatim; they never emit a value/content
 // op — structurally they behave EXACTLY like a sheet/embed read-only atom.
 function isCanvasFleetType(type) {
-  return CANVAS_FLEET_TYPES.has(type);
+  // The DataViz kinds ride the same bpFleet node + server-paint channel
+  // (pd-ee-dataviz-editors) — a parallel set, same projection.
+  return CANVAS_FLEET_TYPES.has(type) || CANVAS_DATAVIZ_TYPES.has(type);
 }
 
 // True when a TipTap NODE type is the canvas fleet node ("bpFleet"). runToOps reads

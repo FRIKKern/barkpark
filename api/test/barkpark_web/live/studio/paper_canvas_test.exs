@@ -364,6 +364,54 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs([task_board("b1")]) == [{:run, [task_board("b1")]}]
     end
 
+    # ── pd-ee-dataviz-editors: the 5 DATA-VIZ kinds are CANVAS-ELIGIBLE (D3) ──
+
+    test "dataviz: every data-viz kind INSIDE prose keeps the run whole (was the :1339 catch-all)" do
+      # stat / stats / stat-grid / heatmap / chart fold into runs as server-painted
+      # bpFleet atoms (@canvas_dataviz_types, a parallel painted-set — the block
+      # rides verbatim, display HTML arrives via push_block_renders' bp:block-html).
+      # `stat-grid` is the accepted alias of `stats`; both are enumerated.
+      for type <- ~w(stat stats stat-grid heatmap chart) do
+        blk = fleet("dv1", type)
+        blocks = [para("p1"), blk, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}],
+               "expected #{type} to ride the run (canvas-eligible)"
+
+        assert PaperCanvas.canvas?(blk), "expected canvas?(#{type}) to be true"
+      end
+    end
+
+    test "dataviz: a stat block folds into a run as a painted boundary node, VERBATIM (D5)" do
+      stat = %{
+        "id" => "st1",
+        "type" => "stat",
+        "value" => "71",
+        "label" => "tests",
+        "max" => 118,
+        "spark" => [1, 2, 3]
+      }
+
+      blocks = [heading("h1"), stat, para("p1")]
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+
+      # The block is untouched by partitioning — the authored config (the save
+      # baseline the canvas diffs, and the payload the JSON island edits) rides
+      # verbatim; the paint never mutates the block (display-only, D5).
+      assert Enum.at(blocks, 1) == stat
+    end
+
+    test "dataviz: a data-viz block next to a nested-structure boundary still splits at the boundary only" do
+      chart = %{"id" => "ch1", "type" => "chart", "series" => [%{"points" => [1, 2]}]}
+      blocks = [para("p1"), chart, boundary("cmp"), fleet("hm1", "heatmap"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1"), chart]},
+               {:block, boundary("cmp")},
+               {:run, [fleet("hm1", "heatmap"), para("p2")]}
+             ]
+    end
+
     # ── S10: the `columns` CONTAINER is now CANVAS-ELIGIBLE (recursive nested-block) ──
 
     test "S10: a columns block INSIDE prose keeps the run whole (was a boundary)" do
