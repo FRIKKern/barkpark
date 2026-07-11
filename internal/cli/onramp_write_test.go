@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -484,6 +485,190 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 	}
 	if bytes.Contains(mustRead(t, path), []byte("STALE-bp")) {
 		t.Errorf("stale barkpark command survived the force overwrite")
+	}
+}
+
+// agentsMdMergeFile returns the agents-md target's marker-managed ./AGENTS.md
+// onrampFile (path kept cwd-relative — the caller must t.Chdir into a tempdir
+// first, since HOME sandboxing does nothing for a cwd-relative target).
+func agentsMdMergeFile(t *testing.T) onrampFile {
+	t.Helper()
+	spec, ok := buildOnrampSpec("agents-md", guerrilla, "")
+	if !ok {
+		t.Fatal("agents-md spec not ok")
+	}
+	for _, f := range spec.Files {
+		if f.MergeKind == mergeMarkdown {
+			return f
+		}
+	}
+	t.Fatal("agents-md has no markdown file")
+	return onrampFile{}
+}
+
+// TestOnrampWriteAgentsMdCreates: an absent ./AGENTS.md is created byte-identical
+// to the printed marker-managed block (+ trailing newline) and round-trips to
+// 'unchanged', file byte-untouched. Tests cd into a tempdir (the target is
+// cwd-relative) per the write test law.
+func TestOnrampWriteAgentsMdCreates(t *testing.T) {
+	t.Chdir(t.TempDir())
+	f := agentsMdMergeFile(t)
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("action = %q, want created", act.Action)
+	}
+	got := mustRead(t, "AGENTS.md")
+	if !bytes.Equal(got, withTrailingNewline([]byte(f.Content))) {
+		t.Errorf("created AGENTS.md is not byte-identical to the printed block.\n--- got ---\n%s", got)
+	}
+	// It carries both managed markers.
+	for _, marker := range []string{agentsMDMarkerBegin, agentsMDMarkerEnd} {
+		if !bytes.Contains(got, []byte(marker)) {
+			t.Errorf("created block missing marker %q", marker)
+		}
+	}
+
+	// Idempotent: a re-run is 'unchanged' and leaves the bytes untouched.
+	act2, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("second merge: %v", err)
+	}
+	if act2.Action != "unchanged" {
+		t.Errorf("re-run action = %q, want unchanged", act2.Action)
+	}
+	if !bytes.Equal(got, mustRead(t, "AGENTS.md")) {
+		t.Errorf("unchanged re-run changed the file bytes")
+	}
+}
+
+// TestOnrampWriteAgentsMdAppendsWithoutMarkers: a pre-existing AGENTS.md WITHOUT
+// barkpark markers is APPENDED to (updated) — every user byte preserved verbatim
+// and the block lands after it.
+func TestOnrampWriteAgentsMdAppendsWithoutMarkers(t *testing.T) {
+	t.Chdir(t.TempDir())
+	existing := "# My Repo\n\nContributors: run the tests before pushing.\n"
+	if err := os.WriteFile("AGENTS.md", []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (append, no markers)", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+	// User content preserved verbatim as a prefix — never rewritten.
+	if !bytes.HasPrefix(result, []byte(existing)) {
+		t.Errorf("append rewrote the user's existing content.\n--- got ---\n%s", result)
+	}
+	// The canonical block landed after it.
+	if !bytes.Contains(result, []byte(agentsMDMarkerBegin)) || !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("appended block missing.\n--- got ---\n%s", result)
+	}
+
+	// Now that markers exist, a re-run is 'unchanged'.
+	act2, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("re-run: %v", err)
+	}
+	if act2.Action != "unchanged" {
+		t.Errorf("re-run after append = %q, want unchanged", act2.Action)
+	}
+}
+
+// TestOnrampWriteAgentsMdSkipAndForce: an AGENTS.md whose markers wrap a DIFFERENT
+// (stale) block is left byte-untouched without --force (skipped, --force hinted),
+// and with --force the begin→end span is replaced ONLY — surrounding user prose
+// above and below the block survives verbatim.
+func TestOnrampWriteAgentsMdSkipAndForce(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const head = "# My Repo\n\nIntro the humans wrote.\n\n"
+	const tail = "\n\n## Footer\n\nMore human prose below the block.\n"
+	stale := head + agentsMDMarkerBegin + "\n## Task tracking — Barkpark (bp)\n\nSTALE outdated body from an old bp version.\n" + agentsMDMarkerEnd + tail
+	if err := os.WriteFile("AGENTS.md", []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	// No --force: skipped, file byte-untouched, note carries the --force hint.
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("skip merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped", act.Action)
+	}
+	if !strings.Contains(act.Note, "--force") {
+		t.Errorf("skip note %q must carry the --force hint (onrampAnySkipped greps it)", act.Note)
+	}
+	if !bytes.Equal([]byte(stale), mustRead(t, "AGENTS.md")) {
+		t.Errorf("skipped write must not touch the file at all")
+	}
+
+	// --force: the stale span is replaced with the canonical block; the human head
+	// and tail survive verbatim.
+	act, err = mergeOnrampFile(f, true)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+	if bytes.Contains(result, []byte("STALE outdated body")) {
+		t.Errorf("stale block body survived the force replace")
+	}
+	if !bytes.HasPrefix(result, []byte(head)) {
+		t.Errorf("human prose above the block was lost.\n--- got ---\n%s", result)
+	}
+	if !bytes.Contains(result, []byte("More human prose below the block.")) {
+		t.Errorf("human prose below the block was lost.\n--- got ---\n%s", result)
+	}
+	if !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("canonical block not written on force")
+	}
+	// Re-run is now unchanged.
+	act, err = mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("post-force re-run: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("post-force re-run = %q, want unchanged", act.Action)
+	}
+}
+
+// TestOnrampWriteAgentsMdMalformedSkipped: a file carrying only ONE of the two
+// markers is a broken managed block — skipped for hand repair, never auto-spliced,
+// and its note does NOT dangle a --force hint (force can't safely own it).
+func TestOnrampWriteAgentsMdMalformedSkipped(t *testing.T) {
+	t.Chdir(t.TempDir())
+	broken := "# Repo\n" + agentsMDMarkerBegin + "\n## half-open block, no end marker\n"
+	if err := os.WriteFile("AGENTS.md", []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	for _, force := range []bool{false, true} {
+		act, err := mergeOnrampFile(f, force)
+		if err != nil {
+			t.Fatalf("malformed merge (force=%v): %v", force, err)
+		}
+		if act.Action != "skipped" {
+			t.Fatalf("malformed action (force=%v) = %q, want skipped", force, act.Action)
+		}
+		if strings.Contains(act.Note, "--force") {
+			t.Errorf("malformed skip note should not offer --force (it can't repair): %q", act.Note)
+		}
+		if !bytes.Equal([]byte(broken), mustRead(t, "AGENTS.md")) {
+			t.Errorf("malformed skip must not touch the file (force=%v)", force)
+		}
 	}
 }
 

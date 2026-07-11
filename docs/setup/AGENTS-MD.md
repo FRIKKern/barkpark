@@ -9,7 +9,7 @@
 bp onramp agents-md
 ```
 
-Print-only in this wave: it shows the block and where it belongs (`./AGENTS.md`); nothing is written for you yet. Pipe or paste it into your repo-root `AGENTS.md`. Machine-readable form for scripts:
+By default it prints the block and where it belongs (`./AGENTS.md`) — pipe or paste it into your repo-root `AGENTS.md`, or add `--write` to have it merge the block for you (see [Merge semantics](#merge-semantics---write) below). Machine-readable form for scripts:
 
 ```bash
 bp onramp agents-md -o json   # {target, files:[{path:"./AGENTS.md", content}], verify}
@@ -38,16 +38,21 @@ The block is the single source of truth. Three wave-1 teach wrappers now **deriv
 
 A Go parity test (`internal/cli/onramp_cmd_test.go` · `TestOnrampAgentsMdWrapperParity`) reads all three and fails if any stops embedding the canonical body — dedup is gate-enforced, not a hope.
 
-## Merge semantics (`--write`, planned)
+## Merge semantics (`--write`)
 
-`bp onramp agents-md --write` rides the shared onramp writer seam and merges into `./AGENTS.md`:
+`bp onramp agents-md --write` rides the shared onramp writer seam (the same atomic temp-file+rename as every JSON target) and merges the marker-managed block into `./AGENTS.md`:
 
 - **no file** → create it with the block (`created`).
-- **file, no markers** → *append* the block (`updated`); your existing content is never rewritten.
-- **markers present** → replace only the text between them (`updated`).
-- **identical** → report `unchanged`, exit 0.
+- **file, no markers** → *append* the block after a blank line (`updated`); your existing content is preserved byte-for-byte, never rewritten.
+- **markers present, block differs** → left untouched (`skipped`); re-run with `--force` to refresh only the text between the markers — your surrounding content stays put.
+- **markers present, block identical** → `unchanged`, exit 0, file byte-untouched.
 
-Every run prints a per-file action (`created` / `updated` / `unchanged`), in text and under `-o json` — the same action vocabulary as the JSON `--write` targets ([Agent Onramps hub](AGENT-ONRAMPS.md)). Until that ships, use the print-only path above.
+```bash
+bp onramp agents-md --write            # merge (safe, idempotent)
+bp onramp agents-md --write --force    # refresh a stale managed block in place
+```
+
+Every run prints a per-file action (`created` / `updated` / `unchanged` / `skipped`), in text and under `-o json` — the same action vocabulary as the JSON `--write` targets ([Agent Onramps hub](AGENT-ONRAMPS.md)).
 
 ## See also
 

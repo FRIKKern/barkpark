@@ -124,6 +124,15 @@ func tomlFile(path, content string) onrampFile {
 	return onrampFile{Path: path, Content: content, MergeKind: mergeTOML}
 }
 
+// markdownFile stamps the merge metadata for the agents-md target's marker-managed
+// ./AGENTS.md block — the SAME atomicWriteFile seam the JSON mergers use, only the
+// strategy differs (mergeMarkdownFile in onramp_write.go: create / append-without-
+// markers / replace-between-markers / unchanged, with a --force deny path). No
+// TopKey/ServerKey — a markdown block is not a keyed JSON object.
+func markdownFile(path, content string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeMarkdown}
+}
+
 // onrampSpec is the `-o json` emission: the resolved target, the file(s) to
 // create, and the one-line verify step. It is the single source both the human
 // print and the JSON envelope render from.
@@ -449,7 +458,7 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 		return onrampSpec{
 			Target: target,
 			Files: []onrampFile{
-				{Path: "./AGENTS.md", Content: agentsMDBlock()},
+				markdownFile("./AGENTS.md", agentsMDBlock()),
 			},
 			Verify: "open a fresh agent session in this repo — it reads AGENTS.md and knows the claim-first task contract before touching the board",
 		}, true

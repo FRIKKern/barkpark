@@ -38,6 +38,7 @@ const (
 	mergeServerMap = "server-map" // barkpark entry at data[TopKey][ServerKey]
 	mergeFlat      = "flat"       // barkpark value at data[TopKey]
 	mergeTOML      = "toml"       // codex config.toml — deferred to wave 3
+	mergeMarkdown  = "markdown"   // agents-md marker-managed block in ./AGENTS.md
 )
 
 // onrampAction is the per-file outcome of a `--write`: what happened to one
@@ -126,6 +127,8 @@ func mergeOnrampFile(f onrampFile, force bool) (onrampAction, error) {
 		return mergeServerMapFile(f, force)
 	case mergeFlat:
 		return mergeFlatFile(f, force)
+	case mergeMarkdown:
+		return mergeMarkdownFile(f, force)
 	case mergeTOML:
 		return onrampAction{
 			Path:   f.Path,
@@ -256,6 +259,87 @@ func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
 		return onrampAction{}, err
 	}
 	if err := atomicWriteFile(path, withTrailingNewline(merged)); err != nil {
+		return onrampAction{}, err
+	}
+	return onrampAction{Path: f.Path, Action: "updated"}, nil
+}
+
+// mergeMarkdownFile is the markdown analogue of the JSON mergers: it lands the
+// canonical AGENTS.md teach block (f.Content — begin marker, heading, body, end
+// marker) into a consumer's ./AGENTS.md WITHOUT rewriting anything else the file
+// holds, expressed the only way markdown allows — managed markers (charter D6 as
+// amended by D13):
+//   - no file           → created  (write the block verbatim, one trailing NL).
+//   - file, no markers   → updated  (APPEND after a blank-line separator; every
+//     existing byte is preserved — a consumer's AGENTS.md is their content).
+//   - markers, identical → unchanged (exit 0, file byte-untouched — no write).
+//   - markers, differing → skipped + "--force" hint (D13 aligns markdown with the
+//     JSON/TOML deny-path law); with --force, replace ONLY the begin→end span,
+//     leaving every byte outside it verbatim.
+//   - one marker only / end-before-begin → skipped as a malformed managed block,
+//     fix by hand (a textual splice cannot own a half-open block safely; --force
+//     does NOT auto-repair it, so its note carries no --force hint).
+func mergeMarkdownFile(f onrampFile, force bool) (onrampAction, error) {
+	path, err := expandOnrampPath(f.Path)
+	if err != nil {
+		return onrampAction{}, err
+	}
+	block := f.Content
+
+	existing, readErr := os.ReadFile(path)
+	if os.IsNotExist(readErr) {
+		if err := atomicWriteFile(path, withTrailingNewline([]byte(block))); err != nil {
+			return onrampAction{}, err
+		}
+		return onrampAction{Path: f.Path, Action: "created"}, nil
+	}
+	if readErr != nil {
+		return onrampAction{}, fmt.Errorf("read %s: %w", path, readErr)
+	}
+
+	text := string(existing)
+	beginIdx := strings.Index(text, agentsMDMarkerBegin)
+	endIdx := strings.Index(text, agentsMDMarkerEnd)
+
+	// Managed block present and well-formed: replace only its begin→end span.
+	if beginIdx >= 0 && endIdx > beginIdx {
+		spanEnd := endIdx + len(agentsMDMarkerEnd)
+		if text[beginIdx:spanEnd] == block {
+			return onrampAction{Path: f.Path, Action: "unchanged"}, nil
+		}
+		if !force {
+			return onrampAction{
+				Path:   f.Path,
+				Action: "skipped",
+				Note:   "a different barkpark:onramp block is already here — re-run with --force to refresh it",
+			}, nil
+		}
+		merged := text[:beginIdx] + block + text[spanEnd:]
+		if err := atomicWriteFile(path, withTrailingNewline([]byte(merged))); err != nil {
+			return onrampAction{}, err
+		}
+		return onrampAction{Path: f.Path, Action: "updated"}, nil
+	}
+
+	// A lone marker (or end-before-begin) is a broken managed block — a textual
+	// splice cannot own it safely, and --force cannot guess the intended span.
+	if beginIdx >= 0 || endIdx >= 0 {
+		return onrampAction{
+			Path:   f.Path,
+			Action: "skipped",
+			Note:   "malformed barkpark:onramp markers (only one of begin/end, or out of order) — fix them by hand",
+		}, nil
+	}
+
+	// No markers at all: append the block after a blank-line separator, preserving
+	// every existing byte verbatim (a consumer's own AGENTS.md content).
+	buf := append([]byte{}, existing...)
+	if len(buf) > 0 && buf[len(buf)-1] != '\n' {
+		buf = append(buf, '\n')
+	}
+	buf = append(buf, '\n')
+	buf = append(buf, block...)
+	if err := atomicWriteFile(path, withTrailingNewline(buf)); err != nil {
 		return onrampAction{}, err
 	}
 	return onrampAction{Path: f.Path, Action: "updated"}, nil
