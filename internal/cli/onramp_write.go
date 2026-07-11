@@ -348,7 +348,7 @@ func mergeTOMLFile(f onrampFile, force bool) (onrampAction, error) {
 		return onrampAction{
 			Path:   f.Path,
 			Action: "skipped",
-			Note: fmt.Sprintf("a different %q stanza is already here — re-run with --force to replace the whole [%s] span (sub-tables included) with the canonical block; bytes outside the span are never touched", f.ServerKey, ownedKey),
+			Note:   fmt.Sprintf("a different %q stanza is already here — re-run with --force to replace the whole [%s] span (sub-tables included) with the canonical block; bytes outside the span are never touched", f.ServerKey, ownedKey),
 		}, nil
 	}
 
