@@ -29,7 +29,19 @@ defmodule Barkpark.SelfUpdate.Runner do
   use GenServer
 
   @default_command {"bash", ["scripts/self-update.sh"]}
+  # Rollback rides the SAME Runner single-flight as self-update (one run slot
+  # for both verbs). `--rollback` resets the shared checkout to the idle slot's
+  # recorded sha, reboots + health-gates that slot, and flips Caddy only on
+  # green (W6 charter D11/D13/D15). `--rollback-preflight` is the synchronous,
+  # read-only probe the controller runs FIRST to learn the target sha and to
+  # get a typed refusal before anything mutates.
+  @default_rollback_command {"bash", ["deploy/instance-deploy.sh", "--rollback"]}
+  @default_rollback_preflight_command {"bash", ["deploy/instance-deploy.sh", "--rollback-preflight"]}
   @default_max_log_lines 500
+
+  # exit 0 prints `TARGET_SHA=<40-hex>` (charter W6 contract); tolerate a short
+  # sha for stub-command tests, but require hex so a garbage line can't pass.
+  @target_sha_re ~r/TARGET_SHA=([0-9a-fA-F]{7,40})\b/
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -57,7 +69,72 @@ defmodule Barkpark.SelfUpdate.Runner do
   Start the configured update command. Single-flight; never raises.
   """
   @spec trigger() :: {:ok, :started} | {:error, :already_running | :disabled | :start_failed}
-  def trigger, do: safe_call(:trigger, {:error, :disabled})
+  def trigger, do: safe_call({:trigger, :self_update}, {:error, :disabled})
+
+  @doc """
+  Start the configured rollback command as an async `Port`, SHARING the same
+  single-flight run slot as `trigger/0` — a rollback while a self-update runs
+  (or vice-versa) returns `{:error, :already_running}`. Never raises.
+
+  The controller runs `preflight_rollback/0` synchronously first; this only
+  spawns the mutating `--rollback` run once preflight has cleared it.
+  """
+  @spec trigger_rollback() ::
+          {:ok, :started} | {:error, :already_running | :disabled | :start_failed}
+  def trigger_rollback, do: safe_call({:trigger, :rollback}, {:error, :disabled})
+
+  @doc """
+  Whether a run (self-update OR rollback) is currently in flight. Used by the
+  controller to reject a colliding rollback with a clean 409 before it spends a
+  preflight subprocess; the GenServer trigger remains the authoritative gate.
+  """
+  @spec running?() :: boolean()
+  def running?, do: match?(%{state: :running}, status())
+
+  @doc """
+  Run the synchronous, read-only rollback preflight and map the script's typed
+  exit codes to a result. Never raises.
+
+    * `{:ok, target_sha}` — exit 0, `TARGET_SHA=` parsed from stdout
+    * `{:error, :no_previous_slot}` — exit 21
+    * `{:error, :not_supported}` — exit 22 (box has no `.slots` machinery)
+    * `{:error, :already_running}` — exit 23 (script flock held)
+    * `{:error, {:preflight_failed, code}}` — any other outcome (incl. an
+      exit 0 with no parseable sha) → the caller FAILS CLOSED, never flips.
+  """
+  @spec preflight_rollback() ::
+          {:ok, String.t()}
+          | {:error, :no_previous_slot | :not_supported | :already_running | {:preflight_failed, term()}}
+  def preflight_rollback do
+    {exe, args} = Keyword.get(config(), :rollback_preflight_command, @default_rollback_preflight_command)
+
+    case System.cmd(exe, args, cd: run_cd(), stderr_to_stdout: true) do
+      {output, 0} ->
+        case Regex.run(@target_sha_re, output) do
+          [_, sha] -> {:ok, sha}
+          # exit 0 but no sha = a malformed success; refuse rather than flip
+          # to garbage (deny-path: never a flip to an unknown target).
+          nil -> {:error, {:preflight_failed, {:no_target_sha, 0}}}
+        end
+
+      {_output, 21} ->
+        {:error, :no_previous_slot}
+
+      {_output, 22} ->
+        {:error, :not_supported}
+
+      {_output, 23} ->
+        {:error, :already_running}
+
+      {_output, code} ->
+        {:error, {:preflight_failed, code}}
+    end
+  rescue
+    # System.cmd raises (e.g. ErlangError :enoent) when the executable is
+    # missing — a preflight that cannot even run is a fail-closed refusal,
+    # never a silent flip.
+    error -> {:error, {:preflight_failed, error}}
+  end
 
   @doc """
   The current run status: `state` (`:idle` | `:running` | `:done`),
@@ -92,7 +169,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   @impl true
-  def handle_call(:trigger, _from, state) do
+  def handle_call({:trigger, mode}, _from, state) do
     cond do
       not enabled?() ->
         {:reply, {:error, :disabled}, state}
@@ -101,13 +178,14 @@ defmodule Barkpark.SelfUpdate.Runner do
         {:reply, {:error, :already_running}, state}
 
       true ->
-        case open_port() do
+        case open_port(mode) do
           {:ok, port} ->
             {:reply, {:ok, :started},
              %{
                state
                | run: :running,
                  port: port,
+                 mode: mode,
                  log: [],
                  started_at: DateTime.utc_now(),
                  finished_at: nil
@@ -143,11 +221,21 @@ defmodule Barkpark.SelfUpdate.Runner do
   # ── internals ───────────────────────────────────────────────────────────
 
   defp initial_state do
-    %{run: :idle, port: nil, log: [], started_at: nil, finished_at: nil}
+    # `mode` records which verb the current/last run is — defaults to
+    # :self_update so a box that has never run reports the primary verb.
+    %{run: :idle, port: nil, mode: :self_update, log: [], started_at: nil, finished_at: nil}
   end
 
-  defp open_port do
-    {exe, args} = Keyword.get(config(), :command, @default_command)
+  # Each mode resolves its own injectable command (tests stub these); the
+  # single-flight, port handling, and log capture are identical for both.
+  defp command_for(:rollback),
+    do: Keyword.get(config(), :rollback_command, @default_rollback_command)
+
+  defp command_for(_self_update),
+    do: Keyword.get(config(), :command, @default_command)
+
+  defp open_port(mode) do
+    {exe, args} = command_for(mode)
 
     case System.find_executable(exe) do
       nil ->
@@ -183,6 +271,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp render_status(state) do
     %{
       state: run_state(state.run),
+      mode: state.mode,
       exit_code: run_exit_code(state.run),
       log: Enum.reverse(state.log),
       started_at: state.started_at,

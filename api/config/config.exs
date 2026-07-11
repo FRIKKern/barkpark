@@ -259,6 +259,13 @@ config :barkpark, Barkpark.SelfUpdate,
 config :barkpark, Barkpark.SelfUpdate.Runner,
   enabled: false,
   command: {"bash", ["scripts/self-update.sh"]},
+  # Rollback shares the Runner single-flight with self-update. `--rollback`
+  # is the mutating slot flip; `--rollback-preflight` is the synchronous,
+  # read-only probe the controller runs first for the target sha + a typed
+  # refusal (W6 charter D13/D15). Both default here so an operator can see
+  # and override them exactly like `command`.
+  rollback_command: {"bash", ["deploy/instance-deploy.sh", "--rollback"]},
+  rollback_preflight_command: {"bash", ["deploy/instance-deploy.sh", "--rollback-preflight"]},
   cd: nil,
   max_log_lines: 500
 

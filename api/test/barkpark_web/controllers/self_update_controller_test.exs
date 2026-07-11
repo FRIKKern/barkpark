@@ -133,5 +133,118 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
       assert resp.status == 409
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "already_running"
     end
+
+    test "GET status carries the run mode", %{conn: conn} do
+      put_runner_cfg(enabled: true, command: {"bash", ["-c", "echo hi"]})
+      assert conn |> admin_conn() |> post("/v1/admin/self-update") |> Map.get(:status) == 202
+      done = await_done()
+      assert done["mode"] == "self_update"
+    end
+  end
+
+  # A preflight stub that exits `code` and (on 0) echoes a target sha. Tests
+  # NEVER shell out to the real deploy script — only these bash stubs.
+  @sha "0123456789abcdef0123456789abcdef01234567"
+
+  defp preflight_ok, do: {"bash", ["-c", "echo TARGET_SLOT=green; echo TARGET_SHA=#{@sha}; exit 0"]}
+  defp preflight_exit(code), do: {"bash", ["-c", "exit #{code}"]}
+
+  describe "rollback — auth gating" do
+    test "POST /v1/admin/rollback returns 401 without a token", %{conn: conn} do
+      assert post(conn, "/v1/admin/rollback").status == 401
+    end
+
+    test "POST /v1/admin/rollback returns 403 for a non-admin token", %{conn: conn} do
+      assert conn |> junior_conn() |> post("/v1/admin/rollback") |> Map.get(:status) == 403
+    end
+  end
+
+  describe "rollback — disabled (fail-closed default)" do
+    test "POST returns 503 feature_not_configured", %{conn: conn} do
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 503
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "feature_not_configured"
+    end
+  end
+
+  describe "rollback — typed preflight refusals" do
+    test "no previous slot (preflight exit 21) → 409 no_previous_slot", %{conn: conn} do
+      put_runner_cfg(enabled: true, rollback_preflight_command: preflight_exit(21))
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "no_previous_slot"
+    end
+
+    test "unsupported box (preflight exit 22) → 409 not_supported", %{conn: conn} do
+      put_runner_cfg(enabled: true, rollback_preflight_command: preflight_exit(22))
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_supported"
+    end
+
+    test "script lock held (preflight exit 23) → 409 already_running", %{conn: conn} do
+      put_runner_cfg(enabled: true, rollback_preflight_command: preflight_exit(23))
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "already_running"
+    end
+
+    test "exit 0 with no TARGET_SHA fails CLOSED → 500, never a flip to garbage", %{conn: conn} do
+      # Preflight succeeds but prints no sha — we must refuse, not spawn.
+      put_runner_cfg(
+        enabled: true,
+        rollback_preflight_command: {"bash", ["-c", "echo no-sha-here; exit 0"]},
+        rollback_command: {"bash", ["-c", "echo SHOULD-NOT-RUN"]}
+      )
+
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 500
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "rollback_preflight_failed"
+      # The mutating run never started.
+      assert Runner.status().state in [:idle, :done]
+      refute Runner.running?()
+    end
+  end
+
+  describe "rollback — happy path" do
+    test "POST 202 returns the preflight target_sha and spawns the async run", %{conn: conn} do
+      put_runner_cfg(
+        enabled: true,
+        rollback_preflight_command: preflight_ok(),
+        rollback_command: {"bash", ["-c", "echo rolled-back-line"]}
+      )
+
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 202
+      body = Jason.decode!(resp.resp_body)
+      assert body["status"] == "started"
+      assert body["target_sha"] == @sha
+
+      done = await_done()
+      assert done["state"] == "done"
+      assert done["exit_code"] == 0
+      assert done["mode"] == "rollback"
+      assert "rolled-back-line" in done["log"]
+      # The command itself is never exposed — only its output lines.
+      refute Map.has_key?(done, "command")
+    end
+  end
+
+  describe "rollback — shared single-flight with self-update" do
+    test "rollback while a self-update run is in flight returns 409", %{conn: conn} do
+      put_runner_cfg(
+        enabled: true,
+        command: {"bash", ["-c", "sleep 2"]},
+        rollback_preflight_command: preflight_ok(),
+        rollback_command: {"bash", ["-c", "echo should-not-run"]}
+      )
+
+      # Start a self-update, then a rollback collides on the shared run slot.
+      assert conn |> admin_conn() |> post("/v1/admin/self-update") |> Map.get(:status) == 202
+
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "already_running"
+    end
   end
 end
