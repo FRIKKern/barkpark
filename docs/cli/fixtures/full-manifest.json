@@ -564,6 +564,113 @@
     {
       "args": [
         {
+          "name": "doc_id",
+          "required": true,
+          "summary": "Task document id to stamp.",
+          "type": "string"
+        },
+        {
+          "name": "worker_id",
+          "required": true,
+          "summary": "Worker identity that holds the claim (holder-only).",
+          "type": "string"
+        },
+        {
+          "name": "observed_epoch",
+          "required": true,
+          "summary": "Claim epoch returned at claim time (same fence as close).",
+          "type": "int"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "criterion",
+          "summary": "Zero-based index into acceptance_criteria — the criterion to stamp.",
+          "type": "int"
+        },
+        {
+          "name": "met",
+          "summary": "Mark the criterion met. Requires non-empty --evidence.",
+          "type": "bool"
+        },
+        {
+          "name": "evidence",
+          "summary": "Concrete proof for --met (gate output, test names, PR) — required, non-empty.",
+          "type": "string"
+        },
+        {
+          "name": "miss",
+          "summary": "Record an honest failed attempt; appends {note,ts,worker} to attempts (5 kept); met never flips.",
+          "type": "bool"
+        },
+        {
+          "name": "note",
+          "summary": "What was tried and why it missed — required with --miss, non-empty.",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/stamp"
+      },
+      "id": "task.stamp",
+      "noun": "task",
+      "paginated": false,
+      "source": "plugin:tasks",
+      "summary": "Stamp ONE acceptance criterion mid-claim: --criterion N with either --met --evidence \"…\" or --miss --note \"…\". Holder + epoch-gated; stamp is progress, close is the seal.",
+      "verb": "stamp",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "doc_id",
+          "required": true,
+          "summary": "Task document id to pulse.",
+          "type": "string"
+        },
+        {
+          "name": "worker_id",
+          "required": true,
+          "summary": "Worker identity that holds the claim.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "now",
+          "summary": "The now-line text (required, max 500 bytes).",
+          "type": "string"
+        },
+        {
+          "name": "criterion",
+          "summary": "Optional acceptance_criteria index this pulse is working on.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/pulse"
+      },
+      "id": "task.pulse",
+      "noun": "task",
+      "paginated": false,
+      "source": "plugin:tasks",
+      "summary": "Heartbeat a held claim: write the now-line AND renew the lease in one atomic write. No epoch arg — pulse survives fence bumps and bumps the claim epoch.",
+      "verb": "pulse",
+      "writes": true
+    },
+    {
+      "args": [
+        {
           "name": "worker_id",
           "required": true,
           "summary": "Worker identity claiming the task.",

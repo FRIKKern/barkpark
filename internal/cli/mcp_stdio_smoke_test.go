@@ -72,10 +72,10 @@ func (s *mcpSmokeSink) Bytes() []byte {
 }
 
 // mcpSmokeCuratedTools is the exact tool set `bp mcp serve` exposes under the
-// default --tools tasks (charter decision 5 — the curated six, hand-mapped, not
+// default --tools tasks (charter decision 5 — the curated eight, hand-mapped, not
 // 1:1 verb aliases). Sorted for set comparison.
 var mcpSmokeCuratedTools = []string{
-	"task_close", "task_create", "task_next", "task_prime", "task_ready", "task_show",
+	"task_close", "task_create", "task_next", "task_prime", "task_pulse", "task_ready", "task_show", "task_stamp",
 }
 
 // mcpSmokeRPCMsg is the sliver of a JSON-RPC frame the smoke gate inspects.
@@ -331,7 +331,7 @@ func TestMCPServeStdioSmoke(t *testing.T) {
 func TestMCPStdoutBytePurityHarness(t *testing.T) {
 	initResult := `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"barkpark","version":"0"},"capabilities":{"tools":{}}}}`
 	toolsResult := `{"jsonrpc":"2.0","id":2,"result":{"tools":[` +
-		`{"name":"task_ready"},{"name":"task_next"},{"name":"task_show"},{"name":"task_close"},{"name":"task_create"},{"name":"task_prime"}]}}`
+		`{"name":"task_ready"},{"name":"task_next"},{"name":"task_show"},{"name":"task_close"},{"name":"task_create"},{"name":"task_prime"},{"name":"task_stamp"},{"name":"task_pulse"}]}}`
 	cleanStr := initResult + "\n" + toolsResult + "\n"
 	clean := []byte(cleanStr)
 
@@ -340,7 +340,7 @@ func TestMCPStdoutBytePurityHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clean ndjson stream rejected by the purity check: %v", err)
 	}
-	// ...and yields exactly the six curated tool names.
+	// ...and yields exactly the eight curated tool names.
 	names, ok := mcpSmokeToolNames(msgs)
 	if !ok {
 		t.Fatal("tool-name extraction found no tools/list result in a clean stream")

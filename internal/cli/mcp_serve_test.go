@@ -32,7 +32,9 @@ const mcpTestManifest = `{
     {"id":"task.prime","noun":"task","verb":"prime","summary":"prime","http":{"method":"GET","path_template":"/v1/tasks/prime"},"auth_tier":"read","args":[],"flags":[{"name":"worker","type":"string","summary":"w"},{"name":"limit","type":"int","summary":"l"}],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"json"},
     {"id":"task.get","noun":"task","verb":"get","summary":"get","http":{"method":"GET","path_template":"/v1/tasks/:doc_id"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"}],"flags":[],"writes":false,"batch":false,"paginated":false,"dry_run":false,"default_output":"table"},
     {"id":"task.next","noun":"task","verb":"next","summary":"next","http":{"method":"POST","path_template":"/v1/tasks/claim"},"auth_tier":"read","args":[{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
-    {"id":"task.close","noun":"task","verb":"close","summary":"close","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/close"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"},{"name":"lifecycle_status","required":false,"type":"string","summary":"s"},{"name":"reason","required":false,"type":"string","summary":"r"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"extra close-body fields"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}
+    {"id":"task.close","noun":"task","verb":"close","summary":"close","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/close"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"},{"name":"lifecycle_status","required":false,"type":"string","summary":"s"},{"name":"reason","required":false,"type":"string","summary":"r"}],"flags":[{"name":"set","repeatable":true,"type":"string","summary":"extra close-body fields"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"task.stamp","noun":"task","verb":"stamp","summary":"stamp","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/stamp"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"},{"name":"observed_epoch","required":true,"type":"int","summary":"e"}],"flags":[{"name":"criterion","type":"int","summary":"idx"},{"name":"met","type":"bool","summary":"m"},{"name":"evidence","type":"string","summary":"ev"},{"name":"miss","type":"bool","summary":"x"},{"name":"note","type":"string","summary":"n"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"},
+    {"id":"task.pulse","noun":"task","verb":"pulse","summary":"pulse","http":{"method":"POST","path_template":"/v1/tasks/:doc_id/pulse"},"auth_tier":"read","args":[{"name":"doc_id","required":true,"type":"string","summary":"id"},{"name":"worker_id","required":true,"type":"string","summary":"w"}],"flags":[{"name":"now","type":"string","summary":"nowline"},{"name":"criterion","type":"int","summary":"idx"}],"writes":true,"batch":false,"paginated":false,"dry_run":false,"default_output":"minimal"}
   ]
 }`
 
@@ -63,6 +65,10 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	// request body exactly as `bp task close … --set criteria:=[…]` would.
 	var closeBody []byte
 	var primeQuery string
+	// stamp/pulse capture: body proves the positionals landed in the JSON body,
+	// query proves the flags rode as query params — the whole tail→seam translation.
+	var stampBody, pulseBody []byte
+	var stampQuery, pulseQuery string
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		switch {
 		case req.URL.Path == "/v1/tasks/prime":
@@ -77,6 +83,14 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 		case req.URL.Path == "/v1/tasks/claim":
 			// Empty queue: 200 with ok:false — a valid outcome, not an error.
 			io.WriteString(rw, `{"ok":false,"reason":"no_ready"}`)
+		case strings.HasSuffix(req.URL.Path, "/stamp"):
+			stampBody, _ = io.ReadAll(req.Body)
+			stampQuery = req.URL.RawQuery
+			io.WriteString(rw, `{"ok":true,"doc":{"doc_id":"t1"}}`)
+		case strings.HasSuffix(req.URL.Path, "/pulse"):
+			pulseBody, _ = io.ReadAll(req.Body)
+			pulseQuery = req.URL.RawQuery
+			io.WriteString(rw, `{"ok":true,"doc":{"doc_id":"t1"}}`)
 		case strings.HasSuffix(req.URL.Path, "/close"):
 			closeBody, _ = io.ReadAll(req.Body)
 			// A stale-epoch conflict: HTTP 409 must surface as IsError.
@@ -126,7 +140,7 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 		got = append(got, tool.Name)
 	}
 	sort.Strings(got)
-	want := []string{"task_close", "task_create", "task_next", "task_prime", "task_ready", "task_show"}
+	want := []string{"task_close", "task_create", "task_next", "task_prime", "task_pulse", "task_ready", "task_show", "task_stamp"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools = %v, want %v", got, want)
 	}
@@ -147,6 +161,15 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 		a := byName[name].Annotations
 		if a == nil || a.ReadOnlyHint != false || a.DestructiveHint == nil || *a.DestructiveHint != true {
 			t.Errorf("%s annotations = %+v, want ReadOnlyHint:false + DestructiveHint:true", name, a)
+		}
+	}
+	// task_stamp/task_pulse are the middle group: they DO write (ReadOnlyHint:false)
+	// but carry DestructiveHint EXPLICITLY false — additive, holder-gated heartbeats
+	// a client should not gate behind a destructive-confirm.
+	for _, name := range []string{"task_stamp", "task_pulse"} {
+		a := byName[name].Annotations
+		if a == nil || a.ReadOnlyHint != false || a.DestructiveHint == nil || *a.DestructiveHint != false {
+			t.Errorf("%s annotations = %+v, want ReadOnlyHint:false + DestructiveHint:false", name, a)
 		}
 	}
 
@@ -245,6 +268,117 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	}
 	if !res.IsError || !strings.Contains(mcpContentText(res), "observed_epoch") {
 		t.Fatalf("missing-epoch close must IsError naming observed_epoch; got IsError=%v %q", res.IsError, mcpContentText(res))
+	}
+
+	// task_stamp --met: the positionals (worker_id + observed_epoch) land in the
+	// POST body; criterion + met + evidence ride as query params (declared flags).
+	res, err = cs.CallTool(bg, &mcp.CallToolParams{
+		Name: "task_stamp",
+		Arguments: map[string]any{
+			"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2,
+			"criterion": 1, "met": true, "evidence": "gate green",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_stamp: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_stamp unexpectedly IsError: %s", mcpContentText(res))
+	}
+	var stampSent map[string]any
+	if err := json.Unmarshal(stampBody, &stampSent); err != nil {
+		t.Fatalf("stamp body did not parse: %v (%q)", err, stampBody)
+	}
+	// worker_id + observed_epoch (server-coerced string, like close) in the body.
+	if stampSent["worker_id"] != "cursor-test" || stampSent["observed_epoch"] != "2" {
+		t.Fatalf("stamp body positionals wrong: %q", stampBody)
+	}
+	// criterion/met/evidence rode as query flags — and never as body.
+	if !strings.Contains(stampQuery, "criterion=1") || !strings.Contains(stampQuery, "met=true") || !strings.Contains(stampQuery, "evidence=gate+green") {
+		t.Fatalf("stamp query = %q, want criterion+met+evidence", stampQuery)
+	}
+	if _, ok := stampSent["criterion"]; ok {
+		t.Fatalf("stamp flags must not leak into the body: %q", stampBody)
+	}
+
+	// task_stamp --miss: records a note WITHOUT met; miss+note ride the query.
+	stampQuery = ""
+	res, err = cs.CallTool(bg, &mcp.CallToolParams{
+		Name: "task_stamp",
+		Arguments: map[string]any{
+			"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2,
+			"criterion": 0, "miss": true, "note": "flaky, rerunning",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_stamp miss: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_stamp miss unexpectedly IsError: %s", mcpContentText(res))
+	}
+	if !strings.Contains(stampQuery, "miss=true") || !strings.Contains(stampQuery, "note=flaky") || strings.Contains(stampQuery, "met=true") {
+		t.Fatalf("stamp miss query = %q, want miss+note and no met", stampQuery)
+	}
+
+	// task_stamp arg errors, caught client-side before any request:
+	//   missing criterion; both met and miss; met without evidence.
+	for _, bad := range []map[string]any{
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "met": true, "evidence": "x"},                                            // no criterion
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0},                                                          // neither met nor miss
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0, "met": true, "miss": true, "evidence": "x", "note": "y"}, // both
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0, "met": true},                                             // met, no evidence
+		{"doc_id": "t1", "worker_id": "cursor-test", "criterion": 0, "met": true, "evidence": "x"},                                                 // no observed_epoch
+	} {
+		res, err = cs.CallTool(bg, &mcp.CallToolParams{Name: "task_stamp", Arguments: bad})
+		if err != nil {
+			t.Fatalf("CallTool task_stamp (bad args %v): %v", bad, err)
+		}
+		if !res.IsError {
+			t.Fatalf("task_stamp with bad args %v must IsError; got %q", bad, mcpContentText(res))
+		}
+	}
+
+	// task_pulse: worker_id lands in the body; now + criterion ride the query; and
+	// there is NO observed_epoch anywhere (pulse carries no epoch arg).
+	res, err = cs.CallTool(bg, &mcp.CallToolParams{
+		Name: "task_pulse",
+		Arguments: map[string]any{
+			"doc_id": "t1", "worker_id": "cursor-test", "now": "gating now", "criterion": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_pulse: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_pulse unexpectedly IsError: %s", mcpContentText(res))
+	}
+	var pulseSent map[string]any
+	if err := json.Unmarshal(pulseBody, &pulseSent); err != nil {
+		t.Fatalf("pulse body did not parse: %v (%q)", err, pulseBody)
+	}
+	if pulseSent["worker_id"] != "cursor-test" {
+		t.Fatalf("pulse body worker_id wrong: %q", pulseBody)
+	}
+	if _, ok := pulseSent["observed_epoch"]; ok {
+		t.Fatalf("pulse must carry NO observed_epoch; body = %q", pulseBody)
+	}
+	if strings.Contains(pulseQuery, "observed_epoch") {
+		t.Fatalf("pulse must carry NO observed_epoch; query = %q", pulseQuery)
+	}
+	if !strings.Contains(pulseQuery, "now=gating+now") || !strings.Contains(pulseQuery, "criterion=2") {
+		t.Fatalf("pulse query = %q, want now+criterion", pulseQuery)
+	}
+
+	// task_pulse with an empty now: an arg error before any request.
+	res, err = cs.CallTool(bg, &mcp.CallToolParams{
+		Name:      "task_pulse",
+		Arguments: map[string]any{"doc_id": "t1", "worker_id": "cursor-test"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_pulse (bad args): %v", err)
+	}
+	if !res.IsError || !strings.Contains(mcpContentText(res), "now") {
+		t.Fatalf("missing-now pulse must IsError naming now; got IsError=%v %q", res.IsError, mcpContentText(res))
 	}
 
 	// Tear the sessions down, then assert bp wrote nothing to os.Stdout.
