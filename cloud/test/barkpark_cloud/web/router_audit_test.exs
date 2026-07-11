@@ -14,6 +14,9 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.StubGateway
   alias BarkparkCloud.Registry
+  alias BarkparkCloud.Registry.Vault
+  alias BarkparkCloud.StudioLinkFakeHttpClient
+  alias BarkparkCloud.Vercel
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -434,6 +437,423 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert is_nil(ev.actor_user_id)
       assert ev.metadata["source"] == "stripe_webhook"
       assert ev.metadata["plan"] == "supporter"
+    end
+  end
+
+  ## Instance-lifecycle levers (OC24) — every headline console button leaves a
+  ## trail. The seven async triggers (retry / verify / studio-link /
+  ## self-update / rollback / vercel-deploy / resurrect) record post-commit on
+  ## the SUCCESS branch only; the sync trio (site-url / autoupdate / domain)
+  ## is transactional — a failed action writes NO row (asserted below). No
+  ## detail map ever carries a token, a ticket, or a URL that embeds one.
+
+  @instance_admin_token "instance-admin-token-plaintext"
+  @instance_url "https://prod.barkpark.cloud"
+  @bundle "s3://barkpark-archives/shop-2026-07-09.tar.zst"
+
+  # All-green fake for the :verify_http_client seam — every probe answers a
+  # bare 200, so Verify.run/1 yields {:ok, result} with reachable: true. The
+  # app-env swap is bleed-free under async: the seam's only other user
+  # (verify_test.exs) is async: false, so it never runs concurrently with
+  # this file, and swap_verify_client!/0 restores on exit.
+  defmodule FakeVerifyHttp do
+    def request(_req), do: {:ok, %{status: 200, body: "", headers: []}}
+  end
+
+  defp swap_verify_client! do
+    prev = Application.get_env(:barkpark_cloud, :verify_http_client)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:barkpark_cloud, :verify_http_client)
+        mod -> Application.put_env(:barkpark_cloud, :verify_http_client, mod)
+      end
+    end)
+
+    Application.put_env(:barkpark_cloud, :verify_http_client, FakeVerifyHttp)
+  end
+
+  # Wire the Vercel platform token + in-memory Fake client (vercel_test's
+  # idiom — restored on exit).
+  defp configure_vercel! do
+    base = Application.get_env(:barkpark_cloud, Vercel, [])
+    on_exit(fn -> Application.put_env(:barkpark_cloud, Vercel, base) end)
+
+    Application.put_env(
+      :barkpark_cloud,
+      Vercel,
+      Keyword.merge(base, client: Vercel.Fake, token: "vt_test_token")
+    )
+  end
+
+  # A LIVE instance: url + host + encrypted admin token stored (what the
+  # provision-succeed path writes) — the shape the lifecycle relays need.
+  defp live_barkpark(team) do
+    team
+    |> barkpark_fixture(%{})
+    |> Ecto.Changeset.change(
+      url: @instance_url,
+      host: "203.0.113.10",
+      admin_token_encrypted: Vault.encrypt(@instance_admin_token)
+    )
+    |> Repo.update!()
+  end
+
+  # …plus the dwb-4/5 bootstrap outputs site-url needs to find the
+  # revalidation webhook on the instance.
+  defp bootstrapped_barkpark(team) do
+    team
+    |> live_barkpark()
+    |> Ecto.Changeset.change(
+      template: "blog-starter",
+      bootstrap_workspace: "acme",
+      bootstrap_project: "default",
+      bootstrap_dataset: "production",
+      bootstrap_read_token_encrypted: Vault.encrypt("bp_read_secret")
+    )
+    |> Repo.update!()
+  end
+
+  # A vercel-deployable instance (vercel_test's fixture shape): deployable
+  # template + bootstrap env stored. No live box needed — deploy_for reads
+  # stored state only.
+  defp vercel_ready_barkpark(team) do
+    env = %{
+      "BARKPARK_API_URL" => "https://acme.barkpark.cloud/w/acme/p/default",
+      "BARKPARK_TOKEN" => "bp_read_supersecret",
+      "BARKPARK_WORKSPACE" => "acme",
+      "BARKPARK_PROJECT" => "default",
+      "BARKPARK_DATASET" => "production",
+      "BARKPARK_WEBHOOK_SECRET" => "whsec_test"
+    }
+
+    team
+    |> barkpark_fixture(%{})
+    |> Ecto.Changeset.change(
+      template: "blog-starter",
+      bootstrap_workspace: "acme",
+      bootstrap_project: "default",
+      bootstrap_dataset: "production",
+      bootstrap_read_token_encrypted: Vault.encrypt("bp_read_supersecret"),
+      bootstrap_env_encrypted: Vault.encrypt(Jason.encode!(env))
+    )
+    |> Repo.update!()
+  end
+
+  # The instance webhook-list response carrying the bootstrap-owned endpoint
+  # (what wire_site_url LISTs before it PUTs).
+  defp webhook_list_response do
+    {:ok,
+     %{
+       status: 200,
+       body:
+         Jason.encode!(%{
+           webhooks: [%{id: "wh_bootstrap_1", name: "bootstrap-revalidation", active: false}]
+         })
+     }}
+  end
+
+  defp find_events(team, action),
+    do: team |> Accounts.list_audit_events() |> Enum.filter(&(&1.action == action))
+
+  describe "lifecycle async triggers audit post-commit on the success branch" do
+    test "POST retry writes barkpark.retry_requested; a not-retryable 409 writes none" do
+      {user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, "boom")
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+      assert conn.status == 201
+
+      assert [ev] = find_events(team, "barkpark.retry_requested")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+      assert ev.metadata == %{"name" => bp.name}
+
+      # The retry's own fresh job is now PENDING → a second retry 409s and
+      # stamps nothing new (success branch only).
+      dup = call(:post, "/v1/barkparks/#{bp.id}/retry", %{}, token)
+      assert dup.status == 409
+      assert length(find_events(team, "barkpark.retry_requested")) == 1
+    end
+
+    test "POST verify writes barkpark.verify_requested with the headline verdict, never a token" do
+      swap_verify_client!()
+      {user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/verify", nil, token)
+      assert conn.status == 200
+
+      assert [ev] = find_events(team, "barkpark.verify_requested")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+      assert ev.metadata == %{"name" => bp.name, "reachable" => true}
+      refute inspect(ev.metadata) =~ @instance_admin_token
+    end
+
+    test "POST studio-link writes barkpark.studio_link_minted — the mint, never the URL/ticket" do
+      {user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 201, body: ~s({"ticket":"bplt_audit-ticket-1","expires_in":60})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", nil, token)
+      assert conn.status == 200
+
+      assert [ev] = find_events(team, "barkpark.studio_link_minted")
+      assert ev.actor_user_id == user.id
+      assert ev.target_id == bp.id
+      assert ev.metadata == %{"name" => bp.name}
+      refute inspect(ev.metadata) =~ "bplt_"
+      refute inspect(ev.metadata) =~ @instance_admin_token
+    end
+
+    test "a failed mint (transport error → 502) writes NO studio_link row" do
+      {_user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([{:error, {:http_client, :timeout}}])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", nil, token)
+      assert conn.status == 502
+      assert find_events(team, "barkpark.studio_link_minted") == []
+    end
+
+    test "POST self-update writes barkpark.self_update_triggered with the force flag" do
+      {user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"ok":true,"status":"started"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", nil, token)
+      assert conn.status == 202
+
+      assert [ev] = find_events(team, "barkpark.self_update_triggered")
+      assert ev.actor_user_id == user.id
+      assert ev.target_id == bp.id
+      assert ev.metadata == %{"name" => bp.name, "force" => false}
+    end
+
+    test "an instance 409 (already_running) writes NO self_update row" do
+      {_user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 409, body: ~s({"error":{"code":"already_running"}})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", nil, token)
+      assert conn.status == 409
+      assert find_events(team, "barkpark.self_update_triggered") == []
+    end
+
+    test "POST rollback writes barkpark.rollback_triggered with the REPORTED sha + pin" do
+      {user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"status":"started","target_sha":"abc123def456"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/rollback", nil, token)
+      assert conn.status == 202
+
+      assert [ev] = find_events(team, "barkpark.rollback_triggered")
+      assert ev.actor_user_id == user.id
+      assert ev.target_id == bp.id
+
+      assert ev.metadata == %{
+               "name" => bp.name,
+               "target_sha" => "abc123def456",
+               "pinned_release" => "abc123def456"
+             }
+    end
+
+    test "an instance 409 (no_previous_slot) writes NO rollback row" do
+      {_user, team, token} = logged_in()
+      bp = live_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 409, body: ~s({"error":{"code":"no_previous_slot"}})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/rollback", nil, token)
+      assert conn.status == 409
+      assert find_events(team, "barkpark.rollback_triggered") == []
+    end
+
+    test "POST vercel-deploy writes barkpark.vercel_deploy_triggered — never the claim state" do
+      configure_vercel!()
+      {user, team, token} = logged_in()
+      bp = vercel_ready_barkpark(team)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/vercel-deploy", %{}, token)
+      assert conn.status == 201
+
+      assert [ev] = find_events(team, "barkpark.vercel_deploy_triggered")
+      assert ev.actor_user_id == user.id
+      assert ev.target_id == bp.id
+      # The metadata is EXACTLY the instance name — no claim code / claim_url
+      # (a bearer-shaped capability link) can ride along.
+      assert ev.metadata == %{"name" => bp.name}
+    end
+
+    test "a bootstrap-less deploy (409) writes NO vercel_deploy row" do
+      configure_vercel!()
+      {_user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/vercel-deploy", %{}, token)
+      assert conn.status == 409
+      assert find_events(team, "barkpark.vercel_deploy_triggered") == []
+    end
+
+    test "POST /v1/resurrect writes barkpark.resurrected for the fresh row with the resolved bundle" do
+      {user, team, token} = logged_in()
+      {:ok, _sub} = Billing.subscribe(team, "supporter")
+
+      conn =
+        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: @bundle}, token)
+
+      assert conn.status == 202
+      new_id = json_body(conn)["id"]
+
+      assert [ev] = find_events(team, "barkpark.resurrected")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == new_id
+      assert ev.metadata == %{"name" => "Shop", "bundle_ref" => @bundle}
+    end
+  end
+
+  describe "lifecycle sync trio audits transactionally — no row on failure" do
+    test "POST site-url writes barkpark.site_url_set with the wired URLs, never the admin token" do
+      {user, team, token} = logged_in()
+      bp = bootstrapped_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([
+        webhook_list_response(),
+        {:ok, %{status: 200, body: ~s({"webhook":{"id":"wh_bootstrap_1","active":true}})}}
+      ])
+
+      site = "https://acme-blog.vercel.app"
+      conn = call(:post, "/v1/barkparks/#{bp.id}/site-url", %{url: site}, token)
+      assert conn.status == 200
+
+      assert [ev] = find_events(team, "barkpark.site_url_set")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+
+      assert ev.metadata == %{
+               "site_url" => site,
+               "webhook_url" => site <> "/api/barkpark/webhook"
+             }
+
+      refute inspect(ev.metadata) =~ @instance_admin_token
+    end
+
+    test "a failed wire (transport error → 502) writes NO site_url row" do
+      {_user, team, token} = logged_in()
+      bp = bootstrapped_barkpark(team)
+
+      StudioLinkFakeHttpClient.program([{:error, {:http_client, :timeout}}])
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/site-url", %{url: "https://x.vercel.app"}, token)
+
+      assert conn.status == 502
+      assert find_events(team, "barkpark.site_url_set") == []
+    end
+
+    test "a non-http url (422) writes NO site_url row" do
+      {_user, team, token} = logged_in()
+      bp = bootstrapped_barkpark(team)
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/site-url", %{url: "ftp://nope"}, token)
+      assert conn.status == 422
+      assert find_events(team, "barkpark.site_url_set") == []
+    end
+
+    test "PATCH autoupdate writes barkpark.autoupdate_changed with the PERSISTED policy" do
+      {user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+
+      conn =
+        call(:patch, "/v1/barkparks/#{bp.id}/autoupdate", %{autoupdate_enabled: false}, token)
+
+      assert conn.status == 200
+
+      assert [ev] = find_events(team, "barkpark.autoupdate_changed")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+
+      assert ev.metadata == %{
+               "enabled" => false,
+               "paused" => false,
+               "pinned_release" => nil
+             }
+    end
+
+    test "an invalid autoupdate PATCH (422) writes NO row" do
+      {_user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+
+      conn =
+        call(:patch, "/v1/barkparks/#{bp.id}/autoupdate", %{autoupdate_enabled: "nope"}, token)
+
+      assert conn.status == 422
+      assert find_events(team, "barkpark.autoupdate_changed") == []
+    end
+
+    test "POST domain writes barkpark.domain_attached with the persisted host" do
+      {user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+      host = "audited-#{System.unique_integer([:positive])}.barkpark.cloud"
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: host}, token)
+      assert conn.status == 202
+
+      assert [ev] = find_events(team, "barkpark.domain_attached")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "barkpark"
+      assert ev.target_id == bp.id
+      assert ev.metadata == %{"custom_host" => host}
+    end
+
+    test "an invalid domain (422) writes NO domain row" do
+      {_user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: "not a host"}, token)
+      assert conn.status == 422
+      assert find_events(team, "barkpark.domain_attached") == []
+    end
+
+    test "a taken host (409) writes NO domain row for the loser" do
+      {_user, team, token} = logged_in()
+      bp = barkpark_fixture(team, %{})
+      other = barkpark_fixture(team, %{})
+      host = "claimed-#{System.unique_integer([:positive])}.barkpark.cloud"
+
+      assert call(:post, "/v1/barkparks/#{other.id}/domain", %{domain: host}, token).status ==
+               202
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: host}, token)
+      assert conn.status == 409
+
+      # Exactly ONE row — the winner's; the refused attach stamped nothing.
+      assert [ev] = find_events(team, "barkpark.domain_attached")
+      assert ev.target_id == other.id
     end
   end
 end

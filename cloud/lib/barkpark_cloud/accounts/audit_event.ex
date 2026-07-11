@@ -34,7 +34,10 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
   # The closed verb vocabulary. Dotted `<noun>.<verb>` so the UI can group by
   # noun and a typo is a changeset error (validate_inclusion), not a silent new
   # category. Extend here as new audited call-sites land — the routes wired today
-  # are the member / invitation / token / subscription / site / barkpark seams;
+  # are the member / invitation / token / subscription / site / barkpark seams
+  # (including the OC24 instance-lifecycle triggers: retry / verify /
+  # studio-link / site-url / self-update / rollback / autoupdate / domain /
+  # vercel-deploy / resurrect);
   # the env_var / twofa / oauth / email verbs are reserved for the PR-#680
   # feature seams (onboarding, 2FA, SSO, shared secrets, email verification) as
   # those call-sites gain audit wiring.
@@ -47,6 +50,10 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     deployment.promoted
     webhook.created webhook.updated webhook.deleted webhook.rotated webhook.replayed
     barkpark.go_live barkpark.deleted
+    barkpark.retry_requested barkpark.verify_requested barkpark.studio_link_minted
+    barkpark.site_url_set barkpark.self_update_triggered barkpark.rollback_triggered
+    barkpark.autoupdate_changed barkpark.domain_attached
+    barkpark.vercel_deploy_triggered barkpark.resurrected
     env_var.created env_var.deleted
     twofa.enabled twofa.disabled
     oauth.linked email.verified
