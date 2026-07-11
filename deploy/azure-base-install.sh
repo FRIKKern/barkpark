@@ -10,7 +10,7 @@
 # What it installs, all idempotent (safe to re-run):
 #   1. apt: PostgreSQL, Caddy, and the build toolchain (git, build-essential,
 #      autoconf, the Erlang/OpenSSL headers, unzip, curl).
-#   2. asdf + Erlang/Elixir pinned to the repo's api/.tool-versions.
+#   2. asdf + Erlang/Elixir pinned to the repo-root .tool-versions.
 #   3. Go, pinned to the go.mod toolchain, under /usr/local/go.
 #   4. The repo, cloned to /opt/barkpark (or fast-forwarded if already there).
 #   5. A production build (mix deps.get + deps.compile --force + compile) so the box
@@ -31,7 +31,7 @@ set -euo pipefail
 REPO="${BARKPARK_REPO:-https://github.com/FRIKKern/barkpark}"
 APP="${BARKPARK_APP:-/opt/barkpark}"
 REF="${BARKPARK_REF:-main}"
-# Pins mirror api/.tool-versions + go.mod; override only for a deliberate bump.
+# Pins mirror the repo-root .tool-versions + go.mod; override only for a deliberate bump.
 ERLANG_VERSION="${ERLANG_VERSION:-27.3.4}"
 ELIXIR_VERSION="${ELIXIR_VERSION:-1.18.4-otp-27}"
 GO_VERSION="${GO_VERSION:-1.25.0}"
@@ -77,7 +77,7 @@ install_apt() {
   fi
 }
 
-# ── 2. asdf + Erlang/Elixir pinned to api/.tool-versions ─────────────────────
+# ── 2. asdf + Erlang/Elixir pinned to the repo-root .tool-versions ───────────
 install_asdf_beam() {
   if [ ! -d "$ASDF_DIR" ]; then
     log "cloning asdf → $ASDF_DIR"

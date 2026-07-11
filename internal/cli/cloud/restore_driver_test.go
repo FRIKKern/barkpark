@@ -121,11 +121,11 @@ func TestBuildRestoreTarRoundTrips(t *testing.T) {
 // TestSSHFeedArgvKeepsStdin proves the feed argv drops the `</dev/null` redirect
 // (so the fed bytes reach the remote script) while the ordinary step argv keeps it.
 func TestSSHFeedArgvKeepsStdin(t *testing.T) {
-	feed := sshFeedArgv("root", "1.2.3.4", "/k", "tar -xzf -")
+	feed := sshFeedArgv("root", "1.2.3.4", "/k", "tar -xzf -", false)
 	if strings.Contains(feed[len(feed)-1], "</dev/null") {
 		t.Fatalf("feed argv must NOT redirect stdin from /dev/null; got %q", feed[len(feed)-1])
 	}
-	step := sshStepArgv("root", "1.2.3.4", "/k", "echo hi")
+	step := sshStepArgv("root", "1.2.3.4", "/k", "echo hi", false)
 	if !strings.Contains(step[len(step)-1], "</dev/null") {
 		t.Fatal("the ordinary step argv must keep </dev/null")
 	}

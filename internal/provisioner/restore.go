@@ -61,16 +61,19 @@ type RestoreDriver interface {
 	// RepointDNS points the bundle's fqdn A-record at ip (secure step).
 	RepointDNS(ctx context.Context, fqdn, ip string) error
 	// InstallSecrets unseals secrets.enc with the CARRIED kek and installs the box's
-	// identity secrets (configure step). It MUST NOT mint fresh secrets.
-	InstallSecrets(ctx context.Context, ref BundleRef, ip string) error
+	// identity secrets (configure step). It MUST NOT mint fresh secrets. job carries
+	// the TARGET provider so the driver picks the box's ssh policy (azure → the non-
+	// root barkpark admin + sudo; hetzner → root).
+	InstallSecrets(ctx context.Context, job JobSpec, ref BundleRef, ip string) error
 	// InstallAgent writes the freshly-minted monitoring token + enables the beat.
-	// Called only when the job carries an agent token.
-	InstallAgent(ctx context.Context, agentToken, ip string) error
+	// Called only when the job carries an agent token. job carries the target provider
+	// (the ssh-policy source — see InstallSecrets).
+	InstallAgent(ctx context.Context, job JobSpec, agentToken, ip string) error
 	// RestoreData fetches db.dump + media from the bundle store, DROPs + CREATEs the
 	// database the manifest names, pg_restore --no-owner, unpacks media, and runs a
 	// best-effort migrate (the content/restore phase — seed + template bootstrap are
-	// suppressed).
-	RestoreData(ctx context.Context, ref BundleRef, ip string) error
+	// suppressed). job carries the target provider (the ssh-policy source).
+	RestoreData(ctx context.Context, job JobSpec, ref BundleRef, ip string) error
 	// Verify runs the golden-path gate against the restored fqdn (verify step).
 	Verify(ctx context.Context, fqdn string) error
 }
@@ -169,11 +172,11 @@ func provisionRestore(ctx context.Context, seams Seams, job JobSpec) (string, st
 
 	// ── 4. configure — install SEALED identity (KEK carried, not minted) + agent ──
 	report("configure", "started", "install sealed identity (KEK carried, not minted); empty-DB seed skipped")
-	if err := driver.InstallSecrets(ctx, *ref, ip); err != nil {
+	if err := driver.InstallSecrets(ctx, job, *ref, ip); err != nil {
 		return failStep("configure", ip, err)
 	}
 	if strings.TrimSpace(job.AgentToken) != "" {
-		if err := driver.InstallAgent(ctx, job.AgentToken, ip); err != nil {
+		if err := driver.InstallAgent(ctx, job, job.AgentToken, ip); err != nil {
 			return failStep("configure", ip, err)
 		}
 	}
@@ -181,7 +184,7 @@ func provisionRestore(ctx context.Context, seams Seams, job JobSpec) (string, st
 
 	// ── 5. content — the RESTORE phase: drop → create → pg_restore → media → migrate ──
 	report("content", "started", "restore db "+ref.Manifest.DBName+" (drop→create→pg_restore→migrate); template bootstrap suppressed")
-	if err := driver.RestoreData(ctx, *ref, ip); err != nil {
+	if err := driver.RestoreData(ctx, job, *ref, ip); err != nil {
 		return failStep("content", ip, err)
 	}
 	report("content", "done", "")

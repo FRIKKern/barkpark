@@ -67,6 +67,33 @@ type RestoreExecutor struct {
 	ControlURL string
 }
 
+// azureRestoreUser is the non-root admin an AZURE box provisions (D56): the SSH key
+// lands ONLY in /home/<user>/.ssh/authorized_keys and stock Canonical images lock
+// root, so every azure restore step SSHes as this user and reaches root via sudo. It
+// mirrors azure.DefaultAdminUsername (kept a local literal — package cloud cannot
+// import cloud/azure, which imports cloud, without a cycle).
+const azureRestoreUser = "barkpark"
+
+// restoreRunner builds the per-host StepRunner for one restore step, applying the
+// PER-PROVIDER ssh policy. Hetzner (and any other/empty kind) keeps the byte-
+// identical root/no-sudo path the whole provisioner shares. AZURE boxes provision
+// only the non-root barkpark admin (D56) while azure-base-install + the on-box
+// restore pipeline require root, so an azure runner SSHes as barkpark and sudo-wraps
+// every step. The user+sudo are set on the concrete *SSHStepRunner the production
+// factory returns fresh per call; a non-SSH runner (a test recorder) is returned
+// unchanged — the azure argv is proven at the SSHStepRunner level, and the scripts
+// themselves stay byte-identical across providers (only the transport differs).
+func (e *RestoreExecutor) restoreRunner(kind, ip string) StepRunner {
+	r := e.RunnerFor(ip)
+	if kind == ProviderAzure {
+		if ssh, ok := r.(*SSHStepRunner); ok {
+			ssh.User = azureRestoreUser
+			ssh.Sudo = true
+		}
+	}
+	return r
+}
+
 // restoreHealthURL is where the on-box agent self-probes after a resurrect. The
 // agent runs ON the box, so localhost is the truthful target (and needs no fqdn
 // threaded through the interface's agentless InstallAgent signature).
@@ -119,7 +146,7 @@ func (e *RestoreExecutor) CreateHost(ctx context.Context, kind string, creds map
 	// Runners that don't probe (the test fakes) skip it — the same capability gate
 	// configureHost uses.
 	if e.RunnerFor != nil {
-		if rw, ok := e.RunnerFor(host.IP).(sshReadyWaiter); ok {
+		if rw, ok := e.restoreRunner(kind, host.IP).(sshReadyWaiter); ok {
 			if err := rw.WaitReady(ctx, sshReadyTimeout); err != nil {
 				return "", fmt.Errorf("resurrect ssh not ready on %s: %w", host.IP, err)
 			}
@@ -135,7 +162,7 @@ func (e *RestoreExecutor) Freshen(ctx context.Context, kind, ip string) error {
 	if e.RunnerFor == nil {
 		return fmt.Errorf("resurrect freshen: no runner factory wired")
 	}
-	return e.RunnerFor(ip).Run(ctx, restoreFreshenStep(kind))
+	return e.restoreRunner(kind, ip).Run(ctx, restoreFreshenStep(kind))
 }
 
 // RepointDNS points the bundle's fqdn A-record at the fresh box (the secure step).
@@ -155,7 +182,7 @@ func (e *RestoreExecutor) RepointDNS(ctx context.Context, fqdn, ip string) error
 // idempotently into the box's .env. It does NOT restart the service — the restart
 // happens after the DATA lands (RestoreData's tail), so the box comes up ONCE with
 // both the restored identity and the restored database.
-func (e *RestoreExecutor) InstallSecrets(ctx context.Context, prefix, kek, ip string) error {
+func (e *RestoreExecutor) InstallSecrets(ctx context.Context, kind, prefix, kek, ip string) error {
 	if e.Store == nil {
 		return fmt.Errorf("resurrect configure: no bundle store wired")
 	}
@@ -170,17 +197,17 @@ func (e *RestoreExecutor) InstallSecrets(ctx context.Context, prefix, kek, ip st
 	if err != nil {
 		return err
 	}
-	return e.RunnerFor(ip).Run(ctx, step)
+	return e.restoreRunner(kind, ip).Run(ctx, step)
 }
 
 // InstallAgent writes the freshly-minted monitoring token + enables the beat
 // (reusing the exact configure sub-step a normal go-live runs). Called only when
 // the job carries an agent token.
-func (e *RestoreExecutor) InstallAgent(ctx context.Context, agentToken, ip string) error {
+func (e *RestoreExecutor) InstallAgent(ctx context.Context, kind, agentToken, ip string) error {
 	if e.RunnerFor == nil {
 		return fmt.Errorf("resurrect configure: no runner factory wired")
 	}
-	return e.RunnerFor(ip).Run(ctx, agentInstallStep(agentToken, e.ControlURL, restoreHealthURL))
+	return e.restoreRunner(kind, ip).Run(ctx, agentInstallStep(agentToken, e.ControlURL, restoreHealthURL))
 }
 
 // RestoreData is the content phase: fetch db.dump + media.tar.gz from the bundle
@@ -188,7 +215,7 @@ func (e *RestoreExecutor) InstallAgent(ctx context.Context, agentToken, ip strin
 // on-box restore pipeline — DROP → createdb → pg_restore --no-owner → media untar →
 // best-effort migrate → restart. The database name comes from the MANIFEST (fenced
 // safe), so the restore lands in the right place regardless of the box's own env.
-func (e *RestoreExecutor) RestoreData(ctx context.Context, prefix, dbName, ip string) error {
+func (e *RestoreExecutor) RestoreData(ctx context.Context, kind, prefix, dbName, ip string) error {
 	if e.Store == nil {
 		return fmt.Errorf("resurrect content: no bundle store wired")
 	}
@@ -201,7 +228,7 @@ func (e *RestoreExecutor) RestoreData(ctx context.Context, prefix, dbName, ip st
 	if e.RunnerFor == nil {
 		return fmt.Errorf("resurrect content: no runner factory wired")
 	}
-	runner := e.RunnerFor(ip)
+	runner := e.restoreRunner(kind, ip)
 	feeder, ok := runner.(StdinStepRunner)
 	if !ok {
 		return fmt.Errorf("resurrect content: runner for %s cannot stream stdin (need StdinStepRunner)", ip)
