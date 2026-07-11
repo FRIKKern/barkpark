@@ -151,9 +151,11 @@ driving a **real MCP client over real HTTP** against the production handler:
 - `TestMCPHTTPPaperResourcesTemplateOnly` — HTTP mode registers only the
   `barkpark://papers/{id}` read template; the enumeration GET fires zero times.
 
-Still owed (NOT this slice): the live remote smoke against
-`https://guerrilla.barkpark.cloud/mcp` — that is the close criterion of the
-deploy slice (`ve-w2-mcp-deploy`), which owns the systemd unit + Caddy route.
+Owed at the time of the transport slice, since paid: the live remote smoke
+against `https://guerrilla.barkpark.cloud/mcp` — the close criterion of the
+deploy slice (`ve-w2-mcp-deploy`), which owns the systemd unit + Caddy route —
+is recorded below (see "Live smoke — guerrilla remote, 2026-07-11").
+
 ## Remote endpoint (Streamable HTTP) — deploy shape + smoke recipe
 
 The remote path (viable-everywhere charter D18/D19) exposes the SAME server at
