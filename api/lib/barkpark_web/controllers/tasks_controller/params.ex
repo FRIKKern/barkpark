@@ -305,6 +305,9 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
+  # Stamp (and any future holder-gated verb) on a task with no live claim —
+  # mirror the invalid_lifecycle wire shape instead of leaking inspect() output.
+  def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
   def reason_to_string(other), do: inspect(other)
 
   # ─── Acceptance-criteria close-out (living-values §8/§9) ─────────────────
@@ -363,6 +366,55 @@ defmodule BarkparkWeb.TasksController.Params do
 
   defp parse_criteria_entry(_other),
     do: {:error, "each criteria entry needs an integer index >= 0"}
+
+  # ─── Mid-claim criterion stamp (expressive-agent-loops D8) ───────────────
+
+  # Parses the stamp body/query into `{:ok, index, {:met, evidence} | {:miss,
+  # note}}`. The bp CLI sends flags as query strings ("true", "0"); curl sends
+  # typed JSON — both shapes are accepted. Exactly one of met/miss; --met
+  # REQUIRES non-empty evidence (evidence or nothing, D3); --miss REQUIRES a
+  # non-empty note (an honest attempt has words). SHAPE-only validation (→
+  # 400); state conflicts are the stamp transaction's to detect under its lock.
+  def parse_stamp(params) do
+    met = stamp_flag?(Map.get(params, "met"))
+    miss = stamp_flag?(Map.get(params, "miss"))
+
+    with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
+      cond do
+        met and miss ->
+          {:error, :invalid_stamp, "pass exactly one of --met / --miss, not both"}
+
+        met ->
+          case Map.get(params, "evidence") do
+            e when is_binary(e) and e != "" -> {:ok, index, {:met, e}}
+            _ -> {:error, :invalid_stamp, "--met requires non-empty --evidence"}
+          end
+
+        miss ->
+          case Map.get(params, "note") do
+            n when is_binary(n) and n != "" -> {:ok, index, {:miss, n}}
+            _ -> {:error, :invalid_stamp, "--miss requires non-empty --note"}
+          end
+
+        true ->
+          {:error, :invalid_stamp, "pass one of --met (with --evidence) or --miss (with --note)"}
+      end
+    end
+  end
+
+  defp stamp_flag?(v), do: v in [true, "true", "1"]
+
+  defp parse_stamp_index(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  defp parse_stamp_index(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> {:error, :invalid_stamp, "criterion must be an integer index >= 0"}
+    end
+  end
+
+  defp parse_stamp_index(_),
+    do: {:error, :invalid_stamp, "criterion (the index) is required — --criterion N"}
 
   def changeset_errors(%Ecto.Changeset{} = cs) do
     Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->

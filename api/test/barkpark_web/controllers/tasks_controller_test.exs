@@ -388,6 +388,133 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  describe "POST /v1/tasks/:doc_id/stamp (expressive-agent-loops D8)" do
+    # Claim helper: file a task with criteria, claim it, return {doc_id, epoch}.
+    defp claim_with_criteria!(conn, scope, criteria) do
+      phase = uniq("phase-stamp")
+      doc_id = uniq("stamp")
+      _task = mk_task!(doc_id, scope, %{"parent_id" => phase, "acceptance_criteria" => criteria})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-1", phase_id: phase})
+      claim_resp = conn |> authed() |> post("/v1/tasks/claim", claim_body)
+      payload = Jason.decode!(claim_resp.resp_body)
+      {payload["doc"]["doc_id"], payload["doc"]["claim"]["epoch"]}
+    end
+
+    # The EXACT bp CLI wire shape (run.go): positional args worker_id +
+    # observed_epoch ride the JSON body as STRINGS; flags (criterion/met/
+    # evidence/miss/note) ride the query string, bools as "true".
+    test "met via the CLI wire shape flips the criterion and returns the fresh doc",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [%{"criterion" => "gate green", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: to_string(epoch)})
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&evidence=81+tests+green", body)
+
+      assert resp.status == 200
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == true
+
+      assert [%{"met" => true, "evidence" => "81 tests green"}] =
+               payload["doc"]["content"]["acceptance_criteria"]
+
+      # Claim untouched — stamp is progress, not the seal.
+      assert payload["doc"]["lifecycle_status"] == "in_progress"
+      assert payload["doc"]["claim"]["epoch"] == epoch
+    end
+
+    test "miss records the attempt without flipping met", %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [%{"criterion" => "live smoke", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&miss=true&note=flaky+sandbox", body)
+
+      assert resp.status == 200
+      doc = Jason.decode!(resp.resp_body)["doc"]
+
+      assert [%{"met" => false, "attempts" => [attempt]}] =
+               doc["content"]["acceptance_criteria"]
+
+      assert attempt["note"] == "flaky sandbox"
+      assert attempt["worker"] == "worker-1"
+      assert is_binary(attempt["ts"])
+    end
+
+    test "shape errors 400 before any state check", %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [%{"criterion" => "c", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      # met without evidence
+      r1 = conn |> authed() |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&met=true", body)
+      assert r1.status == 400
+
+      # both met and miss
+      r2 =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&miss=true&evidence=e&note=n",
+          body
+        )
+
+      assert r2.status == 400
+
+      # no criterion index
+      r3 = conn |> authed() |> post("/v1/tasks/#{doc_id}/stamp?met=true&evidence=e", body)
+      assert r3.status == 400
+
+      # missing worker_id
+      r4 =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&evidence=e",
+          Jason.encode!(%{observed_epoch: epoch})
+        )
+
+      assert r4.status == 400
+    end
+
+    test "state conflicts 409 with close's reason vocabulary", %{conn: conn, scope: scope} do
+      {doc_id, _epoch} =
+        claim_with_criteria!(conn, scope, [%{"criterion" => "c", "met" => false}])
+
+      # stale epoch → fenced_off (close's exact fence)
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: 999})
+
+      r1 =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&evidence=e", body)
+
+      assert r1.status == 409
+      assert Jason.decode!(r1.resp_body)["reason"] == "fenced_off"
+
+      # non-holder → not_holder
+      body2 = Jason.encode!(%{worker_id: "intruder", observed_epoch: 1})
+
+      r2 =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&evidence=e", body2)
+
+      assert r2.status == 409
+      assert Jason.decode!(r2.resp_body)["reason"] == "not_holder"
+    end
+  end
+
   describe "criteria_progress surfacing (lvw-t6 — read & surface, no gate)" do
     defp criteria(list), do: %{"acceptance_criteria" => list}
 

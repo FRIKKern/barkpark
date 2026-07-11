@@ -13,6 +13,7 @@ defmodule Barkpark.Tasks.Close do
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
       caller_stamp: 1,
+      merge_criteria: 2,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -164,7 +165,10 @@ defmodule Barkpark.Tasks.Close do
 
   # "Edited-under-you becomes a 409, never a silent close." When the caller did
   # NOT pin an explicit observed_rev AND the claim carries a work_digest, the
-  # doc's current work-defining fields (title/description/acceptance_criteria)
+  # doc's current work-defining fields (title/description/acceptance_criteria —
+  # for criteria, only each entry's `criterion` TEXT is work-defining; the
+  # met/evidence/attempts progress subfields a mid-claim `stamp` writes are
+  # excluded by WorkDigest D5, so a worker's own stamps never fence its close)
   # are re-digested inside this close txn and compared to the claim-time stamp.
   # Drift → {:error, {:doc_changed_since_claim, current_rev, changed_fields}} so
   # the worker re-reads the changed brief before closing against stale
@@ -265,37 +269,10 @@ defmodule Barkpark.Tasks.Close do
     end
   end
 
-  # Applies `[%{"index" => i, "met" => bool, "evidence" => str, "criterion" =>
-  # guard}]` updates onto content["acceptance_criteria"]. `met` defaults to
-  # true (close-time semantics: you are proving the expectation); `evidence`
-  # is written only when a non-empty string; the stored `criterion` text is
-  # never touched. The optional `criterion` guard is a CAS at criteria grain:
-  # when given, it must equal the stored text at that index or the close
-  # aborts with :criteria_mismatch (the caller's view of the list is stale —
-  # e.g. rows were reordered/edited since the claim-time read).
-  defp merge_criteria(content, []), do: {:ok, content}
-
-  defp merge_criteria(content, updates) when is_list(updates) do
-    existing =
-      case Map.get(content, "acceptance_criteria") do
-        list when is_list(list) -> list
-        _ -> []
-      end
-
-    updates
-    |> Enum.reduce_while({:ok, existing}, fn update, {:ok, acc} ->
-      case apply_criteria_update(acc, update) do
-        {:ok, next} -> {:cont, {:ok, next}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, merged} -> {:ok, Map.put(content, "acceptance_criteria", merged)}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp merge_criteria(_content, _other), do: {:error, :invalid_criteria}
+  # merge_criteria/2 (the `[%{"index" => i, "met" => bool, "evidence" => str,
+  # "criterion" => guard}]` close-out merge) moved to `Tasks.Internal` — ONE
+  # definition shared with `Tasks.Stamp`, so mid-claim stamps and close-time
+  # flips cannot drift. Imported above.
 
   # Land digest merge. UNION into any existing digest so a re-close or a CI
   # backfill accumulates rather than clobbers. A nil/empty/malformed payload
@@ -330,39 +307,6 @@ defmodule Barkpark.Tasks.Close do
   rescue
     ArgumentError -> :__missing__
   end
-
-  defp apply_criteria_update(list, %{"index" => index} = update)
-       when is_integer(index) and index >= 0 do
-    case Enum.at(list, index) do
-      %{} = entry ->
-        guard = Map.get(update, "criterion")
-
-        if is_binary(guard) and guard != Map.get(entry, "criterion") do
-          {:error, :criteria_mismatch}
-        else
-          met = Map.get(update, "met", true)
-
-          if is_boolean(met) do
-            entry = Map.put(entry, "met", met)
-
-            entry =
-              case Map.get(update, "evidence") do
-                e when is_binary(e) and e != "" -> Map.put(entry, "evidence", e)
-                _ -> entry
-              end
-
-            {:ok, List.replace_at(list, index, entry)}
-          else
-            {:error, :invalid_criteria}
-          end
-        end
-
-      _ ->
-        {:error, :criteria_index_out_of_range}
-    end
-  end
-
-  defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
 
   # After a task flips to `done`, walk every inbound `blocks` edge and flip the
   # dependent's lifecycle_status "blocked"→"open" IFF every one of ITS blockers

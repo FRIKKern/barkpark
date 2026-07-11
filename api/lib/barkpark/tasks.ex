@@ -88,6 +88,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
+  alias Barkpark.Tasks.Stamp
   alias Barkpark.Tasks.Validation
 
   # W7-04 mutation_events kinds. Routed into the existing `mutation` text column
@@ -107,6 +108,11 @@ defmodule Barkpark.Tasks do
   # move_by_id/2 (the `POST /v1/tasks/:doc_id/move` path); the event's document
   # map carries `%{"reparented" => %{"from" => <old>, "to" => <new>}}`.
   @event_task_reparented "task.reparented"
+  # expressive-agent-loops D8: criterion-level mid-claim stamp. Emitted on BOTH
+  # stamp paths (`--met` and `--miss`) via stamp/3 (the
+  # `POST /v1/tasks/:doc_id/stamp` path); the event's document map carries
+  # `%{"criterion_stamp" => %{"index" => i, "result" => "met"|"miss", "worker" => w}}`.
+  @event_task_criterion "task.criterion"
 
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
@@ -472,6 +478,26 @@ defmodule Barkpark.Tasks do
   defdelegate release(task_id, worker_id, opts \\ []), to: Release
 
   @doc """
+  Stamp ONE acceptance criterion mid-claim (expressive-agent-loops D3/D8) —
+  progress, not the seal (close still validates the full set). Holder-only +
+  close's exact epoch fence, close-family advisory lock, rev-CAS'd write,
+  `task.criterion` mutation_event in the same transaction.
+
+      Tasks.stamp(task_uuid, "agent-1",
+        observed_epoch: 3, criterion: 0, outcome: {:met, "gate green: 42 tests"})
+
+      Tasks.stamp(task_uuid, "agent-1",
+        observed_epoch: 3, criterion: 1, outcome: {:miss, "flaky under sandbox"})
+
+  `{:met, evidence}` REQUIRES non-empty evidence; `{:miss, note}` appends the
+  attempt (bounded, 5 most recent) and never flips `met`. Errors: `:not_found`,
+  `{:not_in_progress, status}`, `:not_holder`, `:fenced_off`, `:stale_claim`,
+  `:criteria_index_out_of_range`, `:evidence_required`, `:note_required`,
+  `:invalid_criteria`. See `Barkpark.Tasks.Stamp`.
+  """
+  defdelegate stamp(task_id, worker_id, opts \\ []), to: Stamp
+
+  @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
   CAS-on-rev guarded, emitting a `task.relabeled` mutation_event. Powers the
   `bp task` labels endpoint (`POST /v1/tasks/:doc_id/labels`) — historically the
@@ -566,7 +592,8 @@ defmodule Barkpark.Tasks do
           mutated: String.t(),
           relabeled: String.t(),
           referenced: String.t(),
-          reparented: String.t()
+          reparented: String.t(),
+          criterion: String.t()
         }
   def event_kinds do
     %{
@@ -575,7 +602,8 @@ defmodule Barkpark.Tasks do
       mutated: @event_task_mutated,
       relabeled: @event_task_relabeled,
       referenced: @event_task_referenced,
-      reparented: @event_task_reparented
+      reparented: @event_task_reparented,
+      criterion: @event_task_criterion
     }
   end
 end

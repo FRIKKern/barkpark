@@ -37,10 +37,12 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
-    * `cli_commands/0` — the eight `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
-      `claim`, `close`, `next`, `move`) the `/v1/capabilities` manifest exposes. Five
+    * `cli_commands/0` — the nine `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
+      `claim`, `close`, `stamp`, `next`, `move`) the `/v1/capabilities` manifest
+      exposes. Five
       moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry;
-      `next` (the queue-based atomic claim) was added later. `task` is no
+      `next` (the queue-based atomic claim) and `stamp` (criterion-level
+      mid-claim evidence) were added later. `task` is no
       longer a core noun: the capabilities controller now derives
       `source: "plugin:tasks"` provenance for these commands. The content-graph
       read verbs (`graph` / `graph-orphans` / `graph-dangling`) are NOT here —
@@ -311,8 +313,8 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   @doc """
-  The eleven `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
-  byte-identical, order-preserving — the `scope "/v1/tasks"` block this replaces
+  The `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
+  order-preserving — the `scope "/v1/tasks"` block this replaces
   in `router.ex`
   (C4-3b). Every spec carries `auth: :token_root`, so the dormant host-level
   `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)` wrapper
@@ -339,6 +341,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/claim", BarkparkWeb.TasksController, :claim_by_id,
        auth: :token_root},
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
+      {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
@@ -366,7 +369,7 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Eight verbs over eight routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Nine verbs over nine routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
   not document mutations):
 
@@ -375,6 +378,8 @@ defmodule Barkpark.Plugins.Tasks do
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
+    * `stamp` — `POST /v1/tasks/:doc_id/stamp` (criterion-level mid-claim
+      evidence, expressive-agent-loops D8). WRITES, minimal receipt.
     * `next` — `POST /v1/tasks/claim` (queue-based: atomically hand me the next
       ready task in priority order). WRITES, minimal receipt. Returns
       `{"ok":false,"reason":"no_ready"}` with HTTP 200 when the queue is empty —
@@ -565,6 +570,70 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "The rail_rev (rail ETag) you last observed for this task's parent rail. When it differs from the current rail_rev the response carries a rail_changed notice — advisory, never a gate."
+          }
+        ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.stamp",
+        noun: "task",
+        verb: "stamp",
+        summary:
+          "Stamp ONE acceptance criterion mid-claim: --criterion N with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to stamp."
+          },
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity that holds the claim (holder-only)."
+          },
+          %{
+            name: "observed_epoch",
+            required: true,
+            type: "int",
+            summary: "Claim epoch returned at claim time (same fence as close)."
+          }
+        ],
+        flags: [
+          %{
+            name: "criterion",
+            type: "int",
+            summary: "Zero-based index into acceptance_criteria — the criterion to stamp."
+          },
+          %{
+            name: "met",
+            type: "bool",
+            summary: "Mark the criterion met. Requires non-empty --evidence."
+          },
+          %{
+            name: "evidence",
+            type: "string",
+            summary:
+              "Concrete proof for --met (gate output, test names, PR) — required, non-empty."
+          },
+          %{
+            name: "miss",
+            type: "bool",
+            summary:
+              "Record an honest failed attempt. Appends {note,ts,worker} to the criterion's attempts (5 most recent kept); met never flips."
+          },
+          %{
+            name: "note",
+            type: "string",
+            summary: "What was tried and why it missed — required with --miss, non-empty."
           }
         ],
         writes: true,

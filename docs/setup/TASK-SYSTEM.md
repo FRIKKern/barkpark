@@ -8,10 +8,10 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the sam
 | Surface | What |
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system), soft validations, `dependencies`/`claim` read-only. Live **Projects board** at `/admin/projects` (below). |
-| **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / close / move` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
+| **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / stamp / close / move` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
 | **Terminal TUI** | `c`/`x` claim/close the highlighted task (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys `/` search, `n` new, `y` duplicate, `D`×2 delete. |
-| **HTTP API** | Twelve bearer-token endpoints under `/v1/tasks/*` (read tier): list, ready-queue, prime, queue/targeted claim, close, move, fetch-with-children, edges, labels, paper links. |
-| **Events** | Every task op emits a `mutation_events` row — `task.{claimed,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}` — SSE at `/v1/data/listen/:dataset`. |
+| **HTTP API** | Thirteen bearer-token endpoints under `/v1/tasks/*` (read tier): list, ready, prime, claim (queue/targeted), close, stamp, move, fetch, edges, labels, papers. |
+| **Events** | Every task op emits a `mutation_events` row — `task.{claimed,criterion,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}` — SSE at `/v1/data/listen/:dataset`. |
 
 Lifecycle states: `open · in_progress · blocked · done · cancelled`.
 
@@ -51,23 +51,20 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix note:** `create` lands as a draft (`drafts.t1`), but the task endpoints resolve bare `t1` automatically — use either (an exact published `t1` wins if both exist). Task lifecycle is independent of draft/publish; publishing is optional.
+> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (an exact published `t1` wins). Lifecycle is independent of draft/publish; publishing optional.
 
-**4. The claim → work → close loop.** Pick a stable `worker_id` per agent.
+**4. The claim → stamp → close loop.** Pick a stable `worker_id` per agent.
 
 ```bash
 # Queue claim: atomically take the NEXT ready task (priority ASC, then oldest)
 bp task next agent-1                # prints the claimed doc_id + epoch; no_ready on empty queue
-curl -X POST $API/v1/tasks/claim \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"worker_id":"agent-1"}'
-# → {"ok":true,"doc":{...,"claim":{"worker":"agent-1","ts_iso":"…","epoch":1}}}
-# → {"ok":false,"reason":"no_ready"} when empty
 
 # Targeted claim: name the row
 bp task claim t1 agent-1            # <doc_id> <worker_id>
 
-# ... do the work ...
+# Mid-claim: stamp ONE criterion — proven or honestly missed
+bp task stamp t1 agent-1 1 --criterion 0 --met --evidence "gate green"
+bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
 
 # Close: CAS on the fencing epoch handed at claim
 bp task close t1 agent-1 1          # <doc_id> <worker> <epoch> [status] [reason]
@@ -79,7 +76,8 @@ bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"P
 The contract, precisely:
 
 - **Claim** flips `lifecycle_status` to `in_progress` + stamps `content.claim = {worker, ts_iso, epoch}`; the epoch bumps on every claim (race loss → 409 `stale_claim`).
-- **Close** requires `worker_id` + `observed_epoch` (mismatch → 409 `fenced_off`). Body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` (rev-CAS; index/text mismatch → 409). Unmet criteria warn, never gate. Default fence: a claim-time **work digest** over title/description/criteria — a brief edited under your claim → 409 `doc_changed_since_claim`; re-read/retry or pass `observed_rev`. Self-edits (`code_refs`, `labels`) never trip it.
+- **Stamp (mid-claim)** — `POST /v1/tasks/:id/stamp`, holder-only + close's epoch fence. `--met` REQUIRES non-empty `--evidence`; `--miss` appends `{note,ts,worker}` to the criterion's `attempts` (5 kept) without flipping `met`. Emits `task.criterion`; stamps never trip the work-digest fence below.
+- **Close** requires `worker_id` + `observed_epoch` (mismatch → 409 `fenced_off`). Body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` (rev-CAS; index/text mismatch → 409). Unmet criteria warn, never gate. Default fence: a claim-time **work digest** (title/description/criterion text) — a brief edited under your claim → 409 `doc_changed_since_claim`; re-read/retry or pass `observed_rev`. Self-edits (`code_refs`, `labels`, criteria progress) never trip it.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **2700**, env-tunable), emitting `task.lease_expired` (reap keeps `content.assignee`). Finish or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
 - **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` over `acceptance_criteria` — only `met:true` counts; omitted when absent (never `0/0`). A `done` close with unmet criteria warns but still commits.
@@ -98,7 +96,7 @@ curl $API/v1/tasks/drafts.t2/edges -H "Authorization: Bearer $TOKEN"   # ?kind=a
 curl -X POST $API/v1/tasks/drafts.t1/labels -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{"add":["sprint-3"],"remove":[]}'
 
-# Link a paper (Bulldocs doc) to a task — design notes travel with the work
+# Link a paper to a task — design notes travel with the work
 curl -X POST $API/v1/tasks/drafts.t1/papers -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{"add":["design-notes"]}'
 ```
@@ -114,7 +112,7 @@ curl "$API/v1/tasks?parent=drafts.g1" -H "Authorization: Bearer $TOKEN"   # a go
 
 Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit` (index default 1000; `ready` and the bp verbs default 50).
 
-**7. Watch the stream.** Subscribe to `/v1/data/listen/:dataset` (SSE) and react to `task.claimed`, `task.closed`, `task.lease_expired`, etc. — no polling.
+**7. Watch the stream.** Subscribe to `/v1/data/listen/:dataset` (SSE) and react to `task.claimed`, `task.criterion`, `task.closed`, etc. — no polling.
 
 ## Task ↔ code linkage
 
@@ -133,13 +131,13 @@ Leave a field **absent** when unknown, never fabricate a ref.
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its Barkpark task. `bp cmux install --print` shows the four Claude Code hooks (SessionStart · PreToolUse · Stop · SessionEnd, each running `bp cmux hook <event>`) plus the worker-id shell line, writing nothing; `bp cmux install --merge --yes` folds them into `~/.claude/settings.json` additively — deduped, a timestamped backup first, foreign hook groups never touched. The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one fencing lease: with `BARKPARK_TASK=<doc_id>` set, **SessionStart** claims it (re-claim = renewal), **PreToolUse** renews ≤1/60s bumping the epoch, and **Stop**/**SessionEnd** close it IFF every acceptance criterion is met (met-flips on a published task need a re-publish to count) — else honestly LEAVE it claimed to resume. Fail-safe is never fail-invisible: every hook exits 0 with empty stdout, so a dead server can't harm the agent — it stamps a breadcrumb (OS user-config dir) that `bp cmux status` surfaces; auth lives in `~/.config/barkpark/`. There is no `bp cmux uninstall` verb — remove the four `bp cmux hook` groups from `~/.claude/settings.json` by hand; the `--merge` backup is your undo.
+A cmux pane can auto-own its Barkpark task. `bp cmux install --print` shows the four `bp cmux hook <event>` Claude Code hooks (SessionStart · PreToolUse · Stop · SessionEnd) plus the worker-id shell line, writing nothing; `bp cmux install --merge --yes` folds them into `~/.claude/settings.json` additively — deduped, timestamped backup first, foreign hook groups untouched. The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one fencing lease: with `BARKPARK_TASK=<doc_id>` set, **SessionStart** claims it (re-claim = renewal), **PreToolUse** renews ≤1/60s bumping the epoch, and **Stop**/**SessionEnd** close it IFF every acceptance criterion is met (met-flips on a published task need a re-publish to count) — else honestly LEAVE it claimed to resume. Fail-safe, never fail-invisible: every hook exits 0 with empty stdout (a dead server can't harm the agent) and stamps a breadcrumb (OS user-config dir) that `bp cmux status` surfaces; auth lives in `~/.config/barkpark/`. No uninstall verb — remove the four hook groups from `~/.claude/settings.json` by hand; the `--merge` backup is your undo.
 
 ## Working with your AI in Studio
 
 Open `/studio` → the **Tasks ✅** group. You (form) flip `lifecycle_status`, set `priority`/`assignee`, edit titles/descriptions; the agent (API) claims/closes with fencing, adds edges, relabels, links papers. The terminal TUI edits flat fields with `c`/`x` claim/close; composite fields like `acceptance_criteria` are Studio/API-only, and `dependencies`/`claim` stay read-only — the API is the single writer for structured values. Updates are live via PubSub.
 
-The live board at **`/admin/projects`** (`:ops` admin-gated) is a kanban over the same docs: five columns — open · ready · in_progress · blocked · done (cancelled folded to a tally) — that move in realtime; a claim/close flashes and slides the card, no refresh. **Drag** to restage through the same fenced `claim`/`close` primitives (a foreign-held card refuses the drop; `ready` is derived, not a drop target). **Group** into swimlanes and **filter** by chips, both saved in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
+The live board at **`/admin/projects`** (`:ops` admin-gated) is a kanban over the same docs: five columns — open · ready · in_progress · blocked · done (cancelled folded to a tally) — moving in realtime (a claim/close flashes and slides the card). **Drag** to restage through the same fenced `claim`/`close` primitives (a foreign-held card refuses the drop; `ready` is derived, not a drop target). **Group** into swimlanes and **filter** by chips, both saved in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
 
 ## Goals and phases
 
@@ -147,15 +145,15 @@ Everything is a task. The pattern:
 
 - **Goal** = a root task (no `parent_id`).
 - **Phase / subtask** = a task whose `content.parent_id` is the parent's doc id.
-- **Rail** = a task's chronological children: `GET /v1/tasks?parent=<id>` (oldest first); `GET /v1/tasks/:id` also inlines one level of `children` summaries + `child_count`.
+- **Rail** = a task's chronological children: `GET /v1/tasks?parent=<id>` (oldest first); `GET /v1/tasks/:id` inlines one level of `children` summaries + `child_count`.
 - Scope a worker to one phase: `POST /v1/tasks/claim` `{"worker_id":…,"phase_id":…}`, or `GET /v1/tasks/ready?phase_id=…`.
 
 ### How to organize tasks (the rules — follow these when creating ANY task)
 
 A scattered board is a defect. When you add a task, make it fit the structure:
 
-1. **Every task belongs to a goal.** A task either HAS subtasks or IS one — never a floating orphan. If related tasks lack a parent, create a goal and set their `parent_id` to it; nest that goal under an epic for a bigger mission.
-2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"*. Never name a goal after provenance/process (`loop`, `cleanup`, `misc`) or a label. A shared tag is a facet; the goal states the outcome.
+1. **Every task belongs to a goal.** A task either HAS subtasks or IS one — never a floating orphan. If related tasks lack a parent, create a goal and set their `parent_id` to it; nest goals under epics.
+2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"*. Never name one after provenance/process (`loop`, `cleanup`, `misc`) or a label — a tag is a facet; the goal states the outcome.
 3. **Combine tasks with the same goal beneath each other** — group by ancestry first; the parent tree is the spine.
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, and flags `needs-human`/`decision`/`security` where they gate the work.
 5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. Decisions and goals may omit them.
@@ -179,8 +177,8 @@ Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio` and scoped da
 |---|---|
 | No **Tasks** pane in Studio | Plugin not whitelisted (`BARKPARK_PLUGINS` set without `tasks`) **or** the `task` schema isn't registered in this dataset. Fix env, restart; the schema auto-registers on boot. |
 | `404` on `/v1/tasks/*` | Plugin disabled — routes only mount when the tasks plugin is registered. |
-| `404 task not found` on an id you just created | Rare — the endpoints resolve bare `t1` to `drafts.t1` automatically. Check that the task plugin is enabled and the token has access. |
-| `400 worker_id is required` | Claim/close need `worker_id` — positional via bp (`bp task claim <id> <worker>`), JSON body via curl. |
+| `404 task not found` on an id you just created | Rare — bare `t1` resolves to `drafts.t1` automatically. Check the plugin is enabled and the token has access. |
+| `400 worker_id is required` | Claim/stamp/close need `worker_id` — positional via bp, JSON body via curl. |
 | `409 fenced_off` | Your `observed_epoch` is stale — the lease was swept, **or a blocker/move landed on your claimed task** (L4 fence). Renew with `bp task claim <id> <same-worker>`, then close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
 | `409 doc_changed_since_claim` | The brief was edited under your claim. Re-read (`bp task get <id>`) then close again, or pass `observed_rev` for strict rev fencing. |

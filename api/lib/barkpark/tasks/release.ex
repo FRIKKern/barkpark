@@ -34,6 +34,7 @@ defmodule Barkpark.Tasks.Release do
     only: [
       generate_rev: 0,
       insert_mutation_event!: 5,
+      check_holder: 2,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -102,12 +103,9 @@ defmodule Barkpark.Tasks.Release do
     end
   end
 
-  defp check_holder(%Document{content: content}, worker_id) do
-    case get_in(content, ["claim", "worker"]) do
-      ^worker_id -> :ok
-      _ -> {:error, :not_holder}
-    end
-  end
+  # check_holder/2 → Tasks.Internal (D7 extraction, expressive-agent-loops):
+  # one holder-check definition shared with `Tasks.Stamp` (and future
+  # holder-gated verbs). Semantics unchanged — imported above.
 
   defp check_fencing(%Document{content: content}, observed_epoch) do
     case content do
