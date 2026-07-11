@@ -247,6 +247,7 @@ defmodule Barkpark.Content.TagRegistry do
     Document
     |> where([d], d.type == @tag_type and d.status == "published")
     |> where([d], d.dataset == ^dataset)
+    # global-read: registered type:tag vocabulary is deliberately workspace-OR-global (charter D3 — global codelist tags are shared; the E3 publish gate must accept both), so the fail-open _including_global family is the intended read here.
     |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
   end
 
@@ -281,6 +282,7 @@ defmodule Barkpark.Content.TagRegistry do
     Document
     |> where([d], d.type == @tag_type and d.dataset == ^dataset)
     |> where([d], d.doc_id in ^both_variants)
+    # global-read: registered type:tag vocabulary is deliberately workspace-OR-global (charter D3 — global codelist tags are shared; the E3 publish gate must accept both), so the fail-open _including_global family is the intended read here.
     |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
     |> select([d], d.doc_id)
     |> Repo.all()

@@ -121,3 +121,9 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/s
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:837,7FCC742
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1144,E7AF58
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark_web/studio/claude_chat.ex:1043,F22D3
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:401,170CAD4
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:306,38A8F71
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:385,4CC55DF
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:270,5559365
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:455,75FFD53
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1985,774D4D2
