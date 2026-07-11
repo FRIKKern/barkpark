@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,7 +33,7 @@ func TestOnrampWriteCreatesFile(t *testing.T) {
 	dir := t.TempDir()
 	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("create merge: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestOnrampWriteCreatesFile(t *testing.T) {
 	}
 
 	// Idempotent: a second run is 'unchanged' and leaves the bytes untouched.
-	act2, err := mergeOnrampFile(f, false)
+	act2, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("second merge: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestOnrampWriteSkipAndForce(t *testing.T) {
 	f := serverMapFileAt(t, "cursor", dir, "mcp.json")
 
 	// No --force: a differing barkpark entry is skipped and the file is UNTOUCHED.
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("skip merge: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestOnrampWriteSkipAndForce(t *testing.T) {
 	}
 
 	// --force: barkpark is overwritten; foreign server + unrelated key survive.
-	act, err = mergeOnrampFile(f, true)
+	act, err = mergeOnrampFile(f, true, false)
 	if err != nil {
 		t.Fatalf("force merge: %v", err)
 	}
@@ -151,7 +152,7 @@ func TestOnrampWriteAddsAbsentKey(t *testing.T) {
 	}
 	f := serverMapFileAt(t, "cursor", dir, "mcp.json")
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestOnrampWriteServersShape(t *testing.T) {
 	}
 
 	f := serversFile(path, stanza)
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("servers merge: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestOnrampWriteServersShape(t *testing.T) {
 	}
 
 	// Idempotent re-run.
-	act, err = mergeOnrampFile(f, false)
+	act, err = mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("servers re-run: %v", err)
 	}
@@ -266,7 +267,7 @@ func TestOnrampWriteFlatCursorCloud(t *testing.T) {
 	}
 	flat.Path = filepath.Join(dir, "environment.json")
 
-	act, err := mergeOnrampFile(flat, false)
+	act, err := mergeOnrampFile(flat, false, false)
 	if err != nil {
 		t.Fatalf("flat create: %v", err)
 	}
@@ -276,7 +277,7 @@ func TestOnrampWriteFlatCursorCloud(t *testing.T) {
 	if !bytes.Contains(mustRead(t, flat.Path), []byte("install")) {
 		t.Errorf("environment.json missing the install key")
 	}
-	act, err = mergeOnrampFile(flat, false)
+	act, err = mergeOnrampFile(flat, false, false)
 	if err != nil {
 		t.Fatalf("flat re-run: %v", err)
 	}
@@ -285,22 +286,357 @@ func TestOnrampWriteFlatCursorCloud(t *testing.T) {
 	}
 }
 
-// TestOnrampWriteCodexSkipped: codex's TOML config is reported skipped (wave 3),
-// never written — and no *.toml file is created anywhere.
-func TestOnrampWriteCodexSkipped(t *testing.T) {
+// codexSandbox sandboxes HOME AND the cwd into a fresh temp dir (test law:
+// HOME-only sandboxing does not isolate cwd-relative targets — live-proven),
+// then returns codex's toml onrampFile plus the resolved ~/.codex/config.toml
+// path. It also pins the merge metadata tomlFile stamps. Read any testdata
+// fixture BEFORE calling this — the chdir breaks relative testdata/ paths.
+func codexSandbox(t *testing.T) (onrampFile, string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Chdir(dir)
 	spec, ok := buildOnrampSpec("codex", guerrilla, "")
 	if !ok {
 		t.Fatal("codex spec not ok")
 	}
-	act, err := mergeOnrampFile(spec.Files[0], false)
+	f := spec.Files[0]
+	if f.MergeKind != mergeTOML || f.TopKey != "mcp_servers" || f.ServerKey != "barkpark" {
+		t.Fatalf("codex merge metadata = {%q %q %q}, want {toml mcp_servers barkpark}", f.MergeKind, f.TopKey, f.ServerKey)
+	}
+	return f, filepath.Join(dir, ".codex", "config.toml")
+}
+
+// TestOnrampWriteCodexCreatesFile is the wave-2 TestOnrampWriteCodexSkipped
+// INVERTED: codex's config.toml is no longer 'skipped — wave 3'. An absent
+// ~/.codex/config.toml is created byte-identical to the printed codexTOMLBlock
+// (+ trailing newline), mode 0644, and a re-run reports 'unchanged' with the
+// bytes untouched.
+func TestOnrampWriteCodexCreatesFile(t *testing.T) {
+	f, path := codexSandbox(t)
+
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
-		t.Fatalf("codex merge: %v", err)
+		t.Fatalf("codex create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("codex action = %q (note %q), want created", act.Action, act.Note)
+	}
+	if bytes.Contains([]byte(act.Note), []byte("wave 3")) {
+		t.Errorf("codex write still carries the wave-3 skip note: %q", act.Note)
+	}
+	got := mustRead(t, path)
+	if !bytes.Equal(got, withTrailingNewline([]byte(codexTOMLBlock(guerrilla)))) {
+		t.Errorf("created config.toml is not byte-identical to codexTOMLBlock.\n--- got ---\n%s", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("file mode = %v, want 0644", info.Mode().Perm())
+	}
+
+	act, err = mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("codex re-run: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("re-run action = %q, want unchanged", act.Action)
+	}
+	if !bytes.Equal(got, mustRead(t, path)) {
+		t.Errorf("idempotent re-run changed the file bytes")
+	}
+}
+
+// TestOnrampWriteCodexAppendsToForeign: a lived-in config.toml WITHOUT a
+// barkpark span gets the canonical stanza APPENDED with a blank-line separator
+// ('updated'), every existing byte preserved verbatim.
+func TestOnrampWriteCodexAppendsToForeign(t *testing.T) {
+	f, path := codexSandbox(t)
+	existing := "model = \"gpt-5.3-codex\"\n\n[mcp_servers.other] # a foreign server\nurl = \"https://mcp.example.com/mcp\"\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (span absent)", act.Action)
+	}
+	want := existing + "\n" + codexTOMLBlock(guerrilla) + "\n"
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("append is not existing + blank line + stanza.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// codexFixtureStaleSpan is the differing [mcp_servers.barkpark] span carried by
+// testdata/onramp_config_foreign.toml — codexTOMLBlock with a STALE server URL.
+const codexFixtureStaleSpan = `[mcp_servers.barkpark]
+command = "bp"
+args = ["mcp", "serve"]
+env = { BARKPARK_API_URL = "https://STALE.example.old" }
+env_vars = ["BARKPARK_API_TOKEN"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120`
+
+// TestOnrampWriteCodexSkipAndForce drives the deny path and the whole-span
+// replace on the foreign fixture: a differing barkpark span is 'skipped'
+// without --force (file byte-untouched, note carries the --force hint
+// onrampAnySkipped greps), and --force replaces EXACTLY the owned span — the
+// url-shaped [mcp_servers.other] neighbor, [profiles.work], and the comments
+// before/after the span survive byte-for-byte.
+func TestOnrampWriteCodexSkipAndForce(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/onramp_config_foreign.toml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	f, path := codexSandbox(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("skip merge: %v", err)
 	}
 	if act.Action != "skipped" {
-		t.Fatalf("codex action = %q, want skipped", act.Action)
+		t.Fatalf("action = %q, want skipped", act.Action)
 	}
-	if !bytes.Contains([]byte(act.Note), []byte("wave 3")) {
-		t.Errorf("codex skip note should name wave 3, got %q", act.Note)
+	if !onrampAnySkipped([]onrampAction{act}) {
+		t.Errorf("skip note must carry the --force hint onrampAnySkipped greps, got %q", act.Note)
+	}
+	if !bytes.Equal(fixture, mustRead(t, path)) {
+		t.Errorf("skipped write must not touch the file at all")
+	}
+
+	act, err = mergeOnrampFile(f, true, false)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	want := strings.Replace(string(fixture), codexFixtureStaleSpan, codexTOMLBlock(guerrilla), 1)
+	if want == string(fixture) {
+		t.Fatal("fixture drift: codexFixtureStaleSpan not found in testdata/onramp_config_foreign.toml")
+	}
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("force write must replace ONLY the owned span, byte-exact.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestOnrampWriteCodexSubTableStanza pins the D11 kill-switch: real
+// `codex mcp add` (codex-cli 0.144.1, live-captured; openai/codex@5c19155c)
+// writes env as a NESTED [mcp_servers.barkpark.env] sub-table with alpha-sorted
+// keys. That is a DIFFERING stanza — skipped without --force, NEVER an error —
+// and --force replaces the WHOLE span (header table + every
+// [mcp_servers.barkpark.*] continuation) with the canonical flat stanza.
+func TestOnrampWriteCodexSubTableStanza(t *testing.T) {
+	f, path := codexSandbox(t)
+	existing := `[mcp_servers.barkpark]
+command = "bp"
+args = ["mcp", "serve"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120
+
+[mcp_servers.barkpark.env]
+BARKPARK_API_URL = "https://guerrilla.barkpark.cloud"
+
+[profiles.work]
+model = "gpt-5.3-codex"
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("sub-table stanza must be a DIFFERING stanza, never an error: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped", act.Action)
+	}
+	if !onrampAnySkipped([]onrampAction{act}) {
+		t.Errorf("skip note must carry the --force hint, got %q", act.Note)
+	}
+	if got := mustRead(t, path); string(got) != existing {
+		t.Errorf("skipped write must not touch the file")
+	}
+
+	act, err = mergeOnrampFile(f, true, false)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	want := codexTOMLBlock(guerrilla) + "\n\n[profiles.work]\nmodel = \"gpt-5.3-codex\"\n"
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("force must replace header table + env sub-table with the flat stanza.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestOnrampWriteCodexDenyForms: the stanza forms a textual splice cannot own —
+// root dotted-key, root inline-table, and barkpark inline under a bare
+// [mcp_servers] header — error LOUDLY with or without --force, and the file is
+// byte-untouched (charter D11).
+func TestOnrampWriteCodexDenyForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"root dotted-key", "mcp_servers.barkpark.command = \"bp\"\nmcp_servers.barkpark.args = [\"mcp\", \"serve\"]\n"},
+		{"root inline-table", "mcp_servers.barkpark = { command = \"bp\", args = [\"mcp\", \"serve\"] }\n"},
+		{"inline under bare header", "[mcp_servers]\nbarkpark = { command = \"bp\", args = [\"mcp\", \"serve\"] }\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, path := codexSandbox(t)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, force := range []bool{false, true} {
+				if _, err := mergeOnrampFile(f, force, false); err == nil {
+					t.Errorf("force=%v: %s must error loudly, got nil", force, tc.name)
+				}
+				if got := mustRead(t, path); string(got) != tc.content {
+					t.Errorf("force=%v: deny path must leave the file byte-untouched", force)
+				}
+			}
+		})
+	}
+}
+
+// TestOnrampWriteCodexHeaderComment: a trailing `# comment` after the header's
+// closing bracket must not break span detection (charter D11: match on the
+// header TOKEN) — the span is found and reported as differing, never treated as
+// absent and appended twice.
+func TestOnrampWriteCodexHeaderComment(t *testing.T) {
+	f, path := codexSandbox(t)
+	existing := "[mcp_servers.barkpark] # managed by bp\ncommand = \"bp\"\nargs = [\"mcp\", \"serve\"]\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped (span FOUND via its token, differing) — 'updated' means the commented header was missed and the stanza appended", act.Action)
+	}
+	if got := mustRead(t, path); string(got) != existing {
+		t.Errorf("skipped write must not touch the file")
+	}
+}
+
+// TestOnrampWriteCodexCRLF: a CRLF config.toml round-trips — a canonical stanza
+// in CRLF form reads 'unchanged', and a --force replace keeps the whole file
+// CRLF with every foreign byte surviving.
+func TestOnrampWriteCodexCRLF(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/onramp_config_foreign.toml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	f, path := codexSandbox(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical stanza, CRLF convention → unchanged, untouched.
+	crlfCanonical := strings.ReplaceAll(codexTOMLBlock(guerrilla)+"\n", "\n", "\r\n")
+	if err := os.WriteFile(path, []byte(crlfCanonical), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("crlf unchanged merge: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("crlf canonical action = %q, want unchanged", act.Action)
+	}
+	if got := mustRead(t, path); string(got) != crlfCanonical {
+		t.Errorf("unchanged must not rewrite the CRLF file")
+	}
+
+	// Differing span in a CRLF file → force replaces it and the file stays CRLF.
+	crlfFixture := strings.ReplaceAll(string(fixture), "\n", "\r\n")
+	if err := os.WriteFile(path, []byte(crlfFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err = mergeOnrampFile(f, true, false)
+	if err != nil {
+		t.Fatalf("crlf force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("crlf force action = %q, want updated", act.Action)
+	}
+	got := string(mustRead(t, path))
+	if strings.Contains(strings.ReplaceAll(got, "\r\n", ""), "\n") {
+		t.Errorf("force write introduced a lone LF into a CRLF file")
+	}
+	wantLF := strings.Replace(string(fixture), codexFixtureStaleSpan, codexTOMLBlock(guerrilla), 1)
+	if got != strings.ReplaceAll(wantLF, "\n", "\r\n") {
+		t.Errorf("crlf force result drifted.\n--- got ---\n%q", got)
+	}
+}
+
+// TestOnrampWriteCodexNoFinalNewline: a config.toml without a final newline
+// round-trips — a canonical stanza reads 'unchanged', and an append first
+// completes the last line, then separates with a blank line.
+func TestOnrampWriteCodexNoFinalNewline(t *testing.T) {
+	f, path := codexSandbox(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical stanza, no final newline → unchanged, untouched.
+	if err := os.WriteFile(path, []byte(codexTOMLBlock(guerrilla)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("no-final-newline unchanged merge: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("action = %q, want unchanged", act.Action)
+	}
+	if got := mustRead(t, path); string(got) != codexTOMLBlock(guerrilla) {
+		t.Errorf("unchanged must not rewrite the newline-less file")
+	}
+
+	// Foreign content, no final newline → appended with the separator.
+	if err := os.WriteFile(path, []byte(`model = "gpt-5.3-codex"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err = mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated", act.Action)
+	}
+	want := "model = \"gpt-5.3-codex\"\n\n" + codexTOMLBlock(guerrilla) + "\n"
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("append into a newline-less file drifted.\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 
@@ -314,7 +650,7 @@ func TestOnrampWriteJSONReport(t *testing.T) {
 	var so, se bytes.Buffer
 	w := newWriter(&so, &se)
 	w.output = "json"
-	if code := runOnrampWrite(w, spec, false); code != exitOK {
+	if code := runOnrampWrite(w, spec, false, false); code != exitOK {
 		t.Fatalf("write exit = %d, want %d; stderr=%s", code, exitOK, se.String())
 	}
 	var got onrampWriteResult
@@ -341,7 +677,7 @@ func TestOnrampWriteHumanReport(t *testing.T) {
 
 	var so, se bytes.Buffer
 	w := newWriter(&so, &se)
-	if code := runOnrampWrite(w, spec, false); code != exitOK {
+	if code := runOnrampWrite(w, spec, false, false); code != exitOK {
 		t.Fatalf("exit = %d", code)
 	}
 	out := so.String()
@@ -364,7 +700,7 @@ func TestOnrampWriteZedCreatesAndIdempotent(t *testing.T) {
 		t.Fatalf("zed merge TopKey = %q, want context_servers", f.TopKey)
 	}
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("create merge: %v", err)
 	}
@@ -375,7 +711,7 @@ func TestOnrampWriteZedCreatesAndIdempotent(t *testing.T) {
 		t.Errorf("created settings.json not byte-identical to the printed stanza.\n--- got ---\n%s", mustRead(t, f.Path))
 	}
 
-	act, err = mergeOnrampFile(f, false)
+	act, err = mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("idempotent merge: %v", err)
 	}
@@ -404,7 +740,7 @@ func TestOnrampWriteZedPreservesForeign(t *testing.T) {
 	}
 	f := serverMapFileAt(t, "zed", dir, "settings.json")
 
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -463,7 +799,7 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 
 	// No --force: a differing barkpark entry is skipped and the file is UNTOUCHED.
 	before := mustRead(t, path)
-	act, err := mergeOnrampFile(f, false)
+	act, err := mergeOnrampFile(f, false, false)
 	if err != nil {
 		t.Fatalf("skip merge: %v", err)
 	}
@@ -475,7 +811,7 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 	}
 
 	// --force: the stale entry is overwritten with the fresh flat stanza.
-	act, err = mergeOnrampFile(f, true)
+	act, err = mergeOnrampFile(f, true, false)
 	if err != nil {
 		t.Fatalf("force merge: %v", err)
 	}
@@ -484,6 +820,474 @@ func TestOnrampWriteZedSkipAndForce(t *testing.T) {
 	}
 	if bytes.Contains(mustRead(t, path), []byte("STALE-bp")) {
 		t.Errorf("stale barkpark command survived the force overwrite")
+	}
+}
+
+// agentsMdMergeFile returns the agents-md target's marker-managed ./AGENTS.md
+// onrampFile (path kept cwd-relative — the caller must t.Chdir into a tempdir
+// first, since HOME sandboxing does nothing for a cwd-relative target).
+func agentsMdMergeFile(t *testing.T) onrampFile {
+	t.Helper()
+	spec, ok := buildOnrampSpec("agents-md", guerrilla, "")
+	if !ok {
+		t.Fatal("agents-md spec not ok")
+	}
+	for _, f := range spec.Files {
+		if f.MergeKind == mergeMarkdown {
+			return f
+		}
+	}
+	t.Fatal("agents-md has no markdown file")
+	return onrampFile{}
+}
+
+// TestOnrampWriteAgentsMdCreates: an absent ./AGENTS.md is created byte-identical
+// to the printed marker-managed block (+ trailing newline) and round-trips to
+// 'unchanged', file byte-untouched. Tests cd into a tempdir (the target is
+// cwd-relative) per the write test law.
+func TestOnrampWriteAgentsMdCreates(t *testing.T) {
+	t.Chdir(t.TempDir())
+	f := agentsMdMergeFile(t)
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("action = %q, want created", act.Action)
+	}
+	got := mustRead(t, "AGENTS.md")
+	if !bytes.Equal(got, withTrailingNewline([]byte(f.Content))) {
+		t.Errorf("created AGENTS.md is not byte-identical to the printed block.\n--- got ---\n%s", got)
+	}
+	// It carries both managed markers.
+	for _, marker := range []string{agentsMDMarkerBegin, agentsMDMarkerEnd} {
+		if !bytes.Contains(got, []byte(marker)) {
+			t.Errorf("created block missing marker %q", marker)
+		}
+	}
+
+	// Idempotent: a re-run is 'unchanged' and leaves the bytes untouched.
+	act2, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("second merge: %v", err)
+	}
+	if act2.Action != "unchanged" {
+		t.Errorf("re-run action = %q, want unchanged", act2.Action)
+	}
+	if !bytes.Equal(got, mustRead(t, "AGENTS.md")) {
+		t.Errorf("unchanged re-run changed the file bytes")
+	}
+}
+
+// TestOnrampWriteAgentsMdAppendsWithoutMarkers: a pre-existing AGENTS.md WITHOUT
+// barkpark markers is APPENDED to (updated) — every user byte preserved verbatim
+// and the block lands after it.
+func TestOnrampWriteAgentsMdAppendsWithoutMarkers(t *testing.T) {
+	t.Chdir(t.TempDir())
+	existing := "# My Repo\n\nContributors: run the tests before pushing.\n"
+	if err := os.WriteFile("AGENTS.md", []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (append, no markers)", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+	// User content preserved verbatim as a prefix — never rewritten.
+	if !bytes.HasPrefix(result, []byte(existing)) {
+		t.Errorf("append rewrote the user's existing content.\n--- got ---\n%s", result)
+	}
+	// The canonical block landed after it.
+	if !bytes.Contains(result, []byte(agentsMDMarkerBegin)) || !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("appended block missing.\n--- got ---\n%s", result)
+	}
+
+	// Now that markers exist, a re-run is 'unchanged'.
+	act2, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("re-run: %v", err)
+	}
+	if act2.Action != "unchanged" {
+		t.Errorf("re-run after append = %q, want unchanged", act2.Action)
+	}
+}
+
+// TestOnrampWriteAgentsMdSkipAndForce: an AGENTS.md whose markers wrap a DIFFERENT
+// (stale) block is left byte-untouched without --force (skipped, --force hinted),
+// and with --force the begin→end span is replaced ONLY — surrounding user prose
+// above and below the block survives verbatim.
+func TestOnrampWriteAgentsMdSkipAndForce(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const head = "# My Repo\n\nIntro the humans wrote.\n\n"
+	const tail = "\n\n## Footer\n\nMore human prose below the block.\n"
+	stale := head + agentsMDMarkerBegin + "\n## Task tracking — Barkpark (bp)\n\nSTALE outdated body from an old bp version.\n" + agentsMDMarkerEnd + tail
+	if err := os.WriteFile("AGENTS.md", []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	// No --force: skipped, file byte-untouched, note carries the --force hint.
+	act, err := mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("skip merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped", act.Action)
+	}
+	if !strings.Contains(act.Note, "--force") {
+		t.Errorf("skip note %q must carry the --force hint (onrampAnySkipped greps it)", act.Note)
+	}
+	if !bytes.Equal([]byte(stale), mustRead(t, "AGENTS.md")) {
+		t.Errorf("skipped write must not touch the file at all")
+	}
+
+	// --force: the stale span is replaced with the canonical block; the human head
+	// and tail survive verbatim.
+	act, err = mergeOnrampFile(f, true, false)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	result := mustRead(t, "AGENTS.md")
+	if bytes.Contains(result, []byte("STALE outdated body")) {
+		t.Errorf("stale block body survived the force replace")
+	}
+	if !bytes.HasPrefix(result, []byte(head)) {
+		t.Errorf("human prose above the block was lost.\n--- got ---\n%s", result)
+	}
+	if !bytes.Contains(result, []byte("More human prose below the block.")) {
+		t.Errorf("human prose below the block was lost.\n--- got ---\n%s", result)
+	}
+	if !bytes.Contains(result, []byte(f.Content)) {
+		t.Errorf("canonical block not written on force")
+	}
+	// Re-run is now unchanged.
+	act, err = mergeOnrampFile(f, false, false)
+	if err != nil {
+		t.Fatalf("post-force re-run: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("post-force re-run = %q, want unchanged", act.Action)
+	}
+}
+
+// TestOnrampWriteAgentsMdMalformedSkipped: a file carrying only ONE of the two
+// markers is a broken managed block — skipped for hand repair, never auto-spliced,
+// and its note does NOT dangle a --force hint (force can't safely own it).
+func TestOnrampWriteAgentsMdMalformedSkipped(t *testing.T) {
+	t.Chdir(t.TempDir())
+	broken := "# Repo\n" + agentsMDMarkerBegin + "\n## half-open block, no end marker\n"
+	if err := os.WriteFile("AGENTS.md", []byte(broken), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := agentsMdMergeFile(t)
+
+	for _, force := range []bool{false, true} {
+		act, err := mergeOnrampFile(f, force, false)
+		if err != nil {
+			t.Fatalf("malformed merge (force=%v): %v", force, err)
+		}
+		if act.Action != "skipped" {
+			t.Fatalf("malformed action (force=%v) = %q, want skipped", force, act.Action)
+		}
+		if strings.Contains(act.Note, "--force") {
+			t.Errorf("malformed skip note should not offer --force (it can't repair): %q", act.Note)
+		}
+		if !bytes.Equal([]byte(broken), mustRead(t, "AGENTS.md")) {
+			t.Errorf("malformed skip must not touch the file (force=%v)", force)
+		}
+	}
+}
+
+// runOnrampWriteJSON drives `bp onramp <args...> --write -o json` through the REAL
+// command entry point (runOnramp → buildOnrampSpec → runOnrampWrite) and decodes
+// the structured report. Server is pinned to guerrilla so the emission is
+// deterministic (short-circuits activeSavedServer / disk config). This is the
+// wired-path driver the isolation-only merge tests lack — it exercises the exact
+// arm buildOnrampSpec stamps, catching a dropped merge-metadata helper (the #2129
+// copilot bare-literal regression) that a hand-built onrampFile would mask.
+func runOnrampWriteJSON(t *testing.T, args ...string) onrampWriteResult {
+	t.Helper()
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	full := append(append([]string{}, args...), "--write")
+	if code := runOnramp(w, globals{server: guerrilla}, full); code != exitOK {
+		t.Fatalf("runOnramp %v exit = %d; stderr=%s", full, code, se.String())
+	}
+	var res onrampWriteResult
+	if err := json.Unmarshal(so.Bytes(), &res); err != nil {
+		t.Fatalf("json report did not decode into onrampWriteResult: %v\n%s", err, so.String())
+	}
+	return res
+}
+
+// TestOnrampWriteCopilotWiredPath drives `bp onramp copilot --write` end-to-end
+// through the REAL command (cd'd into a tempdir so the cwd-relative
+// .vscode/mcp.json resolves there, not the repo — HOME sandboxing alone would not
+// isolate it, charter D15). It is the wired-path guard the isolation-only
+// TestOnrampWriteServersShape lacked: the #2129 bare-literal regression made this
+// path a SILENT NO-OP (buildOnrampSpec's copilot arm dropped serversFile, so
+// mergeOnrampFile fell to default and reported skipped, zero files). Here the
+// action must be created — then unchanged on a clean re-run, bytes untouched
+// (charter D14).
+func TestOnrampWriteCopilotWiredPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	res := runOnrampWriteJSON(t, "copilot")
+	if len(res.Actions) != 1 {
+		t.Fatalf("copilot --write actions = %+v, want exactly one", res.Actions)
+	}
+	if got := res.Actions[0].Action; got != "created" {
+		t.Fatalf("copilot --write action = %q, want created (the bare-literal regression reports skipped and writes nothing)", got)
+	}
+	if res.Actions[0].Path != ".vscode/mcp.json" {
+		t.Errorf("action path = %q, want .vscode/mcp.json", res.Actions[0].Path)
+	}
+
+	// The file exists under cwd, byte-identical to the printed copilot stanza.
+	written := mustRead(t, filepath.Join(dir, ".vscode", "mcp.json"))
+	spec, ok := buildOnrampSpec("copilot", guerrilla, "")
+	if !ok {
+		t.Fatal("buildOnrampSpec(copilot) not ok")
+	}
+	if !bytes.Equal(written, withTrailingNewline([]byte(spec.Files[0].Content))) {
+		t.Errorf("written .vscode/mcp.json is not byte-identical to the printed stanza:\n--- got ---\n%s", written)
+	}
+	// Top-level key is `servers` (VS Code's shape), never mcpServers.
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(written, &top); err != nil {
+		t.Fatalf("written file not valid JSON: %v", err)
+	}
+	if _, ok := top["servers"]; !ok {
+		t.Errorf("copilot file missing the top-level servers key")
+	}
+	if _, ok := top["mcpServers"]; ok {
+		t.Errorf("copilot file leaked a sibling mcpServers key — VS Code's shape is servers")
+	}
+
+	// Re-run: unchanged, exit clean, bytes untouched.
+	res = runOnrampWriteJSON(t, "copilot")
+	if got := res.Actions[0].Action; got != "unchanged" {
+		t.Fatalf("copilot re-run action = %q, want unchanged", got)
+	}
+	if !bytes.Equal(written, mustRead(t, filepath.Join(dir, ".vscode", "mcp.json"))) {
+		t.Errorf("idempotent re-run changed the file bytes")
+	}
+}
+
+// TestOnrampWriteCopilotWiredPreservesForeign proves the wired copilot --write
+// merges into an existing .vscode/mcp.json without clobbering it: a foreign server
+// under `servers` and an unrelated top-level key both survive, and barkpark is
+// added (updated, key absent).
+func TestOnrampWriteCopilotWiredPreservesForeign(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.MkdirAll(filepath.Join(dir, ".vscode"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{
+  "inputs": [{"id": "token", "type": "promptString"}],
+  "servers": {
+    "playwright": {"type": "stdio", "command": "npx", "args": ["@playwright/mcp"]}
+  }
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, ".vscode", "mcp.json"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res := runOnrampWriteJSON(t, "copilot")
+	if got := res.Actions[0].Action; got != "updated" {
+		t.Fatalf("copilot merge action = %q, want updated (barkpark absent under servers)", got)
+	}
+
+	result := mustRead(t, filepath.Join(dir, ".vscode", "mcp.json"))
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(result, &top); err != nil {
+		t.Fatalf("result not valid JSON: %v", err)
+	}
+	if _, ok := top["inputs"]; !ok {
+		t.Errorf("foreign top-level \"inputs\" key lost on merge")
+	}
+	servers := map[string]json.RawMessage{}
+	if err := json.Unmarshal(top["servers"], &servers); err != nil {
+		t.Fatalf("servers key not an object: %v", err)
+	}
+	if _, ok := servers["playwright"]; !ok {
+		t.Errorf("foreign playwright server lost when adding barkpark")
+	}
+	if _, ok := servers["barkpark"]; !ok {
+		t.Errorf("barkpark entry not added under servers")
+	}
+}
+
+// TestOnrampWriteDryRunCreatesNothing: `--write --dry-run` on a fresh dir reports
+// 'created' (the exact action a real write would) but leaves NO file on disk — the
+// honest doctor mode the global --dry-run promises (charter D15).
+func TestOnrampWriteDryRunCreatesNothing(t *testing.T) {
+	dir := t.TempDir()
+	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
+
+	act, err := mergeOnrampFile(f, false, true)
+	if err != nil {
+		t.Fatalf("dry-run create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("dry-run action = %q, want created", act.Action)
+	}
+	if _, err := os.Stat(f.Path); !os.IsNotExist(err) {
+		t.Errorf("dry-run must not create the file, but %s exists (err=%v)", f.Path, err)
+	}
+	// The parent directory must not be created either — a dry run touches nothing.
+	if _, err := os.Stat(filepath.Dir(f.Path)); !os.IsNotExist(err) {
+		t.Errorf("dry-run created the parent dir %s", filepath.Dir(f.Path))
+	}
+}
+
+// TestOnrampWriteDryRunSkipAndForceUntouched: on an EXISTING differing barkpark
+// entry, `--dry-run` reports 'skipped' without --force and 'updated' with --force
+// — but in BOTH cases the file's bytes are left exactly as they were. Proves the
+// dry-run guard covers the update path, not just create.
+func TestOnrampWriteDryRunSkipAndForceUntouched(t *testing.T) {
+	dir := t.TempDir()
+	fixture, err := os.ReadFile("testdata/onramp_mcp_foreign.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	path := filepath.Join(dir, "mcp.json")
+	if err := os.WriteFile(path, fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := serverMapFileAt(t, "cursor", dir, "mcp.json")
+
+	// dry-run, no --force: reports skipped, file untouched.
+	act, err := mergeOnrampFile(f, false, true)
+	if err != nil {
+		t.Fatalf("dry-run skip merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("dry-run action = %q, want skipped", act.Action)
+	}
+	if after := mustRead(t, path); !bytes.Equal(fixture, after) {
+		t.Errorf("dry-run skip touched the file")
+	}
+
+	// dry-run, --force: reports the 'updated' action a real force write would, but
+	// the file on disk is STILL the original fixture — not one byte written.
+	act, err = mergeOnrampFile(f, true, true)
+	if err != nil {
+		t.Fatalf("dry-run force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("dry-run force action = %q, want updated", act.Action)
+	}
+	if after := mustRead(t, path); !bytes.Equal(fixture, after) {
+		t.Errorf("dry-run --force wrote to the file — the stale entry should still be present.\n--- got ---\n%s", after)
+	}
+	if !bytes.Contains(mustRead(t, path), []byte("STALE.example.old")) {
+		t.Errorf("dry-run --force overwrote the stale barkpark URL")
+	}
+}
+
+// TestOnrampRunWriteDryRunEndToEnd drives the whole command path — runOnramp reads
+// g.dryRun, threads it through runOnrampWrite, and the -o json envelope carries
+// "dryRun":true — while the cwd-relative target (.cursor/mcp.json) is never
+// created. cd into a tempdir: HOME-only sandboxing does NOT isolate a
+// cwd-relative target (charter D15 test law).
+func TestOnrampRunWriteDryRunEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	code := runOnramp(w, globals{server: guerrilla, dryRun: true}, []string{"cursor", "--write"})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want %d; stderr=%s", code, exitOK, se.String())
+	}
+
+	var got onrampWriteResult
+	if err := json.Unmarshal(so.Bytes(), &got); err != nil {
+		t.Fatalf("json report did not decode: %v\n%s", err, so.String())
+	}
+	if !got.DryRun {
+		t.Errorf("report DryRun = false, want true")
+	}
+	if len(got.Actions) != 1 || got.Actions[0].Action != "created" {
+		t.Fatalf("actions = %+v, want one created", got.Actions)
+	}
+	// The cwd-relative target must NOT exist — the dry run wrote nothing.
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "mcp.json")); !os.IsNotExist(err) {
+		t.Errorf("dry-run end-to-end created .cursor/mcp.json (err=%v)", err)
+	}
+}
+
+// TestOnrampRunWriteHonorsRealWrite is the paired positive: WITHOUT --dry-run the
+// same command actually writes the file — so the dry-run test above proves a real
+// suppression, not a path that never writes (a guard that never lets a write
+// through is vacuous). It also asserts a real write's JSON omits the dryRun field.
+func TestOnrampRunWriteHonorsRealWrite(t *testing.T) {
+	dir := t.TempDir()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(cwd) })
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	if code := runOnramp(w, globals{server: guerrilla}, []string{"cursor", "--write"}); code != exitOK {
+		t.Fatalf("exit = %d; stderr=%s", code, se.String())
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".cursor", "mcp.json")); err != nil {
+		t.Errorf("real --write did not create .cursor/mcp.json: %v", err)
+	}
+	if bytes.Contains(so.Bytes(), []byte("dryRun")) {
+		t.Errorf("a real (non-dry-run) write leaked the dryRun field:\n%s", so.String())
+	}
+}
+
+// TestOnrampWriteDryRunHumanMarker: the human report marks a dry run clearly and
+// still prints the per-file action + verify pointer, writing nothing.
+func TestOnrampWriteDryRunHumanMarker(t *testing.T) {
+	dir := t.TempDir()
+	f := serverMapFileAt(t, "cursor", dir, ".cursor/mcp.json")
+	spec := onrampSpec{Target: "cursor", Files: []onrampFile{f}, Verify: "reload MCP servers"}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	if code := runOnrampWrite(w, spec, false, true); code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	out := so.Bytes()
+	for _, want := range []string{"DRY RUN", "created", "verify:"} {
+		if !bytes.Contains(out, []byte(want)) {
+			t.Errorf("dry-run human report missing %q\n%s", want, out)
+		}
+	}
+	if _, err := os.Stat(f.Path); !os.IsNotExist(err) {
+		t.Errorf("dry-run human path wrote the file")
 	}
 }
 

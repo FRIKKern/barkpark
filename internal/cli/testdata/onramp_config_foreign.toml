@@ -1,0 +1,20 @@
+# ~/.codex/config.toml — a lived-in Codex config (test fixture). Only the
+# [mcp_servers.barkpark] span below may be touched by `bp onramp codex --write`.
+model = "gpt-5.3-codex"
+
+[mcp_servers.other] # a foreign remote server the user configured
+url = "https://mcp.example.com/mcp"
+bearer_token_env_var = "OTHER_TOKEN"
+
+[mcp_servers.barkpark]
+command = "bp"
+args = ["mcp", "serve"]
+env = { BARKPARK_API_URL = "https://STALE.example.old" }
+env_vars = ["BARKPARK_API_TOKEN"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120
+
+# user note between spans — outside the owned span, must survive --force
+[profiles.work]
+model = "gpt-5.3-codex"
+approval_policy = "on-request"

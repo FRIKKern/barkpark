@@ -201,6 +201,7 @@ DUPES=$(
     -not -path './_attic/*' -not -path './node_modules/*' \
     -not -path '*/node_modules/*' -not -path './.artifacts/*' \
     -not -path '*/_build/*' -not -path '*/deps/*' \
+    -not -path './.claude/*' \
     -not -path './cloud/priv/templates/*' |
   while IFS= read -r f; do
     h=$(header_line "$f")
@@ -281,6 +282,7 @@ echo "== @canonical capability markers =="
 CANON_DUPES=$(
   grep -rhoE '@canonical capability:[A-Za-z0-9._-]+' \
     --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
+    --exclude-dir='.claude' \
     . 2>/dev/null | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
 )
 if [ -n "$CANON_DUPES" ]; then
@@ -293,7 +295,8 @@ fi
 # (b) each marker sits on a PUBLIC entry point (def / func / export within 6 lines below)
 grep -rn '@canonical capability:' \
   --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-  . 2>/dev/null | grep -vE '/_build/|/deps/|/node_modules/' > /tmp/canon-hits.$$ || true
+  --exclude-dir='.claude' \
+  . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' > /tmp/canon-hits.$$ || true
 while IFS= read -r hit; do
   [ -z "$hit" ] && continue
   cf=${hit%%:*}; rest=${hit#*:}; cl=${rest%%:*}

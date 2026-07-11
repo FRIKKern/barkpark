@@ -1,9 +1,10 @@
 package cli
 
 // onramp_write.go — the `--write` engine behind `bp onramp <target> --write`.
-// It merges ONLY the barkpark server entry into a target's JSON config and
+// It merges ONLY the barkpark server entry into a target's config and
 // touches nothing else the user put there: every foreign server and every
-// unrelated top-level key survives byte-for-byte (json.RawMessage passthrough).
+// unrelated top-level key survives byte-for-byte (json.RawMessage passthrough
+// for JSON; a textual span splice for TOML).
 // Re-running is a no-op ('unchanged', exit 0) — that idempotence IS the "one
 // step" promise; an emitter that clobbers a user's mcp.json once poisons the
 // whole story.
@@ -15,8 +16,12 @@ package cli
 //     for copilot's .vscode/mcp.json once that target lands).
 //   - flat:       a top-level scalar/value at data[TopKey] (cursor-cloud's
 //     .cursor/environment.json `install` command).
-//   - toml:       codex's config.toml — NO write this wave; reported 'skipped'
-//     (TOML write is wave 3, and no TOML dependency may enter go.mod).
+//   - toml:       codex's config.toml — a parse-lite SPAN SPLICE, deliberately
+//     NO TOML dependency (charter D10: mainstream Go TOML libs don't round-trip
+//     comments — a reserialize would clobber the very bytes we must preserve).
+//     The owned span is the [mcp_servers.barkpark] header table PLUS every
+//     [mcp_servers.barkpark.*] continuation table (charter D11); every byte
+//     outside it survives verbatim.
 //
 // atomicWriteFile is the shared write seam: the AGENTS.md marker-merge
 // (ve-w2-agents-md-onramp) routes its own atomic write + report through it too.
@@ -37,7 +42,8 @@ import (
 const (
 	mergeServerMap = "server-map" // barkpark entry at data[TopKey][ServerKey]
 	mergeFlat      = "flat"       // barkpark value at data[TopKey]
-	mergeTOML      = "toml"       // codex config.toml — deferred to wave 3
+	mergeTOML      = "toml"       // codex config.toml — parse-lite span splice (charter D10/D11)
+	mergeMarkdown  = "markdown"   // agents-md marker-managed block in ./AGENTS.md
 )
 
 // onrampAction is the per-file outcome of a `--write`: what happened to one
@@ -52,21 +58,27 @@ type onrampAction struct {
 }
 
 // onrampWriteResult is the single structured document `bp onramp <t> --write -o
-// json` emits: the resolved target and the per-file actions.
+// json` emits: the resolved target and the per-file actions. DryRun is true when
+// the global --dry-run was set — the actions are computed identically but NOT a
+// single byte was written (omitempty so a real write emits no noise).
 type onrampWriteResult struct {
 	Target  string         `json:"target"`
 	Actions []onrampAction `json:"actions"`
+	DryRun  bool           `json:"dryRun,omitempty"`
 }
 
 // runOnrampWrite performs the safe JSON merge for every file in the spec and
 // reports per file. It is honest: a merge error stops the run (nothing after it
 // is written) with exitGeneric, and the report shows exactly what was done up to
-// the failure — never a partial-success lie.
-func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
+// the failure — never a partial-success lie. When dryRun is set (the global
+// --dry-run), every action is computed exactly as a real run would but NOT a
+// single byte reaches disk — the report is byte-identical apart from the dry-run
+// marker.
+func runOnrampWrite(out *writer, spec onrampSpec, force, dryRun bool) int {
 	var actions []onrampAction
 	var failed error
 	for _, f := range spec.Files {
-		act, err := mergeOnrampFile(f, force)
+		act, err := mergeOnrampFile(f, force, dryRun)
 		if err != nil {
 			failed = err
 			actions = append(actions, onrampAction{Path: f.Path, Action: "error", Note: err.Error()})
@@ -76,7 +88,7 @@ func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
 	}
 
 	if out.machineOut() {
-		out.renderJSON(onrampWriteResult{Target: spec.Target, Actions: actions})
+		out.renderJSON(onrampWriteResult{Target: spec.Target, Actions: actions, DryRun: dryRun})
 		if failed != nil {
 			return exitGeneric
 		}
@@ -85,6 +97,9 @@ func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
 
 	// Human report — one aligned line per file, then the verify pointer.
 	out.outf("# bp onramp %s --write", spec.Target)
+	if dryRun {
+		out.outf("# DRY RUN — nothing was written; this is exactly what --write would do.")
+	}
 	out.outf("")
 	for _, a := range actions {
 		line := fmt.Sprintf("  %-9s %s", a.Action, a.Path)
@@ -101,6 +116,10 @@ func runOnrampWrite(out *writer, spec onrampSpec, force bool) int {
 	if onrampAnySkipped(actions) {
 		out.outf("")
 		out.outf("# some files were left as-is — re-run with --force to overwrite the existing barkpark entry.")
+	}
+	if dryRun {
+		out.outf("")
+		out.outf("# dry run — re-run without --dry-run to apply these changes.")
 	}
 	out.outf("")
 	out.outf("# verify: %s", spec.Verify)
@@ -119,19 +138,19 @@ func onrampAnySkipped(actions []onrampAction) bool {
 	return false
 }
 
-// mergeOnrampFile dispatches one file by its stamped merge kind.
-func mergeOnrampFile(f onrampFile, force bool) (onrampAction, error) {
+// mergeOnrampFile dispatches one file by its stamped merge kind. dryRun (the
+// global --dry-run) is threaded to every merge function so the actions are
+// computed identically while no byte reaches disk.
+func mergeOnrampFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 	switch f.MergeKind {
 	case mergeServerMap:
-		return mergeServerMapFile(f, force)
+		return mergeServerMapFile(f, force, dryRun)
 	case mergeFlat:
-		return mergeFlatFile(f, force)
+		return mergeFlatFile(f, force, dryRun)
+	case mergeMarkdown:
+		return mergeMarkdownFile(f, force, dryRun)
 	case mergeTOML:
-		return onrampAction{
-			Path:   f.Path,
-			Action: "skipped",
-			Note:   "TOML write is wave 3 — paste the [mcp_servers.barkpark] block by hand (`bp onramp codex`)",
-		}, nil
+		return mergeTOMLFile(f, force, dryRun)
 	default:
 		return onrampAction{
 			Path:   f.Path,
@@ -142,8 +161,9 @@ func mergeOnrampFile(f onrampFile, force bool) (onrampAction, error) {
 }
 
 // mergeServerMapFile inserts/updates ONLY data[TopKey][ServerKey], preserving
-// every other server and top-level key verbatim.
-func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
+// every other server and top-level key verbatim. dryRun computes the same action
+// without touching disk.
+func mergeServerMapFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 	path, err := expandOnrampPath(f.Path)
 	if err != nil {
 		return onrampAction{}, err
@@ -157,7 +177,7 @@ func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
 	if os.IsNotExist(readErr) {
 		// Fresh file — write the doc-shaped stanza verbatim (byte-identical to what
 		// `bp onramp <target>` prints), which round-trips cleanly to 'unchanged'.
-		if err := atomicWriteFile(path, withTrailingNewline([]byte(f.Content))); err != nil {
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(f.Content))); err != nil {
 			return onrampAction{}, err
 		}
 		return onrampAction{Path: f.Path, Action: "created"}, nil
@@ -200,7 +220,7 @@ func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
 	if err != nil {
 		return onrampAction{}, err
 	}
-	if err := atomicWriteFile(path, withTrailingNewline(merged)); err != nil {
+	if err := writeOnrampFile(dryRun, path, withTrailingNewline(merged)); err != nil {
 		return onrampAction{}, err
 	}
 	return onrampAction{Path: f.Path, Action: "updated"}, nil
@@ -208,7 +228,8 @@ func mergeServerMapFile(f onrampFile, force bool) (onrampAction, error) {
 
 // mergeFlatFile inserts/updates ONLY the top-level data[TopKey], preserving every
 // other top-level key verbatim (cursor-cloud's .cursor/environment.json install).
-func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
+// dryRun computes the same action without touching disk.
+func mergeFlatFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
 	path, err := expandOnrampPath(f.Path)
 	if err != nil {
 		return onrampAction{}, err
@@ -224,7 +245,7 @@ func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
 
 	existing, readErr := os.ReadFile(path)
 	if os.IsNotExist(readErr) {
-		if err := atomicWriteFile(path, withTrailingNewline([]byte(f.Content))); err != nil {
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(f.Content))); err != nil {
 			return onrampAction{}, err
 		}
 		return onrampAction{Path: f.Path, Action: "created"}, nil
@@ -255,10 +276,232 @@ func mergeFlatFile(f onrampFile, force bool) (onrampAction, error) {
 	if err != nil {
 		return onrampAction{}, err
 	}
-	if err := atomicWriteFile(path, withTrailingNewline(merged)); err != nil {
+	if err := writeOnrampFile(dryRun, path, withTrailingNewline(merged)); err != nil {
 		return onrampAction{}, err
 	}
 	return onrampAction{Path: f.Path, Action: "updated"}, nil
+}
+
+// mergeTOMLFile merges ONLY the [TopKey.ServerKey] span into a TOML config via a
+// parse-lite textual span splice — deliberately NO TOML dependency (charter D10;
+// go TOML libs don't round-trip comments, and comments are exactly the user
+// bytes this merger must preserve). Provenance: behavior pinned against
+// codex-cli 0.144.1 (live capture: `codex mcp add` writes env as a NESTED
+// [mcp_servers.barkpark.env] sub-table, alpha-sorted keys, LF-only, single
+// trailing newline) and openai/codex@5c19155c (upstream itself edits config.toml
+// with a decor-preserving toml_edit editor; profiles are inline [profiles.NAME]
+// tables in the same file).
+//
+// Span law (charter D11): the owned span = the [mcp_servers.barkpark] header
+// table PLUS every [mcp_servers.barkpark.*] continuation table, ending at the
+// first header NOT sharing the dotted prefix (or EOF); trailing blank and
+// comment-only lines before that header stay OUTSIDE the span. Header match is
+// on the header TOKEN (a trailing # comment after `]` must not break
+// detection). The honest contract: every byte outside the owned span survives
+// verbatim; --force replaces the WHOLE owned span (sub-tables, and any user key
+// or comment inside it) with the canonical flat stanza. A sub-table-shaped
+// stanza (real `codex mcp add` output) is a DIFFERING stanza — skipped without
+// --force, replaced on --force, never an error. Root dotted-key / inline-table
+// forms error loudly with the file untouched: a textual splice cannot own them
+// safely. CRLF files and files without a final newline round-trip.
+func mergeTOMLFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
+	path, err := expandOnrampPath(f.Path)
+	if err != nil {
+		return onrampAction{}, err
+	}
+	ownedKey := f.TopKey + "." + f.ServerKey // e.g. mcp_servers.barkpark
+
+	existing, readErr := os.ReadFile(path)
+	if os.IsNotExist(readErr) {
+		// Fresh file — the doc-shaped stanza verbatim (byte-identical to what
+		// `bp onramp codex` prints), which round-trips cleanly to 'unchanged'.
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(f.Content))); err != nil {
+			return onrampAction{}, err
+		}
+		return onrampAction{Path: f.Path, Action: "created"}, nil
+	}
+	if readErr != nil {
+		return onrampAction{}, fmt.Errorf("read %s: %w", path, readErr)
+	}
+
+	// Scan and splice on LF; restore the file's own newline convention on write.
+	crlf := bytes.Contains(existing, []byte("\r\n"))
+	work := string(existing)
+	if crlf {
+		work = strings.ReplaceAll(work, "\r\n", "\n")
+	}
+	lines := strings.Split(work, "\n")
+
+	if err := tomlDenyUnsafeForms(lines, f.TopKey, f.ServerKey); err != nil {
+		return onrampAction{}, fmt.Errorf("%s: %w — fix the file by hand (`bp onramp codex` prints the canonical block); nothing was written", path, err)
+	}
+
+	start, end, found := tomlOwnedSpan(lines, ownedKey)
+	if !found {
+		// No barkpark span — append the canonical stanza with a blank-line
+		// separator, preserving every existing byte (a missing final newline is
+		// completed so the appended header starts on its own line).
+		out := work
+		if strings.TrimSpace(out) == "" {
+			out = f.Content + "\n"
+		} else {
+			if !strings.HasSuffix(out, "\n") {
+				out += "\n"
+			}
+			out += "\n" + f.Content + "\n"
+		}
+		if crlf {
+			out = strings.ReplaceAll(out, "\n", "\r\n")
+		}
+		if err := writeOnrampFile(dryRun, path, []byte(out)); err != nil {
+			return onrampAction{}, err
+		}
+		return onrampAction{Path: f.Path, Action: "updated"}, nil
+	}
+
+	// Byte-compare the owned span against the canonical stanza (parse-lite
+	// honesty: a reordered or reformatted stanza is a DIFFERING stanza).
+	if strings.Join(lines[start:end], "\n") == f.Content {
+		return onrampAction{Path: f.Path, Action: "unchanged"}, nil
+	}
+	if !force {
+		return onrampAction{
+			Path:   f.Path,
+			Action: "skipped",
+			Note:   fmt.Sprintf("a different %q stanza is already here — re-run with --force to replace the whole [%s] span (sub-tables included) with the canonical block; bytes outside the span are never touched", f.ServerKey, ownedKey),
+		}, nil
+	}
+
+	merged := make([]string, 0, len(lines))
+	merged = append(merged, lines[:start]...)
+	merged = append(merged, strings.Split(f.Content, "\n")...)
+	merged = append(merged, lines[end:]...)
+	out := strings.Join(merged, "\n")
+	if crlf {
+		out = strings.ReplaceAll(out, "\n", "\r\n")
+	}
+	if err := writeOnrampFile(dryRun, path, []byte(out)); err != nil {
+		return onrampAction{}, err
+	}
+	return onrampAction{Path: f.Path, Action: "updated"}, nil
+}
+
+// tomlOwnedSpan locates the owned span in lines: from the first header whose
+// token is ownedKey (or a dotted continuation ownedKey.*) up to — exclusive —
+// the first following header that is NOT ours, or EOF. Trailing blank and
+// comment-only lines are excluded from the span (they read as the next
+// section's preamble and must survive a --force replace).
+func tomlOwnedSpan(lines []string, ownedKey string) (start, end int, found bool) {
+	start = -1
+	end = -1
+	for i, ln := range lines {
+		tok, isHeader := tomlHeaderToken(ln)
+		if !isHeader {
+			continue
+		}
+		match := tok == ownedKey || strings.HasPrefix(tok, ownedKey+".")
+		if start == -1 {
+			if match {
+				start = i
+			}
+			continue
+		}
+		if !match {
+			end = i
+			break
+		}
+	}
+	if start == -1 {
+		return 0, 0, false
+	}
+	if end == -1 {
+		end = len(lines)
+	}
+	for end > start+1 {
+		t := strings.TrimSpace(lines[end-1])
+		if t == "" || strings.HasPrefix(t, "#") {
+			end--
+			continue
+		}
+		break
+	}
+	return start, end, true
+}
+
+// tomlHeaderToken reports whether line is a TOML table header ([a.b] or
+// [[a.b]]) and returns its normalized dotted key. A trailing `# comment` after
+// the closing bracket is allowed and ignored (charter D11: header match on the
+// TOKEN). A malformed header still counts as a header with an empty token, so a
+// span scan treats it conservatively as foreign.
+func tomlHeaderToken(line string) (string, bool) {
+	s := strings.TrimSpace(line)
+	if !strings.HasPrefix(s, "[") {
+		return "", false
+	}
+	open, closing := 1, "]"
+	if strings.HasPrefix(s, "[[") { // array-of-tables header
+		open, closing = 2, "]]"
+	}
+	rest := s[open:]
+	idx := strings.Index(rest, closing)
+	if idx < 0 {
+		return "", true
+	}
+	after := strings.TrimSpace(rest[idx+len(closing):])
+	if after != "" && !strings.HasPrefix(after, "#") {
+		return "", true
+	}
+	return tomlNormalizeKey(rest[:idx]), true
+}
+
+// tomlNormalizeKey canonicalizes a dotted TOML key for comparison: whitespace
+// around dots is dropped and each part's surrounding quotes are stripped, so
+// [ mcp_servers . "barkpark" ] matches mcp_servers.barkpark. (Parse-lite: a
+// quoted key containing a literal dot would mis-split — the keys this merger
+// owns never do.)
+func tomlNormalizeKey(k string) string {
+	parts := strings.Split(k, ".")
+	for i, p := range parts {
+		p = strings.TrimSpace(p)
+		if len(p) >= 2 && ((p[0] == '"' && p[len(p)-1] == '"') || (p[0] == '\'' && p[len(p)-1] == '\'')) {
+			p = p[1 : len(p)-1]
+		}
+		parts[i] = p
+	}
+	return strings.Join(parts, ".")
+}
+
+// tomlDenyUnsafeForms errors on the stanza forms a textual span splice cannot
+// own safely (charter D11 — loud error, file untouched): a root-level dotted or
+// inline-table key (`mcp_servers.barkpark.command = …`, `mcp_servers = {…}`)
+// and the inline form under a bare [mcp_servers] header (`barkpark = {…}`,
+// `barkpark.command = …`). These have no header-delimited span to replace, and
+// appending a [mcp_servers.barkpark] table alongside them would redefine the
+// key — invalid TOML that breaks the user's whole config.
+func tomlDenyUnsafeForms(lines []string, topKey, serverKey string) error {
+	section := "" // "" = the root table
+	for _, ln := range lines {
+		if tok, isHeader := tomlHeaderToken(ln); isHeader {
+			section = tok
+			continue
+		}
+		s := strings.TrimSpace(ln)
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		eq := strings.Index(s, "=")
+		if eq <= 0 {
+			continue
+		}
+		key := tomlNormalizeKey(strings.TrimSpace(s[:eq]))
+		switch {
+		case section == "" && (key == topKey || strings.HasPrefix(key, topKey+".")):
+			return fmt.Errorf("%q is declared as a root-level dotted/inline key (%q) — a textual span merge cannot own that form safely", topKey, s)
+		case section == topKey && (key == serverKey || strings.HasPrefix(key, serverKey+".")):
+			return fmt.Errorf("%q is declared inline under [%s] (%q) — a textual span merge cannot own that form safely", serverKey, topKey, s)
+		}
+	}
+	return nil
 }
 
 // desiredServerEntry extracts the barkpark server entry (data[TopKey][ServerKey])
@@ -354,6 +597,21 @@ func withTrailingNewline(b []byte) []byte {
 	return b
 }
 
+// writeOnrampFile is the single dry-run seam every merge function writes through:
+// with dryRun set (the global --dry-run) it is a no-op — the caller has already
+// computed the honest action, and NOT one byte reaches disk — otherwise it
+// performs the real atomic write. Guarding here (not at each call site) keeps the
+// merge functions readable and guarantees no atomicWriteFile path can slip the
+// dry-run contract. The AGENTS.md/codex mergers landing this same wave route
+// their atomic writes through here too, so the lead's union guard is this one
+// function (charter D15/D7).
+func writeOnrampFile(dryRun bool, path string, data []byte) error {
+	if dryRun {
+		return nil
+	}
+	return atomicWriteFile(path, data)
+}
+
 // atomicWriteFile writes data to path via a same-directory temp file + rename, so
 // a crash or a concurrent reader never observes a half-written config. The parent
 // directory is created 0755 and the file lands 0644 — these are project-committed
@@ -389,4 +647,85 @@ func atomicWriteFile(path string, data []byte) error {
 		return fmt.Errorf("rename to %s: %w", path, err)
 	}
 	return nil
+}
+
+// mergeMarkdownFile is the markdown analogue of the JSON mergers: it lands the
+// canonical AGENTS.md teach block (f.Content — begin marker, heading, body, end
+// marker) into a consumer's ./AGENTS.md WITHOUT rewriting anything else the file
+// holds, expressed the only way markdown allows — managed markers (charter D6 as
+// amended by D13):
+//   - no file           → created  (write the block verbatim, one trailing NL).
+//   - file, no markers   → updated  (APPEND after a blank-line separator; every
+//     existing byte is preserved — a consumer's AGENTS.md is their content).
+//   - markers, identical → unchanged (exit 0, file byte-untouched — no write).
+//   - markers, differing → skipped + "--force" hint (D13 aligns markdown with the
+//     JSON/TOML deny-path law); with --force, replace ONLY the begin→end span,
+//     leaving every byte outside it verbatim.
+//   - one marker only / end-before-begin → skipped as a malformed managed block,
+//     fix by hand (a textual splice cannot own a half-open block safely; --force
+//     does NOT auto-repair it, so its note carries no --force hint).
+func mergeMarkdownFile(f onrampFile, force, dryRun bool) (onrampAction, error) {
+	path, err := expandOnrampPath(f.Path)
+	if err != nil {
+		return onrampAction{}, err
+	}
+	block := f.Content
+
+	existing, readErr := os.ReadFile(path)
+	if os.IsNotExist(readErr) {
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(block))); err != nil {
+			return onrampAction{}, err
+		}
+		return onrampAction{Path: f.Path, Action: "created"}, nil
+	}
+	if readErr != nil {
+		return onrampAction{}, fmt.Errorf("read %s: %w", path, readErr)
+	}
+
+	text := string(existing)
+	beginIdx := strings.Index(text, agentsMDMarkerBegin)
+	endIdx := strings.Index(text, agentsMDMarkerEnd)
+
+	// Managed block present and well-formed: replace only its begin→end span.
+	if beginIdx >= 0 && endIdx > beginIdx {
+		spanEnd := endIdx + len(agentsMDMarkerEnd)
+		if text[beginIdx:spanEnd] == block {
+			return onrampAction{Path: f.Path, Action: "unchanged"}, nil
+		}
+		if !force {
+			return onrampAction{
+				Path:   f.Path,
+				Action: "skipped",
+				Note:   "a different barkpark:onramp block is already here — re-run with --force to refresh it",
+			}, nil
+		}
+		merged := text[:beginIdx] + block + text[spanEnd:]
+		if err := writeOnrampFile(dryRun, path, withTrailingNewline([]byte(merged))); err != nil {
+			return onrampAction{}, err
+		}
+		return onrampAction{Path: f.Path, Action: "updated"}, nil
+	}
+
+	// A lone marker (or end-before-begin) is a broken managed block — a textual
+	// splice cannot own it safely, and --force cannot guess the intended span.
+	if beginIdx >= 0 || endIdx >= 0 {
+		return onrampAction{
+			Path:   f.Path,
+			Action: "skipped",
+			Note:   "malformed barkpark:onramp markers (only one of begin/end, or out of order) — fix them by hand",
+		}, nil
+	}
+
+	// No markers at all: append the block after a blank-line separator, preserving
+	// every existing byte verbatim (a consumer's own AGENTS.md content).
+	buf := append([]byte{}, existing...)
+	if len(buf) > 0 && buf[len(buf)-1] != '\n' {
+		buf = append(buf, '\n')
+	}
+	buf = append(buf, '\n')
+	buf = append(buf, block...)
+	if err := writeOnrampFile(dryRun, path, withTrailingNewline(buf)); err != nil {
+		return onrampAction{}, err
+	}
+	return onrampAction{Path: f.Path, Action: "updated"}, nil
 }
