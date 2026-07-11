@@ -33,16 +33,30 @@ defmodule Barkpark.Content.WriterTest do
   # ── resolve_dynamics/1 ────────────────────────────────────────────────────
 
   describe "resolve_dynamics/1" do
+    # $today / $today.year read the UTC clock INSIDE resolve_dynamics. If the
+    # assertion recomputed Date.utc_today() a line later, a run crossing UTC
+    # midnight (or New Year) between the two reads false-reds. We instead bracket
+    # the code-under-test with clock reads and assert membership of the boundary
+    # set: the value the code stamped happened between `d_before` and `d_after`,
+    # so it must equal one of them (a test spans far less than a day). This still
+    # rejects a genuinely wrong date — only the exact just-before/just-after
+    # dates are accepted — while being rollover-proof.
+
     test "$today resolves to today's ISO-8601 date string" do
-      result = Writer.resolve_dynamics("$today")
-      expected = Date.utc_today() |> Date.to_iso8601()
-      assert result == expected
+      {result, acceptable} =
+        with_date_boundary(fn -> Writer.resolve_dynamics("$today") end, &Date.to_iso8601/1)
+
+      assert result in acceptable
     end
 
     test "$today.year resolves to a 4-digit year string" do
-      result = Writer.resolve_dynamics("$today.year")
-      expected = Date.utc_today().year |> Integer.to_string()
-      assert result == expected
+      {result, acceptable} =
+        with_date_boundary(
+          fn -> Writer.resolve_dynamics("$today.year") end,
+          &Integer.to_string(&1.year)
+        )
+
+      assert result in acceptable
       assert String.length(result) == 4
     end
 
@@ -53,16 +67,38 @@ defmodule Barkpark.Content.WriterTest do
 
     test "resolves tokens nested inside a map" do
       input = %{"date" => "$today", "static" => "keep"}
-      result = Writer.resolve_dynamics(input)
-      expected_date = Date.utc_today() |> Date.to_iso8601()
-      assert result == %{"date" => expected_date, "static" => "keep"}
+
+      {result, acceptable} =
+        with_date_boundary(fn -> Writer.resolve_dynamics(input) end, &Date.to_iso8601/1)
+
+      assert result["static"] == "keep"
+      assert result["date"] in acceptable
+      assert Map.keys(result) |> Enum.sort() == ["date", "static"]
     end
 
     test "resolves tokens inside a list" do
-      result = Writer.resolve_dynamics(["$today", "literal"])
-      expected_date = Date.utc_today() |> Date.to_iso8601()
-      assert result == [expected_date, "literal"]
+      {result, acceptable} =
+        with_date_boundary(
+          fn -> Writer.resolve_dynamics(["$today", "literal"]) end,
+          &Date.to_iso8601/1
+        )
+
+      assert [date, "literal"] = result
+      assert date in acceptable
     end
+  end
+
+  # Runs `fun` bracketed by UTC clock reads and returns {result, acceptable},
+  # where `acceptable` is the boundary date(s) projected through `project`
+  # (e.g. ISO string, or year string). Because the code's own clock read is
+  # sandwiched between the two, the correct answer is always in `acceptable`,
+  # regardless of a midnight/New-Year rollover during the call.
+  defp with_date_boundary(fun, project) do
+    d_before = Date.utc_today()
+    result = fun.()
+    d_after = Date.utc_today()
+    acceptable = [d_before, d_after] |> Enum.map(project) |> Enum.uniq()
+    {result, acceptable}
   end
 
   # ── from_envelope/1 ───────────────────────────────────────────────────────
