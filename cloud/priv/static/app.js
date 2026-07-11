@@ -3186,6 +3186,55 @@
     if (f) f.addEventListener("click", function () { updateInstance(bp, f, { force: true }); });
   }
 
+  // isu-w6: confirm-then-trigger an app-level rollback, cloning the isu-w5 update
+  // trio 1:1. The control plane relays to the instance's POST /v1/admin/rollback,
+  // which flips Caddy's upstream to the previous blue/green slot. Distinct from the
+  // D7/D25 SITE-deployment "Roll back to this" promote (app.js:5139-5175) — that's
+  // per-site deployment history; this is per-INSTANCE slot flip.
+  function confirmRollbackInstance(bp) {
+    openModal(rollbackConfirmHtml(bp));
+    var go = $("#rollback-go");
+    if (go) go.addEventListener("click", function () { rollbackInstance(bp, go); });
+  }
+
+  // POST /v1/barkparks/:id/rollback → 202 {status,target_sha,pinned_release}. On
+  // 202 the CP has ALREADY re-pinned at the rolled-back target (charter D16) — the
+  // toast names it so the operator sees the pin land. A typed 409/50x refusal is
+  // classified by rollbackConflictCopy and surfaced honestly (no silent retry).
+  //
+  // NO noBounce: this route is session-gated (require_primary_team_admin), so a 401
+  // is a genuinely-expired session that SHOULD bounce to login. noBounce is ONLY
+  // for the worker-gated fleet-banner probe (loadFleetRollout above) where a plain
+  // session token 401s by design.
+  function rollbackInstance(bp, btn) {
+    btn = btn || $("#rollback-go");
+    if (btn) { btn.disabled = true; btn.textContent = "Rolling back…"; }
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/rollback", {}).then(function (r) {
+      if (r.status === 202) {
+        closeModal();
+        var d = r.data || {};
+        // target_sha is server data → toast() escapes it (see toast()).
+        var target = d.target_sha ? shortSha(d.target_sha)
+          : (d.pinned_release ? vRel(d.pinned_release) : "the previous slot");
+        toast({
+          kind: "success", title: "Rollback started",
+          body: "Rolling back to " + target + " and pinning there — the instance will restart.",
+        });
+        fleetCache = null;
+        loadInstance(bp.id);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Roll back"; }
+      // Errors arrive as {error:{code}} (or a bare string) — never the flat
+      // friendly() shape. Classify to typed, honest copy.
+      var err = (r.data && r.data.error) || {};
+      var code = typeof err === "string" ? err : err.code;
+      var copy = rollbackConflictCopy(code, r.data);
+      closeModal();
+      toast({ kind: "error", title: copy.title, body: copy.body });
+    });
+  }
+
   // custom-domain: attach a bare barkpark.cloud host to a live instance. The
   // control plane validates + queues the DNS/TLS work (202); the fleet payload
   // carries custom_host once it's persisted.
@@ -3350,6 +3399,55 @@
   // The request body for a forced (pin-overriding) self-update re-trigger.
   function forceUpdateBody() { return { force: true }; }
 
+  // isu-w6: the rollback confirm-modal markup. HONEST copy per charter D19 — a
+  // rollback flips code to the previous slot but the SCHEMA STAYS FORWARD (it
+  // does not undo migrations), and the instance is PINNED at the rolled-back
+  // version (D16: an unpinned rollback re-updates on the next cron tick — a lie).
+  // bp.name is server data → escaped, so a hostile instance name can never inject
+  // markup (escaping test mirrors the isu-w5 hostile-channel precedent).
+  function rollbackConfirmHtml(bp) {
+    bp = bp || {};
+    return '<h2 class="modal-title" id="modal-title">Roll back ' + esc(bp.name) + "?</h2>" +
+      '<p class="modal-sub">App-level rollback to the previous slot. Schema stays forward &mdash; ' +
+        "rolling back code does <b>not</b> undo migrations (write a compensating migration if you " +
+        "need to). The instance will be <b>pinned</b> at the rolled-back version so autoupdate " +
+        "won't re-apply the version you're leaving.</p>" +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" type="button" id="rollback-go">Roll back</button></div>';
+  }
+
+  // isu-w6: typed, honest copy for a rollback refusal. PURE — maps the charter's
+  // W6 refusal vocabulary (D23) to operator-facing title+body. Static strings only
+  // (no server free-text embedded), so nothing here can carry markup; `body` is the
+  // raw envelope, accepted for signature parity + future enrichment. NO force
+  // affordance: unlike a pin conflict, a rollback refusal is always terminal.
+  function rollbackConflictCopy(code, body) {
+    body = body || {};
+    switch (code) {
+      case "no_previous_slot":
+        return {
+          title: "Nothing to roll back to",
+          body: "No previous slot build to roll back to — nothing was recorded, or it was " +
+            "already recycled by a newer deploy.",
+        };
+      case "already_running":
+        return { title: "An update or rollback is already running", body: "Give it a moment to finish, then try again." };
+      case "not_supported":
+        return { title: "Rollback isn't available here", body: "This isn't a blue/green slot box — there's no previous slot to flip to." };
+      case "not_enabled":
+      case "feature_not_configured":
+        return { title: "Rollback is not enabled on this instance", body: "Set BARKPARK_SELF_UPDATE_APPLY=1 on the box to allow one-click rollback." };
+      case "not_live":
+        return { title: "This instance isn't live yet", body: "Wait until it finishes provisioning." };
+      case "instance_unreachable":
+        return { title: "Couldn't reach the instance", body: "The box didn't answer. Give it a moment and try again." };
+      case "instance_error":
+        return { title: "The instance rejected the rollback", body: "The box couldn't complete the rollback — check its logs, then try again." };
+      default:
+        return { title: "Couldn't start the rollback", body: "Please try again in a moment." };
+    }
+  }
+
   // The per-instance update panel: state badge, running→latest, channel, last
   // checked, the policy chip, and the policy action buttons. Pure string builder;
   // buttons carry data-au the wiring reads. Degrades: blank cells + hidden buttons
@@ -3385,6 +3483,12 @@
       if (acts.showPin) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>';
       if (acts.showUnpin) buttons += '<button class="btn btn-ghost btn-sm" type="button" data-au="unpin">Unpin</button>';
     }
+    // isu-w6: Rollback is offered for every hosted box (this panel only renders
+    // when the box has a host). It's a DISTINCT affordance from the policy toggles
+    // — data-rollback, never data-au — and the SERVER owns whether a previous slot
+    // exists: a box with nothing to flip to gets the honest no_previous_slot typed
+    // conflict on click, never a flip to garbage (charter D23).
+    buttons += '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back</button>';
     var actionsHtml = buttons ? '<div class="update-panel-actions">' + buttons + "</div>" : "";
 
     return '<div class="card update-panel">' +
@@ -3409,6 +3513,9 @@
         if (verb === "resume") return patchAutoupdate(bp, { autoupdate_paused: false }, "Autoupdate resumed");
       });
     });
+    // isu-w6: the Rollback affordance (data-rollback) opens the confirm modal.
+    var rb = panel.querySelector("[data-rollback]");
+    if (rb) rb.addEventListener("click", function () { confirmRollbackInstance(bp); });
   }
 
   // The pin prompt — a release tag input with the charter's HONEST pin caveat
@@ -10748,6 +10855,11 @@
       updateConflictCopy: updateConflictCopy, forceUpdateBody: forceUpdateBody,
       updatePanelHtml: updatePanelHtml, fleetRolloutBanner: fleetRolloutBanner,
       fleetRolloutBannerHtml: fleetRolloutBannerHtml,
+      // isu-w6 console instance-rollback: the confirm-modal HTML builder + the
+      // typed-conflict copy classifier. Both pure (node-pinned); the DOM mounts
+      // (confirmRollbackInstance/rollbackInstance, wired via wireUpdatePanel) are
+      // browser-verified. rollbackConfirmHtml escapes the server-supplied name.
+      rollbackConfirmHtml: rollbackConfirmHtml, rollbackConflictCopy: rollbackConflictCopy,
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,
