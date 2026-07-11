@@ -352,6 +352,141 @@ func TestOnrampWriteHumanReport(t *testing.T) {
 	}
 }
 
+// TestOnrampWriteZedCreatesAndIdempotent drives the zed context_servers emitter
+// through the generic server-map engine (TopKey=context_servers, charter D21):
+// an absent settings.json is created byte-identical to the printed stanza and a
+// re-run reports 'unchanged'. This proves the zed case is a REAL --write, not the
+// copilot bare-literal no-op (D23).
+func TestOnrampWriteZedCreatesAndIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	f := serverMapFileAt(t, "zed", dir, "settings.json")
+	if f.TopKey != "context_servers" {
+		t.Fatalf("zed merge TopKey = %q, want context_servers", f.TopKey)
+	}
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("action = %q, want created", act.Action)
+	}
+	if !bytes.Equal(mustRead(t, f.Path), withTrailingNewline([]byte(f.Content))) {
+		t.Errorf("created settings.json not byte-identical to the printed stanza.\n--- got ---\n%s", mustRead(t, f.Path))
+	}
+
+	act, err = mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("idempotent merge: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("re-run action = %q, want unchanged", act.Action)
+	}
+}
+
+// TestOnrampWriteZedPreservesForeign proves a merge into an existing Zed
+// settings.json keeps every unrelated top-level setting AND every foreign context
+// server byte-for-byte, and never leaks a sibling mcpServers/servers map key.
+func TestOnrampWriteZedPreservesForeign(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	// A realistic global settings.json: unrelated editor settings + a foreign
+	// context server the user configured.
+	existing := `{
+  "theme": "One Dark",
+  "context_servers": {
+    "some-other": {"command": "other-mcp", "args": ["run"], "env": {}}
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := serverMapFileAt(t, "zed", dir, "settings.json")
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (barkpark absent under context_servers)", act.Action)
+	}
+	result := mustRead(t, path)
+	top := map[string]json.RawMessage{}
+	if err := json.Unmarshal(result, &top); err != nil {
+		t.Fatalf("result not valid JSON: %v", err)
+	}
+	if _, ok := top["theme"]; !ok {
+		t.Errorf("foreign top-level \"theme\" setting lost on merge")
+	}
+	if _, ok := top["mcpServers"]; ok {
+		t.Errorf("merge leaked a sibling mcpServers key — zed uses context_servers")
+	}
+	if _, ok := top["servers"]; ok {
+		t.Errorf("merge leaked a sibling servers key — zed uses context_servers")
+	}
+	cs := map[string]json.RawMessage{}
+	if err := json.Unmarshal(top["context_servers"], &cs); err != nil {
+		t.Fatalf("context_servers not an object: %v", err)
+	}
+	if _, ok := cs["some-other"]; !ok {
+		t.Errorf("foreign context server lost when adding barkpark")
+	}
+	if _, ok := cs["barkpark"]; !ok {
+		t.Errorf("barkpark entry not added under context_servers")
+	}
+	// The added barkpark entry is flat — no source key, empty env.
+	bark := map[string]json.RawMessage{}
+	if err := json.Unmarshal(cs["barkpark"], &bark); err != nil {
+		t.Fatalf("barkpark entry not an object: %v", err)
+	}
+	if _, ok := bark["source"]; ok {
+		t.Errorf("barkpark entry leaked a \"source\" key — Zed's user-facing shape is flat (D21)")
+	}
+}
+
+// TestOnrampWriteZedSkipAndForce: a pre-existing DIFFERENT barkpark entry is left
+// untouched without --force (skipped) and overwritten with --force (updated).
+func TestOnrampWriteZedSkipAndForce(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	existing := `{
+  "context_servers": {
+    "barkpark": {"command": "STALE-bp", "args": [], "env": {}}
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := serverMapFileAt(t, "zed", dir, "settings.json")
+
+	// No --force: a differing barkpark entry is skipped and the file is UNTOUCHED.
+	before := mustRead(t, path)
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("skip merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped", act.Action)
+	}
+	if !bytes.Equal(before, mustRead(t, path)) {
+		t.Errorf("skipped write must not touch the file at all")
+	}
+
+	// --force: the stale entry is overwritten with the fresh flat stanza.
+	act, err = mergeOnrampFile(f, true)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	if bytes.Contains(mustRead(t, path), []byte("STALE-bp")) {
+		t.Errorf("stale barkpark command survived the force overwrite")
+	}
+}
+
 // mustRead reads a file or fails the test.
 func mustRead(t *testing.T, path string) []byte {
 	t.Helper()

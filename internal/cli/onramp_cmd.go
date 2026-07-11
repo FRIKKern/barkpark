@@ -10,8 +10,10 @@ package cli
 // flag is a usage error, never silently ignored.
 //
 // Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli |
-// copilot.
-// agents-md. agents-md is the odd one out — not an MCP stanza but the ONE
+// copilot | zed | agents-md. zed is the odd one on the stanza side — Zed has no
+// ${env:} interpolation, so its context_servers entry carries an EMPTY env {} and
+// the credential rides bp's OWN saved config, never a token in settings.json
+// (charter D21). agents-md is the odd one out — not an MCP stanza but the ONE
 // canonical consumer AGENTS.md teach block (the ~23-tool convergence standard),
 // marker-wrapped, that the three wave-1 teach-layer wrappers now derive from.
 // windsurf and gemini-cli both reuse mcpJSONStanza verbatim (charter decision 7)
@@ -103,6 +105,17 @@ func serversFile(path, content string) onrampFile {
 	return onrampFile{Path: path, Content: content, MergeKind: mergeServerMap, TopKey: "servers", ServerKey: onrampServerKey}
 }
 
+// contextServersFile stamps the merge metadata for Zed's top-level
+// `context_servers` map — the SAME generic server-map engine (mergeServerMap),
+// only the TopKey differs. Zero new merge-kind code: the TopKey parametrization is
+// already proven by the servers-shape sibling (TestOnrampWriteServersShape), and a
+// w2 verify probe re-confirmed create/foreign-preserve/idempotent under
+// context_servers (charter D21). This is NOT the copilot bare-literal onrampFile
+// that shipped the --write silent no-op (D23).
+func contextServersFile(path, content string) onrampFile {
+	return onrampFile{Path: path, Content: content, MergeKind: mergeServerMap, TopKey: "context_servers", ServerKey: onrampServerKey}
+}
+
 func flatFile(path, content, topKey string) onrampFile {
 	return onrampFile{Path: path, Content: content, MergeKind: mergeFlat, TopKey: topKey}
 }
@@ -122,7 +135,7 @@ type onrampSpec struct {
 
 // onrampLocalTargets is the ordered set of targets the verb prints config for.
 func onrampLocalTargets() []string {
-	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot", "agents-md"}
+	return []string{"cursor", "claude-code", "codex", "cursor-cloud", "windsurf", "gemini-cli", "copilot", "zed", "agents-md"}
 }
 
 // onrampServer resolves the URL to bake into the env block: --server wins, else
@@ -216,6 +229,31 @@ func copilotMcpJSONStanza(server, tokenValue string) string {
     }
   }
 }`, server, tokenValue)
+}
+
+// zedContextServersStanza renders the GLOBAL `~/.config/zed/settings.json`
+// `context_servers` block in Zed's shape. Zed's user-facing context_servers entry
+// is a serde-UNTAGGED enum (zed crates/settings_content/src/project.rs:392) — there
+// is NO `source` key of any kind; the entry is FLAT {command, args, env} directly
+// (the charter's old `source:"custom"` premise was stale, corrected D21). Zed does
+// NOT expand ${env:VAR} / ${VAR} inside settings.json (open FRs zed#26043 / #28632 /
+// #18630 / #53780), so the stanza carries an EMPTY `env {}` and NEVER a token
+// placeholder — `bp` resolves the server + token from its OWN saved config
+// (~/.config/barkpark/config.json), independent of Zed's env map. An onramp never
+// writes a literal token; on Zed the credential rides bp's config, so `bp setup`
+// must have run first. There is no server/token to bake in, so this takes no args
+// (unlike the mcpServers stanzas). Key ORDER (command, args, env) is fixed by a raw
+// template — a map marshal would sort keys and drift from ZED.md (decision 14).
+func zedContextServersStanza() string {
+	return `{
+  "context_servers": {
+    "barkpark": {
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {}
+    }
+  }
+}`
 }
 
 // codexTOMLBlock renders the `~/.codex/config.toml` [mcp_servers.barkpark] block.
@@ -385,6 +423,23 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 			},
 			Verify: `run "MCP: List Servers" from the VS Code Command Palette — barkpark appears; its task tools show in Copilot agent mode's tool picker`,
 		}, true
+	case "zed":
+		// Zed reads MCP "context servers" from the GLOBAL ~/.config/zed/settings.json
+		// (zed::OpenSettingsFile; project .zed/settings.json is not documented for
+		// context_servers). The entry is FLAT — NO `source` key (charter D21) — and
+		// carries an EMPTY env {}: Zed has no ${env:} interpolation, so the credential
+		// rides bp's OWN saved config (~/.config/barkpark/), never a literal token in
+		// settings.json. contextServersFile stamps the generic server-map merge with
+		// TopKey=context_servers (zero new merge-kind code) so --write is real, not the
+		// copilot bare-literal no-op. The file holds the whole editor config, so the
+		// human print carries a merge-the-key note, never a whole-file label.
+		return onrampSpec{
+			Target: target,
+			Files: []onrampFile{
+				contextServersFile("~/.config/zed/settings.json", zedContextServersStanza()),
+			},
+			Verify: "reload Zed (or run `zed: reload`) — barkpark's task tools appear in the Agent Panel's tool list",
+		}, true
 	case "agents-md":
 		// The tool-agnostic teach block for the ~23-tool AGENTS.md convergence
 		// standard — Codex, Aider, and every AGENTS.md-reading agent. It carries no
@@ -403,10 +458,12 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 }
 
 // onrampTargetUsesServer reports whether a target bakes the resolved server URL
-// into its emission. agents-md is a pure teach block with no MCP stanza, so the
-// human print skips the `# server:` line for it.
+// into its emission. agents-md is a pure teach block with no MCP stanza; zed's
+// stanza carries an empty env {} and reads the server from bp's saved config
+// (charter D21) — neither bakes a URL, so the human print skips the `# server:`
+// line for both (printing one would falsely imply the stanza targets it).
 func onrampTargetUsesServer(target string) bool {
-	return target != "agents-md"
+	return target != "agents-md" && target != "zed"
 }
 
 // runOnramp is the `bp onramp <target>` built-in. Prints the config by default;
@@ -535,6 +592,11 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 		out.outf("# If the file already holds other servers, MERGE the \"barkpark\" entry into \"servers\" — don't overwrite it.")
 		out.outf("# Set BARKPARK_API_TOKEN in your shell; ${env:BARKPARK_API_TOKEN} reads it (VS Code dialect, shared with Cursor).")
 		out.outf("# Prefer a typed prompt over a shell var? Add an \"inputs\" promptString and reference ${input:id} — see docs/setup/COPILOT.md.")
+	case "zed":
+		out.outf("# ~/.config/zed/settings.json is your GLOBAL Zed config and holds every editor setting:")
+		out.outf("# MERGE the \"barkpark\" entry into a top-level \"context_servers\" object — don't overwrite the file.")
+		out.outf("# No token goes here: Zed has no ${env:} interpolation, so env stays {} and `bp` reads your")
+		out.outf("# server + token from its own saved config (~/.config/barkpark/) — run `bp setup` first.")
 	case "agents-md":
 		out.outf("# This is the ONE canonical teach block — the AGENTS.md standard that Codex,")
 		out.outf("# Aider, and every AGENTS.md-reading agent converge on. It bakes no token and")
@@ -555,7 +617,7 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 
 // printOnrampHelp is the usage/help screen for `bp onramp`.
 func printOnrampHelp(out *writer) {
-	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot|agents-md> [--write [--force]] [--server URL] [--token TOKEN]")
+	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot|zed|agents-md> [--write [--force]] [--server URL] [--token TOKEN]")
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
 	out.outf("block(s), where they belong, and how to verify. With --write, merge just the")
@@ -569,6 +631,7 @@ func printOnrampHelp(out *writer) {
 	out.outf("  windsurf      ~/.codeium/mcp_config.json stanza (${env:BARKPARK_API_TOKEN}) + merge note")
 	out.outf("  gemini-cli    .gemini/settings.json stanza (${BARKPARK_API_TOKEN}) + global/merge note")
 	out.outf("  copilot       .vscode/mcp.json stanza (top-level `servers`, ${env:BARKPARK_API_TOKEN}) + inputs note")
+	out.outf("  zed           ~/.config/zed/settings.json context_servers (flat entry, env {} — token via bp saved config)")
 	out.outf("  agents-md     ./AGENTS.md marker-managed teach block (the AGENTS.md convergence standard — Codex, Aider, …)")
 	out.outf("")
 	out.outf("chatgpt / claude-ai are remote-agent onramps (no local config) — see docs/setup/REMOTE.md")

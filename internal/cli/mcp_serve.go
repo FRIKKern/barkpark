@@ -20,14 +20,29 @@ package cli
 // its payload as MCP result content and writes NOTHING to os.Stdout — no
 // handleResponse, no render*, no receipt. Diagnostics (the startup line, fatal
 // errors) go to os.Stderr only.
+//
+// REMOTE transport (`--http <addr>`, viable-everywhere charter D18): the same
+// server also speaks Streamable HTTP for remote MCP clients (Claude.ai/ChatGPT-
+// class connectors, via a fronting proxy). The design is FORWARD-THROUGH: the
+// process holds NO ambient credential — every request's `Authorization: Bearer`
+// is copied into a per-request manifest.Context and rides downstream on the
+// normal dispatch seam, so Barkpark's own Auth.verify_token/1 stays the single
+// choke point and a missing/bogus bearer fails closed with the ordinary 401
+// envelope. No pre-verify middleware in v1 (charter D18: no bearer-gated
+// verify-only route exists, and the SDK's RequireBearerToken hard-401s tokens
+// without an expiry, which Barkpark tokens legitimately are).
 
 import (
 	"context"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -48,7 +63,7 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		return exitOK
 	}
 
-	toolset, err := parseMCPServeArgs(tail)
+	toolset, httpAddr, err := parseMCPServeArgs(tail)
 	if err != nil {
 		return usageErrf(out, func() { printMCPServeHelp(out) }, "%v", err)
 	}
@@ -63,50 +78,17 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		return exitGeneric
 	}
 
-	srv := mcp.NewServer(&mcp.Implementation{
-		Name:    "barkpark-tasks",
-		Title:   "Barkpark Tasks",
-		Version: cliVersion,
-	}, nil)
-
-	// The curated six task tools are the point of this server and register under
-	// both toolsets. --tools all additionally exposes every other bp capability
-	// as a generic tool via the bridge (bridge slice owns registerBridgeTools).
-	// Headless liveness (charter decision 5): tool handlers ride the guard-free
-	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a
-	// stdin-reading confirm prompt would hang a server whose stdin is the
-	// protocol pipe.
-	g.yes = true
-
-	// Under the default --tools tasks the curated task tools ARE the server, so a
-	// missing task verb is fatal (fail fast, decision 10). Under --tools all the
-	// bridge exposes whatever the manifest DOES carry, so a tasks-less instance is
-	// served bridge-only after a stderr warning rather than refused — a Barkpark
-	// with the Tasks plugin off still gets a useful MCP surface. registerTaskTools
-	// batches every verb Lookup before the first AddTool, so a failure leaves
-	// NOTHING half-registered on srv; and bridgeShadowedIDs is inert when the
-	// task verbs are absent (there is no twin to skip) — so continuing is safe.
-	if err := registerTaskTools(srv, g, ctx, m); err != nil {
-		if toolset != "all" {
-			out.userErr("mcp serve: register task tools: %v", err)
-			return exitGeneric
-		}
-		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
-		out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
-	}
-	if toolset == "all" {
-		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
-			out.userErr("mcp serve: register bridge tools: %v", err)
-			return exitGeneric
-		}
+	if httpAddr != "" {
+		return runMCPServeHTTP(out, g, ctx, m, toolset, httpAddr)
 	}
 
-	// Published papers as read-only MCP resources — independent of --tools (the
-	// 40-tool Cursor cap is about TOOLS, not resources). Wholly best-effort: it
-	// registers the read template and enumerates the published papers for
-	// resources/list, warning to stderr and degrading to template-only on any
-	// failure (unreachable API, missing doc verbs) — never fatal to startup.
-	registerPaperResources(out, srv, g, ctx, m)
+	// Stdio mode: one server instance, the process's own credential (env/config),
+	// papers enumerated once at startup for resources/list.
+	srv, err := buildMCPServer(out, g, ctx, m, toolset, true)
+	if err != nil {
+		out.userErr("mcp serve: %v", err)
+		return exitGeneric
+	}
 
 	// Announce readiness on stderr (never stdout — that pipe is the protocol).
 	out.errf("bp mcp serve: %s tools over stdio (server %s) — Ctrl-C to stop", toolset, ctx.Server)
@@ -129,11 +111,225 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 	return exitOK
 }
 
+// buildMCPServer assembles a fully registered MCP server: the curated task
+// tools, optionally the generic capabilities bridge (--tools all), and the
+// published-papers resources. Extracted from runMCPServe so the stdio path (one
+// server per process) and the Streamable-HTTP path (one server PER REQUEST,
+// carrying that request's forwarded bearer in ctx.Token) build the exact same
+// server from the exact same registration code — mcp_tasks.go / mcp_bridge.go /
+// mcp_resources.go are untouched by the transport split.
+//
+// enumeratePapers selects the resource registration mode: true (stdio) runs the
+// full registerPaperResources — read template + a best-effort downstream doc.ls
+// enumeration for resources/list; false (HTTP) registers the read TEMPLATE ONLY,
+// because this function runs per-request in stateless HTTP mode and an
+// enumeration GET per request would hammer the API (charter D18).
+//
+// Under the default --tools tasks the curated task tools ARE the server, so a
+// missing task verb is a returned error (fail fast, decision 10). Under --tools
+// all the bridge exposes whatever the manifest DOES carry, so a tasks-less
+// instance is served bridge-only after a stderr warning rather than refused — a
+// Barkpark with the Tasks plugin off still gets a useful MCP surface.
+// registerTaskTools batches every verb Lookup before the first AddTool, so a
+// failure leaves NOTHING half-registered on srv; and bridgeShadowedIDs is inert
+// when the task verbs are absent (there is no twin to skip) — so continuing is
+// safe. out is stderr-only diagnostics (decision 4).
+func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset string, enumeratePapers bool) (*mcp.Server, error) {
+	srv := mcp.NewServer(&mcp.Implementation{
+		Name:    "barkpark-tasks",
+		Title:   "Barkpark Tasks",
+		Version: cliVersion,
+	}, nil)
+
+	// Headless liveness (charter decision 5): tool handlers ride the guard-free
+	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a
+	// stdin-reading confirm prompt would hang a server whose stdin is the
+	// protocol pipe (stdio) or does not exist (HTTP).
+	g.yes = true
+
+	if err := registerTaskTools(srv, g, ctx, m); err != nil {
+		if toolset != "all" {
+			return nil, fmt.Errorf("register task tools: %w", err)
+		}
+		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
+		out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
+	}
+	if toolset == "all" {
+		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
+			return nil, fmt.Errorf("register bridge tools: %w", err)
+		}
+	}
+
+	// Published papers as read-only MCP resources — independent of --tools (the
+	// 40-tool Cursor cap is about TOOLS, not resources). Wholly best-effort: on
+	// any failure (unreachable API, missing doc verbs) it warns to stderr and
+	// degrades — never fatal to startup.
+	if enumeratePapers {
+		registerPaperResources(out, srv, g, ctx, m)
+	} else {
+		registerPaperResourceTemplateOnly(out, srv, g, ctx, m)
+	}
+	return srv, nil
+}
+
+// registerPaperResourceTemplateOnly registers ONLY the barkpark://papers/{id}
+// read template — no resources/list enumeration. It is the HTTP-mode resource
+// surface: buildMCPServer runs per-request there, and registerPaperResources
+// would fire a downstream doc.ls GET at every registration (mcp_resources.go),
+// so the HTTP path registers the lazy read alone; any published paper still
+// reads by URI, authorized by the request's own forwarded bearer.
+//
+// The template's fields and read handler deliberately mirror
+// registerPaperResources (mcp_resources.go) — kept as a sibling here rather
+// than a parameter on it so the resources file stays transport-agnostic and
+// byte-unchanged (charter D18: the transport split edits mcp_serve.go only).
+func registerPaperResourceTemplateOnly(out *writer, srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) {
+	getCmd, ok := m.Tree().Lookup("doc", "get")
+	if !ok {
+		// No doc.get → no way to back a paper read. Same degrade as the full path.
+		out.errf("mcp serve: paper resources disabled — manifest has no doc.get verb")
+		return
+	}
+	srv.AddResourceTemplate(&mcp.ResourceTemplate{
+		Name:        "paper",
+		Title:       "Barkpark paper",
+		Description: "A published Barkpark paper (Bulldocs document) as raw JSON. Read barkpark://papers/<id> for any published paper by its id — including papers created after the server started, which resources/list may not yet enumerate.",
+		MIMEType:    paperResourceMIME,
+		URITemplate: paperResourceTemplate,
+	}, func(_ context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
+		uri := ""
+		if req != nil && req.Params != nil {
+			uri = req.Params.URI
+		}
+		id := paperIDFromURI(uri)
+		if id == "" {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		return readPaperResource(g, ctx, m, *getCmd, uri, id)
+	})
+}
+
+// runMCPServeHTTP serves the MCP protocol over Streamable HTTP on addr until
+// signalled. Stateless mode: the SDK calls getServer for every request, and the
+// per-request server is built around THAT request's Authorization bearer — the
+// forward-through design (charter D18). Returns the exit code.
+func runMCPServeHTTP(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset, addr string) int {
+	handler, err := newMCPHTTPHandler(out, g, ctx, m, toolset)
+	if err != nil {
+		out.userErr("mcp serve: %v", err)
+		return exitGeneric
+	}
+
+	// Bind before announcing, so a taken port / bad addr fails fast and clear.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		out.userErr("mcp serve: listen %s: %v", addr, err)
+		return exitGeneric
+	}
+
+	// stderr for diagnostics, same discipline as stdio mode (decision 4) — and
+	// never a token byte: the process holds no credential to leak.
+	out.errf("bp mcp serve: %s tools over Streamable HTTP on %s (server %s, forward-through bearer) — Ctrl-C to stop", toolset, ln.Addr(), ctx.Server)
+
+	httpSrv := &http.Server{Handler: handler}
+	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- httpSrv.Serve(ln) }()
+
+	select {
+	case <-runCtx.Done():
+		// Signalled: drain in-flight requests briefly, then exit clean.
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpSrv.Shutdown(shutCtx)
+		return exitOK
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			out.userErr("mcp serve: %v", err)
+			return exitGeneric
+		}
+		return exitOK
+	}
+}
+
+// newMCPHTTPHandler builds the Streamable-HTTP handler for `bp mcp serve
+// --http`. Forward-through bearer (charter D18):
+//
+//   - The base context's Token is DISCARDED — the server process never uses an
+//     ambient credential (env, saved config, --token) on behalf of a remote
+//     caller. The only key is the one the request itself carries.
+//   - Per request, getServer copies the base manifest.Context, sets ctx.Token
+//     from the request's `Authorization: Bearer` (empty when absent/malformed),
+//     and registers the same tools/resources stdio serves. A tool call then
+//     rides the normal dispatch seam, so downstream Auth.verify_token/1 is the
+//     single choke point: no/bad bearer → the ordinary 401 envelope back as the
+//     tool result (fail closed), zero side effects server-side.
+//   - Stateless: no Mcp-Session-Id bookkeeping, so getServer runs per request
+//     and one request's token can never bleed into another's.
+//   - DisableLocalhostProtection: the deploy shape is a loopback bind behind a
+//     reverse proxy (charter D19), where inbound Host headers are the public
+//     hostname — the SDK's DNS-rebind guard would 403 exactly that. The proxy
+//     terminates TLS and owns origin policy.
+//
+// No RequireBearerToken pre-verify in v1 (charter D18): Barkpark has no
+// bearer-gated verify-only route, and the SDK middleware rejects TokenInfo
+// without an expiry while Barkpark tokens legitimately never expire.
+func newMCPHTTPHandler(out *writer, g globals, base manifest.Context, m *manifest.Manifest, toolset string) (http.Handler, error) {
+	// No ambient credential, ever: scrub the process token from the base context
+	// (belt-and-braces — getServer overwrites Token per request regardless).
+	base.Token = ""
+
+	// Fail fast at startup exactly like stdio: if the manifest cannot back the
+	// requested toolset, refuse to come up (and surface any bridge-only warning
+	// ONCE, here, instead of per request).
+	if _, err := buildMCPServer(out, g, base, m, toolset, false); err != nil {
+		return nil, err
+	}
+
+	// Per-request rebuilds are validated-by-construction (same manifest, same
+	// toolset), so their diagnostics would only repeat the startup line — send
+	// them to a discard writer to keep stderr per-session quiet.
+	quiet := newWriter(io.Discard, io.Discard)
+
+	getServer := func(req *http.Request) *mcp.Server {
+		ctx := base
+		ctx.Token = bearerFromRequest(req)
+		srv, err := buildMCPServer(quiet, g, ctx, m, toolset, false)
+		if err != nil {
+			return nil // cannot happen after the startup probe; SDK answers 400
+		}
+		return srv
+	}
+
+	return mcp.NewStreamableHTTPHandler(getServer, &mcp.StreamableHTTPOptions{
+		Stateless:                  true,
+		DisableLocalhostProtection: true,
+	}), nil
+}
+
+// bearerFromRequest extracts the bearer credential from a request's
+// Authorization header. Anything that is not a well-formed `Bearer <token>`
+// (missing header, other scheme, empty credential) returns "" — which the
+// dispatch seam turns into a request with NO Authorization header downstream
+// (authHeaders, run.go), i.e. a guaranteed 401: fail closed, never fall back to
+// any ambient token.
+func bearerFromRequest(req *http.Request) string {
+	h := req.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+		return strings.TrimSpace(h[len(prefix):])
+	}
+	return ""
+}
+
 // parseMCPServeArgs reads the `--tools tasks|all` selector (default "tasks")
-// from the command tail. It accepts both `--tools all` and `--tools=all`. Any
-// other flag/positional is a usage error so a typo is not silently ignored.
-func parseMCPServeArgs(tail []string) (string, error) {
-	toolset := "tasks"
+// and the `--http <addr>` transport switch (default "" = stdio) from the
+// command tail. It accepts both `--flag val` and `--flag=val` forms. Any other
+// flag/positional is a usage error so a typo is not silently ignored.
+func parseMCPServeArgs(tail []string) (toolset, httpAddr string, err error) {
+	toolset = "tasks"
 	for i := 0; i < len(tail); i++ {
 		a := tail[i]
 		key, val, hasInline := a, "", false
@@ -144,7 +340,7 @@ func parseMCPServeArgs(tail []string) (string, error) {
 		case "--tools":
 			if !hasInline {
 				if i+1 >= len(tail) {
-					return "", fmt.Errorf("flag --tools needs a value (tasks|all)")
+					return "", "", fmt.Errorf("flag --tools needs a value (tasks|all)")
 				}
 				val = tail[i+1]
 				i++
@@ -153,31 +349,53 @@ func parseMCPServeArgs(tail []string) (string, error) {
 			case "tasks", "all":
 				toolset = val
 			default:
-				return "", fmt.Errorf("invalid --tools %q (want tasks|all)", val)
+				return "", "", fmt.Errorf("invalid --tools %q (want tasks|all)", val)
 			}
+		case "--http":
+			if !hasInline {
+				if i+1 >= len(tail) {
+					return "", "", fmt.Errorf("flag --http needs a listen address (e.g. 127.0.0.1:4010)")
+				}
+				val = tail[i+1]
+				i++
+			}
+			if strings.TrimSpace(val) == "" {
+				return "", "", fmt.Errorf("flag --http needs a listen address (e.g. 127.0.0.1:4010)")
+			}
+			httpAddr = val
 		default:
-			return "", fmt.Errorf("unknown argument %q (mcp serve accepts --tools tasks|all)", a)
+			return "", "", fmt.Errorf("unknown argument %q (mcp serve accepts --tools tasks|all and --http <addr>)", a)
 		}
 	}
-	return toolset, nil
+	return toolset, httpAddr, nil
 }
 
 func printMCPServeHelp(out *writer) {
-	out.outf(`usage: bp mcp serve [--tools tasks|all]
-  Run a stdio Model-Context-Protocol server exposing Barkpark to MCP clients
+	out.outf(`usage: bp mcp serve [--tools tasks|all] [--http <addr>]
+  Run a Model-Context-Protocol server exposing Barkpark to MCP clients
   (Cursor, Claude Desktop, any MCP host). Path B for task tracking — the
   MCP-native counterpart to the shell-based .cursor/rules/barkpark-tasks.mdc
-  card. Speaks JSON-RPC over stdin/stdout; run it as a subprocess from your MCP
-  client config, never interactively.
+  card. Default transport is stdio (JSON-RPC over stdin/stdout; run it as a
+  subprocess from your MCP client config, never interactively).
 
 flags:
   --tools tasks|all   Which tools to expose. "tasks" (default) is the curated
                       six — task_ready, task_next, task_show, task_close,
                       task_create, task_prime. "all" additionally bridges every
                       other bp capability into a generic tool.
+  --http <addr>       Serve Streamable HTTP on <addr> (e.g. 127.0.0.1:4010)
+                      instead of stdio, for REMOTE MCP clients. Forward-through
+                      auth: each request's "Authorization: Bearer <token>" is
+                      forwarded to the Barkpark API as that request's
+                      credential — the process itself holds NO token, and a
+                      missing or invalid bearer fails closed with the API's own
+                      401. Bind loopback behind a TLS reverse proxy; never
+                      expose the plain listener publicly.
 
 Published papers are also exposed as read-only MCP resources
-(barkpark://papers/<id>), independent of --tools.
+(barkpark://papers/<id>), independent of --tools. In --http mode papers read
+lazily by URI (barkpark://papers/{id} template); resources/list enumeration is
+stdio-only.
 
 The server resolves its target Barkpark the same way every other bp command
 does (-s / --token / BARKPARK_* env / saved config). Register it in Cursor via
