@@ -160,4 +160,45 @@ s1–s8 + the anchor, log the wave.
 
 ## Wave log
 
-(empty — Review appends per-wave entries here)
+### Wave 2026-07-11 (wave 1 — the flagship ships)
+
+**Landed.** All three slices done, gates green at review:
+
+- **pp-w1-author-flagship** — `gui-tui-parity-page` LIVE on guerrilla at rev 1
+  (style=article, 66 top-level / 70 total blocks), all 8 D2 sections + colophon, zero
+  screenshots, zero code changes. Published ONCE; offline-first verification made the
+  skeleton final so the patch+ifRev law was never needed post-publish. Reviewer re-ran
+  every gate leg independently (cmd/dump 80→424 lines side-by-side / 40→675 stacked,
+  pass2 harness 19/19 types, reader HTML with grid + 6-role legend, bp paper view 80)
+  and confirmed the offline blocks JSON is byte-identical to the published paper.
+  Branch `…-0-r` carries only the empty marker commit + this wave-log entry.
+- **pp-w1-ledger-truth** — parity-state ws-012 item 0 corrected (diff vs pre-write
+  snapshot proves exactly one block, one item changed), the three false-done stubs
+  (p-retheme, p-live-plans, p-white-ladder) carry the honest annotation, probe paper
+  unpublished (bp doc get → not_found). Note: the reader serves HTTP 200 soft-404s for
+  unpublished papers — existence gates must use the API signal (filed:
+  pp-b-existence-gate-signal).
+- **pp-w1-canvas-verify** — stalled in-window (flagship published after this builder
+  finished; the paper 404'd for them), RESOLVED AT REVIEW: reviewer regenerated the
+  live-blocks JSON, repointed the driver at the review worktree, fixed a real bug —
+  the harness's `bp-ready` wait is racy (element upgrades+mounts empty synchronously
+  during bundle-script execution, before the inline listener attaches; the blocks
+  setter applies content via `setContent(…,false)` without re-firing) — and ran the
+  gate green: clean mount, full 66-id round-trip, one patch-block op keyed gtp-002,
+  `.bp-section__grid` with `--bp-tracks:2`, 11 readonly chips as expected offline
+  degrade. Race documented on pp-b-canvas-harness-generic.
+
+**Lead closes on merge:** the LEAD-CLOSES criterion on each of the three slice tasks;
+parity-s1…s7 + parity-s8-goal against sections of the live paper; then the anchor
+`parity-page` with https://guerrilla.barkpark.cloud/papers/gui-tui-parity-page as
+evidence (anchor c1/c2/c3/c4 are all now provable from this wave's stamps).
+
+**Next wave should take:** nothing is owed on the wish itself — it is fulfilled once
+the lead closes. Highest-leverage follow-ons, already filed: pp-b-branch-protection
+(P2 — required-named freshness check was bypassable), the resolver arc named by the
+page's own §8 (query-driven task blocks → realtime — the "plans are living documents"
+goal), pp-b-dump-harness + pp-b-canvas-harness-generic (turn this wave's two proven
+/tmp verification drivers into documented tooling), and the stale parity-state item
+"terminal renderer knows none of the 11 new blocks — unreadable in the TUI" which
+pdrender parity (14/14, #1357) has since falsified — next ledger-truth pass should
+correct it the same snapshot-diff way ws-012 was.
