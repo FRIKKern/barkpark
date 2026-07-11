@@ -69,3 +69,21 @@ Integration order: 1→2→3 (Elixir train, stacked or sequential — 1 and 3 to
 ## Run policy
 
 Fable strategy/digest/decide/review; Opus builders for well-specified seams; Fable builders for the subtle/cross-surface slices. Never Haiku. Ledger is the spine; wave Paper opens at Strategize and closes as the debrief. Unattended gates acceptable.
+
+## Wave log
+
+### Wave 2026-07-11 (wave 1 — the chat gets hands) — reviewed, grade A
+
+**Landed (5/6 slices green, all gates re-run green at review; Paper debrief: chat-task-hands-wave-2026-07-11):**
+
+- **S1 spawn-env** (`task-cth-w1-spawn-env`, branch `loop-epic/chat-spawn-env-inject-bp-credentials-wor-0`): `spawn_env/2` at Port.open — bp credentials in (one mint, two consumers), 24-name secret scrub out, poison sentinel on refusal, `task_hands/1` queryable. 86/0. No review fixes.
+- **S2 probe** (`task-cth-w1-probe`, branch `loop-epic/provider-neutral-readiness-probe-barkpar-1`): pure `Barkpark.StudioChat.Probe` (claude/bp/codex) + `Capabilities.codex/0` honest stub. 123/0. No review fixes.
+- **S3 onboarding card** (`task-cth-w1-onboarding-card`, final branch `loop-epic/chat-never-vanishes-gate-inversion-onboa-2-r`, STACKED on S1+S2): gate inversion (`enabled?` = flag+demo only, posture tests verbatim), named-state card in the composer chrome, runtime auth guard proven by a captured NDJSON fixture (subtype:"success" never trusted). 350/0. Review fix: mix format on claude_chat_test.exs.
+- **S4 MCP stamp/pulse** (`task-eal-bl-mcp-stamp-pulse`, final branch `loop-epic/mcp-tools-task-stamp-task-pulse-hand-map-3-r`): curated overlay 6→8 tools, epoch-teaching descriptions, DestructiveHint:false middle-ground documented, bridge shadow set + fixture manifest synced. Review fix: gofmt on mcp_serve_test.go.
+- **S5 bp deploy-install** (`task-cth-w1-bp-deploy-install`, branch `loop-epic/every-deploy-installs-bp-instance-deploy-4`): idempotent atomic build+install of `/usr/local/bin/bp` in instance-deploy.sh, loud-WARN non-fatal. No review fixes.
+
+**Stalled honestly:** S6 dogfood (`task-cth-w1-dogfood`) — strictly last, needs all five merged + guerrilla deployed; blocked with grep-proven evidence, left in_progress. **The next wave (or the lead post-merge) runs the dogfood FIRST** — it closes epic criterion 1 and expressive-agent-loops criterion 2.
+
+**Merge order for the lead:** S1 → S2 → S3-r is a stacked train (S3-r carries S1+S2 commits; squash-merges force `--onto` rebases — one PR at a time, or merge S3-r as the train). S4-r and S5 merge independently anytime; this wave-log branch (`loop-epic/chat-task-hands-wave1-review-log`, off main — the slice branches predate the charter commit) merges trivially. Lead closes each task's "PR merged" criterion, plus superseded `task-scc-bl-mcp-hands-indicator` on S3's merge, and stamps S5's live-proof criterion after guerrilla auto-deploys.
+
+**Known imprecisions riding along (accepted, not bugs):** auth_failure? maps any is_error+terminal_reason:api_error result to :not_logged_in (recoverable via Re-check); probe System.cmd has no timeout (async mandate mitigates); scrub denylist is a static snapshot — drift gate filed as `task-cth-bl-scrub-drift-gate`; `:checking` deliberately keeps the composer live (deviation stamped on the ledger).
