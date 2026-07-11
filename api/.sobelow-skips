@@ -110,3 +110,5 @@ XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/tic
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/studio_chat.ex:1769,6D40EF1
 XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/plugs/idempotency.ex:79,6F2CFF5
 Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:217,72AA425
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1975,223DD4C
+CI.System: Command Injection via `System` function,lib/barkpark/self_update/runner.ex:114,AFDFBA
