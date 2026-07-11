@@ -323,11 +323,11 @@ func TestMCPServeToolsLiveOverInMemory(t *testing.T) {
 	// task_stamp arg errors, caught client-side before any request:
 	//   missing criterion; both met and miss; met without evidence.
 	for _, bad := range []map[string]any{
-		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "met": true, "evidence": "x"}, // no criterion
-		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0},               // neither met nor miss
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "met": true, "evidence": "x"},                                            // no criterion
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0},                                                          // neither met nor miss
 		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0, "met": true, "miss": true, "evidence": "x", "note": "y"}, // both
-		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0, "met": true},  // met, no evidence
-		{"doc_id": "t1", "worker_id": "cursor-test", "criterion": 0, "met": true, "evidence": "x"},      // no observed_epoch
+		{"doc_id": "t1", "worker_id": "cursor-test", "observed_epoch": 2, "criterion": 0, "met": true},                                             // met, no evidence
+		{"doc_id": "t1", "worker_id": "cursor-test", "criterion": 0, "met": true, "evidence": "x"},                                                 // no observed_epoch
 	} {
 		res, err = cs.CallTool(bg, &mcp.CallToolParams{Name: "task_stamp", Arguments: bad})
 		if err != nil {
