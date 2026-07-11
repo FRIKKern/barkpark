@@ -365,7 +365,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # container does not, so it GRADUATES out of this list the moment it becomes editable.
     #
     # `task-list` GRADUATED to EDITABLE (live-data widget, bpTaskList; task-list-node.js)
-    # but STILL carries NO reader markup here: unlike columns/terminal/card (which emit
+    # but STILL carries NO reader markup here: unlike columns/terminal (which emit
     # their own structural chrome to edit INSIDE), the task-list ROWS remain SERVER-
     # PAINTED (the query is the authored datum, the rows are the one server producer via
     # TaskResolver). The node-view writes ONLY `bp-canvas-tasklist-*` edit chrome and
@@ -374,19 +374,21 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # It is the figure precedent (editable caption + server-painted child), applied to a
     # LIVE QUERY + server-painted rows.
     #
-    # `bp-card__` GRADUATED out (STEP 4, same reasoning as `bp-cols__`/`bp-term__`): the
-    # NEW `card` WIDGET is an EDITABLE canvas node (card-node.js bpCard) whose node-view
-    # MUST emit `bp-card__t`/`bp-card__d`/`bp-card__media`/`bp-card__action` to inherit
-    # the reader's own `.bp-paper-surface .bp-card*` paint — the callout precedent, ZERO
-    # second HTML producer. `bp-cards` (the legacy fleet GRID wrapper) STAYS forbidden
-    # below (via painted_fleet's `cards` sig) — the new path emits `bp-section__grid`,
-    # NEVER `bp-cards`, and `bp-card__t`/`bp-card__d` do NOT contain the substring
-    # `bp-cards` — so the still-verbatim-carried legacy `cards` fleet stays gated against
-    # a hand-mirrored second producer.
+    # `bp-card__` is FORBIDDEN again (S10, parity2-bug-card-slot-chrome — reverting the
+    # STEP-4 graduation, whose premise model B falsified). The reader's `card_html/2`
+    # (components.ex) no longer emits ANY `bp-card__*` slot chrome: slots recurse to
+    # bare semantics — <h2>/<p>/<img>/a.bp-button (PRs #1529/#1539, pinned by
+    # card_widget_test.exs) — so an editor `bp-card__` literal can only be a
+    # HAND-WRITTEN model-A second producer (the exact WYSIWYG break S10 fixed). The
+    # card node-view (card-node.js bpCard) now emits the model-B shape directly;
+    # __card_parity.test.mjs pins its mounted DOM against the reader ground truth.
+    # `bp-cards` (the legacy fleet GRID wrapper) stays forbidden via painted_fleet's
+    # `cards` sig; the legacy fleet's own `bp-card__t`/`bp-card__d` remain reader-only
+    # bytes (components.ex cards_html/1 — server-painted, verbatim-carried).
     reader_markup =
       Enum.map(painted_fleet(), fn {_l, _b, _e, sig} -> sig end) ++
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
-        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__)
+        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__ bp-card__)
 
     offenders =
       reader_markup

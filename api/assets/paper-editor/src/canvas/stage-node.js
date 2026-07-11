@@ -11,9 +11,9 @@
 //
 // ── VIEW⇄EDIT PARITY (the DESIGN-1 carve-out) ────────────────────────────────
 //
-// CHROME = `bp-canvas-stage*` ONLY. UNLIKE card-node.js (which emits the reader's own
-// `bp-card__*` to inherit the reader cascade), the stage node-view does NOT emit the
-// reader pipeline-node cell class — that class STAYS in the parity-gate §3 forbidden
+// CHROME = `bp-canvas-stage*` ONLY. UNLIKE card-node.js (whose node-view emits the
+// reader's own model-B bare-semantic shapes to inherit the surface paint), the stage
+// node-view does NOT emit the reader pipeline-node cell class — it STAYS in the §3 forbidden
 // list so the still-verbatim-carried legacy `pipeline` fleet keeps its gate protection.
 // The reader (Components.stage_html/1, server-side) paints the real cell; here the cell
 // look is hand-mirrored by dedicated `bp-canvas-stage*` CSS (styles.css embedder +
