@@ -5176,3 +5176,67 @@ test("isu-w5: fleetRolloutBannerHtml emits a wired Halt/Resume button, empty on 
   assert.doesNotMatch(evil, /<b>x<\/b>/);
   assert.match(evil, /&lt;b&gt;x/);
 });
+
+// ── isu-w6: console instance rollback (charter W6 D16/D19/D23) ───────────────
+
+test("isu-w6: the rollback pure helpers are exported through the ONE test hook", () => {
+  assert.equal(typeof hooks.rollbackConfirmHtml, "function");
+  assert.equal(typeof hooks.rollbackConflictCopy, "function");
+});
+
+test("isu-w6: rollbackConfirmHtml carries the honest D19 copy (app-level, schema forward, pins)", () => {
+  const html = hooks.rollbackConfirmHtml({ name: "acme-prod" });
+  assert.match(html, /Roll back acme-prod\?/);         // names the instance
+  assert.match(html, /previous slot/);                 // app-level slot flip
+  assert.match(html, /does <b>not<\/b> undo migrations/); // schema stays FORWARD
+  assert.match(html, /<b>pinned<\/b>/);                // pins at rolled-back version
+  assert.match(html, /id="rollback-go"/);              // the wired trigger button
+  assert.match(html, /data-close/);                    // Cancel exists
+  assert.match(html, /btn-danger/);                    // rollback is a caution action
+});
+
+test("isu-w6: rollbackConfirmHtml escapes a hostile instance name (no markup injection)", () => {
+  const html = hooks.rollbackConfirmHtml({ name: '<img src=x onerror=alert(1)>' });
+  assert.doesNotMatch(html, /<img src=x/); // never emitted as live markup
+  assert.match(html, /&lt;img/);           // rendered as escaped text
+});
+
+test("isu-w6: rollbackConflictCopy maps the full W6 refusal vocabulary (D23), no force affordance", () => {
+  const noPrev = hooks.rollbackConflictCopy("no_previous_slot", { error: { code: "no_previous_slot" } });
+  assert.match(noPrev.title, /Nothing to roll back to/);
+  assert.match(noPrev.body, /No previous slot/);
+
+  assert.match(hooks.rollbackConflictCopy("already_running").title, /already running/);
+  assert.match(hooks.rollbackConflictCopy("not_supported").body, /blue\/green slot box/);
+
+  // not_enabled and its 503 alias feature_not_configured collapse to one honest copy
+  const notEnabled = hooks.rollbackConflictCopy("not_enabled");
+  const notConfigured = hooks.rollbackConflictCopy("feature_not_configured");
+  assert.match(notEnabled.body, /BARKPARK_SELF_UPDATE_APPLY=1/);
+  assert.deepEqual(plain(notConfigured), plain(notEnabled));
+
+  // not_live (409 while provisioning) gets the same honest copy as the w5 update trio
+  assert.match(hooks.rollbackConflictCopy("not_live").title, /isn't live yet/);
+
+  assert.match(hooks.rollbackConflictCopy("instance_unreachable").title, /Couldn't reach the instance/);
+  assert.match(hooks.rollbackConflictCopy("instance_error").title, /rejected the rollback/);
+
+  // unknown / absent code → a safe generic terminal copy, never a crash
+  assert.match(hooks.rollbackConflictCopy(undefined).title, /Couldn't start the rollback/);
+  assert.match(hooks.rollbackConflictCopy("wat", null).title, /Couldn't start the rollback/);
+
+  // NO force affordance on any branch — a rollback refusal is always terminal
+  for (const code of ["no_previous_slot", "already_running", "not_supported", "not_live",
+    "not_enabled", "feature_not_configured", "instance_unreachable", "instance_error", "wat"]) {
+    assert.equal(hooks.rollbackConflictCopy(code).forceLabel, undefined, code + " must not offer force");
+  }
+});
+
+test("isu-w6: rollbackConflictCopy embeds NO server free-text — copy is static (no injection surface)", () => {
+  // The raw envelope may carry hostile strings; the classifier must NEVER splice
+  // them into its title/body (they'd reach a toast). Every branch stays static.
+  const hostile = { error: { code: "instance_error", message: "<script>alert(1)</script>" } };
+  const copy = hooks.rollbackConflictCopy("instance_error", hostile);
+  assert.doesNotMatch(copy.title + copy.body, /<script/);
+  assert.doesNotMatch(copy.title + copy.body, /alert\(1\)/);
+});

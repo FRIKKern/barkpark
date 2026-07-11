@@ -12,6 +12,12 @@
 #     only and REFUSES a non-main DEPLOY_REF (exit 11); a staging box (.staging
 #     present) fetch+hard-resets ANY ref (branch or PR pull/<n>/head) and flips
 #   - the coalesce no-op stays a no-op; rm-ing the STATE file forces a rebuild
+#   - rollback (W6): every deploy stamps .slots/<target>.sha; a happy
+#     --rollback resets the checkout to the stamp sha, reboots + health-gates
+#     the idle slot, flips Caddy back, rewrites STATE; --rollback-preflight is
+#     read-only and typed (21 no_previous_slot / 22 not_supported / 23 lock
+#     held); an unhealthy rollback fails CLOSED (exit 24, Caddy byte-identical,
+#     slot re-disabled, checkout reset back)
 # The fake git records every invocation to $GITLOG so the channel asserts can
 # see which git verb ran. Never touches a real server.
 # Run: bash deploy/instance-deploy_test.sh
@@ -71,7 +77,8 @@ if [ "${1:-}" = "-i" ]; then shift; expr="$1"; shift; exec perl -pi -e "$expr" "
 exec /usr/bin/sed "$@"
 EOF
   printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/sleep"
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/flock"
+  # FLOCK_FAIL=1 simulates a held deploy lock (rollback modes must exit 23).
+  printf '#!/usr/bin/env bash\n[ -n "${FLOCK_FAIL:-}" ] && exit 1\nexit 0\n' > "$dir/flock"
   chmod +x "$dir"/*
 }
 
@@ -96,6 +103,22 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE from env
     bash "$SCRIPT" > "$TMP/out.log" 2>&1
   echo $?
 }
+run_rollback() { # $1=health code  $2=fake sha (live HEAD)
+  env PATH="$FAKE:$PATH" \
+    BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
+    BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+    HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
+    bash "$SCRIPT" --rollback > "$TMP/rollback.log" 2>&1
+  echo $?
+}
+run_preflight() { # $1=fake sha (live HEAD); stdout kept for TARGET_* asserts
+  env PATH="$FAKE:$PATH" \
+    BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
+    BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+    HOME="$TMP/home" FAKE_SHA="$1" HEALTH_CODE=200 \
+    bash "$SCRIPT" --rollback-preflight > "$TMP/preflight.log" 2>&1
+  echo $?
+}
 # shellcheck disable=SC2329  # invoked indirectly via eval inside check()
 first_upstream() { grep -oE 'localhost:40[0-9]{2}' "$CADDY" | head -1; }
 
@@ -115,6 +138,8 @@ check "maintenance handler armed once"    "[ \"\$(grep -c 'handle_errors {' '$CA
 check "old slot + legacy unit retired"    "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG' && grep -q 'disable --now barkpark' '$SYSCTLLOG'"
 check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"
+check "per-slot sha stamp written (W6)"   "[ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'newsha' ]"
+check "idle slot has no stamp yet"        "[ ! -e '$APP/.slots/blue.sha' ]"
 check "prod channel: ff-only pull of origin main" "grep -q 'pull --ff-only origin main' '$GITLOG'"
 check "prod channel: no staging fetch/reset"       "! grep -qE 'fetch|reset --hard FETCH_HEAD' '$GITLOG'"
 
@@ -129,6 +154,7 @@ check "Caddy flipped back to :4000"       "[ \"\$(first_upstream)\" = 'localhost
 check "no double arm (idempotent)"        "[ \"\$(grep -c 'handle_errors {' '$CADDY')\" = '1' ]"
 check "flipped Caddyfile still caddy-valid" "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
 check "green slot retired"                "grep -q 'disable --now barkpark-slot@green' '$SYSCTLLOG'"
+check "blue stamp written, green stamp kept" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'newsha2' ] && [ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'newsha' ]"
 rm -rf "$TMP"
 
 echo "== Case 3: unhealthy new slot -> stopped, NO flip, active untouched =="
@@ -211,6 +237,63 @@ rc="$(run_deploy 200 coalsha)"
 check "rebuild after rm STATE: exit 0"    "[ '$rc' = '0' ]"
 check "rebuild recompiled (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
 check "state file re-written = coalsha"   "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'coalsha' ]"
+rm -rf "$TMP"
+
+echo "== Case 8: rollback refusals — not_supported, no_previous_slot, lock held =="
+setup_case
+rc="$(run_preflight freshsha)"            # no .slots dir at all (pre-stamp box)
+check "preflight on pre-slot box: exit 22 not_supported" "[ '$rc' = '22' ]"
+run_deploy 200 v1sha >/dev/null           # ONE deploy: green live, blue never built
+cp "$CADDY" "$TMP/caddy.before"
+: > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(run_preflight v1sha)"
+check "preflight single-deploy box: exit 21 no_previous_slot" "[ '$rc' = '21' ]"
+rc="$(run_rollback 200 v1sha)"
+check "rollback single-deploy box: exit 21 no_previous_slot"  "[ '$rc' = '21' ]"
+check "refusal leaves Caddyfile byte-identical" "cmp -s '$CADDY' '$TMP/caddy.before'"
+check "refusal makes zero systemctl mutations"  "! grep -qE 'restart|enable|disable|reload' '$SYSCTLLOG'"
+check "refusal never resets the checkout"       "! grep -q 'reset --hard' '$GITLOG'"
+rc="$(FLOCK_FAIL=1 run_preflight v1sha)"
+check "deploy lock held: exit 23 already_running" "[ '$rc' = '23' ]"
+rm -rf "$TMP"
+
+echo "== Case 9: happy rollback — two deploys populate both slots, --rollback flips back =="
+setup_case
+run_deploy 200 v1sha >/dev/null           # green live :4001, .slots/green.sha=v1sha
+run_deploy 200 v2sha >/dev/null           # blue live :4000,  .slots/blue.sha=v2sha
+check "both slot stamps recorded"         "[ \"\$(cat '$APP/.slots/green.sha')\" = 'v1sha' ] && [ \"\$(cat '$APP/.slots/blue.sha')\" = 'v2sha' ]"
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(run_preflight v2sha)"
+check "preflight exit 0"                  "[ '$rc' = '0' ]"
+check "preflight prints TARGET_SLOT=green" "grep -q '^TARGET_SLOT=green$' '$TMP/preflight.log'"
+check "preflight prints TARGET_SHA=v1sha"  "grep -q '^TARGET_SHA=v1sha$' '$TMP/preflight.log'"
+check "preflight is read-only"            "! grep -qE 'restart|enable|disable|reload' '$SYSCTLLOG' && ! grep -q 'reset --hard' '$GITLOG'"
+rc="$(run_rollback 200 v2sha)"
+check "rollback exit 0"                   "[ '$rc' = '0' ]"
+check "checkout reset to the stamp sha"   "grep -q 'reset --hard v1sha' '$GITLOG'"
+check "old slot rebooted"                 "grep -q 'restart barkpark-slot@green' '$SYSCTLLOG'"
+check "Caddy flipped back to :4001"       "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+check "rolled-back Caddyfile caddy-valid" "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+check "STATE rewritten to rolled-back sha" "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'v1sha' ]"
+check "rolled-back slot enabled (reboot-safe)" "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
+check "rolled-away slot retired"          "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG'"
+check "no rebuild during rollback"        "[ \"\$(grep -c compile '$MIXLOG')\" = '0' ]"
+rm -rf "$TMP"
+
+echo "== Case 10: unhealthy rollback fails CLOSED — Caddy untouched, slot re-disabled, checkout back =="
+setup_case
+run_deploy 200 v1sha >/dev/null
+run_deploy 200 v2sha >/dev/null           # blue live :4000, green idle at v1sha
+cp "$CADDY" "$TMP/caddy.before"
+: > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(run_rollback 000 v2sha)"            # resurrected slot never turns healthy
+check "exit 24 unhealthy_fail_closed"     "[ '$rc' = '24' ]"
+check "Caddyfile byte-identical (no flip)" "cmp -s '$CADDY' '$TMP/caddy.before'"
+check "resurrected slot re-disabled"      "grep -q 'disable --now barkpark-slot@green' '$SYSCTLLOG'"
+check "live blue slot never touched"      "! grep -qE '(stop|disable --now) barkpark-slot@blue' '$SYSCTLLOG'"
+check "checkout reset back to live sha"   "grep -q 'reset --hard v2sha' '$GITLOG'"
+check "STATE untouched (still v2sha)"     "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'v2sha' ]"
+check "no caddy reload attempted"         "! grep -q 'reload caddy' '$SYSCTLLOG'"
 rm -rf "$TMP"
 
 echo

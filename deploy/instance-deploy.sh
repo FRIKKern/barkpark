@@ -32,6 +32,18 @@
 # EVERY git path suppresses the repo's post-merge hook (core.hooksPath=.githooks
 # on the box): that hook nukes the live _build and restarts the legacy `barkpark`
 # unit — exactly the outage this script exists to prevent.
+#
+# ROLLBACK MODES (W6) — the same script owns the reverse flip:
+#   --rollback-preflight  read-only: is a rollback possible right now? Typed
+#                         exits (21 no_previous_slot, 22 not_supported, 23 lock
+#                         held); exit 0 prints TARGET_SLOT=/TARGET_SHA= lines
+#                         (machine-parsed by the instance controller).
+#   --rollback            flip+reset to the IDLE slot at its RECORDED sha
+#                         (.slots/<slot>.sha): git reset --hard <stamp>, reboot
+#                         the slot, health-gate it on its OWN port, flip Caddy
+#                         only on green, rewrite deploy STATE. Unhealthy = fail
+#                         closed (slot re-disabled, Caddy untouched, checkout
+#                         reset back, exit 24).
 set -uo pipefail
 
 APP="${BARKPARK_APP_DIR:-/opt/barkpark}"
@@ -42,12 +54,26 @@ BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
 
+MODE=deploy
+case "${1:-}" in
+  --rollback)           MODE=rollback ;;
+  --rollback-preflight) MODE=preflight ;;
+  "") ;;
+  *) log "unknown flag '${1}' (supported: --rollback, --rollback-preflight)"; exit 2 ;;
+esac
+
 # ---- Serialize: overlapping runs (back-to-back merges, manual + CD) queue
 # here. Each run pulls AFTER taking the lock, so a queued run deploys the
 # latest HEAD; if its commits were already shipped by the run ahead of it,
-# the coalesce check below turns it into a no-op.
+# the coalesce check below turns it into a no-op. Rollback modes NEVER queue:
+# racing a deploy would flip to a slot mid-rebuild, so a held lock is a typed
+# refusal (23 = already_running) the caller surfaces honestly.
 exec 9>"$LOCK"
 if ! flock -n 9; then
+  if [ "$MODE" != "deploy" ]; then
+    log "deploy lock held — refusing to $MODE while a deploy runs (already_running)"
+    exit 23
+  fi
   log "another deploy holds the lock — queueing (max 30 min)"
   flock -w 1800 9 || { log "gave up waiting for the deploy lock"; exit 15; }
 fi
@@ -59,6 +85,106 @@ cd "$APP" || { log "no $APP"; exit 10; }
 STATE="$APP/.instance-deploy-last"   # commit of the last HEALTHY deploy
 OLD="$(git rev-parse HEAD)"
 log "current=$OLD"
+
+# ---- Rollback modes (W6). Flip+reset, never flip-only: both slots share ONE
+# checkout, so a bare Caddy flip + slot restart would `mix phx.server`-recompile
+# NEW source into the old slot's stale build root (proven by the mix-staleness
+# probe). `git reset --hard <stamp>` — this script's own failure-path idiom —
+# restores the old code byte-identically. Schema stays FORWARD: rolling back
+# code does NOT undo the schema; write a compensating migration (PROD_OPS law).
+# The health gate proves boot + a shallow endpoint, NOT schema compatibility.
+if [ "$MODE" != "deploy" ]; then
+  # Preflight checks (shared by both modes; --rollback-preflight is read-only).
+  if [ ! -d "$APP/.slots" ]; then
+    log "no $APP/.slots — this box predates per-slot stamps (not_supported)"
+    exit 22
+  fi
+  ACTIVE_PORT="$(grep -oE 'localhost:40[0-9]{2}' "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2)"
+  ACTIVE_PORT="${ACTIVE_PORT:-$BLUE_PORT}"
+  if [ "$ACTIVE_PORT" = "$BLUE_PORT" ]; then
+    LIVE=blue; TARGET_SLOT=green; TARGET_PORT="$GREEN_PORT"
+  else
+    LIVE=green; TARGET_SLOT=blue; TARGET_PORT="$BLUE_PORT"
+  fi
+  TARGET_SHA="$(cat "$APP/.slots/$TARGET_SLOT.sha" 2>/dev/null || true)"
+  if [ -z "$TARGET_SHA" ]; then
+    log "idle slot '$TARGET_SLOT' has no recorded sha (.slots/$TARGET_SLOT.sha) — no_previous_slot"
+    exit 21
+  fi
+  if [ ! -d "$APP/api/_build_$TARGET_SLOT/prod" ]; then
+    log "idle slot '$TARGET_SLOT' has no complete build root (api/_build_$TARGET_SLOT/prod) — no_previous_slot"
+    exit 21
+  fi
+  if [ "$MODE" = "preflight" ]; then
+    log "rollback possible: would flip :$ACTIVE_PORT ($LIVE) -> :$TARGET_PORT ($TARGET_SLOT) at $TARGET_SHA"
+    echo "TARGET_SLOT=$TARGET_SLOT"
+    echo "TARGET_SHA=$TARGET_SHA"
+    exit 0
+  fi
+
+  # --rollback: mutate. $OLD (the live checkout's HEAD) is what every failure
+  # path resets back to, keeping sources in step with the still-serving slot.
+  log "ROLLBACK: flip :$ACTIVE_PORT ($LIVE) -> :$TARGET_PORT ($TARGET_SLOT) at $TARGET_SHA"
+  if ! git reset --hard "$TARGET_SHA"; then
+    log "git reset --hard $TARGET_SHA failed — checkout unchanged, Caddy untouched, no flip"
+    exit 24
+  fi
+
+  # Rebuild the pdrender wasm at the OLD sha (same non-fatal contract as the
+  # forward path: a failed build only degrades the reader's TUI view to its
+  # fallback). priv/static is ONE shared dir, so this is healing, not snapshot.
+  log "building pdrender wasm at rolled-back sha (non-fatal)"
+  if command -v go >/dev/null 2>&1; then
+    if make wasm; then log "pdrender wasm built"; else log "WARN: pdrender wasm build failed — reader TUI view degrades to its fallback"; fi
+  else
+    log "go not found — skipping pdrender wasm build"
+  fi
+
+  log "boot barkpark-slot@$TARGET_SLOT on :$TARGET_PORT"
+  systemctl restart "barkpark-slot@$TARGET_SLOT"
+  ok=0
+  for _ in $(seq 1 40); do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://localhost:${TARGET_PORT}/api/schemas" || true)"
+    if [ "$code" = "200" ]; then ok=1; log "slot $TARGET_SLOT healthy ($code)"; break; fi
+    sleep 5
+  done
+  if [ "$ok" != "1" ]; then
+    log "slot $TARGET_SLOT UNHEALTHY at $TARGET_SHA — fail closed: slot re-disabled, Caddy untouched, checkout back to live sha"
+    systemctl disable --now "barkpark-slot@$TARGET_SLOT" 2>/dev/null || true
+    git reset --hard "$OLD"
+    exit 24
+  fi
+
+  # Hot swap back (mirrors the forward flip; the post-flip public curl below
+  # is LOG-ONLY and must never gate — the pre-flip own-port loop above is the gate).
+  cp -a "$CADDYFILE" "$CADDYFILE.pre-rollback"
+  sed -i "s/localhost:${ACTIVE_PORT}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
+  if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
+    log "Caddyfile invalid after rollback flip — restoring, fail closed"
+    cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"
+    systemctl disable --now "barkpark-slot@$TARGET_SLOT" 2>/dev/null || true
+    git reset --hard "$OLD"; exit 24
+  fi
+  if ! systemctl reload caddy; then
+    log "caddy reload failed during rollback — restoring, fail closed"
+    cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"; systemctl reload caddy || true
+    systemctl disable --now "barkpark-slot@$TARGET_SLOT" 2>/dev/null || true
+    git reset --hard "$OLD"; exit 24
+  fi
+  code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
+  log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+
+  # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
+  # sha (W6 D21) — keeps coalesce, the agent's git_commit, and the next
+  # deploy's OLD baseline truthful. The retired slot's stamp + build root stay:
+  # a second --rollback legitimately flips forward again.
+  sleep 5
+  systemctl enable "barkpark-slot@$TARGET_SLOT" >/dev/null 2>&1 || true
+  systemctl disable --now "barkpark-slot@$LIVE" >/dev/null 2>&1 || true
+  echo "$TARGET_SHA" > "$STATE"
+  log "ROLLED BACK — slot $TARGET_SLOT live at $TARGET_SHA"
+  exit 0
+fi
 
 # ---- Channel-gated git step (see header). Fail-closed on the $APP/.staging
 # marker: absent => production (strict ff-only main, non-main ref REFUSED);
@@ -188,6 +314,11 @@ install -m 0644 "$APP/deploy/systemd/barkpark-slot@.service" /etc/systemd/system
 mkdir -p "$APP/.slots"
 printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$BLUE_PORT" "$APP/api/_build_blue" > "$APP/.slots/blue.env"
 printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$GREEN_PORT" "$APP/api/_build_green" > "$APP/.slots/green.env"
+# Per-slot version stamp (W6 D12): record what THIS deploy puts into the target
+# slot, so --rollback knows what the idle slot holds after the next flip. STATE
+# is one global sha and the env files carry only port+build-root — without the
+# stamp a box has slot amnesia and rollback would flip to an unknown build.
+echo "$NEW" > "$APP/.slots/$TARGET.sha"
 systemctl daemon-reload
 
 # ---- Clean-build the idle slot's root while the active slot keeps serving
@@ -261,8 +392,12 @@ code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALT
 log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 
 # ---- Drain, then retire the old slot AND the pre-blue/green legacy unit.
-# Exactly one slot stays enabled (survives reboot). Instant manual rollback:
-# flip the Caddyfile port back, reload caddy, start the old slot again.
+# Exactly one slot stays enabled (survives reboot). Rollback is NOT a bare
+# Caddyfile flip — a slot restart recompiles NEW source from the ONE shared
+# checkout into the old slot's stale build root. Run `instance-deploy.sh
+# --rollback`: it resets the checkout to the idle slot's recorded sha
+# (.slots/<slot>.sha), health-gates that slot on its own port, and flips
+# Caddy only on green (see the rollback block above).
 sleep 5
 systemctl enable "barkpark-slot@$TARGET" >/dev/null 2>&1 || true
 systemctl disable --now "barkpark-slot@$OTHER" >/dev/null 2>&1 || true

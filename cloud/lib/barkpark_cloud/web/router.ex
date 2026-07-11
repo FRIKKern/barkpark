@@ -1875,6 +1875,143 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/barkparks/:id/rollback → 202 {status: "started", target_sha,
+  # pinned_release} — trigger a blue/green ROLLBACK run on the instance
+  # (isu-w6). The control plane relays POST /v1/admin/rollback server-side
+  # with the STORED admin token (the self-update seam above) and relays the
+  # instance's verdict:
+  #
+  #   202 {status:"started",target_sha:…}      — preflight passed, the async
+  #                                              flip started; by the time we
+  #                                              answer, the CP has ALREADY
+  #                                              pinned (below).
+  #   409 {error:{code:"no_previous_slot"      — typed refusals, relayed
+  #               |"already_running"             VERBATIM (D23) — the console
+  #               |"not_supported"}}             and CLI key their copy off
+  #                                              these exact codes.
+  #   503 {error:{code:"not_enabled"}}         — instance did not set
+  #                                              BARKPARK_SELF_UPDATE_APPLY=1
+  #                                              (matched on the BODY, like
+  #                                              self-update: a bare 503 is
+  #                                              the front proxy's restart
+  #                                              window → 502).
+  #
+  # PIN ATOMICITY (D16/D17): on instance 202 the CP atomically writes
+  # pinned_release = the instance-REPORTED target_sha (never operator input)
+  # through the narrow autoupdate_changeset path, then enqueues the one-row
+  # status refresh + fleet push exactly like the update trigger. Why: an
+  # unpinned rollback is re-updated within one 5-minute rollout tick — a lie.
+  # There is NO pin precondition — a pinned box CAN roll back (rollback
+  # re-pins by design; the fresh pin replaces the stale one). Freeze-only
+  # semantics: if the async flip later fails closed, the pin stays at the
+  # intended target while the refreshed status shows reality (OC10 law: a pin
+  # freezes, it never downgrades).
+  #
+  # The fleet-wide halt does NOT gate this route (D18): the halt is the
+  # autonomous-rollout brake; a human override wins, matching self-update.
+  #
+  # ADMIN-gated + TEAM-SCOPED fail-closed exactly like self-update above:
+  # 401 / 422 no_team / 403 plain member; wrong-team / nonexistent /
+  # malformed id → the SAME 404 (no existence leak); 409 not_live while
+  # provisioning; 404 no_admin_token; 500 decrypt_failed; 502 unreachable.
+  post "/v1/barkparks/:id/rollback" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.trigger_rollback(bp) do
+              {:ok, 202, body} ->
+                # Pin at the instance-REPORTED target — never a client value.
+                # A 202 without a parsable target_sha is outside the W6
+                # instance contract; the run has still started, so relay
+                # honestly with the pin untouched rather than unpinning or
+                # pretending the flip never began.
+                target_sha =
+                  case body["target_sha"] do
+                    sha when is_binary(sha) and sha != "" -> sha
+                    _ -> nil
+                  end
+
+                pinned_release =
+                  with sha when is_binary(sha) <- target_sha,
+                       {:ok, %Barkpark{} = updated} <-
+                         Registry.set_autoupdate(bp, %{pinned_release: sha}) do
+                    updated.pinned_release
+                  else
+                    _ -> bp.pinned_release
+                  end
+
+                # Refresh the row's cached status once the flip has had time
+                # to land — the sweep would otherwise leave the row (and the
+                # console) stale for up to an hour.
+                _ =
+                  %{"barkpark_id" => bp.id}
+                  |> BarkparkCloud.Workers.UpdateStatusWorker.new(schedule_in: 60)
+                  |> Oban.insert()
+
+                push_event(team.id, "fleet")
+
+                json(conn, 202, %{
+                  status: "started",
+                  target_sha: target_sha,
+                  pinned_release: pinned_release
+                })
+
+              {:ok, 409, %{"error" => %{"code" => code}}}
+              when code in ["no_previous_slot", "already_running", "not_supported"] ->
+                json(conn, 409, %{error: %{code: code}})
+
+              # A REAL instance 503 carries {"error":{"code":"feature_not_
+              # configured"}}; a bare/HTML 503 is the box's front proxy during
+              # a restart window. Match on the body, not the status.
+              {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}} ->
+                json(conn, 503, %{error: %{code: "not_enabled"}})
+
+              {:ok, 503, _proxy_or_restart_window} ->
+                json(conn, 502, %{error: %{code: "instance_unavailable"}})
+
+              # Anything else — an unknown 409 code, a pre-rollback instance
+              # 404ing the admin endpoint, a 500 — is outside the W6 contract:
+              # report the instance misbehaving, never invent semantics.
+              {:ok, _status, _body} ->
+                json(conn, 502, %{error: %{code: "instance_error"}})
+
+              {:error, :not_live} ->
+                json(conn, 409, %{error: %{code: "not_live"}})
+
+              {:error, :no_admin_token} ->
+                json(conn, 404, %{
+                  error: %{
+                    code: "no_admin_token",
+                    detail:
+                      "No admin token is stored for this instance yet. It is captured at " <>
+                        "provision time — a pre-existing instance may need a re-provision."
+                  }
+                })
+
+              {:error, :decrypt_failed} ->
+                json(conn, 500, %{error: %{code: "decrypt_failed"}})
+
+              {:error, _reason} ->
+                json(conn, 502, %{error: %{code: "instance_unreachable"}})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # PATCH /v1/barkparks/:id/autoupdate {autoupdate_enabled?, autoupdate_paused?,
   # pinned_release?} → 200 {ok, autoupdate: {enabled, paused, pinned_release,
   # channel}} — set the isu-w4 fleet-autoupdate POLICY (the opt-out / pause /
