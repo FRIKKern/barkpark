@@ -550,7 +550,9 @@ func runOnramp(out *writer, g globals, args []string) int {
 	}
 
 	if write {
-		return runOnrampWrite(out, spec, force)
+		// --dry-run is a GLOBAL flag (globals.go): with --write it computes every
+		// action but writes nothing — an honest doctor mode, no bespoke --check flag.
+		return runOnrampWrite(out, spec, force, g.dryRun)
 	}
 
 	if out.machineOut() {
@@ -639,7 +641,7 @@ func printOnrampHuman(out *writer, target, server, token string, spec onrampSpec
 
 // printOnrampHelp is the usage/help screen for `bp onramp`.
 func printOnrampHelp(out *writer) {
-	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot|zed|agents-md> [--write [--force]] [--server URL] [--token TOKEN]")
+	out.outf("usage: bp onramp <cursor|claude-code|codex|cursor-cloud|windsurf|gemini-cli|copilot|zed|agents-md> [--write [--force] [--dry-run]] [--server URL] [--token TOKEN]")
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
 	out.outf("block(s), where they belong, and how to verify. With --write, merge just the")
@@ -663,6 +665,7 @@ func printOnrampHelp(out *writer) {
 	out.outf("  --write        merge the barkpark entry into the target's config in place —")
 	out.outf("                 created / updated / unchanged / skipped, per file, atomically")
 	out.outf("  --force        with --write: overwrite an existing, differing barkpark entry")
+	out.outf("  --dry-run      with --write: report the per-file actions (created/updated/…) and write NOTHING (global flag)")
 	out.outf("  --server URL   BARKPARK_API_URL to bake in (default: your active server, else %s)", onrampDefaultServer)
 	out.outf("  --token TOKEN  bake a literal token instead of the ${…} env placeholder (default: keep it in the shell)")
 	out.outf("  -o json        without --write: emit {target, files:[{path,content}], verify};")
