@@ -22,6 +22,10 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
   @dataset "wikilink_task_chip_test"
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     Content.upsert_schema(
       %{
         "name" => "paper",
@@ -49,7 +53,9 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
     {:ok, _} =
       Content.create_document(
         "paper",
-        Map.merge(%{"_id" => id, "title" => title}, attrs),
+        %{"_id" => id, "title" => title}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.merge(attrs),
         @dataset
       )
 
@@ -58,7 +64,10 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
   end
 
   defp task!(id, title, content_extra \\ %{}) do
-    content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+    content =
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+      |> Map.merge(content_extra)
 
     {:ok, doc} =
       Content.create_document(

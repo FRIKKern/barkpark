@@ -18,6 +18,7 @@ defmodule Barkpark.Content.ValidationTest do
 
   import ExUnit.CaptureLog
 
+  alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.Validation
 
   # ─── flat_mode parity (legacy v1 seed schemas) ────────────────────────────
@@ -648,7 +649,11 @@ defmodule Barkpark.Content.ValidationTest do
       schema = %{
         "fields" => [
           %{"name" => "ratio", "type" => "number", "validation" => %{"min" => 0.5, "max" => 1.5}},
-          %{"name" => "meta", "type" => "composite", "fields" => [%{"name" => "n", "type" => "string"}]}
+          %{
+            "name" => "meta",
+            "type" => "composite",
+            "fields" => [%{"name" => "n", "type" => "string"}]
+          }
         ]
       }
 
@@ -695,7 +700,11 @@ defmodule Barkpark.Content.ValidationTest do
       schema = %{
         "fields" => [
           %{"name" => "code", "type" => "string", "validation" => %{"min" => nil}},
-          %{"name" => "meta", "type" => "composite", "fields" => [%{"name" => "n", "type" => "string"}]}
+          %{
+            "name" => "meta",
+            "type" => "composite",
+            "fields" => [%{"name" => "n", "type" => "string"}]
+          }
         ]
       }
 
@@ -724,6 +733,92 @@ defmodule Barkpark.Content.ValidationTest do
         end)
 
       assert log =~ "falling back to flat_mode"
+    end
+  end
+
+  # ─── authoring-excellence: weighted-tags schema spine (D16) ───────────────
+  #
+  # Adding `tags` (arrayOf-of-composite) to paper.json flips the PAPER schema
+  # flat_mode → v2 for the FIRST time (the task schema was already v2 via
+  # `labels`). These lock two invariants:
+  #   1. representative legacy paper content still validates on the v2 path
+  #      (the flip does not break existing papers), and
+  #   2. the composite member leaves DO validate (pattern + numeric bounds)
+  #      with JSON-Pointer error paths — the schema half of the label wall.
+  # Array-length and cross-member rules remain DSL-inexpressible and belong to
+  # Barkpark.Content.LabelSpine (see label_spine_test.exs).
+  describe "authoring-excellence — paper schema flat_mode → v2 parity" do
+    # The live paper schema, read from the same file bulldocs registers.
+    defp paper_schema do
+      Path.expand("../../../priv/plugins/bulldocs/schemas/paper.json", __DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+    end
+
+    test "the paper schema is now v2 (the tags composite flips flat_mode)" do
+      refute SchemaDefinition.flat?(paper_schema())
+    end
+
+    test "representative legacy paper content still passes v2 validation" do
+      # A pre-weighted-tags paper: no `description`, no `tags`. Neither is
+      # required at the top level, so the flip must not reject it.
+      legacy = %{
+        "event_type" => "digest",
+        "source_doc" => "some-source",
+        "goal_id" => "g-42",
+        "related" => ["other-paper"]
+      }
+
+      assert {:ok, ^legacy} = Validation.validate(legacy, "A Legacy Paper", paper_schema())
+    end
+
+    test "well-formed weighted tags pass v2 validation" do
+      content = %{
+        "description" => "A paper about note-taking.",
+        "tags" => [
+          %{"tag" => "obsidian", "strength" => 80, "rationale" => "Central topic."},
+          %{"tag" => "search", "strength" => 45, "rationale" => "Secondary topic."}
+        ]
+      }
+
+      assert {:ok, ^content} = Validation.validate(content, "Tagged Paper", paper_schema())
+    end
+
+    test "member leaf: a tag violating ^[a-z0-9-]+$ fails with a JSON-Pointer path" do
+      content = %{
+        "tags" => [
+          %{"tag" => "ok-tag", "strength" => 50, "rationale" => "fine"},
+          # index 1 — uppercase + bang violate the pattern
+          %{"tag" => "Bad!", "strength" => 40, "rationale" => "fine"}
+        ]
+      }
+
+      assert {:error, %{"tags" => msgs}} = Validation.validate(content, nil, paper_schema())
+      assert Enum.any?(msgs, &String.contains?(&1, "/tags/1/tag"))
+    end
+
+    test "member leaf: a strength above the numeric max fails with a JSON-Pointer path" do
+      content = %{
+        "tags" => [
+          %{"tag" => "obsidian", "strength" => 101, "rationale" => "over the ceiling"}
+        ]
+      }
+
+      assert {:error, %{"tags" => msgs}} = Validation.validate(content, nil, paper_schema())
+      assert Enum.any?(msgs, &String.contains?(&1, "/tags/0/strength"))
+      assert Enum.any?(msgs, &String.contains?(&1, "at most 100"))
+    end
+
+    test "member leaf: a missing required rationale fails with a JSON-Pointer path" do
+      content = %{
+        "tags" => [
+          %{"tag" => "obsidian", "strength" => 80}
+        ]
+      }
+
+      assert {:error, %{"tags" => msgs}} = Validation.validate(content, nil, paper_schema())
+      assert Enum.any?(msgs, &String.contains?(&1, "/tags/0/rationale"))
+      assert Enum.any?(msgs, &String.contains?(&1, "Required"))
     end
   end
 end

@@ -27,10 +27,12 @@ defmodule Barkpark.Content.SchemaSurfaceRuntimeTest do
 
     assert Map.new(parsed.fields, &{&1.name, &1.surface}) == %{
              "title" => "body",
+             "description" => "sidebar",
              "event_type" => "sidebar",
              "source_doc" => "sidebar",
              "goal_id" => "sidebar",
-             "related" => "sidebar"
+             "related" => "sidebar",
+             "tags" => "sidebar"
            }
 
     # write path: stored verbatim
