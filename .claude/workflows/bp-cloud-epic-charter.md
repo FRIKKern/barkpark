@@ -139,3 +139,40 @@ Later waves / backlog (filed as published children of the anchor):
   final audit, close the anchor.
 
 ## Wave log
+
+### Wave 2026-07-11 — bundle debt paid, card chrome to model B, DataViz editable (grade A-)
+
+All three slices built green and reviewed; nothing stalled. Reviewer pre-integrated
+the predicted collisions into a clean stack — merge in this exact order:
+
+1. **S1 · pd-ee-bundle-regen** — `loop-epic/paper-editor-yml-green-again-catch-up-bu-0`
+   (507931dc, unchanged in review). Regen-only, 2 artifacts; paper-editor.yml's
+   "Assert committed bundle is fresh" reproduced green locally. Merges on its own
+   gate (no .ex/.heex).
+2. **S2 · parity2-bug-card-slot-chrome** —
+   `loop-epic/s10-card-slot-chrome-parity-editor-node--1-r` (REVIEW branch: rebased
+   onto S1; + 7a455738 fixing the stale root.html.heex model-A comment, which pays
+   pd-ee-root-heex-card-comment). Card node-view now emits model-B DOM byte-aligned
+   with card_html/2; §3 forbids `bp-card__` again; `__card_parity.test.mjs` (11
+   checks) wired. Gates on tip: npm ALL PASS, mix 44/0. WAITS for Elixir Test CI.
+3. **S3 · pd-ee-dataviz-editors** —
+   `loop-epic/dataviz-blocks-become-canvas-editable-st-2-r` (REVIEW branch: rebased
+   onto S2-r; the parity-gate-test §3 collision resolved — the list carries BOTH
+   `bp-card__` and `bp-dataviz` — and the bundle rebuilt byte-fresh on the merged
+   tree). 5 DataViz kinds canvas-editable via the parallel painted-set (D3), islands
+   pinned by `__dataviz.test.mjs` (19 checks), D4 held (slash types stay 23). Gates
+   on tip: npm ALL PASS, slash smoke green, mix 158/0, full portable_doc 884/0.
+   WAITS for Elixir Test CI.
+
+Lead closes on merge: criterion "PR merged" on all three tasks + the
+pd-ee-root-heex-card-comment task (its fix rides S2-r). C1 flips TRUE when S3
+merges — stamp the anchor with the S3 PR + paper_canvas.ex/@canvas_dataviz_types
+evidence then.
+
+**Next wave should take:** the close ceremony is now gated ONLY on C3
+(pd-ee-live-verify, infra-blocked on the shared Chrome profile —
+pd-ee-chrome-mcp-userdatadir unblocks it). If the profile frees up, run the live
+checklist (now incl. card slots + a DataViz island round-trip) and close the
+anchor with evidence. Do NOT pull pd-ee-dataviz-structured-editors (p3, v2 UX)
+into the close path. Backlog unchanged otherwise: pd-ee-sheet-embed-audit,
+pd-ee-reader-stale-cache.

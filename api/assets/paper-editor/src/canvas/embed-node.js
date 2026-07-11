@@ -324,6 +324,12 @@ const FLEET_KIND_LABELS = {
   asciicast: "Terminal cast",
   form: "Form",
   questionnaire: "Questionnaire",
+  // pd-ee-dataviz-editors: the 5 data-viz kinds ride the same bpFleet paint.
+  stat: "Stat",
+  stats: "Stats",
+  "stat-grid": "Stat grid",
+  heatmap: "Heatmap",
+  chart: "Chart",
 };
 
 export function fleetChipLabel(block) {
@@ -438,6 +444,10 @@ const FLEET_ITEM_EDITORS = {
   cards: { arrayKey: "items" },
   notes: { arrayKey: "items" },
   pipeline: { arrayKey: "nodes" },
+  // pd-ee-dataviz-editors: stats + its stat-grid alias carry an authored array of
+  // stat-cell objects on `items` — the exact key stats_html reads (data_viz.ex).
+  stats: { arrayKey: "items" },
+  "stat-grid": { arrayKey: "items" },
 };
 
 // task-* kinds edit their QUERY (filter label) + optional id ref, not an item array.
@@ -449,16 +459,118 @@ const FLEET_QUERY_KINDS = new Set([
   "roadmap",
 ]);
 
+// pd-ee-dataviz-editors: CONFIG-OBJECT island kinds — the authored payload is a
+// flat set of top-level keys on the block itself (not one array, not a query).
+// Each descriptor enumerates EXACTLY the keys its reader emitter consumes
+// (data_viz.ex: stat_html reads value/label/max/denom/spark; heatmap_html reads
+// cells/rowLabels/colLabels/mode/marginals/values; chart_html reads series/axes —
+// series/axes only in v1, the structured grid/series editors are deferred to
+// pd-ee-dataviz-structured-editors). The island edits those keys as ONE JSON
+// object; parse writes ONLY the enumerated keys (present → set, absent → delete),
+// so id/type/anything-else can never be clobbered from the island.
+const FLEET_CONFIG_EDITORS = {
+  stat: { keys: ["value", "label", "max", "denom", "spark"] },
+  heatmap: { keys: ["cells", "rowLabels", "colLabels", "mode", "marginals", "values"] },
+  chart: { keys: ["series", "axes"] },
+};
+
 // Is this fleet kind editable in-canvas? (status-legend has no authored data;
 // asciicast/form/questionnaire are ref/complex config, left read-only in v1.)
 export function fleetKindEditable(type) {
-  return !!FLEET_ITEM_EDITORS[type] || FLEET_QUERY_KINDS.has(type);
+  return (
+    !!FLEET_ITEM_EDITORS[type] ||
+    !!FLEET_CONFIG_EDITORS[type] ||
+    FLEET_QUERY_KINDS.has(type)
+  );
 }
 
 // A canvas-editor local deep clone (the carried block is plain JSON, so a round-trip
 // is exact and dependency-free — keeps embed-node.js importable in pure Node).
 function cloneFleetBlock(b) {
   return b == null ? b : JSON.parse(JSON.stringify(b));
+}
+
+// ── the island's PURE serialize/parse pair (exported for the pure-Node tests) ──
+//
+// Serialize the current block → the island textarea's text representation.
+// Three shapes, keyed by the block's kind:
+//   * item kinds (cards/notes/pipeline/stats/stat-grid) → the authored array,
+//     pretty JSON;
+//   * config kinds (stat/heatmap/chart) → ONE object holding exactly the
+//     descriptor keys PRESENT on the block, pretty JSON (absent keys stay absent —
+//     never rendered as null);
+//   * query kinds (task-*) → the query object, pretty JSON.
+export function fleetEditorText(block) {
+  const type = (block && block.type) || "";
+  const itemEditor = FLEET_ITEM_EDITORS[type];
+  if (itemEditor) {
+    const arr = Array.isArray(block[itemEditor.arrayKey])
+      ? block[itemEditor.arrayKey]
+      : [];
+    return JSON.stringify(arr, null, 2);
+  }
+  const configEditor = FLEET_CONFIG_EDITORS[type];
+  if (configEditor) {
+    const cfg = {};
+    for (const key of configEditor.keys) {
+      if (block && block[key] !== undefined) cfg[key] = block[key];
+    }
+    return JSON.stringify(cfg, null, 2);
+  }
+  // query kind
+  const q =
+    block && block.query && typeof block.query === "object" && !Array.isArray(block.query)
+      ? block.query
+      : {};
+  return JSON.stringify(q, null, 2);
+}
+
+// Parse the island text → a mutated clone of `initialBlock`, or null when the text
+// is not yet valid (a mid-edit JSON) — null means "don't commit, keep the last good
+// state". Config kinds write ONLY the descriptor's enumerated keys: a key present
+// in the parsed object is set, an enumerated key absent from it is DELETED (so
+// removing `"max"` from the JSON really drops the stat's bar mode), and any
+// non-enumerated key in the text is ignored — id/type can never be clobbered.
+export function fleetEditorParse(initialBlock, text) {
+  const type = (initialBlock && initialBlock.type) || "";
+  const next = cloneFleetBlock(initialBlock) || { type };
+  const itemEditor = FLEET_ITEM_EDITORS[type];
+  if (itemEditor) {
+    let arr;
+    try {
+      arr = JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+    if (!Array.isArray(arr)) return null;
+    next[itemEditor.arrayKey] = arr;
+    return next;
+  }
+  const configEditor = FLEET_CONFIG_EDITORS[type];
+  if (configEditor) {
+    let cfg;
+    try {
+      cfg = text.trim() === "" ? {} : JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+    if (cfg == null || typeof cfg !== "object" || Array.isArray(cfg)) return null;
+    for (const key of configEditor.keys) {
+      if (cfg[key] !== undefined) next[key] = cfg[key];
+      else delete next[key];
+    }
+    return next;
+  }
+  // query kind
+  let q;
+  try {
+    q = text.trim() === "" ? {} : JSON.parse(text);
+  } catch (_) {
+    return null;
+  }
+  if (q == null || typeof q !== "object" || Array.isArray(q)) return null;
+  next.query = Object.keys(q).length ? q : null;
+  return next;
 }
 
 // Build the fleet edit island DOM for a block. Returns { el, refresh, destroy }.
@@ -482,6 +594,7 @@ function cloneFleetBlock(b) {
 function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   const type = (initialBlock && initialBlock.type) || "";
   const itemEditor = FLEET_ITEM_EDITORS[type];
+  const configEditor = FLEET_CONFIG_EDITORS[type];
   const el = document.createElement("div");
   el.className = "bp-fleet-edit";
   el.setAttribute("contenteditable", "false");
@@ -496,7 +609,9 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   hint.style.marginBottom = "0.25rem";
   hint.textContent = itemEditor
     ? "Edit items as JSON — add / remove / reorder rows"
-    : "Edit query — filter label + task id";
+    : configEditor
+      ? `Edit config as JSON — keys: ${configEditor.keys.join(", ")}`
+      : "Edit query — filter label + task id";
   el.appendChild(hint);
 
   const area = document.createElement("textarea");
@@ -508,47 +623,16 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   area.style.fontFamily = "var(--paper-font-mono, monospace)";
   el.appendChild(area);
 
-  // Serialize the current block → the textarea's text representation.
+  // Serialize / parse delegate to the module-level PURE pair (fleetEditorText /
+  // fleetEditorParse — exported so __dataviz.test.mjs exercises the exact island
+  // logic in pure Node). A block echoed on refresh keeps its type, so the
+  // per-kind branch never shifts mid-life.
   function toText(block) {
-    if (itemEditor) {
-      const arr = Array.isArray(block[itemEditor.arrayKey])
-        ? block[itemEditor.arrayKey]
-        : [];
-      return JSON.stringify(arr, null, 2);
-    }
-    // query kind
-    const q =
-      block.query && typeof block.query === "object" && !Array.isArray(block.query)
-        ? block.query
-        : {};
-    return JSON.stringify(q, null, 2);
+    return fleetEditorText({ type, ...(block || {}) });
   }
 
-  // Parse the textarea text → a mutated block clone, or null when the text is not yet
-  // valid (a mid-edit JSON) — null means "don't commit, keep the last good state".
   function toBlock(text) {
-    const next = cloneFleetBlock(initialBlock) || { type };
-    if (itemEditor) {
-      let arr;
-      try {
-        arr = JSON.parse(text);
-      } catch (_) {
-        return null;
-      }
-      if (!Array.isArray(arr)) return null;
-      next[itemEditor.arrayKey] = arr;
-      return next;
-    }
-    // query kind
-    let q;
-    try {
-      q = text.trim() === "" ? {} : JSON.parse(text);
-    } catch (_) {
-      return null;
-    }
-    if (q == null || typeof q !== "object" || Array.isArray(q)) return null;
-    next.query = Object.keys(q).length ? q : null;
-    return next;
+    return fleetEditorParse(initialBlock || { type }, text);
   }
 
   let textTimer = null;

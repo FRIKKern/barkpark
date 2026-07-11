@@ -3710,12 +3710,14 @@
     .bp-canvas-section:hover > .bp-canvas-section__controls, .bp-canvas-section:focus-within > .bp-canvas-section__controls { opacity: 1; }
     .bp-canvas-section__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
     .bp-canvas-section__tracks { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); }
-    <%!-- STEP 4 card WIDGET: `bp-canvas-card` is a thin edit-only hook. PARITY rides
-         the SHARED reader classes — the node-view root carries bp-card/__t/__d/__media/
-         __action, painted by the inlined `.bp-paper-surface .bp-card*` (paper-surface.css)
-         through the ancestor cascade — so ONLY the edit-only control row lives here
-         (hidden at rest, revealed on hover/focus-within; NO reader counterpart). Keep
-         BYTE-IDENTICAL with styles.css. --%>
+    <%!-- card WIDGET (MODEL B — S10, parity2-bug-card-slot-chrome): `bp-canvas-card`
+         is a thin edit-only hook. PARITY rides the reader's OWN model-B shapes — the
+         node-view root carries bp-card[ bp-card--tone] and its slots are bare
+         semantics (h2 / p / img / a.bp-button, byte-aligned with card_html/2), all
+         painted by the inlined `.bp-paper-surface` cascade (paper-surface.css) — so
+         ONLY the edit-only control row lives here (hidden at rest, revealed on
+         hover/focus-within; NO reader counterpart). Keep BYTE-IDENTICAL with
+         styles.css. --%>
     .bp-canvas-card { position: relative; }
     .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
     .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }

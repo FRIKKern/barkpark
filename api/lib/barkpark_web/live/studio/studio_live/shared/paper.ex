@@ -244,6 +244,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # paper_canvas.ex:@canvas_figure_types.
   @figure_render_types ~w(figure)
 
+  # pd-ee-dataviz-editors (charter D3) — the 5 DATA-VIZ kinds (Render.DataViz:
+  # stat / stats / stat-grid / heatmap / chart; `stat-grid` is the accepted alias
+  # of `stats`). They paint through the SAME `bp:block-html` channel + bpFleet atom
+  # the component fleet uses — `Render.render_block(block, %{style: :article})`
+  # routes them to the ONE DataViz emitter (compose.ex), byte-parity by
+  # construction. A PARALLEL set, deliberately NOT folded into @fleet_render_types:
+  # that set rides the 4-way lockstep with paper_editor.ex @fleet_preview_types
+  # (the classic-mode boundary widget), and DataViz stays OUT of the classic paint
+  # (charter D2 — classic keeps the read-only catch-all for these kinds). They
+  # carry no query, so task_previews never resolves them — fleet_block_html renders
+  # them directly from their own carried data.
+  #
+  # Keep aligned with run-convert.js CANVAS_DATAVIZ_TYPES and
+  # paper_canvas.ex @canvas_dataviz_types.
+  @dataviz_render_types ~w(stat stats stat-grid heatmap chart)
+
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
   # block, render the reader's OWN HTML (`Render.render_block(block, %{style:
@@ -286,8 +302,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
+  # A block that paints through the fleet channel: a component-fleet kind OR a
+  # data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same bp:block-html
+  # push, same render_block(:article) producer).
   defp fleet_block?(block) when is_map(block),
-    do: Map.get(block, "type") in @fleet_render_types
+    do:
+      Map.get(block, "type") in @fleet_render_types or
+        Map.get(block, "type") in @dataviz_render_types
 
   defp fleet_block?(_), do: false
 

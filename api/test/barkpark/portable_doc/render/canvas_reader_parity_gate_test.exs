@@ -8,7 +8,8 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
 
   The Beta canvas is THE paper editor. For every non-prose FLEET block (tasks,
   task-board, roadmap, cards, pipeline, notes, status-legend, task-detail, form,
-  asciicast, diagram — plus the sheet/embed chip-carry pair) the canvas must show
+  asciicast, diagram, plus the 5 data-viz kinds stat/stats/stat-grid/heatmap/chart
+  — and the sheet/embed chip-carry pair) the canvas must show
   the reader's own render. D8 mandates ONE producer: display HTML is produced by
   `Render.render_block/2` (the `/papers` reader's emitter) server-side and painted
   into read-only canvas atoms; the block itself rides verbatim (bpBlock) and stays
@@ -78,7 +79,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Render
-  alias Barkpark.PortableDoc.Render.{Components, Compose, Figures, Forms}
+  alias Barkpark.PortableDoc.Render.{Components, Compose, DataViz, Figures, Forms}
 
   @article %{style: :article}
 
@@ -153,7 +154,51 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
        %{"type" => "asciicast", "src" => "https://example.com/c.cast", "caption" => "A cast"},
        &Figures.asciicast_html(&1["src"], &1["caption"], :article), "bp-asciicast"},
       {"diagram", %{"type" => "diagram", "source" => "graph TD; A-->B", "caption" => "A graph"},
-       &Figures.diagram_html(&1["source"], &1["caption"], :article), "class=\"mermaid\""}
+       &Figures.diagram_html(&1["source"], &1["caption"], :article), "class=\"mermaid\""},
+      # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds are server-painted
+      # bpFleet atoms (a parallel painted-set — run-convert.js CANVAS_DATAVIZ_TYPES /
+      # paper_canvas.ex @canvas_dataviz_types / shared/paper.ex @dataviz_render_types),
+      # painted by the ONE Render.DataViz emitter per kind. Fixtures carry real data
+      # shaped per data_viz.ex so every emitter branch is genuinely exercised
+      # (an empty fixture would vacuously test the `bp-dataviz--empty` box).
+      # `stat-grid` is the accepted alias of `stats` (compose.ex normalizes both onto
+      # stats_html — the task-list ⇄ tasks precedent).
+      {"stat",
+       %{
+         "type" => "stat",
+         "value" => "71",
+         "label" => "tests green",
+         "max" => 118,
+         "denom" => "118",
+         "spark" => [1, 3, 2, 5]
+       }, &DataViz.stat_html/1, "bp-stat"},
+      {"stats",
+       %{
+         "type" => "stats",
+         "items" => [
+           %{"value" => "9", "label" => "open"},
+           %{"value" => "4", "label" => "done"}
+         ]
+       }, &DataViz.stats_html/1, "bp-stats"},
+      {"stat-grid (alias)",
+       %{
+         "type" => "stat-grid",
+         "items" => [%{"value" => "12", "label" => "aliased"}]
+       }, &DataViz.stats_html/1, "bp-stats"},
+      {"heatmap",
+       %{
+         "type" => "heatmap",
+         "cells" => [[1, 2, 3], [4, 5, 6]],
+         "rowLabels" => ["mon", "tue"],
+         "colLabels" => ["a", "b", "c"]
+       }, &DataViz.heatmap_html/1, "bp-heat"},
+      {"chart",
+       %{
+         "type" => "chart",
+         "series" => [%{"label" => "velocity", "points" => [1, 4, 2, 8]}],
+         "axes" => %{"min" => 0, "xLabels" => ["w1", "w4"]},
+         "caption" => "A chart"
+       }, &DataViz.chart_html/1, "bp-chart"}
     ]
   end
 
@@ -365,7 +410,7 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # container does not, so it GRADUATES out of this list the moment it becomes editable.
     #
     # `task-list` GRADUATED to EDITABLE (live-data widget, bpTaskList; task-list-node.js)
-    # but STILL carries NO reader markup here: unlike columns/terminal/card (which emit
+    # but STILL carries NO reader markup here: unlike columns/terminal (which emit
     # their own structural chrome to edit INSIDE), the task-list ROWS remain SERVER-
     # PAINTED (the query is the authored datum, the rows are the one server producer via
     # TaskResolver). The node-view writes ONLY `bp-canvas-tasklist-*` edit chrome and
@@ -374,19 +419,28 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # It is the figure precedent (editable caption + server-painted child), applied to a
     # LIVE QUERY + server-painted rows.
     #
-    # `bp-card__` GRADUATED out (STEP 4, same reasoning as `bp-cols__`/`bp-term__`): the
-    # NEW `card` WIDGET is an EDITABLE canvas node (card-node.js bpCard) whose node-view
-    # MUST emit `bp-card__t`/`bp-card__d`/`bp-card__media`/`bp-card__action` to inherit
-    # the reader's own `.bp-paper-surface .bp-card*` paint — the callout precedent, ZERO
-    # second HTML producer. `bp-cards` (the legacy fleet GRID wrapper) STAYS forbidden
-    # below (via painted_fleet's `cards` sig) — the new path emits `bp-section__grid`,
-    # NEVER `bp-cards`, and `bp-card__t`/`bp-card__d` do NOT contain the substring
-    # `bp-cards` — so the still-verbatim-carried legacy `cards` fleet stays gated against
-    # a hand-mirrored second producer.
+    # `bp-card__` is FORBIDDEN again (S10, parity2-bug-card-slot-chrome — reverting the
+    # STEP-4 graduation, whose premise model B falsified). The reader's `card_html/2`
+    # (components.ex) no longer emits ANY `bp-card__*` slot chrome: slots recurse to
+    # bare semantics — <h2>/<p>/<img>/a.bp-button (PRs #1529/#1539, pinned by
+    # card_widget_test.exs) — so an editor `bp-card__` literal can only be a
+    # HAND-WRITTEN model-A second producer (the exact WYSIWYG break S10 fixed). The
+    # card node-view (card-node.js bpCard) now emits the model-B shape directly;
+    # __card_parity.test.mjs pins its mounted DOM against the reader ground truth.
+    # `bp-cards` (the legacy fleet GRID wrapper) stays forbidden via painted_fleet's
+    # `cards` sig; the legacy fleet's own `bp-card__t`/`bp-card__d` remain reader-only
+    # bytes (components.ex cards_html/1 — server-painted, verbatim-carried).
+    #
+    # pd-ee-dataviz-editors: the DataViz literals (bp-stat / bp-stats / bp-heat /
+    # bp-chart) ride in via their painted_fleet sigs; `bp-dataviz` (the shared
+    # empty-state wrapper, data_viz.ex `empty/1`) is added explicitly — the canvas
+    # must never hand-write even the honest empty box (the server paints it).
+    # NOTE `bp-stat` is a substring of `bp-stats`/`bp-stat__*`, so forbidding it
+    # covers the whole stat class family in one contains-check.
     reader_markup =
       Enum.map(painted_fleet(), fn {_l, _b, _e, sig} -> sig end) ++
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
-        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__)
+        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__ bp-card__ bp-dataviz)
 
     offenders =
       reader_markup
