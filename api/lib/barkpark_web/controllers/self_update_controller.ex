@@ -94,7 +94,8 @@ defmodule BarkparkWeb.SelfUpdateController do
         |> json(%{
           error: %{
             code: "rollback_preflight_failed",
-            message: "rollback preflight could not determine a safe target — check the server logs"
+            message:
+              "rollback preflight could not determine a safe target — check the server logs"
           }
         })
     end

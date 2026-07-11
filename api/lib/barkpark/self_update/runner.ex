@@ -36,7 +36,8 @@ defmodule Barkpark.SelfUpdate.Runner do
   # read-only probe the controller runs FIRST to learn the target sha and to
   # get a typed refusal before anything mutates.
   @default_rollback_command {"bash", ["deploy/instance-deploy.sh", "--rollback"]}
-  @default_rollback_preflight_command {"bash", ["deploy/instance-deploy.sh", "--rollback-preflight"]}
+  @default_rollback_preflight_command {"bash",
+                                       ["deploy/instance-deploy.sh", "--rollback-preflight"]}
   @default_max_log_lines 500
 
   # exit 0 prints `TARGET_SHA=<40-hex>` (charter W6 contract); tolerate a short
@@ -104,9 +105,11 @@ defmodule Barkpark.SelfUpdate.Runner do
   """
   @spec preflight_rollback() ::
           {:ok, String.t()}
-          | {:error, :no_previous_slot | :not_supported | :already_running | {:preflight_failed, term()}}
+          | {:error,
+             :no_previous_slot | :not_supported | :already_running | {:preflight_failed, term()}}
   def preflight_rollback do
-    {exe, args} = Keyword.get(config(), :rollback_preflight_command, @default_rollback_preflight_command)
+    {exe, args} =
+      Keyword.get(config(), :rollback_preflight_command, @default_rollback_preflight_command)
 
     case System.cmd(exe, args, cd: run_cd(), stderr_to_stdout: true) do
       {output, 0} ->

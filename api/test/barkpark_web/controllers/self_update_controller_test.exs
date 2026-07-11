@@ -146,7 +146,9 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
   # NEVER shell out to the real deploy script — only these bash stubs.
   @sha "0123456789abcdef0123456789abcdef01234567"
 
-  defp preflight_ok, do: {"bash", ["-c", "echo TARGET_SLOT=green; echo TARGET_SHA=#{@sha}; exit 0"]}
+  defp preflight_ok,
+    do: {"bash", ["-c", "echo TARGET_SLOT=green; echo TARGET_SHA=#{@sha}; exit 0"]}
+
   defp preflight_exit(code), do: {"bash", ["-c", "exit #{code}"]}
 
   describe "rollback — auth gating" do
