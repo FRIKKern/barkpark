@@ -114,6 +114,8 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudAutoupdate(out, g, args[1:])
 	case "rollout":
 		return runCloudRollout(out, g, args[1:])
+	case "rollback":
+		return runCloudRollback(out, g, args[1:])
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown cloud command %q (run `bp cloud -h` for usage)", args[0]), exitUsage)
 	}
