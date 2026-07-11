@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -285,22 +286,357 @@ func TestOnrampWriteFlatCursorCloud(t *testing.T) {
 	}
 }
 
-// TestOnrampWriteCodexSkipped: codex's TOML config is reported skipped (wave 3),
-// never written — and no *.toml file is created anywhere.
-func TestOnrampWriteCodexSkipped(t *testing.T) {
+// codexSandbox sandboxes HOME AND the cwd into a fresh temp dir (test law:
+// HOME-only sandboxing does not isolate cwd-relative targets — live-proven),
+// then returns codex's toml onrampFile plus the resolved ~/.codex/config.toml
+// path. It also pins the merge metadata tomlFile stamps. Read any testdata
+// fixture BEFORE calling this — the chdir breaks relative testdata/ paths.
+func codexSandbox(t *testing.T) (onrampFile, string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Chdir(dir)
 	spec, ok := buildOnrampSpec("codex", guerrilla, "")
 	if !ok {
 		t.Fatal("codex spec not ok")
 	}
-	act, err := mergeOnrampFile(spec.Files[0], false)
+	f := spec.Files[0]
+	if f.MergeKind != mergeTOML || f.TopKey != "mcp_servers" || f.ServerKey != "barkpark" {
+		t.Fatalf("codex merge metadata = {%q %q %q}, want {toml mcp_servers barkpark}", f.MergeKind, f.TopKey, f.ServerKey)
+	}
+	return f, filepath.Join(dir, ".codex", "config.toml")
+}
+
+// TestOnrampWriteCodexCreatesFile is the wave-2 TestOnrampWriteCodexSkipped
+// INVERTED: codex's config.toml is no longer 'skipped — wave 3'. An absent
+// ~/.codex/config.toml is created byte-identical to the printed codexTOMLBlock
+// (+ trailing newline), mode 0644, and a re-run reports 'unchanged' with the
+// bytes untouched.
+func TestOnrampWriteCodexCreatesFile(t *testing.T) {
+	f, path := codexSandbox(t)
+
+	act, err := mergeOnrampFile(f, false)
 	if err != nil {
-		t.Fatalf("codex merge: %v", err)
+		t.Fatalf("codex create merge: %v", err)
+	}
+	if act.Action != "created" {
+		t.Fatalf("codex action = %q (note %q), want created", act.Action, act.Note)
+	}
+	if bytes.Contains([]byte(act.Note), []byte("wave 3")) {
+		t.Errorf("codex write still carries the wave-3 skip note: %q", act.Note)
+	}
+	got := mustRead(t, path)
+	if !bytes.Equal(got, withTrailingNewline([]byte(codexTOMLBlock(guerrilla)))) {
+		t.Errorf("created config.toml is not byte-identical to codexTOMLBlock.\n--- got ---\n%s", got)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("file mode = %v, want 0644", info.Mode().Perm())
+	}
+
+	act, err = mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("codex re-run: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("re-run action = %q, want unchanged", act.Action)
+	}
+	if !bytes.Equal(got, mustRead(t, path)) {
+		t.Errorf("idempotent re-run changed the file bytes")
+	}
+}
+
+// TestOnrampWriteCodexAppendsToForeign: a lived-in config.toml WITHOUT a
+// barkpark span gets the canonical stanza APPENDED with a blank-line separator
+// ('updated'), every existing byte preserved verbatim.
+func TestOnrampWriteCodexAppendsToForeign(t *testing.T) {
+	f, path := codexSandbox(t)
+	existing := "model = \"gpt-5.3-codex\"\n\n[mcp_servers.other] # a foreign server\nurl = \"https://mcp.example.com/mcp\"\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated (span absent)", act.Action)
+	}
+	want := existing + "\n" + codexTOMLBlock(guerrilla) + "\n"
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("append is not existing + blank line + stanza.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// codexFixtureStaleSpan is the differing [mcp_servers.barkpark] span carried by
+// testdata/onramp_config_foreign.toml — codexTOMLBlock with a STALE server URL.
+const codexFixtureStaleSpan = `[mcp_servers.barkpark]
+command = "bp"
+args = ["mcp", "serve"]
+env = { BARKPARK_API_URL = "https://STALE.example.old" }
+env_vars = ["BARKPARK_API_TOKEN"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120`
+
+// TestOnrampWriteCodexSkipAndForce drives the deny path and the whole-span
+// replace on the foreign fixture: a differing barkpark span is 'skipped'
+// without --force (file byte-untouched, note carries the --force hint
+// onrampAnySkipped greps), and --force replaces EXACTLY the owned span — the
+// url-shaped [mcp_servers.other] neighbor, [profiles.work], and the comments
+// before/after the span survive byte-for-byte.
+func TestOnrampWriteCodexSkipAndForce(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/onramp_config_foreign.toml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	f, path := codexSandbox(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, fixture, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("skip merge: %v", err)
 	}
 	if act.Action != "skipped" {
-		t.Fatalf("codex action = %q, want skipped", act.Action)
+		t.Fatalf("action = %q, want skipped", act.Action)
 	}
-	if !bytes.Contains([]byte(act.Note), []byte("wave 3")) {
-		t.Errorf("codex skip note should name wave 3, got %q", act.Note)
+	if !onrampAnySkipped([]onrampAction{act}) {
+		t.Errorf("skip note must carry the --force hint onrampAnySkipped greps, got %q", act.Note)
+	}
+	if !bytes.Equal(fixture, mustRead(t, path)) {
+		t.Errorf("skipped write must not touch the file at all")
+	}
+
+	act, err = mergeOnrampFile(f, true)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	want := strings.Replace(string(fixture), codexFixtureStaleSpan, codexTOMLBlock(guerrilla), 1)
+	if want == string(fixture) {
+		t.Fatal("fixture drift: codexFixtureStaleSpan not found in testdata/onramp_config_foreign.toml")
+	}
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("force write must replace ONLY the owned span, byte-exact.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestOnrampWriteCodexSubTableStanza pins the D11 kill-switch: real
+// `codex mcp add` (codex-cli 0.144.1, live-captured; openai/codex@5c19155c)
+// writes env as a NESTED [mcp_servers.barkpark.env] sub-table with alpha-sorted
+// keys. That is a DIFFERING stanza — skipped without --force, NEVER an error —
+// and --force replaces the WHOLE span (header table + every
+// [mcp_servers.barkpark.*] continuation) with the canonical flat stanza.
+func TestOnrampWriteCodexSubTableStanza(t *testing.T) {
+	f, path := codexSandbox(t)
+	existing := `[mcp_servers.barkpark]
+command = "bp"
+args = ["mcp", "serve"]
+startup_timeout_sec = 15
+tool_timeout_sec = 120
+
+[mcp_servers.barkpark.env]
+BARKPARK_API_URL = "https://guerrilla.barkpark.cloud"
+
+[profiles.work]
+model = "gpt-5.3-codex"
+`
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("sub-table stanza must be a DIFFERING stanza, never an error: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped", act.Action)
+	}
+	if !onrampAnySkipped([]onrampAction{act}) {
+		t.Errorf("skip note must carry the --force hint, got %q", act.Note)
+	}
+	if got := mustRead(t, path); string(got) != existing {
+		t.Errorf("skipped write must not touch the file")
+	}
+
+	act, err = mergeOnrampFile(f, true)
+	if err != nil {
+		t.Fatalf("force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("force action = %q, want updated", act.Action)
+	}
+	want := codexTOMLBlock(guerrilla) + "\n\n[profiles.work]\nmodel = \"gpt-5.3-codex\"\n"
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("force must replace header table + env sub-table with the flat stanza.\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
+// TestOnrampWriteCodexDenyForms: the stanza forms a textual splice cannot own —
+// root dotted-key, root inline-table, and barkpark inline under a bare
+// [mcp_servers] header — error LOUDLY with or without --force, and the file is
+// byte-untouched (charter D11).
+func TestOnrampWriteCodexDenyForms(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"root dotted-key", "mcp_servers.barkpark.command = \"bp\"\nmcp_servers.barkpark.args = [\"mcp\", \"serve\"]\n"},
+		{"root inline-table", "mcp_servers.barkpark = { command = \"bp\", args = [\"mcp\", \"serve\"] }\n"},
+		{"inline under bare header", "[mcp_servers]\nbarkpark = { command = \"bp\", args = [\"mcp\", \"serve\"] }\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f, path := codexSandbox(t)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, force := range []bool{false, true} {
+				if _, err := mergeOnrampFile(f, force); err == nil {
+					t.Errorf("force=%v: %s must error loudly, got nil", force, tc.name)
+				}
+				if got := mustRead(t, path); string(got) != tc.content {
+					t.Errorf("force=%v: deny path must leave the file byte-untouched", force)
+				}
+			}
+		})
+	}
+}
+
+// TestOnrampWriteCodexHeaderComment: a trailing `# comment` after the header's
+// closing bracket must not break span detection (charter D11: match on the
+// header TOKEN) — the span is found and reported as differing, never treated as
+// absent and appended twice.
+func TestOnrampWriteCodexHeaderComment(t *testing.T) {
+	f, path := codexSandbox(t)
+	existing := "[mcp_servers.barkpark] # managed by bp\ncommand = \"bp\"\nargs = [\"mcp\", \"serve\"]\n"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if act.Action != "skipped" {
+		t.Fatalf("action = %q, want skipped (span FOUND via its token, differing) — 'updated' means the commented header was missed and the stanza appended", act.Action)
+	}
+	if got := mustRead(t, path); string(got) != existing {
+		t.Errorf("skipped write must not touch the file")
+	}
+}
+
+// TestOnrampWriteCodexCRLF: a CRLF config.toml round-trips — a canonical stanza
+// in CRLF form reads 'unchanged', and a --force replace keeps the whole file
+// CRLF with every foreign byte surviving.
+func TestOnrampWriteCodexCRLF(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/onramp_config_foreign.toml")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	f, path := codexSandbox(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical stanza, CRLF convention → unchanged, untouched.
+	crlfCanonical := strings.ReplaceAll(codexTOMLBlock(guerrilla)+"\n", "\n", "\r\n")
+	if err := os.WriteFile(path, []byte(crlfCanonical), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("crlf unchanged merge: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("crlf canonical action = %q, want unchanged", act.Action)
+	}
+	if got := mustRead(t, path); string(got) != crlfCanonical {
+		t.Errorf("unchanged must not rewrite the CRLF file")
+	}
+
+	// Differing span in a CRLF file → force replaces it and the file stays CRLF.
+	crlfFixture := strings.ReplaceAll(string(fixture), "\n", "\r\n")
+	if err := os.WriteFile(path, []byte(crlfFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err = mergeOnrampFile(f, true)
+	if err != nil {
+		t.Fatalf("crlf force merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("crlf force action = %q, want updated", act.Action)
+	}
+	got := string(mustRead(t, path))
+	if strings.Contains(strings.ReplaceAll(got, "\r\n", ""), "\n") {
+		t.Errorf("force write introduced a lone LF into a CRLF file")
+	}
+	wantLF := strings.Replace(string(fixture), codexFixtureStaleSpan, codexTOMLBlock(guerrilla), 1)
+	if got != strings.ReplaceAll(wantLF, "\n", "\r\n") {
+		t.Errorf("crlf force result drifted.\n--- got ---\n%q", got)
+	}
+}
+
+// TestOnrampWriteCodexNoFinalNewline: a config.toml without a final newline
+// round-trips — a canonical stanza reads 'unchanged', and an append first
+// completes the last line, then separates with a blank line.
+func TestOnrampWriteCodexNoFinalNewline(t *testing.T) {
+	f, path := codexSandbox(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Canonical stanza, no final newline → unchanged, untouched.
+	if err := os.WriteFile(path, []byte(codexTOMLBlock(guerrilla)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err := mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("no-final-newline unchanged merge: %v", err)
+	}
+	if act.Action != "unchanged" {
+		t.Errorf("action = %q, want unchanged", act.Action)
+	}
+	if got := mustRead(t, path); string(got) != codexTOMLBlock(guerrilla) {
+		t.Errorf("unchanged must not rewrite the newline-less file")
+	}
+
+	// Foreign content, no final newline → appended with the separator.
+	if err := os.WriteFile(path, []byte(`model = "gpt-5.3-codex"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	act, err = mergeOnrampFile(f, false)
+	if err != nil {
+		t.Fatalf("append merge: %v", err)
+	}
+	if act.Action != "updated" {
+		t.Fatalf("action = %q, want updated", act.Action)
+	}
+	want := "model = \"gpt-5.3-codex\"\n\n" + codexTOMLBlock(guerrilla) + "\n"
+	if got := mustRead(t, path); string(got) != want {
+		t.Errorf("append into a newline-less file drifted.\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

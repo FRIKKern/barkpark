@@ -50,10 +50,15 @@ codex mcp add barkpark --env BARKPARK_API_URL=https://guerrilla.barkpark.cloud -
 ```
 
 <!-- grammar verified 2026-07-10 against openai/codex codex-rs/cli/src/mcp_cmd.rs: usage `codex mcp add [OPTIONS] <NAME> (--url <URL> | -- <COMMAND>...)`; --env takes KEY=VALUE (stdio only); the NAME precedes the `--` command -->
+<!-- write shape verified 2026-07-11 against codex-cli 0.144.1 (live capture) + openai/codex@5c19155c: `codex mcp add` writes env as a NESTED [mcp_servers.barkpark.env] sub-table (alpha-sorted keys), NOT the inline env = {…} form -->
 
 The `--` separates Codex's own flags from the command Codex will run. This
-writes the core of the stanza below (`command`/`args`/`env`) into
-`~/.codex/config.toml`; add `env_vars` and the timeouts by hand.
+writes the core of the stanza (`command`/`args`) into `~/.codex/config.toml` —
+note it writes `env` as a **nested `[mcp_servers.barkpark.env]` sub-table**,
+not the inline `env = {…}` form shown below (both are valid TOML for the same
+config); add `env_vars` and the timeouts by hand, or run
+`bp onramp codex --write --force` to replace the span with the full canonical
+stanza below.
 
 ### Or hand-edit `~/.codex/config.toml`
 
@@ -92,6 +97,27 @@ codex mcp list       # barkpark should appear
 ```
 
 In the Codex TUI, `/mcp` lists the same servers and their tools.
+
+### Or let `bp` write it — `bp onramp codex --write`
+
+`bp onramp codex --write` merges the stanza above into `~/.codex/config.toml`
+for you — a textual span splice that owns **only** the `[mcp_servers.barkpark]`
+table plus any `[mcp_servers.barkpark.*]` sub-table; every byte outside that
+span (your model settings, other MCP servers, profiles, comments) survives
+verbatim. It is idempotent and honest per file: `created` (no file yet — the
+canonical stanza, byte-for-byte), `updated` (stanza absent — appended after a
+blank line), `unchanged` (already canonical — nothing written, exit 0), or
+`skipped` (a **different** barkpark stanza is present — including the sub-table
+shape `codex mcp add` writes; re-run with `--force` to replace the whole span
+with the flat canonical stanza). Root-level dotted or inline forms
+(`mcp_servers.barkpark = {…}`) can't be spliced safely and error loudly with
+the file untouched. Writes are atomic (temp file + rename). `-o json` emits
+`{target, actions:[{path,action,note}]}`.
+
+```bash
+bp onramp codex --write             # merge the [mcp_servers.barkpark] span
+bp onramp codex --write --force     # replace a differing span (e.g. codex mcp add output)
+```
 
 ### Per-project override
 
