@@ -178,6 +178,16 @@ type CloudRestoreDriver struct {
 // resolveRestoreBase, so cloud.CreateHost receives an ALREADY-RESOLVED base.
 func (d *CloudRestoreDriver) CreateHost(ctx context.Context, job JobSpec) (string, error) {
 	base := resolveRestoreBase(job)
+	// Image is NOT part of the D49 precedence — the pinned bp-bundle-v1 manifest
+	// carries no image hint and a resurrect claim cannot pin one (JobSpec has no
+	// image field) — so it resolves exactly the way the provision path does
+	// (provision.go): the newest baked `role=warm-image` snapshot for hetzner
+	// (else the env-pinned fallback), and the provider's own platform default
+	// off-hetzner (FreshSpec yields "" there; azure fills its own). Without this
+	// fill the resurrect create ran `hcloud server create --image ""` and failed
+	// every ladder candidate — and restoreFreshenStep's hetzner no-op freshen
+	// depends on the box having BOOTED the warm image.
+	base.Image = cloud.FreshSpec(ctx, restoreKind(job.Kind)).Image
 	fqdn := ""
 	if job.BundleRef != nil {
 		fqdn = job.BundleRef.Manifest.Fqdn

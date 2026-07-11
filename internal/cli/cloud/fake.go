@@ -23,6 +23,7 @@ type FakeProvider struct {
 	mu       sync.Mutex
 	servers  map[string]Server
 	archives map[string][]Archive // fqdn → recorded archives, oldest→newest (append order)
+	created  []ServerSpec         // every spec Create was handed, in call order
 	next     int                  // counter feeding the deterministic id/IP
 }
 
@@ -46,6 +47,7 @@ func (f *FakeProvider) Create(_ context.Context, spec ServerSpec) (Server, error
 	if _, exists := f.servers[spec.Name]; exists {
 		return Server{}, fmt.Errorf("cloud: fake server %q already exists", spec.Name)
 	}
+	f.created = append(f.created, spec)
 	f.next++
 	srv := Server{
 		ID:   fmt.Sprintf("fake-%d", f.next),
@@ -57,6 +59,17 @@ func (f *FakeProvider) Create(_ context.Context, spec ServerSpec) (Server, error
 	}
 	f.servers[spec.Name] = srv
 	return srv, nil
+}
+
+// CreatedSpecs returns a copy of every ServerSpec Create was handed, in call
+// order — so a test can assert the EXACT shape (region/type/image) that reached
+// the provider boundary, not just that a server exists.
+func (f *FakeProvider) CreatedSpecs() []ServerSpec {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]ServerSpec, len(f.created))
+	copy(out, f.created)
+	return out
 }
 
 // LabelServer adds (or overwrites) a label on an existing fake server — the
