@@ -44,10 +44,15 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     subscription.activated subscription.canceled
     token.minted token.revoked
     site.created site.deleted
+    site.deploy_requested site.artifact_uploaded site.env_changed
+    site.domain_added site.github_connected site.github_disconnected
     deployment.promoted
     webhook.created webhook.updated webhook.deleted webhook.rotated webhook.replayed
     barkpark.go_live barkpark.deleted
     env_var.created env_var.deleted
+    provider.connected
+    github.installation_connected github.installation_disconnected github.repo_pushed
+    notifications.settings_changed notifications.channels_changed notifications.events_changed
     twofa.enabled twofa.disabled
     oauth.linked email.verified
   )

@@ -2614,9 +2614,25 @@ defmodule BarkparkCloud.Web.Router do
       true ->
         team = conn.assigns.current_team
 
-        case GitHub.record_installation(team, conn.body_params["installation_id"]) do
+        # activity-audit-log: the installation row + a `github.installation_connected`
+        # audit event commit atomically. Detail carries only the account_login (the
+        # decrypted installation handle NEVER touches the audit row).
+        audited =
+          Accounts.audit(
+            %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "github.installation_connected",
+              target_type: "github_installation"
+            },
+            fn -> GitHub.record_installation(team, conn.body_params["installation_id"]) end,
+            fn inst -> %{target_id: inst.id, metadata: %{account_login: inst.account_login}} end
+          )
+
+        case audited do
           {:ok, inst} ->
             push_event(team.id, "github")
+            push_event(team.id, "audit")
 
             json(conn, 201, %{
               installation:
@@ -2649,9 +2665,31 @@ defmodule BarkparkCloud.Web.Router do
       true ->
         team = conn.assigns.current_team
 
-        case GitHub.disconnect(team) do
-          :ok ->
+        # activity-audit-log: the installation-row delete + a
+        # `github.installation_disconnected` audit event commit atomically. The
+        # bare `:ok` from disconnect/1 is lifted to `{:ok, :disconnected}` so it
+        # rides the audit/3 contract; a `{:error, :not_found}` rolls back with NO
+        # audit row (nothing was disconnected).
+        audited =
+          Accounts.audit(
+            %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "github.installation_disconnected",
+              target_type: "github_installation"
+            },
+            fn ->
+              case GitHub.disconnect(team) do
+                :ok -> {:ok, :disconnected}
+                {:error, _} = err -> err
+              end
+            end
+          )
+
+        case audited do
+          {:ok, :disconnected} ->
             push_event(team.id, "github")
+            push_event(team.id, "audit")
             json(conn, 200, %{ok: true})
 
           {:error, :not_found} ->
@@ -2703,7 +2741,23 @@ defmodule BarkparkCloud.Web.Router do
 
         case GitHub.create_repo_from_template(team, template, name, private?) do
           {:ok, %{repo_full_name: full, html_url: url, pushed: pushed}} ->
+            # activity-audit-log: this route RELAYS to GitHub (create-repo +
+            # push-files) rather than opening one local transaction, so the audit
+            # is a post-commit best-effort record_audit/1 (the repo already exists
+            # on GitHub — an audit-insert failure must never 500 the success). The
+            # detail carries the repo name + template + file count, no secrets.
+            _ =
+              Accounts.record_audit(%{
+                team_id: team.id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "github.repo_pushed",
+                target_type: "github_repo",
+                target_id: full,
+                metadata: %{repo_full_name: full, template: template, pushed: pushed}
+              })
+
             push_event(team.id, "github")
+            push_event(team.id, "audit")
 
             json(conn, 201, %{
               repo_full_name: full,
@@ -2774,11 +2828,34 @@ defmodule BarkparkCloud.Web.Router do
             ~w(key value scope barkpark_id is_secret is_shown_once comment)
           )
 
-        case Registry.put_env_var(conn.assigns.current_team, attrs) do
-          {:ok, ev} -> json(conn, 201, %{env_var: env_var_json(ev)})
-          {:error, :write_once} -> json(conn, 409, %{error: "write_once"})
-          {:error, :barkpark_not_in_team} -> json(conn, 403, %{error: "forbidden"})
-          {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+        # activity-audit-log: the env-var insert + an `env_var.created` audit
+        # event commit atomically. Detail carries only the KEY NAME + scope —
+        # NEVER the plaintext value (which is Vault-encrypted at rest).
+        audited =
+          Accounts.audit(
+            %{
+              team_id: conn.assigns.current_team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "env_var.created",
+              target_type: "env_var"
+            },
+            fn -> Registry.put_env_var(conn.assigns.current_team, attrs) end,
+            fn ev -> %{target_id: ev.id, metadata: %{key: ev.key, scope: ev.scope}} end
+          )
+
+        case audited do
+          {:ok, ev} ->
+            push_event(conn.assigns.current_team.id, "audit")
+            json(conn, 201, %{env_var: env_var_json(ev)})
+
+          {:error, :write_once} ->
+            json(conn, 409, %{error: "write_once"})
+
+          {:error, :barkpark_not_in_team} ->
+            json(conn, 403, %{error: "forbidden"})
+
+          {:error, changeset} ->
+            json(conn, 422, %{error: "invalid", details: errors(changeset)})
         end
     end
   end
@@ -2800,9 +2877,28 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 403, %{error: "forbidden"})
 
       true ->
-        case Registry.delete_env_var(conn.assigns.current_team, conn.path_params["id"]) do
-          {:ok, _} -> json(conn, 200, %{ok: true})
-          {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
+        # activity-audit-log: the env-var delete + an `env_var.deleted` audit
+        # event commit atomically (key name only, never the value). A wrong-team
+        # / missing id rolls back with NO audit row.
+        audited =
+          Accounts.audit(
+            %{
+              team_id: conn.assigns.current_team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "env_var.deleted",
+              target_type: "env_var"
+            },
+            fn -> Registry.delete_env_var(conn.assigns.current_team, conn.path_params["id"]) end,
+            fn ev -> %{target_id: ev.id, metadata: %{key: ev.key, scope: ev.scope}} end
+          )
+
+        case audited do
+          {:ok, _} ->
+            push_event(conn.assigns.current_team.id, "audit")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -2841,8 +2937,28 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted do
       conn
     else
-      case Notifications.update_settings(conn.assigns.current_team, conn.body_params) do
+      team = conn.assigns.current_team
+
+      # activity-audit-log: the settings update + a `notifications.settings_changed`
+      # audit event commit atomically. Detail records only the FIELD NAMES that were
+      # submitted (e.g. "smtp_password", "api_key") — never the plaintext secret
+      # values (those are Vault-encrypted at rest and never echoed).
+      audited =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "notifications.settings_changed",
+            target_type: "notification_settings",
+            metadata: %{fields: Map.keys(conn.body_params)}
+          },
+          fn -> Notifications.update_settings(team, conn.body_params) end,
+          fn settings -> %{target_id: settings.id} end
+        )
+
+      case audited do
         {:ok, settings} ->
+          push_event(team.id, "audit")
           json(conn, 200, %{settings: Notifications.settings_view(settings)})
 
         {:error, changeset} ->
@@ -2868,10 +2984,29 @@ defmodule BarkparkCloud.Web.Router do
       type = params["type"]
       enabled = params["enabled"] == true
       creds = if is_map(params["credentials"]), do: params["credentials"], else: nil
+      team = conn.assigns.current_team
 
-      case Notifications.put_channel(conn.assigns.current_team, type, enabled, creds) do
+      # activity-audit-log: the channel upsert + a `notifications.channels_changed`
+      # audit event commit atomically. Detail records the channel TYPE + enabled
+      # flag only — NEVER the channel `credentials` (chat/webhook secrets sealed
+      # via Vault before they hit the DB).
+      audited =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "notifications.channels_changed",
+            target_type: "notification_settings",
+            metadata: %{type: type, enabled: enabled}
+          },
+          fn -> Notifications.put_channel(team, type, enabled, creds) end,
+          fn settings -> %{target_id: settings.id} end
+        )
+
+      case audited do
         {:ok, settings} ->
-          push_event(conn.assigns.current_team.id, "notifications")
+          push_event(team.id, "notifications")
+          push_event(team.id, "audit")
           json(conn, 200, %{settings: Notifications.settings_view(settings)})
 
         {:error, changeset} ->
@@ -2892,10 +3027,28 @@ defmodule BarkparkCloud.Web.Router do
       params = conn.body_params
       event = params["event"]
       channels = if is_list(params["channels"]), do: params["channels"], else: []
+      team = conn.assigns.current_team
 
-      case Notifications.set_event_route(conn.assigns.current_team, event, channels) do
+      # activity-audit-log: the event×channel route change + a
+      # `notifications.events_changed` audit event commit atomically. Detail carries
+      # the event name + the target channel TYPES (routing labels, never secrets).
+      audited =
+        Accounts.audit(
+          %{
+            team_id: team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "notifications.events_changed",
+            target_type: "notification_settings",
+            metadata: %{event: event, channels: channels}
+          },
+          fn -> Notifications.set_event_route(team, event, channels) end,
+          fn settings -> %{target_id: settings.id} end
+        )
+
+      case audited do
         {:ok, settings} ->
-          push_event(conn.assigns.current_team.id, "notifications")
+          push_event(team.id, "notifications")
+          push_event(team.id, "audit")
           json(conn, 200, %{settings: Notifications.settings_view(settings)})
 
         {:error, changeset} ->
@@ -4349,7 +4502,7 @@ defmodule BarkparkCloud.Web.Router do
   # Enqueues a Deployment with status:"queued"; the off-box builder (P2) polls
   # for queued rows and walks them through building → pushing → live.
   post "/v1/sites/:id/deploy" do
-    with_team_site(conn, {:ability, "write"}, fn site ->
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
       # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
       # connected repo can never build regardless of fleet — the row would sit
       # "queued" forever as an eternal dashboard spinner. Refuse it up front so
@@ -4385,7 +4538,29 @@ defmodule BarkparkCloud.Web.Router do
           nil ->
             case Registry.create_deployment(site, attrs) do
               {:ok, deployment} ->
+                # activity-audit-log: a deploy request ENQUEUES a queued row the
+                # off-box builder later walks — a relay, so the audit is a
+                # post-commit best-effort record_audit/1 (never rolls the queued
+                # row back). Only a FRESHLY minted row is audited; a coalesced /
+                # lost-race 200 re-uses an existing row and stamps nothing (no
+                # double-audit on a double-click). Detail carries git_ref + whether
+                # an artifact was supplied, never the artifact bytes.
+                _ =
+                  Accounts.record_audit(%{
+                    team_id: site.team_id,
+                    actor_user_id: conn.assigns.current_user.id,
+                    action: "site.deploy_requested",
+                    target_type: "deployment",
+                    target_id: deployment.id,
+                    metadata: %{
+                      site_id: site.id,
+                      git_ref: attrs.git_ref,
+                      has_artifact: not is_nil(attrs.artifact_url)
+                    }
+                  })
+
                 push_event(site.team_id, "deployments")
+                push_event(site.team_id, "audit")
                 json(conn, 201, %{deployment: deployment_json(deployment)})
 
               {:error, %Ecto.Changeset{errors: errs} = cs} ->
@@ -4490,7 +4665,7 @@ defmodule BarkparkCloud.Web.Router do
   # Ownership: a site in another team returns 404 (existence-leak protection),
   # same shape as a nonexistent id — never 403.
   post "/v1/sites/:id/artifact" do
-    with_team_site(conn, fn site ->
+    with_team_site(conn, fn conn, site ->
       cfg = artifact_config()
       max = cfg[:max_artifact_bytes]
       dir = cfg[:artifact_dir]
@@ -4502,6 +4677,21 @@ defmodule BarkparkCloud.Web.Router do
       case stream_body_to_file(conn, path, max) do
         {:ok, conn, bytes} ->
           url = "file://" <> path
+
+          # activity-audit-log: the upload writes a host-local file (not a DB
+          # transaction), so the audit is a post-commit best-effort record_audit/1.
+          # Detail carries the filename + byte count — never the artifact bytes.
+          _ =
+            Accounts.record_audit(%{
+              team_id: site.team_id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "site.artifact_uploaded",
+              target_type: "site",
+              target_id: site.id,
+              metadata: %{filename: filename, bytes: bytes}
+            })
+
+          push_event(site.team_id, "audit")
 
           json(conn, 201, %{
             artifact_url: url,
@@ -4523,7 +4713,7 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/sites/:id/env {env: {...}} → 200 {ok: true}. Replaces the whole
   # encrypted env blob (Vault.encrypt-stored, never echoed back).
   post "/v1/sites/:id/env" do
-    with_team_site(conn, fn site ->
+    with_team_site(conn, fn conn, site ->
       env = conn.body_params["env"]
 
       cond do
@@ -4531,9 +4721,29 @@ defmodule BarkparkCloud.Web.Router do
           json(conn, 422, %{error: "env_required"})
 
         true ->
-          case Registry.set_site_env(site, env) do
-            {:ok, _} -> json(conn, 200, %{ok: true})
-            {:error, cs} -> json(conn, 422, %{error: "invalid", details: errors(cs)})
+          # activity-audit-log: the env-blob update + a `site.env_changed` audit
+          # event commit atomically. Detail records only the KEY NAMES of the env
+          # map — NEVER the values (the whole blob is Vault-encrypted at rest).
+          audited =
+            Accounts.audit(
+              %{
+                team_id: site.team_id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "site.env_changed",
+                target_type: "site",
+                target_id: site.id,
+                metadata: %{site_id: site.id, keys: Map.keys(env)}
+              },
+              fn -> Registry.set_site_env(site, env) end
+            )
+
+          case audited do
+            {:ok, _} ->
+              push_event(site.team_id, "audit")
+              json(conn, 200, %{ok: true})
+
+            {:error, cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
           end
       end
     end)
@@ -4542,7 +4752,7 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/sites/:id/domains {domain} → 200 {site}. Adds the domain to the
   # site's array; the domain becomes acceptable to the on-demand-TLS ask-gate.
   post "/v1/sites/:id/domains" do
-    with_team_site(conn, fn site ->
+    with_team_site(conn, fn conn, site ->
       domain = conn.body_params["domain"]
 
       cond do
@@ -4550,8 +4760,25 @@ defmodule BarkparkCloud.Web.Router do
           json(conn, 422, %{error: "domain_required"})
 
         true ->
-          case Registry.add_site_domain(site, domain) do
+          # activity-audit-log: the domain-array update + a `site.domain_added`
+          # audit event commit atomically. Detail carries the domain (a public
+          # hostname, not a secret). A cross-site collision rolls back with NO row.
+          audited =
+            Accounts.audit(
+              %{
+                team_id: site.team_id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "site.domain_added",
+                target_type: "site",
+                target_id: site.id,
+                metadata: %{site_id: site.id, domain: domain}
+              },
+              fn -> Registry.add_site_domain(site, domain) end
+            )
+
+          case audited do
             {:ok, site} ->
+              push_event(site.team_id, "audit")
               json(conn, 200, %{site: site_json(site)})
 
             # Cross-team collision guard: a domain owned by another site is a
@@ -4578,7 +4805,7 @@ defmodule BarkparkCloud.Web.Router do
   # cryptographically random one and returns it ONCE in this response (it is
   # Vault-encrypted at rest and never returned again).
   post "/v1/sites/:id/github" do
-    with_team_site(conn, fn site ->
+    with_team_site(conn, fn conn, site ->
       repo = conn.body_params["repo"]
       branch = conn.body_params["branch"]
       provided = conn.body_params["webhook_secret"]
@@ -4598,8 +4825,26 @@ defmodule BarkparkCloud.Web.Router do
               true -> generate_webhook_secret()
             end
 
-          case Registry.set_site_github(site, repo, branch, plaintext_secret) do
+          # activity-audit-log: the repo/branch/secret link update + a
+          # `site.github_connected` audit event commit atomically. Detail carries
+          # the repo + branch (public references) — NEVER the webhook secret.
+          audited =
+            Accounts.audit(
+              %{
+                team_id: site.team_id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "site.github_connected",
+                target_type: "site",
+                target_id: site.id,
+                metadata: %{site_id: site.id, repo: repo, branch: branch || "main"}
+              },
+              fn -> Registry.set_site_github(site, repo, branch, plaintext_secret) end
+            )
+
+          case audited do
             {:ok, updated} ->
+              push_event(site.team_id, "audit")
+
               json(conn, 200, %{
                 site: site_json(updated),
                 webhook_url: webhook_url_for(conn, updated.id),
@@ -4678,8 +4923,23 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 404, %{error: "not_found"})
 
           %Registry.Site{} = site ->
-            {:ok, updated} = Registry.clear_site_github(site)
+            # activity-audit-log: the link-clear + a `site.github_disconnected`
+            # audit event commit atomically (repo reference only, no secret).
+            {:ok, updated} =
+              Accounts.audit(
+                %{
+                  team_id: site.team_id,
+                  actor_user_id: conn.assigns.current_user.id,
+                  action: "site.github_disconnected",
+                  target_type: "site",
+                  target_id: site.id,
+                  metadata: %{site_id: site.id, repo: site.github_repo}
+                },
+                fn -> Registry.clear_site_github(site) end
+              )
+
             push_event(conn.assigns.current_team.id, "sites")
+            push_event(conn.assigns.current_team.id, "audit")
             json(conn, 200, %{site: site_json(updated)})
         end
     end
@@ -6328,9 +6588,30 @@ defmodule BarkparkCloud.Web.Router do
     with true <- kind in @neutral_kinds,
          {:ok, credential} <- provider_credential(kind, conn.body_params),
          :ok <- preflight_provider(kind, credential) do
-      case Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label) do
-        {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
-        {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      # activity-audit-log: the credential row insert + a `provider.connected`
+      # audit event share ONE transaction. The detail map carries only the
+      # provider KIND and LABEL — NEVER the credential material (the token /
+      # service-principal blob never reaches an audit row or a log line).
+      audited =
+        Accounts.audit(
+          %{
+            team_id: conn.assigns.current_team.id,
+            actor_user_id: conn.assigns.current_user.id,
+            action: "provider.connected",
+            target_type: "provider",
+            metadata: %{kind: kind, label: label}
+          },
+          fn -> Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label) end,
+          fn provider -> %{target_id: provider.id} end
+        )
+
+      case audited do
+        {:ok, provider} ->
+          push_event(conn.assigns.current_team.id, "audit")
+          json(conn, 201, %{provider: provider_json(provider)})
+
+        {:error, changeset} ->
+          json(conn, 422, %{error: "invalid", details: errors(changeset)})
       end
     else
       false ->
@@ -7591,11 +7872,19 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
-          %Registry.Site{} = site -> fun.(site)
+          %Registry.Site{} = site -> apply_site_fun(fun, conn, site)
           nil -> json(conn, 404, %{error: "not_found"})
         end
     end
   end
+
+  # A read-only site handler takes just the site; a MUTATING one that must stamp
+  # an audit row needs the AUTHED conn too (current_user is assigned inside
+  # with_team_site, so the outer route body's conn never carries it). Arity picks
+  # the right shape: `fn site -> … end` for reads, `fn conn, site -> … end` for
+  # audited writes.
+  defp apply_site_fun(fun, _conn, site) when is_function(fun, 1), do: fun.(site)
+  defp apply_site_fun(fun, conn, site) when is_function(fun, 2), do: fun.(conn, site)
 
   # Promote (rollback/redeploy) the `dep_id` deployment onto `site` — charter
   # decision 7. The source must belong to THIS (already team-scoped) site and be
@@ -8053,7 +8342,28 @@ defmodule BarkparkCloud.Web.Router do
           {:ok, _hook} ->
             case Registry.set_site_github(site, repo, branch, secret) do
               {:ok, updated} ->
+                # activity-audit-log: same `site.github_connected` event as the
+                # manual link route. This path already RELAYED to GitHub (the hook
+                # is registered), so the audit is a post-commit best-effort
+                # record_audit/1 — an audit-insert failure must not strand a live
+                # GitHub webhook by rolling the local link back. Repo/branch only,
+                # never the webhook secret.
+                _ =
+                  Accounts.record_audit(%{
+                    team_id: team.id,
+                    actor_user_id: conn.assigns.current_user.id,
+                    action: "site.github_connected",
+                    target_type: "site",
+                    target_id: site.id,
+                    metadata: %{
+                      site_id: site.id,
+                      repo: updated.github_repo,
+                      branch: updated.github_branch
+                    }
+                  })
+
                 push_event(team.id, "sites")
+                push_event(team.id, "audit")
 
                 json(conn, 200, %{
                   site: site_json(updated),
