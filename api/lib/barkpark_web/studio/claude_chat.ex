@@ -15,8 +15,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     2. **Public-demo hard refuse.** `enabled?/0` returns false whenever
        `public_demo_studio` is on. Fail-closed, not overridable by the flag.
     3. **Per-host opt-out.** `BARKPARK_CLAUDE_CHAT=0` (runtime.exs) disables
-       it on a given host; `enabled?/0` also requires the `claude` binary
-       (or a configured command override) to be present.
+       it on a given host. Binary presence does NOT gate `enabled?/0` (the
+       chat-task-hands gate inversion): a host without `claude` still shows
+       the chat surface, which renders the onboarding card instead of a
+       composer — the tab never silently vanishes.
 
   Wave 1 runs the agent in **plan mode** (`--permission-mode plan`): the
   model may read the filesystem it runs in but cannot edit or execute —
@@ -51,13 +53,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   @doc """
   Whether the chat may run on this host. ON by default; requires the flag
-  (default on, opt out via env) and a launchable command, and is HARD-REFUSED
-  whenever anonymous Studio is on (`public_demo_studio`). Both the nav tab
-  (admin-only) and the LiveView mount gate on this.
+  (default on, opt out via env) and is HARD-REFUSED whenever anonymous Studio
+  is on (`public_demo_studio`). Both the nav tab (admin-only) and the LiveView
+  mount gate on this.
+
+  Binary presence deliberately does NOT gate here (chat-task-hands charter,
+  decision 4 — the gate inversion): a missing/logged-out `claude` must never
+  make the tab vanish or the mount redirect. The chat surface stays, and the
+  onboarding card (`ChatLive`, keyed off the async `Probe` readiness) names
+  the exact not-ready state with its next step instead — never fail silent
+  (charter D2). Security posture is UNCHANGED: flag-off, public-demo, and the
+  admin `on_mount` still refuse outright.
   """
   @spec enabled?() :: boolean()
   def enabled? do
-    flag_on?() and not public_demo?() and launchable?()
+    flag_on?() and not public_demo?()
   end
 
   # Enable flag defaults ON; only an explicit `enabled: false` (base config or
@@ -67,11 +77,6 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # Fail-closed: a host that serves Studio to anonymous visitors must never
   # expose an agent with the server's filesystem in reach.
   defp public_demo?, do: Application.get_env(:barkpark, :public_demo_studio, false) == true
-
-  defp launchable? do
-    {exe, _args} = command()
-    System.find_executable(exe) != nil
-  end
 
   @doc "The configured Claude binary (default `claude`)."
   @spec binary() :: String.t()
@@ -278,6 +283,45 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   def mcp_connected?(_), do: false
 
+  # ── runtime auth guard (chat-task-hands, charter decision 5) ──────────────
+
+  @doc ~S"""
+  Whether a stream frame is the unauthed-CLI footgun (charter Verified ground
+  2026-07-11, captured live on 2.1.207): a logged-out `claude` ends the turn
+  with a result frame that says `subtype:"success"` BUT carries
+  `is_error:true` / `terminal_reason:"api_error"`, and the assistant frame
+  before it carries top-level `error:"authentication_failed"`. Subtype alone
+  MISCLASSIFIES — never trust it; this classifier keys on the error facts.
+
+  `test/fixtures/claude_chat/unauthed_stream.ndjson` holds the captured wire
+  truth these clauses are written against.
+  """
+  @spec auth_failure?(term()) :: boolean()
+  def auth_failure?(%{"type" => "assistant"} = ev) do
+    ev["error"] == "authentication_failed" or
+      get_in(ev, ["message", "error"]) == "authentication_failed"
+  end
+
+  def auth_failure?(%{"type" => "result"} = ev) do
+    ev["is_error"] == true and
+      (ev["terminal_reason"] == "api_error" or ev["api_error_status"] == 401)
+  end
+
+  def auth_failure?(_), do: false
+
+  @doc ~S"""
+  Whether a result frame is a REAL success. `subtype == "success"` alone is a
+  proven lie (see `auth_failure?/1`): an unauthed turn ends `subtype:"success"`
+  with `is_error:true`. A result only counts as a success when the subtype
+  says so AND the error facts agree.
+  """
+  @spec result_success?(term()) :: boolean()
+  def result_success?(%{"type" => "result"} = ev) do
+    ev["subtype"] == "success" and ev["is_error"] != true
+  end
+
+  def result_success?(_), do: false
+
   @doc """
   The per-session MCP config map (charter D63/D64) — `Session.init` serializes
   it into a temp file that `--mcp-config` references. ONE server: Barkpark
@@ -321,6 +365,98 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     port = if is_list(http), do: Keyword.get(http, :port, 4000), else: 4000
     port = if is_integer(port), do: port, else: 4000
     "http://127.0.0.1:#{port}"
+  end
+
+  # ── spawn env: bp credentials in, prod secrets out (charter D1/D3) ────────
+
+  # The poison sentinel injected as BARKPARK_API_TOKEN when the session-token
+  # mint was refused (or never attempted). NEVER omit the var instead: bp's
+  # credential precedence (flags > env > persisted ~/.config/barkpark > baked
+  # dev-token) would silently fall through to a possibly different server or a
+  # higher-privileged persisted token. With the sentinel, the URL still points
+  # at THIS server, so every call 401s HERE — loud, local, diagnosable.
+  @mint_refused_sentinel "bpcs-mint-refused"
+
+  @doc "The poison BARKPARK_API_TOKEN injected when the mint was refused (D2)."
+  @spec mint_refused_sentinel() :: String.t()
+  def mint_refused_sentinel, do: @mint_refused_sentinel
+
+  # Secret env vars the child must NEVER inherit: everything secret-valued that
+  # config/runtime.exs reads, plus RELEASE_COOKIE (BEAM distribution) and
+  # BARKPARK_TOKEN (the host's bp credential — typically ADMIN), plus the
+  # Hetzner tokens a cloud host's .env exports. Unsetting an absent var is a
+  # proven no-op, so the list errs wide. HOME and PATH are deliberately NOT
+  # here — the merge keeps them, and claude's OAuth lives under $HOME.
+  @scrubbed_env ~w(
+    DATABASE_URL SECRET_KEY_BASE RELEASE_COOKIE BARKPARK_TOKEN
+    BARKPARK_CLOAK_KEY BARKPARK_KEK BARKPARK_KEK_PREVIOUS
+    BOKBASEN_CLIENT_ID BOKBASEN_CLIENT_SECRET
+    INDX_USER_EMAIL INDX_USER_PASSWORD INDX_API_TOKEN
+    BARKPARK_SYNC_TOKEN
+    MEDIA_SIGNING_SECRET MEDIA_CDN_INVALIDATION_SECRET
+    MEDIA_PROCESSING_CALLBACK_TOKEN MEDIA_WEBHOOK_SECRET
+    SMTP_USERNAME SMTP_PASSWORD
+    PREVIEW_JWT_SECRET
+    BARKPARK_INGEST_TOKEN PAPERFLOW_INGEST_TOKEN
+    HETZNER_API_TOKEN HCLOUD_TOKEN
+  )
+
+  @doc "The secret env var names scrubbed from every chat child (charter D3)."
+  @spec scrubbed_env_names() :: [String.t()]
+  def scrubbed_env_names, do: @scrubbed_env
+
+  @doc """
+  The `env:` option for the chat child's `Port.open` (charter D1/D3). Injects
+  the bp credential seam — `BARKPARK_API_URL` (this server's loopback),
+  `BARKPARK_API_TOKEN` (the minted session token, or the poison sentinel on a
+  refused mint), `BARKPARK_WORKER_ID` — and UNSETS every secret in
+  `scrubbed_env_names/0`. Without this, the child inherits the FULL BEAM env
+  (DATABASE_URL, SECRET_KEY_BASE, every token — a live-proven leak).
+
+  OTP semantics (proven 26–28): `:env` MERGES into the inherited env (HOME and
+  PATH survive, so claude's OAuth is unaffected); `{~c"NAME", false}` unsets;
+  both key AND value must be charlists — a binary on either side is an
+  ArgumentError at `Port.open`. The sibling `args:` list stays binaries.
+
+  Injection propagates to grandchildren (claude's Bash subprocesses AND its
+  `--mcp-config` MCP child), so one seam feeds both lanes; scrubbed vars stay
+  scrubbed down the tree. Pure (config reads only) and public so the tuple
+  shape is unit-testable without spawning a Port.
+  """
+  @spec spawn_env(String.t(), String.t()) :: [{charlist(), charlist() | false}]
+  def spawn_env(raw_token, worker_id) when is_binary(raw_token) and is_binary(worker_id) do
+    [
+      {~c"BARKPARK_API_URL", String.to_charlist(mcp_api_url())},
+      {~c"BARKPARK_API_TOKEN", String.to_charlist(raw_token)},
+      {~c"BARKPARK_WORKER_ID", String.to_charlist(worker_id)}
+    ] ++ Enum.map(@scrubbed_env, &{String.to_charlist(&1), false})
+  end
+
+  @doc """
+  The bp worker identity for a chat session — `claude-chat-<sid8>` (cmux
+  precedent: ONE worker per chat tab, so the agent's subagents share the same
+  fencing lease). `sid8` is the first 8 chars of the pinned session uuid;
+  an anonymous session (no pinned id) gets the shared `claude-chat-anon`.
+  """
+  @spec worker_id(String.t() | nil) :: String.t()
+  def worker_id(session_id) when is_binary(session_id) and session_id != "",
+    do: "claude-chat-" <> String.slice(session_id, 0, 8)
+
+  def worker_id(_), do: "claude-chat-anon"
+
+  @doc """
+  Whether a live session got real bp task-hands (charter D2 — the onboarding
+  card's `no_task_hands` truth). `:minted` — the env carries a real session
+  token; `:mint_refused` — the mint failed and the env carries the poison
+  sentinel (`mint_refused_sentinel/0`); `:not_attempted` — the session carried
+  no minter principal (no socket identity to mint from); `:unknown` — the
+  session is gone.
+  """
+  @spec task_hands(pid()) :: :minted | :mint_refused | :not_attempted | :unknown
+  def task_hands(session) when is_pid(session) do
+    GenServer.call(session, :task_hands)
+  catch
+    :exit, _reason -> :unknown
   end
 
   defp default_args(mode) do
@@ -661,16 +797,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       # Give the subprocess its hands BEFORE the argv is assembled (charter
       # D63/D64): mint the session-scoped token and write the per-session temp
       # mcp-config here — init owns the impure work; `build_args/2` stays pure
-      # (D9) and merely references the path. Fail-closed AND fail-soft: no
-      # minter, a refused mint, or a failed write ⇒ the chat spawns exactly as
-      # before, without loopback hands — never a dead chat, never
-      # host-credential inheritance.
+      # (D9) and merely references the path. ONE mint feeds BOTH consumers
+      # (charter D1): the mcp-config env block and the spawn env below. Fail
+      # soft, never silent: a failed config write drops only the MCP lane (the
+      # spawn env still carries the real token — bp-on-PATH keeps its hands);
+      # a refused mint poisons the spawn env with the sentinel (D2) — never a
+      # dead chat, never host-credential inheritance.
       mcp = setup_mcp(opts, session_opts)
 
       session_opts =
         case mcp do
-          %{config_path: path} -> Map.put(session_opts, :mcp_config_path, path)
-          _ -> session_opts
+          %{config_path: path} when is_binary(path) ->
+            Map.put(session_opts, :mcp_config_path, path)
+
+          _ ->
+            session_opts
         end
 
       {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"), session_opts)
@@ -679,7 +820,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         nil ->
           # An init-time stop skips terminate/2 — release the minted credential
           # + temp config inline so neither outlives a spawn that never was.
-          cleanup_mcp(%{mcp_token: mcp[:token], mcp_config_path: mcp[:config_path]})
+          cleanup_mcp(%{mcp_token: mcp.token, mcp_config_path: mcp.config_path})
           {:stop, :binary_not_found}
 
         path ->
@@ -695,6 +836,19 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           stderr_path = stderr_path(opts)
           _ = File.rm(stderr_path)
 
+          # The bp credential seam + secret scrub (charter D1/D3). The raw
+          # minted token exists only here and inside the config file — the env
+          # tuples hand it to the OS; state keeps the STRUCT for revocation,
+          # never the secret. A refused/never-attempted mint injects the
+          # poison sentinel, NEVER absence (D2): bp's precedence would
+          # otherwise fall through to the host's persisted — possibly admin —
+          # credentials. Charlists BOTH sides; the sibling args: stay binaries.
+          env =
+            ClaudeChat.spawn_env(
+              mcp.raw || ClaudeChat.mint_refused_sentinel(),
+              ClaudeChat.worker_id(pinned_session_id(opts))
+            )
+
           port =
             Port.open(
               {:spawn_executable, @shell},
@@ -703,6 +857,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
                 :exit_status,
                 :hide,
                 args: ["-c", ~s(exec "$0" "$@" 2>>"#{stderr_path}"), path | args],
+                env: env,
                 cd: ClaudeChat.cwd()
               ]
             )
@@ -721,9 +876,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
              # The loopback credential + temp config (charter D63/D64): revoked
              # and removed in BOTH terminate clauses; the token's short TTL is
              # the crash backstop. The STRUCT rides state (for revocation) —
-             # never the raw secret, which exists only inside the config file.
-             mcp_token: mcp[:token],
-             mcp_config_path: mcp[:config_path],
+             # never the raw secret, which lives only in the spawn env + the
+             # config file. `task_hands` is the queryable mint outcome the
+             # onboarding card reads (charter D2 — no_task_hands, never silent).
+             mcp_token: mcp.token,
+             mcp_config_path: mcp.config_path,
+             task_hands: mcp.mint,
              buffer: "",
              pending_controls: %{},
              # request_id → the ORIGINAL ask input, tracked so a plain `:allow`
@@ -752,6 +910,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       # Reply with the REAL write outcome (charter D24) — the LiveView gates its
       # optimistic echo on a DISPATCHED frame, so a swallowed failure would lie.
       {:reply, safe_command(state.port, line), state}
+    end
+
+    # The queryable mint outcome (charter D2): what BARKPARK_API_TOKEN the
+    # child actually got — a real minted token, the poison sentinel, or no
+    # attempt at all. The onboarding-card slice renders no_task_hands off this.
+    def handle_call(:task_hands, _from, state) do
+      {:reply, state.task_hands, state}
     end
 
     @impl true
@@ -926,51 +1091,67 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # D63/D64). Only a session that carries a `:minter` principal — the chat
     # admin's api_token/user, threaded from the socket — gets hands, and never
     # more rights than that human holds (`Auth.create_claude_session_token/3`
-    # authorizes the mint up front via Tenancy.Auth.authorize/3). The raw
-    # token exists ONLY inside the temp file's env block; the returned map
-    # carries the STRUCT (for revocation), never the secret. Any failure logs
-    # and returns nil — the chat spawns without loopback, never dead.
+    # authorizes the mint up front via Tenancy.Auth.authorize/3). ONE mint,
+    # two consumers (charter D1): `raw` feeds the spawn env AND the config
+    # file's env block; the STRUCT rides back for revocation. A failed config
+    # write keeps the token alive (env-only hands — the Bash-lane bp still
+    # works); a refused/crashed mint returns `:mint_refused` so init poisons
+    # the env with the sentinel (D2) — the chat spawns either way, never dead.
     defp setup_mcp(opts, %{minter: minter}) when not is_nil(minter) do
       session_id = pinned_session_id(opts) || "anonymous"
 
       case Barkpark.Auth.create_claude_session_token(minter, session_id) do
         {:ok, {raw, token}} ->
-          path = mcp_config_path(opts)
-          json = Jason.encode!(ClaudeChat.mcp_config(raw))
-
-          # 0600 BEFORE the secret lands: create empty, clamp perms, then write.
-          with :ok <- File.touch(path),
-               :ok <- File.chmod(path, 0o600),
-               :ok <- File.write(path, json) do
-            %{token: token, config_path: path}
-          else
-            {:error, reason} ->
-              Logger.warning(
-                "claude chat: mcp config write failed (#{inspect(reason)}) — spawning without loopback"
-              )
-
-              safe_revoke(token)
-              _ = File.rm(path)
-              nil
-          end
+          %{mint: :minted, raw: raw, token: token, config_path: write_mcp_config(opts, raw)}
 
         {:error, reason} ->
           Logger.warning(
-            "claude chat: mcp token mint refused (#{inspect(reason)}) — spawning without loopback"
+            "claude chat: mcp token mint refused (#{inspect(reason)}) — poisoning task hands"
           )
 
+          %{mint: :mint_refused, raw: nil, token: nil, config_path: nil}
+      end
+    rescue
+      e ->
+        Logger.warning("claude chat: mcp setup crashed (#{inspect(e)}) — poisoning task hands")
+
+        %{mint: :mint_refused, raw: nil, token: nil, config_path: nil}
+    end
+
+    defp setup_mcp(_opts, _session_opts),
+      do: %{mint: :not_attempted, raw: nil, token: nil, config_path: nil}
+
+    # Serialize the mcp-config to its per-session temp file. Fail-soft to nil
+    # (the MCP lane is lost, the spawn-env lane keeps the SAME token): the
+    # mint stays valid, so a transient tmp-dir problem degrades hands, never
+    # revokes them. Rescues internally so a post-mint crash can't leak the
+    # token past setup_mcp's return.
+    defp write_mcp_config(opts, raw) do
+      path = mcp_config_path(opts)
+      json = Jason.encode!(ClaudeChat.mcp_config(raw))
+
+      # 0600 BEFORE the secret lands: create empty, clamp perms, then write.
+      with :ok <- File.touch(path),
+           :ok <- File.chmod(path, 0o600),
+           :ok <- File.write(path, json) do
+        path
+      else
+        {:error, reason} ->
+          Logger.warning(
+            "claude chat: mcp config write failed (#{inspect(reason)}) — env-only task hands"
+          )
+
+          _ = File.rm(path)
           nil
       end
     rescue
       e ->
         Logger.warning(
-          "claude chat: mcp setup crashed (#{inspect(e)}) — spawning without loopback"
+          "claude chat: mcp config write crashed (#{inspect(e)}) — env-only task hands"
         )
 
         nil
     end
-
-    defp setup_mcp(_opts, _session_opts), do: nil
 
     # The per-session temp mcp-config file — the stderr_path keying pattern
     # (pinned session id, or a unique anon token); removed on every teardown.

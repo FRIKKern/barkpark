@@ -546,10 +546,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # admin-gated regardless — this just keeps the tab out of non-admin chrome.
   # Flat singleton path (not dataset-scoped): one shared session per host.
   # The Claude chat tab. Shown ONLY to admins AND only where
-  # ClaudeChat.enabled?/0 holds (on by default when the `claude` binary is
-  # installed; hard-refused on public-demo hosts). The route is admin-gated
-  # regardless — this just keeps the tab out of non-admin chrome. Flat
-  # singleton path: one chat surface per host, like the tmux console.
+  # ClaudeChat.enabled?/0 holds (flag on by default; hard-refused on
+  # public-demo hosts). Binary presence deliberately does NOT gate the tab
+  # (chat-task-hands gate inversion): a host without `claude` still shows it,
+  # and the chat surface renders the onboarding card with the next step —
+  # the tab never silently vanishes. The route is admin-gated regardless —
+  # this just keeps the tab out of non-admin chrome. Flat singleton path:
+  # one chat surface per host, like the tmux console.
   # The Workspace Settings tab (ssp-w3, charter D15). Admin-only — mirrors the
   # Style/tmux/chat gating (the route itself is admin-gated). Scope-prefixed:
   # on a scoped surface it addresses the SAME workspace/project/dataset the page

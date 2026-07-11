@@ -1,0 +1,219 @@
+defmodule Barkpark.StudioChat.Probe do
+  @moduledoc """
+  Provider-neutral readiness probe for the Studio chat onboarding lane
+  (epic chat-task-hands, wave 1, charter D2/D3 · decision 3).
+
+  ONE pure function — `probe/1` — answers "is THIS provider's CLI present, and
+  is it logged in?" for each lane the chat can drive. The onboarding card
+  (`task-cth-w1-onboarding-card`, slice 3) reads the returned struct and renders
+  a NAMED next step for every not-ready state (never fails silent, charter D2).
+
+      %Barkpark.StudioChat.Probe{
+        provider: :claude | :bp | :codex,
+        binary:   boolean(),        # is the CLI resolvable on PATH?
+        path:     String.t() | nil, # absolute path when present
+        version:  String.t() | nil, # e.g. "2.1.207" (claude only)
+        authed?:  boolean() | nil,  # nil = auth is not a probe concern (bp)
+        account:  map() | nil        # %{email, org, subscription, method} when authed
+      }
+
+  ## The three lanes (each probes DIFFERENTLY — charter Verified ground 2026-07-11)
+
+    * **`:claude`** — the live Anthropic `claude` binary. Resolve via
+      `System.find_executable/1`, then `claude --version` (works with ZERO
+      credentials), then `claude auth status --json`. The auth shape is proven:
+      exit 0 + `{loggedIn: true, authMethod, email, orgName, subscriptionType}`
+      when authed; exit 1 + `{loggedIn: false, authMethod: "none"}` when not.
+      **Expired credentials are indistinguishable from never-logged-in without
+      an API call — both degrade to `authed?: false` BY DESIGN** (charter D2:
+      the shapes collapse, so the card shows the same "log in" next step).
+
+    * **`:bp`** — binary presence/path ONLY. bp's auth is mint-driven
+      server-side: the chat spawn mints a scoped `bpcs_` token into the child's
+      env (charter D1/D3). There is NO bp login step and NO config file to
+      probe, so `authed?` is `nil` (not-applicable) — the bp not-ready states
+      (`no_task_hands` / `task_token_expired`, charter D2) are surfaced at spawn
+      time by the mint, not here.
+
+    * **`:codex`** — a real binary check for a provider that is **designed, not
+      built** (charter D5: the provider-horizon trigger is CLOSED this wave).
+      On every real host `binary: false`; `authed?: false`. The honest
+      capability flags for codex live in `Barkpark.StudioChat.Runtime.Capabilities.codex/0`.
+
+  ## LATENCY — callers MUST run this ASYNC (this is not optional)
+
+  `claude auth status --json` costs **~1–2s** (measured 1.0–2.0s on the guerrilla
+  host, charter Verified ground). Running `probe(:claude)` inline in a LiveView
+  `mount/3` would BLOCK the socket connect for up to two seconds — a visibly
+  janky first paint. The onboarding card MUST probe off the LiveView process
+  (`Task.async` + `handle_info`, or the dispatch_send template) and render a
+  spinner until the result lands. `probe(:bp)` and `probe(:codex)` are cheap
+  (find_executable only), but treat the whole seam as async so no lane surprises
+  you when the claude version/auth shell-outs are added to a fast path.
+
+  ## Config-injectable binary names (test seam — existing fake-binary idiom)
+
+  Binary names resolve from `config :barkpark, :studio_chat_probe` — keys
+  `:claude_binary`, `:bp_binary`, `:codex_binary`. When unset, `:claude` falls
+  back to the SAME binary the chat spawns (`config :barkpark, :claude_chat,
+  :binary`, default `"claude"`) so the probe can never point at a different
+  claude than the runtime; `:bp`/`:codex` default to `"bp"`/`"codex"`. Tests
+  inject a `chmod +x` sh script per lane (VACUOUS-GREEN LAW: the fake emits each
+  branch's exact JSON + exit code, so a passing test proves the real parse path).
+  """
+
+  @enforce_keys [:provider]
+  defstruct provider: nil,
+            binary: false,
+            path: nil,
+            version: nil,
+            authed?: nil,
+            account: nil
+
+  @type provider :: :claude | :bp | :codex
+
+  @type t :: %__MODULE__{
+          provider: provider(),
+          binary: boolean(),
+          path: String.t() | nil,
+          version: String.t() | nil,
+          authed?: boolean() | nil,
+          account: map() | nil
+        }
+
+  @providers [:claude, :bp, :codex]
+
+  @doc """
+  Probe one provider lane's readiness. Pure w.r.t. Barkpark state — it only
+  reads config + the filesystem/PATH and (for `:claude`) shells out to the CLI.
+
+  Returns a `%Probe{}`; NEVER raises — a CLI that is missing, non-executable, or
+  emits garbage degrades to the honest not-ready struct for that lane.
+
+  **Run async** — see the module doc's LATENCY section; `probe(:claude)` can
+  cost ~1–2s.
+  """
+  @spec probe(provider()) :: t()
+  def probe(provider) when provider in @providers do
+    name = binary_name(provider)
+
+    case System.find_executable(name) do
+      nil -> absent(provider)
+      path -> present(provider, path)
+    end
+  end
+
+  # ── present-binary probes (one per lane) ──────────────────────────────────
+
+  defp present(:claude, path) do
+    {authed?, account} = claude_auth(path)
+
+    %__MODULE__{
+      provider: :claude,
+      binary: true,
+      path: path,
+      version: claude_version(path),
+      authed?: authed?,
+      account: account
+    }
+  end
+
+  # bp: presence/path only. Auth is mint-driven (no login step to probe) — so
+  # authed? stays nil (not-applicable), never a misleading false.
+  defp present(:bp, path) do
+    %__MODULE__{provider: :bp, binary: true, path: path, version: nil, authed?: nil, account: nil}
+  end
+
+  # codex: designed-not-built. A real binary check (honest true if some codex is
+  # on PATH) but no version/auth probing — that lane is not wired this wave.
+  defp present(:codex, path) do
+    %__MODULE__{
+      provider: :codex,
+      binary: true,
+      path: path,
+      version: nil,
+      authed?: false,
+      account: nil
+    }
+  end
+
+  # ── absent-binary structs ─────────────────────────────────────────────────
+
+  # bp's authed? is not-applicable in BOTH states (mint-driven).
+  defp absent(:bp), do: %__MODULE__{provider: :bp, binary: false}
+
+  defp absent(provider),
+    do: %__MODULE__{provider: provider, binary: false, authed?: false}
+
+  # ── claude shell-outs (tolerant; degrade on any error) ────────────────────
+
+  # `claude --version` works with zero credentials, e.g. "2.1.207 (Claude Code)".
+  # We surface the semver token when we can recognise it, else the raw trimmed
+  # line, else nil.
+  defp claude_version(path) do
+    case run(path, ["--version"]) do
+      {out, 0} -> parse_version(out)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp parse_version(out) do
+    trimmed = String.trim(out)
+
+    case Regex.run(~r/\d+(?:\.\d+)+\S*/, trimmed) do
+      [version | _] -> version
+      nil -> if trimmed == "", do: nil, else: trimmed
+    end
+  end
+
+  # `claude auth status --json`: exit 0 + loggedIn:true ⇒ authed with account;
+  # ANYTHING else (exit 1, loggedIn:false, non-JSON, crash) ⇒ {false, nil}.
+  # Expired == never here BY DESIGN (charter D2 — indistinguishable shapes).
+  defp claude_auth(path) do
+    with {out, 0} <- run(path, ["auth", "status", "--json"]),
+         {:ok, %{"loggedIn" => true} = json} <- Jason.decode(String.trim(out)) do
+      {true, account(json)}
+    else
+      _ -> {false, nil}
+    end
+  rescue
+    _ -> {false, nil}
+  end
+
+  defp account(json) do
+    %{
+      email: json["email"],
+      org: json["orgName"],
+      subscription: json["subscriptionType"],
+      method: json["authMethod"]
+    }
+  end
+
+  # System.cmd captures stdout and returns the exit status without raising on a
+  # non-zero exit (only a missing/non-executable file raises — we rescue that).
+  # stderr stays on our stderr so it never pollutes the JSON we parse.
+  defp run(path, args), do: System.cmd(path, args, stderr_to_stdout: false)
+
+  # ── config-injectable binary names ────────────────────────────────────────
+
+  defp binary_name(:claude), do: probe_cfg(:claude_binary) || claude_chat_binary()
+  defp binary_name(:bp), do: probe_cfg(:bp_binary) || "bp"
+  defp binary_name(:codex), do: probe_cfg(:codex_binary) || "codex"
+
+  defp probe_cfg(key) do
+    :barkpark
+    |> Application.get_env(:studio_chat_probe, [])
+    |> Keyword.get(key)
+  end
+
+  # Default claude binary = the one the chat runtime actually spawns, read from
+  # the same config key (no module dependency on BarkparkWeb, keeping this core
+  # module layer-clean).
+  defp claude_chat_binary do
+    :barkpark
+    |> Application.get_env(:claude_chat, [])
+    |> Keyword.get(:binary, "claude")
+  end
+end
