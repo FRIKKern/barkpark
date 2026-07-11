@@ -118,6 +118,10 @@ defmodule Barkpark.Tasks.Stamp do
         # over the same task row + criteria list.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:#{task_id}"])
 
+        # Tenancy was resolved and authorized at the controller (doc_id →
+        # task.id), and the holder + epoch-CAS checks below bind the caller to
+        # this exact row. Same accepted posture as Close/Release's re-read.
+        # global-read: by-PK re-read inside the close-family advisory lock
         case Repo.get(Document, task_id) do
           nil ->
             {:error, :not_found}
