@@ -58,12 +58,32 @@ defmodule Barkpark.Plugin do
   ## Fresh-install invariant
 
   With `Application.put_env(:barkpark, :plugins, [])`, Barkpark must still
-  boot, Studio must load, the public API must serve exactly the 8 seed
-  schemas, and host code under `lib/barkpark` + `lib/barkpark_web`
-  (excluding `lib/barkpark/plugins/`) must not name any plugin module.
-  Regression bar: `api/test/barkpark/plugin_free_boot_test.exs` (tagged
-  `:boot_test`, excluded from default runs — invoke with
-  `mix test --only boot_test test/barkpark/plugin_free_boot_test.exs`).
+  boot, Studio must load, and the public API must serve exactly the 8 seed
+  schemas.
+
+  The host-code coupling rule is NOT "never name a plugin module" — that
+  literal reading is false by construction: the host owns ALL Studio UI (a
+  plugin ships none), so `Studio.SheetGrid` necessarily names
+  `Barkpark.Plugins.Sheets.*` and the Bulldocs reader names
+  `Barkpark.Plugins.Bulldocs.Events`; `application.ex` declares
+  `Sheets.Supervisor` as an always-present core-static child; and host
+  controllers/plugs back plugin `register_routes/1` surfaces. The ENFORCED
+  rule is:
+
+  > Host code under `lib/barkpark` + `lib/barkpark_web` (excluding
+  > `lib/barkpark/plugins/`) must not name a **removable** plugin module on a
+  > code path that runs while that plugin is disabled — and every legitimate
+  > exception is enumerated in a reviewed allowlist.
+
+  Regression bar: `api/test/barkpark/plugin_free_boot_test.exs` tier 5. It
+  sweeps EVERY registered (== removable) plugin namespace — derived from
+  `priv/plugins/*/plugin.json` so a newly added plugin is covered
+  automatically — via AST detection of real module references (a mention in a
+  `@moduledoc` or comment is not a coupling), and asserts the detected
+  coupling set EQUALS the allowlist (`@sanctioned_host_plugin_coupling`,
+  grouped by why each is sanctioned). A NEW reference outside the allowlist
+  reds the gate. Tagged `:boot_test`, excluded from default runs — invoke
+  with `mix test --only boot_test test/barkpark/plugin_free_boot_test.exs`.
 
   ## Route buckets
 
