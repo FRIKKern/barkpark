@@ -535,6 +535,33 @@ if command -v go >/dev/null 2>&1; then
   rm -rf "$MCP_TMPD"
 fi
 
+# ---- Install the bp CLI so every Studio chat session can wield Barkpark tasks
+# (chat-task-hands W1). /usr/local/bin is already on the LIVE BEAM process PATH
+# (/proc-proven on guerrilla), so a Port.open child resolves `bp` with zero PATH
+# injection — no reliance on the stray, off-PATH /opt/barkpark/bp manual build.
+# Build ONCE per deploy (this main flow runs once under flock, not per slot),
+# native arch (guerrilla is ARM64), CGO off to match the barkpark-agent precedent
+# above. Install ATOMICALLY: build to a tmpfile on the SAME filesystem, then
+# rename over the live binary, so an in-flight `bp` invocation never sees a half-
+# written file. LOUD on failure — a silent skip is exactly the silent-failure bug
+# this epic exists to kill — but NON-FATAL: the app is already live on the new
+# slot, and bricking a good deploy over a transient toolchain hiccup is worse than
+# a logged miss that self-heals on the next deploy.
+log "installing bp CLI -> /usr/local/bin/bp"
+if command -v go >/dev/null 2>&1; then
+  bp_tmp="$(mktemp /usr/local/bin/.bp.XXXXXX)"
+  if CGO_ENABLED=0 go build -o "$bp_tmp" ./cmd/barkpark; then
+    chmod 0755 "$bp_tmp"
+    mv -f "$bp_tmp" /usr/local/bin/bp
+    log "bp CLI installed -> /usr/local/bin/bp ($(command -v bp))"
+  else
+    rm -f "$bp_tmp"
+    log "WARN: bp CLI build FAILED (go build ./cmd/barkpark) — Studio chat task hands unavailable until next deploy"
+  fi
+else
+  log "WARN: go not found — bp CLI NOT installed; Studio chat task hands unavailable until next deploy"
+fi
+
 echo "$NEW" > "$STATE"
 log "HEALTHY — slot $TARGET live at $(git rev-parse --short HEAD)"
 exit 0
