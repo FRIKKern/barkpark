@@ -420,12 +420,12 @@ func buildOnrampSpec(target, server, token string) (onrampSpec, bool) {
 			Target: target,
 			Files: []onrampFile{
 				// serversFile stamps the generic server-map merge with
-					// TopKey=servers (VS Code's shape, zero new merge-kind code) so
-					// --write is REAL: a bare onrampFile literal here is the #2129
-					// regression that shipped a silent no-op (charter D14 — mergeOnrampFile
-					// falls to default and reports skipped). The zed/contextServersFile
-					// sibling is the same TopKey-parametrization precedent.
-					serversFile(".vscode/mcp.json", copilotMcpJSONStanza(server, onrampTokenValue(copilotTokenRef, token))),
+				// TopKey=servers (VS Code's shape, zero new merge-kind code) so
+				// --write is REAL: a bare onrampFile literal here is the #2129
+				// regression that shipped a silent no-op (charter D14 — mergeOnrampFile
+				// falls to default and reports skipped). The zed/contextServersFile
+				// sibling is the same TopKey-parametrization precedent.
+				serversFile(".vscode/mcp.json", copilotMcpJSONStanza(server, onrampTokenValue(copilotTokenRef, token))),
 			},
 			Verify: `run "MCP: List Servers" from the VS Code Command Palette — barkpark appears; its task tools show in Copilot agent mode's tool picker`,
 		}, true
