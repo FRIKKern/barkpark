@@ -61,3 +61,23 @@ Workflow mode in the regular chat: `gated: true` arg on bp-epic-cycle (AskUserQu
 - Models: Fable for strategy/digest/decide/review; Opus for builders/judges of the Elixir slices; Sonnet for survey. Never Haiku.
 - Workers claim via `bp task claim <id> <worker>` and close with `--set criteria:=[…]` evidence — the ledger is the spine; the wave Paper is opened at Strategize and closed as the debrief.
 - Gates for this run: unattended defaults are acceptable (lead decides between phases as today); this epic BUILDS the substrate that wave-2 gates will ride.
+
+## Wave log
+
+### Wave 2026-07-11 (wave 1 — stamp · pulse · events · locks strip · dogfood)
+
+**Landed (all five slices built + reviewed green; branches STACKED in merge order):**
+
+1. `bp task stamp` (task-79d71bc80427f0e4) — `loop-epic/bp-task-stamp-criterion-level-live-evide-0-r`. Criterion-level mid-claim evidence + D5 digest narrowing + check_holder/merge_criteria extraction to `Tasks.Internal`. Reviewer added 4 ConnCase HTTP tests pinning the exact CLI wire shape (body-string args + query-string flags).
+2. `bp task pulse` (task-9e59a7bd4fb241a2) — `loop-epic/bp-task-pulse-now-line-lease-renewal-in--1-r`, stacked on stamp-r. Now-line + lease renewal in one atomic write, own write path (never claim_by_id). Reviewer caught a REAL red: the branch added a 9th verb while the manifest test still pinned `== 8` (builder's gate excluded that suite); fixed in the stack resolution — manifest now pins 10 verbs + the task.pulse shape (no epoch anywhere).
+3. Events feed (task-1780b182cf404dc7) — `loop-epic/task-events-feed-v1-tasks-events-since-k-2-r`, stacked on pulse-r. `GET /v1/tasks/events?since=` keyset replay over mutation_events (id = cursor, never Prime reuse); route above `/tasks/:doc_id` with a route_info precedence test. Manifest pins 11 verbs.
+4. TUI locks strip (task-70eb8244dd1e702a) — `loop-epic/tui-locks-strip-criteria-ladder-now-line-3-r` (Go-only lane, independent). Criteria ladder `✓⠹!○ 2/4` with narrow-fallback shedding, now-line ticker with TTL decay, momentum criteria tally; goldens genuinely show all three. Zero new glyphs.
+5. Dogfood wiring (task-eal-w1-dogfood-wiring) — `loop-epic/epic-cycle-dogfood-wiring-builder-prompt-4-r` (this branch; also carries the charter cherry-pick). Builder prompts now stamp per criterion + pulse at phase boundaries.
+
+**Cutover warning (D5):** any lease claimed BEFORE stamp merges carries an old-style work_digest; its first default-path close after deploy 409s `doc_changed_since_claim` once. Recovery: re-read then pass `observed_rev`. One-time, documented.
+
+**Deliberate scope holds:** TUI pulse decay uses the board's pre-existing 5-minute `leaseTTL` UI constant (matches the claim glyph), not the server's 2700s reap TTL — consistent liveness vocabulary, revisit only if it confuses. Detail-frame attempts/pulse rendering filed as task-46d05e6c3369941e.
+
+**Open on the epic:** criterion 2 (a real epic-cycle run demonstrably stamps live) needs stamp/pulse DEPLOYED first — close it on the first post-merge epic run. TUI live ○→✓ flip proof (locks-strip criterion 3) same dependency.
+
+**Next wave should take:** (1) the real-run integration proof (epic criterion 2 + TUI live flip) immediately after merge+deploy; (2) `bp task events` consumption in a first surface (chat/statusline per Wave 2 plan, gated:true arg); (3) backlog: lock-key convergence, (dataset,type,id) index, MCP task_stamp/task_pulse hand-mapping, release-at-HTTP, cmux auto-pulse, web embed realtime — all filed as published children of the epic.
