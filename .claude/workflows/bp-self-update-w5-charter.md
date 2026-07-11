@@ -308,4 +308,41 @@ sanctioned deploy machinery riding the exact W5 relay seam.
 
 ## W6 Wave log
 
-_(Review closes this wave — entries land here at debrief.)_
+### Wave 2026-07-11 — rollback becomes real (Review debrief; Paper self-update-epic-wave-2026-07-11)
+
+**All 5 slices green, grade A.** The pinned contract held with zero drift across five
+surfaces. Landed (final branches for the lead):
+
+- **S1** `isu-w6-rollback-script-stamp` → `loop-epic/w6-1-rollback-becomes-real-in-instance-d-0`
+  (unchanged by review). Per-slot stamp (D12), `--rollback-preflight` typed exits 21/22/23 +
+  `TARGET_SLOT=`/`TARGET_SHA=`, `--rollback` flip+reset with blocking own-port health gate,
+  fail-closed exit 24 (Caddy byte-identical), STATE rewrite (D21), :264-265 lie rewritten.
+  Harness 68→99 checks ALL PASS (re-run at Review).
+- **S2** `isu-w6-instance-rollback-api` → `loop-epic/w6-2-instance-rollback-api-post-v1-admin-1-r`
+  (review: mix-format only + this wave-log entry). POST /v1/admin/rollback, sync preflight →
+  typed 409s / 503, exit-0-no-sha fails CLOSED (500), async Port SHARING one run slot with
+  self-update, status gains `mode`. 40/0 re-run at Review. **Waits Elixir Test CI.**
+- **S3** `isu-w6-cp-rollback-relay` → `loop-epic/w6-3-cp-rollback-relay-team-admin-gated--2`
+  (unchanged). CP route + `trigger_rollback` (NO pin precondition, D16), pin = instance-REPORTED
+  sha written before the 202 (DB-proven), D23 relays verbatim, halt doesn't gate (D18),
+  self-update trigger refactored onto shared `relay_admin_post` (sibling 7/0). 27/0 re-run at
+  Review. **Waits Elixir Test CI; cloud/** merge briefly 503s the CP.**
+- **S4** `isu-w6-console-rollback-button` → `loop-epic/w6-4-console-rollback-button-typed-confl-3-r`
+  (review FIX: `rollbackConflictCopy` maps `not_live` — w5 update-trio parity — pinned in the
+  node suite). D19 confirm copy, data-rollback button, typed toasts, escaping tests. 388/388.
+- **S5** `isu-w6-cli-rollback-verb` → `loop-epic/w6-5-bp-cloud-rollback-instance-cli-twin-4`
+  (unchanged). `bp cloud rollback`: Raw-verbatim `-o json`, both refusal shapes decoded, exit
+  ladder by status family, honest STARTED-not-done verdict + pin + schema-forward law.
+
+Residuals (documented in code, not debt tickets): exit 24 reused for caddy-validate/reload
+failures during the rollback flip (logs disambiguate); pin write non-transactional with the
+instance call (degrades to honest 202 with old pin); fail-closed wasm skew mirrors the forward
+path (D20). Ledger audit clean — evidence stamped live, merge-gated criteria left open.
+
+**Stalled:** nothing. Live smoke is scoped out (D26), not stalled.
+
+**Next wave:** (1) THE LIVE SMOKE — staging box from the warm image, two forward deploys, then
+rollback + deny cases (the D26 recipe; the one gap between proven-offline and proven);
+(2) operator-principal decision (W5 carry — unblocks console halt/resume + the require_worker
+reachability bug); (3) CI-wire the 99-check deploy harness (D25 backlog); (4) charter residue:
+growing cohorts, maintenance windows.
