@@ -52,6 +52,11 @@ CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
 HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 BLUE_PORT="${BARKPARK_PORT_BLUE:-4000}"
 GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
+# Remote MCP endpoint (viable-everywhere D19). MUST stay outside the blue/green
+# slot ports: the port-flip sed rewrites localhost:<slot> globally on every
+# deploy, and the ACTIVE_PORT greps match slot ports exactly.
+MCP_PORT="${BARKPARK_PORT_MCP:-4010}"
+MCP_ENV_FILE="${BARKPARK_MCP_ENV_FILE:-/etc/barkpark/mcp.env}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
 
 MODE=deploy
@@ -99,7 +104,10 @@ if [ "$MODE" != "deploy" ]; then
     log "no $APP/.slots — this box predates per-slot stamps (not_supported)"
     exit 22
   fi
-  ACTIVE_PORT="$(grep -oE 'localhost:40[0-9]{2}' "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2)"
+  # Slot ports ONLY (never 40[0-9]{2}): the Caddyfile also carries the /mcp
+  # route's localhost:4010, which a loose grep + head -1 would misread as the
+  # active slot.
+  ACTIVE_PORT="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2)"
   ACTIVE_PORT="${ACTIVE_PORT:-$BLUE_PORT}"
   if [ "$ACTIVE_PORT" = "$BLUE_PORT" ]; then
     LIVE=blue; TARGET_SLOT=green; TARGET_PORT="$GREEN_PORT"
@@ -241,7 +249,7 @@ set -a; . ./.env; set +a
 # deploys themselves don't drop the upstream — shows "back in a moment", not a
 # raw 502. Idempotent, backed up, `caddy validate`d, auto-reverting; NEVER fails
 # the deploy. Reconciled with the blue/green machinery: the injected block
-# contains no `localhost:40xx` token, so the ACTIVE_PORT grep below still hits
+# contains no slot-port token, so the ACTIVE_PORT grep below still hits
 # the site upstream first and the port-flip sed passes over it untouched. The
 # renderers in internal/caddyfile + internal/cli/setup bake the same block into
 # every provisioned instance; this arms an already-running box on deploy.
@@ -250,8 +258,11 @@ arm_caddy_maintenance() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping maintenance page"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping maintenance page"; return 0; }
   if grep -q 'BARKPARK_MAINTENANCE' "$CADDYFILE"; then log "caddy maintenance page already armed"; return 0; fi
-  if ! grep -qE 'reverse_proxy[[:space:]]+localhost:40[0-9]{2}([[:space:]]|$)' "$CADDYFILE"; then
-    log "no 'reverse_proxy localhost:40xx' site in $CADDYFILE — leaving Caddy untouched (arm manually: deploy/caddy/barkpark-maintenance.caddy)"
+  # Slot ports ONLY: the /mcp route (if armed first) carries its own
+  # `reverse_proxy localhost:4010` line, which must never become the
+  # insertion anchor.
+  if ! grep -qE "reverse_proxy[[:space:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:space:]]|\$)" "$CADDYFILE"; then
+    log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — leaving Caddy untouched (arm manually: deploy/caddy/barkpark-maintenance.caddy)"
     return 0
   fi
   local block; block="$(cat <<'MAINT'
@@ -276,12 +287,13 @@ MAINT
   local bak; bak="${CADDYFILE}.bak.$(date -u +%Y%m%d%H%M%S)"
   cp -a "$CADDYFILE" "$bak"
   local tmp; tmp="$(mktemp)"
-  # Insert the block right after the FIRST `reverse_proxy localhost:40xx` line
-  # (whichever slot port is live), so it lands inside that site block.
-  BP_BLOCK="$block" awk '
-    BEGIN { blk=ENVIRON["BP_BLOCK"] }
+  # Insert the block right after the FIRST slot `reverse_proxy localhost:<port>`
+  # line (whichever slot port is live), so it lands inside that site block.
+  # Slot ports only — never the /mcp route's :4010 line.
+  BP_BLOCK="$block" BP_SLOT_RE="reverse_proxy[[:blank:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:blank:]]|\$)" awk '
+    BEGIN { blk=ENVIRON["BP_BLOCK"]; re=ENVIRON["BP_SLOT_RE"] }
     { print }
-    !ins && $0 ~ /reverse_proxy[ \t]+localhost:40[0-9][0-9]([ \t]|$)/ { print blk; ins=1 }
+    !ins && $0 ~ re { print blk; ins=1 }
   ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
   # mktemp files are 0600 and mv preserves that — the caddy user must still be
   # able to read its own config or `systemctl reload caddy` fails with
@@ -298,9 +310,73 @@ MAINT
 }
 arm_caddy_maintenance
 
+# ---- Arm the /mcp Caddy route for the remote MCP endpoint (viable-everywhere
+# charter D19): path-based on the EXISTING public site — never a new subdomain —
+# proxying to 127.0.0.1:$MCP_PORT where barkpark-mcp.service listens
+# (`bp mcp serve --http`, guarded install below). :4010 sits OUTSIDE the
+# blue/green slot ports {4000,4001} ON PURPOSE: the ACTIVE_PORT greps and the
+# port-flip sed match slot ports exactly, so they pass over this route
+# untouched. Same contract as the maintenance arming: idempotent (marker),
+# backed up, `caddy validate`d, auto-reverting, NEVER fails the deploy. Until
+# the unit is enabled, /mcp requests hit a dead upstream and land on the
+# maintenance 503 — never a raw 502.
+arm_caddy_mcp_route() {
+  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /mcp route"; return 0; }
+  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping /mcp route"; return 0; }
+  if grep -q 'BARKPARK_MCP_ROUTE' "$CADDYFILE"; then log "caddy /mcp route already armed"; return 0; fi
+  if [ "$MCP_PORT" = "$BLUE_PORT" ] || [ "$MCP_PORT" = "$GREEN_PORT" ]; then
+    log "refusing /mcp route on a blue/green slot port (:$MCP_PORT) — the port-flip sed would rewrite it"
+    return 0
+  fi
+  if ! grep -qE "reverse_proxy[[:space:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:space:]]|\$)" "$CADDYFILE"; then
+    log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — leaving Caddy untouched (/mcp route not armed)"
+    return 0
+  fi
+  local block; block="$(cat <<MCPROUTE
+	# BARKPARK_MCP_ROUTE — remote MCP endpoint (barkpark-mcp.service,
+	# bp mcp serve --http). Matcher covers the bare /mcp AND /mcp/* —
+	# Streamable-HTTP clients POST the bare path.
+	@barkpark_mcp path /mcp /mcp/*
+	handle @barkpark_mcp {
+		reverse_proxy localhost:${MCP_PORT}
+	}
+MCPROUTE
+)"
+  local bak; bak="${CADDYFILE}.bak.mcp.$(date -u +%Y%m%d%H%M%S)"
+  cp -a "$CADDYFILE" "$bak"
+  local tmp; tmp="$(mktemp)"
+  # Insert the block right BEFORE the first slot `reverse_proxy localhost:<port>`
+  # line, so the handle sits inside that site block ahead of the bare fallback
+  # proxy (requests matching /mcp terminate in the handle; everything else
+  # falls through to the site upstream). Slot ports only — a re-run must never
+  # anchor on this block's own :4010 line (the marker guard above already
+  # prevents that; the tight regex is belt-and-braces).
+  BP_BLOCK="$block" BP_SLOT_RE="reverse_proxy[[:blank:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:blank:]]|\$)" awk '
+    BEGIN { blk=ENVIRON["BP_BLOCK"]; re=ENVIRON["BP_SLOT_RE"] }
+    !ins && $0 ~ re { print blk; ins=1 }
+    { print }
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  # mktemp files are 0600 and mv preserves that — keep the file readable for
+  # the caddy user (same lesson as the maintenance arming).
+  chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+  chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
+  if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+    if systemctl reload caddy 2>/dev/null; then log "armed caddy /mcp route -> localhost:$MCP_PORT"; else log "caddy reload failed (config valid) — /mcp route live on next reload"; fi
+    rm -f "$bak"
+  else
+    log "caddy validate rejected the /mcp route — reverting, Caddy untouched"
+    mv "$bak" "$CADDYFILE"
+  fi
+}
+arm_caddy_mcp_route
+
 # ---- Which slot serves now? Caddy's upstream port is the source of truth
 # (on the pre-blue/green layout it reads 4000, which maps to legacy-as-blue).
-ACTIVE_PORT="$(grep -oE 'localhost:40[0-9]{2}' "$CADDYFILE" | head -1 | cut -d: -f2)"
+# Slot ports ONLY (never 40[0-9]{2}): the /mcp route above put a
+# localhost:4010 line in the Caddyfile ahead of the site upstream — a loose
+# grep + head -1 would misread it as the active slot and the flip sed would
+# then destroy the route.
+ACTIVE_PORT="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" | head -1 | cut -d: -f2)"
 ACTIVE_PORT="${ACTIVE_PORT:-$BLUE_PORT}"
 if [ "$ACTIVE_PORT" = "$BLUE_PORT" ]; then
   TARGET=green; TARGET_PORT="$GREEN_PORT"; OTHER=blue
@@ -420,6 +496,43 @@ if [ -f /etc/barkpark/agent.token ]; then
   else
     log "WARN: barkpark-agent rebuild skipped/failed — keeping the running agent"
   fi
+fi
+
+# ---- Refresh the remote MCP endpoint (viable-everywhere D18/D19), best-effort
+# + GUARDED. barkpark-mcp.service runs the just-built bp binary as
+# `mcp serve --http 127.0.0.1:$MCP_PORT` behind the /mcp Caddy route armed
+# above. FORWARD-THROUGH design (D18): the unit and its env file hold NO API
+# token — each caller's own bearer rides through to the downstream API; a
+# missing/bogus bearer fails closed with the downstream 401. The downstream URL
+# is the STABLE public front (https://$HEALTH_HOST), never a raw slot port —
+# the blue/green flip would strand a pinned port (cp-deploy control-url
+# precedent). GUARD: install+enable ONLY when the built binary advertises
+# --http in its `mcp serve --help`, so this deploy step ships independently of
+# the bearer transport slice without crash-looping the box on an unknown flag.
+# NON-FATAL throughout — the app is already live on the new slot.
+if command -v go >/dev/null 2>&1; then
+  MCP_TMPD="$(mktemp -d)"
+  if CGO_ENABLED=0 go build -o "$MCP_TMPD/bp" ./cmd/barkpark \
+     && "$MCP_TMPD/bp" mcp serve --help 2>/dev/null | grep -q -- '--http'; then
+    log "refreshing barkpark-mcp (remote MCP endpoint on 127.0.0.1:$MCP_PORT)"
+    # `install` (not cp) — it unlinks first, so a running barkpark-mcp never
+    # ETXTBSY-blocks its own refresh.
+    install -m 0755 "$MCP_TMPD/bp" /usr/local/bin/barkpark-mcp
+    mkdir -p "$(dirname "$MCP_ENV_FILE")"
+    printf 'BARKPARK_API_URL=https://%s\nBARKPARK_MCP_HTTP_ADDR=127.0.0.1:%s\n' "$HEALTH_HOST" "$MCP_PORT" > "$MCP_ENV_FILE"
+    install -m 0644 "$APP/deploy/systemd/barkpark-mcp.service" /etc/systemd/system/barkpark-mcp.service
+    systemctl daemon-reload
+    # restart (not just enable --now): an already-running unit must pick up the
+    # freshly-installed binary.
+    if systemctl enable barkpark-mcp >/dev/null 2>&1 && systemctl restart barkpark-mcp; then
+      log "barkpark-mcp enabled (https://$HEALTH_HOST/mcp -> 127.0.0.1:$MCP_PORT)"
+    else
+      log "WARN: barkpark-mcp enable/restart failed — remote MCP down until next deploy"
+    fi
+  else
+    log "bp binary does not advertise 'mcp serve --http' — skipping barkpark-mcp install (bearer transport slice not merged yet)"
+  fi
+  rm -rf "$MCP_TMPD"
 fi
 
 echo "$NEW" > "$STATE"
