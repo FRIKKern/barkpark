@@ -133,6 +133,14 @@ config :barkpark, :public_demo_studio, true
 # fake command (no real `claude` on CI).
 config :barkpark, :claude_chat, enabled: false
 
+# The chat's mount-time readiness probe (chat-task-hands, decision 4) resolves
+# to :ready by default in test — the REAL probe shells out to whatever `claude`
+# the host has (present+authed on a dev Mac, absent on CI), which would make
+# every chat-mounting test host-dependent and 1–2s slower. The onboarding-card
+# tests override this per-test ({:static, state} or a 0-arity fun) to drive
+# every named state deterministically through the same async machinery.
+config :barkpark, :studio_chat_readiness_probe, {:static, :ready}
+
 # Studio chat image attachments (charter D25) — write bytes under a temp dir in
 # test so they never touch a real store. Tests that assert file lifecycle point
 # it at a per-test unique dir via Application.put_env.

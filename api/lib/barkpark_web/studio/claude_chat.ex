@@ -15,8 +15,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     2. **Public-demo hard refuse.** `enabled?/0` returns false whenever
        `public_demo_studio` is on. Fail-closed, not overridable by the flag.
     3. **Per-host opt-out.** `BARKPARK_CLAUDE_CHAT=0` (runtime.exs) disables
-       it on a given host; `enabled?/0` also requires the `claude` binary
-       (or a configured command override) to be present.
+       it on a given host. Binary presence does NOT gate `enabled?/0` (the
+       chat-task-hands gate inversion): a host without `claude` still shows
+       the chat surface, which renders the onboarding card instead of a
+       composer — the tab never silently vanishes.
 
   Wave 1 runs the agent in **plan mode** (`--permission-mode plan`): the
   model may read the filesystem it runs in but cannot edit or execute —
@@ -51,13 +53,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   @doc """
   Whether the chat may run on this host. ON by default; requires the flag
-  (default on, opt out via env) and a launchable command, and is HARD-REFUSED
-  whenever anonymous Studio is on (`public_demo_studio`). Both the nav tab
-  (admin-only) and the LiveView mount gate on this.
+  (default on, opt out via env) and is HARD-REFUSED whenever anonymous Studio
+  is on (`public_demo_studio`). Both the nav tab (admin-only) and the LiveView
+  mount gate on this.
+
+  Binary presence deliberately does NOT gate here (chat-task-hands charter,
+  decision 4 — the gate inversion): a missing/logged-out `claude` must never
+  make the tab vanish or the mount redirect. The chat surface stays, and the
+  onboarding card (`ChatLive`, keyed off the async `Probe` readiness) names
+  the exact not-ready state with its next step instead — never fail silent
+  (charter D2). Security posture is UNCHANGED: flag-off, public-demo, and the
+  admin `on_mount` still refuse outright.
   """
   @spec enabled?() :: boolean()
   def enabled? do
-    flag_on?() and not public_demo?() and launchable?()
+    flag_on?() and not public_demo?()
   end
 
   # Enable flag defaults ON; only an explicit `enabled: false` (base config or
@@ -67,11 +77,6 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   # Fail-closed: a host that serves Studio to anonymous visitors must never
   # expose an agent with the server's filesystem in reach.
   defp public_demo?, do: Application.get_env(:barkpark, :public_demo_studio, false) == true
-
-  defp launchable? do
-    {exe, _args} = command()
-    System.find_executable(exe) != nil
-  end
 
   @doc "The configured Claude binary (default `claude`)."
   @spec binary() :: String.t()
@@ -277,6 +282,45 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   end
 
   def mcp_connected?(_), do: false
+
+  # ── runtime auth guard (chat-task-hands, charter decision 5) ──────────────
+
+  @doc ~S"""
+  Whether a stream frame is the unauthed-CLI footgun (charter Verified ground
+  2026-07-11, captured live on 2.1.207): a logged-out `claude` ends the turn
+  with a result frame that says `subtype:"success"` BUT carries
+  `is_error:true` / `terminal_reason:"api_error"`, and the assistant frame
+  before it carries top-level `error:"authentication_failed"`. Subtype alone
+  MISCLASSIFIES — never trust it; this classifier keys on the error facts.
+
+  `test/fixtures/claude_chat/unauthed_stream.ndjson` holds the captured wire
+  truth these clauses are written against.
+  """
+  @spec auth_failure?(term()) :: boolean()
+  def auth_failure?(%{"type" => "assistant"} = ev) do
+    ev["error"] == "authentication_failed" or
+      get_in(ev, ["message", "error"]) == "authentication_failed"
+  end
+
+  def auth_failure?(%{"type" => "result"} = ev) do
+    ev["is_error"] == true and
+      (ev["terminal_reason"] == "api_error" or ev["api_error_status"] == 401)
+  end
+
+  def auth_failure?(_), do: false
+
+  @doc ~S"""
+  Whether a result frame is a REAL success. `subtype == "success"` alone is a
+  proven lie (see `auth_failure?/1`): an unauthed turn ends `subtype:"success"`
+  with `is_error:true`. A result only counts as a success when the subtype
+  says so AND the error facts agree.
+  """
+  @spec result_success?(term()) :: boolean()
+  def result_success?(%{"type" => "result"} = ev) do
+    ev["subtype"] == "success" and ev["is_error"] != true
+  end
+
+  def result_success?(_), do: false
 
   @doc """
   The per-session MCP config map (charter D63/D64) — `Session.init` serializes

@@ -203,6 +203,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          title_source: "default",
          title_kicked: false
        )
+       # Chat-never-vanishes readiness (chat-task-hands, charter decision 4):
+       # the probe costs ~1–2s (claude auth status), so mount only seeds
+       # :checking and kicks it ASYNC — never inline. The composer chrome keys
+       # its onboarding card off this assign; :checking keeps the composer
+       # live (optimistic — the common case is :ready) with a quiet probe
+       # strip, a definitive claude-lane verdict swaps the card in.
+       |> kick_readiness_probe()
        |> refresh_sessions()
        |> subscribe_activity()
        |> allow_upload(:attachments,
@@ -402,6 +409,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Cancel a staged attachment before send (the × on its chip).
   def handle_event("cancel_upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :attachments, ref)}
+  end
+
+  # Re-check on the onboarding card (chat-task-hands, charter decision 4):
+  # re-run the SAME async probe and unlock the composer in place — no reload,
+  # no dead end. The card flips to :checking for honest feedback while the
+  # probe (~1–2s on a real host) runs off the LiveView process.
+  def handle_event("readiness-recheck", _params, socket) do
+    session = socket.assigns[:session]
+
+    {:noreply,
+     socket
+     |> assign(readiness: :checking)
+     |> start_async(:readiness_probe, fn -> compute_readiness(session) end)}
   end
 
   # Stop a running turn. The interrupt is a control-request frame on stdin
@@ -1059,6 +1079,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # so its ✻ row lands just before the tool row, matching the persisted order.
     socket = settle_thinking(socket)
 
+    # Runtime auth guard (chat-task-hands, charter decision 5): a logged-out
+    # CLI's assistant frame carries `error:"authentication_failed"` — flip the
+    # onboarding card to :not_logged_in the moment it shows. The frame's text
+    # blocks still render below (transcript stays honest).
+    socket = if ClaudeChat.auth_failure?(ev), do: flag_auth_failure(socket), else: socket
+
     # A sub-agent's frames carry a top-level parent_tool_use_id (charter D40);
     # every row this frame produces inherits it so children indent under the
     # spawn row. Top-level frames leave it nil (no indent).
@@ -1129,7 +1155,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     socket =
       cond do
-        ev["subtype"] == "success" ->
+        # Runtime auth guard (chat-task-hands, charter decision 5): an unauthed
+        # turn's terminal result says `subtype:"success"` BUT `is_error:true` /
+        # `terminal_reason:"api_error"` (captured wire truth —
+        # fixtures/claude_chat/unauthed_stream.ndjson). This clause runs FIRST:
+        # subtype alone is never trusted.
+        ClaudeChat.auth_failure?(ev) ->
+          flag_auth_failure(socket)
+
+        ClaudeChat.result_success?(ev) ->
           maybe_kick_title(socket)
 
         interrupted? ->
@@ -1530,6 +1564,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
+
+  # The async readiness probe landed (chat-task-hands, charter decision 4).
+  # A probe that CRASHES fails OPEN to :ready — the chat must never vanish
+  # because the checking machinery broke; a real not-ready state will still
+  # speak at spawn time (spawn_error_text) and through the runtime auth guard.
+  @impl true
+  def handle_async(:readiness_probe, {:ok, state}, socket) do
+    {:noreply, assign(socket, readiness: state)}
+  end
+
+  def handle_async(:readiness_probe, {:exit, reason}, socket) do
+    Logger.warning("claude chat: readiness probe crashed (#{inspect(reason)}) — failing open")
+    {:noreply, assign(socket, readiness: :ready)}
+  end
 
   # ── transcript row + agent drill-down (charter D46) ─────────────────────────
 
@@ -2403,6 +2451,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
               them and break the phx-change selectors); the card div is pure
               chrome. --%>
         <div class="bp-composer">
+        <%!-- Chat-never-vanishes onboarding card (chat-task-hands, charter
+              D2/decision 4): a claude-lane not-ready verdict (:no_binary /
+              :not_logged_in) REPLACES the composer inside this same chrome —
+              one calm card, the exact next step, and a Re-check that
+              re-probes and unlocks the composer in place. The bp-lane states
+              render as a banner BELOW the live composer instead (the chat
+              itself still works; only its task hands are offline). --%>
+        <.chat_readiness_card :if={composer_locked?(@readiness)} readiness={@readiness} />
+        <div :if={not composer_locked?(@readiness)} style="display: contents;">
         <form
           id="chat-composer-form"
           phx-hook="ChatComposer"
@@ -2632,6 +2689,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
               </button>
             </div>
         </div>
+        <%!-- Probe-in-flight strip (:checking): the readiness check costs
+              ~1–2s — say so quietly WITHOUT hiding the composer (the common
+              verdict is :ready; hiding it on every mount would be its own
+              vanish). A not-ready verdict swaps the card in above. --%>
+        <div
+          :if={@readiness == :checking}
+          data-role="chat-readiness"
+          data-readiness="checking"
+          class="text-xs text-dim"
+          style="display: flex; align-items: center; gap: 8px; padding: 0 14px 10px; font-family: var(--font-mono); opacity: 0.75;"
+        >
+          <span class="bp-chat-spinner" aria-hidden="true"></span>
+          <span>checking Claude readiness…</span>
+        </div>
+        <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
+              named state + next step, never a silent Logger line). --%>
+        <.chat_readiness_card
+          :if={@readiness in [:no_task_hands, :task_token_expired]}
+          readiness={@readiness}
+        />
+        </div>
         </div>
         <%!-- Bypass ARM panel (charter D48): opened only when the user picks
               bypassPermissions. Loud via --danger tokens, type-the-word-"bypass"
@@ -2725,6 +2803,80 @@ defmodule BarkparkWeb.Studio.ChatLive do
     </div>
     """
   end
+
+  # The onboarding card (chat-task-hands, charter D2/decision 4) — ONE calm
+  # card per named not-ready state, rendered inside the bp-composer chrome.
+  # Every state carries its exact next step and a Re-check button that
+  # re-probes and unlocks the composer in place — the chat never dead-ends.
+  attr :readiness, :atom, required: true
+
+  defp chat_readiness_card(assigns) do
+    ~H"""
+    <div
+      data-role="chat-readiness"
+      data-readiness={@readiness}
+      role="status"
+      style="display: flex; flex-direction: column; gap: 8px; padding: 14px 16px;"
+    >
+      <span class="text-sm" style="font-weight: 600; display: flex; align-items: center; gap: 8px;">
+        <.icon name="alert-triangle" size={15} />
+        <%= readiness_title(@readiness) %>
+      </span>
+      <p class="text-sm text-dim" style="margin: 0; max-width: 60ch;">
+        <%= readiness_body(@readiness) %>
+      </p>
+      <code
+        :if={readiness_step(@readiness)}
+        class="text-xs"
+        style="font-family: var(--font-mono); background: var(--bg); border: 1px solid var(--border-muted); border-radius: 6px; padding: 4px 8px; align-self: flex-start;"
+      >
+        <%= readiness_step(@readiness) %>
+      </code>
+      <div>
+        <button
+          type="button"
+          class="btn text-xs"
+          phx-click="readiness-recheck"
+          aria-label="Re-check readiness"
+          style="padding: 4px 12px;"
+        >
+          Re-check
+        </button>
+      </div>
+    </div>
+    """
+  end
+
+  defp readiness_title(:no_binary), do: "Claude Code isn't installed on this host"
+  defp readiness_title(:not_logged_in), do: "Claude Code isn't logged in on this host"
+  defp readiness_title(:no_task_hands), do: "Task hands are offline"
+  defp readiness_title(:task_token_expired), do: "The chat's task credential expired"
+  defp readiness_title(_), do: "Checking readiness"
+
+  # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
+  # first live surface — it was dead code until this slice).
+  defp readiness_body(:no_binary), do: spawn_error_text(:binary_not_found)
+
+  defp readiness_body(:not_logged_in),
+    do:
+      "The `claude` binary is installed, but it has no credentials. " <>
+        "Log in on this host, then Re-check — the composer unlocks in place, no reload."
+
+  defp readiness_body(:no_task_hands),
+    do:
+      "Barkpark refused to mint this session's task credential — the agent can chat, " <>
+        "but its bp task tools are offline. Check that your admin token has write " <>
+        "access to this workspace, then Re-check."
+
+  defp readiness_body(:task_token_expired),
+    do:
+      "This session's minted Barkpark task token has expired, so task tools stopped " <>
+        "working. Re-check, then your next send mints a fresh credential."
+
+  defp readiness_body(_), do: "Checking Claude readiness…"
+
+  defp readiness_step(:not_logged_in), do: "claude auth login"
+  defp readiness_step(_), do: nil
 
   # The agents rail (charter D47) — mission control below the composer. Distinct
   # from the D45/D46 transcript spawn rows BY DESIGN (this is live state, that is
@@ -3063,14 +3215,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # have already landed on the Recorder before we subscribed, so read the
       # held list now; the broadcast covers the ack that arrives after.
       |> assign(commands: Recorder.advertised_commands(recorder))
+      # bp-lane readiness (chat-task-hands, charter D2): the task-hands mint
+      # happens AT spawn, so this is the moment its outcome is queryable — a
+      # refused/expired mint surfaces the onboarding card as a banner beside
+      # the (still live) composer, never a silent Logger.warning.
+      |> observe_hands_state(session)
       |> refresh_sessions()
     else
       {:error, reason} ->
         socket
         |> append_message(:system, spawn_error_text(reason))
+        # Keep the onboarding card in step with the spawn truth: a spawn that
+        # died on a missing binary flips the card to :no_binary, so the next
+        # step renders beside the honest system line (charter D2).
+        |> maybe_flip_readiness(reason)
         |> assign(session: nil, status: :offline)
     end
   end
+
+  # Spawn-failure → readiness-card mapping. Only reasons the card has a named
+  # state for; anything else leaves the current readiness (the system line
+  # from spawn_error_text/1 already spoke).
+  defp maybe_flip_readiness(socket, :binary_not_found), do: assign(socket, readiness: :no_binary)
+  defp maybe_flip_readiness(socket, _reason), do: socket
 
   # Follow exactly one session's frame topic at a time (PubSub). Idempotent for
   # the same session; switching sessions swaps the subscription — never two
@@ -3116,6 +3283,113 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> assign(composer_draft: text, pending_echo_id: nil)
     |> assign_messages(Enum.reject(socket.assigns.messages, &(&1.id == echo_id)))
   end
+
+  # ── chat-never-vanishes readiness (chat-task-hands, charter D2/decision 4) ──
+  #
+  # The onboarding card's state machine. `@readiness` is one of:
+  #
+  #   :checking           probe in flight — quiet strip, composer stays live
+  #   :no_binary          claude lane: the CLI is not on PATH   (locks composer)
+  #   :not_logged_in      claude lane: CLI present, not authed  (locks composer)
+  #   :no_task_hands      bp lane: the task-credential mint was refused
+  #   :task_token_expired bp lane: the minted task credential expired
+  #   :ready              live composer
+  #
+  # The two claude-lane states REPLACE the composer (there is nothing to send
+  # to); the two bp-lane states render as a banner BESIDE the live composer —
+  # the chat itself still works, only its task hands are offline, and locking
+  # the whole chat for a bp-side problem would be its own vanish (the wish).
+
+  defp kick_readiness_probe(socket) do
+    socket = assign(socket, readiness: :checking)
+
+    if connected?(socket) do
+      start_async(socket, :readiness_probe, fn -> compute_readiness(nil) end)
+    else
+      socket
+    end
+  end
+
+  # Probe seam (config-injectable for deterministic tests — the same idiom as
+  # the fake-binary `:command` override). `:studio_chat_readiness_probe` may be
+  # `{:static, state}` or a 0-arity fun; absent ⇒ the real provider-neutral
+  # probe. Runs INSIDE the start_async task, never on the LiveView process
+  # (the claude auth shell-out costs ~1–2s, charter Verified ground).
+  defp compute_readiness(session) do
+    case Application.get_env(:barkpark, :studio_chat_readiness_probe) do
+      {:static, state} when is_atom(state) -> state
+      fun when is_function(fun, 0) -> fun.()
+      _ -> with(:ready <- claude_readiness(), do: hands_readiness(session))
+    end
+  end
+
+  defp claude_readiness do
+    probe = Barkpark.StudioChat.Probe.probe(:claude)
+
+    cond do
+      probe.binary != true -> :no_binary
+      probe.authed? != true -> :not_logged_in
+      true -> :ready
+    end
+  end
+
+  # bp-lane readiness from the spawn-time mint outcome. Pre-spawn (no session)
+  # there is nothing to ask — the mint happens AT spawn (charter decision 2) —
+  # so a nil session reads :ready and observe_hands_state/2 covers the spawn
+  # moment. The default reads the spawn-env slice's queryable mint state
+  # (`ClaudeChat.task_hands/1`: :minted | :mint_refused | :not_attempted |
+  # :unknown); the config seam injects a verdict for deterministic tests.
+  # `:task_token_expired` is reachable only through the seam today —
+  # mid-session TTL expiry detection is backlogged (task-cth-bl-token-renewal);
+  # the card state is ready for it.
+  defp hands_readiness(session) do
+    case hands_state(session) do
+      state when state in [:refused, :mint_refused] -> :no_task_hands
+      :expired -> :task_token_expired
+      _ -> :ready
+    end
+  end
+
+  defp hands_state(nil), do: :ok
+
+  defp hands_state(session) do
+    case Application.get_env(:barkpark, :studio_chat_hands_state) do
+      fun when is_function(fun, 1) -> fun.(session)
+      _ -> ClaudeChat.task_hands(session)
+    end
+  catch
+    # A session that died between spawn and query is not a hands verdict.
+    :exit, _ -> :ok
+  end
+
+  defp observe_hands_state(socket, session) do
+    case hands_readiness(session) do
+      :ready -> socket
+      state -> assign(socket, readiness: state)
+    end
+  end
+
+  # Flip the card to :not_logged_in off a live-stream auth failure (charter
+  # decision 5). Idempotent: the frames arrive as a pair (assistant + result),
+  # and the honest system line must land once, not twice.
+  defp flag_auth_failure(socket) do
+    if socket.assigns[:readiness] == :not_logged_in do
+      socket
+    else
+      socket
+      |> assign(readiness: :not_logged_in)
+      |> append_message(
+        :system,
+        "⚠ Claude isn't logged in on this host — the turn ended unauthenticated. " <>
+          "Run `claude auth login` on this host, then Re-check below."
+      )
+    end
+  end
+
+  # The claude-lane states lock the composer (no CLI to talk to); everything
+  # else keeps it live — :checking optimistically (the common case is :ready),
+  # the bp-lane states because the chat itself still works.
+  defp composer_locked?(readiness), do: readiness in [:no_binary, :not_logged_in]
 
   # Drop the phase-1 text-only echo WITHOUT restoring the composer — used when a
   # dispatched turn carries images (D25) and the echo upgrades to the full

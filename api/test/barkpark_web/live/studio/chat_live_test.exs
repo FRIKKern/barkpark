@@ -131,6 +131,38 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     marker
   end
 
+  # Readiness-probe seam (chat-task-hands, decision 4): config/test.exs pins
+  # {:static, :ready} suite-wide (the REAL probe shells out to the host's
+  # `claude` — host-dependent and slow); card tests override per-test to drive
+  # every named state through the same async start_async machinery.
+  defp put_probe(value) do
+    prev = Application.get_env(:barkpark, :studio_chat_readiness_probe)
+    Application.put_env(:barkpark, :studio_chat_readiness_probe, value)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :studio_chat_readiness_probe, prev),
+        else: Application.delete_env(:barkpark, :studio_chat_readiness_probe)
+    end)
+  end
+
+  # bp-lane hands seam: what the spawn-time mint reported. Tests inject the
+  # verdict; the default (absent) reads the spawn-env slice's session seam.
+  defp put_hands_state(fun) when is_function(fun, 1) do
+    Application.put_env(:barkpark, :studio_chat_hands_state, fun)
+    on_exit(fn -> Application.delete_env(:barkpark, :studio_chat_hands_state) end)
+  end
+
+  @readiness_fixture Path.expand("../../../fixtures/claude_chat/unauthed_stream.ndjson", __DIR__)
+
+  defp unauthed_frames do
+    @readiness_fixture
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+    |> Enum.reject(&(&1["type"] == "fixture_provenance"))
+  end
+
   # Route a frame through the session's REAL Recorder (wave 4, charter D28): it
   # persists the durable outcome and rebroadcasts to every subscribed viewer.
   # The Recorder's PubSub broadcast is a synchronous local send, so once the
@@ -333,6 +365,190 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/chat")
+    end
+  end
+
+  describe "readiness onboarding card (chat never vanishes — chat-task-hands)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    # THE INVERSION (charter decision 4): a missing binary used to make this
+    # exact mount redirect. Now the chat surface stays, and the card names the
+    # state — reusing the spawn_error_text(:binary_not_found) copy, which was
+    # dead code until this test.
+    test ":no_binary mounts (no redirect), swaps the composer for the card", %{conn: conn} do
+      Application.put_env(:barkpark, :claude_chat,
+        enabled: true,
+        command: {"definitely-not-a-real-binary-bp", []}
+      )
+
+      put_probe({:static, :no_binary})
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render_async(view)
+
+      assert html =~ ~s(data-readiness="no_binary")
+      assert html =~ "not installed on this host"
+      assert html =~ "Install Claude Code and run"
+      assert has_element?(view, "button[phx-click=readiness-recheck]")
+      refute has_element?(view, "form[phx-submit=send]")
+    end
+
+    test ":not_logged_in names the exact next step (claude auth login)", %{conn: conn} do
+      put_probe({:static, :not_logged_in})
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render_async(view)
+
+      assert html =~ ~s(data-readiness="not_logged_in")
+      assert html =~ "claude auth login"
+      assert has_element?(view, "button[phx-click=readiness-recheck]")
+      refute has_element?(view, "form[phx-submit=send]")
+    end
+
+    test ":checking shows the probe strip WITHOUT hiding the composer", %{conn: conn} do
+      # A probe that never lands: the card stays :checking for the whole test.
+      put_probe(fn -> Process.sleep(60_000) end)
+
+      {:ok, view, html} = live(conn, "/studio/chat")
+
+      assert html =~ ~s(data-readiness="checking")
+      assert html =~ "checking Claude readiness"
+      # The composer stays live — :checking must never be its own vanish.
+      assert has_element?(view, "form[phx-submit=send]")
+      refute has_element?(view, "button[phx-click=readiness-recheck]")
+    end
+
+    test "Re-check re-probes and unlocks the composer WITHOUT a reload", %{conn: conn} do
+      {:ok, verdict} = Agent.start_link(fn -> :no_binary end)
+      put_probe(fn -> Agent.get(verdict, & &1) end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render_async(view)
+
+      assert html =~ ~s(data-readiness="no_binary")
+      refute has_element?(view, "form[phx-submit=send]")
+
+      # The host got fixed (binary installed + logged in) — Re-check sees it.
+      Agent.update(verdict, fn _ -> :ready end)
+      view |> element("button[phx-click=readiness-recheck]") |> render_click()
+      html = render_async(view)
+
+      # Same LiveView process, no reload: the composer is back, the card gone.
+      assert has_element?(view, "form[phx-submit=send]")
+      refute html =~ ~s(data-readiness="no_binary")
+    end
+
+    test "a spawn that dies on a missing binary flips the card beside the honest system line",
+         %{conn: conn} do
+      # Probe said ready (e.g. raced an uninstall), but the REAL spawn dies on
+      # find_executable — the card must follow the spawn truth, not the stale
+      # probe verdict.
+      Application.put_env(:barkpark, :claude_chat,
+        enabled: true,
+        command: {"definitely-not-a-real-binary-bp", []}
+      )
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      html = render(view)
+
+      # The dead spawn_error_text(:binary_not_found) copy, live in the transcript…
+      assert html =~ "not installed on this host"
+      # …AND the card, locking the composer with the same next step.
+      assert html =~ ~s(data-readiness="no_binary")
+      refute has_element?(view, "form[phx-submit=send]")
+    end
+
+    test ":no_task_hands renders as a banner BESIDE a live composer", %{conn: conn} do
+      put_hands_state(fn _session -> :refused end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="no_task_hands")
+      assert html =~ "task tools are offline"
+      # The chat itself still works — a bp-side problem never locks the composer.
+      assert has_element?(view, "form[phx-submit=send]")
+      assert has_element?(view, "button[phx-click=readiness-recheck]")
+    end
+
+    test ":task_token_expired renders as a banner BESIDE a live composer", %{conn: conn} do
+      put_hands_state(fn _session -> :expired end)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      html = render(view)
+
+      assert html =~ ~s(data-readiness="task_token_expired")
+      assert html =~ "task token has expired"
+      assert has_element?(view, "form[phx-submit=send]")
+    end
+  end
+
+  describe "runtime auth guard (unauthed stream replay — chat-task-hands, decision 5)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_async(view)
+      {:ok, view: view}
+    end
+
+    test "the captured unauthed stream flips the card to :not_logged_in, exactly once", %{
+      view: view
+    } do
+      for frame <- unauthed_frames() do
+        send(view.pid, {:claude_chat_event, frame})
+      end
+
+      html = render(view)
+
+      # The card locked the composer with the login step…
+      assert lv_assigns(view).readiness == :not_logged_in
+      assert html =~ ~s(data-readiness="not_logged_in")
+      assert html =~ "claude auth login"
+      refute has_element?(view, "form[phx-submit=send]")
+
+      # …the transcript got ONE honest line (assistant + result frames both
+      # classify, but the flip is idempotent)…
+      assert length(String.split(html, "turn ended unauthenticated")) == 2
+
+      # …and the lying subtype:"success" was NOT classified a success: the
+      # result took the auth branch, so no generic error line either.
+      refute html =~ "The turn ended with an error"
+    end
+
+    test "the lying result frame ALONE flips the card — subtype:success is never trusted", %{
+      view: view
+    } do
+      result = Enum.find(unauthed_frames(), &(&1["type"] == "result"))
+      assert result["subtype"] == "success"
+
+      send(view.pid, {:claude_chat_event, result})
+      html = render(view)
+
+      assert lv_assigns(view).readiness == :not_logged_in
+      assert html =~ ~s(data-readiness="not_logged_in")
+      refute has_element?(view, "form[phx-submit=send]")
+    end
+
+    test "an honest success result does NOT flip the card", %{view: view} do
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      html = render(view)
+
+      assert lv_assigns(view).readiness == :ready
+      refute html =~ ~s(data-readiness="not_logged_in")
+      assert has_element?(view, "form[phx-submit=send]")
     end
   end
 

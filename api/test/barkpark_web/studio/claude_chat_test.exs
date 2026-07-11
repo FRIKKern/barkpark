@@ -30,7 +30,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute ClaudeChat.enabled?()
     end
 
-    test "on with an available command and the default flag" do
+    test "on with the default flag — binary presence no longer gates (the inversion)" do
       put_chat_config(command: {"cat", []})
       assert ClaudeChat.enabled?()
     end
@@ -41,14 +41,76 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute ClaudeChat.enabled?()
     end
 
-    test "off when the binary is not installed" do
+    # FLIPPED by the chat-task-hands gate inversion (charter decision 4): a
+    # missing binary used to hide the tab and redirect the mount — now the
+    # surface stays and the onboarding card names the state instead. The
+    # security-posture gates (flag-off, public-demo, non-admin) still refuse.
+    test "STAYS on when the binary is not installed — the card speaks, not a vanish" do
       put_chat_config(enabled: true, command: {"definitely-not-a-real-binary-bp", []})
-      refute ClaudeChat.enabled?()
+      assert ClaudeChat.enabled?()
     end
 
     test "start_session refuses when disabled" do
       put_chat_config(enabled: false, command: {"cat", []})
       assert {:error, :disabled} = ClaudeChat.start_session(%{sink: self()})
+    end
+  end
+
+  @unauthed_fixture Path.expand("../../fixtures/claude_chat/unauthed_stream.ndjson", __DIR__)
+
+  defp unauthed_frames do
+    @unauthed_fixture
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
+    |> Enum.reject(&(&1["type"] == "fixture_provenance"))
+  end
+
+  describe "runtime auth guard classifiers (chat-task-hands, decision 5)" do
+    test "the captured unauthed stream's assistant AND result frames both classify as auth failures" do
+      frames = unauthed_frames()
+
+      assistant = Enum.find(frames, &(&1["type"] == "assistant"))
+      result = Enum.find(frames, &(&1["type"] == "result"))
+
+      # The fixture carries the exact footgun (wire truth, charter Verified
+      # ground 2026-07-11): result says subtype success, but the error facts win.
+      assert result["subtype"] == "success"
+      assert result["is_error"] == true
+      assert result["terminal_reason"] == "api_error"
+      assert assistant["error"] == "authentication_failed"
+
+      assert ClaudeChat.auth_failure?(assistant)
+      assert ClaudeChat.auth_failure?(result)
+    end
+
+    test "subtype:success alone is NEVER trusted — result_success? demands the error facts agree" do
+      [result] = Enum.filter(unauthed_frames(), &(&1["type"] == "result"))
+
+      # The lying frame: subtype success + is_error true → never a success.
+      refute ClaudeChat.result_success?(result)
+
+      # The honest frame: same subtype, no error facts → a real success.
+      assert ClaudeChat.result_success?(%{"type" => "result", "subtype" => "success"})
+      refute ClaudeChat.result_success?(%{"type" => "result", "subtype" => "error_during_execution"})
+      refute ClaudeChat.result_success?(%{"type" => "assistant"})
+    end
+
+    test "ordinary frames never classify as auth failures" do
+      refute ClaudeChat.auth_failure?(%{"type" => "assistant", "message" => %{"content" => []}})
+      refute ClaudeChat.auth_failure?(%{"type" => "result", "subtype" => "success"})
+
+      # An interrupted turn (is_error without the api_error terminus) is an
+      # interrupt, never a login card.
+      refute ClaudeChat.auth_failure?(%{
+               "type" => "result",
+               "subtype" => "error_during_execution",
+               "is_error" => true,
+               "terminal_reason" => "aborted_streaming"
+             })
+
+      refute ClaudeChat.auth_failure?(nil)
+      refute ClaudeChat.auth_failure?(%{"type" => "system", "subtype" => "init"})
     end
   end
 
