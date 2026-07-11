@@ -86,6 +86,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue, Release}
   alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
+  alias Barkpark.Tasks.Pulse
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Stamp
@@ -496,6 +497,24 @@ defmodule Barkpark.Tasks do
   `:invalid_criteria`. See `Barkpark.Tasks.Stamp`.
   """
   defdelegate stamp(task_id, worker_id, opts \\ []), to: Stamp
+
+  @doc """
+  Pulse the task's now-line + renew its lease in ONE atomic write — the
+  `bp task pulse` heartbeat (`POST /v1/tasks/:doc_id/pulse`). Writes
+  `content.claim.now = %{"text","ts","criterion"?}`, bumps the epoch and
+  refreshes `ts_iso`; `work_digest` stays untouched (renewal semantics,
+  mirroring the rail-l4 same-worker re-claim). Holder-gated, NO epoch fence —
+  pulse survives L4 fence bumps; a lost lease (reaped/released/closed) is
+  `{:error, :not_holder}`, never a silent re-claim. Emits `task.pulse` in the
+  same transaction. See `Barkpark.Tasks.Pulse`.
+
+      Tasks.pulse_by_id(task_uuid, "agent-1", text: "warm-up pinned, rerunning", criterion: 2)
+
+  Errors: `:not_found`, `:not_holder`, `:stale_claim`.
+  """
+  @spec pulse_by_id(binary(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, :not_found | :not_holder | :stale_claim}
+  def pulse_by_id(task_uuid, worker_id, opts \\ []), do: Pulse.pulse(task_uuid, worker_id, opts)
 
   @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +

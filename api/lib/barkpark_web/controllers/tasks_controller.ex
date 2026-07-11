@@ -3,7 +3,7 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI
   (historically the bd-compatible shim `bin/bd-shim`, retired 2026-06-22).
 
-  Thirteen endpoints, all bearer-token gated via the existing `:api` +
+  Fourteen endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
@@ -14,6 +14,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
     * `POST   /v1/tasks/:doc_id/close`      — `Tasks.close/3`
     * `POST   /v1/tasks/:doc_id/stamp`      — `Tasks.stamp/3` (criterion-level mid-claim evidence)
+    * `POST   /v1/tasks/:doc_id/pulse`      — `Tasks.pulse_by_id/3` (now-line + lease renewal)
     * `GET    /v1/tasks/:doc_id/edges`      — `Tasks.dependencies/2` + `dependents/2`
     * `POST   /v1/tasks/edges`              — `Tasks.add_dep/3`
     * `POST   /v1/tasks/:doc_id/labels`     — `Tasks.relabel_by_id/3`
@@ -435,6 +436,72 @@ defmodule BarkparkWeb.TasksController do
         not_found(conn, "task not found")
     end
   end
+
+  # ─── POST /v1/tasks/:doc_id/pulse ───────────────────────────────────────
+  # Now-line heartbeat + lease renewal in one atomic write (Tasks.Pulse; see
+  # its moduledoc for the write-path law). Body shape:
+  #   { "worker_id": "agent-1", "now": "warm-up pinned, rerunning", "criterion": 2 }
+  # `criterion` optional (non-negative integer index into acceptance_criteria).
+  # NO observed_epoch — pulse is the renewal, it survives fence bumps; a lost
+  # lease (reaped/released/closed/foreign) is 409 not_holder, never a re-claim.
+
+  # A now-line is a ticker cell, not a worklog: bound it so one chatty agent
+  # can't bloat every board row + event payload. Bytes, honest 400 (never a
+  # silent truncation — the worker should know its pulse didn't land as sent).
+  @pulse_now_max_bytes 500
+
+  def pulse(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
+         {:ok, text} <- Params.fetch_string(params, "now"),
+         :ok <- check_now_length(text),
+         {:ok, criterion} <- parse_criterion(params["criterion"]),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      opts =
+        [text: text]
+        |> Params.put_opt(:criterion, criterion)
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+
+      case Tasks.pulse_by_id(task.id, worker_id, opts) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :missing, field} ->
+        bad_request(conn, "#{field} is required")
+
+      {:error, :now_too_long} ->
+        bad_request(conn, "now must be at most #{@pulse_now_max_bytes} bytes")
+
+      {:error, :invalid_criterion} ->
+        bad_request(conn, "criterion must be a non-negative integer")
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  defp check_now_length(text) when byte_size(text) <= @pulse_now_max_bytes, do: :ok
+  defp check_now_length(_), do: {:error, :now_too_long}
+
+  # `criterion` arrives as an int (JSON body) or a string (`--criterion 2`
+  # through generic dispatch / query form). Absent → {:ok, nil} (a plain
+  # now-line names no lock). Negative / non-integer → honest 400.
+  defp parse_criterion(nil), do: {:ok, nil}
+  defp parse_criterion(n) when is_integer(n) and n >= 0, do: {:ok, n}
+
+  defp parse_criterion(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> {:error, :invalid_criterion}
+    end
+  end
+
+  defp parse_criterion(_), do: {:error, :invalid_criterion}
 
   # ─── GET /v1/tasks/:doc_id/edges ────────────────────────────────────────
 

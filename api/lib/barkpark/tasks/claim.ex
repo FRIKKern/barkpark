@@ -308,6 +308,11 @@ defmodule Barkpark.Tasks.Claim do
   # rail_rev + notices (a renewal after an edge fence surfaces
   # blocked_while_claimed in the same response). Resources + worker are left
   # exactly as the live claim holds them.
+  #
+  # SIBLING: `Barkpark.Tasks.Pulse` mirrors this write (epoch bump + ts_iso
+  # refresh, digest untouched) and adds the `claim.now` now-line — but as its
+  # OWN path, holder-gated with NO re-claim fall-through: a lapsed lease must
+  # pulse `:not_holder`, never silently re-claim through do_claim below.
   defp do_renew(%Document{content: content} = doc, worker_id, caller_token_id) do
     observed_rev = doc.rev
     new_rev = generate_rev()
