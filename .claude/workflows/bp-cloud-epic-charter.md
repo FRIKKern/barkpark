@@ -195,3 +195,37 @@ goal), pp-b-dump-harness + pp-b-canvas-harness-generic (turn this wave's two pro
 "terminal renderer knows none of the 11 new blocks — unreadable in the TUI" which
 pdrender parity (14/14, #1357) has since falsified — next ledger-truth pass should
 correct it the same snapshot-diff way ws-012 was.
+
+### Wave 2026-07-11 (pd-layout-engine ledger reconcile — wave 1, reviewed)
+
+**Landed.** Four of five slices green through review; grade A-. Paper:
+`pd-layout-engine-wave-2026-07-11` (debrief appended, published).
+
+- **pdle-r1-pdrender-doc-truth** — merge `loop-epic/pdrender-doc-truth-d22-citation-per-bloc-0-r`
+  (NOT the base branch): D22 citation + per-block reader-parity matrix (all
+  portable-doc.tsx anchors re-verified at HEAD) + module-root divide-formula
+  tripwire with decoy-proven teeth. Reviewer hardening rides the -r branch
+  (0be051d1): grep failures red the test instead of passing vacuously; an
+  owner-liveness self-check kills silent pattern drift. Gate green post-fix.
+- **pdle-r2-le-children-close** — half landed: dashboard-pipeline-blocks closed
+  SUPERSEDED-BY-DECISION (D1; GH #1455 CLOSED, successor #2113 OPEN — both
+  reviewer-confirmed). The fullbleed matrix-close is honestly BLOCKED on the r1
+  merge (its idx2 cites the r1 doc-note); everything else is pre-proven in the
+  task's evidence. Re-dispatch or lead-complete after merge.
+- **pdle-r3/r4/r5 (ledger)** — pdd-m1 done 3/3 + t5-migrate parked with the
+  corpus-APPLY recipe (--apply never run); the ten pd-doctrine hollow-done
+  children retro-stamped honestly (t14 2/3, t19 2/3, t12 3/4 stay honest-false
+  with residue tasks); m2/m3 rolled up 3/3; drafts.pd-doctrine closed done and
+  collapsed. Reviewer re-ran every gate leg (39/0, 50/0, 146/0, npm pass, bp
+  legs verbatim) and spot-checked six file:line anchors at HEAD — all true.
+- **Reviewer ledger fixes:** publish-collapsed the two leftover draft twins
+  drafts.pdd-t7-classify + drafts.pdd-t8-canvas; review_note stamped on pdle-r1
+  naming the -r merge target.
+
+**Lead closes on merge:** r1 c4 → fullbleed matrix-close (r2 idx2/idx3) → r2
+close → epic anchor `pd-layout-engine` per D12 (cite #1435/#1445/#1454/#1461 +
+post-D4 module-root tripwire + fresh go test PASS) → slice LEAD criteria
+(r3 c5, r4 c4, r5 c3). Open by design: pdd-t5-migrate (corpus-APPLY human
+gate), pdd-t12-a11y-eyeball (human), pdd-t14-jsdom-residue,
+pdd-t16-writer-path-test. Stale charter note found: `bp task stamp` IS live on
+guerrilla — drop the operational-facts bullet next slot edit.
