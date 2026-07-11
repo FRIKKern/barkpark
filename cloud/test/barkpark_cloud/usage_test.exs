@@ -269,6 +269,13 @@ defmodule BarkparkCloud.UsageTest do
       assert m.disk.measured_at == "2026-07-03T10:00:00Z"
     end
 
+    test "the db_size -1 sentinel (PGSizeBytes probe unwired) degrades — never a fake size" do
+      m = meters(%{telemetry: telemetry(%{db_size: -1})})
+      assert m.db_size.value == "unmetered"
+      # The snapshot time is still carried so the GUI can say "as of …".
+      assert m.db_size.measured_at == "2026-07-03T10:00:00Z"
+    end
+
     test "a nil db_size / disk degrades to unmetered" do
       m = meters(%{telemetry: telemetry(%{db_size: nil, disk: %{used_pct: nil}})})
       assert m.db_size.value == "unmetered"

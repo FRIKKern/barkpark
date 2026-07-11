@@ -209,12 +209,16 @@ defmodule BarkparkCloud.Usage do
 
   defp instance_meter(_other, source), do: meter(@unmetered, source, nil)
 
-  # DB size in bytes, from the agent's latest health beat. Absent telemetry or a
-  # non-number → unmetered (with the telemetry event's snapshot time when we have
-  # one, so the GUI can still say "as of …" even on a degraded read).
+  # DB size in bytes, from the agent's latest health beat. The agent reports `-1`
+  # verbatim until the PGSizeBytes probe lands (report.go:170/194/246), so a bare
+  # `is_number` guard would render that sentinel as a fake metered size on every
+  # surface. Guard `n >= 0` like disk_meter/telemetry_threshold_meter: absent
+  # telemetry, a negative sentinel, or a non-number → unmetered (with the
+  # telemetry event's snapshot time when we have one, so the GUI can still say
+  # "as of …" even on a degraded read).
   defp db_size_meter(telemetry, measured_at) do
     case telemetry && Map.get(telemetry, :db_size) do
-      n when is_number(n) -> meter(n, @src_db_size, measured_at)
+      n when is_number(n) and n >= 0 -> meter(n, @src_db_size, measured_at)
       _ -> meter(@unmetered, @src_db_size, measured_at)
     end
   end
