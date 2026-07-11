@@ -681,7 +681,6 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * `.bp-paper-surface .bp-button` rules byte-for-byte (the .bp-canvas-action
  * precedent above) so the embedder paints it identically to /papers. */
 .bp-paper-editor-body .bp-card .bp-button { display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent); color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0; }
-.bp-paper-editor-body .bp-card .bp-button--primary { border: none; background: var(--paper-accent); color: #ffffff; }
 .bp-canvas-card { position: relative; }
 .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
 .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
@@ -991,7 +990,10 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
   color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
 }
-.bp-canvas-action .bp-button--primary {
+/* Shared with the card slot's primary button (folded here so the one
+   hand-stamped on-accent white stays a single exempted literal). */
+.bp-canvas-action .bp-button--primary,
+.bp-paper-editor-body .bp-card .bp-button--primary {
   border: none; background: var(--paper-accent); color: #ffffff;
 }
 .bp-canvas-action-controls {
