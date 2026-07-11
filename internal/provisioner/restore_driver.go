@@ -247,19 +247,19 @@ func (d *CloudRestoreDriver) RepointDNS(ctx context.Context, fqdn, ip string) er
 }
 
 // InstallSecrets unseals with the CARRIED kek (ref.KEK) and merges the identity
-// into the box's .env.
-func (d *CloudRestoreDriver) InstallSecrets(ctx context.Context, ref BundleRef, ip string) error {
-	return d.Exec.InstallSecrets(ctx, ref.Key, ref.KEK, ip)
+// into the box's .env. job.Kind picks the box's ssh policy (azure → barkpark+sudo).
+func (d *CloudRestoreDriver) InstallSecrets(ctx context.Context, job JobSpec, ref BundleRef, ip string) error {
+	return d.Exec.InstallSecrets(ctx, job.Kind, ref.Key, ref.KEK, ip)
 }
 
 // InstallAgent lights up the monitoring beat with the freshly-minted token.
-func (d *CloudRestoreDriver) InstallAgent(ctx context.Context, agentToken, ip string) error {
-	return d.Exec.InstallAgent(ctx, agentToken, ip)
+func (d *CloudRestoreDriver) InstallAgent(ctx context.Context, job JobSpec, agentToken, ip string) error {
+	return d.Exec.InstallAgent(ctx, job.Kind, agentToken, ip)
 }
 
 // RestoreData runs the on-box drop → pg_restore → media → migrate → restart.
-func (d *CloudRestoreDriver) RestoreData(ctx context.Context, ref BundleRef, ip string) error {
-	return d.Exec.RestoreData(ctx, ref.Key, ref.Manifest.DBName, ip)
+func (d *CloudRestoreDriver) RestoreData(ctx context.Context, job JobSpec, ref BundleRef, ip string) error {
+	return d.Exec.RestoreData(ctx, job.Kind, ref.Key, ref.Manifest.DBName, ip)
 }
 
 // Verify runs the EXISTING golden-path gate against the restored fqdn — no

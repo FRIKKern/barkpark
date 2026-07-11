@@ -67,6 +67,16 @@ type SSHStepRunner struct {
 	Key  string
 	User string
 
+	// Sudo sudo-wraps every step run through this runner (`sudo -n bash …` instead
+	// of `bash …`). It is set ONLY on the per-host runner an AZURE resurrect builds
+	// (restoreRunner): those boxes provision only the non-root `barkpark` admin (D56 —
+	// the SSH key lands in /home/barkpark and stock Canonical images lock root), yet
+	// azure-base-install + the on-box restore pipeline require root, so the steps SSH
+	// as barkpark and reach root via passwordless sudo (waagent grants it). Every
+	// other path — hetzner restore, warm-pool configure, the deploy feeder — leaves it
+	// false, so their argv is byte-identical to before (`bash …`, root, no sudo).
+	Sudo bool
+
 	// Exec dispatches the ssh argv and returns combined stdout+stderr + the error.
 	// nil → runCapture (the same exec mechanism provider.go / CloudDNS use). The
 	// signature mirrors runCapture so the production runner is a one-line adapter;
@@ -138,6 +148,18 @@ func shJoinArgv(argv []string) string {
 	return strings.Join(parts, " ")
 }
 
+// sshRunPrefix is the shell invocation that runs the decoded temp-file script on
+// the box: `bash -l "$b"` for a root step (byte-unchanged), or `sudo -n bash -l
+// "$b"` when the runner is sudo-wrapped — an azure restore's non-root `barkpark`
+// admin reaching root through passwordless sudo (`-n` fails fast rather than
+// prompting, matching the runner's BatchMode contract).
+func sshRunPrefix(sudo bool) string {
+	if sudo {
+		return "sudo -n bash -l"
+	}
+	return "bash -l"
+}
+
 // sshStepArgv builds the EXACT ssh argv that runs cmd as user on host over SSH.
 // PURE function (no exec, no env) so a test asserts the argv without invoking
 // ssh — the hcloudCreateArgv / hcloudZoneRRSetArgv pattern.
@@ -179,13 +201,15 @@ func shJoinArgv(argv []string) string {
 //	-o ServerAliveInterval=15             ping a quiet connection every 15s …
 //	-o ServerAliveCountMax=4              … and give up after 4 missed (≈60s) so a
 //	                                       dead box/long step fails instead of hanging
-func sshStepArgv(user, host, key, cmd string) []string {
+func sshStepArgv(user, host, key, cmd string, sudo bool) []string {
 	if strings.TrimSpace(user) == "" {
 		user = defaultSSHUser
 	}
 	b64 := base64.StdEncoding.EncodeToString([]byte(cmd))
 	// Decode to a temp file and run with stdin closed (see the stdin-eating note).
-	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; bash -l "$b" </dev/null; rc=$?; rm -f "$b"; exit $rc`
+	// `sudo -n bash …` when the runner is sudo-wrapped (an azure restore's non-root
+	// `barkpark` admin reaching root); a bare `bash …` — byte-unchanged — otherwise.
+	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; ` + sshRunPrefix(sudo) + ` "$b" </dev/null; rc=$?; rm -f "$b"; exit $rc`
 	return []string{
 		"ssh",
 		"-i", key,
@@ -206,13 +230,14 @@ func sshStepArgv(user, host, key, cmd string) []string {
 // resurrect restore pipes the bundle tar into `tar -xzf -` this way. The
 // arg-splitting hazard is still dodged (single base64 token). PURE (no exec) so a
 // test asserts the argv without invoking ssh.
-func sshFeedArgv(user, host, key, cmd string) []string {
+func sshFeedArgv(user, host, key, cmd string, sudo bool) []string {
 	if strings.TrimSpace(user) == "" {
 		user = defaultSSHUser
 	}
 	b64 := base64.StdEncoding.EncodeToString([]byte(cmd))
-	// No `</dev/null` here: the script READS stdin (the fed bundle bytes).
-	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; bash -l "$b"; rc=$?; rm -f "$b"; exit $rc`
+	// No `</dev/null` here: the script READS stdin (the fed bundle bytes). sudo passes
+	// stdin through, so the sudo-wrapped azure feed still receives the bundle tar.
+	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; ` + sshRunPrefix(sudo) + ` "$b"; rc=$?; rm -f "$b"; exit $rc`
 	return []string{
 		"ssh",
 		"-i", key,
@@ -240,7 +265,7 @@ func (r *SSHStepRunner) RunFeed(ctx context.Context, title, script string, stdin
 	if strings.TrimSpace(key) == "" {
 		key = sshKeyPath()
 	}
-	argv := sshFeedArgv(r.User, r.Host, key, script)
+	argv := sshFeedArgv(r.User, r.Host, key, script, r.Sudo)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = stdin
 	out, err := cmd.CombinedOutput()
@@ -271,7 +296,7 @@ func (r *SSHStepRunner) Run(ctx context.Context, s CaddyStep) error {
 	if strings.TrimSpace(key) == "" {
 		key = sshKeyPath()
 	}
-	argv := sshStepArgv(r.User, r.Host, key, cmd)
+	argv := sshStepArgv(r.User, r.Host, key, cmd, r.Sudo)
 	if out, err := r.run(ctx, argv[0], argv[1:]...); err != nil {
 		// Scrub any per-step secrets from the captured ssh output before it lands
 		// in the error — the error flows to the worker's fail() POST and the
@@ -297,7 +322,7 @@ func (r *SSHStepRunner) RunOutput(ctx context.Context, script string) (string, e
 	if strings.TrimSpace(key) == "" {
 		key = sshKeyPath()
 	}
-	argv := sshStepArgv(r.User, r.Host, key, script)
+	argv := sshStepArgv(r.User, r.Host, key, script, r.Sudo)
 	return r.run(ctx, argv[0], argv[1:]...)
 }
 
@@ -320,7 +345,11 @@ func (r *SSHStepRunner) WaitReady(ctx context.Context, timeout time.Duration) er
 	if strings.TrimSpace(key) == "" {
 		key = sshKeyPath()
 	}
-	argv := sshStepArgv(r.User, r.Host, key, "true")
+	// Pure connectivity probe: SSH as r.User and run `true` WITHOUT sudo, so a fresh
+	// azure box's readiness turns on sshd + key acceptance for `barkpark`, not on
+	// waagent having finished writing sudoers (the first real step fails loudly if
+	// passwordless sudo is missing). Hetzner keeps its byte-identical root probe.
+	argv := sshStepArgv(r.User, r.Host, key, "true", false)
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {

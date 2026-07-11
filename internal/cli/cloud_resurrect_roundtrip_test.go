@@ -65,19 +65,19 @@ func (d *recordingRestoreDriver) RepointDNS(_ context.Context, fqdn, ip string) 
 	return nil
 }
 
-func (d *recordingRestoreDriver) InstallSecrets(_ context.Context, ref provisioner.BundleRef, ip string) error {
+func (d *recordingRestoreDriver) InstallSecrets(_ context.Context, _ provisioner.JobSpec, ref provisioner.BundleRef, ip string) error {
 	d.calls = append(d.calls, "InstallSecrets")
 	d.kekSeen = ref.KEK
 	return nil
 }
 
-func (d *recordingRestoreDriver) InstallAgent(_ context.Context, token, ip string) error {
+func (d *recordingRestoreDriver) InstallAgent(_ context.Context, _ provisioner.JobSpec, token, ip string) error {
 	d.calls = append(d.calls, "InstallAgent")
 	d.agentSeen = token
 	return nil
 }
 
-func (d *recordingRestoreDriver) RestoreData(_ context.Context, ref provisioner.BundleRef, ip string) error {
+func (d *recordingRestoreDriver) RestoreData(_ context.Context, _ provisioner.JobSpec, ref provisioner.BundleRef, ip string) error {
 	d.calls = append(d.calls, "RestoreData")
 	d.installedDB = ref.Manifest.DBName
 	// The mandated on-box restore sequence the real driver runs: drop the target DB,

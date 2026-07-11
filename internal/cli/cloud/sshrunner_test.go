@@ -105,7 +105,7 @@ func decodeRemote(t *testing.T, remote string) string {
 // re-split it), so drift fails here rather than silently on a live box.
 func TestSSHStepArgv_Exact(t *testing.T) {
 	cmd := "cd /opt/barkpark/api && mix ecto.migrate"
-	got := sshStepArgv("root", "203.0.113.7", "/keys/barkpark_indx", cmd)
+	got := sshStepArgv("root", "203.0.113.7", "/keys/barkpark_indx", cmd, false)
 	wantPrefix := []string{
 		"ssh",
 		"-i", "/keys/barkpark_indx",
@@ -146,7 +146,7 @@ func TestRemoteTransport_StdinClosed_TailSurvives(t *testing.T) {
 	// Build the remote command exactly as the runner does, then run it locally.
 	// The remote is the last argv element; we feed local bash the SAME data on
 	// stdin that ssh would, to prove the script's </dev/null isolates it.
-	argv := sshStepArgv("root", "10.0.0.5", "/keys/k", script)
+	argv := sshStepArgv("root", "10.0.0.5", "/keys/k", script, false)
 	remote := argv[len(argv)-1]
 
 	cmd := exec.Command("bash", "-c", remote)
