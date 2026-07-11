@@ -3,11 +3,11 @@ package cli
 // onramp_cmd.go — `bp onramp <target>`: emit the exact MCP-registration config
 // block(s) for ONE AI-agent surface, where they belong, and how to verify.
 // PRINT-FIRST: by default it SHOWS the blocks and writes nothing. `--write` does
-// the work — a safe JSON merge that touches ONLY the barkpark entry
+// the work — a safe merge that touches ONLY the barkpark entry
 // (onramp_write.go), idempotent and atomic; `--force` overwrites a differing
-// barkpark entry. Codex's TOML config stays print-only until wave 3 (reported
-// 'skipped' under --write, so no TOML dependency enters go.mod). A stray unknown
-// flag is a usage error, never silently ignored.
+// barkpark entry. Codex's config.toml is merged by a parse-lite textual span
+// splice — deliberately NO TOML dependency in go.mod (charter D10/D11). A stray
+// unknown flag is a usage error, never silently ignored.
 //
 // Targets: cursor | claude-code | codex | cursor-cloud | windsurf | gemini-cli |
 // copilot | zed | agents-md. zed is the odd one on the stanza side — Zed has no
@@ -120,8 +120,11 @@ func flatFile(path, content, topKey string) onrampFile {
 	return onrampFile{Path: path, Content: content, MergeKind: mergeFlat, TopKey: topKey}
 }
 
+// tomlFile stamps codex's config.toml merge metadata: the parse-lite span
+// splice (onramp_write.go mergeTOMLFile) locates the owned [TopKey.ServerKey]
+// span from these — never a hardcoded key.
 func tomlFile(path, content string) onrampFile {
-	return onrampFile{Path: path, Content: content, MergeKind: mergeTOML}
+	return onrampFile{Path: path, Content: content, MergeKind: mergeTOML, TopKey: "mcp_servers", ServerKey: onrampServerKey}
 }
 
 // onrampSpec is the `-o json` emission: the resolved target, the file(s) to
@@ -262,7 +265,11 @@ func zedContextServersStanza() string {
 // anywhere — Codex does not expand it inside a TOML value, so a placeholder would
 // ship as a literal string (charter decision 7). The raised timeouts (defaults
 // 10/60) match docs/setup/CODEX.md — a cold bp binary + first manifest fetch
-// must not trip the launcher.
+// must not trip the launcher. This block is the ONE stanza source: the doc, the
+// print, and the --write splice all carry it byte-identically (decision 14).
+// Provenance: codex-cli 0.144.1 accepts this flat env form, though its own
+// `codex mcp add` writes env as a nested [mcp_servers.barkpark.env] sub-table
+// (live-captured); openai/codex@5c19155c reads both (2026-07-11 source pin).
 func codexTOMLBlock(server string) string {
 	return fmt.Sprintf(`[mcp_servers.barkpark]
 command = "bp"
@@ -621,7 +628,8 @@ func printOnrampHelp(out *writer) {
 	out.outf("")
 	out.outf("Print the exact MCP-registration config for one AI-agent surface — the config")
 	out.outf("block(s), where they belong, and how to verify. With --write, merge just the")
-	out.outf("barkpark entry into the target's JSON config (idempotent; codex TOML is wave 3).")
+	out.outf("barkpark entry into the target's config (idempotent — a JSON key, or codex's")
+	out.outf("[mcp_servers.barkpark] TOML span; everything else survives verbatim).")
 	out.outf("")
 	out.outf("targets")
 	out.outf("  cursor        .cursor/mcp.json stanza (${env:BARKPARK_API_TOKEN}) + rules pointer")
@@ -637,7 +645,7 @@ func printOnrampHelp(out *writer) {
 	out.outf("chatgpt / claude-ai are remote-agent onramps (no local config) — see docs/setup/REMOTE.md")
 	out.outf("")
 	out.outf("flags")
-	out.outf("  --write        merge the barkpark entry into the target's JSON config in place —")
+	out.outf("  --write        merge the barkpark entry into the target's config in place —")
 	out.outf("                 created / updated / unchanged / skipped, per file, atomically")
 	out.outf("  --force        with --write: overwrite an existing, differing barkpark entry")
 	out.outf("  --server URL   BARKPARK_API_URL to bake in (default: your active server, else %s)", onrampDefaultServer)

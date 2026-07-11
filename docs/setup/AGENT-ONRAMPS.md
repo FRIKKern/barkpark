@@ -112,7 +112,7 @@ Every target with a local shell registers the same server: `bp mcp serve` (stdio
 
 ### `--write` — merge it for you
 
-`bp onramp <target> --write` does the work: it merges **only** the `barkpark` entry into the target's JSON config and touches nothing else. Every other MCP server and every unrelated top-level key survives verbatim — only the barkpark key is swapped (a merge re-emits the file in canonical 2-space form, so unusual whitespace or key order is normalised; values are never altered, and a fresh `created` file is the doc stanza byte-for-byte). Writes are **atomic** (temp file + rename, so a crash never leaves a half-written config) and land at mode `0644` / dir `0755` — these are project-committed configs holding a `${env:}` placeholder, not secrets.
+`bp onramp <target> --write` does the work: it merges **only** the `barkpark` entry into the target's config and touches nothing else. Every other MCP server and every unrelated top-level key survives verbatim — only the barkpark key is swapped (a JSON merge re-emits the file in canonical 2-space form, so unusual whitespace or key order is normalised; values are never altered, and a fresh `created` file is the doc stanza byte-for-byte). Codex's `~/.codex/config.toml` is merged as a textual **span splice** (no TOML library): the owned span is the `[mcp_servers.barkpark]` table plus every `[mcp_servers.barkpark.*]` sub-table; every byte outside it survives verbatim, and `--force` replaces the whole span with the canonical flat stanza. Writes are **atomic** (temp file + rename, so a crash never leaves a half-written config) and land at mode `0644` / dir `0755` — these are project-committed configs holding a `${env:}` placeholder, not secrets.
 
 It is **idempotent** and honest per file:
 
@@ -121,7 +121,7 @@ It is **idempotent** and honest per file:
 | `created` | the file did not exist — written with just the barkpark stanza |
 | `updated` | the file existed with no barkpark entry (or a differing one under `--force`) — barkpark merged in, everything else preserved |
 | `unchanged` | the barkpark entry already matches — exit 0, nothing written |
-| `skipped` | a **different** barkpark entry is already present — left untouched; re-run with `--force` to overwrite it (also the Codex `config.toml` row: TOML write is wave 3) |
+| `skipped` | a **different** barkpark entry is already present — left untouched; re-run with `--force` to overwrite it |
 
 Re-running `--write` is always safe: an already-correct config reports `unchanged` and is not rewritten. `--force` only changes the `skipped`→`updated` case; it still never touches a foreign server or an unrelated key.
 
@@ -131,5 +131,5 @@ Re-running `--write` is always safe: an already-correct config reports `unchange
 bp onramp cursor --write            # merge barkpark into .cursor/mcp.json
 bp onramp cursor --write --force    # overwrite an existing, differing barkpark entry
 bp onramp cursor-cloud --write      # both .cursor/environment.json + .cursor/mcp.json, per file
-bp onramp codex --write             # skipped — Codex TOML is wave 3; paste the block by hand
+bp onramp codex --write             # merge the [mcp_servers.barkpark] span into ~/.codex/config.toml
 ```
