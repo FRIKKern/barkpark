@@ -641,6 +641,229 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # The spawn-env seam (chat-task-hands charter D1/D3): the child gets bp
+  # credentials injected and the BEAM's prod secrets SCRUBBED. Before this seam
+  # the child inherited the FULL server env — DATABASE_URL, SECRET_KEY_BASE,
+  # BARKPARK_KEK, every token (live-proven leak). OTP :env semantics (proven
+  # 26–28): the list MERGES into the inherited env, `{~c"NAME", false}` unsets,
+  # and both tuple sides must be charlists. The `:command` override is safe
+  # here (unlike argv assertions): env: rides Port.open regardless of how the
+  # command tuple was produced.
+  describe "spawn env (charter D1/D3 — bp credentials in, prod secrets out)" do
+    @sid "3f9a1c2e-0b7d-4a11-9c33-77e6a2b4d501"
+
+    test "spawn_env/2 injects the three bp vars and unsets every scrubbed secret, charlists both sides" do
+      env = ClaudeChat.spawn_env("bpcs_secret", "claude-chat-3f9a1c2e")
+
+      assert {~c"BARKPARK_API_URL", String.to_charlist(ClaudeChat.mcp_api_url())} in env
+      assert {~c"BARKPARK_API_TOKEN", ~c"bpcs_secret"} in env
+      assert {~c"BARKPARK_WORKER_ID", ~c"claude-chat-3f9a1c2e"} in env
+
+      for name <- ClaudeChat.scrubbed_env_names() do
+        assert {String.to_charlist(name), false} in env, "#{name} must be unset"
+      end
+
+      # Every tuple side is a charlist (or the unset `false`) — a binary on
+      # either side is an ArgumentError crash at Port.open.
+      for {k, v} <- env do
+        assert is_list(k)
+        assert v == false or is_list(v)
+      end
+    end
+
+    test "the denylist covers the live-proven leak set; HOME/PATH are never scrubbed" do
+      scrubbed = ClaudeChat.scrubbed_env_names()
+
+      # The leak the wave verified live, plus the two mandated extras.
+      for name <- ~w(DATABASE_URL SECRET_KEY_BASE BARKPARK_KEK BARKPARK_CLOAK_KEY
+                     SMTP_PASSWORD PREVIEW_JWT_SECRET MEDIA_SIGNING_SECRET
+                     BOKBASEN_CLIENT_SECRET HETZNER_API_TOKEN
+                     RELEASE_COOKIE BARKPARK_TOKEN) do
+        assert name in scrubbed, "#{name} missing from the scrub denylist"
+      end
+
+      # The merge keeps everything unlisted — claude's OAuth lives under $HOME.
+      refute "HOME" in scrubbed
+      refute "PATH" in scrubbed
+    end
+
+    test "worker_id/1 is claude-chat-<sid8> (cmux precedent — one worker per chat tab)" do
+      assert ClaudeChat.worker_id(@sid) == "claude-chat-3f9a1c2e"
+      assert ClaudeChat.worker_id(@sid) =~ ~r/^claude-chat-[0-9a-f]{8}$/
+      # anonymous sessions degrade to the shared anon worker, never crash
+      assert ClaudeChat.worker_id(nil) == "claude-chat-anon"
+      assert ClaudeChat.worker_id("") == "claude-chat-anon"
+    end
+
+    test "the child's REAL env: injected vars present, a seeded secret absent, HOME survives" do
+      file = capture_path("env")
+      secret = "leak-me-#{System.unique_integer([:positive])}"
+      System.put_env("BARKPARK_KEK", secret)
+      on_exit(fn -> System.delete_env("BARKPARK_KEK") end)
+
+      put_chat_config(command: env_dump_command(file))
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: @sid}})
+
+      env = read_child_env(file)
+
+      assert env["BARKPARK_API_URL"] == ClaudeChat.mcp_api_url()
+      # No minter on this session ⇒ the poison sentinel — NEVER absence: bp's
+      # precedence would otherwise fall through to the host's persisted
+      # (possibly admin) credentials. The URL stays THIS server, so calls 401
+      # here instead of resolving elsewhere.
+      assert env["BARKPARK_API_TOKEN"] == ClaudeChat.mint_refused_sentinel()
+      assert env["BARKPARK_WORKER_ID"] == "claude-chat-3f9a1c2e"
+
+      # The seeded BEAM secret must NOT reach the child…
+      refute Map.has_key?(env, "BARKPARK_KEK")
+      # …while the untouched inherited env survives the merge.
+      assert Map.has_key?(env, "HOME")
+      assert Map.has_key?(env, "PATH")
+
+      ClaudeChat.close(session)
+    end
+
+    test "task_hands/1 is :not_attempted without a minter, :unknown once the session is gone" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: @sid}})
+
+      assert ClaudeChat.task_hands(session) == :not_attempted
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+
+      assert ClaudeChat.task_hands(session) == :unknown
+    end
+  end
+
+  # The mint→env link, end-to-end with a REAL mint (charter D1 — ONE minted
+  # bpcs_ token feeds BOTH consumers: the spawn env and the mcp-config file).
+  # DB-backed: a shared sandbox owner covers the Session GenServer's own
+  # process (this file is async: false).
+  describe "spawn env with a real mint (charter D1 — one mint, two consumers)" do
+    setup do
+      owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: true)
+      on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+
+      ws = Barkpark.TenancyFixtures.create_workspace!("chat-spawn-env-ws")
+
+      {:ok, minter} =
+        Barkpark.Auth.create_token(
+          "spawn-env-minter-#{System.unique_integer([:positive])}",
+          "chat admin",
+          "production",
+          ["read", "write"],
+          ws.id
+        )
+
+      %{ws: ws, minter: minter}
+    end
+
+    test "the ONE minted bpcs_ token reaches the child env AND the mcp-config", %{minter: minter} do
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter}
+        })
+
+      env = read_child_env(file)
+      token = env["BARKPARK_API_TOKEN"]
+      assert is_binary(token) and String.starts_with?(token, "bpcs_")
+      assert env["BARKPARK_API_URL"] == ClaudeChat.mcp_api_url()
+      assert env["BARKPARK_WORKER_ID"] == "claude-chat-" <> String.slice(uuid, 0, 8)
+
+      # The SAME mint feeds the mcp-config env block — one mint, two consumers.
+      config_path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json")
+      config = config_path |> File.read!() |> Jason.decode!()
+
+      assert get_in(config, ["mcpServers", "barkpark", "env", "BARKPARK_API_TOKEN"]) == token
+
+      assert ClaudeChat.task_hands(session) == :minted
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "a failed mcp-config write keeps ENV hands — same token, MCP lane lost", %{
+      minter: minter
+    } do
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      # A DIRECTORY squatting on the config path forces File.write to fail
+      # ({:error, :eisdir}) — the env injection must still carry the REAL token.
+      config_path = Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json")
+      File.mkdir_p!(config_path)
+      on_exit(fn -> File.rm_rf(config_path) end)
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter}
+        })
+
+      env = read_child_env(file)
+      assert is_binary(env["BARKPARK_API_TOKEN"])
+      assert String.starts_with?(env["BARKPARK_API_TOKEN"], "bpcs_")
+      assert ClaudeChat.task_hands(session) == :minted
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "a REFUSED mint poisons the child env with the sentinel and reports :mint_refused", %{
+      ws: ws
+    } do
+      # A read-only member fails the up-front :write authorize — the proven
+      # refusal path (auth_session_token_test), exercised end-to-end here.
+      {:ok, reader} =
+        Barkpark.Auth.create_token(
+          "spawn-env-reader-#{System.unique_integer([:positive])}",
+          "read-only member",
+          "production",
+          ["read"],
+          ws.id
+        )
+
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: reader}
+        })
+
+      env = read_child_env(file)
+      # Poison, never absence — and the URL still points HERE, so the child's
+      # bp 401s against THIS server instead of resolving somewhere else.
+      assert env["BARKPARK_API_TOKEN"] == ClaudeChat.mint_refused_sentinel()
+      assert env["BARKPARK_API_URL"] == ClaudeChat.mcp_api_url()
+
+      assert ClaudeChat.task_hands(session) == :mint_refused
+
+      # No config file was written (nothing to leak, no --mcp-config lane).
+      refute File.exists?(Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json"))
+
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+  end
+
   # Outbound control frames (charter D10/D12), wire-proven against the real
   # binary 2026-07-09. These tests capture the EXACT bytes we write to stdin (a
   # `head -n 1` fake drains the first frame to a file). They prove the frame is
@@ -1000,6 +1223,28 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   # `head -n 1` drains exactly the first written frame to a file (flushing on
   # exit), then `cat` keeps the Port alive.
   defp frame_capture_command(file), do: {"sh", ["-c", "head -n 1 > '#{file}'; cat"]}
+
+  # Dumps the child's REAL environment to `file` (write-then-rename so the
+  # reader never sees a partial dump), then `cat` keeps the Port alive. This is
+  # the one place the `:command` override is legitimate for spawn assertions:
+  # env: rides Port.open regardless of how the command tuple was produced (the
+  # vacuous-green law is about argv, which :command bypasses via build_args).
+  defp env_dump_command(file),
+    do: {"sh", ["-c", "env > '#{file}.tmp' && mv '#{file}.tmp' '#{file}'; cat"]}
+
+  # The child env as a map. `parts: 2` keeps values containing `=` intact;
+  # continuation lines of a rare multi-line value simply don't parse as pairs.
+  defp read_child_env(file) do
+    file
+    |> wait_for_file()
+    |> String.split("\n", trim: true)
+    |> Enum.reduce(%{}, fn line, acc ->
+      case String.split(line, "=", parts: 2) do
+        [k, v] -> Map.put(acc, k, v)
+        _ -> acc
+      end
+    end)
+  end
 
   defp read_lines(file), do: file |> wait_for_file() |> String.split("\n", trim: true)
 
