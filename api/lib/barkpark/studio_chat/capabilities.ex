@@ -138,6 +138,43 @@ defmodule Barkpark.StudioChat.Runtime.Capabilities do
   end
 
   @doc """
+  Capabilities of the OpenAI `codex` provider — **designed, not built**
+  (chat-task-hands charter D5: the provider-horizon trigger is CLOSED this wave,
+  no demand signal). This is the moduledoc's promised second constructor: a
+  future provider gets its own `Capabilities.*` so the UI — reading flags —
+  degrades HONESTLY instead of pretending Claude.
+
+  Every capability flag is the safe not-supported value (`false` / `:none` /
+  `[]`): the codex lane exposes no modes, no models, no efforts, no MCP bridge,
+  no plan gate, no agent rail. The `Barkpark.StudioChat.Probe.probe(:codex)`
+  binary check returns `binary: false` on every real host to match — nothing
+  drives this lane until the trigger opens and the flags are filled from a real
+  probed binary. Explicit (not struct-default) so a future change to a
+  `defstruct` default cannot silently grant codex a capability it does not have.
+  """
+  @spec codex() :: t()
+  def codex do
+    %__MODULE__{
+      provider: :codex,
+      modes: [],
+      danger_mode: nil,
+      models: [],
+      efforts: [],
+      thinking: :none,
+      plan: :none,
+      agent_rail: :none,
+      slash_commands: false,
+      mode_switch: false,
+      rewind: false,
+      images: false,
+      mcp_tools: false,
+      agent_spawn_names: [],
+      todo_write: false,
+      user_input: false
+    }
+  end
+
+  @doc """
   The sub-agent spawn tool names for this runtime (charter D40) — the value
   `chat_tool_renderer.ex`'s `@spawn_names` sources at compile time.
   """
