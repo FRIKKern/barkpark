@@ -18,24 +18,33 @@
 //                  slot by a label/href/priority editor (the action-node pattern —
 //                  attrs.action={type:"action",label,href,priority?} PRESENT-ONLY).
 //
-// ── VIEW⇄EDIT PARITY (the callout carve-out) ─────────────────────────────────
+// ── VIEW⇄EDIT PARITY (MODEL B — byte-aligned with card_html/2) ────────────────
 //
-// CHROME = `bp-canvas-*` ONLY (bp-canvas-card, bp-canvas-card__controls). PAINT VIA
-// THE SHARED READER CLASS: the node-view root carries `bp-card` + `bp-card--<tone>`,
-// its title/body wrappers carry `bp-card__t` / `bp-card__d`, its media/action wrappers
-// carry `bp-card__media` / `bp-card__action` — so the reader's OWN
-// `.bp-paper-surface .bp-card*` cascade paints it for FREE (callout-node.js pattern;
-// embedder styles.css mirror + root.html.heex canvas copy). ZERO inline paint, ZERO
-// reader-class duplication in logic. The node-view emits `bp-card__` literals so it
-// inherits the reader paint (parity-gate §3 GRADUATED `bp-card__` out of its forbidden
-// list for exactly this reason); it NEVER emits the legacy fleet GRID wrapper class
+// CHROME = `bp-canvas-*` ONLY (bp-canvas-card, bp-canvas-card__controls). The
+// node-view emits the reader's MODEL-B DOM directly — bare semantics, byte-aligned
+// with `Components.card_html/2` (components.ex), which recurses each slot through
+// the ONE shared compose→walk bridge:
+//   media  → <img src alt style="max-width:100%;height:auto"[ width height]>
+//            (walk.ex image/1 — a bare img, NO wrapper div)
+//   title  → <h2>text</h2> (PdHeading, default level 2 — here a contentEditable
+//            island writing node.attrs.title)
+//   body   → <p>…</p> (PdParagraph, classless — here the contentDOM IS the <p>)
+//   action → <a href class="bp-button[ bp-button--primary]">label</a>
+//            (walk.ex button/2's binary priority collapse)
+// inside <div class="bp-card[ bp-card--<tone>]">, slots in the reader ORDER
+// media, title, body, action. The root ALSO carries the `bp-canvas-card` mount
+// hook + `data-bp-type` stamp (edit-only, the section-node precedent), and the
+// #2398 media-picker/action-editor CONTROLS ride a contentEditable=false bar
+// OUTSIDE the reader-shape subtree. The node-view emits NO card slot-chrome class
+// (the model-A `__t`/`__d`/`__media`/`__action` wrappers) — the reader dropped that
+// chrome (PRs #1529/#1539) and parity-gate §3 forbids the literal again (so it may
+// not appear here even in a comment); __card_parity.test.mjs pins the mounted shape
+// against the reader ground truth above. It NEVER emits the legacy fleet GRID wrapper class
 // (still gated) — a grid section of cards emits `bp-section__grid` instead.
 //
-// The reader ground truth is Components.card_html/1 (byte-aligned to ONE legacy
-// `cards` item): <div class="bp-card[ bp-card--<tone>]">[media][__t][__d][action]</div>.
-// The body slot FLATTENS to plain text server-side (Slots.card_body_text), so inline
-// marks authored here round-trip in persistence but do NOT render — a deliberate
-// STEP-4 tradeoff (byte-compat over rich body).
+// The body slot persists as ONE paragraph whose inline content round-trips
+// (run-convert cardNodeToSlots) — model B renders it as a real <p> with inline
+// marks, so what is authored here is what /papers shows.
 //
 // DOM-aware (the NodeView builds real DOM) but the Node SCHEMA object loads in plain
 // Node (imports ONLY @tiptap/core; references `document` lazily inside addNodeView,
@@ -172,22 +181,26 @@ export const Card = Node.create({
     ];
   },
 
-  // ── the NodeView: reader-shaped card around an editable body contentDOM ───────
+  // ── the NodeView: the reader's MODEL-B card around an editable body contentDOM ─
   //
   //   <div class="bp-canvas-card bp-card[ bp-card--<tone>]" data-bp-type="card">
   //     <div class="bp-canvas-card__controls">              ← PM-safe chrome (fenced)
   //       <bp-media-picker chrome="ghost">                  ← the REAL media editor
   //       <input action-label> <input action-href> <select action-priority>
   //     </div>
-  //     <div class="bp-card__media"><img></div>            ← media chrome (present-only)
-  //     <div class="bp-card__t" contenteditable>TITLE</div> ← EDITABLE title island
-  //     <div class="bp-card__d">…</div>                     ← contentDOM (editable body)
-  //     <div class="bp-card__action"><a>…</a></div>         ← action chrome (present-only)
+  //     <img style="max-width:100%;height:auto">            ← media slot (present-only,
+  //                                                            the reader's bare <img>)
+  //     <h2 contenteditable>TITLE</h2>                       ← EDITABLE title island
+  //     <p>…</p>                                             ← contentDOM (editable body)
+  //     <a class="bp-button[ bp-button--primary]">…</a>      ← action slot (present-only,
+  //                                                            the reader's PdButton)
   //   </div>
   //
-  // Colour rides ENTIRELY on `bp-card--<tone>` (reader cascade + embedder mirror). The
-  // title island writes node.attrs.title via a debounced, re-entrancy-guarded
-  // setNodeMarkup; its events/mutations are hidden from PM (stopEvent/ignoreMutation).
+  // Colour rides ENTIRELY on `bp-card--<tone>` (reader cascade + embedder mirror);
+  // the slots are the reader's OWN bare-semantic shapes, so the surface h2/p/img/
+  // .bp-button rules paint them identically in View and Edit. The title island
+  // writes node.attrs.title via a debounced, re-entrancy-guarded setNodeMarkup;
+  // its events/mutations are hidden from PM (stopEvent/ignoreMutation).
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
@@ -259,31 +272,31 @@ export const Card = Node.create({
         actionPrioritySelect
       );
 
-      // media chrome — a read-only <img> wrapper (present-only).
-      const mediaEl = document.createElement("div");
-      mediaEl.className = "bp-card__media";
-      mediaEl.contentEditable = "false";
+      // media slot — the reader's BARE <img> (walk.ex image/1): the same inline
+      // max-width:100%/height:auto rides the element, NO model-A media wrapper div
+      // (model B). Read-only chrome, present-only (hidden when the slot is absent).
       const mediaImg = document.createElement("img");
-      mediaEl.appendChild(mediaImg);
+      mediaImg.setAttribute("contenteditable", "false");
+      mediaImg.style.maxWidth = "100%";
+      mediaImg.style.height = "auto";
 
-      // title island — an editable contentEditable island writing node.attrs.title.
-      const titleEl = document.createElement("div");
-      titleEl.className = "bp-card__t";
+      // title slot — the reader's semantic <h2> (PdHeading, default level 2), here
+      // an editable contentEditable island writing node.attrs.title.
+      const titleEl = document.createElement("h2");
       titleEl.setAttribute("data-test-id", "paper-card-title");
 
-      // body — the contentDOM hole PM fills with the inline body slot.
-      const body = document.createElement("div");
-      body.className = "bp-card__d";
+      // body slot — the reader's <p>: the contentDOM IS the paragraph, so PM fills
+      // the card's inline* content straight into the same classless <p> shape
+      // card_html/2 emits (zero wrapper).
+      const body = document.createElement("p");
 
-      // action chrome — a read-only link wrapper (present-only).
-      const actionEl = document.createElement("div");
-      actionEl.className = "bp-card__action";
-      actionEl.contentEditable = "false";
+      // action slot — the reader's PdButton anchor (walk.ex button/2). Read-only
+      // chrome, present-only; label/href/priority are edited via the controls bar.
       const actionLink = document.createElement("a");
-      actionEl.appendChild(actionLink);
+      actionLink.setAttribute("contenteditable", "false");
 
       // Reader order: media, title, body, action. Controls ride at the top (edit-only).
-      dom.append(controls, mediaEl, titleEl, body, actionEl);
+      dom.append(controls, mediaImg, titleEl, body, actionLink);
 
       let syncingTitle = false;
       let titleFocused = false;
@@ -312,15 +325,27 @@ export const Card = Node.create({
         titleEl.contentEditable = editable ? "true" : "false";
         titleEl.style.display = hasTitle || (editable && titleFocused) ? "" : "none";
 
-        // media chrome (present-only): show the <img> iff a media element with a src.
+        // media slot (present-only): show the bare <img> iff a media element with
+        // a src. width/height mirror PdImage's optional dims (the media element is
+        // carried VERBATIM, so an API-authored width/height paints here too).
         const media = a.media;
         const src = (media && media.src) || "";
         if (src) {
           mediaImg.setAttribute("src", src);
           mediaImg.setAttribute("alt", (media && media.alt) || "");
-          mediaEl.style.display = "";
+          if (media && media.width != null) {
+            mediaImg.setAttribute("width", String(media.width));
+          } else {
+            mediaImg.removeAttribute("width");
+          }
+          if (media && media.height != null) {
+            mediaImg.setAttribute("height", String(media.height));
+          } else {
+            mediaImg.removeAttribute("height");
+          }
+          mediaImg.style.display = "";
         } else {
-          mediaEl.style.display = "none";
+          mediaImg.style.display = "none";
         }
         // Keep the media picker in sync with an EXTERNAL attr change (an echo, an undo)
         // via its `value` PROPERTY setter (re-renders the preview; does NOT re-fire
@@ -328,16 +353,22 @@ export const Card = Node.create({
         // is mid-interaction with.
         if (mediaPicker.value !== src) mediaPicker.value = src;
 
-        // action chrome (present-only): show the link iff a label or href.
+        // action slot (present-only): show the PdButton anchor iff a label or
+        // href. The class mirrors walk.ex button/2's binary priority collapse:
+        // primary iff priority=="primary", else the plain secondary outline.
         const action = a.action;
         const label = (action && action.label) || "";
         const href = (action && action.href) || "";
         if (label || href) {
           actionLink.textContent = label;
           actionLink.setAttribute("href", href);
-          actionEl.style.display = "";
+          actionLink.className =
+            action && action.priority === "primary"
+              ? "bp-button bp-button--primary"
+              : "bp-button";
+          actionLink.style.display = "";
         } else {
-          actionEl.style.display = "none";
+          actionLink.style.display = "none";
         }
         if (actionLabelInput.value !== label && document.activeElement !== actionLabelInput) {
           actionLabelInput.value = label;
@@ -478,8 +509,8 @@ export const Card = Node.create({
           if (m.type === "attributes" && m.target === dom) return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // controls (inc. the picker WC's own preview DOM) are attr writes
-          if (mediaEl.contains(m.target)) return true; // media chrome is attr-painted
-          if (actionEl.contains(m.target)) return true; // action chrome is attr-painted
+          if (mediaImg.contains(m.target)) return true; // media slot is attr-painted
+          if (actionLink.contains(m.target)) return true; // action slot is attr-painted
           // Let PM handle mutations inside the editable body (contentDOM); ignore chrome.
           return !body.contains(m.target);
         },
