@@ -43,6 +43,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/claim",
                  "/v1/tasks/:doc_id/close",
                  "/v1/tasks/:doc_id/stamp",
+                 "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/move"
                ])
 
@@ -84,7 +85,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the nine task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the ten task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -95,6 +96,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.claim" in ids
       assert "task.close" in ids
       assert "task.stamp" in ids
+      assert "task.pulse" in ids
       assert "task.next" in ids
       assert "task.move" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
@@ -102,7 +104,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 9
+      assert length(cmds) == 10
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
@@ -168,6 +170,24 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert stamp_flags["miss"].type == "bool"
       assert stamp_flags["evidence"].type == "string"
       assert stamp_flags["note"].type == "string"
+
+      # task.pulse (expressive-agent-loops D9): the pinned CLI shape —
+      # `bp task pulse <id> <worker> --now "…" [--criterion N]` — NO epoch
+      # anywhere (pulse IS the renewal; it survives fences).
+      pulse = Enum.find(cmds, &(&1.id == "task.pulse"))
+      assert pulse.writes
+      assert pulse.default_output == "minimal"
+      assert pulse.http.path_template == "/v1/tasks/:doc_id/pulse"
+
+      pulse_arg_names = Enum.map(pulse.args, & &1.name)
+      assert pulse_arg_names == ["doc_id", "worker_id"]
+      assert Enum.all?(pulse.args, & &1.required)
+      refute "observed_epoch" in pulse_arg_names
+
+      pulse_flags = Map.new(pulse.flags, &{&1.name, &1})
+      assert pulse_flags["now"].type == "string"
+      assert pulse_flags["criterion"].type == "int"
+      refute Map.has_key?(pulse_flags, "epoch")
 
       # task.next is the queue-based atomic claim (POST /v1/tasks/claim):
       # worker_id required, phase_id optional — both body args (no path
@@ -295,12 +315,22 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert Enum.any?(cmds, fn c -> c["id"] == "access.mine" end)
 
       by_id = Map.new(access_cmds, fn c -> {c["id"], c} end)
-      assert by_id["access.grant"]["http"] == %{"method" => "POST", "path_template" => "/v1/access"}
+
+      assert by_id["access.grant"]["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/access"
+             }
+
       assert by_id["access.grant"]["auth_tier"] == "scoped_admin"
       assert by_id["access.grant"]["writes"] == true
       assert by_id["access.ls"]["http"] == %{"method" => "GET", "path_template" => "/v1/access"}
       assert by_id["access.ls"]["auth_tier"] == "read"
-      assert by_id["access.show"]["http"] == %{"method" => "GET", "path_template" => "/v1/access/:id"}
+
+      assert by_id["access.show"]["http"] == %{
+               "method" => "GET",
+               "path_template" => "/v1/access/:id"
+             }
+
       assert by_id["access.revoke"]["http"] == %{
                "method" => "DELETE",
                "path_template" => "/v1/access/:id"

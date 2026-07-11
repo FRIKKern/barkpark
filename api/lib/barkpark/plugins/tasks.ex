@@ -37,12 +37,12 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
-    * `cli_commands/0` — the nine `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
-      `claim`, `close`, `stamp`, `next`, `move`) the `/v1/capabilities` manifest
-      exposes. Five
+    * `cli_commands/0` — the ten `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
+      `claim`, `close`, `stamp`, `pulse`, `next`, `move`) the `/v1/capabilities`
+      manifest exposes. Five
       moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry;
-      `next` (the queue-based atomic claim) and `stamp` (criterion-level
-      mid-claim evidence) were added later. `task` is no
+      `next` (the queue-based atomic claim), `stamp` (criterion-level mid-claim
+      evidence) and `pulse` (now-line heartbeat + lease renewal) were added later. `task` is no
       longer a core noun: the capabilities controller now derives
       `source: "plugin:tasks"` provenance for these commands. The content-graph
       read verbs (`graph` / `graph-orphans` / `graph-dangling`) are NOT here —
@@ -313,10 +313,10 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   @doc """
-  The `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
-  order-preserving — the `scope "/v1/tasks"` block this replaces
-  in `router.ex`
-  (C4-3b). Every spec carries `auth: :token_root`, so the dormant host-level
+  The thirteen `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
+  order-preserving — the `scope "/v1/tasks"` block this replaced in `router.ex`
+  (C4-3b), plus later verb additions (stamp, pulse). Every spec carries
+  `auth: :token_root`, so the dormant host-level
   `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)` wrapper
   mounts them at `/v1/tasks/*` behind the `[:api, :require_token]` pipeline
   (authenticated bearer, NOT admin — claim/close are workflow ops, not document
@@ -342,6 +342,7 @@ defmodule Barkpark.Plugins.Tasks do
        auth: :token_root},
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
+      {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
       {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
@@ -369,7 +370,7 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Nine verbs over nine routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Ten verbs over ten routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
   not document mutations):
 
@@ -386,6 +387,9 @@ defmodule Barkpark.Plugins.Tasks do
       a valid outcome, not an error.
     * `move` — `POST /v1/tasks/:doc_id/move` (rail-l3 re-parent). WRITES, minimal
       receipt.
+    * `pulse` — `POST /v1/tasks/:doc_id/pulse` (now-line heartbeat + lease
+      renewal, one atomic write; no epoch arg — pulse survives fences). WRITES,
+      minimal receipt.
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -702,6 +706,49 @@ defmodule Barkpark.Plugins.Tasks do
           }
         ],
         flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.pulse",
+        noun: "task",
+        verb: "pulse",
+        summary:
+          "Heartbeat a held claim: write the now-line (what you're doing right now) AND renew the lease (epoch bump + ts refresh) in one atomic write. No epoch arg — pulse survives fence bumps; a lost lease (reaped/released/closed) is 409 not_holder, never a silent re-claim. Boards render claim.now with its ts so a stale pulse reads stale.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/pulse"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to pulse."
+          },
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity that holds the claim."
+          }
+        ],
+        flags: [
+          %{
+            name: "now",
+            type: "string",
+            summary:
+              "The now-line text (required, max 500 bytes), e.g. \"warm-up pinned, rerunning\"."
+          },
+          %{
+            name: "criterion",
+            type: "int",
+            summary:
+              "Optional acceptance_criteria index this pulse is working on (boards spin that lock)."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,

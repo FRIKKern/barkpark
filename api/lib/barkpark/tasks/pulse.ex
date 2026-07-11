@@ -1,0 +1,192 @@
+defmodule Barkpark.Tasks.Pulse do
+  @moduledoc false
+  # `bp task pulse` — the now-line heartbeat that RENEWS the lease.
+  #
+  # Writes `content.claim.now = %{"text", "ts", "criterion"?}` (what the worker
+  # is doing right now) AND renews the claim lease — epoch bump + `ts_iso`
+  # refresh — in ONE atomic `Repo.update_all`. Never two writes: a board
+  # reading between them would render a fresh now-line on a dead lease (or a
+  # stale now-line on a fresh lease). Boards render staleness/decay from
+  # `claim.now.ts` vs the lease TTL — a pulse past TTL must READ stale, never
+  # lie fresh, which is why `ts` is stamped server-side, same instant as the
+  # lease's `ts_iso`.
+  #
+  # Naming disambiguation — three "pulses" live in this repo, this is ONE:
+  #   * bare `Barkpark.Pulse` is Shared Storm's presence substrate — NOT this;
+  #   * the Go taskboard's `pulseMsg` is an SSE-keepalive tick — NOT this;
+  #   * THIS module is the task-lease heartbeat behind
+  #     `POST /v1/tasks/:doc_id/pulse` (`bp task pulse`).
+  #
+  # Write-path law (expressive-agent-loops charter D7): pulse is its OWN write
+  # path — a `Claim.do_renew` sibling — NEVER a thin `claim_by_id` call.
+  # `claim_by_id`'s fall-through silently RE-CLAIMS with a fresh `work_digest`
+  # when the lease has lapsed (proven hazard): a crashed-and-reaped worker's
+  # pulse would steal the row back and swallow any brief edit. A lost lease
+  # (reaped / released / closed) must REFUSE with `{:error, :not_holder}`.
+  #
+  # Gates (charter D7): holder-gated via `Tasks.Internal.check_holder/2`, but
+  # NO epoch fence — pulse IS the renewal, so it survives L4 fence bumps
+  # exactly like `Claim.do_renew` (a pulse after a blocker edge landed still
+  # renews; the fence's job is refusing the CLOSE, not the heartbeat).
+  # `work_digest` + `work_field_digests` stay untouched so the L2 close-fence
+  # still catches a brief edited under the claim.
+  #
+  # Lock family (charter D6): advisory key `task:<doc_id>` STRING — the
+  # renewal family (claim / ttl_sweeper / compactor) — so a pulse serializes
+  # with the TTL sweeper's reap of the same row. The key is the ROW's doc_id
+  # (read before locking, re-read after), matching the sweeper's key exactly.
+  #
+  # Emits a `task.pulse` mutation_event in the SAME transaction (charter D8 —
+  # the `/v1/tasks/events` feed projects it) and mirrors the PubSub broadcast
+  # post-commit so live boards tick without polling.
+
+  import Ecto.Query, only: [from: 2]
+
+  import Barkpark.Tasks.Internal,
+    only: [
+      generate_rev: 0,
+      current_epoch: 1,
+      check_holder: 2,
+      insert_mutation_event!: 5,
+      caller_stamp: 1,
+      task_broadcast: 4,
+      emit_broadcasts: 1
+    ]
+
+  alias Barkpark.Content.Document
+  alias Barkpark.Repo
+
+  @event_task_pulse "task.pulse"
+
+  @doc "The mutation_events kind a pulse emits."
+  def event_kind, do: @event_task_pulse
+
+  @doc """
+  Pulse the task's now-line + renew its lease, in one atomic write.
+
+  `task_id` is the `documents.id` uuid (the controller resolves `doc_id` →
+  row, same as close/release/move). Opts:
+
+    * `:text` (required) — the now-line, e.g. `"warm-up pinned, rerunning"`.
+    * `:criterion` — optional non-negative integer index into
+      `acceptance_criteria`, naming which lock the worker is on.
+    * `:caller_token_id` — audit stamp for the mutation_event.
+
+  No `:observed_epoch` — pulse deliberately has no epoch fence (see moduledoc).
+
+  Returns `{:ok, doc}`, or `{:error, :not_found | :not_holder | :stale_claim}`.
+  `:not_holder` covers every lost-lease shape: reaped (worker cleared),
+  released, closed (no longer `in_progress`), or held by someone else.
+  """
+  def pulse(task_id, worker_id, opts \\ []) when is_binary(task_id) and is_binary(worker_id) do
+    text = Keyword.fetch!(opts, :text)
+    criterion = Keyword.get(opts, :criterion)
+    caller_token_id = Keyword.get(opts, :caller_token_id)
+
+    result =
+      Repo.transaction(fn ->
+        # Read once for the lock key, lock, then RE-read: the advisory lock
+        # (renewal family, `task:<doc_id>` string — the sweeper's exact key)
+        # must be held before the row state we gate on is read, or a reap
+        # committing between our read and our write could race the holder
+        # check. doc_id is immutable, so the pre-lock read is safe for keying.
+        # Tenancy was resolved at the controller (doc_id -> task.id); the
+        # holder check below binds the caller to this exact row (same
+        # accepted posture as Claim.do_renew and Close's re-read).
+        # global-read: by-PK read for the renewal-family lock key
+        case Repo.get(Document, task_id) do
+          nil ->
+            {:error, :not_found}
+
+          %Document{doc_id: doc_id} ->
+            _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task:" <> doc_id])
+
+            # global-read: in-lock re-read of the same PK row (see above)
+            doc = Repo.get!(Document, task_id)
+
+            with :ok <- check_live(doc),
+                 :ok <- check_holder(doc, worker_id) do
+              apply_pulse(doc, worker_id, text, criterion, caller_token_id)
+            end
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, doc, broadcasts}} ->
+        :ok = emit_broadcasts(broadcasts)
+        {:ok, doc}
+
+      {:ok, {:error, reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # A pulse needs a LIVE lease. Anything not in_progress (reaped rows flip to
+  # "open" with worker cleared; released rows likewise; closed rows are
+  # done/cancelled — close keeps `claim.worker` for the dossier, so the holder
+  # check alone would wrongly pass) is a lost lease → `:not_holder`, the ONE
+  # honest answer the charter pins for every lost-lease shape.
+  defp check_live(%Document{content: content}) do
+    case Map.get(content || %{}, "lifecycle_status") do
+      "in_progress" -> :ok
+      _ -> {:error, :not_holder}
+    end
+  end
+
+  # The one atomic write — mirrors `Claim.do_renew` (epoch bump + ts_iso
+  # refresh, work_digest DELIBERATELY untouched) plus the now-line. `ts` on
+  # the now-line is the SAME instant as the lease's `ts_iso`, so decay
+  # rendering needs no clock reconciliation.
+  defp apply_pulse(%Document{content: content} = doc, worker_id, text, criterion, caller_token_id) do
+    observed_rev = doc.rev
+    new_rev = generate_rev()
+    claim = Map.get(content, "claim") || %{}
+    next_epoch = current_epoch(doc) + 1
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    now =
+      %{"text" => text, "ts" => ts_iso}
+      |> then(fn m ->
+        if is_integer(criterion), do: Map.put(m, "criterion", criterion), else: m
+      end)
+
+    new_claim =
+      claim
+      |> Map.put("epoch", next_epoch)
+      |> Map.put("ts_iso", ts_iso)
+      |> Map.put("now", now)
+
+    new_content = Map.put(content, "claim", new_claim)
+
+    {rows, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+      |> Repo.update_all(
+        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+      )
+
+    case rows do
+      1 ->
+        updated = %Document{doc | content: new_content, rev: new_rev}
+
+        ev =
+          insert_mutation_event!(
+            updated,
+            @event_task_pulse,
+            observed_rev,
+            "api",
+            Map.merge(
+              %{"pulse" => Map.merge(now, %{"worker" => worker_id, "epoch" => next_epoch})},
+              caller_stamp(caller_token_id)
+            )
+          )
+
+        {:ok, updated, [task_broadcast(updated, @event_task_pulse, ev, observed_rev)]}
+
+      0 ->
+        {:error, :stale_claim}
+    end
+  end
+end
