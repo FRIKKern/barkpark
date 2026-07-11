@@ -122,3 +122,104 @@ func TestTranslateResurrectErrorPaths(t *testing.T) {
 		}
 	})
 }
+
+// hintJob builds a resurrect JobSpec pinned to (pinRegion,pinType), carrying a
+// bundle whose source provider is srcProvider and whose archive-time shape hint is
+// (hintRegion,hintType). kind is the TARGET provider (empty → hetzner).
+func hintJob(kind, pinRegion, pinType, srcProvider, hintRegion, hintType string) JobSpec {
+	return JobSpec{
+		Kind:       kind,
+		Region:     pinRegion,
+		ServerType: pinType,
+		BundleRef: &BundleRef{
+			Manifest: BundleManifest{
+				SourceProvider: srcProvider,
+				Spec:           BundleSpec{Region: hintRegion, ServerType: hintType},
+			},
+		},
+	}
+}
+
+// TestResolveRestoreBasePrecedence proves the charter-D49 precedence pin > archived
+// hint > provider default, field by field, including the two refutations the wave
+// owes: a DIFFERING pin still wins, and a CROSS-PROVIDER job ignores the hint.
+func TestResolveRestoreBasePrecedence(t *testing.T) {
+	// The provider default the bottom tier resolves to (hetzner). Read from the same
+	// source the code uses so the test tracks any default change.
+	def := cloud.DefaultSpec(cloud.ProviderHetzner)
+	if def.Region == "" || def.ServerType == "" {
+		t.Fatalf("test premise: hetzner DefaultSpec must be concrete, got %+v", def)
+	}
+
+	t.Run("pin wins over a differing hint", func(t *testing.T) {
+		// REFUTE: even when the bundle carries a real, DIFFERENT shape, an explicit pin
+		// is an operator/CP choice and must win — the hint never overrides it.
+		job := hintJob("hetzner", "nbg1", "cax11", "hetzner", "hel1", "cx33")
+		got := resolveRestoreBase(job)
+		if got.Region != "nbg1" || got.ServerType != "cax11" {
+			t.Fatalf("pin must win over hint; got %+v, want {nbg1 cax11}", got)
+		}
+	})
+
+	t.Run("unpinned same-provider takes the hint", func(t *testing.T) {
+		// The core new behavior: an unpinned same-provider claim rebuilds to the
+		// archived shape (not the generic provider default).
+		job := hintJob("hetzner", "", "", "hetzner", "hel1", "cx33")
+		got := resolveRestoreBase(job)
+		if got.Region != "hel1" || got.ServerType != "cx33" {
+			t.Fatalf("unpinned same-provider must take the hint; got %+v, want {hel1 cx33}", got)
+		}
+	})
+
+	t.Run("empty Kind normalizes to hetzner and takes the hint", func(t *testing.T) {
+		// An OLD control plane omits kind; the zero value must route hetzner, so a
+		// hetzner-sourced hint still applies.
+		job := hintJob("", "", "", "hetzner", "hel1", "cx33")
+		got := resolveRestoreBase(job)
+		if got.Region != "hel1" || got.ServerType != "cx33" {
+			t.Fatalf("empty kind must be hetzner + take the hint; got %+v", got)
+		}
+	})
+
+	t.Run("cross-provider job ignores the hint", func(t *testing.T) {
+		// REFUTE: a Hetzner-archived shape is meaningless to Azure (D50 — cross-provider
+		// size mapping is deferred, no heuristic guessed), so the hint is dropped and the
+		// base falls to the provider default. Azure's DefaultSpec is empty today, which is
+		// the honest "operator must pin" outcome — assert the hint values did NOT leak in.
+		job := hintJob("azure", "", "", "hetzner", "hel1", "cx33")
+		got := resolveRestoreBase(job)
+		if got.Region == "hel1" || got.ServerType == "cx33" {
+			t.Fatalf("cross-provider must ignore the hint; got %+v (hint leaked)", got)
+		}
+	})
+
+	t.Run("no pin and no hint falls to the provider default", func(t *testing.T) {
+		// Same provider but a blank hint (an unpinned archive stamped "") → the provider
+		// default fills both fields.
+		job := hintJob("hetzner", "", "", "hetzner", "", "")
+		got := resolveRestoreBase(job)
+		if got.Region != def.Region || got.ServerType != def.ServerType {
+			t.Fatalf("blank pin+hint must fall to the default; got %+v, want %+v", got, def)
+		}
+	})
+
+	t.Run("field-by-field: pin one, hint fills the other", func(t *testing.T) {
+		// The pin sets only the region; the same-provider hint fills the unpinned
+		// server_type — precedence resolves per field, not all-or-nothing.
+		job := hintJob("hetzner", "nbg1", "", "hetzner", "hel1", "cx33")
+		got := resolveRestoreBase(job)
+		if got.Region != "nbg1" || got.ServerType != "cx33" {
+			t.Fatalf("per-field precedence: pin region + hint server_type; got %+v, want {nbg1 cx33}", got)
+		}
+	})
+
+	t.Run("no bundle ref falls to the provider default", func(t *testing.T) {
+		// Defensive: a resurrect JobSpec should always carry a BundleRef, but a nil one
+		// must not panic and must resolve to the default.
+		job := JobSpec{Kind: "hetzner"}
+		got := resolveRestoreBase(job)
+		if got.Region != def.Region || got.ServerType != def.ServerType {
+			t.Fatalf("nil bundle ref must fall to the default; got %+v, want %+v", got, def)
+		}
+	})
+}
