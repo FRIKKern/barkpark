@@ -264,7 +264,8 @@ defmodule Barkpark.Tasks.EventsTest do
 
   describe "route precedence — /v1/tasks/events over /tasks/:doc_id" do
     test "GET /v1/tasks/events resolves to the :events action, never :show(doc_id=events)" do
-      info = Phoenix.Router.route_info(BarkparkWeb.Router, "GET", "/v1/tasks/events", "example.com")
+      info =
+        Phoenix.Router.route_info(BarkparkWeb.Router, "GET", "/v1/tasks/events", "example.com")
 
       assert info.plug == BarkparkWeb.TasksController
       assert info.plug_opts == :events
@@ -274,7 +275,12 @@ defmodule Barkpark.Tasks.EventsTest do
 
     test "a real id still resolves to the :show catchall (precedence is surgical)" do
       info =
-        Phoenix.Router.route_info(BarkparkWeb.Router, "GET", "/v1/tasks/task-abc123", "example.com")
+        Phoenix.Router.route_info(
+          BarkparkWeb.Router,
+          "GET",
+          "/v1/tasks/task-abc123",
+          "example.com"
+        )
 
       assert info.plug == BarkparkWeb.TasksController
       assert info.plug_opts == :show

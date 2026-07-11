@@ -126,7 +126,10 @@ defmodule BarkparkWeb.TasksController do
   def events(conn, params) do
     dataset = request_dataset(conn)
     since = Params.parse_int(params["since"], 0)
-    limit = Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
+
+    limit =
+      Tasks.Events.page_limit(Params.parse_int(params["limit"], Tasks.Events.default_limit()))
+
     workspace_id = Keyword.get(scope_opts(conn), :workspace_id)
 
     rows =
