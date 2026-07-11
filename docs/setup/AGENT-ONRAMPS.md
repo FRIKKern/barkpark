@@ -16,6 +16,7 @@ Every target below wires the same `bp mcp serve` tool catalog (curated task tool
 | Windsurf (Cascade) | `~/.codeium/mcp_config.json` (merge the key) | [WINDSURF.md](WINDSURF.md) |
 | Gemini CLI | `.gemini/settings.json` (merge the key) | [GEMINI-CLI.md](GEMINI-CLI.md) |
 | VS Code (GitHub Copilot) | `.vscode/mcp.json` (top-level `servers`) | [COPILOT.md](COPILOT.md) |
+| Zed | `~/.config/zed/settings.json` (`context_servers`, merge the key) | [ZED.md](ZED.md) |
 | Codex · Aider · any AGENTS.md agent | `./AGENTS.md` (marker-managed teach block) | [AGENTS-MD.md](AGENTS-MD.md) |
 | ChatGPT · Claude.ai | Custom GPT Actions · remote MCP | [REMOTE.md](REMOTE.md) |
 
@@ -107,7 +108,7 @@ Every target with a local shell registers the same server: `bp mcp serve` (stdio
 
 ## One-step onramp — `bp onramp <target>`
 
-`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default (nothing is written). Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli`, `copilot` (`chatgpt` / `claude-ai` are remote — see [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` env placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
+`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default (nothing is written). Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli`, `copilot`, `zed` (`chatgpt` / `claude-ai` are remote — see [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` env placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
 
 ### `--write` — merge it for you
 
