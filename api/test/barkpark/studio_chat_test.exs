@@ -11,8 +11,19 @@ defmodule Barkpark.StudioChatTest do
     * the rename ⇄ AI-title clobber guard holds BOTH ways (human always wins,
       the SQL WHERE decides the race);
     * metrics accumulate model-agnostically across turns.
+
+  `async: false` — REQUIRED by the "image attachments" describe below, which
+  does `Application.put_env(:barkpark, StudioChat, attachments_dir: …)` in its
+  setup. Application env is PROCESS-GLOBAL VM state (the SQL sandbox isolates the
+  DB, not the env). `StudioChat.attachments_dir/0` reads that same key at
+  runtime, so a concurrent async test writing/reading attachments would observe
+  this module's mutation and race its `on_exit` restore — an order-dependent
+  flake (the solved sandbox-ownership scar shape). The only other reader is
+  `chat_live_test.exs`, itself async:false — the leak is latent, not absent.
+  Serial execution is the correct fix; the traded parallelism is worth the
+  correctness.
   """
-  use Barkpark.DataCase, async: true
+  use Barkpark.DataCase, async: false
 
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{Message, Session}

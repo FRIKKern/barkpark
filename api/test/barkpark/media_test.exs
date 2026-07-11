@@ -18,11 +18,22 @@ defmodule Barkpark.MediaTest do
   hooks — it is exercised through the controller integration tests; this file
   stays at the context boundary.
 
-  `async: true` is safe here — every DB write is row-level and the SQL sandbox
-  provides per-test isolation. Tests that create workspace fixtures use unique
-  slugs from `System.unique_integer/1` to avoid collisions.
+  `async: false` — REQUIRED, not incidental. The upload-validation tests below
+  drive `put_media_cfg/1`, which does `Application.put_env(:barkpark,
+  :media_uploads, …)`. Application env is PROCESS-GLOBAL VM state; the SQL
+  sandbox isolates the DB, NOT the env. `Barkpark.Media.validate_upload/3` reads
+  that same key at runtime (`Application.get_env/3`), so a concurrent async test
+  calling `Media.upload/3` would observe this module's mutation — and race its
+  `on_exit` restore (the exact order-dependent flake shape of the solved
+  sandbox-ownership scar). Today the only other reader lives in an async:false
+  module (`v1_media_test.exs`), so the leak is latent — but relying on "no other
+  async reader exists yet" is a landmine, not isolation. Serial execution is the
+  real fix; the parallelism we trade is worth the correctness (matches the
+  suite's convention — every dedicated global-state test is already async:false).
+  DB writes remain row-level and workspace fixtures use unique slugs from
+  `System.unique_integer/1` to avoid collisions.
   """
-  use Barkpark.DataCase, async: true
+  use Barkpark.DataCase, async: false
 
   import Barkpark.TenancyFixtures
 
