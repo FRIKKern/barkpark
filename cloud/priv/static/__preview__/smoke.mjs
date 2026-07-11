@@ -347,6 +347,28 @@ const EXPECTATIONS = {
       assert.ok(panel.includes("Documents"), "the documents meter renders in the wall");
     },
   },
+  // w6 (OC25): the instance Webhooks sub-tab. mountWebhooksTab re-acquires the
+  // tabpanel by id (the mountUsageTab idiom), so the shell + the endpoint list
+  // render into the OBSERVABLE #instance-tabpanel. The tab strip lands in
+  // #instance-body; the list (each row carrying the new Edit action) lands in
+  // #instance-tabpanel. The edit/create MODAL flows are click-driven (inert here)
+  // and DOM-tested in __app.test.mjs.
+  "webhooks-panel": {
+    what: "the Webhooks tab routes and fills the endpoint list with the Edit action",
+    check(reg) {
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-body rendered empty");
+      for (const needle of ["inst-tabs", '/webhooks" aria-current="page"', 'id="instance-tabpanel"', ">Webhooks<"]) {
+        assert.ok(body.includes(needle), "#instance-body missing " + JSON.stringify(needle));
+      }
+      const panel = (reg.get("instance-tabpanel") || {}).innerHTML || "";
+      assert.ok(panel.length > 0, "#instance-tabpanel webhook list rendered empty");
+      assert.ok(panel.includes('class="wh-card"'), "the endpoint list must render webhook cards");
+      assert.ok(panel.includes("data-wh-edit"), "each card must carry the w6 Edit action");
+      assert.ok(panel.includes("Prod indexer"), "the fixture webhook name renders");
+      assert.ok(panel.includes("data-wh-delete"), "the full action bar renders (delete present)");
+    },
+  },
   // Wave 3: the Overview fleet usage strip. Unlike the Usage meter wall, the
   // strip fills its OWN #overview-fleet-usage container (a real registry element
   // the app writes to), so the async /v1/usage/summary fetch → render is fully

@@ -3823,6 +3823,7 @@
       webhookBannerHtml(wh) +
       (meta ? '<div class="wh-meta">' + meta + "</div>" : "") +
       '<div class="wh-actions">' +
+        '<button class="btn btn-sm" type="button" data-wh-edit>Edit</button>' +
         toggleBtn +
         '<button class="btn btn-sm" type="button" data-wh-rotate>Rotate secret</button>' +
         '<button class="btn btn-sm" type="button" data-wh-deliveries>Deliveries</button>' +
@@ -4034,6 +4035,11 @@
   // so the fake-DOM smoke can drive it: the shell paints synchronously, the list
   // fetch fills in on resolve.
   function mountWebhooksTab(root, bp) {
+    // Defensive re-acquire by id: the caller passes the freshly-rendered tabpanel,
+    // but a lost ref still resolves through getElementById — so the panel shell
+    // renders (and stays observable to the preview harness) rather than no-op.
+    // Same idiom as mountUsageTab.
+    if (!root && typeof document !== "undefined" && document.getElementById) root = document.getElementById("instance-tabpanel");
     if (!root) return;
     var ds = "production";
     root.innerHTML = webhooksTabShellHtml(bp, ds);
@@ -4056,7 +4062,12 @@
 
   var webhookLoadSeq = 0;
   function loadWebhooks(root, bp, ds) {
-    var listBox = root && root.querySelector ? root.querySelector(".wh-list") : null;
+    // .wh-list is the swap target in the live DOM; if a harness (smoke.mjs) can't
+    // resolve the sub-query it falls back to the root itself — the same element
+    // the list lands in — so the endpoint list stays observable (mirrors
+    // mountUsageTab's `.fleet-body || panel` fallback). Live DOM always resolves
+    // .wh-list, so behaviour there is unchanged.
+    var listBox = (root && root.querySelector && root.querySelector(".wh-list")) || root;
     if (!listBox) return;
     var seq = ++webhookLoadSeq;
     listBox.innerHTML = '<div class="loading">Loading webhooks&hellip;</div>';
@@ -4088,6 +4099,7 @@
     var card = findWhCard(listBox, wh.id);
     if (!card) return;
     var on = function (sel, fn) { var el = card.querySelector(sel); if (el) el.addEventListener("click", fn); };
+    on("[data-wh-edit]", function () { openEditWebhookModal(listBox, bp, ds, wh); });
     on("[data-wh-toggle]", function () { toggleWebhook(listBox, bp, ds, wh, false); });
     on("[data-wh-reenable]", function () { toggleWebhook(listBox, bp, ds, wh, true); });
     on("[data-wh-rotate]", function () { rotateWebhook(listBox, bp, ds, wh); });
@@ -4176,8 +4188,22 @@
     );
   }
 
+  // The mutation-event vocabulary the instance dispatcher fans out on — the ONE
+  // list both the create and edit modals draw their checkboxes from, so their
+  // event set can never drift apart.
+  var WEBHOOK_EVENTS = ["create", "update", "publish", "unpublish", "delete", "discardDraft", "patch"];
+
+  // Pure: the event-checkbox grid, marking every event in `selected` checked.
+  // Shared by the create (nothing selected) + edit (pre-filled) modals.
+  function webhookEventPickHtml(selected) {
+    var sel = (selected || []).map(function (e) { return String(e); });
+    return '<div class="wh-events-pick">' + WEBHOOK_EVENTS.map(function (e) {
+      var on = sel.indexOf(e) >= 0 ? " checked" : "";
+      return '<label class="wh-event-opt"><input type="checkbox" class="wh-event-cb" value="' + esc(e) + '"' + on + "> " + esc(e) + "</label>";
+    }).join("") + "</div>";
+  }
+
   function openCreateWebhookModal(root, bp, ds) {
-    var events = ["create", "update", "publish", "unpublish", "delete", "discardDraft", "patch"];
     openModal(
       '<h2 class="modal-title" id="modal-title">New webhook</h2>' +
       '<p class="modal-sub">Deliver document mutation events on <b>' + esc(ds) + "</b> to an HTTPS endpoint.</p>" +
@@ -4187,9 +4213,7 @@
         '<label class="label" for="wh-c-url">Payload URL</label>' +
         '<input class="form-input" id="wh-c-url" type="url" placeholder="https://example.com/hooks" required autocomplete="off" spellcheck="false">' +
         '<span class="label">Events <span class="muted">(none = all)</span></span>' +
-        '<div class="wh-events-pick">' + events.map(function (e) {
-          return '<label class="wh-event-opt"><input type="checkbox" class="wh-event-cb" value="' + esc(e) + '"> ' + esc(e) + "</label>";
-        }).join("") + "</div>" +
+        webhookEventPickHtml([]) +
         '<label class="label" for="wh-c-types">Document types <span class="muted">(optional, comma-separated)</span></label>' +
         '<input class="form-input" id="wh-c-types" autocomplete="off" placeholder="post, page">' +
         '<div id="wh-c-error" class="form-error" hidden></div>' +
@@ -4199,6 +4223,88 @@
     );
     var form = $("#wh-create-form");
     if (form) form.addEventListener("submit", function (e) { e.preventDefault(); submitCreateWebhook(root, bp, ds); });
+  }
+
+  // Pure: the EDIT modal body, pre-filled from the listed webhook row — name,
+  // payload URL, the event subscription (checked), and comma-joined types. Field
+  // ids are e-prefixed so they can never collide with an open create form. The
+  // whole surface is one testable string (adapts openCreateWebhookModal).
+  function webhookEditFormHtml(wh) {
+    wh = wh || {};
+    var types = (wh.types || []).map(function (t) { return String(t); }).join(", ");
+    return '<h2 class="modal-title" id="modal-title">Edit webhook</h2>' +
+      '<p class="modal-sub">Update where and what this endpoint receives &mdash; changes apply on save.</p>' +
+      '<form id="wh-edit-form" class="wh-form">' +
+        '<label class="label" for="wh-e-name">Name</label>' +
+        '<input class="form-input" id="wh-e-name" required autocomplete="off" value="' + esc(wh.name || "") + '">' +
+        '<label class="label" for="wh-e-url">Payload URL</label>' +
+        '<input class="form-input" id="wh-e-url" type="url" placeholder="https://example.com/hooks" required autocomplete="off" spellcheck="false" value="' + esc(wh.url || "") + '">' +
+        '<span class="label">Events <span class="muted">(none = all)</span></span>' +
+        webhookEventPickHtml(wh.events) +
+        '<label class="label" for="wh-e-types">Document types <span class="muted">(optional, comma-separated)</span></label>' +
+        '<input class="form-input" id="wh-e-types" autocomplete="off" placeholder="post, page" value="' + esc(types) + '">' +
+        '<div id="wh-e-error" class="form-error" hidden></div>' +
+        '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+          '<button class="btn btn-primary" type="submit">Save changes</button></div>' +
+      "</form>";
+  }
+
+  // Pure: the FULL PUT body from the edit form's gathered state. name/url are
+  // trimmed; events + types are ALWAYS sent as arrays (an empty array clears the
+  // filter → all events / all types) so an edit can REMOVE a subscription, not
+  // only add one. This is the single place the edited body is shaped, so the
+  // wire contract is pinned by one unit test.
+  function webhookEditBody(state) {
+    state = state || {};
+    var events = (state.events || []).map(function (s) { return String(s).trim(); }).filter(Boolean);
+    var types = (state.types || []).map(function (s) { return String(s).trim(); }).filter(Boolean);
+    return {
+      name: String(state.name || "").trim(),
+      url: String(state.url || "").trim(),
+      events: events,
+      types: types
+    };
+  }
+
+  function openEditWebhookModal(listBox, bp, ds, wh) {
+    openModal(webhookEditFormHtml(wh));
+    var form = $("#wh-edit-form");
+    if (form) form.addEventListener("submit", function (e) { e.preventDefault(); submitEditWebhook(listBox, bp, ds, wh); });
+  }
+
+  // PUT the full edited body through the SAME generic update path the toggle uses
+  // (whPath + api()); the control-plane proxy forwards the body verbatim and the
+  // upstream changeset casts name/url/events/types. On success we refetch the
+  // list so the reconciled rows repaint from server truth; a failure keeps the
+  // modal open with exactly one honest sentence (webhookMutationError, D25).
+  function submitEditWebhook(listBox, bp, ds, wh) {
+    var typesRaw = ($("#wh-e-types") || {}).value || "";
+    var events = [];
+    document.querySelectorAll(".wh-event-cb").forEach(function (cb) { if (cb.checked) events.push(cb.value); });
+    var body = webhookEditBody({
+      name: ($("#wh-e-name") || {}).value || "",
+      url: ($("#wh-e-url") || {}).value || "",
+      events: events,
+      types: typesRaw.split(",")
+    });
+    var errEl = $("#wh-e-error");
+    if (errEl) errEl.hidden = true;
+    var btn = document.querySelector('#wh-edit-form button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    api("PUT", whPath(bp, "/" + encodeURIComponent(wh.id), ds), body).then(function (r) {
+      if (r.ok) {
+        closeModal();
+        toast({ kind: "success", title: "Webhook updated", body: body.url });
+        // .wh-list is a direct child of the tab panel (webhooksTabShellHtml), so
+        // its parent IS the root loadWebhooks re-queries; fall back to the list
+        // node itself if it is somehow detached.
+        var root = (listBox && listBox.parentNode) || listBox;
+        loadWebhooks(root, bp, ds);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Save changes"; }
+      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data); }
+    });
   }
 
   function submitCreateWebhook(root, bp, ds) {
@@ -9177,9 +9283,11 @@
 
   // Fold the quota tones of a row's headline cells to the worst present:
   // over > warn > ok. Returns null when no headline cell carries a quota bar
-  // (nothing to accent) — in v1 only `instances` has a ceiling, so most rows
-  // fold to null, but the fold lights up for free the moment a headline meter
-  // gains a limit.
+  // (nothing to accent). Since wave 5 the machine meters cpu/ram and disk carry
+  // real physical ceilings (100 / warn 70 / over 90), so an armed hot box folds
+  // to over/warn here; the billing meters (documents/db_size/seats) stay bar-less
+  // until plan truth lands (cloud-console-billing-live-gate), and the fold lights
+  // up for them too the moment a ceiling arrives.
   function fleetStripWorst(meters) {
     var order = { ok: 1, warn: 2, over: 3 };
     var worst = null;
@@ -10889,6 +10997,9 @@
       deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
+      // w6 (OC25): full webhook edit — the pre-fill form + the PUT-body builder.
+      webhookEventPickHtml: webhookEventPickHtml, webhookEditFormHtml: webhookEditFormHtml,
+      webhookEditBody: webhookEditBody,
       // Zero-broken-promises slice (charter D5/D7/D25/D26): the shared confirm
       // modal (pure state machine + focus-trap seam), the promote grammar
       // (rollback/redeploy), and the invitation-accept landing.
