@@ -46,6 +46,10 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    "already_running",
                    "feature_not_configured",
                    "runner_start_failed",
+                   # Self-update W6 rollback preflight — same admin-ops
+                   # endpoint family as the three codes above (fail-closed
+                   # 500 when preflight can't clear the rollback).
+                   "rollback_preflight_failed",
                    # Status-page incident admin — POST /v1/status/incidents.
                    "invalid_incident",
                    # Pulse telemetry beacon ingest — /v1/pulse (internal analytics).
