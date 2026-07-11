@@ -1,6 +1,6 @@
 package cli
 
-// mcp_tasks.go — the curated six Barkpark task tools, hand-mapped onto the
+// mcp_tasks.go — the curated eight Barkpark task tools, hand-mapped onto the
 // manifest task verbs and exposed over MCP. Each tool's description carries the
 // barkpark-tasks.mdc doctrine (claim-first, epoch-CAS, lifecycle_status is the
 // done-signal, criteria-in-close, 409 doc_changed_since_claim, re-claim on
@@ -8,13 +8,27 @@ package cli
 // would. task_prime (task.prime) is the one-call rehydration entry point: an
 // agent resuming a session reads its in-progress claims (with the epoch it needs
 // to close), the ready head, recent events, and lifecycle counts in a single
-// read — no re-fetch loop.
+// read — no re-fetch loop. task_stamp / task_pulse are the mid-claim heartbeat
+// pair: stamp records evidence on ONE acceptance criterion the moment it is
+// proven (holder + epoch-gated, --met needs non-empty evidence, --miss records
+// an honest attempt WITHOUT flipping the lock), pulse writes the now-line and
+// renews the lease in one write (holder-gated, NO epoch arg — it BUMPS the claim
+// epoch, so re-read doc.claim.epoch before the next stamp/close). Close remains
+// the seal (epoch-only CAS).
 //
 // Every tool also carries an MCP behaviour annotation (readOnlyHint /
 // destructiveHint) hand-set to match what it actually does: the three reads
-// (task_ready, task_show, task_prime) are ReadOnlyHint:true; the three writers
-// (task_next, task_close, task_create) are ReadOnlyHint:false + DestructiveHint
-// so a client can prompt before a mutating call.
+// (task_ready, task_show, task_prime) are ReadOnlyHint:true; the three
+// lifecycle/claim writers (task_next, task_close, task_create) are
+// ReadOnlyHint:false + DestructiveHint:true so a client can prompt before a
+// mutating call. task_stamp / task_pulse are the deliberate middle ground:
+// ReadOnlyHint:false (they DO write) + DestructiveHint:FALSE — both are
+// holder+epoch-gated, forward-only updates (stamp records criterion evidence,
+// pulse writes a now-line + renews the lease) that a client should NOT gate
+// behind a destructive-confirm, since stamp-as-you-go and per-phase pulses fire
+// often and neither destroys prior state. This is a deliberate divergence from
+// the bridge's blunt Writes→DestructiveHint:true rule (mcp_bridge.go), which has
+// only the one manifest bit; the curated tools know better.
 //
 // The handlers ride the dispatch seam (execManifestCommand, run.go): each one
 // translates its MCP tool arguments into the manifest command's positional+flag
@@ -43,7 +57,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// registerTaskTools registers the curated six task tools on srv, hand-mapping
+// registerTaskTools registers the curated eight task tools on srv, hand-mapping
 // each onto its manifest task verb (task_create has no manifest verb — the live
 // manifest declares no task.create, so it is built directly from the mutate
 // contract). It returns an error only if a required manifest verb is missing —
@@ -53,7 +67,12 @@ import (
 // and it is why a tasks-less manifest under --tools all fails this function fast
 // rather than serving a broken tool.
 //
-// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close,task_prime doc:docs/cards/cli.md
+// Naming note: most tool names match their verb, but task_show maps onto the
+// task.get verb (the tool keeps its show-vs-get name for MCP-client familiarity).
+// task_stamp / task_pulse have no such divergence — they map straight onto
+// task.stamp / task.pulse.
+//
+// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close,task_prime,task_stamp,task_pulse doc:docs/cards/cli.md
 func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
 	tree := m.Tree()
 
@@ -78,6 +97,14 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	prime, ok := tree.Lookup("task", "prime")
 	if !ok {
 		return fmt.Errorf("manifest has no task.prime verb")
+	}
+	stamp, ok := tree.Lookup("task", "stamp")
+	if !ok {
+		return fmt.Errorf("manifest has no task.stamp verb")
+	}
+	pulse, ok := tree.Lookup("task", "pulse")
+	if !ok {
+		return fmt.Errorf("manifest has no task.pulse verb")
 	}
 
 	// task_ready — the queue head. A read; the optional limit rides the query.
@@ -411,6 +438,167 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			tail = append(tail, "--limit", strconv.Itoa(*in.Limit))
 		}
 		return mcpRun(execManifestCommand(g, ctx, m, primeCmd, tail)), nil
+	})
+
+	// task_stamp — record evidence on ONE acceptance criterion mid-claim. A
+	// holder + epoch-gated write, but NOT DestructiveHint: it advances the ledger
+	// forward (evidence on --met, an honest attempt note on --miss), it never
+	// destroys prior state, and stamp-as-you-go fires often — a confirm prompt
+	// would be friction. Stamp does NOT bump the epoch (unlike pulse); close
+	// remains the seal.
+	stampCmd := *stamp
+	srv.AddTool(&mcp.Tool{
+		Name:        "task_stamp",
+		Title:       "Stamp a criterion mid-claim",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(false)},
+		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the 0-based index into the task's acceptance_criteria. Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["doc_id", "worker_id", "observed_epoch", "criterion"],
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "description": "The claimed task's doc_id."
+    },
+    "worker_id": {
+      "type": "string",
+      "description": "The SAME worker_id you claimed with (holder-only)."
+    },
+    "observed_epoch": {
+      "type": "integer",
+      "description": "The epoch from your claim (doc.claim.epoch). Same fence as close — a stale epoch 409s. Stamp does NOT bump it."
+    },
+    "criterion": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "0-based index into the task's acceptance_criteria — the one criterion to stamp."
+    },
+    "met": {
+      "type": "boolean",
+      "description": "Flip the criterion to met. REQUIRES a non-empty evidence. Pass EITHER met (with evidence) OR miss (with note), never both."
+    },
+    "evidence": {
+      "type": "string",
+      "description": "Concrete proof for met — test names, gate output, branch, commit. Required + non-empty when met is true."
+    },
+    "miss": {
+      "type": "boolean",
+      "description": "Record an honest failed attempt: appends {note,ts,worker} to the criterion's attempts (5 kept) and does NOT flip met. REQUIRES a non-empty note."
+    },
+    "note": {
+      "type": "string",
+      "description": "What was tried and why it missed. Required + non-empty when miss is true."
+    }
+  }
+}`),
+	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in struct {
+			DocID         string `json:"doc_id"`
+			WorkerID      string `json:"worker_id"`
+			ObservedEpoch *int   `json:"observed_epoch"`
+			Criterion     *int   `json:"criterion"`
+			Met           bool   `json:"met"`
+			Evidence      string `json:"evidence"`
+			Miss          bool   `json:"miss"`
+			Note          string `json:"note"`
+		}
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpArgError(err), nil
+		}
+		if strings.TrimSpace(in.DocID) == "" || strings.TrimSpace(in.WorkerID) == "" {
+			return mcpArgError(fmt.Errorf("doc_id and worker_id are required")), nil
+		}
+		if in.ObservedEpoch == nil {
+			return mcpArgError(fmt.Errorf("observed_epoch is required (the epoch from your claim)")), nil
+		}
+		if in.Criterion == nil {
+			return mcpArgError(fmt.Errorf("criterion is required (the 0-based acceptance_criteria index)")), nil
+		}
+		// Exactly one outcome, with its required companion — validated here so the
+		// caller gets immediate, precise feedback instead of a server 400 round-trip
+		// (the server enforces the same rules as a backstop).
+		if in.Met == in.Miss {
+			return mcpArgError(fmt.Errorf("pass exactly one of met / miss, not both (and not neither)")), nil
+		}
+		if in.Met && strings.TrimSpace(in.Evidence) == "" {
+			return mcpArgError(fmt.Errorf("met requires non-empty evidence")), nil
+		}
+		if in.Miss && strings.TrimSpace(in.Note) == "" {
+			return mcpArgError(fmt.Errorf("miss requires non-empty note")), nil
+		}
+		// Positionals mirror `bp task stamp <id> <worker> <epoch>` (observed_epoch
+		// rides as a string the server coerces via fetch_int, same as close);
+		// criterion + the met/evidence | miss/note outcome ride as manifest flags
+		// (query params) exactly as the CLI types them after the positionals.
+		tail := []string{in.DocID, in.WorkerID, strconv.Itoa(*in.ObservedEpoch), "--criterion", strconv.Itoa(*in.Criterion)}
+		if in.Met {
+			tail = append(tail, "--met", "--evidence", in.Evidence)
+		} else {
+			tail = append(tail, "--miss", "--note", in.Note)
+		}
+		return mcpRun(execManifestCommand(g, ctx, m, stampCmd, tail)), nil
+	})
+
+	// task_pulse — heartbeat a held claim: write the now-line AND renew the lease
+	// in one atomic write. Holder-gated but NO epoch arg — pulse survives fence
+	// bumps and BUMPS the claim epoch itself (re-read doc.claim.epoch before the
+	// next epoch-gated call). NOT DestructiveHint: it is an additive heartbeat that
+	// fires at every phase boundary; a confirm prompt would defeat the point.
+	pulseCmd := *pulse
+	srv.AddTool(&mcp.Tool{
+		Name:        "task_pulse",
+		Title:       "Pulse a claim's now-line",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(false)},
+		Description: "Heartbeat a task you hold: write the now-line (what you are doing RIGHT NOW) and renew the lease in one atomic write. Pulse right after you claim and at each phase boundary so the board moves while you work. Pass the SAME worker_id you claimed with (holder-only). There is NO epoch arg — pulse survives fence bumps, and a lost lease (reaped / released / closed / foreign) returns 409 not_holder, never a silent re-claim. IMPORTANT: pulse BUMPS the claim epoch, so the epoch you last held is now stale — re-read doc.claim.epoch from the response before your next stamp or close. now is required (max 500 bytes). Optional criterion (0-based index) tells boards which acceptance criterion this pulse is working on.",
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["doc_id", "worker_id", "now"],
+  "properties": {
+    "doc_id": {
+      "type": "string",
+      "description": "The claimed task's doc_id."
+    },
+    "worker_id": {
+      "type": "string",
+      "description": "The SAME worker_id you claimed with (holder-only)."
+    },
+    "now": {
+      "type": "string",
+      "description": "The now-line: what you are doing right now (required, max 500 bytes), e.g. \"gate green, committing on branch loop-epic/…\"."
+    },
+    "criterion": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional 0-based acceptance_criteria index this pulse is working on (boards spin that lock)."
+    }
+  }
+}`),
+	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in struct {
+			DocID     string `json:"doc_id"`
+			WorkerID  string `json:"worker_id"`
+			Now       string `json:"now"`
+			Criterion *int   `json:"criterion"`
+		}
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpArgError(err), nil
+		}
+		if strings.TrimSpace(in.DocID) == "" || strings.TrimSpace(in.WorkerID) == "" {
+			return mcpArgError(fmt.Errorf("doc_id and worker_id are required")), nil
+		}
+		if strings.TrimSpace(in.Now) == "" {
+			return mcpArgError(fmt.Errorf("now is required (the now-line text)")), nil
+		}
+		// Positionals mirror `bp task pulse <id> <worker>` (NO epoch — pulse is the
+		// renewal); now + the optional criterion ride as manifest flags (query
+		// params), exactly as `bp task pulse … --now "…" [--criterion N]`.
+		tail := []string{in.DocID, in.WorkerID, "--now", in.Now}
+		if in.Criterion != nil {
+			tail = append(tail, "--criterion", strconv.Itoa(*in.Criterion))
+		}
+		return mcpRun(execManifestCommand(g, ctx, m, pulseCmd, tail)), nil
 	})
 
 	return nil

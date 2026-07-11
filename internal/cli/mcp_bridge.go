@@ -32,14 +32,16 @@ import (
 
 // bridgeShadowedIDs is the set of manifest command IDs the curated overlay
 // (mcp_tasks.go) already exposes under a hand-tuned name, so the bridge must NOT
-// also generate a bp_<noun>_<verb> twin for them. Only the five queue/read/close/
-// prime verbs the curated six cover are shadowed:
+// also generate a bp_<noun>_<verb> twin for them. The seven queue/read/close/
+// prime/stamp/pulse verbs the curated eight cover are shadowed:
 //
 //   - task.ready  → curated task_ready
 //   - task.next   → curated task_next  (atomic queue-claim)
 //   - task.get    → curated task_show
 //   - task.close  → curated task_close (epoch-CAS)
 //   - task.prime  → curated task_prime (one-call rehydration)
+//   - task.stamp  → curated task_stamp (mid-claim criterion evidence)
+//   - task.pulse  → curated task_pulse (now-line + lease renewal)
 //
 // task.claim is NOT shadowed: the curated task_next is the ATOMIC queue-claim,
 // whereas task.claim claims a SPECIFIC id — a distinct capability, so
@@ -66,6 +68,8 @@ var bridgeShadowedIDs = map[string]bool{
 	"task.get":   true,
 	"task.close": true,
 	"task.prime": true,
+	"task.stamp": true,
+	"task.pulse": true,
 }
 
 // registerBridgeTools walks m.Commands and registers one MCP tool per command

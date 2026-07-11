@@ -167,15 +167,15 @@ func TestBridgeInputSchema_Derivation(t *testing.T) {
 	}
 }
 
-// TestBridgeShadowing proves the five curated-twin IDs are shadowed while the
+// TestBridgeShadowing proves the seven curated-twin IDs are shadowed while the
 // distinct by-id claim and a non-covered doc verb still generate — over a real
 // MCP session's tools/list. doc.create is synthesised (the fixture carries only
 // doc.get/ls/query/mutate) so the test asserts the shadow set is scoped to
-// EXACTLY the five twins and never over-shadows a sibling verb.
+// EXACTLY the seven twins and never over-shadows a sibling verb.
 func TestBridgeShadowing(t *testing.T) {
 	m := loadFixtureManifest(t)
 	// Synthesize doc.create so we can assert it generates (not covered by the
-	// curated six, must NOT be shadowed).
+	// curated eight, must NOT be shadowed).
 	m.Commands = append(m.Commands, manifest.Command{
 		ID:     "doc.create",
 		Noun:   "doc",
@@ -188,7 +188,7 @@ func TestBridgeShadowing(t *testing.T) {
 	cs := newBridgeSession(t, globals{}, manifest.Context{Server: "http://x"}, m)
 	tools := listAllTools(t, cs)
 
-	absent := []string{"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close", "bp_task_prime"}
+	absent := []string{"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close", "bp_task_prime", "bp_task_stamp", "bp_task_pulse"}
 	for _, name := range absent {
 		if _, ok := tools[name]; ok {
 			t.Errorf("shadowed tool %q should be absent (curated twin covers it)", name)
@@ -452,7 +452,7 @@ func TestBridgeAccessParity(t *testing.T) {
 	// (1) The shadow set must never swallow an access verb.
 	for _, cmd := range access {
 		if bridgeShadowedIDs[cmd.ID] {
-			t.Errorf("access verb %q is in bridgeShadowedIDs — the curated overlay must never shadow an access verb (it covers only the 5 task twins)", cmd.ID)
+			t.Errorf("access verb %q is in bridgeShadowedIDs — the curated overlay must never shadow an access verb (it covers only the 7 task twins)", cmd.ID)
 		}
 	}
 	// Belt-and-suspenders: no shadowed id is under the access noun at all.
