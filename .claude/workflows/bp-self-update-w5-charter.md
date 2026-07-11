@@ -5,9 +5,12 @@
 > `.claude/workflows/bp-airdrop-grants-leakseal-charter.md`. This file is the memory of the
 > self-update epic's W5 wave onward.
 
-Epic anchor: bp task slug **`self-update-epic`** (published, lifecycle open, priority 1,
-3 done children W2–W4). Design paper: `self-update-from-nag-to-product` (Barkpark Paper —
-amend it, don't fork it). W3 runbook: `.claude/workflows/release-curator.md`. Server: guerrilla.
+Epic anchor: bp task slug **`self-update-epic`** — CLOSED done by the W7 reconcile wave
+(2026-07-11): 20 children, 18 done, exactly TWO blessed open remainders
+(`isu-backlog-rollback-live-smoke`, `isu-backlog-operator-principal`); the five other
+backlog children were re-homed to top-level tasks (see W7 D28). Design paper:
+`self-update-from-nag-to-product` (Barkpark Paper — amend it, don't fork it). W3 runbook:
+`.claude/workflows/release-curator.md`. Server: guerrilla.
 
 ## Vision
 
@@ -67,6 +70,8 @@ manual console Update button) updates past a pin without an explicit force.
    affordance that exists; the blue/green Caddy port-flip rollback API is a named W6
    candidate (bp-cloud-console-charter OC10), not this wave. Why: no rollback capability
    exists at any layer — surfacing a fake button would violate the epic's own thesis.
+   **[SUPERSEDED by W6, 2026-07-11: the real rollback engine SHIPPED end-to-end in #2514 —
+   see D11-D26. This decision was true for W5 only.]**
 8. **Bless policy (ratifies the paper's open decision):** agent-proposes/human-publishes
    stays the default; autonomous tag-on-green is authorized ONLY on a fleet whose staging
    gate is live (a staging-channel box exists and gates the rollout). Why: closes W3 crit 3
@@ -99,10 +104,11 @@ manual console Update button) updates past a pin without an explicit force.
 - **W5-S5 (medium)** `isu-w5-curator-digest-email` — daily plain-text fleet update digest
   mailed to platform admins.
 - **W6 candidates (deliberately unfiled):** blue/green rollback verb (Caddy port-flip as an
-  API + console button — needs a Runner/script capability first); growing canary cohorts
-  (v2 per worker moduledoc); maintenance-window gate for the rollout worker; CP-driven
-  staging ref deploys (needs an operator SSH capability in the CP — decide deliberately,
-  don't drift into it).
+  API + console button — needs a Runner/script capability first) **[SHIPPED as W6, #2514]**;
+  growing canary cohorts (v2 per worker moduledoc); maintenance-window gate for the rollout
+  worker; CP-driven staging ref deploys (needs an operator SSH capability in the CP — decide
+  deliberately, don't drift into it). **[W7 note: the unshipped items here were NOT filed as
+  epic children — they remain deliberately unfiled; file them only when someone wants them.]**
 
 ## Wave log
 
@@ -346,3 +352,124 @@ rollback + deny cases (the D26 recipe; the one gap between proven-offline and pr
 (2) operator-principal decision (W5 carry — unblocks console halt/resume + the require_worker
 reachability bug); (3) CI-wire the 99-check deploy harness (D25 backlog); (4) charter residue:
 growing cohorts, maintenance windows.
+
+**[W7 close-out annotation, 2026-07-11 — disposition of the four items above:** (1) live smoke
+stays PARKED as blessed remainder `isu-backlog-rollback-live-smoke` (recipe made stranger-grade
+in W7); (2) operator-principal stays the second blessed remainder
+`isu-backlog-operator-principal` (W5 open-decision #1 text inlined verbatim); (3) harness CI
+wiring re-homed to top-level task `isu-backlog-harness-ci-wiring` — real, still-open, NOT an
+epic remainder; (4) growing cohorts + maintenance windows remain deliberately unfiled per the
+W6-candidates note. The epic is CLOSED; this file is its durable memory.**]**
+
+---
+
+# W7 — final ledger reconcile (decided 2026-07-11; the closing wave)
+
+Wave Paper: `self-update-epic-wave-2026-07-11-reconcile`. Two exploration rounds + a 7-report
+verify fleet ran. HEAD = 703c5406 (#2514). ZERO build slices — D12 held: every gate green
+(instance-deploy harness 99/99, cp-deploy 7/7, cloud Elixir 44/0 + registry 24/0, api Elixir
+27/0, Go 1060 PASS / 0 FAIL across internal/cli+cloudclient, SPA 388/388, go build+vet clean).
+This wave is ledger, paper, and park work ONLY — no repo code changes.
+
+## W7 Decisions (numbering continues from W6's D26)
+
+27. **Close the epic done with exactly two open blessed children.** Empirically proven safe on
+    guerrilla: no server-side parent-with-open-children guard; close of an UNCLAIMED task
+    accepts any epoch (fencing skipped when claim=null); one `task.closed` event, no cascade.
+    Sequence law: patch description FIRST via /v1/data/mutate, then `bp task close
+    self-update-epic <worker> 0 done "…"` — NEVER flip lifecycle_status via raw mutate (skips
+    the mutation event + cascade). Why: task-system semantics allow it and re-homing the two
+    blessed remainders would orphan them from the epic story they belong to.
+28. **The five non-blessed open backlog children re-home to TOP-LEVEL tasks** (parent_id
+    cleared, provenance note added): isu-backlog-cloud-update-trigger-verb,
+    isu-backlog-fetch-prebuilt-slots-guard, isu-backlog-slot-box-branch-hygiene,
+    isu-backlog-harness-ci-wiring, isu-backlog-expand-contract-enforcement. All five were
+    individually proven still-open at HEAD (no update verb in runCloud dispatch; zero
+    "slots" in fetch-prebuilt.sh; branch d889aa08 still on origin; no harness refs in
+    .github/workflows; expand/contract prose-only in 3 files). None shipped, none foldable
+    into the blessed two, none closed. Why: the closed epic must read as done + exactly two
+    deliberate threads; these five are real future work that outlives the epic.
+29. **dwb-6 is SHIPPED — stamp all 4 criteria and close it (PR #773, merged 2026-07-02).**
+    C1 run-pinned (SSE narration/elapsed: app.js:8107/8144/8385-8392, __app.test.mjs 388/388);
+    C2 code-present (newLaunch app.js:8012-8028 optimistic flip + immediate progress);
+    C3 code-present (newRenderFailed app.js:8839, Retry→/retry app.js:8866, router.ex:1457);
+    C4 code-present (double-submit guard app.js:8015-8017 + 409 reconcile). The owed manual
+    browser pass (PR #773's own note) folds into dwb-12's framing, not a reason to hold open.
+30. **The six done-with-0/N dwb children are STAMPING DEBT, not false-done — stamp, never
+    reopen:** dwb-14/15 (#783), dwb-16 (#798; control-url pin cp-deploy.sh:120-140,
+    cp-deploy_test.sh 7/7; console app.js:8200-8247), dwb-17 (#1080/#748), dwb-19 (#890;
+    persistence provision_job.ex:92-96 + router.ex:6089,6127 + app.js:8469-8482), dwb-20
+    (#914; warmpool.go:761,771-778,1207). None of PRs #783/#798/#890/#914/#1080 was reverted.
+    PATH LAW: the rollout worker test lives at
+    cloud/test/barkpark_cloud/autoupdate_rollout_worker_test.exs — NO workers/ segment;
+    never cite the workers/ path.
+31. **The NINE zero-evidence done dwb children (gh-2..6, dwb-1/3/5/8) get evidence backfill:**
+    PR-hunt via git log, write code_refs.prs + close_reason. If no PR is found for one, add an
+    honest `close_reason: "evidence not reconstructible — done on lifecycle only"` note; do
+    NOT reopen without proof of absence of the work itself.
+32. **dwb-9 stays OPEN, split-stamped:** criterion 1 (README badge) IS shipped — stamp met
+    (README.md:4, cloud/priv/static/button.svg, router.ex:193, PR #795). Criterion 2 (launch
+    docs page) is a genuine not_found (templates/DEPLOYING.md and cloud/README.md:17 are
+    DIFFERENT admin-facing flows); note that "to live site + Studio" cannot be honestly
+    documented yet — Studio one-click entry is itself missing (paper item (g), token-paste-only).
+33. **Human gates park as explicit recipes:** gh-1 THICKENED (compose passes only
+    GITHUB_OAUTH_* at docker-compose.yml:47-48 — the GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY /
+    GITHUB_APP_WEBHOOK_SECRET / GITHUB_APP_SLUG passthrough lines must be ADDED; exact GitHub
+    permission scopes named). NEW task `dwb-vercel-token-gate` authored — the Vercel gate had
+    ZERO task and ZERO doc: VERCEL_PLATFORM_TOKEN (+optional VERCEL_TEAM_ID),
+    cloud/config/runtime.exs:169-188, vercel.ex:52-56 configured?, compose passthrough ALREADY
+    exists (docker-compose.yml:55-58), absent token → 503 + classic clone-URL fallback.
+34. **Warm-pool memory conflict resolved by SUBSYSTEM SPLIT — never conflate again:**
+    instance warm-pool is LIVE (WARM_POOL_SIZE=2 in /etc/barkpark-provisioner.env on CP host
+    178.105.92.191, barkpark-provisioner.service active, re-confirmed 2026-07-11); the off-box
+    SITE builder is merged source only, never deployed (no systemd unit, no binary anywhere on
+    the box, only /opt/barkpark/cmd/barkpark-builder/main.go). Park text must state both halves.
+35. **dwb-builder-cross-tenant-auth is FIXED, stays done, no security surfacing:** PR #936
+    (2026-07-08) re-gated all four builder routes require_worker (router.ex:4817/4858/4935/4968);
+    live CP 401s anonymous + bogus tokens. Add #936 to its code_refs.prs. The stale pre-fix
+    moduledoc header (router.ex:4751-4758) is a backlog microfix, NOT a W7 code touch (D12).
+36. **Papers get truth this wave:** `self-update-from-nag-to-product` is REWRITTEN as
+    style=article blocks (it is legacy body_html, unrenderable by bp paper view) with the full
+    W1-W6 arc (#1195/#1197/#1199/#1230/#2227/#2514) and its "Still open" list reconciled to
+    the two blessed remainders. `deploy-with-barkpark` gains a "Parked remainders" block naming
+    VERCEL_PLATFORM_TOKEN + the GITHUB_APP_* set with file:line seams, and the warm-pool/builder
+    split (D34).
+37. **Publish-collapse worklist = parent + 28 children = 29 docs** (dwb-16 AND lvd-t5-task are
+    already published — the "29 children" figure double-counted lvd-t5-task). Law: every slice
+    publish-collapses its OWN drafts.* touches; a final sweep slice proves zero drafts.dwb*
+    remain. Draft-form reads need the authed /w/default/... path (public endpoint 404s drafts).
+38. **lvd-t5-task is mis-parented Living-Values contamination** — re-home it off dwb
+    (clear parent_id + provenance note); the dwb close-out narrative carves it out explicitly.
+39. **The blessed remainders become stranger-grade:** isu-backlog-rollback-live-smoke's WRONG
+    citation "health gate uses curl --resolve (instance-deploy.sh:259)" is corrected (line 259
+    is the Caddy maintenance-page HTML; the BLOCKING gate is the plain localhost curl loop —
+    D14's law; the --resolve public curl is LOG-ONLY) and the recipe gains: warm-image selector
+    (`hcloud image list --type snapshot --selector role=warm-image` per bake-server-image.sh:60),
+    SSH root + ~/.ssh/barkpark_indx, a pasteable `tls internal` Caddy block, `hcloud server
+    delete`, and the Hetzner-token note. isu-backlog-operator-principal inlines the W5 wave-log
+    open-decision #1 text VERBATIM (charter lines above) before this file goes cold. GitHub
+    mirrors (#2486/#2485) get the same corrections.
+40. **GitHub mirror settles with the epic:** issue 2181 (FRIKKern/barkpark) must end closed —
+    verify the task-sync closed it; if not, `gh issue close 2181` with a close-out comment.
+
+## W7 Wave plan (6 slices, ledger/paper only, zero repo code)
+
+- **S1 (fable)** `isu-reconcile-epic-close` — epic description rewrite (full W1-W6 arc + PR
+  trail), fix both blessed remainders (D39), re-home the five (D28), close the epic (D27),
+  settle GH mirror (D40).
+- **S2 (opus)** `isu-reconcile-nag-paper` — rewrite self-update-from-nag-to-product as
+  style=article blocks with W1-W6 truth (D36).
+- **S3 (opus)** `dwb-reconcile-stamp-pack` — stamp the six 0/N done children + close dwb-6 +
+  split-stamp dwb-9 + add #936 to builder-auth code_refs (D29/D30/D32/D35); collapse own touches.
+- **S4 (opus)** `dwb-reconcile-evidence-backfill` — PR-hunt the nine zero-evidence done
+  children (D31); re-home lvd-t5-task (D38); collapse own touches.
+- **S5 (fable)** `dwb-reconcile-human-gate-parks` — gh-1 thickening + NEW dwb-vercel-token-gate
+  + dwb parent parked-state description (D33/D34) + deploy-with-barkpark paper block (D36);
+  collapse own touches.
+- **S6 (opus)** `dwb-reconcile-publish-collapse` — runs LAST: sweep-publish every remaining
+  drafts.dwb* doc; prove bare-id 200 / drafts.<id> 404 for parent + all 28 (D37).
+
+Backlog filed (published, honest): `dwb-doc-lag-microfixes` (stale router.ex:4751-4758 builder
+auth header + stale example domain in cmd/barkpark-provisioner/main.go doc comment — tiny code
+touches, next wave), `dwb-launch-flow-double-submit-test` (router_launch_flow_test.exs has no
+explicit double-submit/409 case — C4's server half untested in Elixir).
