@@ -3889,6 +3889,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # chat-owned dir keyed by the session id, and carry the bytes forward (for the
   # base64 wire block + the live bubble data-URI). A store/read failure drops that
   # one image honestly (logged) rather than failing the whole turn.
+  #
+  # Sobelow Traversal.FileModule (File.read/1) is a false-positive: `tmp_path`
+  # is the temp file LiveView's upload machinery created and hands to the
+  # `consume_uploaded_entries/3` callback — never a client-supplied name. The
+  # client controls the file BYTES and `entry.client_type`, not this path.
+  # (Was baseline-skipped in .sobelow-skips; the fingerprint is line-anchored,
+  # so edits above this function broke it — the inline skip is durable.)
+  # sobelow_skip ["Traversal.FileModule"]
   defp consume_attachments(socket) do
     store_id = socket.assigns.store_session_id
 
