@@ -49,6 +49,10 @@ defmodule Barkpark.Plugins.Indx.Persistence do
 
   require Logger
 
+  # Sobelow reads `@sobelow_skip` from source; register it so the compiler
+  # counts it as used (else `--warnings-as-errors` reds on "set but never used").
+  Module.register_attribute(__MODULE__, :sobelow_skip, accumulate: true, persist: true)
+
   @type scope :: String.t()
   @type entry :: %{dataset: String.t() | nil, key_map: %{optional(integer()) => String.t()}}
 
@@ -85,6 +89,13 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   and treated as missing — Recovery will rebuild from the live engine's
   dataset list.
   """
+  # The bytes come from `save/2`'s own `term_to_binary` (trusted, self-written).
+  # We still decode with `[:safe]` as defense-in-depth: a tampered/corrupt file
+  # can neither mint atoms (atom-table exhaustion) nor materialize unsafe terms
+  # — the `rescue ArgumentError` below folds any such input into `:error`
+  # ("treated as missing"). Sobelow flags every `binary_to_term` regardless of
+  # `[:safe]`, so this justified use is annotated rather than left as a finding.
+  @sobelow_skip ["Misc.BinToTerm"]
   @spec load(scope()) :: {:ok, entry()} | :error
   def load(scope) when is_binary(scope) do
     path = path_for(scope)
