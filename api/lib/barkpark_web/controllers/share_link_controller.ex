@@ -111,6 +111,15 @@ defmodule BarkparkWeb.ShareLinkController do
     end
   end
 
+  # @sobelow_skip — both findings on this clause are accepted false-positives:
+  #   * Traversal.SendFile (send_file/3): `file` is resolved by
+  #     `Media.get_file/2` scoped to the LINK's own workspace/project; `.path` is
+  #     a server-generated `uploads/YYYY/MM/slug-rand.ext` (`unique_filename/1`
+  #     strips directory parts). No request-controlled path reaches `send_file`.
+  #   * XSS.ContentType (put_resp_content_type/2): pinned through
+  #     `MediaFile.serve_content_type/1` + `nosniff` + an `attachment` disposition
+  #     for dangerous types — a stored text/html blob downloads, never executes.
+  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
   defp serve(conn, %ShareLink{kind: "media"} = link) do
     case Media.get_file(link.ref_id, scope(link)) do
       {:ok, file} ->

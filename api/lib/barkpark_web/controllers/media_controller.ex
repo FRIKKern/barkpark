@@ -62,7 +62,13 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file_by_path(relative_path, scope_opts(conn)),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :original) do
-      full_path = Media.file_path(relative_path)
+      # Serve the path off the RESOLVED record, not the raw URL segment. The
+      # lookup already matched on `path == relative_path`, but deriving the disk
+      # path from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
+      # — `Media.unique_filename/1` strips directory parts and non-`[a-z0-9-]`) —
+      # instead of the attacker-typed segment removes any raw-input flow into
+      # `send_file`. A `../…` URL never matches a stored row → {:error,:not_found}.
+      full_path = Media.file_path(file.path)
       mime = MIME.from_path(full_path)
 
       conn
@@ -126,6 +132,18 @@ defmodule BarkparkWeb.MediaController do
   #     API/Studio origin (the stored-XSS vector).
   #   * safe types (images, pdf, …) keep their honest type and serve `inline`
   #     so Studio previews still work.
+  #
+  # @sobelow_skip — both findings on this function are accepted false-positives:
+  #   * Traversal.SendFile (send_file/3): `full_path` is ALWAYS derived from a
+  #     server-owned relative path — either a DB-resolved `file.path` (media
+  #     `serve/2`, sanitized at write by `Media.unique_filename/1`) or a
+  #     `Renditions.ensure/3` output (server-generated, `serve_rendition/2`).
+  #     No caller passes a raw request segment; a `../…` URL never resolves a row.
+  #   * XSS.ContentType (put_resp_content_type/2): the type is pinned through
+  #     `MediaFile.serve_content_type/1` (dangerous svg/html/xml/js collapse to a
+  #     non-executable octet-stream) AND paired with `nosniff` + an `attachment`
+  #     disposition for dangerous types — the stored-XSS vector is defused here.
+  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
   defp maybe_send_file(conn, full_path, mime) do
     conn
     |> put_resp_content_type(MediaFile.serve_content_type(mime))
