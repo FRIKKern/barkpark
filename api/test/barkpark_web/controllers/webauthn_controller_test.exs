@@ -182,6 +182,33 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assert authed(token) |> get("/v1/auth/webauthn/credentials") |> json_response(200) |> Map.fetch!("credentials") == []
   end
 
+  # BinToTerm scar: the stored `cose_key` is decoded with `binary_to_term/2
+  # [:safe]`. A poisoned column (backup restore / injection) carrying a
+  # well-formed term with a novel atom must fail authentication CLOSED and never
+  # mint the atom (atom-table exhaustion), instead of materializing it.
+  test "a poisoned cose_key fails closed without minting an atom (:safe decode)", %{token: token} do
+    cred = register!(token)
+
+    novel = "webauthn_cose_novel_atom_#{System.unique_integer([:positive])}"
+    assert_raise ArgumentError, fn -> String.to_existing_atom(novel) end
+
+    # <<131>> magic + SMALL_ATOM_UTF8_EXT (119) for a not-yet-interned atom.
+    crafted = <<131, 119, byte_size(novel)::8, novel::binary>>
+
+    {1, _} =
+      Repo.update_all(
+        from(c in Accounts.WebauthnCredential, where: c.credential_id == ^cred.cred_id),
+        set: [cose_key: crafted]
+      )
+
+    # load_cose runs before Wax.authenticate, so the crafted key is what's
+    # exercised: [:safe] rejects it → fail-closed error, not a materialized atom.
+    assert {:error, :corrupt_credential} =
+             Webauthn.verify_authentication(cred.cred_id, <<>>, <<>>, "{}", <<0::256>>)
+
+    assert_raise ArgumentError, fn -> String.to_existing_atom(novel) end
+  end
+
   # Binary_id scar: a non-UUID :id must fold into not_found, NOT raise
   # Ecto.CastError → 500 inside the id: get_by cast. Any authed user could
   # trigger the 500 trivially by DELETEing a garbage id.
