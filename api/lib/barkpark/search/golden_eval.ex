@@ -41,25 +41,42 @@ defmodule Barkpark.Search.GoldenEval do
     }
   end
 
-  @spec compare(metrics(), metrics()) :: :ok | {:error, [String.t()]}
+  @spec compare(map(), map()) :: :ok | {:error, [String.t()]}
   def compare(current, baseline) do
+    # Baselines loaded from disk arrive with STRING keys (Jason.decode!); metrics
+    # from run/3 carry ATOM keys. Route BOTH sides through metric/2 so either
+    # shape compares cleanly (fixes the KeyError at atom dot-access on a string map).
+    cur_ndcg = metric(current, :ndcg_at_10)
+    base_ndcg = metric(baseline, :ndcg_at_10)
+    cur_mrr = metric(current, :mrr)
+    base_mrr = metric(baseline, :mrr)
+
     regressions = []
 
     regressions =
-      if current.ndcg_at_10 + 0.001 < baseline.ndcg_at_10 do
-        ["NDCG@10 regressed #{baseline.ndcg_at_10} -> #{current.ndcg_at_10}" | regressions]
+      if cur_ndcg + 0.001 < base_ndcg do
+        ["NDCG@10 regressed #{base_ndcg} -> #{cur_ndcg}" | regressions]
       else
         regressions
       end
 
     regressions =
-      if current.mrr + 0.001 < baseline.mrr do
-        ["MRR regressed #{baseline.mrr} -> #{current.mrr}" | regressions]
+      if cur_mrr + 0.001 < base_mrr do
+        ["MRR regressed #{base_mrr} -> #{cur_mrr}" | regressions]
       else
         regressions
       end
 
     if regressions == [], do: :ok, else: {:error, Enum.reverse(regressions)}
+  end
+
+  # One shared accessor tolerant of atom-keyed (run/3) and string-keyed
+  # (JSON-loaded) metric maps. Missing metrics score 0.0 rather than crash.
+  defp metric(m, key) when is_atom(key) do
+    case Map.fetch(m, key) do
+      {:ok, v} -> v
+      :error -> Map.get(m, Atom.to_string(key), 0.0)
+    end
   end
 
   defp eval_query("documents", scope, spec) do

@@ -1,0 +1,7 @@
+{
+  "queries": 4,
+  "zero_hit_rate": 0.25,
+  "mrr": 0.75,
+  "ndcg_at_10": 0.75,
+  "failures": []
+}

@@ -16,6 +16,9 @@ defmodule Barkpark.Quiz.StatsTest do
     end)
 
     before = Stats.live_room_count()
+    # Joins never start rooms (Decision N) — ensure (host) first, then join.
+    {:ok, _} = Quiz.ensure_room(pin1)
+    {:ok, _} = Quiz.ensure_room(pin2)
     Quiz.join(pin1, "p1", "Alice")
     Quiz.join(pin1, "p2", "Bob")
     Quiz.join(pin2, "p3", "Carol")
@@ -32,6 +35,7 @@ defmodule Barkpark.Quiz.StatsTest do
     pin = "TST#{System.unique_integer([:positive])}"
     on_exit(fn -> Quiz.stop_room(pin) end)
     ref = :telemetry_test.attach_event_handlers(self(), [[:barkpark, :quiz, :tick]])
+    {:ok, _} = Quiz.ensure_room(pin)
     Quiz.join(pin, "p1", "Alice")
     assert_receive {[:barkpark, :quiz, :tick], ^ref, %{cursors: _}, %{pin: ^pin}}, 500
   end

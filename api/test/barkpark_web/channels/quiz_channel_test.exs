@@ -15,6 +15,9 @@ defmodule BarkparkWeb.QuizChannelTest do
 
   setup do
     pin = "T" <> Integer.to_string(System.unique_integer([:positive]))
+    # Joins never start rooms (Decision N) — mirror production: the host mount
+    # creates the room, then players/observers join it.
+    {:ok, _pid} = Quiz.ensure_room(pin)
     on_exit(fn -> Quiz.stop_room(pin) end)
     %{pin: pin}
   end
@@ -191,6 +194,52 @@ defmodule BarkparkWeb.QuizChannelTest do
     assert reply == %{observer: true}
     # The projector receives frames but must never inflate the count.
     assert Quiz.state(pin).player_count == 1
+  end
+
+  # ── Ghost-room guard (Decision N): joins never create rooms ───────────────
+
+  test "a player join to a pin nobody hosts is rejected without spawning a room" do
+    bogus = "TGHOSTP" <> Integer.to_string(System.unique_integer([:positive]))
+
+    assert {:error, %{reason: "room_unavailable"}} =
+             QuizSocket
+             |> socket("p1", %{player_id: "p1"})
+             |> subscribe_and_join(QuizChannel, "quiz:room:" <> bogus, %{"name" => "Alice"})
+
+    assert Barkpark.Quiz.Room.whereis(bogus) == nil
+  end
+
+  test "an observer join to a pin nobody hosts is rejected without spawning a room" do
+    bogus = "TGHOSTO" <> Integer.to_string(System.unique_integer([:positive]))
+
+    assert {:error, %{reason: "room_unavailable"}} =
+             QuizSocket
+             |> socket("obs", %{player_id: "obs"})
+             |> subscribe_and_join(QuizChannel, "quiz:room:" <> bogus, %{"observe" => true})
+
+    assert Barkpark.Quiz.Room.whereis(bogus) == nil
+  end
+
+  test "scanned bogus pins leave the room Registry untouched (no ghost rooms)" do
+    count_before = Registry.count(Barkpark.Quiz.RoomRegistry)
+
+    for i <- 1..3 do
+      bogus = "TSCAN#{System.unique_integer([:positive])}x#{i}"
+
+      assert {:error, %{reason: "room_unavailable"}} =
+               QuizSocket
+               |> socket("p#{i}", %{player_id: "p#{i}"})
+               |> subscribe_and_join(QuizChannel, "quiz:room:" <> bogus, %{"name" => "Scan"})
+
+      assert {:error, %{reason: "room_unavailable"}} =
+               QuizSocket
+               |> socket("o#{i}", %{player_id: "o#{i}"})
+               |> subscribe_and_join(QuizChannel, "quiz:room:" <> bogus, %{"observe" => true})
+
+      assert Barkpark.Quiz.Room.whereis(bogus) == nil
+    end
+
+    assert Registry.count(Barkpark.Quiz.RoomRegistry) == count_before
   end
 
   test "a player's cursor socket re-joining with the same id does not double-count", %{pin: pin} do

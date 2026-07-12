@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -33,9 +34,11 @@ func seedCloudLogin(t *testing.T, cloudURL string) {
 // fleetHits records which auto-register routes a fake control plane saw, so the
 // steal-guard / headless-frozen tests can assert what did (and did NOT) fire.
 type fleetHits struct {
-	barkparks    int
-	credentials  int
-	capabilities int
+	barkparks      int
+	barkparksQuery string
+	credentials    int
+	credentialTeam string
+	capabilities   int
 }
 
 // newFleetControlPlane stands up ONE httptest server that plays BOTH the control
@@ -53,9 +56,11 @@ func newFleetControlPlane(t *testing.T, hits *fleetHits, fleetBody func(self str
 		switch {
 		case r.URL.Path == "/v1/barkparks":
 			hits.barkparks++
+			hits.barkparksQuery = r.URL.RawQuery
 			_, _ = io.WriteString(w, fleetBody(srv.URL))
 		case strings.HasSuffix(r.URL.Path, "/credentials"):
 			hits.credentials++
+			hits.credentialTeam = r.Header.Get("X-Barkpark-Team")
 			if credsToken == "" {
 				w.WriteHeader(http.StatusNotFound)
 				_, _ = io.WriteString(w, `{"error":"no_admin_token"}`)
@@ -132,6 +137,26 @@ func TestFinishLoginConnectSingleAutoConnects(t *testing.T) {
 	}
 	if e, ok := loaded.FindServer(srv.URL); !ok || e.Token != "admin-secret" {
 		t.Fatalf("admin token must be saved as the server token; entry = %+v ok=%v", e, ok)
+	}
+}
+
+func TestFinishLoginConnectSingleSecondaryTeamSendsCredentialTeam(t *testing.T) {
+	withTempConfigHome(t)
+	var hits fleetHits
+	srv := newFleetControlPlane(t, &hits, func(self string) string {
+		return `{"barkparks":[{"id":"bp-2","name":"docs","url":"` + self + `","team":{"id":"team-docs","name":"Docs","role":"admin"}}]}`
+	}, "admin-secret")
+	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-primary"}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	finishLoginConnect(ttyWriter(&stdout, &stderr), cfg)
+	if hits.barkparksQuery != "scope=all" {
+		t.Fatalf("fleet query = %q, want scope=all", hits.barkparksQuery)
+	}
+	if hits.credentials != 1 || hits.credentialTeam != "team-docs" {
+		t.Fatalf("credential request count/team = %d/%q, want 1/team-docs", hits.credentials, hits.credentialTeam)
 	}
 }
 
@@ -236,7 +261,7 @@ func TestFinishLoginConnectMultiNonTTYPrintsFleet(t *testing.T) {
 	forceDeviceTTY(t, false) // stdin is NOT a terminal → no interactive pick
 
 	var hits fleetHits
-	twoFleet := `{"barkparks":[{"id":"bp-1","name":"alpha","url":"https://alpha.example.com"},{"id":"bp-2","name":"beta","host":"beta.example.com"}]}`
+	twoFleet := `{"barkparks":[{"id":"bp-1","name":"shared","url":"https://alpha.example.com","team":{"id":"team-1","name":"Primary","role":"owner"}},{"id":"bp-2","name":"shared","host":"beta.example.com","team":{"id":"team-2","name":"Docs","role":"admin"}}]}`
 	srv := newFleetControlPlane(t, &hits, staticFleet(twoFleet), "admin-secret")
 
 	cfg := &Config{CloudURL: srv.URL, CloudToken: "sess", CloudTeam: "team-1"}
@@ -248,7 +273,7 @@ func TestFinishLoginConnectMultiNonTTYPrintsFleet(t *testing.T) {
 	if hits.credentials != 0 {
 		t.Fatalf("no interactive pick → no credentials fetch; got %d", hits.credentials)
 	}
-	for _, want := range []string{"alpha", "beta", "https://alpha.example.com", "beta.example.com", "bp setup --target cloud"} {
+	for _, want := range []string{"shared · Primary", "shared · Docs", "https://alpha.example.com", "beta.example.com", "bp setup --target cloud"} {
 		if !bytes.Contains(stdout.Bytes(), []byte(want)) {
 			t.Fatalf("multi non-tty fleet listing missing %q:\n%s", want, stdout.String())
 		}
@@ -716,6 +741,220 @@ func TestBarkparksHitsControlPlane(t *testing.T) {
 	}
 }
 
+func TestBarkparksAllHitsCrossTeamScope(t *testing.T) {
+	withTempConfigHome(t)
+
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		_, _ = io.WriteString(w, `{"barkparks":[
+			{"id":"bp-1","name":"prod","slug":"prod","provider":"hetzner","host":"prod.example.com","team_id":"team-1","team":{"id":"team-1","name":"Primary","slug":"primary","role":"owner"}},
+			{"id":"bp-2","name":"docs","slug":"docs","provider":"azure","host":"docs.example.com","team_id":"team-2","team":{"id":"team-2","name":"Docs","slug":"docs","role":"member"}}
+		]}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runBarkparks(out, []string{"--all"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if gotQuery != "scope=all" {
+		t.Fatalf("query = %q, want scope=all", gotQuery)
+	}
+	for _, want := range []string{"TEAM", "Primary", "Docs", "prod", "docs"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("cross-team table missing %q:\n%s", want, stdout)
+		}
+	}
+
+	jsonOut, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "json"
+		return runBarkparks(out, []string{"--all"})
+	})
+	if code != exitOK {
+		t.Fatalf("json exit = %d, want 0\n%s", code, jsonOut)
+	}
+	var payload struct {
+		Barkparks []struct {
+			Team struct {
+				Slug string `json:"slug"`
+				Role string `json:"role"`
+			} `json:"team"`
+		} `json:"barkparks"`
+	}
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("decode cross-team json: %v\n%s", err, jsonOut)
+	}
+	if len(payload.Barkparks) != 2 || payload.Barkparks[1].Team.Slug != "docs" || payload.Barkparks[1].Team.Role != "member" {
+		t.Fatalf("cross-team json missing team envelope: %+v", payload)
+	}
+}
+
+func TestExecuteBarkparksAllHitsCrossTeamScope(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "after noun", args: []string{"barkparks", "--all", "-o", "json"}},
+		{name: "before noun", args: []string{"--all", "barkparks", "-o", "json"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withTempConfigHome(t)
+
+			var gotAuth, gotPath, gotQuery string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				gotPath = r.URL.Path
+				gotQuery = r.URL.RawQuery
+				_, _ = io.WriteString(w, `{"barkparks":[
+					{"id":"bp-1","name":"prod","team_id":"team-1","team":{"id":"team-1","name":"Primary","slug":"primary","role":"owner"}},
+					{"id":"bp-2","name":"docs","team_id":"team-2","team":{"id":"team-2","name":"Docs","slug":"docs","role":"member"}}
+				]}`)
+			}))
+			defer srv.Close()
+			seedCloudLogin(t, srv.URL)
+
+			out, code := captureExecuteCode(t, tc.args)
+			if code != exitOK {
+				t.Fatalf("Execute(%v) exit = %d, want 0\n%s", tc.args, code, out)
+			}
+			if gotPath != "/v1/barkparks" || gotQuery != "scope=all" {
+				t.Fatalf("Execute(%v) requested %q?%s, want /v1/barkparks?scope=all", tc.args, gotPath, gotQuery)
+			}
+			if gotAuth != "Bearer sess-abc" {
+				t.Fatalf("Execute(%v) auth = %q, want Bearer sess-abc", tc.args, gotAuth)
+			}
+			var payload struct {
+				Barkparks []struct {
+					Name string `json:"name"`
+					Team struct {
+						Slug string `json:"slug"`
+						Role string `json:"role"`
+					} `json:"team"`
+				} `json:"barkparks"`
+			}
+			if err := json.Unmarshal([]byte(out), &payload); err != nil {
+				t.Fatalf("Execute(%v) decode cross-team output: %v\n%s", tc.args, err, out)
+			}
+			if len(payload.Barkparks) != 2 || payload.Barkparks[1].Name != "docs" || payload.Barkparks[1].Team.Slug != "docs" || payload.Barkparks[1].Team.Role != "member" {
+				t.Fatalf("Execute(%v) missing cross-team envelope: %+v", tc.args, payload)
+			}
+		})
+	}
+}
+
+func TestExecuteBarkparksDefaultStaysCurrentTeam(t *testing.T) {
+	withTempConfigHome(t)
+
+	var gotAuth, gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
+		_, _ = io.WriteString(w, `{"barkparks":[]}`)
+	}))
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	out, code := captureExecuteCode(t, []string{"barkparks", "-o", "json"})
+	if code != exitOK {
+		t.Fatalf("Execute(barkparks) exit = %d, want 0\n%s", code, out)
+	}
+	if gotPath != "/v1/barkparks" || gotQuery != "" {
+		t.Fatalf("Execute(barkparks) requested %q?%s, want current-team /v1/barkparks with no query", gotPath, gotQuery)
+	}
+	if gotAuth != "Bearer sess-abc" {
+		t.Fatalf("Execute(barkparks) auth = %q, want Bearer sess-abc", gotAuth)
+	}
+}
+
+func TestExecuteBarkparksKindStaysLocalWithCloudSession(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(w, `{"barkparks":[]}`)
+	}))
+	defer srv.Close()
+
+	seedTwoBarkparks(t)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	cfg.CloudURL = srv.URL
+	cfg.CloudToken = "sess-abc"
+	cfg.CloudTeam = "team-1"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	out, code := captureExecuteCode(t, []string{"barkparks", "--kind", "local", "-o", "json"})
+	if code != exitOK {
+		t.Fatalf("Execute(barkparks --kind local) exit = %d, want 0\n%s", code, out)
+	}
+	var payload struct {
+		Source    string `json:"source"`
+		Barkparks []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+			Kind string `json:"kind"`
+		} `json:"barkparks"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode local barkparks output: %v\n%s", err, out)
+	}
+	if payload.Source != "local-config" || len(payload.Barkparks) != 1 ||
+		payload.Barkparks[0].Name != "dev" || payload.Barkparks[0].URL != "http://localhost:4000" ||
+		payload.Barkparks[0].Kind != "local" {
+		t.Fatalf("explicit --kind did not preserve the local-config view: %+v", payload)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("explicit --kind made %d control-plane request(s), want zero", got)
+	}
+}
+
+func TestExecuteBarkparksAllRejectsKind(t *testing.T) {
+	withTempConfigHome(t)
+	seedCloudLogin(t, "https://cloud.invalid")
+
+	out, code := captureExecuteCode(t, []string{"barkparks", "--all", "--kind", "cloud"})
+	if code != exitUsage {
+		t.Fatalf("Execute(barkparks --all --kind cloud) exit = %d, want %d\n%s", code, exitUsage, out)
+	}
+	if !strings.Contains(out, "--all cannot be combined with --kind") {
+		t.Fatalf("missing --all/--kind usage error:\n%s", out)
+	}
+}
+
+func TestExecuteBarkparksHelpDocumentsScopeContract(t *testing.T) {
+	out, code := captureExecuteCode(t, []string{"barkparks", "--help"})
+	if code != exitOK {
+		t.Fatalf("Execute(barkparks --help) exit = %d, want 0\n%s", code, out)
+	}
+	for _, want := range []string{
+		"current team's",
+		"control-plane fleet",
+		"every authorized team membership",
+		"includes the owning team",
+		"--kind local|cloud",
+		"reads local config and makes no network call",
+		"requires login and cannot be combined with --kind",
+		"-o json|yaml",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("barkparks help missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // TestRegistryLifecycleToken pins the Go port of the SPA's lifecyclePillState
 // (app.js:674-682 over instanceLifecycle :2375-2383): the same boolean ladder,
 // the same precedence, the same "" fall-through. The first six cases MIRROR the
@@ -767,7 +1006,7 @@ func TestBarkparksFleetTableGolden(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	renderCloudBarkparksTable(w, list)
+	renderCloudBarkparksTable(w, list, false)
 	assertGolden(t, "barkparks_fleet_table", stdout.String())
 }
 
@@ -782,7 +1021,7 @@ func TestBarkparksFleetTableSanitizes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
-	renderCloudBarkparksTable(w, list)
+	renderCloudBarkparksTable(w, list, false)
 	got := stdout.String()
 	if bytes.Contains([]byte(got), []byte("\x1b")) {
 		t.Fatalf("fleet table echoed a raw ESC from a server value:\n%q", got)
@@ -817,7 +1056,7 @@ func TestBarkparksFleetTableColorTints(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	w.output = "table"
 	w.color = true
-	renderCloudBarkparksTable(w, list)
+	renderCloudBarkparksTable(w, list, false)
 	got := stdout.String()
 	if !bytes.Contains([]byte(got), []byte("\x1b[")) {
 		t.Fatalf("color-on fleet table carried no SGR — PROVIDER/STATUS chrome did not paint:\n%q", got)
@@ -827,7 +1066,7 @@ func TestBarkparksFleetTableColorTints(t *testing.T) {
 	var offOut, offErr bytes.Buffer
 	wo := newWriter(&offOut, &offErr) // buffer → not a tty → color off
 	wo.output = "table"
-	renderCloudBarkparksTable(wo, list)
+	renderCloudBarkparksTable(wo, list, false)
 	if strip := stripANSI(got); strip != offOut.String() {
 		t.Fatalf("color-on minus SGR must equal color-off bytes:\n--- stripped ---\n%q\n--- color-off ---\n%q", strip, offOut.String())
 	}

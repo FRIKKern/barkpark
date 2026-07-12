@@ -428,6 +428,11 @@ defmodule Barkpark.Tasks.QueueTest do
 
       {400, nil} = Repo.insert_all(Document, rows)
 
+      # Fresh stats: without ANALYZE the planner sees default estimates for the
+      # 400 just-inserted rows and its join choice varies per runner (live flake:
+      # the Hash pin below failed on runners that picked another strategy).
+      Repo.query!("ANALYZE documents")
+
       query = Queue.ready_query(scope ++ [dataset: dataset, limit: 200])
       {sql, params} = Ecto.Adapters.SQL.to_sql(:all, Repo, query)
 
@@ -445,9 +450,16 @@ defmodule Barkpark.Tasks.QueueTest do
                node["Relation Name"] == "documents" and node["Actual Loops"] == 1
              end)
 
-      assert Enum.any?(plan_nodes(unsatisfied_cte), fn node ->
-               node["Node Type"] in ["Hash", "Hash Join"]
-             end)
+      # The property under test is ONE-TIME consumption of the done-task CTE —
+      # never a per-row re-scan. Assert that behavior directly instead of
+      # pinning the planner's join algorithm (environment-sensitive).
+      done_cte_scans =
+        Enum.filter(plan_nodes(unsatisfied_cte), fn node ->
+          node["Node Type"] == "CTE Scan" and node["CTE Name"] == "ready_done_tasks"
+        end)
+
+      assert done_cte_scans != []
+      assert Enum.all?(done_cte_scans, &(&1["Actual Loops"] == 1))
     end
   end
 end

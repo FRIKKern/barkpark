@@ -8,12 +8,12 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// This file is the LOCAL-ONLY surface of the bp Cloud commands — the half of
-// "one login for all your Barkparks" that needs NO control plane. Everything
-// here reads/writes the on-disk config (KnownServers via config.go) and renders
-// the SSH command an agent action WOULD run; nothing here makes a control-plane
-// HTTP call. The control-plane-backed counterparts — `bp login`, `bp go-live`,
-// and the live registry view of `bp barkparks` — are cloud-12 and land later.
+// This file owns the local-config Barkpark commands and the `bp barkparks`
+// source switch. With a saved Cloud session and no explicit --kind,
+// `bp barkparks` delegates to the control plane (bare = current team, --all =
+// every authorized team). Without a saved session, or with --kind, it reads
+// KnownServers only and makes no network call. The attach/register and agent
+// command paths below remain local-only.
 //
 // The three commands mirror the existing built-in idiom exactly:
 //   - bp barkparks            — the cloud-facing view of `bp servers` (cloud-11)
@@ -29,15 +29,11 @@ import (
 // and keep RememberServer a deterministic, dependency-free helper.
 var cloudClock = func() time.Time { return time.Now().UTC() }
 
-// runBarkparks is the `bp barkparks` built-in — the cloud-facing view of the
-// known servers. It is the LOCAL-CONFIG view (cloud-11): every Barkpark bp has
-// been told about, rendered as a clean table of name · url · kind · status.
-// Status is "unknown" until the agent / control plane reports it (cloud-10 /
-// cloud-12); here it is always read from local config, never fetched.
-//
-// Read-only, no network, no mutation — the same contract as `bp servers`, just
-// labelled and columned as Barkparks. An optional `--kind local|cloud` filter
-// reuses the servers parser.
+// runBarkparks is the `bp barkparks` source switch. With a saved Cloud session
+// and no explicit --kind, it renders the control-plane registry: bare stays
+// current-team scoped and --all spans every authorized team. Without a saved
+// session, or with `--kind local|cloud`, it renders KnownServers and makes no
+// network call. Both paths are read-only.
 func runBarkparks(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -55,6 +51,18 @@ func runBarkparks(out *writer, args []string) int {
 	if kerr != nil {
 		return useError(out, "usage", kerr.Error(), exitUsage)
 	}
+	allTeams := false
+	for _, arg := range args {
+		if arg == "--all" {
+			allTeams = true
+		}
+	}
+	if allTeams && kindFilter != "" {
+		return useError(out, "usage", "--all cannot be combined with --kind", exitUsage)
+	}
+	if allTeams && !cfg.HasCloudToken() {
+		return useError(out, "usage", "--all requires Barkpark Cloud login", exitUsage)
+	}
 
 	// AUTHORITATIVE path (cloud-12): when a Cloud token is present, the live
 	// control-plane registry is the source of truth — query it instead of the
@@ -62,7 +70,7 @@ func runBarkparks(out *writer, args []string) int {
 	// caller passing it explicitly opts back into the local view; bare
 	// `bp barkparks` with a token hits the control plane. No token → local view.
 	if cfg.HasCloudToken() && kindFilter == "" {
-		return runBarkparksCloud(out, cfg)
+		return runBarkparksCloud(out, cfg, allTeams)
 	}
 
 	list := cfg.KnownServerList()
@@ -496,20 +504,21 @@ func attachUsageErr(out *writer, msg string) int {
 
 // printBarkparksHelp writes `bp barkparks` usage WITHOUT touching the TTY.
 func printBarkparksHelp(out *writer) {
-	const help = `bp barkparks — list the Barkparks bp knows about (local config view).
+	const help = `bp barkparks — list Barkparks from local config or Barkpark Cloud.
 
 USAGE
-  bp barkparks [--kind local|cloud] [-o json]
+  bp barkparks [--all | --kind local|cloud] [-o json|yaml]
 
 WHAT IT SHOWS
-  every Barkpark in local config — name · url · kind · status. The ★ marks the
-  active one. Status is read from local config: "active" for the selected
-  Barkpark, "unknown" for the rest (live status arrives with the agent + control
-  plane in a later task — this command makes NO network call).
+  with a saved Cloud session, bare bp barkparks queries the current team's
+  control-plane fleet. --all queries every authorized team membership and
+  includes the owning team. Without a saved session, or with an explicit
+  --kind filter, it reads local config and makes no network call.
 
 FLAGS
-  --kind local|cloud   show only local or only cloud Barkparks
-  -o json              emit one machine-readable JSON object on stdout
+  --all                list Barkparks across every authorized Cloud team; requires login and cannot be combined with --kind
+  --kind local|cloud   filter the local-config view; cannot combine with --all
+  -o json|yaml         emit one machine-readable object on stdout
 
 RELATED
   bp register ssh root@<host> --name <name>   add a self-hosted Barkpark

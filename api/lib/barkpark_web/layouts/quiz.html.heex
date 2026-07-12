@@ -1,44 +1,68 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
   <title>Hyperquiz · Barkpark</title>
   <style>
-    /* Hyperquiz P1 walking-skeleton chrome — clean projector + phone surfaces.
-       Kahoot-style 4-colour choice palette. Deliberately self-contained (no
-       Studio chrome): this is the public player/host page. */
+    /* Hyperquiz chrome — clean projector + phone surfaces, skinned onto the
+       derive(theme) token system (charter Decision E, hq-w2-theme-reskin).
+       Kahoot-style 4-colour choice palette stays the game's own vocabulary. */
     *, *::before, *::after { box-sizing: border-box; }
-    :root {
-      /* Game-surface palette: the projector-dark chrome + Kahoot-style 4-colour
-         answer vocabulary are the game's OWN identity, not Studio chrome — the
-         quadrant hues are load-bearing game semantics (phones and projector must
-         agree on them), the same class of documented exception as the terminal
-         traffic dots. Re-skinning the CHROME vars (--bg/--panel/--ink*) onto
-         derive(theme) is filed as hq-w2-theme-reskin (charter Decision E). */
-      --bg: #0f1020; --panel: #1a1c33; --ink: #f4f4fb; --ink-soft: #a6a8c8; /* lit-allow */
-      --c0: #e2483d; --c1: #2b7fff; --c2: #f5a524; --c3: #2bb673; /* lit-allow */
-      --accent: #7c5cff; /* lit-allow */
-    }
+    <%!-- The ONE canonical theme-token source (paper-surface.css via
+          Barkpark.PortableDoc.Render.Stylesheet) — the SAME bytes Studio and
+          the paper reader embed (bulldocs.html.heex pattern). It supplies the
+          `--paper-*` tokens this chrome consumes, scoped
+          `html[data-theme] .bp-paper-surface` — satisfied here by
+          data-theme="dark" on <html> + bp-paper-surface on <body>. Embedded
+          FIRST so every quiz rule below is later-in-cascade: at equal
+          specificity the game surface wins (see BLEED SHIELD below). --%>
+    <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>
+    /* Paper-surface BLEED SHIELD (audited): <body> carries .bp-paper-surface
+       for TOKEN SCOPE only, but the shared source also ships element rules
+       (h1-h6/p/a/ul/li/code/pre/img — specificity 0,1,1). Quiz markup rides
+       p/h1/code/img; every quiz rule below on one of those elements is written
+       element.class (equal 0,1,1, later in cascade → quiz wins), and this
+       shield re-zeros the properties the quiz rules never declared. a/ul/li/pre
+       never appear in quiz markup; the source's .bp-* classed rules can't
+       match it. */
+    .q-shell p { hyphens: none; }
+    .q-shell h1 { font-family: inherit; letter-spacing: normal; }
+    .q-shell img { border: 0; background: transparent; }
     body {
+      /* Chrome vars resolve from the generated theme tokens (Decision E,
+         done). Defined at BODY scope, not :root: the generated tokens live on
+         `html[data-theme] .bp-paper-surface` — this <body> — so a :root
+         var() reference would sit above that scope and silently never
+         resolve. Accent follows the theme (purple → teal): accepted by
+         decision. */
+      --bg: var(--paper-bg); --panel: var(--paper-bg-deep);
+      --ink: var(--paper-ink); --ink-soft: var(--paper-ink-soft);
+      --accent: var(--paper-accent);
+      /* Kahoot-style 4-colour answer vocabulary — the quadrant hues are
+         load-bearing game semantics (phones and projector must agree on
+         them), the game's OWN identity, not Studio chrome — the same class of
+         documented exception as the terminal traffic dots. The theme manifest
+         has no game palette; Decision E keeps these quiz-scoped. */
+      --c0: #e2483d; --c1: #2b7fff; --c2: #f5a524; --c3: #2bb673; /* lit-allow */
       margin: 0; background: var(--bg); color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
       min-height: 100vh;
     }
     .q-shell { max-width: 960px; margin: 0 auto; padding: 32px 20px 80px; }
-    .q-eyebrow {
+    p.q-eyebrow {
       font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em;
       text-transform: uppercase; color: var(--accent); margin: 0 0 6px;
     }
-    .q-pin { font-size: 0.95rem; color: var(--ink-soft); margin: 0 0 24px; }
+    p.q-pin { font-size: 0.95rem; color: var(--ink-soft); margin: 0 0 24px; }
     .q-pin code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
       background: var(--panel); padding: 2px 8px; border-radius: 6px;
       color: var(--ink); letter-spacing: 0.15em; font-size: 1.05rem;
     }
-    .q-question { font-size: 1.9rem; font-weight: 700; line-height: 1.2; margin: 0 0 28px; }
-    .q-image { max-width: 100%; max-height: 38vh; border-radius: 12px; margin: 0 0 18px; display: block; }
+    h1.q-question { font-size: 1.9rem; font-weight: 700; line-height: 1.2; margin: 0 0 28px; }
+    img.q-image { max-width: 100%; max-height: 38vh; border-radius: 12px; margin: 0 0 18px; display: block; }
     .q-meta { color: var(--ink-soft); font-size: 0.9rem; margin: 0 0 20px; }
     .q-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     @media (max-width: 560px) { .q-grid { grid-template-columns: 1fr; } }
@@ -60,13 +84,13 @@
     .q-bar-track { background: var(--panel); border-radius: 8px; height: 26px; overflow: hidden; }
     .q-bar-fill { height: 100%; border-radius: 8px; transition: width .3s ease; min-width: 2px; }
     .q-count { font-variant-numeric: tabular-nums; color: var(--ink-soft); }
-    .q-status { color: var(--ink-soft); font-size: 0.95rem; margin-top: 20px; }
+    p.q-status { color: var(--ink-soft); font-size: 0.95rem; margin-top: 20px; }
     .q-big { font-size: 3rem; font-weight: 800; }
     /* P2 cursor overlay — full-viewport, never intercepts clicks. */
     .quiz-cursor-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 50; }
   </style>
 </head>
-<body>
+<body class="bp-paper-surface">
   {@inner_content}
   <%!-- LiveView client at the bottom of the body (never a blocking head
         script — golden rule), mirroring the Sheets reader layout. --%>

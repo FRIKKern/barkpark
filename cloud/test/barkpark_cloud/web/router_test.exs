@@ -427,6 +427,42 @@ defmodule BarkparkCloud.Web.RouterTest do
       refute "b-secret" in slugs
     end
 
+    test "scope=all lists every membership with team envelopes and excludes outsiders" do
+      {user, primary_team} = user_with_team()
+      secondary_team = team_fixture(%{name: "Secondary", slug: "secondary"})
+      outsider_team = team_fixture(%{name: "Outsider", slug: "outsider"})
+      {:ok, _} = Accounts.add_member(secondary_team, user, "member")
+
+      _primary = barkpark_fixture(primary_team, %{name: "Primary", slug: "primary"})
+      _secondary = barkpark_fixture(secondary_team, %{name: "Secondary", slug: "secondary"})
+      _outsider = barkpark_fixture(outsider_team, %{name: "Secret", slug: "secret"})
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks?scope=all", nil, token)
+
+      assert conn.status == 200
+      rows = json_body(conn)["barkparks"]
+      assert Enum.map(rows, & &1["slug"]) |> Enum.sort() == ["primary", "secondary"]
+
+      assert Enum.map(rows, & &1["team"]["slug"]) |> Enum.sort() ==
+               [primary_team.slug, secondary_team.slug] |> Enum.sort()
+
+      assert Enum.find(rows, &(&1["slug"] == "secondary"))["team"]["role"] == "member"
+
+      refute Enum.any?(rows, &(&1["slug"] == "secret"))
+    end
+
+    test "scope=all rejects a team-scoped PAT" do
+      {user, team} = user_with_team()
+
+      {:ok, plaintext, _token} =
+        Accounts.create_personal_access_token(user, team, %{name: "read", abilities: ["read"]})
+
+      conn = call(:get, "/v1/barkparks?scope=all", nil, plaintext)
+      assert conn.status == 401
+      assert json_body(conn)["error"] == "unauthorized"
+    end
+
     test "an AGENT token cannot satisfy a USER route → 401" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)

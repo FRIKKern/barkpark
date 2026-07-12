@@ -7,18 +7,20 @@ defmodule Barkpark.Quiz.Room do
 
   ## Lifecycle
 
-  Started LAZILY by `ensure/1` (the ONLY starter, used by `join/3` and
-  `ensure/1`). `restart: :temporary` — a crashed room is gone; the next join
-  starts a fresh one (state is ephemeral by design). The room self-stops after
+  Started LAZILY by `ensure/1` — the ONLY starter, reached solely from the
+  host mount (`QuizHostLive`), so joins can never spawn a ghost room for a
+  typo'd pin. `restart: :temporary` — a crashed room is gone; the next host
+  visit starts a fresh one (state is ephemeral by design). The room self-stops after
   an idle window with NO interaction — a short window while empty
   (`@empty_idle_ms`) so abandoned/never-populated rooms don't linger, a long
   one once it has players (`@idle_stop_ms`). `hibernate_after` releases its heap
   between bursts. The idle timer is generation-tokened so a stale `:idle_stop`
   already in the mailbox can't stop a freshly-active room.
 
-  Read/leave paths (`leave/2`, `tally/1`, `state/1`, `submit_answer/3`) resolve
-  via `whereis/1` and NEVER start a room — only `join/3`/`ensure/1` do — so a
-  disconnect or a stray read can't resurrect a stopped room as a zombie.
+  Join/read/leave paths (`join/3`, `leave/2`, `tally/1`, `state/1`,
+  `submit_answer/3`) resolve via `whereis/1` and NEVER start a room — only
+  `ensure/1` does — so a disconnect, a stray read, or a bogus-pin join can't
+  start (or resurrect) a room as a zombie.
 
   CORE + plugin-independent. State is in-memory and authoritative while the room
   lives; nothing persists per-tick (per `/papers/hyperquiz-scaling`). Live
@@ -123,17 +125,16 @@ defmodule Barkpark.Quiz.Room do
   # ── Public API ─────────────────────────────────────────────────────────────
 
   @doc """
-  Add (or refresh) a player. Starts the room if needed. Returns `{:ok, snapshot}`,
-  `{:error, :room_full}` past the per-room cap, or `{:error, :max_children}` past
-  the global room cap.
+  Add (or refresh) a player in a LIVE room. Never starts one — the host mount
+  is the sole room creator, so a typo'd/scanned pin can't spawn a ghost room
+  that looks like a working quiz. Returns `{:ok, snapshot}`,
+  `{:error, :no_room}` when nobody is hosting `pin`, or `{:error, :room_full}`
+  past the per-room cap.
   """
   @spec join(pin(), player_id(), String.t()) ::
-          {:ok, map()} | {:error, :room_full | :max_children | term()}
-  def join(pin, player_id, name) do
-    with {:ok, pid} <- ensure(pin) do
-      GenServer.call(pid, {:join, player_id, name}, @call_timeout)
-    end
-  end
+          {:ok, map()} | {:error, :no_room | :room_full | term()}
+  def join(pin, player_id, name),
+    do: call_existing(pin, {:join, player_id, name}, {:error, :no_room})
 
   @doc "Remove a player and drop their answer. No-op (never starts a room) when none lives."
   @spec leave(pin(), player_id()) :: :ok

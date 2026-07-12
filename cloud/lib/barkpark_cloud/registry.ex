@@ -24,7 +24,7 @@ defmodule BarkparkCloud.Registry do
   require Logger
 
   alias BarkparkCloud.Repo
-  alias BarkparkCloud.Accounts.Team
+  alias BarkparkCloud.Accounts.{Team, TeamMembership, User}
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
 
@@ -355,6 +355,19 @@ defmodule BarkparkCloud.Registry do
     Barkpark
     |> where([b], b.team_id == ^team_id)
     |> order_by([b], desc: b.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc "List Barkparks across every Team the user belongs to, newest first."
+  @spec list_barkparks_for_user(User.t()) :: [{Barkpark.t(), binary()}]
+  def list_barkparks_for_user(%User{} = user) do
+    Barkpark
+    |> join(:inner, [b], membership in TeamMembership,
+      on: membership.team_id == b.team_id and membership.user_id == ^user.id
+    )
+    |> order_by([b], desc: b.inserted_at)
+    |> preload([b], :team)
+    |> select([b, membership], {b, membership.role})
     |> Repo.all()
   end
 

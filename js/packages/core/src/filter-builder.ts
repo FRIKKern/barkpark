@@ -32,6 +32,7 @@ const VALID_OPS: readonly FilterOp[] = [
   'in',
   'nin',
   'has',
+  'hasStrong',
   'contains',
   'startsWith',
   'endsWith',
@@ -201,6 +202,9 @@ export function createDocsBuilder<T = BarkparkDocument>(
     },
     has(field, value) {
       return b.where(field, 'has', value)
+    },
+    hasStrong(field, value) {
+      return b.where(field, 'hasStrong', value)
     },
     contains(field, value) {
       return b.where(field, 'contains', value)

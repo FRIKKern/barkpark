@@ -11,6 +11,8 @@ defmodule Barkpark.Quiz.RoomTimingTest do
 
   setup do
     pin = "TM" <> Integer.to_string(System.unique_integer([:positive]))
+    # Joins never start rooms (Decision N) - the host (ensure) is the sole creator.
+    {:ok, _pid} = Quiz.ensure_room(pin)
     on_exit(fn -> Quiz.stop_room(pin) end)
     %{pin: pin}
   end

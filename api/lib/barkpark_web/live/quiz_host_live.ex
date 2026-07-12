@@ -14,9 +14,23 @@ defmodule BarkparkWeb.QuizHostLive do
   alias Barkpark.Quiz
 
   @impl true
-  def mount(%{"pin" => pin}, _session, socket) do
+  def mount(%{"pin" => pin} = params, _session, socket) do
     if connected?(socket) do
       {:ok, _pid} = Quiz.ensure_room(pin)
+
+      # Bind an optional `?quiz=<id>` so a Studio publish of that quiz reaches
+      # this live room in under a second (charter Vision + Decision M). This is
+      # the first production call site of `bind_quiz/3`. The default dataset
+      # ("production") is deliberate; the id rides the doc_id string column, so
+      # NO UUID guard — a guard would reject valid non-UUID ids. `bind_quiz`
+      # always returns `:ok`: it silently no-ops on a garbage/unpublished id
+      # (the room keeps its default question) and is idempotent across refresh,
+      # so there is no error branch to render.
+      case params["quiz"] do
+        qid when is_binary(qid) and qid != "" -> Quiz.bind_quiz(pin, qid)
+        _ -> :ok
+      end
+
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
       state = Quiz.state(pin)
 

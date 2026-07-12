@@ -4,9 +4,11 @@ defmodule BarkparkWeb.QuizChannel do
   cohesive surface over a single anonymous WebSocket:
 
     * **Join flow + Presence** — a phone/browser joins `"quiz:room:<pin>"` with
-      a nickname; we ensure the room (`Barkpark.Quiz`), register the player, and
+      a nickname; we register the player in the LIVE room (`Barkpark.Quiz`) and
       track them in `BarkparkWeb.Presence` on the channel topic so every client
-      sees the live roster.
+      sees the live roster. Joins NEVER create rooms — the host mount is the
+      sole creator (ghost-room guard), so a typo'd/scanned pin is refused with
+      `room_unavailable` instead of silently spawning an empty room.
     * **Answer submit** — a `"submit_answer"` frame records the player's choice
       (last write wins) and replies with the fresh tally.
     * **Live tally** — the room broadcasts `{:quiz, pin, {:tally, t}}` on its
@@ -35,18 +37,27 @@ defmodule BarkparkWeb.QuizChannel do
   # Backpressure: minimum gap between accepted hover frames per connection.
   @hover_min_interval_ms 50
 
+  # Ghost-room guard (Decision N): the host page's own observer canvas can
+  # connect a beat before the host LiveView's synchronous ensure_room in mount.
+  # A short bounded retry absorbs that race without ever creating a room from
+  # the observer path — a URL-scan projector visit still gets refused.
+  @observer_room_retries 3
+  @observer_room_retry_ms 100
+
   # Observer join (host/projector): subscribes to the room's frames but is NEVER
   # registered or counted as a player — that's what kept player_count honest.
+  # Whereis-gated: observing requires a LIVE room (the host mount is the sole
+  # creator), so scanning pins can't spawn ghost rooms.
   @impl true
   def join("quiz:room:" <> pin, %{"observe" => true}, socket) when pin != "" do
-    case Quiz.ensure_room(pin) do
-      {:ok, _pid} ->
+    case await_room(pin, @observer_room_retries) do
+      pid when is_pid(pid) ->
         Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
         Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.cursor_topic(pin))
         Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.heat_topic(pin))
         {:ok, %{observer: true}, socket |> assign(:pin, pin) |> assign(:observer, true)}
 
-      {:error, _reason} ->
+      nil ->
         {:error, %{reason: "room_unavailable"}}
     end
   end
@@ -77,6 +88,19 @@ defmodule BarkparkWeb.QuizChannel do
   end
 
   def join(_topic, _params, _socket), do: {:error, %{reason: "bad_topic"}}
+
+  # Resolve the live room for `pin`, retrying briefly (observer path only) to
+  # absorb the host-canvas-vs-mount race. Read-only: never starts a room.
+  defp await_room(pin, retries) do
+    case Barkpark.Quiz.Room.whereis(pin) do
+      nil when retries > 0 ->
+        Process.sleep(@observer_room_retry_ms)
+        await_room(pin, retries - 1)
+
+      pid_or_nil ->
+        pid_or_nil
+    end
+  end
 
   @impl true
   def handle_info(:after_join, socket) do

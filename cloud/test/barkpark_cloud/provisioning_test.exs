@@ -62,6 +62,10 @@ defmodule BarkparkCloud.ProvisioningTest do
   ## Request helpers
 
   defp call(method, path, body, token) do
+    call(method, path, body, token, nil)
+  end
+
+  defp call(method, path, body, token, team_id) do
     conn =
       case body do
         nil ->
@@ -73,6 +77,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       end
 
     conn = if token, do: put_req_header(conn, "authorization", "Bearer #{token}"), else: conn
+    conn = if team_id, do: put_req_header(conn, "x-barkpark-team", team_id), else: conn
     Router.call(conn, @opts)
   end
 
@@ -1847,6 +1852,49 @@ defmodule BarkparkCloud.ProvisioningTest do
   end
 
   describe "GET /v1/barkparks/:id/credentials (instance-admin-token retrieval)" do
+    for role <- ["owner", "admin"] do
+      test "secondary-team #{role} gets credentials with explicit team context" do
+        {user, _primary_team} = user_with_team()
+        secondary = team_fixture()
+        {:ok, _} = Accounts.add_member(secondary, user, unquote(role))
+        {:ok, token} = Accounts.create_user_session_token(user)
+        bp = barkpark_fixture(secondary)
+        {:ok, job} = Registry.enqueue_provision_job(bp)
+        {:ok, _} = Registry.succeed_job(job.id, "203.0.113.8", admin_token: "bp_admin_secondary")
+
+        conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, token, secondary.id)
+
+        assert conn.status == 200
+        assert json_body(conn)["admin_token"] == "bp_admin_secondary"
+      end
+    end
+
+    test "secondary-team member with explicit team context gets 403" do
+      {user, _primary_team} = user_with_team()
+      secondary = team_fixture()
+      {:ok, _} = Accounts.add_member(secondary, user, "member")
+      {:ok, token} = Accounts.create_user_session_token(user)
+      bp = barkpark_fixture(secondary)
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, token, secondary.id)
+
+      assert conn.status == 403
+    end
+
+    test "outsider supplying another team's context gets indistinguishable 404" do
+      {outsider, _primary_team} = user_with_team()
+      {_owner, secondary} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(outsider)
+      bp = barkpark_fixture(secondary)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.9", admin_token: "bp_admin_hidden")
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/credentials", nil, token, secondary.id)
+
+      assert conn.status == 404
+      refute String.contains?(conn.resp_body, "bp_admin_hidden")
+    end
+
     test "team owner gets the decrypted admin token (show-to-owner)" do
       {owner, team} = user_with_team()
       {:ok, owner_token} = Accounts.create_user_session_token(owner)

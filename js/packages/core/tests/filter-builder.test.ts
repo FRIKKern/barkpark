@@ -28,6 +28,7 @@ describe('filter-builder', () => {
       .in('tag', ['a', 'b'])
       .nin('tag', ['x', 'y'])
       .has('tags', 'tag-x')
+      .hasStrong('tags', 'search:40')
       .contains('title', 'hello')
       .gt('rank', 5)
       .gte('score', 1)
@@ -40,6 +41,7 @@ describe('filter-builder', () => {
       { field: 'tag', op: 'in', value: ['a', 'b'] },
       { field: 'tag', op: 'nin', value: ['x', 'y'] },
       { field: 'tags', op: 'has', value: 'tag-x' },
+      { field: 'tags', op: 'hasStrong', value: 'search:40' },
       { field: 'title', op: 'contains', value: 'hello' },
       { field: 'rank', op: 'gt', value: 5 },
       { field: 'score', op: 'gte', value: 1 },
@@ -77,6 +79,32 @@ describe('filter-builder', () => {
     expect(() => createDocsBuilder(async () => []).nin('sku', ['A,B'])).toThrow(
       BarkparkValidationError,
     )
+  })
+
+  it('hasStrong() passes the scalar `<tag>:<min_strength>` value through unguarded', () => {
+    // hasStrong is a scalar op (NOT in ARRAY_OPS), so the value-guard dispatch on
+    // ARRAY_OPS membership lets the string through with zero new guard code — the
+    // colon-bearing `'search:40'` is a plain scalar, not an array.
+    expect(makeFilterExpression('tags', 'hasStrong', 'search:40')).toEqual({
+      field: 'tags',
+      op: 'hasStrong',
+      value: 'search:40',
+    })
+  })
+
+  it('hasStrong() rejects an array value (scalar-only, like has)', () => {
+    // Same guard that fails `has('f', [...])`: a non-array op with an array value.
+    expect(() => makeFilterExpression('tags', 'hasStrong', ['a', 'b'] as any)).toThrow(
+      BarkparkValidationError,
+    )
+  })
+
+  it('buildQueryString encodes hasStrong in Phoenix nested-map shape', () => {
+    // filter[tags][hasStrong]=search:40 — the server splits on the LAST colon.
+    const qs = buildQueryString({
+      filters: [{ field: 'tags', op: 'hasStrong', value: 'search:40' }],
+    })
+    expect(decodeURIComponent(qs)).toContain('filter[tags][hasStrong]=search:40')
   })
 
   it('in() with plain values still encodes comma-joined (no regression)', async () => {

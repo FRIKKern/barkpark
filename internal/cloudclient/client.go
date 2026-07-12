@@ -57,6 +57,15 @@ type Client struct {
 	HTTP    *http.Client
 }
 
+// Team identifies the membership that owns a Barkpark in a cross-team fleet
+// response. It is omitted by the default, current-team list for compatibility.
+type Team struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+	Role string `json:"role"`
+}
+
 // Barkpark is one registered server in the user's fleet, as returned by
 // GET /v1/barkparks (and embedded in launch / go-live responses). The JSON tags
 // match the control plane's serialization 1:1 — the two status axes
@@ -83,6 +92,7 @@ type Barkpark struct {
 	GitCommit    string `json:"git_commit"`
 	LastSeenAt   string `json:"last_seen_at"`
 	TeamID       string `json:"team_id"`
+	Team         *Team  `json:"team,omitempty"`
 	InsertedAt   string `json:"inserted_at"`
 
 	// Provider is the cloud the box runs on (hetzner/azure). The control plane
@@ -181,6 +191,12 @@ func (c *Client) url(path string) string {
 // response body. It is the shared core all five methods route through, mirroring
 // apiclient's hand-built net/http requests.
 func (c *Client) do(ctx context.Context, method, path string, auth bool, body any) (int, []byte, error) {
+	return c.doWithHeaders(ctx, method, path, auth, body, nil)
+}
+
+// doWithHeaders is do plus a small explicit header seam for calls whose
+// authorization context cannot be inferred from the saved primary team.
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, auth bool, body any, headers http.Header) (int, []byte, error) {
 	var rdr io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -199,6 +215,11 @@ func (c *Client) do(ctx context.Context, method, path string, auth bool, body an
 	}
 	if auth && c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	for name, values := range headers {
+		for _, value := range values {
+			req.Header.Add(name, value)
+		}
 	}
 
 	resp, err := c.httpClient().Do(req)
@@ -455,7 +476,17 @@ func (c *Client) CreateCheckout(ctx context.Context, plan string) (CheckoutResp,
 // This is the AUTHORITATIVE registry view `bp barkparks` renders when a cloud
 // token is present (vs. the local KnownServers fallback in cloud-11).
 func (c *Client) ListBarkparks(ctx context.Context) ([]Barkpark, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/barkparks", true, nil)
+	return c.listBarkparks(ctx, "/v1/barkparks")
+}
+
+// ListAllBarkparks returns Barkparks across every Team membership available to
+// the signed-in human. The control plane rejects team-scoped PATs for this view.
+func (c *Client) ListAllBarkparks(ctx context.Context) ([]Barkpark, error) {
+	return c.listBarkparks(ctx, "/v1/barkparks?scope=all")
+}
+
+func (c *Client) listBarkparks(ctx context.Context, path string) ([]Barkpark, error) {
+	status, body, err := c.do(ctx, "GET", path, true, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -489,7 +520,22 @@ type Credentials struct {
 // A 404 "no_admin_token" means the instance never had one captured (e.g. an
 // ip-only/legacy provision).
 func (c *Client) GetCredentials(ctx context.Context, id string) (Credentials, error) {
-	status, body, err := c.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/credentials", true, nil)
+	return c.getCredentials(ctx, id, "")
+}
+
+// GetCredentialsForTeam fetches credentials using an explicit team membership
+// context. An empty teamID is intentionally identical to GetCredentials.
+func (c *Client) GetCredentialsForTeam(ctx context.Context, id, teamID string) (Credentials, error) {
+	return c.getCredentials(ctx, id, strings.TrimSpace(teamID))
+}
+
+func (c *Client) getCredentials(ctx context.Context, id, teamID string) (Credentials, error) {
+	var headers http.Header
+	if teamID != "" {
+		headers = make(http.Header)
+		headers.Set("X-Barkpark-Team", teamID)
+	}
+	status, body, err := c.doWithHeaders(ctx, "GET", "/v1/barkparks/"+esc(id)+"/credentials", true, nil, headers)
 	if err != nil {
 		return Credentials{}, err
 	}

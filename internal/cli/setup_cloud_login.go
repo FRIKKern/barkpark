@@ -31,8 +31,8 @@ import (
 // needs. *cloudclient.Client satisfies it; a test passes a fake so the
 // fleet-pick / no-admin-token branches are exercised without a network.
 type cloudFleetClient interface {
-	ListBarkparks(ctx context.Context) ([]cloudclient.Barkpark, error)
-	GetCredentials(ctx context.Context, id string) (cloudclient.Credentials, error)
+	ListAllBarkparks(ctx context.Context) ([]cloudclient.Barkpark, error)
+	GetCredentialsForTeam(ctx context.Context, id, teamID string) (cloudclient.Credentials, error)
 }
 
 // cloudLoginHook is injected into setup.Options.CloudLogin by the setup built-in.
@@ -120,7 +120,7 @@ var cloudSetupDeviceLogin = func(out *writer) (*Config, error) {
 // tail (no_admin_token → manual paste, still-provisioning → logged-in) is shared
 // by both paths in cloudResolveTarget. The admin token is never printed.
 func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.CloudLoginResult, error) {
-	list, err := client.ListBarkparks(cloudCtx())
+	list, err := client.ListAllBarkparks(cloudCtx())
 	if err != nil {
 		return setup.CloudLoginResult{}, fmt.Errorf("list barkparks: %w", err)
 	}
@@ -148,7 +148,7 @@ func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.C
 	out.outf("")
 	out.outf("Your Barkparks:")
 	for i, b := range list {
-		out.outf("  %d) %s  %s", i+1, b.Name, fleetTarget(b.URL, b.Host))
+		out.outf("  %d) %s  %s", i+1, fleetLabel(b), fleetTarget(b.URL, b.Host))
 	}
 
 	idx, ok := promptFleetChoice(out, reader, len(list))
@@ -161,6 +161,13 @@ func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.C
 	return cloudResolveTarget(out, reader, client, list[idx])
 }
 
+func fleetLabel(b cloudclient.Barkpark) string {
+	if b.Team == nil || strings.TrimSpace(b.Team.Name) == "" {
+		return b.Name
+	}
+	return b.Name + " · " + b.Team.Name
+}
+
 // cloudResolveTarget fetches the picked Barkpark's admin credentials and returns
 // them as the connect target. It is the shared tail of both the single-Barkpark
 // fast path and the numbered multi-pick. A no_admin_token 404 diverts to the
@@ -169,7 +176,14 @@ func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.C
 // never a dead end. The admin token is saved as the server token (charter-accepted
 // posture) and is never printed here.
 func cloudResolveTarget(out *writer, reader *bufio.Reader, client cloudFleetClient, picked cloudclient.Barkpark) (setup.CloudLoginResult, error) {
-	creds, gerr := client.GetCredentials(cloudCtx(), picked.ID)
+	if picked.Team != nil && strings.EqualFold(strings.TrimSpace(picked.Team.Role), "member") {
+		out.outf("")
+		out.outf("%q belongs to %s, where your member role cannot retrieve its admin token.", picked.Name, fleetTeamName(picked))
+		out.outf("You stay logged in. Ask a team owner or admin for access, or connect with your own token.")
+		return setup.CloudLoginResult{LoggedInOnly: true}, nil
+	}
+
+	creds, gerr := client.GetCredentialsForTeam(cloudCtx(), picked.ID, fleetTeamID(picked))
 	if gerr != nil {
 		if strings.Contains(gerr.Error(), "no_admin_token") {
 			return cloudNoAdminToken(out, reader, picked)
@@ -182,6 +196,20 @@ func cloudResolveTarget(out *writer, reader *bufio.Reader, client cloudFleetClie
 		return cloudStillProvisioning(out, picked), nil
 	}
 	return setup.CloudLoginResult{Server: target, Token: creds.AdminToken, Name: picked.Name}, nil
+}
+
+func fleetTeamID(b cloudclient.Barkpark) string {
+	if b.Team == nil {
+		return ""
+	}
+	return strings.TrimSpace(b.Team.ID)
+}
+
+func fleetTeamName(b cloudclient.Barkpark) string {
+	if b.Team == nil || strings.TrimSpace(b.Team.Name) == "" {
+		return "that team"
+	}
+	return b.Team.Name
 }
 
 // cloudStillProvisioning is the not-a-dead-end outcome when a Barkpark has no URL
