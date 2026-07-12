@@ -14,9 +14,10 @@ defmodule Barkpark.Tasks.AggQueryTest do
 
   import Barkpark.TenancyFixtures
 
+  alias Barkpark.PortableDoc.TaskResolver
   alias Barkpark.{Content, Tasks}
   alias Barkpark.Tasks.Query, as: TaskQuery
-  alias Barkpark.PortableDoc.TaskResolver
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: StudioPaper
 
   @dataset "test"
 
@@ -32,7 +33,14 @@ defmodule Barkpark.Tasks.AggQueryTest do
     register_task_schema!(scope_a)
     register_task_schema!(scope_b)
 
-    %{scope_a: scope_a, scope_b: scope_b}
+    %{
+      proj_a: proj_a,
+      proj_b: proj_b,
+      scope_a: scope_a,
+      scope_b: scope_b,
+      ws_a: ws_a,
+      ws_b: ws_b
+    }
   end
 
   defp register_task_schema!(scope, opts \\ []) do
@@ -190,26 +198,30 @@ defmodule Barkpark.Tasks.AggQueryTest do
     assert is_list(spark["spark"]) and Enum.sum(spark["spark"]) == 2
   end
 
-  test "editor preview applies the same live aggregate shape as the reader", %{scope_a: scope_a} do
+  test "Studio editor preview wires the scoped aggregate into the reader shape", %{
+    proj_a: proj_a,
+    scope_a: scope_a,
+    ws_a: ws_a
+  } do
     mk_task!(scope_a, %{"lifecycle_status" => "open"})
     mk_task!(scope_a, %{"lifecycle_status" => "done"})
 
-    for type <- ~w(chart heatmap stat) do
-      query =
-        case type do
-          "chart" -> %{"source" => "tasks", "groupBy" => "status"}
-          "heatmap" -> %{"source" => "tasks", "groupBy" => ["status", "priority"]}
-          "stat" -> %{"source" => "tasks"}
-        end
+    block = %{"id" => "preview-stat", "type" => "stat", "query" => %{"source" => "tasks"}}
 
-      block = %{"id" => "preview-#{type}", "type" => type, "query" => query}
-      fetch = agg_fetch(scope_a)
+    socket = %Phoenix.LiveView.Socket{
+      assigns: %{current_project: proj_a, current_workspace: ws_a, dataset: @dataset}
+    }
 
-      assert [entry] = TaskResolver.preview([block], no_rows(), fetch)
+    assert [entry] = StudioPaper.task_previews([block], socket)
 
-      assert TaskResolver.apply_preview(block, entry) ==
-               TaskResolver.resolve([block], no_rows(), fetch) |> List.first()
-    end
+    assert entry == %{
+             "attrs" => %{"value" => 2},
+             "block_id" => "preview-stat",
+             "type" => "stat"
+           }
+
+    assert TaskResolver.apply_preview(block, entry) ==
+             TaskResolver.resolve([block], no_rows(), agg_fetch(scope_a)) |> List.first()
   end
 
   # ── PROOF 3: offline parity — literal blocks with NO query pass through ───────
