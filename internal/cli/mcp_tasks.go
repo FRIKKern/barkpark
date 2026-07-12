@@ -414,6 +414,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			}
 			body["tags"] = tags
 		}
+		ensureTaskPortableBrief(body)
 		publish := true
 		if in.Publish != nil {
 			publish = *in.Publish

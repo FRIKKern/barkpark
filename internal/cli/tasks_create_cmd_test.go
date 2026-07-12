@@ -2,6 +2,7 @@ package cli
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +99,40 @@ func TestTaskCreateBodyShape(t *testing.T) {
 	want := map[string]any{"kind": "task", "lifecycle_status": "open", "title": "hello"}
 	if !reflect.DeepEqual(body, want) {
 		t.Errorf("body = %#v, want %#v", body, want)
+	}
+}
+
+func TestEnsureTaskPortableBrief(t *testing.T) {
+	body := map[string]any{
+		"title":       "Ship the reader",
+		"description": "**Why:** humans must scan it.",
+		"acceptance_criteria": []any{
+			map[string]any{"criterion": "PortableDoc renders in the task TUI"},
+		},
+	}
+	ensureTaskPortableBrief(body)
+	brief, ok := body["brief"].(map[string]any)
+	if !ok || brief["version"] != 1 {
+		t.Fatalf("brief = %#v, want PortableDoc v1", body["brief"])
+	}
+	blocks, _ := brief["blocks"].([]any)
+	if len(blocks) != 6 {
+		t.Fatalf("blocks = %d, want purpose/state/definition-of-done pairs", len(blocks))
+	}
+	purpose := blocks[1].(map[string]any)["content"].([]any)[0].(map[string]any)["value"]
+	if strings.Contains(purpose.(string), "**") {
+		t.Fatalf("purpose retained Markdown markers: %q", purpose)
+	}
+	if blocks[5].(map[string]any)["type"] != "list" {
+		t.Fatalf("definition of done is not a TUI-supported list: %#v", blocks[5])
+	}
+}
+
+func TestEnsureTaskPortableBriefPreservesExplicitBrief(t *testing.T) {
+	explicit := map[string]any{"version": float64(1), "blocks": []any{map[string]any{"type": "heading"}}}
+	body := map[string]any{"title": "t", "brief": explicit}
+	ensureTaskPortableBrief(body)
+	if !reflect.DeepEqual(body["brief"], explicit) {
+		t.Fatalf("explicit brief was replaced: %#v", body["brief"])
 	}
 }

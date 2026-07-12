@@ -105,8 +105,78 @@ defmodule Barkpark.Plugins.Tasks do
   """
   @impl Barkpark.Plugin
   def lifecycle_hooks do
-    %{before_save: [&quality_gate/1]}
+    %{before_save: [&quality_gate/1], before_publish: [&portable_brief_gate/1]}
   end
+
+  @tui_block_types ~w(
+    heading paragraph list callout divider section code table figure action
+    pullquote embed ingress eyebrow byline diagram asciicast image composite
+    arrayOf codelist localizedText form questionnaire PdSheet sheet note stage
+    card columns terminal notes cards pipeline status-legend tasks task-list
+    task-detail task-board roadmap heatmap stat stats stat-grid gauge-list chart
+    dashboard field-string field-slug field-text field-boolean field-select
+    field-datetime field-color field-reference field-image
+  )
+
+  # Publish wall: a task that cannot render as PortableDoc in the terminal is
+  # not a publishable task. Draft authoring remains permissive; publication
+  # gives every agent an actionable repair message.
+  defp portable_brief_gate(%{doc: %{"type" => "task"} = doc}) do
+    with content when is_map(content) <- fetch(doc, "content"),
+         brief when is_map(brief) <- fetch(content, "brief"),
+         1 <- fetch(brief, "version"),
+         blocks when is_list(blocks) and blocks != [] <- fetch(brief, "blocks"),
+         :ok <- validate_brief_blocks(blocks) do
+      :ok
+    else
+      {:halt, _} = halted -> halted
+      _ ->
+        {:halt,
+         "task brief is required before publish — set content.brief to " <>
+           "PortableDoc {version: 1, blocks: [...]} so bp task tui can render it"}
+    end
+  end
+
+  defp portable_brief_gate(_payload), do: :ok
+
+  defp validate_brief_blocks(blocks) do
+    Enum.reduce_while(blocks, :ok, fn
+      %{} = block, :ok ->
+        type = fetch(block, "type")
+
+        cond do
+          type not in @tui_block_types ->
+            {:halt,
+             {:halt,
+              "task brief contains unsupported block type #{inspect(type)} — " <>
+                "use a bp task tui PortableDoc block type (for prose: heading, paragraph, callout, list)"}}
+
+          true ->
+            case validate_nested_brief_blocks(block) do
+              :ok -> {:cont, :ok}
+              {:halt, _} = halted -> {:halt, halted}
+            end
+        end
+
+      _other, :ok ->
+        {:halt, {:halt, "task brief blocks must be PortableDoc objects with a supported type"}}
+    end)
+  end
+
+  defp validate_nested_brief_blocks(block) do
+    with :ok <- validate_optional_block_list(fetch(block, "blocks")),
+         :ok <- validate_optional_child(fetch(block, "child")) do
+      :ok
+    end
+  end
+
+  defp validate_optional_block_list(:absent), do: :ok
+  defp validate_optional_block_list(list) when is_list(list), do: validate_brief_blocks(list)
+  defp validate_optional_block_list(_), do: {:halt, "nested task brief blocks must be a list"}
+
+  defp validate_optional_child(:absent), do: :ok
+  defp validate_optional_child(%{} = child), do: validate_brief_blocks([child])
+  defp validate_optional_child(_), do: {:halt, "task brief figure child must be a block object"}
 
   # ── Authoring quality gate (before_save) ──────────────────────────────────
 
