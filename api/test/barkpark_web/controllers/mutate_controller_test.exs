@@ -314,6 +314,26 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert published.status == "published"
     end
 
+    test "patching a published paper with blocks and weighted tags reprojects preview without a 500",
+         %{conn: conn} do
+      assert create_paper(conn, "w-preview-tags", good_labels(2)).status == 200
+      assert publish_paper(conn, "w-preview-tags").status == 200
+
+      blocks = [
+        %{
+          "id" => "intro",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Preview projection survives."}]
+        }
+      ]
+
+      response = patch_paper(conn, "w-preview-tags", %{"blocks" => blocks})
+
+      assert response.status == 200
+      {:ok, draft} = Content.get_document("drafts.w-preview-tags", "paper", "test")
+      assert draft.content["preview"]["extensions"]["tags"] == ["wall-tag-1", "wall-tag-2"]
+    end
+
     test "a legal tag count OUTSIDE the 2–4 norm rides `warnings` on the 200 envelope, never blocks",
          %{conn: conn} do
       assert create_paper(conn, "w-norm", good_labels(1)).status == 200
