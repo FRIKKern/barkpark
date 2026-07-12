@@ -46,9 +46,11 @@ defmodule Barkpark.Plugins.Github.Link do
   own write.
 
   A task that has NEVER been published (draft-only) is LEFT a draft — `put/4`
-  never force-publishes under a user. A failed collapse publish is a harmless
-  leftover draft (the next reconcile converges it), not a correctness bug: it is
-  ignored and `put/4` still returns `{:ok, %Document{}}`.
+  never force-publishes under a user. A REJECTED collapse publish (e.g. the
+  bookkeeping-carrying draft now trips the authoring wall) leaves a harmless
+  leftover draft (the next reconcile converges it), not a correctness bug: the
+  discarded reason is LOGGED (authoring-excellence D23 — no longer silently
+  swallowed) and `put/4` still returns `{:ok, %Document{}}`.
 
   ## Absent, never fabricated
 
@@ -57,6 +59,8 @@ defmodule Barkpark.Plugins.Github.Link do
   patch-MERGE into the existing `github` sub-map, so writing just a fresh
   `synced_rev` preserves the stored `repo`/`issue`.
   """
+
+  require Logger
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -109,8 +113,9 @@ defmodule Barkpark.Plugins.Github.Link do
   too, so the Outbox excludes it (loop-cut #2); see the moduledoc.
 
   Returns `{:ok, %Document{}}` or `{:error, term}` (`:not_found` when the task
-  doesn't exist). A failed collapse publish is ignored — the leftover draft is
-  harmless and `put/4` still returns the `{:ok, %Document{}}` upsert result.
+  doesn't exist). A REJECTED collapse publish is LOGGED (D23) — the leftover
+  draft is harmless and `put/4` still returns the `{:ok, %Document{}}` upsert
+  result.
   """
   @spec put(String.t(), String.t(), map(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
@@ -137,7 +142,10 @@ defmodule Barkpark.Plugins.Github.Link do
 
       with {:ok, upserted} <-
              Content.upsert_document(@task_type, attrs, dataset, source_opts) do
-        {:ok, collapse_draft_twin(was_published?, upserted, pid, dataset, source_opts)}
+        {doc, _collapse} =
+          collapse_draft_twin(was_published?, upserted, pid, dataset, source_opts)
+
+        {:ok, doc}
       end
     end
   end
@@ -164,22 +172,55 @@ defmodule Barkpark.Plugins.Github.Link do
     end
   end
 
-  # Collapse the draft twin the upsert wrote (D12). Only when the task was
-  # ALREADY published: publish the fresh draft back into the published row so no
-  # phantom unpublished draft is left in Studio. The publish is threaded the same
-  # `source: :github` as the stamp, so its `mutation_events` row is excluded from
-  # the Outbox (loop-cut #2). A never-published task is left a draft (never
-  # force-published under a user). A failed publish is a harmless leftover draft,
-  # not a correctness bug — ignore it and return the upsert result unchanged so
-  # `put/4`'s `{:ok, %Document{}}` contract holds.
-  defp collapse_draft_twin(false, upserted, _pid, _dataset, _opts), do: upserted
+  # Collapse the draft twin the upsert wrote (D12). Returns `{doc, collapse}`
+  # where `collapse` is `nil` on success (or when no collapse was needed) and a
+  # `%{published: false, error: <wall detail>}` map when the collapse publish
+  # was REJECTED. Only when the task was ALREADY published do we publish the
+  # fresh draft back into the published row so no phantom unpublished draft is
+  # left in Studio; the publish is threaded the same `source: :github` as the
+  # stamp, so its `mutation_events` row is excluded from the Outbox (loop-cut
+  # #2). A never-published task is left a draft (never force-published under a
+  # user).
+  #
+  # A REJECTED collapse publish (authoring-excellence D23) was silently swallowed
+  # before; it is no longer silent — the discarded reason is logged so a wall
+  # rejection on the bookkeeping-collapse is diagnosable. `put/4` still returns
+  # its `{:ok, %Document{}}` contract (the bookkeeping stamp landed on the draft;
+  # a leftover draft twin is harmless and the next reconcile converges it).
+  defp collapse_draft_twin(false, upserted, _pid, _dataset, _opts), do: {upserted, nil}
 
   defp collapse_draft_twin(true, upserted, pid, dataset, opts) do
     case Content.publish_document(pid, @task_type, dataset, opts) do
-      {:ok, published} -> published
-      _ -> upserted
+      {:ok, published} ->
+        {published, nil}
+
+      {:error, reason} ->
+        Logger.warning(
+          "github link: draft-twin collapse publish for #{pid} rejected: #{inspect(reason)}"
+        )
+
+        {upserted, %{published: false, error: collapse_error_detail(reason)}}
     end
   end
+
+  # Machine-readable summary of a publish-wall rejection (label_spine 422,
+  # unknown_tag 422, duplicate_of 409). Symmetric with `Adopt.collapse_error_detail/1`
+  # — the two collapse paths are intentionally duplicated (as is
+  # `collapse_draft_twin/5` itself). Anything unexpected degrades LOUDLY.
+  defp collapse_error_detail({:label_spine, details}),
+    do: %{code: "label_spine", details: details}
+
+  defp collapse_error_detail({:unknown_tag, payload}),
+    do: %{code: "unknown_tag", details: payload}
+
+  defp collapse_error_detail({:duplicate_of, payload}),
+    do: %{code: "duplicate_of", details: payload}
+
+  defp collapse_error_detail({:halted, reason}),
+    do: %{code: "halted", message: to_string(reason)}
+
+  defp collapse_error_detail(other),
+    do: %{code: "publish_failed", message: inspect(other)}
 
   # Draft-first lookup (mirror of Content.Mutations.get_patch_base/4): the write
   # target is always the draft row, so the merge base must be the draft too —

@@ -11,9 +11,10 @@ defmodule Barkpark.Plugins.Github.LinkTest do
   use Barkpark.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
-  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Plugins.Github.{Link, Outbox}
 
   @dataset "production"
@@ -164,6 +165,43 @@ defmodule Barkpark.Plugins.Github.LinkTest do
       {:ok, published} = Content.get_document(Content.published_id(id), "task", @dataset, scope)
       assert %{"repo" => "FRIKKern/barkpark", "issue" => 9} = Link.get(published)
       assert published.status == "published"
+    end
+  end
+
+  describe "draft-twin collapse rejected by the publish wall (D23)" do
+    # An already-published task whose weighted tag is later UNregistered: the
+    # bookkeeping stamp's collapse-republish trips the E3 unknown_tag wall. The
+    # stamp still landed on the draft, so `put/4` keeps its {:ok, %Document{}}
+    # contract — but the discarded reason is LOGGED (was silently swallowed) and
+    # the un-collapsed draft twin survives.
+    test "a rejected collapse still returns {:ok, doc}, logs the reason, leaves the draft twin",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_published_task!(id, scope)
+
+      # `with_labels/1` tagged the task fixture-tag-1..2; drop one from the E3
+      # registry so the collapse-republish fails unknown_tag.
+      Repo.delete_all(
+        from d in Document,
+          where: d.doc_id == "fixture-tag-1" and d.type == "tag" and d.dataset == ^@dataset
+      )
+
+      {result, log} =
+        with_log(fn ->
+          Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 42}, scope)
+        end)
+
+      # Contract holds: the bookkeeping stamp landed on the draft.
+      assert {:ok, %Document{} = doc} = result
+      assert %{"repo" => "FRIKKern/barkpark", "issue" => 42} = Link.get(doc)
+
+      # No longer silent.
+      assert log =~ "collapse publish"
+      assert log =~ "rejected"
+
+      # The rejected collapse means the draft twin was NOT folded back into the
+      # published row — it survives (the next reconcile converges it).
+      assert {:ok, _draft} = Content.get_document(Content.draft_id(id), "task", @dataset, scope)
     end
   end
 

@@ -14,6 +14,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   import Phoenix.LiveView
 
   alias Barkpark.{Content, Tenancy}
+  alias Barkpark.Content.Warnings
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.{PaneBuilder, PresenceState}
@@ -331,9 +332,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     type = socket.assigns[:editor_type]
 
     if doc && type do
+      # The advisory channel (authoring-excellence D5): the publish wall queues
+      # non-blocking warnings ([{code, severity, message}]) while the write
+      # applies. A Studio publish is an agent-facing surface too, so drain them
+      # into the SUCCESS flash instead of dropping them on the floor (mirrors
+      # MutateController). Reset first — the accumulator is
+      # collect-only-when-listening, so without an open queue the 2–4 tag-count
+      # norm advisory would never be captured.
+      Warnings.reset()
+
       case action.(doc, type) do
         {:ok, _} ->
-          {:noreply, socket |> put_flash(:info, msg) |> rebuild_panes()}
+          {:noreply,
+           socket |> put_flash(:info, with_advisories(msg, Warnings.drain())) |> rebuild_panes()}
 
         {:error, {:halted, reason}} ->
           {:noreply, put_flash(socket, :error, "#{msg} cancelled: #{reason}")}
@@ -378,6 +389,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   def format_wall_details(other), do: inspect(other)
 
+  # Append the publish wall's drained advisory messages (authoring-excellence
+  # D5 — the 2–4 tag-count norm, the dedup advise band) to a success flash. Each
+  # entry is `%{code, severity, message}`; the human-readable `message` is what
+  # the author reads. No advisories ⇒ the flash is unchanged.
+  @doc false
+  def with_advisories(msg, []), do: msg
+
+  def with_advisories(msg, warnings) when is_list(warnings) do
+    msg <> " · " <> Enum.map_join(warnings, " · ", & &1.message)
+  end
+
   defp wall_detail(detail, key) do
     case detail[key] || detail[to_string(key)] do
       value when is_binary(value) and value != "" -> value
@@ -395,6 +417,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     if type == nil or ids == [] do
       assign(socket, selected_doc_ids: MapSet.new())
     else
+      # Open the advisory queue before the batch (authoring-excellence D5):
+      # every successful publish in the set may queue a 2–4 norm / dedup-advise
+      # warning; drained after the reduce and folded into the success flash so a
+      # bulk publish surfaces the same advisories the single-doc path does.
+      Warnings.reset()
+
       # `walled` tracks label-spine rejections separately from plugin halts and
       # generic failures (authoring-excellence D14): a wall rejection carries a
       # fix and must say so — "cancelled by plugin rules" would misattribute
@@ -424,6 +452,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         end)
 
       verb = if kind == :publish, do: "Published", else: "Unpublished"
+      advisories = Warnings.drain()
 
       flash =
         cond do
@@ -448,7 +477,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
       socket
       |> assign(selected_doc_ids: MapSet.new())
-      |> put_flash(:info, flash)
+      |> put_flash(:info, with_advisories(flash, advisories))
       |> rebuild_panes()
     end
   end

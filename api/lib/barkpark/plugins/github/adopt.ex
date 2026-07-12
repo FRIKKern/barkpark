@@ -74,11 +74,21 @@ defmodule Barkpark.Plugins.Github.Adopt do
 
     * `{:ok, %Document{}}`   — the task was adopted (a genuine `intake → adopted`
       flip, backlink attempted) OR was already `"adopted"` (idempotent no-op)
+    * `{:ok, %Document{}, collapse}` — adopted, but the draft-twin collapse
+      publish (D12) was REJECTED (e.g. the published task carries an
+      unregistered weighted tag the authoring wall now blocks). The adopt side
+      effects are already committed — a 422 here would lie — so this stays an
+      `:ok`, carrying `collapse = %{published: false, error: <wall detail>}` so
+      the caller can surface + retry (authoring-excellence D23). The label strip
+      + state flip landed on the DRAFT; the published perspective is unchanged.
     * `{:error, :not_intake}` — the task exists but is not an adoptable intake
     * `{:error, :not_found}`  — no such task
     * `{:error, term()}`      — the ledger write failed
   """
-  @type result :: {:ok, Document.t()} | {:error, :not_intake | :not_found | term()}
+  @type result ::
+          {:ok, Document.t()}
+          | {:ok, Document.t(), %{published: false, error: map()}}
+          | {:error, :not_intake | :not_found | term()}
 
   @doc """
   Adopt an intake task into Barkpark. See the moduledoc for the gate, the
@@ -130,9 +140,13 @@ defmodule Barkpark.Plugins.Github.Adopt do
 
     with {:ok, upserted} <-
            Content.upsert_document(@task_type, attrs, dataset, source_opts) do
-      doc = collapse_draft_twin(was_published?, upserted, pid, dataset, source_opts)
+      {doc, collapse} = collapse_draft_twin(was_published?, upserted, pid, dataset, source_opts)
       maybe_backlink(github, opts)
-      {:ok, doc}
+
+      case collapse do
+        nil -> {:ok, doc}
+        %{} = collapse -> {:ok, doc, collapse}
+      end
     end
   end
 
@@ -142,21 +156,57 @@ defmodule Barkpark.Plugins.Github.Adopt do
   defp strip_gate(labels) when is_list(labels), do: Enum.reject(labels, &(&1 == @gate_label))
   defp strip_gate(_), do: []
 
-  # Collapse the draft twin the upsert wrote (D12 / the `Link.put` pattern). Only
-  # when the task was ALREADY published: publish the fresh draft back into the
-  # published row so no phantom unpublished draft is left in Studio. The publish
-  # carries the same `source: :github` stamp, so its `mutation_events` row is
-  # outbox-excluded (loop cut #2). A never-published task is left a draft. A
-  # failed publish is a harmless leftover draft, not a correctness bug — ignore
-  # it and return the upsert result so the `{:ok, %Document{}}` contract holds.
-  defp collapse_draft_twin(false, upserted, _pid, _dataset, _opts), do: upserted
+  # Collapse the draft twin the upsert wrote (D12 / the `Link.put` pattern).
+  # Returns `{doc, collapse}` where `collapse` is `nil` on success (or when no
+  # collapse was needed) and a `%{published: false, error: <wall detail>}` map
+  # when the collapse publish was REJECTED. Only when the task was ALREADY
+  # published do we publish the fresh draft back into the published row so no
+  # phantom unpublished draft is left in Studio; the publish carries the same
+  # `source: :github` stamp, so its `mutation_events` row is outbox-excluded
+  # (loop cut #2). A never-published task is left a draft.
+  #
+  # A REJECTED collapse publish (authoring-excellence D23) was silently
+  # swallowed before — the label edit never reached the published perspective
+  # and no signal reached anyone. It is no longer silent: the discarded reason
+  # is logged (the `maybe_backlink` best-effort precedent) AND returned as a
+  # machine-readable `collapse` detail so the operator/agent can retry. The
+  # adopt itself stays committed on the draft (a 422-after-commit would lie), so
+  # the return is still `{:ok, …}` upstream.
+  defp collapse_draft_twin(false, upserted, _pid, _dataset, _opts), do: {upserted, nil}
 
   defp collapse_draft_twin(true, upserted, pid, dataset, opts) do
     case Content.publish_document(pid, @task_type, dataset, opts) do
-      {:ok, published} -> published
-      _ -> upserted
+      {:ok, published} ->
+        {published, nil}
+
+      {:error, reason} ->
+        Logger.warning(
+          "github adopt: draft-twin collapse publish for #{pid} rejected: #{inspect(reason)}"
+        )
+
+        {upserted, %{published: false, error: collapse_error_detail(reason)}}
     end
   end
+
+  # Machine-readable summary of a publish-wall rejection for the `collapse`
+  # response field — mirrors the wall's own error atoms (label_spine 422,
+  # unknown_tag 422, duplicate_of 409) so an agent keys on `code` to retry with
+  # a fixed label set. Anything unexpected degrades LOUDLY (inspected), never
+  # into a hint-less blob.
+  defp collapse_error_detail({:label_spine, details}),
+    do: %{code: "label_spine", details: details}
+
+  defp collapse_error_detail({:unknown_tag, payload}),
+    do: %{code: "unknown_tag", details: payload}
+
+  defp collapse_error_detail({:duplicate_of, payload}),
+    do: %{code: "duplicate_of", details: payload}
+
+  defp collapse_error_detail({:halted, reason}),
+    do: %{code: "halted", message: to_string(reason)}
+
+  defp collapse_error_detail(other),
+    do: %{code: "publish_failed", message: inspect(other)}
 
   # ── best-effort backlink ────────────────────────────────────────────────────
 

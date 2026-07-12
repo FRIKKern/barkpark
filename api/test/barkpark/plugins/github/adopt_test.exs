@@ -15,9 +15,10 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
   use Barkpark.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
-  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Plugins.Github.{Adopt, Intake, Link}
 
   @dataset "production"
@@ -210,6 +211,93 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
 
       assert {:ok, doc} = Adopt.adopt("gh-106", @dataset, failing)
       assert Link.get(doc)["state"] == "adopted"
+    end
+  end
+
+  describe "draft-twin collapse rejected by the publish wall (D23)" do
+    # Publish an intake task whose ONE weighted tag is registered, then UNregister
+    # the tag: the adopt collapse-republish now trips the E3 unknown_tag wall.
+    # The adopt side effects are already committed on the draft (a 422 would lie),
+    # so the return stays {:ok, …} — but carries a machine-readable `collapse`
+    # detail AND the discarded reason is LOGGED, never swallowed.
+    defp published_intake_with_tag!(number, tag, scope) do
+      Barkpark.LabelFixtures.register_tags!(@dataset, [tag])
+
+      doc_id = "gh-#{number}"
+
+      content =
+        Barkpark.LabelFixtures.with_labels(
+          %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "labels" => ["src:github", "needs-human"],
+            "github" => %{"state" => "intake", "repo" => "FRIKKern/barkpark", "issue" => number}
+          },
+          1
+        )
+        # Pin the single tag to the freshly-registered name.
+        |> Map.put("tags", [
+          %{
+            "tag" => tag,
+            "strength" => 90,
+            "rationale" => "Registered fixture tag for the collapse-wall test path."
+          }
+        ])
+
+      {:ok, _} =
+        Content.create_document(
+          "task",
+          %{"doc_id" => doc_id, "title" => "Intake #{number}", "content" => content},
+          @dataset,
+          scope
+        )
+
+      {:ok, _} = Content.publish_document(doc_id, "task", @dataset, scope)
+      doc_id
+    end
+
+    defp unregister_tag!(tag) do
+      Repo.delete_all(
+        from d in Document, where: d.doc_id == ^tag and d.type == "tag" and d.dataset == ^@dataset
+      )
+    end
+
+    test "a rejected collapse returns {:ok, doc, collapse} + logs the discarded reason",
+         %{scope: scope} do
+      tag = "collapse-wall-tag-#{System.unique_integer([:positive])}"
+      doc_id = published_intake_with_tag!(207, tag, scope)
+      unregister_tag!(tag)
+
+      {result, log} =
+        with_log(fn -> Adopt.adopt(doc_id, @dataset, opts(scope)) end)
+
+      # HTTP-shaped: the adopt committed (a 422-after-commit would lie), so it is
+      # STILL :ok — now carrying the collapse detail instead of swallowing it.
+      assert {:ok, doc, %{published: false, error: error}} = result
+      assert %{code: "unknown_tag"} = error
+      assert Link.get(doc)["state"] == "adopted"
+
+      # The discarded reason is no longer silent.
+      assert log =~ "collapse publish"
+      assert log =~ "rejected"
+
+      # The published perspective was NOT overwritten (the label strip lives on
+      # the un-collapsed draft), so the published row still holds needs-human.
+      {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
+      assert "needs-human" in published.content["labels"]
+    end
+
+    test "a CLEAN collapse (tag still registered) stays a plain {:ok, doc}", %{scope: scope} do
+      tag = "collapse-clean-tag-#{System.unique_integer([:positive])}"
+      doc_id = published_intake_with_tag!(208, tag, scope)
+
+      assert {:ok, doc} = Adopt.adopt(doc_id, @dataset, opts(scope))
+      assert Link.get(doc)["state"] == "adopted"
+
+      # The collapse succeeded: no permanent draft twin, published row adopted.
+      {:ok, published} = Content.get_document(doc_id, "task", @dataset, scope)
+      assert Link.get(published)["state"] == "adopted"
+      refute "needs-human" in published.content["labels"]
     end
   end
 end

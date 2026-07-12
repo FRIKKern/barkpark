@@ -609,6 +609,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
             {:noreply,
              assign(socket, valueref_panel: Map.merge(panel, %{authorized: false, error: nil}))}
 
+          # The canonical-value writeback publishes the owning doc; a publish-wall
+          # rejection (authoring-excellence D14/D23) must RENDER its field/rule/fix,
+          # not degrade to the content-free "The write was rejected." Unwrap the
+          # walled reason so `format_wall_details` renders the documentation-grade
+          # detail (a `{:label_spine, details}` tuple carries the details one level
+          # in); anything else falls through its generic inspect fallback.
+          {:error, {:publish_failed, reason}} ->
+            {:noreply,
+             assign(socket,
+               valueref_panel:
+                 Map.put(
+                   panel,
+                   :error,
+                   "Publish blocked — " <> Shared.format_wall_details(wall_reason(reason))
+                 )
+             )}
+
           {:error, _} ->
             {:noreply,
              assign(socket, valueref_panel: Map.put(panel, :error, "The write was rejected."))}
@@ -620,6 +637,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def valueref_writeback(_params, socket), do: {:noreply, socket}
+
+  # Unwrap a wrapped wall reason (`{:label_spine, details}`, `{:unknown_tag,
+  # payload}`, …) to the inner detail so `Shared.format_wall_details/1` renders
+  # its documentation-grade field/rule/fix line; a bare reason (or a
+  # non-wall failure such as `{:rev_mismatch, _}`) passes straight through to
+  # the generic inspect fallback.
+  defp wall_reason({_code, detail}), do: detail
+  defp wall_reason(other), do: other
 
   @doc "Close the shared-value inspector."
   def valueref_close(socket), do: {:noreply, assign(socket, valueref_panel: nil)}
