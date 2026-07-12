@@ -242,6 +242,35 @@ jobs:
         # Do NOT add a CI job that requires real Bokbasen credentials.
         run: mix test
 
+      - name: Plugins-off boot invariant (boot_test — separate step, NOT in `mix test`)
+        # Goal barkpark-G1 / authoring-excellence ae-boot-gate-ci. The
+        # fresh-install invariant bar (test/barkpark/plugin_free_boot_test.exs)
+        # is tagged `:boot_test` and EXCLUDED from the default `mix test` above
+        # (api/test/test_helper.exs). It cannot ride the bare invocation: its
+        # `setup_all` STOPS and RESTARTS the whole :barkpark OTP app with
+        # `:plugins` forced to `[]` — incompatible with the async suite sharing
+        # that application. So it runs here as its OWN step, after the default
+        # suite, reusing the same compiled build, DB, and Postgres service.
+        #
+        # This is the CI wire-in for a bar that was RED on main for weeks
+        # without anyone noticing (4 pre-existing failures found 2026-07-10,
+        # repaired in wave 2 / D12) precisely BECAUSE nothing ran it. A red
+        # boot bar now blocks merge for api/** changes — the plugins-off
+        # promise ("Barkpark boots + serves Studio + /api/schemas with every
+        # plugin off") is verified on every PR, not just asserted.
+        #
+        # GATE SIGNAL = exit code, NOT log scraping. After the 8 tests pass
+        # (0 failures), ExUnit prints a noisy async Postgrex/DBConnection
+        # teardown warning — `Barkpark.Plugins.Indx.Auth` still holds a sandbox
+        # connection at `on_exit` when the app restarts — that begins with
+        # `[error]` but does NOT fail the run (`mix test` still exits 0). This
+        # step must key off the process exit status (which GitHub Actions does
+        # by default), never grep the log for the word "error".
+        #
+        # Budget: ~30-60s (local wall 30.75s / 13.3s ExUnit sync; CI runners
+        # slower). Measured job-step duration is recorded in the PR body.
+        run: mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
+
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
     name: Prod compile gate (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
