@@ -27,7 +27,19 @@ if [ -n "${BARKPARK_CLI_RELEASE_BASE:-}" ]; then
 elif [ -n "${BARKPARK_CLI_VERSION:-}" ]; then
   RELEASE_BASE="${REPO_URL}/releases/download/cli-v${BARKPARK_CLI_VERSION}"
 else
-  RELEASE_BASE="${REPO_URL}/releases/latest/download"
+  # Resolve the newest cli-v* release via the GitHub API instead of trusting
+  # `releases/latest`: this repo also publishes build-<sha> server-artifact
+  # releases (no bp assets), and one of those holding "latest" 404s every
+  # unpinned install. The API lists newest-first; the [0-9.]* charset skips
+  # prereleases like cli-v1.2.0-rc.1 (matching the old releases/latest rule).
+  api_url="https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30"
+  cli_tag="$( { curl -fsSL "$api_url" 2>/dev/null || wget -qO- "$api_url" 2>/dev/null || true; } \
+    | sed -n 's/.*"tag_name"[: ]*"\(cli-v[0-9.]*\)".*/\1/p' | head -n 1 )"
+  if [ -n "$cli_tag" ]; then
+    RELEASE_BASE="${REPO_URL}/releases/download/${cli_tag}"
+  else
+    RELEASE_BASE="${REPO_URL}/releases/latest/download"
+  fi
 fi
 BIN_DIR="${BARKPARK_BIN_DIR:-/usr/local/bin}"
 
