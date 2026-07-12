@@ -23,7 +23,7 @@ defmodule Barkpark.Tasks.Queue do
   # parented at `drafts.phase-x` is still found by a phase-scoped ready for
   # `phase-x` (and vice-versa).
 
-  import Ecto.Query, only: [from: 2]
+  import Ecto.Query, only: [from: 2, with_cte: 3]
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
@@ -44,6 +44,22 @@ defmodule Barkpark.Tasks.Queue do
     dataset = Keyword.get(opts, :dataset)
     phase_id = Keyword.get(opts, :phase_id)
     limit = Keyword.get(opts, :limit, @ready_default_limit)
+
+    done_tasks =
+      Document
+      |> Scope.scope_to_workspace(workspace_id)
+      |> then(fn query ->
+        from(t in query,
+          where: t.type == "task",
+          where: fragment("?->>'lifecycle_status'", t.content) == "done",
+          distinct: [t.dataset, t.project_id, fragment("regexp_replace(?, '^drafts\\.', '')", t.doc_id)],
+          select: %{
+            dataset: t.dataset,
+            project_id: t.project_id,
+            normalized_id: fragment("regexp_replace(?, '^drafts\\.', '')", t.doc_id)
+          }
+        )
+      end)
 
     base =
       from(d in Document,
@@ -89,23 +105,16 @@ defmodule Barkpark.Tasks.Queue do
                      THEN ?->'dependencies'
                      ELSE '[]'::jsonb END
               ) AS dep(id)
-              LEFT JOIN (
-                SELECT DISTINCT regexp_replace(t.doc_id, '^drafts\\.', '') AS normalized_id
-                FROM documents t
-                WHERE t.type = 'task'
-                  AND t.dataset = ?
-                  AND t.workspace_id IS NOT DISTINCT FROM ?
-                  AND t.project_id IS NOT DISTINCT FROM ?
-                  AND t.content->>'lifecycle_status' = 'done'
-              ) AS done
-                ON done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
+              LEFT JOIN ready_done_tasks AS done
+                ON done.dataset = ?
+               AND done.project_id IS NOT DISTINCT FROM ?
+               AND done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
               WHERE done.normalized_id IS NULL
             )
             """,
             d.content,
             d.content,
             d.dataset,
-            d.workspace_id,
             d.project_id
           ),
         # (3) twin collapse (published-wins): suppress a row when a DISTINCT
@@ -144,6 +153,7 @@ defmodule Barkpark.Tasks.Queue do
       )
 
     base
+    |> with_cte("ready_done_tasks", as: ^done_tasks, materialized: true)
     |> maybe_filter_dataset(dataset)
     |> maybe_filter_phase(phase_id)
     |> Scope.scope_to_workspace(workspace_id, project_id)
