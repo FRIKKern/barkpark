@@ -55,4 +55,12 @@ audit-tables FK orphan risk, Preview weighted-tags crash fix (root cause now kno
 
 ## Wave log
 
-(empty — Review appends per-wave debrief lines here)
+### Wave 2026-07-12 — 8 verdict papers landed, grade A-
+
+**Landed (all 8 gates green on final state, all readers 200):** workspace-bundle-keystone (35 blk, REFUTED-as-surveyed/SETTLED-as-corrected three-enumeration walk), quota-suspend-seams (29, plug SETTLED / context-hook REFUTED), host-tenancy-caddy-probe (37, ask-gate loop SETTLED live on a scratch box), playground-tenancy-cost (29, mechanism SETTLED / readiness REFUTED), live-migrate-cutover-timing (62, live-migration REFUTED / ~60 s dump-restore freeze SETTLED — slice report was lost by the workflow but paper+branch+ledger were intact), edge-cache-share (31, REFUTED as stated), telemetry-inventory (24, SETTLED, per-workspace greenfield), onboarding-wallclock (47, SETTLED overall / R1 default curl|sh REFUTED — it 404s today). Zero product code; both scratch boxes torn down; prod untouched.
+
+**Review fixes (remote papers, no -r branches):** tone="warn" → "warning" on edge-cache + live-migrate verdict callouts (unregistered tone rendered info-blue); live-migrate's missing and edge-cache's prose-only shared-cells forward links made real action links; D14 mesh completed — shared-cells +4 backlinks, barkpark-estate +1 (quota), one-shot-onboarding +1 (onboarding-wallclock). Ledger: ppr-playground-cost 0-index stamp off-by-one fixed (evidence re-seated 0-2, LEAD gate un-flipped) — second builder to hit the 0-indexed `--criterion` footgun; consider a CLI guard.
+
+**Stalled:** nothing. **Open for the lead:** merge the 7 marker branches and close each slice's criterion 3 (ppr-edge-cache-verdict has no branch — close on the debrief).
+
+**Next wave:** author the capstone `bl-capstone-readiness-ledger` (charter D15) rolling the 8 verdicts into the next epic's build sequence; ship the two user-facing reds early (install-cli.sh default 404s — the QUICKSTART front door is broken today; Preview weighted-tags PATCH crash, root cause known). Wave paper: `perfect-plan-research-wave-2026-07-12` (debrief appended).
