@@ -378,3 +378,42 @@ era-bl-audit-swallow-unify, era-bl-gdpr-selfserve-ui; bp-paper-view-bodyhtml-fal
 defects. Review owes: re-verify slice gates at merge HEAD, then rewrite criteria 0/4 evidence to name the honest
 remainder (era-hg-okta-live-idp; era-hg-pen-test / era-hg-dpa-legal-signoff / era-hg-soc2-type2-window) and leave
 the epic OPEN with those human legs as the sole gates.
+
+### Wave w10 2026-07-12 — REVIEW complete; all 3 slices green, one format fix, sweep completed; merges owed on 2 branches
+
+Reviewer re-ran every gate in an isolated worktree and read every diff adversarially. Grade **A-** (debrief:
+paper `enterprise-ready-auth-wave-2026-07-11`).
+
+- **S1** `era-w10-governed-idp-lane` — final branch `loop-epic/governed-session-proof-on-the-live-keycl-0-r`
+  (original + one whitespace-only commit: mix format paid the file's PRE-EXISTING 3-line SLO format debt).
+  Gate re-run green TWICE at review (8 tests, 0 failures, ~19s warm, teardown clean both times). All three
+  governed-session proofs real: OIDC 403 refusal (JIT ran, zero UserSession rows, audit row), SAML ACS twin,
+  live-minted token dead under absolute-lifetime policy. Protective red verified recorded (403-expected-got-201
+  with governance disabled; file restored byte-identical, blob 78751121 confirmed at HEAD). D27 law enforced and
+  documented at `govern_with_workspace!`. Lead: push, PR body `Task: era-w10-governed-idp-lane`, merge after
+  Elixir Test green, close the merge criterion.
+- **S2** `era-w10-trust-panel` — final branch `loop-epic/trust-and-legal-panel-on-org-admin-the-f-1` (zero
+  fixes; identical -r twin deleted). Gate green: 8 tests 0 failures; format clean. Markup idiom-exact
+  (bp_card + bp_section_header description slot verified to render); all five targets confirmed served
+  (/papers/:slug reader ×4 + /status). D28 honored — zero new backend. Lead: push, PR body
+  `Task: era-w10-trust-panel`, merge after Elixir Test green.
+- **S3** `era-w10-hygiene-ledger` — no branch by design. Gate re-run GATE_PASS (0 wf_527f53f4-206 worktrees;
+  0 target origin branches). All three ledger read-backs independently verified: rollup c5 flipped true with
+  real flip evidence + c7 rewritten to the real sweep proof; anchor c1/c3 criterion-specific; soc2 paper cites
+  sso/org_domain.ex (grep 1/0). Builder's 4-vs-5 push-ref discrepancy handled honestly. REVIEW COMPLETED THE
+  SWEEP: 8 w8-era local branches the brief's worktree-scoped wording missed (S1/S3/S4/S5 slice branches + -r
+  twins, all verified content-landed via charter-canonical SHAs + ancestor checks) deleted at review.
+  Review-gated criterion 6 verified — builder still held the claim at review time, so the LEAD stamps+closes it.
+
+**Ledger:** honest throughout — all three slices claimed first, stamped as they worked, left in_progress with
+only merge/review-gated criteria open. Review rewrote the anchor's c0/c4 evidence to the honest remainder
+(D32) and paid c5's boilerplate (zero-tax-specific citations) — published, read back clean; met flags
+untouched [F,T,T,T,F,T]; epic stays OPEN with era-hg-okta-live-idp (c0) and era-hg-pen-test /
+era-hg-dpa-legal-signoff / era-hg-soc2-type2-window (c4) as the SOLE remaining gates.
+
+**Next wave:** (1) lead lands the two PRs (S1 rides Elixir Test as test-only .ex; S2 is a small LiveView
+diff) and closes their merge criteria + S3's review-gated criterion; (2) then the epic has NO agent-reachable
+legs left — it waits on the era-hg-* human gates alone; agent-side residue is backlog only
+(era-scim-conformance-polish, era-bl-scim-discovery-tests, era-bl-mfa-returnto-parity,
+era-bl-gdpr-selfserve-ui, era-bl-policy-query-perf, era-bl-audit-swallow-unify,
+bp-paper-view-bodyhtml-fallback).
