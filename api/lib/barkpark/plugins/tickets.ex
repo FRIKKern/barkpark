@@ -195,6 +195,31 @@ defmodule Barkpark.Plugins.Tickets do
     end
   end
 
+  @doc """
+  Adds the operator inbox to the shared Studio top menu.
+
+  `scope_prefix` keeps the tab inside the current workspace/project on scoped
+  Studio routes; flat Studio uses the same `/studio/tickets` path. The plugin
+  resolver chain applies workspace enablement before invoking this callback,
+  so a disabled Tickets plugin contributes no tab.
+  """
+  @impl Barkpark.Plugin
+  def resolve_top_menu_entries(prev, ctx) do
+    scope_prefix = Map.get(ctx, :scope_prefix, "")
+    path = "#{scope_prefix}/studio/tickets"
+
+    prev ++
+      [
+        %{
+          label: "Tickets",
+          path: path,
+          icon: "ticket",
+          order: 36,
+          active_when: path
+        }
+      ]
+  end
+
   # Failure-safe schema probe (tasks.ex precedent): a context with no DB
   # sandbox / no Repo (registration-time fingerprint, boot) must never crash
   # here — no schema reachable → no desk entry.
