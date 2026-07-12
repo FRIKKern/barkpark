@@ -1411,6 +1411,32 @@ func TestRenderSuccessWarnings(t *testing.T) {
 		t.Errorf("json stdout should carry the warnings field, got %q", stdout.String())
 	}
 
+	// Object-shaped warning (the authoring wall's {code,severity,message} advisory):
+	// the code + message render on stderr for the human shapes; a mixed list keeps
+	// the bare-string entry too, and an object with no message stays skipped.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "minimal"
+	objPayload := `{"ok":true,"doc":{"doc_id":"t"},"warnings":[` +
+		`{"code":"label_norm","severity":"advisory","message":"tags: 5 labels — advisory norm is 2–4"},` +
+		`{"severity":"advisory","message":"no code, still surfaced"},` +
+		`{"code":"nomsg","severity":"advisory"},` +
+		`"plain string advisory"]}`
+	renderSuccess(w, manifest.Command{}, []byte(objPayload))
+	if got := stderr.String(); !strings.Contains(got, "warning[label_norm]: tags: 5 labels — advisory norm is 2–4") {
+		t.Errorf("object warning stderr = %q, want the label_norm line", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "warning: no code, still surfaced") {
+		t.Errorf("code-less object warning stderr = %q, want the message line", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "warning: plain string advisory") {
+		t.Errorf("mixed-list bare string stderr = %q, want the string line", got)
+	}
+	if got := stderr.String(); strings.Contains(got, "nomsg") {
+		t.Errorf("message-less object warning must be skipped, got %q", got)
+	}
+
 	// No warnings key / non-string entries: nothing printed, nothing crashes.
 	for _, p := range []string{
 		`{"ok":true,"doc":{"doc_id":"t"}}`,

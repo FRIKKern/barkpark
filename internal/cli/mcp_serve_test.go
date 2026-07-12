@@ -503,6 +503,89 @@ func TestMCPTaskCreateWeightedTags(t *testing.T) {
 	}
 }
 
+// TestMCPTaskCreateSurfacesWarnings proves the task_create receipt folds the
+// authoring wall's advisories from the create/publish success envelope (ae-w1)
+// instead of dropping the response body on the floor (D24). It stands up a fake
+// /v1/data/mutate server that returns a {code,severity,message} warning on the
+// PUBLISH step, runs create+publish over a real in-memory MCP session, and asserts
+// the receipt carries {id, status:"published", warnings:[…]} with the advisory
+// intact — the publish body's warnings preferred over the create body's.
+func TestMCPTaskCreateSurfacesWarnings(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			b, _ := io.ReadAll(req.Body)
+			if strings.Contains(string(b), `"publish"`) {
+				io.WriteString(rw, `{"results":[{"id":"task-1"}],"warnings":[`+
+					`{"code":"label_norm","severity":"advisory","message":"tags: advisory norm is 2–4"}]}`)
+				return
+			}
+			io.WriteString(rw, `{"results":[{"id":"drafts.task-1"}]}`)
+			return
+		}
+		rw.WriteHeader(http.StatusNotFound)
+		io.WriteString(rw, `{"error":{"code":"not_found"}}`)
+	}))
+	defer ts.Close()
+
+	m, err := manifest.Parse([]byte(mcpTestManifest))
+	if err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	ctx := manifest.Context{Server: ts.URL, Token: "tok"}
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: "barkpark-tasks", Version: "test"}, nil)
+	if err := registerTaskTools(srv, globals{yes: true}, ctx, m); err != nil {
+		t.Fatalf("registerTaskTools: %v", err)
+	}
+
+	serverT, clientT := mcp.NewInMemoryTransports()
+	bg := context.Background()
+	ss, err := srv.Connect(bg, serverT, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	defer ss.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0"}, nil)
+	cs, err := client.Connect(bg, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	defer cs.Close()
+
+	res, err := cs.CallTool(bg, &mcp.CallToolParams{
+		Name: "task_create",
+		Arguments: map[string]any{
+			"title":   "warned task",
+			"publish": true, // exercise the create + publish exchange
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool task_create: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("task_create unexpectedly IsError: %s", mcpContentText(res))
+	}
+
+	var receipt struct {
+		ID       string           `json:"id"`
+		Draft    string           `json:"draft"`
+		Status   string           `json:"status"`
+		Warnings []map[string]any `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(mcpContentText(res)), &receipt); err != nil {
+		t.Fatalf("receipt did not parse: %v (%q)", err, mcpContentText(res))
+	}
+	if receipt.ID != "task-1" || receipt.Status != "published" {
+		t.Fatalf("receipt id/status wrong: %+v", receipt)
+	}
+	if len(receipt.Warnings) != 1 {
+		t.Fatalf("receipt.warnings = %v, want the publish-step advisory folded in", receipt.Warnings)
+	}
+	if receipt.Warnings[0]["code"] != "label_norm" || receipt.Warnings[0]["message"] != "tags: advisory norm is 2–4" {
+		t.Fatalf("receipt.warnings[0] = %v, want the {label_norm, …} advisory intact", receipt.Warnings[0])
+	}
+}
+
 // mcpContentText concatenates the text of a result's content blocks.
 func mcpContentText(res *mcp.CallToolResult) string {
 	var b strings.Builder
