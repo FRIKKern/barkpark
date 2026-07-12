@@ -86,6 +86,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @doc false
   def spinner_words, do: @spinner_words
 
+  # How many turn-clock ticks (seconds) a spinner word gets before the tick
+  # rotation swaps it for a fresh one. Long enough to read, short enough that
+  # no turn ever feels stuck on one word.
+  @spinner_rotate_s 7
+
   # Per-socket transcript window (efficiency; task-9e21c3f285b3d7d0). A long
   # multi-hundred-turn agent session appends user/assistant/tool rows for its
   # whole life; without a bound `@messages` grows the socket heap O(n) and the
@@ -1519,6 +1524,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply,
      socket
      |> start_turn_clock()
+     |> roll_spinner_word()
      |> put_message(message)
      |> assign(status: :thinking)}
   end
@@ -1575,7 +1581,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_info(:turn_tick, socket) do
     if turn_active?(socket.assigns.status) do
       Process.send_after(self(), :turn_tick, 1_000)
-      {:noreply, assign(socket, turn_elapsed_s: socket.assigns.turn_elapsed_s + 1)}
+      elapsed = socket.assigns.turn_elapsed_s + 1
+
+      socket = assign(socket, turn_elapsed_s: elapsed)
+
+      # The park never stands still: every @spinner_rotate_s the busy row AND
+      # the pulse wear a NEW word (next_spinner_word/1 excludes the current
+      # one, so the change is always visible). This is the liveness floor —
+      # send-path rolls only pick the opening word.
+      socket =
+        if rem(elapsed, @spinner_rotate_s) == 0, do: rotate_spinner_words(socket), else: socket
+
+      {:noreply, socket}
     else
       {:noreply, assign(socket, turn_clock_armed: false)}
     end
@@ -2012,6 +2029,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
           border-top-color: var(--primary);
           animation: bp-chat-spin 0.8s linear infinite;
         }
+        /* Claude-TUI-style shimmer: an evergreen highlight sweeps through the
+           spinner word. Gradient-clipped text needs explicit colors, so the
+           base tone is the primary dimmed — it reads in both themes. Browsers
+           without background-clip:text paint the base gradient behind the
+           (transparent) text, so keep this on the SHORT word span only. */
+        @keyframes bp-chat-shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        .bp-chat-spin-word {
+          background: linear-gradient(90deg,
+            hsl(var(--primary-hsl) / 0.45) 35%,
+            hsl(var(--primary-hsl) / 1) 50%,
+            hsl(var(--primary-hsl) / 0.45) 65%) 0 0 / 200% 100%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          animation: bp-chat-shimmer 2.4s linear infinite;
+        }
         /* Chat bubbles borrow the paper TYPOGRAPHY from .bp-paper-surface —
            NOT the page. The reader class also carries page-scale layout:
            min-height:100% (inside the transcript this stretched the streaming
@@ -2442,7 +2478,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span :if={@thinking_pulse.text in [nil, ""]}>
-              <%= @thinking_pulse.word %>… ~<%= @thinking_pulse.tokens %> tokens
+              <span class="bp-chat-spin-word"><%= @thinking_pulse.word %>…</span> ~<%= @thinking_pulse.tokens %> tokens
             </span>
             <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;" data-gutter-text>{@thinking_pulse.text}</span>
           </div>
@@ -2476,7 +2512,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span>
-              <%= if @status == :interrupting, do: "stopping…", else: "#{@spinner_word}…" %>
+              <span :if={@status == :interrupting}>stopping…</span>
+              <span :if={@status != :interrupting} class="bp-chat-spin-word">{@spinner_word}…</span>
               <%= if @turn_elapsed_s > 0 do %>
                 <span style="opacity: 0.8;"><%= @turn_elapsed_s %>s</span>
               <% end %>
@@ -4230,8 +4267,24 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp blank_pulse, do: %{tokens: 0, text: "", word: Enum.random(@spinner_words)}
 
   # Roll the turn-level word (worn by the between-tools busy row). Called at
-  # every FRESH send — a queued send rides the running turn and keeps its word.
+  # every turn start; the tick rotation (rotate_spinner_words/1) takes over
+  # from there.
   defp roll_spinner_word(socket), do: assign(socket, spinner_word: Enum.random(@spinner_words))
+
+  # A new word, never the one currently showing — a rotation the eye can see.
+  defp next_spinner_word(current), do: Enum.random(@spinner_words -- [current])
+
+  # Tick-driven liveness: re-roll the busy row's word, and the pulse's too when
+  # a pulse is breathing. Both move together so a long thinking bout and a long
+  # tool run are equally alive.
+  defp rotate_spinner_words(socket) do
+    socket = assign(socket, spinner_word: next_spinner_word(socket.assigns[:spinner_word]))
+
+    case socket.assigns[:thinking_pulse] do
+      nil -> socket
+      pulse -> assign(socket, thinking_pulse: %{pulse | word: next_spinner_word(pulse.word)})
+    end
+  end
 
   defp thinking_label(n), do: "thought for ~#{n} tokens"
 
