@@ -87,9 +87,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   # threaded in. On the scoped surface the flat shape would ride the
   # flat→scoped 302 funnel, which re-resolves the workspace from the
   # SESSION and can teleport the user out of the workspace they're on, so
-  # rewrite to the `/d/` canonical instead. Empty prefix (flat surfaces,
-  # e.g. the `/studio/:dataset/_plugins` admin LV) keeps the flat path —
-  # mirrors the flat branch in
+  # rewrite to the `/d/` canonical instead. Empty prefix keeps the flat path
+  # for callers without a canonical scope. The plugins-admin LV is scoped at
+  # `/w/:ws/p/:proj/d/:dataset/studio/_plugins`; its legacy
+  # `/studio/:dataset/_plugins` URL is only a 302 compatibility entry. This
+  # empty-prefix branch mirrors
   # `StudioComponents.Nav.default_top_menu_entries/4`. Non-`/studio` hrefs
   # (e.g. a plugin's `/admin/...` console) pass through untouched.
   @doc false

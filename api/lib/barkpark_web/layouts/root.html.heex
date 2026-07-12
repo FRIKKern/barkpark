@@ -2648,8 +2648,10 @@
     }
 
     /* ── Plugin admin LV (Task barkpark-otv) ─────────────────────────────
-       Per-plugin cards on `/studio/:dataset/_plugins`. Mirrors the
-       shadcn-card palette (.card / .schema-card) but adds a callbacks
+       Per-plugin cards on the canonical
+       `/w/:ws/p/:proj/d/:dataset/studio/_plugins`; the legacy
+       `/studio/:dataset/_plugins` URL is only a 302 compatibility entry.
+       Mirrors the shadcn-card palette (.card / .schema-card) but adds a callbacks
        list with impl (✓) / default (—) markers so the publisher can
        see at a glance which `Barkpark.Plugin` callbacks each plugin
        overrides. */

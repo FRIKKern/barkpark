@@ -461,9 +461,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     ds = URI.encode(dataset)
 
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
-    # the page is on via the /d/ canonical. "" on a flat surface (e.g. the
-    # /studio/:dataset/_plugins admin LV) keeps the legacy flat paths —
-    # those ride the flat→scoped 302 funnel.
+    # the page is on via the /d/ canonical. The plugins-admin LV lives at
+    # `/w/:ws/p/:proj/d/:dataset/studio/_plugins` with a non-empty prefix;
+    # `/studio/:dataset/_plugins` is only its 302 compatibility entry. A truly
+    # flat surface (scope_prefix "") keeps the legacy flat paths, which ride
+    # the flat→scoped 302 funnel.
     base =
       case scope_prefix || "" do
         "" -> Paths.flat_root(ds)
