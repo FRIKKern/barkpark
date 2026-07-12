@@ -83,12 +83,10 @@ func run(args []string) int {
 			// Request stats ride the SAME base+token seam as the health gate: the
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
-			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
-			HealthBaseURL: *healthURL,
-			HealthToken:   *healthTok,
-			HealthGateOpts: setup.HealthGate{
-				Token: *healthTok,
-			},
+			ReqStatsProbe:  agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
+			HealthBaseURL:  *healthURL,
+			HealthToken:    *healthTok,
+			HealthGateOpts: agentHealthGateOpts(*healthURL, *healthTok),
 		},
 	}
 
@@ -112,6 +110,20 @@ func run(args []string) int {
 	// RunWith returns only when ctx is cancelled (signal) — a clean shutdown.
 	fmt.Fprintln(os.Stderr, "barkpark-agent: shutting down")
 	return 0
+}
+
+func agentHealthGateOpts(base, token string) setup.HealthGate {
+	base = strings.TrimRight(base, "/")
+	statusURL := ""
+	if base != "" {
+		statusURL = base + "/status.json"
+	}
+	return setup.HealthGate{
+		Token:                            token,
+		PostgresProbeURL:                 statusURL,
+		RequireDatabaseStatusOperational: true,
+		StubsOptional:                    true,
+	}
 }
 
 // readToken reads, trims, and validates the agent token from path. An empty

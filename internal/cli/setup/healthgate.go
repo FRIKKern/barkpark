@@ -38,6 +38,11 @@ type HealthGate struct {
 	// from Postgres (a scoped /v1/data/query read by default — see
 	// RunHealthGate). Empty disables the check with an explicit "skipped" detail.
 	PostgresProbeURL string
+	// RequireDatabaseStatusOperational makes the Postgres probe decode the
+	// public status envelope and require its database component to be
+	// operational. It is opt-in so explicit legacy probe URLs retain their
+	// historical HTTP-200/body-independent contract.
+	RequireDatabaseStatusOperational bool
 	// AgentStatusURL is an ABSOLUTE URL to the agent-status endpoint. This
 	// endpoint does NOT exist yet — cloud-9/10 build it. Until then the caller
 	// points this at the real route (failing closed) or a fake in tests. Empty
@@ -337,6 +342,26 @@ func (g HealthGate) checkPostgres() CheckResult {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		return CheckResult{name, false, fmt.Sprintf("query probe returned %d, want 200 (DB read failed)", resp.StatusCode)}
+	}
+	if g.RequireDatabaseStatusOperational {
+		var status struct {
+			Components []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"components"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			return CheckResult{name, false, fmt.Sprintf("status probe returned malformed JSON: %v", err)}
+		}
+		for _, component := range status.Components {
+			if component.Name == "database" {
+				if component.Status == "operational" {
+					return CheckResult{name, true, "public status database component is operational"}
+				}
+				return CheckResult{name, false, fmt.Sprintf("public status database component is %q, want operational", component.Status)}
+			}
+		}
+		return CheckResult{name, false, "public status response has no database component"}
 	}
 	return CheckResult{name, true, "scoped query read returned 200 (Postgres reachable via API)"}
 }

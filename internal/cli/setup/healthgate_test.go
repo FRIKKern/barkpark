@@ -249,6 +249,51 @@ func TestPostgresCheck(t *testing.T) {
 			t.Fatalf("empty postgres probe URL must fail, got pass: %s", got.Detail)
 		}
 	})
+
+	for _, tc := range []struct {
+		name       string
+		statusCode int
+		body       string
+		wantPass   bool
+	}{
+		{"status database operational", http.StatusOK, `{"components":[{"name":"database","status":"operational"}]}`, true},
+		{"status database degraded", http.StatusOK, `{"components":[{"name":"database","status":"degraded"}]}`, false},
+		{"status missing database", http.StatusOK, `{"components":[{"name":"plugins","status":"operational"}]}`, false},
+		{"status malformed", http.StatusOK, `{`, false},
+		{"status non-200", http.StatusServiceUnavailable, `{"components":[{"name":"database","status":"operational"}]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("Authorization"); got != "" {
+					t.Errorf("Authorization = %q, want empty for public status probe", got)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.statusCode)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			g := HealthGate{
+				PostgresProbeURL:                 srv.URL + "/status.json",
+				RequireDatabaseStatusOperational: true,
+			}
+			if got := g.checkPostgres(); got.Pass != tc.wantPass {
+				t.Fatalf("pass=%v detail=%q, want pass=%v", got.Pass, got.Detail, tc.wantPass)
+			}
+		})
+	}
+
+	t.Run("explicit legacy status path remains body-independent", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`not-json`))
+		}))
+		defer srv.Close()
+
+		g := HealthGate{PostgresProbeURL: srv.URL + "/status.json"}
+		if got := g.checkPostgres(); !got.Pass {
+			t.Fatalf("legacy explicit probe must pass on HTTP 200 regardless of body: %s", got.Detail)
+		}
+	})
 }
 
 func TestStubProbeChecks(t *testing.T) {
