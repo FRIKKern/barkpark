@@ -45,7 +45,12 @@ defmodule BarkparkWeb.ListenController do
     # content.ex's tap_broadcast/5 fires BOTH the bare topic AND
     # `documents:ws:#{ws}:#{dataset}` for scoped writes, so self-delivery is
     # intact; the nil/Default (flat back-compat) path keeps the bare topic.
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, list_topic(dataset, workspace_id))
+    forwarder =
+      start_event_forwarder(
+        list_topic(dataset, workspace_id),
+        self(),
+        sse_mailbox_limit()
+      )
 
     conn =
       conn
@@ -82,7 +87,11 @@ defmodule BarkparkWeb.ListenController do
         conn
       end
 
-    listen_loop(conn, dataset, workspace_id, caller_context, scope)
+    try do
+      listen_loop(conn, dataset, workspace_id, caller_context, scope)
+    after
+      send(forwarder, :stop)
+    end
   end
 
   @doc """
@@ -142,22 +151,18 @@ defmodule BarkparkWeb.ListenController do
   # --- Subscriber backpressure (Barkpark scar: unbounded BEAM mailbox) ---
   #
   # chunk/2 BLOCKS the connection process on Bandit while a stalled/slow TCP
-  # reader drains. Meanwhile Phoenix.PubSub keeps send/2-ing {:document_changed,
-  # msg} (each carrying a full rendered document) into THIS same process
-  # mailbox. With no consumer-side bound, a high-mutation dataset (bulk import
-  # ~100 events/s) + ONE stalled client grows the mailbox without limit → heap
-  # growth → node OOM. The `after 30_000` keepalive never fires under sustained
-  # load, so it is no guard. Two complementary bounds fix it:
+  # reader drains. Subscribing that same process directly lets Phoenix.PubSub
+  # fill its mailbox while no Elixir code can run. The event forwarder below is
+  # the nonblocking subscriber: it caps deliveries to the connection mailbox,
+  # then sends ONE overload signal and drops the remaining burst until the
+  # connection returns and stops it. The listener therefore owns at most the
+  # configured event window plus that signal even while chunk/2 is fully stuck.
+  # Two complementary bounds remain:
   #
-  #   1. max_heap_size (kill: true), set in listen/2 — the HARD backstop for a
-  #      fully stalled reader where chunk/2 never returns: the BEAM kills this
-  #      one connection process at the ceiling, node survives.
-  #   2. This message_queue_len check, each loop iteration — the GRACEFUL shed
-  #      for a slow-but-progressing reader: once the backlog crosses the limit
-  #      we emit a final `event: overloaded` and close, well before the heap
-  #      ceiling. The client reconnects and re-syncs the gap via Last-Event-ID
-  #      replay (replay_since/4) — no events are lost, only the stalled socket
-  #      is shed. A slow reader losing its stream is correct; a dead node is not.
+  #   1. The forwarder caps the blocked connection's mailbox at limit + 1.
+  #   2. This message_queue_len check emits a final `event: overloaded` and
+  #      closes as soon as chunk/2 returns. max_heap_size remains a last-resort
+  #      process-local guard for unrelated heap growth.
   defp listen_loop(conn, dataset, workspace_id, caller_context, scope) do
     case backpressure_step(conn, sse_mailbox_limit()) do
       {:shed, conn} ->
@@ -171,6 +176,9 @@ defmodule BarkparkWeb.ListenController do
 
   defp listen_recv(conn, dataset, workspace_id, caller_context, scope) do
     receive do
+      :sse_overloaded ->
+        shed(conn)
+
       {:document_changed, %{event_id: _eid} = msg} ->
         if forward_event?(msg, workspace_id) do
           # Re-render the live document under THIS subscriber instead of
@@ -209,6 +217,49 @@ defmodule BarkparkWeb.ListenController do
           {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope)
           _ -> conn
         end
+    end
+  end
+
+  defp start_event_forwarder(topic, listener, limit) do
+    caller = self()
+
+    pid =
+      spawn_link(fn ->
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+        send(caller, {:sse_forwarder_ready, self()})
+        event_forwarder(listener, limit)
+      end)
+
+    receive do
+      {:sse_forwarder_ready, ^pid} -> pid
+    end
+  end
+
+  defp event_forwarder(listener, limit) do
+    receive do
+      :stop ->
+        :ok
+
+      {:document_changed, _msg} = event ->
+        case Process.info(listener, :message_queue_len) do
+          {:message_queue_len, n} when n >= limit ->
+            send(listener, :sse_overloaded)
+            overloaded_forwarder()
+
+          {:message_queue_len, _n} ->
+            send(listener, event)
+            event_forwarder(listener, limit)
+
+          nil ->
+            :ok
+        end
+    end
+  end
+
+  defp overloaded_forwarder do
+    receive do
+      :stop -> :ok
+      {:document_changed, _msg} -> overloaded_forwarder()
     end
   end
 
