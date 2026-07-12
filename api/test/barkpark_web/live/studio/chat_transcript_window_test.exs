@@ -19,13 +19,31 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
     3. `@messages` (and the reopen DB load) are bounded to `@transcript_window`,
        so a long session's socket heap does not grow O(n).
   """
-  use Barkpark.DataCase, async: true
+  use BarkparkWeb.ConnCase, async: false
 
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Auth
+  alias Barkpark.Repo
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Message
   alias BarkparkWeb.Studio.ChatLive
 
   @window 500
+  @large_session_size 2000
+  @admin_token "chat-transcript-window-admin-token"
   @source Path.expand("../../../../lib/barkpark_web/live/studio/chat_live.ex", __DIR__)
+
+  setup do
+    {:ok, _} =
+      Auth.create_token(@admin_token, "chat transcript window admin", "production", [
+        "read",
+        "write",
+        "admin"
+      ])
+
+    :ok
+  end
 
   # ── fix 3: bounded per-socket transcript ──────────────────────────────────
 
@@ -74,6 +92,57 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
           do: StudioChat.append_message(session, %{role: "user", source_markdown: "m#{i}"})
 
       assert length(StudioChat.list_messages(session.id, 0)) == 5
+    end
+  end
+
+  describe "large-session reopen evidence (N=2000)" do
+    test "the capped heap is smaller and the reopened LiveView remains interactive", %{conn: conn} do
+      session = seed_large_session(@large_session_size)
+
+      {full_us, full} = :timer.tc(fn -> StudioChat.list_messages(session.id) end)
+
+      {capped_us, capped} =
+        :timer.tc(fn -> StudioChat.list_messages(session.id, @window) end)
+
+      full_bytes = :erlang.external_size(full)
+      capped_bytes = :erlang.external_size(capped)
+
+      assert length(full) == @large_session_size
+      assert length(capped) == @window
+      assert capped_bytes < full_bytes
+
+      IO.puts(
+        "chat reopen N=#{@large_session_size}: " <>
+          "full=#{full_us}us/#{full_bytes}B capped=#{capped_us}us/#{capped_bytes}B"
+      )
+
+      previous_chat = Application.get_env(:barkpark, :claude_chat)
+      previous_demo = Application.get_env(:barkpark, :public_demo_studio)
+      Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
+      Application.put_env(:barkpark, :public_demo_studio, false)
+
+      on_exit(fn ->
+        restore_env(:claude_chat, previous_chat)
+        restore_env(:public_demo_studio, previous_demo)
+      end)
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+
+      {reopen_us, {:ok, view, _html}} =
+        :timer.tc(fn -> live(conn, "/studio/chat/#{session.id}") end)
+
+      messages = live_assigns(view).messages
+      assert length(messages) == @window
+      assert hd(messages).id == @large_session_size - @window + 1
+      assert List.last(messages).id == @large_session_size
+
+      render_change(element(view, "form[phx-submit=send]"), %{"message" => "still responsive"})
+      assert live_assigns(view).composer_draft == "still responsive"
+      assert Process.alive?(view.pid)
+
+      IO.puts(
+        "chat reopen N=#{@large_session_size}: LiveView mount=#{reopen_us}us; interaction=ok"
+      )
     end
   end
 
@@ -158,4 +227,32 @@ defmodule BarkparkWeb.Studio.ChatTranscriptWindowTest do
     {:reductions, after_} = Process.info(self(), :reductions)
     after_ - before
   end
+
+  defp seed_large_session(count) do
+    {:ok, session} =
+      StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp", mode: "plan"})
+
+    now = DateTime.utc_now()
+
+    rows =
+      for seq <- 1..count do
+        %{
+          session_id: session.id,
+          seq: seq,
+          role: "user",
+          source_markdown: "message #{seq}",
+          metadata: %{},
+          inserted_at: now,
+          updated_at: now
+        }
+      end
+
+    {^count, nil} = Repo.insert_all(Message, rows)
+    session
+  end
+
+  defp live_assigns(view), do: :sys.get_state(view.pid).socket.assigns
+
+  defp restore_env(key, nil), do: Application.delete_env(:barkpark, key)
+  defp restore_env(key, value), do: Application.put_env(:barkpark, key, value)
 end
