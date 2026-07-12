@@ -5,6 +5,7 @@ import {
 } from "@barkpark/core";
 import type { Paper, BarkparkTypeMap } from "./barkpark.types";
 import { inlineText } from "./find.ts";
+import type { PaperTag } from "./paper-tags.ts";
 
 /**
  * Inline content node (PortableDoc). Mirrors `Barkpark.PortableDoc.Render`'s
@@ -79,8 +80,10 @@ export type PaperDocument = Paper &
     blocks?: Block[];
     body?: { blocks?: Block[] };
     /** Content tags (Obsidian #tags). The envelope spreads `content` to the top
-     * level, so these surface here; consumed by the /tags/[tag] route. */
-    tags?: string[];
+     * level, so these surface here; consumed by the /tags/[tag] route. Since the
+     * authoring-excellence wall (charter D8–D10) tags may be flat strings, weighted
+     * `{tag, strength, rationale}` objects, or a mix — read them via {@link paperTags}. */
+    tags?: PaperTag[];
   };
 
 /** Blocks live at top-level `blocks`, with `body.blocks` as a mirror fallback. */

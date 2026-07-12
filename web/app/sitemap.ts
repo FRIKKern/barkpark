@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
 import { client } from "@/lib/barkpark-client";
 import { fetchPosts, postSlug } from "@/lib/posts";
-import { fetchPapers, paperSlug, type PaperDocument } from "@/lib/papers";
+import { fetchPapers, paperSlug } from "@/lib/papers";
+import { paperTags } from "@/lib/paper-tags";
 import { absoluteUrl } from "@/lib/site-url";
 
 /**
@@ -23,12 +24,6 @@ function lastModified(iso?: string): Date | undefined {
   if (!iso) return undefined;
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? undefined : d;
-}
-
-function paperTags(paper: PaperDocument): string[] {
-  return Array.isArray(paper.tags)
-    ? paper.tags.filter((t): t is string => typeof t === "string")
-    : [];
 }
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -58,7 +53,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
 
     const tags = new Set<string>();
-    for (const paper of papers) for (const t of paperTags(paper)) tags.add(t);
+    for (const paper of papers) for (const t of paperTags(paper.tags)) tags.add(t);
     const tagEntries: MetadataRoute.Sitemap = [...tags].map((tag) => ({
       url: absoluteUrl(`/tags/${encodeURIComponent(tag)}`),
       changeFrequency: "weekly",

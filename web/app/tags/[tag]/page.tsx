@@ -7,6 +7,7 @@ import {
   paperExcerpt,
   type PaperDocument,
 } from "@/lib/papers";
+import { paperTags } from "@/lib/paper-tags";
 import { PostsListSkeleton } from "@/components/posts-list";
 import { EmptyState } from "@/components/empty-state";
 
@@ -18,18 +19,6 @@ const shell =
   "mx-auto flex min-h-screen w-full max-w-2xl flex-col gap-8 px-6 py-16";
 
 type Params = Promise<{ tag: string }>;
-
-/**
- * Tags live at `content["tags"]` (a string array). The rendered envelope
- * (`Envelope.render`) spreads `content` to the top level, so they surface as the
- * declared `PaperDocument.tags` field. We still guard the runtime shape (the
- * projection could omit or malform it) and keep only string entries.
- */
-function paperTags(paper: PaperDocument): string[] {
-  return Array.isArray(paper.tags)
-    ? paper.tags.filter((t): t is string => typeof t === "string")
-    : [];
-}
 
 async function TagListing({ tag }: { tag: string }) {
   let papers: PaperDocument[] = [];
@@ -51,7 +40,7 @@ async function TagListing({ tag }: { tag: string }) {
     error = err instanceof Error ? err.message : String(err);
   }
 
-  const matches = papers.filter((paper) => paperTags(paper).includes(tag));
+  const matches = papers.filter((paper) => paperTags(paper.tags).includes(tag));
 
   return (
     <main className={shell}>
