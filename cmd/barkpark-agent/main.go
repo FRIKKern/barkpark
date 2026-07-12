@@ -119,9 +119,10 @@ func agentHealthGateOpts(base, token string) setup.HealthGate {
 		statusURL = base + "/status.json"
 	}
 	return setup.HealthGate{
-		Token:            token,
-		PostgresProbeURL: statusURL,
-		StubsOptional:    true,
+		Token:                            token,
+		PostgresProbeURL:                 statusURL,
+		RequireDatabaseStatusOperational: false,
+		StubsOptional:                    true,
 	}
 }
 
