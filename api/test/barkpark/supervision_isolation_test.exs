@@ -66,9 +66,20 @@ defmodule Barkpark.SupervisionIsolationTest do
   # Stand-in for Repo/Oban/Endpoint: starts and stays alive forever.
   defmodule Sentinel do
     use GenServer
-    def start_link(_), do: GenServer.start_link(__MODULE__, :ok)
+    def start_link(arg), do: GenServer.start_link(__MODULE__, arg)
+
+    # When given the test's ETS table, register our pid at init: the FLAT test
+    # must be able to find the sentinel WITHOUT calling the supervisor — the
+    # burst can escalate before any which_children call returns (live flake:
+    # GenServer.call(:which_children) → (EXIT) shutdown). Child starts are
+    # synchronous, so the row exists the instant start_link(sup) returns.
     @impl true
-    def init(:ok), do: {:ok, :ok}
+    def init([]), do: {:ok, :ok}
+
+    def init(table) do
+      :ets.insert(table, {:sentinel, self()})
+      {:ok, :ok}
+    end
   end
 
   # 4 blip workers: 4 runtime restarts — strictly more than the flat budget of 3
@@ -108,7 +119,7 @@ defmodule Barkpark.SupervisionIsolationTest do
        %{table: table} do
     Process.flag(:trap_exit, true)
 
-    sentinel_spec = Supervisor.child_spec({Sentinel, []}, id: :sentinel)
+    sentinel_spec = Supervisor.child_spec({Sentinel, table}, id: :sentinel)
 
     children = [sentinel_spec | blip_children(table)]
 
@@ -119,10 +130,14 @@ defmodule Barkpark.SupervisionIsolationTest do
         max_seconds: @intensity_window_s
       )
 
-    [{:sentinel, sentinel_pid, _, _}] =
-      Supervisor.which_children(sup) |> Enum.filter(fn {id, _, _, _} -> id == :sentinel end)
-
     sup_ref = Process.monitor(sup)
+
+    # Never ask the supervisor: the escalation under test can complete before a
+    # which_children call returns (observed live as `(EXIT) shutdown` from the
+    # probe itself). The sentinel registered its pid in ETS during its own init;
+    # monitoring an already-dead pid delivers an immediate :DOWN (:noproc),
+    # which the assertion below accepts as the same outcome.
+    [{:sentinel, sentinel_pid}] = :ets.lookup(table, :sentinel)
     sentinel_ref = Process.monitor(sentinel_pid)
 
     # Escalation: the top supervisor terminates, taking the critical sentinel
