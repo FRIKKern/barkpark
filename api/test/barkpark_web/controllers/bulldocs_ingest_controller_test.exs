@@ -314,14 +314,23 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
         Content.upsert_paper(%{
           slug: slug,
           blocks: [
-            %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
-              "locked" => true, "text" => "T"},
+            %{
+              "id" => "tpl-title",
+              "type" => "heading",
+              "level" => 1,
+              "role" => "title",
+              "locked" => true,
+              "text" => "T"
+            },
             %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
             # A real body block: skeleton-only papers are refused by the
             # hollow-body quality gate (p-quality-gate); this test targets the
             # constraint vocabulary veto.
-            %{"id" => "body-p", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]}
+            %{
+              "id" => "body-p",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Body."}]
+            }
           ]
         })
 
@@ -694,8 +703,11 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
           }
         ],
         "tags" => [
-          %{"tag" => "nonexistent-#{System.unique_integer([:positive])}", "strength" => 80,
-            "rationale" => "unique-token rationale so the fixture description never collides"}
+          %{
+            "tag" => "nonexistent-#{System.unique_integer([:positive])}",
+            "strength" => 80,
+            "rationale" => "unique-token rationale so the fixture description never collides"
+          }
         ]
       }
 
