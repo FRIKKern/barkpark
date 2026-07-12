@@ -19,7 +19,8 @@ defmodule Barkpark.Tasks.QueueTest do
 
   use Barkpark.DataCase, async: false
 
-  alias Barkpark.{Content, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Document
+  alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Tasks.Queue
 
   @dataset "production"
@@ -69,6 +70,14 @@ defmodule Barkpark.Tasks.QueueTest do
   end
 
   defp ids_of(docs), do: Enum.map(docs, & &1.id)
+
+  defp plan_nodes(value) when is_list(value), do: Enum.flat_map(value, &plan_nodes/1)
+
+  defp plan_nodes(value) when is_map(value) do
+    [value | value |> Map.values() |> Enum.flat_map(&plan_nodes/1)]
+  end
+
+  defp plan_nodes(_value), do: []
 
   # Build a genuine draft/published TWIN pair for `base_id`, the shape a
   # published-task mutate leaves behind: a published row at the bare id +
@@ -322,6 +331,123 @@ defmodule Barkpark.Tasks.QueueTest do
         })
 
       assert main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+    end
+
+    test "dataset-less ready keeps dependency satisfaction isolated by dataset", %{scope: scope} do
+      phase_id = "phase-dep-dataset-#{System.unique_integer([:positive])}"
+      dep_id = "dep-dataset-#{System.unique_integer([:positive])}"
+
+      _done_elsewhere =
+        mk_task!(dep_id, scope, @dataset_alt, %{"lifecycle_status" => "done"})
+
+      _open_here = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
+
+      main =
+        mk_task!("main-dep-dataset-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      refute main.id in ids_of(Queue.ready(scope ++ [phase_id: phase_id]))
+    end
+
+    test "workspace-wide ready keeps dependency satisfaction isolated by project", %{
+      scope: scope
+    } do
+      workspace_id = scope[:workspace_id]
+      other_project = TenancyFixtures.create_project!(workspace_id)
+      other_scope = [workspace_id: workspace_id, project_id: other_project.id]
+      register_schemas!(other_scope, @dataset)
+
+      phase_id = "phase-dep-project-#{System.unique_integer([:positive])}"
+      dep_id = "dep-project-#{System.unique_integer([:positive])}"
+
+      _done_elsewhere =
+        mk_task!(dep_id, other_scope, @dataset, %{"lifecycle_status" => "done"})
+
+      _open_here = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
+
+      main =
+        mk_task!("main-dep-project-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      refute main.id in ids_of(
+               Queue.ready(
+                 workspace_id: workspace_id,
+                 dataset: @dataset,
+                 phase_id: phase_id
+               )
+             )
+    end
+
+    test "dependency plan hashes a one-time done-task scan", %{scope: scope} do
+      dataset = "queue-plan-#{System.unique_integer([:positive])}"
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      rows =
+        Enum.flat_map(1..200, fn index ->
+          dep_id = "plan-dep-#{index}"
+
+          [
+            %{
+              id: Ecto.UUID.generate(),
+              doc_id: dep_id,
+              type: "task",
+              dataset: dataset,
+              title: dep_id,
+              status: "draft",
+              content: %{"kind" => "task", "lifecycle_status" => "done"},
+              workspace_id: scope[:workspace_id],
+              project_id: scope[:project_id],
+              inserted_at: now,
+              updated_at: now,
+              rev: "done-#{index}"
+            },
+            %{
+              id: Ecto.UUID.generate(),
+              doc_id: "plan-main-#{index}",
+              type: "task",
+              dataset: dataset,
+              title: "plan-main-#{index}",
+              status: "draft",
+              content: %{
+                "kind" => "task",
+                "lifecycle_status" => "open",
+                "dependencies" => [dep_id]
+              },
+              workspace_id: scope[:workspace_id],
+              project_id: scope[:project_id],
+              inserted_at: now,
+              updated_at: now,
+              rev: "main-#{index}"
+            }
+          ]
+        end)
+
+      {400, nil} = Repo.insert_all(Document, rows)
+
+      query = Queue.ready_query(scope ++ [dataset: dataset, limit: 200])
+      {sql, params} = Ecto.Adapters.SQL.to_sql(:all, Repo, query)
+
+      explain = Repo.query!("EXPLAIN (ANALYZE, FORMAT JSON) " <> sql, params)
+      document = explain.rows |> hd() |> hd() |> hd()
+      nodes = plan_nodes(document)
+
+      done_cte = Enum.find(nodes, &(&1["Subplan Name"] == "CTE ready_done_tasks"))
+      unsatisfied_cte = Enum.find(nodes, &(&1["Subplan Name"] == "CTE ready_unsatisfied_tasks"))
+
+      assert done_cte
+      assert unsatisfied_cte
+
+      assert Enum.any?(plan_nodes(done_cte), fn node ->
+               node["Relation Name"] == "documents" and node["Actual Loops"] == 1
+             end)
+
+      assert Enum.any?(plan_nodes(unsatisfied_cte), fn node ->
+               node["Node Type"] in ["Hash", "Hash Join"]
+             end)
     end
   end
 end

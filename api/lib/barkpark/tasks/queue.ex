@@ -23,7 +23,7 @@ defmodule Barkpark.Tasks.Queue do
   # parented at `drafts.phase-x` is still found by a phase-scoped ready for
   # `phase-x` (and vice-versa).
 
-  import Ecto.Query, only: [from: 2]
+  import Ecto.Query
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
@@ -44,6 +44,53 @@ defmodule Barkpark.Tasks.Queue do
     dataset = Keyword.get(opts, :dataset)
     phase_id = Keyword.get(opts, :phase_id)
     limit = Keyword.get(opts, :limit, @ready_default_limit)
+    workspace_uuid = workspace_id && Ecto.UUID.dump!(workspace_id)
+
+    done_tasks =
+      Document
+      |> Scope.scope_to_workspace(workspace_id)
+      |> then(fn query ->
+        from(t in query,
+          where: t.type == "task",
+          where: fragment("?->>'lifecycle_status'", t.content) == "done",
+          distinct: [
+            t.dataset,
+            t.project_id,
+            fragment("regexp_replace(?, '^drafts\\.', '')", t.doc_id)
+          ],
+          select: %{
+            dataset: t.dataset,
+            project_id: t.project_id,
+            normalized_id: fragment("regexp_replace(?, '^drafts\\.', '')", t.doc_id)
+          }
+        )
+      end)
+
+    unsatisfied_tasks =
+      from(
+        u in fragment(
+          """
+          SELECT DISTINCT candidate.id
+          FROM documents AS candidate
+          CROSS JOIN LATERAL jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(candidate.content->'dependencies') = 'array'
+                 THEN candidate.content->'dependencies'
+                 ELSE '[]'::jsonb END
+          ) AS dep(id)
+          LEFT JOIN ready_done_tasks AS done
+            ON done.dataset = candidate.dataset
+           AND done.project_id IS NOT DISTINCT FROM candidate.project_id
+           AND done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
+          WHERE candidate.type = 'task'
+            AND candidate.workspace_id = ?
+            AND candidate.content->>'kind' = 'task'
+            AND candidate.content->>'lifecycle_status' IN ('open', 'blocked')
+            AND done.normalized_id IS NULL
+          """,
+          ^workspace_uuid
+        ),
+        select: %{id: field(u, :id)}
+      )
 
     base =
       from(d in Document,
@@ -75,38 +122,17 @@ defmodule Barkpark.Tasks.Queue do
         # (2) content.dependencies gate: every doc_id in the (jsonb array)
         # `content.dependencies` must resolve to a same-scope task that is
         # `done`. `drafts.` is stripped on both sides so a dep pointing at either
-        # twin matches. A dep with NO matching done task — including a dangling
-        # id that resolves to nothing — leaves the inner NOT EXISTS true, so the
-        # task is excluded (fail CLOSED). A non-array/absent `dependencies` value
-        # unnests to zero rows and never gates.
+        # twin matches. `ready_unsatisfied_tasks` expands dependencies once and
+        # hash-joins them to the materialized done set; a dep with NO match —
+        # including a dangling id — records the candidate here, so this outer
+        # anti-filter excludes it (fail CLOSED). A non-array/absent value unnests
+        # to zero rows and never gates.
         where:
           fragment(
             """
-            NOT EXISTS (
-              SELECT 1
-              FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(?->'dependencies') = 'array'
-                     THEN ?->'dependencies'
-                     ELSE '[]'::jsonb END
-              ) AS dep(id)
-              LEFT JOIN (
-                SELECT DISTINCT regexp_replace(t.doc_id, '^drafts\\.', '') AS normalized_id
-                FROM documents t
-                WHERE t.type = 'task'
-                  AND t.dataset = ?
-                  AND t.workspace_id IS NOT DISTINCT FROM ?
-                  AND t.project_id IS NOT DISTINCT FROM ?
-                  AND t.content->>'lifecycle_status' = 'done'
-              ) AS done
-                ON done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
-              WHERE done.normalized_id IS NULL
-            )
+            NOT EXISTS (SELECT 1 FROM ready_unsatisfied_tasks AS u WHERE u.id = ?)
             """,
-            d.content,
-            d.content,
-            d.dataset,
-            d.workspace_id,
-            d.project_id
+            d.id
           ),
         # (3) twin collapse (published-wins): suppress a row when a DISTINCT
         # same-scope task shares its published id (its `drafts.`-stripped doc_id).
@@ -144,6 +170,8 @@ defmodule Barkpark.Tasks.Queue do
       )
 
     base
+    |> with_cte("ready_done_tasks", as: ^done_tasks, materialized: true)
+    |> with_cte("ready_unsatisfied_tasks", as: ^unsatisfied_tasks, materialized: true)
     |> maybe_filter_dataset(dataset)
     |> maybe_filter_phase(phase_id)
     |> Scope.scope_to_workspace(workspace_id, project_id)
