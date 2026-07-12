@@ -1,0 +1,532 @@
+package apiclient
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+)
+
+// chatTestToken is the data-plane bearer every chat call must carry (D3). The
+// tests assert this value reaches the server so a regression that dropped auth,
+// or reached for a different token field, would red.
+const chatTestToken = "dataplane-tok-123"
+
+func newChatClient(baseURL string) *Client {
+	return New(Config{BaseURL: baseURL, Token: chatTestToken})
+}
+
+func wantBearer(t *testing.T, r *http.Request) {
+	t.Helper()
+	if got := r.Header.Get("Authorization"); got != "Bearer "+chatTestToken {
+		t.Errorf("Authorization = %q, want %q (data-plane token, D3)", got, "Bearer "+chatTestToken)
+	}
+}
+
+func TestCreateChatSession(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/sessions" {
+			t.Errorf("got %s %s, want POST /v1/chat/sessions", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"sess-1","status":"idle","cwd":"/tmp","mode":"default","draft":"hi","model_choice":"opus"}`)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).CreateChatSession("default", "opus", "high")
+	if err != nil {
+		t.Fatalf("CreateChatSession: %v", err)
+	}
+	if s.ID != "sess-1" || s.Cwd != "/tmp" || s.Mode != "default" {
+		t.Fatalf("decoded session = %+v", s)
+	}
+	// Full struct carries the D14 continuity fields on create too.
+	if s.Draft != "hi" || s.ModelChoice != "opus" {
+		t.Errorf("continuity fields lost: draft=%q model_choice=%q", s.Draft, s.ModelChoice)
+	}
+	// The create body carries ONLY mode/model/effort (C0).
+	if gotBody["mode"] != "default" || gotBody["model"] != "opus" || gotBody["effort"] != "high" {
+		t.Errorf("request body = %v, want mode/model/effort set", gotBody)
+	}
+	// cwd is a launcher control the client must NEVER send, even though the
+	// server may report a read-only Cwd on the response (C0).
+	if _, ok := gotBody["cwd"]; ok {
+		t.Errorf("create body must not send cwd (launcher control), got %v", gotBody)
+	}
+	// No launcher/session/token/bypass control keys leak into the body.
+	for _, forbidden := range []string{"cwd", "session_id", "token", "bypass", "launcher"} {
+		if _, ok := gotBody[forbidden]; ok {
+			t.Errorf("create body leaked forbidden key %q: %v", forbidden, gotBody)
+		}
+	}
+}
+
+func TestCreateChatSessionOmitsEmptyOptions(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"id":"sess-2"}`)
+	}))
+	defer srv.Close()
+
+	if _, err := newChatClient(srv.URL).CreateChatSession("", "", ""); err != nil {
+		t.Fatalf("CreateChatSession: %v", err)
+	}
+	if len(gotBody) != 0 {
+		t.Errorf("empty options should be omitted, got body %v", gotBody)
+	}
+}
+
+func TestListChatSessions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/chat/sessions" {
+			t.Errorf("got %s %s, want GET /v1/chat/sessions", r.Method, r.URL.Path)
+		}
+		if got := r.URL.Query().Get("archived"); got != "true" {
+			t.Errorf("archived query = %q, want true", got)
+		}
+		_, _ = io.WriteString(w, `{"sessions":[{"id":"a","title":"First"},{"id":"b","title":"Second","archived":true}]}`)
+	}))
+	defer srv.Close()
+
+	got, err := newChatClient(srv.URL).ListChatSessions(true)
+	if err != nil {
+		t.Fatalf("ListChatSessions: %v", err)
+	}
+	if len(got) != 2 || got[0].ID != "a" || got[1].Title != "Second" {
+		t.Fatalf("list = %+v", got)
+	}
+}
+
+func TestListChatSessionsActiveFlag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("archived"); got != "false" {
+			t.Errorf("archived query = %q, want false", got)
+		}
+		_, _ = io.WriteString(w, `{"sessions":[]}`)
+	}))
+	defer srv.Close()
+
+	got, err := newChatClient(srv.URL).ListChatSessions(false)
+	if err != nil {
+		t.Fatalf("ListChatSessions: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("want empty list, got %+v", got)
+	}
+}
+
+func TestGetChatSessionPassesBlocksRaw(t *testing.T) {
+	// The assistant row's blocks JSON must reach the caller VERBATIM as raw
+	// JSON for pdrender.Decode (D8) — the client must not project or reshape it.
+	const blocks = `[{"type":"heading","level":2,"text":"Hi"},{"type":"paragraph","content":[{"type":"text","value":"body"}]}]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/chat/sessions/sess-1" {
+			t.Errorf("got %s %s, want GET /v1/chat/sessions/sess-1", r.Method, r.URL.Path)
+		}
+		if r.URL.RawQuery != "" {
+			t.Errorf("sinceSeq 0 must send no query, got %q", r.URL.RawQuery)
+		}
+		_, _ = io.WriteString(w, `{"id":"sess-1","draft":"wip","rail_snapshot":{"x":1},"mode":"plan","model_choice":"opus","effort_choice":"high","messages":[{"seq":1,"role":"user","content":"hey"},{"seq":2,"role":"assistant","source_markdown":"## Hi\n\nbody","blocks":`+blocks+`}]}`)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).GetChatSession("sess-1", 0)
+	if err != nil {
+		t.Fatalf("GetChatSession: %v", err)
+	}
+	// D14 continuity set present on the full GET.
+	if s.Draft != "wip" || s.Mode != "plan" || s.ModelChoice != "opus" || s.EffortChoice != "high" {
+		t.Errorf("continuity fields = %+v", s)
+	}
+	if string(s.RailSnapshot) == "" {
+		t.Errorf("rail_snapshot dropped")
+	}
+	if len(s.Messages) != 2 {
+		t.Fatalf("want 2 messages, got %d", len(s.Messages))
+	}
+	asst := s.Messages[1]
+	if asst.Role != "assistant" || asst.SourceMarkdown == "" {
+		t.Errorf("assistant row = %+v", asst)
+	}
+	// blocks survived as raw JSON that pdrender.Decode can consume: decode it
+	// back and confirm the first block type round-tripped untouched.
+	var decoded []map[string]interface{}
+	if err := json.Unmarshal(asst.Blocks, &decoded); err != nil {
+		t.Fatalf("blocks not valid raw JSON: %v", err)
+	}
+	if len(decoded) != 2 || decoded[0]["type"] != "heading" {
+		t.Errorf("blocks passthrough corrupted: %+v", decoded)
+	}
+}
+
+func TestGetChatSessionSinceTail(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("since"); got != "7" {
+			t.Errorf("since query = %q, want 7", got)
+		}
+		_, _ = io.WriteString(w, `{"id":"sess-1","messages":[{"seq":8,"role":"assistant"}]}`)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).GetChatSession("sess-1", 7)
+	if err != nil {
+		t.Fatalf("GetChatSession since: %v", err)
+	}
+	if len(s.Messages) != 1 || s.Messages[0].Seq != 8 {
+		t.Errorf("tail refetch = %+v", s.Messages)
+	}
+}
+
+func TestUpdateChatSession(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodPatch || r.URL.Path != "/v1/chat/sessions/sess-1" {
+			t.Errorf("got %s %s, want PATCH /v1/chat/sessions/sess-1", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	draft := "a new draft"
+	mode := "plan"
+	if err := newChatClient(srv.URL).UpdateChatSession("sess-1", ChatSessionPatch{Draft: &draft, Mode: &mode}); err != nil {
+		t.Fatalf("UpdateChatSession: %v", err)
+	}
+	if gotBody["draft"] != "a new draft" || gotBody["mode"] != "plan" {
+		t.Errorf("patch body = %v", gotBody)
+	}
+	// Unset pointer fields must be omitted, not sent as null.
+	if _, ok := gotBody["title"]; ok {
+		t.Errorf("nil title should be omitted, body = %v", gotBody)
+	}
+}
+
+func TestUpdateChatSessionClearsDraft(t *testing.T) {
+	// A pointer to "" must SEND draft:"" (clear), distinct from nil (untouched).
+	var gotBody map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	empty := ""
+	if err := newChatClient(srv.URL).UpdateChatSession("sess-1", ChatSessionPatch{Draft: &empty}); err != nil {
+		t.Fatalf("UpdateChatSession: %v", err)
+	}
+	raw, ok := gotBody["draft"]
+	if !ok || string(raw) != `""` {
+		t.Errorf("draft clear should send empty string, got %q ok=%v", string(raw), ok)
+	}
+}
+
+func TestSendChatMessage(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/sessions/sess-1/messages" {
+			t.Errorf("got %s %s, want POST .../messages", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"accepted":true}`)
+	}))
+	defer srv.Close()
+
+	if err := newChatClient(srv.URL).SendChatMessage("sess-1", "hello there"); err != nil {
+		t.Fatalf("SendChatMessage: %v", err)
+	}
+	if gotBody["content"] != "hello there" {
+		t.Errorf("send body = %v", gotBody)
+	}
+}
+
+func TestInterruptChat(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/sessions/sess-1/interrupt" {
+			t.Errorf("got %s %s, want POST .../interrupt", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"request_id":"req-9"}`)
+	}))
+	defer srv.Close()
+
+	reqID, err := newChatClient(srv.URL).InterruptChat("sess-1")
+	if err != nil {
+		t.Fatalf("InterruptChat: %v", err)
+	}
+	if reqID != "req-9" {
+		t.Errorf("request_id = %q, want req-9", reqID)
+	}
+}
+
+func TestInterruptChatEmptyAck(t *testing.T) {
+	// D11: the control ack is semantically empty — a no-turn Esc yields a benign
+	// body with no request_id and must NOT error.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = io.WriteString(w, `{"still_queued":[]}`)
+	}))
+	defer srv.Close()
+
+	reqID, err := newChatClient(srv.URL).InterruptChat("sess-1")
+	if err != nil {
+		t.Fatalf("InterruptChat empty ack must not error: %v", err)
+	}
+	if reqID != "" {
+		t.Errorf("want empty request_id, got %q", reqID)
+	}
+}
+
+func TestRespondChatApproval(t *testing.T) {
+	var gotBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wantBearer(t, r)
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/sessions/sess-1/approval" {
+			t.Errorf("got %s %s, want POST .../approval", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	if err := newChatClient(srv.URL).RespondChatApproval("sess-1", "req-3", "allow"); err != nil {
+		t.Fatalf("RespondChatApproval: %v", err)
+	}
+	if gotBody["request_id"] != "req-3" || gotBody["decision"] != "allow" {
+		t.Errorf("approval body = %v", gotBody)
+	}
+}
+
+func TestChatMethodErrorPropagates(t *testing.T) {
+	// A non-2xx must surface through humanAPIError, not be swallowed.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = io.WriteString(w, `{"error":{"code":"forbidden","message":"admin token required"}}`)
+	}))
+	defer srv.Close()
+
+	_, err := newChatClient(srv.URL).GetChatSession("sess-1", 0)
+	if err == nil {
+		t.Fatalf("expected error on 403")
+	}
+	if !strings.Contains(err.Error(), "admin token required") {
+		t.Errorf("error = %v, want human message", err)
+	}
+}
+
+// ChatEvents: full stream covering the replay phase (id=seq message frames), the
+// live phase (id-less chat deltas), the keepalive comment (ignored), and the
+// caller-owned cursor being sent on connect. onEvent stops the stream by
+// cancelling ctx after the live frame so no reconnect fires.
+func TestChatEventsReplayLiveKeepalive(t *testing.T) {
+	var seededCursor string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seededCursor = r.Header.Get("Last-Event-ID")
+		if r.URL.Path != "/v1/chat/sessions/sess-1/events" {
+			t.Errorf("path = %s, want events route", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+chatTestToken {
+			t.Errorf("events auth = %q", got)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		// Replay phase: persisted rows > Last-Event-ID, each with id:<seq>.
+		_, _ = io.WriteString(w, "id: 4\nevent: message\ndata: {\"seq\":4,\"role\":\"user\"}\n\n")
+		_, _ = io.WriteString(w, ": keepalive\n\n") // comment — ignored
+		// Live phase: raw claude stream-json delta, NO id.
+		_, _ = io.WriteString(w, "event: chat\ndata: {\"type\":\"text\",\"text\":\"streaming\"}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	var events []string
+	err := newChatClient(srv.URL).ChatEvents(ctx, "sess-1", "3", func(event, data string) error {
+		mu.Lock()
+		events = append(events, event+"|"+data)
+		n := len(events)
+		mu.Unlock()
+		if n == 2 {
+			cancel()
+		}
+		return nil
+	}, nil)
+	if err != nil {
+		t.Fatalf("ChatEvents: %v", err)
+	}
+	if seededCursor != "3" {
+		t.Errorf("caller-owned cursor not sent: Last-Event-ID = %q, want 3", seededCursor)
+	}
+	want := []string{`message|{"seq":4,"role":"user"}`, `chat|{"type":"text","text":"streaming"}`}
+	if len(events) != len(want) {
+		t.Fatalf("got %d events, want %d: %v", len(events), len(want), events)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Errorf("event[%d] = %q, want %q", i, events[i], want[i])
+		}
+	}
+}
+
+// PROTECTIVE: the first connection replays one row with id:5 then drops (EOF).
+// ChatEvents must reconnect carrying Last-Event-ID:5 — the cursor ADVANCED from
+// the caller's seed (3) by the replayed id, proving resume is by the last row
+// actually seen, and onReconnect must fire.
+func TestChatEventsReconnectAdvancesCursor(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		reqs         int
+		secondResume string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		reqs++
+		n := reqs
+		if n == 2 {
+			secondResume = r.Header.Get("Last-Event-ID")
+		}
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		if n == 1 {
+			_, _ = io.WriteString(w, "id: 5\nevent: message\ndata: {\"seq\":5}\n\n")
+			if fl != nil {
+				fl.Flush()
+			}
+			return // drop → triggers reconnect
+		}
+		// Second connection: one live frame, then hold until ctx cancel.
+		_, _ = io.WriteString(w, "event: chat\ndata: {\"type\":\"done\"}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := newChatClient(srv.URL)
+	c.listenBackoffFloor = time.Millisecond // fast reconnect for the test
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var reconnected int32
+	var mu2 sync.Mutex
+	var events []string
+	err := c.ChatEvents(ctx, "sess-1", "3", func(event, data string) error {
+		mu2.Lock()
+		events = append(events, event)
+		n := len(events)
+		mu2.Unlock()
+		if n == 2 { // first replay + second-conn live frame
+			cancel()
+		}
+		return nil
+	}, func() { reconnected++ })
+	if err != nil {
+		t.Fatalf("ChatEvents: %v", err)
+	}
+	if secondResume != "5" {
+		t.Errorf("reconnect Last-Event-ID = %q, want 5 (advanced from seed 3)", secondResume)
+	}
+	if reconnected == 0 {
+		t.Errorf("onReconnect never fired")
+	}
+}
+
+// The initial connect stays strict: a non-200 on the first attempt fails fast
+// rather than looping forever (bad creds must not retry).
+func TestChatEventsInitialErrorFailsFast(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":{"code":"unauthorized","message":"bad token"}}`)
+	}))
+	defer srv.Close()
+
+	c := newChatClient(srv.URL)
+	c.listenBackoffFloor = time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	err := c.ChatEvents(ctx, "sess-1", "", func(event, data string) error { return nil }, nil)
+	if err == nil {
+		t.Fatalf("expected error on 401 initial connect")
+	}
+	if !strings.Contains(err.Error(), "bad token") {
+		t.Errorf("error = %v, want human message", err)
+	}
+}
+
+// The terminal exit frame carries a PUBLIC {status, reason} only — the client
+// forwards it verbatim and never surfaces raw process-error vocabulary (C2).
+// This proves the exit frame flows through the shared parser and that the data
+// the client passes on holds status+reason, nothing stderr-shaped.
+func TestChatEventsPublicExit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		fl, _ := w.(http.Flusher)
+		// event:exit — public status + reason, nothing stderr-shaped.
+		_, _ = io.WriteString(w, "event: exit\ndata: {\"status\":\"completed\",\"reason\":\"aborted_streaming\"}\n\n")
+		if fl != nil {
+			fl.Flush()
+		}
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var gotEvent, gotData string
+	err := newChatClient(srv.URL).ChatEvents(ctx, "sess-1", "", func(event, data string) error {
+		gotEvent, gotData = event, data
+		cancel()
+		return nil
+	}, nil)
+	if err != nil {
+		t.Fatalf("ChatEvents: %v", err)
+	}
+	if gotEvent != "exit" {
+		t.Errorf("event = %q, want exit", gotEvent)
+	}
+	// The forwarded payload decodes to public {status, reason} and carries no
+	// stderr-shaped key.
+	var exit map[string]interface{}
+	if err := json.Unmarshal([]byte(gotData), &exit); err != nil {
+		t.Fatalf("exit data not valid JSON: %v", err)
+	}
+	if exit["status"] != "completed" || exit["reason"] != "aborted_streaming" {
+		t.Errorf("exit payload = %v, want public status+reason", exit)
+	}
+	if strings.Contains(gotData, "stderr") {
+		t.Errorf("exit frame must not carry stderr vocabulary, got %q", gotData)
+	}
+}
