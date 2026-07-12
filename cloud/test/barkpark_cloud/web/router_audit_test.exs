@@ -6,13 +6,19 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   successful mutation stamps exactly one correctly-shaped audit row, and a failed
   one stamps none. Driven via Plug.Test, mirroring RouterTest.
   """
-  use BarkparkCloud.DataCase, async: true
+  # async: false — the GitHub credential seams toggle the global
+  # `BarkparkCloud.GitHub` app env to simulate a configured App (same reason the
+  # dedicated GitHub router tests run non-async), so this module must not race a
+  # parallel test reading `GitHub.configured?/0`.
+  use BarkparkCloud.DataCase, async: false
   import Plug.Test
   import Plug.Conn
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.StubGateway
+  alias BarkparkCloud.GitHub
+  alias BarkparkCloud.GitHub.Fake
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient
@@ -72,6 +78,34 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
     bp
   end
+
+  defp site_fixture(team, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+    bp = barkpark_fixture(team, %{})
+
+    {:ok, site} =
+      Registry.create_site(bp, Enum.into(attrs, %{name: "Site #{n}", slug: "site-#{n}"}))
+
+    site
+  end
+
+  # Simulate a wired GitHub App (id + private key present) so `configured?/0` is
+  # true; the client stays the in-memory Fake, so validation costs nothing. The
+  # on_exit restores the base config (whole-module async: false makes this safe).
+  defp configure_github do
+    base = Application.get_env(:barkpark_cloud, GitHub, [])
+
+    Application.put_env(
+      :barkpark_cloud,
+      GitHub,
+      Keyword.merge(base, app_id: "test-app-id", private_key: "dummy-pem", app_slug: "bp-deploy")
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark_cloud, GitHub, base) end)
+  end
+
+  defp events(team, action),
+    do: team |> Accounts.list_audit_events() |> Enum.filter(&(&1.action == action))
 
   ## Request helpers
 
@@ -854,6 +888,334 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       # Exactly ONE row — the winner's; the refused attach stamped nothing.
       assert [ev] = find_events(team, "barkpark.domain_attached")
       assert ev.target_id == other.id
+    end
+  end
+
+  ## OC24 cluster A — credential / settings seams
+  ##
+  ## The secrets law is verified structurally, not just by shape: every credential
+  ## route asserts the plaintext material (token / secret / value) is absent from
+  ## the audit row's metadata.
+
+  describe "provider connect seam" do
+    test "POST /v1/providers writes provider.connected — kind+label only, NEVER the token" do
+      {user, team, token} = logged_in()
+
+      conn =
+        call(
+          :post,
+          "/v1/providers",
+          %{kind: "hetzner", token: "secret-hz-token", label: "main"},
+          token
+        )
+
+      assert conn.status == 201
+
+      assert [ev] = events(team, "provider.connected")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "provider"
+      assert ev.metadata["kind"] == "hetzner"
+      assert ev.metadata["label"] == "main"
+      # The plaintext credential never reaches the audit row.
+      refute Enum.any?(Map.values(ev.metadata), &(&1 == "secret-hz-token"))
+      refute Map.has_key?(ev.metadata, "token")
+      refute Map.has_key?(ev.metadata, "credential")
+    end
+  end
+
+  describe "github credential seams" do
+    test "POST /v1/github/installations writes github.installation_connected (login only)" do
+      configure_github()
+      {user, team, token} = logged_in()
+
+      conn = call(:post, "/v1/github/installations", %{installation_id: "4242"}, token)
+      assert conn.status == 201
+
+      assert [ev] = events(team, "github.installation_connected")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "github_installation"
+      assert is_binary(ev.metadata["account_login"])
+      # The installation handle is stored encrypted, never in the audit row.
+      refute Map.has_key?(ev.metadata, "installation_id")
+    end
+
+    test "DELETE /v1/github/installation writes github.installation_disconnected" do
+      configure_github()
+      {user, team, token} = logged_in()
+      {:ok, _} = GitHub.record_installation(team, "4242")
+
+      conn = call(:delete, "/v1/github/installation", nil, token)
+      assert conn.status == 200
+
+      assert [ev] = events(team, "github.installation_disconnected")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "github_installation"
+    end
+
+    test "a disconnect with NO installation 404s and writes NO row" do
+      configure_github()
+      {_user, team, token} = logged_in()
+
+      conn = call(:delete, "/v1/github/installation", nil, token)
+      assert conn.status == 404
+      assert events(team, "github.installation_disconnected") == []
+    end
+
+    test "POST /v1/github/repos writes github.repo_pushed (repo + template + count)" do
+      configure_github()
+      {user, team, token} = logged_in()
+      {:ok, _} = GitHub.record_installation(team, "4242")
+      Fake.reset()
+
+      conn =
+        call(
+          :post,
+          "/v1/github/repos",
+          %{template: "blog-starter", name: "my-blog", private: true},
+          token
+        )
+
+      assert conn.status == 201
+
+      assert [ev] = events(team, "github.repo_pushed")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "github_repo"
+      assert ev.metadata["repo_full_name"] == "octo-4242/my-blog"
+      assert ev.metadata["template"] == "blog-starter"
+      assert ev.metadata["pushed"] > 0
+    end
+  end
+
+  describe "env-var seams" do
+    test "POST /v1/env-vars writes env_var.created — key name only, NEVER the value" do
+      {user, team, token} = logged_in()
+
+      conn =
+        call(:post, "/v1/env-vars", %{key: "API_TOKEN", value: "super-secret", scope: "team"}, token)
+
+      assert conn.status == 201
+
+      assert [ev] = events(team, "env_var.created")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "env_var"
+      assert ev.metadata["key"] == "API_TOKEN"
+      # The plaintext value never reaches the audit row.
+      refute Enum.any?(Map.values(ev.metadata), &(&1 == "super-secret"))
+      refute Map.has_key?(ev.metadata, "value")
+    end
+
+    test "DELETE /v1/env-vars/:id writes env_var.deleted" do
+      {_user, team, token} = logged_in()
+      {:ok, ev} = Registry.put_env_var(team, %{key: "DELME", value: "v", scope: "team"})
+
+      conn = call(:delete, "/v1/env-vars/#{ev.id}", nil, token)
+      assert conn.status == 200
+
+      assert [audit] = events(team, "env_var.deleted")
+      assert audit.metadata["key"] == "DELME"
+    end
+
+    # Transactional no-row proof for the credential/settings family: the audit
+    # rides put_env_var's transaction, so a write-once rejection rolls the audit
+    # row back too — exactly one env_var.created event survives both POSTs.
+    test "a write-once conflict 409s and writes NO second row" do
+      {_user, team, token} = logged_in()
+
+      assert call(:post, "/v1/env-vars", %{key: "ONCE", value: "v1", is_shown_once: true}, token).status ==
+               201
+
+      dup = call(:post, "/v1/env-vars", %{key: "ONCE", value: "v2"}, token)
+      assert dup.status == 409
+      assert length(events(team, "env_var.created")) == 1
+    end
+  end
+
+  describe "notifications settings seams" do
+    test "PUT /v1/notifications/settings writes notifications.settings_changed (field NAMES, no secret)" do
+      {user, team, token} = logged_in()
+
+      conn =
+        call(
+          :put,
+          "/v1/notifications/settings",
+          %{"alerts_enabled" => true, "smtp_password" => "hunter2"},
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "notifications.settings_changed")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "notification_settings"
+      # The submitted field NAMES are recorded; the secret VALUE is not.
+      assert "smtp_password" in ev.metadata["fields"]
+      refute Enum.any?(List.flatten(Map.values(ev.metadata)), &(&1 == "hunter2"))
+    end
+
+    test "PUT /v1/notifications/channels writes notifications.channels_changed (type only, no creds)" do
+      {_user, team, token} = logged_in()
+
+      conn =
+        call(
+          :put,
+          "/v1/notifications/channels",
+          %{
+            "type" => "slack",
+            "enabled" => true,
+            "credentials" => %{"url" => "https://hooks.slack.com/services/secret-hook"}
+          },
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "notifications.channels_changed")
+      assert ev.metadata["type"] == "slack"
+      assert ev.metadata["enabled"] == true
+      # The channel credentials (chat webhook URL) never reach the audit row.
+      refute Map.has_key?(ev.metadata, "credentials")
+      refute Enum.any?(Map.values(ev.metadata), &(&1 == "https://hooks.slack.com/services/secret-hook"))
+    end
+
+    test "PUT /v1/notifications/events writes notifications.events_changed" do
+      {_user, team, token} = logged_in()
+
+      conn =
+        call(
+          :put,
+          "/v1/notifications/events",
+          %{"event" => "provision_succeeded", "channels" => ["slack"]},
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "notifications.events_changed")
+      assert ev.metadata["event"] == "provision_succeeded"
+      assert ev.metadata["channels"] == ["slack"]
+    end
+  end
+
+  ## OC24 cluster B — Sites consistency (create + promote already audit)
+
+  describe "site sibling seams" do
+    test "POST /v1/sites/:id/deploy writes site.deploy_requested for a freshly minted row" do
+      {user, team, token} = logged_in()
+      site = site_fixture(team)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/deploy",
+          %{git_ref: "abc123", artifact_url: "file:///tmp/app.tgz"},
+          token
+        )
+
+      assert conn.status == 201
+
+      assert [ev] = events(team, "site.deploy_requested")
+      assert ev.actor_user_id == user.id
+      assert ev.target_type == "deployment"
+      assert ev.metadata["site_id"] == site.id
+      assert ev.metadata["git_ref"] == "abc123"
+      assert ev.metadata["has_artifact"] == true
+    end
+
+    test "POST /v1/sites/:id/artifact writes site.artifact_uploaded (filename + bytes)" do
+      {user, team, token} = logged_in()
+      site = site_fixture(team)
+
+      conn =
+        conn(:post, "/v1/sites/#{site.id}/artifact", "tarball-bytes")
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put_req_header("authorization", "Bearer #{token}")
+        |> Router.call(@opts)
+
+      assert conn.status == 201
+
+      assert [ev] = events(team, "site.artifact_uploaded")
+      assert ev.actor_user_id == user.id
+      assert ev.metadata["bytes"] > 0
+      assert is_binary(ev.metadata["filename"])
+    end
+
+    test "POST /v1/sites/:id/env writes site.env_changed — key names only, NEVER the values" do
+      {user, team, token} = logged_in()
+      site = site_fixture(team)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/env",
+          %{env: %{"DB_URL" => "postgres://secret", "API_KEY" => "sk-live"}},
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "site.env_changed")
+      assert ev.actor_user_id == user.id
+      assert Enum.sort(ev.metadata["keys"]) == ["API_KEY", "DB_URL"]
+      refute Enum.any?(List.flatten(Map.values(ev.metadata)), &(&1 == "sk-live"))
+    end
+
+    test "POST /v1/sites/:id/domains writes site.domain_added" do
+      {_user, team, token} = logged_in()
+      site = site_fixture(team)
+
+      conn = call(:post, "/v1/sites/#{site.id}/domains", %{domain: "shop.example.com"}, token)
+      assert conn.status == 200
+
+      assert [ev] = events(team, "site.domain_added")
+      assert ev.metadata["domain"] == "shop.example.com"
+    end
+
+    # Transactional no-row proof for the Sites family: a cross-site domain
+    # collision rolls the audit row back with the changeset.
+    test "a domain collision 409s and writes NO site.domain_added row" do
+      {_user, team, token} = logged_in()
+      site_a = site_fixture(team)
+      site_b = site_fixture(team)
+      {:ok, _} = Registry.add_site_domain(site_a, "taken.example.com")
+
+      conn = call(:post, "/v1/sites/#{site_b.id}/domains", %{domain: "taken.example.com"}, token)
+      assert conn.status == 409
+      assert events(team, "site.domain_added") == []
+    end
+
+    test "POST /v1/sites/:id/github writes site.github_connected — repo/branch, NEVER the secret" do
+      {user, team, token} = logged_in()
+      site = site_fixture(team)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites/#{site.id}/github",
+          %{repo: "octo/app", branch: "main", webhook_secret: "whsec-plaintext"},
+          token
+        )
+
+      assert conn.status == 200
+
+      assert [ev] = events(team, "site.github_connected")
+      assert ev.actor_user_id == user.id
+      assert ev.metadata["repo"] == "octo/app"
+      assert ev.metadata["branch"] == "main"
+      # The webhook secret never reaches the audit row.
+      refute Enum.any?(Map.values(ev.metadata), &(&1 == "whsec-plaintext"))
+      refute Map.has_key?(ev.metadata, "webhook_secret")
+    end
+
+    test "DELETE /v1/sites/:id/github writes site.github_disconnected" do
+      {_user, team, token} = logged_in()
+      site = site_fixture(team)
+      {:ok, _} = Registry.set_site_github(site, "octo/app", "main", "whsec")
+
+      conn = call(:delete, "/v1/sites/#{site.id}/github", nil, token)
+      assert conn.status == 200
+
+      assert [ev] = events(team, "site.github_disconnected")
+      assert ev.metadata["repo"] == "octo/app"
     end
   end
 end

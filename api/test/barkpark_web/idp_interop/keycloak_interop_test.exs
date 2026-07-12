@@ -4,7 +4,8 @@ defmodule BarkparkWeb.KeycloakInteropTest do
   OIDC relying-party and SAML SP through full handshakes against a REAL
   Keycloak (an independent IdP implementation), simulating the browser with an
   HTTP client. Proves interop beyond the in-repo mocks with zero external
-  accounts.
+  accounts — including that login lands a GOVERNED session (org-require-MFA
+  refusal at mint, org session-policy expiry; era-w10).
 
   Opt-in: excluded from the default suite (`@moduletag :idp_interop`). Run via
 
@@ -20,7 +21,8 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
   @moduletag :idp_interop
 
-  alias Barkpark.Tenancy
+  alias Barkpark.{Accounts, Audit, Repo, Tenancy}
+  alias Barkpark.Accounts.UserSession
   alias Barkpark.Sso.{Oidc, Saml}
 
   @kc "http://localhost:8081"
@@ -192,7 +194,10 @@ defmodule BarkparkWeb.KeycloakInteropTest do
     # 2. CONTROL — the IdP session is alive: a fresh AuthnRequest with the same
     #    cookies comes straight back with a SAMLResponse (no login form).
     start2 = build_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
-    {:ok, sso} = Req.get(start2, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+
+    {:ok, sso} =
+      Req.get(start2, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+
     assert sso.status == 200 and sso.body =~ "SAMLResponse"
 
     # 3. Barkpark logout hands back the SP-initiated LogoutRequest URL.
@@ -206,17 +211,130 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
     # 4. The "browser" carries it to Keycloak: the IdP session dies and the
     #    LogoutResponse form (bound for our /slo endpoint) comes back.
-    {:ok, slo} = Req.get(logout["slo_url"], headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+    {:ok, slo} =
+      Req.get(logout["slo_url"],
+        headers: [{"cookie", jar_header(jar)}],
+        redirect: false,
+        retry: false
+      )
+
     jar = jar_merge(jar, slo)
     assert slo.status == 200 and slo.body =~ "SAMLResponse"
 
     # 5. PROOF — the same cookies no longer SSO: a fresh AuthnRequest now shows
     #    the login form instead of an instant SAMLResponse.
     start3 = build_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
-    {:ok, after_slo} = Req.get(start3, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+
+    {:ok, after_slo} =
+      Req.get(start3, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+
     assert after_slo.status == 200
     refute after_slo.body =~ ~r/name="SAMLResponse"/
     assert after_slo.body =~ "password"
+  end
+
+  # ── governed sessions (era-w10) ──────────────────────────────────────────────
+  #
+  # The handshake tests above all run against an UNGOVERNED org. These prove
+  # that login lands a GOVERNED session: the same live-IdP flows refuse to
+  # mint for a factor-less user under org-require-MFA, and a live-minted
+  # token dies under the org session policy.
+
+  test "OIDC governed: org-require-MFA refuses a factor-less user at the live callback (era-w10)",
+       %{conn: conn, org: org} do
+    govern_with_workspace!(org, "kc-gov-oidc-ws")
+    {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+    create_oidc_connection(org)
+
+    start = get(conn, "/v1/auth/oidc/#{@slug}/start")
+    {code, state} = kc_oidc_login(redirected_to(start, 302))
+
+    cb =
+      start
+      |> recycle()
+      |> get("/v1/auth/oidc/#{@slug}/callback", %{"code" => code, "state" => state})
+
+    # The interop client sends no text/html Accept header, so this is the
+    # JSON contract of SessionIssuer.deny_org_mfa_enrolment/4.
+    body = json_response(cb, 403)
+    assert body["error"]["code"] == "mfa_enrolment_required"
+    refute body["token"]
+
+    # Fail closed: JIT provisioned the account, but NO session was minted.
+    user = Accounts.get_user_by_email(@email)
+    assert user
+    refute Repo.exists?(from s in UserSession, where: s.user_id == ^user.id)
+
+    # The block is on the tamper-evident audit trail.
+    assert Repo.exists?(
+             from e in Audit.Event,
+               where:
+                 e.category == "auth" and e.action == "mfa_enrolment_required" and
+                   e.subject == ^user.id
+           )
+  end
+
+  test "SAML governed: org-require-MFA refuses a factor-less user at the live ACS (era-w10)",
+       %{conn: conn, org: org} do
+    govern_with_workspace!(org, "kc-gov-saml-ws")
+    {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+    create_saml_connection(org)
+
+    start = get(conn, "/v1/auth/saml/#{@slug}/start")
+    saml_response = kc_saml_login(redirected_to(start, 302))
+
+    acs =
+      start
+      |> recycle()
+      |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => saml_response})
+
+    body = json_response(acs, 403)
+    assert body["error"]["code"] == "mfa_enrolment_required"
+    refute body["token"]
+
+    # Fail closed: JIT ran, no session; the block is audited.
+    user = Accounts.get_user_by_email(@email)
+    assert user
+    refute Repo.exists?(from s in UserSession, where: s.user_id == ^user.id)
+
+    assert Repo.exists?(
+             from e in Audit.Event,
+               where:
+                 e.category == "auth" and e.action == "mfa_enrolment_required" and
+                   e.subject == ^user.id
+           )
+  end
+
+  test "OIDC governed: a live-minted session EXPIRES under the org absolute-lifetime policy (era-w10)",
+       %{conn: conn, org: org} do
+    govern_with_workspace!(org, "kc-gov-policy-ws")
+    create_oidc_connection(org)
+
+    start = get(conn, "/v1/auth/oidc/#{@slug}/start")
+    {code, state} = kc_oidc_login(redirected_to(start, 302))
+
+    token =
+      start
+      |> recycle()
+      |> get("/v1/auth/oidc/#{@slug}/callback", %{"code" => code, "state" => state})
+      |> json_response(201)
+      |> Map.fetch!("token")
+
+    # Live before the policy bites…
+    assert Accounts.verify_user_session_token(token)
+
+    {:ok, _} =
+      Tenancy.set_organization_session_policy(org.id, %{absolute_lifetime_seconds: 3600})
+
+    # …then backdate its birth past the lifetime (org_session_policy_test idiom).
+    hash = UserSession.hash_token(token)
+
+    {1, _} =
+      from(t in UserSession, where: t.token_hash == ^hash)
+      |> Repo.update_all(set: [inserted_at: DateTime.add(DateTime.utc_now(), -7200, :second)])
+
+    # Fail closed: the governed token is now dead.
+    refute Accounts.verify_user_session_token(token)
   end
 
   # ── browser simulation ───────────────────────────────────────────────────────
@@ -294,6 +412,33 @@ defmodule BarkparkWeb.KeycloakInteropTest do
   defp jar_header(jar), do: Enum.map_join(jar, "; ", fn {k, v} -> "#{k}=#{v}" end)
 
   defp header!(resp, name), do: resp.headers |> Map.fetch!(name) |> hd()
+
+  # THE LAW (charter D27): governance binds through org → workspace →
+  # membership. Assign a workspace to the org BEFORE driving the login, or
+  # JIT never creates a membership, the user is never governed, and a
+  # refusal test silently proves nothing (false green).
+  defp govern_with_workspace!(org, slug) do
+    {:ok, ws} = Tenancy.create_workspace(%{slug: slug, name: slug})
+    {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+    ws
+  end
+
+  # The org's OIDC connection against the live realm — same shape the
+  # handshake test wires inline.
+  defp create_oidc_connection(org) do
+    {:ok, c} =
+      Oidc.create_connection(%{
+        organization_id: org.id,
+        issuer: @realm_url,
+        client_id: "barkpark-oidc",
+        client_secret: "interop-secret",
+        authorization_endpoint: "#{@realm_url}/protocol/openid-connect/auth",
+        token_endpoint: "#{@realm_url}/protocol/openid-connect/token",
+        jwks_uri: "#{@realm_url}/protocol/openid-connect/certs"
+      })
+
+    c
+  end
 
   # The org's SAML connection, trust-anchored on Keycloak's own published
   # descriptor cert — nothing hardcoded, exactly how a real operator pastes

@@ -299,6 +299,39 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
           </li>
         </ul>
       </.bp_card>
+
+      <.bp_card aria-labelledby="trust-heading">
+        <.bp_section_header id="trust-heading" title="Trust and legal">
+          The security, compliance, and legal documents behind this deployment — each one click away.
+        </.bp_section_header>
+        <ul data-trust-panel class="org-admin-trust" style="list-style: none; margin: 0; padding: 0; display: grid; gap: 8px;">
+          <li>
+            <a href="/papers/soc2-controls-mapping" data-trust-link="soc2">
+              SOC 2 controls mapping
+            </a>
+          </li>
+          <li>
+            <a href="/papers/vulnerability-disclosure-policy" data-trust-link="vdp">
+              Vulnerability disclosure policy
+            </a>
+          </li>
+          <li>
+            <a href="/papers/dpa-template" data-trust-link="dpa">
+              Data Processing Agreement (DPA) template
+            </a>
+          </li>
+          <li>
+            <a href="/papers/support-tiers" data-trust-link="support">
+              Support tiers and SLA targets
+            </a>
+          </li>
+          <li>
+            <a href="/status" data-trust-link="status">
+              Service status page
+            </a>
+          </li>
+        </ul>
+      </.bp_card>
     </div>
     """
   end
