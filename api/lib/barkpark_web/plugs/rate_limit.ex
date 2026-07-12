@@ -75,14 +75,20 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp bucket_key(conn, class, dataset) do
     scope = dataset || "global"
 
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> raw] ->
-        token_id = Barkpark.Auth.ApiToken.hash_token(raw)
-        "token:#{token_id}:#{class}:#{scope}"
+    key =
+      case get_req_header(conn, "authorization") do
+        ["Bearer " <> raw] ->
+          token_id = Barkpark.Auth.ApiToken.hash_token(raw)
+          "token:#{token_id}:#{class}:#{scope}"
 
-      _ ->
-        ip = conn.remote_ip |> :inet.ntoa() |> to_string()
-        "ip:#{ip}:#{class}:#{scope}"
+        _ ->
+          ip = conn.remote_ip |> :inet.ntoa() |> to_string()
+          "ip:#{ip}:#{class}:#{scope}"
+      end
+
+    case conn.private[:barkpark_rate_limit_scope] do
+      test_scope when is_binary(test_scope) -> key <> ":test:" <> test_scope
+      _ -> key
     end
   end
 

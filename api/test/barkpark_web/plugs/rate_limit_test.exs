@@ -4,6 +4,7 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
   alias BarkparkWeb.Plugs.RateLimit
 
   setup do
+    :ets.delete_all_objects(:barkpark_rate_limiter)
     original = Application.get_env(:barkpark, :rate_limits)
     on_exit(fn -> Application.put_env(:barkpark, :rate_limits, original) end)
     :ok
@@ -122,5 +123,31 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
     assert RateLimit.call(conn_a, RateLimit.init([])).halted == false
     assert RateLimit.call(conn_a, RateLimit.init([])).halted == true
     assert RateLimit.call(conn_b, RateLimit.init([])).halted == false
+  end
+
+  test "ConnCase private scopes isolate otherwise identical token buckets" do
+    with_limits(read_per_minute: 1, write_per_minute: 1)
+
+    conn_a =
+      build(:get, "/v1/data/query/production/post", %{"dataset" => "production"}, [
+        {"authorization", "Bearer scoped-token"}
+      ])
+      |> put_private(:barkpark_rate_limit_scope, "test-a")
+
+    conn_b =
+      build(:get, "/v1/data/query/production/post", %{"dataset" => "production"}, [
+        {"authorization", "Bearer scoped-token"}
+      ])
+      |> put_private(:barkpark_rate_limit_scope, "test-b")
+
+    refute RateLimit.call(conn_a, RateLimit.init([])).halted
+    assert RateLimit.call(conn_a, RateLimit.init([])).halted
+
+    refute RateLimit.call(conn_b, RateLimit.init([])).halted
+    assert RateLimit.call(conn_b, RateLimit.init([])).halted
+  end
+
+  test "ConnCase assigns a server-owned limiter scope", %{conn: conn} do
+    assert is_binary(conn.private[:barkpark_rate_limit_scope])
   end
 end

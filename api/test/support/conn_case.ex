@@ -54,7 +54,14 @@ defmodule BarkparkWeb.ConnCase do
     # leaked load-order list from a sibling test can't hide plugins from the
     # collectors this test exercises. See `Barkpark.DataCase.reset_plugins_env/0`.
     Barkpark.DataCase.reset_plugins_env()
-    :ets.delete_all_objects(:barkpark_rate_limiter)
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.put_private(
+        :barkpark_rate_limit_scope,
+        Integer.to_string(System.unique_integer([:positive, :monotonic]))
+      )
+
+    {:ok, conn: conn}
   end
 end
