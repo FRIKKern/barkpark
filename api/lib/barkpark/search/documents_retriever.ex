@@ -289,6 +289,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join(" ")
 
+    # Lowercased query tokens for the weighted-tag boost arm below — a tag's
+    # NAME must equal a query term for its strength to move rank (topic-aware
+    # by construction; a high-strength tag on an unrelated topic buys nothing).
+    tag_terms =
+      positive_query
+      |> String.downcase()
+      |> String.split()
+
     if positive_query == "" do
       # Browse path (empty query) — recency, then the id PK so the order is TOTAL.
       # updated_at is not unique; without the tiebreaker LIMIT/OFFSET paging over
@@ -301,14 +309,29 @@ defmodule Barkpark.Search.DocumentsRetriever do
         desc:
           fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query),
         # 2) Relevance over the whole query: best of full-text rank and title
-        #    trigram similarity.
+        #    trigram similarity, PLUS the weighted-tag boost (authoring
+        #    excellence D8/D21): + w·max(strength)/100 over the doc's weighted
+        #    tags whose name matches a query term. ADDITIVE with small w=0.1,
+        #    never a bare GREATEST arm — a normalized strength (0.2–0.95)
+        #    would dwarf typical ts_rank (~0.05) and erase textual relevance.
+        #    Reducer is MAX among matching tags (sum is tag-count-gameable;
+        #    the main tag alone is topic-agnostic). Shape guards make legacy
+        #    content contribute 0 without erroring: non-array `tags` →
+        #    '[]'::jsonb, flat string elements fail jsonb_typeof(e)='object',
+        #    and a non-integer strength fails the digits guard instead of
+        #    blowing up the ::int cast mid-query. Untagged docs get +0, and
+        #    the pool is where_match-gated, so non-matching docs never enter.
+        #    Perf: subplan ~0.032ms/row over the 500-row bounded pool.
         desc:
           fragment(
-            "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?))",
+            "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?)) + 0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
             d,
             ^positive_query,
             d.title,
-            ^positive_query
+            ^positive_query,
+            d.content,
+            d.content,
+            type(^tag_terms, {:array, :string})
           ),
         # 3) Recency tiebreak.
         desc: d.updated_at,
