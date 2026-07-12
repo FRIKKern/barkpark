@@ -48,6 +48,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
   @default_interrupt_timeout_ms 8_000
 
+  # The park's spinner vocabulary — this chat's own answer to Claude Code's
+  # "Pondering…". Barkpark is a happy place, so the busy rows speak dog-park:
+  # the thinking pulse rolls one word per bout (blank_pulse/0), the
+  # between-tools busy row one per turn (roll_spinner_word/1). Only
+  # ":interrupting → stopping…" stays literal — a Stop must always read as a
+  # Stop.
+  @spinner_words [
+    "Joymaxxing",
+    "Waggeling",
+    "Sniffing around",
+    "Aurafarming",
+    "Barkstorming",
+    "Pawndering",
+    "Doing zoomies",
+    "Chasing squirrels",
+    "Fetchmaxxing",
+    "Gnawing on it",
+    "Digging up bones",
+    "Borking softly",
+    "Treatseeking",
+    "Goodboying",
+    "Herding pixels",
+    "Vibesniffing",
+    "Snoot-booping",
+    "Frolicmaxxing",
+    "Squirrel-checking",
+    "Basking in sunbeams",
+    "Howling at the moon",
+    "Bellyrub pending",
+    "Rolling in the grass",
+    "Wagmaxxing"
+  ]
+
+  # Public so the tests (and any future surface that wants the same voice) can
+  # assert against the one canonical list instead of pinning a word.
+  @doc false
+  def spinner_words, do: @spinner_words
+
   # Per-socket transcript window (efficiency; task-9e21c3f285b3d7d0). A long
   # multi-hundred-turn agent session appends user/assistant/tool rows for its
   # whole life; without a bound `@messages` grows the socket heap O(n) and the
@@ -169,11 +207,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
          todo_card_id: nil,
          streaming: nil,
          # The live extended-thinking pulse (charter D41): nil, or
-         # %{tokens: N, text: ""}. Driven by `system/thinking_tokens` frames — the
-         # wire never carries thinking text, so the row shows a "✻ thinking… ~N
-         # tokens" counter that settles into a durable `:thinking` message the
-         # instant real output (text/tool/result) begins.
+         # %{tokens: N, text: "", word: w}. Driven by `system/thinking_tokens`
+         # frames — the wire never carries thinking text, so the row shows a
+         # "✻ <spinner word>… ~N tokens" counter that settles into a durable
+         # `:thinking` message the instant real output (text/tool/result) begins.
          thinking_pulse: nil,
+         # The turn's spinner word (the park voice): rolled fresh on every send,
+         # worn by the between-tools busy row. The pulse rolls its own per bout.
+         spinner_word: Enum.random(@spinner_words),
          # Advertised slash commands (charter D36a) — the CLI's initialize list,
          # held by the Recorder and delivered on subscribe + broadcast. The
          # composer's slash menu merges these with the builtin floor.
@@ -398,6 +439,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               else
                 socket
                 |> start_turn_clock()
+                |> roll_spinner_word()
                 |> assign(status: :thinking, interrupt_requested: false, composer_draft: "")
               end
 
@@ -2400,7 +2442,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span :if={@thinking_pulse.text in [nil, ""]}>
-              thinking… ~<%= @thinking_pulse.tokens %> tokens
+              <%= @thinking_pulse.word %>… ~<%= @thinking_pulse.tokens %> tokens
             </span>
             <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;" data-gutter-text>{@thinking_pulse.text}</span>
           </div>
@@ -2434,7 +2476,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span>
-              <%= if @status == :interrupting, do: "stopping…", else: "working…" %>
+              <%= if @status == :interrupting, do: "stopping…", else: "#{@spinner_word}…" %>
               <%= if @turn_elapsed_s > 0 do %>
                 <span style="opacity: 0.8;"><%= @turn_elapsed_s %>s</span>
               <% end %>
@@ -3847,6 +3889,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # chat-owned dir keyed by the session id, and carry the bytes forward (for the
   # base64 wire block + the live bubble data-URI). A store/read failure drops that
   # one image honestly (logged) rather than failing the whole turn.
+  #
+  # Sobelow Traversal.FileModule (File.read/1) is a false-positive: `tmp_path`
+  # is the temp file LiveView's upload machinery created and hands to the
+  # `consume_uploaded_entries/3` callback — never a client-supplied name. The
+  # client controls the file BYTES and `entry.client_type`, not this path.
+  # (Was baseline-skipped in .sobelow-skips; the fingerprint is line-anchored,
+  # so edits above this function broke it — the inline skip is durable.)
+  # sobelow_skip ["Traversal.FileModule"]
   defp consume_attachments(socket) do
     store_id = socket.assigns.store_session_id
 
@@ -4177,7 +4227,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp blank_pulse, do: %{tokens: 0, text: ""}
+  defp blank_pulse, do: %{tokens: 0, text: "", word: Enum.random(@spinner_words)}
+
+  # Roll the turn-level word (worn by the between-tools busy row). Called at
+  # every FRESH send — a queued send rides the running turn and keeps its word.
+  defp roll_spinner_word(socket), do: assign(socket, spinner_word: Enum.random(@spinner_words))
 
   defp thinking_label(n), do: "thought for ~#{n} tokens"
 

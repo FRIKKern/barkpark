@@ -720,7 +720,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, {:claude_chat_event, thinking_tokens(64)})
       send(view.pid, {:claude_chat_event, thinking_tokens(210)})
       html = render(view)
-      assert html =~ "thinking…"
+      assert spinner_word_shown?(html)
       # the cumulative high-water mark, not a per-frame count
       assert html =~ "~210 tokens"
     end
@@ -728,12 +728,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "the pulse settles into a durable 'thought for ~N tokens' line when prose begins",
          %{view: view} do
       send(view.pid, {:claude_chat_event, thinking_tokens(128)})
-      assert render(view) =~ "thinking…"
+      assert spinner_word_shown?(render(view))
 
       # the first text delta is the moment thinking gives way to prose
       send(view.pid, {:claude_chat_event, stream_delta("Here")})
       html = render(view)
-      refute html =~ "thinking…"
+      refute spinner_word_shown?(html)
       assert html =~ "thought for ~128 tokens"
     end
 
@@ -764,7 +764,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a bout that never counted leaves no pulse and no durable row", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("no prior thought")})
       html = render(view)
-      refute html =~ "thinking…"
+      refute spinner_word_shown?(html)
       refute html =~ "thought for"
     end
 
@@ -3161,7 +3161,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "the turn clock ticks while working and the spinner shows", %{view: view} do
       html = render(view)
       assert html =~ "bp-chat-spinner"
-      assert html =~ "working…"
+      assert spinner_word_shown?(html)
 
       send(view.pid, :turn_tick)
       send(view.pid, :turn_tick)
@@ -5879,5 +5879,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   # `estimated_tokens`, no thinking text ever.
   defp thinking_tokens(n) do
     %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}
+  end
+
+  # The busy/pulse rows wear a random park word (the chat's spinner
+  # personality) — assert against the canonical list, never a pinned word.
+  defp spinner_word_shown?(html) do
+    Enum.any?(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
   end
 end
