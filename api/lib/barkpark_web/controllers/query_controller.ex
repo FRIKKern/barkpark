@@ -318,7 +318,7 @@ defmodule BarkparkWeb.QueryController do
   # The documented public filter operators (api-v1.md §4). An op outside this set
   # has no `apply_field_op/4` clause, so it must be rejected up front — otherwise
   # it hits the catch-all and the filter is silently a no-op (returns every row).
-  @valid_filter_ops ~w(eq neq in nin has contains startsWith endsWith gt gte lt lte is)
+  @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is)
 
   # Range/comparison ops take a SCALAR bound param. Array-bracket syntax
   # (`?filter[price][gt][]=1`) delivers a LIST, which `parse_number/1` can't read
@@ -344,6 +344,15 @@ defmodule BarkparkWeb.QueryController do
 
           Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
             {field, "is"}
+
+          # `hasStrong` needs its VALUE checked with the same grammar the SQL
+          # arm parses (`<tag>:<min_strength>`, split at the LAST colon): a
+          # malformed value hits the op's :error arm and would silently no-op
+          # — the same fail-open the `is` guard above prevents. One parser,
+          # two callers (`Content.Query.parse_has_strong/1`).
+          Map.has_key?(ops, "hasStrong") and
+              Content.Query.parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
+            {field, "hasStrong"}
 
           op = Enum.find(@scalar_value_ops, fn op -> non_scalar_op_value?(ops, op) end) ->
             {field, op}

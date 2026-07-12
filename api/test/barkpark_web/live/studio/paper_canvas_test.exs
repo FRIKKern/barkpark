@@ -43,8 +43,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   # used to prove they RIDE a run. `native_field/1` produces a field-string. `section/1`
   # produces the now-canvas-eligible container (with a nested child body).
   defp boundary(id), do: %{"id" => id, "type" => "composite", "fields" => [], "value" => %{}}
+
   defp section(id),
     do: %{"id" => id, "type" => "section", "title" => "S", "blocks" => [para(id <> "-c")]}
+
   defp boundary2(id), do: %{"id" => id, "type" => "arrayOf", "of" => %{}, "value" => []}
   defp picker(id), do: %{"id" => id, "type" => "field-image", "value" => ""}
   defp picker_ref(id), do: %{"id" => id, "type" => "field-reference", "value" => ""}
@@ -61,7 +63,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   # (bpAction) — a LEAF (href/label/priority) edited by native controls, so it no
   # longer splits a run.
   defp action(id),
-    do: %{"id" => id, "type" => "action", "href" => "https://x.test", "label" => "Go", "priority" => "primary"}
+    do: %{
+      "id" => id,
+      "type" => "action",
+      "href" => "https://x.test",
+      "label" => "Go",
+      "priority" => "primary"
+    }
 
   # Extract + normalize a CSS selector's declaration body: the text between its `{` and
   # the next `}`, split on `;`, trimmed, empties dropped, re-joined "; ". Whitespace /
@@ -440,6 +448,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # The ONLY remaining run boundaries are the deep nested-structure fields
       # (composite / arrayOf / codelist / localizedText).
       sec = %{"id" => "b", "type" => "section", "title" => "S", "blocks" => [para("b-c")]}
+
       assert PaperCanvas.partition_runs([para("p1"), sec, para("p2")]) ==
                [{:run, [para("p1"), sec, para("p2")]}],
              "expected section to ride the run (canvas-eligible container)"
@@ -1188,6 +1197,24 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.paper_labels(paper) == ["design", "obsidian"]
       assert PaperCanvas.paper_labels(%{content: %{}}) == []
       assert PaperCanvas.paper_labels(nil) == []
+    end
+
+    test "weighted tags render as their NAMES — the Labels sidebar is never blank for post-wall papers (D18)" do
+      weighted = %{
+        content: Barkpark.LabelFixtures.named_weighted_labels(["design-w", "obsidian-w"])
+      }
+
+      assert PaperCanvas.paper_labels(weighted) == ["design-w", "obsidian-w"]
+    end
+
+    test "mixed shapes coexist: flat strings + weighted entries; junk maps and blanks dropped" do
+      [weighted_entry] = Barkpark.LabelFixtures.named_weighted_labels(["weighted-tag"])["tags"]
+
+      paper = %{
+        content: %{"tags" => ["flat-tag", weighted_entry, %{"nota" => "tag"}, "", 42]}
+      }
+
+      assert PaperCanvas.paper_labels(paper) == ["flat-tag", "weighted-tag"]
     end
 
     test "relations are field-reference blocks with a non-blank value" do

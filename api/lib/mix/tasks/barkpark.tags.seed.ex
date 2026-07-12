@@ -8,10 +8,10 @@ defmodule Mix.Tasks.Barkpark.Tags.Seed do
       mix barkpark.tags.seed --dataset staging
 
   One-time bridge for the authoring-excellence weighted-label rollout
-  (charter D3): sweeps every schema type's DISTINCT legacy `content.tags`
-  strings (`Content.search_tags_for_type/5` — the old flat shape, which is
-  exactly what legacy data carries) and creates one draft tag doc per name
-  that has no tag doc yet.
+  (charter D3): sweeps every schema type's DISTINCT `content.tags` names via
+  `Content.search_tags_for_type/5` — the dual-shape reader (D19): legacy flat
+  strings AND weighted entries' tag names both come back clean — and creates
+  one draft tag doc per name that has no tag doc yet.
 
   **Nothing is published.** A draft tag is NOT registered — the publish
   wall's E3 gate only resolves PUBLISHED tag docs. Promotion (publishing) is

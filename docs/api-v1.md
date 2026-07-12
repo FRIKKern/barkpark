@@ -67,10 +67,10 @@ List documents. 404 if the schema's `visibility` is `"private"`; 404/403 per §2
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
+| `filter[<field>][<op>]` | — | Ops `op` ∈ `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, last-colon split: weighted entry `strength >= min`; flat elements never match), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
-**Response:** `result` is `{perspective, documents:[envelopes], count, limit, offset}` (`count` = rows on this page); outer keys per §3.
+**Response:** `result` is `{perspective, documents:[envelopes], count, limit, offset}` (`count` = page rows); outer keys per §3.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
@@ -156,7 +156,7 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_T
 
 **`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), recompute refreshes values, undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
 
-**Filtering** is per-viewer view-state in Studio + the `/sheets` reader — readers can filter; sorting is an edit mutation for editors only. There is deliberately NO filter wire endpoint; adding one is a design regression, not a gap.
+**Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a design regression, not a gap.
 
 ## 9. Error Codes
 
@@ -178,7 +178,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Additive: `halted` 409 (hook veto) · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (`details.similar`) · `schema_has_documents` 409 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413.
 
-Endpoint-specific (in the OpenAPI `Error.code` enum): ingest `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · grants/tokens `invalid_grant`/`unprocessable` · step-up `mfa_required`/`mfa_enrolment_required`. Single source `Content.Errors.known_codes/0`, contract-tested; ops endpoints (self-update, incidents, pulse, GitHub webhooks) are off-spec by design.
+Endpoint-specific (in the OpenAPI `Error.code` enum): ingest `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · grants/tokens `invalid_grant`/`unprocessable` · step-up `mfa_required`/`mfa_enrolment_required`. Single source `Content.Errors.known_codes/0`, contract-tested; ops endpoints are off-spec by design.
 
 ## 10. Legacy `/api/*` Routes
 

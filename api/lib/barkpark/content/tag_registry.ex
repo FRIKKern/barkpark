@@ -147,13 +147,15 @@ defmodule Barkpark.Content.TagRegistry do
   end
 
   @doc """
-  Import the dataset's legacy DISTINCT flat-string tags as DRAFT tag docs.
+  Import the dataset's DISTINCT tag names as DRAFT tag docs.
 
-  Sweeps every schema type via `Content.search_tags_for_type/5` (which unnests
-  the OLD flat `content.tags` string-array shape — correct for legacy data;
-  weighted entries unnest to JSON-object text and are filtered out), then
-  creates one draft `type:tag` doc per name that has no tag doc yet (draft or
-  published). Never publishes — promotion is a human/curator decision.
+  Sweeps every schema type via `Content.search_tags_for_type/5` — the
+  DUAL-SHAPE reader (authoring-excellence D19): legacy flat `content.tags`
+  strings AND weighted entries' tag NAMES both come back clean, so an
+  unregistered weighted vocabulary is drafted for curation too (the third
+  consumer, benefiting transitively). Creates one draft `type:tag` doc per
+  name that has no tag doc yet (draft or published). Never publishes —
+  promotion is a human/curator decision.
 
   Returns `%{created: [name], skipped: [name]}`.
   """
@@ -263,8 +265,9 @@ defmodule Barkpark.Content.TagRegistry do
       Content.search_tags_for_type("", type, dataset, opts, 10_000)
     end)
     |> Enum.uniq()
-    # `jsonb_array_elements_text` over a WEIGHTED tags array yields the JSON
-    # text of each object — those are not legacy tag names; drop them.
+    # Dual-shape read (D19): weighted entries surface as their tag NAMES.
+    # Belt-and-braces: a malformed tags array (an object element with no
+    # `tag` key) would still surface as JSON-object text — never a name.
     |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "{"))
     |> Enum.reject(&(String.trim(&1) == ""))
     |> Enum.sort()

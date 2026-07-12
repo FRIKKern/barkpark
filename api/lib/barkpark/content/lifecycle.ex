@@ -139,8 +139,9 @@ defmodule Barkpark.Content.Lifecycle do
               {:error, {:halted, reason}}
 
             :ok ->
-              # Upsert the published version with draft's content. Inherit the
-              # draft's tenancy scope so a publish never drops workspace_id/
+              # Upsert the published version with draft's content (main_tag
+              # denormalized — see stamp_main_tag/1). Inherit the draft's
+              # tenancy scope so a publish never drops workspace_id/
               # project_id on the published row.
               pub_attrs =
                 %{
@@ -149,7 +150,7 @@ defmodule Barkpark.Content.Lifecycle do
                   "dataset" => dataset,
                   "title" => draft.title,
                   "status" => "published",
-                  "content" => draft.content,
+                  "content" => stamp_main_tag(draft.content),
                   "rev" => Writer.generate_rev()
                 }
                 |> WriteScope.inherit_scope_attrs(draft)
@@ -243,6 +244,25 @@ defmodule Barkpark.Content.Lifecycle do
 
   defp authoring_wall(_draft, _type, _pid, _dataset, _exempt?), do: :ok
 
+  # D7/D20 — denormalize the derived main tag (the strength argmax) onto the
+  # published row's content at the ONE write chokepoint, so `filter[main_tag]`
+  # is an indexed `->>` equality (btree expression index, migration
+  # 20260712121000) instead of a seq-scanning jsonb argmax predicate.
+  # `LabelSpine.main_tag/1` is the single derivation — the backfill migration
+  # reuses it, so backfilled and freshly published rows can never disagree.
+  # Weighted-valid tags → stamped; anything else (legacy flat strings under
+  # the ratchet, tagless docs, non-map content) passes through UNCHANGED —
+  # never a nil key, never a raise. Runs for every type: main_tag derives
+  # purely from the tags shape, and non-walled types simply never carry it.
+  defp stamp_main_tag(%{} = content) do
+    case LabelSpine.main_tag(content) do
+      {:ok, tag} -> Map.put(content, "main_tag", tag)
+      :error -> content
+    end
+  end
+
+  defp stamp_main_tag(content), do: content
+
   # Advisory, never blocking (charter D5): a legal tag count (1–12) outside
   # the 2–4 norm rides the mutate success envelope as a warning. Emitted only
   # AFTER a validate pass, so the count is known-legal here.
@@ -294,7 +314,9 @@ defmodule Barkpark.Content.Lifecycle do
   """
   def unpublish_document(published_doc_id, type, dataset, opts \\ []),
     do:
-      span_write(:unpublish, fn -> do_unpublish_document(published_doc_id, type, dataset, opts) end)
+      span_write(:unpublish, fn ->
+        do_unpublish_document(published_doc_id, type, dataset, opts)
+      end)
 
   defp do_unpublish_document(published_doc_id, type, dataset, opts) do
     pid = DraftId.published_id(published_doc_id)
@@ -385,7 +407,8 @@ defmodule Barkpark.Content.Lifecycle do
 
   @doc "Discard a draft without publishing. Published version (if any) remains."
   def discard_draft(published_doc_id, type, dataset, opts \\ []),
-    do: span_write(:discard_draft, fn -> do_discard_draft(published_doc_id, type, dataset, opts) end)
+    do:
+      span_write(:discard_draft, fn -> do_discard_draft(published_doc_id, type, dataset, opts) end)
 
   defp do_discard_draft(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)

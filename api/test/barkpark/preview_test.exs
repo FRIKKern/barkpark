@@ -430,6 +430,24 @@ defmodule Barkpark.PreviewTest do
       refute Map.has_key?(ext, "authors")
     end
 
+    test "weighted tag entries project as their NAMES — never a raise (D18 dual-shape)" do
+      # The pre-fix crash: `to_string/1` on a weighted `%{"tag" => …}` map
+      # raised Protocol.UndefinedError, killing Preview.project for every
+      # weighted-tag paper reaching a projecting write path.
+      content = Barkpark.LabelFixtures.weighted_labels()
+
+      ext = Preview.project(content, [], %{doc_type: "paper"})["extensions"]
+      assert ext["tags"] == ["fixture-tag-1", "fixture-tag-2"]
+    end
+
+    test "mixed corpus: flat strings + weighted entries read together; tagless maps dropped" do
+      weighted = Barkpark.LabelFixtures.named_weighted_labels(["weighted-tag"])["tags"]
+      tags = ["flat-tag"] ++ weighted ++ [%{"nota" => "tag"}]
+
+      ext = Preview.project(%{"tags" => tags}, [], %{doc_type: "paper"})["extensions"]
+      assert ext["tags"] == ["flat-tag", "weighted-tag"]
+    end
+
     test "an unknown doctype has an empty extensions map" do
       assert Preview.project(%{}, [], %{doc_type: "widget"})["extensions"] == %{}
     end

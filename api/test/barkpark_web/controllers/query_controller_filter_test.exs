@@ -28,6 +28,22 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
     end
   end
 
+  describe "invalid_filter_op/1 — hasStrong value validation (D20)" do
+    test "a well-formed tag:min value is accepted" do
+      assert invalid(%{"tags" => %{"hasStrong" => "epic:50"}}) == nil
+    end
+
+    test "a colon-carrying tag name splits at the LAST colon and is accepted" do
+      assert invalid(%{"tags" => %{"hasStrong" => "ns:sub:50"}}) == nil
+    end
+
+    for bad <- ["epic", "epic:", ":50", "epic:high", ""] do
+      test "malformed value #{inspect(bad)} is rejected as {field, \"hasStrong\"}" do
+        assert invalid(%{"tags" => %{"hasStrong" => unquote(bad)}}) == {"tags", "hasStrong"}
+      end
+    end
+  end
+
   describe "invalid_filter_op/1 — scalar-value guard for range ops" do
     for op <- ~w(gt gte lt lte) do
       test "#{op} with a LIST value (array-bracket syntax) is rejected" do

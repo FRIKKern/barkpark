@@ -1,9 +1,13 @@
 defmodule Barkpark.Content.TagSearchTest do
   @moduledoc """
   `Content.search_tags/3` — the `#tag` typeahead candidate read: DISTINCT tag
-  NAMES across papers in a dataset matching `query` (case-insensitive substring),
-  via a `jsonb_array_elements_text` unnest of `content["tags"]`. The inverse of
-  `papers_with_tag/3`. Name-ordered, distinct, capped, blank → top distinct tags.
+  NAMES across papers in a dataset matching `query` (case-insensitive
+  substring), via a LATERAL unnest of `content["tags"]`. DUAL-SHAPE
+  (authoring-excellence D10/D19): weighted entries read as their tag NAME
+  (never the raw JSON blob, never a rationale-text ILIKE false positive);
+  legacy flat strings read as themselves; a tag present in both shapes dedups
+  to ONE row. The inverse of `papers_with_tag/3`. Name-ordered, distinct,
+  capped, blank → top distinct tags.
   """
   use Barkpark.DataCase, async: true
 
@@ -107,5 +111,47 @@ defmodule Barkpark.Content.TagSearchTest do
 
     assert Content.search_tags("tag", @dataset) == ["scopedtag"]
     assert Content.search_tags("leak", @dataset) == []
+  end
+
+  # WEIGHTED docs ride the REAL publish path (the wall stamps prod's weighted
+  # rows): registered tags + compliant description via LabelFixtures.
+  defp weighted_paper!(id, title, names) do
+    content = Barkpark.LabelFixtures.with_named_labels(%{}, @dataset, names)
+
+    {:ok, _} =
+      Content.create_document(
+        "paper",
+        Map.merge(%{"_id" => id, "title" => title}, content),
+        @dataset
+      )
+
+    {:ok, _} = Content.publish_document(id, "paper", @dataset)
+    :ok
+  end
+
+  describe "dual-shape typeahead (D10/D19)" do
+    test "weighted tags surface as NAMES — never a JSON blob, never a rationale false positive" do
+      weighted_paper!("pw-1", "Weighted One", ["obsidian-w", "unrelated-w"])
+
+      assert Content.search_tags("obsidian", @dataset) == ["obsidian-w"]
+
+      # The OLD reader unnested the raw element text, so the weighted object's
+      # rationale ILIKE-matched typeahead queries. Names only now.
+      assert Content.search_tags("exercises", @dataset) == []
+      assert Content.search_tags("dual-shape", @dataset) == []
+
+      # And the blank-query top list carries no serialized-object noise.
+      results = Content.search_tags("", @dataset)
+      assert results == ["obsidian-w", "unrelated-w"]
+      refute Enum.any?(results, &String.contains?(&1, "{"))
+    end
+
+    test "mixed corpus: a tag present in BOTH shapes dedups to ONE row (DISTINCT)" do
+      paper!("p-flat", "Flat Half", %{"tags" => ["design"]})
+      weighted_paper!("p-weighted", "Weighted Half", ["design", "wextra"])
+
+      assert Content.search_tags("des", @dataset) == ["design"]
+      assert Content.search_tags("", @dataset) == ["design", "wextra"]
+    end
   end
 end

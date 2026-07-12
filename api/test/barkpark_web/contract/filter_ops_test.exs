@@ -330,4 +330,51 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
 
     assert Enum.map(body["documents"], & &1["title"]) == ["Alpha"]
   end
+
+  test "filter[tags][hasStrong]=tag:min filters on weighted strength; malformed value 400s",
+       %{conn: conn} do
+    # E3 runs for every type at publish, so the weighted names are registered.
+    content =
+      Barkpark.LabelFixtures.with_named_labels(
+        %{},
+        "fops_http",
+        [{"wired", 80}, {"wiredx", 10}]
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        Map.merge(%{"_id" => "hs1", "title" => "Wired Strong"}, content),
+        "fops_http"
+      )
+
+    {:ok, _} = Content.publish_document("hs1", "post", "fops_http")
+
+    %{"result" => hit} =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter%5Btags%5D%5BhasStrong%5D=wired:50")
+      |> json_response(200)
+
+    assert hit["count"] == 1
+    assert hd(hit["documents"])["_id"] == "hs1"
+
+    # Below the stored strength -> no match (and flat-tagged f1..f3 never match).
+    %{"result" => miss} =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter%5Btags%5D%5BhasStrong%5D=wired:90")
+      |> json_response(200)
+
+    assert miss["count"] == 0
+
+    # A floor-less value fails CLOSED (invalid_filter), never a silent no-op.
+    error =
+      conn
+      |> get("/v1/data/query/fops_http/post?filter%5Btags%5D%5BhasStrong%5D=wired")
+      |> json_response(400)
+      |> Map.fetch!("error")
+
+    assert error["code"] == "invalid_filter"
+    assert error["details"]["field"] == "tags"
+    assert error["details"]["op"] == "hasStrong"
+  end
 end

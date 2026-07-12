@@ -487,6 +487,41 @@ defmodule Barkpark.Content.Query do
     )
   end
 
+  # `hasStrong` — weighted-tag membership with a strength floor (authoring-
+  # excellence D20): matches docs whose array field contains a WEIGHTED entry
+  # named `tag` with `strength >= min`. The wire value is ONE scalar
+  # `<tag>:<min_strength>` split at the LAST colon (tag names may carry
+  # colons; the strength never does). Legacy flat-string elements are ignored
+  # by construction (`->>` on a scalar element is NULL) and a non-numeric
+  # `strength` never casts (CASE-guarded), so a mixed-shape corpus can't
+  # raise. The array CASE guard mirrors `has`. A value that doesn't parse is a
+  # no-op here, matching the strict-parser convention (`parse_number`,
+  # `parse_ts`) — the public wire is 400-guarded up front by the controller's
+  # `invalid_filter` check, which calls `parse_has_strong/1` too.
+  defp apply_field_op(query, field, "hasStrong", v) do
+    case parse_has_strong(v) do
+      {:ok, tag, min} ->
+        segs = nested_segments(field)
+
+        where(
+          query,
+          [d],
+          fragment(
+            "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'tag' = ? AND (CASE WHEN jsonb_typeof(e->'strength') = 'number' THEN (e->>'strength')::numeric ELSE NULL END) >= ?)",
+            d.content,
+            ^segs,
+            d.content,
+            ^segs,
+            ^tag,
+            ^min
+          )
+        )
+
+      :error ->
+        query
+    end
+  end
+
   # `is` — null/absence on a content field. `eq(field, null)` → IS NULL (matches an
   # absent key OR an explicit JSON null, since `->>` of a JSON null is SQL NULL);
   # `neq(field, null)` → IS NOT NULL. Nested-aware via segs, like the other ops.
@@ -511,6 +546,26 @@ defmodule Barkpark.Content.Query do
   end
 
   defp apply_field_op(query, _field, _op, _value), do: query
+
+  @doc """
+  Parse a `hasStrong` filter value — `"<tag>:<min_strength>"`, split at the
+  LAST colon — into `{:ok, tag, min}` | `:error`. Public so the HTTP layer can
+  reject a malformed value up front (422 `invalid_filter`, fail-closed) with
+  the SAME grammar the SQL arm uses; one parser, two callers.
+  """
+  @spec parse_has_strong(term()) :: {:ok, String.t(), integer()} | :error
+  def parse_has_strong(v) when is_binary(v) do
+    with [_, _ | _] = parts <- String.split(v, ":"),
+         {min_s, tag_parts} <- List.pop_at(parts, -1),
+         tag when tag != "" <- Enum.join(tag_parts, ":"),
+         {min, ""} <- Integer.parse(min_s) do
+      {:ok, tag, min}
+    else
+      _ -> :error
+    end
+  end
+
+  def parse_has_strong(_), do: :error
 
   # Parse a range filter value into a number Postgrex encodes as `numeric`, so a
   # numeric `gt`/`lt` compares numerically while `gt('title', 'M')` stays text.
@@ -860,11 +915,16 @@ defmodule Barkpark.Content.Query do
   Every document of `type` carrying `tag` in its `content["tags"]` array, scoped
   to `dataset` + the caller's tenant — the tag-index read.
 
-  Tag membership is the scalar-membership JSONB containment
-  `content->'tags' @> to_jsonb(tag::text)` (the same proven pattern as the alias
-  read and the task-label query), so it matches a tag EXACTLY (Obsidian-parity).
-  Results are title-ordered (then `doc_id` for a stable tie-break). Scoping is
-  identical to `get_document/4` (the P0 leak guard).
+  DUAL-SHAPE (authoring-excellence D10/D19): `tags` elements are weighted
+  objects `{tag, strength, rationale}` post-wall AND legacy flat strings under
+  the exemption ratchet, so membership is an EXISTS over
+  `jsonb_array_elements` matching `e->>'tag'` (weighted; NULL on a scalar
+  element) OR `e #>> '{}'` (the flat element's own text — never matches a
+  weighted object, whose `#>> '{}'` is its full JSON text). Exact match either
+  way (Obsidian-parity); the CASE guards a non-array/absent `tags` into
+  no-match instead of an error (the `has`-op idiom above). Results are
+  title-ordered (then `doc_id` for a stable tie-break). Scoping is identical
+  to `get_document/4` (the P0 leak guard).
   """
   @spec docs_with_tag(String.t(), String.t(), String.t(), keyword()) :: [Document.t()]
   def docs_with_tag(tag, type, dataset, opts \\ []) when is_binary(tag) do
@@ -873,7 +933,16 @@ defmodule Barkpark.Content.Query do
 
     Document
     |> where([d], d.type == ^type)
-    |> where([d], fragment("?->'tags' @> to_jsonb(?::text)", d.content, ^tag))
+    |> where(
+      [d],
+      fragment(
+        "EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) AS e WHERE e->>'tag' = ? OR e #>> '{}' = ?)",
+        d.content,
+        d.content,
+        ^tag,
+        ^tag
+      )
+    )
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_owner(type, dataset, opts)
@@ -923,12 +992,18 @@ defmodule Barkpark.Content.Query do
   tag OUT to the papers carrying it, this gathers the tag NAMES themselves
   across the corpus, for the `#tag` autocomplete popup.
 
-  Implemented by unnesting each row's `content["tags"]` JSONB string array with
-  `jsonb_array_elements_text`, filtering the unnested value by `ilike("%v%")`,
-  and taking it `DISTINCT` — name-ordered, capped at `limit_n` (default 20) so
-  an unbounded tag vocabulary can never flood a typeahead. Scoping is the same
-  `get_document/4` P0 leak guard (dataset + tenant). A blank `query` yields the
-  top distinct tags (no `ilike` filter); a no-match yields `[]`.
+  DUAL-SHAPE (authoring-excellence D10/D19): each row's `content["tags"]` is
+  unnested through a LATERAL `jsonb_array_elements` selecting
+  `COALESCE(e->>'tag', e #>> '{}')` — the weighted object's tag NAME when
+  present (so strength/rationale text can neither surface as a "tag" nor
+  ILIKE-false-positive the typeahead), else the legacy flat element's own
+  text. The ILIKE filter + `DISTINCT` run in the OUTER query against the
+  materialised name (a tag present in both shapes dedups to ONE row) —
+  name-ordered, capped at `limit_n` (default 20) so an unbounded tag
+  vocabulary can never flood a typeahead. The CASE guards a non-array/absent
+  `tags` into zero rows. Scoping is the same `get_document/4` P0 leak guard
+  (dataset + tenant). A blank `query` yields the top distinct tags (no `ilike`
+  filter); a no-match yields `[]`.
   """
   @spec search_tags_for_type(String.t(), String.t(), String.t(), keyword(), pos_integer()) ::
           [String.t()]
@@ -938,9 +1013,11 @@ defmodule Barkpark.Content.Query do
     project_id = Keyword.get(opts, :project_id)
     trimmed = String.trim(query)
 
-    # The set-returning `jsonb_array_elements_text` is illegal in WHERE, so the
-    # unnest happens in an inner subquery (scoped) and the ILIKE filter is applied
-    # in the OUTER query against the materialised `tag` column.
+    # A set-returning function is illegal in WHERE, so the unnest is a LATERAL
+    # join in an inner subquery (scoped) and the ILIKE filter is applied in the
+    # OUTER query against the materialised `tag` column. Named binding: the
+    # scope helpers may grow joins of their own, so the element source is
+    # addressed as `:tag_elem`, never positionally.
     unnested =
       Document
       |> where([d], d.type == ^type)
@@ -948,7 +1025,18 @@ defmodule Barkpark.Content.Query do
       |> scope_to_workspace_or_global(workspace_id, project_id)
       |> maybe_scope_to_owner(type, dataset, opts)
       |> maybe_scope_to_grants(opts)
-      |> select([d], %{tag: fragment("jsonb_array_elements_text(?->'tags')", d.content)})
+      |> join(
+        :inner_lateral,
+        [d],
+        e in fragment(
+          "(SELECT COALESCE(e->>'tag', e #>> '{}') AS tag FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) AS e)",
+          d.content,
+          d.content
+        ),
+        on: true,
+        as: :tag_elem
+      )
+      |> select([tag_elem: e], %{tag: e.tag})
 
     outer =
       from(t in subquery(unnested),
