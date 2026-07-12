@@ -57,7 +57,14 @@ defmodule Barkpark.Content.WriteScope do
   # write, and the changeset leaves an existing row's dataset_id untouched.
   # Scope-id keys a client must never choose — dropped (string AND atom form)
   # before the scope is resolved from server-authoritative opts / Default.
-  @client_scope_keys ["workspace_id", "project_id", "dataset_id", :workspace_id, :project_id, :dataset_id]
+  @client_scope_keys [
+    "workspace_id",
+    "project_id",
+    "dataset_id",
+    :workspace_id,
+    :project_id,
+    :dataset_id
+  ]
 
   def put_scope_attrs(attrs, opts) do
     # Scope is SERVER-AUTHORITATIVE. Strip any client-supplied scope-id keys
@@ -365,6 +372,15 @@ defmodule Barkpark.Content.WriteScope do
     if get_in(after_payload, [:ctx, :source]) != :worker do
       _ = Barkpark.EdgeProjector.Lifecycle.enqueue_rebuild(after_payload)
     end
+
+    # E5 findability self-test (authoring-excellence D9/D29): after a
+    # walled-type (paper/task) PUBLISH, enqueue an async golden self-query that
+    # asserts the doc retrieves itself. This is the exact
+    # `EdgeProjector.Lifecycle.enqueue_rebuild` precedent — a post-commit,
+    # non-blocking Oban enqueue off the fire_after seam. `enqueue_after/2` is
+    # self-gated to `:after_publish` + walled types and is fully rescued, so it
+    # can never crash or delay the publish that just committed.
+    _ = Barkpark.Workers.FindabilityPosttest.enqueue_after(after_payload)
 
     {:ok, doc}
   end
