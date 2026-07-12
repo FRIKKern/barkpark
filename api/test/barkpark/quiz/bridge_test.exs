@@ -21,6 +21,8 @@ defmodule Barkpark.Quiz.BridgeTest do
     n = System.unique_integer([:positive])
     pin = "TB#{n}"
     qid = "quiz-#{n}"
+    # Joins never start rooms (Decision N) — the host is the sole creator.
+    {:ok, _pid} = Quiz.ensure_room(pin)
     on_exit(fn -> Quiz.stop_room(pin) end)
     %{pin: pin, qid: qid}
   end
@@ -86,6 +88,8 @@ defmodule Barkpark.Quiz.BridgeTest do
 
     pin_prod = "TBP#{System.unique_integer([:positive])}"
     pin_stag = "TBS#{System.unique_integer([:positive])}"
+    {:ok, _} = Quiz.ensure_room(pin_prod)
+    {:ok, _} = Quiz.ensure_room(pin_stag)
 
     on_exit(fn ->
       Quiz.stop_room(pin_prod)

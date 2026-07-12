@@ -11,6 +11,8 @@ defmodule Barkpark.Quiz.RoomCursorTest do
 
   setup do
     pin = "TC" <> Integer.to_string(System.unique_integer([:positive]))
+    # Joins never start rooms (Decision N) - the host (ensure) is the sole creator.
+    {:ok, _pid} = Quiz.ensure_room(pin)
     on_exit(fn -> Quiz.stop_room(pin) end)
     %{pin: pin}
   end
@@ -48,12 +50,13 @@ defmodule Barkpark.Quiz.RoomCursorTest do
 
   test "move from a non-joined player is ignored", %{pin: pin} do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.cursor_topic(pin))
-    {:ok, _} = Quiz.ensure_room(pin)
     Quiz.move(pin, "ghost", 0.5, 0.5)
     refute_receive {:quiz_cursors, ^pin, _}, 200
   end
 
-  test "move on a missing room is a no-op and never starts one", %{pin: pin} do
+  test "move on a missing room is a no-op and never starts one" do
+    # A pin nobody ever hosted — the setup pin is pre-ensured, so use our own.
+    pin = "TCNOROOM" <> Integer.to_string(System.unique_integer([:positive]))
     assert :ok = Quiz.move(pin, "p1", 0.1, 0.1)
     assert Barkpark.Quiz.Room.whereis(pin) == nil
   end

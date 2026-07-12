@@ -1,6 +1,7 @@
 defmodule Barkpark.Quiz.RoomTest do
   @moduledoc """
-  P1 walking-skeleton tests for the per-room quiz GenServer: lazy lifecycle,
+  P1 walking-skeleton tests for the per-room quiz GenServer: lifecycle (rooms
+  start ONLY via ensure/1 — joins never spawn one, the ghost-room guard),
   join, answer tallying (last-write-wins), validation, and live PubSub fan-out.
   Each test uses a unique PIN so they stay independent under async.
   """
@@ -10,11 +11,14 @@ defmodule Barkpark.Quiz.RoomTest do
 
   setup do
     pin = "T" <> Integer.to_string(System.unique_integer([:positive]))
+    # Joins never start rooms (Decision N) — mirror production: the host mount
+    # (ensure) creates the room, then players join it.
+    {:ok, _pid} = Quiz.ensure_room(pin)
     on_exit(fn -> Quiz.stop_room(pin) end)
     %{pin: pin}
   end
 
-  test "lazy start + join returns a snapshot", %{pin: pin} do
+  test "join on a live room returns a snapshot", %{pin: pin} do
     assert Quiz.room_topic(pin) == "quiz:events:" <> pin
     assert {:ok, snapshot} = Quiz.join(pin, "p1", "Alice")
     assert snapshot.pin == pin
@@ -45,7 +49,6 @@ defmodule Barkpark.Quiz.RoomTest do
   end
 
   test "rejects answer from a non-joined player", %{pin: pin} do
-    assert {:ok, _} = Quiz.ensure_room(pin)
     assert {:error, :not_joined} = Quiz.submit_answer(pin, "ghost", "a")
   end
 
@@ -104,7 +107,13 @@ defmodule Barkpark.Quiz.RoomTest do
     assert Enum.find(Quiz.state(pin).players, &(&1.id == "p3")).slot == slot_p1
   end
 
-  test "leave/tally/state/submit never start (or resurrect) a room", %{pin: pin} do
+  test "join/leave/tally/state/submit never start (or resurrect) a room" do
+    # A pin nobody ever hosted — the setup pin is pre-ensured, so use our own.
+    pin = "TNOROOM" <> Integer.to_string(System.unique_integer([:positive]))
+
+    assert {:error, :no_room} = Quiz.join(pin, "p1", "Alice")
+    assert Barkpark.Quiz.Room.whereis(pin) == nil
+
     assert :ok = Quiz.leave(pin, "ghost")
     assert Barkpark.Quiz.Room.whereis(pin) == nil
 
