@@ -51,8 +51,21 @@ alike.
   into the desk against the just-connected barkpark; `n` leaves `Run 'bp' any
   time to open the desk.` The wizard instead announces the auto-pick and
   continues straight into the desk.
-- **Several barkparks** — `bp` prints a numbered list to pick from. If stdin is
-  piped, it prints the fleet plus a one-line connect command.
+- **Several barkparks** — `bp` lists Barkparks across every team membership and
+  prints the owning team beside each numbered choice. If stdin is piped, it
+  prints the fleet plus a one-line connect command.
+
+### Fleet listing scope
+
+`bp barkparks` keeps one explicit source contract:
+
+- With a saved Cloud session, bare `bp barkparks` queries the control plane for
+  the current team's fleet.
+- `bp barkparks --all` queries every authorized team membership and includes the
+  owning team in its output. `--all` cannot be combined with `--kind`.
+- Without a saved Cloud session, or with an explicit `--kind local|cloud`, the
+  command reads local config and makes no network call.
+- `-o json` and `-o yaml` emit the same selected scope as machine-readable data.
 
 ### Complete non-connecting outcomes
 

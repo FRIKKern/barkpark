@@ -1271,29 +1271,58 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # GET /v1/barkparks → 200 {barkparks: [...]} for the user's team. Each row
+  # GET /v1/barkparks → 200 {barkparks: [...]} for the user's team. A signed-in
+  # human may request `?scope=all` to list every Team membership; PATs remain
+  # team-scoped. Each row
   # carries the LATEST provision job's status/error (merged from a single batch
   # query) so the dashboard can show a FAILED launch distinctly from one still
   # provisioning — a failed job leaves the barkpark health "unknown"/host nil,
   # otherwise indistinguishable from in-progress.
   get "/v1/barkparks" do
-    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
+    conn = fetch_query_params(conn)
+    all_teams? = conn.query_params["scope"] == "all"
+
+    conn =
+      if all_teams? do
+        Auth.require_user(conn, [])
+      else
+        conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("read")
+      end
 
     if conn.halted do
       conn
     else
-      barkparks =
-        case conn.assigns.current_team do
-          nil -> []
-          team -> Registry.list_barkparks(team)
+      scoped_barkparks =
+        if all_teams? do
+          Registry.list_barkparks_for_user(conn.assigns.current_user)
+        else
+          case conn.assigns.current_team do
+            nil -> []
+            team -> Enum.map(Registry.list_barkparks(team), &{&1, nil})
+          end
         end
 
+      barkparks = Enum.map(scoped_barkparks, &elem(&1, 0))
       ids = Enum.map(barkparks, & &1.id)
       pmap = Registry.latest_provision_status_map(ids)
       dmap = Registry.latest_deprovision_status_map(ids)
 
       json(conn, 200, %{
-        barkparks: Enum.map(barkparks, &barkpark_json(&1, pmap[&1.id], dmap[&1.id]))
+        barkparks:
+          Enum.map(scoped_barkparks, fn {barkpark, role} ->
+            row = barkpark_json(barkpark, pmap[barkpark.id], dmap[barkpark.id])
+
+            if all_teams? do
+              Map.put(row, :team, %{
+                id: barkpark.team.id,
+                name: barkpark.team.name,
+                slug: barkpark.team.slug,
+                role: role
+              })
+            else
+              row
+            end
+          end)
       })
     end
   end
@@ -6758,7 +6787,9 @@ defmodule BarkparkCloud.Web.Router do
             target_type: "provider",
             metadata: %{kind: kind, label: label}
           },
-          fn -> Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label) end,
+          fn ->
+            Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label)
+          end,
           fn provider -> %{target_id: provider.id} end
         )
 

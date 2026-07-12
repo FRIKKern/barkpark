@@ -249,7 +249,11 @@ func Execute(args []string) int {
 			printBarkparksHelp(out)
 			return exitOK
 		}
-		return runBarkparks(out, rest[1:])
+		barkparksArgs := append([]string(nil), rest[1:]...)
+		if g.all {
+			barkparksArgs = append(barkparksArgs, "--all")
+		}
+		return runBarkparks(out, barkparksArgs)
 	case "provider":
 		// `bp provider add hetzner --token <t> [--label <l>]` — connect a cloud
 		// account to the control plane (cloud-12). Requires `bp login`.

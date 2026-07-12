@@ -16,13 +16,19 @@ type fakeFleetClient struct {
 	listErr  error
 	creds    map[string]cloudclient.Credentials
 	credErrs map[string]error
+	credTeam string
 }
 
-func (f *fakeFleetClient) ListBarkparks(context.Context) ([]cloudclient.Barkpark, error) {
+func (f *fakeFleetClient) ListAllBarkparks(context.Context) ([]cloudclient.Barkpark, error) {
 	return f.list, f.listErr
 }
 
 func (f *fakeFleetClient) GetCredentials(_ context.Context, id string) (cloudclient.Credentials, error) {
+	return f.GetCredentialsForTeam(context.Background(), id, "")
+}
+
+func (f *fakeFleetClient) GetCredentialsForTeam(_ context.Context, id, teamID string) (cloudclient.Credentials, error) {
+	f.credTeam = teamID
 	if err, ok := f.credErrs[id]; ok {
 		return cloudclient.Credentials{}, err
 	}
@@ -60,8 +66,8 @@ func TestCloudFleetPickNumberedPickResolvesCredentials(t *testing.T) {
 	w, out, errb := newTestWriter()
 	client := &fakeFleetClient{
 		list: []cloudclient.Barkpark{
-			{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"},
-			{ID: "bp-2", Name: "bravo", URL: "https://bravo.example.com"},
+			{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com", Team: &cloudclient.Team{Name: "Primary"}},
+			{ID: "bp-2", Name: "bravo", URL: "https://bravo.example.com", Team: &cloudclient.Team{ID: "team-docs", Name: "Docs", Role: "admin"}},
 		},
 		creds: map[string]cloudclient.Credentials{
 			"bp-2": {AdminToken: "super-secret-token", URL: "https://bravo.example.com"},
@@ -85,9 +91,15 @@ func TestCloudFleetPickNumberedPickResolvesCredentials(t *testing.T) {
 	if res.LoggedInOnly {
 		t.Fatal("a resolved pick must not be LoggedInOnly")
 	}
+	if client.credTeam != "team-docs" {
+		t.Fatalf("credential team = %q, want selected secondary team", client.credTeam)
+	}
 	// The admin token must never be printed on either stream.
 	if strings.Contains(out.String()+errb.String(), "super-secret-token") {
 		t.Fatalf("admin token leaked into output:\nstdout:%s\nstderr:%s", out.String(), errb.String())
+	}
+	if !strings.Contains(out.String(), "bravo · Docs") {
+		t.Fatalf("numbered fleet should disambiguate teams:\n%s", out.String())
 	}
 }
 
@@ -210,6 +222,38 @@ func TestCloudFleetPickSingleBarkparkAutoConnects(t *testing.T) {
 	}
 	if strings.Contains(out.String()+errb.String(), "solo-secret") {
 		t.Fatalf("admin token leaked into output:\nstdout:%s\nstderr:%s", out.String(), errb.String())
+	}
+}
+
+func TestCloudFleetPickSingleSecondaryTeamUsesTeamContext(t *testing.T) {
+	w, _, _ := newTestWriter()
+	client := &fakeFleetClient{
+		list:  []cloudclient.Barkpark{{ID: "bp-2", Name: "docs", URL: "https://docs.example.com", Team: &cloudclient.Team{ID: "team-docs", Name: "Docs", Role: "owner"}}},
+		creds: map[string]cloudclient.Credentials{"bp-2": {AdminToken: "secret", URL: "https://docs.example.com"}},
+	}
+	res, err := cloudFleetPick(w, client, strings.NewReader(""))
+	if err != nil || res.Server != "https://docs.example.com" {
+		t.Fatalf("secondary-team single pick = %+v, %v", res, err)
+	}
+	if client.credTeam != "team-docs" {
+		t.Fatalf("credential team = %q, want team-docs", client.credTeam)
+	}
+}
+
+func TestCloudFleetPickMemberStaysLoggedInWithoutCredentials(t *testing.T) {
+	w, out, _ := newTestWriter()
+	client := &fakeFleetClient{
+		list: []cloudclient.Barkpark{{ID: "bp-2", Name: "docs", Team: &cloudclient.Team{ID: "team-docs", Name: "Docs", Role: "member"}}},
+	}
+	res, err := cloudFleetPick(w, client, strings.NewReader(""))
+	if err != nil || !res.LoggedInOnly {
+		t.Fatalf("member pick = %+v, %v; want clean logged-in-only", res, err)
+	}
+	if client.credTeam != "" {
+		t.Fatalf("member selection attempted credential retrieval for %q", client.credTeam)
+	}
+	if !strings.Contains(out.String(), "member role") || !strings.Contains(out.String(), "owner or admin") {
+		t.Fatalf("member guidance not actionable:\n%s", out.String())
 	}
 }
 

@@ -55,6 +55,18 @@ func runBarkparks(out *writer, args []string) int {
 	if kerr != nil {
 		return useError(out, "usage", kerr.Error(), exitUsage)
 	}
+	allTeams := false
+	for _, arg := range args {
+		if arg == "--all" {
+			allTeams = true
+		}
+	}
+	if allTeams && kindFilter != "" {
+		return useError(out, "usage", "--all cannot be combined with --kind", exitUsage)
+	}
+	if allTeams && !cfg.HasCloudToken() {
+		return useError(out, "usage", "--all requires Barkpark Cloud login", exitUsage)
+	}
 
 	// AUTHORITATIVE path (cloud-12): when a Cloud token is present, the live
 	// control-plane registry is the source of truth — query it instead of the
@@ -62,7 +74,7 @@ func runBarkparks(out *writer, args []string) int {
 	// caller passing it explicitly opts back into the local view; bare
 	// `bp barkparks` with a token hits the control plane. No token → local view.
 	if cfg.HasCloudToken() && kindFilter == "" {
-		return runBarkparksCloud(out, cfg)
+		return runBarkparksCloud(out, cfg, allTeams)
 	}
 
 	list := cfg.KnownServerList()
@@ -496,20 +508,21 @@ func attachUsageErr(out *writer, msg string) int {
 
 // printBarkparksHelp writes `bp barkparks` usage WITHOUT touching the TTY.
 func printBarkparksHelp(out *writer) {
-	const help = `bp barkparks — list the Barkparks bp knows about (local config view).
+	const help = `bp barkparks — list Barkparks from local config or Barkpark Cloud.
 
 USAGE
-  bp barkparks [--kind local|cloud] [-o json]
+  bp barkparks [--all | --kind local|cloud] [-o json|yaml]
 
 WHAT IT SHOWS
-  every Barkpark in local config — name · url · kind · status. The ★ marks the
-  active one. Status is read from local config: "active" for the selected
-  Barkpark, "unknown" for the rest (live status arrives with the agent + control
-  plane in a later task — this command makes NO network call).
+  with a saved Cloud session, bare bp barkparks queries the current team's
+  control-plane fleet. --all queries every authorized team membership and
+  includes the owning team. Without a saved session, or with an explicit
+  --kind filter, it reads local config and makes no network call.
 
 FLAGS
-  --kind local|cloud   show only local or only cloud Barkparks
-  -o json              emit one machine-readable JSON object on stdout
+  --all                list Barkparks across every authorized Cloud team; requires login and cannot be combined with --kind
+  --kind local|cloud   filter the local-config view; cannot combine with --all
+  -o json|yaml         emit one machine-readable object on stdout
 
 RELATED
   bp register ssh root@<host> --name <name>   add a self-hosted Barkpark

@@ -188,10 +188,32 @@ func TestListBarkparks(t *testing.T) {
 	}
 }
 
+func TestListAllBarkparks(t *testing.T) {
+	var gotPath, gotQuery string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		_, _ = io.WriteString(w, `{"barkparks":[
+			{"id":"bp-1","name":"prod","slug":"prod","team_id":"team-1","team":{"id":"team-1","name":"Primary","slug":"primary"}},
+			{"id":"bp-2","name":"docs","slug":"docs","team_id":"team-2","team":{"id":"team-2","name":"Docs","slug":"docs","role":"member"}}
+		]}`)
+	})
+
+	list, err := c.ListAllBarkparks(context.Background())
+	if err != nil {
+		t.Fatalf("ListAllBarkparks: %v", err)
+	}
+	if gotPath != "/v1/barkparks" || gotQuery != "scope=all" {
+		t.Fatalf("request = %s?%s, want /v1/barkparks?scope=all", gotPath, gotQuery)
+	}
+	if len(list) != 2 || list[1].Team == nil || list[1].Team.Name != "Docs" || list[1].Team.Role != "member" {
+		t.Fatalf("cross-team response decoded wrong: %+v", list)
+	}
+}
+
 func TestGetCredentials(t *testing.T) {
-	var gotAuth, gotMethod, gotPath string
+	var gotAuth, gotMethod, gotPath, gotTeam string
 	c := newFake(t, "sess-xyz", func(w http.ResponseWriter, r *http.Request) {
-		gotAuth, gotMethod, gotPath = r.Header.Get("Authorization"), r.Method, r.URL.Path
+		gotAuth, gotMethod, gotPath, gotTeam = r.Header.Get("Authorization"), r.Method, r.URL.Path, r.Header.Get("X-Barkpark-Team")
 		_, _ = io.WriteString(w, `{"admin_token":"bp_admin_secret-bearer","url":"https://prod.example.com","host":"203.0.113.7"}`)
 	})
 
@@ -205,8 +227,25 @@ func TestGetCredentials(t *testing.T) {
 	if gotAuth != "Bearer sess-xyz" {
 		t.Fatalf("auth header = %q, want Bearer sess-xyz", gotAuth)
 	}
+	if gotTeam != "" {
+		t.Fatalf("default GetCredentials team header = %q, want absent", gotTeam)
+	}
 	if creds.AdminToken != "bp_admin_secret-bearer" || creds.URL != "https://prod.example.com" || creds.Host != "203.0.113.7" {
 		t.Fatalf("credentials decoded wrong: %+v", creds)
+	}
+}
+
+func TestGetCredentialsForTeamSetsTeamHeader(t *testing.T) {
+	var gotTeam string
+	c := newFake(t, "sess-xyz", func(w http.ResponseWriter, r *http.Request) {
+		gotTeam = r.Header.Get("X-Barkpark-Team")
+		_, _ = io.WriteString(w, `{"admin_token":"secret"}`)
+	})
+	if _, err := c.GetCredentialsForTeam(context.Background(), "bp-2", "team-docs"); err != nil {
+		t.Fatalf("GetCredentialsForTeam: %v", err)
+	}
+	if gotTeam != "team-docs" {
+		t.Fatalf("team header = %q, want team-docs", gotTeam)
 	}
 }
 

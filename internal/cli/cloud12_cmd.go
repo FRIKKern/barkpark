@@ -248,7 +248,7 @@ func finishLoginConnect(out *writer, cfg *Config) int {
 	}
 
 	client := cfg.CloudClient()
-	list, err := client.ListBarkparks(cloudCtx())
+	list, err := client.ListAllBarkparks(cloudCtx())
 	if err != nil {
 		// Logged in IS success; a fleet lookup blip is a warning, not a failure.
 		out.errf("logged in, but couldn't reach your fleet (%v) — try `bp barkparks`.", err)
@@ -280,6 +280,12 @@ func finishLoginConnect(out *writer, cfg *Config) int {
 // token (GetCredentials always mints/returns the current one).
 func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) int {
 	target := fleetTarget(only.URL, only.Host)
+	if only.Team != nil && strings.EqualFold(strings.TrimSpace(only.Team.Role), "member") {
+		out.outf("")
+		out.outf("You're logged in. %q belongs to %s, where your member role cannot retrieve its admin token.", only.Name, fleetTeamName(only))
+		out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
+		return exitOK
+	}
 
 	if active, ok := activeSavedServer(); ok && strings.TrimSpace(active.Server) != "" {
 		if normalizeServerURL(active.Server) != normalizeServerURL(target) {
@@ -292,7 +298,7 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 		// Same server → a reconnect: fall through to fetch a fresh token + re-save.
 	}
 
-	creds, gerr := client.GetCredentials(cloudCtx(), only.ID)
+	creds, gerr := client.GetCredentialsForTeam(cloudCtx(), only.ID, fleetTeamID(only))
 	if gerr != nil {
 		if strings.Contains(gerr.Error(), "no_admin_token") {
 			// No stored admin token (an older / ip-only provision): fall back to the
@@ -359,7 +365,7 @@ func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclien
 	out.outf("")
 	out.outf("You're logged in. Your Barkparks:")
 	for _, b := range list {
-		out.outf("  %s  %s", b.Name, orDash(fleetTarget(b.URL, b.Host)))
+		out.outf("  %s  %s", fleetLabel(b), orDash(fleetTarget(b.URL, b.Host)))
 	}
 	out.outf("")
 	out.outf("Connect to one with:  bp setup --target cloud")
@@ -569,12 +575,19 @@ func runLogout(out *writer, g globals, args []string) int {
 }
 
 // runBarkparksCloud is the control-plane path of `bp barkparks`: it fetches the
-// AUTHORITATIVE fleet from the registry (GET /v1/barkparks) and renders it. It is
+// AUTHORITATIVE fleet from the registry (GET /v1/barkparks, optionally with the
+// explicit cross-team scope) and renders it. It is
 // only reached when a CloudToken is present (runBarkparks branches to it); the
 // local KnownServers view (cloud-11) is the no-token fallback.
-func runBarkparksCloud(out *writer, cfg *Config) int {
+func runBarkparksCloud(out *writer, cfg *Config, allTeams bool) int {
 	client := cfg.CloudClient()
-	list, err := client.ListBarkparks(cloudCtx())
+	var list []cloudclient.Barkpark
+	var err error
+	if allTeams {
+		list, err = client.ListAllBarkparks(cloudCtx())
+	} else {
+		list, err = client.ListBarkparks(cloudCtx())
+	}
 	if err != nil {
 		return cloudFail(out, "list barkparks", err)
 	}
@@ -596,14 +609,14 @@ func runBarkparksCloud(out *writer, cfg *Config) int {
 		return exitOK
 	}
 
-	renderCloudBarkparksTable(out, list)
+	renderCloudBarkparksTable(out, list, allTeams)
 	return exitOK
 }
 
 // cloudBarkparkRow projects a control-plane Barkpark onto the JSON row shape — a
 // flat map so the -o json output is stable and self-describing.
 func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
-	return map[string]any{
+	row := map[string]any{
 		"id":            b.ID,
 		"name":          b.Name,
 		"slug":          b.Slug,
@@ -617,6 +630,12 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"git_commit":    b.GitCommit,
 		"team_id":       b.TeamID,
 	}
+	if b.Team != nil {
+		row["team"] = map[string]any{
+			"id": b.Team.ID, "name": b.Team.Name, "slug": b.Team.Slug, "role": b.Team.Role,
+		}
+	}
+	return row
 }
 
 // renderCloudBarkparksTable prints the aligned fleet table through the ONE shared
@@ -632,18 +651,29 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // empty PROVIDER or STATUS cell (a pre-migration or unplaceable row) renders the
 // house em-dash rather than a bare gap — the tinters key on exact vocabulary
 // values, so a dashed cell stays honestly unpainted.
-func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
+func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark, showTeam bool) {
 	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT"}
+	if showTeam {
+		headers = append([]string{"TEAM"}, headers...)
+	}
 	rows := make([][]string, 0, len(list))
 	for _, b := range list {
 		u := b.URL
 		if u == "" {
 			u = b.Host
 		}
-		rows = append(rows, []string{
+		row := []string{
 			hzCell(b.Name), hzCell(b.Provider), hzCell(u), hzCell(registryLifecycleToken(b)),
 			hzCell(b.Mode), hzCell(b.HealthStatus), hzCell(b.AgentStatus),
-		})
+		}
+		if showTeam {
+			team := ""
+			if b.Team != nil {
+				team = b.Team.Name
+			}
+			row = append([]string{hzCell(team)}, row...)
+		}
+		rows = append(rows, row)
 	}
 	renderHzTable(out, headers, rows)
 }
