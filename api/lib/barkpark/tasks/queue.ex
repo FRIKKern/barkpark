@@ -53,7 +53,11 @@ defmodule Barkpark.Tasks.Queue do
         from(t in query,
           where: t.type == "task",
           where: fragment("?->>'lifecycle_status'", t.content) == "done",
-          distinct: [t.dataset, t.project_id, fragment("regexp_replace(?, '^drafts\\.', '')", t.doc_id)],
+          distinct: [
+            t.dataset,
+            t.project_id,
+            fragment("regexp_replace(?, '^drafts\\.', '')", t.doc_id)
+          ],
           select: %{
             dataset: t.dataset,
             project_id: t.project_id,
@@ -63,27 +67,28 @@ defmodule Barkpark.Tasks.Queue do
       end)
 
     unsatisfied_tasks =
-      from(u in fragment(
-             """
-             SELECT DISTINCT candidate.id
-             FROM documents AS candidate
-             CROSS JOIN LATERAL jsonb_array_elements_text(
-               CASE WHEN jsonb_typeof(candidate.content->'dependencies') = 'array'
-                    THEN candidate.content->'dependencies'
-                    ELSE '[]'::jsonb END
-             ) AS dep(id)
-             LEFT JOIN ready_done_tasks AS done
-               ON done.dataset = candidate.dataset
-              AND done.project_id IS NOT DISTINCT FROM candidate.project_id
-              AND done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
-             WHERE candidate.type = 'task'
-               AND candidate.workspace_id = ?
-               AND candidate.content->>'kind' = 'task'
-               AND candidate.content->>'lifecycle_status' IN ('open', 'blocked')
-               AND done.normalized_id IS NULL
-             """,
-             ^workspace_uuid
-           ),
+      from(
+        u in fragment(
+          """
+          SELECT DISTINCT candidate.id
+          FROM documents AS candidate
+          CROSS JOIN LATERAL jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(candidate.content->'dependencies') = 'array'
+                 THEN candidate.content->'dependencies'
+                 ELSE '[]'::jsonb END
+          ) AS dep(id)
+          LEFT JOIN ready_done_tasks AS done
+            ON done.dataset = candidate.dataset
+           AND done.project_id IS NOT DISTINCT FROM candidate.project_id
+           AND done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
+          WHERE candidate.type = 'task'
+            AND candidate.workspace_id = ?
+            AND candidate.content->>'kind' = 'task'
+            AND candidate.content->>'lifecycle_status' IN ('open', 'blocked')
+            AND done.normalized_id IS NULL
+          """,
+          ^workspace_uuid
+        ),
         select: %{id: field(u, :id)}
       )
 
@@ -117,10 +122,11 @@ defmodule Barkpark.Tasks.Queue do
         # (2) content.dependencies gate: every doc_id in the (jsonb array)
         # `content.dependencies` must resolve to a same-scope task that is
         # `done`. `drafts.` is stripped on both sides so a dep pointing at either
-        # twin matches. A dep with NO matching done task — including a dangling
-        # id that resolves to nothing — leaves the inner NOT EXISTS true, so the
-        # task is excluded (fail CLOSED). A non-array/absent `dependencies` value
-        # unnests to zero rows and never gates.
+        # twin matches. `ready_unsatisfied_tasks` expands dependencies once and
+        # hash-joins them to the materialized done set; a dep with NO match —
+        # including a dangling id — records the candidate here, so this outer
+        # anti-filter excludes it (fail CLOSED). A non-array/absent value unnests
+        # to zero rows and never gates.
         where:
           fragment(
             """
