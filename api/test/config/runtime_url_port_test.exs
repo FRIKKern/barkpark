@@ -71,7 +71,21 @@ defmodule Barkpark.Config.RuntimeUrlPortTest do
   end
 
   test "capabilities base URL follows the public scheme and host" do
-    assert capabilities_base_url(%{"PHX_SCHEME" => "https"}) ==
-             "https://guerrilla.barkpark.cloud"
+    base_url = capabilities_base_url(%{"PHX_SCHEME" => "https"})
+    previous = Application.fetch_env(:barkpark, :capabilities_base_url)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, value} -> Application.put_env(:barkpark, :capabilities_base_url, value)
+        :error -> Application.delete_env(:barkpark, :capabilities_base_url)
+      end
+    end)
+
+    Application.put_env(:barkpark, :capabilities_base_url, base_url)
+    manifest = Barkpark.Plugins.Capabilities.manifest("admin", project: false)
+
+    assert base_url == "https://guerrilla.barkpark.cloud"
+    assert get_in(manifest, ["server", "base_url"]) == base_url
+    assert Barkpark.Api.OpenApi.spec(manifest)["servers"] == [%{"url" => base_url}]
   end
 end
