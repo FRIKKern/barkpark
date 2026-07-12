@@ -26,15 +26,21 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     def chunk(%{test: test} = state, body) do
       body = IO.iodata_to_binary(body)
 
-      if String.starts_with?(body, "event: welcome") do
-        send(test, {:chunk, :welcome, self()})
-        {:ok, body, state}
-      else
-        send(test, {:chunk, :blocked, self()})
+      cond do
+        String.starts_with?(body, "event: welcome") ->
+          send(test, {:chunk, :welcome, self()})
+          {:ok, body, state}
 
-        receive do
-          {:release_chunk, from} when from == test -> {:ok, body, state}
-        end
+        String.starts_with?(body, "event: overloaded") ->
+          send(test, {:chunk, :overloaded, self()})
+          {:ok, body, state}
+
+        true ->
+          send(test, {:chunk, :blocked, self()})
+
+          receive do
+            {:release_chunk, from} when from == test -> {:ok, body, state}
+          end
       end
     end
   end
@@ -75,12 +81,12 @@ defmodule BarkparkWeb.ListenBackpressureTest do
              "without it the loop drains all #{len} into the connection heap (OOM path)"
   end
 
-  test "a fully stalled chunk sink is killed at the heap bound before its mailbox reaches N=1000" do
+  test "a blocked chunk sink keeps its mailbox bounded and terminates after overload" do
     previous = Application.get_env(:barkpark, ListenController)
 
     Application.put_env(:barkpark, ListenController,
-      mailbox_limit: 500,
-      max_heap_words: 100_000
+      mailbox_limit: 20,
+      max_heap_words: 10_000_000
     )
 
     on_exit(fn -> restore_controller_env(previous) end)
@@ -106,12 +112,22 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     send(pid, {:document_changed, event(0, %{"body" => "trigger"})})
     assert_receive {:chunk, :blocked, ^pid}
 
-    {sent, max_queue, reason} = flood_until_down(pid, monitor, 1_000)
+    for id <- 1..1_000 do
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "documents:production",
+        {:document_changed, event(id, %{"body" => "queued #{id}"})}
+      )
+    end
 
-    assert reason == :killed
-    assert sent < 1_000, "the hard heap bound must terminate before all N messages queue"
-    assert max_queue < 1_000, "the stalled connection mailbox reached the full flood"
-    refute_received :listener_returned
+    queue = await_bounded_overload(pid, 20)
+    assert queue <= 21
+
+    send(pid, {:release_chunk, self()})
+
+    assert_receive {:chunk, :overloaded, ^pid}
+    assert_receive :listener_returned
+    assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
   end
 
   test "backpressure_step continues on an empty mailbox and does NOT emit the overloaded frame" do
@@ -137,40 +153,22 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     assert String.ends_with?(frame, "\n\n")
   end
 
-  defp flood_until_down(pid, monitor, limit), do: flood_until_down(pid, monitor, limit, 0, 0)
+  defp await_bounded_overload(pid, limit, attempts \\ 10_000)
 
-  defp flood_until_down(pid, monitor, limit, sent, max_queue) when sent < limit do
-    receive do
-      {:DOWN, ^monitor, :process, ^pid, reason} ->
-        {sent, max_queue, reason}
-    after
-      0 ->
-        next = sent + 1
+  defp await_bounded_overload(_pid, _limit, 0),
+    do: flunk("event forwarder never filled the bounded listener window")
 
-        payload =
-          for i <- 1..2_000 do
-            {next, i, rem(next + i, 17), rem(next * i, 31)}
-          end
+  defp await_bounded_overload(pid, limit, attempts) do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, n} when n > limit ->
+        n
 
-        send(pid, {:document_changed, event(next, %{"payload" => payload})})
+      {:message_queue_len, _n} ->
+        :erlang.yield()
+        await_bounded_overload(pid, limit, attempts - 1)
 
-        queue =
-          case Process.info(pid, :message_queue_len) do
-            {:message_queue_len, n} -> n
-            nil -> max_queue
-          end
-
-        flood_until_down(pid, monitor, limit, next, max(max_queue, queue))
-    end
-  end
-
-  defp flood_until_down(pid, monitor, limit, limit, max_queue) do
-    send(pid, {:release_chunk, self()})
-
-    receive do
-      {:DOWN, ^monitor, :process, ^pid, reason} -> {limit, max_queue, reason}
-    after
-      1_000 -> flunk("stalled listener survived the full flood and did not terminate")
+      nil ->
+        flunk("listener terminated before the blocked chunk was released")
     end
   end
 
