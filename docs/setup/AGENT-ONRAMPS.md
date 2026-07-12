@@ -86,8 +86,13 @@ bp seed note --count 1
 bp doc ls note --perspective raw
 
 # 3. A task — a claimable, dependency-aware work item.
+# `tags` are weighted labels [{tag, strength 1–100, rationale}] — mandatory on
+# publish, and every `tag` must already be a registered tag doc (`bp doc ls tag`)
+# or the publish 422s `unknown_tag`. Strengths must be distinct; the max is the
+# main tag. `docs` and `search` below are registered examples.
 bp task create "Draft the launch note" --publish \
   --set 'priority:=1' \
+  --set 'tags:=[{"tag":"docs","strength":80,"rationale":"launch-note authoring is documentation work"},{"tag":"search","strength":40,"rationale":"the note should be findable via FTS once published"}]' \
   --set 'acceptance_criteria:=[{"criterion":"note published","met":false,"evidence":""}]'
 bp task ready
 
