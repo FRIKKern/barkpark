@@ -202,6 +202,48 @@
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
     }
+    html[data-bp-theme="charple"] body:has(.bp-paper-article),
+    html[data-bp-theme="charple"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+      --paper-bg: #f9fafe;
+      --paper-bg-deep: #ebedf5;
+      --paper-ink: #1d202a;
+      --paper-ink-soft: #50525c;
+      --paper-rule: #dcdee2;
+      --paper-accent: #3431b4;
+      --paper-accent-soft: rgba(52, 49, 180, 0.10);
+      --paper-reading-accent: #218bc4;
+    }
+    @media (prefers-color-scheme: dark) {
+      html[data-bp-theme="charple"] body:has(.bp-paper-article),
+      html[data-bp-theme="charple"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
+        --paper-bg: #08090e;
+        --paper-bg-deep: #121219;
+        --paper-ink: #dddee5;
+        --paper-ink-soft: #9e9ea7;
+        --paper-rule: rgba(221, 222, 229, 0.13);
+        --paper-accent: #6c52ff;
+        --paper-accent-soft: rgba(108, 82, 255, 0.16);
+        --paper-reading-accent: #52abff;
+        --paper-ink-faint: #6b6c72;
+        --paper-chrome-bg: #121219;
+        --paper-chrome-border: rgba(221, 222, 229, 0.13);
+        --bp-tone-info-bg: #00072c; --bp-tone-info-fg: #a0bef9;
+        --bp-tone-success-bg: #001103; --bp-tone-success-fg: #93cf9f;
+        --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #e0b67a;
+        --bp-tone-danger-bg: #210001; --bp-tone-danger-fg: #f3a79e;
+        --bp-tone-neutral-bg: #0c0c0e; --bp-tone-neutral-fg: #bdbdc0;
+      }
+    }
+    html[data-bp-theme="charple"] #bp-mailapp {
+      --mail-paper: #f8f8fc; --mail-bar: #f9fafe; --mail-rule: #dcdee2;
+      --mail-ink: #1d202a; --mail-soft: #50525c; --mail-accent: #3431b4;
+    }
+    @media (prefers-color-scheme: dark) {
+      html[data-bp-theme="charple"] #bp-mailapp {
+        --mail-paper: #121219; --mail-bar: #08090e; --mail-rule: #333439;
+        --mail-ink: #dddee5; --mail-soft: #9e9ea7; --mail-accent: #6c52ff;
+      }
+    }
     html[data-bp-theme="ember"] body:has(.bp-paper-article),
     html[data-bp-theme="ember"] body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
       --paper-bg: #fef9f7;

@@ -53,6 +53,22 @@ type ThemeChrome struct {
 // genChrome keys each theme's chrome map by id (evergreen REFERENCES GenChrome).
 var genChrome = map[string]ThemeChrome{
 	"evergreen": {Chrome: GenChrome},
+	"charple": {Chrome: map[string]lipgloss.AdaptiveColor{
+			"chrome-accent": lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#6c52ff"},
+			"chrome-dim": lipgloss.AdaptiveColor{Light: "#a7a6ab", Dark: "#6e6d73"},
+			"chrome-ink": lipgloss.AdaptiveColor{Light: "#323138", Dark: "#d7d6dc"},
+			"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#57565c", Dark: "#a1a0a6"},
+			"chrome-selection-bg": lipgloss.AdaptiveColor{Light: "#e5e4f5", Dark: "#29253d"},
+			"chrome-selection-fg": lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#8e7aff"},
+			"chrome-field-border": lipgloss.AdaptiveColor{Light: "#d2d1d6", Dark: "#a5a4aa"},
+			"chrome-toolbar-bg": lipgloss.AdaptiveColor{Light: "#f4f3f8", Dark: "#29282f"},
+			"chrome-cursor-bg": lipgloss.AdaptiveColor{Light: "#eeedf1", Dark: "#35343b"},
+			"chrome-border": lipgloss.AdaptiveColor{Light: "#dee0e5", Dark: "#131417"},
+			"chrome-border-active": lipgloss.AdaptiveColor{Light: "#406bcd", Dark: "#76a2ff"},
+			"chrome-label": lipgloss.AdaptiveColor{Light: "#67696f", Dark: "#9999a2"},
+			"chrome-primary-cta": lipgloss.AdaptiveColor{Light: "#3431b4", Dark: "#6c52ff"},
+			"chrome-on-primary": lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#ffffff"},
+	}},
 	"ember": {Chrome: map[string]lipgloss.AdaptiveColor{
 			"chrome-accent": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f7993b"},
 			"chrome-dim": lipgloss.AdaptiveColor{Light: "#aaa6a4", Dark: "#6a6561"},

@@ -91,6 +91,24 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
+      html[data-bp-theme="charple"] .bp-auth {
+        --primary: hsl(241 57% 45%);
+        --primary-fg: hsl(0 0% 100%);
+        --ring: hsl(241 57% 53%);
+        --ring-soft: hsl(241 57% 53% / 0.15);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: hsl(163 46% 17%);
+      }
+      html[data-bp-theme="charple"][data-theme="dark"] .bp-auth {
+        --primary: hsl(249 100% 66%);
+        --primary-fg: hsl(0 0% 100%);
+        --ring: hsl(249 100% 66%);
+        --ring-soft: hsl(249 100% 66% / 0.2);
+        --btn-bg: hsl(163 45% 30%);
+        --btn-fg: hsl(0 0% 100%);
+        --btn-bg-hover: hsl(163 45% 26%);
+      }
       html[data-bp-theme="ember"] .bp-auth {
         --primary: hsl(20 82% 42%);
         --primary-fg: hsl(0 0% 100%);
