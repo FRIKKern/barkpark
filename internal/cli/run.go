@@ -776,12 +776,14 @@ func quickstartCard(payload []byte) string {
 	return strings.TrimRight(env.Quickstart, "\n")
 }
 
-// emitWarnings prints a top-level {"warnings":[…]} string list to stderr for
+// emitWarnings prints a top-level {"warnings":[…]} advisory list to stderr for
 // the human output shapes (minimal/table). Shape-keyed, never verb-keyed: any
-// 2xx envelope may carry advisory strings — e.g. the tasks close endpoint
-// warns when a task is closed done with unmet acceptance_criteria (lvw-t6).
-// Advisory only: exit code and stdout payload are untouched; json/yaml
-// consumers read the field itself.
+// 2xx envelope may carry advisories — bare strings (e.g. the tasks close endpoint
+// warns when a task is closed done with unmet acceptance_criteria, lvw-t6) OR the
+// authoring wall's {code,severity,message} objects on the mutate success envelope
+// (ae-w1). Both shapes render; an object without a non-empty message is skipped
+// (malformed entries never print). Advisory only: exit code and stdout payload are
+// untouched; json/yaml consumers read the field itself.
 func emitWarnings(out *writer, payload []byte) {
 	var env struct {
 		Warnings []any `json:"warnings"`
@@ -790,8 +792,21 @@ func emitWarnings(out *writer, payload []byte) {
 		return
 	}
 	for _, w := range env.Warnings {
-		if s, ok := w.(string); ok && s != "" {
-			out.errf("warning: %s", s)
+		switch v := w.(type) {
+		case string:
+			if v != "" {
+				out.errf("warning: %s", v)
+			}
+		case map[string]any:
+			msg, _ := v["message"].(string)
+			if msg == "" {
+				continue // malformed / message-less object — stay silent
+			}
+			if code, _ := v["code"].(string); code != "" {
+				out.errf("warning[%s]: %s", code, msg)
+			} else {
+				out.errf("warning: %s", msg)
+			}
 		}
 	}
 }

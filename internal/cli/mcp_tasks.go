@@ -641,9 +641,12 @@ func mcpBoolPtr(b bool) *bool { return &b }
 // manifest verb), riding sendTaskMutations — the same raw send half `bp task
 // create` uses (tasks_create_cmd.go) — but returning an MCP result instead of
 // writing a receipt to stdout. It creates the draft, optionally publishes it, and
-// returns a compact JSON receipt {id, draft, status} as tool content. Any failure
-// sets IsError with a message that still names the created id (so a
-// created-but-publish-failed task is not silently lost).
+// returns a compact JSON receipt {id, draft, status} as tool content — plus a
+// `warnings` key when the create/publish success envelope carries the authoring
+// wall's advisories (publish response preferred, else create), so an agent sees the
+// same {code,severity,message} advice the CLI surfaces. Any failure sets IsError
+// with a message that still names the created id (so a created-but-publish-failed
+// task is not silently lost).
 func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp.CallToolResult {
 	createOp := map[string]any{"_type": "task"}
 	for k, v := range body {
@@ -662,6 +665,7 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 	}
 	bareID := strings.TrimPrefix(draftID, "drafts.")
 	docStatus := "draft"
+	warnBody := respBody // fold advisories from the last successful step (publish preferred)
 	if publish {
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
 		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
@@ -672,9 +676,31 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %s", bareID, mutateErrorMessage(pStatus, pBody)))
 		}
 		docStatus = "published"
+		warnBody = pBody
 	}
-	receipt, _ := json.Marshal(map[string]any{"id": bareID, "draft": draftID, "status": docStatus})
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(receipt)}}}
+	receipt := map[string]any{"id": bareID, "draft": draftID, "status": docStatus}
+	if warnings := warningsFrom(warnBody); len(warnings) > 0 {
+		receipt["warnings"] = warnings
+	}
+	out, _ := json.Marshal(receipt)
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(out)}}}
+}
+
+// warningsFrom extracts a non-empty top-level {"warnings":[…]} advisory list from a
+// mutate response body, mirroring firstMutationID's tolerant decode: the authoring
+// wall folds its {code,severity,message} advisories onto the mutate success envelope
+// (ae-w1), and the MCP task_create receipt would otherwise drop them on the floor.
+// Returns nil for an absent/empty/malformed list so the caller can fold it
+// conditionally — the receipt gains a `warnings` key only when there is something
+// to say.
+func warningsFrom(body []byte) []any {
+	var env struct {
+		Warnings []any `json:"warnings"`
+	}
+	if json.Unmarshal(body, &env) != nil || len(env.Warnings) == 0 {
+		return nil
+	}
+	return env.Warnings
 }
 
 // decodeMCPArgs unmarshals a tool call's raw arguments into dst. A nil/empty
