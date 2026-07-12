@@ -8,12 +8,12 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// This file is the LOCAL-ONLY surface of the bp Cloud commands — the half of
-// "one login for all your Barkparks" that needs NO control plane. Everything
-// here reads/writes the on-disk config (KnownServers via config.go) and renders
-// the SSH command an agent action WOULD run; nothing here makes a control-plane
-// HTTP call. The control-plane-backed counterparts — `bp login`, `bp go-live`,
-// and the live registry view of `bp barkparks` — are cloud-12 and land later.
+// This file owns the local-config Barkpark commands and the `bp barkparks`
+// source switch. With a saved Cloud session and no explicit --kind,
+// `bp barkparks` delegates to the control plane (bare = current team, --all =
+// every authorized team). Without a saved session, or with --kind, it reads
+// KnownServers only and makes no network call. The attach/register and agent
+// command paths below remain local-only.
 //
 // The three commands mirror the existing built-in idiom exactly:
 //   - bp barkparks            — the cloud-facing view of `bp servers` (cloud-11)
@@ -29,15 +29,11 @@ import (
 // and keep RememberServer a deterministic, dependency-free helper.
 var cloudClock = func() time.Time { return time.Now().UTC() }
 
-// runBarkparks is the `bp barkparks` built-in — the cloud-facing view of the
-// known servers. It is the LOCAL-CONFIG view (cloud-11): every Barkpark bp has
-// been told about, rendered as a clean table of name · url · kind · status.
-// Status is "unknown" until the agent / control plane reports it (cloud-10 /
-// cloud-12); here it is always read from local config, never fetched.
-//
-// Read-only, no network, no mutation — the same contract as `bp servers`, just
-// labelled and columned as Barkparks. An optional `--kind local|cloud` filter
-// reuses the servers parser.
+// runBarkparks is the `bp barkparks` source switch. With a saved Cloud session
+// and no explicit --kind, it renders the control-plane registry: bare stays
+// current-team scoped and --all spans every authorized team. Without a saved
+// session, or with `--kind local|cloud`, it renders KnownServers and makes no
+// network call. Both paths are read-only.
 func runBarkparks(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {

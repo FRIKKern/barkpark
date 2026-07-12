@@ -23,10 +23,6 @@ func (f *fakeFleetClient) ListAllBarkparks(context.Context) ([]cloudclient.Barkp
 	return f.list, f.listErr
 }
 
-func (f *fakeFleetClient) GetCredentials(_ context.Context, id string) (cloudclient.Credentials, error) {
-	return f.GetCredentialsForTeam(context.Background(), id, "")
-}
-
 func (f *fakeFleetClient) GetCredentialsForTeam(_ context.Context, id, teamID string) (cloudclient.Credentials, error) {
 	f.credTeam = teamID
 	if err, ok := f.credErrs[id]; ok {

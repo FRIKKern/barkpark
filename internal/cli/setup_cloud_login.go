@@ -32,7 +32,6 @@ import (
 // fleet-pick / no-admin-token branches are exercised without a network.
 type cloudFleetClient interface {
 	ListAllBarkparks(ctx context.Context) ([]cloudclient.Barkpark, error)
-	GetCredentials(ctx context.Context, id string) (cloudclient.Credentials, error)
 	GetCredentialsForTeam(ctx context.Context, id, teamID string) (cloudclient.Credentials, error)
 }
 

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
@@ -870,6 +871,53 @@ func TestExecuteBarkparksDefaultStaysCurrentTeam(t *testing.T) {
 	}
 	if gotAuth != "Bearer sess-abc" {
 		t.Fatalf("Execute(barkparks) auth = %q, want Bearer sess-abc", gotAuth)
+	}
+}
+
+func TestExecuteBarkparksKindStaysLocalWithCloudSession(t *testing.T) {
+	withTempConfigHome(t)
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		_, _ = io.WriteString(w, `{"barkparks":[]}`)
+	}))
+	defer srv.Close()
+
+	seedTwoBarkparks(t)
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	cfg.CloudURL = srv.URL
+	cfg.CloudToken = "sess-abc"
+	cfg.CloudTeam = "team-1"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	out, code := captureExecuteCode(t, []string{"barkparks", "--kind", "local", "-o", "json"})
+	if code != exitOK {
+		t.Fatalf("Execute(barkparks --kind local) exit = %d, want 0\n%s", code, out)
+	}
+	var payload struct {
+		Source    string `json:"source"`
+		Barkparks []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+			Kind string `json:"kind"`
+		} `json:"barkparks"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("decode local barkparks output: %v\n%s", err, out)
+	}
+	if payload.Source != "local-config" || len(payload.Barkparks) != 1 ||
+		payload.Barkparks[0].Name != "dev" || payload.Barkparks[0].URL != "http://localhost:4000" ||
+		payload.Barkparks[0].Kind != "local" {
+		t.Fatalf("explicit --kind did not preserve the local-config view: %+v", payload)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Fatalf("explicit --kind made %d control-plane request(s), want zero", got)
 	}
 }
 
