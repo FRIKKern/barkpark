@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.PlanPapers
+  alias Barkpark.Tasks
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
@@ -244,6 +245,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # Live sidebar overlay (wave 5): session_id → %{state, line}, fed by
          # every Recorder's activity broadcasts. Renders over the stored row.
          activity: %{},
+         # The hand-task surface (chat ⇄ ledger): every bp-task claim THIS
+         # session's worker (ClaudeChat.worker_id/1) currently holds, keyed by
+         # published doc id — fed live off the dataset's task-document
+         # broadcasts and hydrated from the ledger on session open. Renders as
+         # the Doing strip above the composer.
+         hand_tasks: %{},
+         # The ready-task picker: nil (closed) or the ready head as lean rows.
+         # Loaded fresh on every open — never a cached queue.
+         task_picker: nil,
          last_result: nil,
          ring: blank_ring(),
          title_source: "default",
@@ -258,6 +268,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
        |> kick_readiness_probe()
        |> refresh_sessions()
        |> subscribe_activity()
+       |> subscribe_hand_tasks()
        |> allow_upload(:attachments,
          # Charter D25: paste/drop images ride the SAME user turn as base64
          # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
@@ -399,6 +410,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
          |> append_message(:system, "Usage: /model default · haiku · sonnet · opus · fable")
          |> clear_composer()}
 
+      :task_usage ->
+        {:noreply,
+         socket
+         |> clear_persisted_draft()
+         |> append_message(
+           :system,
+           "Usage: /task <task-id> — hand a task to Claude (claim → work → stamp → close) · /task new <wish> — author + publish a task"
+         )
+         |> clear_composer()}
+
+      {:agent_prompt, prompt} ->
+        # The builtin expands into a full doctrine prompt and rides the NORMAL
+        # send path — the expansion IS the message (visible, persisted, queued
+        # like any other turn; no hidden steering).
+        handle_event("send", %{"message" => prompt}, socket)
+
       :none ->
         cond do
           text == "" and not has_attachments? ->
@@ -456,6 +483,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Cancel a staged attachment before send (the × on its chip).
   def handle_event("cancel_upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :attachments, ref)}
+  end
+
+  # Toggle the ready-task picker (hand-task surface). Open loads the ready
+  # head FRESH from the queue — the panel is a window, never a cache.
+  def handle_event("toggle-task-picker", _params, socket) do
+    case socket.assigns.task_picker do
+      nil ->
+        rows = Tasks.ready([limit: 8] ++ hand_task_scope()) |> Enum.map(&hand_ready_row/1)
+        {:noreply, assign(socket, task_picker: rows)}
+
+      _open ->
+        {:noreply, assign(socket, task_picker: nil)}
+    end
+  end
+
+  # Hand a ready task to the agent: close the picker and ride the NORMAL send
+  # path with the claim-first work prompt — the echo, queueing, persistence,
+  # and status flip all behave exactly like a typed message.
+  def handle_event("hand_task", %{"id" => id}, socket) do
+    handle_event("send", %{"message" => task_work_prompt(id)}, assign(socket, task_picker: nil))
   end
 
   # Re-check on the onboarding card (chat-task-hands, charter decision 4):
@@ -892,6 +939,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # spot-check assumption per D36b — we never scrape ids off frames).
   defp builtin_command("/plan"), do: {:set_mode, "plan"}
   defp builtin_command("/model"), do: :model_usage
+
+  # /task builtins (hand-task surface): both expand to a doctrine prompt the
+  # model works with its own bp hands — the builtin is sugar, never a second
+  # write path (chat-task-hands D1). `/task new <wish>` authors + publishes;
+  # `/task <id>` claims and works. Bare/malformed forms teach usage.
+  defp builtin_command("/task new " <> wish) do
+    case String.trim(wish) do
+      "" -> :task_usage
+      w -> {:agent_prompt, task_create_prompt(w)}
+    end
+  end
+
+  defp builtin_command("/task " <> rest) do
+    case String.trim(rest) do
+      "" -> :task_usage
+      "new" -> :task_usage
+      id -> {:agent_prompt, task_work_prompt(id)}
+    end
+  end
+
+  defp builtin_command("/task"), do: :task_usage
 
   defp builtin_command(text) when is_binary(text) do
     case String.split(text, ~r/\s+/, trim: true) do
@@ -1577,6 +1645,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
       {:noreply, socket}
     end
   end
+
+  # A task-document mutation on the dataset stream (hand-task surface): fold it
+  # into the Doing strip. Only PUBLISHED ledger rows count (claims live on the
+  # published twin; a draft-twin echo must not flap the strip). A row is OURS
+  # while this session's worker holds its claim and it is in_progress — any
+  # other shape (closed, released, reaped, re-claimed elsewhere) drops it.
+  def handle_info({:document_changed, %{type: "task"} = msg}, socket) do
+    id = msg.doc_id
+
+    if String.starts_with?(id, "drafts.") do
+      {:noreply, socket}
+    else
+      worker = ClaudeChat.worker_id(socket.assigns.store_session_id)
+      content = (msg.doc && msg.doc.content) || %{}
+      claim = content["claim"] || %{}
+
+      mine? =
+        claim["worker"] == worker and content["lifecycle_status"] == "in_progress"
+
+      hand_tasks =
+        if mine?,
+          do: Map.put(socket.assigns.hand_tasks, id, hand_task_row(msg.doc.title, content)),
+          else: Map.delete(socket.assigns.hand_tasks, id)
+
+      {:noreply, assign(socket, hand_tasks: hand_tasks)}
+    end
+  end
+
+  # Every other document type on the dataset stream is not ours to render.
+  def handle_info({:document_changed, _msg}, socket), do: {:noreply, socket}
 
   def handle_info(:turn_tick, socket) do
     if turn_active?(socket.assigns.status) do
@@ -2523,6 +2621,76 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </div>
       </div>
 
+      <%!-- The Doing strip (hand-task surface): every ledger claim this
+            session's worker holds, live off the dataset's task broadcasts —
+            title · met/total criteria · pulse now-line · id. Proof the agent
+            is ON a task, not just talking about one. --%>
+      <div :if={@hand_tasks != %{}} style="flex: none; padding: 0 16px;">
+        <div
+          :for={{task_id, t} <- Enum.take(Enum.sort(@hand_tasks), 3)}
+          class="text-xs text-dim"
+          data-role="chat-hand-task"
+          data-task-id={task_id}
+          style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px; padding: 2px 0; min-width: 0;"
+        >
+          <span aria-hidden="true" style="color: var(--primary);">⚒</span>
+          <span style="color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            {t.title}
+          </span>
+          <span :if={t.total > 0} title="acceptance criteria met">{t.met}/{t.total} ✓</span>
+          <span
+            :if={t.now not in [nil, ""]}
+            style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85;"
+            title="the claim's pulse now-line"
+          >
+            · {t.now}
+          </span>
+          <span style="opacity: 0.7; flex: none;">{task_id}</span>
+        </div>
+        <div
+          :if={map_size(@hand_tasks) > 3}
+          class="text-xs text-dim"
+          style="font-family: var(--font-mono); padding: 2px 0;"
+        >
+          +{map_size(@hand_tasks) - 3} more claims
+        </div>
+      </div>
+
+      <%!-- Ready-task picker (hand-task surface): the queue head, loaded fresh
+            on every open. Hand to Claude rides the normal send path with the
+            claim-first prompt — the ledger writes stay in the agent's hands. --%>
+      <div :if={@task_picker != nil} data-role="chat-task-picker" style="flex: none; padding: 6px 16px 0;">
+        <div style="border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;">
+          <div class="text-xs text-dim" style="font-family: var(--font-mono);">ready tasks</div>
+          <div :if={@task_picker == []} class="text-xs text-dim">
+            Nothing ready — file new work with /task new &lt;wish&gt;.
+          </div>
+          <div
+            :for={t <- @task_picker}
+            class="text-xs"
+            style="display: flex; align-items: center; gap: 8px; min-width: 0;"
+          >
+            <span :if={t.priority} class="text-dim" style="font-family: var(--font-mono); flex: none;">
+              p{t.priority}
+            </span>
+            <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              {t.title}
+            </span>
+            <span class="text-dim" style="font-family: var(--font-mono); flex: none;">{t.id}</span>
+            <button
+              type="button"
+              class="bp-iconbtn"
+              style="width: auto; padding: 0 8px; font-size: 0.72rem; font-family: var(--font-mono);"
+              phx-click="hand_task"
+              phx-value-id={t.id}
+              title="Claim-first: Claude claims it, reads the brief, stamps evidence, closes"
+            >
+              Hand to Claude
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div style="flex: none; padding: 8px 16px 12px;">
         <%!-- One-card composer: input on top, controls row below, ONE rounded
               border around both. The form and the cockpit stay SIBLINGS inside
@@ -2728,6 +2896,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <%= status_label(@status) %>
               </span>
               <.context_ring ring={@ring} size={:sm} show_cost={false} />
+              <%!-- Ready-task picker toggle (hand-task surface): opens the
+                    ready-queue head above the composer; each row hands its
+                    task to the agent as a claim-first work prompt. --%>
+              <button
+                type="button"
+                class="bp-iconbtn"
+                phx-click="toggle-task-picker"
+                aria-label="Barkpark tasks — hand ready work to Claude"
+                aria-expanded={to_string(@task_picker != nil)}
+                title="Barkpark tasks"
+              >
+                <.icon name="check-square" size={16} />
+              </button>
               <%!-- Attach an image (charter D44/D25): a <label> for the hidden
                     live_file_input (whose id is the upload ref) opens the native
                     picker with ZERO hook change. The strip / paste-drop are below. --%>
@@ -3605,6 +3786,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # A reopened session whose rehydrated rail is already fully settled gets the
     # same linger-then-clear as a live one — replay shows it, then it ages out.
     |> schedule_rail_sweep()
+    # The Doing strip follows the SESSION's worker — re-read its held claims
+    # off the ledger so a reopen shows in-flight task work immediately.
+    |> assign(task_picker: nil)
+    |> hydrate_hand_tasks()
   end
 
   # A reopened session whose persisted mode is bypassPermissions (charter D55).
@@ -3649,6 +3834,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session: nil,
       store_session_id: nil,
       session_id: nil,
+      # No session → no worker → no held claims; the picker is per-view UI.
+      hand_tasks: %{},
+      task_picker: nil,
       mode: "plan",
       # Sticky model default (charter D36d): a new chat inherits the last
       # non-default model you picked, via a DEDICATED query (list_sessions omits
@@ -4262,6 +4450,94 @@ defmodule BarkparkWeb.Studio.ChatLive do
       _ ->
         assign(socket, thinking_pulse: nil)
     end
+  end
+
+  # ── hand-task surface (chat ⇄ ledger) ────────────────────────────────────
+  # The chat-task-hands substrate already gives every session's CLI a worker id
+  # + scoped bp credentials; this surface makes that work VISIBLE and DRIVABLE:
+  # the Doing strip mirrors the worker's held claims live, the picker hands a
+  # ready task to the agent, and the /task builtins expand to doctrine prompts.
+  # One-substrate law (chat-task-hands D1): the surface only PROMPTS — every
+  # ledger write still goes through the agent's own bp/MCP hands.
+
+  # The whole dataset's document stream — the Doing strip folds task mutations
+  # out of it. Same global topic the SSE listener serves; cheap to filter.
+  defp subscribe_hand_tasks(socket) do
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{socket.assigns.dataset}")
+    end
+
+    socket
+  end
+
+  # The scope the agent's own task hands work in: the flat /v1/tasks routes
+  # resolve to the seeded defaults via AssignDefaultScope, so the surface reads
+  # the SAME board the agent writes. (Tasks.ready is fail-closed on a nil
+  # workspace — passing no scope would render the picker permanently empty.)
+  defp hand_task_scope do
+    ws = Barkpark.Tenancy.get_default_workspace()
+    proj = Barkpark.Tenancy.get_default_project()
+    [workspace_id: ws && ws.id, project_id: proj && proj.id]
+  end
+
+  # Re-read the session worker's held claims off the ledger (reopen/mount).
+  # No session → no worker → empty strip, no query.
+  defp hydrate_hand_tasks(%{assigns: %{store_session_id: nil}} = socket),
+    do: assign(socket, hand_tasks: %{})
+
+  defp hydrate_hand_tasks(socket) do
+    worker = ClaudeChat.worker_id(socket.assigns.store_session_id)
+
+    rows =
+      Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope())
+      |> Map.get(:in_progress, [])
+      |> Map.new(fn d ->
+        {String.replace_prefix(d.doc_id, "drafts.", ""), hand_task_row(d.title, d.content)}
+      end)
+
+    assign(socket, hand_tasks: rows)
+  end
+
+  defp hand_task_row(title, content) when is_map(content) do
+    criteria = List.wrap(content["acceptance_criteria"])
+
+    %{
+      title: title || content["title"] || "untitled task",
+      now: get_in(content, ["claim", "now"]),
+      met: Enum.count(criteria, fn c -> is_map(c) and c["met"] == true end),
+      total: length(criteria)
+    }
+  end
+
+  defp hand_task_row(title, _content),
+    do: %{title: title || "untitled task", now: nil, met: 0, total: 0}
+
+  # A ready-queue Document as a lean picker row.
+  defp hand_ready_row(doc) do
+    %{
+      id: String.replace_prefix(doc.doc_id, "drafts.", ""),
+      title: doc.title || doc.content["title"] || "untitled task",
+      priority: doc.content["priority"]
+    }
+  end
+
+  # The claim-first work prompt (spinner-claim-first doctrine): the agent
+  # claims to GET the brief, stamps evidence as it goes, pulses (epoch bumps —
+  # re-read it), and closes with the final epoch.
+  defp task_work_prompt(task_id) do
+    """
+    Work Barkpark task #{task_id}.
+    Claim it first as your $BARKPARK_WORKER_ID worker (`bp task claim #{task_id} "$BARKPARK_WORKER_ID"`) and read the brief + acceptance criteria off the claim response. Then do the work. Discipline: stamp each criterion with concrete evidence the moment it is met (`bp task stamp`); pulse a now-line at phase boundaries (`bp task pulse` — pulse BUMPS the claim epoch, re-read it from the response); close with the final epoch only when every criterion is stamped. If you get blocked, stamp `--miss` with an honest note and tell me what you need.
+    """
+  end
+
+  # The authoring prompt: the agent writes a rubric-grade task and satisfies
+  # the publish wall (weighted registered tags) itself.
+  defp task_create_prompt(wish) do
+    """
+    Author and publish a Barkpark task for this wish: #{wish}
+    Meet the authoring rubric: a crisp title; a description carrying the WHY and the shape of done; acceptance_criteria as {criterion, met: false, evidence: ""} entries; a priority (0 = highest); and 1-12 weighted tags picked from the REGISTERED tag registry ({tag, strength, rationale} — list the registered tags first). Create it with `bp task create … --publish`; if the publish wall rejects it, fix exactly what it names and republish. Report the task id once it is live.
+    """
   end
 
   defp blank_pulse, do: %{tokens: 0, text: "", word: Enum.random(@spinner_words)}
@@ -5421,6 +5697,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
       "name" => "/model",
       "description" => "Switch the model for this session",
       "argumentHint" => "default | haiku | sonnet | opus | fable",
+      "builtin" => true
+    },
+    %{
+      "name" => "/task",
+      "description" => "Hand a Barkpark task to Claude — or author a new one",
+      "argumentHint" => "<task-id> | new <wish>",
       "builtin" => true
     }
   ]
