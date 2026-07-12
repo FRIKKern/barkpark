@@ -54,6 +54,8 @@ defmodule Barkpark.Plugins.Tickets do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
 
+  @tickets_active_when ~r{^(?:/w/[^/]+/p/[^/]+)?/studio/tickets(?:/|$)}
+
   # Installed but OFF by default — surfaced under the "Plugins" node only when
   # an admin enables it for the workspace.
   @impl Barkpark.Plugin
@@ -212,7 +214,7 @@ defmodule Barkpark.Plugins.Tickets do
         path: "/studio/tickets",
         icon: "ticket",
         order: 36,
-        active_when: ~r{^(?:/w/[^/]+/p/[^/]+)?/studio/tickets(?:/|$)}
+        active_when: @tickets_active_when
       }
     ]
   end
