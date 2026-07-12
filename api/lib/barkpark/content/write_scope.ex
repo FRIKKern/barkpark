@@ -57,7 +57,14 @@ defmodule Barkpark.Content.WriteScope do
   # write, and the changeset leaves an existing row's dataset_id untouched.
   # Scope-id keys a client must never choose — dropped (string AND atom form)
   # before the scope is resolved from server-authoritative opts / Default.
-  @client_scope_keys ["workspace_id", "project_id", "dataset_id", :workspace_id, :project_id, :dataset_id]
+  @client_scope_keys [
+    "workspace_id",
+    "project_id",
+    "dataset_id",
+    :workspace_id,
+    :project_id,
+    :dataset_id
+  ]
 
   def put_scope_attrs(attrs, opts) do
     # Scope is SERVER-AUTHORITATIVE. Strip any client-supplied scope-id keys

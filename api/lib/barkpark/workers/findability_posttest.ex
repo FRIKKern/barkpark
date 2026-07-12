@@ -257,7 +257,9 @@ defmodule Barkpark.Workers.FindabilityPosttest do
   # ProjectorWorker). `nil` (the production default) → the real facade module.
   defp resolve_mod(nil, default), do: default
   defp resolve_mod(mod, _default) when is_atom(mod), do: mod
-  defp resolve_mod(mod, _default) when is_binary(mod), do: String.to_existing_atom("Elixir." <> mod)
+
+  defp resolve_mod(mod, _default) when is_binary(mod),
+    do: String.to_existing_atom("Elixir." <> mod)
 
   @doc "The telemetry event a findability miss emits — exposed for handler attach."
   def telemetry_event, do: @telemetry_event

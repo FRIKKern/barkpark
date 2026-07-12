@@ -215,8 +215,8 @@ defmodule Barkpark.Workers.FindabilityPosttestTest do
       assert log =~ "authoring.findability_miss"
       assert log =~ "fp-miss"
 
-      assert_receive {:findability_miss, [:barkpark, :authoring, :findability_miss],
-                      %{count: 1}, metadata}
+      assert_receive {:findability_miss, [:barkpark, :authoring, :findability_miss], %{count: 1},
+                      metadata}
 
       assert metadata.doc_id == "fp-miss"
       assert metadata.type == "paper"
