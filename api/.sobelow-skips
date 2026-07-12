@@ -163,3 +163,5 @@ Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controll
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:85,1FD0599
 Misc.BinToTerm: Unsafe `binary_to_term`,lib/barkpark/accounts/webauthn.ex:146,1FCB160
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/sheets/web/import_controller.ex:142,4E875F5
+XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:4130,7966598
