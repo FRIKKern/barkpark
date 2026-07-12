@@ -576,6 +576,7 @@ if config_env() == :prod do
   # genuinely HTTP-only (PHX_SCHEME=http) this stays false and the cookie is sent
   # as today; the moment TLS is fronted (PHX_SCHEME=https) it tightens.
   config :barkpark, :session_secure, scheme == "https"
+  config :barkpark, :capabilities_base_url, "#{scheme}://#{host}"
 
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 

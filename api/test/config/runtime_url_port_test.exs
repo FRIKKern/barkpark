@@ -44,6 +44,14 @@ defmodule Barkpark.Config.RuntimeUrlPortTest do
     |> get_in([:barkpark, BarkparkWeb.Endpoint, :url])
   end
 
+  defp capabilities_base_url(env) do
+    Enum.each(env, fn {k, v} -> System.put_env(k, v) end)
+
+    @runtime_exs
+    |> Config.Reader.read!(env: :prod)
+    |> get_in([:barkpark, :capabilities_base_url])
+  end
+
   test "https + internal PORT 4001 → public url port 443 (no :4001 leak)" do
     url = url_config(%{"PHX_SCHEME" => "https", "PORT" => "4001"})
     assert url[:port] == 443
@@ -60,5 +68,10 @@ defmodule Barkpark.Config.RuntimeUrlPortTest do
   test "PHX_PORT overrides for a genuinely nonstandard public port" do
     url = url_config(%{"PHX_SCHEME" => "https", "PHX_PORT" => "8443", "PORT" => "4000"})
     assert url[:port] == 8443
+  end
+
+  test "capabilities base URL follows the public scheme and host" do
+    assert capabilities_base_url(%{"PHX_SCHEME" => "https"}) ==
+             "https://guerrilla.barkpark.cloud"
   end
 end
