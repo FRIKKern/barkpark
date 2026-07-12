@@ -523,6 +523,134 @@ func TestWebhookCreateSendsURL(t *testing.T) {
 	}
 }
 
+// editEnvelope is a canonical edit success used by the edit-verb tests.
+const editEnvelope = `{"ok":true,"resource":"webhook","data":{"webhook":{"id":"wh_1","name":"renamed","url":"https://new.test/hook","active":true}}}`
+
+// TestWebhookEditPartialBody proves the partial-update contract: each flag alone
+// PUTs ONLY that key, combined flags PUT exactly the passed set (and nothing
+// else), and events/types split on commas.
+func TestWebhookEditPartialBody(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want map[string]any
+	}{
+		{"name only", []string{"--name", "renamed"}, map[string]any{"name": "renamed"}},
+		{"url only", []string{"--url", "https://new.test/hook"}, map[string]any{"url": "https://new.test/hook"}},
+		{"events only", []string{"--events", "create,update"}, map[string]any{"events": []any{"create", "update"}}},
+		{"types only", []string{"--types", "post,page"}, map[string]any{"types": []any{"post", "page"}}},
+		{"combined", []string{"--name", "renamed", "--url", "https://new.test/hook", "--events", "publish"},
+			map[string]any{"name": "renamed", "url": "https://new.test/hook", "events": []any{"publish"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "PUT" || !strings.HasSuffix(r.URL.Path, "/webhooks/wh_1") {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				writeEnvelope(w, 200, editEnvelope)
+			})
+			args := append([]string{"edit", testInstanceID, "wh_1"}, tc.args...)
+			_, _, code := runWebhook(t, "table", false, args...)
+			if code != exitOK {
+				t.Fatalf("exit = %d", code)
+			}
+			if rec.count("PUT", "/webhooks/wh_1") != 1 {
+				t.Fatalf("want exactly one PUT, reqs=%+v", rec.all())
+			}
+			var body map[string]any
+			if err := json.Unmarshal([]byte(rec.all()[0].body), &body); err != nil {
+				t.Fatalf("PUT body not json: %q", rec.all()[0].body)
+			}
+			if len(body) != len(tc.want) {
+				t.Fatalf("PUT body = %v, want exactly the passed keys %v", body, tc.want)
+			}
+			for k, want := range tc.want {
+				got := body[k]
+				if wantSlice, ok := want.([]any); ok {
+					gotSlice, _ := got.([]any)
+					if len(gotSlice) != len(wantSlice) {
+						t.Fatalf("body[%q] = %v, want %v", k, got, want)
+					}
+					for i := range wantSlice {
+						if gotSlice[i] != wantSlice[i] {
+							t.Fatalf("body[%q][%d] = %v, want %v", k, i, gotSlice[i], wantSlice[i])
+						}
+					}
+					continue
+				}
+				if got != want {
+					t.Fatalf("body[%q] = %v, want %v", k, got, want)
+				}
+			}
+		})
+	}
+}
+
+// TestWebhookEditNoFlags: an edit with no editable flags is a usage error that
+// resolves no instance and issues no PUT.
+func TestWebhookEditNoFlags(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("a no-flag edit must not call the proxy: %s %s", r.Method, r.URL.Path)
+	})
+	_, stderr, code := runWebhook(t, "table", false, "edit", testInstanceID, "wh_1")
+	if code != exitUsage {
+		t.Fatalf("no-flag edit exit = %d, want %d (usage)", code, exitUsage)
+	}
+	if !strings.Contains(stderr, "nothing to edit") {
+		t.Fatalf("stderr = %q, want the nothing-to-edit hint", stderr)
+	}
+	if len(rec.all()) != 0 {
+		t.Fatalf("no-flag edit hit the network: %+v", rec.all())
+	}
+}
+
+// TestWebhookEditHappyPath: a full edit reports the updated id and the `update`
+// alias routes to the same verb; -o json emits the server receipt verbatim.
+func TestWebhookEditHappyPath(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, editEnvelope)
+	})
+	stdout, _, code := runWebhook(t, "table", false, "edit", testInstanceID, "wh_1", "--name", "renamed")
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stdout, "updated webhook wh_1") {
+		t.Fatalf("stdout = %s", stdout)
+	}
+	// the `update` alias routes to the same runner.
+	if _, _, code := runWebhook(t, "table", false, "update", testInstanceID, "wh_1", "--name", "renamed"); code != exitOK {
+		t.Fatalf("update alias exit = %d", code)
+	}
+	// -o json emits the proxy envelope byte-for-byte (the contract).
+	jout, _, _ := runWebhook(t, "json", false, "edit", testInstanceID, "wh_1", "--name", "renamed")
+	if strings.TrimRight(jout, "\n") != editEnvelope {
+		t.Fatalf("json not verbatim:\n%s", jout)
+	}
+}
+
+// TestWebhookEditClearsList: an explicit empty --events PUTs an empty list (a
+// deliberate clear), not a null and not an omission.
+func TestWebhookEditClearsList(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, editEnvelope)
+	})
+	if _, _, code := runWebhook(t, "table", false, "edit", testInstanceID, "wh_1", "--events", ""); code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(rec.all()[0].body), &body); err != nil {
+		t.Fatalf("PUT body not json: %q", rec.all()[0].body)
+	}
+	ev, present := body["events"]
+	if !present {
+		t.Fatalf("an explicit --events \"\" must PUT the events key, body=%v", body)
+	}
+	if evSlice, ok := ev.([]any); !ok || len(evSlice) != 0 {
+		t.Fatalf("cleared events = %v, want an empty list []", ev)
+	}
+}
+
 // TestWebhookUsageErrors: wrong positional counts are usage errors that touch no
 // network.
 func TestWebhookUsageErrors(t *testing.T) {
@@ -534,6 +662,7 @@ func TestWebhookUsageErrors(t *testing.T) {
 		{"replay", testInstanceID, "wh_1"}, // missing event id
 		{"list", testInstanceID, "extra"},  // too many
 		{"create", testInstanceID},         // missing url
+		{"edit", testInstanceID},           // missing webhook id
 	}
 	for _, args := range cases {
 		if _, _, code := runWebhook(t, "table", false, args...); code != exitUsage {

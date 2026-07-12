@@ -694,6 +694,36 @@ export const SCENARIOS = {
       usageSummary: fleetUsageSummary,
     },
   },
+  // ── Webhooks panel (w6 / OC25 / D5) — the FIRST webhook-panel scenario ─────
+  // The instance Webhooks sub-tab: the toolbar shell (dataset + New webhook) plus
+  // a real endpoint list, each row carrying the full action bar — Edit (w6),
+  // toggle, rotate, deliveries, delete. Deep-links straight to the tab so the
+  // panel shell + list mount are observable. Click-driven edit/create modals are
+  // DOM-tested in __app.test.mjs (smoke's click() is inert).
+  "webhooks-panel": {
+    label: "Webhooks sub-tab — endpoint list with the Edit action (w6)",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/webhooks",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      webhooks: [
+        {
+          id: "wh-prod", name: "Prod indexer", url: "https://hooks.acme.com/reindex",
+          active: true, events: ["create", "publish"], types: ["post"],
+          updated_at: tMinus(3600), consecutive_failures: 0,
+        },
+        {
+          id: "wh-stale", name: "Legacy sync", url: "https://legacy.acme.com/sync",
+          active: false, events: [], types: [], updated_at: tMinus(86400),
+          consecutive_failures: 0,
+        },
+      ],
+    },
+  },
   // ── rollback/redeploy (charter D7 + D25) ──────────────────────────────────
   // The deployment history with promote actions: Redeploy on the current live
   // row, "Roll back to this" on the prior live row, nothing on the failed one.
@@ -1093,6 +1123,21 @@ export function route(name, method, path) {
   // plane that never shipped the endpoint).
   if (/^\/v1\/barkparks\/[^/]+\/usage\/history$/.test(p)) {
     return { status: 200, body: d.usageHistory || { ok: true, window_days: 14, series: {} } };
+  }
+
+  // w6 (OC25): the instance webhooks proxy. The collection GET paints the panel
+  // list; a specific-endpoint PUT (the edit modal) echoes the merged row back so
+  // a live click reconciles (smoke's click is inert, so only the GET is exercised
+  // here — the edit body/pre-fill are unit-tested). The proxy envelope nests the
+  // instance body under `data`, exactly like the real control-plane relay.
+  const whColl = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks$/);
+  if (whColl && method === "GET") {
+    return { status: 200, body: { data: { webhooks: d.webhooks || [] } } };
+  }
+  const whOne = p.match(/^\/v1\/barkparks\/[^/]+\/api\/webhooks\/([^/]+)$/);
+  if (whOne && method === "PUT") {
+    const cur = (d.webhooks || []).filter((w) => String(w.id) === whOne[1])[0] || { id: whOne[1] };
+    return { status: 200, body: { data: { webhook: Object.assign({}, cur) } } };
   }
 
   // C8: the instance event history (agent events + verify runs, newest first).
