@@ -55,6 +55,16 @@ defmodule Barkpark.Plugins.TasksQualityGateTest do
     })
   end
 
+  defp before_publish(content) do
+    Hooks.fire(:before_publish, %{
+      event: :before_publish,
+      doc: %{"type" => "task", "content" => content},
+      dataset: @dataset,
+      prev_doc: nil,
+      ctx: %{}
+    })
+  end
+
   describe "empty title → hard stop (409)" do
     test "a create with no title halts the save" do
       assert {:error, {:halted, msg}} =
@@ -164,6 +174,46 @@ defmodule Barkpark.Plugins.TasksQualityGateTest do
                  },
                  @dataset
                )
+    end
+  end
+
+  describe "PortableDoc brief publish wall" do
+    test "a task without a brief cannot publish" do
+      assert {:halt, msg} = before_publish(base_content())
+      assert msg =~ "task brief is required"
+      assert msg =~ "bp task tui"
+    end
+
+    test "a PortableDoc v1 brief using TUI block types publishes" do
+      brief = %{
+        "version" => 1,
+        "blocks" => [
+          %{"type" => "heading", "level" => 2, "text" => "Purpose"},
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Clear."}]},
+          %{"type" => "list", "items" => ["One proof"]}
+        ]
+      }
+
+      assert :ok = before_publish(base_content(%{"brief" => brief}))
+    end
+
+    test "a renderer-unknown block is rejected with the exact type" do
+      brief = %{"version" => 1, "blocks" => [%{"type" => "bullet_list", "items" => ["x"]}]}
+      assert {:halt, msg} = before_publish(base_content(%{"brief" => brief}))
+      assert msg =~ "bullet_list"
+      assert msg =~ "unsupported"
+    end
+
+    test "nested section blocks are checked too" do
+      brief = %{
+        "version" => 1,
+        "blocks" => [
+          %{"type" => "section", "blocks" => [%{"type" => "not-in-pdrender"}]}
+        ]
+      }
+
+      assert {:halt, msg} = before_publish(base_content(%{"brief" => brief}))
+      assert msg =~ "not-in-pdrender"
     end
   end
 end

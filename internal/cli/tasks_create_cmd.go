@@ -50,6 +50,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		return usageErrf(out, func() { printTaskCreateHelp(out) },
 			"a task needs a non-empty title (pass it positionally, via --title, or --set title=…)")
 	}
+	ensureTaskPortableBrief(body)
 
 	// The create mutation the server's mutate contract accepts. `_type` names the
 	// schema; the required task fields + title/description/any --set overrides ride
@@ -120,6 +121,53 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	}
 	out.outf("created task %s (%s)", bareID, status)
 	return exitOK
+}
+
+// ensureTaskPortableBrief makes a TUI-readable PortableDoc brief an invariant
+// of both ergonomic task-create paths. An explicit valid brief wins; otherwise
+// the document is composed only from facts already present in the request.
+func ensureTaskPortableBrief(body map[string]any) {
+	if brief, ok := body["brief"].(map[string]any); ok {
+		switch brief["version"] {
+		case 1, float64(1):
+			return
+		}
+	}
+	title, _ := body["title"].(string)
+	description, _ := body["description"].(string)
+	description = strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(description))
+	if description == "" {
+		description = "Complete the work described by “" + strings.TrimSpace(title) + "” and record verifiable evidence."
+	}
+	blocks := []any{
+		map[string]any{"id": "purpose", "type": "heading", "level": 2, "text": "Purpose"},
+		map[string]any{"id": "purpose-copy", "type": "paragraph", "content": []any{map[string]any{"type": "text", "value": description}}},
+		map[string]any{"id": "state", "type": "heading", "level": 2, "text": "Current state"},
+		map[string]any{"id": "state-callout", "type": "callout", "tone": "info", "title": "Ready to begin", "content": []any{map[string]any{"type": "text", "value": "This task is open and has not yet recorded completion evidence."}}},
+	}
+	if items := taskCriterionTexts(body["acceptance_criteria"]); len(items) > 0 {
+		blocks = append(blocks,
+			map[string]any{"id": "done", "type": "heading", "level": 2, "text": "Definition of done"},
+			map[string]any{"id": "done-list", "type": "list", "ordered": false, "items": items},
+		)
+	}
+	body["brief"] = map[string]any{"version": 1, "blocks": blocks}
+}
+
+func taskCriterionTexts(value any) []any {
+	list, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]any, 0, len(list))
+	for _, item := range list {
+		if row, ok := item.(map[string]any); ok {
+			if text, ok := row["criterion"].(string); ok && strings.TrimSpace(text) != "" {
+				out = append(out, strings.TrimSpace(text))
+			}
+		}
+	}
+	return out
 }
 
 // sendTaskMutations POSTs a mutate batch to /v1/data/mutate/<dataset> and

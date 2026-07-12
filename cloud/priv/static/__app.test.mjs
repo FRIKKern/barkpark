@@ -5240,3 +5240,73 @@ test("isu-w6: rollbackConflictCopy embeds NO server free-text — copy is static
   assert.doesNotMatch(copy.title + copy.body, /<script/);
   assert.doesNotMatch(copy.title + copy.body, /alert\(1\)/);
 });
+
+// ── w6 (OC25): webhook full-edit — Edit action + pre-fill + PUT-body builder ──
+
+test("webhookCardHtml carries an Edit action alongside toggle/rotate/deliveries/delete", () => {
+  const html = hooks.webhookCardHtml(
+    { id: "wh1", name: "Prod hook", url: "https://x/h", active: true, events: [] }, "abc", "production");
+  assert.match(html, /data-wh-edit>Edit</);
+  // Edit sits FIRST in the action bar (the primary configuration action).
+  assert.ok(html.indexOf("data-wh-edit") < html.indexOf("data-wh-toggle"),
+    "Edit should precede the toggle in the action bar");
+});
+
+test("webhookEventPickHtml: renders every event; only the selected ones are checked", () => {
+  const none = hooks.webhookEventPickHtml([]);
+  for (const e of ["create", "update", "publish", "unpublish", "delete", "discardDraft", "patch"]) {
+    assert.match(none, new RegExp('value="' + e + '"'));
+  }
+  assert.doesNotMatch(none, /checked/); // nothing selected → no checked boxes
+  const some = hooks.webhookEventPickHtml(["create", "publish"]);
+  assert.match(some, /value="create"\s+checked/);
+  assert.match(some, /value="publish"\s+checked/);
+  assert.doesNotMatch(some, /value="update"\s+checked/); // an unselected event stays unchecked
+});
+
+test("webhookEditFormHtml pre-fills name/url/types and checks the subscribed events (escaped)", () => {
+  const html = hooks.webhookEditFormHtml({
+    name: "Prod <hook>", url: "https://x/h?a=1&b=2", events: ["publish"], types: ["post", "page"],
+  });
+  assert.match(html, /id="wh-edit-form"/);
+  assert.match(html, /id="wh-e-name"[^>]*value="Prod &lt;hook&gt;"/); // hostile name escaped, not injected
+  assert.doesNotMatch(html, /<hook>/);
+  assert.match(html, /id="wh-e-url"[^>]*value="https:\/\/x\/h\?a=1&amp;b=2"/);
+  assert.match(html, /id="wh-e-types"[^>]*value="post, page"/); // comma-joined types
+  assert.match(html, /value="publish"\s+checked/);
+  assert.doesNotMatch(html, /value="create"\s+checked/);
+  assert.match(html, />Save changes</); // the edit CTA, distinct from create
+});
+
+test("webhookEditFormHtml on a bare row: empty fields, no checked events, no crash", () => {
+  const html = hooks.webhookEditFormHtml({ id: "wh9" });
+  assert.match(html, /id="wh-e-name"[^>]*value=""/);
+  assert.match(html, /id="wh-e-url"[^>]*value=""/);
+  assert.match(html, /id="wh-e-types"[^>]*value=""/);
+  assert.doesNotMatch(html, /checked/);
+  // Fully null-safe (no argument at all).
+  assert.match(hooks.webhookEditFormHtml(), /id="wh-edit-form"/);
+});
+
+test("webhookEditBody builds the FULL edited body — name/url trimmed, events/types arrays", () => {
+  const body = hooks.webhookEditBody({
+    name: "  Renamed  ", url: "  https://new/h  ",
+    events: ["create", "publish"], types: [" post ", "page", ""],
+  });
+  assert.equal(body.name, "Renamed");
+  assert.equal(body.url, "https://new/h"); // trimmed
+  assert.deepEqual([...body.events], ["create", "publish"]);
+  assert.deepEqual([...body.types], ["post", "page"]); // trimmed, blanks dropped
+});
+
+test("webhookEditBody: an emptied subscription sends [] (an edit can CLEAR a filter, not only add)", () => {
+  const body = hooks.webhookEditBody({ name: "n", url: "https://u", events: [], types: [] });
+  assert.deepEqual([...body.events], []);
+  assert.deepEqual([...body.types], []);
+  // Fully null-safe: a missing state yields empty arrays + empty strings, never a throw.
+  const bare = hooks.webhookEditBody();
+  assert.equal(bare.name, "");
+  assert.equal(bare.url, "");
+  assert.deepEqual([...bare.events], []);
+  assert.deepEqual([...bare.types], []);
+});

@@ -15,6 +15,7 @@ package cli
 //	list       <instance>
 //	show       <instance> <webhook-id>
 //	create     <instance> <url>            [--name <n>] [--events a,b] [--types a,b]
+//	edit       <instance> <webhook-id>     [--name] [--url] [--events] [--types] (partial PUT)
 //	rm         <instance> <webhook-id>     [--yes]      (typed-resource confirm)
 //	toggle     <instance> <webhook-id>                  (PUT {active:<flipped>})
 //	rotate     <instance> <webhook-id>                  (prints the new secret ONCE)
@@ -74,6 +75,8 @@ func runCloudWebhook(out *writer, g globals, args []string) int {
 		return runWebhookShow(out, cfg, rest)
 	case "create", "add":
 		return runWebhookCreate(out, cfg, rest)
+	case "edit", "update":
+		return runWebhookEdit(out, cfg, rest)
 	case "rm", "delete", "del":
 		return runWebhookRm(out, cfg, rest)
 	case "toggle":
@@ -177,6 +180,71 @@ func runWebhookCreate(out *writer, cfg *Config, rest []string) int {
 	}
 	wh := webhookObject(res.Data)
 	out.outf("created webhook %s", webhookCell(wh["id"]))
+	renderTable(out, res.Data)
+	return exitOK
+}
+
+// runWebhookEdit is the full-edit twin of the console's Webhooks edit panel
+// (D36: one product, two surfaces). It PUTs a PARTIAL update through the generic
+// WebhookUpdate capability — ONLY the flags the caller actually passed enter the
+// body, so an omitted field keeps its stored value (the upstream changeset
+// merges what it receives). Passing zero editable flags is a usage error, caught
+// BEFORE any instance resolve so it never touches the network. `edit` and
+// `update` are the two blessed spellings.
+func runWebhookEdit(out *writer, cfg *Config, rest []string) int {
+	const usage = "bp cloud webhook edit <instance> <webhook-id> [--name <n>] [--url <u>] [--events a,b] [--types a,b] [--dataset <ds>]"
+	a, err := parseHzArgs(rest, []string{"dataset", "name", "url", "events", "types"}, nil, usage)
+	if err != nil {
+		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	pos, ok := webhookPositionals(out, a, 2, usage)
+	if !ok {
+		return exitUsage
+	}
+	ref, whID := pos[0], pos[1]
+
+	// Partial-update body: presence of the flag KEY (not a non-empty value) decides
+	// inclusion, so `--name ""` deliberately clears a name and an omitted --name is
+	// left untouched. events/types coerce nil → [] so an explicit clear PUTs an
+	// empty list rather than a null.
+	body := map[string]any{}
+	if _, present := a.vals["name"]; present {
+		body["name"] = a.val("name")
+	}
+	if _, present := a.vals["url"]; present {
+		body["url"] = a.val("url")
+	}
+	if _, present := a.vals["events"]; present {
+		ev := a.list("events")
+		if ev == nil {
+			ev = []string{}
+		}
+		body["events"] = ev
+	}
+	if _, present := a.vals["types"]; present {
+		ty := a.list("types")
+		if ty == nil {
+			ty = []string{}
+		}
+		body["types"] = ty
+	}
+	if len(body) == 0 {
+		return useError(out, "usage", "nothing to edit — pass at least one of --name/--url/--events/--types (usage: "+usage+")", exitUsage)
+	}
+
+	id, rerr := resolveOpenBarkparkID(cfg, ref)
+	if rerr != nil {
+		return openResolveFail(out, rerr)
+	}
+	res, err := cfg.CloudClient().WebhookUpdate(cloudCtx(), id, webhookDataset(a), whID, body)
+	if err != nil {
+		return cloudFail(out, "edit webhook", err)
+	}
+	if code, done := webhookRespond(out, res, ref); done {
+		return code
+	}
+	wh := webhookObject(res.Data)
+	out.outf("updated webhook %s", webhookCell(wh["id"]))
 	renderTable(out, res.Data)
 	return exitOK
 }
@@ -744,6 +812,7 @@ VERBS
   list       <instance>                    every webhook in the dataset
   show       <instance> <webhook-id>       one webhook's full config
   create     <instance> <url>              add an endpoint  [--name --events --types]
+  edit       <instance> <webhook-id>       change config    [--name --url --events --types]
   rm         <instance> <webhook-id>       delete it + its delivery history [--yes]
   toggle     <instance> <webhook-id>       enable ⇄ disable (PUT {active})
   rotate     <instance> <webhook-id>       new signing secret (shown ONCE)
@@ -756,6 +825,8 @@ FLAGS
   -o json          emit the proxy envelope verbatim (the contract)
 
 NOTES
+  edit is a PARTIAL update — only the flags you pass are sent; omitted fields keep
+    their stored value. It needs at least one of --name/--url/--events/--types.
   rm asks you to type the webhook id (or URL) back — it drops delivery history.
   replay works even when the webhook is inactive (a manual redelivery).
   An unreachable or too-old instance degrades honestly, never hangs.`
