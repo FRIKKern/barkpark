@@ -640,9 +640,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   # Unwrap a wrapped wall reason (`{:label_spine, details}`, `{:unknown_tag,
   # payload}`, …) to the inner detail so `Shared.format_wall_details/1` renders
-  # its documentation-grade field/rule/fix line; a bare reason (or a
-  # non-wall failure such as `{:rev_mismatch, _}`) passes straight through to
-  # the generic inspect fallback.
+  # its documentation-grade field/rule/fix line. Any OTHER 2-tuple (e.g. a
+  # non-wall `{:rev_mismatch, detail}`) unwraps too — harmless: its detail
+  # lands in `format_wall_details`' generic inspect fallback. A bare
+  # (non-tuple) reason passes straight through to the same fallback.
   defp wall_reason({_code, detail}), do: detail
   defp wall_reason(other), do: other
 
