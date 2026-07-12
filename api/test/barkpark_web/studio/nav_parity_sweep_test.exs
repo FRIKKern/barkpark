@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       TABS are gated by the SAME predicates, so the env-gated-lockstep
       assertion below computes the expected presence from those exact
       predicates — oracle and component never drift.
-    * `:reflect_only` — other installed-plugin routes (tickets, pulse,
+    * `:reflect_only` — other installed-plugin routes (pulse,
       onixedit ping/staleness, github) and their scoped `/w/:ws/p/:proj`
       mirrors. Counted by the completeness guard so they can't dodge the
       contract; not mounted here (each needs its own plugin-enable +
@@ -174,15 +174,27 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: "/admin/onixedit/bokbasen",
       active: "Bokbasen"
     },
+    %{
+      route: "/studio/tickets",
+      disposition: :plugin,
+      plugin: "tickets",
+      url: "/studio/tickets",
+      active: "Tickets"
+    },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/tickets",
+      disposition: :plugin,
+      plugin: "tickets",
+      url: {:scoped, "/studio/tickets"},
+      active: "Tickets"
+    },
 
     # ── other installed-plugin routes — counted, not mounted here ──
-    %{route: "/studio/tickets", disposition: :reflect_only},
     %{route: "/studio/onixedit/ping", disposition: :reflect_only},
     %{route: "/admin/pulse", disposition: :reflect_only},
     %{route: "/admin/onixedit/staleness", disposition: :reflect_only},
     %{route: "/admin/github", disposition: :reflect_only},
     # scoped /w/:ws/p/:proj mirrors of the plugin routes
-    %{route: "/w/:workspace_slug/p/:project_slug/studio/tickets", disposition: :reflect_only},
     %{
       route: "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping",
       disposition: :reflect_only
@@ -324,7 +336,7 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       reference = labels(ref_nav)
 
       # Both representative plugin tabs must be present in the shared nav.
-      for label <- ["Projects", "Bokbasen"] do
+      for label <- ["Projects", "Bokbasen", "Tickets"] do
         assert label in reference,
                "expected #{label} tab in the plugin-enabled nav: #{inspect(reference)}"
       end
