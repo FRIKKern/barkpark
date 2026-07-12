@@ -100,7 +100,19 @@ defmodule Barkpark.Tasks.WorkDigestTest do
 
   # ─── The other work-defining fields are untouched by D5 ───────────────────
 
-  describe "title/description digests" do
+  describe "title/brief/description digests" do
+    test "a PortableDoc brief edit changes the digest and is named" do
+      original = Map.put(content(criteria()), "brief", %{"version" => 1, "blocks" => []})
+      stored = WorkDigest.field_digests(@title, original)
+
+      changed =
+        put_in(original, ["brief", "blocks"], [
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "text" => "new"}]}
+        ])
+
+      assert WorkDigest.changed_fields(stored, @title, changed) == ["brief"]
+    end
+
     test "a description edit still changes the digest and is named" do
       stored = WorkDigest.field_digests(@title, content(criteria()))
       changed = Map.put(content(criteria()), "description", "rewritten brief")

@@ -12,6 +12,7 @@ type TaskDetail struct {
 	Task // the board row (identity, lifecycle, claim, criteria, twins)
 
 	Description    string
+	BriefRaw       []byte   // content.brief — canonical PortableDoc envelope/blocks
 	Design         string   // content.design ("" when absent)
 	DesignDoc      string   // content.design_doc — a paper slug ("" when absent)
 	Papers         []string // content.papers — paper slugs

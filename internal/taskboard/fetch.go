@@ -411,6 +411,7 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d := TaskDetail{Task: t}
 	m := contentMap(w.Content)
 	d.Description = strField(m, "description")
+	d.BriefRaw = rawPortableDoc(m["brief"])
 	d.Design = strField(m, "design")
 	d.DesignDoc = strField(m, "design_doc")
 	d.Papers = strList(m["papers"])
@@ -431,6 +432,29 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
 	}
 	return d
+}
+
+// rawPortableDoc preserves a task's inline PortableDoc value for pdrender.
+// Missing, null and non-object values degrade to the legacy description.
+func rawPortableDoc(value any) []byte {
+	if value == nil {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) || raw[0] != '{' {
+		return nil
+	}
+	var env struct {
+		Blocks []json.RawMessage `json:"blocks"`
+	}
+	if json.Unmarshal(raw, &env) != nil || env.Blocks == nil {
+		return nil
+	}
+	return append([]byte(nil), raw...)
 }
 
 // decodeCriteriaEvidence extracts each acceptance_criteria entry's "evidence"

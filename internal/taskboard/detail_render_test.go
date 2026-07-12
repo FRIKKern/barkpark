@@ -34,6 +34,37 @@ func at(s string) time.Time {
 	return t
 }
 
+func TestPortableDocBriefRendersAndWinsOverLegacyDescription(t *testing.T) {
+	d := TaskDetail{
+		Task:        Task{Title: "Rich brief", Lifecycle: "open"},
+		Description: "LEGACY FALLBACK MUST NOT RENDER",
+		BriefRaw: []byte(`{"version":1,"blocks":[
+          {"id":"h","type":"heading","level":2,"text":"Why this matters"},
+          {"id":"p","type":"paragraph","content":[{"type":"text","value":"A brief humans can scan."}]}
+        ]}`),
+	}
+	lines, _ := RenderTaskDetail(d, nil, 0, 80, detailNow)
+	plain := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Why this matters") || !strings.Contains(plain, "A brief humans can scan.") {
+		t.Fatalf("PortableDoc brief did not render:\n%s", plain)
+	}
+	if strings.Contains(plain, "LEGACY FALLBACK") {
+		t.Fatalf("legacy description rendered despite a valid PortableDoc brief:\n%s", plain)
+	}
+}
+
+func TestMalformedPortableDocBriefFallsBackToDescription(t *testing.T) {
+	d := TaskDetail{
+		Task:        Task{Title: "Fallback", Lifecycle: "open"},
+		Description: "Readable legacy brief",
+		BriefRaw:    []byte(`{"version":1,"not_blocks":[]}`),
+	}
+	lines, _ := RenderTaskDetail(d, nil, 0, 80, detailNow)
+	if plain := ansi.Strip(strings.Join(lines, "\n")); !strings.Contains(plain, "Readable legacy brief") {
+		t.Fatalf("missing legacy fallback:\n%s", plain)
+	}
+}
+
 // richDetail exercises EVERY conditional section at once.
 func richDetail() (TaskDetail, []Task) {
 	d := TaskDetail{

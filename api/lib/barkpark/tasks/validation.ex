@@ -106,6 +106,7 @@ defmodule Barkpark.Tasks.Validation do
     # every existing writer (the `bp task` CLI, engine CAS updates, legacy
     # docs) green.
     |> check_optional_string(content, "description")
+    |> check_optional_map(content, "brief")
     |> check_optional_string(content, "design")
     |> check_optional_string(content, "design_doc")
     |> check_optional_string(content, "due_at")

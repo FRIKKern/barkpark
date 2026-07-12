@@ -177,6 +177,18 @@ defmodule Barkpark.Tasks.Schema do
         # ── BRIEF — what the claiming agent reads first ─────────────────
         %{"name" => "title", "title" => "Title", "type" => "string", "group" => "brief"},
 
+        # The canonical, presentation-grade task brief. PortableDoc is kept
+        # inline so every task read carries its full human/agent context; the
+        # legacy description below remains the plain-text fallback/excerpt.
+        %{
+          "name" => "brief",
+          "title" => "Portable brief",
+          "type" => "object",
+          "group" => "brief",
+          "description" =>
+            "Canonical PortableDoc document: {version: 1, blocks: [...]}. Use headings, sections, lists, code, tables, diagrams and callouts to make the work immediately understandable on every renderer. description remains the concise fallback for legacy and text-only surfaces."
+        },
+
         # The what/why. The only free-text field a task create writes
         # (`bp task create --description`) — finally declared. `text` not
         # richText: agents write markdown strings, a textarea round-trips
@@ -188,7 +200,7 @@ defmodule Barkpark.Tasks.Schema do
           "rows" => 6,
           "group" => "brief",
           "description" =>
-            "What this task is and why it exists. Markdown. Written at create time; the claiming agent reads this first."
+            "Concise plain-text/Markdown fallback and search excerpt. Put the presentation-grade brief in brief as PortableDoc; text-only clients read this field."
         },
 
         # Approach sketch inline; the FULL design doc travels as design_doc.

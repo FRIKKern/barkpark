@@ -164,8 +164,12 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 		b.lines = append(b.lines, timelineLines(segs, width)...)
 	}
 
-	// (5) Description / Design — real typography via mdlite → pdrender.
-	if prose := proseLines(d.Description, width); len(prose) > 0 {
+	// (5) Canonical PortableDoc brief, with the legacy Markdown description as
+	// a compatibility fallback. Both paths converge on the paper renderer.
+	if prose := portableDocLines(d.BriefRaw, width); len(prose) > 0 {
+		b.blank()
+		b.lines = append(b.lines, prose...)
+	} else if prose := proseLines(d.Description, width); len(prose) > 0 {
 		b.blank()
 		b.lines = append(b.lines, prose...)
 	}
@@ -387,6 +391,25 @@ func proseLines(src string, width int) []string {
 	for _, ln := range strings.Split(doc, "\n") {
 		// JoinVertical pads short lines to the block width; trim the dead air
 		// so goldens (and the terminal) never carry trailing spaces.
+		out = append(out, strings.TrimRight(pad+ln, " "))
+	}
+	return out
+}
+
+func portableDocLines(raw []byte, width int) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	blocks, err := pdrender.Decode(raw)
+	if err != nil || len(blocks) == 0 {
+		return nil
+	}
+	doc := detailRegistry.RenderDoc(blocks, pdrender.RenderCtx{
+		Width: measure(width), Profile: detailProfile,
+	})
+	pad := strings.Repeat(" ", proseIndent)
+	out := make([]string, 0, strings.Count(doc, "\n")+1)
+	for _, ln := range strings.Split(doc, "\n") {
 		out = append(out, strings.TrimRight(pad+ln, " "))
 	}
 	return out

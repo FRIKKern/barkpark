@@ -235,7 +235,7 @@ defmodule Barkpark.Tasks.Claim do
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
     # Work digest over the task's work-defining fields AS READ in this claim
-    # txn (title + content.description + content.acceptance_criteria). Stamped
+    # txn (title + content.brief + content.description + content.acceptance_criteria). Stamped
     # so close/3 can refuse a silent close if the brief was edited under the
     # claim — see Barkpark.Tasks.WorkDigest. Both claim paths land here, so both
     # get the stamp. The per-field companion map is what lets close name WHICH
