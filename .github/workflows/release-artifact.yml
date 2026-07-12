@@ -54,6 +54,7 @@ jobs:
           # Create the release (or upload into it if a re-run already made it).
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
+              --latest=false \
               --title "build $SHA" \
               --notes "Precompiled api/_build/prod for $SHA (elixir/otp pinned via .tool-versions). Consumed by scripts/fetch-prebuilt.sh." \
               artifact/api-build.tar.zst artifact/api-build.tar.zst.sha256 artifact/stamp.json

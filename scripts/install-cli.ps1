@@ -30,7 +30,21 @@ if ($env:BARKPARK_CLI_RELEASE_BASE) {
 } elseif ($env:BARKPARK_CLI_VERSION) {
   $releaseBase = "$RepoUrl/releases/download/cli-v$($env:BARKPARK_CLI_VERSION)"
 } else {
+  # Resolve the newest cli-v* release via the GitHub API instead of trusting
+  # releases/latest: the repo also publishes build-<sha> server-artifact
+  # releases (no bp assets), and one of those holding "latest" 404s every
+  # unpinned install. The [0-9.]+ pattern skips prereleases (cli-v*-rc.*),
+  # matching the old releases/latest rule.
   $releaseBase = "$RepoUrl/releases/latest/download"
+  try {
+    $apiUrl = 'https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30'
+    $releases = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
+    $cliTag = ($releases | Where-Object { $_.tag_name -match '^cli-v[0-9.]+$' } |
+               Select-Object -First 1).tag_name
+    if ($cliTag) { $releaseBase = "$RepoUrl/releases/download/$cliTag" }
+  } catch {
+    Note "GitHub API unreachable; falling back to releases/latest"
+  }
 }
 $releaseBase = $releaseBase.TrimEnd('/')
 
