@@ -79,6 +79,44 @@ func TestAreaLintFindings(t *testing.T) {
 	}
 }
 
+func TestRenderCompletenessLint(t *testing.T) {
+	snap := taskboard.Snapshot{Tasks: []taskboard.Task{{
+		DocID: "drafts.thin-task", Title: "Thin task",
+		Completeness: taskboard.Completeness{
+			Score: 3, Total: 7, Gaps: []string{"criteria", "deps", "paper", "placement"},
+		},
+	}}}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.color = false
+	if code := renderCompletenessLint(w, snap, "thin-task"); code != exitOK {
+		t.Fatalf("table exit = %d, want %d", code, exitOK)
+	}
+	for _, want := range []string{"COMPLETENESS · thin-task · 3/7", "gaps: criteria, deps, paper, placement"} {
+		if !strings.Contains(so.String(), want) {
+			t.Errorf("table missing %q\n%s", want, so.String())
+		}
+	}
+
+	so.Reset()
+	w.output = "json"
+	if code := renderCompletenessLint(w, snap, "drafts.thin-task"); code != exitOK {
+		t.Fatalf("json exit = %d, want %d", code, exitOK)
+	}
+	var payload struct {
+		Score int      `json:"score"`
+		Total int      `json:"total"`
+		Gaps  []string `json:"gaps"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &payload); err != nil {
+		t.Fatalf("decode JSON: %v\n%s", err, so.String())
+	}
+	if payload.Score != 3 || payload.Total != 7 || len(payload.Gaps) != 4 {
+		t.Fatalf("JSON payload = %+v", payload)
+	}
+}
+
 // TestAreaLintAdvisoryExit — the CRITICAL guarantee: both render paths return
 // exitOK even when findings EXIST. The nudge is never an error.
 func TestAreaLintAdvisoryExit(t *testing.T) {

@@ -17,7 +17,6 @@ package cli
 // the same area derivation (taskboard.AreaLintOf), so it can never drift.
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -357,5 +356,3 @@ func printTaskLintHelp(out *writer) {
 	out.outf("See also: docs/contracts/dispatch-areas.md (the area: vocabulary),")
 	out.outf("`bp task frontier` (the interference model this metadata feeds).")
 }
-
-var _ = fmt.Sprintf
