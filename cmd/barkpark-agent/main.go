@@ -83,9 +83,9 @@ func run(args []string) int {
 			// Request stats ride the SAME base+token seam as the health gate: the
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
-			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
-			HealthBaseURL: *healthURL,
-			HealthToken:   *healthTok,
+			ReqStatsProbe:  agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
+			HealthBaseURL:  *healthURL,
+			HealthToken:    *healthTok,
 			HealthGateOpts: agentHealthGateOpts(*healthURL, *healthTok),
 		},
 	}
