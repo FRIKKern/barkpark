@@ -27,10 +27,15 @@ import (
 //   - Content is a forward-compat slot for a nested "content" envelope
 //     (content.blocks). The current API never populates it; PaperBlocks prefers
 //     top-level Blocks and falls back to content.blocks if a future shape uses it.
+//   - Body ({"blocks":[…]}) and BodyHTML (pre-rendered HTML) are the two
+//     alternate paper shapes live on guerrilla: some papers project their block
+//     tree under "body", others carry only "body_html". PaperBlocks falls back
+//     through body.blocks; BodyHTML is the render source when no block tree exists.
 //
-// All four block-related additions use json.RawMessage / omitempty, so an
-// ordinary document (no _type/blocks/content keys, or a non-paper type) decodes
-// exactly as before — the string-flat path is untouched.
+// All block-related additions use json.RawMessage/omitempty (BodyHTML is a
+// string with omitempty), so an ordinary document (no _type/blocks/content/
+// body/body_html keys, or a non-paper type) decodes exactly as before — the
+// string-flat path is untouched.
 type Doc struct {
 	ID        string            `json:"id"`
 	Type      string            `json:"_type,omitempty"`
@@ -45,6 +50,16 @@ type Doc struct {
 	// Content is the forward-compat nested envelope ({"blocks":[…]}). Unused by
 	// the current API; PaperBlocks falls back to it when top-level Blocks is empty.
 	Content json.RawMessage `json:"content,omitempty"`
+	// Body is a second nested envelope shape ({"blocks":[…]}) some papers use
+	// instead of top-level "blocks" (e.g. block-editor docs projected under
+	// "body" — verified against enterprise-ready-auth-wave-2026-07-11, whose 58
+	// blocks live at body.blocks). PaperBlocks falls back to it after Content.
+	Body json.RawMessage `json:"body,omitempty"`
+	// BodyHTML is the pre-rendered HTML some papers carry INSTEAD of a block tree
+	// (e.g. soc2-controls-mapping, a 7.7 KB body_html with no blocks). It is the
+	// last-resort render source: a paper with body_html but no blocks is NOT
+	// empty. Callers strip it to plain text when no block tree is present.
+	BodyHTML string `json:"body_html,omitempty"`
 	// Extra holds every top-level key of the decoded envelope, raw. The v1
 	// envelope flattens a document's content fields to the top level (verified
 	// against /v1/data/query — e.g. a task's "lifecycle_status" / "priority"
@@ -82,6 +97,7 @@ var envelopeMetaKeys = map[string]bool{
 	"_id": true, "_type": true, "_rev": true, "_draft": true,
 	"_publishedId": true, "_createdAt": true, "_updatedAt": true,
 	"title": true, "blocks": true, "content": true,
+	"body": true, "body_html": true,
 }
 
 // normalizeEnvelope maps the v1 flat envelope onto the legacy-shaped typed
@@ -200,25 +216,58 @@ func (d Doc) ClaimEpoch() (int, bool) {
 }
 
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,
-// preferring the top-level "blocks" the live API emits and falling back to a
-// nested "content":{"blocks":[…]} envelope if one is ever present. It returns
-// nil when the document carries no block tree (every non-paper doc), so callers
-// can branch on "is this a paper with renderable content?" off a single nil check.
+// preferring the top-level "blocks" the live API emits and falling back through
+// a nested "content":{"blocks":[…]} envelope and then a "body":{"blocks":[…]}
+// envelope (the two alternate paper shapes on guerrilla). It returns nil when
+// the document carries no block tree (every non-paper doc, and body_html-only
+// papers — see Doc.BodyHTML for the last-resort render source), so callers can
+// branch on "is this a paper with renderable blocks?" off a single nil check.
 func (d Doc) PaperBlocks() json.RawMessage {
-	if len(d.Blocks) > 0 {
-		return d.Blocks
+	// Each candidate is checked for a NON-EMPTY block array so an empty "blocks":[]
+	// at one level falls through to the next source (and ultimately to body_html)
+	// rather than short-circuiting into a blank render.
+	if blocks := blocksFromEnvelope(d.Blocks); blocks != nil {
+		return blocks
 	}
-	if len(d.Content) > 0 {
-		var env struct {
-			Blocks json.RawMessage `json:"blocks"`
+	if blocks := blocksFromEnvelope(d.Content); blocks != nil {
+		return blocks
+	}
+	// Some papers project their block tree under "body" ({"blocks":[…]}) rather
+	// than top-level "blocks" — e.g. enterprise-ready-auth-wave-2026-07-11, whose
+	// 58 blocks live at body.blocks. Mirror the content-envelope fallback so those
+	// papers render instead of reporting "no renderable blocks".
+	if blocks := blocksFromEnvelope(d.Body); blocks != nil {
+		return blocks
+	}
+	return nil
+}
+
+// blocksFromEnvelope pulls a block tree out of a RawMessage, accepting either a
+// bare block array ([…]) or the object envelope form ({"blocks":[…]}). It
+// returns nil unless the resolved array carries at least one element, so an
+// empty array (whichever shape) is treated as "no blocks" and the caller can
+// fall through to the next source.
+func blocksFromEnvelope(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	// A bare block array (top-level "blocks", or a content/body value that is
+	// itself the array).
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err == nil {
+		if len(arr) > 0 {
+			return raw
 		}
-		if err := json.Unmarshal(d.Content, &env); err == nil && len(env.Blocks) > 0 {
+		return nil
+	}
+	// The object envelope {"blocks":[…]}.
+	var env struct {
+		Blocks json.RawMessage `json:"blocks"`
+	}
+	if err := json.Unmarshal(raw, &env); err == nil && len(env.Blocks) > 0 {
+		var inner []json.RawMessage
+		if json.Unmarshal(env.Blocks, &inner) == nil && len(inner) > 0 {
 			return env.Blocks
-		}
-		// A bare content array (no envelope) is also acceptable.
-		var arr []json.RawMessage
-		if err := json.Unmarshal(d.Content, &arr); err == nil && len(arr) > 0 {
-			return d.Content
 		}
 	}
 	return nil
