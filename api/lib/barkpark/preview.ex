@@ -287,7 +287,7 @@ defmodule Barkpark.Preview do
       "published_time" =>
         first_string(content, ["published_time", "publishedAt", "published_at"]),
       "authors" => string_list(content, ["authors", "author"]),
-      "tags" => string_list(content, ["tags"]),
+      "tags" => paper_tags(content),
       "section" => first_string(content, ["section"])
     })
   end
@@ -338,6 +338,26 @@ defmodule Barkpark.Preview do
   defp free?(_), do: true
 
   defp first_string(content, keys), do: Enum.find_value(keys, &blank_to_nil(Map.get(content, &1)))
+
+  defp paper_tags(content) do
+    case Map.get(content, "tags") do
+      [_ | _] = tags ->
+        tags
+        |> Enum.map(fn
+          %{"tag" => tag} when is_binary(tag) -> tag
+          tag when is_binary(tag) -> tag
+          _ -> nil
+        end)
+        |> Enum.reject(&is_nil/1)
+        |> presence()
+
+      tag when is_binary(tag) ->
+        tag |> blank_to_nil() |> List.wrap() |> presence()
+
+      _ ->
+        nil
+    end
+  end
 
   defp string_list(content, keys) do
     Enum.find_value(keys, fn key ->
