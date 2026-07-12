@@ -29,6 +29,12 @@ defmodule BarkparkWeb.StatusController do
 
   # ── Public ────────────────────────────────────────────────────────────────────
 
+  # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: `page_html/0`
+  # is a server-generated status page. Its only user-influenced values are the
+  # admin-authored incident fields (title/component/body), each run through
+  # `esc/1` (`Phoenix.HTML.html_escape`) before interpolation; health/status
+  # tones come from server probes + `TokensGen`. No unescaped request data.
+  # sobelow_skip ["XSS.SendResp"]
   def index(conn, _params) do
     conn
     |> put_resp_content_type("text/html")

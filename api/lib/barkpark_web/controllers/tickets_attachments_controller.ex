@@ -206,6 +206,17 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   # with the (sanitized) original name so images stay viewable in Studio. Names
   # that don't survive the ASCII-safe check are served without one rather than
   # risking header games.
+  #
+  # @sobelow_skip — both findings on this function are accepted false-positives:
+  #   * Traversal.SendFile (send_file/3): `file` is resolved by
+  #     `Attachments.linked_asset/4`, which only returns a blob STAMPED to the
+  #     ticket the presented key owns; its `.path` is a server-generated
+  #     `uploads/YYYY/MM/slug-rand.ext` (`Media.upload/3` → `unique_filename/1`
+  #     strips directory parts). No request-controlled path reaches `send_file`.
+  #   * XSS.ContentType (put_resp_content_type/2): pinned through
+  #     `MediaFile.serve_content_type/1` + `nosniff` + an `attachment` disposition
+  #     for dangerous types — an outsider-uploaded text/html cannot execute.
+  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
   defp stream_file(conn, file) do
     full = Media.file_path(file.path)
     mime = file.mime_type || MIME.from_path(full)
@@ -238,6 +249,12 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   # Read the multipart temp file, refusing an oversize blob WITHOUT reading it
   # into memory first (stat-then-read).
+  #
+  # @sobelow_skip — Traversal.FileModule (File.read/1) is a false-positive: `path`
+  # is the `%Plug.Upload{}.path` that Plug.Parsers created (a random temp file
+  # under the multipart upload dir), NOT any client-supplied name. The attacker
+  # controls the file BYTES and the separate `.filename` field, never this path.
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_upload(%Plug.Upload{path: path}) do
     case File.stat(path) do
       {:ok, %{size: size}} when size > 0 ->
