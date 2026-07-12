@@ -220,6 +220,9 @@ func detailMetaLine(d TaskDetail, width int, now time.Time) string {
 	if p := priorityToken(d.Priority); p != "" {
 		segs = append(segs, p)
 	}
+	if badge := completenessBadge(d.Completeness); badge != "" {
+		segs = append(segs, badge)
+	}
 	if d.Kind != "" {
 		segs = append(segs, d.Kind)
 	}

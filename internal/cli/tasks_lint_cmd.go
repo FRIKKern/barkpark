@@ -17,6 +17,7 @@ package cli
 // the same area derivation (taskboard.AreaLintOf), so it can never drift.
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -34,7 +35,9 @@ type areaLintFinding struct {
 	Suggested string
 }
 
-// runTaskLint handles `bp task lint [-o table|json|yaml]`. Advisory: it returns
+// runTaskLint handles `bp task lint [<id>] [-o table|json|yaml]`. With an id it
+// reports the canonical seven-field completeness read; without one it preserves
+// the global area/files metadata nudge. Advisory: it returns
 // exitOK whether or not it finds area-less tasks — the whole point is a nudge,
 // never an error. Only an operational failure (fetch) yields a non-OK code.
 func runTaskLint(out *writer, g globals, ctx manifest.Context, tail []string) int {
@@ -42,9 +45,9 @@ func runTaskLint(out *writer, g globals, ctx manifest.Context, tail []string) in
 		printTaskLintHelp(out)
 		return exitOK
 	}
-	if len(tail) > 0 {
+	if len(tail) > 1 {
 		return usageErrf(out, func() { printTaskLintHelp(out) },
-			"unknown flag %q (lint accepts only -o table|json|yaml)", tail[0])
+			"expected at most one task id")
 	}
 
 	client := apiclient.New(apiclient.Config{
@@ -61,6 +64,9 @@ func runTaskLint(out *writer, g globals, ctx manifest.Context, tail []string) in
 		out.userErr("lint: %v", err)
 		return exitGeneric
 	}
+	if len(tail) == 1 {
+		return renderCompletenessLint(out, snap, tail[0])
+	}
 
 	findings, readyLeaves := areaLintFindings(snap)
 	filesFindings, _ := filesLintFindings(snap) // same ready-leaf pool; denominator matches
@@ -72,6 +78,37 @@ func runTaskLint(out *writer, g globals, ctx manifest.Context, tail []string) in
 		return code
 	}
 	return renderFilesLintTable(out, filesFindings, readyLeaves)
+}
+
+func renderCompletenessLint(out *writer, snap taskboard.Snapshot, id string) int {
+	want := taskboard.BareID(id)
+	for _, t := range snap.Tasks {
+		if taskboard.BareID(t.DocID) != want {
+			continue
+		}
+		c := t.Completeness
+		if out.machineOut() {
+			payload := map[string]any{
+				"ok": true, "advisory": true, "id": want, "title": t.Title,
+				"score": c.Score, "total": c.Total, "gaps": c.Gaps,
+			}
+			if out.output == "yaml" {
+				out.renderYAML(payload)
+			} else {
+				out.renderJSON(payload)
+			}
+			return exitOK
+		}
+		out.outf("COMPLETENESS · %s · %d/%d", want, c.Score, c.Total)
+		if len(c.Gaps) == 0 {
+			out.outf("gaps: none")
+		} else {
+			out.outf("gaps: %s", strings.Join(c.Gaps, ", "))
+		}
+		return exitOK
+	}
+	out.userErr("lint: task %q not found", id)
+	return exitGeneric
 }
 
 // areaLintFindings scans a snapshot for WORKABLE LEAVES carrying no authored
@@ -295,7 +332,10 @@ func emitLintJSON(out *writer, area []areaLintFinding, files []filesLintFinding,
 }
 
 func printTaskLintHelp(out *writer) {
-	out.outf("usage: bp task lint [-o table|json|yaml]")
+	out.outf("usage: bp task lint [<id>] [-o table|json|yaml]")
+	out.outf("")
+	out.outf("With <id>, reports the task's 0-7 authoring completeness score and named")
+	out.outf("gaps: title, description, criteria, placement, priority, deps, paper.")
 	out.outf("")
 	out.outf("Advisory metadata NUDGE: every workable LEAF task (ready, no children)")
 	out.outf("that carries NO authored area: label — and, separately, no files: label.")
@@ -317,3 +357,5 @@ func printTaskLintHelp(out *writer) {
 	out.outf("See also: docs/contracts/dispatch-areas.md (the area: vocabulary),")
 	out.outf("`bp task frontier` (the interference model this metadata feeds).")
 }
+
+var _ = fmt.Sprintf

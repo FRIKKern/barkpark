@@ -458,6 +458,13 @@ func blockerCause(t Task) string { return "blocked" }
 // resolved age. frame drives the ladder's live-pulse spinner rung (0 at rest).
 func richRowMeta(t Task, now time.Time, frame int) (drop []metaToken, sticky metaToken) {
 	terminal := isTerminal(t.Lifecycle)
+	if badge := completenessBadge(t.Completeness); badge != "" {
+		style := dimStyle
+		if t.Completeness.Score < t.Completeness.Total {
+			style = warnStyle
+		}
+		drop = append(drop, metaToken{plain: badge, styled: style.Render(badge)})
+	}
 	if !terminal {
 		if lbl := priorityLabel(t.Priority); lbl != "" {
 			drop = append(drop, metaToken{plain: lbl, styled: priorityStyle(t.Priority).Render(lbl)})

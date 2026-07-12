@@ -27,6 +27,7 @@ type Task struct {
 	// text so len(CriteriaItems) always equals Criteria.Total when both exist.
 	// Empty when the task has no criteria.
 	CriteriaItems   []CriterionItem
+	Completeness    Completeness
 	DependencyCount int
 	DependentCount  int
 	InsertedAt      time.Time

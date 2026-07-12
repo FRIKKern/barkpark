@@ -281,6 +281,20 @@ func (w taskWire) toTask() Task {
 		t.Criteria = &Criteria{Met: w.Criteria.Met, Total: w.Criteria.Total}
 	}
 	t.CriteriaItems = decodeAcceptanceCriteria(w.Content)
+	m := contentMap(w.Content)
+	papers := strList(m["papers"])
+	if len(papers) == 0 {
+		papers = strList(rawList(w.Papers))
+	}
+	t.Completeness = ScoreCompleteness(CompletenessInput{
+		Title:           t.Title,
+		Description:     strField(m, "description"),
+		HasCriteria:     len(t.CriteriaItems) > 0,
+		Placement:       t.ParentID,
+		Priority:        t.Priority,
+		HasDependencies: t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0,
+		HasPaper:        strField(m, "design_doc") != "" || len(papers) > 0,
+	})
 	return t
 }
 
