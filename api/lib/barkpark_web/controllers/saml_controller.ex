@@ -93,6 +93,13 @@ defmodule BarkparkWeb.SamlController do
   auto-submit LogoutResponse form is returned (the browser posts it back to the
   IdP, completing the front channel).
   """
+  # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: the body is
+  # `Saml.logout_response_html/2`, an auto-submit SAML POST form emitted by the
+  # esaml library (`:esaml_binding.encode_http_post/3`) from the server-signed
+  # LogoutResponse and the IdP URL stored on the DB SamlConnection. No request
+  # parameter is interpolated into the HTML — `slug` only builds server-side
+  # entity/ACS URIs inside `sp_for/2`, never the response body.
+  # sobelow_skip ["XSS.SendResp"]
   def slo(conn, %{"org_slug" => slug, "SAMLRequest" => encoded}) do
     c = Saml.connection_for_org_slug(slug)
 

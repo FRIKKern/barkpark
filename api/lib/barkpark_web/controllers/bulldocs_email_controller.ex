@@ -19,6 +19,12 @@ defmodule BarkparkWeb.BulldocsEmailController do
   alias Barkpark.Content
   alias Barkpark.PortableDoc.Render
 
+  # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: the body is
+  # `Render.render_document/2` output — the SAME trusted PortableDoc HTML renderer
+  # (block-typed, escaping) that the `/papers/:slug` reader serves, over the same
+  # published-only paper. `slug` selects the record; it is never interpolated into
+  # the response. No new user HTML reaches the wire that the reader wouldn't.
+  # sobelow_skip ["XSS.SendResp"]
   def show(conn, %{"slug" => slug}) do
     case Content.get_public_paper(slug) do
       nil ->

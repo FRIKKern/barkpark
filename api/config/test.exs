@@ -28,6 +28,11 @@ config :barkpark, Barkpark.Repo,
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
 config :barkpark, error_test_routes: true
 
+# Preview-JWT test signing secret (throwaway). Kept OUT of config.exs so Sobelow
+# Config.Secrets stays clean (test.exs is in Sobelow's config skip-list). Merges
+# with the ttl_seconds/issuer base set in config.exs.
+config :barkpark, :preview, secret: "test-preview-secret-change-in-prod-please-32"
+
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
 config :barkpark, BarkparkWeb.Endpoint,
@@ -84,6 +89,12 @@ config :barkpark, :allow_private_outbound, true
 # process"), which intermittently cascades into unrelated test setups. Tests that
 # need codelist data seed it explicitly, so skip the boot pass here.
 config :barkpark, run_boot_codelist_seeders: false
+
+# Same sandbox constraint for the core tag-schema registration (charter D12):
+# SchemaBootstrap would upsert the `tag` schema before any test owns a
+# connection. Tests prove the registration path by calling
+# `Content.TagRegistry.register!/1` directly (tag_registry_test.exs).
+config :barkpark, run_boot_core_schema_registration: false
 
 # Pulse (Shared Storm): one channel fixture so the public-surface tests can
 # exercise ingest/feed/caps end-to-end. Prod channels come from

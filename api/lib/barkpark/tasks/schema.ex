@@ -177,6 +177,18 @@ defmodule Barkpark.Tasks.Schema do
         # ── BRIEF — what the claiming agent reads first ─────────────────
         %{"name" => "title", "title" => "Title", "type" => "string", "group" => "brief"},
 
+        # The canonical, presentation-grade task brief. PortableDoc is kept
+        # inline so every task read carries its full human/agent context; the
+        # legacy description below remains the plain-text fallback/excerpt.
+        %{
+          "name" => "brief",
+          "title" => "Portable brief",
+          "type" => "object",
+          "group" => "brief",
+          "description" =>
+            "Canonical PortableDoc document: {version: 1, blocks: [...]}. Use headings, sections, lists, code, tables, diagrams and callouts to make the work immediately understandable on every renderer. description remains the concise fallback for legacy and text-only surfaces."
+        },
+
         # The what/why. The only free-text field a task create writes
         # (`bp task create --description`) — finally declared. `text` not
         # richText: agents write markdown strings, a textarea round-trips
@@ -188,7 +200,7 @@ defmodule Barkpark.Tasks.Schema do
           "rows" => 6,
           "group" => "brief",
           "description" =>
-            "What this task is and why it exists. Markdown. Written at create time; the claiming agent reads this first."
+            "Concise plain-text/Markdown fallback and search excerpt. Put the presentation-grade brief in brief as PortableDoc; text-only clients read this field."
         },
 
         # Approach sketch inline; the FULL design doc travels as design_doc.
@@ -298,6 +310,46 @@ defmodule Barkpark.Tasks.Schema do
           "description" =>
             "Free-form scope tags. Agents: POST /v1/tasks/:id/labels {add,remove} (union semantics).",
           "of" => %{"type" => "string"}
+        },
+
+        # Weighted-label spine (authoring-excellence). Distinct from the legacy
+        # free-form `labels` above (D11 — labels feeds Tasks.Similarity and is
+        # untouched this epic): `tags` carries {tag, strength 1-100, rationale},
+        # cross-member rules (1-12 count, distinct strengths, unique main tag)
+        # enforced by Barkpark.Content.LabelSpine at the publish wall (mount is
+        # ae-w1-publish-wall-mount). Per-leaf shape declared here so Studio + the
+        # recursive validator reject malformed leaves early.
+        %{
+          "name" => "tags",
+          "title" => "Tags",
+          "type" => "arrayOf",
+          "ordered" => false,
+          "group" => "brief",
+          "description" =>
+            "Weighted labels: {tag ^[a-z0-9-]+$, strength 1-100 distinct, rationale}. 1-12 tags; the unique-max strength is the main tag.",
+          "of" => %{
+            "type" => "composite",
+            "fields" => [
+              %{
+                "name" => "tag",
+                "title" => "Tag",
+                "type" => "string",
+                "validation" => %{"required" => true, "pattern" => "^[a-z0-9-]+$"}
+              },
+              %{
+                "name" => "strength",
+                "title" => "Strength",
+                "type" => "number",
+                "validation" => %{"required" => true, "min" => 1, "max" => 100}
+              },
+              %{
+                "name" => "rationale",
+                "title" => "Rationale",
+                "type" => "string",
+                "validation" => %{"required" => true}
+              }
+            ]
+          }
         },
 
         # UPGRADED string → reference. Persistence is IDENTICAL (a

@@ -146,4 +146,33 @@ defmodule Barkpark.Plugins.Sheets.HtmlTest do
       assert html =~ "</body></html>"
     end
   end
+
+  describe "export/2 — cell content escaping (XSS defense)" do
+    # Protective test for the Sobelow XSS.SendResp skip on
+    # `ExportController.export_html/2`: the export serves this HTML inline
+    # (`text/html`), so an unescaped user cell would be stored XSS when the
+    # export is viewed. A cell value carrying markup must render inert.
+    test "a cell value with an HTML/script payload is escaped, not injected" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Data",
+            "cells" => %{
+              "A1" => %{"v" => "<script>alert('xss')</script>"},
+              "A2" => %{"v" => "<img src=x onerror=\"alert(1)\">"}
+            }
+          }
+        ]
+      }
+
+      html = Html.export(content, "Report")
+
+      # The dangerous markup is HTML-escaped in the rendered grid …
+      assert html =~ "&lt;script&gt;alert(&#39;xss&#39;)&lt;/script&gt;"
+      assert html =~ "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"
+      # … and no live <script>/onerror sink reaches the output body.
+      refute html =~ "<script>alert('xss')</script>"
+      refute html =~ "<img src=x onerror=\"alert(1)\">"
+    end
+  end
 end

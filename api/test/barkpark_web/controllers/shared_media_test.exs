@@ -154,6 +154,31 @@ defmodule BarkparkWeb.SharedMediaTest do
     end
   end
 
+  # ── (c2) PATH TRAVERSAL — a `../` serve path can never escape the upload root
+  # (sobelow Traversal.SendFile, media_controller.ex `serve/2`). The serve edge
+  # resolves the file by a validated key: `get_file_by_path/2` matches on exact
+  # `path` equality, and stored paths are server-generated (`unique_filename/1`
+  # strips directory parts), so a `../…` glob matches no row → 404 and the disk
+  # path is derived from the RECORD's `file.path`, never the raw URL segment.
+  describe "(c2) path traversal is rejected" do
+    test "a `../` serve path escaping the upload root 404s and never serves the file",
+         %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      with_shares(share(ws_a, proj_a, :media))
+
+      # Plant a secret OUTSIDE the upload root, at the location a naive
+      # `file_path(raw_relative)` would resolve `../<name>` to.
+      secret_name = "traversal-secret-#{System.unique_integer([:positive])}.txt"
+      escaped = Media.file_path("../" <> secret_name)
+      File.write!(escaped, "TOP-SECRET-OUTSIDE-ROOT")
+      on_exit(fn -> File.rm_rf(escaped) end)
+
+      conn = get(conn, "#{media_root(ws_a, proj_a)}/files/../#{secret_name}")
+
+      assert conn.status == 404
+      refute conn.resp_body =~ "TOP-SECRET-OUTSIDE-ROOT"
+    end
+  end
+
   # ── (d) non-shared scope stays gated ──────────────────────────────────────
   describe "(d) non-shared scope" do
     test "no share -> anonymous media list is gated", %{conn: conn, ws_a: ws_a, proj_a: proj_a} do

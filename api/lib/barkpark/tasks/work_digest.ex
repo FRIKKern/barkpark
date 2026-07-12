@@ -1,7 +1,8 @@
 defmodule Barkpark.Tasks.WorkDigest do
   @moduledoc false
   # Semantic "was I edited under my claim?" digest over a task's WORK-DEFINING
-  # fields — `title`, `content.description`, `content.acceptance_criteria`.
+  # fields — `title`, `content.brief`, `content.description`, and
+  # `content.acceptance_criteria`.
   #
   # A claim stamps `content.claim.work_digest` (a short combined hex) plus a
   # per-field companion map `content.claim.work_field_digests`. Close (on the
@@ -26,17 +27,18 @@ defmodule Barkpark.Tasks.WorkDigest do
   # text still trips the fence (the list keeps its order and length).
 
   # The work-defining fields, in the order `changed_fields/3` reports them.
-  @fields ~w(title description acceptance_criteria)
+  @fields ~w(title brief description acceptance_criteria)
 
   @doc """
   Per-field digest map for a task read as `title` (the `documents.title` column)
-  and `content` (the JSON map carrying `description` + `acceptance_criteria`).
-  Returns `%{"title" => h, "description" => h, "acceptance_criteria" => h}` where
+  and `content` (the JSON map carrying `brief`, `description`, and
+  `acceptance_criteria`). Returns one digest per work-defining field, where
   each `h` is a 16-hex sub-digest of that one field.
   """
   def field_digests(title, content) when is_map(content) do
     %{
       "title" => hash(title),
+      "brief" => hash(Map.get(content, "brief")),
       "description" => hash(Map.get(content, "description")),
       "acceptance_criteria" => hash(criteria_texts(Map.get(content, "acceptance_criteria")))
     }
@@ -62,7 +64,7 @@ defmodule Barkpark.Tasks.WorkDigest do
 
   @doc """
   The subset of `@fields` whose current sub-digest differs from the one stored
-  on the claim — i.e. which of title/description/acceptance_criteria changed
+  on the claim — i.e. which of title/brief/description/acceptance_criteria changed
   since the claim. Preserves `@fields` order; empty when nothing drifted.
   """
   def changed_fields(stored_field_digests, title, content)

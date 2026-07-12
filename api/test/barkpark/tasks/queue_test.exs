@@ -26,6 +26,10 @@ defmodule Barkpark.Tasks.QueueTest do
   @dataset_alt "staging"
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
@@ -49,10 +53,9 @@ defmodule Barkpark.Tasks.QueueTest do
 
   defp mk_task!(doc_id, scope, dataset, content_extra \\ %{}) do
     content =
-      Map.merge(
-        %{"kind" => "task", "lifecycle_status" => "open"},
-        content_extra
-      )
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+      |> Map.merge(content_extra)
 
     {:ok, doc} =
       Content.create_document(

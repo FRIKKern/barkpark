@@ -7,8 +7,10 @@ defmodule Barkpark.PluginFreeBootTest do
   app, and asserts a 5-tier set of invariants over the live system:
 
     1. The supervision tree has no `Barkpark.Plugins.OnixEdit.*` children.
-    2. `GET /studio/production` returns 200 with the `"Structure"` marker.
-    3. `GET /api/schemas` returns exactly the 8 seed schema names.
+    2. `GET /studio/production` (following the scoped-shell redirect)
+       renders 200 with the `"Structure"` marker.
+    3. `GET /api/schemas` returns exactly the 9 seed schema names
+       (8 demo seeds + the CORE `tag` schema, charter D12).
     4. Studio HTML contains no plugin-specific tokens
        (`OnixEdit`, `Bokbasen`, `book`).
     5. Host code under `lib/barkpark` + `lib/barkpark_web` couples to a
@@ -18,16 +20,18 @@ defmodule Barkpark.PluginFreeBootTest do
        `__aliases__` references, not text — a `@moduledoc`/comment mention is
        not a coupling); the detected set must EQUAL the allowlist, so a NEW
        core→disabled-plugin reach reds the gate.
+    6. The authoring-excellence publish wall holds with all plugins off:
+       an unknown-tag publish over HTTP is still a 422 `unknown_tag` —
+       core enforcement, provably not plugin-carried.
 
-  Tagged `:boot_test` — excluded from the default `mix test` run. Invoke
+  Tagged `:boot_test` — excluded from the default `mix test` run (it stops
+  and restarts the whole application, which no async suite survives). Invoke
   explicitly:
 
       mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
 
-  The test FAILS until tasks s2 (supervisor pluginification), s3
-  (content_renderer split), and s4 (settings_live split) land. That is the
-  regression bar — it is the gate that keeps the fresh-install invariant
-  from drifting in future PRs.
+  This is the regression bar that keeps the fresh-install invariant from
+  drifting in future PRs. (Wiring it into CI is backlog `ae-boot-gate-ci`.)
   """
 
   use ExUnit.Case, async: false
@@ -35,14 +39,18 @@ defmodule Barkpark.PluginFreeBootTest do
   @moduletag :boot_test
 
   import Phoenix.ConnTest
-  # `put_req_header/3` (used to attach the Bearer token for the /v1/graph
-  # kill-switch request) lives in Plug.Conn, which Phoenix.ConnTest does not
-  # re-export — import it directly.
-  import Plug.Conn, only: [put_req_header: 3]
+  # `put_req_header/3` (used to attach Bearer tokens) and `get_resp_header/2`
+  # (used to follow the Studio scoped-shell redirect) live in Plug.Conn, which
+  # Phoenix.ConnTest does not re-export — import them directly.
+  import Plug.Conn, only: [put_req_header: 3, get_resp_header: 2]
 
   @endpoint BarkparkWeb.Endpoint
 
-  @expected_seed_schemas ~w(post page author category project siteSettings navigation colors)
+  # The 8 demo seed schemas PLUS the core `tag` schema (authoring-excellence
+  # charter D12 — registered by SchemaBootstrap from CORE, present even with
+  # every plugin off). Growing this list is a deliberate act: a 10th name must
+  # be added here explicitly, never drift in silently (Q6 locked).
+  @expected_seed_schemas ~w(post page author category project siteSettings navigation colors tag)
 
   # ── Tier-5 allowlist: sanctioned host→removable-plugin code coupling ──────
   #
@@ -171,9 +179,9 @@ defmodule Barkpark.PluginFreeBootTest do
     # purge plugin-contributed rows that earlier test runs (or a prior
     # `mix ecto.reset`) persisted in `schema_definitions` — most commonly
     # OnixEdit's `book` schema. Without this purge, assertion #3 ("exactly
-    # the 8 seed names") sees `book` and fails. Q6 of the G1 grill locks
-    # the 8-name list — adding a 9th host seed must trigger an explicit
-    # assertion update, not silent drift.
+    # the 9 seed names") sees `book` and fails. Q6 of the G1 grill locks
+    # the name list — growing it (as the core `tag` schema did, 8→9) must
+    # be an explicit assertion update here, never silent drift.
     #
     # Two races to dodge before we delete + reseed:
     #
@@ -191,8 +199,16 @@ defmodule Barkpark.PluginFreeBootTest do
     # Wait for the Task.Supervisor to drain, THEN purge + reseed.
     wait_for_post_boot_task_to_finish()
 
+    # Reseed under the SAME Default scope the flat routes' AssignDefaultScope
+    # plug resolves at request time. The reseed used to insert nil-scope rows
+    # directly, but /api/schemas reads scope-filtered (list_schemas →
+    # scope_to_workspace_or_global) — nil-scope rows are invisible to it, so
+    # assertion #3 saw []. Stamping the Default scope on the write makes the
+    # test exercise the exact read the endpoint serves.
+    {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
     Barkpark.Repo.delete_all(Barkpark.Content.SchemaDefinition)
-    reseed_host_schemas()
+    reseed_host_schemas(workspace_id: ws.id, project_id: project.id)
 
     on_exit(fn ->
       Application.stop(:barkpark)
@@ -240,16 +256,17 @@ defmodule Barkpark.PluginFreeBootTest do
       do_wait_for_task_supervisor(deadline)
   end
 
-  # The 8 host seed schemas, inlined verbatim from `priv/repo/seeds.exs`
-  # (the schema half — documents, dev token, codelist seeding skipped).
+  # The 8 demo seed schemas, inlined verbatim from `priv/repo/seeds.exs`
+  # (the schema half — documents, dev token, codelist seeding skipped), plus
+  # the CORE `tag` schema read from its single source of truth.
   #
   # Option B (inline) over option A (Code.eval_file seeds.exs) because
   # seeds.exs is monolithic: schema seeding is followed by 27 document
   # inserts, dev-token creation, plugin-Bootstrap, ONIX codelist seeding,
   # and Thema codelist seeding. The test only queries `/api/schemas` — the
   # extra inserts (especially ~28k codelist rows) are noise. Coupling the
-  # test to the canonical 8-schema list IS the regression bar (Q6 locked).
-  defp reseed_host_schemas do
+  # test to the canonical seed-schema list IS the regression bar (Q6 locked).
+  defp reseed_host_schemas(scope) do
     dataset = "production"
 
     host_specs = [
@@ -383,16 +400,21 @@ defmodule Barkpark.PluginFreeBootTest do
       }
     ]
 
-    # Insert via SchemaDefinition.changeset directly — same path as
-    # `priv/repo/seeds.exs`. We deliberately do NOT route through
-    # `Content.upsert_schema/2`: that function injects a string
-    # `"dataset"` key into the (atom-keyed) attrs, which produces a
-    # mixed-key map and Ecto.CastError. The on_conflict: :nothing keeps
-    # this idempotent even if a row already exists from a prior reseed.
-    Enum.each(host_specs, fn attrs ->
-      %Barkpark.Content.SchemaDefinition{}
-      |> Barkpark.Content.SchemaDefinition.changeset(attrs)
-      |> Barkpark.Repo.insert!(on_conflict: :nothing)
+    # Route through Content.upsert_schema/3 — the SAME write path a real
+    # schema registration takes — so every row carries the Default scope ids
+    # the scope-filtered /api/schemas read requires (the old raw changeset
+    # insert left rows nil-scoped and invisible to assertion #3). The
+    # atom-keyed specs are stringified first: upsert_schema injects a string
+    # "dataset" key, and a mixed-key map is an Ecto.CastError. Idempotent on
+    # (name, dataset).
+    #
+    # The 9th seed is the CORE `tag` schema (charter D12), read from its one
+    # source of truth — TagRegistry.schema_attrs/0 — so this bar and the boot
+    # registration can never drift apart.
+    stringified = Enum.map(host_specs, &(&1 |> Jason.encode!() |> Jason.decode!()))
+
+    Enum.each(stringified ++ [Barkpark.Content.TagRegistry.schema_attrs()], fn attrs ->
+      {:ok, _} = Barkpark.Content.upsert_schema(attrs, dataset, scope)
     end)
   end
 
@@ -411,15 +433,15 @@ defmodule Barkpark.PluginFreeBootTest do
              "supervision tree contains plugin children: #{inspect(offenders)}"
     end
 
-    test "GET /studio/production returns 200 with Structure marker" do
-      conn = build_conn() |> get("/studio/production")
+    test "GET /studio/production renders 200 with Structure marker (following the scoped-shell redirect)" do
+      conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)
 
       assert body =~ "Structure",
              "expected nav marker \"Structure\" in Studio HTML, got body of #{byte_size(body)} bytes"
     end
 
-    test "GET /api/schemas returns exactly the 8 seed schema names" do
+    test "GET /api/schemas returns exactly the 9 seed schema names" do
       conn = build_conn() |> get("/api/schemas")
       body = json_response(conn, 200)
 
@@ -435,7 +457,7 @@ defmodule Barkpark.PluginFreeBootTest do
     end
 
     test "Studio HTML contains no plugin-specific tokens" do
-      conn = build_conn() |> get("/studio/production")
+      conn = get_following_redirects("/studio/production")
       body = html_response(conn, 200)
 
       for token <- ["OnixEdit", "Bokbasen", "book"] do
@@ -521,6 +543,59 @@ defmodule Barkpark.PluginFreeBootTest do
              "expected the core `graph` noun in the read-tier manifest under :plugins []"
     end
 
+    # ── Authoring-excellence publish wall under :plugins [] (charter D12) ─────
+    #
+    # The wall is CORE (lifecycle.ex), not a before_publish hook — hooks are
+    # plugin-droppable, so a plugin-carried wall would silently vanish under
+    # the kill switch and this "plugins-off" proof would be vacuous. Here a
+    # publish whose weighted tags[].tag is unregistered must STILL come back
+    # 422 `unknown_tag` over real HTTP with every plugin off. (The unlabeled-
+    # publish arm joins this test when the LabelSpine mount ships — S2 of the
+    # same wave.)
+    test "publish with an unregistered tag is still 422 unknown_tag under :plugins []" do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+      doc_id = "wall-killswitch-#{System.unique_integer([:positive])}"
+      bogus_tag = "never-registered-#{System.unique_integer([:positive])}"
+
+      {:ok, _draft} =
+        Barkpark.Content.create_document(
+          "post",
+          %{
+            "doc_id" => doc_id,
+            "title" => doc_id,
+            "content" => %{
+              "tags" => [
+                %{"tag" => bogus_tag, "strength" => 80, "rationale" => "kill-switch probe"}
+              ]
+            }
+          },
+          "production",
+          scope
+        )
+
+      raw_token = "barkpark-plugin-free-wall-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Barkpark.Auth.create_token(raw_token, "plugin-free-wall", "test", ["read", "write"])
+
+      conn =
+        build_conn()
+        |> put_req_header("authorization", "Bearer " <> raw_token)
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          "/v1/data/mutate/production",
+          Jason.encode!(%{"mutations" => [%{"publish" => %{"id" => doc_id, "type" => "post"}}]})
+        )
+
+      body = json_response(conn, 422)
+
+      assert body["error"]["code"] == "unknown_tag",
+             "expected the core wall's unknown_tag envelope under :plugins [], got #{inspect(body)}"
+
+      assert bogus_tag in body["error"]["details"]["unknown"]
+    end
+
     # ── Tier 5: host code couples to a REMOVABLE plugin only within the
     #    reviewed allowlist (broadened from the OnixEdit-only grep) ───────────
     #
@@ -571,6 +646,27 @@ defmodule Barkpark.PluginFreeBootTest do
   end
 
   # ── Helpers ───────────────────────────────────────────────────────────
+
+  # The flat legacy `/studio/:dataset` path now 302s to the canonical scoped
+  # shell (`/w/default/p/default/d/:dataset/studio`). The invariant under test
+  # is unchanged — Studio must RENDER with plugins off — so follow the
+  # redirect chain (bounded) and assert on the shell's HTML.
+  defp get_following_redirects(path, hops \\ 3)
+
+  defp get_following_redirects(path, 0) do
+    raise "studio redirect chain did not terminate within 3 hops (last: #{inspect(path)})"
+  end
+
+  defp get_following_redirects(path, hops) do
+    conn = build_conn() |> get(path)
+
+    if conn.status in [301, 302] do
+      [location] = get_resp_header(conn, "location")
+      get_following_redirects(location, hops - 1)
+    else
+      conn
+    end
+  end
 
   # The legacy `/api/schemas` endpoint (`LegacyController.schemas/2`)
   # returns a bare JSON array of `%{"name" => ...}` maps. The newer

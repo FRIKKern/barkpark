@@ -165,6 +165,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       scope = [workspace_id: ws.id, project_id: project.id]
       dataset = Content.paper_default_dataset()
 
+      # E3 tag registry: the fixture weighted tags on the task below must
+      # resolve to PUBLISHED type:tag docs in the dataset scope.
+      Barkpark.LabelFixtures.register_tags!(dataset)
+
       for schema_def <- Barkpark.Tasks.schema_definitions(dataset) do
         attrs =
           schema_def
@@ -181,15 +185,16 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           %{
             "doc_id" => @dt_task,
             "title" => "Drive the strategy",
-            "content" => %{
-              "kind" => "task",
-              "lifecycle_status" => "open",
-              "design_doc" => @dt_paper,
-              "acceptance_criteria" => [
-                %{"criterion" => "satisfied claim", "met" => true, "evidence" => "PR #42"},
-                %{"criterion" => "open claim", "met" => false}
-              ]
-            }
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{
+                "kind" => "task",
+                "lifecycle_status" => "open",
+                "design_doc" => @dt_paper,
+                "acceptance_criteria" => [
+                  %{"criterion" => "satisfied claim", "met" => true, "evidence" => "PR #42"},
+                  %{"criterion" => "open claim", "met" => false}
+                ]
+              })
           },
           dataset,
           scope

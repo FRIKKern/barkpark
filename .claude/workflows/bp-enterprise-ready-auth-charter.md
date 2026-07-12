@@ -6,7 +6,7 @@
 
 Epic anchor: bp task `enterprise-ready-auth` ("Enterprise-ready auth — one layer, easy for everyone", priority 1).
 Design paper: `enterprise-ready-barkpark` (body_html-only; read via `bp tinker doc paper enterprise-ready-barkpark`, NOT `bp paper view`).
-Wave papers: `enterprise-ready-auth-wave-2026-07-10` (w8, prove-and-close) · `enterprise-ready-auth-wave-2026-07-10-w9` (w9, LAND w8).
+Wave papers: `enterprise-ready-auth-wave-2026-07-10` (w8, prove-and-close) · `enterprise-ready-auth-wave-2026-07-10-w9` (w9, LAND w8) · `enterprise-ready-auth-wave-2026-07-11` (w10, settle the split criteria).
 
 ## Vision
 
@@ -112,6 +112,60 @@ no silent auth events.
     leaked false poisons every subsequent bare-conn Studio LV test (caused a 207-failure scare during w9
     verification; the suite is async:false).
 
+### Wave w10 decisions (2026-07-12 — honesty-and-freshness wave; settle the two split criteria's agent legs)
+
+25. **The wish's "locally-untracked charter" premise was STALE** — the charter landed on main at f1d43060
+    (#2367), byte-identical to the working copy (git diff origin/main on the path is empty; five scouts refuted
+    it independently). What was owed is the merge-train close-out wave-log entry below, not a first commit.
+26. **Criterion 0 leg (a) = RAISE THE LANE'S BAR, not re-run or reinvent** — the Keycloak lane was live-re-run at
+    origin/main 030b0108 (strictly newer than #2361/#2372): 5 tests 0 failures, 68.4s warm, clean container +
+    worktree teardown. But the lane proves handshake+JIT+mint+groups→role+SLO ONLY — zero governance assertions
+    (every test org is ungoverned). No in-repo OIDC-provider precedent exists anywhere in the tree, so the wish's
+    fallback condition is unmet: the one honest build slice is EXTENDING keycloak_interop_test.exs with three
+    governed-session tests — (t1) OIDC callback REFUSES a governed factor-less user at mint time (403 JSON
+    `mfa_enrolment_required`, JIT account exists, NO UserSession row, audit row `auth`/`mfa_enrolment_required`),
+    (t2) same refusal at the live SAML ACS, (t3) a live-IdP-minted session EXPIRES under an org
+    absolute-lifetime/idle bound (backdate via token_hash → Repo.update_all, then
+    `refute verify_user_session_token(token)`). Setters are public: `Tenancy.set_organization_require_mfa/3`
+    (tenancy.ex:81) and `set_organization_session_policy/3` (tenancy.ex:117). NO realm.json or Keycloak-client
+    changes needed. Test-only .ex — still rides the Elixir Test gate. Lane stays on-demand, never per-PR CI.
+27. **The false-green law of that slice: governance only binds through org→workspace→membership** — every
+    governed-refusal test MUST `create_workspace` + `assign_workspace_to_organization` BEFORE driving the login,
+    or the user is never governed, the refusal never fires, and the test silently proves nothing (the mock tests
+    at oidc_controller_test.exs:110-114 do exactly this — transplant the pattern).
+28. **Criterion 4 build slice = Trust & Legal link-out panel in org_admin_live.ex** — the cheapest honest slice:
+    all four trust papers are already publicly served at `/papers/:slug`; the gap is discoverability from the
+    org-admin surface a security reviewer actually opens. NOT building: a DPA-acceptance column (zero
+    persisted-consent precedent exists in tenancy/ or migrations — it's multi-part schema+setter+audit+UI work),
+    a GDPR self-serve UI (small-medium, parked as backlog), or measured-uptime (a subsystem, not a slice).
+    Anchor point: append after the "Recent activity" section (org_admin_live.ex:292); extend the 7/7-green
+    org_admin_live_test.exs baseline.
+29. **era-w8-epic-rollup's git-hygiene stamp is FALSE — the cleanup actually happens this wave.** All 10
+    wf_527f53f4-206-23..32 worktrees verified clean (empty `git status --porcelain` in every one) and
+    content-landed: branch-name match to merged PR heads (wt-23/24/27/28/29/31), patch-id identity
+    (wt-30 ≡ wt-28 ≡ merged #2392, patch-id f940307a…), or title/body match under conflict-rename
+    (wt-25→#2368 "land-s3-resolved", wt-26→#2372); wt-32's 19 commits all resolve to landed content, its charter
+    commit 18ef4ff2 superseded by da840738 (ancestor of origin/main). 6 origin loop-epic/* branches +
+    origin/cody/scim-layering (#2246 MERGED) + origin/fix/scim-casterror-redaction (#1577 MERGED) are deletable —
+    gh PR state is the truth signal, NOT raw SHA ancestry (squash merges always read NOT-ANCESTOR). The 4 local
+    `push/loop-epic/*` refs are UNVERIFIED — patch-id-verify before deleting, else leave and note.
+30. **Rollup criteria correct by doc patch, not reopen** — era-w8-epic-rollup is closed; its criterion 6 (AC-flip,
+    still met:false with stale STALLED text) gets evidence updated to the real 2026-07-11 anchor flip, and
+    criterion 8 (git hygiene, falsely met:true) gets honest evidence only AFTER the sweep actually runs.
+31. **era-hg-okta-live-idp recipe audited honest** — 6-step recipe with real schema/table names and the interop
+    lane as shape; stays the SOLE gate for criterion 0 leg (b). No tightening owed.
+32. **Anchor evidence hygiene** — criteria 2/4 (SCIM deprovision, audit log) carry identical pasted boilerplate;
+    the hygiene slice rewrites each to criterion-specific citations (PR + test file names). Criteria 0/4's final
+    "honest remainder" rewrite happens at Review, AFTER the w10 slices land; the epic stays OPEN with the
+    era-hg-* human legs as the sole gates — never closed over parked legs.
+33. **`bp paper view` has two real bugs, both hit this wave's own evidence chain** — (1) paperFetchAll
+    (internal/cli/paper_cmd.go:247) sends no `limit`, the server silently caps at 100 of 122 papers, so
+    soc2-controls-mapping reads "no paper matches"; (2) PaperBlocks() (internal/apiclient/doc.go:207) is blind to
+    `body.blocks`, so the w10 wave paper reads "no renderable blocks" despite full content. Until fixed
+    (backlog, folded into bp-paper-view-bodyhtml-fallback), verifiers MUST use `bp doc get paper <id> -o json`.
+34. **One path drift in a trust paper** — soc2-controls-mapping's CC6.2 row cites `tenancy/org_domain.ex`; the
+    module lives at `sso/org_domain.ex`. The hygiene slice corrects the paper (bp doc mutate + publish).
+
 ## Roadmap
 
 ### Wave w8 (7 slices, integration-ordered) — BUILT, never pushed; landing = wave w9
@@ -149,6 +203,15 @@ no silent auth events.
    stale branches (cody/scim-layering tip, fix/scim-casterror-redaction worktree — both content-landed); close
    every w8 task's merge criterion with fresh claims.
 
+### Wave w10 (this wave — 3 slices, parallel; settle the split criteria's agent legs)
+1. `era-w10-governed-idp-lane` (medium, fable, p1) — extend the Keycloak interop lane with the three
+   governed-session tests (D26/D27); gate = full `scripts/idp-interop.sh` run, 8 tests 0 failures, teardown clean.
+2. `era-w10-trust-panel` (small, opus, p2) — Trust & Legal link-out panel in org_admin_live.ex linking the four
+   trust papers at /papers/:slug (D28); gate = org_admin_live_test.exs green with new panel assertions.
+3. `era-w10-hygiene-ledger` (small, opus, p1) — execute the D29 git sweep (10 worktrees + local branches +
+   8 origin branches), correct era-w8-epic-rollup criteria 6/8 (D30), tighten anchor criteria 2/4 evidence +
+   fix the soc2 paper path drift (D32/D34).
+
 ### Backlog (filed, published, not this wave)
 - `era-hg-okta-live-idp` (p2, HUMAN-GATED) — Okta/Entra live-tenant SSO smoke; recipe written; flips AC1 leg two.
 - `era-bl-allowed-auth-methods` (p2) — org policy: SSO-only / disable-password; greenfield; deny-path spec included.
@@ -162,7 +225,14 @@ no silent auth events.
 - `era-bl-scim-discovery-tests` (p3, NEW w9) — dedicated scim_discovery_controller_test.exs (coverage today is
   incidental inside scim_users_controller_test.exs); after S5 merges.
 - `bp-paper-view-bodyhtml-fallback` (p2, UNPARENTED — CLI scope, not auth) — `bp paper view` misreports
-  body_html-only papers as "no renderable blocks"; misled two scouts this wave.
+  body_html-only papers as "no renderable blocks"; misled two scouts this wave. EXTENDED w10 (D33) with the two
+  newly-proven defects: silent 100-doc truncation (no limit param) + body.blocks blindness.
+- `era-bl-policy-query-perf` (p3, NEW w10) — S4 watch-item: verify_user_session runs one extra membership query
+  per request for ALL users (behavioral zero-tax holds; perf tax unmeasured). Was debrief prose only.
+- `era-bl-audit-swallow-unify` (p4, NEW w10) — four module-local best-effort audit-swallow helpers
+  (accounts / auth_controller / webhooks / session_issuer) could unify into one. Was debrief prose only.
+- `era-bl-gdpr-selfserve-ui` (p3, NEW w10) — Studio UI over the proven GDPR backend (GET /v1/auth/export download,
+  password-confirmed POST /v1/auth/erase); backend 7/7 green at HEAD, zero UI exists. Small-medium; not one slice.
 
 ### Adjacent open work (NOT duplicated here — lives under the Felix audit umbrellas)
 - webauthn delete_credential non-UUID 500 (task-b5af6673bfb773ea), HIBP transport fail-open test
@@ -278,3 +348,33 @@ notes), flipping each merge criterion + closing on fresh claims; (2) re-run era-
 AC2/AC4/AC6 + git hygiene; (3) then the anchor's remaining legs are human-gated (era-hg-okta-live-idp,
 era-hg-pen-test, era-hg-dpa-legal-signoff, era-hg-soc2-type2-window) + parked polish
 (era-scim-conformance-polish, era-bl-scim-discovery-tests, era-bl-mfa-returnto-parity).
+
+### Wave w9 CLOSE-OUT (merged 2026-07-10 21:13–22:49 UTC; recorded 2026-07-12) — MERGE TRAIN COMPLETE
+
+The entry above ended at "0/7 merged"; the debt is paid: all 7 slice PRs merged the same evening, in the
+prescribed order — S1 #2361 (21:13:15Z), S2 #2362, S3 #2368 (21:57:14Z, head renamed `land-s3-resolved` after
+conflict resolution), S4 #2372, S5 #2384, S6 #2392, B7 #2395 (22:49:45Z) — plus wave-log PR #2367 (22:03), which
+landed this charter on main (f1d43060). All verified via `gh pr view --json state,mergedAt`: state MERGED on all
+eight. Epic anchor criteria for SCIM deprovision, custom roles, audit log, and zero-tax were stamped met=true on
+2026-07-11 against the merged PRs. Honest residue, owned by wave w10: the rollup task's git-hygiene criterion was
+stamped true while the 10 wf_527f53f4-206-* worktrees and 8 origin branches still existed (false stamp — D29/D30);
+the anchor's SCIM/audit criteria carry pasted boilerplate evidence (D32); the rollup's AC-flip criterion still
+shows stale STALLED text (D30).
+
+### Wave w10 2026-07-12 — DECIDE complete; honesty-and-freshness wave, 3 slices filed, builders flying
+
+Verification round (4 deep verifiers, run proofs): (1) Keycloak lane re-driven LIVE at origin/main 030b0108 —
+5 tests 0 failures, 68.4s warm, container + worktree torn down clean — but handshake-only; the governed-session
+extension spec pinned from source (D26/D27), every building block confirmed (setters public, refusal envelope
+403/`mfa_enrolment_required`, backdating transplantable). (2) era-w8-epic-rollup reconciled at 8/9 met with the
+git-hygiene stamp proven FALSE; all 10 worktrees clean + content-landed, 8 origin branches confirmed merged via
+gh PR state (D29). (3) Charter proven byte-identical to origin/main; local main was 1 ahead/2 behind — rebased
+before this commit. `bp paper view` two bugs reproduced with root cause in paper_cmd.go:247 + doc.go:207 (D33).
+(4) Trust slice priced: link-out panel wins (D28); no consent pattern exists to copy; GDPR + status/SLA legs
+re-proven 7/0 + 7/0 at HEAD; era-hg recipes audited honest (D31). Slices filed as children of
+enterprise-ready-auth, linked to wave paper `enterprise-ready-auth-wave-2026-07-11`: era-w10-governed-idp-lane
+(fable), era-w10-trust-panel (opus), era-w10-hygiene-ledger (opus). Backlog filed: era-bl-policy-query-perf,
+era-bl-audit-swallow-unify, era-bl-gdpr-selfserve-ui; bp-paper-view-bodyhtml-fallback extended with the two new
+defects. Review owes: re-verify slice gates at merge HEAD, then rewrite criteria 0/4 evidence to name the honest
+remainder (era-hg-okta-live-idp; era-hg-pen-test / era-hg-dpa-legal-signoff / era-hg-soc2-type2-window) and leave
+the epic OPEN with those human legs as the sole gates.

@@ -319,7 +319,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_create",
 		Title:       "Create a task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation.",
+		Description: "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. NOTE: this MCP tool defaults publish TRUE, unlike the `bp task create` CLI which defaults it FALSE (draft-first) — reach for publish:false here only when you deliberately want a draft. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation. Give tags as weighted labels — each {tag, strength (integer 1-100), rationale}, all three required. Strengths must be DISTINCT with a single UNIQUE MAXIMUM (that top-weighted tag is the main tag). Bounds are HARD: 1-12 tags; the healthy advisory norm is 2-4. Once the authoring-excellence publish wall is live, a task that violates these rules is rejected at publish — so shape tags to the rules and this tool is the retry channel.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -343,6 +343,22 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
         }
       }
     },
+    "tags": {
+      "type": "array",
+      "description": "Weighted labels. Hard bounds 1-12 (advisory norm 2-4); strengths must be distinct with a single unique maximum (the main tag).",
+      "minItems": 1,
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tag", "strength", "rationale"],
+        "properties": {
+          "tag": { "type": "string", "pattern": "^[a-z0-9-]+$", "description": "The label — lowercase letters, digits and hyphens only." },
+          "strength": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Weight 1-100; distinct across tags, one unique max." },
+          "rationale": { "type": "string", "minLength": 20, "description": "Why this label earns its strength (at least 20 characters)." }
+        }
+      }
+    },
     "publish": { "type": "boolean", "description": "Publish immediately (default true).", "default": true }
   }
 }`),
@@ -353,6 +369,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			ParentID           string            `json:"parent_id"`
 			Priority           *int              `json:"priority"`
 			AcceptanceCriteria []json.RawMessage `json:"acceptance_criteria"`
+			Tags               []json.RawMessage `json:"tags"`
 			Publish            *bool             `json:"publish"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
@@ -385,6 +402,17 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 				crit = append(crit, v)
 			}
 			body["acceptance_criteria"] = crit
+		}
+		if len(in.Tags) > 0 {
+			tags := make([]any, 0, len(in.Tags))
+			for _, raw := range in.Tags {
+				var v any
+				if err := json.Unmarshal(raw, &v); err != nil {
+					return mcpArgError(fmt.Errorf("tags: %w", err)), nil
+				}
+				tags = append(tags, v)
+			}
+			body["tags"] = tags
 		}
 		publish := true
 		if in.Publish != nil {

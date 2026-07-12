@@ -256,9 +256,9 @@ defmodule Barkpark.Tasks.ClaimTest do
 
       assert claim["work_digest"] == expected_combined
       assert claim["work_field_digests"] == expected_fields
-      # The stamp is derived from the actual brief, so it names all three fields.
+      # The stamp is derived from the actual brief, including PortableDoc.
       assert Map.keys(expected_fields) |> Enum.sort() ==
-               ["acceptance_criteria", "description", "title"]
+               ["acceptance_criteria", "brief", "description", "title"]
 
       # Persisted, not just in the returned struct.
       reloaded = Repo.get!(Document, task.id)

@@ -24,6 +24,10 @@ defmodule Barkpark.Accounts.Webauthn do
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, WebauthnCredential}
 
+  # Sobelow reads `@sobelow_skip` from source; register it so the compiler
+  # counts it as used (else `--warnings-as-errors` reds on "set but never used").
+  Module.register_attribute(__MODULE__, :sobelow_skip, accumulate: true, persist: true)
+
   @doc "Relying-party id — the registrable host the passkey is scoped to."
   @spec rp_id(keyword()) :: String.t()
   def rp_id(opts \\ []), do: opts[:rp_id] || cfg(:rp_id) || "localhost"
@@ -96,14 +100,20 @@ defmodule Barkpark.Accounts.Webauthn do
         {:error, :unknown_credential}
 
       %WebauthnCredential{} = cred ->
-        cose_key = load_cose(cred)
+        case load_cose(cred) do
+          {:ok, cose_key} ->
+            with {:ok, auth_data} <-
+                   Wax.authenticate(credential_id, auth_data_bin, sig, client_data_json, challenge, [
+                     {credential_id, cose_key}
+                   ]),
+                 :ok <- counter_ok?(cred.sign_count, auth_data.sign_count) do
+              advance_counter(cred, auth_data.sign_count)
+            end
 
-        with {:ok, auth_data} <-
-               Wax.authenticate(credential_id, auth_data_bin, sig, client_data_json, challenge, [
-                 {credential_id, cose_key}
-               ]),
-             :ok <- counter_ok?(cred.sign_count, auth_data.sign_count) do
-          advance_counter(cred, auth_data.sign_count)
+          # A stored key that no longer decodes to a safe term (see load_cose)
+          # fails authentication closed rather than crashing the ceremony.
+          :error ->
+            {:error, :corrupt_credential}
         end
     end
   end
@@ -123,7 +133,20 @@ defmodule Barkpark.Accounts.Webauthn do
     |> Repo.update()
   end
 
-  defp load_cose(%WebauthnCredential{cose_key: bin}), do: :erlang.binary_to_term(bin)
+  # The stored `cose_key` is OUR OWN `term_to_binary` of the COSE key map the
+  # vetted `wax` library parsed at registration (verify_registration/5) —
+  # integer labels with integer/binary values, no atoms. Decoding with `[:safe]`
+  # therefore never rejects a legitimate key, but a poisoned column (a restored
+  # backup, or an injection reaching this row) can no longer mint atoms
+  # (atom-table exhaustion) or materialize unsafe terms during authentication —
+  # it fails closed via the rescue below. Sobelow flags every `binary_to_term`
+  # regardless of `[:safe]`; the input is our own trusted bytes, hardened here.
+  @sobelow_skip ["Misc.BinToTerm"]
+  defp load_cose(%WebauthnCredential{cose_key: bin}) do
+    {:ok, :erlang.binary_to_term(bin, [:safe])}
+  rescue
+    ArgumentError -> :error
+  end
 
   # ── Management ──────────────────────────────────────────────────────────────
 

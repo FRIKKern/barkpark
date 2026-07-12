@@ -10,9 +10,8 @@ import (
 // is a full-screen interactive Bubble Tea program, not the single JSON body the
 // generic command path decodes.
 //
-// NB: `bp tasks` (this interactive pane) is a DIFFERENT thing from `bp task …`
-// (the manifest-driven singular noun that lists/claims/closes tasks as JSON).
-// The help below cross-references both so neither is a dead end.
+// `bp task tui` is an alias for this same interactive pane. Other `bp task …`
+// verbs remain manifest-driven list/claim/close operations.
 func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if g.help {
 		printTasksBoardHelp(out)
@@ -60,7 +59,7 @@ func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) 
 // printTasksBoardHelp prints the short help block for `bp tasks`, cross-
 // referencing the manifest-driven `bp task …` verbs in both directions.
 func printTasksBoardHelp(out *writer) {
-	out.outf("usage: bp tasks")
+	out.outf("usage: bp tasks  (alias: bp task tui)")
 	out.outf("")
 	out.outf("Open the live portrait task board: a tall, glanceable pane organized by")
 	out.outf("epics with active work pinned on top, latest movement first, auto-connected")
@@ -82,6 +81,6 @@ func printTasksBoardHelp(out *writer) {
 	out.outf("  o              open the task in Studio (the URL is shown too)")
 	out.outf("  q, ctrl-c      quit")
 	out.outf("")
-	out.outf("`bp tasks` (this pane) is separate from `bp task …` — the scriptable verbs")
-	out.outf("that list, claim, and close tasks as JSON (see `bp task -h`).")
+	out.outf("`bp tasks` / `bp task tui` open this pane; the other `bp task …` verbs")
+	out.outf("list, claim, and close tasks as JSON (see `bp task -h`).")
 }

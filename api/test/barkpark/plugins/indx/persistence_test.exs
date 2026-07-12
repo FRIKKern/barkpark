@@ -67,6 +67,25 @@ defmodule Barkpark.Plugins.Indx.PersistenceTest do
     assert :error = Persistence.load("scope-c")
   end
 
+  test "a well-formed term carrying a novel atom is rejected without minting it (:safe)",
+       %{dir: dir} do
+    novel = "indx_persistence_novel_atom_#{System.unique_integer([:positive])}"
+    # Sanity: the atom truly does not exist yet.
+    assert_raise ArgumentError, fn -> String.to_existing_atom(novel) end
+
+    # Hand-crafted external term format: <<131>> magic + SMALL_ATOM_UTF8_EXT
+    # (119) for a small UTF-8 atom that is NOT in the atom table. Under a plain
+    # binary_to_term/1 this would MINT the atom (atom-table exhaustion vector);
+    # the [:safe] decode in load/1 must reject it and fold to :error instead.
+    crafted = <<131, 119, byte_size(novel)::8, novel::binary>>
+    File.write!(Path.join(dir, "scope-novel.term"), crafted)
+
+    assert :error = Persistence.load("scope-novel")
+
+    # Proof [:safe] held: the atom was NOT materialized as a load side effect.
+    assert_raise ArgumentError, fn -> String.to_existing_atom(novel) end
+  end
+
   test "scope with slashes is sanitized; no dir-escape", %{dir: dir} do
     # A scope with a path-traversal-looking string MUST round-trip safely
     # and the file MUST stay inside `dir`.

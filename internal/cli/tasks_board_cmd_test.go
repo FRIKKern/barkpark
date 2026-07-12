@@ -44,6 +44,9 @@ func TestTasksBoardHelp(t *testing.T) {
 	if !strings.Contains(out, "usage: bp tasks") {
 		t.Fatalf("help missing usage line: %q", out)
 	}
+	if !strings.Contains(out, "bp task tui") {
+		t.Fatalf("help missing the singular-noun TUI alias: %q", out)
+	}
 	if !strings.Contains(out, "bp task") {
 		t.Fatalf("help should cross-reference `bp task …`: %q", out)
 	}

@@ -60,8 +60,15 @@ config :barkpark, :ticket_rate_limits,
   message: 60,
   attachment: 30
 
+# The preview-JWT signing secret is env-specific and is NEVER a hardcoded
+# default in this shared base (closes Sobelow Config.Secrets, config.exs:64
+# at the source rather than the baseline):
+#   * prod REQUIRES `PREVIEW_JWT_SECRET` — runtime.exs raises if it is unset;
+#   * dev/test supply a throwaway literal in config/dev.exs + config/test.exs,
+#     both in Sobelow's config skip-list, so no secret literal ever lands in a
+#     scanned config file.
+# `ttl_seconds`/`issuer` stay here and merge per-key with the env secret at boot.
 config :barkpark, :preview,
-  secret: "dev-preview-secret-change-in-prod-please-32-chars",
   ttl_seconds: 600,
   issuer: "barkpark"
 

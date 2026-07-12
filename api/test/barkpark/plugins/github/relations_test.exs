@@ -57,6 +57,10 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
   end
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
     register_schemas!(scope)
@@ -92,7 +96,10 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
         %{
           "doc_id" => doc_id,
           "title" => doc_id,
-          "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content)
+          "content" =>
+            %{"kind" => "task", "lifecycle_status" => "open"}
+            |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+            |> Map.merge(content)
         },
         @dataset,
         scope

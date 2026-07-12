@@ -74,6 +74,34 @@ func step(t2 *testing.T, m Model, msg tea.Msg) (Model, tea.Cmd) {
 
 func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
 
+// This is the bp-tasks boundary proof, not a unit test of portableDocLines:
+// API-shaped JSON is decoded into DetailIndex, installed in the TUI model, and
+// rendered through FrameTask — the exact path `bp tasks` / `bp task tui` uses.
+func TestTaskTUIFrameShowsPortableDocBriefFromWire(t2 *testing.T) {
+	body := []byte(`{"docs":[{"doc_id":"drafts.rich-task","title":"Rich task","content":{
+      "kind":"task","lifecycle_status":"open",
+      "description":"LEGACY WALL MUST NOT RENDER",
+      "brief":{"version":1,"blocks":[
+        {"id":"h","type":"heading","level":2,"text":"Human brief"},
+        {"id":"p","type":"paragraph","content":[{"type":"text","value":"PortableDoc reaches the task TUI."}]}
+      ]}
+    }}]}`)
+	tasks, details, err := decodeTaskListFull(body)
+	if err != nil {
+		t2.Fatalf("decodeTaskListFull: %v", err)
+	}
+	m := testModel(Board{})
+	m.tasks, m.details = tasks, details
+	lines, _ := m.frameContent(Frame{Kind: FrameTask, Ref: "drafts.rich-task"}, 80, detailNow)
+	plain := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(plain, "Human brief") || !strings.Contains(plain, "PortableDoc reaches the task TUI.") {
+		t2.Fatalf("bp task TUI frame lost PortableDoc:\n%s", plain)
+	}
+	if strings.Contains(plain, "LEGACY WALL") {
+		t2.Fatalf("bp task TUI rendered legacy fallback over PortableDoc:\n%s", plain)
+	}
+}
+
 // --- flattening --------------------------------------------------------------
 
 func TestVisibleRowsOrderAndKinds(t2 *testing.T) {

@@ -1443,6 +1443,29 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # OC24 pattern law (async triggers): record an instance-lifecycle operator
+  # TRIGGER post-commit, on the SUCCESS branch only — best-effort, the
+  # barkpark.go_live discipline: the action already succeeded (a job enqueued,
+  # a remote run started), so a failed audit insert is LOGGED and never rolls
+  # it back or 500s it. Detail maps carry small FACTS only — never a token, a
+  # ticket, or a URL that embeds one (studio-link audits THAT a link was
+  # minted, never the link). Sync DB writes (autoupdate / site-url / domain)
+  # do NOT use this — they wrap in the transactional Accounts.audit/3 so the
+  # row and the record land or fail together (the barkpark.deleted prior art).
+  defp audit_lifecycle_trigger(conn, team, bp_id, action, metadata) do
+    case Accounts.record_audit(%{
+           team_id: team.id,
+           actor_user_id: conn.assigns.current_user.id,
+           action: action,
+           target_type: "barkpark",
+           target_id: bp_id,
+           metadata: metadata
+         }) do
+      {:ok, _event} -> push_event(team.id, "audit")
+      {:error, cs} -> Logger.error("audit #{action} failed: #{inspect(cs)}")
+    end
+  end
+
   # POST /v1/barkparks/:id/retry → 201 {job} — re-enqueue provisioning for an
   # instance whose LAST provision attempt FAILED. Gated on a failed latest job so
   # a retry can never open a second concurrent provision (and a second billed
@@ -1473,6 +1496,11 @@ defmodule BarkparkCloud.Web.Router do
             if retryable_provision_state?(bp) do
               case Registry.enqueue_provision_job(bp) do
                 {:ok, _job} ->
+                  # OC24: the enqueue committed — record the operator trigger.
+                  audit_lifecycle_trigger(conn, team, bp.id, "barkpark.retry_requested", %{
+                    name: bp.name
+                  })
+
                   push_event(team.id, "fleet")
                   json(conn, 201, %{ok: true})
 
@@ -1558,6 +1586,14 @@ defmodule BarkparkCloud.Web.Router do
           {:ok, _event} -> :ok
           {:error, cs} -> Logger.error("verify event insert failed: #{inspect(cs)}")
         end
+
+        # OC24: the suite ran — record who asked, and the headline verdict
+        # (never the probe envelope; the `verify` instance event above carries
+        # the full detail on the Timeline).
+        audit_lifecycle_trigger(conn, team, bp.id, "barkpark.verify_requested", %{
+          name: bp.name,
+          reachable: result.reachable
+        })
 
         push_event(team.id, "fleet")
         json(conn, 200, result)
@@ -1672,6 +1708,12 @@ defmodule BarkparkCloud.Web.Router do
             # instances ignore the field — legacy ticket, still one-click.
             case Registry.mint_studio_link(bp, conn.assigns.current_user.email) do
               {:ok, url} ->
+                # OC24: audit THAT a link was minted — never the URL (it embeds
+                # the single-use login ticket) and never the admin token.
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
+                  name: bp.name
+                })
+
                 json(conn, 200, %{url: url})
 
               {:error, :not_live} ->
@@ -1730,8 +1772,31 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            case Registry.wire_site_url(bp, conn.body_params["url"]) do
+            # OC24 (transactional): the audit row commits with the success
+            # verdict and NEVER lands on a failed wire — audit/3 rolls the
+            # insert back on any error tuple. The metadata carries the wired
+            # URLs (public site facts), never the admin token that did the
+            # wiring.
+            audit_attrs = %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "barkpark.site_url_set",
+              target_type: "barkpark",
+              target_id: bp.id
+            }
+
+            wire_result =
+              Accounts.audit(
+                audit_attrs,
+                fn -> Registry.wire_site_url(bp, conn.body_params["url"]) end,
+                fn %{site_url: site_url, webhook_url: webhook_url} ->
+                  %{metadata: %{site_url: site_url, webhook_url: webhook_url}}
+                end
+              )
+
+            case wire_result do
               {:ok, %{site_url: site_url, webhook_url: webhook_url}} ->
+                push_event(team.id, "audit")
                 json(conn, 200, %{site_url: site_url, webhook_url: webhook_url})
 
               {:error, :invalid_url} ->
@@ -1754,6 +1819,13 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, :instance_error} ->
                 json(conn, 502, %{error: "instance_unreachable"})
+
+              # The wire succeeded but the audit insert did not — audit/3
+              # refuses to report an unrecorded success. The instance-side
+              # wiring is idempotent (a re-POST converges), so the honest
+              # move is a 422 the operator can simply retry.
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
             end
 
           _ ->
@@ -1810,6 +1882,13 @@ defmodule BarkparkCloud.Web.Router do
                 json(conn, 409, %{error: %{code: "pinned", pinned_release: bp.pinned_release}})
 
               {:ok, 202, _body} ->
+                # OC24: the run started on the box — record the operator
+                # trigger (and whether the pin was force-overridden).
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.self_update_triggered", %{
+                  name: bp.name,
+                  force: force?
+                })
+
                 # Refresh the row's cached status once the run has had time to
                 # land (the run itself takes a minute or two — the sweep would
                 # otherwise leave the row stale for up to an hour).
@@ -1951,6 +2030,15 @@ defmodule BarkparkCloud.Web.Router do
                     _ -> bp.pinned_release
                   end
 
+                # OC24: the flip started on the box — record the operator
+                # trigger with the instance-REPORTED target and the pin that
+                # now holds it (both facts, never operator input).
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.rollback_triggered", %{
+                  name: bp.name,
+                  target_sha: target_sha,
+                  pinned_release: pinned_release
+                })
+
                 # Refresh the row's cached status once the flip has had time
                 # to land — the sweep would otherwise leave the row (and the
                 # console) stale for up to an hour.
@@ -2044,9 +2132,38 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            case Registry.set_autoupdate(bp, conn.body_params) do
+            # OC24 (transactional): a policy governing unattended production
+            # deploys changes ONLY with its record — the policy write and the
+            # barkpark.autoupdate_changed row share one transaction (the
+            # barkpark.deleted prior art), and the metadata carries the NEW
+            # settings as persisted (never client input).
+            audit_attrs = %{
+              team_id: team.id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "barkpark.autoupdate_changed",
+              target_type: "barkpark",
+              target_id: bp.id
+            }
+
+            set_result =
+              Accounts.audit(
+                audit_attrs,
+                fn -> Registry.set_autoupdate(bp, conn.body_params) end,
+                fn updated ->
+                  %{
+                    metadata: %{
+                      enabled: updated.autoupdate_enabled,
+                      paused: updated.autoupdate_paused,
+                      pinned_release: updated.pinned_release
+                    }
+                  }
+                end
+              )
+
+            case set_result do
               {:ok, updated} ->
                 push_event(team.id, "fleet")
+                push_event(team.id, "audit")
 
                 json(conn, 200, %{
                   ok: true,
@@ -2187,9 +2304,33 @@ defmodule BarkparkCloud.Web.Router do
 
   # The persist + enqueue tail of POST /v1/barkparks/:id/domain, after the auth
   # + team-scope + presence gates all passed.
+  #
+  # OC24 (transactional): the custom_host persist and its
+  # barkpark.domain_attached row share one transaction — a rejected/taken host
+  # writes NO row (the barkpark.deleted prior art). The audited fact is the
+  # PERSISTED host (normalized by the changeset, never raw input); the enqueue
+  # below is the async half and its 409/422 does not unwrite the host — the
+  # audit honestly records the attach that DID land on the row.
   defp attach_custom_domain(conn, team, bp, domain) do
-    case Registry.set_custom_host(bp, domain) do
+    audit_attrs = %{
+      team_id: team.id,
+      actor_user_id: conn.assigns.current_user.id,
+      action: "barkpark.domain_attached",
+      target_type: "barkpark",
+      target_id: bp.id
+    }
+
+    set_result =
+      Accounts.audit(
+        audit_attrs,
+        fn -> Registry.set_custom_host(bp, domain) end,
+        fn bp -> %{metadata: %{custom_host: bp.custom_host}} end
+      )
+
+    case set_result do
       {:ok, bp} ->
+        push_event(team.id, "audit")
+
         case Registry.enqueue_attach_domain_job(bp) do
           {:ok, _job} ->
             push_event(team.id, "fleet")
@@ -2289,6 +2430,13 @@ defmodule BarkparkCloud.Web.Router do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             case Vercel.deploy_for(bp) do
               {:ok, state} ->
+                # OC24: the deploy + claim-code mint landed — record the
+                # trigger. Never the state: its claim_url is a bearer-shaped
+                # capability link (whoever holds it claims the deployment).
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.vercel_deploy_triggered", %{
+                  name: bp.name
+                })
+
                 push_event(bp.team_id, "fleet")
                 json(conn, 201, %{ok: true, vercel: state})
 
@@ -6083,6 +6231,15 @@ defmodule BarkparkCloud.Web.Router do
       {:ok, barkpark} ->
         case Registry.enqueue_resurrect_job(barkpark, bundle_ref) do
           {:ok, job} ->
+            # OC24: row + job both landed — record the operator trigger with
+            # the RESOLVED bundle (a storage key, not a secret). The enqueue-
+            # failure branch below deletes the row again, so only this branch
+            # is a resurrect that actually happened.
+            audit_lifecycle_trigger(conn, team, barkpark.id, "barkpark.resurrected", %{
+              name: name,
+              bundle_ref: bundle_ref
+            })
+
             # Live-push the new restoring row to any open dashboard tab.
             push_event(team.id, "fleet")
             # Echo the RESOLVED bundle_ref so a "resurrect latest" caller learns

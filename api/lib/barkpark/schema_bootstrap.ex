@@ -37,6 +37,24 @@ defmodule Barkpark.SchemaBootstrap do
 
   @impl true
   def init(:ok) do
+    # Authoring-excellence D12: the CORE `tag` schema registers BEFORE (outside)
+    # the defensive try/rescue below — deliberately. That rescue exists to keep
+    # one broken PLUGIN from taking down boot; a core type that cannot register
+    # is a hard bug, and letting the rescue log-and-swallow it would boot a
+    # system whose publish wall can never resolve a tag. Registration failure
+    # RAISES here, so boot fails CLOSED. Direct `Content.upsert_schema` (via
+    # `TagRegistry.register!/1`, idempotent on `(name, dataset)`) — never
+    # `Plugins.Bootstrap.register_all_schemas/0`, whose `Registry.all()` walk
+    # is EMPTY under `config :barkpark, :plugins, []`.
+    #
+    # Config-gated OFF in the test env only (same sandbox constraint as the
+    # codelist seeders below: this GenServer boots before any test owns a
+    # connection). Tests prove the registration path by calling
+    # `TagRegistry.register!/1` directly — see tag_registry_test.exs.
+    if Application.get_env(:barkpark, :run_boot_core_schema_registration, true) do
+      Barkpark.Content.TagRegistry.register!("production")
+    end
+
     try do
       # WI1: discover plugins from disk (or the configured whitelist) and
       # register them into the live Plugins.Registry GenServer, which is

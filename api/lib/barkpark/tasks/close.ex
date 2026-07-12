@@ -165,7 +165,7 @@ defmodule Barkpark.Tasks.Close do
 
   # "Edited-under-you becomes a 409, never a silent close." When the caller did
   # NOT pin an explicit observed_rev AND the claim carries a work_digest, the
-  # doc's current work-defining fields (title/description/acceptance_criteria —
+  # doc's current work-defining fields (title/brief/description/acceptance_criteria —
   # for criteria, only each entry's `criterion` TEXT is work-defining; the
   # met/evidence/attempts progress subfields a mid-claim `stamp` writes are
   # excluded by WorkDigest D5, so a worker's own stamps never fence its close)

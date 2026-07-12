@@ -70,6 +70,12 @@ defmodule BarkparkWeb.Plugs.Idempotency do
     |> halt()
   end
 
+  # @sobelow_skip — XSS.SendResp (send_resp/3) is a false-positive: `cached.body`
+  # is the EXACT byte stream this server produced on the ORIGINAL request (stored
+  # by `register_complete/3` from `sent.body`) and replayed with its cached
+  # content-type. It is not new request input — replaying it is byte-identical to
+  # re-running the handler, whose own emitters already govern escaping.
+  # sobelow_skip ["XSS.SendResp"]
   defp replay(conn, cached) do
     headers = cached.headers |> Map.to_list()
 

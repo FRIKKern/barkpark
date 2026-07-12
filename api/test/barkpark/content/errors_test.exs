@@ -219,4 +219,68 @@ defmodule Barkpark.Content.ErrorsTest do
       Errors.to_envelope({:error, {:not_found, "gadget_not_found", "gadget not found"}})
     end
   end
+
+  # ── Authoring-excellence E4 dedup wall (duplicate_of) ──────────────────────
+  #
+  # DELIBERATE membership test: the OpenAPI drift-guard is a TAUTOLOGY
+  # (known_codes/0 derives from @hints), which is exactly how `duplicate_task`
+  # slipped in with a build clause but no hint — invisible in the served spec
+  # and untested. This pins the new code so it can't repeat that hole.
+  test "duplicate_of IS a registered code (deliberate — not the duplicate_task hole)" do
+    assert MapSet.member?(Errors.known_codes(), "duplicate_of")
+  end
+
+  test "duplicate_of maps to a 409 carrying the incumbent id and a fix-hint" do
+    Logger.metadata(request_id: nil)
+
+    env =
+      Errors.to_envelope(
+        {:error,
+         {:duplicate_of,
+          %{
+            message: "document duplicates an already-published document",
+            duplicate_of: "paper-live",
+            similar: [%{id: "paper-live", similarity: 0.92, shared_tokens: 5}]
+          }}}
+      )
+
+    assert env.code == "duplicate_of"
+    assert env.status == 409
+    assert env.details.duplicate_of == "paper-live"
+    assert [%{id: "paper-live"} | _] = env.details.similar
+    # additive hint like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  # The publish wall's label-spine rejection (authoring-excellence D5): a new
+  # top-level atom — deliberately NOT the task-scoped invalid_task_content and
+  # NOT the plugin {:halted, _} shape. The validator's documentation-grade
+  # details (field / rule / fix) ride verbatim so an agent's one retry can be
+  # exact.
+  test "maps {:label_spine, details} to a 422 with the field/rule/fix details verbatim" do
+    Logger.metadata(request_id: nil)
+
+    details = %{
+      field: "tags",
+      rule: "A published document requires a `tags` array.",
+      fix: "Add 1–12 weighted tags: [{tag, strength, rationale}]."
+    }
+
+    env = Errors.to_envelope({:error, {:label_spine, details}})
+    assert env.code == "label_spine"
+    assert env.status == 422
+    assert env.details == details
+    assert is_binary(env.message) and env.message != ""
+    # additive fix-suggesting hint, like every other registered code
+    assert is_binary(env.hint) and env.hint != ""
+  end
+
+  # DELIBERATE membership test (charter D5, amended): known_codes/0 derives
+  # from @hints, which makes the OpenAPI drift-guard a tautology — a build
+  # clause without an @hints entry is invisible in the served spec and no test
+  # reds (live counter-example: duplicate_task). This assertion is the real
+  # tripwire: drop the @hints entry and this fails.
+  test "label_spine is a registered code (OpenAPI enum + hint table truthful)" do
+    assert MapSet.member?(Errors.known_codes(), "label_spine")
+  end
 end

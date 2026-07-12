@@ -40,6 +40,10 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
   @dataset "production"
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
@@ -81,7 +85,11 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
     {:ok, _} =
       Content.create_document(
         type,
-        %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
+        %{
+          "doc_id" => doc_id,
+          "title" => doc_id,
+          "content" => Barkpark.LabelFixtures.with_labels(content)
+        },
         @dataset,
         scope
       )

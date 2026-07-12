@@ -129,6 +129,15 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
     end
   end
 
+  # Sobelow Traversal.FileModule false-positive: `path` is `Plug.Upload.path` —
+  # the framework-managed temp file Plug wrote the multipart body to, NOT a
+  # user-supplied name. The attacker-controlled `filename` is used only for
+  # extension detection (`detect_kind/1`) and slug derivation (`resolve_identity/2`,
+  # which slugifies + regex-validates it); it never reaches `File.read`. No
+  # request string is joined into this path, so directory traversal is impossible.
+  # Pinned by `ImportControllerTest` "a traversal-laden filename reads the upload
+  # temp path, never the named path".
+  # sobelow_skip ["Traversal.FileModule"]
   defp read_upload(%Plug.Upload{path: path}) do
     case File.read(path) do
       {:ok, raw} -> {:ok, raw}
