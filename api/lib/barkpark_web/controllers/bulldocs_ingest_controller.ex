@@ -71,6 +71,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
+  alias Barkpark.Content.Errors
   alias Barkpark.Tenancy
 
   # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
@@ -118,6 +119,24 @@ defmodule BarkparkWeb.BulldocsIngestController do
         |> put_status(:conflict)
         |> json(%{error: %{code: "halted", message: reason}})
 
+      # Publish-wall rejections (authoring-excellence D27). Once the upsert_paper
+      # mount (D26) lands, a walled paper birth surfaces as a RAW wall tuple —
+      # route each through the shared v1 error envelope so the ingest caller gets
+      # field/rule/fix + a machine hint and can retry: label_spine 422,
+      # unknown_tag 422, duplicate_of 409. These sit ABOVE the changeset
+      # catch-all so a wall tuple is NEVER demoted to the generic invalid_paper,
+      # and they are NOT flattened into {:halted, _} (that would mis-route the
+      # 422s to the 409 halted head). Pure routing — every envelope + @hints
+      # entry already lives in Barkpark.Content.Errors (errors.ex:289/:316/:330).
+      {:error, {:label_spine, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:unknown_tag, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:duplicate_of, _}} = err ->
+        render_error(conn, err)
+
       {:error, _changeset} ->
         conn
         |> put_status(:unprocessable_entity)
@@ -161,6 +180,18 @@ defmodule BarkparkWeb.BulldocsIngestController do
         conn
         |> put_status(:conflict)
         |> json(%{error: %{code: "halted", message: reason}})
+
+      # Publish-wall rejections (authoring-excellence D27) — see the blocks path
+      # above. Same three raw wall tuples, routed through render_error/2 above
+      # the changeset catch-all.
+      {:error, {:label_spine, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:unknown_tag, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:duplicate_of, _}} = err ->
+        render_error(conn, err)
 
       {:error, _changeset} ->
         conn
@@ -469,6 +500,22 @@ defmodule BarkparkWeb.BulldocsIngestController do
             })
         end
     end
+  end
+
+  # Route a RAW publish-wall tuple through the shared v1 error envelope
+  # (authoring-excellence D27) — mirrors FallbackController.call/2 so an ingest
+  # rejection carries the same field/rule/fix details + code-keyed hint +
+  # request_id an SDK already branches on. Zero new envelope code: the
+  # label_spine / unknown_tag / duplicate_of builders + @hints entries live in
+  # Barkpark.Content.Errors. NEVER used for the changeset path — a changeset
+  # through to_envelope becomes validation_failed, breaking the public
+  # invalid_paper contract — so that clause stays hand-rolled above.
+  defp render_error(conn, tuple) do
+    env = Errors.to_envelope(tuple, conn)
+
+    conn
+    |> put_status(env.status)
+    |> json(%{error: Map.delete(env, :status)})
   end
 
   # A minimally well-formed op: a map whose "op" is one of the five kinds.
