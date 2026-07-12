@@ -83,6 +83,37 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
   end
 
   describe "preview/2 — non-destructive DISPLAY channel (doctrine D5)" do
+    test "data-viz previews reuse the reader aggregate shape without mutating source blocks" do
+      tally = %{
+        buckets: [],
+        labels1: ["done", "open"],
+        labels2: [],
+        op: "count",
+        tally: %{{"done", :__all__} => 1, {"open", :__all__} => 2},
+        total: 3
+      }
+
+      agg_fetch = fn %{"source" => "tasks"} -> {:ok, tally} end
+
+      for type <- ~w(chart heatmap stat) do
+        block = %{"id" => "viz-#{type}", "type" => type, "query" => %{"source" => "tasks"}}
+
+        assert [entry] = TaskResolver.preview([block], &fetch/1, agg_fetch)
+        shown = TaskResolver.apply_preview(block, entry)
+
+        assert [shown] == TaskResolver.resolve([block], &fetch/1, agg_fetch)
+        assert block["query"] == %{"source" => "tasks"}
+      end
+    end
+
+    test "data-viz preview stays absent when agg_fetch is unavailable or rejects the query" do
+      block = %{"id" => "viz-chart", "type" => "chart", "query" => %{"source" => "tasks"}}
+
+      assert TaskResolver.preview([block], &fetch/1) == []
+      assert TaskResolver.preview([block], &fetch/1, fn _ -> {:error, :offline} end) == []
+      assert TaskResolver.apply_preview(block, nil) == block
+    end
+
     test "yields an id-keyed snapshot entry for a query-carrying snapshot block" do
       blocks = [%{"id" => "b1", "type" => "task-list", "query" => %{"parent_id" => "epic"}}]
 

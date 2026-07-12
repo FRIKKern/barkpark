@@ -190,6 +190,27 @@ defmodule Barkpark.Tasks.AggQueryTest do
     assert is_list(spark["spark"]) and Enum.sum(spark["spark"]) == 2
   end
 
+  test "editor preview applies the same live aggregate shape as the reader", %{scope_a: scope_a} do
+    mk_task!(scope_a, %{"lifecycle_status" => "open"})
+    mk_task!(scope_a, %{"lifecycle_status" => "done"})
+
+    for type <- ~w(chart heatmap stat) do
+      query =
+        case type do
+          "chart" -> %{"source" => "tasks", "groupBy" => "status"}
+          "heatmap" -> %{"source" => "tasks", "groupBy" => ["status", "priority"]}
+          "stat" -> %{"source" => "tasks"}
+        end
+
+      block = %{"id" => "preview-#{type}", "type" => type, "query" => query}
+      fetch = agg_fetch(scope_a)
+
+      assert [entry] = TaskResolver.preview([block], no_rows(), fetch)
+      assert TaskResolver.apply_preview(block, entry) ==
+               TaskResolver.resolve([block], no_rows(), fetch) |> List.first()
+    end
+  end
+
   # ── PROOF 3: offline parity — literal blocks with NO query pass through ───────
 
   test "a literal data-viz block with no query is untouched (offline/wasm)", %{scope_a: scope_a} do
