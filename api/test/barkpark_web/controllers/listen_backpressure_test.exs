@@ -108,6 +108,8 @@ defmodule BarkparkWeb.ListenBackpressureTest do
       end)
 
     assert_receive {:chunk, :welcome, ^pid}
+    forwarder = only_forwarder_link(pid)
+    forwarder_monitor = Process.monitor(forwarder)
 
     send(pid, {:document_changed, event(0, %{"body" => "trigger"})})
     assert_receive {:chunk, :blocked, ^pid}
@@ -120,14 +122,50 @@ defmodule BarkparkWeb.ListenBackpressureTest do
       )
     end
 
-    queue = await_bounded_overload(pid, 20)
-    assert queue <= 21
+    await_bounded_overload(pid, 20)
+    await_empty_mailbox(forwarder)
+
+    {:message_queue_len, stable_queue} = Process.info(pid, :message_queue_len)
+    assert stable_queue <= 21
 
     send(pid, {:release_chunk, self()})
 
     assert_receive {:chunk, :overloaded, ^pid}
     assert_receive :listener_returned
     assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
+    assert_receive {:DOWN, ^forwarder_monitor, :process, ^forwarder, :normal}
+  end
+
+  test "an overload signal at the low-queue race boundary terminates and cleans up" do
+    previous = Application.get_env(:barkpark, ListenController)
+
+    Application.put_env(:barkpark, ListenController,
+      mailbox_limit: 20,
+      max_heap_words: 10_000_000
+    )
+
+    on_exit(fn -> restore_controller_env(previous) end)
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Conn.assign(:caller_context, %CallerContext{
+        principal_type: :api_token,
+        is_admin: true
+      })
+      |> Map.put(:adapter, {BlockingChunkAdapter, %{test: self()}})
+
+    {pid, monitor} =
+      spawn_monitor(fn -> ListenController.listen(conn, %{"dataset" => "production"}) end)
+
+    assert_receive {:chunk, :welcome, ^pid}
+    forwarder = only_forwarder_link(pid)
+    forwarder_monitor = Process.monitor(forwarder)
+
+    send(pid, :sse_overloaded)
+
+    assert_receive {:chunk, :overloaded, ^pid}
+    assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}
+    assert_receive {:DOWN, ^forwarder_monitor, :process, ^forwarder, :normal}
   end
 
   test "backpressure_step continues on an empty mailbox and does NOT emit the overloaded frame" do
@@ -170,6 +208,31 @@ defmodule BarkparkWeb.ListenBackpressureTest do
       nil ->
         flunk("listener terminated before the blocked chunk was released")
     end
+  end
+
+  defp await_empty_mailbox(pid, attempts \\ 10_000)
+
+  defp await_empty_mailbox(_pid, 0),
+    do: flunk("event forwarder mailbox did not drain")
+
+  defp await_empty_mailbox(pid, attempts) do
+    case Process.info(pid, :message_queue_len) do
+      {:message_queue_len, 0} ->
+        :ok
+
+      {:message_queue_len, _n} ->
+        :erlang.yield()
+        await_empty_mailbox(pid, attempts - 1)
+
+      nil ->
+        flunk("event forwarder terminated before the stable queue observation")
+    end
+  end
+
+  defp only_forwarder_link(pid) do
+    {:links, links} = Process.info(pid, :links)
+    assert length(links) == 1
+    hd(links)
   end
 
   defp event(id, document) do
