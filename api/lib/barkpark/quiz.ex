@@ -16,7 +16,11 @@ defmodule Barkpark.Quiz do
   @doc "Resolve-or-start the room for `pin`."
   defdelegate ensure_room(pin), to: Room, as: :ensure
 
-  @doc "Add (or refresh) a player; returns `{:ok, snapshot}`."
+  @doc """
+  Add (or refresh) a player in a live room; returns `{:ok, snapshot}`, or
+  `{:error, :no_room}` when nobody is hosting `pin` (joins never start rooms —
+  the host mount is the sole creator).
+  """
   defdelegate join(pin, player_id, name), to: Room
 
   @doc "Remove a player and drop their answer."

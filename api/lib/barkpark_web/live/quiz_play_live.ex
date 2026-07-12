@@ -10,6 +10,9 @@ defmodule BarkparkWeb.QuizPlayLive do
   topic (`Barkpark.Quiz.room_topic/1`); every `{:tally, t}` broadcast re-renders
   the bars. The dead (HTTP) mount renders a "Connecting…" placeholder and never
   touches the room, so a bare GET never spins up a room as a side effect.
+  Joining NEVER starts a room either (the host mount is the sole creator —
+  ghost-room guard): a typo'd pin gets the quiet honest "nobody is hosting"
+  state instead of a silently-spawned empty room that looks like a working quiz.
 
   `terminate/2` calls `Quiz.leave/2` so a closed tab / navigation / disconnect
   sheds the player from the room's roster (otherwise the players map and the
@@ -107,6 +110,10 @@ defmodule BarkparkWeb.QuizPlayLive do
       <p class="q-pin">Room <code>{@pin}</code></p>
 
       <%= cond do %>
+        <% @error == :no_room -> %>
+          <p class="q-status">
+            Nobody is hosting this room right now — check the pin, or refresh once your host is up.
+          </p>
         <% @error -> %>
           <p class="q-status">This room is unavailable right now. Try again shortly.</p>
         <% @question -> %>

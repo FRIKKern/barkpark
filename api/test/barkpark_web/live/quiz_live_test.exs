@@ -47,6 +47,8 @@ defmodule BarkparkWeb.QuizLiveTest do
   end
 
   test "player renders choices and can lock in an answer", %{conn: conn, pin: pin} do
+    # Joins never start rooms (Decision N) — the host is the sole creator.
+    {:ok, _pid} = Quiz.ensure_room(pin)
     {:ok, view, html} = live(conn, "/quiz/play/#{pin}")
     assert html =~ "powers Barkpark"
 
@@ -61,6 +63,15 @@ defmodule BarkparkWeb.QuizLiveTest do
     player |> element("button.c0") |> render_click()
 
     assert render(host) =~ "1 answers in"
+  end
+
+  test "a connected mount on a pin nobody hosts shows the honest no-host state and never spawns a room",
+       %{conn: conn, pin: pin} do
+    # Decision N: the setup pin has no host — the join must be refused at the
+    # primitive (no ghost room), and the player sees the quiet honest state.
+    {:ok, _view, html} = live(conn, "/quiz/play/#{pin}")
+    assert html =~ "Nobody is hosting this room right now"
+    assert Barkpark.Quiz.Room.whereis(pin) == nil
   end
 
   test "a bare GET to the player page renders without starting a room", %{conn: conn, pin: pin} do
