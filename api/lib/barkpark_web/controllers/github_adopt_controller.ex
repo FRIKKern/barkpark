@@ -18,6 +18,13 @@ defmodule BarkparkWeb.GithubAdoptController do
   ## Status mapping
 
     * `{:ok, _doc}`            → `200 {ok: true, task: id, state: "adopted"}`
+    * `{:ok, _doc, collapse}`  → `200 {ok: true, task: id, state: "adopted",
+      collapse: %{published: false, error: <wall detail>}}` — adopted, but the
+      draft-twin collapse publish was REJECTED by the authoring wall (D23). The
+      adopt side effects are already committed (a 422-after-commit would lie),
+      so HTTP stays `200`; the `collapse.error` carries the machine-readable
+      wall `code` (`label_spine`/`unknown_tag`/`duplicate_of`) so the operator
+      fixes the published task's labels and re-adopts.
     * `{:error, :not_intake}`  → `409` — the task exists but is not an adoptable
       intake (already adopted-and-re-hit returns `{:ok,_}`, so a `:not_intake`
       here is a plain/mirrored/detached task, an operator error, not transient)
@@ -52,6 +59,12 @@ defmodule BarkparkWeb.GithubAdoptController do
     opts = BarkparkWeb.ScopeHelpers.scope_opts(conn)
 
     case adopt_fun().(id, dataset, opts) do
+      # Adopted, but the draft-twin collapse publish hit the authoring wall
+      # (D23): side effects committed on the draft, so HTTP stays 200 — the
+      # `collapse` field carries the machine-readable wall detail for a retry.
+      {:ok, _doc, %{published: false} = collapse} ->
+        json(conn, %{ok: true, task: id, state: "adopted", collapse: collapse})
+
       {:ok, _doc} ->
         json(conn, %{ok: true, task: id, state: "adopted"})
 

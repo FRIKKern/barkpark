@@ -24,6 +24,16 @@ defmodule BarkparkWeb.Studio.StudioLiveValuerefWritebackTest do
 
   @dataset "production"
 
+  # A bare plugin whose before_publish HALTS — used to force the target's
+  # propagate-publish to fail so the writeback returns {:error,{:publish_failed,
+  # reason}} (authoring-excellence D14/D23). Bare module: the Hooks dispatcher
+  # only needs `lifecycle_hooks/0` (the hooks_test precedent).
+  defmodule HaltPublishPlugin do
+    @moduledoc false
+    def lifecycle_hooks, do: %{before_publish: [&__MODULE__.halt/1]}
+    def halt(_payload), do: {:halt, "wall says no: fixture-tag missing rationale"}
+  end
+
   setup %{conn: conn} do
     ws_a = create_workspace!("vwb-ws-a")
     proj_a = create_project!(ws_a, "vwb-pa")
@@ -198,6 +208,47 @@ defmodule BarkparkWeb.Studio.StudioLiveValuerefWritebackTest do
 
     render_hook(view, "valueref-writeback-confirm", %{"value" => "0 days"})
 
+    assert canon_value(ws_a, proj_a) == "14 days"
+  end
+
+  test "a publish-wall rejection RENDERS the wall detail, not 'The write was rejected.'", %{
+    conn_a: conn,
+    ws_a: ws_a,
+    proj_a: proj_a
+  } do
+    {:ok, view, _html} = live(conn, studio_url(ws_a, proj_a))
+
+    render_hook(view, "paper-valueref-inspect", %{
+      "target" => "vwb-canon",
+      "field" => "launch_delay"
+    })
+
+    # Arm the halting plugin ONLY for the confirm-time propagate-publish, then
+    # restore. The writeback patches the draft, then re-publishes the (published)
+    # canonical row → before_publish halts → {:error,{:publish_failed,{:halted,…}}}.
+    prior = Application.get_env(:barkpark, :plugins)
+    Application.put_env(:barkpark, :plugins, [HaltPublishPlugin])
+
+    on_exit(fn ->
+      if prior == nil,
+        do: Application.delete_env(:barkpark, :plugins),
+        else: Application.put_env(:barkpark, :plugins, prior)
+    end)
+
+    html =
+      view
+      |> element(~s([data-test-id="valueref-writeback-form"]))
+      |> render_submit(%{"value" => "21 days"})
+
+    # The wall detail is RENDERED (D14 "render, not degrade") — the panel shows
+    # the specific reason, not the content-free generic degrade.
+    assert html =~ ~s(data-test-id="valueref-error")
+    assert html =~ "Publish blocked"
+    assert html =~ "wall says no"
+    refute html =~ "The write was rejected."
+
+    # The published canonical value is untouched — the failed propagate-publish
+    # never landed the edit on the published perspective.
     assert canon_value(ws_a, proj_a) == "14 days"
   end
 end

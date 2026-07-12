@@ -300,7 +300,15 @@ defmodule Barkpark.Plugins.Github do
   # a `[workspace_id:, project_id:]` keyword list). `mode` is discarded.
   defp build_adopt_handler(opts) when is_list(opts) do
     fn doc_id, dataset, _mode ->
-      Barkpark.Plugins.Github.Adopt.adopt(doc_id, dataset, opts)
+      # Normalize the collapse-annotated `{:ok, doc, collapse}` variant (D23)
+      # back to `{:ok, doc}` for the Studio modal path — `confirm_modal_real`
+      # keys on the 2-tuple and the adopt itself committed; a rejected
+      # draft-twin collapse is a CLI/HTTP-surfaced diagnostic, not a Studio
+      # dead-end (the button is convenience over the CLI verb).
+      case Barkpark.Plugins.Github.Adopt.adopt(doc_id, dataset, opts) do
+        {:ok, doc, _collapse} -> {:ok, doc}
+        other -> other
+      end
     end
   end
 
