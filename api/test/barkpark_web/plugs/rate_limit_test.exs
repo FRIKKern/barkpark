@@ -146,4 +146,8 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
     refute RateLimit.call(conn_b, RateLimit.init([])).halted
     assert RateLimit.call(conn_b, RateLimit.init([])).halted
   end
+
+  test "ConnCase assigns a server-owned limiter scope", %{conn: conn} do
+    assert is_binary(conn.private[:barkpark_rate_limit_scope])
+  end
 end
