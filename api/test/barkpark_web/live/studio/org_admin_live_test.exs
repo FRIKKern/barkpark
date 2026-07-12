@@ -118,4 +118,18 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
       assert html =~ "sso_login"
     end
   end
+
+  describe "trust and legal panel (era-w10-trust-panel)" do
+    test "lists the four trust papers plus the status page, one click away", %{conn: conn} do
+      {:ok, _view, html} = live(admin_conn(conn), "/studio/org-admin")
+
+      assert html =~ "Trust and legal"
+
+      assert html =~ ~s(href="/papers/soc2-controls-mapping")
+      assert html =~ ~s(href="/papers/vulnerability-disclosure-policy")
+      assert html =~ ~s(href="/papers/dpa-template")
+      assert html =~ ~s(href="/papers/support-tiers")
+      assert html =~ ~s(href="/status")
+    end
+  end
 end
