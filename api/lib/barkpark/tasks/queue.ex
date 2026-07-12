@@ -89,16 +89,17 @@ defmodule Barkpark.Tasks.Queue do
                      THEN ?->'dependencies'
                      ELSE '[]'::jsonb END
               ) AS dep(id)
-              WHERE NOT EXISTS (
-                SELECT 1 FROM documents t
+              LEFT JOIN (
+                SELECT DISTINCT regexp_replace(t.doc_id, '^drafts\\.', '') AS normalized_id
+                FROM documents t
                 WHERE t.type = 'task'
                   AND t.dataset = ?
                   AND t.workspace_id IS NOT DISTINCT FROM ?
                   AND t.project_id IS NOT DISTINCT FROM ?
-                  AND regexp_replace(t.doc_id, '^drafts\\.', '') =
-                      regexp_replace(dep.id, '^drafts\\.', '')
                   AND t.content->>'lifecycle_status' = 'done'
-              )
+              ) AS done
+                ON done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
+              WHERE done.normalized_id IS NULL
             )
             """,
             d.content,
