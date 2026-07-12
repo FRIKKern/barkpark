@@ -338,6 +338,26 @@ func (g HealthGate) checkPostgres() CheckResult {
 	if resp.StatusCode != http.StatusOK {
 		return CheckResult{name, false, fmt.Sprintf("query probe returned %d, want 200 (DB read failed)", resp.StatusCode)}
 	}
+	if u, err := url.Parse(g.PostgresProbeURL); err == nil && u.Path == "/status.json" {
+		var status struct {
+			Components []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			} `json:"components"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			return CheckResult{name, false, fmt.Sprintf("status probe returned malformed JSON: %v", err)}
+		}
+		for _, component := range status.Components {
+			if component.Name == "database" {
+				if component.Status == "operational" {
+					return CheckResult{name, true, "public status database component is operational"}
+				}
+				return CheckResult{name, false, fmt.Sprintf("public status database component is %q, want operational", component.Status)}
+			}
+		}
+		return CheckResult{name, false, "public status response has no database component"}
+	}
 	return CheckResult{name, true, "scoped query read returned 200 (Postgres reachable via API)"}
 }
 

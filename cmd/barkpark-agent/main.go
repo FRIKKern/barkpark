@@ -86,9 +86,7 @@ func run(args []string) int {
 			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
 			HealthBaseURL: *healthURL,
 			HealthToken:   *healthTok,
-			HealthGateOpts: setup.HealthGate{
-				Token: *healthTok,
-			},
+			HealthGateOpts: agentHealthGateOpts(*healthURL, *healthTok),
 		},
 	}
 
@@ -112,6 +110,19 @@ func run(args []string) int {
 	// RunWith returns only when ctx is cancelled (signal) — a clean shutdown.
 	fmt.Fprintln(os.Stderr, "barkpark-agent: shutting down")
 	return 0
+}
+
+func agentHealthGateOpts(base, token string) setup.HealthGate {
+	base = strings.TrimRight(base, "/")
+	statusURL := ""
+	if base != "" {
+		statusURL = base + "/status.json"
+	}
+	return setup.HealthGate{
+		Token:            token,
+		PostgresProbeURL: statusURL,
+		StubsOptional:    true,
+	}
 }
 
 // readToken reads, trims, and validates the agent token from path. An empty
