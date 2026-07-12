@@ -249,6 +249,33 @@ func TestPostgresCheck(t *testing.T) {
 			t.Fatalf("empty postgres probe URL must fail, got pass: %s", got.Detail)
 		}
 	})
+
+	for _, tc := range []struct {
+		name     string
+		body     string
+		wantPass bool
+	}{
+		{"status database operational", `{"components":[{"name":"database","status":"operational"}]}`, true},
+		{"status database degraded", `{"components":[{"name":"database","status":"degraded"}]}`, false},
+		{"status missing database", `{"components":[{"name":"plugins","status":"operational"}]}`, false},
+		{"status malformed", `{`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if got := r.Header.Get("Authorization"); got != "" {
+					t.Errorf("Authorization = %q, want empty for public status probe", got)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+
+			g := HealthGate{PostgresProbeURL: srv.URL + "/status.json"}
+			if got := g.checkPostgres(); got.Pass != tc.wantPass {
+				t.Fatalf("pass=%v detail=%q, want pass=%v", got.Pass, got.Detail, tc.wantPass)
+			}
+		})
+	}
 }
 
 func TestStubProbeChecks(t *testing.T) {
