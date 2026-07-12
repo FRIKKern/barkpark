@@ -5,6 +5,13 @@ defmodule BarkparkWeb.Router do
   # router. See `BarkparkWeb.Router.Plugins` and Goal barkpark-G2.
   import BarkparkWeb.Router.Plugins
 
+  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): a
+  # pipeline-level CSP here would apply to the whole Studio/admin/public-root
+  # HTML surface (LiveView with inline styles/JS, the paper reader, plugin
+  # readers) and a wrong policy silently breaks rendering. The public paper
+  # reader ALREADY carries a tailored script-blocking CSP via PaperReaderCsp
+  # (#2389), layered per-scope. A carefully-scoped Studio/admin CSP is filed as
+  # a follow-up rather than shipped blind here. CSRF/Headers ARE present.
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -58,9 +65,27 @@ defmodule BarkparkWeb.Router do
 
   # SSO browser redirect flows (OIDC, social login) — need a session to carry
   # state/nonce/PKCE-verifier across the round-trip (era-w3-oidc-rp, era-w2-social).
+  #
+  # Sobelow triage (task-f76e9b7b):
+  #   * Config.Headers — FIXED. SamlController.slo renders a real HTML page (the
+  #     esaml HTTP-POST LogoutResponse auto-submit form, saml_controller.ex:118)
+  #     that was served with NO secure headers. put_secure_browser_headers now
+  #     adds X-Frame-Options/nosniff/referrer-policy on every response this
+  #     pipeline emits (redirects included) — clickjacking + MIME-sniff + Referer
+  #     leakage of the SLO/callback tokens closed.
+  #   * Config.CSRF — N/A (justified, stays baselined). These are FEDERATED flows:
+  #     OIDC/social use the `state` param + PKCE verifier as the CSRF defense, and
+  #     the SAML ACS/SLO endpoints are cross-site POST-backs from the IdP that
+  #     structurally cannot carry a Phoenix CSRF token. protect_from_forgery would
+  #     BREAK SSO. The session holds only transient state/nonce, never a trust
+  #     anchor — the IdP assertion (XML-dsig, pinned cert) is what authenticates.
+  #   * Config.CSP — follow-up (task filed). A meaningful CSP would block the
+  #     esaml SLO form's inline `onload` auto-submit; a nonce-based policy needs
+  #     an esaml form rewrite. Tracked separately.
   pipeline :sso_browser do
     plug(:accepts, ["html", "json"])
     plug(:fetch_session)
+    plug(:put_secure_browser_headers)
   end
 
   # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
@@ -138,6 +163,12 @@ defmodule BarkparkWeb.Router do
   # header (wins when present — API clients unchanged) OR
   # `session["api_token"]`; anonymous still passes through untouched, so the
   # :media share path and the fail-closed default are byte-identical.
+  # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): the session
+  # is fetched ONLY so OptionalSessionToken can resolve a member's token from the
+  # cookie for READ authorization (bare <img> tags cannot send a Bearer header).
+  # RequireShareScope is method-aware — a :media share grants GET/HEAD only — so
+  # no cookie-authorized state change is reachable here. Reads are not a CSRF
+  # target; protect_from_forgery would break same-origin <img> media loads.
   pipeline :shared_media_api do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -185,6 +216,13 @@ defmodule BarkparkWeb.Router do
   # Media writes (upload/update/delete) — mirrors [:scoped_api, :media_mutate]
   # (keeps the session-cookie branch + AssignDefaultScope for the browser
   # Studio) with the edit-token grant spliced in before ResolveWorkspace.
+  # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): this IS a
+  # write pipeline, but the cookie/session branch is CSRF-defended by
+  # RequireBearerOrSessionToken (below), which requires an `x-requested-with`
+  # header a cross-site form/img cannot set and a cross-origin fetch cannot add
+  # without a CORS preflight the allowlist blocks. Bearer callers return before
+  # that check (token-auth, not a CSRF target). protect_from_forgery is the wrong
+  # tool: API/Web-Component clients present no Phoenix CSRF token.
   pipeline :scoped_media_mutate do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -222,6 +260,10 @@ defmodule BarkparkWeb.Router do
   # session cookie (`session["api_token"]`) — a real member with only the
   # cookie resolves their token and clears the gate instead of 403'ing
   # before mount. The LV's own on_mount admin/ops hook is the UI auth gate.
+  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): same as
+  # :browser — this serves scoped Studio/admin LiveView HTML where a blind
+  # pipeline-level CSP risks breaking inline-style/JS rendering. Scoped-CSP work
+  # is filed as a follow-up. CSRF + secure headers are present.
   pipeline :scoped_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -261,6 +303,9 @@ defmodule BarkparkWeb.Router do
   # RequireShareScope (read-only; LiveScope attaches the server-side write
   # gate at mount); otherwise byte-identical to :scoped_browser — members via
   # membership, anonymous via the Default allowance, everything else closed.
+  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): scoped Studio
+  # HTML surface — same blind-CSP risk as :browser/:scoped_browser; scoped-CSP is
+  # a filed follow-up. CSRF + secure headers present.
   pipeline :shared_studio_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -297,6 +342,13 @@ defmodule BarkparkWeb.Router do
   # exposure: the reader resolves by slug (a `drafts.` row never matches) and
   # renders wikilinks/valuerefs as the anonymous principal over published rows
   # (D2/D5) on BOTH surfaces.
+  # Sobelow Config.CSP (justified, stays baselined — task-f76e9b7b): the scoped
+  # paper reader at /w/:ws/p/:project/papers/:slug ALREADY carries the tailored
+  # script-blocking CSP — its scope layers [:shared_paper_browser,
+  # :paper_reader_csp] (see the scope block below), and PaperReaderCsp (#2389)
+  # self-gates to `.../papers/:slug` to emit the policy per-response. A
+  # pipeline-level CSP here would double-set / conflict with it. CSRF + secure
+  # headers present.
   pipeline :shared_paper_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
@@ -382,6 +434,11 @@ defmodule BarkparkWeb.Router do
   #
   # GET-ONLY BUCKET. The cookie branch is navigation auth with no CSRF header, so
   # a WRITE must NEVER ride this pipeline — only idempotent, side-effect-free GETs.
+  #
+  # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): the GET-only
+  # invariant IS the CSRF defense — a side-effect-free read is not a CSRF target,
+  # and protect_from_forgery would break the plain-<a href> attachment-download
+  # navigations this bucket exists to serve (they cannot carry a CSRF token).
   pipeline :session_token_root do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -398,6 +455,14 @@ defmodule BarkparkWeb.Router do
   # the api-token/tenancy plugs (auth is pre-tenant) and WITH :fetch_session so
   # login can set the signed `user_session` cookie. RateLimit keys on IP here
   # (anonymous), which is the brute-force defense for login.
+  #
+  # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): this is a
+  # JSON API (accepts ["json"] + AcceptBarkparkVendor), so a cross-site HTML form
+  # cannot forge an application/json request against it. The session-gated
+  # routes mounted downstream (:require_user / :access_principal) run
+  # RequireUserSession / OptionalUserSession, which STILL enforce the
+  # `x-requested-with` CSRF check on the cookie branch for mutating methods — so
+  # login setting the cookie here introduces no CSRF-writable surface.
   pipeline :user_auth do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
@@ -452,6 +517,11 @@ defmodule BarkparkWeb.Router do
 
   # Browser Studio uploads send `credentials: same-origin` with the session
   # cookie; API clients still use Bearer. Requires `:fetch_session` upstream.
+  # Sobelow Config.CSRF (justified, stays baselined — task-f76e9b7b): identical
+  # rationale to :scoped_media_mutate — the session branch is CSRF-defended by
+  # RequireBearerOrSessionToken's `x-requested-with` check; bearer callers are
+  # token-auth. protect_from_forgery cannot apply (no Phoenix CSRF token on API /
+  # Web-Component uploads).
   pipeline :media_mutate do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -1981,6 +2051,12 @@ defmodule BarkparkWeb.Router do
   # The app defends every real path (route misses and parse errors are handled
   # gracefully), so nothing user-facing raises — this is the only way to reach
   # the crash path. Compiled out unless :error_test_routes is set (config/test.exs).
+  #
+  # Sobelow Config.Headers (justified, stays baselined — task-f76e9b7b): this
+  # pipeline is COMPILED OUT of dev and prod (the compile_env guard is only true
+  # under MIX_ENV=test). It exists solely to reach the raw crash path so the
+  # RenderErrors tests can assert ErrorHTML/ErrorJSON render — no real browser
+  # ever hits it, so missing put_secure_browser_headers exposes nothing.
   if Application.compile_env(:barkpark, :error_test_routes, false) do
     pipeline :error_test do
       plug(:accepts, ["json", "html"])

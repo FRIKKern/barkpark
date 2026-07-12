@@ -466,4 +466,22 @@ defmodule Barkpark.PreviewTest do
       assert Preview.media_resolver().("/some/other/path") == nil
     end
   end
+
+  # Sobelow Config.Secrets fix (task-f76e9b7b): the preview signing secret was
+  # relocated OUT of config/config.exs (where Sobelow flagged the literal) into
+  # config/dev.exs + config/test.exs (both in Sobelow's config skip-list); prod
+  # requires PREVIEW_JWT_SECRET via runtime.exs. This fences that relocation —
+  # the merged :preview config must still carry a usable secret alongside the
+  # ttl_seconds/issuer base kept in config.exs, or preview-JWT signing silently
+  # breaks in this env.
+  describe ":preview config after Config.Secrets relocation" do
+    test "the ambient test-env :preview config still carries secret + merged base" do
+      preview = Application.get_env(:barkpark, :preview)
+
+      assert is_binary(preview[:secret]) and preview[:secret] != ""
+      # ttl_seconds/issuer stay in config.exs and merge per-key at boot.
+      assert preview[:ttl_seconds] == 600
+      assert preview[:issuer] == "barkpark"
+    end
+  end
 end

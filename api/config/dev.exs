@@ -10,6 +10,12 @@ config :barkpark, Barkpark.Repo,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
 
+# Preview-JWT dev signing secret (throwaway). Prod reads PREVIEW_JWT_SECRET in
+# runtime.exs; kept OUT of config.exs so Sobelow Config.Secrets stays clean
+# (dev.exs is in Sobelow's config skip-list). Merges with the ttl_seconds/issuer
+# base set in config.exs.
+config :barkpark, :preview, secret: "dev-preview-secret-change-in-prod-please-32-chars"
+
 # For development, we disable any cache and enable
 # debugging and code reloading.
 #

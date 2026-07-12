@@ -276,6 +276,14 @@ defmodule BarkparkWeb.SamlControllerTest do
       assert html =~ "SAMLResponse"
       assert html =~ "https://idp.example.com/slo"
 
+      # Sobelow Config.Headers fix (task-f76e9b7b): the SLO auto-submit HTML form
+      # rides the :sso_browser pipeline, which now sets secure browser headers.
+      # Regression fence — this HTML page must never ship without them again.
+      # (Phoenix 1.8's put_secure_browser_headers sets nosniff/referrer-policy/
+      # permitted-cross-domain-policies; it no longer emits x-frame-options.)
+      assert get_resp_header(resp, "x-content-type-options") == ["nosniff"]
+      assert get_resp_header(resp, "referrer-policy") == ["strict-origin-when-cross-origin"]
+
       # The named session is dead; the SLO is on the audit chain.
       refute Accounts.verify_user_session_token(token)
       assert Repo.one(from e in Barkpark.Audit.Event, where: e.action == "saml_slo")
