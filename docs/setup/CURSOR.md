@@ -56,8 +56,12 @@ returns the entire API — every noun, verb, and route — in one call.
 ## Filing work for the agent
 
 ```bash
+# `tags` are weighted labels [{tag, strength 1–100, rationale}], mandatory on
+# publish; each `tag` must be a registered tag doc (`bp doc ls tag`) or the
+# publish 422s `unknown_tag`. Strengths are distinct; the max is the main tag.
 bp task create "Fix the flaky search test" --publish \
   --set 'priority:=1' \
+  --set 'tags:=[{"tag":"search","strength":80,"rationale":"the flaky test exercises the search path"},{"tag":"testing","strength":50,"rationale":"stabilising a flaky test is test-reliability work"}]' \
   --set 'acceptance_criteria:=[{"criterion":"test green 10x in a row","met":false,"evidence":""}]'
 ```
 

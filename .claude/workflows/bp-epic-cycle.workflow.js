@@ -52,8 +52,8 @@ const GATES_BLOCK = `Local gates available (a slice must name at least one that 
 
 const TASKS_BLOCK = `THE BP TASK CONTRACT (the ledger is the spine — every phase reads and writes it):
 - Tasks are type:task documents in Barkpark, driven via the bp CLI. Try \`bp task create\` first; if this binary lacks the verb, the fallback is:
-    bp doc create task --yes --set _id=<slug> --set title="..." --set kind=task --set lifecycle_status=open --set 'priority:=1' --set parent_id=<epic-task-slug> --set description="..." --set 'acceptance_criteria:=[{"criterion":"...","met":false,"evidence":""}]'
-    bp doc publish task <slug> --yes        # tasks MUST be published — gates and boards read the published ledger only
+    bp doc create task --yes --set _id=<slug> --set title="..." --set kind=task --set lifecycle_status=open --set 'priority:=1' --set parent_id=<epic-task-slug> --set description="..." --set 'tags:=[{"tag":"docs","strength":80,"rationale":"..."},{"tag":"search","strength":40,"rationale":"..."}]' --set 'acceptance_criteria:=[{"criterion":"...","met":false,"evidence":""}]'
+    bp doc publish task <slug> --yes        # tasks MUST be published — gates and boards read the published ledger only. tags are weighted [{tag,strength 1–100,rationale}] with DISTINCT strengths (max = main tag); each tag MUST be a registered tag doc (bp doc ls tag) or publish 422s unknown_tag
 - Fields are FLAT top-level in content. priority 0=highest..4. parent_id is a slug. Typed values use key:=json.
 - Acceptance criteria to the authoring rubric: concrete, evidence-bearing, one per real proof obligation — {criterion, met, evidence}.
 - DECIDE phases: author \`files:\` labels on each wave slice — the exact paths it will touch (one repo-relative path per label; trailing \`/\` = directory prefix; no globs). This feeds the dispatch frontier's file-truth collision check so slices with disjoint file sets dispatch in parallel. Grammar + semantics: docs/contracts/dispatch-areas.md.
