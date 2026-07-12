@@ -60,12 +60,16 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   that baseline every save would persist stale rows into the doc and break
   byte-stability (doctrine D5/D3). So `preview/2` leaves `blocks` UNTOUCHED and
   returns a SEPARATE, FLAT list of id-keyed preview entries the editor pushes to
-  the task-block node views on a parallel channel:
+  the block node views on a parallel channel:
 
     * `%{"block_id" => id, "type" => t, "snapshot" => rows}` — a `tasks` /
       `task-list` / `task-board` / `roadmap` block carrying a live `query`.
     * `%{"block_id" => id, "type" => "task-detail", "task" => task}` — the first
       matched row (or `%{}` when none match).
+    * `%{"block_id" => id, "type" => t, "attrs" => attrs}` — a `chart` /
+      `heatmap` / `stat` block shaped through the same aggregate path as the
+      reader. Aggregate errors or an absent `agg_fetch` produce no entry, so the
+      unresolved query block keeps rendering its dim placeholder.
     * `%{"block_id" => id, "type" => t, "error" => true}` — the fetch RAISED
       (Tasks plugin off / substrate error): a quiet stub note, never a crash.
 
@@ -75,11 +79,13 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   its rows, so there is nothing to preview live. The input `blocks` are never
   returned nor mutated: `preview/2` yields ONLY the previews.
   """
-  def preview(blocks, fetch) when is_list(blocks) and is_function(fetch, 1) do
-    collect_previews(blocks, fetch)
+  def preview(blocks, fetch, agg_fetch \\ nil)
+
+  def preview(blocks, fetch, agg_fetch) when is_list(blocks) and is_function(fetch, 1) do
+    collect_previews(blocks, fetch, agg_fetch)
   end
 
-  def preview(_blocks, _fetch), do: []
+  def preview(_blocks, _fetch, _agg_fetch), do: []
 
   @doc """
   Merge one `preview/2` entry back onto its block FOR DISPLAY — the pure last
@@ -98,40 +104,65 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     block |> Map.put("task", task) |> Map.delete("query")
   end
 
-  def apply_preview(block, _entry), do: block
-
-  defp collect_previews(blocks, fetch) do
-    Enum.flat_map(blocks, &preview_block(&1, fetch))
+  def apply_preview(
+        %{"type" => type} = block,
+        %{"type" => type, "attrs" => attrs}
+      )
+      when type in @dataviz_types and is_map(attrs) do
+    block |> Map.merge(attrs) |> Map.delete("query")
   end
 
-  defp preview_block(%{"type" => type, "query" => query, "id" => id}, fetch)
+  def apply_preview(block, _entry), do: block
+
+  defp collect_previews(blocks, fetch, agg_fetch) do
+    Enum.flat_map(blocks, &preview_block(&1, fetch, agg_fetch))
+  end
+
+  defp preview_block(%{"type" => type, "query" => query, "id" => id}, fetch, _agg_fetch)
        when type in @snapshot_types and is_map(query) and is_binary(id) and id != "" do
     [preview_entry(id, type, query, fetch, :snapshot)]
   end
 
-  defp preview_block(%{"type" => @detail_type, "query" => query, "id" => id}, fetch)
+  defp preview_block(%{"type" => @detail_type, "query" => query, "id" => id}, fetch, _agg_fetch)
        when is_map(query) and is_binary(id) and id != "" do
     [preview_entry(id, @detail_type, query, fetch, :detail)]
+  end
+
+  defp preview_block(
+         %{"type" => type, "query" => query, "id" => id},
+         _fetch,
+         agg_fetch
+       )
+       when type in @dataviz_types and is_map(query) and is_binary(id) and id != "" and
+              is_function(agg_fetch, 1) do
+    try do
+      case dataviz_attrs(type, query, agg_fetch) do
+        {:ok, attrs} -> [%{"block_id" => id, "type" => type, "attrs" => attrs}]
+        :error -> []
+      end
+    rescue
+      _ -> []
+    end
   end
 
   # Container blocks nest task blocks under `children` (terminal-family),
   # `blocks` (section) and `columns` (list of lists) — the same three shapes
   # resolve_block/3 walks.
-  defp preview_block(%{"children" => children}, fetch) when is_list(children) do
-    collect_previews(children, fetch)
+  defp preview_block(%{"children" => children}, fetch, agg_fetch) when is_list(children) do
+    collect_previews(children, fetch, agg_fetch)
   end
 
-  defp preview_block(%{"blocks" => blocks}, fetch) when is_list(blocks) do
-    collect_previews(blocks, fetch)
+  defp preview_block(%{"blocks" => blocks}, fetch, agg_fetch) when is_list(blocks) do
+    collect_previews(blocks, fetch, agg_fetch)
   end
 
-  defp preview_block(%{"columns" => cols}, fetch) when is_list(cols) do
+  defp preview_block(%{"columns" => cols}, fetch, agg_fetch) when is_list(cols) do
     cols
     |> Enum.filter(&is_list/1)
-    |> Enum.reduce(%{}, fn col, acc -> Map.merge(acc, collect_previews(col, fetch)) end)
+    |> Enum.flat_map(&collect_previews(&1, fetch, agg_fetch))
   end
 
-  defp preview_block(_block, _fetch), do: []
+  defp preview_block(_block, _fetch, _agg_fetch), do: []
 
   # Run the block's fetch on a rescue boundary: a raising fetcher (Tasks plugin
   # off / substrate error) degrades to an `{ error: true }` stub entry so the node
@@ -189,11 +220,11 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   # exactly like an offline/wasm render with only a `query` present.
   defp resolve_block(%{"type" => type, "query" => query} = block, _fetch, agg_fetch)
        when type in @dataviz_types and is_map(query) and is_function(agg_fetch, 1) do
-    case agg_fetch.(query) do
-      {:ok, tally} when is_map(tally) ->
-        block |> Map.merge(shape(type, tally)) |> Map.delete("query")
+    case dataviz_attrs(type, query, agg_fetch) do
+      {:ok, attrs} ->
+        block |> Map.merge(attrs) |> Map.delete("query")
 
-      _ ->
+      :error ->
         block
     end
   end
@@ -223,6 +254,15 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   end
 
   defp resolve_block(block, _fetch, _agg_fetch), do: block
+
+  # ONE aggregate-to-render-attrs path for reader resolve and editor preview.
+  # Keeping the fetch + shape pair here prevents the two surfaces from drifting.
+  defp dataviz_attrs(type, query, agg_fetch) do
+    case agg_fetch.(query) do
+      {:ok, tally} when is_map(tally) -> {:ok, shape(type, tally)}
+      _ -> :error
+    end
+  end
 
   # ── data-viz shapers (pure): neutral count tally → ratified block Attrs ──────
 

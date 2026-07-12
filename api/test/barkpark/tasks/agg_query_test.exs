@@ -206,6 +206,7 @@ defmodule Barkpark.Tasks.AggQueryTest do
       fetch = agg_fetch(scope_a)
 
       assert [entry] = TaskResolver.preview([block], no_rows(), fetch)
+
       assert TaskResolver.apply_preview(block, entry) ==
                TaskResolver.resolve([block], no_rows(), fetch) |> List.first()
     end

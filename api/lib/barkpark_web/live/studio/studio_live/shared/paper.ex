@@ -364,17 +364,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   # Build the id-keyed live-task previews for `blocks` under the SESSION's tenant
   # scope. Fail-closed: `scope_opts` carries the session's workspace/project — a
-  # nil workspace resolves to ZERO rows in the fetcher (Tasks.Query.docs_for_query
-  # → Scope.scope_to_workspace), never a cross-tenant leak. The fetch may RAISE
-  # with the Tasks plugin off; `TaskResolver.preview/2` rescues each fetch into an
-  # `{ error: true }` stub, so this never crashes the LiveView. Returns ONLY the
-  # previews — `blocks` is left unresolved (the save baseline is untouched).
+  # nil workspace resolves to ZERO rows/aggregate values in Tasks.Query, never a
+  # cross-tenant leak. The row fetch may RAISE with the Tasks plugin off;
+  # `TaskResolver.preview/3` rescues each row fetch into an `{ error: true }` stub.
+  # Aggregate failure produces no preview entry, leaving the query block's dim
+  # placeholder unchanged. Returns ONLY previews — `blocks` stays unresolved.
   def task_previews(blocks, socket) do
     scope = ScopeHelpers.scope_opts(socket)
 
-    TaskResolver.preview(blocks, fn query ->
-      Barkpark.Tasks.Query.rows_for_query(query, scope)
-    end)
+    TaskResolver.preview(
+      blocks,
+      fn query -> Barkpark.Tasks.Query.rows_for_query(query, scope) end,
+      fn query ->
+        Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: socket.assigns.dataset)
+      end
+    )
   end
 
   @doc false

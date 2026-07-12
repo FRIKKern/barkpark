@@ -5,25 +5,40 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
   alias Barkpark.PortableDoc.TaskResolver
 
   # A stub fetcher: echoes deterministic rows so we test the TRAVERSAL, not a DB.
-  defp fetch(%{"parent_id" => "epic"}), do: [%{"title" => "a", "status" => "ready"}, %{"title" => "b", "status" => "done"}]
+  defp fetch(%{"parent_id" => "epic"}),
+    do: [%{"title" => "a", "status" => "ready"}, %{"title" => "b", "status" => "done"}]
+
   defp fetch(%{"one" => true}), do: [%{"title" => "solo", "status" => "in_progress"}]
   defp fetch(_), do: []
 
   describe "resolve/2 — traversal + injection" do
     test "replaces a snapshot block's query with fetched rows" do
-      [out] = TaskResolver.resolve([%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}], &fetch/1)
-      assert out["snapshot"] == [%{"title" => "a", "status" => "ready"}, %{"title" => "b", "status" => "done"}]
+      [out] =
+        TaskResolver.resolve(
+          [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}],
+          &fetch/1
+        )
+
+      assert out["snapshot"] == [
+               %{"title" => "a", "status" => "ready"},
+               %{"title" => "b", "status" => "done"}
+             ]
+
       refute Map.has_key?(out, "query")
     end
 
     test "task-detail takes the first fetched row as its task" do
-      [out] = TaskResolver.resolve([%{"type" => "task-detail", "query" => %{"one" => true}}], &fetch/1)
+      [out] =
+        TaskResolver.resolve([%{"type" => "task-detail", "query" => %{"one" => true}}], &fetch/1)
+
       assert out["task"] == %{"title" => "solo", "status" => "in_progress"}
       refute Map.has_key?(out, "query")
     end
 
     test "task-detail with no matches injects an empty task, not a crash" do
-      [out] = TaskResolver.resolve([%{"type" => "task-detail", "query" => %{"nope" => 1}}], &fetch/1)
+      [out] =
+        TaskResolver.resolve([%{"type" => "task-detail", "query" => %{"nope" => 1}}], &fetch/1)
+
       assert out["task"] == %{}
     end
 
@@ -33,14 +48,23 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
     end
 
     test "recurses into container children" do
-      blocks = [%{"type" => "columns", "children" => [%{"type" => "task-board", "query" => %{"parent_id" => "epic"}}]}]
+      blocks = [
+        %{
+          "type" => "columns",
+          "children" => [%{"type" => "task-board", "query" => %{"parent_id" => "epic"}}]
+        }
+      ]
+
       [%{"children" => [board]}] = TaskResolver.resolve(blocks, &fetch/1)
       assert length(board["snapshot"]) == 2
     end
 
     test "recurses into a section's blocks" do
       blocks = [
-        %{"type" => "section", "blocks" => [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}]}
+        %{
+          "type" => "section",
+          "blocks" => [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}]
+        }
       ]
 
       [%{"blocks" => [list]}] = TaskResolver.resolve(blocks, &fetch/1)
@@ -68,7 +92,10 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
         %{
           "type" => "section",
           "blocks" => [
-            %{"type" => "terminal", "children" => [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}]}
+            %{
+              "type" => "terminal",
+              "children" => [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}]
+            }
           ]
         }
       ]
@@ -131,12 +158,14 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
 
     test "task-detail yields the first row as its task; no matches → empty task" do
       hit = [%{"id" => "d1", "type" => "task-detail", "query" => %{"one" => true}}]
+
       assert [%{"block_id" => "d1", "type" => "task-detail", "task" => task}] =
                TaskResolver.preview(hit, &fetch/1)
 
       assert task == %{"title" => "solo", "status" => "in_progress"}
 
       miss = [%{"id" => "d2", "type" => "task-detail", "query" => %{"nope" => 1}}]
+
       assert [%{"block_id" => "d2", "type" => "task-detail", "task" => %{}}] =
                TaskResolver.preview(miss, &fetch/1)
     end
@@ -184,7 +213,9 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
       blocks = [
         %{
           "type" => "columns",
-          "children" => [%{"id" => "b1", "type" => "task-board", "query" => %{"parent_id" => "epic"}}]
+          "children" => [
+            %{"id" => "b1", "type" => "task-board", "query" => %{"parent_id" => "epic"}}
+          ]
         }
       ]
 
@@ -205,7 +236,9 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
 
     test "non-list / non-fn inputs yield no previews" do
       assert TaskResolver.preview("x", &fetch/1) == []
-      assert TaskResolver.preview([%{"id" => "b", "type" => "task-list", "query" => %{}}], :nope) == []
+
+      assert TaskResolver.preview([%{"id" => "b", "type" => "task-list", "query" => %{}}], :nope) ==
+               []
     end
   end
 
@@ -244,33 +277,62 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
 
   describe "row_from_task/1 — field mapping" do
     test "open with no blockers → ready; open with blockers → open (backlog)" do
-      assert TaskResolver.row_from_task(%{"title" => "t", "lifecycle_status" => "open"})["status"] == "ready"
-      assert TaskResolver.row_from_task(%{"title" => "t", "lifecycle_status" => "open", "dependency_count" => 2})["status"] == "open"
+      assert TaskResolver.row_from_task(%{"title" => "t", "lifecycle_status" => "open"})["status"] ==
+               "ready"
+
+      assert TaskResolver.row_from_task(%{
+               "title" => "t",
+               "lifecycle_status" => "open",
+               "dependency_count" => 2
+             })["status"] == "open"
     end
 
     test "blocked / in_progress / done map straight through" do
       for s <- ~w(blocked in_progress done cancelled) do
-        assert TaskResolver.row_from_task(%{"title" => "t", "lifecycle_status" => s})["status"] == s
+        assert TaskResolver.row_from_task(%{"title" => "t", "lifecycle_status" => s})["status"] ==
+                 s
       end
     end
 
     test "worker from claim.worker, else assignee" do
-      assert TaskResolver.row_from_task(%{"title" => "t", "claim" => %{"worker" => "o3"}})["worker"] == "o3"
-      assert TaskResolver.row_from_task(%{"title" => "t", "assignee" => "opus"})["worker"] == "opus"
+      assert TaskResolver.row_from_task(%{"title" => "t", "claim" => %{"worker" => "o3"}})[
+               "worker"
+             ] == "o3"
+
+      assert TaskResolver.row_from_task(%{"title" => "t", "assignee" => "opus"})["worker"] ==
+               "opus"
     end
 
     test "criteria_progress → criteria; zero-total omitted" do
-      assert TaskResolver.row_from_task(%{"title" => "t", "criteria_progress" => %{"met" => 2, "total" => 3}})["criteria"] == %{"met" => 2, "total" => 3}
-      refute Map.has_key?(TaskResolver.row_from_task(%{"title" => "t", "criteria_progress" => %{"met" => 0, "total" => 0}}), "criteria")
+      assert TaskResolver.row_from_task(%{
+               "title" => "t",
+               "criteria_progress" => %{"met" => 2, "total" => 3}
+             })["criteria"] == %{"met" => 2, "total" => 3}
+
+      refute Map.has_key?(
+               TaskResolver.row_from_task(%{
+                 "title" => "t",
+                 "criteria_progress" => %{"met" => 0, "total" => 0}
+               }),
+               "criteria"
+             )
     end
 
     test "a phase:/wave: label becomes the phase group; other labels ignored" do
-      assert TaskResolver.row_from_task(%{"title" => "t", "labels" => ["proj:x", "wave:5"]})["phase"] == "5"
-      refute Map.has_key?(TaskResolver.row_from_task(%{"title" => "t", "labels" => ["proj:x"]}), "phase")
+      assert TaskResolver.row_from_task(%{"title" => "t", "labels" => ["proj:x", "wave:5"]})[
+               "phase"
+             ] == "5"
+
+      refute Map.has_key?(
+               TaskResolver.row_from_task(%{"title" => "t", "labels" => ["proj:x"]}),
+               "phase"
+             )
     end
 
     test "tolerates atom keys (the render_doc shape)" do
-      row = TaskResolver.row_from_task(%{title: "t", lifecycle_status: "in_progress", priority: "1"})
+      row =
+        TaskResolver.row_from_task(%{title: "t", lifecycle_status: "in_progress", priority: "1"})
+
       assert row["title"] == "t"
       assert row["status"] == "in_progress"
       assert row["priority"] == "1"
@@ -289,7 +351,12 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
     ]
 
     fetch = fn %{"parent_id" => "resolver"} -> Enum.map(docs, &TaskResolver.row_from_task/1) end
-    [out] = TaskResolver.resolve([%{"type" => "task-list", "query" => %{"parent_id" => "resolver"}}], fetch)
+
+    [out] =
+      TaskResolver.resolve(
+        [%{"type" => "task-list", "query" => %{"parent_id" => "resolver"}}],
+        fetch
+      )
 
     assert out["snapshot"] == [
              %{"title" => "collect", "status" => "done", "phase" => "5"},
