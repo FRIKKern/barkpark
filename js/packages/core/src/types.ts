@@ -47,6 +47,7 @@ export type FilterOp =
   | 'in'
   | 'nin'
   | 'has'
+  | 'hasStrong'
   | 'contains'
   | 'startsWith'
   | 'endsWith'
@@ -931,6 +932,13 @@ export interface DocsBuilder<T = BarkparkDocument> {
   nin(field: DocFieldName<T>, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
   /** Sugar for `where(field, 'has', value)` — array membership (the field's array contains `value`, as a `{_ref}` or scalar). */
   has(field: DocFieldName<T>, value: string | number | boolean | Date): DocsBuilder<T>
+  /**
+   * Sugar for `where(field, 'hasStrong', value)` — weighted-tag membership: matches
+   * rows whose `field` array carries `<tag>` at strength ≥ `<min_strength>`. Pass the
+   * scalar wire value `'<tag>:<min_strength>'` (e.g. `'search:40'`); the server splits
+   * on the LAST colon, so tags containing colons are safe.
+   */
+  hasStrong(field: DocFieldName<T>, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'contains', value)` — substring match (case-insensitive). */
   contains(field: DocFieldName<T>, value: string): DocsBuilder<T>
   /** Sugar for `where(field, 'startsWith', value)` — prefix match (case-insensitive). */
