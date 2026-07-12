@@ -325,5 +325,19 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
       refute log =~ "plugin hello defines both",
              "expected no duplicate-form warning for default-lift plugin (got: #{log})"
     end
+
+    test "does NOT warn when a default lift returns regex-backed menu data" do
+      # Tickets uses a Regex active matcher so one tab highlights on both the
+      # flat and workspace/project-scoped inbox routes. Each callback call
+      # compiles a fresh :re_pattern reference; the fingerprint must compare
+      # Regex semantics rather than that runtime artifact.
+      log =
+        capture_log(fn ->
+          :ok = Registry.warn_duplicate_forms()
+        end)
+
+      refute log =~ "plugin tickets defines both",
+             "expected no duplicate-form warning for Tickets' default lift (got: #{log})"
+    end
   end
 end

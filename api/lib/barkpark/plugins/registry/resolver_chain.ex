@@ -443,22 +443,54 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
 
       resolver_result = apply(module, resolver, [empty_prev, ctx])
 
-      cond do
-        is_list(empty_prev) and is_list(additive_result) ->
-          resolver_result == empty_prev ++ additive_result
+      expected =
+        cond do
+          is_list(empty_prev) and is_list(additive_result) ->
+            empty_prev ++ additive_result
 
-        is_map(empty_prev) and is_map(additive_result) ->
-          resolver_result == Map.merge(empty_prev, additive_result)
+          is_map(empty_prev) and is_map(additive_result) ->
+            Map.merge(empty_prev, additive_result)
 
-        true ->
-          false
-      end
+          true ->
+            :not_a_default_lift
+        end
+
+      expected != :not_a_default_lift and fingerprint_equal?(resolver_result, expected)
     rescue
       _ -> false
     catch
       _, _ -> false
     end
   end
+
+  # Regex sigils compile a fresh `:re_pattern` reference each time the
+  # additive callback runs. Two semantically identical entries therefore fail
+  # raw term equality even though the default resolver returned precisely the
+  # additive lift. Normalize only that runtime artifact; every other value
+  # keeps ordinary structural equality semantics.
+  defp fingerprint_equal?(left, right),
+    do: normalize_regex_fingerprint(left) == normalize_regex_fingerprint(right)
+
+  defp normalize_regex_fingerprint(%Regex{} = regex),
+    do: {:regex, regex.source, regex.opts}
+
+  defp normalize_regex_fingerprint(value) when is_list(value),
+    do: Enum.map(value, &normalize_regex_fingerprint/1)
+
+  defp normalize_regex_fingerprint(value) when is_map(value) do
+    Map.new(value, fn {key, item} ->
+      {normalize_regex_fingerprint(key), normalize_regex_fingerprint(item)}
+    end)
+  end
+
+  defp normalize_regex_fingerprint(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.map(&normalize_regex_fingerprint/1)
+    |> List.to_tuple()
+  end
+
+  defp normalize_regex_fingerprint(value), do: value
 
   # Invoke `module.function(args)` only when exported. Errors / non-export
   # fall back to the supplied default. Centralised so all collectors share
