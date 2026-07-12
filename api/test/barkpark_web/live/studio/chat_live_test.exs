@@ -3167,6 +3167,34 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       send(view.pid, :turn_tick)
       assert render(view) =~ "2s"
     end
+
+    test "the busy row's word rotates on the turn clock (never sticks)", %{view: view} do
+      before = shown_spinner_word(render(view))
+      assert before
+
+      # 7 ticks = one rotation window; next_spinner_word excludes the current
+      # word, so the swap is guaranteed visible.
+      for _ <- 1..7, do: send(view.pid, :turn_tick)
+      after_rotation = shown_spinner_word(render(view))
+      assert after_rotation
+      assert after_rotation != before
+    end
+
+    test "the busy row's word wears the shimmer, stopping… stays plain", %{view: view} do
+      assert render(view) =~ "bp-chat-spin-word"
+    end
+
+    test "the thinking pulse's word rotates on the turn clock too", %{view: view} do
+      # a live pulse hides the busy row, so the shown word IS the pulse's
+      send(view.pid, {:claude_chat_event, thinking_tokens(64)})
+      before = shown_spinner_word(render(view))
+      assert before
+
+      for _ <- 1..7, do: send(view.pid, :turn_tick)
+      after_rotation = shown_spinner_word(render(view))
+      assert after_rotation
+      assert after_rotation != before
+    end
   end
 
   describe "TodoWrite living checklist card (charter D39)" do
@@ -5885,5 +5913,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   # personality) — assert against the canonical list, never a pinned word.
   defp spinner_word_shown?(html) do
     Enum.any?(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
+  end
+
+  # WHICH park word is currently showing (nil if none) — for asserting the
+  # tick rotation actually swaps it.
+  defp shown_spinner_word(html) do
+    Enum.find(BarkparkWeb.Studio.ChatLive.spinner_words(), &(html =~ &1 <> "…"))
   end
 end
