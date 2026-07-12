@@ -11,6 +11,7 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Content
+  alias Barkpark.Content.Errors
   import Ecto.Query, only: [from: 2]
 
   # Convenience accessors — papers are type-"paper" documents now; the block
@@ -508,6 +509,233 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert length(pc(paper, "blocks")) == 1
       assert pc(paper, "rev") == rev0
       refute pc(paper, "body_html") =~ "nope"
+    end
+  end
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # D27 — ingest rejections are honest: publish-wall tuples render field/rule/fix
+  # at BOTH upsert_paper sites (blocks + html). The routing added here (three
+  # per-tuple case heads → render_error/2 → Errors.to_envelope) is BYTE-SAFE
+  # today: it only fires once the ae-upsert-paper-wall mount (D26) makes
+  # upsert_paper return a raw wall tuple. This block proves two things now:
+  #
+  #   (a) the existing hand-rolled error shapes stay byte-identical — halted 409,
+  #       malformed 400, and the invalid_paper (changeset) LAST resort — so the
+  #       new heads did NOT smuggle in a wholesale action_fallback (a changeset
+  #       through Errors.to_envelope silently becomes `validation_failed`, a
+  #       public-contract break; this block PINS that divergence);
+  #
+  #   (b) the shared envelope render_error/2 delegates to yields the exact D27
+  #       status / code / details / hint for each of the three wall codes — the
+  #       precise wire shape the caller retries against.
+  #
+  # The end-to-end endpoint assertions (a real POST tripping each gate) are
+  # skip-gated until the D26 mount lands in this tree; they are the ready target
+  # for the LEAD's rebase-over-the-mount step (remove the `skip:` tag).
+  # ───────────────────────────────────────────────────────────────────────────
+  describe "D27 publish-wall error surfacing" do
+    # ── (a) hand-rolled clauses stay byte-identical — no action_fallback swap ──
+
+    test "malformed request still renders 400 code=malformed (unchanged by the new heads)",
+         %{conn: conn} do
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @token)
+        |> put_req_header("content-type", "application/json")
+        |> post(@path, %{"event_type" => "plan-written"})
+
+      assert json_response(conn, 400)["error"]["code"] == "malformed"
+    end
+
+    test "template halt still renders 409 code=halted with the verbatim message",
+         %{conn: conn} do
+      slug = "d27-halt-#{System.unique_integer([:positive])}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "stray",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "early"}]
+          },
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "T"
+          }
+        ]
+      }
+
+      conn = auth_ingest(conn, payload)
+      resp = json_response(conn, 409)
+      assert resp["error"]["code"] == "halted"
+      assert resp["error"]["message"] =~ "paper template violated"
+      refute Content.get_paper(slug)
+    end
+
+    test "a changeset routed through Errors.to_envelope becomes validation_failed — WHY the ingest changeset clause must stay hand-rolled as invalid_paper" do
+      cs = Ecto.Changeset.add_error(Ecto.Changeset.change({%{}, %{}}), :base, "bad")
+      env = Errors.to_envelope({:error, cs}, nil)
+
+      # If the controller had swapped to a wholesale action_fallback, a paper
+      # store failure would surface with THIS code (a public-contract break).
+      # The controller keeps invalid_paper hand-rolled precisely to avoid it.
+      assert env.code == "validation_failed"
+      assert env.status == 422
+      refute env.code == "invalid_paper"
+    end
+
+    # ── (b) render_error/2's delegation target: the exact wire shape per code ──
+
+    test "label_spine → 422 code=label_spine with the validator details + hint verbatim" do
+      details = [
+        %{"field" => "tags", "rule" => "min_labels", "fix" => "add at least 2 weighted tags"}
+      ]
+
+      env = Errors.to_envelope({:error, {:label_spine, details}}, nil)
+
+      assert env.status == 422
+      assert env.code == "label_spine"
+      assert env.details == details
+      assert is_binary(env.hint) and env.hint != ""
+      # render_error strips :status before it hits the wire (see the helper).
+      refute Map.has_key?(Map.delete(env, :status), :status)
+    end
+
+    test "unknown_tag → 422 code=unknown_tag carrying the unknown names + trgm suggestions" do
+      payload = %{unknown: ["quantum-widget"], suggestions: %{"quantum-widget" => ["quantum"]}}
+      env = Errors.to_envelope({:error, {:unknown_tag, payload}}, nil)
+
+      assert env.status == 422
+      assert env.code == "unknown_tag"
+      assert env.details[:unknown] == ["quantum-widget"]
+      assert Map.has_key?(env.details, :suggestions)
+      assert env.message =~ "quantum-widget"
+      assert is_binary(env.hint) and env.hint != ""
+    end
+
+    test "duplicate_of → 409 code=duplicate_of naming the incumbent published id" do
+      payload = %{
+        duplicate_of: "incumbent-slug",
+        similar: [%{id: "incumbent-slug", score: 0.91}]
+      }
+
+      env = Errors.to_envelope({:error, {:duplicate_of, payload}}, nil)
+
+      assert env.status == 409
+      assert env.code == "duplicate_of"
+      assert env.details[:duplicate_of] == "incumbent-slug"
+      assert is_binary(env.hint) and env.hint != ""
+    end
+
+    # ── End-to-end endpoint assertions (skip-gated on the D26 mount) ──
+    # These POST a real request tripping each gate. They cannot pass until the
+    # ae-upsert-paper-wall mount makes upsert_paper return the raw wall tuple —
+    # remove the `skip:` on the rebase-over-the-mount step.
+
+    @skip_reason "activates after this branch rebases over ae-upsert-paper-wall (D26): the mount is what makes Content.upsert_paper return the raw wall tuple this asserts. Remove the skip: tag on rebase."
+
+    @tag skip: @skip_reason
+    test "tagless block ingest → 422 code=label_spine with field/rule/fix + hint",
+         %{conn: conn} do
+      slug = "d27-labelspine-#{System.unique_integer([:positive])}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "Well-formed but unlabeled"
+          },
+          %{
+            "id" => "body",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Real body content."}]
+          }
+        ]
+      }
+
+      conn = auth_ingest(conn, payload)
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "label_spine"
+      assert is_binary(resp["error"]["hint"])
+      # Fail closed — the unlabeled paper is not born.
+      refute Content.get_paper(slug)
+    end
+
+    @tag skip: @skip_reason
+    test "ingest with an unregistered weighted tag → 422 code=unknown_tag with suggestions",
+         %{conn: conn} do
+      slug = "d27-unknowntag-#{System.unique_integer([:positive])}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "Labeled but with an unregistered tag"
+          },
+          %{
+            "id" => "body",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Real body content."}]
+          }
+        ],
+        "tags" => [
+          %{"tag" => "nonexistent-#{System.unique_integer([:positive])}", "strength" => 80,
+            "rationale" => "unique-token rationale so the fixture description never collides"}
+        ]
+      }
+
+      conn = auth_ingest(conn, payload)
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "unknown_tag"
+      assert Map.has_key?(resp["error"]["details"], "suggestions")
+      refute Content.get_paper(slug)
+    end
+
+    @tag skip: @skip_reason
+    test "near-duplicate ingest → 409 code=duplicate_of naming the incumbent",
+         %{conn: conn} do
+      # Requires a seeded, registered incumbent published paper; the mount's E4
+      # dedup gate produces the {:duplicate_of, %{duplicate_of: <id>}} tuple.
+      slug = "d27-duplicate-#{System.unique_integer([:positive])}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "A title that near-duplicates an incumbent"
+          },
+          %{
+            "id" => "body",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Real body content."}]
+          }
+        ]
+      }
+
+      conn = auth_ingest(conn, payload)
+      resp = json_response(conn, 409)
+      assert resp["error"]["code"] == "duplicate_of"
+      assert is_binary(resp["error"]["details"]["duplicate_of"])
     end
   end
 end
