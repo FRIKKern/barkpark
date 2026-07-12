@@ -3197,6 +3197,155 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "hand-task surface (chat ⇄ ledger)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "a claim held by THIS session's worker raises the Doing strip", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed("task-hs-1", "Fix the gate latch", %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => worker, "now" => "reading the brief"},
+          "acceptance_criteria" => [%{"met" => true}, %{"met" => false}, %{"met" => false}]
+        })
+      )
+
+      html = render(view)
+      assert html =~ "data-role=\"chat-hand-task\""
+      assert html =~ "Fix the gate latch"
+      assert html =~ "1/3 ✓"
+      assert html =~ "reading the brief"
+      assert html =~ "task-hs-1"
+    end
+
+    test "another worker's claim never renders", %{view: view} do
+      send(
+        view.pid,
+        task_changed("task-hs-2", "Someone else's yard", %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => "claude-chat-deadbeef"}
+        })
+      )
+
+      refute render(view) =~ "data-role=\"chat-hand-task\""
+    end
+
+    test "a close drops the strip row", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed("task-hs-3", "Dig the hole", %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => worker}
+        })
+      )
+
+      assert render(view) =~ "Dig the hole"
+
+      send(
+        view.pid,
+        task_changed("task-hs-3", "Dig the hole", %{"lifecycle_status" => "done"})
+      )
+
+      refute render(view) =~ "data-role=\"chat-hand-task\""
+    end
+
+    test "a draft-twin echo never flaps the strip", %{view: view, sid: sid} do
+      worker = BarkparkWeb.Studio.ClaudeChat.worker_id(sid)
+
+      send(
+        view.pid,
+        task_changed("drafts.task-hs-4", "Draft twin", %{
+          "lifecycle_status" => "in_progress",
+          "claim" => %{"worker" => worker}
+        })
+      )
+
+      refute render(view) =~ "data-role=\"chat-hand-task\""
+    end
+
+    test "the picker opens on the ready head and hands a task to Claude", %{view: view} do
+      register_task_schema()
+
+      # Tasks.ready is fail-closed on workspace scope — the fixture must live
+      # in the same seeded Default scope the surface (and the agent's flat
+      # /v1/tasks hands) read.
+      ws = Barkpark.Tenancy.get_default_workspace()
+      proj = Barkpark.Tenancy.get_default_project()
+
+      {:ok, _} =
+        Barkpark.Content.create_document(
+          "task",
+          %{
+            "doc_id" => "task-hs-ready1",
+            "title" => "Sweep the yard",
+            "content" => %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1}
+          },
+          "production",
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      render_click(element(view, "button[phx-click=toggle-task-picker]"))
+      html = render(view)
+      assert html =~ "data-role=\"chat-task-picker\""
+      assert html =~ "Sweep the yard"
+      assert html =~ "Hand to Claude"
+
+      render_click(element(view, "button[phx-value-id=task-hs-ready1]"))
+      html = render(view)
+      # picker closes; the claim-first work prompt rode the normal send path
+      refute html =~ "data-role=\"chat-task-picker\""
+      assert html =~ "Work Barkpark task task-hs-ready1"
+      assert html =~ "bp task claim task-hs-ready1"
+    end
+
+    test "an empty ready queue shows the honest empty state", %{view: view} do
+      render_click(element(view, "button[phx-click=toggle-task-picker]"))
+      html = render(view)
+      assert html =~ "data-role=\"chat-task-picker\""
+      assert html =~ "Nothing ready"
+    end
+
+    test "/task <id> expands to the claim-first work prompt", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/task task-abc123"})
+      html = render(view)
+      assert html =~ "Work Barkpark task task-abc123"
+      assert html =~ "stamp each criterion"
+    end
+
+    test "/task new <wish> expands to the authoring prompt", %{view: view} do
+      render_submit(
+        element(view, "form[phx-submit=send]"),
+        %{"message" => "/task new fix the fence latch"}
+      )
+
+      html = render(view)
+      assert html =~ "Author and publish a Barkpark task"
+      assert html =~ "fix the fence latch"
+      assert html =~ "publish wall"
+    end
+
+    test "bare /task teaches usage without reaching the model", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/task"})
+      html = render(view)
+      assert html =~ "Usage: /task &lt;task-id&gt;" or html =~ "Usage: /task <task-id>"
+    end
+
+    test "/task rides the slash-menu builtin floor", %{view: view} do
+      assert render(view) =~ "/task"
+    end
+  end
+
   describe "TodoWrite living checklist card (charter D39)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -5907,6 +6056,37 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   # `estimated_tokens`, no thinking text ever.
   defp thinking_tokens(n) do
     %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}
+  end
+
+  # A task-document broadcast as the Doing strip sees it — the lean mirror of
+  # Content.Broadcast.broadcast_document_mutation/3's :document_changed shape.
+  defp task_changed(doc_id, title, content) do
+    {:document_changed,
+     %{
+       type: "task",
+       doc_id: doc_id,
+       doc: %{
+         doc_id: doc_id,
+         title: title,
+         status: "published",
+         content: content,
+         updated_at: nil
+       }
+     }}
+  end
+
+  # Register the tasks plugin's schema definitions under the flat default scope
+  # so Content.create_document("task", …) validates (tasks_test idiom, flattened).
+  defp register_task_schema do
+    for schema_def <- Barkpark.Tasks.schema_definitions("production") do
+      attrs =
+        schema_def
+        |> Map.from_struct()
+        |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+        |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+      Barkpark.Content.upsert_schema(attrs, "production", [])
+    end
   end
 
   # The busy/pulse rows wear a random park word (the chat's spinner
