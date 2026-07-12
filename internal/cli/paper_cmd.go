@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -186,6 +188,15 @@ func runPaperView(out *writer, g globals, args []string) int {
 	}
 	blocksRaw := doc.PaperBlocks()
 	if len(blocksRaw) == 0 {
+		// A paper with no block tree is NOT necessarily empty: some papers carry
+		// only pre-rendered "body_html" (e.g. soc2-controls-mapping, 7.7 KB of
+		// real content). Fall back to a plain-text dump of that HTML rather than
+		// misreport the paper as having no content. Only when body_html is ALSO
+		// empty is the paper genuinely blank.
+		if text := htmlToPlainText(doc.BodyHTML); text != "" {
+			out.outf("%s", text)
+			return exitOK
+		}
 		return paperError(out, jsonOut, "empty",
 			fmt.Sprintf("paper %q has no renderable blocks", opt.slug), exitNotFound)
 	}
@@ -245,59 +256,79 @@ type paperRawDoc struct {
 // _id (the API emits "_id", Doc decodes "id"). Perspective is passed explicitly
 // so the caller controls published vs drafts vs raw.
 func paperFetchAll(client *apiclient.Client, perspective string) ([]paperRawDoc, error) {
-	u := paperScopedURL(client, "/v1/data/query/"+url.PathEscape(client.Dataset)+"/paper")
-	params := url.Values{}
-	if perspective != "" {
-		params.Set("perspective", perspective)
-	}
-	// resolve=tasks (p-resolve-seam): the server swaps each task block's
-	// authored `query` for a live `snapshot`/`task` before responding, so the
-	// task widgets render live plans instead of "[task-list — unresolved]".
-	// Read-only: paperFetchAll feeds the render path, never a write-back.
-	params.Set("resolve", "tasks")
-	if qs := params.Encode(); qs != "" {
-		u += "?" + qs
-	}
-
+	base := paperScopedURL(client, "/v1/data/query/"+url.PathEscape(client.Dataset)+"/paper")
 	headers := map[string]string{}
 	if t := client.Token(); t != "" {
 		headers["Authorization"] = "Bearer " + t
 	}
-	status, body, err := doRequest("GET", u, headers, nil)
-	if err != nil {
-		return nil, err
-	}
-	if status < 200 || status >= 300 {
-		ae := classifyError(status, body)
-		return nil, fmt.Errorf("status %d: %s", status, ae.errorMessage())
-	}
 
-	var env struct {
-		Result struct {
-			Documents []json.RawMessage `json:"documents"`
-		} `json:"result"`
-		Documents []json.RawMessage `json:"documents"`
-	}
-	if jerr := json.Unmarshal(body, &env); jerr != nil {
-		return nil, fmt.Errorf("parse query response: %w", jerr)
-	}
-	rawDocs := env.Result.Documents
-	if rawDocs == nil {
-		rawDocs = env.Documents
-	}
-
-	out := make([]paperRawDoc, 0, len(rawDocs))
-	for _, r := range rawDocs {
-		var ident struct {
-			ID    string `json:"_id"`
-			Slug  string `json:"slug"`
-			Title string `json:"title"`
+	// Page until a short page. The query endpoint defaults to limit=100 and
+	// silently drops the rest, so an unbounded fetch capped the corpus at 100
+	// docs — papers beyond that window (e.g. soc2-controls-mapping, dpa-template)
+	// vanished and `bp paper view` reported "no paper matches" for papers that
+	// exist. paperPageSize (1000) is the server's max clamp, so this loop drains
+	// the whole corpus in as few round-trips as possible while staying correct
+	// past 1000 papers. Mirrors migrateFetchAll's proven pagination.
+	var out []paperRawDoc
+	offset := 0
+	for {
+		params := url.Values{}
+		if perspective != "" {
+			params.Set("perspective", perspective)
 		}
-		_ = json.Unmarshal(r, &ident)
-		out = append(out, paperRawDoc{id: ident.ID, slug: ident.Slug, title: ident.Title, raw: r})
+		// resolve=tasks (p-resolve-seam): the server swaps each task block's
+		// authored `query` for a live `snapshot`/`task` before responding, so the
+		// task widgets render live plans instead of "[task-list — unresolved]".
+		// Read-only: paperFetchAll feeds the render path, never a write-back.
+		params.Set("resolve", "tasks")
+		params.Set("limit", strconv.Itoa(paperPageSize))
+		params.Set("offset", strconv.Itoa(offset))
+		u := base + "?" + params.Encode()
+
+		status, body, err := doRequest("GET", u, headers, nil)
+		if err != nil {
+			return nil, err
+		}
+		if status < 200 || status >= 300 {
+			ae := classifyError(status, body)
+			return nil, fmt.Errorf("status %d: %s", status, ae.errorMessage())
+		}
+
+		var env struct {
+			Result struct {
+				Documents []json.RawMessage `json:"documents"`
+			} `json:"result"`
+			Documents []json.RawMessage `json:"documents"`
+		}
+		if jerr := json.Unmarshal(body, &env); jerr != nil {
+			return nil, fmt.Errorf("parse query response: %w", jerr)
+		}
+		rawDocs := env.Result.Documents
+		if rawDocs == nil {
+			rawDocs = env.Documents
+		}
+
+		for _, r := range rawDocs {
+			var ident struct {
+				ID    string `json:"_id"`
+				Slug  string `json:"slug"`
+				Title string `json:"title"`
+			}
+			_ = json.Unmarshal(r, &ident)
+			out = append(out, paperRawDoc{id: ident.ID, slug: ident.Slug, title: ident.Title, raw: r})
+		}
+		if len(rawDocs) < paperPageSize {
+			break
+		}
+		offset += paperPageSize
 	}
 	return out, nil
 }
+
+// paperPageSize is the per-request page size for paperFetchAll. 1000 is the
+// query endpoint's max limit clamp (see query_controller.ex), so it drains the
+// corpus in the fewest round-trips while the loop still handles a >1000 corpus.
+const paperPageSize = 1000
 
 // paperScopedURL builds the workspace/project-scoped /v1/ URL for a paper read,
 // mirroring apiclient.Client.scopedURL (which is unexported) so the built-in
@@ -987,6 +1018,52 @@ func paperError(out *writer, jsonOut bool, code, msg string, exit int) int {
 	}
 	out.userErr("%s", msg)
 	return exit
+}
+
+// paperHTMLEntities decodes the handful of entities a paper's body_html
+// serializer emits — a plain-text dump needs readable text, not a full parser.
+var paperHTMLEntities = strings.NewReplacer(
+	"&amp;", "&", "&lt;", "<", "&gt;", ">", "&quot;", `"`,
+	"&#39;", "'", "&apos;", "'", "&nbsp;", " ", "&mdash;", "—", "&ndash;", "–",
+)
+
+// paperBlockTagBreak matches the block-level tag boundaries whose visible effect
+// is a line break: paragraph/heading/list-item/table-row/div closes and <br>.
+// Rendered to "\n" so the dump keeps paragraph structure a naive tag-strip would
+// collapse into one run-on line. Only CLOSING tags break (plus the void <br>) —
+// breaking on opens too would double-space every list item.
+var paperBlockTagBreak = regexp.MustCompile(`(?i)</(p|h[1-6]|li|tr|div|blockquote|ul|ol|table|section|article|pre)>|<br\s*/?>`)
+
+// paperTagStrip matches any remaining HTML tag (inline formatting, attributes),
+// dropped to leave the visible text.
+var paperTagStrip = regexp.MustCompile(`(?s)<[^>]*>`)
+
+// paperBlankRuns collapses three-or-more consecutive newlines to two, so the
+// dump never carries large vertical gaps from stacked block closes.
+var paperBlankRuns = regexp.MustCompile(`\n{3,}`)
+
+// htmlToPlainText renders a paper's body_html to a readable plain-text dump: it
+// turns block-level tag boundaries into line breaks, strips every remaining tag,
+// decodes the common entities, and trims stray whitespace. It is a best-effort
+// FALLBACK for body_html-only papers (no block tree), NOT a full HTML renderer
+// — the goal is legible content in the terminal, not fidelity. Returns "" for
+// empty/whitespace-only or all-tag input, so the caller can distinguish a truly
+// empty paper from one that renders.
+func htmlToPlainText(html string) string {
+	if strings.TrimSpace(html) == "" {
+		return ""
+	}
+	s := paperBlockTagBreak.ReplaceAllString(html, "\n")
+	s = paperTagStrip.ReplaceAllString(s, "")
+	s = paperHTMLEntities.Replace(s)
+	// Trim trailing spaces on each line, then collapse blank runs.
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		lines[i] = strings.TrimRight(ln, " \t")
+	}
+	s = strings.Join(lines, "\n")
+	s = paperBlankRuns.ReplaceAllString(s, "\n\n")
+	return strings.TrimSpace(s)
 }
 
 // usagePaper prints the `bp paper` noun usage (its single verb). An explicit
