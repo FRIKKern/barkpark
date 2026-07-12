@@ -121,7 +121,7 @@ func agentHealthGateOpts(base, token string) setup.HealthGate {
 	return setup.HealthGate{
 		Token:                            token,
 		PostgresProbeURL:                 statusURL,
-		RequireDatabaseStatusOperational: false,
+		RequireDatabaseStatusOperational: true,
 		StubsOptional:                    true,
 	}
 }
