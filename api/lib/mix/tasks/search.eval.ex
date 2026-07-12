@@ -6,8 +6,11 @@ defmodule Mix.Tasks.Search.Eval do
       mix search.eval
       mix search.eval --surface documents --dataset pipeline
       mix search.eval --baseline test/search_golden/baseline.json
+      mix search.eval --write-baseline test/search_golden/baseline.json
 
   Exits non-zero when expected ids are missing or baseline regresses.
+  `--write-baseline` serializes the run's metrics (pretty JSON) to the given
+  path and exits 0 — a capture mode, so it neither compares nor fails on misses.
   """
 
   use Mix.Task
@@ -16,6 +19,7 @@ defmodule Mix.Tasks.Search.Eval do
     surface: :string,
     dataset: :string,
     baseline: :string,
+    write_baseline: :string,
     fixtures_dir: :string
   ]
 
@@ -48,25 +52,30 @@ defmodule Mix.Tasks.Search.Eval do
       Enum.each(metrics.failures, fn f -> IO.puts(:stderr, "  #{f.q}: #{f.reason}") end)
     end
 
-    case opts[:baseline] do
-      nil ->
-        :ok
+    if path = opts[:write_baseline] do
+      File.write!(path, Jason.encode!(metrics, pretty: true) <> "\n")
+      IO.puts("Wrote baseline -> #{path}")
+    else
+      case opts[:baseline] do
+        nil ->
+          :ok
 
-      path ->
-        baseline = path |> File.read!() |> Jason.decode!()
+        path ->
+          baseline = path |> File.read!() |> Jason.decode!()
 
-        case Barkpark.Search.GoldenEval.compare(metrics, baseline) do
-          :ok ->
-            IO.puts("Baseline OK")
+          case Barkpark.Search.GoldenEval.compare(metrics, baseline) do
+            :ok ->
+              IO.puts("Baseline OK")
 
-          {:error, msgs} ->
-            Enum.each(msgs, &IO.puts(:stderr, &1))
-            System.halt(1)
-        end
-    end
+            {:error, msgs} ->
+              Enum.each(msgs, &IO.puts(:stderr, &1))
+              System.halt(1)
+          end
+      end
 
-    if metrics.failures != [] do
-      System.halt(1)
+      if metrics.failures != [] do
+        System.halt(1)
+      end
     end
   end
 end
