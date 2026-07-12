@@ -252,9 +252,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # construction. A PARALLEL set, deliberately NOT folded into @fleet_render_types:
   # that set rides the 4-way lockstep with paper_editor.ex @fleet_preview_types
   # (the classic-mode boundary widget), and DataViz stays OUT of the classic paint
-  # (charter D2 — classic keeps the read-only catch-all for these kinds). They
-  # carry no query, so task_previews never resolves them — fleet_block_html renders
-  # them directly from their own carried data.
+  # (charter D2 — classic keeps the read-only catch-all for these kinds). Literal
+  # blocks render their carried data directly; query-bearing chart/heatmap/stat
+  # blocks receive display-only aggregate attrs through task_previews.
   #
   # Keep aligned with run-convert.js CANVAS_DATAVIZ_TYPES and
   # paper_canvas.ex @canvas_dataviz_types.
@@ -342,11 +342,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     %{"block_id" => Map.get(block, "id"), "html" => html}
   end
 
-  # Render one fleet block's reader HTML. A query-carrying task block is resolved
-  # against its session-scoped preview (rows merged onto a COPY); every other fleet
-  # block renders directly from its own carried snapshot/data. An error preview
-  # falls back to the un-resolved block so the reader emitter degrades gracefully
-  # (an empty board) rather than crashing the push.
+  # Render one fleet block's reader HTML. A query-carrying task or data-viz block
+  # is resolved against its session-scoped preview (attrs merged onto a COPY);
+  # every other fleet block renders directly from its carried snapshot/data. An
+  # error preview falls back to the unresolved block so the emitter degrades
+  # gracefully rather than crashing the push.
   defp fleet_block_html(block, previews) do
     resolved =
       case Map.get(previews, Map.get(block, "id")) do

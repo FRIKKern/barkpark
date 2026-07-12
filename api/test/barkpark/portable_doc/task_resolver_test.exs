@@ -141,6 +141,31 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
       assert TaskResolver.apply_preview(block, nil) == block
     end
 
+    test "threads aggregate previews through columns without changing their source blocks" do
+      block = %{
+        "id" => "viz-stat",
+        "type" => "stat",
+        "query" => %{"source" => "tasks"}
+      }
+
+      blocks = [%{"type" => "columns", "columns" => [[block], "junk"]}]
+
+      tally = %{
+        buckets: [],
+        labels1: [],
+        labels2: [],
+        op: "count",
+        tally: %{},
+        total: 4
+      }
+
+      assert TaskResolver.preview(blocks, &fetch/1, fn _ -> {:ok, tally} end) == [
+               %{"attrs" => %{"value" => 4}, "block_id" => "viz-stat", "type" => "stat"}
+             ]
+
+      assert blocks == [%{"type" => "columns", "columns" => [[block], "junk"]}]
+    end
+
     test "yields an id-keyed snapshot entry for a query-carrying snapshot block" do
       blocks = [%{"id" => "b1", "type" => "task-list", "query" => %{"parent_id" => "epic"}}]
 
