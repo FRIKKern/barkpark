@@ -323,9 +323,7 @@ defmodule Barkpark.Content.Lifecycle do
       %{code: code, type: type, dataset: dataset}
     )
 
-    Logger.warning(
-      "authoring wall rejected a #{type} publish in dataset #{dataset}: #{code}"
-    )
+    Logger.warning("authoring wall rejected a #{type} publish in dataset #{dataset}: #{code}")
 
     :ok
   end
