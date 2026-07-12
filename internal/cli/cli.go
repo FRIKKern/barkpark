@@ -144,6 +144,13 @@ func Execute(args []string) int {
 		// Distinct from the singular `bp task …` manifest noun (help cross-refs both).
 		return runTasksBoard(out, g, ctx, rest[1:])
 	case "task":
+		// `bp task tui` is the discoverable singular-noun spelling of the same
+		// full-screen reader as `bp tasks`. Keep one implementation and one
+		// renderer; this alias exists so a user already navigating `bp task …`
+		// does not have to discover a separate noun to read rich task briefs.
+		if verb == "tui" {
+			return runTasksBoard(out, g, ctx, tail)
+		}
 		// `bp task frontier` — the dispatch surface (wave 13): the maximal set of
 		// ready tasks that can run in parallel without their blast radii colliding.
 		// A built-in because it computes the interference model client-side over the

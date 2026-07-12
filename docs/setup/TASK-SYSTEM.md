@@ -9,7 +9,7 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the sam
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system), soft validations, `dependencies`/`claim` read-only. Live **Projects board** at `/admin/projects`. |
 | **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / stamp / pulse / close / move` — manifest-driven from `GET /v1/capabilities`. |
-| **Terminal TUI** | `c`/`x` claim/close the highlighted task (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys: `/` search, `n` new, `y` duplicate, `D`×2 delete. |
+| **Terminal TUI** | `bp tasks` (also `bp task tui`) opens the PortableDoc-capable task reader; `c`/`x` claim/close the highlighted task (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys: `/` search, `n` new, `y` duplicate, `D`×2 delete. |
 | **HTTP API** | Fifteen bearer-token endpoints under `/v1/tasks/*` (read tier): the verbs above plus fetch, edges, labels, papers. |
 | **Events** | Each op emits a `mutation_events` row — `task.{claimed,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
 
