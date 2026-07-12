@@ -171,4 +171,41 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportControllerTest do
     assert body["error"]["code"] == "invalid_slug"
     assert body["error"]["message"] =~ "has spaces!"
   end
+
+  # ── 7. Traversal defense — File.read uses the upload temp path, not filename ─
+  #
+  # Protective test for the Sobelow Traversal.FileModule skip on
+  # `ImportController.read_upload/1`: the attacker-controlled `filename` never
+  # reaches `File.read`. We build an upload whose `path` points at a real temp
+  # file holding our CSV, but whose `filename` is a directory-traversal payload.
+  # The import must read OUR temp file (cells == 4), NOT the named path, and the
+  # malicious filename must only ever produce a safe slugified basename.
+  @tag :tmp_dir
+  test "a traversal-laden filename reads the upload temp path, never the named path",
+       %{conn: conn, tmp_dir: tmp_dir} do
+    body_path = Path.join(tmp_dir, "legit_body.csv")
+    File.write!(body_path, "Item,Cost\r\nOps,500\r\n")
+
+    upload = %Plug.Upload{
+      path: body_path,
+      filename: "../../../../etc/passwd.csv",
+      content_type: "text/csv"
+    }
+
+    body =
+      conn
+      |> authed()
+      |> post(@import_path, %{"file" => upload, "dataset" => @dataset})
+      |> json_response(200)
+
+    # It read our temp file's CSV (2x2 = 4 cells), proving `path` was used —
+    # not /etc/passwd (which would not parse to this shape).
+    assert body["ok"] == true
+    assert body["cells"] == 4
+    # The traversal payload collapses to a safe slug (basename rootname,
+    # slugified) — no "/" or ".." survives into the derived identity.
+    assert body["slug"] == "passwd"
+    refute body["slug"] =~ "/"
+    refute body["slug"] =~ ".."
+  end
 end

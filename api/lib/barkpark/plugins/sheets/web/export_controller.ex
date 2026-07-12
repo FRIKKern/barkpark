@@ -28,6 +28,11 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   @default_dataset "production"
   @xlsx_mime "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+  # Sobelow XSS.SendResp false-positive: `binary` is the xlsx file bytes from
+  # `XlsxExport.to_binary/2`, served under the FIXED office MIME `@xlsx_mime`
+  # with `Content-Disposition: attachment` — a binary download, never an
+  # HTML/script-executable response body.
+  # sobelow_skip ["XSS.SendResp"]
   def export_xlsx(conn, %{"slug" => slug} = params) do
     with {:ok, doc} <- fetch_sheet(slug, params),
          {:ok, binary} <- build_xlsx(doc, slug) do
@@ -58,6 +63,15 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
     end
   end
 
+  # Sobelow XSS.SendResp false-positive: this is a legitimate viewable HTML page
+  # (like the `/papers/:slug` reader). Every dynamic value in the body is escaped
+  # before it reaches the response: `Html.export/2` HTML-escapes the title and tab
+  # names, and every cell value renders through the shared PortableDoc walker
+  # (`Barkpark.PortableDoc.Render.Walk.sheet_cell_html/2`), which `escape_html`s
+  # plain cells and routes URL cells through the `safe_url/1` scheme allowlist. A
+  # `<script>` in a cell renders as inert `&lt;script&gt;` text. The escaping
+  # invariant is pinned by `HtmlTest` "cell value with HTML/script is escaped".
+  # sobelow_skip ["XSS.SendResp"]
   def export_html(conn, %{"slug" => slug} = params) do
     case fetch_sheet(slug, params) do
       {:ok, doc} ->
@@ -70,6 +84,13 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
     end
   end
 
+  # Sobelow XSS.ContentType + XSS.SendResp false-positives: `mime` is NEVER
+  # attacker-controlled — the only two callers pass compile-time literals
+  # (`export_csv` → "text/csv", `export_tsv` → "text/tab-separated-values"); no
+  # request value flows into it. `text` is the CSV/TSV delimited data served with
+  # `Content-Disposition: attachment` under that fixed text MIME — a data
+  # download, not an HTML/script response body.
+  # sobelow_skip ["XSS.ContentType", "XSS.SendResp"]
   defp delimited(conn, %{"slug" => slug} = params, sep, ext, mime) do
     with {:ok, doc} <- fetch_sheet(slug, params),
          {:ok, tab_index} <- tab_index(params),
