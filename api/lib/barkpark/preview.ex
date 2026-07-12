@@ -348,7 +348,7 @@ defmodule Barkpark.Preview do
           tag when is_binary(tag) -> tag
           _ -> nil
         end)
-        |> Enum.reject(&is_nil/1)
+        |> Enum.reject(&(&1 in [nil, ""]))
         |> presence()
 
       tag when is_binary(tag) ->
