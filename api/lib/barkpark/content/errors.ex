@@ -26,6 +26,8 @@ defmodule Barkpark.Content.Errors do
       "A single If-Match header can't fence a multi-op batch — drop the header and put an ifRevisionID (or ifMatch) inside each mutation instead.",
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
+    "duplicate_of" =>
+      "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document, or differentiate this one's title/tags before publishing.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the request with ?force=true to remove the schema and orphan them.",
@@ -35,6 +37,8 @@ defmodule Barkpark.Content.Errors do
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
+    "label_spine" =>
+      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "idempotency_key_in_use" =>
@@ -58,7 +62,10 @@ defmodule Barkpark.Content.Errors do
     # it was silently absent from known_codes/0 → the served enum omitted a code
     # every task-create caller can receive. Registering the hint re-enters it.
     "duplicate_task" =>
-      "This task duplicates an existing one — claim/extend the task in details.similar, or resend with distinct_from set to that id to confirm it is genuinely different."
+      "This task duplicates an existing one — claim/extend the task in details.similar, or resend with distinct_from set to that id to confirm it is genuinely different.",
+    # Authoring-excellence publish wall, E3 gate (charter D3/D5).
+    "unknown_tag" =>
+      "Every tags[].tag must be a registered tag — publish a type:tag document whose _id is the tag name, or switch to one of the registered tags in details.suggestions, then publish again."
   }
 
   # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────
@@ -272,6 +279,21 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 
+  # The publish wall's label spine (authoring-excellence D5): the document
+  # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
+  # legacy exemption ledger. 422 with the validator's documentation-grade
+  # details (field / rule / fix per violation) verbatim, so the one agent
+  # retry can be exact. A NEW top-level atom — deliberately NOT the
+  # task-scoped invalid_task_content and NOT the plugin {:halted, _} shape
+  # (this is core enforcement, not a plugin veto).
+  defp build({:error, {:label_spine, details}}),
+    do: %{
+      code: "label_spine",
+      message: "document failed the publish wall's label spine",
+      status: 422,
+      details: details
+    }
+
   # Find-or-create gate (task-obsession layer 1): a new task duplicates an
   # existing one. 409 Conflict; the similar-candidate list rides in `details` so
   # the CLI/SDK can show the author which task to claim/extend, or which id to
@@ -283,6 +305,38 @@ defmodule Barkpark.Content.Errors do
       status: 409,
       details: Map.take(payload, [:similar, :advise])
     }
+
+  # Publish dedup wall (authoring-excellence E4): a publish near-duplicates an
+  # already-published document. 409 Conflict; the incumbent published id rides in
+  # `details.duplicate_of` so the author can claim/extend it, and `details.similar`
+  # lists every near-match with its similarity score. UNLIKE `duplicate_task`
+  # above, this code carries a registered `@hints` entry (so it is a member of
+  # `known_codes/0` and truthful in the served OpenAPI enum) — the drift-guard is
+  # a tautology, so a DELIBERATE membership test pins it (see errors_test.exs).
+  defp build({:error, {:duplicate_of, payload}}) when is_map(payload),
+    do: %{
+      code: "duplicate_of",
+      message: Map.get(payload, :message, "document duplicates an already-published document"),
+      status: 409,
+      details: Map.take(payload, [:duplicate_of, :similar, :advise])
+    }
+
+  # Authoring-excellence publish wall, E3 gate (TagRegistry.validate_publish):
+  # a publish referenced weighted tags[].tag names with no PUBLISHED type:tag
+  # doc in the dataset scope. 422 with the unknown names and the trgm-nearest
+  # registered tags in `details`, so an authoring agent's retry is one edit
+  # away. NEW top-level code per charter D1 — never reuses the task-scoped
+  # `invalid_task_content` or the plugin `{:halted, _}` shape.
+  defp build({:error, {:unknown_tag, payload}}) when is_map(payload) do
+    unknown = Map.get(payload, :unknown, [])
+
+    %{
+      code: "unknown_tag",
+      message: "publish references unregistered tag(s): " <> Enum.join(unknown, ", "),
+      status: 422,
+      details: Map.take(payload, [:unknown, :suggestions])
+    }
+  end
 
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =

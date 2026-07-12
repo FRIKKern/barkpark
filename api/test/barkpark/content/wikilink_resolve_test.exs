@@ -16,6 +16,10 @@ defmodule Barkpark.Content.WikilinkResolveTest do
   @dataset "wikilink_resolve_test"
 
   setup do
+    # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
+    # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
+    Barkpark.LabelFixtures.register_tags!(@dataset)
+
     Content.upsert_schema(
       %{
         "name" => "paper",
@@ -33,7 +37,9 @@ defmodule Barkpark.Content.WikilinkResolveTest do
     {:ok, _} =
       Content.create_document(
         "paper",
-        Map.merge(%{"_id" => id, "title" => title}, attrs),
+        %{"_id" => id, "title" => title}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.merge(attrs),
         @dataset
       )
 

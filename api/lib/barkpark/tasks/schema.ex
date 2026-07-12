@@ -300,6 +300,46 @@ defmodule Barkpark.Tasks.Schema do
           "of" => %{"type" => "string"}
         },
 
+        # Weighted-label spine (authoring-excellence). Distinct from the legacy
+        # free-form `labels` above (D11 — labels feeds Tasks.Similarity and is
+        # untouched this epic): `tags` carries {tag, strength 1-100, rationale},
+        # cross-member rules (1-12 count, distinct strengths, unique main tag)
+        # enforced by Barkpark.Content.LabelSpine at the publish wall (mount is
+        # ae-w1-publish-wall-mount). Per-leaf shape declared here so Studio + the
+        # recursive validator reject malformed leaves early.
+        %{
+          "name" => "tags",
+          "title" => "Tags",
+          "type" => "arrayOf",
+          "ordered" => false,
+          "group" => "brief",
+          "description" =>
+            "Weighted labels: {tag ^[a-z0-9-]+$, strength 1-100 distinct, rationale}. 1-12 tags; the unique-max strength is the main tag.",
+          "of" => %{
+            "type" => "composite",
+            "fields" => [
+              %{
+                "name" => "tag",
+                "title" => "Tag",
+                "type" => "string",
+                "validation" => %{"required" => true, "pattern" => "^[a-z0-9-]+$"}
+              },
+              %{
+                "name" => "strength",
+                "title" => "Strength",
+                "type" => "number",
+                "validation" => %{"required" => true, "min" => 1, "max" => 100}
+              },
+              %{
+                "name" => "rationale",
+                "title" => "Rationale",
+                "type" => "string",
+                "validation" => %{"required" => true}
+              }
+            ]
+          }
+        },
+
         # UPGRADED string → reference. Persistence is IDENTICAL (a
         # reference stores the bare doc-id string), so the ready phase
         # filter (exact match) and the controller's prefix-agnostic
