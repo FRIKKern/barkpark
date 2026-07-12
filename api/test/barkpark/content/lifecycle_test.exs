@@ -423,6 +423,13 @@ defmodule Barkpark.Content.LifecycleTest do
       # Fail-closed: the published row still carries the OLD flat content.
       {:ok, published} = Content.get_document("e3-pin", "paper", @dataset)
       assert published.content["tags"] == ["legacy-flat"]
+
+      # BUG (b) pin (charter D28): the exemption SURVIVES the failed publish.
+      # The label spine passed (one syntactically-valid weighted tag), so the
+      # OLD code cleared the ledger row at spine-pass — then E3 rejected. That
+      # spent the doc's grandfathering on a publish that FAILED. The ratchet
+      # must fire only after the WHOLE wall passes.
+      assert Exemptions.member?("e3-pin", @dataset)
     end
   end
 
@@ -456,6 +463,49 @@ defmodule Barkpark.Content.LifecycleTest do
 
       assert {:ok, republished} = Content.publish_document("mt-legacy", "paper", @dataset)
       refute Map.has_key?(republished.content, "main_tag")
+    end
+
+    test "a grandfathered republish DROPS a stale main_tag key — recompute-else-drop (bug a)" do
+      # The draft content pre-carries a STALE main_tag (copied from a backfilled
+      # row) alongside flat legacy tags that no longer support it. The old
+      # :error branch passed the content through UNCHANGED, republishing WITH
+      # the stale key; recompute-else-drop deletes it.
+      stale = %{"main_tag" => "stale-was-strongest", "tags" => ["legacy-flat"]}
+      legacy_published!("mt-stale", stale)
+
+      paper_draft!("mt-stale", stale)
+
+      assert {:ok, republished} = Content.publish_document("mt-stale", "paper", @dataset)
+      refute Map.has_key?(republished.content, "main_tag")
+    end
+  end
+
+  # ── wall telemetry (charter D28) ────────────────────────────────────────────
+
+  describe "wall rejection telemetry" do
+    test "a label_spine rejection emits [:barkpark, :authoring, :wall_rejection]" do
+      test_pid = self()
+      handler_id = "wall-rejection-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:barkpark, :authoring, :wall_rejection],
+        fn event, measurements, metadata, _config ->
+          send(test_pid, {:wall_rejection, event, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      # An unlabeled paper first-publish → label_spine 422 → one wall_rejection.
+      paper_draft!("tele-bare", %{})
+
+      assert {:error, {:label_spine, _}} =
+               Content.publish_document("tele-bare", "paper", @dataset)
+
+      assert_receive {:wall_rejection, [:barkpark, :authoring, :wall_rejection], %{count: 1},
+                      %{code: :label_spine, type: "paper", dataset: @dataset}}
     end
   end
 end
