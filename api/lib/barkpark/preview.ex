@@ -362,12 +362,26 @@ defmodule Barkpark.Preview do
   defp string_list(content, keys) do
     Enum.find_value(keys, fn key ->
       case Map.get(content, key) do
-        [_ | _] = list -> list |> Enum.map(&to_string/1) |> Enum.reject(&(&1 == "")) |> presence()
-        s when is_binary(s) -> s |> blank_to_nil() |> List.wrap() |> presence()
-        _ -> nil
+        [_ | _] = list ->
+          list |> Enum.map(&element_name/1) |> Enum.reject(&(&1 == "")) |> presence()
+
+        s when is_binary(s) ->
+          s |> blank_to_nil() |> List.wrap() |> presence()
+
+        _ ->
+          nil
       end
     end)
   end
+
+  # Dual-shape list elements (authoring-excellence D18): a weighted label
+  # entry `%{"tag" => name, …}` reads as its tag name; any OTHER map is
+  # dropped — `to_string/1` on a map raises Protocol.UndefinedError, which
+  # crashed `Preview.project/3` on every weighted-tag paper. Scalars
+  # stringify exactly as before.
+  defp element_name(%{"tag" => name}) when is_binary(name), do: name
+  defp element_name(%{}), do: ""
+  defp element_name(v), do: to_string(v)
 
   defp number(content, keys) do
     Enum.find_value(keys, fn key ->

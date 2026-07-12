@@ -563,14 +563,25 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def visibility_label(_), do: "Draft"
 
   @doc """
-  Taxonomy labels for the sidebar Labels section — the paper's `content["tags"]`,
-  filtered to non-blank strings. `[]` when a paper carries no tags. Pure.
+  Taxonomy labels for the sidebar Labels section — the paper's `content["tags"]`
+  as tag NAMES. Dual-shape (authoring-excellence D18): a weighted entry
+  `%{"tag" => name, …}` (post-wall) reads as its name; a legacy flat string
+  reads as itself; blanks and anything else are dropped. `[]` when a paper
+  carries no tags. Pure.
   """
   @spec paper_labels(term()) :: [String.t()]
-  def paper_labels(%{content: %{"tags" => tags}}) when is_list(tags),
-    do: Enum.filter(tags, &(is_binary(&1) and String.trim(&1) != ""))
+  def paper_labels(%{content: %{"tags" => tags}}) when is_list(tags) do
+    tags
+    |> Enum.map(&label_name/1)
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+  end
 
   def paper_labels(_), do: []
+
+  # Both label shapes name a tag; a tagless map falls through to the filter
+  # above (non-binary → dropped) rather than raising.
+  defp label_name(%{"tag" => name}), do: name
+  defp label_name(other), do: other
 
   @doc """
   Outbound relations for the sidebar Relations section: each `field-reference`

@@ -251,17 +251,19 @@ defmodule Barkpark.Content.TagRegistryTest do
   # ── legacy vocabulary seed ─────────────────────────────────────────────────
 
   describe "seed_legacy_drafts/2 (mix barkpark.tags.seed)" do
-    test "imports distinct legacy flat tags as DRAFTS, never publishes, skips weighted entries, idempotent" do
+    test "imports distinct tag names from BOTH shapes as DRAFTS, never publishes, idempotent" do
       create_post_draft!("legacy-a", %{"tags" => ["alpha", "beta"]})
       create_post_draft!("legacy-b", %{"tags" => ["beta", "gamma"]})
-      # A weighted doc's tags unnest to JSON-object text — never legacy names.
+      # Dual-shape read (D19): a weighted doc's tag NAME is drafted for
+      # curation too — the seeder is the third consumer of
+      # search_tags_for_type and benefits transitively.
       create_post_draft!("modern-doc", %{"tags" => [weighted("modern", 80)]})
 
       %{created: created} = TagRegistry.seed_legacy_drafts(@dataset)
 
-      assert Enum.sort(created) == ["alpha", "beta", "gamma"]
+      assert Enum.sort(created) == ["alpha", "beta", "gamma", "modern"]
 
-      for name <- ["alpha", "beta", "gamma"] do
+      for name <- ["alpha", "beta", "gamma", "modern"] do
         # Draft variant exists…
         assert %Document{status: "draft"} =
                  Repo.one(
@@ -280,19 +282,19 @@ defmodule Barkpark.Content.TagRegistryTest do
                )
       end
 
-      # The weighted entry never became a tag doc (neither its name nor its
-      # JSON-object text).
+      # The weighted entry became a DRAFT by NAME only — its JSON-object
+      # text never leaks in as a doc id (dual-shape names, not blobs).
       refute Repo.exists?(
                from(d in Document,
                  where:
                    d.type == "tag" and d.dataset == ^@dataset and
-                     d.doc_id in ["modern", "drafts.modern"]
+                     ilike(d.doc_id, "%{%")
                )
              )
 
       # Idempotent: a second sweep creates nothing and skips the vocabulary.
       assert %{created: [], skipped: skipped} = TagRegistry.seed_legacy_drafts(@dataset)
-      assert Enum.sort(skipped) == ["alpha", "beta", "gamma"]
+      assert Enum.sort(skipped) == ["alpha", "beta", "gamma", "modern"]
     end
   end
 end

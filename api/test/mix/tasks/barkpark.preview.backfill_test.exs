@@ -330,9 +330,11 @@ defmodule Mix.Tasks.Barkpark.Preview.BackfillTest do
 
   describe "per-doc rescue" do
     test "a poison doc is recorded in errors and the sweep continues" do
-      # `authors: [%{...}]` makes Preview extensions call to_string/1 on a map,
-      # which raises — the per-doc rescue must catch it and keep going.
-      seed_paper("poison", content: %{"authors" => [%{"bad" => "map"}]})
+      # A nested-list author element makes Preview's element_name/1 call
+      # to_string/1 on a list containing a map, which raises (List.Chars) —
+      # the per-doc rescue must catch it and keep going. (A bare map no
+      # longer raises: dual-shape string_list drops non-tag maps, D18.)
+      seed_paper("poison", content: %{"authors" => [["bad", %{"x" => 1}]]})
       good = seed_paper("survivor", [])
 
       {:ok, stats} = Backfill.backfill(dry_run: false)

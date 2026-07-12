@@ -392,5 +392,70 @@ defmodule Barkpark.Content.LifecycleTest do
       assert {:error, {:label_spine, _}} =
                Content.publish_document("wall-ratchet", "paper", @dataset)
     end
+
+    test "E3 is NEVER exempted: a grandfathered doc adopting an UNREGISTERED weighted tag still 422s (D25)" do
+      # A pre-wall doc in the ledger — grandfathered for its FLAT shape.
+      legacy_published!("e3-pin", %{"tags" => ["legacy-flat"]})
+      assert Exemptions.member?("e3-pin", @dataset)
+
+      # It ADOPTS the weighted shape, but with a tag no one ever registered.
+      # `TagRegistry.validate_publish` runs unconditionally (exempt? feeds
+      # only authoring_wall + dedup_wall), so the exemption cannot carry an
+      # unknown tag past the registry gate.
+      adopting = %{
+        "description" => "A grandfathered document adopting weighted labels for the first time.",
+        "tags" => [
+          %{
+            "tag" => "never-registered-e3",
+            "strength" => 77,
+            "rationale" => "Deliberately absent from the E3 registry to pin the gate."
+          }
+        ]
+      }
+
+      paper_draft!("e3-pin", adopting)
+
+      assert {:error, {:unknown_tag, payload}} =
+               Content.publish_document("e3-pin", "paper", @dataset)
+
+      assert "never-registered-e3" in payload.unknown
+
+      # Fail-closed: the published row still carries the OLD flat content.
+      {:ok, published} = Content.get_document("e3-pin", "paper", @dataset)
+      assert published.content["tags"] == ["legacy-flat"]
+    end
+  end
+
+  # ── main_tag denormalization (charter D7/D20) ───────────────────────────────
+
+  describe "main_tag stamp at the publish chokepoint" do
+    test "publish stamps the strength argmax as content.main_tag" do
+      paper_draft!("mt-stamp", @good_labels)
+
+      assert {:ok, published} = Content.publish_document("mt-stamp", "paper", @dataset)
+
+      # @good_labels: publish-wall@90 > lifecycle@40 — the unique max.
+      assert published.content["main_tag"] == "publish-wall"
+
+      # The stamp lands on the PUBLISHED row only; the draft's content was
+      # never mutated (drafts stay free — the stamp is a publish artifact).
+      assert published.content["tags"] == @good_labels["tags"]
+    end
+
+    test "a non-walled type publishes without a main_tag key (derives only from weighted tags)" do
+      draft!("mt-lpost")
+
+      assert {:ok, published} = Content.publish_document("mt-lpost", @type_name, @dataset)
+      refute Map.has_key?(published.content, "main_tag")
+    end
+
+    test "a grandfathered flat-tag republish passes through UNSTAMPED — never a nil key" do
+      legacy_published!("mt-legacy", %{"tags" => ["old-flat"]})
+
+      paper_draft!("mt-legacy", %{"tags" => ["old-flat"]})
+
+      assert {:ok, republished} = Content.publish_document("mt-legacy", "paper", @dataset)
+      refute Map.has_key?(republished.content, "main_tag")
+    end
   end
 end

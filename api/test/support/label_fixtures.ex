@@ -75,6 +75,49 @@ defmodule Barkpark.LabelFixtures do
   end
 
   @doc """
+  Wall-compliant weighted labels with EXPLICIT tag names — for tests that
+  assert on specific names (the dual-shape tag readers, `hasStrong` filters,
+  main_tag stamping). `names` entries are either `"name"` (descending
+  strengths assigned automatically: FIRST name = strongest = the main tag) or
+  `{"name", strength}` used verbatim. PURE — no registry write; use
+  `with_named_labels/3` when the doc must pass the E3 gate. Description
+  tokens stay unique per call (the E4 token-bag rule — `weighted_labels/1`).
+  """
+  def named_weighted_labels(names) when is_list(names) do
+    tags =
+      names
+      |> Enum.with_index(1)
+      |> Enum.map(fn
+        {{name, strength}, _i} ->
+          %{
+            "tag" => name,
+            "strength" => strength,
+            "rationale" => "Named fixture tag '#{name}' — exercises the dual-shape tag readers."
+          }
+
+        {name, i} ->
+          %{
+            "tag" => name,
+            "strength" => 100 - i,
+            "rationale" => "Named fixture tag '#{name}' — exercises the dual-shape tag readers."
+          }
+      end)
+
+    Map.put(weighted_labels(), "tags", tags)
+  end
+
+  @doc """
+  `named_weighted_labels/1` + E3 registration + merge into `content` (content
+  wins on clash) — one call to make a doc with SPECIFIC tag names publishable
+  through the whole wall.
+  """
+  def with_named_labels(content \\ %{}, dataset, names) do
+    labels = named_weighted_labels(names)
+    register_tags!(dataset, Enum.map(labels["tags"], & &1["tag"]))
+    Map.merge(labels, content)
+  end
+
+  @doc """
   Register tag names in the E3 tag registry for `dataset` — inserts PUBLISHED
   `type:tag` rows directly (the test-side spelling of "publish a tag doc",
   fast and recursion-free). Defaults to the 12 `fixture-tag-N` names

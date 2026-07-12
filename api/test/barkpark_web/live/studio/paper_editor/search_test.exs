@@ -153,4 +153,45 @@ defmodule BarkparkWeb.Studio.PaperEditor.SearchTest do
       assert results == []
     end
   end
+
+  # ── paper_tag_search handler — weighted corpus (D10/D18 close) ─────────────
+
+  describe "paper_tag_search/2 — weighted-tag corpus" do
+    setup do
+      # A post-wall paper: weighted `{tag, strength, rationale}` entries,
+      # published through the REAL wall (registered tags + compliant
+      # description via LabelFixtures — the one test-side label spelling).
+      content =
+        Barkpark.LabelFixtures.with_named_labels(%{}, @dataset, ["weighted-design", "wtextra"])
+
+      {:ok, _} =
+        Content.create_document(
+          "paper",
+          Map.merge(%{"_id" => "tag-paper-w", "title" => "Weighted Tag Candidate"}, content),
+          @dataset
+        )
+
+      {:ok, _} = Content.publish_document("tag-paper-w", "paper", @dataset)
+      :ok
+    end
+
+    test "autocomplete returns weighted tag NAMES, not JSON blobs" do
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: results}, _socket} = Paper.paper_tag_search("weighted-des", socket)
+
+      assert results == ["weighted-design"]
+      assert Enum.all?(results, &is_binary/1)
+    end
+
+    test "rationale text never false-positives the typeahead" do
+      # Every LabelFixtures rationale contains "exercises" — the OLD reader
+      # unnested raw element text, so this query would have matched the blob.
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: results}, _socket} = Paper.paper_tag_search("exercises", socket)
+
+      assert results == []
+    end
+  end
 end
