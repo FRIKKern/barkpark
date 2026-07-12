@@ -450,6 +450,9 @@ defmodule BarkparkWeb.Contract.MutateTest do
   end
 
   defp create_paper_mutation(id, blocks) do
+    # The publish wall (authoring-excellence) requires a compliant label spine
+    # on every NEW paper publish — these tests target the hollow-body gate,
+    # which fires AFTER the wall, so the fixture must pass the wall first.
     %{
       "mutations" => [
         %{
@@ -457,7 +460,8 @@ defmodule BarkparkWeb.Contract.MutateTest do
             "_id" => id,
             "_type" => "paper",
             "title" => "Hollow-gate paper",
-            "content" => %{"blocks" => blocks}
+            "content" =>
+              Barkpark.LabelFixtures.with_labels(%{"blocks" => blocks})
           }
         }
       ]
@@ -476,6 +480,7 @@ defmodule BarkparkWeb.Contract.MutateTest do
       prior = Application.get_env(:barkpark, :plugins, [])
       Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Bulldocs])
       on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+      Barkpark.LabelFixtures.register_tags!("test")
       :ok
     end
 
