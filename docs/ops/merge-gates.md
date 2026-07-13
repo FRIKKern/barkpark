@@ -91,24 +91,16 @@ Elixir security gates, path-triggered on `api/**`:
 9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
    SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
    `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
-   true`) — Sobelow fingerprints are derived from compiled AST and are NOT
-   stable across Elixir toolchains, so a baseline generated on a dev machine's
-   Elixir does not match CI's 1.18.1/OTP27 and a blocking gate would red the
-   fleet on fingerprint drift rather than real regressions. Findings stay
-   VISIBLE in CI; flip to blocking once the baseline is regenerated **in CI**
-   (matched toolchain) or the 30 real high/medium findings are remediated
-   (task-c9d6d29cc0059d2a). The 98 findings that existed on main at wiring time
-   (21 high / 9 medium / 68 low confidence) are captured in
-   `api/.sobelow-skips` — the **reviewed baseline**. Command:
-   `mix sobelow --skip --exit Low` (`--skip` reads the baseline; `--exit Low`
-   fails on any non-baselined finding at Low confidence or above, so even a
-   low-confidence new `raw()` reds it — proven by planting a
-   `send_resp(conn, 200, params["body"])`). Regenerate the baseline **only**
-   after a reviewed cleanup: `cd api && mix sobelow --mark-skip-all`, then commit
-   the shrunk `.sobelow-skips`. The baselined high-confidence findings are real
-   and tracked for remediation (follow-up task); baselining them here is the
-   standard "gate catches regressions, backlog fixes history" split — NOT an
-   acceptance that they are safe.
+   true`) because Sobelow fingerprints are not stable across Elixir toolchains.
+   `mix sobelow --skip --exit Low` reads the reviewed `api/.sobelow-skips`
+   baseline and reds on a fresh unskipped finding. CI also runs a pinned
+   Elixir 1.18.1/OTP27 reconcile in the only safe order: `--clear-skip`, then
+   `--mark-skip-all`; it uploads the regenerated baseline and diff as an
+   artifact for human review. CI never auto-commits it, and a developer-box
+   regeneration must never be committed. After review, a separate change may
+   update the tracked baseline. The fresh-finding guard plants a non-controller
+   `String.to_atom` call and requires Sobelow to exit 1, preventing blanket
+   suppression while the job remains advisory.
 
 10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
     dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8
