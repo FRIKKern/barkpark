@@ -75,20 +75,24 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
     # Each workspace owns a paper with the SAME slug — the per-workspace slug
     # collision that the workspace-less topic conflated.
     {:ok, paper_a} =
-      Content.upsert_paper(%{
-        slug: @slug,
-        dataset: @dataset,
-        workspace_id: ws_a.id,
-        blocks: blocks("Alpha body")
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @slug,
+          dataset: @dataset,
+          workspace_id: ws_a.id,
+          blocks: blocks("Alpha body")
+        })
+      )
 
     {:ok, paper_b} =
-      Content.upsert_paper(%{
-        slug: @slug,
-        dataset: @dataset,
-        workspace_id: ws_b.id,
-        blocks: blocks("Bravo body")
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @slug,
+          dataset: @dataset,
+          workspace_id: ws_b.id,
+          blocks: blocks("Bravo body")
+        })
+      )
 
     # Distinct rows, distinct tenants — the precondition for the leak.
     assert paper_a.id != paper_b.id
@@ -111,12 +115,14 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
         )
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: @slug,
-          dataset: @dataset,
-          workspace_id: ws_b.id,
-          blocks: blocks("B updated body")
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @slug,
+            dataset: @dataset,
+            workspace_id: ws_b.id,
+            blocks: blocks("B updated body")
+          })
+        )
 
       # A hears NEITHER B's block delta NOR B's paper update.
       refute_receive {:paper_block, _}, 300
@@ -162,12 +168,14 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
       assert frag =~ "A streamed"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: @slug,
-          dataset: @dataset,
-          workspace_id: ws_a.id,
-          blocks: blocks("A new body")
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @slug,
+            dataset: @dataset,
+            workspace_id: ws_a.id,
+            blocks: blocks("A new body")
+          })
+        )
 
       assert_receive {:paper_updated, %{slug: @slug}}, 1_000
     end
@@ -317,7 +325,13 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
       # same. To prove the normalization meeting point, subscribe with the
       # SUBSCRIBER's view: nil normalized to Default, which paper_topic resolves.
       {:ok, paper} =
-        Content.upsert_paper(%{slug: legacy_slug, dataset: @dataset, blocks: blocks("legacy")})
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: legacy_slug,
+            dataset: @dataset,
+            blocks: blocks("legacy")
+          })
+        )
 
       assert paper.workspace_id == default_ws.id
 
@@ -332,11 +346,13 @@ defmodule Barkpark.ContentPubsubWorkspaceLeakTest do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Content.paper_topic(legacy_slug, nil))
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: legacy_slug,
-          dataset: @dataset,
-          blocks: blocks("legacy updated")
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: legacy_slug,
+            dataset: @dataset,
+            blocks: blocks("legacy updated")
+          })
+        )
 
       assert_receive {:paper_updated, %{slug: ^legacy_slug}}, 1_000
     end

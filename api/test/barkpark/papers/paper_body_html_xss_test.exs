@@ -37,7 +37,10 @@ defmodule Barkpark.Papers.PaperBodyHtmlXssTest do
     test "a body_html-only paper is stored with script/handler/scheme stripped" do
       slug = "xss-ingest-#{System.unique_integer([:positive])}"
 
-      {:ok, _paper} = Content.upsert_paper(%{slug: slug, body_html: @payload})
+      {:ok, _paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, body_html: @payload})
+        )
 
       stored = get_in(Content.get_paper(slug).content, ["body_html"])
 

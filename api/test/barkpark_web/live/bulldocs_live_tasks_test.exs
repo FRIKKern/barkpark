@@ -60,21 +60,23 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     slug = "live-plan-#{System.unique_integer([:positive])}"
 
     {:ok, _paper} =
-      Content.upsert_paper(%{
-        slug: slug,
-        # Real ingested papers are article-styled (BulldocsIngestController
-        # defaults style: "article") — the reader renders their blocks with the
-        # CLASSED article emitters. A style-less legacy paper renders the
-        # self-contained inline :email variants instead (works, different DOM).
-        style: "article",
-        blocks: [
-          %{
-            "id" => "t1",
-            "type" => "task-list",
-            "query" => %{"parent_id" => epic, "dataset" => @dataset}
-          }
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          # Real ingested papers are article-styled (BulldocsIngestController
+          # defaults style: "article") — the reader renders their blocks with the
+          # CLASSED article emitters. A style-less legacy paper renders the
+          # self-contained inline :email variants instead (works, different DOM).
+          style: "article",
+          blocks: [
+            %{
+              "id" => "t1",
+              "type" => "task-list",
+              "query" => %{"parent_id" => epic, "dataset" => @dataset}
+            }
+          ]
+        })
+      )
 
     {:ok, view, html} = live(conn, "/papers/#{slug}")
 
@@ -111,21 +113,23 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     slug = "static-plan-#{System.unique_integer([:positive])}"
 
     {:ok, _paper} =
-      Content.upsert_paper(%{
-        slug: slug,
-        # Real ingested papers are article-styled (BulldocsIngestController
-        # defaults style: "article") — the reader renders their blocks with the
-        # CLASSED article emitters. A style-less legacy paper renders the
-        # self-contained inline :email variants instead (works, different DOM).
-        style: "article",
-        blocks: [
-          %{
-            "id" => "t1",
-            "type" => "task-list",
-            "snapshot" => [%{"title" => "hand-written", "status" => "ready"}]
-          }
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          # Real ingested papers are article-styled (BulldocsIngestController
+          # defaults style: "article") — the reader renders their blocks with the
+          # CLASSED article emitters. A style-less legacy paper renders the
+          # self-contained inline :email variants instead (works, different DOM).
+          style: "article",
+          blocks: [
+            %{
+              "id" => "t1",
+              "type" => "task-list",
+              "snapshot" => [%{"title" => "hand-written", "status" => "ready"}]
+            }
+          ]
+        })
+      )
 
     {:ok, _view, html} = live(conn, "/papers/#{slug}")
     assert html =~ "hand-written"

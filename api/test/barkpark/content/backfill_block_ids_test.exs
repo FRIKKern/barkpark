@@ -254,7 +254,10 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
     # STRIP the ids from its stored blocks via a direct Repo write — exactly the
     # legacy id-less corpus the backfill must repair.
     defp seed_legacy_idless_paper(slug, blocks, opts \\ []) do
-      {:ok, _} = Content.upsert_paper(%{slug: slug, blocks: blocks, style: "article"})
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks, style: "article"})
+        )
 
       doc = Content.get_paper(slug)
       stored = doc.content["blocks"]
@@ -362,7 +365,11 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
 
     test "an HTML-only paper (no block list) is skipped, never errors" do
       slug = "backfill-htmlonly-#{System.unique_integer([:positive])}"
-      {:ok, _} = Content.upsert_paper(%{slug: slug, body_html: "<article>hi</article>"})
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, body_html: "<article>hi</article>"})
+        )
 
       {:ok, stats} = BackfillBlockIds.run(dry_run: false)
       refute Enum.any?(stats.changes, &(&1.slug == slug))
@@ -398,19 +405,21 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
     # (exactly how the id-less corpus is seeded) — the corpus the backfill repairs.
     defp seed_string_item_list_paper(slug) do
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          style: "article",
-          blocks: [
-            %{"id" => "h-1", "type" => "heading", "level" => 1, "text" => "Spec"},
-            %{
-              "id" => "l-1",
-              "type" => "list",
-              "ordered" => false,
-              "items" => [[%{"type" => "text", "value" => "placeholder"}]]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            style: "article",
+            blocks: [
+              %{"id" => "h-1", "type" => "heading", "level" => 1, "text" => "Spec"},
+              %{
+                "id" => "l-1",
+                "type" => "list",
+                "ordered" => false,
+                "items" => [[%{"type" => "text", "value" => "placeholder"}]]
+              }
+            ]
+          })
+        )
 
       doc = Content.get_paper(slug)
       [head, list] = doc.content["blocks"]
@@ -527,18 +536,20 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       slug = "choke-paper-stritem-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          style: "article",
-          blocks: [
-            %{
-              "id" => "l-1",
-              "type" => "list",
-              "ordered" => false,
-              "items" => ["alpha", "beta"]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            style: "article",
+            blocks: [
+              %{
+                "id" => "l-1",
+                "type" => "list",
+                "ordered" => false,
+                "items" => ["alpha", "beta"]
+              }
+            ]
+          })
+        )
 
       stored = Content.get_paper(slug).content
       [list] = stored["blocks"]
@@ -583,10 +594,12 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       slug = "opfold-single-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          blocks: [%{"id" => "anchor", "type" => "paragraph", "text" => "anchor"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [%{"id" => "anchor", "type" => "paragraph", "text" => "anchor"}]
+          })
+        )
 
       # append-block whose payload carries NO id (clients normally mint one).
       op = %{
@@ -609,10 +622,12 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       slug = "opfold-batch-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          blocks: [%{"id" => "anchor", "type" => "paragraph", "text" => "anchor"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [%{"id" => "anchor", "type" => "paragraph", "text" => "anchor"}]
+          })
+        )
 
       ops = [
         %{
@@ -706,13 +721,15 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       slug = "backfill-postcond-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          blocks: [
-            %{"type" => "paragraph", "text" => "a"},
-            %{"type" => "paragraph", "text" => "b"}
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [
+              %{"type" => "paragraph", "text" => "a"},
+              %{"type" => "paragraph", "text" => "b"}
+            ]
+          })
+        )
 
       # Strip ids → legacy id-less, then backfill.
       doc = Content.get_paper(slug)

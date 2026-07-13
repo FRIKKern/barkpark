@@ -93,15 +93,17 @@ defmodule Barkpark.Papers.PaperEventsWorkspaceScopeTest do
       proj = create_project!(ws)
 
       assert {:ok, doc} =
-               Content.upsert_paper(%{
-                 "slug" => "scoped-paper",
-                 "dataset" => @dataset,
-                 "body_html" => "<article>hi</article>",
-                 "goal_id" => "bd-scoped",
-                 "event_type" => "plan-written",
-                 "workspace_id" => ws.id,
-                 "project_id" => proj.id
-               })
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{
+                   "slug" => "scoped-paper",
+                   "dataset" => @dataset,
+                   "body_html" => "<article>hi</article>",
+                   "goal_id" => "bd-scoped",
+                   "event_type" => "plan-written",
+                   "workspace_id" => ws.id,
+                   "project_id" => proj.id
+                 })
+               )
 
       # The paper document carries the explicit scope.
       assert doc.workspace_id == ws.id
@@ -122,13 +124,15 @@ defmodule Barkpark.Papers.PaperEventsWorkspaceScopeTest do
       {default_ws, _default_proj} = ensure_default_scope!()
 
       assert {:ok, doc} =
-               Content.upsert_paper(%{
-                 "slug" => "default-paper",
-                 "dataset" => @dataset,
-                 "body_html" => "<article>hi</article>",
-                 "goal_id" => "bd-default",
-                 "event_type" => "plan-written"
-               })
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{
+                   "slug" => "default-paper",
+                   "dataset" => @dataset,
+                   "body_html" => "<article>hi</article>",
+                   "goal_id" => "bd-default",
+                   "event_type" => "plan-written"
+                 })
+               )
 
       assert doc.workspace_id == default_ws.id
 

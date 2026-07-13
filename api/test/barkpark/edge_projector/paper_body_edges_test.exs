@@ -127,11 +127,13 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
   # is byte-for-byte the pre-existing-corpus state §7.6's backfill exists for.
   defp seed_paper_with_stored_nodes!(slug, inline_nodes) do
     {:ok, _} =
-      Content.upsert_paper(%{
-        slug: slug,
-        dataset: @dataset,
-        blocks: [%{"id" => "b-intro", "type" => "paragraph", "text" => "intro"}]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          blocks: [%{"id" => "b-intro", "type" => "paragraph", "text" => "intro"}]
+        })
+      )
 
     doc = Content.get_paper(slug, @dataset)
 
@@ -245,11 +247,13 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       slug = "wire-upsert-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: @dataset,
-          blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: @dataset,
+            blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
+          })
+        )
 
       assert_enqueued(
         worker: ProjectorWorker,
@@ -268,11 +272,13 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       # workaround. This doubles as the regression guard for the mixed-type
       # dedup drop #714 surfaced.
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: @dataset,
-          blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: @dataset,
+            blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
+          })
+        )
 
       op = %{
         "op" => "append-block",
@@ -295,11 +301,13 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       slug = "wire-batch-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: @dataset,
-          blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: @dataset,
+            blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
+          })
+        )
 
       ops = [
         %{
@@ -331,11 +339,13 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       # unique key, Oban returned the existing ["task"] job and the paper
       # rebuild was silently dropped, so the edge below never materialised.
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: @dataset,
-          blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: @dataset,
+            blocks: [%{"id" => "b1", "type" => "paragraph", "text" => "hello"}]
+          })
+        )
 
       op = %{
         "op" => "append-block",

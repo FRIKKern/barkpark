@@ -555,19 +555,21 @@ defmodule Barkpark.Content.EncryptionTest do
       paper_schema!(dataset)
 
       {:ok, doc} =
-        Content.upsert_paper(%{
-          "slug" => "vault-paper",
-          "dataset" => dataset,
-          "blocks" => [
-            %{
-              "id" => "b1",
-              "type" => "field-string",
-              "fieldName" => "secret",
-              "value" => "hunter2"
-            },
-            %{"id" => "b2", "type" => "paragraph", "value" => "free body"}
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "vault-paper",
+            "dataset" => dataset,
+            "blocks" => [
+              %{
+                "id" => "b1",
+                "type" => "field-string",
+                "fieldName" => "secret",
+                "value" => "hunter2"
+              },
+              %{"id" => "b2", "type" => "paragraph", "value" => "free body"}
+            ]
+          })
+        )
 
       raw = raw_content(doc)
 
@@ -593,18 +595,20 @@ defmodule Barkpark.Content.EncryptionTest do
       paper_schema!(dataset)
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          "slug" => "stream-vault",
-          "dataset" => dataset,
-          "blocks" => [
-            %{
-              "id" => "b1",
-              "type" => "field-string",
-              "fieldName" => "secret",
-              "value" => "first"
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "stream-vault",
+            "dataset" => dataset,
+            "blocks" => [
+              %{
+                "id" => "b1",
+                "type" => "field-string",
+                "fieldName" => "secret",
+                "value" => "first"
+              }
+            ]
+          })
+        )
 
       # Edit the bound field through the streaming op path — a fresh PLAINTEXT
       # value arrives and MUST be encrypted before it lands. (Also exercises the
@@ -641,18 +645,20 @@ defmodule Barkpark.Content.EncryptionTest do
       _ = schema
 
       {:ok, doc} =
-        Content.upsert_paper(%{
-          "slug" => "plain-paper",
-          "dataset" => dataset,
-          "blocks" => [
-            %{
-              "id" => "b1",
-              "type" => "field-string",
-              "fieldName" => "secret",
-              "value" => "visible"
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "plain-paper",
+            "dataset" => dataset,
+            "blocks" => [
+              %{
+                "id" => "b1",
+                "type" => "field-string",
+                "fieldName" => "secret",
+                "value" => "visible"
+              }
+            ]
+          })
+        )
 
       raw = raw_content(doc)
       # No marked field → stored verbatim (additive / no-behaviour-change).

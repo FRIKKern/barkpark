@@ -79,7 +79,11 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       %{"id" => "d-end", "type" => "divider"}
     ]
 
-    {:ok, paper} = Content.upsert_paper(%{slug: @slug, dataset: @dataset, blocks: blocks})
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: @slug, dataset: @dataset, blocks: blocks})
+      )
+
     paper
   end
 
@@ -283,11 +287,13 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       legacy_slug = "2026-06-23-legacy-html-paper"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: legacy_slug,
-          dataset: @dataset,
-          body_html: "<p>Legacy body, nothing to edit.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: legacy_slug,
+            dataset: @dataset,
+            body_html: "<p>Legacy body, nothing to edit.</p>"
+          })
+        )
 
       {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{legacy_slug}"))
 
@@ -865,7 +871,14 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
         }
       ]
 
-      {:ok, _} = Content.upsert_paper(%{slug: split_slug, dataset: @dataset, blocks: blocks})
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: split_slug,
+            dataset: @dataset,
+            blocks: blocks
+          })
+        )
 
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{split_slug}"))
@@ -916,7 +929,14 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
         }
       ]
 
-      {:ok, _} = Content.upsert_paper(%{slug: fleet_slug, dataset: @dataset, blocks: blocks})
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: fleet_slug,
+            dataset: @dataset,
+            blocks: blocks
+          })
+        )
 
       {:ok, view, _html} =
         live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{fleet_slug}"))
@@ -1000,7 +1020,13 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       ]
 
       {:ok, _} =
-        Content.upsert_paper(%{slug: other_slug, dataset: @dataset, blocks: other_blocks})
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: other_slug,
+            dataset: @dataset,
+            blocks: other_blocks
+          })
+        )
 
       {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
       assert html =~ ~s(id="paper-canvas-#{@run0_id}")

@@ -27,7 +27,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
   defp seed_paper(html) do
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @slug, body_html: html, event_type: "plan-written"})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @slug,
+          body_html: html,
+          event_type: "plan-written"
+        })
+      )
 
     paper
   end
@@ -62,12 +68,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # the real Content/PubSub spine: upsert_paper persists + broadcasts on
       # the per-doc topic the LiveView subscribed to at mount.
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: @slug,
-          body_html:
-            ~s(<section id="block-1"><h1>First</h1></section>) <>
-              ~s(<section id="block-2"><p>Second block streamed in</p></section>)
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @slug,
+            body_html:
+              ~s(<section id="block-1"><h1>First</h1></section>) <>
+                ~s(<section id="block-2"><p>Second block streamed in</p></section>)
+          })
+        )
 
       # Pull the post-update DOM. render/1 reflects assigns after handle_info.
       updated = render(view)
@@ -104,24 +112,29 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     test "renders a 'Linked mentions' section listing a paper that references here",
          %{conn: conn} do
       # Target paper (the one being read) — plain HTML body is fine.
-      {:ok, _t} = Content.upsert_paper(%{slug: @bl_target, body_html: "<h1>Target</h1>"})
+      {:ok, _t} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: @bl_target, body_html: "<h1>Target</h1>"})
+        )
 
       # Source paper. A heading block gives it a real title (the engine hydrates
       # the referencer title from the source's documents row).
       {:ok, _s} =
-        Content.upsert_paper(%{
-          slug: @bl_source,
-          blocks: [
-            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Source Paper"},
-            # A body block: heading-only papers are hollow and refused by the
-            # p-quality-gate hollow gate; this test is about edges, not the gate.
-            %{
-              "id" => "p",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @bl_source,
+            blocks: [
+              %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Source Paper"},
+              # A body block: heading-only papers are hollow and refused by the
+              # p-quality-gate hollow gate; this test is about edges, not the gate.
+              %{
+                "id" => "p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       # Materialise the inbound edge in `content_edges` the way the EdgeProjector
       # would on publish — the reader reads the INDEXED engine
@@ -140,7 +153,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     end
 
     test "omits the section entirely when nothing references the paper", %{conn: conn} do
-      {:ok, _t} = Content.upsert_paper(%{slug: @bl_target, body_html: "<h1>Lonely</h1>"})
+      {:ok, _t} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: @bl_target, body_html: "<h1>Lonely</h1>"})
+        )
 
       {:ok, _view, html} = live(conn, "/papers/#{@bl_target}")
 
@@ -156,7 +172,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
     test "renders a 'Driven tasks' section with the citing task's criteria state",
          %{conn: conn} do
-      {:ok, _p} = Content.upsert_paper(%{slug: @dt_paper, body_html: "<h1>Strategy</h1>"})
+      {:ok, _p} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: @dt_paper, body_html: "<h1>Strategy</h1>"})
+        )
 
       # A REAL published task doc citing the paper via design_doc. The section
       # hydrates the task through Content.get_document, so the doc must exist
@@ -236,25 +255,32 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # draft-only referencing paper would have no materialised edge, and its
       # absence is correct v1 behaviour, not a bug.
       {:ok, _} =
-        Content.upsert_paper(%{slug: @ub_canonical, body_html: "<h1>Canonical Value</h1>"})
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @ub_canonical,
+            body_html: "<h1>Canonical Value</h1>"
+          })
+        )
 
       # In-scope referencer: a published paper whose body valueref-references
       # the canonical doc (the #714 body-walk extractor materialises exactly
       # this row on publish — kind "valueref", plugin_source "bulldocs").
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: @ub_user,
-          blocks: [
-            %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Dependent Paper"},
-            # A body block: heading-only papers are hollow and refused by the
-            # p-quality-gate hollow gate; this test is about edges, not the gate.
-            %{
-              "id" => "p",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @ub_user,
+            blocks: [
+              %{"id" => "h", "type" => "heading", "level" => 1, "text" => "Dependent Paper"},
+              # A body block: heading-only papers are hollow and refused by the
+              # p-quality-gate hollow gate; this test is about edges, not the gate.
+              %{
+                "id" => "p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       # Out-of-scope referencer: an owner_scoped published doc owned by a user.
       # The public reader threads NO caller_context, so the graph's hydration
@@ -337,7 +363,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       ]
 
       {:ok, paper} =
-        Content.upsert_paper(%{slug: @block_slug, blocks: blocks, event_type: "plan-written"})
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @block_slug,
+            blocks: blocks,
+            event_type: "plan-written"
+          })
+        )
 
       paper
     end
@@ -481,14 +513,24 @@ defmodule BarkparkWeb.BulldocsLiveTest do
          %{conn: conn} do
       # An HTML-only paper (no blocks) keeps the Wave-3 re-assign path.
       slug = "wave4-html-fallback"
-      {:ok, _} = Content.upsert_paper(%{slug: slug, body_html: "<p id=\"v1\">v1</p>"})
+
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, body_html: "<p id=\"v1\">v1</p>"})
+        )
 
       {:ok, view, html} = live(conn, "/papers/#{slug}")
       assert html =~ ~s(id="v1")
       refute html =~ ~s(id="v2")
       pid_before = view.pid
 
-      {:ok, _} = Content.upsert_paper(%{slug: slug, body_html: "<p id=\"v2\">v2 re-assigned</p>"})
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            body_html: "<p id=\"v2\">v2 re-assigned</p>"
+          })
+        )
 
       rendered = render(view)
       assert rendered =~ ~s(id="v2")
@@ -509,19 +551,21 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     # the rail has a 3-commit lineage.
     defp seed_rail_paper do
       {:ok, paper} =
-        Content.upsert_paper(%{
-          "slug" => @rail_slug,
-          "style" => "article",
-          "goal_id" => @rail_goal,
-          "event_type" => "goal-opened",
-          "blocks" => [
-            %{
-              "id" => "r-intro",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Rail demo body."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @rail_slug,
+            "style" => "article",
+            "goal_id" => @rail_goal,
+            "event_type" => "goal-opened",
+            "blocks" => [
+              %{
+                "id" => "r-intro",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Rail demo body."}]
+              }
+            ]
+          })
+        )
 
       # W1.5-C: the rail now scopes events to the paper's OWN workspace, so the
       # follow-up events must carry the paper's resolved scope (upsert_paper
@@ -600,11 +644,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       slug = "2026-05-25-no-goal-paper"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          "slug" => slug,
-          "style" => "article",
-          "body_html" => "<p id=\"no-goal-body\">No goal here.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => slug,
+            "style" => "article",
+            "body_html" => "<p id=\"no-goal-body\">No goal here.</p>"
+          })
+        )
 
       {:ok, _view, html} = live(conn, "/papers/#{slug}")
 
@@ -625,11 +671,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     # one line — so the diff has a stable context line, one removed, one added.
     defp seed_diff_paper do
       {:ok, paper} =
-        Content.upsert_paper(%{
-          "slug" => @diff_slug,
-          "style" => "article",
-          "body_html" => "<p id=\"diff-body\">Diff demo body.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @diff_slug,
+            "style" => "article",
+            "body_html" => "<p id=\"diff-body\">Diff demo body.</p>"
+          })
+        )
 
       {:ok, a} =
         Events.create_event(%{
@@ -721,13 +769,15 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     # a click can be attributed to the goal.
     defp seed_action_paper do
       {:ok, paper} =
-        Content.upsert_paper(%{
-          "slug" => @action_slug,
-          "style" => "article",
-          "goal_id" => @action_goal,
-          "source_doc" => "/plans/2026-05-25-convergence-plan.html",
-          "body_html" => "<p id=\"action-body\">Action demo body.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @action_slug,
+            "style" => "article",
+            "goal_id" => @action_goal,
+            "source_doc" => "/plans/2026-05-25-convergence-plan.html",
+            "body_html" => "<p id=\"action-body\">Action demo body.</p>"
+          })
+        )
 
       paper
     end
@@ -782,11 +832,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       slug = "2026-05-25-no-source-doc-paper"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          "slug" => slug,
-          "style" => "article",
-          "body_html" => "<p id=\"no-source-body\">No source doc here.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => slug,
+            "style" => "article",
+            "body_html" => "<p id=\"no-source-body\">No source doc here.</p>"
+          })
+        )
 
       {:ok, _view, html} = live(conn, "/papers/#{slug}")
 
@@ -805,12 +857,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     # here (no U5 action bar) to prove Simplify is its own control.
     defp seed_simplify_paper do
       {:ok, paper} =
-        Content.upsert_paper(%{
-          "slug" => @simplify_slug,
-          "style" => "article",
-          "goal_id" => @simplify_goal,
-          "body_html" => "<p id=\"simplify-body\">Simplify demo body.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @simplify_slug,
+            "style" => "article",
+            "goal_id" => @simplify_goal,
+            "body_html" => "<p id=\"simplify-body\">Simplify demo body.</p>"
+          })
+        )
 
       paper
     end
@@ -922,11 +976,13 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       slug = "2026-05-25-no-goal-simplify-paper"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          "slug" => slug,
-          "style" => "article",
-          "body_html" => "<p id=\"no-goal-simplify-body\">No goal, no simplify.</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => slug,
+            "style" => "article",
+            "body_html" => "<p id=\"no-goal-simplify-body\">No goal, no simplify.</p>"
+          })
+        )
 
       {:ok, _view, html} = live(conn, "/papers/#{slug}")
 
@@ -991,13 +1047,15 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # A titled article paper — `derive_title/2` sets the row title from the
       # `role: "title"` block's text (pdd-t4 doctrine).
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: "titled-share-paper",
-          blocks: [
-            %{"type" => "heading", "role" => "title", "text" => "A Branded Title"},
-            %{"type" => "paragraph", "text" => "Body."}
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "titled-share-paper",
+            blocks: [
+              %{"type" => "heading", "role" => "title", "text" => "A Branded Title"},
+              %{"type" => "paragraph", "text" => "Body."}
+            ]
+          })
+        )
 
       conn = get(conn, "/papers/titled-share-paper")
       html = html_response(conn, 200)

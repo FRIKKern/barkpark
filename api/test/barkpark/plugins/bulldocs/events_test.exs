@@ -163,13 +163,15 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
       slug = "wired-paper"
 
       assert {:ok, _doc} =
-               Content.upsert_paper(%{
-                 "slug" => slug,
-                 "body_html" => "<p>hello</p>",
-                 "goal_id" => "bd-wire",
-                 "event_type" => "plan-written",
-                 "source_doc" => "plans/my-plan.html"
-               })
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{
+                   "slug" => slug,
+                   "body_html" => "<p>hello</p>",
+                   "goal_id" => "bd-wire",
+                   "event_type" => "plan-written",
+                   "source_doc" => "plans/my-plan.html"
+                 })
+               )
 
       events = Events.list_for_paper(slug)
       assert length(events) == 1
@@ -186,10 +188,12 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
       slug = "quiet-paper"
 
       assert {:ok, _doc} =
-               Content.upsert_paper(%{
-                 "slug" => slug,
-                 "body_html" => "<p>no event here</p>"
-               })
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{
+                   "slug" => slug,
+                   "body_html" => "<p>no event here</p>"
+                 })
+               )
 
       assert Events.list_for_paper(slug) == []
     end
@@ -198,11 +202,13 @@ defmodule Barkpark.Plugins.Bulldocs.EventsTest do
       slug = "empty-type-paper"
 
       assert {:ok, _doc} =
-               Content.upsert_paper(%{
-                 "slug" => slug,
-                 "body_html" => "<p>blank</p>",
-                 "event_type" => ""
-               })
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{
+                   "slug" => slug,
+                   "body_html" => "<p>blank</p>",
+                   "event_type" => ""
+                 })
+               )
 
       assert Events.list_for_paper(slug) == []
     end

@@ -52,11 +52,13 @@ defmodule Barkpark.Tasks.ExpectationsTest do
 
   defp mk_paper!(slug) do
     {:ok, _} =
-      Content.upsert_paper(%{
-        slug: slug,
-        dataset: @dataset,
-        blocks: [%{"id" => "b-intro", "type" => "paragraph", "text" => "the strategy"}]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          dataset: @dataset,
+          blocks: [%{"id" => "b-intro", "type" => "paragraph", "text" => "the strategy"}]
+        })
+      )
 
     Content.get_paper(slug, @dataset)
   end

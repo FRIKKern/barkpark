@@ -150,7 +150,9 @@ defmodule Barkpark.Content.Papers.HollowTest do
       # blocks: [] seeds the template (locked title + empty tpl-body) — the
       # canonical hollow stub a machine writer would POST.
       assert {:error, {:halted, msg}} =
-               Content.upsert_paper(%{slug: slug, blocks: [], title: "Stub"})
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: [], title: "Stub"})
+               )
 
       assert msg == Hollow.message()
       assert Content.get_paper(slug, @dataset) == nil
@@ -160,7 +162,9 @@ defmodule Barkpark.Content.Papers.HollowTest do
       slug = fresh_slug("hollow-explicit")
 
       assert {:error, {:halted, msg}} =
-               Content.upsert_paper(%{slug: slug, blocks: [locked_title()]})
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: [locked_title()]})
+               )
 
       assert msg == Hollow.message()
     end
@@ -169,10 +173,12 @@ defmodule Barkpark.Content.Papers.HollowTest do
       slug = fresh_slug("real-upsert")
 
       assert {:ok, doc} =
-               Content.upsert_paper(%{
-                 slug: slug,
-                 blocks: [locked_title("Real paper"), para("A real body block.")]
-               })
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{
+                   slug: slug,
+                   blocks: [locked_title("Real paper"), para("A real body block.")]
+                 })
+               )
 
       assert doc.title == "Real paper"
       assert doc.status == "published"
@@ -181,7 +187,11 @@ defmodule Barkpark.Content.Papers.HollowTest do
     test "HTML-only (pre-doctrine) writes stay exempt" do
       slug = fresh_slug("html-only")
 
-      assert {:ok, doc} = Content.upsert_paper(%{slug: slug, body_html: "<p>legacy</p>"})
+      assert {:ok, doc} =
+               Content.upsert_paper(
+                 Barkpark.LabelFixtures.paper_attrs(%{slug: slug, body_html: "<p>legacy</p>"})
+               )
+
       refute Map.has_key?(doc.content, "blocks")
     end
   end
@@ -193,10 +203,12 @@ defmodule Barkpark.Content.Papers.HollowTest do
     slug = fresh_slug("ratchet")
 
     {:ok, doc} =
-      Content.upsert_paper(%{
-        slug: slug,
-        blocks: [locked_title("Ratchet paper"), para("The only content block.")]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          blocks: [locked_title("Ratchet paper"), para("The only content block.")]
+        })
+      )
 
     {slug, doc}
   end

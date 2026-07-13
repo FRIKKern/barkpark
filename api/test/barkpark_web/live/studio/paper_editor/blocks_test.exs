@@ -165,7 +165,9 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     ]
 
     {:ok, _paper} =
-      Barkpark.Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      Barkpark.Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: @dataset, blocks: blocks})
+      )
 
     slug
   end

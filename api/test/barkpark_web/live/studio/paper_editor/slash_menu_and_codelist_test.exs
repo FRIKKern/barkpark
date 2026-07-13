@@ -157,7 +157,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @codelist_view_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @codelist_view_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
 
     paper
   end
@@ -177,7 +183,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @codelist_tree_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @codelist_tree_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
 
     paper
   end

@@ -26,13 +26,15 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     # Create a real paper (doc_id == slug, NOT a `drafts.` row) in this scope,
     # carrying a known body_html so we can assert it renders.
     {:ok, _paper} =
-      Content.upsert_paper(%{
-        "slug" => "shared-paper",
-        "dataset" => @dataset,
-        "body_html" => "<h1>Hello Shared Paper</h1><p>scoped body</p>",
-        "workspace_id" => ws.id,
-        "project_id" => project.id
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "shared-paper",
+          "dataset" => @dataset,
+          "body_html" => "<h1>Hello Shared Paper</h1><p>scoped body</p>",
+          "workspace_id" => ws.id,
+          "project_id" => project.id
+        })
+      )
 
     # The conn is anonymous (no Bearer / no session token) — so the only way it
     # can read this scope is via a public share.
@@ -154,19 +156,24 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       # A second paper in the SAME scope. A heading block gives it a real title
       # (the engine hydrates the referencer title from its documents row).
       {:ok, _src} =
-        Content.upsert_paper(%{
-          "slug" => "linking-paper",
-          "dataset" => @dataset,
-          "workspace_id" => ws.id,
-          "project_id" => project.id,
-          "blocks" => [
-            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"},
-            # A body block: heading-only papers are hollow and refused by the
-            # p-quality-gate hollow gate; this test is about backlink tenancy.
-            %{"id" => "p1", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]}
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "linking-paper",
+            "dataset" => @dataset,
+            "workspace_id" => ws.id,
+            "project_id" => project.id,
+            "blocks" => [
+              %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "The Linking Paper"},
+              # A body block: heading-only papers are hollow and refused by the
+              # p-quality-gate hollow gate; this test is about backlink tenancy.
+              %{
+                "id" => "p1",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       # Materialise the inbound edge in `content_edges` (what the EdgeProjector
       # writes on publish). The reader reads the INDEXED engine
@@ -216,19 +223,24 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       foreign_project = create_project!(foreign_ws, "foreign-proj")
 
       {:ok, _foreign} =
-        Content.upsert_paper(%{
-          "slug" => "foreign-linker",
-          "dataset" => @dataset,
-          "workspace_id" => foreign_ws.id,
-          "project_id" => foreign_project.id,
-          "blocks" => [
-            %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Foreign Linker"},
-            # A body block: heading-only papers are hollow and refused by the
-            # p-quality-gate hollow gate; this test is about backlink tenancy.
-            %{"id" => "p1", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]}
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "foreign-linker",
+            "dataset" => @dataset,
+            "workspace_id" => foreign_ws.id,
+            "project_id" => foreign_project.id,
+            "blocks" => [
+              %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Foreign Linker"},
+              # A body block: heading-only papers are hollow and refused by the
+              # p-quality-gate hollow gate; this test is about backlink tenancy.
+              %{
+                "id" => "p1",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       # Resolve both endpoints unscoped (dataset only) so the cross-workspace
       # edge row is actually written.
@@ -263,13 +275,15 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       {default_ws, default_project} = ensure_default_scope!()
 
       {:ok, _paper} =
-        Content.upsert_paper(%{
-          "slug" => "default-public-paper",
-          "dataset" => @dataset,
-          "body_html" => "<h1>Default Public Paper</h1><p>default body</p>",
-          "workspace_id" => default_ws.id,
-          "project_id" => default_project.id
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => "default-public-paper",
+            "dataset" => @dataset,
+            "body_html" => "<h1>Default Public Paper</h1><p>default body</p>",
+            "workspace_id" => default_ws.id,
+            "project_id" => default_project.id
+          })
+        )
 
       {:ok, conn: conn, default_ws: default_ws, default_project: default_project}
     end

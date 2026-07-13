@@ -51,20 +51,24 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
       # Two papers under the SAME slug — one public (Default), one private
       # (other workspace). The per-workspace uniqueness flip lets them coexist.
       {:ok, public_paper} =
-        Content.upsert_paper(%{
-          "slug" => @slug,
-          "body_html" => "<article id=\"public\">PUBLIC default-workspace paper</article>",
-          "workspace_id" => default_ws.id,
-          "project_id" => default_proj.id
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @slug,
+            "body_html" => "<article id=\"public\">PUBLIC default-workspace paper</article>",
+            "workspace_id" => default_ws.id,
+            "project_id" => default_proj.id
+          })
+        )
 
       {:ok, private_paper} =
-        Content.upsert_paper(%{
-          "slug" => @slug,
-          "body_html" => "<article id=\"private\">PRIVATE other-workspace paper</article>",
-          "workspace_id" => other_ws.id,
-          "project_id" => other_proj.id
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => @slug,
+            "body_html" => "<article id=\"private\">PRIVATE other-workspace paper</article>",
+            "workspace_id" => other_ws.id,
+            "project_id" => other_proj.id
+          })
+        )
 
       %{
         default_ws: default_ws,
@@ -99,12 +103,14 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
       private_only_slug = "2026-05-25-private-only"
 
       {:ok, _private_only} =
-        Content.upsert_paper(%{
-          "slug" => private_only_slug,
-          "body_html" => "<article>private only</article>",
-          "workspace_id" => ctx.other_ws.id,
-          "project_id" => ctx.other_proj.id
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => private_only_slug,
+            "body_html" => "<article>private only</article>",
+            "workspace_id" => ctx.other_ws.id,
+            "project_id" => ctx.other_proj.id
+          })
+        )
 
       # The private paper IS stored (proves the slug exists) — read it with its
       # OWN workspace+project scope (dataset resolution is project-scoped)...
@@ -126,12 +132,14 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
       lone_proj = create_project!(lone_ws)
 
       {:ok, _paper} =
-        Content.upsert_paper(%{
-          "slug" => fail_slug,
-          "body_html" => "<article>lone</article>",
-          "workspace_id" => lone_ws.id,
-          "project_id" => lone_proj.id
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => fail_slug,
+            "body_html" => "<article>lone</article>",
+            "workspace_id" => lone_ws.id,
+            "project_id" => lone_proj.id
+          })
+        )
 
       # Simulate "no seeded Default tenant" without an FK-entangled teardown:
       # rename the Default workspace's slug so the slug-keyed

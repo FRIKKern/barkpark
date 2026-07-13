@@ -247,11 +247,13 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       pub_id = Content.published_id(sheet.doc_id)
 
       {:ok, paper} =
-        Content.upsert_paper(%{
-          slug: "wt-cache-paper",
-          dataset: @dataset,
-          blocks: [sheet_block(pub_id)]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "wt-cache-paper",
+            dataset: @dataset,
+            blocks: [sheet_block(pub_id)]
+          })
+        )
 
       # Draft edit alone must NOT reach the published paper's cache.
       {:ok, _} =
@@ -429,11 +431,13 @@ defmodule Barkpark.ContentSheetsWritethroughTest do
       pub_id = Content.published_id(sheet.doc_id)
 
       {:ok, paper} =
-        Content.upsert_paper(%{
-          slug: "hy-paper-2",
-          dataset: @dataset,
-          blocks: [sheet_block(pub_id)]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: "hy-paper-2",
+            dataset: @dataset,
+            blocks: [sheet_block(pub_id)]
+          })
+        )
 
       [block] = get_in(paper.content, ["blocks"])
       assert block["snapshot"]["rows"] == [["ingest-value"]]

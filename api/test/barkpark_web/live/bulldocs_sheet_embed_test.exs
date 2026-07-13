@@ -47,10 +47,12 @@ defmodule BarkparkWeb.BulldocsSheetEmbedTest do
     # ingest hydrates the block's snapshot immediately (M0a) — the reader's
     # first render shows the grid values, no post-embed sheet save needed.
     {:ok, _paper} =
-      Content.upsert_paper(%{
-        slug: @slug,
-        blocks: [%{"id" => "s1", "type" => "sheet", "ref" => pub_id, "tab" => 0}]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @slug,
+          blocks: [%{"id" => "s1", "type" => "sheet", "ref" => pub_id, "tab" => 0}]
+        })
+      )
 
     {:ok, _view, html} = live(conn, "/papers/#{@slug}")
     assert html =~ "<table"

@@ -311,7 +311,11 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
   # Seed a paper through the canonical write path, then strip it back to a LEGACY
   # (pre-doctrine) shape via a direct Repo write — the corpus the backfill repairs.
   defp seed_legacy_paper(slug, blocks) do
-    {:ok, _} = Content.upsert_paper(%{slug: slug, style: "article", blocks: blocks})
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, style: "article", blocks: blocks})
+      )
+
     slug
   end
 
@@ -439,18 +443,20 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       # Seed an ALREADY-conforming paper (title@0 + body). upsert_paper preserves
       # the locked title (single role:title @0) and validates clean.
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          style: "article",
-          blocks: [
-            title_block,
-            %{
-              "id" => "body",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "b"}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            style: "article",
+            blocks: [
+              title_block,
+              %{
+                "id" => "body",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "b"}]
+              }
+            ]
+          })
+        )
 
       before = Content.get_paper(slug).content
       before_bytes = Jason.encode!(before)
@@ -496,13 +502,15 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       slug = "doctrine-tenant-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          style: "article",
-          workspace_id: ws.id,
-          project_id: project.id,
-          blocks: [%{"id" => "p1", "type" => "paragraph", "text" => "tenant body"}]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            style: "article",
+            workspace_id: ws.id,
+            project_id: project.id,
+            blocks: [%{"id" => "p1", "type" => "paragraph", "text" => "tenant body"}]
+          })
+        )
 
       {:ok, _} = DoctrineBackfill.run(dry_run: false)
 

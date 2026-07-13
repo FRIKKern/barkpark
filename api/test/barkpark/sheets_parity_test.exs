@@ -173,13 +173,15 @@ defmodule Barkpark.SheetsParityTest do
 
     # The paper embeds BOTH tabs — ingest hydrates each block's snapshot (M0a).
     {:ok, _} =
-      Content.upsert_paper(%{
-        slug: @paper_slug,
-        blocks: [
-          %{"id" => "s0", "type" => "sheet", "ref" => @slug, "tab" => 0},
-          %{"id" => "s1", "type" => "sheet", "ref" => @slug, "tab" => 1}
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @paper_slug,
+          blocks: [
+            %{"id" => "s0", "type" => "sheet", "ref" => @slug, "tab" => 0},
+            %{"id" => "s1", "type" => "sheet", "ref" => @slug, "tab" => 1}
+          ]
+        })
+      )
 
     :ok
   end

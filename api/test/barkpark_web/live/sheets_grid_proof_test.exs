@@ -459,11 +459,13 @@ defmodule BarkparkWeb.SheetsGridProofTest do
 
     # ── M0a: a paper created fresh AFTER the sheet embeds the final total ─
     {:ok, _paper} =
-      Content.upsert_paper(%{
-        slug: @paper_slug,
-        title: "Q3 budget readout",
-        blocks: [%{"id" => "grid", "type" => "sheet", "ref" => @slug, "tab" => 0}]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @paper_slug,
+          title: "Q3 budget readout",
+          blocks: [%{"id" => "grid", "type" => "sheet", "ref" => @slug, "tab" => 0}]
+        })
+      )
 
     {:ok, _view, paper_html} = live(Phoenix.ConnTest.build_conn(), "/papers/#{@paper_slug}")
     assert paper_html =~ "<table"

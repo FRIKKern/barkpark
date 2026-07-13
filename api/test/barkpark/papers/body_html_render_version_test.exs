@@ -23,7 +23,15 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
   end
 
   defp create_paper(slug, blocks) do
-    {:ok, doc} = Content.upsert_paper(%{"slug" => slug, "blocks" => blocks, "dataset" => @dataset})
+    {:ok, doc} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "blocks" => blocks,
+          "dataset" => @dataset
+        })
+      )
+
     doc
   end
 
@@ -73,7 +81,8 @@ defmodule Barkpark.Papers.BodyHtmlRenderVersionTest do
     test "a second run rewrites nothing (idempotent)" do
       doc = create_paper("rh-2", [para("p1", "text")])
 
-      stale_content = doc.content |> Map.put("body_html", "<p>STALE</p>") |> Map.delete("body_html_sv")
+      stale_content =
+        doc.content |> Map.put("body_html", "<p>STALE</p>") |> Map.delete("body_html_sv")
 
       {:ok, _} =
         doc
