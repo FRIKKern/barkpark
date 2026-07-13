@@ -90,7 +90,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
       <% banner = health_banner(@health) %>
 
       <div :if={banner == :db_down} data-role="github-health-db-down"
-           style="border:1px solid var(--danger, #d13); background:hsl(0 70% 50% / 0.10); border-radius:8px; padding:0.8rem 1rem; margin:1rem 0;">
+           style="border:1px solid var(--danger); background:hsl(var(--danger-hsl) / 0.10); border-radius:8px; padding:0.8rem 1rem; margin:1rem 0;">
         <strong>Cannot reach the database — readings are blind, not necessarily zero.</strong>
         <span style="opacity:0.85;">
           A trivial <code>SELECT 1</code> liveness probe failed, so every count below
