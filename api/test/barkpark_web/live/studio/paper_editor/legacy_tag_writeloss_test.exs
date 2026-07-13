@@ -65,8 +65,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
       }
     ]
 
+    # bypass_wall (charter D26 audit): an editor-mechanics fixture, not a wall
+    # test. The publish wall (integrated from ae-upsert-paper-wall) would 422 a
+    # tagless paper birth; bypassing keeps the seeded blocks PRISTINE so the
+    # render/round-trip assertions below see exactly the legacy shape under test.
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @tags_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(%{slug: @tags_slug, dataset: @dataset, blocks: blocks},
+        bypass_wall: true
+      )
 
     paper
   end
@@ -148,8 +154,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
       }
     ]
 
+    # bypass_wall (charter D26 audit): editor-mechanics fixture — see the tags
+    # seed above for the rationale.
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @nontag_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(%{slug: @nontag_slug, dataset: @dataset, blocks: blocks},
+        bypass_wall: true
+      )
 
     paper
   end
@@ -202,8 +212,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.LegacyTagWritelossTest do
       }
     ]
 
+    # bypass_wall (charter D26 audit): editor-mechanics fixture — see the tags
+    # seed above for the rationale.
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @scalar_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(%{slug: @scalar_slug, dataset: @dataset, blocks: blocks},
+        bypass_wall: true
+      )
 
     paper
   end
