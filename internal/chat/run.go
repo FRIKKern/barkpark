@@ -58,8 +58,9 @@ func (s *streamer) start(sessionID string, lastSeq int) {
 	p, tr := s.program, s.tr
 	go func() {
 		err := tr.Events(ctx, sessionID, lastSeq, func(event string, data []byte) {
-			// Copy the frame payload: readSSE reuses its scanner buffer, so the
-			// []byte handed here must not escape into another goroutine unowned.
+			// Copy the frame payload before it crosses into the update loop: the
+			// adapter hands a fresh []byte per frame, but a defensive copy keeps
+			// this seam safe regardless of the underlying parser's buffer reuse.
 			cp := append([]byte(nil), data...)
 			p.Send(streamFrameMsg{name: event, data: cp})
 		})

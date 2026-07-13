@@ -172,6 +172,84 @@ func TestGetChatSessionPassesBlocksRaw(t *testing.T) {
 	}
 }
 
+// PROTECTIVE (charter D26 / the dedup 3-way merge): the full GET must decode the
+// live server projection's FLAT usage metrics, denormalised counters,
+// rail_snapshot, and message metadata/inserted_at — the exact fields the fork
+// was blind to. A revert to the old apiclient shape (token_metrics/
+// context_metrics/archived/created_at) would leave every one of these zero and
+// red this test, because none of those keys are on the wire.
+func TestGetChatSessionDecodesLiveProjection(t *testing.T) {
+	const body = `{
+		"id":"sess-1","title":"T","status":"running","mode":"plan","model_choice":"opus","effort_choice":"high",
+		"draft":"wip","summary":"a chat","message_count":4,"pending_approvals":1,
+		"input_tokens":1200,"output_tokens":800,"total_cost_usd":0.042,"context_window":200000,"last_context_tokens":15000,
+		"last_active_at":"2026-07-13T00:00:00Z","inserted_at":"2026-07-12T00:00:00Z","updated_at":"2026-07-13T00:00:00Z",
+		"rail_snapshot":{"task-abc":{"status":"running","origin":"background","description":"survey the tree","seq":1,"usage":{"input":10}}},
+		"messages":[{"seq":9,"role":"tool","source_markdown":"ran ls","metadata":{"prompt":"list files"},"inserted_at":"2026-07-13T00:00:01Z"}]
+	}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	s, err := newChatClient(srv.URL).GetChatSession("sess-1", 0)
+	if err != nil {
+		t.Fatalf("GetChatSession: %v", err)
+	}
+	// Flat usage metrics (top-level, NOT nested).
+	if s.InputTokens != 1200 || s.OutputTokens != 800 || s.ContextWindow != 200000 || s.LastContextTokens != 15000 {
+		t.Errorf("flat token metrics = %+v", s)
+	}
+	if s.TotalCostUSD != 0.042 {
+		t.Errorf("total_cost_usd = %v, want 0.042", s.TotalCostUSD)
+	}
+	// Denormalised counters + timestamps.
+	if s.MessageCount != 4 || s.PendingApprovals != 1 {
+		t.Errorf("counters = msg %d / pending %d", s.MessageCount, s.PendingApprovals)
+	}
+	if s.InsertedAt == "" || s.LastActiveAt == "" {
+		t.Errorf("inserted_at / last_active_at dropped: %+v", s)
+	}
+	// Rail decodes the task_id-keyed map with origin/status/description.
+	rail, err := s.Rail()
+	if err != nil {
+		t.Fatalf("Rail: %v", err)
+	}
+	entry, ok := rail["task-abc"]
+	if !ok {
+		t.Fatalf("rail entry missing, got %v", rail)
+	}
+	if entry.Status != "running" || entry.Origin != "background" || entry.Description != "survey the tree" {
+		t.Errorf("rail entry = %+v", entry)
+	}
+	if len(entry.Usage) == 0 {
+		t.Errorf("rail entry usage passthrough dropped")
+	}
+	// Message metadata reaches the read-only cards; inserted_at present.
+	if len(s.Messages) != 1 {
+		t.Fatalf("want 1 message, got %d", len(s.Messages))
+	}
+	m := s.Messages[0]
+	if m.Metadata["prompt"] != "list files" || m.InsertedAt == "" {
+		t.Errorf("message metadata/inserted_at = %+v", m)
+	}
+}
+
+// An absent or empty rail_snapshot is the common idle case: Rail returns nil,nil
+// (never an error), so callers can range over it safely.
+func TestChatSessionRailEmpty(t *testing.T) {
+	for _, raw := range []string{"", "{}", "null", "  "} {
+		s := ChatSession{RailSnapshot: json.RawMessage(raw)}
+		rail, err := s.Rail()
+		if err != nil {
+			t.Errorf("Rail(%q) errored: %v", raw, err)
+		}
+		if rail != nil {
+			t.Errorf("Rail(%q) = %v, want nil", raw, rail)
+		}
+	}
+}
+
 func TestGetChatSessionSinceTail(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.URL.Query().Get("since"); got != "7" {
