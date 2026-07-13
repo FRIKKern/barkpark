@@ -233,7 +233,18 @@ defmodule BarkparkWeb.ChatController do
          %StudioChat.Session{} <- StudioChat.get_session(id) do
       with recorder when is_pid(recorder) <- Recorder.whereis(id),
            {:ok, session} <- Recorder.session_pid(recorder) do
-        ClaudeChat.respond_permission(session, request_id, decision)
+        :ok = ClaudeChat.respond_permission(session, request_id, decision)
+
+        status =
+          case decision do
+            :allow -> "allowed"
+            {:deny, _message} -> "denied"
+          end
+
+        case StudioChat.update_approval_status(id, request_id, status) do
+          {:ok, _message} -> :ok
+          {:error, :not_found} -> :ok
+        end
       end
 
       send_resp(conn, :no_content, "")

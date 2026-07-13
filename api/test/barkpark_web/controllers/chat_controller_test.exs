@@ -483,7 +483,26 @@ defmodule BarkparkWeb.ChatControllerTest do
   # ── approval (D22 — allow/deny only, never caller updatedInput) ─────────────
 
   describe "POST /sessions/:id/approval (D22)" do
-    test "a valid allow/deny answers => 204", %{admin: a1, sid: sid} do
+    defp pending_approval(sid, request_id) do
+      {:ok, _} =
+        StudioChat.append_message(StudioChat.get_session(sid), %{
+          role: "approval",
+          source_markdown: "Allow Write /tmp/example?",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "Write",
+            "input" => %{"file_path" => "/tmp/example"},
+            "approval_status" => "pending"
+          }
+        })
+    end
+
+    test "a delivered allow/deny persists terminal metadata visible on refetch", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_approval(sid, "req-1")
+      pending_approval(sid, "req-2")
       {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
 
       assert json_conn(a1)
@@ -499,6 +518,56 @@ defmodule BarkparkWeb.ChatControllerTest do
                Jason.encode!(%{request_id: "req-2", decision: "deny"})
              )
              |> response(204)
+
+      refetched = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      statuses =
+        Map.new(refetched["messages"], fn message ->
+          {message["metadata"]["request_id"], message["metadata"]["approval_status"]}
+        end)
+
+      assert statuses == %{"req-1" => "allowed", "req-2" => "denied"}
+      assert refetched["pending_approvals"] == 0
+    end
+
+    test "without a live runtime the request is a 204 no-op and stays pending", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_approval(sid, "req-pending")
+
+      assert json_conn(a1)
+             |> post(
+               "/v1/chat/sessions/#{sid}/approval",
+               Jason.encode!(%{request_id: "req-pending", decision: "allow"})
+             )
+             |> response(204)
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "pending"
+      assert StudioChat.get_session(sid).pending_approvals == 1
+    end
+
+    test "a missing or terminal request is a 204 no-op after runtime delivery", %{
+      admin: a1,
+      sid: sid
+    } do
+      pending_approval(sid, "req-terminal")
+      assert {:ok, _} = StudioChat.update_approval_status(sid, "req-terminal", "allowed")
+      {:ok, _} = Recorder.ensure(%{session_id: sid, mode: "plan", resume: false})
+
+      for {request_id, decision} <- [{"req-terminal", "deny"}, {"missing", "allow"}] do
+        assert json_conn(a1)
+               |> post(
+                 "/v1/chat/sessions/#{sid}/approval",
+                 Jason.encode!(%{request_id: request_id, decision: decision})
+               )
+               |> response(204)
+      end
+
+      [message] = StudioChat.list_messages(sid)
+      assert message.metadata["approval_status"] == "allowed"
+      assert StudioChat.get_session(sid).pending_approvals == 0
     end
 
     test "rejects a bad decision, a missing request_id, and a caller-supplied updatedInput",

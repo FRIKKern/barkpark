@@ -723,14 +723,20 @@ defmodule Barkpark.StudioChatTest do
       assert reload(s.id).pending_approvals == 0
     end
 
-    test "resolving a resolved approval again does NOT underflow the counter" do
+    test "a terminal approval is immutable and a duplicate resolve does not decrement again" do
       s = new_session()
       ask(s, "req-1")
-      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      assert {:ok, allowed} = StudioChat.update_approval_status(s.id, "req-1", "allowed")
+      assert allowed.metadata["approval_status"] == "allowed"
       assert reload(s.id).pending_approvals == 0
 
-      # a duplicate/racy resolve must never drive the count negative
-      {:ok, _} = StudioChat.update_approval_status(s.id, "req-1", "denied")
+      # A duplicate/opposite answer is a no-op: terminal truth never flips and
+      # the denormalised counter is decremented exactly once.
+      assert {:error, :not_found} =
+               StudioChat.update_approval_status(s.id, "req-1", "denied")
+
+      [persisted] = StudioChat.list_messages(s.id)
+      assert persisted.metadata["approval_status"] == "allowed"
       assert reload(s.id).pending_approvals == 0
     end
 

@@ -1231,18 +1231,17 @@ defmodule Barkpark.StudioChat do
 
   def update_approval_status(session_id, request_id, status) do
     Repo.transaction(fn ->
-      case find_approval(session_id, request_id) do
+      case find_pending_approval(session_id, request_id) do
         nil ->
           Repo.rollback(:not_found)
 
         %Message{} = message ->
-          was_pending? = approval_pending?(message)
           meta = Map.put(message.metadata || %{}, "approval_status", status)
 
           {:ok, updated} =
             message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()
 
-          if was_pending?, do: dec_pending(session_id)
+          dec_pending(session_id)
           updated
       end
     end)
@@ -1387,8 +1386,20 @@ defmodule Barkpark.StudioChat do
     |> Repo.one()
   end
 
-  defp approval_pending?(%Message{metadata: meta}),
-    do: Map.get(meta || %{}, "approval_status") == "pending"
+  # Terminal resolution is a one-way transition. Locking the matching pending
+  # row makes duplicate/opposite answers serialize: after the first commit, a
+  # later resolver sees no pending row and cannot overwrite terminal truth or
+  # decrement the session counter twice.
+  defp find_pending_approval(session_id, request_id) do
+    Message
+    |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
+    |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))
+    |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+    |> order_by([m], desc: m.seq)
+    |> limit(1)
+    |> lock("FOR UPDATE")
+    |> Repo.one()
+  end
 
   # Guarded decrement — the counter never underflows if a resolve races a
   # cancel-all that already zeroed it.
