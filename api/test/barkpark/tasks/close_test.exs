@@ -765,4 +765,167 @@ defmodule Barkpark.Tasks.CloseTest do
       assert events(holder.doc_id, "task.landed_under_you") == []
     end
   end
+
+  # ─── (8) Merge-gate auto-stamp (Felix wave-9) ─────────────────────────────
+  #
+  # The LEAD's merge close auto-stamps the final "PR merged"/LEAD-CLOSED
+  # acceptance criterion — the one the author explicitly marked
+  # `"merge_gate" => true` — so no reviewer hand-patches it every wave. The
+  # guards are the whole point: it fires ONLY on a terminal `done` close that
+  # carries a land digest (the merge close), never on a builder's honest
+  # pre-merge close, never on an unmarked criterion, and never over a caller's
+  # explicit update.
+
+  describe "close/3 — merge-gate auto-stamp" do
+    @merge_gate_criteria [
+      %{"criterion" => "feature built + tests green", "met" => true, "evidence" => "PR #123"},
+      %{"criterion" => "MERGE GATE: PR merged to origin/main", "met" => false, "merge_gate" => true}
+    ]
+
+    test "(a) a done-close WITH a landed digest flips the merge_gate criterion met=true with composed evidence",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      # A claimed task (epoch 5) so the composed evidence carries the epoch.
+      task =
+        mk_task!(uniq("mg-happy"), scope, %{
+          "acceptance_criteria" => @merge_gate_criteria,
+          "claim" => %{"worker" => "lead-w", "epoch" => 5}
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 5,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [456], "files" => ["api/lib/barkpark/tasks/close.ex"]}
+               )
+
+      [built, gate] = closed.content["acceptance_criteria"]
+
+      # The non-gate criterion is untouched.
+      assert built["met"] == true
+      assert built["evidence"] == "PR #123"
+
+      # The gate flipped, carrying the auto evidence (worker + epoch + PR + ts).
+      assert gate["met"] == true
+      # Criterion text (the paper-claim citation) is NEVER rewritten.
+      assert gate["criterion"] == "MERGE GATE: PR merged to origin/main"
+      assert gate["merge_gate"] == true
+      assert String.starts_with?(gate["evidence"], "auto: lead-closed on merge by lead-w (epoch 5)")
+      assert gate["evidence"] =~ "landed PR #456"
+
+      # One atomic write — persisted row matches the returned struct.
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["acceptance_criteria"] == closed.content["acceptance_criteria"]
+      assert reloaded.rev == closed.rev
+    end
+
+    test "(b) a done-close with NO landed digest does NOT auto-stamp (builder pre-merge close)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("mg-nolanded"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "builder-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done"
+               )
+
+      [_built, gate] = closed.content["acceptance_criteria"]
+      assert gate["met"] == false, "no landed digest → the gate is left for the lead"
+      assert gate["evidence"] in [nil, ""]
+    end
+
+    test "(c) a criterion WITHOUT the merge_gate marker is NOT auto-stamped even on a merge close",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      # Same shape but the last entry is unmarked — the text 'MERGE GATE'
+      # convention alone must NOT trigger the stamp.
+      unmarked = [
+        %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
+        %{"criterion" => "MERGE GATE: PR merged to origin/main", "met" => false}
+      ]
+
+      task = mk_task!(uniq("mg-unmarked"), scope, %{"acceptance_criteria" => unmarked})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [789]}
+               )
+
+      [_built, last] = closed.content["acceptance_criteria"]
+      assert last["met"] == false, "no explicit marker → never auto-stamped"
+      refute Map.has_key?(last, "evidence")
+    end
+
+    test "(d) a caller-supplied explicit update for the gate index WINS (no auto overwrite)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("mg-caller-wins"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [456]},
+                 criteria: [%{"index" => 1, "met" => true, "evidence" => "hand-written proof"}]
+               )
+
+      gate = Enum.at(closed.content["acceptance_criteria"], 1)
+      assert gate["met"] == true
+      assert gate["evidence"] == "hand-written proof",
+             "the caller's explicit evidence must not be clobbered by the auto-stamp"
+    end
+
+    test "an already-met merge_gate criterion is left untouched (idempotent, no re-evidence)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      already = [
+        %{
+          "criterion" => "MERGE GATE",
+          "met" => true,
+          "merge_gate" => true,
+          "evidence" => "prior proof"
+        }
+      ]
+
+      task = mk_task!(uniq("mg-idempotent"), scope, %{"acceptance_criteria" => already})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [999]}
+               )
+
+      [gate] = closed.content["acceptance_criteria"]
+      assert gate["evidence"] == "prior proof", "already-met gate keeps its evidence"
+    end
+
+    test "a cancelled close (non-'done' terminal) with landed does NOT auto-stamp the gate",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("mg-cancelled"), scope, %{"acceptance_criteria" => @merge_gate_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 landed: %{"prs" => [456]}
+               )
+
+      gate = Enum.at(closed.content["acceptance_criteria"], 1)
+      assert gate["met"] == false, "cancel is not a merge — the gate stays open"
+    end
+  end
 end

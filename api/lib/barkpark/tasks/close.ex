@@ -255,6 +255,16 @@ defmodule Barkpark.Tasks.Close do
     # matches) aborts the whole close with a CAS-flavoured error so the
     # caller re-reads and retries — deliberate race handling, not silent
     # partial state.
+    #
+    # Merge-gate auto-stamp (Felix wave-9): the LEAD's merge close synthesizes
+    # a met=true update for any acceptance criterion carrying an explicit
+    # "merge_gate":true marker so no reviewer hand-patches it. See
+    # `autostamp_merge_gate/6` for the conservative guards — it only fires on a
+    # terminal `done` close that carries a land digest, and never touches an
+    # index the caller already targeted, so a builder's pre-merge close (no
+    # landed) is untouched. Runs through the SAME merge_criteria rev-CAS write.
+    criteria = autostamp_merge_gate(criteria, doc, worker_id, new_status, landed, ts_iso)
+
     with {:ok, new_content} <- merge_criteria(new_content, criteria) do
       {rows, _} =
         from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
@@ -297,6 +307,82 @@ defmodule Barkpark.Tasks.Close do
   end
 
   defp merge_landed(content, _), do: content
+
+  # Merge-gate auto-stamp (Felix wave-9). Kills the recurring ledger toil where
+  # the final "PR merged"/LEAD-CLOSED acceptance criterion is left met=false at
+  # builder-close time and a reviewer hand-patches it every wave. When the LEAD
+  # closes on merge, synthesize a met=true criteria update for any criterion the
+  # AUTHOR explicitly marked with `"merge_gate" => true`.
+  #
+  # CONSERVATIVE by design — the union of ALL these must hold or nothing is
+  # stamped (a builder's honest pre-merge close is never touched):
+  #   * new_status is the terminal `done` (a cancelled/blocked close is not a merge),
+  #   * a non-empty `landed` digest rides the close (the LEAD merge close carries
+  #     one; a builder pre-merge close does not — this is what prevents recreating
+  #     the Mode-A false-true bug),
+  #   * the criterion carries the EXPLICIT `"merge_gate" => true` marker — never a
+  #     text / last-entry / index heuristic (only 14/34 Felix children carry the
+  #     'MERGE GATE' text convention, so a heuristic would both miss and misfire),
+  #   * it is still `met` != true (idempotent — an already-stamped gate is left alone),
+  #   * the caller's `criteria` payload did NOT already target that index (an
+  #     explicit caller update always wins; we never overwrite it).
+  # The synthetic update rides the SAME merge_criteria + rev-CAS write as every
+  # other close-time criteria flip, so it lands atomically with the close or not
+  # at all.
+  defp autostamp_merge_gate(criteria, %Document{} = doc, worker_id, "done", landed, ts_iso)
+       when is_map(landed) and map_size(landed) > 0 and is_list(criteria) do
+    targeted = MapSet.new(criteria, &Map.get(&1, "index"))
+
+    evidence = compose_merge_gate_evidence(doc, worker_id, landed, ts_iso)
+
+    synthetic =
+      doc.content
+      |> merge_gate_criteria_list()
+      |> Enum.with_index()
+      |> Enum.filter(fn {entry, i} ->
+        is_map(entry) and Map.get(entry, "merge_gate") == true and
+          Map.get(entry, "met") != true and not MapSet.member?(targeted, i)
+      end)
+      |> Enum.map(fn {_entry, i} -> %{"index" => i, "met" => true, "evidence" => evidence} end)
+
+    criteria ++ synthetic
+  end
+
+  defp autostamp_merge_gate(criteria, _doc, _worker, _status, _landed, _ts_iso), do: criteria
+
+  defp merge_gate_criteria_list(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  # "auto: lead-closed on merge by <worker> (epoch <n>) — landed <what> at <ts>".
+  # The claim epoch is read from the doc's own claim lease (nil for an unclaimed
+  # container close → rendered "?"); the landed summary prefers PR numbers, then a
+  # commit sha, then file paths, so the evidence names a concrete merge artifact.
+  defp compose_merge_gate_evidence(%Document{content: content}, worker_id, landed, ts_iso) do
+    epoch =
+      case get_in(content, ["claim", "epoch"]) do
+        nil -> "?"
+        e -> to_string(e)
+      end
+
+    "auto: lead-closed on merge by #{worker_id} (epoch #{epoch}) — landed #{landed_summary(landed)} at #{ts_iso}"
+  end
+
+  defp landed_summary(landed) do
+    prs = normalize_landed_list(Map.get(landed, "prs") || Map.get(landed, safe_atom("prs")))
+    commit = Map.get(landed, "commit") || Map.get(landed, "commits")
+    files = normalize_landed_list(Map.get(landed, "files") || Map.get(landed, safe_atom("files")))
+
+    cond do
+      prs != [] -> "PR " <> Enum.map_join(prs, ", ", &"##{&1}")
+      is_binary(commit) and commit != "" -> "commit #{commit}"
+      files != [] -> Enum.join(files, ", ")
+      true -> "merge"
+    end
+  end
 
   defp normalize_landed_list(nil), do: []
   defp normalize_landed_list(list) when is_list(list), do: Enum.reject(list, &is_nil/1)
