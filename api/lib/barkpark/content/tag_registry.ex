@@ -229,17 +229,51 @@ defmodule Barkpark.Content.TagRegistry do
     |> MapSet.new()
   end
 
+  # Trgm-nearest registered tags to an unknown `name`, via the `%` operator so
+  # the coarse net rides the PARTIAL GIN index `documents_doc_id_trgm_idx`
+  # (migration 20260713130000; authoring-excellence D49/D50 — the D46 `%` +
+  # `SET LOCAL` idiom, keyed on doc_id). `registered_tags_query/2` always carries
+  # `type='tag' AND status='published'`, exactly the index's partial predicate —
+  # keep both literals there or the planner silently drops the index.
+  #
+  # CLIFF: `@suggestion_floor` (0.1) is BELOW pg_trgm's 0.3 default. The `%`
+  # operator reads its threshold from the `pg_trgm.similarity_threshold` GUC, so
+  # WITHOUT the `SET LOCAL` below, `%` would silently tighten to 0.3 and drop
+  # every 0.1–0.3 gray-zone near-match. `SET LOCAL` is transaction-scoped, so the
+  # whole probe runs inside one explicit `Repo.transaction` with the SET FIRST.
+  # The literal is interpolated (SET takes no bind params) but sourced from the
+  # single `@suggestion_floor` attribute so the operator and the GUC can't drift.
+  #
+  # Fail-open: a DBConnection error (or any raise) inside the txn degrades to
+  # "no suggestions" — an empty list — never a 500 on the publish-rejection path
+  # (mirrors `DedupWall.fetch_candidates`).
   defp nearest_registered(name, dataset, opts) do
-    registered_tags_query(dataset, opts)
-    |> where([d], fragment("similarity(?, ?) > ?", d.doc_id, ^name, ^@suggestion_floor))
-    |> order_by([d],
-      desc: fragment("similarity(?, ?)", d.doc_id, ^name),
-      # doc_id tiebreak so equal-similarity candidates order deterministically.
-      asc: d.doc_id
-    )
-    |> limit(@suggestion_limit)
-    |> select([d], d.doc_id)
-    |> Repo.all()
+    query =
+      registered_tags_query(dataset, opts)
+      |> where([d], fragment("? % ?", d.doc_id, ^name))
+      |> order_by([d],
+        desc: fragment("similarity(?, ?)", d.doc_id, ^name),
+        # doc_id tiebreak so equal-similarity candidates order deterministically.
+        asc: d.doc_id
+      )
+      |> limit(@suggestion_limit)
+      |> select([d], d.doc_id)
+
+    Repo.transaction(fn ->
+      Repo.query!("SET LOCAL pg_trgm.similarity_threshold = #{@suggestion_floor}")
+      Repo.all(query)
+    end)
+    |> case do
+      {:ok, results} -> results
+      {:error, _reason} -> []
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "TagRegistry.nearest_registered fail-open: suggestion probe failed: #{inspect(e)}"
+      )
+
+      []
   end
 
   defp registered_tags_query(dataset, opts) do
