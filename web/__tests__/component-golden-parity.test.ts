@@ -196,6 +196,7 @@ import {
   type RoadmapProjection,
   type ColumnsProjection,
   type TerminalProjection,
+  type SectionProjection,
 } from "../lib/component-projections.ts";
 
 /** Load a `<type>.golden.json` fixture (input + expected projection). */
@@ -518,6 +519,41 @@ test("web columns RENDER nests each column's children (count + content)", () => 
       const text = leafText(cols[ci]?.[cj]);
       if (text) present(html, text, `columns[${ci}] child ${cj}`);
     });
+  });
+});
+
+test("web section RENDER realizes the grid + nests authored cells in order", () => {
+  const input = loadFixture("section").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("section").expected as SectionProjection;
+
+  present(html, 'class="bp-section__grid"', "section grid");
+  present(html, "repeat(var(--bp-tracks,2),", "section grid-template contract");
+  present(html, `--bp-tracks:${exp.tracks}`, "section track count");
+
+  const authored = Array.isArray(input.blocks)
+    ? (input.blocks as Array<{ slots?: { title?: unknown[] } }>)
+    : [];
+  const renderedCells = html.split('<div class="bp-section__cell"').slice(1);
+  assert.equal(renderedCells.length, exp.cells.length, "section cell count");
+
+  exp.cells.forEach((cell, i) => {
+    const segment = renderedCells[i] ?? "";
+    const title = (authored[i]?.slots?.title ?? []).map(leafText).join("");
+    assert.ok(title, `section authored cell ${i} has no title text`);
+    present(segment, title, `section cell ${i} authored content`);
+
+    if (cell.span == null) {
+      assert.doesNotMatch(segment, /grid-column:span /, `section cell ${i} span`);
+    } else {
+      present(segment, `grid-column:span ${cell.span}`, `section cell ${i} span`);
+    }
+
+    if (cell.order == null) {
+      assert.doesNotMatch(segment, /order:-?\d+/, `section cell ${i} order`);
+    } else {
+      present(segment, `order:${cell.order}`, `section cell ${i} order`);
+    }
   });
 });
 
