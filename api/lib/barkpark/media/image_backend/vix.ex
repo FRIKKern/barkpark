@@ -8,6 +8,19 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   `Image.*` resolves at runtime; on a host without the `:image` dep (e.g. native
   Windows, where this backend is never selected) these calls are simply never
   reached.
+
+  ## Resource-exhaustion posture (decompression bombs)
+
+  Unlike the ImageMagick CLI backend — which fully decodes into RAM and so is
+  bounded here by an explicit `-limit memory/map/time` plus an OTP deadline —
+  libvips processes images as a demand-driven pipeline of small scanline
+  regions, never materialising the full uncompressed raster. A pixel-count bomb
+  therefore cannot pin RAM the way it can under ImageMagick, and every call runs
+  in-process (no shell-out to bound). libvips also honours its own global caps
+  (`VIPS_MAX_MEM`, `VIPS_DISC_THRESHOLD`) if set. This backend is thus treated as
+  bounded-by-streaming and carries no explicit ceiling. Adding an explicit
+  pixel/memory guard for defense-in-depth is tracked as a low-priority twin task
+  (see `task-vix-bomb-explicit-ceiling`).
   """
   @behaviour Barkpark.Media.ImageBackend
 
