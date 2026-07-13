@@ -332,6 +332,93 @@ const TASK_BOARD_SPINNER_CSS = `
 @media (prefers-reduced-motion: reduce){.bp-tbe-spin::before{animation:none;content:"⠿"}}
 `;
 
+/* ── section grid (composition-doctrine cd-11) ────────────────────────────── */
+
+/**
+ * The `.bp-section__grid` layout rules — the web realization of the SAME class
+ * the Elixir reader lays a grid `section` into (compose.ex `section_grid_html`).
+ * The demo does NOT import paper-surface.css (layout.tsx pulls only globals.css),
+ * so the class it emits would be inert without this. Two rules only:
+ *   1. the grid itself, keyed off the structural `--bp-tracks` count + `--bp-grid-gap`
+ *      token VAR the section carries inline (fallbacks mirror the reader's CSS var
+ *      defaults: 2 tracks, 1.6rem gap);
+ *   2. a 720px collapse to one column — the reader's fixed `@media(max-width:720px)`
+ *      breakpoint, honored here for free BECAUSE the inline style carries only the
+ *      custom props, never `grid-template-columns` itself, so this MQ rule wins on
+ *      narrow viewports (an inline grid-template would out-specify it and never
+ *      collapse — the trap the `columns` case falls into by design).
+ * href + precedence → React 19 hoists this to a single <head> tag and dedupes it
+ * across every grid section in the document (the TASK_BOARD_SPINNER precedent).
+ */
+const SECTION_GRID_HREF = "bp-section-grid";
+const SECTION_GRID_CSS =
+  ".bp-section__grid{display:grid;grid-template-columns:repeat(var(--bp-tracks,2),minmax(0,1fr));gap:var(--bp-grid-gap,1.6rem)}" +
+  "@media(max-width:720px){.bp-section__grid{grid-template-columns:1fr}}";
+
+/** tracks → a positive integer column count (structural, NOT a pixel; mirrors the
+ * reader's `grid_tracks/1`). An int or a WHOLE-string int; anything else → 2. */
+function gridTracks(n: unknown): number {
+  if (typeof n === "number" && Number.isInteger(n) && n > 0) return n;
+  if (typeof n === "string" && /^\d+$/.test(n)) {
+    const i = Number.parseInt(n, 10);
+    if (i > 0) return i;
+  }
+  return 2;
+}
+
+/** gap token name → a CSS custom-property reference (never a px literal — D2;
+ * mirrors the reader's `gap_token_var/1`). Absent / unknown → md. */
+function gapTokenVar(gap: unknown): string {
+  switch (gap) {
+    case "none":
+      return "var(--bp-space-none,0)";
+    case "sm":
+      return "var(--bp-space-sm,0.8rem)";
+    case "lg":
+      return "var(--bp-space-lg,2.4rem)";
+    case "md":
+    default:
+      return "var(--bp-space-md,1.6rem)";
+  }
+}
+
+/** span → a positive int (or whole-string positive int), else null — the reader's
+ * `span_int/1`. UNCLAMPED against tracks to match the reader (compose.ex guards
+ * `n>0` only; CSS clamps at layout time, the golden gate encodes authored intent). */
+function spanInt(v: unknown): number | null {
+  if (typeof v === "number" && Number.isInteger(v) && v > 0) return v;
+  if (typeof v === "string" && /^\d+$/.test(v)) {
+    const i = Number.parseInt(v, 10);
+    if (i > 0) return i;
+  }
+  return null;
+}
+
+/** order → ANY int (0 and negatives are legal CSS `order`), or a whole-string int,
+ * else null — the reader's `order_int/1`. */
+function orderInt(v: unknown): number | null {
+  if (typeof v === "number" && Number.isInteger(v)) return v;
+  if (typeof v === "string" && /^-?\d+$/.test(v)) return Number.parseInt(v, 10);
+  return null;
+}
+
+/** Present-only per-cell placement for the `.bp-section__cell` wrapper: inline
+ * `grid-column:span N` (span, positive) and/or `order:K` (order, any int). A child
+ * carrying NEITHER → undefined (a bare wrapper). gridColumn is inserted BEFORE order
+ * so the serialized style reads `grid-column:span N;order:K`, matching the reader's
+ * `cell_layout_attr/1` byte order. */
+function cellLayoutStyle(child: unknown): CSSProperties | undefined {
+  if (!child || typeof child !== "object") return undefined;
+  const c = child as { span?: unknown; order?: unknown };
+  const span = spanInt(c.span);
+  const order = orderInt(c.order);
+  if (span == null && order == null) return undefined;
+  const style: CSSProperties = {};
+  if (span != null) style.gridColumn = `span ${span}`;
+  if (order != null) style.order = order;
+  return style;
+}
+
 // §1 semantic colour per column (the tone the white ladder assigns each role;
 // the GLYPH itself is TASK_BOARD_GLYPHS — this only tints it).
 const TASK_BOARD_GLYPH_TONE: Record<TaskBoardColumnKey, string> = {
@@ -641,13 +728,60 @@ export function renderBlock(block: Block, key: Key): ReactNode {
     }
     case "section": {
       const inner = Array.isArray(block.blocks) ? (block.blocks as Block[]) : [];
+      const title = block.title ? (
+        <h2 className="text-2xl font-semibold tracking-tight">
+          {str(block.title)}
+        </h2>
+      ) : null;
+
+      // A grid section — layout.mode === "grid" — lays its children into a REAL
+      // CSS grid, exactly as the Elixir reader and Go TUI already do (NOT a
+      // web-only degrade, per composition-doctrine D-W3-4). The `.bp-section__grid`
+      // class is the SHARED reader class; the demo injects its two rules here
+      // (SECTION_GRID_CSS) because it doesn't import paper-surface.css. The inline
+      // style carries ONLY the structural custom props (`--bp-tracks`, `--bp-grid-gap`)
+      // — never the grid-template declaration — so the 720px collapse MQ overrides
+      // for free. Each child rides a `.bp-section__cell` wrapper carrying present-only
+      // `grid-column:span N;order:K` (UNCLAMPED span, matching the reader). Any
+      // non-grid layout (absent / stack / malformed) falls through to the flex stack.
+      const layout = (block as { layout?: unknown }).layout;
+      const isGrid =
+        !!layout &&
+        typeof layout === "object" &&
+        (layout as { mode?: unknown }).mode === "grid";
+
+      if (isGrid) {
+        const l = layout as { tracks?: unknown; gap?: unknown };
+        const gridVars = {
+          "--bp-tracks": gridTracks(l.tracks),
+          "--bp-grid-gap": gapTokenVar(l.gap),
+        } as CSSProperties;
+        return (
+          <section key={key} className="flex flex-col gap-4">
+            {/* Grid rules + 720px collapse — href+precedence hoists + dedupes to
+                one <head> tag (the TASK_BOARD_SPINNER precedent). */}
+            <style href={SECTION_GRID_HREF} precedence="default">
+              {SECTION_GRID_CSS}
+            </style>
+            {title}
+            <div className="bp-section__grid" style={gridVars}>
+              {inner.map((b, i) => (
+                <div
+                  key={i}
+                  className="bp-section__cell"
+                  style={cellLayoutStyle(b)}
+                >
+                  {renderBlock(b, i)}
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      }
+
       return (
         <section key={key} className="flex flex-col gap-4">
-          {block.title ? (
-            <h2 className="text-2xl font-semibold tracking-tight">
-              {str(block.title)}
-            </h2>
-          ) : null}
+          {title}
           {inner.map((b, i) => renderBlock(b, i))}
         </section>
       );
