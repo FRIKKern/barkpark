@@ -31,36 +31,18 @@ defmodule Barkpark.Content.Lifecycle do
 
   import Ecto.Query, only: [from: 2]
 
-  require Logger
-
   alias Barkpark.Repo
   alias Barkpark.Content
 
   alias Barkpark.Content.{
+    AuthoringWall,
     Broadcast,
-    DedupWall,
     Document,
     DraftId,
-    Exemptions,
-    LabelSpine,
     Sheets,
-    TagRegistry,
-    Warnings,
     Writer,
     WriteScope
   }
-
-  # The publish wall (authoring-excellence D1/D6) enforces the label spine on
-  # Barkpark's own knowledge types — the corpus the epic exists to keep
-  # findable. Deliberately a module attribute, not schema-sniffing: the E4
-  # dedup wall scopes to the same pair ("on publish of paper/task types"), and
-  # widening the wall to a new type must be a reviewed one-line decision, never
-  # an accident of registering a schema. User content types (posts, products,
-  # …) publish exactly as before.
-  @walled_types ~w(paper task)
-
-  # The 2–4 tag-count norm (advisory FROM BIRTH, never promoted — charter D5).
-  @tag_count_norm 2..4
 
   # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
   # a publish?" was unanswerable. `:telemetry.span` emits
@@ -114,43 +96,17 @@ defmodule Barkpark.Content.Lifecycle do
         # lives in CORE, immediately BEFORE the before_publish hook fire — the
         # hook chain is plugin-droppable and coerces raising hooks to :ok, so
         # it is the wrong home for a correctness gate (the hook stays for
-        # optional tenant policies). Gates run in charter order:
-        #
-        #   1. label spine (E1/E2, @walled_types) → 422 {:label_spine, details}
-        #   2. tag registry (E3, self-scoping to the weighted-tag shape): every
-        #      weighted tags[].tag must resolve to a PUBLISHED type:tag doc in
-        #      the dataset scope → 422 {:unknown_tag, …} with trgm-nearest
-        #      suggestions
-        #   3. dedup wall (E4, @walled_types) → refuse is 409
-        #      {:duplicate_of, payload}; the advise band rides the warnings
-        #      channel and never blocks
-        #
-        # An error tuple falls straight out of the `with` — nothing below runs.
-        #
-        # Exemption is read ONCE at wall entry: a grandfathered (pre-wall) doc
-        # passes the WHOLE wall unchanged (D6 — "grandfathered republishes
-        # pass unchanged"), including E4: the legacy corpus contains
-        # legitimately similar-titled documents, and holding their republishes
-        # to the dedup wall would strand them behind each other. The label
-        # gate still CLEARS the exemption when the spine passes (the ratchet),
-        # so a doc that opts into the new world is walled fully from its NEXT
-        # publish on.
-        exempt? = type in @walled_types and Exemptions.member?(pid, dataset)
-
-        with {:ok, validated?} <- authoring_wall(draft, type, pid, dataset, exempt?),
-             :ok <- TagRegistry.validate_publish(draft, dataset, opts),
-             :ok <- dedup_wall(draft, type, dataset, opts, exempt?) do
-          # The ratchet shrink (charter D28, bug b) fires ONLY here — after the
-          # WHOLE wall (label spine AND E3 AND E4) has passed. The old home was
-          # inside authoring_wall at the spine PASS, before E3/E4 ran; a
-          # grandfathered doc adopting a syntactically-valid but UNREGISTERED
-          # tag then lost its ledger row at spine-pass and STILL 422'd at E3 —
-          # grandfathering silently spent on a publish that failed. `validated?`
-          # is true only when the label spine actually passed (not merely
-          # grandfathered PAST a spine failure), so a doc that never adopted the
-          # spine keeps its exemption unchanged.
-          if validated? and exempt?, do: Exemptions.clear(pid, dataset)
-
+        # optional tenant policies). The whole chain — exemption read ONCE →
+        # label spine (E1/E2) → E3 tag registry → E4 dedup → clear-on-full-pass
+        # → main_tag stamp — lives in `Barkpark.Content.AuthoringWall` (charter
+        # D26: the ONE shared wall, also mounted by BlockOps.upsert_paper for
+        # the direct paper-birth path). The delegation is behaviour-identical:
+        # the three raw error tuples ({:label_spine, …} 422, {:unknown_tag, …}
+        # 422, {:duplicate_of, …} 409) fall straight out of the `with` —
+        # nothing below runs, each emitting its telemetry at AuthoringWall's own
+        # else seam — and `pub_content` is the draft's content with the D7
+        # main_tag stamp applied (put on derivation, DROPPED when stale).
+        with {:ok, pub_content} <- AuthoringWall.enforce(draft, type, pid, dataset, opts) do
           # Hook stays BEFORE the transaction. The rev-fenced delete below
           # closes the publish-during-edit TOCTOU: a concurrent write that
           # bumps the draft between the read above and the delete now surfaces
@@ -162,9 +118,9 @@ defmodule Barkpark.Content.Lifecycle do
 
             :ok ->
               # Upsert the published version with draft's content (main_tag
-              # denormalized — see stamp_main_tag/1). Inherit the draft's
-              # tenancy scope so a publish never drops workspace_id/
-              # project_id on the published row.
+              # denormalized — see AuthoringWall.stamp_main_tag/2, applied to
+              # `pub_content` above). Inherit the draft's tenancy scope so a
+              # publish never drops workspace_id/project_id on the published row.
               pub_attrs =
                 %{
                   "doc_id" => pid,
@@ -172,7 +128,7 @@ defmodule Barkpark.Content.Lifecycle do
                   "dataset" => dataset,
                   "title" => draft.title,
                   "status" => "published",
-                  "content" => stamp_main_tag(draft.content),
+                  "content" => pub_content,
                   "rev" => Writer.generate_rev()
                 }
                 |> WriteScope.inherit_scope_attrs(draft)
@@ -230,155 +186,18 @@ defmodule Barkpark.Content.Lifecycle do
 
               WriteScope.fire_after(result, :after_publish, payload)
           end
-        else
-          # The wall's FIRST observability (charter D28): today a label_spine
-          # 422 is indistinguishable from any other 422 in prod logs (proven: a
-          # 3h live window carried 32 anonymous "Sent 422" lines, none
-          # attributable). Each of the three rejection shapes emits a
-          # telemetry event + Logger.warning here, then returns UNCHANGED — the
-          # exact tuple the controllers map to 422 (label_spine/unknown_tag) or
-          # 409 (duplicate_of). Routing through one `else` keeps the emit at the
-          # single seam every gate failure funnels through.
-          {:error, {:label_spine, _}} = error ->
-            emit_wall_rejection(:label_spine, type, dataset)
-            error
 
-          {:error, {:unknown_tag, _}} = error ->
-            emit_wall_rejection(:unknown_tag, type, dataset)
-            error
-
-          {:error, {:duplicate_of, _}} = error ->
-            emit_wall_rejection(:duplicate_of, type, dataset)
-            error
+          # A wall rejection ({:label_spine,…}/{:unknown_tag,…}/{:duplicate_of,…})
+          # falls straight out of `AuthoringWall.enforce` above — the `with`
+          # returns it UNCHANGED (each shape emits its telemetry at
+          # AuthoringWall's own else seam), and the controllers map it to
+          # 422/422/409.
         end
 
       {:error, :not_found} ->
         {:error, :not_found}
     end
   end
-
-  # ── the publish wall (authoring-excellence) ────────────────────────────────
-  #
-  # Gate semantics (charter D6, amended by D28):
-  #
-  #   * `LabelSpine.validate` PASSES → `{:ok, true}` (validated). The 2–4
-  #     tag-count norm advisory rides the warnings channel here when the count
-  #     is legal but outside the norm.
-  #   * validate FAILS but the doc is grandfathered (`exempt?`) → `{:ok, false}`
-  #     — passes the gate unchanged, NOT validated. The distinction matters: the
-  #     ratchet shrink (`Exemptions.clear`) is now driven off `validated?` at
-  #     the caller AFTER the whole wall passes, so a grandfathered doc that
-  #     never adopted the spine keeps its exemption, and one whose LATER gate
-  #     (E3/E4) rejects the publish does NOT spend its grandfathering (D28 b).
-  #   * validate FAILS and NOT exempt → the fail-closed 422
-  #     (`{:error, {:label_spine, details}}`). Its telemetry fires at the
-  #     caller's `else` seam, not here.
-  #
-  # Drafts stay free by construction — this runs only on publish. `exempt?` is
-  # the grandfathered flag read once at wall entry (see publish_document).
-  # `emit_tag_norm_advisory` stays at spine-pass: it writes request-scoped
-  # Warnings that are discarded if a later gate fails the publish, so it can
-  # only surface on a publish that ultimately succeeds.
-  defp authoring_wall(draft, type, pid, _dataset, exempt?) when type in @walled_types do
-    case LabelSpine.validate(draft.content) do
-      :ok ->
-        emit_tag_norm_advisory(draft, pid)
-        {:ok, true}
-
-      {:error, {:label_spine, _details}} = error ->
-        if exempt?, do: {:ok, false}, else: error
-    end
-  end
-
-  defp authoring_wall(_draft, _type, _pid, _dataset, _exempt?), do: {:ok, false}
-
-  # D7/D20 — denormalize the derived main tag (the strength argmax) onto the
-  # published row's content at the ONE write chokepoint, so `filter[main_tag]`
-  # is an indexed `->>` equality (btree expression index, migration
-  # 20260712121000) instead of a seq-scanning jsonb argmax predicate.
-  # `LabelSpine.main_tag/1` is the single derivation — the backfill migration
-  # reuses it, so backfilled and freshly published rows can never disagree.
-  # Weighted-valid tags → stamped; anything else (legacy flat strings under
-  # the ratchet, tagless docs, non-map content) passes through UNCHANGED —
-  # never a nil key, never a raise. Runs for every type: main_tag derives
-  # purely from the tags shape, and non-walled types simply never carry it.
-  defp stamp_main_tag(%{} = content) do
-    case LabelSpine.main_tag(content) do
-      {:ok, tag} ->
-        Map.put(content, "main_tag", tag)
-
-      # Recompute-else-DROP (charter D28, bug a): a republish must NEVER carry a
-      # stale main_tag key. When the derivation can't produce one (flat legacy
-      # tags under the ratchet, tagless docs, non-weighted content), DELETE any
-      # key the draft copied from a backfilled row rather than passing it
-      # through untouched — the published row's main_tag is always the current
-      # derivation or absent, never a value the tags no longer support.
-      :error ->
-        Map.delete(content, "main_tag")
-    end
-  end
-
-  defp stamp_main_tag(content), do: content
-
-  # The wall's first observability (charter D28): a structured telemetry event
-  # + a Logger.warning at every publish-wall rejection, so a label_spine 422 is
-  # attributable in prod logs and countable on a dashboard (BarkparkWeb.Telemetry
-  # can subscribe a counter tagged by :code/:type/:dataset). `code` is the
-  # rejection atom (`:label_spine` | `:unknown_tag` | `:duplicate_of`).
-  defp emit_wall_rejection(code, type, dataset) do
-    :telemetry.execute(
-      [:barkpark, :authoring, :wall_rejection],
-      %{count: 1},
-      %{code: code, type: type, dataset: dataset}
-    )
-
-    Logger.warning("authoring wall rejected a #{type} publish in dataset #{dataset}: #{code}")
-
-    :ok
-  end
-
-  # Advisory, never blocking (charter D5): a legal tag count (1–12) outside
-  # the 2–4 norm rides the mutate success envelope as a warning. Emitted only
-  # AFTER a validate pass, so the count is known-legal here.
-  defp emit_tag_norm_advisory(draft, pid) do
-    count = draft.content |> Map.get("tags", []) |> length()
-
-    unless count in @tag_count_norm do
-      Warnings.put(
-        "label_norm",
-        "#{pid}: #{count} tag(s) — the norm is 2–4. " <>
-          "Every extra label dilutes the strong ones; weak entries are pruning candidates."
-      )
-    end
-  end
-
-  # E4 dedup wall (charter D4), scoped to the same @walled_types pair as the
-  # label spine (the S4 brief's own wording: "on publish of paper/task types" —
-  # an unscoped mount would 409 unrelated user content types on title
-  # similarity). Refuse → {:error, {:duplicate_of, payload}} (409 with the
-  # incumbent published id); the advise band NEVER blocks — its entries ride
-  # the mutate success envelope via the warnings channel (D5), each keeping the
-  # severity DedupWall stamped ("warning" — a sharper signal than the tag-count
-  # norm's "advisory").
-  # A grandfathered doc (exempt at wall entry) skips E4 entirely — the legacy
-  # corpus predates the dedup rule and holds legitimately similar titles.
-  defp dedup_wall(_draft, _type, _dataset, _opts, true), do: :ok
-
-  defp dedup_wall(draft, type, dataset, opts, _exempt?) when type in @walled_types do
-    case DedupWall.check(draft, type, dataset, opts) do
-      :ok ->
-        :ok
-
-      {:ok, warnings} when is_list(warnings) ->
-        Enum.each(warnings, &Warnings.put(&1.code, &1.message, &1.severity))
-        :ok
-
-      {:error, {:duplicate_of, _payload}} = error ->
-        error
-    end
-  end
-
-  defp dedup_wall(_draft, _type, _dataset, _opts, _exempt?), do: :ok
 
   @doc """
   Unpublish: move published doc back to draft, delete published version.

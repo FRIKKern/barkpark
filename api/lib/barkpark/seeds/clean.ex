@@ -70,14 +70,21 @@ defmodule Barkpark.Seeds.Clean do
     case Content.get_paper(@welcome_slug, scope.dataset, workspace_id: scope.workspace_id) do
       nil ->
         {:ok, _doc} =
-          Content.upsert_paper(%{
-            "slug" => @welcome_slug,
-            "dataset" => scope.dataset,
-            "workspace_id" => scope.workspace_id,
-            "project_id" => scope.project_id,
-            "blocks" => @welcome_blocks,
-            "style" => "article"
-          })
+          Content.upsert_paper(
+            %{
+              "slug" => @welcome_slug,
+              "dataset" => scope.dataset,
+              "workspace_id" => scope.workspace_id,
+              "project_id" => scope.project_id,
+              "blocks" => @welcome_blocks,
+              "style" => "article"
+            },
+            # bypass_wall (charter D26 audit): boot-time seed of curated host
+            # content into a FRESH install — the E3 tag registry is empty here,
+            # so no label set could pass, and a seed failure would break first
+            # boot. Explicit, audited exemption.
+            bypass_wall: true
+          )
 
         IO.puts("Seeded welcome paper (/papers/#{@welcome_slug})")
 

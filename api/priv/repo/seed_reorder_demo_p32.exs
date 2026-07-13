@@ -34,7 +34,9 @@ blocks =
 # Prepend a heading so the desk-list title is meaningful.
 blocks = [%{"id" => "rd-h", "type" => "heading", "text" => "Reorder Demo (P3.2)", "level" => 1} | blocks]
 
-{:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: dataset, blocks: blocks})
+# bypass_wall (charter D26 audit): dev demo seed script — curated demo content,
+# no tag registry in a fresh dev dataset. Explicit, audited exemption.
+{:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: dataset, blocks: blocks}, bypass_wall: true)
 
 order =
   doc.content["blocks"]

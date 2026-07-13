@@ -90,7 +90,14 @@ defmodule BarkparkWeb.BulldocsIngestController do
         "style" => params["style"] || "article",
         "source_doc" => params["source_doc"],
         "event_type" => params["event_type"],
-        "goal_id" => params["goal_id"]
+        "goal_id" => params["goal_id"],
+        # Label-spine passthrough (charter D26): ingest ENFORCES the publish
+        # wall (fresh papers are never exempt), so a compliant producer must
+        # be able to send its weighted tags + description through this
+        # whitelist — dropping them made every honest POST structurally
+        # unable to pass. nil (absent params) adds nothing.
+        "tags" => params["tags"],
+        "description" => params["description"]
       }
       |> put_scope(conn, params)
 
@@ -154,7 +161,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
         "style" => params["style"],
         "source_doc" => params["source_doc"],
         "event_type" => params["event_type"],
-        "goal_id" => params["goal_id"]
+        "goal_id" => params["goal_id"],
+        # Label-spine passthrough (charter D26) — see the blocks head above;
+        # the legacy HTML leg is walled identically.
+        "tags" => params["tags"],
+        "description" => params["description"]
       }
       |> put_scope(conn, params)
 

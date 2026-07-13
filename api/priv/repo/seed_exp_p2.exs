@@ -55,7 +55,9 @@ blocks = [
   }
 ]
 
-{:ok, post} = Content.upsert_paper(%{slug: "exp-post-p2", dataset: dataset, blocks: blocks})
+# bypass_wall (charter D26 audit): dev demo seed script — curated demo content,
+# no tag registry in a fresh dev dataset. Explicit, audited exemption.
+{:ok, post} = Content.upsert_paper(%{slug: "exp-post-p2", dataset: dataset, blocks: blocks}, bypass_wall: true)
 
 IO.puts("\n=== exp-post-p2 (projected) ===")
 IO.puts("content[title]        = #{inspect(post.content["title"])}")
@@ -66,7 +68,8 @@ IO.puts("content[body][html]   = #{post.content["body"]["html"]}")
 IO.puts("documents.title (row) = #{inspect(post.title)}")
 
 # ── exp-legacy-p2: classic-only doc, no blocks (synthesis target) ──
-{:ok, legacy} = Content.upsert_paper(%{slug: "exp-legacy-p2", dataset: dataset, body_html: "<p>legacy html</p>"})
+# bypass_wall (charter D26 audit): dev demo seed script (legacy HTML leg). Explicit, audited exemption.
+{:ok, legacy} = Content.upsert_paper(%{slug: "exp-legacy-p2", dataset: dataset, body_html: "<p>legacy html</p>"}, bypass_wall: true)
 
 legacy =
   legacy

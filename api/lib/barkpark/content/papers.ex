@@ -1153,10 +1153,11 @@ defmodule Barkpark.Content.Papers do
 
   @doc """
   Upsert a paper keyed by `{dataset, slug}` (as a type-"paper" document) and
-  broadcast a **whole-HTML** frame on the per-doc topic. See
-  `Barkpark.Content.Papers.BlockOps.upsert_paper/1`.
+  broadcast a **whole-HTML** frame on the per-doc topic. Runs the publish
+  wall by default (charter D26); `opts` accepts the audited `bypass_wall:
+  true` escape. See `Barkpark.Content.Papers.BlockOps.upsert_paper/2`.
   """
-  defdelegate upsert_paper(attrs), to: BlockOps
+  defdelegate upsert_paper(attrs, opts \\ []), to: BlockOps
 
   @doc """
   Apply a single portable-doc `op` (a DocPatchOp map) to a paper's block list,
