@@ -209,6 +209,11 @@ defmodule BarkparkWeb.Router do
     # attempts).
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
     plug(BarkparkWeb.Plugs.RequireToken)
+    # Per-workspace quota gate (perfect-plan-build W1, D11) — AFTER
+    # ResolveWorkspace (current_workspace is set) and BEFORE the write gate. Doc
+    # writes are metered by the [:barkpark, :content, :mutate] span, so no
+    # `meter: :media` here (that would double-count against the span).
+    plug(BarkparkWeb.Plugs.RequireWithinQuota)
     plug(BarkparkWeb.Plugs.RequireWritePermission)
     plug(BarkparkWeb.Plugs.Idempotency)
   end
@@ -242,6 +247,12 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    # Per-workspace quota gate (perfect-plan-build W1, D11) — the media write
+    # path bypasses Content (Media.upload/3 = raw Repo.insert), so this router
+    # seam is the ONLY point that gates it. `meter: :media` emits the one
+    # [:barkpark, :media, :mutate] telemetry event per allowed write (the media
+    # path has no span of its own — charter D12).
+    plug(BarkparkWeb.Plugs.RequireWithinQuota, meter: :media)
     # Write-gate: a read-only token/session member is denied 403 before the
     # controller. A P5 edit-share token short-circuits via :share_writer (set by
     # RequireShareEditToken above), so scoped uploads still work. Mirrors
@@ -2019,6 +2030,20 @@ defmodule BarkparkWeb.Router do
     # creation is member-gated (non-member → 404, no existence leak).
     post("/workspaces", WorkspaceController, :create)
     post("/workspaces/:workspace_slug/projects", WorkspaceController, :create_project)
+  end
+
+  # ── Workspace DELETE — admin-gated destructive teardown ─────────────────
+  # Separate scope (NOT the membership-scoped switcher above) because delete is
+  # the destructive primitive eject / backup / abuse-isolation build on: it
+  # requires the GLOBAL `admin` permission, not mere membership. The
+  # `:require_admin` pipeline (RequireToken + RequireAdmin) 401s an absent token
+  # and 403s a non-admin BEFORE the action runs; the action delegates to
+  # `Tenancy.delete_workspace/1`, which cascades across every workspace_id-scoped
+  # table inside one rollback-on-failure transaction (zero orphans).
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    delete("/workspaces/:workspace_slug", WorkspaceController, :delete)
   end
 
   # ── Legacy compat ──────────────────────────────────────────────────────

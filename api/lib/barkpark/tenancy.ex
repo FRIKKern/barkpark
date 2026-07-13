@@ -10,6 +10,7 @@ defmodule Barkpark.Tenancy do
 
   alias Barkpark.Repo
   alias Barkpark.Accounts.User
+  alias Barkpark.Audit.ExportSink
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -904,6 +905,27 @@ defmodule Barkpark.Tenancy do
        (idempotent) and removes the supporting rows that have no
        side-effect cleanup.
 
+  ## The two FK-less audit tables (charter D4/D5, `bl-audit-fk-orphans`)
+
+  `audit_events` and `audit_export_sinks` carry `workspace_id` as a plain
+  `binary_id` with ZERO foreign key (migrations `20260705120000` /
+  `20260705140000`), so the SQL cascade in step 3 never reaches them. They get
+  DIFFERENT, deliberate treatment — one swept, one retained:
+
+    * `audit_export_sinks` (step 2b) — SWEPT. A plain mutable config table
+      (no trigger, no FK) holding SIEM/webhook endpoint URLs + secrets. It has
+      no forensic value and its secrets must not outlive the workspace, so an
+      explicit workspace-scoped `Repo.delete_all` removes it.
+    * `audit_events` — RETAINED BY DESIGN, never touched here. It is the
+      tamper-evident, append-only, per-workspace sha256 hash chain, protected
+      by a DB-level `BEFORE UPDATE OR DELETE` trigger
+      (`audit_events_no_update_delete`) that RAISES on any delete. Carving a
+      teardown exception into that trigger would defeat the exact guarantee the
+      chain exists to provide (a compromised delete path could then erase
+      history). Retaining a deleted workspace's audit trail is the correct
+      compliance/forensics posture, so we intentionally leave those rows in
+      place — orphaned of their workspace row, but by decision, not by neglect.
+
   The whole sequence runs inside a single `Repo.transaction`. If ANY step
   fails — a hook returns an error, a Repo write blows up, the workspace
   delete races — the transaction rolls back and nothing partial-deletes.
@@ -940,11 +962,28 @@ defmodule Barkpark.Tenancy do
   defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do
     with :ok <- delete_workspace_media(ws_id),
          :ok <- delete_workspace_documents(ws_id),
+         :ok <- delete_workspace_audit_sinks(ws_id),
          {:ok, _} <- Repo.delete(workspace) do
       {:ok, workspace}
     else
       {:error, _} = err -> err
     end
+  end
+
+  # Sweep the workspace's audit_export_sinks. This table carries workspace_id as
+  # a plain binary_id with NO foreign key (migration 20260705140000), so the SQL
+  # CASCADE on `Repo.delete(workspace)` never reaches it — without this explicit
+  # step a torn-down workspace would silently orphan its SIEM sink config
+  # (endpoint URLs + secrets). It is a plain mutable table (no immutability
+  # trigger), so a scoped `delete_all` is safe. Its sibling `audit_events` is
+  # intentionally RETAINED (append-only forensic chain; see delete_workspace/1
+  # moduledoc for why we do NOT delete audit history on teardown).
+  defp delete_workspace_audit_sinks(ws_id) do
+    ExportSink
+    |> where([s], s.workspace_id == ^ws_id)
+    |> Repo.delete_all()
+
+    :ok
   end
 
   # Walk every media_file scoped to the workspace and route it through

@@ -134,6 +134,7 @@
                   "not_found",
                   "payload_too_large",
                   "precondition_failed",
+                  "quota_exceeded",
                   "rate_limited",
                   "rev_mismatch",
                   "schema_has_documents",
@@ -148,7 +149,8 @@
                   "unsupported_if_match_for_batch",
                   "unsupported_media_type",
                   "validation_failed",
-                  "webhook_not_found"
+                  "webhook_not_found",
+                  "workspace_suspended"
                 ],
                 "type": "string"
               },

@@ -69,9 +69,15 @@ defmodule Barkpark.Content.Lifecycle do
   # `:stop`, tagged by `:op`, so p95-per-operation (publish/unpublish/
   # discard_draft/delete) is derivable via histogram_quantile. Wraps the whole
   # op — before-hook, transaction, and after-hook — the true caller-visible cost.
-  defp span_write(op, fun) do
-    :telemetry.span([:barkpark, :content, :lifecycle], %{op: op}, fn ->
-      {fun.(), %{op: op}}
+  # `workspace_id` tags the span so per-workspace publish/lifecycle volume is
+  # derivable (perfect-plan-build W1, D12). The value rides `opts` via
+  # `scope_opts(conn)`; nil (unscoped caller) coerces to "global" so the
+  # Prometheus tag is always present and never crashes the reporter handler.
+  defp span_write(op, opts, fun) do
+    meta = %{op: op, workspace_id: Keyword.get(opts, :workspace_id) || "global"}
+
+    :telemetry.span([:barkpark, :content, :lifecycle], meta, fn ->
+      {fun.(), meta}
     end)
   end
 
@@ -83,7 +89,10 @@ defmodule Barkpark.Content.Lifecycle do
   Fires `:before_publish` (halt-capable) and `:after_publish` (async).
   """
   def publish_document(published_doc_id, type, dataset, opts \\ []),
-    do: span_write(:publish, fn -> do_publish_document(published_doc_id, type, dataset, opts) end)
+    do:
+      span_write(:publish, opts, fn ->
+        do_publish_document(published_doc_id, type, dataset, opts)
+      end)
 
   defp do_publish_document(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)
@@ -379,7 +388,7 @@ defmodule Barkpark.Content.Lifecycle do
   """
   def unpublish_document(published_doc_id, type, dataset, opts \\ []),
     do:
-      span_write(:unpublish, fn ->
+      span_write(:unpublish, opts, fn ->
         do_unpublish_document(published_doc_id, type, dataset, opts)
       end)
 
@@ -473,7 +482,9 @@ defmodule Barkpark.Content.Lifecycle do
   @doc "Discard a draft without publishing. Published version (if any) remains."
   def discard_draft(published_doc_id, type, dataset, opts \\ []),
     do:
-      span_write(:discard_draft, fn -> do_discard_draft(published_doc_id, type, dataset, opts) end)
+      span_write(:discard_draft, opts, fn ->
+        do_discard_draft(published_doc_id, type, dataset, opts)
+      end)
 
   defp do_discard_draft(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)
@@ -516,7 +527,7 @@ defmodule Barkpark.Content.Lifecycle do
   if present, otherwise the draft).
   """
   def delete_document(doc_id, type, dataset, opts \\ []),
-    do: span_write(:delete, fn -> do_delete_document(doc_id, type, dataset, opts) end)
+    do: span_write(:delete, opts, fn -> do_delete_document(doc_id, type, dataset, opts) end)
 
   defp do_delete_document(doc_id, type, dataset, opts) do
     pid = DraftId.published_id(doc_id)

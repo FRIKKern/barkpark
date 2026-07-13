@@ -13,7 +13,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Tenancy}
+  alias Barkpark.{Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   setup do
@@ -328,10 +328,171 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
     end
   end
 
+  describe "DELETE /api/workspaces/:workspace_slug" do
+    test "200 for an admin — deletes the workspace and it is gone from the DB", %{conn: conn} do
+      raw_admin = "ws-admin-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Throwaway WS"}, admin_token(raw_admin))
+
+      assert Tenancy.get_workspace_by_slug(target.slug)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> delete("/api/workspaces/#{target.slug}")
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert body["workspace"]["slug"] == target.slug
+      assert body["deleted"] == true
+
+      # The row is actually gone — no soft-delete, no lingering record.
+      refute Tenancy.get_workspace_by_slug(target.slug)
+    end
+
+    test "403 for a NON-admin token (permission denial path)", %{conn: conn, raw_token: raw} do
+      # `raw` (from setup) holds only ["read", "write"] — no global admin perm.
+      {:ok, target} = Tenancy.create_workspace(%{slug: "keep-me-ws", name: "Keep Me"})
+
+      resp =
+        conn
+        |> authed(raw)
+        |> delete("/api/workspaces/#{target.slug}")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+
+      # The denial is REAL: the workspace survives an unauthorized delete attempt.
+      assert Tenancy.get_workspace_by_slug(target.slug)
+    end
+
+    test "unauthenticated → 401", %{conn: conn} do
+      {:ok, target} = Tenancy.create_workspace(%{slug: "anon-keep-ws", name: "Anon Keep"})
+
+      resp = delete(conn, "/api/workspaces/#{target.slug}")
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+      assert Tenancy.get_workspace_by_slug(target.slug)
+    end
+
+    test "404 for an unknown workspace slug (admin)", %{conn: conn} do
+      raw_admin = "ws-admin-404-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> delete("/api/workspaces/no-such-ws")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "ZERO-ORPHAN through the HTTP path — no workspace_id-scoped row survives the delete",
+         %{conn: conn} do
+      raw_admin = "ws-admin-orphan-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # A throwaway workspace bootstrapped through the real owner path (owner
+      # membership + Default project + production dataset) …
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Orphan Sweep WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+
+      # … then given real scoped content so the sweep is NOT vacuously green.
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      ws_id = target.id
+
+      # Live-derive every table carrying a `workspace_id` column (the E1
+      # column-scan the keystone paper names) — never a hardcoded list.
+      scoped_tables = workspace_id_tables()
+      assert scoped_tables != [], "expected at least one workspace_id-scoped table to sweep"
+
+      # Sanity: BEFORE the delete, the workspace really does own scoped rows —
+      # otherwise a zero-orphan assertion would prove nothing.
+      before_total = total_scoped_rows(scoped_tables, ws_id)
+
+      assert before_total > 0,
+             "fixture seeded no workspace_id-scoped rows — sweep would be vacuous"
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> delete("/api/workspaces/#{target.slug}")
+
+      assert resp.status == 200
+
+      # The scoped psql-style sweep through the HTTP path: EVERY workspace_id
+      # table must hold zero rows for the deleted workspace.
+      orphans =
+        for table <- scoped_tables,
+            cnt = scoped_row_count(table, ws_id),
+            cnt > 0,
+            do: {table, cnt}
+
+      assert orphans == [],
+             "zero-orphan violated — rows survived the HTTP delete: #{inspect(orphans)}"
+    end
+  end
+
   # Resolve the api_token id for the raw bearer used in setup, so membership
   # assertions don't depend on the controller echoing the token.
   defp body_token_id(raw) do
     {:ok, token} = Auth.verify_token(raw)
     token.id
+  end
+
+  # The verified %ApiToken{} struct behind a raw bearer — the shape
+  # `create_workspace_with_owner/2` binds the owner membership to.
+  defp admin_token(raw) do
+    {:ok, token} = Auth.verify_token(raw)
+    token
+  end
+
+  # The two FK-less audit tables (charter D4/D15): they carry a workspace_id
+  # column but NO foreign key, so `delete_workspace`'s cascade cannot reach
+  # them. Sweeping them inside delete_workspace is the SEPARATE, file-disjoint
+  # slice `bl-audit-fk-orphans` — NOT this route slice. This slice proves the
+  # FK-cascade zero-orphan through the HTTP path; those two stay excluded here
+  # so the two slices don't overlap. (E3 string-keyed tables are deferred to
+  # bpb-delete-e3-string-keyed-sweep and carry no workspace_id column at all,
+  # so they never enter this scan.)
+  @fk_less_audit_tables ~w(audit_events audit_export_sinks)
+
+  # Live-derived E1 enumeration: every public base table with a workspace_id
+  # column, MINUS the FK-less audit tables above. Sourced from
+  # information_schema so a new FK-scoped tenant table is swept automatically —
+  # never a hardcoded list.
+  defp workspace_id_tables do
+    %{rows: rows} =
+      Repo.query!(
+        "SELECT table_name FROM information_schema.columns " <>
+          "WHERE column_name = 'workspace_id' AND table_schema = 'public' " <>
+          "ORDER BY table_name"
+      )
+
+    rows
+    |> Enum.map(fn [t] -> t end)
+    |> Enum.reject(&(&1 in @fk_less_audit_tables))
+  end
+
+  defp scoped_row_count(table, ws_id) do
+    # Dump the uuid to its 16-byte binary so Postgrex encodes it as a uuid
+    # param (a `$1::uuid` cast on a string param raises an EncodeError).
+    {:ok, ws_bin} = Ecto.UUID.dump(ws_id)
+
+    %{rows: [[cnt]]} =
+      Repo.query!("SELECT count(*) FROM #{table} WHERE workspace_id = $1", [ws_bin])
+
+    cnt
+  end
+
+  defp total_scoped_rows(tables, ws_id) do
+    Enum.reduce(tables, 0, fn table, acc -> acc + scoped_row_count(table, ws_id) end)
   end
 end

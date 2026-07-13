@@ -85,20 +85,34 @@ defmodule BarkparkWeb.Telemetry do
       # (Content.apply_mutations) had ZERO timing before this. `:telemetry.span`
       # emits [:barkpark, :content, :mutate, :stop] with :duration; this
       # histogram makes p95 derivable via histogram_quantile.
+      # `:workspace_id` tags per-workspace mutate volume/latency (perfect-plan-
+      # build W1, D12); unscoped writes carry the "global" sentinel.
       distribution("barkpark.content.mutate.stop.duration",
-        reporter_options: [buckets: latency_buckets],
-        unit: {:native, :millisecond},
-        description: "Batch-mutate (apply_mutations) latency — p95 via histogram_quantile."
-      ),
-      # Q: "what is p95 of a publish?" — the publish/lifecycle hot path had ZERO
-      # timing. One span [:barkpark, :content, :lifecycle, :stop] covers all four
-      # ops; the :op tag selects publish (or unpublish/discard_draft/delete).
-      distribution("barkpark.content.lifecycle.stop.duration",
-        tags: [:op],
+        tags: [:workspace_id],
         reporter_options: [buckets: latency_buckets],
         unit: {:native, :millisecond},
         description:
-          "Publish/lifecycle latency — p95 via histogram_quantile; tag :op selects publish."
+          "Batch-mutate (apply_mutations) latency — p95 via histogram_quantile; tag :workspace_id."
+      ),
+      # Q: "what is p95 of a publish?" — the publish/lifecycle hot path had ZERO
+      # timing. One span [:barkpark, :content, :lifecycle, :stop] covers all four
+      # ops; the :op tag selects publish (or unpublish/discard_draft/delete);
+      # :workspace_id tags it per-tenant (perfect-plan-build W1, D12).
+      distribution("barkpark.content.lifecycle.stop.duration",
+        tags: [:op, :workspace_id],
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "Publish/lifecycle latency — p95 via histogram_quantile; tag :op selects publish, :workspace_id per-tenant."
+      ),
+      # Q: "how many media writes per workspace?" — the media upload/update/delete
+      # path has NO :telemetry.span of its own (it bypasses Content), so
+      # RequireWithinQuota emits one [:barkpark, :media, :mutate] event per
+      # allowed scoped media write (perfect-plan-build W1, D12). This sum meters
+      # it per-tenant.
+      sum("barkpark.media.mutate.count",
+        tags: [:workspace_id],
+        description: "Scoped media writes (upload/update/delete) per workspace."
       ),
       # Q: "which plugin hook is slowing our writes?" — before_*/after_* hooks run
       # on the write path (the sheets before_save gate does a full Engine

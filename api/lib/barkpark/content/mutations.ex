@@ -35,12 +35,18 @@ defmodule Barkpark.Content.Mutations do
     # `:duration`; BarkparkWeb.Telemetry subscribes a Prometheus histogram to
     # `:stop` (p95 via histogram_quantile). `count` tags batch size. The span
     # reraises on exception exactly as the inner rescue already does.
+    # `workspace_id` tags the span so per-workspace mutate volume/latency is
+    # derivable (perfect-plan-build W1, D12). The value already rides `opts` via
+    # `scope_opts(conn)`; nil (unscoped caller) coerces to "global" so the
+    # Prometheus tag is always present and never crashes the reporter handler.
+    workspace_id = Keyword.get(opts, :workspace_id) || "global"
+
     :telemetry.span(
       [:barkpark, :content, :mutate],
-      %{count: length(mutations), dataset: dataset},
+      %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
         result = do_apply_mutations(mutations, dataset, opts)
-        {result, %{count: length(mutations), dataset: dataset}}
+        {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )
   end
