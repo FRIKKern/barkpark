@@ -123,6 +123,7 @@
                   "invalid_paper",
                   "invalid_proposal",
                   "invalid_request_id",
+                  "invalid_text",
                   "label_spine",
                   "malformed",
                   "malformed_op",
