@@ -129,7 +129,9 @@ defmodule Barkpark.Plugins.Tasks do
          :ok <- validate_brief_blocks(blocks) do
       :ok
     else
-      {:halt, _} = halted -> halted
+      {:halt, _} = halted ->
+        halted
+
       _ ->
         {:halt,
          "task brief is required before publish — set content.brief to " <>
@@ -415,6 +417,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/claim", BarkparkWeb.TasksController, :claim_by_id,
        auth: :token_root},
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
+      {:post, "/tasks/:doc_id/release", BarkparkWeb.TasksController, :release, auth: :token_root},
       {:post, "/tasks/:doc_id/stamp", BarkparkWeb.TasksController, :stamp, auth: :token_root},
       {:post, "/tasks/:doc_id/pulse", BarkparkWeb.TasksController, :pulse, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
@@ -444,8 +447,8 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Eleven verbs over eleven routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
-  `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
+  Twelve verbs over twelve routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  `:api + :require_token`, NOT admin — claim/close/release are bearer-gated workflow ops,
   not document mutations):
 
     * `ls` — `GET /v1/tasks` (paginated). READ, table.
@@ -456,6 +459,7 @@ defmodule Barkpark.Plugins.Tasks do
     * `get` — `GET /v1/tasks/:doc_id`. READ, table.
     * `claim` — `POST /v1/tasks/:doc_id/claim`. WRITES, minimal receipt.
     * `close` — `POST /v1/tasks/:doc_id/close`. WRITES, minimal receipt.
+    * `release` — `POST /v1/tasks/:doc_id/release`. WRITES, minimal receipt.
     * `stamp` — `POST /v1/tasks/:doc_id/stamp` (criterion-level mid-claim
       evidence, expressive-agent-loops D8). WRITES, minimal receipt.
     * `next` — `POST /v1/tasks/claim` (queue-based: atomically hand me the next
@@ -689,6 +693,41 @@ defmodule Barkpark.Plugins.Tasks do
               "The rail_rev (rail ETag) you last observed for this task's parent rail. When it differs from the current rail_rev the response carries a rail_changed notice — advisory, never a gate."
           }
         ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.release",
+        noun: "task",
+        verb: "release",
+        summary: "Release a held task claim without waiting for its lease to expire.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/release"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to release."
+          },
+          %{
+            name: "worker_id",
+            required: true,
+            type: "string",
+            summary: "Worker identity that holds the claim."
+          },
+          %{
+            name: "observed_epoch",
+            required: true,
+            type: "int",
+            summary: "Claim epoch returned at claim time (optimistic concurrency guard)."
+          }
+        ],
+        flags: [],
         writes: true,
         batch: false,
         paginated: false,

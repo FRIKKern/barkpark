@@ -8,10 +8,10 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the sam
 | Surface | What |
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system), soft validations, `dependencies`/`claim` read-only. Live **Projects board** at `/admin/projects`. |
-| **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / stamp / pulse / close / move` — manifest-driven from `GET /v1/capabilities`. |
+| **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / close / move` — manifest-driven from `GET /v1/capabilities`. |
 | **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the PortableDoc task reader; `c`/`x` claim/close the highlighted task (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys: `/` search, `n` new, `y` duplicate, `D`×2 delete. |
-| **HTTP API** | Fifteen bearer-token endpoints under `/v1/tasks/*` (read tier): the verbs above plus fetch, edges, labels, papers. |
-| **Events** | Each op emits a `mutation_events` row — `task.{claimed,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
+| **HTTP API** | Sixteen bearer-token endpoints under `/v1/tasks/*` (read tier): the verbs above plus fetch, edges, labels, papers. |
+| **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
 
 Lifecycle states: `open · in_progress · blocked · done · cancelled`.
 
@@ -62,6 +62,9 @@ bp task next agent-1                # prints doc_id + epoch; no_ready on empty q
 # Targeted claim: name the row
 bp task claim t1 agent-1            # <doc_id> <worker_id>
 
+# Voluntary walk-away: holder + claim epoch are both fenced
+bp task release t1 agent-1 1        # <doc_id> <worker> <epoch>
+
 # Mid-claim: stamp a criterion — met or honestly missed
 bp task stamp t1 agent-1 1 --criterion 0 --met --evidence "gate green"
 bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
@@ -78,10 +81,11 @@ bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"P
 
 The contract, precisely:
 
-- **Claim** flips `lifecycle_status` to `in_progress` + stamps `content.claim = {worker, ts_iso, epoch}`; the epoch bumps on every claim (race loss → 409 `stale_claim`).
-- **Stamp (mid-claim)** — `POST /v1/tasks/:id/stamp`, holder-only + close's epoch fence. `--met` REQUIRES non-empty `--evidence`; `--miss` appends `{note,ts,worker}` to the criterion's `attempts` (5 kept), never flipping `met`. Emits `task.criterion`; stamps never trip the digest fence.
-- **Pulse (heartbeat).** `POST /v1/tasks/:id/pulse` `{worker_id, now, criterion?}` atomically writes `claim.now = {text, ts, criterion?}` AND renews the lease (epoch + `ts_iso`); digest untouched; emits `task.pulse`. Holder-only, **no epoch arg** — survives L4; a lost lease → 409 `not_holder`, never a re-claim. Boards render decay from `now.ts`.
-- **Close** needs `worker_id` + `observed_epoch` (mismatch → 409 `fenced_off`). Body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` (rev-CAS; index/text mismatch → 409). Unmet criteria warn, never gate. Default fence: claim-time **work digest** (title/brief/description/criteria) — edits under your claim → 409 `doc_changed_since_claim`; re-read or pass `observed_rev`. Self-edits (`code_refs`, `labels`, progress) never trip.
+- **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, and bumps the epoch (race loss → `stale_claim`).
+- **Release** — `POST /v1/tasks/:id/release` takes holder `worker_id` + `observed_epoch`; flips `in_progress`→`open`; clears `claim.worker` and `assignee`; bumps the epoch; stamps `released_by`/`released_at`; emits `task.released`. Wrong holder → `not_holder`; stale epoch → `fenced_off`; row-rev loss → `stale_claim`.
+- **Stamp** — holder + epoch fenced. `--met` requires evidence; `--miss` records one of the last 5 attempts without flipping `met`. Emits `task.criterion`; does not trip the work-digest fence.
+- **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat that renews the lease and emits `task.pulse`. It has no epoch arg; a lost lease returns `not_holder`.
+- **Close** needs holder + epoch (`fenced_off` on mismatch). Optional status defaults to `done`; reason and criterion updates commit in the same rev-CAS. Unmet criteria warn, never gate. By default, brief drift returns `doc_changed_since_claim`; pass `observed_rev` for strict full-rev CAS.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **2700**, env-tunable), emitting `task.lease_expired` (reap keeps `assignee`). Finish, pulse, or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
 - **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` — only `met:true` counts; omitted when absent (never `0/0`). A `done` close with unmet criteria warns but commits.
@@ -180,7 +184,8 @@ Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes m
 | No **Tasks** pane in Studio | Plugin not whitelisted (`BARKPARK_PLUGINS` set without `tasks`) **or** the `task` schema isn't registered here. Fix env, restart; the schema auto-registers on boot. |
 | `404` on `/v1/tasks/*` | Plugin disabled — the routes mount only when the tasks plugin is on. |
 | `404 task not found` on an id you just created | Rare — bare `t1` resolves to `drafts.t1` automatically; check plugin enabled + token access. |
-| `400 worker_id is required` | Claim/stamp/pulse/close need `worker_id` — positional via bp, JSON body via curl. |
+| `400 worker_id is required` | Claim/release/stamp/pulse/close need `worker_id` — positional via bp, JSON body via curl. |
+| `409 not_holder` | Only the live claim holder can release/stamp/pulse; re-read the task instead of guessing the worker. |
 | `409 fenced_off` | Stale `observed_epoch` — the lease was swept, **or a blocker/move landed on your claimed task** (L4 fence). Renew: `bp task claim <id> <same-worker>`, close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
 | `409 doc_changed_since_claim` | The brief was edited under your claim. Re-read (`bp task get <id>`), close again, or pass `observed_rev`. |

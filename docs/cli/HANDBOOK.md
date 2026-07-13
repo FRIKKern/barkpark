@@ -67,7 +67,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 | `bp plugin ls/settings` | read / admin |
 | `bp bulldocs publish/patch/intents` | ingest |
 | `bp onixedit export` | admin |
-| `bp task ls/ready/prime/get/claim/close/next` | read (plugin:tasks) |
+| `bp task ls/ready/prime/events/get/claim/release/stamp/pulse/close/next/move` | read (plugin:tasks) |
 | `bp share ls/add/rm` | admin |
 | `bp graph show/orphans/dangling/tasks` | read |
 | `bp auth login/logout/me/register/verify-email/request-reset/reset/mfa-enroll/mfa-verify/mfa-disable` | user session — `docs/auth-user-sessions.md` |
@@ -83,7 +83,7 @@ Source: `manifest.Resolve`. Active context is persisted `config.json` (`bp setup
 
 `-o table|json|yaml|minimal` (or `--json`, `-q`). Default: `table` on TTY, `json` piped. The CLI **unwraps** `{"result":…}` envelopes.
 
-Minimal receipts (writes, shape-keyed — never per-verb): `rev:`/`id:` lines when the body carries them; an `{"ok":true,"doc":{…}}` body prints the doc's identity line — `<doc_id>` plus `epoch=<n>` when the doc carries a claim (e.g. `drafts.task-992199 epoch=2`); a 2xx `{"ok":false,"reason":…}` prints the reason token (e.g. `no_ready`, exit 0); otherwise a bare `ok`.
+Minimal receipts (writes, shape-keyed — never per-verb): `rev:`/`id:` lines when the body carries them; an `{"ok":true,"doc":{…}}` body prints the doc's identity line — `<doc_id>` plus `epoch=<n>` when the doc carries a claim fence, including a released claim whose worker is now null (e.g. `drafts.task-992199 epoch=2 rev=a1b2c3`); a 2xx `{"ok":false,"reason":…}` prints the reason token (e.g. `no_ready`, exit 0); otherwise a bare `ok`.
 
 ## `--dry-run` (client-side only in v1)
 
@@ -170,4 +170,3 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 - Dataset discovery absent; `production` is the assumed default.
 - `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh/fish scripts (`bp completion bash|zsh|fish`); `bp --version`/`-V` prints the version offline.
 - `scoped_prefix` is inert.
-

@@ -566,6 +566,44 @@
         {
           "name": "doc_id",
           "required": true,
+          "summary": "Task document id to release.",
+          "type": "string"
+        },
+        {
+          "name": "worker_id",
+          "required": true,
+          "summary": "Worker identity that holds the claim.",
+          "type": "string"
+        },
+        {
+          "name": "observed_epoch",
+          "required": true,
+          "summary": "Claim epoch returned at claim time (optimistic concurrency guard).",
+          "type": "int"
+        }
+      ],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "minimal",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/tasks/:doc_id/release"
+      },
+      "id": "task.release",
+      "noun": "task",
+      "paginated": false,
+      "source": "plugin:tasks",
+      "summary": "Release a held task claim without waiting for its lease to expire.",
+      "verb": "release",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "doc_id",
+          "required": true,
           "summary": "Task document id to stamp.",
           "type": "string"
         },

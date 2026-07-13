@@ -1204,6 +1204,61 @@ func TestBuildBodyTaskClaimClose(t *testing.T) {
 	}
 }
 
+// TestBuildBodyTaskRelease pins the manifest-only voluntary-unclaim command:
+// doc_id is URL-bound, while worker_id + observed_epoch form the generic JSON
+// body. No release-specific Go dispatch branch is needed or allowed.
+func TestBuildBodyTaskRelease(t *testing.T) {
+	m, tree := loadTreeFrom(t, fullManifest)
+	release, ok := tree.Lookup("task", "release")
+	if !ok {
+		t.Fatal("task release missing from full-manifest fixture")
+	}
+	if release.HTTP.Method != "POST" || release.HTTP.PathTemplate != "/v1/tasks/:doc_id/release" {
+		t.Fatalf("task release http = %s %s, want POST /v1/tasks/:doc_id/release", release.HTTP.Method, release.HTTP.PathTemplate)
+	}
+	if !release.Writes || release.AuthTier != "read" || release.DefaultOutput != "minimal" {
+		t.Fatalf("task release contract = writes:%v auth:%q output:%q", release.Writes, release.AuthTier, release.DefaultOutput)
+	}
+
+	args := map[string]string{
+		"doc_id":         "drafts.task a/b",
+		"worker_id":      "paper-agent",
+		"observed_epoch": "42",
+	}
+	body, _, ct, err := buildBody(*release, map[string][]string{}, args)
+	if err != nil {
+		t.Fatalf("buildBody task release: %v", err)
+	}
+	if ct != "application/json" {
+		t.Errorf("release content-type = %q, want application/json", ct)
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		t.Fatalf("release body not valid JSON: %v: %s", err, body)
+	}
+	if obj["worker_id"] != "paper-agent" || obj["observed_epoch"] != "42" {
+		t.Errorf("release body = %s, want worker_id + observed_epoch", body)
+	}
+	if _, leaked := obj["doc_id"]; leaked {
+		t.Errorf("path arg doc_id must not appear in release body: %s", body)
+	}
+
+	rawURL, err := m.BuildURL(*release, manifest.Context{Server: "http://localhost:4000"}, args)
+	if err != nil {
+		t.Fatalf("BuildURL task release: %v", err)
+	}
+	if want := "http://localhost:4000/v1/tasks/drafts.task%20a%2Fb/release"; rawURL != want {
+		t.Errorf("task release url = %q, want %q", rawURL, want)
+	}
+
+	for _, reason := range []string{"fenced_off", "not_holder", "stale_claim", "not_in_progress:done"} {
+		ae := classifyError(409, []byte(`{"ok":false,"reason":"`+reason+`"}`))
+		if ae.code != reason || ae.exit == exitOK {
+			t.Errorf("release reason %q classified as exit=%d code=%q, want nonzero + exact reason", reason, ae.exit, ae.code)
+		}
+	}
+}
+
 // splitFlagLookup reports whether the command declares the named flag —
 // the gate splitArgs enforces before --<name> is accepted on the command line.
 func splitFlagLookup(cmd manifest.Command, name string) (manifest.Flag, bool) {
@@ -1342,6 +1397,14 @@ func TestRenderMinimalDocReceipt(t *testing.T) {
 	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-1","title":"x"}}`))
 	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-1" {
 		t.Errorf("no-claim receipt = %q, want \"drafts.task-1\"", got)
+	}
+
+	// Release-shaped doc: the claim remains as a monotonic epoch fence but its
+	// worker is nil. The generic receipt still prints the new epoch + rev.
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"task-9","rev":"new-rev","claim":{"worker":null,"epoch":8}}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "task-9 epoch=8 rev=new-rev" {
+		t.Errorf("release receipt = %q, want \"task-9 epoch=8 rev=new-rev\"", got)
 	}
 
 	// Doc with a claim that lacks an epoch: id only, no dangling "epoch=".

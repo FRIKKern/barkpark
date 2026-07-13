@@ -3,7 +3,7 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI
   (historically the bd-compatible shim `bin/bd-shim`, retired 2026-06-22).
 
-  Fourteen endpoints, all bearer-token gated via the existing `:api` +
+  Sixteen endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
@@ -13,6 +13,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/claim`              — `Tasks.claim/2` (queue-based)
     * `POST   /v1/tasks/:doc_id/claim`      — `Tasks.claim_by_id/3` (targeted, w7-08)
     * `POST   /v1/tasks/:doc_id/close`      — `Tasks.close/3`
+    * `POST   /v1/tasks/:doc_id/release`    — `Tasks.release/3` (voluntary unclaim)
     * `POST   /v1/tasks/:doc_id/stamp`      — `Tasks.stamp/3` (criterion-level mid-claim evidence)
     * `POST   /v1/tasks/:doc_id/pulse`      — `Tasks.pulse_by_id/3` (now-line + lease renewal)
     * `GET    /v1/tasks/:doc_id/edges`      — `Tasks.dependencies/2` + `dependents/2`
@@ -406,6 +407,30 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :invalid_criteria, msg} ->
         bad_request(conn, msg)
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # ─── POST /v1/tasks/:doc_id/release ─────────────────────────────────────
+
+  def release(conn, %{"doc_id" => doc_id} = params) do
+    with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
+         {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
+         {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
+      case Tasks.release(task.id, worker_id, observed_epoch: observed_epoch) do
+        {:ok, %Document{} = doc} ->
+          json(conn, %{ok: true, doc: Params.render_doc(doc)})
+
+        {:error, reason} ->
+          conn
+          |> put_status(:conflict)
+          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+      end
+    else
+      {:error, :missing, field} ->
+        bad_request(conn, "#{field} is required")
 
       {:error, :not_found} ->
         not_found(conn, "task not found")

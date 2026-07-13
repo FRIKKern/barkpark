@@ -43,6 +43,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id",
                  "/v1/tasks/:doc_id/claim",
                  "/v1/tasks/:doc_id/close",
+                 "/v1/tasks/:doc_id/release",
                  "/v1/tasks/:doc_id/stamp",
                  "/v1/tasks/:doc_id/pulse",
                  "/v1/tasks/:doc_id/move"
@@ -86,7 +87,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the eleven task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the twelve task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -97,6 +98,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.get" in ids
       assert "task.claim" in ids
       assert "task.close" in ids
+      assert "task.release" in ids
       assert "task.stamp" in ids
       assert "task.pulse" in ids
       assert "task.next" in ids
@@ -106,7 +108,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 11
+      assert length(cmds) == 12
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
@@ -117,12 +119,29 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # Every path_template is a route the plugin actually mounts.
       assert Enum.all?(cmds, fn c -> MapSet.member?(@tasks_paths, c.http.path_template) end)
 
-      # claim/close are the writing workflow ops.
+      # claim/close/release are the writing workflow ops.
       claim = Enum.find(cmds, &(&1.id == "task.claim"))
       close = Enum.find(cmds, &(&1.id == "task.close"))
+      release = Enum.find(cmds, &(&1.id == "task.release"))
       assert claim.writes
       assert close.writes
+      assert release.writes
       assert claim.default_output == "minimal"
+      assert release.default_output == "minimal"
+
+      assert release.http == %{
+               method: "POST",
+               path_template: "/v1/tasks/:doc_id/release"
+             }
+
+      assert Enum.map(release.args, &{&1.name, &1.type, &1.required}) == [
+               {"doc_id", "string", true},
+               {"worker_id", "string", true},
+               {"observed_epoch", "int", true}
+             ]
+
+      assert release.auth_tier == "read"
+      assert release.flags == []
 
       # task.claim declares required worker_id body arg (server requires it).
       claim_arg_names = Enum.map(claim.args, & &1.name)

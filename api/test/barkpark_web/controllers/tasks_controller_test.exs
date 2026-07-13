@@ -21,7 +21,7 @@ defmodule BarkparkWeb.TasksControllerTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Tasks.Internal
 
   @token "barkpark-test-tasks-token"
@@ -71,6 +71,25 @@ defmodule BarkparkWeb.TasksControllerTest do
     conn
     |> put_req_header("authorization", "Bearer " <> @token)
     |> put_req_header("content-type", "application/json")
+  end
+
+  defp release_snapshot(%Document{} = doc) do
+    fresh = Repo.get!(Document, doc.id)
+
+    %{
+      content: fresh.content,
+      rev: fresh.rev,
+      events:
+        Repo.aggregate(
+          from(e in MutationEvent, where: e.doc_id == ^fresh.doc_id),
+          :count,
+          :id
+        )
+    }
+  end
+
+  defp assert_release_unchanged(%Document{} = doc, snapshot) do
+    assert release_snapshot(doc) == snapshot
   end
 
   describe "auth gating" do
@@ -385,6 +404,148 @@ defmodule BarkparkWeb.TasksControllerTest do
       doc = Jason.decode!(show.resp_body)["doc"]
       assert doc["lifecycle_status"] == "open"
       assert [%{"met" => false}] = doc["content"]["acceptance_criteria"]
+    end
+  end
+
+  describe "POST /v1/tasks/:doc_id/release" do
+    test "requires bearer-token authentication", %{conn: conn} do
+      resp =
+        conn
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/tasks/missing/release", Jason.encode!(%{}))
+
+      assert resp.status == 401
+    end
+
+    test "holder release clears the lease and assignee, bumps epoch, and emits exactly one event",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("release-ok"), scope, %{"assignee" => "worker-1", "kept" => 42})
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "worker-1", scope)
+      before = release_snapshot(claimed)
+      epoch = get_in(before.content, ["claim", "epoch"])
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/release",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+        )
+
+      payload = json_response(resp, 200)
+      assert payload["ok"] == true
+      assert payload["doc"]["lifecycle_status"] == "open"
+      assert payload["doc"]["claim"]["worker"] == nil
+      assert payload["doc"]["claim"]["epoch"] == epoch + 1
+      assert payload["doc"]["claim"]["released_by"] == "worker-1"
+      assert is_binary(payload["doc"]["claim"]["released_at"])
+      assert payload["doc"]["assignee"] == nil
+      assert payload["doc"]["rev"] != before.rev
+
+      after_release = release_snapshot(claimed)
+
+      assert Map.drop(after_release.content, ["lifecycle_status", "claim", "assignee"]) ==
+               Map.drop(before.content, ["lifecycle_status", "claim", "assignee"])
+
+      assert after_release.events == before.events + 1
+
+      assert Repo.aggregate(
+               from(e in MutationEvent,
+                 where: e.doc_id == ^task.doc_id and e.mutation == "task.released"
+               ),
+               :count,
+               :id
+             ) == 1
+    end
+
+    test "missing fields are 400 and a missing task is 404", %{conn: conn} do
+      worker_missing =
+        conn
+        |> authed()
+        |> post("/v1/tasks/absent/release", Jason.encode!(%{observed_epoch: 1}))
+        |> json_response(400)
+
+      assert worker_missing == %{
+               "ok" => false,
+               "reason" => "bad_request",
+               "message" => "worker_id is required"
+             }
+
+      epoch_invalid =
+        build_conn()
+        |> authed()
+        |> post(
+          "/v1/tasks/absent/release",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: "nope"})
+        )
+        |> json_response(400)
+
+      assert epoch_invalid["reason"] == "bad_request"
+      assert epoch_invalid["message"] == "observed_epoch is required"
+
+      missing =
+        build_conn()
+        |> authed()
+        |> post(
+          "/v1/tasks/absent/release",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: 1})
+        )
+        |> json_response(404)
+
+      assert missing["reason"] == "not_found"
+    end
+
+    test "wrong holder and stale epoch return exact 409 reasons without mutation",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("release-fence"), scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "worker-1", scope)
+      before = release_snapshot(claimed)
+      epoch = get_in(before.content, ["claim", "epoch"])
+
+      wrong_holder =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/release",
+          Jason.encode!(%{worker_id: "worker-2", observed_epoch: epoch})
+        )
+        |> json_response(409)
+
+      assert wrong_holder["reason"] == "not_holder"
+      assert_release_unchanged(claimed, before)
+
+      stale_epoch =
+        build_conn()
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/release",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch + 1})
+        )
+        |> json_response(409)
+
+      assert stale_epoch["reason"] == "fenced_off"
+      assert_release_unchanged(claimed, before)
+      assert BarkparkWeb.TasksController.Params.reason_to_string(:stale_claim) == "stale_claim"
+    end
+
+    test "open, blocked, done, and cancelled targets return not_in_progress without mutation",
+         %{scope: scope} do
+      for status <- ~w(open blocked done cancelled) do
+        task = mk_task!(uniq("release-#{status}"), scope, %{"lifecycle_status" => status})
+        before = release_snapshot(task)
+
+        payload =
+          build_conn()
+          |> authed()
+          |> post(
+            "/v1/tasks/#{task.doc_id}/release",
+            Jason.encode!(%{worker_id: "worker-1", observed_epoch: 1})
+          )
+          |> json_response(409)
+
+        assert payload["reason"] == "not_in_progress:#{status}"
+        assert_release_unchanged(task, before)
+      end
     end
   end
 
