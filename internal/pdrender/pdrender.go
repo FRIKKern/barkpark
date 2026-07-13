@@ -373,5 +373,14 @@ func DefaultRegistry(theme Theme) *Registry {
 	// The composition capstone of the slate (see dashboard.go); $span in a child
 	// query rides INERT (a future Elixir resolver wave reads it, never pdrender).
 	r.blocks["dashboard"] = dashboardRenderer{reg: r}
+
+	// ── chat structural blocks (dual-surface tool/todo/thinking rows) ──────────
+	// Terminal twins of Studio's bespoke chat tool-row HEEx (chat_tool_renderer.ex),
+	// promoted to PortableDoc block types so the same row renders on BOTH surfaces
+	// (Law 1). Server carries the precomputed diff lines / todo list / token count
+	// on the block; pdrender never re-derives (see chat_blocks.go).
+	r.blocks["chat-tool-diff"] = chatToolDiffRenderer{}
+	r.blocks["chat-todo"] = chatTodoRenderer{}
+	r.blocks["chat-thinking"] = chatThinkingRenderer{}
 	return r
 }

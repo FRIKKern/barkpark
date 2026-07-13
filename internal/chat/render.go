@@ -56,12 +56,24 @@ var cardRoles = map[string]string{
 	"plan":     "Plan",
 }
 
-// structuralRoles are the Recorder's provenance rows that the MVP transcript
-// shows as ONE dim line rather than full render — their settled truth is a
-// heading in the conversation, not a body the reader reads (the assistant reply
-// carries the substance). Never hidden (that would be a silent gap); dimmed.
+// blockRoles are the structural rows now promoted to dual-surface PortableDoc
+// block types (charter D25, Law 1): the server carries a typed block
+// (chat-tool-diff / chat-todo / chat-thinking) on the message, so the transcript
+// renders a REAL diff / checklist / thought row through the same pdrender seam
+// the assistant reply body uses — no longer collapsed to one dim line. When the
+// block is absent (a mid-persist or thinner frame) the render degrades honestly
+// to the dim provenance line, never a blank or a crash.
+var blockRoles = map[string]bool{
+	"tool": true, "todo": true, "thinking": true,
+}
+
+// structuralRoles are the remaining Recorder provenance rows that the MVP
+// transcript still shows as ONE dim line rather than full render — their settled
+// truth is a heading in the conversation, not a body the reader reads. Never
+// hidden (that would be a silent gap); dimmed. `system` has no bespoke block
+// type (nothing visual to promote), so it stays here.
 var structuralRoles = map[string]bool{
-	"tool": true, "todo": true, "thinking": true, "system": true,
+	"system": true,
 }
 
 // bodyWidth is the wrap measure for prose: capped so terminal typography stays
@@ -122,12 +134,10 @@ func renderMessage(width int, msg Message) []string {
 		return renderUserEcho(w, msg.SourceMarkdown)
 	case cardRoles[msg.Role] != "":
 		return readonlyCard(w, cardRoles[msg.Role], cardBody(msg))
+	case blockRoles[msg.Role]:
+		return renderStructuralDoc(chatRegistry, width, msg)
 	case structuralRoles[msg.Role]:
-		label := msg.Role
-		if s := firstLine(msg.SourceMarkdown); s != "" {
-			label += ": " + s
-		}
-		return []string{dimStyle.Render(truncate("· "+label, w))}
+		return []string{dimStyle.Render(truncate(provenanceLabel(msg), w))}
 	default:
 		// Forward-compatible: an unknown role still renders its source, never a
 		// crash or a blank (same tolerance pdrender's decoder shows).
@@ -155,6 +165,37 @@ func renderAssistantDoc(reg *pdrender.Registry, width int, msg Message) []string
 		out = append(out, strings.TrimRight(ln, " "))
 	}
 	return out
+}
+
+// renderStructuralDoc renders a tool/todo/thinking row through pdrender on the
+// typed block the server emits (charter D25, Law 1): chat-tool-diff → a colored
+// line diff, chat-todo → the ☒/◐/☐ checklist card, chat-thinking → the dim
+// thought row — the SAME block types Studio renders, drawn in the terminal.
+// When the block is absent or undecodable (a mid-persist or thinner frame) it
+// degrades honestly to the one-line dim provenance label, never a blank line or
+// a crash — the same forward-compat tolerance the assistant path shows.
+func renderStructuralDoc(reg *pdrender.Registry, width int, msg Message) []string {
+	w := bodyWidth(width)
+	blocks, err := pdrender.Decode([]byte(msg.Blocks))
+	if err != nil || len(blocks) == 0 {
+		return []string{dimStyle.Render(truncate(provenanceLabel(msg), w))}
+	}
+	doc := reg.RenderDoc(blocks, pdrender.RenderCtx{Width: w, Profile: chatProfile})
+	out := make([]string, 0, strings.Count(doc, "\n")+1)
+	for _, ln := range strings.Split(doc, "\n") {
+		out = append(out, strings.TrimRight(ln, " "))
+	}
+	return out
+}
+
+// provenanceLabel is the honest one-line fallback for a structural row that has
+// no renderable block: the role, plus the first line of its source when present.
+func provenanceLabel(msg Message) string {
+	label := "· " + msg.Role
+	if s := firstLine(msg.SourceMarkdown); s != "" {
+		label += ": " + s
+	}
+	return label
 }
 
 // renderUserEcho paints a user message as a marked, wrapped prompt echo.
