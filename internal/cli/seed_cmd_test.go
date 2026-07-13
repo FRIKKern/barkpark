@@ -167,6 +167,89 @@ func TestFakeValueArrayOfPopulatesFromOf(t *testing.T) {
 	}
 }
 
+// fixtureArrayOfUnionSchema mirrors a REAL registered schema whose arrayOf field
+// declares `of` as a JSON ARRAY of member shapes — the tickets plugin's
+// `"of" => [%{"type" => "object"}]` (api/lib/barkpark/plugins/tickets.ex). Because
+// `bp seed` fetches and parses EVERY type in the dataset (seedFetchSchema), ONE
+// such schema anywhere must not abort the parse.
+const fixtureArrayOfUnionSchema = `{
+  "name": "ticket",
+  "fields": [
+    {"name": "title", "type": "string"},
+    {"name": "events", "type": "arrayOf", "of": [{"type": "object"}, {"type": "string"}]}
+  ]
+}`
+
+// TestSeedFieldParsesArrayShapedOf is the fail-before for the `of:[]` unmarshal
+// bug. Before seedField grew an `of`-tolerant UnmarshalJSON, a plain
+// `Of *seedField` made encoding/json abort with
+// `json: cannot unmarshal array into Go struct field seedField.schemas.fields.of`
+// on ANY schema declaring an array-shaped `of` — which broke `bp seed <type>`
+// (and thus the AGENT-ONRAMPS CREATE arc) against a clean instance carrying such
+// a schema. This test parses the field AND the exact schema-fetch envelope shape
+// (schemas[].fields[].of) that errored, and asserts the union collapses to its
+// first member so the generator still fabricates a representative element.
+func TestSeedFieldParsesArrayShapedOf(t *testing.T) {
+	var s seedSchema
+	if err := json.Unmarshal([]byte(fixtureArrayOfUnionSchema), &s); err != nil {
+		t.Fatalf("array-shaped `of` must parse (of:[] regression): %v", err)
+	}
+
+	var events *seedField
+	for i := range s.Fields {
+		if s.Fields[i].Name == "events" {
+			events = &s.Fields[i]
+		}
+	}
+	if events == nil || events.Type != "arrayOf" {
+		t.Fatalf("events arrayOf field not parsed: %+v", s.Fields)
+	}
+	if events.Of == nil || events.Of.Type != "object" {
+		t.Fatalf("array `of` should collapse to its first member (type object), got %+v", events.Of)
+	}
+
+	// The precise path that used to error: the /v1/schemas fetch envelope,
+	// schemas[].fields[].of — this is what seedFetchSchema unmarshals.
+	envelope := `{"schemas":[` + fixtureArrayOfUnionSchema + `]}`
+	var env struct {
+		Schemas []seedSchema `json:"schemas"`
+	}
+	if err := json.Unmarshal([]byte(envelope), &env); err != nil {
+		t.Fatalf("schema-fetch envelope with an array `of` must parse: %v", err)
+	}
+
+	// generateDoc must not panic and must emit a JSON-marshalable array for the
+	// union field (populated from the collapsed first member shape).
+	doc := generateDoc(env.Schemas[0], 1)
+	if _, ok := doc["events"].([]any); !ok {
+		t.Errorf("events = %T, want []any", doc["events"])
+	}
+	if _, err := json.Marshal(doc); err != nil {
+		t.Errorf("generated doc with union arrayOf does not marshal: %v", err)
+	}
+}
+
+// TestSeedFieldOfObjectStillParses guards the common single-shape OBJECT `of`
+// path through the new custom UnmarshalJSON (the shape every core/task/paper
+// schema uses) — a reference element must round-trip to a populated array.
+func TestSeedFieldOfObjectStillParses(t *testing.T) {
+	const objectOf = `{"name":"related","type":"arrayOf","of":{"type":"reference","refType":"paper"}}`
+	var f seedField
+	if err := json.Unmarshal([]byte(objectOf), &f); err != nil {
+		t.Fatalf("object-shaped `of` must parse: %v", err)
+	}
+	if f.Of == nil || f.Of.Type != "reference" || f.Of.RefType != "paper" {
+		t.Fatalf("object `of` not parsed: %+v", f.Of)
+	}
+	arr, ok := fakeValue(f, 1).([]any)
+	if !ok || len(arr) != 2 {
+		t.Fatalf("arrayOf-of-reference should populate 2 elements, got %T len=%d", fakeValue(f, 1), len(arr))
+	}
+	if ref, ok := arr[0].(map[string]any); !ok || ref["_ref"] != "seed-paper-1" {
+		t.Errorf("element 0 = %v, want {_ref: seed-paper-1}", arr[0])
+	}
+}
+
 // TestFakeValueRichTextIsPortableText asserts richText fabricates a Portable
 // Text block ARRAY (not a plain string), so the seeded value renders through
 // @barkpark/react's PortableText and matches the shape Studio stores. `text`

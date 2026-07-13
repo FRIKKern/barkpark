@@ -769,3 +769,21 @@ if config_env() == :prod do
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
 end
+
+# Ephemeral dev database override (CREATE-quickstart smoke, agent-onramps D24).
+# `config/dev.exs` hardcodes the dev Repo to `barkpark_dev`; DATABASE_URL is only
+# honored under :prod (above). The CREATE-quickstart smoke boots a THROWAWAY
+# clean-profile server to prove the fresh-user AUTH+CREATE arc and drops its DB on
+# exit — it must NEVER reuse (and drop) a developer's real `barkpark_dev`. When
+# `BARKPARK_DEV_DATABASE` is set, point the dev Repo at that ephemeral database;
+# unset (the default for every normal `mix phx.server` / `mix test`) leaves
+# `barkpark_dev` untouched. Additive and dev-scoped: no other env is affected.
+if config_env() == :dev do
+  case System.get_env("BARKPARK_DEV_DATABASE") do
+    db when is_binary(db) and db != "" ->
+      config :barkpark, Barkpark.Repo, database: db
+
+    _ ->
+      :ok
+  end
+end
