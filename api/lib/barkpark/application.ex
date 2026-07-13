@@ -138,6 +138,22 @@ defmodule Barkpark.Application do
   def child_specs(plugin_children, oban_config, sync_children, self_update_children)
       when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
     [
+      # Dedicated Finch pool for the auth/login OUTBOUND path (Felix W10,
+      # task-felix-outbound-pool-isolation + task-felix-sso-explicit-timeout).
+      # The 5 auth-outbound clients (SSO OIDC/Social, github/indx/bokbasen
+      # plugin-auth token fetches) route through THIS pool via `finch:
+      # Barkpark.Auth.Finch` instead of Req's global default (Req.Finch).
+      # DEFENSE-IN-DEPTH, not a crash-fix: Finch partitions connection slots
+      # per {scheme,host,port}, so a webhook/CDN storm to other hosts already
+      # cannot drain the IdP host's slots on the shared instance. The value is
+      # (a) an owned/tunable/observable connection budget for the login path
+      # decoupled from the global default (mirrors Sync.Finch:~51 below),
+      # (b) bounds BEAM-global socket/FD/ephemeral-port pressure under a real
+      # concurrent storm, (c) deterministically isolates the same-host edge (a
+      # self-hosted IdP sharing a reverse-proxy host with a webhook target).
+      # UNCONDITIONAL + no Repo dep — free idle pool, always up before the
+      # Endpoint so the first login never races an unstarted pool.
+      {Finch, name: Barkpark.Auth.Finch, pools: %{default: [size: 10, count: 1]}},
       Barkpark.RateLimiter,
       BarkparkWeb.Telemetry,
       # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]

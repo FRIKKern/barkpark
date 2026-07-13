@@ -145,6 +145,9 @@ defmodule Barkpark.Plugins.Indx.Auth do
         headers: [{"content-type", "application/json"}],
         body: body,
         receive_timeout: 30_000,
+        # Route the Indx login onto the dedicated auth-outbound Finch pool
+        # (Felix W10) — its token fetch is on the login/retriever hot path.
+        finch: Barkpark.Auth.Finch,
         retry: false,
         decode_body: false
       )
