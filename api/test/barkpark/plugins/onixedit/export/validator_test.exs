@@ -7,7 +7,9 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ValidatorTest do
   libxml2-utils before `mix test`, so the gate runs by default in CI.
   """
 
-  use ExUnit.Case, async: true
+  # async: false — the resource-bound tests toggle the global `:barkpark, Validator`
+  # env (bin/timeout/max_bytes overrides), same race concern as magick_test.exs.
+  use ExUnit.Case, async: false
 
   alias Barkpark.Plugins.OnixEdit.Export
   alias Barkpark.Plugins.OnixEdit.Export.Validator
@@ -20,6 +22,32 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ValidatorTest do
     else
       {:skip, "xmllint not on PATH — install libxml2-utils to run validator suite"}
     end
+  end
+
+  # Snapshot/restore the module env so a bound-test override never leaks into the
+  # real-xmllint tests (which read no config and must see the default resolution).
+  setup do
+    prev = Application.get_env(:barkpark, Validator)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, Validator, prev),
+        else: Application.delete_env(:barkpark, Validator)
+    end)
+
+    :ok
+  end
+
+  defp put_validator_cfg(overrides), do: Application.put_env(:barkpark, Validator, overrides)
+
+  # An executable /bin/sh stub standing in for xmllint via the `bin:` override, so
+  # the deadline is testable with no real libxml2 behaviour.
+  defp write_stub(body) do
+    path = Path.join(System.tmp_dir!(), "xmllint_stub_#{System.unique_integer([:positive])}.sh")
+    File.write!(path, "#!/bin/sh\n" <> body)
+    File.chmod!(path, 0o755)
+    on_exit(fn -> File.rm_rf(path) end)
+    path
   end
 
   defp load_fixture(name) do
@@ -82,6 +110,35 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ValidatorTest do
       book = load_fixture("minimal-book")
       {:ok, xml} = export_xml(book)
       assert :ok = Export.validate_against_xsd(xml)
+    end
+  end
+
+  describe "resource bounds" do
+    test "oversized XML is rejected by the size cap BEFORE any tmp write or shell-out" do
+      put_validator_cfg(max_bytes: 64)
+      oversized = String.duplicate("<Padding/>", 100)
+
+      assert byte_size(oversized) > 64
+      assert {:error, [reason]} = Validator.validate_xsd(oversized)
+      assert reason =~ "over the"
+      assert reason =~ "cap"
+    end
+
+    # FAIL-BEFORE: run_xmllint called System.cmd directly, so this sleeper blocks
+    # the export/Bokbasen worker for the full 2s and returns {out, 0} → :ok.
+    # PASS-AFTER: the child is brutal-killed at the 150ms deadline → bounded error,
+    # returned well under the 2s stub exit.
+    test "a hung xmllint is time-boxed: bounded error AND the wall-clock is cut" do
+      slow = write_stub("sleep 2\nexit 0\n")
+      put_validator_cfg(bin: slow, timeout_ms: 150)
+
+      {micros, result} = :timer.tc(fn -> Validator.validate_xsd("<ONIXMessage/>") end)
+
+      assert {:error, [reason]} = result
+      assert reason =~ "deadline"
+
+      assert micros < 1_500_000,
+             "validation blocked #{micros}µs — the deadline did not bound xmllint"
     end
   end
 
