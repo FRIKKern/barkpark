@@ -1,0 +1,69 @@
+---
+import Base from '../layouts/Base.astro'
+import {
+  resolveEnv,
+  createBarkparkClient,
+  fetchFlagshipDoc,
+} from '../lib/barkpark'
+
+// All of this runs at BUILD time (Astro static output). A missing required env
+// var throws here and fails the build loudly; a network/auth error from the
+// content link throws too — a broken build must never reach visitors.
+const env = resolveEnv()
+const bp = createBarkparkClient(env)
+const { doc } = await fetchFlagshipDoc(bp, env)
+
+const pageTitle = doc ? `${doc.title} · Barkpark Astro starter` : 'Barkpark Astro starter'
+---
+
+<Base
+  title={pageTitle}
+  buildId={env.buildId}
+  contentRev={env.contentRev}
+  docId={doc?._id ?? ''}
+  docTitle={doc?.title ?? ''}
+>
+  <header>
+    <p style="margin:0 0 .25rem;color:var(--muted);font-size:.85rem;letter-spacing:.04em;text-transform:uppercase;">
+      Barkpark Cloud · Astro
+    </p>
+    <h1 style="margin:0 0 1.5rem;font-size:2rem;line-height:1.2;">
+      Content, built right next to Phoenix.
+    </h1>
+  </header>
+
+  {
+    doc ? (
+      <article
+        style="border:1px solid var(--border);background:var(--card);border-radius:12px;padding:1.5rem;"
+      >
+        <p style="margin:0 0 .5rem;color:var(--muted);font-size:.8rem;">
+          Fetched at build time · newest <code>{env.docType}</code>
+        </p>
+        <h2 style="margin:0 0 .5rem;font-size:1.35rem;">{doc.title}</h2>
+        <p style="margin:0;color:var(--muted);font-size:.9rem;">
+          <code>{doc._id}</code>
+        </p>
+      </article>
+    ) : (
+      <article
+        style="border:1px dashed var(--border);border-radius:12px;padding:1.5rem;color:var(--muted);"
+      >
+        <h2 style="margin:0 0 .5rem;font-size:1.15rem;color:var(--fg);">
+          No <code>{env.docType}</code> documents yet
+        </h2>
+        <p style="margin:0;">
+          The content link is live, but this dataset has no published
+          <code>{env.docType}</code> documents. Publish one in Barkpark and
+          redeploy — the site rebuilds against fresh content.
+        </p>
+      </article>
+    )
+  }
+
+  <footer style="margin-top:2.5rem;color:var(--muted);font-size:.8rem;">
+    <p style="margin:0;">
+      build <code>{env.buildId}</code> · content rev <code>{env.contentRev}</code>
+    </p>
+  </footer>
+</Base>
