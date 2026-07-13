@@ -4222,42 +4222,106 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "Build the rail"
     end
 
-    test "a fully-settled rail sweeps after the linger; a stale or still-live sweep is a no-op",
+    # Per-entry auto-dismiss (charter D47): each SETTLED entry ages out on its
+    # OWN ~90s timer, independent of siblings. The three tests below pin the
+    # contract the wholesale 5-min sweep could not honor — a single running
+    # agent used to pin every completed sibling on screen forever.
+    test "a settled entry auto-dismisses on its own while a running sibling stays put",
          %{view: view, sid: sid} do
-      launch =
+      # Two agents launch, both running.
+      send_frame(
+        sid,
         bg_changed([
-          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "fleet"}
+          %{"task_id" => "t1", "task_type" => "local_workflow", "description" => "first"},
+          %{"task_id" => "t2", "task_type" => "local_workflow", "description" => "second"}
         ])
+      )
 
-      done = bg_changed([])
+      html = rail_html(view)
+      assert html =~ ~s(data-rail-task="t1")
+      assert html =~ ~s(data-rail-task="t2")
 
-      send_frame(sid, launch)
+      # t1 vanishes from the snapshot ⇒ completed; t2 keeps running.
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t2", "task_type" => "local_workflow", "description" => "second"}
+        ])
+      )
 
-      # A sweep fired while the task still runs must not clear the rail — the
-      # all-terminal guard holds regardless of the signature it rode in with.
-      {:claude_chat_event, launch_ev} = launch
-      running_rail = StudioChat.rail_apply_background(%{}, launch_ev)
-      send(view.pid, {:rail_sweep, StudioChat.rail_signature(running_rail)})
-      assert render(view) =~ ~s(data-rail-status="running")
+      rail = lv_assigns(view)[:rail]
+      assert rail["t1"]["status"] == "completed"
+      assert rail["t2"]["status"] == "running"
 
-      # The task vanishes from the snapshot ⇒ completed, rail still lingers.
-      send_frame(sid, done)
-      assert render(view) =~ ~s(data-rail-status="completed")
+      # t1's per-entry prune fires (its armed signature still matches): t1 leaves
+      # the on-screen rail, t2 — still running — is untouched.
+      send(view.pid, {:rail_prune_entry, "t1", StudioChat.rail_entry_signature(rail["t1"])})
 
-      # Rebuild the settled rail through the SAME pure folds (D47 shared-fold
-      # law) — the signature excludes seq/token churn, so it matches the view's.
-      {:claude_chat_event, done_ev} = done
+      html = rail_html(view)
+      refute html =~ ~s(data-rail-task="t1")
+      assert html =~ ~s(data-rail-task="t2")
+      # Header count decremented; the rail region survives because t2 runs.
+      assert map_size(lv_assigns(view)[:rail]) == 1
+      assert render(view) =~ ~s(data-role="agents-rail")
 
-      settled_sig =
-        StudioChat.rail_signature(StudioChat.rail_apply_background(running_rail, done_ev))
+      # Replay law (charter D47): the STORE still carries BOTH entries — the
+      # prune only ended t1's screen residency, it never rewrote rail_snapshot.
+      persisted = StudioChat.get_session(sid).rail_snapshot
+      assert Map.has_key?(persisted, "t1")
+      assert Map.has_key?(persisted, "t2")
+    end
 
-      # A STALE signature (rail changed since that timer was armed) is a no-op.
-      send(view.pid, {:rail_sweep, ["bogus"]})
-      assert render(view) =~ ~s(data-rail-status="completed")
+    test "a prune for a STILL-RUNNING entry is a guarded no-op", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t1", "task_type" => "local_workflow", "description" => "runs"}
+        ])
+      )
 
-      # The matching sweep clears the rail from the screen.
-      send(view.pid, {:rail_sweep, settled_sig})
-      refute render(view) =~ ~s(data-role="agents-rail")
+      rail = lv_assigns(view)[:rail]
+      assert rail["t1"]["status"] == "running"
+
+      # Even with a signature matching the CURRENT running entry, the terminal
+      # guard rejects the prune — a running agent is never dismissed.
+      send(view.pid, {:rail_prune_entry, "t1", StudioChat.rail_entry_signature(rail["t1"])})
+
+      assert rail_html(view) =~ ~s(data-rail-task="t1")
+      assert lv_assigns(view)[:rail]["t1"]["status"] == "running"
+    end
+
+    test "a re-run resets the entry so a STALE prune cannot drop the freshly-running row",
+         %{view: view, sid: sid} do
+      # Launch + settle t1, capturing the signature its prune was armed against.
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t1", "task_type" => "local_workflow", "description" => "job"}
+        ])
+      )
+
+      send_frame(sid, bg_changed([]))
+      settled = lv_assigns(view)[:rail]["t1"]
+      assert settled["status"] == "completed"
+      stale_sig = StudioChat.rail_entry_signature(settled)
+
+      # BEFORE that 90s timer fires, the SAME task_id re-runs — a fresh bg
+      # snapshot lists it again, flipping it back to "running".
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t1", "task_type" => "local_workflow", "description" => "job"}
+        ])
+      )
+
+      assert lv_assigns(view)[:rail]["t1"]["status"] == "running"
+
+      # The stale prune (armed against the settled signature) now fires. It MUST
+      # be a no-op: the entry is live again and its signature moved.
+      send(view.pid, {:rail_prune_entry, "t1", stale_sig})
+
+      assert rail_html(view) =~ ~s(data-rail-task="t1")
+      assert lv_assigns(view)[:rail]["t1"]["status"] == "running"
     end
 
     test "a RUNNING cycle reads as a journey: aggregate header, settled phases, breathing active phase, dim futures",

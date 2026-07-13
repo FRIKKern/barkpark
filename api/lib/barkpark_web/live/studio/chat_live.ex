@@ -102,12 +102,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # durable history (replay law, D7); this trims only the in-memory display view.
   @transcript_window 500
 
-  # How long a fully-settled agents rail (every entry terminal) lingers below
-  # the composer before it clears — long enough to read the fleet's outcome,
-  # short enough that a done fleet stops squatting under the input forever.
-  # The rail STATE survives in the store (replay law, charter D47) — this
-  # only ends its screen residency.
-  @rail_linger_ms 5 * 60_000
+  # How long a SETTLED rail entry lingers on screen after IT reaches a terminal
+  # status before it auto-dismisses (fades out) — INDEPENDENTLY of its siblings.
+  # Long enough to read that one agent's outcome, short enough that a done agent
+  # stops squatting under the composer while others still run. Each entry arms
+  # its own prune when it settles (charter D47); running siblings are untouched,
+  # the rail header count decrements as rows drop, and the rail vanishes only
+  # when its LAST entry is pruned. This replaced the old wholesale 5-min sweep,
+  # which could only clear the rail once EVERY entry was terminal — so a single
+  # still-running agent pinned every completed sibling on screen indefinitely.
+  # The rail STATE survives in the store (replay law, charter D47) — this only
+  # ends an entry's SCREEN residency, never its stored `rail_snapshot`.
+  @rail_entry_linger_ms 90_000
 
   # The exact deny message a "Keep planning" click sends back to the model
   # (charter D34, proven on the real binary: the model re-plans and the next
@@ -1528,15 +1534,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
-  # The linger timer fired: clear a rail that is STILL fully settled. Guarded by
-  # the rail signature (same stale-timer pattern as :interrupt_timeout) — any
-  # new launch or status flip since scheduling changed the sig, making this a
-  # no-op; the fresh fold scheduled its own sweep. Clearing only drops the
-  # on-screen assign; the stored rail_snapshot keeps the replay law intact.
-  def handle_info({:rail_sweep, sig}, socket) do
-    if sig == socket.assigns.rail_sig and StudioChat.rail_all_terminal?(socket.assigns.rail),
-      do: {:noreply, assign(socket, rail: %{}, rail_sig: StudioChat.rail_signature(%{}))},
-      else: {:noreply, socket}
+  # A per-entry linger timer fired (charter D47): auto-dismiss THAT ONE entry
+  # iff it is still present, still terminal, and its per-entry signature is
+  # UNCHANGED since scheduling. The signature guard is the re-run defense — if
+  # the same task_id went non-terminal again (or settled to a different tree)
+  # its signature moved, so this stale prune is a no-op and the re-settle armed
+  # a fresh one. Running siblings are never touched; dropping the last entry
+  # makes `map_size` hit 0 so the rail region vanishes on its own. Only the
+  # on-screen assign is trimmed — the stored `rail_snapshot` keeps the replay
+  # law intact (the D47 store is never rewritten here).
+  def handle_info({:rail_prune_entry, key, sig}, socket) do
+    rail = socket.assigns.rail
+    entry = Map.get(rail, key)
+
+    if is_map(entry) and StudioChat.rail_terminal?(entry) and
+         StudioChat.rail_entry_signature(entry) == sig do
+      new_rail = Map.delete(rail, key)
+      {:noreply, assign(socket, rail: new_rail, rail_sig: StudioChat.rail_signature(new_rail))}
+    else
+      {:noreply, socket}
+    end
   end
 
   # A real port exit (exit_status frame). Run the shared honest teardown, and
@@ -2245,6 +2262,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
            in the primary tone, reusing the skeleton pulse keyframes — a live
            signal that collapses to a still report on completion. */
         .bp-chat-agent-run { animation: bp-skel-pulse 1.4s ease-in-out infinite; }
+        /* Rail per-entry auto-dismiss (charter D47): when a settled entry ages
+           out ~90s after it terminates, its row fades opacity and collapses its
+           height before the server diff drops it (phx-remove drives these three
+           classes). Best-effort chrome — no color literal, so studio-literal
+           stays green; if the transition is skipped the node still removes. */
+        .bp-chat-rail-leave {
+          transition: opacity 0.32s ease, max-height 0.32s ease, margin 0.32s ease;
+          overflow: hidden;
+        }
+        .bp-chat-rail-leave-start { opacity: 1; max-height: 200px; }
+        .bp-chat-rail-leave-end { opacity: 0; max-height: 0; margin: 0; }
       </style>
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
@@ -3179,8 +3207,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     ~H"""
     <div
+      id={"rail-entry-#{@entry["task_id"]}"}
       data-rail-task={@entry["task_id"]}
       data-rail-status={@entry["status"]}
+      phx-remove={
+        Phoenix.LiveView.JS.hide(
+          transition:
+            {"bp-chat-rail-leave", "bp-chat-rail-leave-start", "bp-chat-rail-leave-end"},
+          time: 320
+        )
+      }
       style="padding: 3px 0;"
     >
       <div class="text-xs" style="display: flex; align-items: baseline; gap: 6px;">
@@ -3783,9 +3819,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # adopt), so re-read the sidebar list once — the pending pill and the working
     # pill both stay honest on reopen.
     |> refresh_sessions()
-    # A reopened session whose rehydrated rail is already fully settled gets the
-    # same linger-then-clear as a live one — replay shows it, then it ages out.
-    |> schedule_rail_sweep()
+    # A reopened session's rehydrated terminal entries each get the same
+    # per-entry auto-dismiss a live one earns (charter D47) — replay shows the
+    # last-known rail, then each settled entry ages out ~90s later instead of
+    # re-squatting. `old_rail = %{}` treats every rehydrated entry as a fresh
+    # settle; running entries (never flipped by `interrupt_running_tasks/1`) are
+    # left alone. The stored `rail_snapshot` is untouched.
+    |> then(fn s -> schedule_entry_prunes(s, %{}, s.assigns.rail) end)
     # The Doing strip follows the SESSION's worker — re-read its held claims
     # off the ledger so a reopen shows in-flight task work immediately.
     |> assign(task_picker: nil)
@@ -5450,22 +5490,45 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp fold_rail(socket, new_rail) do
     sig = StudioChat.rail_signature(new_rail)
 
-    if sig == socket.assigns.rail_sig,
-      do: socket,
-      else: socket |> assign(rail: new_rail, rail_sig: sig) |> schedule_rail_sweep()
+    if sig == socket.assigns.rail_sig do
+      socket
+    else
+      old_rail = socket.assigns.rail
+
+      socket
+      |> assign(rail: new_rail, rail_sig: sig)
+      |> schedule_entry_prunes(old_rail, new_rail)
+    end
   end
 
-  # Once EVERY rail entry settles terminal, start the linger clock; the
-  # {:rail_sweep, sig} it sends re-checks against the then-current signature,
-  # so a rail that came back to life in the meantime is left alone. Scheduling
-  # is idempotent-enough: an extra timer from a later terminal fold just
-  # re-verifies the same guard.
-  defp schedule_rail_sweep(socket) do
-    if StudioChat.rail_all_terminal?(socket.assigns.rail) do
-      Process.send_after(self(), {:rail_sweep, socket.assigns.rail_sig}, @rail_linger_ms)
-    end
+  # Arm a per-entry auto-dismiss (charter D47) for each entry that JUST reached a
+  # terminal status in this fold — present-and-terminal in `new_rail`, and NOT
+  # already terminal in `old_rail`. Scheduling on the transition (not on every
+  # terminal entry every fold) means an entry's ~90s clock starts when IT
+  # settles and a later sibling flip never resets it. The prune carries the
+  # entry's per-entry signature so a re-run leaves the stale timer a guarded
+  # no-op (see the {:rail_prune_entry, …} handler). A reopened session passes
+  # `old_rail = %{}` so every already-terminal rehydrated entry ages out too
+  # instead of re-squatting. This never deletes the stored `rail_snapshot`.
+  defp schedule_entry_prunes(socket, old_rail, new_rail) do
+    Enum.each(new_rail, fn {key, entry} ->
+      if StudioChat.rail_terminal?(entry) and not rail_entry_terminal?(old_rail, key) do
+        Process.send_after(
+          self(),
+          {:rail_prune_entry, key, StudioChat.rail_entry_signature(entry)},
+          @rail_entry_linger_ms
+        )
+      end
+    end)
 
     socket
+  end
+
+  defp rail_entry_terminal?(rail, key) do
+    case Map.get(rail, key) do
+      entry when is_map(entry) -> StudioChat.rail_terminal?(entry)
+      _ -> false
+    end
   end
 
   # Rail entries in stable insertion order (seq), for a deterministic render.

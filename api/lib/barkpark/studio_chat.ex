@@ -704,7 +704,16 @@ defmodule Barkpark.StudioChat do
 
   def rail_signature(_), do: []
 
-  defp rail_entry_signature(entry) when is_map(entry) do
+  @doc """
+  The change-only signature of ONE rail entry (charter D47) — the same
+  token-churn-stripped term `rail_signature/1` folds per task_id, exposed so
+  ChatLive's per-entry auto-dismiss can arm a prune keyed on it. A status flip
+  (e.g. a re-run driving a settled entry back to `"running"`) or any structural
+  change yields a DIFFERENT term, so a stale prune scheduled against the old
+  signature is a guarded no-op; a token-only tick yields the SAME term. PURE.
+  """
+  @spec rail_entry_signature(any()) :: term()
+  def rail_entry_signature(entry) when is_map(entry) do
     %{
       "row" => entry["row"],
       "status" => entry["status"],
@@ -712,7 +721,7 @@ defmodule Barkpark.StudioChat do
     }
   end
 
-  defp rail_entry_signature(_), do: %{}
+  def rail_entry_signature(_), do: %{}
 
   # Keep only the STRUCTURE of a workflow tree — the phase titles, agent labels,
   # phase grouping, models, and states — and drop the token/usage churn that
