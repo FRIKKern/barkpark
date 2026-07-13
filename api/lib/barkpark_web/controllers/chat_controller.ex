@@ -27,15 +27,17 @@ defmodule BarkparkWeb.ChatController do
     * `:global` — a global-admin bearer keeps INSTANCE-WIDE authority (D21
       unchanged): it may list/read/control every chat session on the instance.
     * `{:workspace, ws}` — a workspace-bound `chat` Connector is CONFINED to the
-      sessions its workspace owns (`owner_workspace_id`). Every fetch is passed
-      through `authorize/2` before any store/runtime work, so a wrong-tenant read
-      joins the not-found oracle (`not_found/1`) — indistinguishable from a
-      missing id, NOT a distinct 403 — and the SSE `:events` route runs that
-      check BEFORE subscribing to `Recorder.topic/1`, so tenant B cannot join
-      tenant A's live stream by guessing a UUID.
+      sessions its workspace owns (`owner_workspace_id`). Every fetch runs through
+      `fetch_scoped/2` — the sealed store `get_session/2` (charter D17) — before
+      any store/runtime work, so a wrong-tenant read joins the not-found oracle
+      (`not_found/1`) — indistinguishable from a missing id, NOT a distinct 403 —
+      and the SSE `:events` route runs that check BEFORE subscribing to
+      `Recorder.topic/1`, so tenant B cannot join tenant A's live stream by
+      guessing a UUID.
 
-  Ownership is stamped at create from the scope (`owner_for/1`); a session an
-  admin creates is `nil`-owned (instance-global, visible only to `:global`).
+  Ownership is stamped at create by the store from the scope threaded into
+  `create_session/2`; a session an admin creates is `nil`-owned (instance-global,
+  visible only to `:global`).
 
   ## Secret safety (D23)
 
@@ -99,15 +101,16 @@ defmodule BarkparkWeb.ChatController do
     with {:ok, attrs} <- validate_create(params) do
       id = Ecto.UUID.generate()
 
-      case StudioChat.create_session(%{
-             id: id,
-             cwd: ClaudeChat.cwd(),
-             mode: attrs.mode,
-             # Stamp tenant ownership from the caller's scope (Connectors
-             # D18/D19a): a workspace Connector owns what it creates; an admin
-             # creates a `nil`-owned instance-global session.
-             owner_workspace_id: owner_for(scope(conn))
-           }) do
+      # Thread the caller's scope into the sealed store (charter D17/D18): the
+      # store stamps `owner_workspace_id` from the scope — a workspace Connector
+      # owns what it creates, an admin (`:global`) creates a `nil`-owned
+      # instance-global session. The scope is authoritative in the store, so it
+      # is passed as the second arg, NOT smuggled through `attrs` (the store
+      # overrides any owner in `attrs`).
+      case StudioChat.create_session(
+             %{id: id, cwd: ClaudeChat.cwd(), mode: attrs.mode},
+             scope(conn)
+           ) do
         {:ok, _session} ->
           if attrs.model, do: StudioChat.set_model_choice(id, attrs.model)
           if attrs.effort, do: StudioChat.set_effort_choice(id, attrs.effort)
@@ -136,12 +139,12 @@ defmodule BarkparkWeb.ChatController do
   @doc "List sessions in the sidebar shape (`list_sessions/1`); omits draft/choices."
   def index(conn, params) do
     with {:ok, archived?} <- validate_archived(params) do
-      scope = scope(conn)
-
-      sessions =
-        [archived: archived?]
-        |> StudioChat.list_sessions()
-        |> Enum.filter(&visible?(&1, scope))
+      # Scope the list AT THE DB (charter D15/D17): a workspace caller narrows to
+      # `owner_workspace_id == ^ws` via the partial index, so a tenant's own
+      # sessions are never starved out of the `@sidebar_cap` window by other
+      # tenants' more-recent sessions (which an after-the-fact in-memory filter
+      # would allow). `:global` stays unfiltered (admin sidebar unchanged).
+      sessions = StudioChat.list_sessions([archived: archived?], store_scope(scope(conn)))
 
       json(conn, %{sessions: Enum.map(sessions, &sidebar_json/1)})
     else
@@ -489,26 +492,17 @@ defmodule BarkparkWeb.ChatController do
 
   defp scope(conn), do: conn.assigns.chat_scope
 
+  # Map the controller's `chat_scope` onto the store funnel's `scope` arg
+  # (`:global | workspace_id binary`, charter D17): `{:workspace, ws}` → `ws`.
+  defp store_scope(:global), do: :global
+  defp store_scope({:workspace, ws}), do: ws
+
   # Fetch a session and confine it to the caller's scope — `nil` (⇒ 404) when the
-  # session does not exist OR is owned by another tenant.
-  defp fetch_scoped(id, scope) do
-    case StudioChat.get_session(id) do
-      %StudioChat.Session{} = session -> if visible?(session, scope), do: session, else: nil
-      _ -> nil
-    end
-  end
-
-  # A `:global` caller sees every session; a `{:workspace, ws}` caller sees only
-  # sessions its workspace owns.
-  defp visible?(_session, :global), do: true
-
-  defp visible?(%StudioChat.Session{} = session, {:workspace, ws}),
-    do: Map.get(session, :owner_workspace_id) == ws
-
-  # The owner stamped at create from the caller's scope (nil ⇒ instance-global,
-  # visible only to `:global`).
-  defp owner_for(:global), do: nil
-  defp owner_for({:workspace, ws}), do: ws
+  # session does not exist OR is owned by another tenant. Reads through the
+  # sealed store scope (charter D17) so a foreign/`:global` session is invisible
+  # at the DB — the store is the single enforcement point, the controller only
+  # threads the scope.
+  defp fetch_scoped(id, scope), do: StudioChat.get_session(id, store_scope(scope))
 
   # ─────────────────────────────────────────────────────────────────────────
   # writes: strict Recorder/ClaudeChat adapter
