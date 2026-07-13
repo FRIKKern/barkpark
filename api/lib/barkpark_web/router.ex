@@ -1460,6 +1460,27 @@ defmodule BarkparkWeb.Router do
     get("/revision/:dataset/:id", HistoryController, :show)
   end
 
+  # ── Claude chat transport (charter bp-chat-tui, D21-D24) — instance-global
+  # admin. `[:api, :require_admin]`: RequireToken + RequireAdmin gate the global
+  # `admin` permission BEFORE any UUID/store/runtime work; `:api` supplies
+  # AcceptBarkparkVendor, which rewrites a `text/event-stream` Accept so the SSE
+  # `:events` route negotiates JSON (D6) instead of 406-ing. No scoped chat
+  # routes and no tenancy filter exist — `chat_sessions`/`chat_messages` have no
+  # tenant/owner column (D21). A strict Recorder/ClaudeChat adapter: no
+  # adopt_sink, no launcher controls, no shed-and-close (see ChatController).
+  scope "/v1/chat", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    get("/sessions", ChatController, :index)
+    post("/sessions", ChatController, :create)
+    get("/sessions/:id", ChatController, :show)
+    patch("/sessions/:id", ChatController, :update)
+    post("/sessions/:id/messages", ChatController, :create_message)
+    post("/sessions/:id/interrupt", ChatController, :interrupt)
+    post("/sessions/:id/approval", ChatController, :approval)
+    get("/sessions/:id/events", ChatController, :events)
+  end
+
   # ── Revision restore — a WRITE (Revisions.restore_revision →
   # Content.upsert_document), so it carries the same :require_write gate as
   # /mutate. Split out of the token-only read scope above so a read/public-read
