@@ -160,3 +160,26 @@ XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2843,3D6DB5F
 Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2082,657F8CA
 
 XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2901,6FC7966
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:477,147AE63
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:536,15374D4
+SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:279,17E6A4F
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:305,197A003
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:326,3D7BA99
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:4170,4079D9A
+CI.System: Command Injection via `System` function,lib/barkpark/media/image_backend/magick.ex:67,4C97975
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:284,4CCC2D5
+Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/tenancy/workspace_bundle/archive.ex:38,4CE988E
+Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/studio_chat.ex:1786,5007D42
+SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:296,5607BD1
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:299,5868132
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:231,5C04A3E
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2107,603364D
+Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:453,6AFB241
+Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/studio_chat.ex:1812,6C777D3
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:250,6D6D3C
+Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/studio_chat.ex:1785,6E40B3E
+Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/tenancy/workspace_bundle/archive.ex:36,73FD054
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:291,755EA42
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:309,773228E
+Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:369,7E46C5D
+Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/studio_chat.ex:1837,94B637
