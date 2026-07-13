@@ -134,7 +134,9 @@ defmodule Barkpark.Application do
   Indx (Auth→Recovery) before Oban; PubSub before the Sheets/StudioChat tiers
   and the Endpoint; Endpoint last.
   """
-  @spec child_specs(list(), keyword(), list(), list()) :: [Supervisor.child_spec() | {module(), term()} | module()]
+  @spec child_specs(list(), keyword(), list(), list()) :: [
+          Supervisor.child_spec() | {module(), term()} | module()
+        ]
   def child_specs(plugin_children, oban_config, sync_children, self_update_children)
       when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
     [
@@ -144,6 +146,10 @@ defmodule Barkpark.Application do
       # (cloud-console W5). Up before the Endpoint so early traffic is counted;
       # a pure ETS-backed window, no Repo dependency.
       BarkparkWeb.RequestStats,
+      # Always-on Linux-host vitals sampler for the Studio bottom bar. Core /
+      # plugin-independent (unlike Pulse.Metrics), no Repo dependency; reads
+      # :os_mon + /proc every few seconds and broadcasts on "server_vitals".
+      Barkpark.HostVitals.Sampler,
       Barkpark.Repo,
       Barkpark.Vault,
       # WI1: plugin registry — must come up before workers/endpoint so any
