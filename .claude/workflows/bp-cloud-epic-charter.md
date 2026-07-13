@@ -224,50 +224,6 @@ NEW `task-felix-a9adc82f-reopen-wall-time-measure` (the unmet #2390 N=2000 measu
 
 ## Wave log
 
-<<<<<<< HEAD
-### Wave 2026-07-11 — the live-smoke wave (Review debrief, grade A-)
-
-**All four slices landed; the live-smoke axis is closed to the ONE named human gate.**
-
-- **azh-w8-consume-spec-hints** — MERGED #2609. Resurrect consumes the archived shape
-  hint (pin > hint > provider default, same-provider only, field-by-field), 7-subtest
-  precedence matrix incl. both owed refutations. Review found ONE adjacent latent
-  defect the slice's own "concrete base" claim papered over: the resurrect create had
-  NO image at all (`hcloud server create --image ""` would fail every ladder
-  candidate). Fixed as follow-up **PR #2614** (task `azh-resurrect-image-fill`):
-  FreshSpec parity with provision.go + FakeProvider.CreatedSpecs provider-boundary
-  assertions that also prove the hint at the actual provider.Create frame (closing
-  the builder's declared one-frame gap). LEAD: merge #2614 before the human gate runs.
-- **azh-azure-ssh-user-fix** — PR #2610 OPEN, review-approved unchanged (final branch
-  = the original). D56 delivered exactly: SSHStepRunner.Sudo + restoreRunner flips
-  barkpark+sudo for azure ONLY; hetzner/warm-pool/deploy-feeder byte-identity refute-
-  tested at the argv level; WaitReady probes without sudo (deliberate, correct).
-  Merges clean with #2614 (combined gate re-proven green). One pre-existing gap found
-  BEYOND the slice: restoreFreshenStep(azure) tests for /opt/barkpark/deploy/
-  azure-base-install.sh on a bare VM whose repo only gets cloned BY that script —
-  chicken-and-egg filed as `azh-azure-freshen-bootstrap` (p2, should land before the
-  human gate's azure leg).
-- **azh-w6-live-agent-smoke** — DONE (evidence). Beat proven from birth on a fresh
-  warm-pool box, both stale clocks, 6-zone DOM pass, product-path teardown; the
-  finishing worker also repaired the prior orphaned run's off-by-one stamps and filed
-  the real 502 finding (`azh-archives-502-unconfigured-finding`). Reviewer closed the
-  task (all 5 criteria met, nothing merge-gated — leaving it in_progress was the one
-  ledger omission).
-- **azh-w7-live-resurrect-smoke** — DONE. --fast lifecycle round-trip live (33s
-  archive, 46s resurrect), drivability survey, recipes verified on
-  `azh-go-live-human-gate`. Its sole open criterion (exact-baseline after-audit) was
-  blocked only by w6's then-live box; reviewer re-ran the two-token audit post-
-  teardown: **servers:6, archives:4, findings:7 — exact Decide baseline**, sealed and
-  closed. Zero paid residue across the whole wave.
-
-**Next wave**: (1) lead merges #2610 + #2614, closes their merge-gated criteria;
-(2) `azh-go-live-human-gate` is the SOLE remainder of the live-smoke axis — 4 S3 vars
-+ Azure SP 4-tuple + manual cp-deploy, recipes verified live; (3) land
-`azh-azure-freshen-bootstrap` BEFORE the human gate's azure leg (bare-VM chicken-and-
-egg would waste the human's shot); (4) backlog: `azh-archives-502-unconfigured-finding`,
-`azh-audit-dns-token-hint`, `azh-w3-pricing-live-join-verify`, roadmap tail rollup.
-Wave Paper: `azure-hetzner-hosting-epic-wave-2026-07-11`.
-=======
 - **Wave 6 — 2026-07-13 — DECIDED (building).** Ratified D23–D31. Two opus slices under
   `task-96a908af98698118`, both linked to `felix-pristine-wave-6-2026-07-13`: ledger restamp
   (verify-and-close, claim→close not raw mutate) and async flip (land the 55-file subset off
@@ -280,7 +236,6 @@ Wave Paper: `azure-hetzner-hosting-epic-wave-2026-07-11`.
   Backlog seeded: root.html.heex durable skip, interop resource-bound sweep. Phantom-media parked.
 - **Wave 4 — 2026-07-13 — SHIPPED (grade recorded prior).** Magick bound #2868, bokbasen
   mount-gate #2869, sobelow durable inline skip #2870 — all merged to origin/main.
->>>>>>> 7fa8cc62 (docs(felix-epic): Wave 6 decisions D23-D31 — FINISH the two unlanded wave-5 slices (restamp verify-and-close, async flip land))
 
 ### Wave 6 landed (2026-07-13, steward) — grade A-
 
