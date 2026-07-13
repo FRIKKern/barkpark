@@ -53,13 +53,16 @@
 // headless.
 
 import { Node, mergeAttributes } from "@tiptap/core";
-// The card's media/action slot editors REUSE the field/action node seams:
-//   * canvasScope + coercePickerValue — the exact bp-media-picker MOUNT PATTERN
-//     (seed dataset/scope/token, map the picker's bp-change STRING detail to a src).
-// card-node.js rides ONLY the browser bundle (index.js imports it); run-convert.js —
-// the pure-Node smoke target — never imports this file, so pulling field-node.js in
-// here does NOT drag the WC/DOM path into the headless harness.
-import { canvasScope, coercePickerValue } from "./field-node.js";
+// The card's media/action slot editors REUSE the field node's canvasScope seam (the
+// exact bp-media-picker MOUNT PATTERN: seed dataset/scope/token). The picker's
+// bp-change value is parsed by mediaUrlFromValue (below), NOT field-node's
+// coercePickerValue: the field path's identity coercion targets a JSON-tolerant render
+// (media_field_url/1), but the CARD render path is JSON-intolerant, so the URL must be
+// extracted here. card-node.js rides ONLY the browser bundle (index.js imports it), but
+// Node.create runs headless (addNodeView never fires in pure Node), so smoke/cards.mjs
+// imports this file for the pure mediaUrlFromValue helper without dragging the WC/DOM
+// path into the harness.
+import { canvasScope } from "./field-node.js";
 
 // The BINARY priority collapse the reader performs (walk.ex button/2): primary iff
 // =="primary", else secondary. Used for the priority-select display; the WRITE path
@@ -68,6 +71,26 @@ import { canvasScope, coercePickerValue } from "./field-node.js";
 // action-node.js:normalizePriority.
 function normalizeActionPriority(p) {
   return p === "primary" ? "primary" : "secondary";
+}
+
+// Parse the bp-media-picker's serialized value into a bare URL. On an ASSET-LIBRARY
+// pick the picker emits JSON.stringify({url,assetId}) (bp-media-picker
+// bpSerializeMediaValue); a direct/legacy pick emits a bare URL. The card render path
+// has NO server-side JSON normalizer (unlike the field path's media_field_url/1), so a
+// JSON blob written into attrs.media.src renders a broken <img src="{…}"> on the reader
+// (walk.ex image/1). This is the exact JSON-tolerant fallback root.html.heex uses for
+// the field-image path. Non-string, empty/whitespace, or an unparseable envelope → ""
+// (a CLEAR, or a safe degrade — NEVER the raw blob). A bare URL passes through verbatim.
+export function mediaUrlFromValue(raw) {
+  if (typeof raw !== "string") return "";
+  if (raw.trim().startsWith("{")) {
+    try {
+      return JSON.parse(raw).url || "";
+    } catch {
+      return "";
+    }
+  }
+  return raw;
 }
 
 // The TipTap node NAME is `bpCard` (its portable-doc bpType stays "card"); run-convert
@@ -442,13 +465,16 @@ export const Card = Node.create({
       titleEl.addEventListener("blur", onTitleBlur);
       titleEl.addEventListener("keydown", onTitleKeydown);
 
-      // ── media control: the picker's bp-change detail is a single asset-ref STRING
-      // (coercePickerValue lifts it identically to the per-block bridge). Map it to the
-      // media element {type:"image",src} — NEVER write the bare value — via the SAME
-      // writeAttr/setNodeMarkup path (card-node.js:349's mapping, preserved). An empty
-      // string is a CLEAR → attrs.media=null → round-trips ABSENT (removal lands).
+      // ── media control: read the picker's PARSED accessor (e.target.meta.url), with a
+      // JSON-tolerant fallback (mediaUrlFromValue) over the bp-change STRING detail — the
+      // exact precedent root.html.heex uses for field images. An asset-library pick emits
+      // JSON {url,assetId}; extracting the URL here keeps attrs.media.src a bare URL so
+      // the reader's <img src> is never the literal JSON blob. Map it to the media element
+      // {type:"image",src} — NEVER write the raw value. An empty string is a CLEAR →
+      // attrs.media=null → round-trips ABSENT (removal lands).
       const onMediaChange = (e) => {
-        const src = coercePickerValue(e.detail) || "";
+        const meta = (e.target && e.target.meta) || {};
+        const src = meta.url || mediaUrlFromValue((e.detail && e.detail.value) || "");
         writeAttr((attrs) => {
           if (src === "") {
             attrs.media = null; // clear → round-trips ABSENT (removal lands)

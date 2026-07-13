@@ -24,6 +24,11 @@ import {
   reconcileServerEcho,
 } from "../canvas/run-convert.js";
 import { canvasDefaultBlock } from "../canvas/slash-insert.js";
+// mediaUrlFromValue is a PURE helper (no DOM, no NodeView) exported from card-node.js
+// for the asset-JSON src fix. card-node.js top-level imports @tiptap/core + field-node
+// but Node.create runs headless (addNodeView never fires here), so this stays a
+// pure-Node import — the helper is unit-testable without mounting an editor.
+import { mediaUrlFromValue } from "../canvas/card-node.js";
 
 // A card WIDGET fixture: tone + title + a one-paragraph body slot.
 const CARD = (id = "cw-1") => ({
@@ -216,6 +221,25 @@ check("card: a card with POPULATED media+action slots round-trips BYTE-EQUAL (ty
   assert.deepEqual(docToBlocks(doc), [CARD_FULL()], "media+action slots round-trip byte-identical");
   // Anti-vacuous: an untouched fully-populated card still emits ZERO ops.
   assert.equal(runToOps([CARD_FULL()], doc).length, 0, "an untouched full card emits ZERO ops");
+});
+
+// ── ASSET-JSON SRC (the bp-media-picker serializes an asset-library pick as
+//    JSON {url,assetId}; the card must store the bare URL, never the blob) ─────
+//
+// FAIL-BEFORE: onMediaChange used coercePickerValue (a pure identity fn), so on an
+// asset-library pick attrs.media.src became the literal JSON string
+// '{"url":"…","assetId":"…"}' → walk.ex image/1 renders <img src="{…}"> = broken
+// image (the card render path has NO server-side JSON normalizer, unlike the field
+// path's media_field_url/1). mediaUrlFromValue is the pure parser the fix keys on.
+check("card mediaUrlFromValue: a serialized {url,assetId} pick → the bare URL (never the JSON blob); a bare URL passes through", () => {
+  assert.equal(
+    mediaUrlFromValue('{"url":"/pic.png","assetId":"a1"}'),
+    "/pic.png",
+    "an asset-library pick serializes to JSON {url,assetId}; the card stores /pic.png, NOT the blob (else <img src> is broken)",
+  );
+  assert.equal(mediaUrlFromValue("/pic.png"), "/pic.png", "a bare-URL pick passes through unchanged");
+  assert.equal(mediaUrlFromValue(""), "", "an empty value (clear) stays empty → media round-trips ABSENT");
+  assert.equal(mediaUrlFromValue("{bad json"), "", "an unparseable envelope degrades to '' (never persists the blob)");
 });
 
 check("card runToOps: SETTING media (the picker's asset-ref) → ONE patch{slots.media type:'image',src}", () => {
