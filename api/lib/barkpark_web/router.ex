@@ -2072,8 +2072,9 @@ defmodule BarkparkWeb.Router do
   #
   # export is SYNC: `WorkspaceBundle.export/2` materializes the whole tar binary,
   # streamed back with `send_resp/3` under an `application/x-tar` attachment.
-  # import reads the raw tar body and calls `import_bundle/2` (idempotent INSERT
-  # ON CONFLICT DO NOTHING), so a re-import of the same bundle is a safe no-op.
+  # import reads the raw tar body and calls `import_bundle/2` — a RESTORE into a
+  # clean scope: E3/allowlist members are idempotent (INSERT ON CONFLICT DO
+  # NOTHING) but the copy-strategy members (root/E1/E2) assume an empty target.
   scope "/api", BarkparkWeb do
     pipe_through([:api, :require_admin])
 

@@ -146,9 +146,11 @@ defmodule BarkparkWeb.WorkspaceController do
   re-import it via `WorkspaceBundle.import_bundle/2` (admin-gated).
 
   The bundle is SELF-DESCRIBING (its manifest carries the workspace identity and
-  per-table import strategy); the string-keyed members re-import via INSERT ON
-  CONFLICT DO NOTHING, so a re-import of the same bundle is a safe no-op. Returns
-  the import stats — `{tables, total_rows}` — as JSON.
+  per-table import strategy). Its string-keyed members (E3/allowlist) re-import
+  idempotently via INSERT ON CONFLICT DO NOTHING, but the copy-strategy members
+  (root/E1/E2) assume a CLEAN target — so this is a restore into an empty scope,
+  NOT a repeatable upsert: a second import over a still-populated workspace
+  PK-conflicts. Returns the import stats — `{tables, total_rows}` — as JSON.
   """
   def import(conn, %{"workspace_slug" => _slug}) do
     {bundle, conn} = read_full_body(conn)
