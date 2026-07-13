@@ -40,7 +40,8 @@ defmodule Barkpark.Tasks.Internal do
   #     CLOSE-TIME semantics, you are proving the expectation. Callers that
   #     must never flip a lock implicitly (stamp) always pass `met`
   #     EXPLICITLY; the default exists for the close body's back-compat.
-  #     `evidence` is written only when a non-empty string.
+  #     An omitted `evidence` key preserves the stored value; an explicitly
+  #     present string is written verbatim, including `""` to clear it.
   #   * miss (`stamp --miss`): `"attempt" => %{"note","ts","worker"}` appends
   #     to the entry's `attempts` list, bounded to the @attempts_bound most
   #     recent, and PINS `met` to its current stored value — explicitly
@@ -123,13 +124,11 @@ defmodule Barkpark.Tasks.Internal do
     if is_boolean(met) do
       entry = Map.put(entry, "met", met)
 
-      entry =
-        case Map.get(update, "evidence") do
-          e when is_binary(e) and e != "" -> Map.put(entry, "evidence", e)
-          _ -> entry
-        end
-
-      {:ok, entry}
+      case Map.fetch(update, "evidence") do
+        :error -> {:ok, entry}
+        {:ok, evidence} when is_binary(evidence) -> {:ok, Map.put(entry, "evidence", evidence)}
+        {:ok, _invalid} -> {:error, :invalid_criteria}
+      end
     else
       {:error, :invalid_criteria}
     end

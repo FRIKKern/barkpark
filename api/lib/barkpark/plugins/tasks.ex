@@ -636,7 +636,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write. By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim — re-read, then close again (or --set observed_rev=<rev> for strict full-rev CAS instead).",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim — re-read, then close again (or --set observed_rev=<rev> for strict full-rev CAS instead).",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
@@ -681,6 +681,8 @@ defmodule Barkpark.Plugins.Tasks do
                 "close-out (task-proves-paper): --set 'criteria:=[{\"index\":0,\"met\":true," <>
                 "\"evidence\":\"PR #1234\"}]' flips acceptance_criteria met/evidence atomically " <>
                 "with the close (same rev CAS — no separate racing mutation). Optional " <>
+                "evidence is presence-sensitive: omit the key to preserve stored evidence, or " <>
+                "send evidence:\"\" to clear it. Optional " <>
                 "\"criterion\" per entry text-guards against a reordered/edited list (409 " <>
                 "criteria_mismatch). Unmet criteria never block a close (soft warning only). " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>

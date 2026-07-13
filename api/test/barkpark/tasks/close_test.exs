@@ -356,6 +356,86 @@ defmodule Barkpark.Tasks.CloseTest do
       assert second["met"] == false
     end
 
+    test "explicit empty evidence clears stale evidence atomically with a cancelled close", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("crit-clear-evidence"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "report honest outcome", "met" => true, "evidence" => "stale proof"}
+          ]
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 criteria: [%{"index" => 0, "met" => false, "evidence" => ""}]
+               )
+
+      assert closed.content["lifecycle_status"] == "cancelled"
+
+      assert [%{"met" => false, "evidence" => ""}] =
+               closed.content["acceptance_criteria"]
+
+      persisted = Repo.get!(Document, task.id)
+      assert persisted.rev == closed.rev
+      assert persisted.content["lifecycle_status"] == "cancelled"
+      assert persisted.content["acceptance_criteria"] == closed.content["acceptance_criteria"]
+    end
+
+    test "omitted evidence preserves stale evidence while other close fields update", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("crit-preserve-evidence"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "report honest outcome", "met" => true, "evidence" => "keep me"}
+          ]
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 criteria: [%{"index" => 0, "met" => false}]
+               )
+
+      assert closed.content["lifecycle_status"] == "cancelled"
+
+      assert [%{"met" => false, "evidence" => "keep me"}] =
+               closed.content["acceptance_criteria"]
+    end
+
+    test "non-binary explicit evidence aborts the whole close without partial mutation", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("crit-invalid-evidence"), scope, %{
+          "acceptance_criteria" => [
+            %{"criterion" => "report honest outcome", "met" => true, "evidence" => "keep me"}
+          ]
+        })
+
+      assert {:error, :invalid_criteria} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 criteria: [%{"index" => 0, "met" => false, "evidence" => 123}]
+               )
+
+      persisted = Repo.get!(Document, task.id)
+      assert persisted.rev == task.rev
+      assert persisted.content["lifecycle_status"] == "open"
+      assert persisted.content["acceptance_criteria"] == task.content["acceptance_criteria"]
+    end
+
     test "index out of range aborts the WHOLE close — no partial state", %{scope: scope} do
       Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
 

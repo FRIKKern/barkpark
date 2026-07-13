@@ -348,6 +348,53 @@ defmodule BarkparkWeb.TasksControllerTest do
       refute Map.has_key?(payload, "warnings"), "fully-met close must carry no warnings"
     end
 
+    test "close distinguishes explicit empty evidence from an omitted evidence key",
+         %{conn: conn, scope: scope} do
+      stale_criterion = %{
+        "acceptance_criteria" => [
+          %{"criterion" => "report honest outcome", "met" => true, "evidence" => "stale proof"}
+        ]
+      }
+
+      clear_task = mk_task!(uniq("close-clear-evidence"), scope, stale_criterion)
+
+      clear_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          lifecycle_status: "cancelled",
+          criteria: [%{index: 0, met: false, evidence: ""}]
+        })
+
+      clear_resp = conn |> authed() |> post("/v1/tasks/#{clear_task.doc_id}/close", clear_body)
+      assert clear_resp.status == 200
+      clear_doc = Jason.decode!(clear_resp.resp_body)["doc"]
+      assert clear_doc["lifecycle_status"] == "cancelled"
+
+      assert [%{"met" => false, "evidence" => ""}] =
+               clear_doc["content"]["acceptance_criteria"]
+
+      preserve_task = mk_task!(uniq("close-preserve-evidence"), scope, stale_criterion)
+
+      preserve_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          lifecycle_status: "cancelled",
+          criteria: [%{index: 0, met: false}]
+        })
+
+      preserve_resp =
+        conn |> authed() |> post("/v1/tasks/#{preserve_task.doc_id}/close", preserve_body)
+
+      assert preserve_resp.status == 200
+      preserve_doc = Jason.decode!(preserve_resp.resp_body)["doc"]
+      assert preserve_doc["lifecycle_status"] == "cancelled"
+
+      assert [%{"met" => false, "evidence" => "stale proof"}] =
+               preserve_doc["content"]["acceptance_criteria"]
+    end
+
     # Graduated enforcement (§12): unmet criteria SURFACE as a warning on a
     # close that still succeeds — never a gate, never a non-200.
     test "close with unmet criteria succeeds AND surfaces a soft warning",
@@ -389,6 +436,17 @@ defmodule BarkparkWeb.TasksControllerTest do
         Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, criteria: [%{met: true}]})
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", bad_shape)
+      assert resp.status == 400
+
+      bad_evidence =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          lifecycle_status: "cancelled",
+          criteria: [%{index: 0, met: false, evidence: 123}]
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", bad_evidence)
       assert resp.status == 400
 
       # State conflict (index beyond the stored list) → 409, atomically aborted.
