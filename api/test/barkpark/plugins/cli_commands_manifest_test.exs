@@ -305,6 +305,25 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end
   end
 
+  describe "core document write verbs" do
+    test "doc.create declares JSON file input alongside repeatable set overrides" do
+      command =
+        Capabilities.manifest("admin", project: false)["commands"]
+        |> Enum.find(&(&1["id"] == "doc.create"))
+
+      assert command
+      flags = Map.new(command["flags"], &{&1["name"], &1})
+
+      assert flags["file"]["type"] == "file"
+      refute flags["file"]["repeatable"]
+      assert flags["file"]["summary"] =~ "JSON object"
+      assert flags["file"]["summary"] =~ "stdin"
+
+      assert flags["set"]["type"] == "string"
+      assert flags["set"]["repeatable"]
+    end
+  end
+
   describe "core access (airdrop-grant) verbs" do
     # FRESH-INSTALL invariant: airdrop grants are the cross-surface access layer,
     # mounted from CORE (not a plugin), so the grantor verbs survive

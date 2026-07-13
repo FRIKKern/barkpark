@@ -2,13 +2,19 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -1040,6 +1046,218 @@ func TestBuildBodyMutationOp(t *testing.T) {
 		map[string]string{"id": "a1"})
 	if want := `{"altText":"A cat","tags":["pet"]}`; string(mbody) != want {
 		t.Errorf("media.update flat body = %s, want %s", mbody, want)
+	}
+}
+
+func TestBuildBodyDocCreateFileMergeAndDryRun(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "doc.json")
+	if err := os.WriteFile(path, []byte(`{"title":"from-file","type":"wrong","nested":{"ok":true}}`), 0o600); err != nil {
+		t.Fatalf("write document body: %v", err)
+	}
+
+	cmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{
+			{Name: "file", Type: "file"},
+			{Name: "set", Type: "string", Repeatable: true},
+		},
+	}
+
+	body, _, contentType, err := buildBody(cmd, map[string][]string{
+		"file": {path},
+		"set":  {"title=first-set", "count:=2", "title=last-set"},
+	}, map[string]string{"type": "paper"})
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if contentType != "application/json" {
+		t.Fatalf("content type = %q, want application/json", contentType)
+	}
+	if want := `{"mutations":[{"create":{"count":2,"nested":{"ok":true},"title":"last-set","type":"paper"}}]}`; string(body) != want {
+		t.Fatalf("request body = %s, want %s", body, want)
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	if code := dryRun(w, cmd, "https://example.test/v1/data/mutate/production", map[string]string{"Content-Type": contentType}, body); code != exitOK {
+		t.Fatalf("dry-run exit = %d, want %d", code, exitOK)
+	}
+	var preview map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &preview); err != nil {
+		t.Fatalf("dry-run JSON: %v\n%s", err, stdout.String())
+	}
+	mutations := preview["body"].(map[string]any)["mutations"].([]any)
+	create := mutations[0].(map[string]any)["create"].(map[string]any)
+	if create["title"] != "last-set" || create["type"] != "paper" || create["count"] != float64(2) {
+		t.Fatalf("dry-run create body = %#v", create)
+	}
+}
+
+func TestBuildBodyDocCreateStdinAndUnusedPipe(t *testing.T) {
+	cmd := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args: []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+	}
+
+	withPipe := func(input string, fn func()) {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("os.Pipe: %v", err)
+		}
+		if _, err := io.WriteString(w, input); err != nil {
+			t.Fatalf("write stdin pipe: %v", err)
+		}
+		_ = w.Close()
+		original := os.Stdin
+		os.Stdin = r
+		t.Cleanup(func() {
+			os.Stdin = original
+			_ = r.Close()
+		})
+		fn()
+		os.Stdin = original
+		_ = r.Close()
+	}
+
+	withPipe(`{"title":"stdin"}`, func() {
+		body, _, _, err := buildBody(cmd, map[string][]string{"file": {"-"}}, map[string]string{"type": "paper"})
+		if err != nil {
+			t.Fatalf("buildBody --file -: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"title":"stdin","type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("stdin request body = %s, want %s", body, want)
+		}
+	})
+
+	withPipe(`{"title":"ignored"}`, func() {
+		_, _, _, err := buildBody(cmd, map[string][]string{}, map[string]string{"type": "paper"})
+		if err == nil || !strings.Contains(err.Error(), "piped stdin is unused") || !strings.Contains(err.Error(), "--file -") {
+			t.Fatalf("unused piped stdin error = %v", err)
+		}
+	})
+
+	withPipe(`{"jsonrpc":"2.0","method":"tools/call"}`, func() {
+		body, _, _, err := buildBodyWithStdinOwnership(cmd, map[string][]string{}, map[string]string{"type": "paper"}, false)
+		if err != nil {
+			t.Fatalf("headless body with protocol stdin: %v", err)
+		}
+		if want := `{"mutations":[{"create":{"type":"paper"}}]}`; string(body) != want {
+			t.Fatalf("headless request body = %s, want %s", body, want)
+		}
+
+		_, _, _, err = buildBodyWithStdinOwnership(cmd, map[string][]string{"file": {"-"}}, map[string]string{"type": "paper"}, false)
+		if err == nil || !strings.Contains(err.Error(), "--file - is unavailable in headless dispatch") {
+			t.Fatalf("headless --file - error = %v", err)
+		}
+
+		remaining, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			t.Fatalf("read untouched protocol stdin: %v", err)
+		}
+		if want := `{"jsonrpc":"2.0","method":"tools/call"}`; string(remaining) != want {
+			t.Fatalf("headless dispatch consumed protocol stdin: got %q, want %q", remaining, want)
+		}
+	})
+}
+
+// TestMCPStdioWriteIgnoresProtocolPipe is the mutation-sensitive regression for
+// the real transport failure found by Team300. A built bp process keeps JSON-RPC
+// on stdin while task_next must still reach exactly one loopback backend write.
+func TestMCPStdioWriteIgnoresProtocolPipe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skips the go-build-and-exec MCP stdio regression in short mode")
+	}
+
+	var claimHits int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/data/query/production/paper":
+			_, _ = io.WriteString(w, `{"result":[]}`)
+		case "/v1/tasks/claim":
+			atomic.AddInt32(&claimHits, 1)
+			_, _ = io.WriteString(w, `{"ok":false,"reason":"no_ready"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer backend.Close()
+
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	bin := filepath.Join(t.TempDir(), "bp")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/barkpark")
+	build.Dir = root
+	build.Env = append(os.Environ(), "CC=/usr/bin/clang")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build bp: %v\n%s", err, out)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "mcp", "serve")
+	cmd.Env = append(os.Environ(),
+		"BARKPARK_MANIFEST="+filepath.Join(root, "docs", "cli", "fixtures", "full-manifest.json"),
+		"BARKPARK_API_URL="+backend.URL,
+		"BARKPARK_API_TOKEN=task304-stub",
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start MCP server: %v", err)
+	}
+
+	writeRPC := func(line string) {
+		t.Helper()
+		if _, err := io.WriteString(stdin, line+"\n"); err != nil {
+			t.Fatalf("write MCP frame: %v", err)
+		}
+	}
+	writeRPC(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"task304-test","version":"1"}}}`)
+	writeRPC(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	writeRPC(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task_next","arguments":{"worker_id":"task304-noop"}}}`)
+
+	dec := json.NewDecoder(stdout)
+	var initialize map[string]any
+	if err := dec.Decode(&initialize); err != nil {
+		t.Fatalf("decode initialize response: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if initialize["id"] != float64(1) {
+		t.Fatalf("initialize response id = %#v", initialize["id"])
+	}
+	var call map[string]any
+	if err := dec.Decode(&call); err != nil {
+		t.Fatalf("decode tools/call response: %v\nstderr:\n%s", err, stderr.String())
+	}
+	encoded, _ := json.Marshal(call)
+	if call["id"] != float64(2) || !bytes.Contains(encoded, []byte("no_ready")) || bytes.Contains(encoded, []byte(`"isError":true`)) {
+		t.Fatalf("task_next response = %s, want successful no_ready", encoded)
+	}
+	if got := atomic.LoadInt32(&claimHits); got != 1 {
+		t.Fatalf("backend claim hits = %d, want exactly 1", got)
+	}
+
+	_ = stdin.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("MCP server exit: %v\nstderr:\n%s", err, stderr.String())
+	}
+	if ctx.Err() != nil {
+		t.Fatalf("MCP server timed out: %v", ctx.Err())
 	}
 }
 

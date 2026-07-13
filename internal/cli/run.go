@@ -68,7 +68,7 @@ func (e *dispatchError) Error() string { return e.msg }
 // caller owns rendering. This is the build half of the dispatch seam — a pure
 // resolution step with one caveat: buildBody may consume os.Stdin for --file -,
 // so it must run exactly once per invocation.
-func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (*manifestRequest, *dispatchError) {
+func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string, ownsProcessStdin bool) (*manifestRequest, *dispatchError) {
 	// Split tail into positional args and command-local flags.
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
@@ -92,9 +92,10 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	rawURL = applyQuery(rawURL, g, cmd, cmdFlags, argMap)
 
 	// Build the request body for writes. Declared non-path args seed the JSON
-	// object; --set merges over them; --file (or stdin) overrides everything; a
+	// object; --set merges over them; mutation commands merge a --file JSON
+	// object before --set, while other commands use --file as the whole body; a
 	// file-typed arg on a media route is sent as multipart/form-data instead.
-	body, stream, contentType, err := buildBody(cmd, cmdFlags, argMap)
+	body, stream, contentType, err := buildBodyWithStdinOwnership(cmd, cmdFlags, argMap, ownsProcessStdin)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: false}
 	}
@@ -134,7 +135,7 @@ func sendManifestRequest(req *manifestRequest) (int, []byte, error) {
 // raw body into a tool result. Headless callers must set g.yes so the prod guard
 // (which lives in runCommand, not here) never blocks them.
 func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (int, []byte, error) {
-	req, derr := buildManifestRequest(g, ctx, m, cmd, tail)
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, false)
 	if derr != nil {
 		return 0, nil, derr
 	}
@@ -153,7 +154,7 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	out.resolveOutputForCommand(g, cmd.DefaultOutput)
 
-	req, derr := buildManifestRequest(g, ctx, m, cmd, tail)
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
 		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
 			out.userErr("%v", derr)
@@ -418,11 +419,13 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 // buildBody builds the request body for a write command. Sources, in increasing
 // precedence:
 //
-//  1. declared non-path positional args (arg name -> value) whose location
+//  1. --file <path> (or - for stdin) when this is a mutation command; the file
+//     must contain a JSON object and seeds the mutation payload. For other
+//     commands, --file remains the complete request body.
+//  2. declared non-path positional args (arg name -> value) whose location
 //     resolves to "body" — e.g. webhook.create `url` -> {"url":"…"},
 //     workspace.project-create `name` -> {"name":"…"}.
-//  2. --set k=v pairs, merged over the arg-seeded object.
-//  3. --file <path> (or - for stdin), which overrides everything and wins.
+//  3. --set k=v pairs, merged last so repeated --set values win per key.
 //
 // A file-typed arg on a media route is special-cased FIRST: it ships as
 // multipart/form-data with the file under the "file" form field, not as JSON —
@@ -431,6 +434,15 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 // Reads return nil; a write with no body source sends an empty JSON object so a
 // POST/PUT that expects JSON does not choke on an empty body.
 func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]string) (body []byte, stream io.Reader, contentType string, err error) {
+	return buildBodyWithStdinOwnership(cmd, flags, args, true)
+}
+
+// buildBodyWithStdinOwnership keeps process-stdin policy at the existing
+// human/headless dispatch seam. Direct CLI commands own stdin and therefore
+// reject redirected input unless --file - consumes it. Headless dispatchers
+// (MCP stdio and HTTP) do not own process stdin: it may be a protocol transport,
+// so they neither inspect nor consume it.
+func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string, args map[string]string, ownsProcessStdin bool) (body []byte, stream io.Reader, contentType string, err error) {
 	if !cmd.Writes {
 		return nil, nil, "", nil
 	}
@@ -442,9 +454,20 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 		return nil, r, ct, err
 	}
 
-	// --file (or stdin) wins outright when given.
+	stdinRedirected := ownsProcessStdin && stdinHasRedirectedInput()
+
+	// For ordinary writes, --file is the whole request body. Mutation commands
+	// instead treat it as the document object that declared args and --set merge
+	// into before the mutation wrapper is applied.
+	var obj map[string]any
 	if files, ok := flags["file"]; ok && len(files) > 0 {
 		path := files[len(files)-1]
+		if path == "-" && !ownsProcessStdin {
+			return nil, nil, "", fmt.Errorf("--file - is unavailable in headless dispatch")
+		}
+		if path != "-" && stdinRedirected {
+			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
+		}
 		var raw []byte
 		if path == "-" {
 			raw, err = io.ReadAll(os.Stdin)
@@ -454,11 +477,23 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("read --file %q: %w", path, err)
 		}
-		return raw, nil, "application/json", nil
+		if cmd.MutationOp == "" {
+			return raw, nil, "application/json", nil
+		}
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return nil, nil, "", fmt.Errorf("read --file %q: mutation body must be a JSON object: %w", path, err)
+		}
+		if obj == nil {
+			return nil, nil, "", fmt.Errorf("read --file %q: mutation body must be a JSON object", path)
+		}
+	} else if stdinRedirected {
+		return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
-	obj := map[string]any{}
+	if obj == nil {
+		obj = map[string]any{}
+	}
 	for _, a := range cmd.Args {
 		if cmd.ArgLocation(a) != "body" {
 			continue
@@ -519,6 +554,18 @@ func buildBody(cmd manifest.Command, flags map[string][]string, args map[string]
 	}
 	raw, _ := json.Marshal(obj)
 	return raw, nil, "application/json", nil
+}
+
+// stdinHasRedirectedInput distinguishes a pipe/file redirect from an
+// interactive terminal (and from character devices such as /dev/null). It
+// deliberately does not read or peek: --file - remains the sole stdin consumer,
+// while every other write fails before silently discarding redirected input.
+func stdinHasRedirectedInput() bool {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice == 0
 }
 
 // mediaUploadFileArg returns the bound file path when cmd has a file-typed

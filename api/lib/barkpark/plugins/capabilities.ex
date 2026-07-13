@@ -775,6 +775,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "write",
         args: [arg("type", true, "string", "Document type.")],
         flags: [
+          flag("file", "file", "Document fields as a JSON object from a file or - for stdin."),
           flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
             repeatable: true
           )
@@ -1699,9 +1700,19 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/access",
         "scoped_admin",
         args: [
-          arg("grantee_email", true, "string", "Who the link is FOR (claimed by a matching account)."),
+          arg(
+            "grantee_email",
+            true,
+            "string",
+            "Who the link is FOR (claimed by a matching account)."
+          ),
           arg("workspace_id", true, "string", "Workspace scope top (required)."),
-          arg("capabilities", true, "string", "Comma list — read|write|admin (only what you hold).")
+          arg(
+            "capabilities",
+            true,
+            "string",
+            "Comma list — read|write|admin (only what you hold)."
+          )
         ],
         flags: [
           flag("project_id", "string", "Narrow the scope to a project."),
@@ -1820,7 +1831,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Chat session id (the same id `bp chat` resumes on).")],
         flags: [
-          flag("since", "int", "Return only message rows with seq > <since> (the turn-boundary tail refetch).")
+          flag(
+            "since",
+            "int",
+            "Return only message rows with seq > <since> (the turn-boundary tail refetch)."
+          )
         ],
         default_output: "json"
       ),
@@ -1877,7 +1892,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [
           arg("id", true, "string", "Chat session id."),
-          arg("request_id", true, "string", "The permission ask's request id (≤256 UTF-8 bytes)."),
+          arg(
+            "request_id",
+            true,
+            "string",
+            "The permission ask's request id (≤256 UTF-8 bytes)."
+          ),
           arg("decision", true, "string", "allow | deny (never a caller-supplied updatedInput).")
         ],
         default_output: "minimal"
