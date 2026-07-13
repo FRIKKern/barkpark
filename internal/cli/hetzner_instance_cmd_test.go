@@ -603,6 +603,52 @@ func TestInstanceAuditFlagsOrphansAndStaleRows(t *testing.T) {
 	}
 }
 
+func TestInstanceAuditDNSZoneNotFoundHintsSeparateToken(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+	t.Setenv("HCLOUD_TOKEN", "compute-secret")
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, http.StatusOK, `{"servers":[]}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, http.StatusNotFound, `{"error":{"code":"not_found","message":"Zone not found"}}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "instance", "audit")
+	if code != exitNotFound {
+		t.Fatalf("audit zone lookup exited %d, want %d; stderr: %s", code, exitNotFound, stderr)
+	}
+	for _, want := range []string{"BARKPARK_DNS_HCLOUD_TOKEN", "cloud/postfix/README.md", "Zone not found"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("audit error missing %q hint context: %s", want, stderr)
+		}
+	}
+	if strings.Contains(stderr, "compute-secret") {
+		t.Errorf("audit error exposed compute token: %s", stderr)
+	}
+}
+
+func TestInstanceAuditDNSZoneNotFoundWithExplicitTokenDoesNotHint(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, http.StatusOK, `{"servers":[]}`)
+	})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, http.StatusNotFound, `{"error":{"code":"not_found","message":"Zone not found"}}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "instance", "audit", "--dns-token", "dns-secret")
+	if code != exitNotFound {
+		t.Fatalf("audit zone lookup exited %d, want %d; stderr: %s", code, exitNotFound, stderr)
+	}
+	for _, absent := range []string{"BARKPARK_DNS_HCLOUD_TOKEN", "cloud/postfix/README.md", "dns-secret"} {
+		if strings.Contains(stderr, absent) {
+			t.Errorf("audit error unexpectedly contains %q: %s", absent, stderr)
+		}
+	}
+}
+
 func TestInstanceResurrectRefusesLiveTwin(t *testing.T) {
 	instTestTuning(t)
 	f := newFakeHzAPI(t)

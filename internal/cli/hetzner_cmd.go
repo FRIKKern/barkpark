@@ -219,6 +219,14 @@ func hzFail(out *writer, what string, err error) int {
 	return useError(out, "failed", what+": "+err.Error(), hzExit(err))
 }
 
+func hzDNSFail(out *writer, what string, err error, usedComputeToken bool) int {
+	if usedComputeToken && hcloud.IsError(err, hcloud.ErrorCodeNotFound) {
+		return useError(out, "failed", what+": "+err.Error()+
+			"; set BARKPARK_DNS_HCLOUD_TOKEN to the DNS-project token (see cloud/postfix/README.md section 1)", hzExit(err))
+	}
+	return hzFail(out, what, err)
+}
+
 // ---------------------------------------------------------------------------
 // arg parsing (the parseAttachArgs idiom, generalised: positionals + declared
 // value flags — repeatable — + declared bool flags; anything else is a usage

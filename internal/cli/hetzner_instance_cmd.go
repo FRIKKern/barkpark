@@ -172,6 +172,11 @@ func instDNSClient(out *writer, g globals, a *hzArgs) (*hcloud.Client, bool) {
 	return newHetznerClient(tok).HCloud(), true
 }
 
+func instDNSUsesComputeToken(a *hzArgs) bool {
+	return strings.TrimSpace(a.val("dns-token")) == "" &&
+		strings.TrimSpace(os.Getenv("BARKPARK_DNS_HCLOUD_TOKEN")) == ""
+}
+
 // cpFleet is the control-plane registry client, authenticated with the shared
 // WORKER_TOKEN (the same credential the provisioner drains its queues with).
 // nil ⇔ no token available: registry steps are skipped, visibly.
@@ -1266,6 +1271,7 @@ func runInstanceAudit(out *writer, g globals, args []string) int {
 	if !ok {
 		return exitAuth
 	}
+	dnsUsesComputeToken := instDNSUsesComputeToken(a)
 	dns, ok := instDNSClient(out, g, a)
 	if !ok {
 		return exitAuth
@@ -1281,7 +1287,7 @@ func runInstanceAudit(out *writer, g globals, args []string) int {
 	}
 	rrsets, derr := dns.Zone.AllRRSets(ctx, hzZoneRef(zone))
 	if derr != nil {
-		return hzFail(out, "audit: list dns records", derr)
+		return hzDNSFail(out, "audit: list dns records", derr, dnsUsesComputeToken)
 	}
 	var rows []cpBarkpark
 	cp := instCP(a)

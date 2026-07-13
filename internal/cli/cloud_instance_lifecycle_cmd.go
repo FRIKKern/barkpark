@@ -539,6 +539,7 @@ func runAzureInstanceAudit(out *writer, g globals, args []string) int {
 	if !ok {
 		return code
 	}
+	dnsUsesComputeToken := instDNSUsesComputeToken(a)
 	dns, ok := instDNSClient(out, g, a)
 	if !ok {
 		return exitAuth
@@ -551,7 +552,7 @@ func runAzureInstanceAudit(out *writer, g globals, args []string) int {
 	}
 	rrsets, derr := dns.Zone.AllRRSets(ctx, hzZoneRef(zone))
 	if derr != nil {
-		return hzFail(out, "azure audit: list dns records", derr)
+		return hzDNSFail(out, "azure audit: list dns records", derr, dnsUsesComputeToken)
 	}
 	var rows []cpBarkpark
 	cp := instCP(a)
