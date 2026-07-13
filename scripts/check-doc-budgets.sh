@@ -62,6 +62,9 @@ docs/cheatsheets/tui.md 2400
 docs/cheatsheets/tasks.md 2400
 docs/cheatsheets/http-api.md 2400
 docs/cheatsheets/papers.md 2400
+docs/setup/CODEX.md 10100
+docs/setup/AGENTS-MD.md 3600
+docs/setup/AGENT-ONRAMPS.md 11000
 CAPS
 
 # --- cards: each <= 2400 B, count must equal exactly 7 (G2, A6) -------------
