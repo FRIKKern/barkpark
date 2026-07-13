@@ -108,8 +108,62 @@ defmodule Barkpark.Media.ImageBackend.VixTest do
   end
 
   # ---------------------------------------------------------------------------
+  # render/4 — decompression-bomb ceiling (defense-in-depth, twin of Magick)
+  # ---------------------------------------------------------------------------
+
+  # A ~73-byte PNG whose IHDR declares 50000×50000 RGB (≈7.5 GB decoded) over a
+  # 16-byte bogus IDAT. libvips `Image.open` reads the header lazily and reports
+  # the declared dimensions WITHOUT decoding (and `Image.thumbnail` is also lazy),
+  # so on origin/main render/4 proceeds past the guard-less open into thumbnail
+  # instead of rejecting. The pre-decode guard rejects it up front.
+  @png_bomb Path.join([
+              __DIR__,
+              "..",
+              "..",
+              "..",
+              "support",
+              "fixtures",
+              "media",
+              "png_bomb_50000x50000.png"
+            ])
+
+  test "render/4 rejects a pixel-dimension bomb before decoding (fail-before)" do
+    # Sanity: the fixture really does open and report the bomb dimensions —
+    # proving the guard, not a decode failure, is what stops the render.
+    {:ok, bomb} = Image.open(@png_bomb)
+    assert {Image.width(bomb), Image.height(bomb)} == {50000, 50000}
+
+    dest = tmp_path("bomb_out.jpg")
+    spec = %{max_width: 100, max_height: 100, quality: 80, format: "jpg"}
+
+    assert {:error, :vix_dimensions_exceeded} = Vix.render(@png_bomb, dest, spec, nil)
+    refute File.exists?(dest)
+  end
+
+  test "render/4 max_decode_bytes ceiling is config-overridable" do
+    # Raise the ceiling above the bomb's estimated raster and the guard lets it
+    # through to the (still lazy) thumbnail — proving the cap is the gate, and it
+    # is env-tunable exactly like Magick's -limit. Restore afterwards.
+    key = Barkpark.Media.ImageBackend.Vix
+    prev = Application.get_env(:barkpark, key)
+    on_exit(fn -> restore_env(key, prev) end)
+
+    Application.put_env(:barkpark, key, max_decode_bytes: 50_000 * 50_000 * 3 + 1)
+
+    dest = tmp_path("bomb_uncapped.jpg")
+    spec = %{max_width: 100, max_height: 100, quality: 80, format: "jpg"}
+
+    # Past the guard now; the bogus IDAT means the lazy decode ultimately fails,
+    # so we assert only that the failure is NOT the dimension guard.
+    assert Vix.render(@png_bomb, dest, spec, nil) != {:error, :vix_dimensions_exceeded}
+  end
+
+  # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  defp restore_env(key, nil), do: Application.delete_env(:barkpark, key)
+  defp restore_env(key, prev), do: Application.put_env(:barkpark, key, prev)
 
   defp write_tmp_jpeg(width, height) do
     path = tmp_path("src_#{width}x#{height}_#{System.unique_integer([:positive])}.jpg")

@@ -17,12 +17,30 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   regions, never materialising the full uncompressed raster. A pixel-count bomb
   therefore cannot pin RAM the way it can under ImageMagick, and every call runs
   in-process (no shell-out to bound). libvips also honours its own global caps
-  (`VIPS_MAX_MEM`, `VIPS_DISC_THRESHOLD`) if set. This backend is thus treated as
-  bounded-by-streaming and carries no explicit ceiling. Adding an explicit
-  pixel/memory guard for defense-in-depth is tracked as a low-priority twin task
-  (see `task-vix-bomb-explicit-ceiling`).
+  (`VIPS_MAX_MEM`, `VIPS_DISC_THRESHOLD`) if set — so this backend is
+  bomb-RESISTANT by streaming.
+
+  On top of that streaming resistance we carry an explicit **pre-decode
+  ceiling** for defense-in-depth — the twin of Magick's `-limit memory 256MiB`.
+  The MECHANISM differs: libvips exposes no per-call memory limit, so this is an
+  IN-PROCESS header guard (`guard_dimensions/1`), NOT a CLI `-limit`. `Image.open`
+  reports the declared raster dimensions lazily from the header (~1ms even on a
+  50000² bomb — it never decodes), and `Image.thumbnail` is ALSO lazy, so the
+  guard cannot lean on a later stage failing: it inspects `width * height *
+  bands` (estimated 8-bit decode bytes) between open and thumbnail and rejects up
+  front with `{:error, :vix_dimensions_exceeded}` when that exceeds the ceiling.
+  The ceiling mirrors Magick's 256MiB and is overridable per-env via
+  `config :barkpark, Barkpark.Media.ImageBackend.Vix, max_decode_bytes: N`.
   """
   @behaviour Barkpark.Media.ImageBackend
+
+  # Explicit pre-decode raster ceiling, mirroring Magick's `-limit memory 256MiB`
+  # so BOTH backends fail closed on the same class of decompression bomb. This is
+  # the estimated fully-decoded size (one byte per 8-bit sample); libvips never
+  # materialises it, but the guard rejects absurd declared dimensions before the
+  # pipeline is built. Overridable per-env for tests via
+  # `config :barkpark, __MODULE__, max_decode_bytes: N`.
+  @default_max_decode_bytes 256 * 1024 * 1024
 
   @impl true
   def available?, do: Code.ensure_loaded?(Image)
@@ -30,12 +48,32 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   @impl true
   def render(src, dest, spec, watermark) do
     with {:ok, image} <- Image.open(src),
+         :ok <- guard_dimensions(image),
          {:ok, thumb} <- Image.thumbnail(image, spec.max_width, thumbnail_opts(spec)),
          {:ok, stamped} <- maybe_watermark(thumb, watermark),
          :ok <- write_image(stamped, dest, spec) do
       :ok
     end
   end
+
+  # Reject a decompression bomb BEFORE the (lazy) thumbnail pipeline is built.
+  # `Image.{width,height,bands}` read the already-parsed header (no decode), so
+  # this is cheap even on a 50000² input. The atom-tagged error tuple flows
+  # untouched through `Renditions.generate/6` (which matches `{:error, reason}`).
+  defp guard_dimensions(image) do
+    estimated_bytes = Image.width(image) * Image.height(image) * Image.bands(image)
+
+    if estimated_bytes > max_decode_bytes() do
+      {:error, :vix_dimensions_exceeded}
+    else
+      :ok
+    end
+  end
+
+  defp max_decode_bytes,
+    do: Keyword.get(config(), :max_decode_bytes, @default_max_decode_bytes)
+
+  defp config, do: Application.get_env(:barkpark, __MODULE__, [])
 
   # Aspect-preserving fit by default; an exact-fill crop when the spec asks for
   # one (`crop: :attention` → cover-and-centre-crop to exactly WxH). `Image 0.67`
