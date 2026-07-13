@@ -232,7 +232,45 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		}
 		return exitGeneric
 	}
+	if status >= 200 && status < 300 {
+		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
+	}
 	return handleResponse(out, cmd, status, respBody)
+}
+
+// warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
+// full default page cannot prove that the server has no next page. The notice is
+// stderr-only so JSON/YAML stdout stays machine-readable, and it is deliberately
+// suppressed when the caller chose an explicit limit (or --all), for writes, and
+// for non-paginated commands.
+func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Command, respBody []byte) {
+	if !cmd.Paginated || cmd.Writes || g.all || g.limitSet {
+		return
+	}
+
+	limit := defaultPageLimit(cmd)
+	if limit <= 0 {
+		return
+	}
+	rows, _ := extractListRows(unwrapResult(respBody))
+	if len(rows) < limit {
+		return
+	}
+
+	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
+}
+
+func defaultPageLimit(cmd manifest.Command) int {
+	for _, flag := range cmd.Flags {
+		if flag.Name != "limit" || flag.Default == nil {
+			continue
+		}
+		limit, err := strconv.Atoi(fmt.Sprint(flag.Default))
+		if err == nil && limit > 0 {
+			return limit
+		}
+	}
+	return 0
 }
 
 // authHeaders returns the tier-appropriate auth headers for cmd. Only `none`
