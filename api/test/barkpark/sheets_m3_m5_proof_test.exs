@@ -50,8 +50,19 @@ defmodule Barkpark.SheetsM3M5ProofTest do
   # Fixed ingest secret from config/test.exs.
   @ingest_token "barkpark-test-ingest-token"
 
+  # Publish-wall labels (charter D26/D39): the ingest enforces the wall, so the
+  # POST must carry registered weighted tags + a description.
+  @wall_tag_names ~w(m3m5-proof-sales m3m5-proof-import m3m5-proof-roundtrip)
+  @wall_tags [
+    %{"tag" => "m3m5-proof-sales", "strength" => 93, "rationale" => "Primary label: the sales-report import proof paper."},
+    %{"tag" => "m3m5-proof-import", "strength" => 58, "rationale" => "Secondary label: import-recompute embed coverage."},
+    %{"tag" => "m3m5-proof-roundtrip", "strength" => 21, "rationale" => "Tertiary label: export round-trip ingest fixture."}
+  ]
+  @wall_description "M3+M5 proof fixture paper embedding an imported live sales sheet."
+
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
+    Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
     Barkpark.Auth.create_token(@write_token, "m3-m5-proof", @dataset, ["read", "write"])
     :ok
   end
@@ -190,6 +201,8 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     resp =
       ingest_paper(%{
         "slug" => @paper_slug,
+        "tags" => @wall_tags,
+        "description" => @wall_description,
         "blocks" => [
           %{
             "id" => "p1",

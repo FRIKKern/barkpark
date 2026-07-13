@@ -13,10 +13,33 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
   # Set in config/test.exs.
   @token "barkpark-test-ingest-token"
 
+  # The ingest omits `dataset`, so upsert_paper lands the paper in Content's
+  # @paper_default_dataset ("production") — register the wall tags there.
+  @dataset "production"
+
+  # Publish-wall labels (charter D26/D39): the paper-birth ingest ENFORCES the
+  # wall, so a compliant POST must carry registered weighted tags + a
+  # description. Distinct strengths, unique max, rationales ≥20 chars.
+  @wall_tag_names ~w(email-proof-deck email-proof-inline email-proof-snapshot)
+  @wall_tags [
+    %{"tag" => "email-proof-deck", "strength" => 89, "rationale" => "Primary label: the full-deck email-view fixture paper."},
+    %{"tag" => "email-proof-inline", "strength" => 54, "rationale" => "Secondary label: inline-styled email render coverage."},
+    %{"tag" => "email-proof-snapshot", "strength" => 23, "rationale" => "Tertiary label: pinned task-snapshot email fixture."}
+  ]
+  @wall_description "Email-view fixture paper: full block deck mailed through the wall."
+
+  setup do
+    # The publish wall (E3) rejects unknown tags — register the payload's tags.
+    Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
+    :ok
+  end
+
   defp ingest!(conn, slug) do
     body = %{
       "slug" => slug,
       "title" => "Email view fixture",
+      "tags" => @wall_tags,
+      "description" => @wall_description,
       "blocks" => [
         %{"type" => "heading", "level" => 1, "text" => "The full deck, mailed"},
         %{
