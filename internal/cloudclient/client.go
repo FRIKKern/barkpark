@@ -1164,6 +1164,214 @@ func (c *Client) AddDomain(ctx context.Context, siteID, domain string) (Site, er
 	return out.Site, nil
 }
 
+// ---------------------------------------------------------------------------
+// Site spawner (bp cloud site) — cloud-site-spawner charter D10.
+//
+// DELIBERATELY DISTINCT from the container-model Site/Deployment above: a
+// SPAWNED site is a static (SSG) build — Astro first, others on the pluggable
+// roadmap — that reads from a Barkpark dataset triple (ws/proj/ds) and rides the
+// co-located instance's OWN Caddy + blue/green + webhook machinery. It shares the
+// /v1/sites route family but carries a `kind` + the dataset triple, and its
+// deploy walks the SIX visible stages PLAN → BUILD → STAGE → HEALTH → SWITCH →
+// RETIRE, health-gated so a broken build never reaches visitors, with a
+// sub-second symlink-flip rollback. These types are self-contained so the
+// spawner and the container model never blur — matching the fields the sibling
+// site-spawner-w1-cloud-schema slice accepts.
+// ---------------------------------------------------------------------------
+
+// SpawnSiteStages are the six visible deploy stages, in order — the Kinsta/Vercel
+// progress bar the CLI streams. The control plane authors per-stage status; this
+// list is the canonical ordering the renderer walks so a lean payload still shows
+// the full bar.
+var SpawnSiteStages = []string{"PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"}
+
+// SpawnSiteCreate is the body POSTed to /v1/sites for a spawned site: the name,
+// the framework (astro is the flagship), the kind (static), and the dataset
+// triple the build reads content from. BarkparkID is optional — when unset the
+// control plane resolves the target instance from the workspace; the CLI fills it
+// only when the user pins `--instance`.
+type SpawnSiteCreate struct {
+	Name       string `json:"name"`
+	Framework  string `json:"framework,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Workspace  string `json:"workspace"`
+	Project    string `json:"project"`
+	Dataset    string `json:"dataset"`
+	BarkparkID string `json:"barkpark_id,omitempty"`
+}
+
+// SpawnSite is one spawned site as returned by the /v1/sites endpoints for a
+// `kind` row. URL is the live PATH url (https://<instance>.barkpark.cloud/sites/
+// <slug>/) the control plane computes; Instance is the instance slug/host the CLI
+// falls back to when URL is absent. CurrentDeployment is the live build, embedded
+// when the control plane includes it so `status` needs no second round trip.
+type SpawnSite struct {
+	ID                  string          `json:"id"`
+	BarkparkID          string          `json:"barkpark_id"`
+	TeamID              string          `json:"team_id"`
+	Name                string          `json:"name"`
+	Slug                string          `json:"slug"`
+	Kind                string          `json:"kind"`
+	Framework           string          `json:"framework"`
+	Workspace           string          `json:"workspace"`
+	Project             string          `json:"project"`
+	Dataset             string          `json:"dataset"`
+	URL                 string          `json:"url"`
+	Instance            string          `json:"instance"`
+	CurrentDeploymentID string          `json:"current_deployment_id"`
+	CurrentDeployment   *SiteDeployment `json:"current_deployment,omitempty"`
+	InsertedAt          string          `json:"inserted_at"`
+	UpdatedAt           string          `json:"updated_at"`
+}
+
+// SiteStage is one of the six visible deploy stages. Status walks
+// pending → running → done (or failed / skipped). Detail is the control plane's
+// optional one-line elaboration (e.g. the health probe URL, the failure line).
+type SiteStage struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	StartedAt  string `json:"started_at,omitempty"`
+	FinishedAt string `json:"finished_at,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+}
+
+// SiteDeployment is one build-and-release of a spawned site. Status walks
+// queued → building → staging → healthy → live (or failed); Stage names the
+// stage currently in flight; Stages carries the per-stage progress the CLI
+// streams. BuildID is the isolated, reproducible build; URL is the live path url
+// once SWITCH flips the symlink.
+type SiteDeployment struct {
+	ID            string      `json:"id"`
+	SiteID        string      `json:"site_id"`
+	Status        string      `json:"status"`
+	Stage         string      `json:"stage"`
+	Stages        []SiteStage `json:"stages"`
+	BuildID       string      `json:"build_id"`
+	URL           string      `json:"url"`
+	FailureReason string      `json:"failure_reason"`
+	BecameLiveAt  string      `json:"became_live_at"`
+	InsertedAt    string      `json:"inserted_at"`
+	UpdatedAt     string      `json:"updated_at"`
+}
+
+// SiteDeploymentTerminal reports whether a deploy status is final — live
+// (success) or failed. The CLI's stream loop polls until this is true.
+func SiteDeploymentTerminal(status string) bool {
+	s := strings.ToLower(strings.TrimSpace(status))
+	return s == "live" || s == "failed"
+}
+
+// SiteRollbackResult is a completed spawned-site rollback — the sub-second
+// symlink flip to the previous good build. Raw is the envelope bytes verbatim so
+// `-o json` re-emits the contract without reshaping (the instance-rollback
+// idiom). The scalar fields are the parsed view the human renderer consumes.
+type SiteRollbackResult struct {
+	Raw                  []byte `json:"-"`
+	OK                   bool   `json:"ok"`
+	Status               string `json:"status"`
+	DeploymentID         string `json:"deployment_id"`
+	PreviousDeploymentID string `json:"previous_deployment_id"`
+	URL                  string `json:"url"`
+}
+
+// CreateSpawnSite POSTs /v1/sites (Bearer) with the spawner body and returns the
+// new row. The dataset triple tells the control plane which content to build
+// from; kind distinguishes the row from a container-model site.
+func (c *Client) CreateSpawnSite(ctx context.Context, req SpawnSiteCreate) (SpawnSite, error) {
+	status, body, err := c.do(ctx, "POST", "/v1/sites", true, req)
+	if err != nil {
+		return SpawnSite{}, err
+	}
+	if !ok(status) {
+		return SpawnSite{}, cloudError(status, body)
+	}
+	var out struct {
+		Site SpawnSite `json:"site"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return SpawnSite{}, fmt.Errorf("decode site response: %w", err)
+	}
+	return out.Site, nil
+}
+
+// GetSpawnSite returns one spawned site by id via GET /v1/sites/:id (Bearer),
+// decoded into the spawner view (kind + dataset triple + embedded current
+// deployment). A 404 does not leak existence across team boundaries.
+func (c *Client) GetSpawnSite(ctx context.Context, id string) (SpawnSite, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(id), true, nil)
+	if err != nil {
+		return SpawnSite{}, err
+	}
+	if !ok(status) {
+		return SpawnSite{}, cloudError(status, body)
+	}
+	var out struct {
+		Site SpawnSite `json:"site"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return SpawnSite{}, fmt.Errorf("decode site response: %w", err)
+	}
+	return out.Site, nil
+}
+
+// DeploySpawnSite enqueues a build via POST /v1/sites/:id/deploy (Bearer) and
+// returns the queued SiteDeployment — status:"queued" with a build id. The CLI
+// then streams it through the six stages by polling SpawnSiteDeployment.
+func (c *Client) DeploySpawnSite(ctx context.Context, id string) (SiteDeployment, error) {
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/deploy", true, map[string]any{})
+	if err != nil {
+		return SiteDeployment{}, err
+	}
+	if !ok(status) {
+		return SiteDeployment{}, cloudError(status, body)
+	}
+	var out struct {
+		Deployment SiteDeployment `json:"deployment"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return SiteDeployment{}, fmt.Errorf("decode deployment response: %w", err)
+	}
+	return out.Deployment, nil
+}
+
+// SpawnSiteDeployment fetches one deployment's current stage-aware state via
+// GET /v1/sites/:id/deployments/:deploymentID (Bearer) — the poll the deploy
+// stream loop reads until the status is terminal.
+func (c *Client) SpawnSiteDeployment(ctx context.Context, id, deploymentID string) (SiteDeployment, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/sites/"+esc(id)+"/deployments/"+esc(deploymentID), true, nil)
+	if err != nil {
+		return SiteDeployment{}, err
+	}
+	if !ok(status) {
+		return SiteDeployment{}, cloudError(status, body)
+	}
+	var out struct {
+		Deployment SiteDeployment `json:"deployment"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return SiteDeployment{}, fmt.Errorf("decode deployment response: %w", err)
+	}
+	return out.Deployment, nil
+}
+
+// RollbackSpawnSite flips a spawned site back to its previous good build via
+// POST /v1/sites/:id/rollback (Bearer) — the sub-second symlink flip. Raw is the
+// envelope bytes verbatim so `-o json` re-emits the contract.
+func (c *Client) RollbackSpawnSite(ctx context.Context, id string) (SiteRollbackResult, error) {
+	status, raw, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/rollback", true, nil)
+	if err != nil {
+		return SiteRollbackResult{}, err
+	}
+	if !ok(status) {
+		return SiteRollbackResult{}, cloudError(status, raw)
+	}
+	res := SiteRollbackResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return SiteRollbackResult{}, fmt.Errorf("decode rollback envelope: %w", err)
+	}
+	return res, nil
+}
+
 // GithubConnectResp is the body the control plane returns from
 // POST /v1/sites/:id/github — the updated Site row, the webhook URL the user
 // pastes into GitHub, and the plaintext webhook secret (shown ONCE; the
