@@ -8,18 +8,34 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
   cannot land silently.
   """
 
-  # These migration tests exercise Ecto.Migrator.up/3 (and the underlying
-  # `repo.query!` path used by `apply_up/1` / `apply_down/1`) against the
-  # SQL sandbox, which races on connection checkout. Tagged :flaky so they
-  # are excluded from the default `mix test` run. Run explicitly with:
+  # Sandbox contention, corrected diagnosis (task-felix-migrator-task-sandbox-race,
+  # 20-seed verify). The original :flaky note blamed a missing `Sandbox.allow/3`
+  # before the Migrator spawns its task — that premise is REFUTED: DataCase runs
+  # these async:false tests in SHARED sandbox mode (data_case.ex `shared: not
+  # async`), so the connection is already shared globally and `Task.async`
+  # already propagates `$callers`. There is no ownership gap to close, and no
+  # 40P01 deadlock ever reproduced (repo-wide grep for 40P01/deadlock_detected
+  # is empty).
   #
-  #     mix test test/barkpark/repo/migrations --include flaky
+  # Two distinct behaviours:
   #
-  # Root cause: Sandbox.allow/3 isn't called before Migrator spawns its
-  # own connection (Task) for the migration body. Fix would require
-  # restructuring the test setup to share the sandbox owner pid with
-  # the migrator's spawned task. Tracked in Goal barkpark-mgu / hygiene
-  # sweep.
+  #   * Fixtures A–D drive `apply_up/1` / `apply_down/1` directly on the shared
+  #     sandbox connection — no Task, no Migrator, no advisory lock. They are
+  #     deterministic (0 failures across 20+5 seeds) and run in the default
+  #     suite (no @tag :flaky).
+  #
+  #   * Fixture E is the ONLY test that goes through `Ecto.Migrator.up/3`, whose
+  #     default `:migration_lock` takes an advisory lock inside a transaction on
+  #     the shared connection. Because the parent test already holds that shared
+  #     connection, the Migrator's `Task.async |> Task.await` child deadlocks on
+  #     checkout — a DETERMINISTIC (20/20) DBConnection.ConnectionError timeout
+  #     (~900ms), stack rooted at ecto_sql migrator.ex run_maybe_in_transaction.
+  #     Fix: pass `migration_lock: false` to the up/down calls so the child does
+  #     not contend for the parent-held connection. It stays @tag :flaky (opt-in
+  #     via `--include flaky`) because it drives the real Migrator and mutates
+  #     schema_migrations globally; run it with:
+  #
+  #         mix test test/barkpark/repo/migrations --include flaky
 
   use Barkpark.DataCase, async: false
 
@@ -78,7 +94,6 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
   end
 
   describe "Fixture A — single-element jsonb[] (navigation shape)" do
-    @tag :flaky
     test "up/0 adds issue_version to the lone codelist field; down/0 strips it" do
       id =
         insert_schema("navigation_test", [
@@ -103,7 +118,6 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
   end
 
   describe "Fixture B — empty jsonb[] (post shape)" do
-    @tag :flaky
     test "up/0 and down/0 are no-ops on empty fields and never crash" do
       id = insert_schema("empty_test", [])
 
@@ -116,7 +130,6 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
   end
 
   describe "Fixture C — multi-element jsonb[] with nested composite (walk/2 recursion)" do
-    @tag :flaky
     test "up/0 adds issue_version to every codelist at every depth; non-codelists untouched" do
       id =
         insert_schema("mixed_test", [
@@ -166,7 +179,6 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
   end
 
   describe "Fixture D — documents.content invariant" do
-    @tag :flaky
     test "up/0 leaves a non-codelist-ref content map untouched (transform_documents/2 guard)" do
       original = %{"category_code" => "03", "title" => "Hello", "tags" => ["a", "b"]}
       insert_doc("mig-doc-untouched", original)
@@ -218,12 +230,20 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
         [@migration_version]
       )
 
+      # migration_lock: false — the default lock takes an advisory lock inside a
+      # transaction on the shared sandbox connection. The parent test already
+      # holds that connection, so the Migrator's spawned Task.await child would
+      # deterministically time out on checkout (DBConnection.ConnectionError,
+      # ~900ms). Disabling the lock removes the contention; the UPDATE body — and
+      # thus the SQLSTATE-22023 jsonb param-binding regression this fixture
+      # guards — still runs, verified by the issue_version assertions below.
       assert :ok =
                Ecto.Migrator.up(
                  Repo,
                  @migration_version,
                  AddCodelistIssueVersion,
-                 log: false
+                 log: false,
+                 migration_lock: false
                )
 
       [country, title] = fields_of(id)
@@ -235,7 +255,8 @@ defmodule Barkpark.Repo.Migrations.CodelistIssueVersionTest do
                  Repo,
                  @migration_version,
                  AddCodelistIssueVersion,
-                 log: false
+                 log: false,
+                 migration_lock: false
                )
 
       [country_d, _title_d] = fields_of(id)
