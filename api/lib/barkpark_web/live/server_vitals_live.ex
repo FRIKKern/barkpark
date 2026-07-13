@@ -83,8 +83,10 @@ defmodule BarkparkWeb.ServerVitalsLive do
   end
 
   # Tint the value with the danger accent once it crosses `threshold` percent.
+  # var(--danger) only (the Studio theme defines it) — the literal-color gate
+  # (scripts/studio-literal-check.sh) forbids hardcoded hex in Studio chrome.
   defp pct_style(v, threshold) when is_number(v) and v >= threshold,
-    do: "color: var(--danger, #e5484d);"
+    do: "color: var(--danger);"
 
   defp pct_style(_v, _threshold), do: nil
 end
