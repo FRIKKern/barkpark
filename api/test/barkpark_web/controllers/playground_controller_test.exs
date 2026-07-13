@@ -17,12 +17,18 @@ defmodule BarkparkWeb.PlaygroundControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Tenancy}
+  alias Barkpark.{Auth, Content, Tenancy}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @ttl_seconds 48 * 60 * 60
 
   defp authed(conn, raw), do: put_req_header(conn, "authorization", "Bearer " <> raw)
+
+  defp json_authed(conn, raw) do
+    conn
+    |> authed(raw)
+    |> put_req_header("content-type", "application/json")
+  end
 
   describe "POST /api/playground" do
     test "201 for an admin — provisions a tier=playground workspace, quota 100, 48h TTL, and a scoped NON-admin token",
@@ -112,6 +118,111 @@ defmodule BarkparkWeb.PlaygroundControllerTest do
     test "401 for an unauthenticated request (no token)", %{conn: conn} do
       resp = post(conn, "/api/playground")
       assert resp.status == 401
+    end
+  end
+
+  describe "POST /api/playground — seeded showcase paper (charter D47)" do
+    test "the fresh workspace is NOT empty — a curated showcase paper is present + readable",
+         %{conn: conn} do
+      raw_admin = "pg-admin-seed-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "pg admin", "test", ["read", "write", "admin"])
+
+      body =
+        conn
+        |> authed(raw_admin)
+        |> post("/api/playground")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
+
+      ws = Tenancy.get_workspace_by_slug(body["workspace_slug"])
+      showcase_slug = "showcase-" <> body["workspace_slug"]
+
+      # Present: the seed lands under the workspace's "production" dataset,
+      # scoped to the new tenant (NOT the literal portabledoc-showcase doc_id).
+      paper = Content.get_paper(showcase_slug, "production", workspace_id: ws.id)
+      assert paper, "a showcase paper must be seeded into the fresh playground workspace"
+
+      # Readable: it is a real, rendered paper, not an empty shell — the seeded
+      # heading is in the stored content and the render produced body HTML.
+      assert paper.content["blocks"] != [] and not is_nil(paper.content["blocks"])
+      assert is_binary(paper.content["body_html"]) and paper.content["body_html"] != ""
+      assert paper.content["body_html"] =~ "Welcome to your playground"
+    end
+
+    test "response carries the write coordinates project_slug + dataset (D34/D46)",
+         %{conn: conn} do
+      raw_admin = "pg-admin-coords-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "pg admin", "test", ["read", "write", "admin"])
+
+      body =
+        conn
+        |> authed(raw_admin)
+        |> post("/api/playground")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
+
+      # The caller learns the write URL in-band rather than hardcoding it.
+      assert body["project_slug"] == "default"
+      assert body["dataset"] == "production"
+
+      # …and those coordinates resolve to a real project in the new workspace.
+      assert Tenancy.get_project(body["workspace_slug"], body["project_slug"])
+    end
+  end
+
+  describe "D34 anti-404: the provision response's own slugs authorize a scoped write" do
+    test "provision → mint token → POST create at /w/:ws/p/:proj/v1/data/mutate/:ds → 200; a non-member → 403",
+         %{conn: conn} do
+      raw_admin = "pg-admin-d34-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "pg admin", "test", ["read", "write", "admin"])
+
+      body =
+        conn
+        |> authed(raw_admin)
+        |> post("/api/playground")
+        |> Map.get(:resp_body)
+        |> Jason.decode!()
+
+      ws_slug = body["workspace_slug"]
+      proj_slug = body["project_slug"]
+      dataset = body["dataset"]
+      pg_token = body["token"]
+
+      # Register a "post" schema in the provisioned workspace so a valid create
+      # is not an unknown-type 422 — scoped to the same workspace+project the
+      # mutate route resolves.
+      project = Tenancy.get_project(ws_slug, proj_slug)
+
+      {:ok, _schema} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          dataset,
+          workspace_id: project.workspace_id,
+          project_id: project.id
+        )
+
+      mutate_url = "/w/#{ws_slug}/p/#{proj_slug}/v1/data/mutate/#{dataset}"
+
+      create_body =
+        Jason.encode!(%{
+          "mutations" => [
+            %{"create" => %{"_id" => "pg-hello-1", "_type" => "post", "title" => "Hello"}}
+          ]
+        })
+
+      # The minted playground token (a workspace MEMBER) writes content → 200.
+      ok = conn |> json_authed(pg_token) |> post(mutate_url, create_body)
+
+      assert ok.status == 200,
+             "the provision response's OWN slugs + token must authorize a write (got #{ok.status})"
+
+      # A token with NO membership in the workspace → the membership gate 403s
+      # (the path resolves — this is authorization, not a 404 dead-end).
+      raw_outsider = "pg-outsider-#{System.unique_integer([:positive])}"
+      {:ok, _out} = Auth.create_token(raw_outsider, "outsider", "test", ["read", "write"])
+
+      denied = conn |> json_authed(raw_outsider) |> post(mutate_url, create_body)
+      assert denied.status == 403
     end
   end
 
