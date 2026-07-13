@@ -1,0 +1,26 @@
+name: Deploy harnesses
+
+on:
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".github/workflows/deploy-harnesses.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  offline-deploy-harnesses:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install and assert Caddy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y caddy
+          command -v caddy
+          caddy version
+      - name: Instance deploy harness
+        run: bash deploy/instance-deploy_test.sh
+      - name: Control-plane deploy harness
+        run: bash deploy/cp-deploy_test.sh
