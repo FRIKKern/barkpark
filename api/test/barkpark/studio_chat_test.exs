@@ -1234,6 +1234,39 @@ defmodule Barkpark.StudioChatTest do
     |> Enum.map(&Jason.decode!/1)
   end
 
+  defp wire_frames(name),
+    do: Enum.reject(load_ndjson(name), &(&1["type"] == "fixture_provenance"))
+
+  describe "Claude queue-race wire fixtures (charter D11/D12/D62)" do
+    test "no-active-turn interrupt is a benign empty queue acknowledgement" do
+      assert [ack] = wire_frames("interrupt_no_active_turn.ndjson")
+      assert ack["type"] == "control_response"
+      assert get_in(ack, ["response", "subtype"]) == "success"
+      assert get_in(ack, ["response", "response", "still_queued"]) == []
+    end
+
+    test "mid-turn user input is ordered after turn one and before a fresh turn init" do
+      frames = wire_frames("mid_turn_queued_user.ndjson")
+
+      assert Enum.map(frames, &{&1["type"], &1["subtype"]}) == [
+               {"system", "init"},
+               {"stream_event", nil},
+               {"user", nil},
+               {"result", "success"},
+               {"system", "init"},
+               {"stream_event", nil},
+               {"result", "success"}
+             ]
+
+      assert get_in(Enum.at(frames, 2), ["message", "content", Access.at(0), "text"]) ==
+               "queued question"
+
+      assert Enum.at(frames, 3)["result"] == "turn one"
+      assert Enum.at(frames, 4)["uuid"] == "turn-2-init"
+      assert Enum.at(frames, 6)["result"] == "turn two"
+    end
+  end
+
   defp workflow_progress_frames(frames) do
     Enum.filter(frames, fn f ->
       f["subtype"] == "task_progress" and is_list(f["workflow_progress"])

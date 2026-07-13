@@ -2,10 +2,31 @@ package chat
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func loadQueueFixture(t *testing.T, name string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "api", "test", "fixtures", "claude_chat", name))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var frames []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			t.Fatalf("decode fixture line: %v", err)
+		}
+		if frame["type"] != "fixture_provenance" {
+			frames = append(frames, frame)
+		}
+	}
+	return frames
+}
 
 // reduce_test.go — the recorded-frame reducer proofs. Every acceptance-criteria
 // invariant (D8 settlement, D9 tail carve-out, D11 interrupt truth, D12 queued
@@ -226,6 +247,23 @@ func TestIdleEscIsSilentNoOp(t *testing.T) {
 	}
 }
 
+func TestInterruptNoActiveTurnFixtureIsSilentNoOp(t *testing.T) {
+	frames := loadQueueFixture(t, "interrupt_no_active_turn.ndjson")
+	if len(frames) != 1 {
+		t.Fatalf("frames = %d, want 1", len(frames))
+	}
+	response := frames[0]["response"].(map[string]any)
+	body := response["response"].(map[string]any)
+	if queued := body["still_queued"].([]any); len(queued) != 0 {
+		t.Fatalf("still_queued = %#v, want []", queued)
+	}
+
+	got, effs := drive(State{SessionID: "s1", Phase: TurnIdle}, t0, InterruptEvent{})
+	if got.Phase != TurnIdle || got.Notice != "" || len(effs) != 0 {
+		t.Fatalf("empty ack race must remain silent: phase=%v notice=%q effects=%d", got.Phase, got.Notice, len(effs))
+	}
+}
+
 // TestMidTurnSendQueuesThenResolvesNextTurn proves D12: a send during a turn is
 // badged queued and only un-badges when a fresh system/init frame proves the
 // next turn started.
@@ -247,6 +285,35 @@ func TestMidTurnSendQueuesThenResolvesNextTurn(t *testing.T) {
 	st, _ = drive(st, t0, initFrame(t))
 	if st.Local[0].Queued {
 		t.Fatal("a fresh system/init frame must clear the queued badge (the turn started)")
+	}
+}
+
+func TestMidTurnQueuedUserFixturePreservesTurnOneUntilFreshInit(t *testing.T) {
+	frames := loadQueueFixture(t, "mid_turn_queued_user.ndjson")
+	if len(frames) != 7 {
+		t.Fatalf("frames = %d, want 7", len(frames))
+	}
+
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, chatFrame(t, frames[0]), chatFrame(t, frames[1]))
+	if st.Tail != "turn one" || st.Phase != TurnStreaming {
+		t.Fatalf("turn one not streaming intact: tail=%q phase=%v", st.Tail, st.Phase)
+	}
+
+	content := frames[2]["message"].(map[string]any)["content"].([]any)[0].(map[string]any)["text"].(string)
+	st, effs := drive(st, t0, SendEvent{Content: content})
+	if st.Tail != "turn one" || len(st.Local) != 1 || !st.Local[0].Queued || !hasEffect[SendEffect](effs) {
+		t.Fatalf("queued send changed turn one or lost queue truth: tail=%q local=%+v effects=%+v", st.Tail, st.Local, effs)
+	}
+
+	st, _ = drive(st, t0, chatFrame(t, frames[3]))
+	if st.Phase != TurnIdle || st.Tail != "turn one" || !st.Local[0].Queued {
+		t.Fatalf("turn one result must settle without consuming queued send: phase=%v tail=%q local=%+v", st.Phase, st.Tail, st.Local)
+	}
+
+	st, _ = drive(st, t0, chatFrame(t, frames[4]))
+	if st.Phase != TurnStreaming || st.Local[0].Queued || st.Tail != "turn one" {
+		t.Fatalf("fresh init must start queued turn and preserve turn one: phase=%v tail=%q local=%+v", st.Phase, st.Tail, st.Local)
 	}
 }
 
