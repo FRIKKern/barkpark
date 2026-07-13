@@ -162,23 +162,11 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_T
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
 
-| Code | HTTP Status | Meaning |
-|------|-------------|---------|
-| `not_found` | 404 | Doc/schema/workspace unknown |
-| `unauthorized` | 401 | Missing/invalid token |
-| `forbidden` | 403 | Token lacks permission / not a member / read-only on write |
-| `schema_unknown` | 404 | No schema for type |
-| `precondition_failed` | 412 | `ifRevisionID` mismatch; `details.expected`/`.actual` |
-| `invalid_filter` | 400 | Unknown filter op (fail-closed; §4) |
-| `conflict` | 409 | Already exists (`create`) |
-| `malformed` | 400 | Bad body / missing `mutations` |
-| `validation_failed` | 422 | Validation; per-field `details` |
-| `internal_error` | 500 | Unexpected |
-| `rate_limited` | 429 | Retry after `Retry-After` |
+Core: `not_found` 404 (doc/schema/workspace) · `unauthorized` 401 (missing/invalid token) · `forbidden` 403 (no permission / not a member / read-only write) · `schema_unknown` 404 · `precondition_failed` 412 (`ifRevisionID` mismatch; `details.expected`/`.actual`) · `invalid_filter` 400 (unknown op; §4) · `conflict` 409 (exists) · `malformed` 400 (bad body) · `validation_failed` 422 (per-field `details`) · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-Additive: `halted` 409 (hook veto) · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task` 409 (`details.similar`) · `schema_has_documents` 409 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413.
+Additive: `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task`/`duplicate_of` 409 · `schema_has_documents` 409 · `idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Workspace/publish wall: `workspace_suspended` 403 · `quota_exceeded` 402 (`details.quota`) · `unknown_tag`/`label_spine` 422; `playground_expired` 403 forthcoming (playground TTL reaper).
 
-Endpoint-specific (in the OpenAPI `Error.code` enum): ingest `invalid_paper`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · grants/tokens `invalid_grant`/`unprocessable` · step-up `mfa_required`/`mfa_enrolment_required`. Single source `Content.Errors.known_codes/0`, contract-tested; ops endpoints are off-spec by design.
+Endpoint-specific (OpenAPI `Error.code` enum): ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · grants/tokens `invalid_grant`/`unprocessable` · step-up `mfa_required`/`mfa_enrolment_required`. Source `Content.Errors.known_codes/0`, §9 coverage guarded; ops endpoints off-spec.
 
 ## 10. Legacy `/api/*` Routes
 
