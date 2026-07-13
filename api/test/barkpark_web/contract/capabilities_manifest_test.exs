@@ -653,4 +653,113 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
   end
+
+  describe "chat transport commands (charter bp-chat-tui, ct-bl-manifest-commands)" do
+    # bp chat was invisible to the capabilities manifest — the MCP bridge
+    # (--tools all), SDK codegen, and headless harnesses could not discover it.
+    # These pin the `chat` noun + the seven non-streaming admin verbs mapped to
+    # the already-shipped /v1/chat routes (the eighth, SSE events, is a builtin
+    # carve-out with no manifest verb). StudioChat is core-embedded, NOT a
+    # Barkpark.Plugin, so the noun is declared in core_nouns/0, not plugin_nouns/2.
+    @chat_commands ~w(
+      chat.create_session chat.list_sessions chat.get_session chat.update_session
+      chat.send_message chat.interrupt chat.approve
+    )
+
+    test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      noun = Enum.find(manifest["nouns"], &(&1["name"] == "chat"))
+      assert noun != nil, "manifest declares no `chat` noun"
+      # StudioChat is core-embedded — the noun carries no plugin provenance.
+      assert noun["plugin"] == nil
+
+      # The events route is manifest-absent but must be discoverable via the
+      # summary so a reading agent knows streaming exists via `bp chat`.
+      assert noun["summary"] =~ ~r/stream/i,
+             "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
+    end
+
+    test "exactly the seven non-streaming chat verbs are registered (events stays absent)",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      chat_ids =
+        manifest["commands"]
+        |> Enum.filter(&(&1["noun"] == "chat"))
+        |> Enum.map(& &1["id"])
+        |> Enum.sort()
+
+      assert chat_ids == Enum.sort(@chat_commands),
+             "chat verb set drifted; got: #{inspect(chat_ids)}"
+
+      # The SSE events route is a builtin carve-out — never a manifest verb.
+      refute Enum.any?(manifest["commands"], &(&1["id"] == "chat.events"))
+    end
+
+    test "every chat command is admin-tier (existence-hidden from anon/lower callers)",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      for id <- @chat_commands do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["auth_tier"] == "admin", "#{id} must be admin-tier; got: #{inspect(cmd["auth_tier"])}"
+        assert cmd["source"] == "core", "#{id} must be a core command; got: #{inspect(cmd["source"])}"
+      end
+    end
+
+    test "chat verbs map to the shipped /v1/chat routes (method + path)", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      expected = %{
+        "chat.create_session" => {"POST", "/v1/chat/sessions"},
+        "chat.list_sessions" => {"GET", "/v1/chat/sessions"},
+        "chat.get_session" => {"GET", "/v1/chat/sessions/:id"},
+        "chat.update_session" => {"PATCH", "/v1/chat/sessions/:id"},
+        "chat.send_message" => {"POST", "/v1/chat/sessions/:id/messages"},
+        "chat.interrupt" => {"POST", "/v1/chat/sessions/:id/interrupt"},
+        "chat.approve" => {"POST", "/v1/chat/sessions/:id/approval"}
+      }
+
+      for {id, {method, path}} <- expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} not found in manifest"
+        assert cmd["http"]["method"] == method, "#{id} method"
+        assert cmd["http"]["path_template"] == path, "#{id} path"
+        # Instance-global admin (D21): no per-doc scoped mirror.
+        refute Map.has_key?(cmd, "scoped_prefix"), "#{id} must have no scoped_prefix (D21 instance-global)"
+      end
+    end
+
+    test "session-scoped chat verbs carry the `id` path arg + their body args", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      get_session = find_cmd(manifest, "chat.get_session")
+      assert "id" in Enum.map(get_session["args"], & &1["name"])
+
+      send = find_cmd(manifest, "chat.send_message")
+      send_args = Enum.map(send["args"], & &1["name"])
+      assert "id" in send_args
+      assert "content" in send_args
+
+      approve = find_cmd(manifest, "chat.approve")
+      approve_args = Enum.map(approve["args"], & &1["name"])
+      assert "id" in approve_args
+      assert "request_id" in approve_args
+      assert "decision" in approve_args
+    end
+
+    test "chat commands are hidden from an anonymous (tier none) caller", %{conn: conn} do
+      # Existence-hiding: an anon manifest must learn zero chat verb NAMES and
+      # not the `chat` noun name — exactly like the other admin-only nouns.
+      anon = conn |> get("/v1/capabilities") |> json_response(200)
+
+      assert anon["auth_tier"] == "none"
+      refute Enum.any?(anon["commands"], &(&1["noun"] == "chat")),
+             "anon manifest leaked a chat command"
+      refute Enum.any?(anon["nouns"], &(&1["name"] == "chat")),
+             "anon manifest leaked the chat noun name"
+    end
+  end
 end
