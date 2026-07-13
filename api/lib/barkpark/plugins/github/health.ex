@@ -39,7 +39,7 @@ defmodule Barkpark.Plugins.Github.Health do
   import Ecto.Query
 
   alias Barkpark.Content.MutationEvent
-  alias Barkpark.Plugins.Github.{Conflict, Conflicts, Cursor, Outbox, Settings}
+  alias Barkpark.Plugins.Github.{Conflict, Cursor, Outbox, Settings}
   alias Barkpark.Repo
 
   # How many open conflict rows to hand the console as plain maps (newest-first).
@@ -92,12 +92,28 @@ defmodule Barkpark.Plugins.Github.Health do
   Aggregate the GitHub sync-health snapshot from LOCAL reads only.
 
   Total by construction: any sub-read that fails (dark plugin, missing table,
-  transient DB error) degrades to zeros for its section, never a raise. `opts`
-  is accepted for forward-compatibility and currently unused — the snapshot
-  always reflects the plugin's OWN resolved settings (repo, datasets).
+  transient DB error) degrades to zeros for its section, never a raise.
+
+  The argument is a **dataset filter** (`nil` | `""` | `"<name>"`):
+
+    * a non-blank binary NARROWS the per-dataset rows AND the open-conflict
+      read to that ONE dataset — this is what lets the JSON status controller
+      pin a snapshot to the caller's own token dataset so an operator token
+      cannot read whole-fleet conflict/lag detail (D18);
+    * `nil` / blank / any non-binary (e.g. the legacy `keyword` shape the
+      forward-compat callers passed) means WHOLE FLEET — every configured
+      dataset, conflicts filtered by repo only. This is what the admin-gated
+      `:ops` console mount uses.
+
+  The header `active`/`repo` and the fleet-wide `queue` depth are unaffected by
+  the filter — they are plugin-global, not per-dataset.
   """
-  @spec snapshot(keyword()) :: t()
-  def snapshot(_opts \\ []) do
+  @spec snapshot(String.t() | nil | keyword()) :: t()
+  def snapshot(dataset_filter \\ nil) do
+    # A non-blank binary narrows the snapshot to one dataset; anything else
+    # (nil, blank, or the legacy keyword shape) is the whole-fleet view.
+    dataset = normalize_dataset(dataset_filter)
+
     # Resolve the repo ONCE and thread it down. Each `Settings.repo/0` is a DB
     # fallback read that logs an audit row, so a single read (vs one per section)
     # both trims audit-table churn on a per-mount probe AND guarantees the header
@@ -121,21 +137,32 @@ defmodule Barkpark.Plugins.Github.Health do
           false
         ),
       repo: repo,
-      conflicts: conflicts_snapshot(repo),
-      datasets: datasets_snapshot(),
+      conflicts: conflicts_snapshot(repo, dataset),
+      datasets: datasets_snapshot(dataset),
       queue: queue_snapshot()
     }
   end
+
+  # A non-blank binary is the dataset filter; nil / blank / any non-binary shape
+  # (the legacy `keyword` forward-compat arg) collapses to nil = whole fleet.
+  defp normalize_dataset(d) when is_binary(d) do
+    case String.trim(d) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_dataset(_), do: nil
 
   # ---------------------------------------------------------------------------
   # (1) Conflicts — the visible quarantine (D7)
   # ---------------------------------------------------------------------------
 
-  defp conflicts_snapshot(repo) do
+  defp conflicts_snapshot(repo, dataset) do
     safe(
       fn ->
-        counts = open_conflict_counts(repo)
-        rows = Conflicts.list(open_conflicts_list_opts(repo))
+        counts = open_conflict_counts(repo, dataset)
+        rows = open_conflict_rows(repo, dataset)
 
         %{
           out_of_band_edit: Map.get(counts, "out_of_band_edit", 0),
@@ -153,11 +180,14 @@ defmodule Barkpark.Plugins.Github.Health do
   # not a bounded row scan, so `total` and every bucket are honest even past a
   # large backlog (no silent cap) while staying O(kinds) in memory. Filtered to
   # the configured repo when one is set; NO :repo filter when the plugin is dark
-  # (repo nil) so a pre-provisioning snapshot still surfaces orphaned rows.
-  defp open_conflict_counts(repo) do
+  # (repo nil) so a pre-provisioning snapshot still surfaces orphaned rows. The
+  # `dataset` filter is applied on top (D18) when the caller pins one, so a
+  # per-dataset-scoped read never counts another dataset's quarantine.
+  defp open_conflict_counts(repo, dataset) do
     Conflict
     |> where([c], is_nil(c.resolved_at))
     |> maybe_repo(repo)
+    |> maybe_dataset(dataset)
     |> group_by([c], c.kind)
     |> select([c], {c.kind, count(c.id)})
     |> Repo.all()
@@ -167,11 +197,26 @@ defmodule Barkpark.Plugins.Github.Health do
   defp maybe_repo(query, repo) when is_binary(repo), do: where(query, [c], c.repo == ^repo)
   defp maybe_repo(query, _repo), do: query
 
-  # Newest-first open rows for the console table, capped. Same repo-filter rule
-  # as the counts (dark → repo-wide) so the table and the counts agree.
-  defp open_conflicts_list_opts(repo) do
-    base = [limit: @open_conflicts_cap]
-    if is_binary(repo), do: [{:repo, repo} | base], else: base
+  defp maybe_dataset(query, dataset) when is_binary(dataset),
+    do: where(query, [c], c.dataset == ^dataset)
+
+  defp maybe_dataset(query, _dataset), do: query
+
+  # Newest-first open rows for the console table / status JSON, capped at
+  # `@open_conflicts_cap`. Applies the SAME repo + dataset filters as the counts
+  # (dark → repo-wide; unpinned → all datasets) IN THE DATABASE so the cap and
+  # the counts observe the identical window — filtering post-cap would drop a
+  # pinned dataset's rows behind another dataset's newer ones. Built locally (not
+  # via `Conflicts.list/1`, which has no `:dataset` option) to keep the D18
+  # dataset narrowing inside this one slice.
+  defp open_conflict_rows(repo, dataset) do
+    Conflict
+    |> where([c], is_nil(c.resolved_at))
+    |> maybe_repo(repo)
+    |> maybe_dataset(dataset)
+    |> order_by([c], desc: c.id)
+    |> limit(@open_conflicts_cap)
+    |> Repo.all()
   end
 
   defp conflict_to_map(%Conflict{} = c) do
@@ -196,7 +241,15 @@ defmodule Barkpark.Plugins.Github.Health do
   # (2) Cursor + lag per dataset
   # ---------------------------------------------------------------------------
 
-  defp datasets_snapshot do
+  # Pinned dataset (D18) → exactly that ONE dataset's row, even if the plugin's
+  # configured `Settings.datasets/0` does not list it: a token-scoped read must
+  # see its OWN dataset's lag and nothing else. Unpinned → the whole configured
+  # fleet, as the admin `:ops` console expects.
+  defp datasets_snapshot(dataset) when is_binary(dataset) do
+    [dataset_snapshot(dataset)]
+  end
+
+  defp datasets_snapshot(_dataset) do
     datasets = safe(fn -> Settings.datasets() end, ["production"])
     Enum.map(datasets, &dataset_snapshot/1)
   end
