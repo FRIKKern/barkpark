@@ -8,6 +8,9 @@ defmodule Barkpark.Telemetry.Handlers do
     * `[:barkpark, :plugin_settings, :read | :write]`
     * `[:barkpark, :hooks, :hook, :stop]` (plugin lifecycle-hook duration —
       previously measured then emitted to the void)
+    * `[:barkpark, :authoring, :wall_rejection | :findability_miss]` (curator
+      forwards, charter D44 — the counting lives in the bounded Prometheus
+      counters; this attach gives the structured events a consumer)
   """
 
   require Logger
@@ -25,7 +28,16 @@ defmodule Barkpark.Telemetry.Handlers do
     # the VOID (no attach, not in metrics/0) — the audit's "measured then thrown
     # away". A debug consumer here + the Prometheus histogram in
     # BarkparkWeb.Telemetry now both consume it.
-    [:barkpark, :hooks, :hook, :stop]
+    [:barkpark, :hooks, :hook, :stop],
+    # Authoring-wall curator forward (charter D44). Both authoring events fired
+    # into a total void — no attached barkpark handler. The counting is done by
+    # the bounded Prometheus counters in
+    # `BarkparkWeb.Telemetry.prometheus_metrics/0` (scraped at the Bearer-gated
+    # /v1/instance/metrics); this debug forward gives the STRUCTURED events a
+    # barkpark-handlers consumer too, mirroring the plugin_settings /
+    # search.intel.record pattern. Bounded metadata only is logged.
+    [:barkpark, :authoring, :wall_rejection],
+    [:barkpark, :authoring, :findability_miss]
   ]
 
   @oban_events [
@@ -97,6 +109,24 @@ defmodule Barkpark.Telemetry.Handlers do
       "search.intel.record surface=#{inspect(metadata[:surface])} " <>
         "scope=#{inspect(metadata[:scope])} result=#{inspect(metadata[:result])} " <>
         "reason=#{inspect(metadata[:reason])}"
+    )
+  end
+
+  # Authoring-wall curator forwards (charter D44). The rejection/miss are ALSO
+  # Logger.warning'd at their emit sites; this structured debug line gives the
+  # events a barkpark-handlers consumer (no longer a void) alongside the bounded
+  # Prometheus counters. Only bounded metadata is echoed.
+  def handle_event([:barkpark, :authoring, :wall_rejection], _measurements, metadata, _config) do
+    Logger.debug(
+      "authoring.wall_rejection code=#{inspect(metadata[:code])} " <>
+        "type=#{inspect(metadata[:type])} dataset=#{inspect(metadata[:dataset])}"
+    )
+  end
+
+  def handle_event([:barkpark, :authoring, :findability_miss], _measurements, metadata, _config) do
+    Logger.debug(
+      "authoring.findability_miss type=#{inspect(metadata[:type])} " <>
+        "dataset=#{inspect(metadata[:dataset])} doc_id=#{inspect(metadata[:doc_id])}"
     )
   end
 end
