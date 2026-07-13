@@ -471,10 +471,11 @@ defmodule BarkparkWeb.TasksController do
   def stamp(conn, %{"doc_id" => doc_id} = params) do
     with {:ok, worker_id} <- Params.fetch_string(params, "worker_id"),
          {:ok, observed_epoch} <- Params.fetch_int(params, "observed_epoch"),
-         {:ok, index, outcome} <- Params.parse_stamp(params),
+         {:ok, index, outcome, criterion_text} <- Params.parse_stamp(params),
          {:ok, task} <- find_task_by_doc_id(doc_id, conn) do
       opts =
         [observed_epoch: observed_epoch, criterion: index, outcome: outcome]
+        |> Params.put_opt(:criterion_text, criterion_text)
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stamp(task.id, worker_id, opts) do

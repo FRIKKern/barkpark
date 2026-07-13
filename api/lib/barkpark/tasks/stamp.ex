@@ -67,19 +67,28 @@ defmodule Barkpark.Tasks.Stamp do
       * `:criterion` (required integer ≥ 0) — index into
         `content.acceptance_criteria`.
       * `:outcome` (required) — `{:met, evidence}` | `{:miss, note}`.
+      * `:criterion_text` (optional string) — the criterion's EXPECTED stored
+        text. When a non-empty string, it is threaded into the merge as the
+        `"criterion"` CAS key so `Internal.merge_criteria`'s
+        `:criteria_mismatch` guard fires — a mis-based / off-by-one index whose
+        text does not match the row at that index is REJECTED instead of
+        silently flipping the neighbour. Absent/blank keeps the permissive
+        index-only path (the merge-gate autostamp never passes text).
       * `:caller_token_id` (optional) — audit stamp on the event row.
 
   Errors: `:not_found`, `{:not_in_progress, status}`, `:not_holder`,
   `:fenced_off`, `:stale_claim`, `:criteria_index_out_of_range`,
-  `:evidence_required`, `:note_required`, `:invalid_criteria`.
+  `:criteria_mismatch`, `:evidence_required`, `:note_required`,
+  `:invalid_criteria`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
     index = Keyword.fetch!(opts, :criterion)
     outcome = Keyword.fetch!(opts, :outcome)
+    criterion_text = Keyword.get(opts, :criterion_text)
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
-    with {:ok, update, result_tag} <- build_update(index, outcome, worker_id) do
+    with {:ok, update, result_tag} <- build_update(index, outcome, worker_id, criterion_text) do
       do_stamp_txn(task_id, worker_id, observed_epoch, update, result_tag, caller_token_id)
     end
   end
@@ -88,28 +97,43 @@ defmodule Barkpark.Tasks.Stamp do
   # payload is shaped, so `met` is always explicit and a miss always carries
   # its attempt. Validation is here (not just the controller) so internal
   # callers get the same evidence-or-nothing contract.
-  defp build_update(index, _outcome, _worker) when not (is_integer(index) and index >= 0),
-    do: {:error, :invalid_criteria}
+  #
+  # The optional `criterion_text` is the criteria-grain CAS: `put_guard` sets
+  # the `"criterion"` key on the update map ONLY when a non-empty string is
+  # given, so `Internal.merge_criteria` rejects a mis-based / off-by-one index
+  # (`:criteria_mismatch`) whose text does not match the stored row. A blank /
+  # nil guard leaves the update untouched — the permissive index-only path the
+  # merge-gate autostamp depends on.
+  defp build_update(index, _outcome, _worker, _text)
+       when not (is_integer(index) and index >= 0),
+       do: {:error, :invalid_criteria}
 
-  defp build_update(index, {:met, evidence}, _worker)
+  defp build_update(index, {:met, evidence}, _worker, text)
        when is_binary(evidence) and evidence != "" do
-    {:ok, %{"index" => index, "met" => true, "evidence" => evidence}, "met"}
+    {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
   end
 
-  defp build_update(_index, {:met, _no_evidence}, _worker), do: {:error, :evidence_required}
+  defp build_update(_index, {:met, _no_evidence}, _worker, _text), do: {:error, :evidence_required}
 
-  defp build_update(index, {:miss, note}, worker) when is_binary(note) and note != "" do
+  defp build_update(index, {:miss, note}, worker, text) when is_binary(note) and note != "" do
     attempt = %{
       "note" => note,
       "ts" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "worker" => worker
     }
 
-    {:ok, %{"index" => index, "attempt" => attempt}, "miss"}
+    {:ok, put_guard(%{"index" => index, "attempt" => attempt}, text), "miss"}
   end
 
-  defp build_update(_index, {:miss, _no_note}, _worker), do: {:error, :note_required}
-  defp build_update(_index, _outcome, _worker), do: {:error, :invalid_criteria}
+  defp build_update(_index, {:miss, _no_note}, _worker, _text), do: {:error, :note_required}
+  defp build_update(_index, _outcome, _worker, _text), do: {:error, :invalid_criteria}
+
+  # Thread the expected criterion text into the merge as the CAS `"criterion"`
+  # key — only when it is a real, non-empty string (nil/"" stay permissive).
+  defp put_guard(update, text) when is_binary(text) and text != "",
+    do: Map.put(update, "criterion", text)
+
+  defp put_guard(update, _text), do: update
 
   defp do_stamp_txn(task_id, worker_id, observed_epoch, update, result_tag, caller_token_id) do
     result =
