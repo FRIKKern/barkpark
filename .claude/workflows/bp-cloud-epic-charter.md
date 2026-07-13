@@ -143,8 +143,88 @@ Backlog filed this wave: `azh-go-live-human-gate` (p1, THE sole remainder for th
 axis), `azh-audit-dns-token-hint` (p3), `azh-cp-registry-inventory-hygiene` (p3),
 `azh-roadmap-tail-s8-s11c-s15-s16` (p3). Pre-existing kept open: `azh-w3-pricing-live-join-verify` (p3).
 
+## Wave 6 Decisions (2026-07-13) — FINISH + HONEST-LEDGER (land the two unlanded wave-5 slices)
+
+Wave Paper: **`felix-pristine-wave-6-2026-07-13`** (guerrilla, style=article). Wave 5 shipped and
+MERGED 4 of 6 slices (vix ceiling #2897→merged path, LV telemetry, bokbasen pagination, Part XI
+Paper #2900). Two slices were BUILT+reviewer-A- but never LANDED/CLOSED — they are local-only
+branches with no PR. Wave 6 FINISHES exactly those two; it does NOT rebuild. Twelve wave-6 scouts +
+three deep verifiers (full-24 SHA sweep, post-rebase seed-varied gate, close-mechanics) converged.
+
+- **D23 — Wave 6 is FINISH + VERIFY-BEFORE-CLOSE, scoped TIGHT to the two unlanded slices.** Why:
+  survey+verify cross-confirmed both wave-5 slices are BUILT and correct; "unlanded" means
+  not-merged/not-closed, not not-built. Restamp = verify-and-close; async = rebase-and-land. Every
+  other open Felix child is mapped-not-built (backlog). No fresh scouts; the 12 domains stay closed.
+- **D24 — Ledger restamp (`task-felix-ledger-restamp`): VERIFY-AND-CLOSE via claim→close, NEVER raw
+  mutate.** Why: the restamp mutations are already LIVE (all 24 published copies carry the asserted
+  met-vectors; verify RAN a full-24 sweep — every cited SHA an ancestor of origin/main, criterion-vs-
+  diff fidelity on 16 of 24, zero fabrication). The task is 5/5 met but lifecycle=open with an
+  EXPIRED claim (epoch 6). Close mechanics (verify-proven): there is NO bare `set lifecycle_status`
+  verb — `task.close` is claim/epoch-CAS-gated by design, so re-claim (fresh epoch) → `bp task close`.
+  A raw `/v1/data/mutate` on lifecycle_status would bypass the exact CAS/work-digest fence this
+  honest-ledger wave exists to protect. The builder re-runs the full-24 ancestry sweep against
+  CURRENT origin/main as the close evidence — audit-grade, not inherited trust.
+- **D25 — d328 OTP landmine: RESTAMP, not reopen (confirmed a THIRD time, live).** Why: fc9665e4/#2403
+  genuinely tiers the top-level supervision tree (4 new supervisors + `supervision_isolation_test.exs`
+  152L + `application_child_specs_test.exs` 87L); verify confirmed [T,T,T] on the ancestor commit and
+  read the diff. The digest's "no landing commit" fabrication-landmine is REFUTED. Do NOT reopen. Rule
+  of the wave: had it been genuinely unfixed, the correct move is REOPEN — never a fabricated commit
+  (surfacing a false-done is a WIN).
+- **D26 — #2390 pair is NOT a double-count; `task-a9adc82f820db065` STAYS [T,F,T].** Why: task-9e21c3f2
+  (issue #2299) and task-a9adc82f (issue #2297) are distinct findings sharing one commit. a9adc82f's
+  criterion[1] (reopen wall-time / `:erlang.external_size` byte at N=2000) is genuinely unmet — #2390
+  measures only `:reductions` — so it stays honestly met:false with a duplicate-of note. The unmet
+  measurement is filed as backlog, not force-stamped.
+- **D27 — Async flip (`task-5a5e2c939a33a621`): LAND the 55-file set as-is; do NOT re-litigate or
+  expand.** Why: 55 is the empirical honest ceiling — the analytic 230 was EMPIRICALLY UNSAFE (non-
+  deterministic breakage across 4 grep-invisible hazard classes; see D14). origin/main has since
+  advanced past the verify base and touched 10 of the 55 files, but ALL 55 flip-target
+  `use …DataCase, async: false` lines survive on origin/main (confirmed) — so the flip RE-APPLIES
+  deterministically off origin/main. Builder re-derives the 55-file flip (avoids cherry-pick context
+  conflicts) rather than growing the set; expanding repeats the failure mode. Merge-gated criterion
+  closed by the lead.
+- **D28 — Async payoff recorded HONESTLY as net-neutral on current base, NOT −36%.** Why: verify RAN
+  both seeds (0-fail) AND a same-seed baseline on current origin/main — flip 220.7s vs baseline 221.4s
+  is FLAT (the −36% was true on the old base 47b8c0ce; today the serial sync tail dominates and
+  absorbs the rebalance). The merge is justified by correctness (2 seeds, 0-fail), not a payoff
+  number — distrust-vacuous-green cuts both ways. The builder re-stamps criterion[2] with the honest
+  net-neutral evidence after the post-rebase gate.
+- **D29 — 40P01 migration-DDL deadlock is a KNOWN pre-existing flake, not a wave-6 regression.** Why:
+  `task-felix-migration-ddl-audit-deadlock` tracks it (workspace-delete-cascade DDL ACCESS-EXCLUSIVE
+  lock vs a leaked fire-and-forget audit-dispatch Task). The 55-flip touches no DDL file but raises
+  ambient concurrency on the audit path, so a 40P01 hit during the seed-varied gate is already-known,
+  self-healing on isolated rerun — NOT a red flag. The wave Paper and PR note this explicitly to
+  prevent a false alarm.
+- **D30 — `task-f0bdb914d63a2e84` (the wish's "25th landmine") is already CLOSED this wave.** Why:
+  lifecycle=done, closed_by=lead-opus 2026-07-13, all 4 criteria met citing #2870/821fcada (verified
+  MERGED, mergeCommit an ancestor of origin/main). Genuinely fixed, honestly marked done — no restamp,
+  no reopen, no action.
+- **D31 — Both slices branch from ORIGIN/main (local checkout diverged +107/−54); isolated worktrees;
+  `CC=/usr/bin/clang`; opus-only builders (Fable exhausted).** Restamp branch f6beac23 is a zero-diff
+  audit anchor — no PR, no repo files. Async is a code PR the lead merges. D11/D12 hold unchanged.
+
+### Wave 6 roadmap (2 opus slices, parallel — disjoint files)
+
+1. **[P1] Ledger restamp — verify-and-close** — `task-felix-ledger-restamp` — opus. No repo files
+   (ledger-only). Re-run the full-24 SHA-ancestry sweep against current origin/main, confirm every
+   published copy's met-vector unchanged (a9adc82f stays [T,F,T]), then claim→close (fresh epoch;
+   NEVER raw mutate). Gate: ancestry sweep prints all-ANCESTOR + `bp task get task-felix-ledger-restamp`
+   shows lifecycle=done post-close.
+2. **[P1] async flip — land the 55-file subset** — `task-5a5e2c939a33a621` — opus. Files: the 55
+   `api/test/**_test.exs` files of commit 0b9dcf8c (re-derived off origin/main). Rebase/re-apply,
+   two seed-varied `CC=/usr/bin/clang mix test` green (0-fail; a 40P01 hit is the known flake per D29),
+   push + open PR; builder stamps [1][2][3] with honest net-neutral payoff (D28); LEAD closes [4]
+   (merge gate). Gate: two `CC=/usr/bin/clang mix test --seed N` runs, 0 failures each.
+
+Backlog (mapped-not-built this wave): 3 open Group-A felix PRs #2897/#2898/#2899 (tasks
+`task-vix-bomb-explicit-ceiling` in_progress, LV-telemetry + bokbasen DONE — merge cleanup);
+`task-felix-roothtml-durable-sobelow-skip`, `task-felix-interop-resource-bound-sweep`,
+`task-felix-phantom-media-atomicity`, `task-felix-migration-ddl-audit-deadlock` (all open);
+NEW `task-felix-a9adc82f-reopen-wall-time-measure` (the unmet #2390 N=2000 measurement).
+
 ## Wave log
 
+<<<<<<< HEAD
 ### Wave 2026-07-11 — the live-smoke wave (Review debrief, grade A-)
 
 **All four slices landed; the live-smoke axis is closed to the ONE named human gate.**
@@ -187,3 +267,21 @@ axis), `azh-audit-dns-token-hint` (p3), `azh-cp-registry-inventory-hygiene` (p3)
 egg would waste the human's shot); (4) backlog: `azh-archives-502-unconfigured-finding`,
 `azh-audit-dns-token-hint`, `azh-w3-pricing-live-join-verify`, roadmap tail rollup.
 Wave Paper: `azure-hetzner-hosting-epic-wave-2026-07-11`.
+=======
+- **Wave 6 — 2026-07-13 — DECIDED (building).** Ratified D23–D31. Two opus slices under
+  `task-96a908af98698118`, both linked to `felix-pristine-wave-6-2026-07-13`: ledger restamp
+  (verify-and-close, claim→close not raw mutate) and async flip (land the 55-file subset off
+  origin/main, honest net-neutral payoff). Full-24 SHA sweep + post-rebase seed-varied gate proved
+  green pre-decision. Backlog: 3 open felix PRs, 4 open backlog children, + new a9adc82f measurement
+  gap. Fable exhausted — all builders opus. Grade: pending build+review.
+- **Wave 5 — 2026-07-13 — SHIPPED (A-, per `felix-pristine-wave-5-2026-07-13`).** Ratified D13–D22.
+  Merged 4 of 6: vix ceiling, LV telemetry, bokbasen pagination, Part XI verdict-table Paper. Two
+  slices built+A- but left unlanded (ledger restamp, async flip) → carried to Wave 6 to LAND.
+  Backlog seeded: root.html.heex durable skip, interop resource-bound sweep. Phantom-media parked.
+- **Wave 4 — 2026-07-13 — SHIPPED (grade recorded prior).** Magick bound #2868, bokbasen
+  mount-gate #2869, sobelow durable inline skip #2870 — all merged to origin/main.
+>>>>>>> 7fa8cc62 (docs(felix-epic): Wave 6 decisions D23-D31 — FINISH the two unlanded wave-5 slices (restamp verify-and-close, async flip land))
+
+### Wave 6 landed (2026-07-13, steward) — grade A-
+
+Both unlanded wave-5 slices are now finished. **Async-flip** (`task-5a5e2c939a33a621`): PR **#2917** merged to main as `dd0c27ce` — 54 empirically-validated cargo-cult-serial DataCase files flipped `async:false→true` (accounts_test.exs excluded per a real seed-333 TOCTOU pool-contention flake — the honest ceiling; 230→54 after hazard-class reversion). Green `CC=/usr/bin/clang mix test` at seeds 111 (10365 tests, 0 failures) + 222; payoff recorded HONESTLY as net-neutral (wall-clock bounded by the serial sync pool), justified by correctness. Criterion 4 (merge gate) closed. **Ledger-restamp** (`task-felix-ledger-restamp`): VERIFY-AND-CLOSE — the full-24 SHA-ancestry sweep re-ran against current origin/main (all 22 unique merge commits ANCESTOR, zero fabrication; d328 RESTAMP-not-reopen on fc9665e4/#2403 confirmed a 3rd time; the #2390 pair stays honest [T,F,T]); task closed done, no PR (zero-diff audit anchor). Steward note: the #2917 task-gate red was a verified stale-event false-negative (trailer + active task confirmed, linkage real). Backlog filed: `task-4bc654f703da9d4a` (the a9adc82f N=2000 wall-time/byte honest-miss). **Next wave (7):** the open named-failure children — task-felix-roothtml-durable-sobelow-skip (durable inline `# sobelow_skip` to end baseline line-shift drift), task-felix-interop-resource-bound-sweep, task-felix-phantom-media-atomicity, task-felix-migration-ddl-audit-deadlock. (Group-A PRs #2897-2900 already merged — not backlog.)
