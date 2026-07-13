@@ -395,11 +395,25 @@ defmodule Barkpark.Media do
         # instead of an uncaught Ecto.StaleEntryError (a 500).
         case Repo.delete(file, stale_error_field: :id) do
           {:ok, deleted} ->
-            Cdn.invalidate(file)
-            Events.dispatch(file.dataset, "media.deleted", file, doc)
-            File.rm(full_path)
-            Barkpark.Media.Renditions.delete_for_file(file.id)
+            # The FOUR irreversible non-DB effects — CDN edge purge, the
+            # `media.deleted` webhook, the on-disk `File.rm`, and the rendition
+            # cache removal — are DEFERRED when we're inside a transaction so a
+            # later rollback cannot strand a surviving row's blob (phantom
+            # media). Outside a transaction they fire IMMEDIATELY (unchanged for
+            # the three non-transaction callers: ticket attachments + the two
+            # media controllers). See `defer_media_effect/1`.
+            defer_media_effect(fn ->
+              Cdn.invalidate(file)
+              Events.dispatch(file.dataset, "media.deleted", file, doc)
+              File.rm(full_path)
+              Barkpark.Media.Renditions.delete_for_file(file.id)
+            end)
 
+            # `run_after_media_delete` is a DB write and MUST stay inside the
+            # transaction so it rolls back with the row. HOOK CONTRACT: an
+            # `after_media_delete` plugin callback may only touch the DATABASE —
+            # NO file or HTTP I/O — because it runs before commit and would
+            # otherwise re-open exactly the phantom hole this deferral closes.
             _ =
               Barkpark.Plugins.Registry.run_after_media_delete(%{
                 media_file_id: file.id,
@@ -415,6 +429,58 @@ defmodule Barkpark.Media do
       error ->
         error
     end
+  end
+
+  # ── Deferred media-delete effects (felix-phantom-media-atomicity) ──────────
+  #
+  # `delete_file/2`'s four irreversible non-DB effects (CDN purge, the
+  # `media.deleted` webhook, the on-disk `File.rm`, and rendition removal) must
+  # NOT fire until the surrounding DB transaction COMMITS. Otherwise a rollback
+  # (e.g. `Tenancy.delete_workspace/1` hitting a halted document delete) leaves
+  # the `media_file` ROW alive but its blob/CDN/renditions already gone — a
+  # phantom. This triad mirrors `Barkpark.Content.Broadcast`'s deferred-broadcast
+  # triad exactly, keyed to its own process-dict slot. Effects are queued as
+  # 0-arity closures (one per `delete_file/2` call, preserving per-file order)
+  # and the transaction OWNER flushes on commit / clears on rollback.
+  @deferred_media_effects :barkpark_deferred_media_effects
+
+  # Run the effect NOW when outside a transaction (today's behaviour for the
+  # three non-transaction callers); otherwise prepend it to the deferred queue
+  # (reversed on flush to preserve original order) to fire on commit.
+  defp defer_media_effect(effect) when is_function(effect, 0) do
+    if Repo.in_transaction?() do
+      queue = Process.get(@deferred_media_effects, [])
+      Process.put(@deferred_media_effects, [effect | queue])
+      :ok
+    else
+      effect.()
+      :ok
+    end
+  end
+
+  @doc """
+  Fire every media-delete effect deferred during a committed transaction, in
+  original (FIFO) order, then reset the queue. Called by the transaction owner
+  (`Barkpark.Tenancy.delete_workspace/1`) on `{:ok, _}`. A no-op when nothing
+  was deferred, so callers outside a transaction never need it.
+  """
+  def flush_deferred_media_effects do
+    (Process.delete(@deferred_media_effects) || [])
+    |> Enum.reverse()
+    |> Enum.each(fn effect -> effect.() end)
+
+    :ok
+  end
+
+  @doc """
+  Drop every deferred media-delete effect WITHOUT firing it — called by the
+  transaction owner on rollback/rescue so a rolled-back workspace delete leaves
+  the blob, CDN entry, and renditions intact alongside the surviving rows.
+  Also used to clear any stale queue before opening a transaction.
+  """
+  def clear_deferred_media_effects do
+    Process.delete(@deferred_media_effects)
+    :ok
   end
 
   # Repo.delete(struct, stale_error_field: :id) turns a would-be
