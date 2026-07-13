@@ -83,6 +83,15 @@ defmodule Barkpark.StudioChat.Probe do
 
   @providers [:claude, :bp, :codex]
 
+  # Hard deadline on each claude shell-out (`--version` and `auth status`).
+  # `System.cmd` blocks with no timeout, and `kick_readiness_probe` spawns this
+  # probe per Studio-chat mount/reconnect with NO dedup — so a stalled `claude
+  # auth status` would otherwise leak one orphaned OS child per page load.
+  # Config-overridable per env for tests via
+  # `config :barkpark, :studio_chat_probe, timeout_ms: N` (same seam as the
+  # injectable binary names). Mirrors `studio_chat/titles.ex`'s @cli_timeout_ms.
+  @default_timeout_ms 15_000
+
   @doc """
   Probe one provider lane's readiness. Pure w.r.t. Barkpark state — it only
   reads config + the filesystem/PATH and (for `:claude`) shells out to the CLI.
@@ -191,10 +200,35 @@ defmodule Barkpark.StudioChat.Probe do
     }
   end
 
-  # System.cmd captures stdout and returns the exit status without raising on a
-  # non-zero exit (only a missing/non-executable file raises — we rescue that).
-  # stderr stays on our stderr so it never pollutes the JSON we parse.
-  defp run(path, args), do: System.cmd(path, args, stderr_to_stdout: false)
+  # Bounded CLI one-shot. `claude --version` / `claude auth status` block with no
+  # timeout; Task.yield waits up to the deadline and Task.shutdown brutal-kills a
+  # child that runs past it, so a wedged CLI returns a named error atom instead of
+  # hanging the probe (and leaking the OS child). Callers degrade the atom to the
+  # honest not-ready struct. Mirrors `studio_chat/titles.ex` per-site — no shared
+  # abstraction. `async_nolink` (via the app's TaskSupervisor) so a shell-out that
+  # crashes surfaces as `{:exit, _}` here rather than taking the probe down.
+  #
+  # Sobelow CI.System is a false-positive: `path` is resolved by
+  # `System.find_executable/1` in `probe/1` (a fixed binary-name lookup or a
+  # test-only config override, never request data) and `args` is a fixed token
+  # list — no shell string, no client input. This inline skip replaces the
+  # line-anchored `.sobelow-skips` fingerprint (`probe.ex:197`) that the deadline
+  # wrapper moved System.cmd off of.
+  # sobelow_skip ["CI.System"]
+  defp run(path, args) do
+    task =
+      Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
+        System.cmd(path, args, stderr_to_stdout: false)
+      end)
+
+    case Task.yield(task, probe_timeout()) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      {:exit, _reason} -> {:error, :probe_crashed}
+      nil -> {:error, :probe_timeout}
+    end
+  end
+
+  defp probe_timeout, do: probe_cfg(:timeout_ms) || @default_timeout_ms
 
   # ── config-injectable binary names ────────────────────────────────────────
 

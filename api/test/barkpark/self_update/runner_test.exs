@@ -89,6 +89,46 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
     end
   end
 
+  describe "preflight_rollback/0 is time-boxed (resource bound)" do
+    # FAIL-BEFORE: preflight called System.cmd directly, so this sleeper blocks the
+    # admin request for the full 2s. PASS-AFTER: the child is brutal-killed at the
+    # 150ms deadline and preflight fails closed with a bounded error, quickly.
+    test "a hung preflight is force-killed at the deadline and fails closed" do
+      put_cfg(
+        rollback_preflight_command: {"bash", ["-c", "sleep 2"]},
+        preflight_timeout_ms: 150
+      )
+
+      {micros, result} = :timer.tc(fn -> Runner.preflight_rollback() end)
+
+      assert {:error, {:preflight_failed, {:preflight_timeout, 150}}} = result
+
+      assert micros < 1_500_000,
+             "preflight blocked #{micros}µs — the deadline did not bound System.cmd"
+    end
+  end
+
+  describe "trigger/0 run watchdog (resource bound)" do
+    # FAIL-BEFORE: no watchdog, so a `sleep 5` run holds state :running (and thus
+    # running?=true) for the full 5s. PASS-AFTER: the deadline watchdog force-closes
+    # the port at 150ms, flipping the run to :done so running? can't wedge true.
+    test "a run that outlives the deadline is force-closed so running? can't wedge" do
+      put_cfg(
+        enabled: true,
+        command: {"bash", ["-c", "sleep 5"]},
+        run_deadline_ms: 150
+      )
+
+      assert Runner.trigger() == {:ok, :started}
+
+      status = await_done()
+      assert status.state == :done
+      # -2 is the watchdog's force-close code, distinct from a natural exit status.
+      assert status.exit_code == -2
+      refute Runner.running?()
+    end
+  end
+
   describe "trigger_rollback/0 single-flight" do
     test "disabled runner refuses" do
       put_cfg(enabled: false)

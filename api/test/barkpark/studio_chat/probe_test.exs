@@ -124,6 +124,39 @@ defmodule Barkpark.StudioChat.ProbeTest do
     end
   end
 
+  describe "probe(:claude) is time-boxed (resource bound)" do
+    # FAIL-BEFORE: the unbounded `defp run/2` called System.cmd directly, so this
+    # sleeper stub blocks each of the two shell-outs (--version, auth status) for
+    # 2s → probe returns ~4s later with version "2.1.207" and authed?: true.
+    #
+    # PASS-AFTER: each shell-out is brutal-killed at the 150ms deadline, so the
+    # version/auth reads degrade to the honest not-ready shape AND the whole probe
+    # returns well under the 2s a single stub would take to exit on its own.
+    test "a stalled claude CLI degrades to not-ready AND the wall-clock is cut" do
+      slow =
+        fake_binary("""
+        case "$1" in
+          --version) sleep 2; echo "2.1.207 (Claude Code)"; exit 0 ;;
+          auth) sleep 2; echo '{"loggedIn":true,"authMethod":"oauth"}'; exit 0 ;;
+          *) exit 0 ;;
+        esac
+        """)
+
+      put_probe_config(claude_binary: slow, timeout_ms: 150)
+
+      {micros, probe} = :timer.tc(fn -> Probe.probe(:claude) end)
+
+      # Binary is present, but the wedged shell-outs yield the not-ready struct.
+      assert probe.binary == true
+      assert probe.version == nil
+      assert probe.authed? == false
+      assert probe.account == nil
+
+      assert micros < 1_500_000,
+             "probe blocked #{micros}µs — the deadline did not bound the claude shell-outs"
+    end
+  end
+
   describe "probe(:bp)" do
     test "present → binary/path reported; authed?: nil (mint-driven, no login step)" do
       path = fake_binary("exit 0\n")
