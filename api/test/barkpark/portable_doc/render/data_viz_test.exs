@@ -414,6 +414,34 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert four =~ "bp-chart__s3"
   end
 
+  test "chart excludes a fifth series from the plot, legend, and autoscale" do
+    first_four = [
+      %{"label" => "one", "points" => [0, 3]},
+      %{"label" => "two", "points" => [0, 6]},
+      %{"label" => "three", "points" => [0, 9]},
+      %{"label" => "four", "points" => [0, 12]}
+    ]
+
+    four = DataViz.chart_html(%{"type" => "chart", "series" => first_four})
+
+    five =
+      DataViz.chart_html(%{
+        "type" => "chart",
+        "series" => first_four ++ [%{"label" => "dropped", "points" => [0, 999_999]}]
+      })
+
+    assert five == four
+    assert 4 == five |> String.split("<polyline") |> length() |> Kernel.-(1)
+
+    assert 4 ==
+             five
+             |> String.split(~s|<span class="bp-chart__key">|)
+             |> length()
+             |> Kernel.-(1)
+
+    refute five =~ "dropped"
+  end
+
   # ── compose dispatch + escaping ──────────────────────────────────────────────
 
   test "compose_block routes all four slate types to DataViz as _raw" do

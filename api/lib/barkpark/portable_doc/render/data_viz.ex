@@ -425,6 +425,9 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         }
       end)
       |> Enum.filter(&(&1.points != []))
+      # Charter D4 deliberately diverges by surface: the TUI caps at 2 via
+      # internal/pdrender/chart.go maxChartSeries, while the web palette caps at 4.
+      |> Enum.take(4)
 
     case series do
       [] ->
