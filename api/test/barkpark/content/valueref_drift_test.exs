@@ -157,7 +157,11 @@ defmodule Barkpark.Content.ValuerefDriftTest do
 
   describe "accept_valueref_baseline/6" do
     defp paper!(slug, blocks) do
-      {:ok, doc} = Content.upsert_paper(%{slug: slug, blocks: blocks, dataset: @dataset})
+      {:ok, doc} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks, dataset: @dataset})
+        )
+
       doc
     end
 

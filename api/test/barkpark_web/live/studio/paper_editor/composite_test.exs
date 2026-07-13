@@ -68,7 +68,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @composite_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @composite_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
 
     paper
   end
@@ -274,7 +280,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.CompositeTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @arraycomp_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @arraycomp_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
 
     paper
   end

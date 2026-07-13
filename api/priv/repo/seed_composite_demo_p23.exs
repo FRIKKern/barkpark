@@ -65,7 +65,9 @@ blocks = [
   }
 ]
 
-{:ok, paper} = Content.upsert_paper(%{slug: slug, dataset: dataset, blocks: blocks})
+# bypass_wall (charter D26 audit): dev demo seed script — curated demo content,
+# no tag registry in a fresh dev dataset. Explicit, audited exemption.
+{:ok, paper} = Content.upsert_paper(%{slug: slug, dataset: dataset, blocks: blocks}, bypass_wall: true)
 
 IO.puts("Seeded paper #{paper.doc_id} (dataset=#{dataset}) with #{length(blocks)} blocks.")
 IO.puts("Block types: " <> Enum.map_join(blocks, ", ", & &1["type"]))

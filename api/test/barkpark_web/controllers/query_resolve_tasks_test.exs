@@ -57,7 +57,9 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
   end
 
   defp mk_paper!(slug, blocks) do
-    {:ok, _doc} = Content.upsert_paper(%{slug: slug, blocks: blocks})
+    {:ok, _doc} =
+      Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks}))
+
     slug
   end
 

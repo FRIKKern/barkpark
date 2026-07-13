@@ -43,11 +43,26 @@ defmodule Barkpark.SheetsM0ProofTest do
   # Fixed paper-ingest secret from config/test.exs.
   @ingest_token "barkpark-test-ingest-token"
 
+  # Publish-wall labels (charter D26/D39): the paper-birth ingest ENFORCES the
+  # wall, so a compliant POST must carry registered weighted tags + a
+  # description. Names are registered in setup; strengths are distinct with a
+  # unique max, rationales ≥20 chars.
+  @wall_tag_names ~w(m0-proof-sheet m0-proof-embed m0-proof-budget)
+  @wall_tags [
+    %{"tag" => "m0-proof-sheet", "strength" => 90, "rationale" => "Primary label: the live-sheet-embedding proof paper."},
+    %{"tag" => "m0-proof-embed", "strength" => 55, "rationale" => "Secondary label: embed hydration coverage for the wall."},
+    %{"tag" => "m0-proof-budget", "strength" => 20, "rationale" => "Tertiary label: budget write-through ingest fixture."}
+  ]
+  @wall_description "M0 proof fixture paper embedding a live sheet across the publish-wall gate."
+
   setup do
     # The Default workspace/project must exist: AssignDefaultScope stamps the
     # sheet row with it on the flat mutate route, upsert_paper falls back to
     # it, and get_public_paper fails closed without it.
     Barkpark.TenancyFixtures.ensure_default_scope!()
+    # Register the weighted tags this file's ingest payload carries — the
+    # publish wall (E3) rejects unknown tags.
+    Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
     Barkpark.Auth.create_token(@write_token, "m0-proof", @dataset, ["read", "write"])
     :ok
   end
@@ -141,6 +156,8 @@ defmodule Barkpark.SheetsM0ProofTest do
     resp =
       ingest_paper(conn, %{
         "slug" => @slug,
+        "tags" => @wall_tags,
+        "description" => @wall_description,
         "blocks" => [
           %{
             "id" => "p1",

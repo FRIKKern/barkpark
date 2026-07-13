@@ -318,7 +318,11 @@ defmodule Barkpark.Content.Papers.CompositionMigrationTest do
   # ── run/1 — DB scan, dry-run default, apply, idempotence ────────────────────
 
   defp seed_legacy_paper(slug, blocks) do
-    {:ok, _} = Content.upsert_paper(%{slug: slug, style: "article", blocks: blocks})
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, style: "article", blocks: blocks})
+      )
+
     slug
   end
 

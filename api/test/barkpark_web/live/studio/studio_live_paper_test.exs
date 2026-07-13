@@ -49,7 +49,9 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: @slug, dataset: @dataset, blocks: blocks})
+      )
 
     paper
   end
@@ -184,18 +186,20 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     # a naive shared stream, leaves paper A's DOM nodes reused under paper B's
     # block ids.
     {:ok, _} =
-      Content.upsert_paper(%{
-        slug: other_slug,
-        dataset: @dataset,
-        blocks: [
-          %{"id" => "h-1", "type" => "heading", "text" => "Other Paper"},
-          %{
-            "id" => "b-intro",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Totally different body."}]
-          }
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: other_slug,
+          dataset: @dataset,
+          blocks: [
+            %{"id" => "h-1", "type" => "heading", "text" => "Other Paper"},
+            %{
+              "id" => "b-intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Totally different body."}]
+            }
+          ]
+        })
+      )
 
     # Open paper A. (Block BODY text — e.g. "First block streamed." — renders
     # ONLY in the editor pane; titles like "Studio Paper" also appear in the

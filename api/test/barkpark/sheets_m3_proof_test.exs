@@ -28,8 +28,19 @@ defmodule Barkpark.SheetsM3ProofTest do
   @write_token "sheets-m3-proof-write-token"
   @ingest_token "barkpark-test-ingest-token"
 
+  # Publish-wall labels (charter D26/D39): the ingest enforces the wall, so the
+  # POST must carry registered weighted tags + a description.
+  @wall_tag_names ~w(m3-proof-compute m3-proof-sheet m3-proof-live)
+  @wall_tags [
+    %{"tag" => "m3-proof-compute", "strength" => 91, "rationale" => "Primary label: the computed-recompute proof paper."},
+    %{"tag" => "m3-proof-sheet", "strength" => 47, "rationale" => "Secondary label: embedded sheet snapshot coverage."},
+    %{"tag" => "m3-proof-live", "strength" => 18, "rationale" => "Tertiary label: live publish write-through fixture."}
+  ]
+  @wall_description "M3 proof fixture paper embedding a computed live sheet across the wall."
+
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
+    Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
     Barkpark.Auth.create_token(@write_token, "m3-proof", @dataset, ["read", "write"])
     :ok
   end
@@ -119,6 +130,8 @@ defmodule Barkpark.SheetsM3ProofTest do
     resp =
       ingest_paper(conn, %{
         "slug" => @slug,
+        "tags" => @wall_tags,
+        "description" => @wall_description,
         "blocks" => [
           %{
             "id" => "p1",

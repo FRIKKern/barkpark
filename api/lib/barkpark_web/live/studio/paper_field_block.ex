@@ -321,13 +321,63 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
 
   # ── value derivation + merge ────────────────────────────────────────────────
 
-  defp derive_value(%{"type" => "arrayOf"} = block), do: List.wrap(Map.get(block, "value", []))
+  defp derive_value(%{"type" => "arrayOf"} = block) do
+    block
+    |> Map.get("value", [])
+    |> List.wrap()
+    |> normalize_legacy_composite_rows(block)
+  end
+
   defp derive_value(%{"type" => "codelist"} = block), do: Map.get(block, "value")
 
   defp derive_value(%{"type" => type} = block) when type in ["composite", "localizedText"],
     do: Map.get(block, "value", %{}) || %{}
 
   defp derive_value(block), do: Map.get(block, "value")
+
+  # D37 (authoring-excellence W4) — legacy bare-string tag write-loss, render seam.
+  #
+  # When an arrayOf's element type is `composite`, a legacy bare-STRING row (the
+  # historical flat-string `tags` shape, e.g. `["obsidian"]`) reconstitutes as
+  # `%{"tag" => s}` BEFORE it reaches the composite editor. Without this, the
+  # element renders with a BLANK `tag` input (the composite renderer reads
+  # `get_value(scalar, "tag", "") == ""`), and the very first `phx-change`
+  # serialises the whole form — re-submitting an empty `[i].tag` — which would
+  # DROP the tag name. Reconstituting here means the name renders in its field
+  # AND rides the next change intact; the first edit also self-heals the row to
+  # the map shape. See `ensure_map/1` for the merge-seam belt-and-suspenders.
+  #
+  # SCOPED TO THE TAGS PATH (D37 genericity guard): the reconstitution fires ONLY
+  # when the composite element declares a `"tag"` subfield — i.e. the tags shape
+  # (paper.json tags `of.fields` = tag/strength/rationale). This is deliberately
+  # narrow: `ensure_map/1` at the merge seam is generic and cannot see the
+  # subfield schema, so if the reconstitution were blanket it would stamp a
+  # spurious `"tag"` onto EVERY composite's legacy scalar. Confining it to
+  # tag-declaring composites means:
+  #   * a SCALAR arrayOf (of.type not composite — e.g. keywords) keeps its bare
+  #     strings, and
+  #   * a NON-tag composite (amount/currency, contributors/name+role, …) is never
+  #     reconstituted, so no `"tag"` key is invented for it.
+  # `tags` is the sole composite that ever persisted a bare-string form, so this
+  # is a no-op for every other composite (always map-shaped).
+  defp normalize_legacy_composite_rows(list, block) when is_list(list) do
+    if tag_bearing_composite?(block) do
+      Enum.map(list, fn
+        s when is_binary(s) -> %{"tag" => s}
+        other -> other
+      end)
+    else
+      list
+    end
+  end
+
+  defp tag_bearing_composite?(%{"of" => %{"type" => "composite"} = of}) do
+    of
+    |> Map.get("fields", [])
+    |> Enum.any?(&(is_map(&1) and Map.get(&1, "name") == "tag"))
+  end
+
+  defp tag_bearing_composite?(_), do: false
 
   # composite: with `path=""` the subfield inputs carry the bare subfield name,
   # so params arrive as a flat `%{sub_name => value}` map. Merge over the
@@ -612,6 +662,31 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
   defp put_path_in(_child, [], value), do: value
 
   defp ensure_map(m) when is_map(m), do: m
+
+  # D37 (authoring-excellence W4) — legacy bare-string tag write-loss.
+  #
+  # A composite-element subfield edit lands via `Map.put(ensure_map(child), key,
+  # value)`. When `child` is a legacy bare STRING row (the historical flat-string
+  # tag shape, e.g. `["obsidian"]`), the old catch-all reconstituted it as `%{}`
+  # — silently DROPPING the tag's name on the very first subfield edit. Preserve
+  # the scalar under `"tag"` so the name survives: the row round-trips as
+  # `%{"tag" => "obsidian", <edited-sub> => …}` instead of losing "obsidian".
+  #
+  # The `"tag"` key is double-proven for the sole field that carries this legacy
+  # form: the paper schema's tags composite (priv/plugins/bulldocs/schemas/
+  # paper.json — {"name":"tag"}) AND the label-spine validator
+  # (content/label_spine.ex main_tag reads get(top, "tag")).
+  #
+  # This is the merge-seam belt-and-suspenders behind `normalize_legacy_composite_rows/2`
+  # (the render seam). `ensure_map/1` is GENERIC — the element's subfield schema
+  # never reaches it — but the render seam is SCOPED to tag-declaring composites,
+  # so for the tags field a bare string is already reconstituted to a map before
+  # it ever reaches here (this head does not fire for tags in the normal flow).
+  # It survives only as defense for a params-only edit path. For a non-tag
+  # composite a bare scalar (which the corpus does not contain — `tags` is the
+  # sole composite with a historical bare-string form) would be PRESERVED under
+  # "tag" rather than dropped to `%{}` — strictly safer than the old catch-all.
+  defp ensure_map(s) when is_binary(s), do: %{"tag" => s}
   defp ensure_map(_), do: %{}
 
   defp ensure_list(l) when is_list(l), do: l

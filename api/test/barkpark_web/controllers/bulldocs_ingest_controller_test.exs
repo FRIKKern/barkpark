@@ -12,6 +12,7 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.Errors
+  alias Barkpark.LabelFixtures
   import Ecto.Query, only: [from: 2]
 
   # Convenience accessors — papers are type-"paper" documents now; the block
@@ -22,14 +23,20 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
   @token "barkpark-test-ingest-token"
   @path "/v1/plugins/bulldocs/papers"
 
+  # A compliant ingest body: since the D26 mount now walls the ingest birth
+  # path (fresh papers are never exempt), an honest POST must carry a
+  # registered weighted `tags` set + `description` — `LabelFixtures.paper_attrs`
+  # registers unique names and merges them in. Auth tests still call this, but
+  # never reach the wall (401 fires first), so the extra registration is inert
+  # there.
   defp body(slug) do
-    %{
+    LabelFixtures.paper_attrs(%{
       "source_doc" => "plans/#{slug}.html",
       "slug" => slug,
       "event_type" => "plan-written",
       "body_html" => ~s(<article><h1>#{slug}</h1></article>),
       "goal_id" => "bd-test1"
-    }
+    })
   end
 
   describe "auth" do
@@ -95,10 +102,25 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
         |> post(@path, payload)
       end
 
-      _ = auth.(conn, %{"slug" => slug, "body_html" => "<p>v1</p>"})
+      # Both writes are walled (fresh births). Same compliant registered labels
+      # on both — the second is a self-id republish (same slug), E4-excluded.
+      %{"tags" => tags, "description" => description} = LabelFixtures.paper_attrs(%{})
 
       _ =
-        auth.(Phoenix.ConnTest.build_conn(), %{"slug" => slug, "body_html" => "<p>v2 updated</p>"})
+        auth.(conn, %{
+          "slug" => slug,
+          "body_html" => "<p>v1</p>",
+          "tags" => tags,
+          "description" => description
+        })
+
+      _ =
+        auth.(Phoenix.ConnTest.build_conn(), %{
+          "slug" => slug,
+          "body_html" => "<p>v2 updated</p>",
+          "tags" => tags,
+          "description" => description
+        })
 
       paper = Content.get_paper(slug)
       assert pc(paper, "body_html") == "<p>v2 updated</p>"
@@ -175,24 +197,28 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
          %{conn: conn} do
       slug = "halt-positive-#{System.unique_integer([:positive])}"
 
-      payload = %{
-        "slug" => slug,
-        "blocks" => [
-          %{
-            "id" => "tpl-title",
-            "type" => "heading",
-            "level" => 1,
-            "role" => "title",
-            "locked" => true,
-            "text" => "Real Doc"
-          },
-          %{
-            "id" => "body",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Real content."}]
-          }
-        ]
-      }
+      # Compliant labels (registered tags + description) so the paper clears the
+      # D26 publish wall the ingest birth path now enforces — the positive
+      # control is about the template gate PASSING, not the wall.
+      payload =
+        LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "blocks" => [
+            %{
+              "id" => "tpl-title",
+              "type" => "heading",
+              "level" => 1,
+              "role" => "title",
+              "locked" => true,
+              "text" => "Real Doc"
+            },
+            %{
+              "id" => "body",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Real content."}]
+            }
+          ]
+        })
 
       conn = auth_ingest(conn, payload)
 
@@ -226,18 +252,21 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
 
     setup do
       slug = "ops-target-#{System.unique_integer([:positive])}"
-      # A block-backed paper to apply ops against.
+      # A block-backed paper to apply ops against — walled at birth by the D26
+      # mount, so seed it with compliant registered labels.
       {:ok, paper} =
-        Content.upsert_paper(%{
-          slug: slug,
-          blocks: [
-            %{
-              "id" => "intro",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Intro."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [
+              %{
+                "id" => "intro",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Intro."}]
+              }
+            ]
+          })
+        )
 
       {:ok, slug: slug, rev0: pc(paper, "rev")}
     end
@@ -311,28 +340,30 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       slug = "ops-constraint-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: slug,
-          blocks: [
-            %{
-              "id" => "tpl-title",
-              "type" => "heading",
-              "level" => 1,
-              "role" => "title",
-              "locked" => true,
-              "text" => "T"
-            },
-            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
-            # A real body block: skeleton-only papers are refused by the
-            # hollow-body quality gate (p-quality-gate); this test targets the
-            # constraint vocabulary veto.
-            %{
-              "id" => "body-p",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [
+              %{
+                "id" => "tpl-title",
+                "type" => "heading",
+                "level" => 1,
+                "role" => "title",
+                "locked" => true,
+                "text" => "T"
+              },
+              %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
+              # A real body block: skeleton-only papers are refused by the
+              # hollow-body quality gate (p-quality-gate); this test targets the
+              # constraint vocabulary veto.
+              %{
+                "id" => "body-p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       conn =
         auth_post(conn, slug, %{
@@ -377,16 +408,18 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       slug = "batch-target-#{System.unique_integer([:positive])}"
 
       {:ok, paper} =
-        Content.upsert_paper(%{
-          slug: slug,
-          blocks: [
-            %{
-              "id" => "intro",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Intro."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          LabelFixtures.paper_attrs(%{
+            slug: slug,
+            blocks: [
+              %{
+                "id" => "intro",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Intro."}]
+              }
+            ]
+          })
+        )
 
       {:ok, slug: slug, rev0: pc(paper, "rev")}
     end
@@ -641,14 +674,11 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert is_binary(env.hint) and env.hint != ""
     end
 
-    # ── End-to-end endpoint assertions (skip-gated on the D26 mount) ──
-    # These POST a real request tripping each gate. They cannot pass until the
-    # ae-upsert-paper-wall mount makes upsert_paper return the raw wall tuple —
-    # remove the `skip:` on the rebase-over-the-mount step.
+    # ── End-to-end endpoint assertions — LIVE as of the D26 mount ──
+    # The ae-upsert-paper-wall mount now makes Content.upsert_paper return the
+    # raw wall tuple these POST a real request to trip; the render_error heads
+    # above route each to its 422/422/409 envelope. The skip: gate is removed.
 
-    @skip_reason "activates after this branch rebases over ae-upsert-paper-wall (D26): the mount is what makes Content.upsert_paper return the raw wall tuple this asserts. Remove the skip: tag on rebase."
-
-    @tag skip: @skip_reason
     test "tagless block ingest → 422 code=label_spine with field/rule/fix + hint",
          %{conn: conn} do
       slug = "d27-labelspine-#{System.unique_integer([:positive])}"
@@ -680,7 +710,6 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       refute Content.get_paper(slug)
     end
 
-    @tag skip: @skip_reason
     test "ingest with an unregistered weighted tag → 422 code=unknown_tag with suggestions",
          %{conn: conn} do
       slug = "d27-unknowntag-#{System.unique_integer([:positive])}"
@@ -702,6 +731,10 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
             "content" => [%{"type" => "text", "value" => "Real body content."}]
           }
         ],
+        # A non-trivial description so the label SPINE passes (E1/E2) and the
+        # publish reaches E3 — the gate under test here. Without it the spine's
+        # description check 422s first as label_spine, never exercising E3.
+        "description" => "A description long enough to satisfy the label spine's non-trivial rule.",
         "tags" => [
           %{
             "tag" => "nonexistent-#{System.unique_integer([:positive])}",
@@ -718,15 +751,46 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       refute Content.get_paper(slug)
     end
 
-    @tag skip: @skip_reason
     test "near-duplicate ingest → 409 code=duplicate_of naming the incumbent",
          %{conn: conn} do
-      # Requires a seeded, registered incumbent published paper; the mount's E4
-      # dedup gate produces the {:duplicate_of, %{duplicate_of: <id>}} tuple.
-      slug = "d27-duplicate-#{System.unique_integer([:positive])}"
+      # The mount's E4 dedup gate produces {:duplicate_of, %{duplicate_of: id}}
+      # when title+tag-name token overlap crosses the refuse band (sim ≥ 0.55,
+      # ≥ 3 shared tokens). Seed a COMPLIANT, REGISTERED incumbent, then POST a
+      # paper with the SAME title and the SAME registered tags — Jaccard 1.0,
+      # so E4 refuses and the render_error head maps it to a 409.
+      n = System.unique_integer([:positive])
+      title = "Distinctive incumbent paper about deduplication guarding rules #{n}"
+      names = ["dedupinc#{n}a", "dedupinc#{n}b", "dedupinc#{n}c"]
+      labels = LabelFixtures.with_named_labels(%{}, "production", names)
+
+      incumbent_slug = "d27-incumbent-#{n}"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          "slug" => incumbent_slug,
+          "blocks" => [
+            %{
+              "id" => "tpl-title",
+              "type" => "heading",
+              "level" => 1,
+              "role" => "title",
+              "locked" => true,
+              "text" => title
+            },
+            %{
+              "id" => "body",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "The incumbent's body content."}]
+            }
+          ],
+          "tags" => labels["tags"],
+          "description" => labels["description"]
+        })
+
+      dup_slug = "d27-duplicate-#{n}"
 
       payload = %{
-        "slug" => slug,
+        "slug" => dup_slug,
         "blocks" => [
           %{
             "id" => "tpl-title",
@@ -734,20 +798,24 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
             "level" => 1,
             "role" => "title",
             "locked" => true,
-            "text" => "A title that near-duplicates an incumbent"
+            "text" => title
           },
           %{
             "id" => "body",
             "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Real body content."}]
+            "content" => [%{"type" => "text", "value" => "A different body, but the same title."}]
           }
-        ]
+        ],
+        "tags" => labels["tags"],
+        "description" => "A distinct description that still leaves the title+tags overlapping."
       }
 
       conn = auth_ingest(conn, payload)
       resp = json_response(conn, 409)
       assert resp["error"]["code"] == "duplicate_of"
-      assert is_binary(resp["error"]["details"]["duplicate_of"])
+      assert resp["error"]["details"]["duplicate_of"] == incumbent_slug
+      # Fail closed — the near-duplicate is not born.
+      refute Content.get_paper(dup_slug)
     end
   end
 end

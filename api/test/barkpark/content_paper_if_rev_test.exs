@@ -14,11 +14,13 @@ defmodule Barkpark.ContentPaperIfRevTest do
 
   defp seed_paper(slug) do
     {:ok, paper} =
-      Content.upsert_paper(%{
-        slug: slug,
-        blocks: [%{"type" => "paragraph", "text" => "seed", "id" => "b1"}],
-        style: "article"
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          blocks: [%{"type" => "paragraph", "text" => "seed", "id" => "b1"}],
+          style: "article"
+        })
+      )
 
     paper
   end

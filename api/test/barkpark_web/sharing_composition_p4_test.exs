@@ -33,19 +33,21 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
     {:ok, proj} = Tenancy.create_project_with_dataset(ws, %{name: "p4-share-proj"})
 
     {:ok, paper} =
-      Content.upsert_paper(%{
-        "slug" => "p4-shared-paper",
-        "title" => "P4 Shared Paper",
-        "blocks" => [
-          %{
-            "id" => "b1",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "SHARED-PAPER-BODY"}]
-          }
-        ],
-        "workspace_id" => ws.id,
-        "project_id" => proj.id
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "p4-shared-paper",
+          "title" => "P4 Shared Paper",
+          "blocks" => [
+            %{
+              "id" => "b1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "SHARED-PAPER-BODY"}]
+            }
+          ],
+          "workspace_id" => ws.id,
+          "project_id" => proj.id
+        })
+      )
 
     %{conn: conn, ws: ws, proj: proj, paper: paper}
   end
@@ -306,6 +308,10 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       ws: ws,
       proj: proj
     } do
+      # The paper birth runs the publish wall (authoring-excellence D26): a
+      # compliant ingest POST carries a description + registered weighted tags.
+      Barkpark.LabelFixtures.register_tags!("production", ["p4-receipt"])
+
       body = %{
         "slug" => "p4-receipt-paper",
         "title" => "Receipt",
@@ -314,6 +320,14 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
             "id" => "b1",
             "type" => "paragraph",
             "content" => [%{"type" => "text", "value" => "x"}]
+          }
+        ],
+        "description" => "Ingest receipt paper for the additive scoped-liveview-path contract.",
+        "tags" => [
+          %{
+            "tag" => "p4-receipt",
+            "strength" => 90,
+            "rationale" => "Receipt paper exercising the scoped liveview path ingest contract."
           }
         ],
         "workspace" => ws.slug,

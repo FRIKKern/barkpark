@@ -118,6 +118,44 @@ defmodule Barkpark.LabelFixtures do
   end
 
   @doc """
+  Wall-compliant PAPER-UPSERT ATTRS (charter D26): merge a compliant label
+  set — `description` + weighted `tags` whose names are unique-per-call AND
+  registered in the E3 registry — into an `upsert_paper` attrs map, so a test
+  that births a paper through `Content.upsert_paper/2` passes the whole
+  AuthoringWall with one mechanical wrap:
+
+      {:ok, doc} = Content.upsert_paper(LabelFixtures.paper_attrs(%{"slug" => "p1", …}))
+
+  `attrs` wins on clash (a test asserting its OWN tags/description keeps
+  them). The dataset for registration derives from the attrs (string or atom
+  key), defaulting to upsert_paper's own `"production"`. Tag names are unique
+  per call (`with_registered_labels/3` reasoning): shared fixture names would
+  put identical tokens in every paper's E4 dedup bag and refuse thin-titled
+  test corpora; unique names keep tag-token overlap at zero AND dilute
+  title-only Jaccard below the refuse band. `tag_count` defaults to 3 (inside
+  the 2–4 norm — no advisory; three unique tokens of dilution).
+  """
+  def paper_attrs(attrs \\ %{}, tag_count \\ 3) when is_map(attrs) do
+    dataset = attrs["dataset"] || attrs[:dataset] || "production"
+    labels = with_registered_labels(%{}, dataset, tag_count)
+
+    # Only fill what the test didn't author itself — and never add a STRING
+    # "tags" key alongside a test's ATOM :tags key (upsert_paper's normalize
+    # folds both to the same key in undefined order).
+    attrs
+    |> put_new_either_key("tags", labels["tags"])
+    |> put_new_either_key("description", labels["description"])
+  end
+
+  defp put_new_either_key(attrs, key, value) do
+    if Map.has_key?(attrs, key) or Map.has_key?(attrs, String.to_existing_atom(key)) do
+      attrs
+    else
+      Map.put(attrs, key, value)
+    end
+  end
+
+  @doc """
   Register tag names in the E3 tag registry for `dataset` — inserts PUBLISHED
   `type:tag` rows directly (the test-side spelling of "publish a tag doc",
   fast and recursion-free). Defaults to the 12 `fixture-tag-N` names

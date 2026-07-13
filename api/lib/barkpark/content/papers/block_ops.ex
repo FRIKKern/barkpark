@@ -5,7 +5,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   This module owns the four public write functions and their private helpers:
 
-    * `upsert_paper/1` — whole-paper upsert + whole-HTML broadcast.
+    * `upsert_paper/2` — whole-paper upsert + whole-HTML broadcast, walled
+      by default (charter D26 — see the function doc).
     * `apply_paper_block_op/4` — single portable-doc op + delta broadcast.
     * `apply_paper_block_ops/4` — atomic batch of ops + one delta broadcast.
     * `apply_document_block_op/5` — generalized block-op for any
@@ -21,7 +22,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, DraftId, Encryption, Labels, Sheets}
+  alias Barkpark.Content.{AuthoringWall, Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{HtmlSanitizer, Patch, Projection, Render}
@@ -37,14 +38,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
   `attrs` accepts string or atom keys: `slug` (required), and either
   `body_html` OR `blocks`. When `blocks` is given, `body_html` is (re)rendered
   from it as the derived cache. Optionally `dataset`, `source_doc`, `goal_id`,
-  `event_type`. The monotonic integer streaming rev (`content["rev"]`) is
-  bumped on every write.
+  `event_type`, and the label spine's `tags` (weighted `[{tag, strength,
+  rationale}]`) + `description` — persisted into the paper's content so the
+  wall and search read them. The monotonic integer streaming rev
+  (`content["rev"]`) is bumped on every write.
+
+  ## The publish wall (authoring-excellence D26)
+
+  This path births PUBLISHED papers via direct Repo writes, so it mounts the
+  SAME `Barkpark.Content.AuthoringWall` chain `Lifecycle.publish_document/4`
+  runs — on a synthesized in-memory ref, BEFORE the row write. Enforcement is
+  ON by default; wall rejections surface RAW (`{:error, {:label_spine, d}}`,
+  `{:error, {:unknown_tag, p}}`, `{:error, {:duplicate_of, p}}` — never
+  flattened into the plugin `{:halted, _}` shape). Pre-wall papers
+  grandfather via the `(slug, dataset)` exemption ledger exactly like
+  Lifecycle publishes; fresh papers are never exempt (D6).
+
+  `opts`:
+
+    * `:bypass_wall` — `true` skips the wall (AND its main_tag stamp) for an
+      AUDITED internal projection that cannot retry (charter D23-b/D26). Every
+      bypass call site carries a one-line rationale comment — the grep-able
+      ledger of exceptions. Default `false`.
 
   On success, broadcasts `{:paper_updated, %{slug, dataset, html, rev, …}}` to
   `paper_topic(slug, dataset)` and returns `{:ok, %Document{}}`. Returns
   `{:error, changeset}` on validation/constraint failure.
   """
-  def upsert_paper(attrs) when is_map(attrs) do
+  def upsert_paper(attrs, opts \\ []) when is_map(attrs) and is_list(opts) do
     attrs = normalize_paper_attrs(attrs)
     slug = attrs["slug"]
     dataset = attrs["dataset"] || @paper_default_dataset
@@ -154,7 +175,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     with [] <- Papers.Template.validate(blocks),
          :ok <- reject_hollow_result(blocks),
          {:ok, blocks} <- encrypt_paper_blocks(blocks, dataset) do
-      write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs)
+      write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs, opts)
     else
       errors when is_list(errors) ->
         {:error, {:halted, "paper template violated: " <> Enum.join(errors, "; ")}}
@@ -164,10 +185,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  # The persistence tail of upsert_paper/1, reached ONLY once bound blocks are
+  # The persistence tail of upsert_paper/2, reached ONLY once bound blocks are
   # sealed (or there was nothing to seal). Split out so the encryption chokepoint
   # can fail closed without re-indenting the whole builder.
-  defp write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs) do
+  defp write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs, opts) do
     # Per-doc article marker. An ingest/POST may set `style: "article"` in
     # attrs; otherwise it sticks at whatever the existing doc already carries
     # (so a partial update never silently demotes an article paper). Threaded
@@ -205,6 +226,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
       |> maybe_put_paper("source_doc", attrs["source_doc"])
       |> maybe_put_paper("goal_id", attrs["goal_id"])
       |> maybe_put_paper("event_type", attrs["event_type"])
+      # Label-spine passthrough (D26): a caller-supplied weighted `tags` array
+      # + `description` persist into the paper's content, so a compliant
+      # ingest POST can pass the wall below and search/readers see the labels.
+      # Absent keys leave any existing content labels untouched (an update
+      # without tags never strips a labeled paper).
+      |> maybe_put_paper("tags", attrs["tags"])
+      |> maybe_put_paper("description", attrs["description"])
       |> Map.put("rev", next_rev)
       # Project-on-write (Exp-P2): when this write carries a block list, project
       # the bound-field index + content["body"] from it. The SOLE writer of
@@ -214,6 +242,30 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     title = paper_title(content, slug)
 
+    # THE WALL (charter D26) — the fifth and LAST mount. This path births
+    # PUBLISHED rows via direct Repo writes below, so the shared AuthoringWall
+    # chain runs HERE, on a synthesized in-memory ref, before anything is
+    # persisted. The ref's doc_id is the SLUG (papers key `(slug, dataset)`
+    # with no `drafts.` prefix), so (a) the exemption ledger grandfathers
+    # pre-wall papers exactly like Lifecycle publishes, and (b) the self-id
+    # reaches the E4 dedup wall's incumbent exclusion — a paper republish can
+    # never near-duplicate ITSELF. Errors return RAW wall tuples (422/422/409
+    # via Errors), never flattened into {:halted, _}. On success `content`
+    # gains the D7 main_tag stamp — ingest-born papers are denormalized like
+    # any lifecycle publish. `bypass_wall: true` (audited call sites only)
+    # skips both.
+    case enforce_paper_wall(content, title, existing, dataset, slug, scope_attrs, opts) do
+      {:ok, content} ->
+        persist_paper(content, attrs, existing, dataset, slug, scope_attrs, title)
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # The Repo write + broadcast tail, reached only once the wall passed (or an
+  # audited caller bypassed it).
+  defp persist_paper(content, attrs, existing, dataset, slug, scope_attrs, title) do
     doc_attrs = %{
       "doc_id" => slug,
       "type" => @paper_type,
@@ -777,6 +829,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   # ── Papers — internal ──────────────────────────────────────────────────────
+
+  # The AuthoringWall mount for the direct paper write path (charter D26).
+  # Synthesizes an in-memory `%Document{}` ref carrying exactly what the wall
+  # reads — doc_id (the slug = the published id), title, the FINAL content
+  # (labels included), dataset and the resolved tenancy scope (the E3 registry
+  # read scopes workspace-or-global) — and runs the SAME chain Lifecycle
+  # delegates to. Returns `{:ok, content}` with the main_tag stamp applied, or
+  # a raw wall error tuple. `bypass_wall: true` short-circuits BOTH (an
+  # unwalled write must stay byte-identical to the pre-mount behaviour —
+  # no stamp, no ledger touch).
+  defp enforce_paper_wall(content, title, existing, dataset, slug, scope_attrs, opts) do
+    if Keyword.get(opts, :bypass_wall, false) do
+      {:ok, content}
+    else
+      scope = paper_scope(existing, scope_attrs)
+
+      ref = %Document{
+        doc_id: slug,
+        type: @paper_type,
+        dataset: dataset,
+        title: title,
+        content: content,
+        workspace_id: scope[:workspace_id],
+        project_id: scope[:project_id]
+      }
+
+      AuthoringWall.enforce(ref, @paper_type, slug, dataset,
+        workspace_id: scope[:workspace_id],
+        project_id: scope[:project_id]
+      )
+    end
+  end
 
   # Quality gate, whole-write seam (p-quality-gate): a block-bearing upsert
   # whose RESULT is hollow (skeleton-only, Hollow.hollow?/1) is refused with

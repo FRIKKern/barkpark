@@ -24,11 +24,13 @@ defmodule BarkparkWeb.PaperReaderCspIntegrationTest do
     Barkpark.TenancyFixtures.ensure_default_scope!()
 
     {:ok, _paper} =
-      Content.upsert_paper(%{
-        slug: @slug,
-        body_html: ~s(<section id="block-1"><h1>CSP proof</h1></section>),
-        event_type: "plan-written"
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @slug,
+          body_html: ~s(<section id="block-1"><h1>CSP proof</h1></section>),
+          event_type: "plan-written"
+        })
+      )
 
     :ok
   end

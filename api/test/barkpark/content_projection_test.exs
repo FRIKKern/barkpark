@@ -77,7 +77,10 @@ defmodule Barkpark.ContentProjectionTest do
         }
       ]
 
-      {:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      {:ok, doc} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: @dataset, blocks: blocks})
+        )
 
       assert doc.content["title"] == "Projected Title"
       assert doc.content["slug"] == "projected-title"
@@ -114,7 +117,36 @@ defmodule Barkpark.ContentProjectionTest do
         }
       ]
 
-      {:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      # The publish wall (authoring-excellence D26) requires a ≥20-char
+      # description + registered weighted tags on every walled paper birth. The
+      # preview manifest mirrors BOTH (description + extensions.tags), and the
+      # re-save below asserts byte-identical recomputation — so the labels must
+      # be EXPLICIT and stable across both writes (paper_attrs would otherwise
+      # inject fresh unique-per-call tag names + description each time). Register
+      # the tags once; wrap in paper_attrs so a bare labelled map still flows
+      # through the one test-side spelling.
+      Barkpark.LabelFixtures.register_tags!(@dataset, ["pc-w1-lead", "pc-w1-manifest"])
+
+      paper = %{
+        slug: slug,
+        dataset: @dataset,
+        blocks: blocks,
+        description: "Lead paragraph, spelled out past the twenty-char wall.",
+        tags: [
+          %{
+            "tag" => "pc-w1-lead",
+            "strength" => 90,
+            "rationale" => "Write-time preview manifest fixture."
+          },
+          %{
+            "tag" => "pc-w1-manifest",
+            "strength" => 60,
+            "rationale" => "Write-time preview manifest fixture."
+          }
+        ]
+      }
+
+      {:ok, doc} = Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(paper))
 
       # The injected :preview render_opts (epic preview-contract) stamp an
       # OpenGraph-shaped manifest on every block-bearing paper write.
@@ -122,11 +154,12 @@ defmodule Barkpark.ContentProjectionTest do
       assert preview["type"] == "paper"
       assert preview["url"] == "/papers/#{slug}"
       assert preview["title"] == "Preview Title"
-      assert preview["description"] == "Lead paragraph."
+      assert preview["description"] == "Lead paragraph, spelled out past the twenty-char wall."
 
-      # Re-save with the same blocks: the manifest recomputes byte-identically
-      # (same no-drift guarantee as content["body"]).
-      {:ok, doc2} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      # Re-save with the same blocks + the same explicit labels: the manifest
+      # recomputes byte-identically (same no-drift guarantee as content["body"]).
+      {:ok, doc2} = Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(paper))
+
       assert doc2.content["preview"] == preview
     end
   end
@@ -144,7 +177,10 @@ defmodule Barkpark.ContentProjectionTest do
         }
       ]
 
-      {:ok, _} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      {:ok, _} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: @dataset, blocks: blocks})
+        )
 
       op = %{"op" => "patch-block", "id" => "t", "patch" => %{"value" => "After"}}
       {:ok, _frame} = Content.apply_paper_block_op(slug, op, @dataset)
@@ -165,11 +201,13 @@ defmodule Barkpark.ContentProjectionTest do
       # A LEGACY paper: HTML-only write (body_html, NO blocks). The classic
       # field values live directly under content; body is a richText string.
       {:ok, legacy} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: @dataset,
-          body_html: "<p>legacy</p>"
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: @dataset,
+            body_html: "<p>legacy</p>"
+          })
+        )
 
       # Manually stamp classic field values to simulate a real legacy post that
       # never went through the block editor (upsert_paper with no blocks does
@@ -214,7 +252,10 @@ defmodule Barkpark.ContentProjectionTest do
         %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]}
       ]
 
-      {:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      {:ok, doc} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{slug: slug, dataset: @dataset, blocks: blocks})
+        )
 
       {resolved, synthesized?} = Content.resolve_blocks_for_edit(doc, "paper", @dataset)
       refute synthesized?

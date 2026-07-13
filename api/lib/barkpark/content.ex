@@ -664,8 +664,8 @@ defmodule Barkpark.Content do
   @doc "True when a HARD cap blocks inserting another bound block. See `Content.Papers`."
   defdelegate expected_field_blocked?(blocks, expectation, field_name), to: Papers
 
-  @doc "Upsert a paper keyed by `{dataset, slug}` and broadcast a whole-HTML frame. See `Content.Papers`."
-  defdelegate upsert_paper(attrs), to: Papers
+  @doc "Upsert a paper keyed by `{dataset, slug}` and broadcast a whole-HTML frame — walled by default (D26); `opts` accepts the audited `bypass_wall: true` escape. See `Content.Papers`."
+  defdelegate upsert_paper(attrs, opts \\ []), to: Papers
 
   @doc "Apply a single portable-doc op to a paper's block list. See `Content.Papers`."
   def apply_paper_block_op(slug, op, dataset \\ Papers.paper_default_dataset(), opts \\ []),

@@ -242,18 +242,20 @@ defmodule Barkpark.StructureTest do
       slug = "2026-05-24-desk-listing"
 
       {:ok, _doc} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: dataset,
-          blocks: [
-            %{"id" => "h", "type" => "heading", "text" => "Desk Listing Paper"},
-            %{
-              "id" => "p",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "body"}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: dataset,
+            blocks: [
+              %{"id" => "h", "type" => "heading", "text" => "Desk Listing Paper"},
+              %{
+                "id" => "p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "body"}]
+              }
+            ]
+          })
+        )
 
       # Drill into the "paper" doc-type-list pane (no slug → no editor yet).
       {panes, editor} = PaneBuilder.build(dataset, ["paper"])
@@ -282,18 +284,20 @@ defmodule Barkpark.StructureTest do
       slug = "2026-05-24-paper-editor"
 
       {:ok, _doc} =
-        Content.upsert_paper(%{
-          slug: slug,
-          dataset: dataset,
-          blocks: [
-            %{"id" => "h", "type" => "heading", "text" => "Editor Paper"},
-            %{
-              "id" => "p",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "body"}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            dataset: dataset,
+            blocks: [
+              %{"id" => "h", "type" => "heading", "text" => "Editor Paper"},
+              %{
+                "id" => "p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "body"}]
+              }
+            ]
+          })
+        )
 
       # Drill into /studio/:dataset/paper/:slug.
       {panes, editor} = PaneBuilder.build(dataset, ["paper", slug])

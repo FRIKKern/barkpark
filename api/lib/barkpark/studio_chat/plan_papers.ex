@@ -5,7 +5,10 @@ defmodule Barkpark.StudioChat.PlanPapers do
 
   We ARE the API app, so there is no HTTP hop and no ingest token: the plan
   markdown goes straight through `FromMarkdown.blocks/1` into
-  `Content.upsert_paper/1`, SCOPE-LESS. A scope-less upsert resolves the seeded
+  `Content.upsert_paper/2` (with the audited `bypass_wall: true` — charter
+  D23-b/D26: this fire-and-forget projection cannot retry a publish-wall
+  rejection, and plan markdown has no label surface), SCOPE-LESS. A
+  scope-less upsert resolves the seeded
   Default workspace/project (`resolve_write_scope([])`,
   content/papers/block_ops.ex:78-80) — the SAME tenant the public
   `/papers/:slug` reader serves — and publishes the row unconditionally
@@ -40,12 +43,19 @@ defmodule Barkpark.StudioChat.PlanPapers do
       when is_binary(session_id) and is_binary(request_id) and is_binary(plan_markdown) do
     slug = slug_for(session_id, request_id)
 
-    case Content.upsert_paper(%{
-           "slug" => slug,
-           "blocks" => FromMarkdown.blocks(plan_markdown),
-           "style" => "article",
-           "dataset" => @dataset
-         }) do
+    case Content.upsert_paper(
+           %{
+             "slug" => slug,
+             "blocks" => FromMarkdown.blocks(plan_markdown),
+             "style" => "article",
+             "dataset" => @dataset
+           },
+           # bypass_wall (charter D23-b/D26): this is a fire-and-forget internal
+           # projection of an ALREADY-approved plan — the approve must never fail
+           # or silently drop the paper on a wall 422, and plan markdown carries
+           # no label surface to retry with. Explicit, audited exemption.
+           bypass_wall: true
+         ) do
       {:ok, _doc} -> {:ok, %{paper_id: slug, paper_url: paper_url(slug)}}
       {:error, reason} -> {:error, reason}
     end

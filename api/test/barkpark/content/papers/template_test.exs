@@ -230,14 +230,16 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     # gate (p-quality-gate — see hollow_test.exs), so the template birth is
     # exercised via the explicit opt-in with a real body block.
     {:ok, doc} =
-      Content.upsert_paper(%{
-        slug: slug,
-        template: true,
-        blocks: [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
-        ],
-        title: "Born as a document"
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          template: true,
+          blocks: [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
+          ],
+          title: "Born as a document"
+        })
+      )
 
     blocks = doc.content["blocks"]
     assert [%{"role" => "title", "text" => "Born as a document"} | _] = blocks
@@ -245,14 +247,19 @@ defmodule Barkpark.Content.Papers.TemplateTest do
 
     # editing the title block re-derives the row title (one truth)
     edited = List.update_at(blocks, 0, &Map.put(&1, "text", "Renamed in the body"))
-    {:ok, doc2} = Content.upsert_paper(%{slug: slug, blocks: edited})
+
+    {:ok, doc2} =
+      Content.upsert_paper(Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: edited}))
+
     assert doc2.title == "Renamed in the body"
 
     # a save that demotes the title block off position 0 is halted by the gate
     [title | rest] = doc2.content["blocks"]
 
     assert {:error, {:halted, reason}} =
-             Content.upsert_paper(%{slug: slug, blocks: rest ++ [title]})
+             Content.upsert_paper(
+               Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: rest ++ [title]})
+             )
 
     assert reason =~ "template"
   end
@@ -261,12 +268,14 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     slug = "legacy-#{System.unique_integer([:positive])}"
 
     {:ok, doc} =
-      Content.upsert_paper(%{
-        slug: slug,
-        blocks: [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "legacy body"}]}
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          blocks: [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "legacy body"}]}
+          ]
+        })
+      )
 
     assert [%{"type" => "paragraph"}] = doc.content["blocks"]
     refute Enum.any?(doc.content["blocks"], &Template.locked?/1)
@@ -298,14 +307,16 @@ defmodule Barkpark.Content.Papers.TemplateStyleTest do
     # template: true + a real body block — a bare blocks: [] stub is refused
     # by the hollow-body quality gate (p-quality-gate).
     {:ok, doc} =
-      Content.upsert_paper(%{
-        slug: slug,
-        template: true,
-        blocks: [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
-        ],
-        title: "Article born"
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          template: true,
+          blocks: [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Body."}]}
+          ],
+          title: "Article born"
+        })
+      )
 
     assert doc.content["style"] == "article"
     assert doc.content["body_html"] =~ "<h1"
@@ -317,17 +328,19 @@ defmodule Barkpark.Content.Papers.TemplateStyleTest do
     slug = "scoped-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      Content.upsert_paper(%{
-        slug: slug,
-        blocks: [
-          %{
-            "id" => "p1",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "seed body"}]
-          }
-        ],
-        workspace_id: ws.id
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: slug,
+          blocks: [
+            %{
+              "id" => "p1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "seed body"}]
+            }
+          ],
+          workspace_id: ws.id
+        })
+      )
 
     op = %{"op" => "patch-block", "id" => "p1", "patch" => %{"content" => ["edited"]}}
 

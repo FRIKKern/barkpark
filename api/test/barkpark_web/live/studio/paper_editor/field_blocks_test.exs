@@ -61,7 +61,15 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
       }
     ]
 
-    {:ok, paper} = Content.upsert_paper(%{slug: @field_slug, dataset: @dataset, blocks: blocks})
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @field_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
+
     paper
   end
 
@@ -252,7 +260,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @ref_view_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @ref_view_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
 
     paper
   end
@@ -314,7 +328,13 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
     ]
 
     {:ok, paper} =
-      Content.upsert_paper(%{slug: @featured_slug, dataset: @dataset, blocks: blocks})
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @featured_slug,
+          dataset: @dataset,
+          blocks: blocks
+        })
+      )
 
     paper
   end

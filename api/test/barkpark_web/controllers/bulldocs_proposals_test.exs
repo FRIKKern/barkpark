@@ -39,28 +39,32 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
   # paper) for provenance. Returns {slug, source_slug}.
   defp seed!(slug, source_slug) do
     {:ok, _} =
-      Content.upsert_paper(%{
-        "slug" => slug,
-        "blocks" => [
-          %{
-            "id" => "intro",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Canonical prose."}]
-          }
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "blocks" => [
+            %{
+              "id" => "intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Canonical prose."}]
+            }
+          ]
+        })
+      )
 
     {:ok, _} =
-      Content.upsert_paper(%{
-        "slug" => source_slug,
-        "blocks" => [
-          %{
-            "id" => "v",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "12 weeks"}]
-          }
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => source_slug,
+          "blocks" => [
+            %{
+              "id" => "v",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "12 weeks"}]
+            }
+          ]
+        })
+      )
 
     # These papers were born PUBLISHED via the upsert_paper bypass (D13 — the
     # wall's fifth mount is deferred to ae-upsert-paper-wall) and carry no
@@ -263,19 +267,35 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
       slug = "lvw-t4-constraint-paper"
 
       {:ok, _} =
-        Content.upsert_paper(%{
-          "slug" => slug,
-          "blocks" => [
-            %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
-              "locked" => true, "text" => "T"},
-            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
-            # A real body block: skeleton-only papers are refused by the
-            # hollow-body quality gate (p-quality-gate); this test targets the
-            # constraint vocabulary, not the hollow gate.
-            %{"id" => "body-p", "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]}
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            "slug" => slug,
+            "blocks" => [
+              %{
+                "id" => "tpl-title",
+                "type" => "heading",
+                "level" => 1,
+                "role" => "title",
+                "locked" => true,
+                "text" => "T"
+              },
+              %{
+                "id" => "tpl-featured",
+                "type" => "image",
+                "role" => "featured",
+                "locked" => true
+              },
+              # A real body block: skeleton-only papers are refused by the
+              # hollow-body quality gate (p-quality-gate); this test targets the
+              # constraint vocabulary, not the hollow gate.
+              %{
+                "id" => "body-p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       {_, source} = seed!("lvw-t4-constraint-helper", "lvw-t4-constraint-kpi")
 

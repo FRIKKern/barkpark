@@ -47,17 +47,19 @@ defmodule BarkparkWeb.Studio.StudioLiveSaveStatusTest do
 
   defp seed_block_paper! do
     {:ok, paper} =
-      Content.upsert_paper(%{
-        slug: @slug,
-        dataset: @dataset,
-        blocks: [
-          %{
-            "id" => "b-intro",
-            "type" => "paragraph",
-            "content" => [%{"type" => "text", "value" => "Original body."}]
-          }
-        ]
-      })
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          slug: @slug,
+          dataset: @dataset,
+          blocks: [
+            %{
+              "id" => "b-intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Original body."}]
+            }
+          ]
+        })
+      )
 
     paper
   end

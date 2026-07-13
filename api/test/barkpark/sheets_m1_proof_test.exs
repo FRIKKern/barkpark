@@ -45,6 +45,16 @@ defmodule Barkpark.SheetsM1ProofTest do
   @write_token "sheets-m1-proof-write-token"
   @ingest_token "barkpark-test-ingest-token"
 
+  # Publish-wall labels (charter D26/D39): the ingest enforces the wall, so the
+  # dashboard-paper POST must carry registered weighted tags + a description.
+  @wall_tag_names ~w(m1-proof-budget m1-proof-live m1-proof-dashboard)
+  @wall_tags [
+    %{"tag" => "m1-proof-budget", "strength" => 88, "rationale" => "Primary label: the live budget dashboard proof paper."},
+    %{"tag" => "m1-proof-live", "strength" => 52, "rationale" => "Secondary label: two-colleague live-edit coverage."},
+    %{"tag" => "m1-proof-dashboard", "strength" => 19, "rationale" => "Tertiary label: sheet-embed dashboard fixture."}
+  ]
+  @wall_description "M1 proof fixture dashboard paper embedding a live budget sheet for the wall."
+
   @rows 20
   @batch_rows 4
   # 40 fill ops + one D1 write per actor.
@@ -54,6 +64,7 @@ defmodule Barkpark.SheetsM1ProofTest do
 
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
+    Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
     Barkpark.Auth.create_token(@write_token, "m1-proof", @dataset, ["read", "write"])
 
     stop_all_sessions()
@@ -259,6 +270,8 @@ defmodule Barkpark.SheetsM1ProofTest do
     resp =
       ingest_paper(%{
         "slug" => @paper_slug,
+        "tags" => @wall_tags,
+        "description" => @wall_description,
         "blocks" => [
           %{
             "id" => "p1",

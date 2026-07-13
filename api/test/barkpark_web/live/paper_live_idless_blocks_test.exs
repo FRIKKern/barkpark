@@ -20,7 +20,11 @@ defmodule BarkparkWeb.BulldocsLiveIdlessBlocksTest do
   alias Barkpark.Content
 
   defp seed_idless_paper(slug, blocks) do
-    {:ok, paper} = Content.upsert_paper(%{slug: slug, blocks: blocks, style: "article"})
+    {:ok, paper} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{slug: slug, blocks: blocks, style: "article"})
+      )
+
     paper
   end
 

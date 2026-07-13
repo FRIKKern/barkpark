@@ -36,25 +36,27 @@ defmodule BarkparkWeb.Studio.PaperEditor.SearchTest do
 
     setup do
       {:ok, _} =
-        Content.upsert_paper(%{
-          slug: @wikilink_slug,
-          dataset: @dataset,
-          blocks: [
-            %{
-              "id" => "h-1",
-              "type" => "heading",
-              "text" => "Wikilink Candidate Paper",
-              "level" => 1
-            },
-            # A body block: heading-only papers are hollow and refused by the
-            # p-quality-gate hollow gate; this test is about wikilink search.
-            %{
-              "id" => "p-1",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Body."}]
-            }
-          ]
-        })
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @wikilink_slug,
+            dataset: @dataset,
+            blocks: [
+              %{
+                "id" => "h-1",
+                "type" => "heading",
+                "text" => "Wikilink Candidate Paper",
+                "level" => 1
+              },
+              # A body block: heading-only papers are hollow and refused by the
+              # p-quality-gate hollow gate; this test is about wikilink search.
+              %{
+                "id" => "p-1",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Body."}]
+              }
+            ]
+          })
+        )
 
       :ok
     end
