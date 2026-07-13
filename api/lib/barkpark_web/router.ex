@@ -585,6 +585,16 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireAdmin)
   end
 
+  # Chat tenancy gate (Connectors charter D18/D19a). RequireToken sets
+  # `:api_token`; RequireChatAccess resolves `:chat_scope` (`:global` for a
+  # global-admin token — D21 authority preserved — or `{:workspace, ws}` for a
+  # workspace-bound `chat` token) and 403s a token that is neither. The
+  # controller confines a workspace scope to sessions its tenant owns.
+  pipeline :require_chat_access do
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.RequireChatAccess)
+  end
+
   # Scoped admin gate (barkpark-23yi / barkpark-fsko P0 fix). For the
   # /w/:ws/p/:project admin routes: require a token AND a membership ROLE of
   # owner/admin in the resolved `current_workspace`. RequireToken sets
@@ -1471,16 +1481,18 @@ defmodule BarkparkWeb.Router do
     get("/revision/:dataset/:id", HistoryController, :show)
   end
 
-  # ── Claude chat transport (charter bp-chat-tui, D21-D24) — instance-global
-  # admin. `[:api, :require_admin]`: RequireToken + RequireAdmin gate the global
-  # `admin` permission BEFORE any UUID/store/runtime work; `:api` supplies
-  # AcceptBarkparkVendor, which rewrites a `text/event-stream` Accept so the SSE
-  # `:events` route negotiates JSON (D6) instead of 406-ing. No scoped chat
-  # routes and no tenancy filter exist — `chat_sessions`/`chat_messages` have no
-  # tenant/owner column (D21). A strict Recorder/ClaudeChat adapter: no
-  # adopt_sink, no launcher controls, no shed-and-close (see ChatController).
+  # ── Claude chat transport (charter bp-chat-tui D21-D24; Connectors D18/D19a).
+  # `[:api, :require_chat_access]`: RequireToken + RequireChatAccess resolve
+  # `conn.assigns.chat_scope` BEFORE any UUID/store/runtime work — `:global` for
+  # a global-admin token (instance-wide authority UNCHANGED, D21) or
+  # `{:workspace, ws}` for a workspace-bound `chat` Connector, else 403. `:api`
+  # supplies AcceptBarkparkVendor, which rewrites a `text/event-stream` Accept so
+  # the SSE `:events` route negotiates JSON (D6) instead of 406-ing. The
+  # controller confines a workspace scope to sessions its tenant owns; a
+  # wrong-tenant read joins the not-found oracle. A strict Recorder/ClaudeChat
+  # adapter: no adopt_sink, no launcher controls, no shed-and-close.
   scope "/v1/chat", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through([:api, :require_chat_access])
 
     get("/sessions", ChatController, :index)
     post("/sessions", ChatController, :create)

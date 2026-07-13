@@ -12,6 +12,8 @@ defmodule BarkparkWeb.ChatControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Auth
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
@@ -145,6 +147,97 @@ defmodule BarkparkWeb.ChatControllerTest do
         |> json_response(200)
 
       assert body["id"] == sid
+    end
+  end
+
+  # ── B'. cross-tenant isolation — a workspace Connector is confined to its own
+  #        tenant (Connectors D18/D19a) ────────────────────────────────────────
+
+  describe "cross-tenant isolation — a workspace connector cannot reach another tenant's session" do
+    setup do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+
+      conn_a_raw = "chat-conn-a-#{System.unique_integer([:positive])}"
+      conn_b_raw = "chat-conn-b-#{System.unique_integer([:positive])}"
+
+      # Workspace-bound Connector tokens: NOT global admin — they carry `chat` and
+      # resolve to `{:workspace, ws}` in RequireChatAccess.
+      {:ok, _} = Auth.create_token(conn_a_raw, "conn-a", @dataset, ["read", "chat"], ws_a.id)
+      {:ok, _} = Auth.create_token(conn_b_raw, "conn-b", @dataset, ["read", "chat"], ws_b.id)
+
+      %{ws_a: ws_a, ws_b: ws_b, conn_a: conn_a_raw, conn_b: conn_b_raw}
+    end
+
+    test "a ws-B connector hits the not-found oracle on a session it does not own across every id route, while a :global admin reads it",
+         %{admin: admin, conn_a: conn_a, conn_b: conn_b, sid: sid} do
+      # Each id-bearing route carries a VALID body so the tenant check (not a 400)
+      # is what produces the 404 — proving the wrong-tenant read is
+      # indistinguishable from a missing id (never a distinct 403).
+      not_found_calls = [
+        fn -> json_conn(conn_b) |> get("/v1/chat/sessions/#{sid}") end,
+        fn ->
+          json_conn(conn_b) |> patch("/v1/chat/sessions/#{sid}", Jason.encode!(%{draft: "x"}))
+        end,
+        fn ->
+          json_conn(conn_b)
+          |> post("/v1/chat/sessions/#{sid}/messages", Jason.encode!(%{content: "x"}))
+        end,
+        fn -> json_conn(conn_b) |> post("/v1/chat/sessions/#{sid}/interrupt", "") end,
+        fn ->
+          json_conn(conn_b)
+          |> post(
+            "/v1/chat/sessions/#{sid}/approval",
+            Jason.encode!(%{request_id: "r", decision: "allow"})
+          )
+        end,
+        fn -> json_conn(conn_b) |> get("/v1/chat/sessions/#{sid}/events") end
+      ]
+
+      for call <- not_found_calls do
+        conn = call.()
+        body = json_response(conn, 404)
+
+        assert body["error"]["code"] == "not_found",
+               "cross-tenant read must join the not-found oracle, not a distinct 403"
+      end
+
+      # index: ws-B's list never surfaces a session it does not own.
+      listed = json_conn(conn_b) |> get("/v1/chat/sessions") |> json_response(200)
+
+      refute Enum.any?(listed["sessions"], &(&1["id"] == sid)),
+             "ws-B leaked another tenant's session"
+
+      # The 404s above are ISOLATION, not a dead token: the SAME ws-B connector is
+      # authorized through the plug and can create its OWN session.
+      own =
+        json_conn(conn_b) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      assert {:ok, _} = Ecto.UUID.cast(own["id"])
+
+      # A :global admin retains instance-wide authority (D21 unchanged) — it reads
+      # the very session ws-B was 404'd on.
+      assert json_conn(admin) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      # POSITIVE isolation leg (Connectors D19a) — the owner reads back what it
+      # created. ws-A's connector creates a session (must be stamped
+      # owner_workspace_id = ws_a from the create scope), then reads it (200) and
+      # sees it in its own list; ws-B is 404'd on that same fresh id. Without the
+      # create-scope stamp the session would be nil-owned and its OWNING connector
+      # would 404 on it — this leg pins that the stamp lands (charter D17/D18).
+      a_own =
+        json_conn(conn_a) |> post("/v1/chat/sessions", Jason.encode!(%{})) |> json_response(201)
+
+      a_id = a_own["id"]
+
+      assert json_conn(conn_a) |> get("/v1/chat/sessions/#{a_id}") |> json_response(200),
+             "ws-A must read back the session it just created (owner stamp lands)"
+
+      a_listed = json_conn(conn_a) |> get("/v1/chat/sessions") |> json_response(200)
+      assert Enum.any?(a_listed["sessions"], &(&1["id"] == a_id)), "ws-A must see its OWN session"
+
+      nf = json_conn(conn_b) |> get("/v1/chat/sessions/#{a_id}") |> json_response(404)
+      assert nf["error"]["code"] == "not_found", "ws-B must be 404'd on ws-A's fresh session"
     end
   end
 
