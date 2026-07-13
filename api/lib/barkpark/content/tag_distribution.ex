@@ -79,6 +79,10 @@ defmodule Barkpark.Content.TagDistribution do
     |> where([d], d.type in ^types)
     |> where([d], d.status == "published")
     |> scope_to_dataset(dataset, opts)
+    # global-read: tag-count DISTRIBUTION is an observability/analytics aggregate (D45) —
+    # the daily instance-wide TagDistribution worker reads across all tenants (workspace_id
+    # nil → global); when a caller threads a workspace_id it scopes workspace-OR-global.
+    # Deliberate fail-open admin telemetry, NOT a per-request tenant read.
     |> scope_to_workspace_or_global(workspace_id, project_id)
     # A set-returning function is illegal in WHERE, so the per-document tag
     # unnest is an inner LATERAL join. The COALESCE materialises the tag NAME
