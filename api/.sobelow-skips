@@ -165,3 +165,4 @@ Misc.BinToTerm: Unsafe `binary_to_term`,lib/barkpark/accounts/webauthn.ex:146,1F
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/sheets/web/import_controller.ex:142,4E875F5
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:4130,7966598
+XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2843,3D6DB5F
