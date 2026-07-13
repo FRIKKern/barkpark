@@ -34,6 +34,18 @@ defmodule Barkpark.StudioChatTest do
     session
   end
 
+  # A fresh workspace id — no FK on owner_workspace_id (greenfield/additive
+  # migration), so a bare generated UUID is a legitimate owner for the store
+  # tenant-seam tests below.
+  defp ws, do: Ecto.UUID.generate()
+
+  # A session owned under `scope` (`:global | {:workspace, ws} | ws`).
+  defp owned_session(scope) do
+    id = Ecto.UUID.generate()
+    {:ok, s} = StudioChat.create_session(%{id: id, cwd: "/tmp/x"}, scope)
+    s
+  end
+
   describe "create_session/1 + get_session/1" do
     test "the caller-minted UUID is the PK (autogenerate false) and round-trips" do
       id = Ecto.UUID.generate()
@@ -1886,6 +1898,141 @@ defmodule Barkpark.StudioChatTest do
     test "strip_kinds/0 IS the priority order (S7's notification vocabulary)" do
       assert StudioChat.strip_kinds() ==
                [:pending_approval, :awaiting_input, :plan_ready, :working, :finished_while_away]
+    end
+  end
+
+  describe "tenant seam — owner_workspace_id scope (Connectors epic wave 1, D14/D15/D17/D19b)" do
+    test "create_session stamps owner_workspace_id from scope ({:workspace,ws}=>ws, :global=>nil)" do
+      ws_a = ws()
+
+      tenant = owned_session({:workspace, ws_a})
+      assert tenant.owner_workspace_id == ws_a
+
+      # :global (the default) and an unscoped create both stamp NULL — the admin
+      # / legacy session, invisible to any workspace-scoped caller.
+      global = owned_session(:global)
+      assert is_nil(global.owner_workspace_id)
+
+      {:ok, defaulted} = StudioChat.create_session(%{id: Ecto.UUID.generate()})
+      assert is_nil(defaulted.owner_workspace_id)
+
+      # A bare workspace binary is accepted defensively (same stamp as the tuple).
+      bare = owned_session(ws_a)
+      assert bare.owner_workspace_id == ws_a
+    end
+
+    test "get_session is fail-closed: ws-B cannot see a ws-A-owned session, :global + ws-A can" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+
+      # Owner and the global superuser resolve it…
+      assert StudioChat.get_session(a.id, ws_a).id == a.id
+      assert StudioChat.get_session(a.id, :global).id == a.id
+      # …a foreign workspace and a nil scope get nil (indistinguishable from missing).
+      assert StudioChat.get_session(a.id, ws_b) == nil
+      assert StudioChat.get_session(a.id, nil) == nil
+
+      # A :global (NULL-owner) session is admin-only: no workspace scope sees it
+      # (a NULL never matches the owner_workspace_id equality — legacy rows stay
+      # invisible without a blanket is_nil carve-out).
+      g = owned_session(:global)
+      assert StudioChat.get_session(g.id, :global).id == g.id
+      assert StudioChat.get_session(g.id, ws_a) == nil
+    end
+
+    test "get_session_with_messages honours the scope gate" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+      {:ok, _} = StudioChat.append_message(a, %{role: "user", source_markdown: "secret"})
+
+      assert %Session{} = StudioChat.get_session_with_messages(a.id, ws_a)
+      assert StudioChat.get_session_with_messages(a.id, ws_b) == nil
+    end
+
+    test "list_sessions is scoped: each workspace sees only its own; :global sees all" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+      b = owned_session({:workspace, ws_b})
+      g = owned_session(:global)
+
+      a_ids = StudioChat.list_sessions([], ws_a) |> Enum.map(& &1.id)
+      assert a.id in a_ids
+      refute b.id in a_ids
+      refute g.id in a_ids
+
+      b_ids = StudioChat.list_sessions([], ws_b) |> Enum.map(& &1.id)
+      assert b.id in b_ids
+      refute a.id in b_ids
+
+      global_ids = StudioChat.list_sessions([], :global) |> Enum.map(& &1.id)
+      assert a.id in global_ids
+      assert b.id in global_ids
+      assert g.id in global_ids
+
+      # a nil scope is fail-closed — zero rows, never a cross-tenant leak.
+      assert StudioChat.list_sessions([], nil) == []
+    end
+
+    test "list_messages is fail-closed: ws-B reads [] on a ws-A session; :global + ws-A read it" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+      {:ok, _} = StudioChat.append_message(a, %{role: "user", source_markdown: "one"})
+      {:ok, _} = StudioChat.append_message(a, %{role: "assistant", source_markdown: "two"})
+
+      assert length(StudioChat.list_messages(a.id, :global)) == 2
+      assert length(StudioChat.list_messages(a.id, ws_a)) == 2
+      # foreign tenant: no transcript leak.
+      assert StudioChat.list_messages(a.id, ws_b) == []
+      # the scoped LIMIT form (charter D17 "+/2 limit threads it") is gated too.
+      assert length(StudioChat.list_messages(a.id, 1, ws_a)) == 1
+      assert StudioChat.list_messages(a.id, 1, ws_b) == []
+    end
+
+    test "delete_session is fail-closed: ws-B cannot delete a ws-A session; ws-A can" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+
+      # foreign workspace: no-op, the row survives.
+      assert :noop = StudioChat.delete_session(a.id, ws_b)
+      assert StudioChat.get_session(a.id, ws_a).id == a.id
+
+      # owner deletes it for real.
+      assert {:ok, %Session{}} = StudioChat.delete_session(a.id, ws_a)
+      assert StudioChat.get_session(a.id, :global) == nil
+    end
+
+    test "archive/unarchive are fail-closed against a foreign workspace" do
+      ws_a = ws()
+      ws_b = ws()
+      a = owned_session({:workspace, ws_a})
+
+      # ws-B cannot archive ws-A's session — no-op, archived_at stays nil.
+      assert :noop = StudioChat.archive_session(a.id, ws_b)
+      assert is_nil(StudioChat.get_session(a.id, ws_a).archived_at)
+
+      # owner archives, then ws-B cannot unarchive it back.
+      {:ok, archived} = StudioChat.archive_session(a.id, ws_a)
+      assert archived.archived_at != nil
+      assert :noop = StudioChat.unarchive_session(a.id, ws_b)
+
+      {:ok, unarchived} = StudioChat.unarchive_session(a.id, ws_a)
+      assert is_nil(unarchived.archived_at)
+    end
+
+    test "back-compat: the default scope is :global — every legacy call site is unchanged" do
+      s = new_session()
+      {:ok, _} = StudioChat.append_message(s, %{role: "user", source_markdown: "hi"})
+
+      # /1 + /2-limit legacy arities keep resolving globally.
+      assert StudioChat.get_session(s.id).id == s.id
+      assert Enum.any?(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert length(StudioChat.list_messages(s.id)) == 1
+      assert length(StudioChat.list_messages(s.id, 1)) == 1
     end
   end
 end

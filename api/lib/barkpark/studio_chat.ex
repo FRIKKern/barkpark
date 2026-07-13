@@ -65,39 +65,92 @@ defmodule Barkpark.StudioChat do
   # sessions
   # ---------------------------------------------------------------------------
 
+  # ---------------------------------------------------------------------------
+  # Tenant scope (Connectors epic wave 1, charter D15/D17) — the store seal.
+  #
+  # Every read/list/mutate funnel takes a `scope` argument that is either
+  # `:global` or a `workspace_id` binary, defaulting to `:global` so no non-chat
+  # caller (Recorder, internal helpers, admin LiveView) breaks:
+  #
+  #   * `:global`     → NO filter (the admin superuser path, mirrors
+  #                     `Content.Scope.scope_to_workspace_global/1`).
+  #   * a workspace id → `owner_workspace_id == ^ws` — the fail-closed semantics
+  #                     of `Content.Scope.scope_to_workspace/3`, applied DIRECTLY
+  #                     to `chat_sessions.owner_workspace_id` (the table has no
+  #                     `workspace_id` column, so we cannot call Scope, which
+  #                     keys on `workspace_id`). A NULL `owner_workspace_id` never
+  #                     matches an equality, so legacy/`:global` rows stay
+  #                     invisible to a scoped caller.
+  #   * anything else (a `nil` workspace) → `where: false`, zero rows, fail-closed
+  #                     (mirrors `scope_to_workspace(query, nil, _)`). NOT the
+  #                     `scope_to_owner` OR-is_nil carve-out, NOT a dataset
+  #                     OR-fallback — chat_sessions never had a prior tenant id.
+  # ---------------------------------------------------------------------------
+  defp scope_sessions(query, :global), do: query
+
+  defp scope_sessions(query, workspace_id) when is_binary(workspace_id),
+    do: where(query, [s], s.owner_workspace_id == ^workspace_id)
+
+  defp scope_sessions(query, _fail_closed), do: where(query, false)
+
+  # The owner_workspace_id to STAMP on a new session from the create scope. The
+  # controller threads the resolved `chat_scope` (`:global | {:workspace, ws}`,
+  # charter D18); a bare workspace binary is also accepted defensively. Anything
+  # else (`:global`, nil) stamps NULL — the admin/global session.
+  defp owner_ws_from_scope({:workspace, ws}) when is_binary(ws), do: ws
+  defp owner_ws_from_scope(ws) when is_binary(ws), do: ws
+  defp owner_ws_from_scope(_), do: nil
+
   @doc """
   Create a session from `attrs`. `id` (the minted claude session UUID) is
   REQUIRED — the caller mints it so it doubles as the `--resume` key.
 
+  `scope` (charter D17) stamps `owner_workspace_id`: `{:workspace, ws}` (or a
+  bare `ws` binary) stamps that workspace; `:global` (the default) stamps NULL —
+  the admin/global session. The scope is authoritative — it overrides any
+  `owner_workspace_id` in `attrs`.
+
   Returns `{:ok, %Session{}}` or `{:error, changeset}`.
   """
-  @spec create_session(map()) :: {:ok, Session.t()} | {:error, Ecto.Changeset.t()}
-  def create_session(attrs) do
+  @spec create_session(map(), :global | {:workspace, binary()} | binary()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t()}
+  def create_session(attrs, scope \\ :global) do
     %Session{}
-    |> Session.create_changeset(attrs)
+    |> Session.create_changeset(Map.put(attrs, :owner_workspace_id, owner_ws_from_scope(scope)))
     |> Repo.insert()
   end
 
   @doc """
-  Fetch a session by id. Returns `nil` for a missing id AND for a non-UUID
-  string (UUID-guarded — never a 500).
+  Fetch a session by id, within `scope` (charter D17). Returns `nil` for a
+  missing id, a non-UUID string (UUID-guarded — never a 500), AND for a session
+  the scope cannot see (a workspace-scoped caller reading a foreign/`:global`
+  session gets `nil` — fail-closed, indistinguishable from missing).
   """
-  @spec get_session(String.t() | nil) :: Session.t() | nil
-  def get_session(id) when is_binary(id) do
+  @spec get_session(String.t() | nil, :global | binary()) :: Session.t() | nil
+  def get_session(id, scope \\ :global)
+
+  def get_session(id, scope) when is_binary(id) do
     case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Session, uuid)
-      :error -> nil
+      {:ok, uuid} ->
+        Session
+        |> where([s], s.id == ^uuid)
+        |> scope_sessions(scope)
+        |> Repo.one()
+
+      :error ->
+        nil
     end
   end
 
-  def get_session(_), do: nil
+  def get_session(_, _), do: nil
 
   @doc """
-  Fetch a session and its messages (ordered by `seq`). Returns `nil` if missing.
+  Fetch a session and its messages (ordered by `seq`), within `scope`. Returns
+  `nil` if missing OR invisible to the scope (fail-closed).
   """
-  @spec get_session_with_messages(String.t() | nil) :: Session.t() | nil
-  def get_session_with_messages(id) do
-    case get_session(id) do
+  @spec get_session_with_messages(String.t() | nil, :global | binary()) :: Session.t() | nil
+  def get_session_with_messages(id, scope \\ :global) do
+    case get_session(id, scope) do
       nil -> nil
       session -> Repo.preload(session, :messages)
     end
@@ -116,13 +169,19 @@ defmodule Barkpark.StudioChat do
     * `:archived` — `false` (default) lists the active side of the shelf
       (`archived_at IS NULL`, the partial-indexed hot path); `true` lists the
       archived shelf (`archived_at IS NOT NULL`).
+
+  `scope` (charter D17) narrows the list: `:global` (default) lists every
+  session (admin sidebar, behaviour identical to today); a `workspace_id` lists
+  only that workspace's sessions (fail-closed — the tenant-scoped sidebar served
+  by the `owner_workspace_id, last_active_at` partial index).
   """
-  @spec list_sessions(keyword()) :: [Session.t()]
-  def list_sessions(opts \\ []) do
+  @spec list_sessions(keyword(), :global | binary()) :: [Session.t()]
+  def list_sessions(opts \\ [], scope \\ :global) do
     archived? = Keyword.get(opts, :archived, false)
 
     Session
     |> archived_filter(archived?)
+    |> scope_sessions(scope)
     |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
     |> limit(^@sidebar_cap)
     |> select([s], %Session{
@@ -149,27 +208,57 @@ defmodule Barkpark.StudioChat do
   defp archived_filter(query, false), do: where(query, [s], is_nil(s.archived_at))
 
   @doc """
-  List a session's messages in `seq` order.
+  List a session's messages in `seq` order, within `scope` (charter D17).
+
+  `chat_messages` carries no `owner_workspace_id` of its own, so the scope gate
+  is the PARENT session's visibility: a workspace-scoped caller that cannot see
+  the session (foreign / `:global` owner) gets `[]` — fail-closed, never a
+  foreign tenant's transcript. `:global` (default) is unfiltered. A `pos_integer`
+  second arg is the LEGACY limit form (see the 3-arity for a scoped limit).
   """
-  @spec list_messages(String.t()) :: [Message.t()]
-  def list_messages(session_id) do
+  @spec list_messages(String.t(), :global | binary() | pos_integer()) :: [Message.t()]
+  def list_messages(session_id, scope_or_limit \\ :global)
+
+  def list_messages(session_id, :global), do: do_messages_all(session_id)
+
+  def list_messages(session_id, ws) when is_binary(ws) do
+    if scoped_session_visible?(session_id, ws), do: do_messages_all(session_id), else: []
+  end
+
+  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
+    do_messages_last(session_id, limit)
+  end
+
+  def list_messages(session_id, limit) when is_integer(limit), do: do_messages_all(session_id)
+
+  @doc """
+  List the LAST `limit` messages of a session (ascending `seq`), within `scope`.
+
+  The transcript reopen path (`ChatLive`) caps the socket to a bounded window
+  (task-9e21c3f285b3d7d0), so a multi-hundred-turn session no longer loads its
+  entire history into memory just to display the tail. The DB `LIMIT` bounds
+  both the query result and the initial socket heap; the durable store is
+  untouched. A non-positive `limit` falls back to the full list. `scope`
+  threads the tenant gate: a workspace-scoped caller that cannot see the session
+  gets `[]` (fail-closed); `:global` is unfiltered.
+  """
+  @spec list_messages(String.t(), pos_integer(), :global | binary()) :: [Message.t()]
+  def list_messages(session_id, limit, scope) when is_integer(limit) and limit > 0 do
+    if scoped_session_visible?(session_id, scope),
+      do: do_messages_last(session_id, limit),
+      else: []
+  end
+
+  def list_messages(session_id, _limit, scope), do: list_messages(session_id, scope)
+
+  defp do_messages_all(session_id) do
     Message
     |> where([m], m.session_id == ^session_id)
     |> order_by([m], asc: m.seq)
     |> Repo.all()
   end
 
-  @doc """
-  List the LAST `limit` messages of a session, still in ascending `seq` order.
-
-  The transcript reopen path (`ChatLive`) caps the socket to a bounded window
-  (task-9e21c3f285b3d7d0), so a multi-hundred-turn session no longer loads its
-  entire history into memory just to display the tail. The DB `LIMIT` bounds
-  both the query result and the initial socket heap; the durable store is
-  untouched. A non-positive/absent `limit` falls back to the full list.
-  """
-  @spec list_messages(String.t(), pos_integer()) :: [Message.t()]
-  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
+  defp do_messages_last(session_id, limit) do
     Message
     |> where([m], m.session_id == ^session_id)
     |> order_by([m], desc: m.seq)
@@ -178,7 +267,10 @@ defmodule Barkpark.StudioChat do
     |> Enum.reverse()
   end
 
-  def list_messages(session_id, _limit), do: list_messages(session_id)
+  # A session is visible to `:global` always; to a workspace scope only when the
+  # scoped `get_session` resolves it (fail-closed on a foreign / NULL owner).
+  defp scoped_session_visible?(_session_id, :global), do: true
+  defp scoped_session_visible?(session_id, scope), do: get_session(session_id, scope) != nil
 
   # ---------------------------------------------------------------------------
   # lifecycle: archive + delete (wave 2 — the sidebar as a managed resource list)
@@ -194,9 +286,10 @@ defmodule Barkpark.StudioChat do
   keeps files; only a permanent delete purges them. The file purge runs AFTER a
   successful row delete and never raises (a stray FS error can't fail the delete).
   """
-  @spec delete_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
-  def delete_session(id) do
-    case get_session(id) do
+  @spec delete_session(String.t(), :global | binary()) ::
+          {:ok, Session.t()} | {:error, term()} | :noop
+  def delete_session(id, scope \\ :global) do
+    case get_session(id, scope) do
       nil ->
         :noop
 
@@ -217,18 +310,21 @@ defmodule Barkpark.StudioChat do
   onto the archived shelf. Orthogonal to `status`: a working/exited session can
   be archived without touching its liveness. `:noop` if the session is gone.
   """
-  @spec archive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
-  def archive_session(id), do: set_archived_at(id, DateTime.utc_now())
+  @spec archive_session(String.t(), :global | binary()) ::
+          {:ok, Session.t()} | {:error, term()} | :noop
+  def archive_session(id, scope \\ :global),
+    do: set_archived_at(id, DateTime.utc_now(), scope)
 
   @doc """
   Unarchive a session — clear `archived_at` so it returns to the active sidebar.
-  `:noop` if the session is gone.
+  `:noop` if the session is gone or invisible to `scope` (fail-closed).
   """
-  @spec unarchive_session(String.t()) :: {:ok, Session.t()} | {:error, term()} | :noop
-  def unarchive_session(id), do: set_archived_at(id, nil)
+  @spec unarchive_session(String.t(), :global | binary()) ::
+          {:ok, Session.t()} | {:error, term()} | :noop
+  def unarchive_session(id, scope \\ :global), do: set_archived_at(id, nil, scope)
 
-  defp set_archived_at(id, value) do
-    case get_session(id) do
+  defp set_archived_at(id, value, scope) do
+    case get_session(id, scope) do
       nil ->
         :noop
 
