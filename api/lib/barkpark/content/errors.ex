@@ -65,7 +65,12 @@ defmodule Barkpark.Content.Errors do
       "This task duplicates an existing one — claim/extend the task in details.similar, or resend with distinct_from set to that id to confirm it is genuinely different.",
     # Authoring-excellence publish wall, E3 gate (charter D3/D5).
     "unknown_tag" =>
-      "Every tags[].tag must be a registered tag — publish a type:tag document whose _id is the tag name, or switch to one of the registered tags in details.suggestions, then publish again."
+      "Every tags[].tag must be a registered tag — publish a type:tag document whose _id is the tag name, or switch to one of the registered tags in details.suggestions, then publish again.",
+    # Per-workspace quota gate at the mutate seam (perfect-plan-build W1, D11).
+    "workspace_suspended" =>
+      "This workspace is suspended — no writes are accepted until an operator reinstates it. Contact your workspace admin; details.reason names why.",
+    "quota_exceeded" =>
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
   }
 
   # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────
@@ -186,6 +191,32 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :forbidden}),
     do: %{code: "forbidden", message: "token lacks required permission", status: 403}
+
+  # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
+  # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
+  # plan's write cap" semantic, distinct from a 429 rate limit that clears on
+  # backoff). `reason`/`quota` ride details so a client can surface the wall.
+  defp build({:error, :workspace_suspended}),
+    do: %{code: "workspace_suspended", message: "workspace is suspended", status: 403}
+
+  defp build({:error, {:workspace_suspended, reason}}),
+    do: %{
+      code: "workspace_suspended",
+      message: "workspace is suspended",
+      status: 403,
+      details: %{reason: reason}
+    }
+
+  defp build({:error, :quota_exceeded}),
+    do: %{code: "quota_exceeded", message: "workspace write quota exceeded", status: 402}
+
+  defp build({:error, {:quota_exceeded, quota}}),
+    do: %{
+      code: "quota_exceeded",
+      message: "workspace write quota exceeded",
+      status: 402,
+      details: %{quota: quota}
+    }
 
   defp build({:error, :forbidden_origin}),
     do: %{code: "cors_forbidden", message: "origin not allowed for dataset", status: 403}

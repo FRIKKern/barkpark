@@ -45,6 +45,16 @@ defmodule Barkpark.Tenancy.Workspace do
     # → the baked-in default, so a workspace with no settings renders unchanged.
     field :settings, :map, default: %{}
 
+    # Quota + suspension state (perfect-plan-build W1, charter D13). Read at the
+    # mutate seam by `BarkparkWeb.Plugs.RequireWithinQuota`; written by
+    # `Barkpark.Tenancy.Quota`. `quota` NULL = unlimited (every workspace ships
+    # uncapped); `suspended` is a hard write-block flag defaulting false, so the
+    # gate is a no-op until an operator sets a quota or suspends.
+    field :quota, :integer
+    field :suspended, :boolean, default: false
+    field :suspended_reason, :string
+    field :suspended_at, :utc_datetime_usec
+
     # Thin Organization tier (era-w1-org): nullable, additive, not read by any
     # authorization path — a workspace joins an org when SSO/SCIM is configured.
     belongs_to :organization, Barkpark.Tenancy.Organization
