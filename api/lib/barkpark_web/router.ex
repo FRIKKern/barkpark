@@ -2058,6 +2058,29 @@ defmodule BarkparkWeb.Router do
     delete("/workspaces/:workspace_slug", WorkspaceController, :delete)
   end
 
+  # ── Workspace bundle transfer — admin-gated export / import ──────────────
+  # The HTTP surface over the shipped `Barkpark.Tenancy.WorkspaceBundle` keystone
+  # engine (bp-export-v1): a complete, self-describing, round-trippable dump of
+  # every workspace-scoped table. Same admin gate as delete above — the bundle
+  # is the raw byte carrier that backup / eject / migration build on, so it
+  # requires the GLOBAL `admin` permission, not mere membership.
+  #
+  # DELIBERATELY a bare router+controller route with NO capabilities manifest
+  # command: `docs/openapi.json` is manifest-derived, so a bare route is invisible
+  # to the OpenAPI drift gate (mirrors the DELETE route above, also absent from
+  # the spec) — zero drift trip, zero local-OOM spec regen.
+  #
+  # export is SYNC: `WorkspaceBundle.export/2` materializes the whole tar binary,
+  # streamed back with `send_resp/3` under an `application/x-tar` attachment.
+  # import reads the raw tar body and calls `import_bundle/2` (idempotent INSERT
+  # ON CONFLICT DO NOTHING), so a re-import of the same bundle is a safe no-op.
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    get("/workspaces/:workspace_slug/export", WorkspaceController, :export)
+    post("/workspaces/:workspace_slug/import", WorkspaceController, :import)
+  end
+
   # ── Legacy compat ──────────────────────────────────────────────────────
   # Deprecated back-compat for the Go TUI's original endpoints — the TUI
   # migrated OFF these (Goal barkpark-qprk, B14). Now token-gated (`:require_token`)

@@ -15,6 +15,8 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
   alias Barkpark.{Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.Archive
 
   setup do
     # create_token/4 with no explicit workspace_id binds to the seeded Default
@@ -437,6 +439,157 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert orphans == [],
              "zero-orphan violated — rows survived the HTTP delete: #{inspect(orphans)}"
+    end
+  end
+
+  describe "GET /api/workspaces/:workspace_slug/export" do
+    test "200 for an admin — application/x-tar attachment with a non-empty bundle body",
+         %{conn: conn} do
+      raw_admin = "ws-export-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Export WS"}, admin_token(raw_admin))
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/#{target.slug}/export")
+
+      assert resp.status == 200
+
+      # Binary tar carrier — NO charset (put_resp_content_type/3 nil charset).
+      assert Plug.Conn.get_resp_header(resp, "content-type") == ["application/x-tar"]
+
+      assert Plug.Conn.get_resp_header(resp, "content-disposition") ==
+               ["attachment; filename=#{target.slug}.tar"]
+
+      # The body is the real materialized bundle, not an empty 200.
+      assert byte_size(resp.resp_body) > 0
+
+      # …and it is a genuine bp-export-v1 bundle FOR THIS workspace — unpack the
+      # manifest straight off the response bytes (no DB write, so no dirty-target
+      # re-import conflict; the round-trip proof lives in the import test below).
+      {manifest, _dumps} = Archive.unpack(resp.resp_body)
+      assert manifest["format"] == Archive.format()
+      assert manifest["workspace_slug"] == target.slug
+    end
+
+    test "404 for an unknown workspace slug (admin)", %{conn: conn} do
+      raw_admin = "ws-export-404-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["admin"])
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> get("/api/workspaces/no-such-ws/export")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    test "403 for a NON-admin token (permission denial before the action)",
+         %{conn: conn, raw_token: raw, member_ws: member_ws} do
+      # `raw` holds only ["read", "write"] — the :require_admin gate 403s it
+      # BEFORE export/2 runs, so no bundle is ever materialized.
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/#{member_ws.slug}/export")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    test "unauthenticated → 401", %{conn: conn, member_ws: member_ws} do
+      resp = get(conn, "/api/workspaces/#{member_ws.slug}/export")
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
+  describe "POST /api/workspaces/:workspace_slug/import" do
+    test "200 for an admin — imports a bundle into a clean scope and returns {tables,total_rows}",
+         %{conn: conn} do
+      raw_admin = "ws-import-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # Seed a real workspace with scoped content so the round-trip is NOT vacuous.
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Import RT WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+      ws_slug = target.slug
+
+      # CLEAN TARGET: delete the workspace (cascades every FK-scoped row) then clear
+      # the two FK-less audit tables so the copy-strategy members re-import without
+      # a primary-key collision (the copy path assumes a clean target; only the
+      # E3/allowlist members are ON CONFLICT idempotent). audit_events is
+      # append-only, so the purge runs under `session_replication_role = replica`
+      # (triggers off) — the same clean-target trick the engine round-trip uses.
+      {:ok, _} = Tenancy.delete_workspace(target)
+      {:ok, ws_bin} = Ecto.UUID.dump(target.id)
+      purge_fkless_audit!(ws_bin)
+      refute Tenancy.get_workspace_by_slug(ws_slug)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{ws_slug}/import", bundle)
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+      assert is_map(body["tables"])
+      assert body["total_rows"] > 0
+
+      # The import REALLY landed through the HTTP path: the workspace + its scoped
+      # document are back — not a vacuous 200.
+      assert Tenancy.get_workspace_by_slug(ws_slug)
+
+      assert scoped_row_count("documents", target.id) > 0
+    end
+
+    test "403 for a NON-admin token (permission denial before the action)",
+         %{conn: conn, raw_token: raw, member_ws: member_ws} do
+      resp =
+        conn
+        |> authed(raw)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import", "ignored")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    test "unauthenticated → 401", %{conn: conn, member_ws: member_ws} do
+      resp =
+        conn
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{member_ws.slug}/import", "ignored")
+
+      assert resp.status == 401
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+  end
+
+  # Clear the two FK-less audit tables for a workspace so a bundle re-import into
+  # the same DB has a clean copy-strategy target. audit_events enforces
+  # append-only via a trigger, so the DELETE runs under
+  # `session_replication_role = replica` (triggers off) and is reset to DEFAULT
+  # after — mirroring the engine round-trip's clean-target purge.
+  defp purge_fkless_audit!(ws_bin) do
+    Repo.query!("SET session_replication_role = replica", [])
+
+    try do
+      Repo.query!("DELETE FROM audit_events WHERE workspace_id = $1", [ws_bin])
+      Repo.query!("DELETE FROM audit_export_sinks WHERE workspace_id = $1", [ws_bin])
+    after
+      Repo.query!("SET session_replication_role = DEFAULT", [])
     end
   end
 
