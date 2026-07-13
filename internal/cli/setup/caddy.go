@@ -104,10 +104,12 @@ func renderCaddyfile(opts CaddyOpts) (string, error) {
 //     (keyring + sources.list + apt-get install -y caddy).
 //  2. write the rendered Caddyfile to /etc/caddy/Caddyfile (reverse_proxy →
 //     localhost:<port>, automatic ACME on <fqdn>).
-//  3. set PHX_HOST=<fqdn> + PHX_SCHEME=https in the app .env idempotently
-//     (grep-then-append/replace, mirroring deploy.sh's BARKPARK_PLUGINS pattern)
-//     — the LiveView-critical pair: a wrong PHX_HOST 403s /live/websocket.
-//     Followed by a barkpark restart to load the pair — UNLESS opts.
+//  3. set PHX_HOST=<fqdn> + PHX_SCHEME=https + BARKPARK_CLOUD_URL in the app
+//     .env idempotently (grep-then-append/replace, mirroring deploy.sh's
+//     BARKPARK_PLUGINS pattern) — the LiveView-critical pair (a wrong PHX_HOST
+//     403s /live/websocket) plus the Cloud URL that arms the "Log in with
+//     Barkpark Cloud" button on /login (unset → the button never renders).
+//     Followed by a barkpark restart to load them — UNLESS opts.
 //     SkipAppRestart, where the caller owns a later restart (the go-live chain's
 //     secrets-install restarts once for the PHX_* pair AND the secrets).
 //  4. reload Caddy so it picks up the new site block (enable first so a fresh
@@ -138,6 +140,7 @@ func CaddySteps(opts CaddyOpts) []step {
 		),
 		setEnvVarStep("set PHX_HOST="+fqdn+" in the app env (LiveView check_origin)", "PHX_HOST", fqdn),
 		setEnvVarStep("set PHX_SCHEME=https in the app env (LiveView check_origin)", "PHX_SCHEME", "https"),
+		setEnvVarStep("set BARKPARK_CLOUD_URL (Log in with Barkpark Cloud on /login)", "BARKPARK_CLOUD_URL", "https://barkpark.cloud"),
 	}
 	if !opts.SkipAppRestart {
 		steps = append(steps, barkparkRestartStep())
