@@ -3,6 +3,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLiveTest do
   use Oban.Testing, repo: Barkpark.Repo
 
   import Phoenix.LiveViewTest
+  import Ecto.Query
 
   alias Barkpark.Auth
   alias Barkpark.Content.Document
@@ -279,6 +280,118 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLiveTest do
       assert rendered_rows == @page_limit,
              "the bounded mount must render exactly @page_limit (#{@page_limit}) rows out of " <>
                "#{total} seeded, got #{rendered_rows}"
+    end
+  end
+
+  # PROTECTIVE TEST (task-5dbbbe2efc44e48e, felix wave 5): #2869 capped
+  # `load_submissions` at @page_limit (order_by updated_at desc, limit) — bounding
+  # the socket heap but making every row past the cap UNREACHABLE. OFFSET-based
+  # pagination (@page assign + next_page/prev_page) makes them reachable while
+  # holding the per-page bound. Seed >@page_limit books with DISTINCT document
+  # `updated_at` (forced post-insert — the column is not castable) so the desc
+  # order is deterministic, then prove a capped-out row is invisible on page 1 and
+  # surfaces on page 2. FAILS on origin/main: there is no next_page control, so the
+  # render_click below raises (no matching element).
+  describe "pagination beyond the page limit" do
+    test "page 2 surfaces a capped-out row that is invisible on page 1", %{conn: conn} do
+      total = @page_limit + 5
+      base = ~U[2026-01-01 00:00:00.000000Z]
+
+      for i <- 1..total do
+        doc_id = "pg-" <> String.pad_leading(Integer.to_string(i), 3, "0")
+
+        seed_book(doc_id, %{
+          "state" => "accepted",
+          "updated_at" => "2026-04-30T10:00:00.000000Z"
+        })
+
+        # Force the DOCUMENT row's updated_at (the pagination sort key) — higher i
+        # is newer, so pg-001 is the oldest row and lands on page 2.
+        forced = DateTime.add(base, i, :second)
+
+        {1, _} =
+          Repo.update_all(
+            from(d in Document, where: d.doc_id == ^doc_id),
+            set: [updated_at: forced]
+          )
+      end
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, @url)
+
+      # Page 1 (0-based @page 0): the 200 newest rows. The oldest row (pg-001) is
+      # capped out; the newest (pg-205) is present.
+      assert html =~ ~s(data-test-doc-id="pg-205")
+      refute html =~ ~s(data-test-doc-id="pg-001")
+      assert has_element?(view, ~s|[data-test-id="bokbasen-pager"]|)
+
+      # Advance to page 2.
+      html2 =
+        view
+        |> element(~s|button[data-test-action="next-page"]|)
+        |> render_click()
+
+      # The capped-out row now surfaces; the first-page-only row is gone.
+      assert html2 =~ ~s(data-test-doc-id="pg-001")
+      refute html2 =~ ~s(data-test-doc-id="pg-205")
+      assert html2 =~ "Page 2"
+
+      # Paging back returns to the first page.
+      html3 =
+        view
+        |> element(~s|button[data-test-action="prev-page"]|)
+        |> render_click()
+
+      assert html3 =~ ~s(data-test-doc-id="pg-205")
+      refute html3 =~ ~s(data-test-doc-id="pg-001")
+    end
+
+    test "a page-2 row receives live PubSub updates (resubscribe on navigation)",
+         %{conn: conn} do
+      total = @page_limit + 3
+      base = ~U[2026-01-01 00:00:00.000000Z]
+
+      for i <- 1..total do
+        doc_id = "sub-" <> String.pad_leading(Integer.to_string(i), 3, "0")
+
+        seed_book(doc_id, %{
+          "state" => "polling",
+          "updated_at" => "2026-04-30T10:00:00.000000Z"
+        })
+
+        forced = DateTime.add(base, i, :second)
+
+        {1, _} =
+          Repo.update_all(
+            from(d in Document, where: d.doc_id == ^doc_id),
+            set: [updated_at: forced]
+          )
+      end
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @url)
+
+      # sub-001 is the oldest → page 2 only.
+      view
+      |> element(~s|button[data-test-action="next-page"]|)
+      |> render_click()
+
+      assert has_element?(view, ~s|tr[data-test-doc-id="sub-001"] [data-test-pill="polling"]|)
+
+      # A broadcast on the page-2 doc must land — proving the mount subscribed the
+      # NEW page's topics (resubscribe), not just page 1's.
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        "bokbasen:document:sub-001",
+        {:bokbasen_status_update,
+         %{
+           "doc_id" => "sub-001",
+           "state" => "accepted",
+           "updated_at" => "2026-04-30T10:05:00.000000Z"
+         }}
+      )
+
+      assert has_element?(view, ~s|tr[data-test-doc-id="sub-001"] [data-test-pill="accepted"]|)
     end
   end
 
