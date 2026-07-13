@@ -23,8 +23,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  alias Barkpark.Papers.TextDiff
   alias Barkpark.PortableDoc.Render.StatusVocab
   alias Barkpark.PortableDoc.Slots
+  alias BarkparkWeb.Studio.ChatToolRenderer
 
   @doc """
   Render a `tasks` block's snapshot as the upgraded task list: an optional
@@ -413,6 +415,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
             d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
             f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
+
             ~s|<div class="bp-pnode#{src_class}">#{k_html}#{t_html}#{d_html}#{f_html}#{src_html}</div>|
           end)
           |> Enum.join(~s|<span class="bp-pipe__arr">→</span>|)
@@ -541,7 +544,9 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         cols =
           board_roles()
-          |> Enum.map(fn role -> board_col(role, board_label(role), Map.get(by_role, role, [])) end)
+          |> Enum.map(fn role ->
+            board_col(role, board_label(role), Map.get(by_role, role, []))
+          end)
           |> Enum.reject(&(&1 == ""))
           |> Enum.join("")
 
@@ -631,6 +636,298 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   def roadmap_html(_), do: ""
+
+  # ═══ Chat tool / todo / thinking rows (charter D25 — dual-surface Law 1) ══════
+  #
+  # The three highest-frequency non-text chat rows become FIRST-CLASS PortableDoc
+  # block types — `chat-tool-diff`, `chat-todo`, `chat-thinking` — so they render
+  # through the SAME compose_block path the assistant reply body already uses (D8)
+  # on BOTH surfaces. The GUI/reader leg is these `_raw` emitters (`compose_block`
+  # :article delegates here); the Go TUI leg (`internal/chat`) decodes the IDENTICAL
+  # typed block map. This closes the Law-1 parallel-render fork: no more bespoke
+  # inline `ChatToolRenderer.tool_diff/todo_card` HEEx in `chat_live.ex`.
+  #
+  # The pure derivations are REUSED verbatim — NO new diff/parse engine is invented:
+  # `Barkpark.Papers.TextDiff.diff_lines/2` (the ONE line diff), `ChatToolRenderer.
+  # classify/1` (shape dispatch), `ChatToolRenderer.parse_todos/1` +
+  # `ChatToolRenderer.todo_glyph/1` (the living checklist), and the "thought for ~N
+  # tokens" count label. Output stays byte-faithful to today's `chat_tool_renderer.ex`.
+  #
+  # Each block carries its DERIVED, surface-neutral render data (diff `lines`,
+  # `todos`, `tokens`) so the Go half renders the same rows WITHOUT re-running the
+  # diff (the "one diff engine" law holds across surfaces); the block-build/render
+  # split mirrors the reply body's markdown→blocks derivation (D8).
+
+  # Lines shown before a chat diff collapses behind a details/summary — matches
+  # `ChatToolRenderer`'s @collapsed_budget so the two surfaces fold at the same row.
+  @chat_diff_budget 20
+
+  @doc """
+  Build a `chat-tool-diff` block from a raw tool-call `input` map. The derived
+  `lines` (string-keyed `%{"op","text"}`) come from `TextDiff.diff_lines/2` via
+  the shared shape dispatch — the SAME derivation the GUI renderer re-runs, so
+  the fixture freshness lock (`lines == derive(input)`) keeps both surfaces true.
+  Returns `nil` for a non-diff shape (the generic tool row stands on its own).
+  """
+  @spec chat_tool_diff_block(map() | any()) :: map() | nil
+  def chat_tool_diff_block(input) do
+    case chat_diff_line_maps(input) do
+      [] ->
+        nil
+
+      lines ->
+        %{
+          "type" => "chat-tool-diff",
+          "input" => input,
+          "lines" => lines,
+          "added" => Enum.count(lines, &(&1["op"] == "+")),
+          "removed" => Enum.count(lines, &(&1["op"] == "-"))
+        }
+    end
+  end
+
+  @doc """
+  Build a `chat-todo` block from an ALREADY-parsed todo list
+  (`ChatToolRenderer.parse_todos/1` output — `%{content, status, active_form}`).
+  The `chat_live` path already parses; the controller/generator parse first via
+  `chat_todo_block_from_input/1`.
+  """
+  @spec chat_todo_block([map()]) :: map()
+  def chat_todo_block(todos) when is_list(todos) do
+    %{"type" => "chat-todo", "todos" => Enum.map(todos, &todo_to_json/1)}
+  end
+
+  def chat_todo_block(_), do: %{"type" => "chat-todo", "todos" => []}
+
+  @doc "Build a `chat-todo` block straight from a raw TodoWrite `input` map."
+  @spec chat_todo_block_from_input(map() | any()) :: map()
+  def chat_todo_block_from_input(input), do: chat_todo_block(ChatToolRenderer.parse_todos(input))
+
+  @doc """
+  Build a `chat-thinking` block from a cumulative thinking-token count (charter
+  D41). The wire never carries thinking TEXT — only the count — so the block is a
+  single integer both surfaces render as "thought for ~N tokens".
+  """
+  @spec chat_thinking_block(integer() | any()) :: map()
+  def chat_thinking_block(tokens) when is_integer(tokens) and tokens >= 0 do
+    %{"type" => "chat-thinking", "tokens" => tokens}
+  end
+
+  def chat_thinking_block(_), do: %{"type" => "chat-thinking", "tokens" => 0}
+
+  @doc """
+  Render a `chat-tool-diff` block: the terminal-style `+`/`−` line diff beneath a
+  tool call (dispatch on input SHAPE, never tool name — `ChatToolRenderer`). A
+  diff over `@chat_diff_budget` lines folds behind a `<details>` with an honest
+  `+N more lines`. Re-derives from `block["input"]` via the ONE `TextDiff` engine,
+  so it is byte-faithful to `ChatToolRenderer.tool_diff/1`. Evergreen tokens only.
+  """
+  def chat_tool_diff_html(block) when is_map(block) do
+    case chat_diff_line_maps(Map.get(block, "input")) do
+      [] ->
+        ""
+
+      lines ->
+        added = Enum.count(lines, &(&1["op"] == "+"))
+        removed = Enum.count(lines, &(&1["op"] == "-"))
+        {head, rest} = Enum.split(lines, @chat_diff_budget)
+
+        counts =
+          ~s|<div class="text-dim" style="font-size: 11px; margin-bottom: 4px;">| <>
+            ~s|<span style="color: var(--ok);">+#{added}</span> | <>
+            ~s|<span style="color: var(--danger);">−#{removed}</span></div>|
+
+        body =
+          if length(lines) > @chat_diff_budget do
+            overflow = length(lines) - @chat_diff_budget
+
+            ~s|<details><summary style="cursor: pointer; list-style: none;">| <>
+              chat_diff_rows_html(head) <>
+              ~s|<div class="text-dim" style="font-size: 11px; padding: 1px 0;">… +#{overflow} more lines</div>| <>
+              ~s|</summary>#{chat_diff_rows_html(rest)}</details>|
+          else
+            chat_diff_rows_html(head)
+          end
+
+        ~s|<div class="bp-chat-tool-diff text-xs" style="font-family: var(--font-mono); margin: 4px 0 0 16px; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;">| <>
+          counts <> body <> ~s|</div>|
+    end
+  end
+
+  def chat_tool_diff_html(_), do: ""
+
+  @doc """
+  Render a `chat-todo` block: the living checklist card (charter D39) — one
+  ☐/◐/☒ row per item with an honest `N/M done` progress read. An empty list
+  still renders the header + a "no items" line, never a blank box. Reuses
+  `ChatToolRenderer.todo_glyph/1`.
+  """
+  def chat_todo_html(block) when is_map(block) do
+    todos = block |> Map.get("todos") |> as_list()
+
+    progress =
+      if todos == [],
+        do: "",
+        else: ~s| <span style="opacity: 0.6;"> · #{todo_progress(todos)}</span>|
+
+    header =
+      ~s|<div class="text-xs" style="overflow-wrap: anywhere;">| <>
+        ~s|<span style="color: var(--primary);">●</span> <span>Update todos</span>#{progress}</div>|
+
+    items =
+      if todos == [] do
+        ~s|<div class="text-xs text-dim" style="padding-left: 16px;">⎿ no items</div>|
+      else
+        rows = todos |> Enum.map(&chat_todo_item_html/1) |> Enum.join("")
+
+        ~s|<ul style="list-style: none; margin: 4px 0 0; padding: 0 0 0 16px; display: flex; flex-direction: column; gap: 2px;">#{rows}</ul>|
+      end
+
+    ~s|<div class="bp-chat-todo" style="font-family: var(--font-mono);">#{header}#{items}</div>|
+  end
+
+  def chat_todo_html(_), do: ""
+
+  @doc """
+  Render a `chat-thinking` block: the dim mono `✻ thought for ~N tokens` row
+  (charter D41) — no thinking text ever, identical live and on replay.
+  """
+  def chat_thinking_html(block) when is_map(block) do
+    tokens = Map.get(block, "tokens")
+
+    label =
+      if is_integer(tokens), do: "thought for ~#{tokens} tokens", else: "thought"
+
+    ~s|<div class="bp-chat-thinking text-xs text-dim" style="font-family: var(--font-mono);">| <>
+      ~s|<span aria-hidden="true">✻</span> #{escape_html(label)}</div>|
+  end
+
+  def chat_thinking_html(_), do: ""
+
+  # ── chat toolrow internals (derivations REUSED, never reinvented) ───────────
+
+  # The flat diff-line list for a tool input, keyed the SAME way as
+  # `ChatToolRenderer` but string-keyed for JSON. `TextDiff.diff_lines/2` is the
+  # ONE line engine; `ChatToolRenderer.classify/1` is the ONE shape dispatch.
+  defp chat_diff_line_maps(input) do
+    case ChatToolRenderer.classify(input) do
+      :edit ->
+        input |> Map.get("old_string") |> chat_diff(Map.get(input, "new_string"))
+
+      :write ->
+        chat_diff("", Map.get(input, "content"))
+
+      :multi_edit ->
+        chat_multi_edit_lines(Map.get(input, "edits"))
+
+      :generic ->
+        []
+    end
+  end
+
+  defp chat_diff(old_text, new_text) do
+    old_text
+    |> TextDiff.diff_lines(new_text)
+    |> Enum.map(fn %{op: op, text: text} -> %{"op" => op, "text" => text} end)
+  end
+
+  # Stack each edit's hunk, separated by a faint gap row — mirrors
+  # `ChatToolRenderer.multi_edit_lines/1`. Defensive: a malformed edit yields no
+  # hunk rather than raising.
+  defp chat_multi_edit_lines(edits) when is_list(edits) do
+    edits
+    |> Enum.filter(&is_map/1)
+    |> Enum.map(fn e -> chat_diff(Map.get(e, "old_string"), Map.get(e, "new_string")) end)
+    |> Enum.reject(&(&1 == []))
+    |> Enum.intersperse([%{"op" => "gap", "text" => ""}])
+    |> List.flatten()
+  end
+
+  defp chat_multi_edit_lines(_), do: []
+
+  defp chat_diff_rows_html(lines) do
+    Enum.map_join(lines, "", fn %{"op" => op, "text" => text} ->
+      ~s|<div style="#{chat_row_style(op)}">#{chat_prefix(op)}#{escape_html(text)}</div>|
+    end)
+  end
+
+  defp chat_row_style("+"),
+    do:
+      "color: var(--ok); background: var(--ok-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;"
+
+  defp chat_row_style("-"),
+    do:
+      "color: var(--danger); background: var(--danger-soft); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;"
+
+  defp chat_row_style("gap"),
+    do: "border-top: 1px solid var(--border-muted); margin: 4px 0; height: 0;"
+
+  defp chat_row_style(_),
+    do: "color: var(--fg-dim); white-space: pre-wrap; overflow-wrap: anywhere; padding: 0 2px;"
+
+  defp chat_prefix("+"), do: "+ "
+  defp chat_prefix("-"), do: "- "
+  defp chat_prefix("gap"), do: ""
+  defp chat_prefix(_), do: "&nbsp;&nbsp;"
+
+  # A parsed todo (atom-keyed) → JSON-safe string-keyed map. `status` is one of
+  # "pending" | "in_progress" | "completed"; `active_form` is null when absent.
+  defp todo_to_json(%{content: content, status: status} = todo) do
+    %{
+      "content" => to_string(content),
+      "status" => Atom.to_string(status),
+      "active_form" => Map.get(todo, :active_form)
+    }
+  end
+
+  defp todo_to_json(todo) when is_map(todo) do
+    %{
+      "content" => to_string(Map.get(todo, "content", "")),
+      "status" => to_string(Map.get(todo, "status", "pending")),
+      "active_form" => Map.get(todo, "active_form")
+    }
+  end
+
+  defp chat_todo_item_html(todo) do
+    status = Map.get(todo, "status", "pending")
+    content = Map.get(todo, "content", "")
+    active_form = Map.get(todo, "active_form")
+
+    glyph = ChatToolRenderer.todo_glyph(chat_todo_status_atom(status))
+
+    active_html =
+      if status == "in_progress" and is_binary(active_form) and active_form != "" do
+        ~s|<div class="text-dim" style="padding-left: 20px; opacity: 0.75;">→ #{escape_html(active_form)}</div>|
+      else
+        ""
+      end
+
+    ~s|<li class="text-xs"><div style="display: flex; gap: 6px; align-items: baseline;">| <>
+      ~s|<span aria-hidden="true" style="#{chat_todo_glyph_style(status)}">#{glyph}</span>| <>
+      ~s|<span style="#{chat_todo_text_style(status)}">#{escape_html(content)}</span></div>#{active_html}</li>|
+  end
+
+  defp chat_todo_status_atom("completed"), do: :completed
+  defp chat_todo_status_atom("in_progress"), do: :in_progress
+  defp chat_todo_status_atom(_), do: :pending
+
+  defp chat_todo_glyph_style("completed"), do: "flex: none; color: var(--ok);"
+  defp chat_todo_glyph_style("in_progress"), do: "flex: none; color: var(--primary);"
+  defp chat_todo_glyph_style(_), do: "flex: none; opacity: 0.6;"
+
+  defp chat_todo_text_style("completed"),
+    do: "overflow-wrap: anywhere; opacity: 0.6; text-decoration: line-through;"
+
+  defp chat_todo_text_style("in_progress"),
+    do: "overflow-wrap: anywhere; color: var(--primary); font-weight: 600;"
+
+  defp chat_todo_text_style(_), do: "overflow-wrap: anywhere;"
+
+  # "1/3 done" — the compact honest progress read; in-progress is not "done".
+  defp todo_progress(todos) do
+    done = Enum.count(todos, &(Map.get(&1, "status") == "completed"))
+    "#{done}/#{length(todos)} done"
+  end
 
   defp clampf(n) when is_number(n), do: n |> max(0) |> min(100)
   defp clampf(_), do: 0

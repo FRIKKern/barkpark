@@ -1862,14 +1862,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <span style="color: var(--primary); flex: none;">●</span>
           <span style="min-width: 0; overflow-wrap: anywhere;" data-gutter-text>{@message.text}</span>
         </div>
-        <%!-- D38: a file-mutating tool call renders as a real colored
+        <%!-- D38 + D25: a file-mutating tool call renders as a real colored
               diff (dispatch on input SHAPE, not tool name) beneath the
-              ● header; a non-diff shape renders nothing here and keeps
-              the generic ⎿ row below. --%>
-        <ChatToolRenderer.tool_diff
-          :if={ChatToolRenderer.diff?(@message[:input])}
-          input={@message.input}
-        />
+              ● header. Routed through the `chat-tool-diff` PortableDoc block
+              (compose_block :article → Components.chat_tool_diff_html) — the
+              SAME block path the assistant reply body uses (D8) and the Go TUI
+              decodes — so this is ONE dual-surface renderer, not a GUI-only
+              widget (Law 1). A non-diff shape yields "" and keeps the ⎿ row. --%>
+        {Phoenix.HTML.raw(chat_tool_diff_html(@message[:input]))}
         <%!-- A classified MCP result renders as a chip INSTEAD of dumping the
               raw JSON blob — the store keeps the full output either way. --%>
         <ChatToolRenderer.tool_chip :if={mcp_chip} chip={mcp_chip} />
@@ -1894,10 +1894,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <% end %>
         </div>
       <% :todo -> %>
-        <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
+        <%!-- The living checklist card (charter D39 + D25): one ☐/◐/☒ card the
               Recorder collapsed + the reducer superseded, so it renders
-              the turn's LATEST todo state whether live or replayed. --%>
-        <ChatToolRenderer.todo_card todos={@message.todos} />
+              the turn's LATEST todo state whether live or replayed. Routed
+              through the `chat-todo` PortableDoc block (compose_block :article →
+              Components.chat_todo_html) — ONE dual-surface renderer the Go TUI
+              decodes too (Law 1), not a bespoke inline HEEx card. --%>
+        {Phoenix.HTML.raw(chat_todo_html(@message.todos))}
       <% :approval -> %>
         <div
           :if={@message.approval_status == :pending}
@@ -2029,12 +2032,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </a>
         </div>
       <% :thinking -> %>
-        <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
-              ever — only "thought for ~N tokens". Same shape live and on
-              replay. --%>
-        <div class="text-xs text-dim" style="font-family: var(--font-mono);">
-          <span aria-hidden="true">✻</span> <%= @message.text %>
-        </div>
+        <%!-- Settled thinking bout (charter D41 + D25): dim mono ✻, no text
+              ever — only "thought for ~N tokens". A token-bearing bout routes
+              through the `chat-thinking` PortableDoc block (compose_block
+              :article → Components.chat_thinking_html) — ONE dual-surface
+              renderer the Go TUI decodes too (Law 1). A legacy row with no
+              persisted count degrades to its plain ✻ text. --%>
+        <%= if is_integer(@message[:tokens]) do %>
+          {Phoenix.HTML.raw(chat_thinking_html(@message[:tokens]))}
+        <% else %>
+          <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+            <span aria-hidden="true">✻</span> <%= @message.text %>
+          </div>
+        <% end %>
       <% _ -> %>
         <div class="text-xs text-dim" style="font-family: var(--font-mono);">
           <span aria-hidden="true">✻</span> <%= @message.text %>
@@ -4403,7 +4413,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp replay_message(%{role: "thinking", seq: seq, source_markdown: md, metadata: meta}, _live?) do
     tokens = Map.get(meta || %{}, "tokens")
     text = if is_integer(tokens), do: thinking_label(tokens), else: md || "thought"
-    %{id: seq, role: :thinking, text: text, html: nil}
+    # `tokens` (when present) routes the render through the `chat-thinking` block
+    # (D25); a legacy row with no count keeps `tokens: nil` and its plain ✻ text.
+    %{id: seq, role: :thinking, text: text, html: nil, tokens: tokens}
   end
 
   defp replay_message(m, _live?) do
@@ -4484,7 +4496,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case socket.assigns[:thinking_pulse] do
       %{tokens: n} when is_integer(n) and n > 0 ->
         socket
-        |> append_message(:thinking, thinking_label(n))
+        |> append_message(:thinking, thinking_label(n), tokens: n)
         |> assign(thinking_pulse: nil)
 
       _ ->
@@ -5247,6 +5259,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> Render.render_blocks(%{style: :article})
   rescue
     _ -> nil
+  end
+
+  # ── chat tool/todo/thinking rows → the SAME PortableDoc block path (D25) ─────
+  #
+  # A tool diff / todo card / thinking bout is a first-class PortableDoc BLOCK
+  # (`chat-tool-diff` | `chat-todo` | `chat-thinking`), rendered through the exact
+  # compose_block :article → Components emitter path the assistant reply body uses
+  # (D8) and the Go TUI decodes — closing the Law-1 parallel-render fork. The
+  # block is built by `Render.Components.chat_*_block/1` (which REUSES the pure
+  # `TextDiff` / `parse_todos` / token derivations), so live-append and replay
+  # reach an identical row. Fail-soft: a crash degrades to "" (never a 500).
+
+  defp chat_tool_diff_html(input) do
+    case Render.Components.chat_tool_diff_block(input) do
+      nil -> ""
+      block -> render_chat_block(block)
+    end
+  end
+
+  defp chat_todo_html(todos), do: render_chat_block(Render.Components.chat_todo_block(todos))
+
+  defp chat_thinking_html(tokens) when is_integer(tokens),
+    do: render_chat_block(Render.Components.chat_thinking_block(tokens))
+
+  defp chat_thinking_html(_), do: ""
+
+  defp render_chat_block(block) do
+    Render.render_blocks([block], %{style: :article})
+  rescue
+    _ -> ""
   end
 
   # Extract {tool_use_id, output_string} pairs from a wire user-frame. The
