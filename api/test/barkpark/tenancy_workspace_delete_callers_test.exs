@@ -101,3 +101,93 @@ defmodule Barkpark.TenancyWorkspaceDeleteCallersTest do
     String.ends_with?(file, "/barkpark/tenancy.ex")
   end
 end
+
+defmodule Barkpark.TenancyWorkspaceDeleteAuditSweepTest do
+  @moduledoc """
+  bl-audit-fk-orphans — proves how `Tenancy.delete_workspace/1` treats the two
+  FK-less audit tables that carry `workspace_id` as a plain binary_id with ZERO
+  foreign key (migrations 20260705120000 / 20260705140000), which the SQL
+  CASCADE on `Repo.delete(workspace)` therefore can NEVER reach.
+
+  Recorded posture (charter D4/D5):
+
+    * `audit_export_sinks` — SWEPT. A plain mutable config table (no trigger,
+      no FK) holding SIEM endpoint URLs + secrets; it must not outlive the
+      workspace, so `do_delete_workspace/1` runs an explicit workspace-scoped
+      `Repo.delete_all`.
+    * `audit_events` — RETAINED BY DESIGN. The append-only, tamper-evident,
+      per-workspace sha256 hash chain is protected by a DB-level
+      `BEFORE UPDATE OR DELETE` trigger (`audit_events_no_update_delete`) that
+      RAISES on any delete. Deleting it would defeat the guarantee the chain
+      exists to provide, so a torn-down workspace's audit trail is intentionally
+      kept for forensics/compliance — orphaned of its workspace row by decision,
+      not by neglect.
+
+  Either way there is NO SILENT orphaning: sinks go, audit history is a recorded,
+  deliberate retention. This test asserts both, and that the target workspace's
+  sweep leaves a SECOND workspace's audit rows and sinks untouched.
+  """
+  use Barkpark.DataCase, async: true
+
+  alias Barkpark.Audit
+  alias Barkpark.Audit.{Event, ExportSink}
+  alias Barkpark.Tenancy
+
+  defp make_workspace(name) do
+    slug = "ws-" <> Integer.to_string(System.unique_integer([:positive]))
+    {:ok, ws} = Tenancy.create_workspace(%{name: name, slug: slug})
+    ws
+  end
+
+  defp count_events(ws_id),
+    do: Repo.aggregate(from(e in Event, where: e.workspace_id == ^ws_id), :count)
+
+  defp count_sinks(ws_id),
+    do: Repo.aggregate(from(s in ExportSink, where: s.workspace_id == ^ws_id), :count)
+
+  test "delete_workspace sweeps audit_export_sinks, retains audit_events, and is workspace-scoped" do
+    target = make_workspace("Teardown Target")
+    bystander = make_workspace("Bystander")
+
+    # Audit history for BOTH workspaces (Audit.emit is the append-only writer).
+    {:ok, %Event{}} = Audit.emit(%{category: "auth", action: "login_succeeded", workspace_id: target.id, actor_id: "u1"})
+    {:ok, %Event{}} = Audit.emit(%{category: "auth", action: "session_revoked", workspace_id: target.id, actor_id: "u1"})
+    {:ok, %Event{}} = Audit.emit(%{category: "auth", action: "login_succeeded", workspace_id: bystander.id, actor_id: "u2"})
+
+    # A SIEM export sink for BOTH workspaces.
+    {:ok, %ExportSink{}} =
+      Barkpark.Audit.Export.create_sink(%{
+        name: "target-splunk",
+        url: "https://splunk.example.com/target",
+        workspace_id: target.id
+      })
+
+    {:ok, %ExportSink{}} =
+      Barkpark.Audit.Export.create_sink(%{
+        name: "bystander-splunk",
+        url: "https://splunk.example.com/bystander",
+        workspace_id: bystander.id
+      })
+
+    assert count_events(target.id) == 2
+    assert count_sinks(target.id) == 1
+    assert count_events(bystander.id) == 1
+    assert count_sinks(bystander.id) == 1
+
+    # Teardown must succeed — a plain DELETE FROM audit_events would RAISE on the
+    # immutability trigger, so a clean {:ok, _} also proves we do NOT touch it.
+    assert {:ok, %Tenancy.Workspace{}} = Tenancy.delete_workspace(target)
+
+    # audit_export_sinks: swept for the target, untouched for the bystander.
+    assert count_sinks(target.id) == 0
+    assert count_sinks(bystander.id) == 1
+
+    # audit_events: RETAINED for the torn-down workspace (recorded posture),
+    # and the bystander's chain is untouched.
+    assert count_events(target.id) == 2
+    assert count_events(bystander.id) == 1
+
+    # The workspace row itself is gone.
+    assert Tenancy.get_workspace_by_id(target.id) == nil
+  end
+end
