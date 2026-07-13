@@ -95,14 +95,19 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
   describe "sanitize_dest/1 (login-return destination — charter D69)" do
     test "admits the FLAT /studio deep links the notifier links to" do
       assert ReturnTo.sanitize_dest("/studio/chat/abc-123") == "/studio/chat/abc-123"
-      assert ReturnTo.sanitize_dest("/studio/chat/abc?panel=diff") == "/studio/chat/abc?panel=diff"
+
+      assert ReturnTo.sanitize_dest("/studio/chat/abc?panel=diff") ==
+               "/studio/chat/abc?panel=diff"
+
       assert ReturnTo.sanitize_dest("/studio/tmux") == "/studio/tmux"
       assert ReturnTo.sanitize_dest("/studio") == "/studio"
     end
 
     test "still admits the scoped grammar (superset of sanitize/1)" do
       assert ReturnTo.sanitize_dest(@scoped) == @scoped
-      assert ReturnTo.sanitize_dest("/w/ws/p/proj/d/ds/studio/media") == "/w/ws/p/proj/d/ds/studio/media"
+
+      assert ReturnTo.sanitize_dest("/w/ws/p/proj/d/ds/studio/media") ==
+               "/w/ws/p/proj/d/ds/studio/media"
     end
 
     test "rejects off-origin, authority tricks, and non-Studio paths" do
@@ -167,6 +172,50 @@ defmodule BarkparkWeb.Studio.ReturnToTest do
 
       assert html =~ ~s(href="/studio/chat")
       refute html =~ "return_to="
+    end
+  end
+
+  describe "shared flat-surface chrome" do
+    setup %{conn: conn} do
+      enable_flat_surfaces!()
+      {:ok, _} = Auth.create_token(@admin_token, "rt admin", "production", ["read", "admin"])
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "renders exactly one scoped return control on every flat surface", %{conn: conn} do
+      encoded = URI.encode_www_form(@scoped)
+
+      for path <- ~w(/studio/chat /studio/tmux /studio/styleguide /studio/org-admin) do
+        {:ok, view, html} = live(conn, "#{path}?return_to=#{encoded}")
+
+        selector =
+          ~s|a[data-test-id="return-to-scope"][href="#{@scoped}"][aria-label="Back to Studio"][title="Back to Studio"]|
+
+        assert has_element?(view, selector)
+        assert length(Regex.scan(~r/data-test-id="return-to-scope"/, html)) == 1
+        assert has_element?(view, selector <> ~s| span.bp-action-icon[aria-hidden="true"] svg|)
+      end
+    end
+
+    test "omits the return control when return_to is absent", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/styleguide")
+
+      refute html =~ ~s|data-test-id="return-to-scope"|
+    end
+
+    test "omits hostile external and admin returns without reflecting attacker text", %{
+      conn: conn
+    } do
+      for {return_to, marker} <- [
+            {"https://evil.example/ATTACKER_EXTERNAL", "ATTACKER_EXTERNAL"},
+            {"/admin?ATTACKER_ADMIN", "ATTACKER_ADMIN"}
+          ] do
+        {:ok, _view, html} =
+          live(conn, "/studio/styleguide?return_to=#{URI.encode_www_form(return_to)}")
+
+        refute html =~ ~s|data-test-id="return-to-scope"|
+        refute html =~ marker
+      end
     end
   end
 

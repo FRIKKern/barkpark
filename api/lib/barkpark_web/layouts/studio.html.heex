@@ -17,6 +17,18 @@
   <.studio_topbar>
     <:brand>
       <div class="studio-bar-brand">
+        <a
+          :if={is_binary(assigns[:return_to]) and assigns[:return_to] != ""}
+          href={assigns[:return_to]}
+          class="btn btn-ghost btn-sm"
+          title="Back to Studio"
+          aria-label="Back to Studio"
+          data-test-id="return-to-scope"
+        >
+          <span class="bp-action-icon" aria-hidden="true">
+            <.icon name="arrow-left" size={16} />
+          </span>
+        </a>
         <%!-- Sanity-style: the WORKSPACE is the studio's identity — when one
               resolves, the scope chip's avatar carries it (workspace initial),
               so the standalone brand square + wordmark only show without one. --%>
