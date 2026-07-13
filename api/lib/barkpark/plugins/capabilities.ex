@@ -493,6 +493,21 @@ defmodule Barkpark.Plugins.Capabilities do
         "name" => "access",
         "summary" => "Airdrop grants — time-boxed, account-bound scoped access links.",
         "plugin" => nil
+      },
+      # Claude chat sessions (charter bp-chat-tui, D21). StudioChat is
+      # CORE-embedded, NOT a Barkpark.Plugin — it never flows through
+      # plugin_nouns/2, so the noun is hand-declared here so MCP/SDK codegen and
+      # any headless harness can DISCOVER chat. The seven non-streaming verbs are
+      # registered below; the SSE `GET /v1/chat/sessions/:id/events` route is a
+      # builtin carve-out (like `listen`) with no manifest verb — it is NAMED
+      # here so a reading agent knows live streaming exists via `bp chat`.
+      %{
+        "name" => "chat",
+        "summary" =>
+          "Claude chat sessions — create/list/read/update, send, interrupt, approve. " <>
+            "Live token streaming rides the `bp chat` SSE events channel " <>
+            "(a builtin carve-out, not a manifest verb).",
+        "plugin" => nil
       }
     ]
   end
@@ -1754,6 +1769,118 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/access/mine",
         "read",
         default_output: "table"
+      ),
+      # ── Claude chat transport (charter bp-chat-tui, D21-D24) ──────────────
+      # The seven non-streaming verbs behind the `/v1/chat` scope, which is
+      # `pipe_through [:api, :require_admin]` — every route needs a data-plane
+      # bearer with the global `admin` permission (D21: instance-global scope,
+      # NO tenant/workspace/project/dataset column, so NO scoped_prefix). All
+      # `auth_tier: "admin"` so the existence-hiding projection hides `chat.*`
+      # from anon/lower-tier callers exactly like the other admin nouns. The
+      # eighth route — `GET /v1/chat/sessions/:id/events` (SSE) — is a builtin
+      # streaming carve-out with no manifest verb (like `listen`); it is named
+      # in the `chat` noun summary. `writes: false` throughout: these are chat
+      # transport calls, not content mutations, so bp does not run the content
+      # --dry-run/confirm path (same treatment as the auth.* exchanges).
+      core_cmd(
+        "chat.create_session",
+        "chat",
+        "create-session",
+        "Start a new Claude chat session (id server-minted; cwd is always ClaudeChat.cwd/0).",
+        "POST",
+        "/v1/chat/sessions",
+        "admin",
+        flags: [
+          flag("mode", "string", "Permission mode (must pass the Session/ClaudeChat allowlist)."),
+          flag("model", "string", "Model choice (allowlisted)."),
+          flag("effort", "string", "Effort choice (allowlisted).")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "chat.list_sessions",
+        "chat",
+        "list-sessions",
+        "List chat sessions (sidebar shape; omits draft/choices — GET one session for the full struct).",
+        "GET",
+        "/v1/chat/sessions",
+        "admin",
+        flags: [
+          flag("archived", "string", "Filter by archived state (query ?archived=<value>).")
+        ],
+        default_output: "table"
+      ),
+      core_cmd(
+        "chat.get_session",
+        "chat",
+        "get-session",
+        "Fetch one chat session in full (draft, rail, mode/model/effort, metrics) plus its messages seq-asc.",
+        "GET",
+        "/v1/chat/sessions/:id",
+        "admin",
+        args: [arg("id", true, "string", "Chat session id (the same id `bp chat` resumes on).")],
+        flags: [
+          flag("since", "int", "Return only message rows with seq > <since> (the turn-boundary tail refetch).")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "chat.update_session",
+        "chat",
+        "update-session",
+        "Patch a chat session's allowlisted keys (draft | mode | model_choice | effort_choice | title).",
+        "PATCH",
+        "/v1/chat/sessions/:id",
+        "admin",
+        args: [arg("id", true, "string", "Chat session id.")],
+        flags: [
+          flag("draft", "string", "In-progress message draft (≤64 KiB)."),
+          flag("mode", "string", "Permission mode (allowlisted)."),
+          flag("model_choice", "string", "Model choice (allowlisted)."),
+          flag("effort_choice", "string", "Effort choice (allowlisted)."),
+          flag("title", "string", "Session title (≤256 UTF-8 bytes).")
+        ],
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "chat.send_message",
+        "chat",
+        "send-message",
+        "Send a message to a chat session (buffered as its own turn if one is mid-flight).",
+        "POST",
+        "/v1/chat/sessions/:id/messages",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg("content", true, "string", "Message content (≤64 KiB).")
+        ],
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "chat.interrupt",
+        "chat",
+        "interrupt",
+        "Interrupt a chat session's in-flight turn (no-op when no turn is active).",
+        "POST",
+        "/v1/chat/sessions/:id/interrupt",
+        "admin",
+        args: [arg("id", true, "string", "Chat session id.")],
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "chat.approve",
+        "chat",
+        "approve",
+        "Answer a pending tool-permission ask on a chat session (allow | deny).",
+        "POST",
+        "/v1/chat/sessions/:id/approval",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg("request_id", true, "string", "The permission ask's request id (≤256 UTF-8 bytes)."),
+          arg("decision", true, "string", "allow | deny (never a caller-supplied updatedInput).")
+        ],
+        default_output: "minimal"
       )
     ]
   end
