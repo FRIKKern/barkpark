@@ -173,6 +173,13 @@ config :barkpark, Oban,
   # even though `github` is a registered plugin. Low concurrency (2) is a
   # deliberate secondary-rate-limit guard (epic D9): a snoozed job re-reads
   # current state when it runs, so throttling loses no intent.
+  # `playground_ttl` drives Barkpark.Tenancy.Workers.PlaygroundReaper (two-stage
+  # TTL reaper for ephemeral playground workspaces — suspend@expires_at,
+  # swept-delete@+24h). Tenancy is core, NOT a plugin, so — like `indx` /
+  # `edge_projector` — its queue MUST be declared statically here; a queue that
+  # only a plugin's oban-merge added would sit `available` forever (plugins can
+  # add CRONTAB but not queues). Concurrency 1: at most one reaper tick runs at a
+  # time, defense-in-depth alongside the worker's `unique` window.
   queues: [
     default: 10,
     bokbasen: 4,
@@ -181,7 +188,8 @@ config :barkpark, Oban,
     tasks_compact: 1,
     indx: 2,
     edge_projector: 2,
-    github_mirror: 2
+    github_mirror: 2,
+    playground_ttl: 1
   ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},
@@ -206,7 +214,14 @@ config :barkpark, Oban,
        {"* * * * *", Barkpark.Webhooks.StuckDeliverySweeper},
        # era-w5 — stream the append-only audit log to configured SIEM sinks
        # (cursor-based tail-shipping; a no-op when no active sink exists).
-       {"* * * * *", Barkpark.Audit.ExportWorker}
+       {"* * * * *", Barkpark.Audit.ExportWorker},
+       # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
+       # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
+       # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
+       # plugin), so this cron entry lives in the static crontab alongside the
+       # webhook/audit sweepers and runs on the static `playground_ttl` queue
+       # declared above. A no-op tick when no playground has expired.
+       {"* * * * *", Barkpark.Tenancy.Workers.PlaygroundReaper}
        # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
        # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
        # entries now live in the Tasks plugin's `oban_crontab/0`
