@@ -7,8 +7,8 @@ Editing (D12): v1 scalar/ref/array inline; v2 read-only. → docs/contracts/sche
 
 ## Papers / Bulldocs
 - `cmd/barkpark/paper.go` — viewer; blocks via `internal/pdrender` (`Decode`→`DefaultRegistry(theme)`→`Render`); `bp paper` shares it.
-- **Parity rule:** new block type ships in all three renderers — `render_html/2`, `.bp-paper-surface` CSS (root.html.heex), pdrender. Doctrine → docs/contracts/tui-render-doctrine.md
-- **Go pin: `go.mod` `go 1.25.0`** (#726); don't bump.
+- **Parity:** new blocks ship in HTML, CSS, and pdrender. Doctrine → docs/contracts/tui-render-doctrine.md
+- **Go:** `go.mod` pins 1.25.0 (#726); don't bump.
 
 ## `bp tasks` — live portrait task board
 Pane `internal/taskboard`, zero-config, SSE-live. NAV (D11): `enter` descends board→task→paper→children…, `esc` ascends. Adaptive two-pane ≥110c. ACTS `c`/`x`/`o`. Entry `cli.go` `case "tasks"`→`taskboard.Run`. `board.go` `BuildBoard`, `render.go` `Render`, `spine.go` `spineRows`=one paint+cursor source, `compose.go` `Compose`=`View()`. **Frontier** `frontier.go` `areasOf`: docs/contracts/dispatch-areas.md. `bp tasks` (pane) ≠ `bp task …` (verbs).
@@ -19,6 +19,7 @@ Pane `internal/chat`, second surface of One Chat Two Surfaces (/papers/barkpark-
 ## Code anchors
 - cmd/barkpark/paper.go — func buildPaperContent, func isPaper
 - internal/pdrender/pdrender.go — func DefaultRegistry
+- scripts/pdrender-dump.sh — offline fixture render; width defaults to 80
 - internal/cli/tasks_board_cmd.go — func runTasksBoard
 - internal/cli/chat_cmd.go — func runChat
 - internal/chat/reduce.go — func Reduce
