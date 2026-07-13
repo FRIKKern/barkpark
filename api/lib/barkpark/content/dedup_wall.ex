@@ -238,21 +238,43 @@ defmodule Barkpark.Content.DedupWall do
     title = field_str(ref, :title)
     incumbent = DraftId.published_id(field_str(ref, :id))
 
-    from(d in Document,
-      as: :doc,
-      where: d.type == ^type,
-      where: d.status == "published",
-      # Same-id republish never trips — the incumbent can't duplicate itself.
-      where: d.doc_id != ^incumbent,
-      # Coarse trgm net over the title; the precise token-Jaccard scores below.
-      where: fragment("similarity(?, ?) > ?", d.title, ^title, ^@candidate_trgm_floor),
-      select: %{doc_id: d.doc_id, title: d.title, content: d.content},
-      limit: @candidate_limit
-    )
-    |> maybe_filter_dataset(dataset)
-    |> Repo.all()
-    |> Enum.map(&row_to_ref/1)
+    query =
+      from(d in Document,
+        as: :doc,
+        where: d.type == ^type,
+        where: d.status == "published",
+        # Same-id republish never trips — the incumbent can't duplicate itself.
+        where: d.doc_id != ^incumbent,
+        # Coarse trgm net over the title. The `%` operator engages the GIN
+        # `documents_title_trgm_idx` (unlike `similarity() > x`, which can only
+        # seq-scan) — the precise token-Jaccard in `assess/3` scores below.
+        where: fragment("? % ?", d.title, ^title),
+        # Deterministic keep: the top-500-BY-SIMILARITY survive the @candidate_limit
+        # cap, so a plan change can never reorder which 500 pass to the scorer. `%`
+        # is `>=` (a safe superset of the old strict `>`) — re-scored downstream.
+        order_by: [desc: fragment("similarity(?, ?)", d.title, ^title)],
+        select: %{doc_id: d.doc_id, title: d.title, content: d.content},
+        limit: @candidate_limit
+      )
+      |> maybe_filter_dataset(dataset)
+
+    # CLIFF A: `SET LOCAL` only takes effect INSIDE a transaction — outside one it
+    # is a silent no-op, leaving pg_trgm.similarity_threshold at its 0.3 default,
+    # which would tighten `%` and drop every 0.1–0.3 gray-zone near-duplicate. So
+    # wrap the fetch in an explicit txn and set the threshold FIRST. The literal is
+    # interpolated because SET takes no bind params; @candidate_trgm_floor stays the
+    # single source of truth.
+    {:ok, rows} =
+      Repo.transaction(fn ->
+        Repo.query!("SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}")
+        Repo.all(query)
+      end)
+
+    Enum.map(rows, &row_to_ref/1)
   rescue
+    # CLIFF B: the fail-open rescue wraps the WHOLE Repo.transaction — a
+    # DBConnection error (or the {:ok, _} match failing on a rollback) still yields
+    # an empty candidate set → `:ok`. A dedup hiccup must NEVER take down publish.
     e ->
       Logger.warning("Content.DedupWall fail-open: candidate fetch failed: #{inspect(e)}")
       []
