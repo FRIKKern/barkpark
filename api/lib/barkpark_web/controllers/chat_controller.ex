@@ -57,6 +57,7 @@ defmodule BarkparkWeb.ChatController do
   require Logger
 
   alias Barkpark.PortableDoc.FromMarkdown
+  alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.ErrorResponse
@@ -731,11 +732,20 @@ defmodule BarkparkWeb.ChatController do
     }
   end
 
-  # A settled message row. An ASSISTANT row carries `blocks` — the exact
-  # PortableDoc JSON the Go client round-trips through pdrender (D8) — alongside
-  # `source_markdown`. Every other role carries its raw metadata (admin-only
-  # route, D21 — no per-row redaction).
-  defp message_json(%StudioChat.Message{} = m) do
+  @doc """
+  Project a settled message row to its wire JSON. An ASSISTANT row carries
+  `blocks` — the exact PortableDoc JSON the Go client round-trips through pdrender
+  (D8) — alongside `source_markdown`. The three non-text chat rows (`tool` when
+  file-mutating, `todo`, `thinking`) ALSO carry a one-element `blocks` list of a
+  TYPED chat block (`chat-tool-diff` | `chat-todo` | `chat-thinking`), built from
+  the ONE shared derivation (`Components` + `ChatToolRenderer`), so the Go TUI
+  half (`internal/chat`) decodes the identical shape and renders the same row
+  (charter D25 — dual-surface Law 1). Every other role carries its raw metadata
+  (admin-only route, D21 — no per-row redaction). Exposed as an `@doc false`
+  public seam (the ListenController convention) so the projection is unit-tested
+  without a live SSE loop.
+  """
+  def message_json(%StudioChat.Message{} = m) do
     base = %{
       seq: m.seq,
       role: m.role,
@@ -744,12 +754,41 @@ defmodule BarkparkWeb.ChatController do
       inserted_at: m.inserted_at
     }
 
-    if m.role == "assistant" and is_binary(m.source_markdown) do
-      Map.put(base, :blocks, FromMarkdown.blocks(m.source_markdown))
-    else
-      base
+    case toolrow_blocks(m) do
+      nil -> base
+      blocks -> Map.put(base, :blocks, blocks)
     end
   end
+
+  # The `blocks` a settled row projects, or nil (no blocks key). An assistant row
+  # converts its markdown; the three chat rows emit ONE typed chat block each,
+  # reusing the SAME pure derivations the Studio renderer uses.
+  defp toolrow_blocks(%StudioChat.Message{role: "assistant", source_markdown: md})
+       when is_binary(md),
+       do: FromMarkdown.blocks(md)
+
+  defp toolrow_blocks(%StudioChat.Message{role: "tool", metadata: meta}) do
+    input = Map.get(meta || %{}, "input")
+
+    case Components.chat_tool_diff_block(input) do
+      nil -> nil
+      block -> [block]
+    end
+  end
+
+  defp toolrow_blocks(%StudioChat.Message{role: "todo", metadata: meta}) do
+    input = Map.get(meta || %{}, "input") || %{}
+    [Components.chat_todo_block_from_input(input)]
+  end
+
+  defp toolrow_blocks(%StudioChat.Message{role: "thinking", metadata: meta}) do
+    case Map.get(meta || %{}, "tokens") do
+      tokens when is_integer(tokens) -> [Components.chat_thinking_block(tokens)]
+      _ -> nil
+    end
+  end
+
+  defp toolrow_blocks(_), do: nil
 
   # ── replay / request helpers ────────────────────────────────────────────────
 

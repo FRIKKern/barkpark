@@ -965,6 +965,26 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.FleetEmail.roadmap_email_html(b)}
   end
 
+  # ── Chat tool / todo / thinking rows (charter D25 — dual-surface Law 1) ──────
+  #
+  # Three first-class chat block types render through the SAME compose_block path
+  # the assistant reply body uses (D8), so Studio and the Go TUI (`internal/chat`)
+  # decode ONE typed block map. Style-invariant (mono, evergreen tokens — no email
+  # variant): a chat row reads the same on any surface. The Components emitters
+  # REUSE the pure derivations (`TextDiff.diff_lines/2`, `ChatToolRenderer.
+  # {classify,parse_todos,todo_glyph}`) — no diff/parse engine is reinvented.
+  def compose_block(%{"type" => "chat-tool-diff"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_tool_diff_html(b)}
+  end
+
+  def compose_block(%{"type" => "chat-todo"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_todo_html(b)}
+  end
+
+  def compose_block(%{"type" => "chat-thinking"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.chat_thinking_html(b)}
+  end
+
   def compose_block(%{"type" => "notes"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.notes_html(b)}
   end
