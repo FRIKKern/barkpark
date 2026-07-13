@@ -11070,6 +11070,14 @@
       // w6 (OC25): full webhook edit — the pre-fill form + the PUT-body builder.
       webhookEventPickHtml: webhookEventPickHtml, webhookEditFormHtml: webhookEditFormHtml,
       webhookEditBody: webhookEditBody,
+      // cloud-console-spa-interaction-harness — existing action seams only.
+      // The hook guard above is absent in browsers, so exporting these references
+      // adds no production branch and leaves every route/wire contract unchanged.
+      wireWebhookCard: wireWebhookCard, toggleWebhook: toggleWebhook,
+      rotateWebhook: rotateWebhook, openEditWebhookModal: openEditWebhookModal,
+      submitEditWebhook: submitEditWebhook, confirmDeleteWebhook: confirmDeleteWebhook,
+      deleteWebhook: deleteWebhook, loadDeliveries: loadDeliveries,
+      replayDelivery: replayDelivery,
       // Zero-broken-promises slice (charter D5/D7/D25/D26): the shared confirm
       // modal (pure state machine + focus-trap seam), the promote grammar
       // (rollback/redeploy), and the invitation-accept landing.

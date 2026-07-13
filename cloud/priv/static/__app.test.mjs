@@ -5310,3 +5310,343 @@ test("webhookEditBody: an emptied subscription sends [] (an edit can CLEAR a fil
   assert.deepEqual([...bare.events], []);
   assert.deepEqual([...bare.types], []);
 });
+
+// ── cloud console interaction harness: programmed fetch + selector/listeners ─
+
+function programmedFetch() {
+  const queue = [];
+  const requests = [];
+  return {
+    queue,
+    requests,
+    fetch(path, init = {}) {
+      const raw = init.body;
+      requests.push({
+        path: String(path),
+        method: init.method || "GET",
+        body: raw == null ? null : JSON.parse(raw),
+        headers: { ...(init.headers || {}) },
+      });
+      if (!queue.length) return Promise.reject(new Error("unprogrammed fetch: " + path));
+      const next = queue.shift();
+      if (next.reject) return Promise.reject(next.reject);
+      const status = next.status == null ? (next.ok === false ? 500 : 200) : next.status;
+      return Promise.resolve({
+        ok: next.ok == null ? status >= 200 && status < 300 : next.ok,
+        status,
+        headers: { get(name) { return String(name).toLowerCase() === "content-type" ? "application/json" : null; } },
+        json() { return Promise.resolve(next.json == null ? {} : next.json); },
+      });
+    },
+  };
+}
+
+function selectorMatches(el, rawSelector) {
+  const full = rawSelector.trim();
+  if (full.includes(",")) return full.split(",").some((part) => selectorMatches(el, part));
+  const selector = full.split(/\s+/).at(-1);
+  if (selector.startsWith("#")) return el.id === selector.slice(1);
+  if (selector.startsWith(".")) return String(el.className || "").split(/\s+/).includes(selector.slice(1));
+  const attr = selector.match(/^([a-z]+)?\[([^=\]]+)(?:="([^"]*)")?\]$/i);
+  if (attr) {
+    if (attr[1] && el.tagName !== attr[1].toUpperCase()) return false;
+    const got = el.getAttribute(attr[2]);
+    return attr[3] == null ? got != null : got === attr[3];
+  }
+  return el.tagName === selector.toUpperCase();
+}
+
+function interactionElement(tag = "div", initial = {}) {
+  const listeners = new Map();
+  const attrs = new Map();
+  const el = {
+    tagName: tag.toUpperCase(), id: "", className: "", value: "", textContent: "",
+    hidden: false, disabled: false, checked: false, children: [], parentNode: null,
+    style: {}, classList: { add: noop, remove: noop, toggle: noop, contains: () => false },
+    addEventListener(type, fn) { listeners.set(type, fn); },
+    removeEventListener(type) { listeners.delete(type); },
+    dispatch(type, extra = {}) {
+      const event = { type, target: el, key: extra.key, shiftKey: !!extra.shiftKey,
+        defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...extra };
+      const fn = listeners.get(type);
+      if (fn) fn(event);
+      return event;
+    },
+    click() { if (!el.disabled) el.dispatch("click"); },
+    focus() {},
+    setAttribute(name, value) {
+      attrs.set(name, String(value));
+      if (name === "id") el.id = String(value);
+      if (name === "class") el.className = String(value);
+    },
+    getAttribute(name) {
+      if (name === "id") return el.id || null;
+      if (name === "class") return el.className || null;
+      return attrs.has(name) ? attrs.get(name) : null;
+    },
+    hasAttribute(name) { return attrs.has(name); },
+    removeAttribute(name) { attrs.delete(name); },
+    appendChild(child) { child.parentNode = el; el.children.push(child); return child; },
+    removeChild(child) { el.children = el.children.filter((x) => x !== child); el._nodes = (el._nodes || []).filter((x) => x !== child); child.parentNode = null; },
+    replaceChild(fresh, old) {
+      fresh.parentNode = el;
+      el.children = el.children.map((x) => x === old ? fresh : x);
+      el._nodes = (el._nodes || []).map((x) => x === old ? fresh : x);
+      old.parentNode = null;
+    },
+    querySelector(selector) { return (el._nodes || []).find((node) => selectorMatches(node, selector)) || null; },
+    querySelectorAll(selector) { return (el._nodes || []).filter((node) => selectorMatches(node, selector)); },
+    _nodes: [], _source: "", firstChild: null,
+  };
+  Object.assign(el, initial);
+  let inner = "";
+  Object.defineProperty(el, "innerHTML", {
+    get() { return inner; },
+    set(html) {
+      inner = String(html || "");
+      el._source = inner;
+      el._nodes = [];
+      el.children = [];
+      el.firstChild = null;
+      const tags = inner.matchAll(/<(div|span|button|input|form|code)\b([^>]*)>([^<]*)/gi);
+      for (const match of tags) {
+        const node = interactionElement(match[1]);
+        const rawAttrs = match[2];
+        for (const a of rawAttrs.matchAll(/([:\w-]+)(?:="([^"]*)")?/g)) {
+          node.setAttribute(a[1], a[2] == null ? "" : a[2]);
+          if (a[1] === "value") node.value = a[2] || "";
+          if (a[1] === "checked") node.checked = true;
+          if (a[1] === "disabled") node.disabled = true;
+          if (a[1] === "hidden") node.hidden = true;
+        }
+        node.textContent = match[3].replace(/&hellip;/g, "…").replace(/&times;/g, "×");
+        el._nodes.push(node);
+      }
+      const card = el._nodes.find((node) => selectorMatches(node, ".wh-card"));
+      if (card) {
+        card._source = inner;
+        card._nodes = el._nodes.filter((node) => node !== card);
+        card.parentNode = el;
+        el.children.push(card);
+        el.firstChild = card;
+      } else if (el._nodes.length) {
+        el.firstChild = el._nodes[0];
+        el._nodes.forEach((node) => { node.parentNode = el; });
+      }
+    },
+  });
+  return el;
+}
+
+function installInteractionHarness() {
+  const prior = {
+    fetch: sandbox.fetch,
+    createElement: sandbox.document.createElement,
+    querySelector: sandbox.document.querySelector,
+    querySelectorAll: sandbox.document.querySelectorAll,
+    getElementById: sandbox.document.getElementById,
+    activeElement: sandbox.document.activeElement,
+  };
+  const net = programmedFetch();
+  const modalRoot = interactionElement("div", { id: "modal-root", hidden: true });
+  const modalBody = interactionElement("div", { id: "modal-body" });
+  const appShell = interactionElement("div", { id: "app-shell" });
+  const toastStack = interactionElement("div", { id: "toast-stack" });
+  const fixed = [modalRoot, modalBody, appShell, toastStack];
+  sandbox.fetch = net.fetch;
+  sandbox.document.createElement = (tag) => interactionElement(tag);
+  sandbox.document.querySelector = (selector) => fixed.find((el) => selectorMatches(el, selector)) || modalBody.querySelector(selector);
+  sandbox.document.querySelectorAll = (selector) => modalBody.querySelectorAll(selector);
+  sandbox.document.getElementById = (id) => fixed.find((el) => el.id === id) || modalBody.querySelector("#" + id);
+  sandbox.document.activeElement = null;
+  return {
+    ...net, modalRoot, modalBody, toastStack,
+    cleanup() { Object.assign(sandbox.document, prior); sandbox.fetch = prior.fetch; },
+  };
+}
+
+function webhookList(wh) {
+  const root = interactionElement("section");
+  const list = interactionElement("div", { className: "wh-list", parentNode: root });
+  root._nodes = [list];
+  list.innerHTML = hooks.webhookCardHtml(wh, "demo", "production");
+  return { root, list, card: () => list.querySelectorAll(".wh-card")[0] || null };
+}
+
+async function settleInteraction() {
+  for (let i = 0; i < 8; i += 1) await Promise.resolve();
+}
+
+function plainRequest(request) {
+  return JSON.parse(JSON.stringify(request));
+}
+
+const interactionBp = { id: "bp 7", name: "demo" };
+const interactionWh = { id: "wh/1", name: "Prod hook", url: "https://example.test/hook", active: true, events: ["publish"], types: ["post"] };
+
+test("interaction toggle records PUT body and reconciles success or restores failure controls", async () => {
+  for (const succeeds of [true, false]) {
+    const h = installInteractionHarness();
+    try {
+      const ui = webhookList(interactionWh);
+      h.queue.push(succeeds
+        ? { json: { data: { webhook: { ...interactionWh, active: false } } } }
+        : { ok: false, status: 422, json: { error: { code: "validation_failed" } } });
+      hooks.wireWebhookCard(ui.list, interactionBp, "production", interactionWh);
+      const button = ui.card().querySelector("[data-wh-toggle]");
+      button.dispatch("click");
+      await settleInteraction();
+      const req = plainRequest(h.requests[0]);
+      assert.deepEqual({ path: req.path, method: req.method, body: req.body }, {
+        path: "/v1/barkparks/bp%207/api/webhooks/wh%2F1?dataset=production", method: "PUT", body: { active: false },
+      });
+      if (succeeds) {
+        assert.match(ui.card()._source, /Disabled/);
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Webhook disabled/);
+      } else {
+        assert.equal(button.disabled, false);
+        assert.equal(button.textContent, "Disable");
+        assert.equal(ui.card().querySelector(".wh-toggle-note").hidden, false);
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Couldn&#39;t disable/);
+      }
+    } finally { h.cleanup(); }
+  }
+});
+
+test("interaction rotate records POST {} and shows secret or restores failure controls", async () => {
+  for (const succeeds of [true, false]) {
+    const h = installInteractionHarness();
+    try {
+      const ui = webhookList(interactionWh);
+      h.queue.push(succeeds
+        ? { json: { data: { secret: "sec_once", webhook: interactionWh } } }
+        : { ok: false, status: 503, json: { error: { code: "instance_unreachable" } } });
+      hooks.wireWebhookCard(ui.list, interactionBp, "production", interactionWh);
+      const button = ui.card().querySelector("[data-wh-rotate]");
+      button.dispatch("click");
+      await settleInteraction();
+      const req = plainRequest(h.requests[0]);
+      assert.deepEqual({ path: req.path, method: req.method, body: req.body }, {
+        path: "/v1/barkparks/bp%207/api/webhooks/wh%2F1/rotate?dataset=production", method: "POST", body: {},
+      });
+      if (succeeds) {
+        assert.equal(h.modalRoot.hidden, false);
+        assert.match(h.modalBody.innerHTML, /sec_once/);
+      } else {
+        assert.equal(button.disabled, false);
+        assert.equal(button.textContent, "Rotate secret");
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Couldn&#39;t rotate/);
+      }
+    } finally { h.cleanup(); }
+  }
+});
+
+test("interaction delete unlocks by exact name, records DELETE null, then removes or reports inline", async () => {
+  for (const succeeds of [true, false]) {
+    const h = installInteractionHarness();
+    try {
+      const ui = webhookList(interactionWh);
+      h.queue.push(succeeds ? { status: 204 } : { ok: false, status: 409, json: { error: { code: "upstream_error" } } });
+      hooks.wireWebhookCard(ui.list, interactionBp, "production", interactionWh);
+      ui.card().querySelector("[data-wh-delete]").dispatch("click");
+      const input = h.modalBody.querySelector("#wh-del-confirm");
+      const go = h.modalBody.querySelector("#wh-del-go");
+      assert.equal(go.disabled, true);
+      input.value = interactionWh.name;
+      input.dispatch("input");
+      assert.equal(go.disabled, false);
+      go.dispatch("click");
+      await settleInteraction();
+      const req = plainRequest(h.requests[0]);
+      assert.deepEqual({ path: req.path, method: req.method, body: req.body }, {
+        path: "/v1/barkparks/bp%207/api/webhooks/wh%2F1?dataset=production", method: "DELETE", body: null,
+      });
+      if (succeeds) {
+        assert.equal(h.modalRoot.hidden, true);
+        assert.equal(ui.card(), null);
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Webhook deleted/);
+      } else {
+        assert.equal(h.modalRoot.hidden, false);
+        assert.equal(go.disabled, false);
+        assert.equal(go.textContent, "Delete webhook");
+        assert.equal(h.modalBody.querySelector("#wh-del-error").hidden, false);
+      }
+    } finally { h.cleanup(); }
+  }
+});
+
+test("interaction edit opens prefilled form and submit records full PUT with success/failure modal behavior", async () => {
+  for (const succeeds of [true, false]) {
+    const h = installInteractionHarness();
+    try {
+      const ui = webhookList(interactionWh);
+      h.queue.push(succeeds ? { json: { data: { webhook: interactionWh } } } : { ok: false, status: 422, json: { error: { code: "validation_failed" } } });
+      if (succeeds) h.queue.push({ json: { data: { webhooks: [] } } });
+      hooks.wireWebhookCard(ui.list, interactionBp, "production", interactionWh);
+      ui.card().querySelector("[data-wh-edit]").dispatch("click");
+      assert.match(h.modalBody.innerHTML, /value="Prod hook"/);
+      h.modalBody.querySelector("#wh-e-name").value = "Renamed";
+      h.modalBody.querySelector("#wh-e-url").value = "https://new.test/h";
+      h.modalBody.querySelector("#wh-e-types").value = "post, page";
+      for (const cb of h.modalBody.querySelectorAll(".wh-event-cb")) cb.checked = cb.value === "publish" || cb.value === "update";
+      h.modalBody.querySelector("#wh-edit-form").dispatch("submit");
+      await settleInteraction();
+      const req = plainRequest(h.requests[0]);
+      assert.deepEqual({ path: req.path, method: req.method, body: req.body }, {
+        path: "/v1/barkparks/bp%207/api/webhooks/wh%2F1?dataset=production", method: "PUT",
+        body: { name: "Renamed", url: "https://new.test/h", events: ["update", "publish"], types: ["post", "page"] },
+      });
+      if (succeeds) {
+        assert.equal(h.modalRoot.hidden, true);
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Webhook updated/);
+        assert.equal(h.requests[1].method, "GET");
+      } else {
+        assert.equal(h.modalRoot.hidden, false);
+        assert.equal(h.modalBody.querySelector('#wh-edit-form button[type="submit"]').disabled, false);
+        assert.equal(h.modalBody.querySelector("#wh-e-error").hidden, false);
+      }
+    } finally { h.cleanup(); }
+  }
+});
+
+test("interaction replay is wired from rendered delivery markup and records POST {} with reload/restore", async () => {
+  for (const succeeds of [true, false]) {
+    const h = installInteractionHarness();
+    try {
+      const ui = webhookList(interactionWh);
+      const deliveries = { deliveries: [{ event_id: "ev/9", status: "ok", attempts: 1 }] };
+      h.queue.push({ json: { data: deliveries } });
+      h.queue.push(succeeds ? { json: { ok: true } } : { ok: false, status: 503, json: { error: { code: "instance_unreachable" } } });
+      if (succeeds) h.queue.push({ json: { data: deliveries } });
+      hooks.loadDeliveries(ui.list, interactionBp, "production", interactionWh);
+      await settleInteraction();
+      const replay = ui.card().querySelector("[data-wh-deliveries-box]").querySelector("[data-wh-replay]");
+      assert.ok(replay, "rendered delivery row must expose its replay selector");
+      replay.dispatch("click");
+      await settleInteraction();
+      const req = plainRequest(h.requests[1]);
+      assert.deepEqual({ path: req.path, method: req.method, body: req.body }, {
+        path: "/v1/barkparks/bp%207/api/webhooks/wh%2F1/deliveries/ev%2F9/replay?dataset=production", method: "POST", body: {},
+      });
+      if (succeeds) {
+        assert.equal(h.requests.length, 3);
+        assert.equal(h.requests[2].method, "GET");
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Replayed/);
+      } else {
+        assert.equal(replay.disabled, false);
+        assert.equal(replay.textContent, "Replay");
+        assert.match(h.toastStack.children.at(-1).innerHTML, /Couldn&#39;t replay/);
+      }
+    } finally { h.cleanup(); }
+  }
+});
+
+test("interaction harness requires the guarded webhook action surface", () => {
+  for (const name of [
+    "wireWebhookCard", "toggleWebhook", "rotateWebhook",
+    "openEditWebhookModal", "submitEditWebhook", "confirmDeleteWebhook",
+    "deleteWebhook", "loadDeliveries", "replayDelivery",
+  ]) {
+    assert.equal(typeof hooks[name], "function", name + " must be test-hook exported");
+  }
+});
