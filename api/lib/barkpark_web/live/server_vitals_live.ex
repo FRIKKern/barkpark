@@ -41,7 +41,7 @@ defmodule BarkparkWeb.ServerVitalsLive do
 
   def line(assigns) do
     ~H"""
-    <span id="server-vitals" style="color: var(--fg-dim);">
+    <span id="server-vitals-line" style="color: var(--fg-dim);">
       · CPU <span style={pct_style(@vitals.cpu_pct, 90)}><%= fmt_pct(@vitals.cpu_pct) %></span>
       · RAM <span style={pct_style(@vitals.mem_pct, 90)}><%= fmt_ram(@vitals) %></span>
       · disk <span style={pct_style(@vitals.disk_pct, 90)}><%= fmt_pct(@vitals.disk_pct) %></span>
