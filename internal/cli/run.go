@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -1173,6 +1175,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 	const pageSize = 100
 	offset := 0
 	var all []json.RawMessage
+	seenFullPages := map[string]int{}
 	// Detected on page 1, then held for every page and the final re-wrap so the
 	// renderer sees the envelope shape the command emits (docs/hits/… not just
 	// documents). Empty until the first page is extracted.
@@ -1195,6 +1198,17 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		if key == "" {
 			key = k
 		}
+		if len(docs) == pageSize {
+			identity := paginatedPageIdentity(docs)
+			if firstOffset, seen := seenFullPages[identity]; seen {
+				msg := fmt.Sprintf("pagination stalled at offset %d: full page repeats offset %d", offset, firstOffset)
+				if !renderErrorEnvelope(out, "pagination_stalled", msg, "", "") {
+					out.userErr("%s", msg)
+				}
+				return exitGeneric
+			}
+			seenFullPages[identity] = offset
+		}
 		all = append(all, docs...)
 		if len(docs) < pageSize {
 			break
@@ -1210,6 +1224,17 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
 	renderSuccess(out, cmd, mustResult(wrapped))
 	return exitOK
+}
+
+func paginatedPageIdentity(rows []json.RawMessage) string {
+	hash := sha256.New()
+	var length [8]byte
+	for _, row := range rows {
+		binary.BigEndian.PutUint64(length[:], uint64(len(row)))
+		_, _ = hash.Write(length[:])
+		_, _ = hash.Write(row)
+	}
+	return string(hash.Sum(nil))
 }
 
 func withOffsetLimit(rawURL string, offset, limit int) string {

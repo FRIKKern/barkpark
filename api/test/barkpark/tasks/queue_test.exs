@@ -242,6 +242,52 @@ defmodule Barkpark.Tasks.QueueTest do
     end
   end
 
+  describe "ready/1 — deterministic offset pages" do
+    test "consecutive pages are disjoint and beyond-end is empty", %{scope: scope} do
+      phase_id = "phase-offset-#{System.unique_integer([:positive])}"
+
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+      ids = 1..4 |> Enum.map(fn _ -> Ecto.UUID.generate() end) |> Enum.sort(:desc)
+
+      rows =
+        Enum.with_index(ids, fn id, index ->
+          %{
+            id: id,
+            doc_id: "offset-#{index}-#{System.unique_integer([:positive])}",
+            type: "task",
+            dataset: @dataset,
+            title: "offset #{index}",
+            status: "draft",
+            content: %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "parent_id" => phase_id,
+              "priority" => 1
+            },
+            workspace_id: scope[:workspace_id],
+            project_id: scope[:project_id],
+            inserted_at: now,
+            updated_at: now,
+            rev: "offset-#{index}"
+          }
+        end)
+
+      {4, nil} = Repo.insert_all(Document, rows)
+
+      opts = scope ++ [dataset: @dataset, phase_id: phase_id, limit: 2]
+      first = Queue.ready(opts ++ [offset: 0]) |> ids_of()
+      second = Queue.ready(opts ++ [offset: 2]) |> ids_of()
+      expected = Enum.sort(ids)
+
+      assert first == Enum.take(expected, 2)
+      assert second == Enum.drop(expected, 2)
+      assert first ++ second == expected
+      assert MapSet.disjoint?(MapSet.new(first), MapSet.new(second))
+      assert Queue.ready(opts ++ [offset: 4]) == []
+      assert Queue.ready(opts ++ [offset: 0]) |> ids_of() == first
+    end
+  end
+
   # ─── (7) content.dependencies gates readiness (fail-closed) ──────────────
 
   describe "ready/1 — content.dependencies gating" do

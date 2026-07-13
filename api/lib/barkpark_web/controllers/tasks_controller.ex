@@ -58,6 +58,7 @@ defmodule BarkparkWeb.TasksController do
       []
       |> Params.put_opt(:phase_id, params["phase_id"])
       |> Params.put_opt(:limit, Params.parse_limit(params["limit"], nil, 1000))
+      |> Params.put_opt(:offset, params["offset"] |> Params.parse_int(0) |> max(0))
       |> Keyword.merge(scope_opts(conn))
 
     docs = Tasks.ready(opts)

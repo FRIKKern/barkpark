@@ -44,6 +44,7 @@ defmodule Barkpark.Tasks.Queue do
     dataset = Keyword.get(opts, :dataset)
     phase_id = Keyword.get(opts, :phase_id)
     limit = Keyword.get(opts, :limit, @ready_default_limit)
+    offset = Keyword.get(opts, :offset, 0)
     workspace_uuid = workspace_id && Ecto.UUID.dump!(workspace_id)
 
     done_tasks =
@@ -164,9 +165,11 @@ defmodule Barkpark.Tasks.Queue do
           ),
         order_by: [
           asc_nulls_last: fragment("(?->>'priority')::int", d.content),
-          asc: d.inserted_at
+          asc: d.inserted_at,
+          asc: d.id
         ],
-        limit: ^limit
+        limit: ^limit,
+        offset: ^offset
       )
 
     base

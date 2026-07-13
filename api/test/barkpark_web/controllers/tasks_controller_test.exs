@@ -127,6 +127,45 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert first["dependent_count"] == 0
       assert first["comment_count"] == 0
     end
+
+    test "offset returns deterministic disjoint pages and fails soft", %{conn: conn, scope: scope} do
+      phase = uniq("phase-ready-offset")
+
+      for i <- 1..5 do
+        mk_task!(uniq("ready-offset-#{i}"), scope, %{
+          "parent_id" => phase,
+          "priority" => 1
+        })
+      end
+
+      fetch_ids = fn offset ->
+        resp =
+          conn |> authed() |> get("/v1/tasks/ready?phase_id=#{phase}&limit=2&offset=#{offset}")
+
+        assert resp.status == 200
+        resp.resp_body |> Jason.decode!() |> Map.fetch!("docs") |> Enum.map(& &1["doc_id"])
+      end
+
+      first = fetch_ids.("0")
+      second = fetch_ids.("2")
+
+      default_resp = conn |> authed() |> get("/v1/tasks/ready?phase_id=#{phase}&limit=2")
+      assert default_resp.status == 200
+
+      default_ids =
+        default_resp.resp_body
+        |> Jason.decode!()
+        |> Map.fetch!("docs")
+        |> Enum.map(& &1["doc_id"])
+
+      assert length(first) == 2
+      assert length(second) == 2
+      assert default_ids == first
+      assert MapSet.disjoint?(MapSet.new(first), MapSet.new(second))
+      assert fetch_ids.("99") == []
+      assert fetch_ids.("-10") == first
+      assert fetch_ids.("not-an-int") == first
+    end
   end
 
   describe "GET /v1/tasks index limit clamp" do

@@ -1449,6 +1449,15 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "Ready-queue row offset.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {

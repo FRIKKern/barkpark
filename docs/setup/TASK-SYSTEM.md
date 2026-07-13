@@ -110,13 +110,12 @@ Paper links (design notes travel with the work) mirror labels: `POST /v1/tasks/:
 **6. Filtered reads.**
 
 ```bash
-bp task ready --limit 5                          # the unblocked queue
-bp task ls --limit 20                            # everything, goals included
-curl "$API/v1/tasks?lifecycle_status=open&label=sprint-3" -H "Authorization: Bearer $TOKEN"
-curl "$API/v1/tasks?parent=drafts.g1" -H "Authorization: Bearer $TOKEN"   # a goal's rail, oldest first
+bp task ready --limit 5 --offset 0     # deterministic queue page
+bp task ready --all                    # aggregate pages; fail closed on a repeat/cycle
+bp task ls --limit 20                  # all tasks, goals included
 ```
 
-Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit` (index default 1000; `ready` and the bp verbs default 50).
+Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `limit`, plus ready-only `offset` (default/floor 0). Ready order is priority/creation/UUID; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
 
 **7. Watch the stream.** **Push:** SSE `/v1/data/listen/:dataset` — `task.*`, no polling. **Pull:** `bp task events --since <id>` → `GET /v1/tasks/events?since=<id>` replays **id-ASC, one page** (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the **stable cursor** (monotonic `mutation_events` PK, lossless under concurrency). Resume with the last `cursor` as `--since`; omit = from start; `has_more:true` → poll again. Scoped one `dataset` (default `production`) + `type=task`.
 
