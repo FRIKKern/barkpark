@@ -42,7 +42,11 @@ defmodule Barkpark.Content.TagDistributionTest do
   end
 
   defp weighted(name, strength),
-    do: %{"tag" => name, "strength" => strength, "rationale" => "Seeded for the distribution test."}
+    do: %{
+      "tag" => name,
+      "strength" => strength,
+      "rationale" => "Seeded for the distribution test."
+    }
 
   defp count_for(rows, type, tag) do
     Enum.find_value(rows, 0, fn
