@@ -3,7 +3,7 @@
 
 ## 1. Overview
 
-Frozen contract for all `/v1` endpoints: breaking changes to the shapes below bump the prefix to `/v2`; additive changes stay in v1.
+Frozen contract for all `/v1` endpoints: breaking changes bump the prefix to `/v2`; additive changes stay in v1.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
@@ -17,7 +17,7 @@ A **Workspace** is the tenancy boundary — every token binds to exactly one, ev
 Base URL: http://<host>:4000
 ```
 
-Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (read + write + admin), bound to the `Default` workspace. CORS reflects only origins in a per-dataset allow-list (`cors_origins` per schema, unioned with `DEFAULT_CORS_ORIGINS` + Barkpark Cloud origins).
+Private endpoints require `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all perms, `Default` ws). CORS reflects only origins in a per-dataset allow-list (`cors_origins` per schema, unioned with `DEFAULT_CORS_ORIGINS` + Barkpark Cloud origins).
 
 **Tenancy enforcement.** Workspace + project resolve from the path; the token's workspace must match — unknown `:workspace_slug` → `404`, non-member → `403`. Binding, membership, write gate: `docs/auth.md`.
 
@@ -32,8 +32,8 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 | Outer key | Type | Description |
 |-----------|------|-------------|
 | `schemaHash` | string | Hex digest of the dataset's schema; changes when any schema changes. |
-| `etag` | string | Content fingerprint; use with `If-None-Match` for conditional GET (304 Not Modified). |
-| `ms` | integer | Server processing time, milliseconds. |
+| `etag` | string | Content fingerprint; use with `If-None-Match` for conditional GET (→ 304). |
+| `ms` | integer | Server processing time (ms). |
 | `syncTags` | string[] | Cache-tag hints for ISR revalidation (e.g. `bp:ds:production:type:post`). |
 
 `result` is `{count, offset, limit, perspective, documents:[...]}` for queries (§4), the document envelope object for single docs (§5).
@@ -50,7 +50,7 @@ Every response wraps its payload under `result`, plus four outer metadata keys:
 | `_createdAt` | string | ISO 8601 UTC, `Z` suffix (e.g. `2026-04-12T09:11:20Z`) |
 | `_updatedAt` | string | ISO 8601 UTC, `Z` suffix |
 
-All other keys come from stored document content plus `title`. User fields cannot shadow reserved keys (silently dropped on write).
+All other keys come from stored document content plus `title`. User fields cannot shadow reserved keys (dropped on write).
 
 ## 4. `GET /w/:workspace_slug/p/:project_slug/v1/data/query/:dataset/:type` [public]
 
@@ -113,7 +113,7 @@ The next four all take the same shape — `{ "<kind>": { "id": "my-post", "type"
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. `operation` is the mutation kind name, except createIfNotExists yields `"noop"` and patch yields `"update"`.
+**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish success may add `warnings: [{code,severity,message}]` — non-blocking advisories (e.g. `label_norm`); the bulldocs paper-ingest 200 carries the same key, omitted when empty.
 
 Failures use the §9 error envelope.
 
