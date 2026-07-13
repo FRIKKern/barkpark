@@ -125,9 +125,67 @@ defmodule BarkparkWeb.Telemetry do
         unit: {:native, :millisecond},
         description:
           "Per-plugin-hook duration — p95 via histogram_quantile; tags :event=stage, :module=plugin."
+      ),
+      # Q: "which LiveView is slow to mount / re-param / handle an event?" —
+      # Studio, the Projects board, the paper reader are all LiveViews; before
+      # this, phoenix.live_view.* fired to nobody in prod (metrics/0 is
+      # LiveDashboard-only, dev-gated). These four are the REAL event families
+      # Phoenix.LiveView emits (V7-verified against the dep): live_view carries
+      # mount/handle_params/handle_event; live_component carries ONLY
+      # handle_event (no mount, no handle_params).
+      #
+      # CRITICAL ASYMMETRY — tag_values is `Map.take(fn.(metadata), tags)`, and a
+      # returned map MISSING a declared tag key SILENTLY DROPS the sample (fails
+      # closed). The live_view metadata carries a raw %Socket{}, so the :view tag
+      # must be dug out of `socket.view`; the live_component metadata already
+      # carries `:component` as a TOP-LEVEL key, so it needs its OWN fn. Reusing
+      # one `%{view: socket.view}` fn across all four would mistag the component
+      # metric (no :component key → every live_component sample dropped).
+      distribution("phoenix.live_view.mount.stop.duration",
+        tags: [:view],
+        tag_values: &lv_view_tag/1,
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description: "LiveView mount latency — p95 via histogram_quantile; tag :view = the module."
+      ),
+      distribution("phoenix.live_view.handle_params.stop.duration",
+        tags: [:view],
+        tag_values: &lv_view_tag/1,
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "LiveView handle_params latency — p95 via histogram_quantile; tag :view = the module."
+      ),
+      distribution("phoenix.live_view.handle_event.stop.duration",
+        tags: [:view],
+        tag_values: &lv_view_tag/1,
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "LiveView handle_event latency — p95 via histogram_quantile; tag :view = the module."
+      ),
+      # live_component tags off metadata.component (a top-level key), NOT the
+      # socket — its OWN fn, never the shared lv_view_tag.
+      distribution("phoenix.live_component.handle_event.stop.duration",
+        tags: [:component],
+        tag_values: &lc_component_tag/1,
+        reporter_options: [buckets: latency_buckets],
+        unit: {:native, :millisecond},
+        description:
+          "LiveComponent handle_event latency — p95 via histogram_quantile; tag :component = the module."
       )
     ]
   end
+
+  # tag_values for the three live_view metrics: the module lives at socket.view,
+  # NOT as a top-level metadata key. Fails closed if a future dep drops :socket.
+  defp lv_view_tag(%{socket: %{view: view}}), do: %{view: view}
+  defp lv_view_tag(_metadata), do: %{view: :unknown}
+
+  # tag_values for the live_component metric: :component is ALREADY a top-level
+  # metadata key — this fn must read it directly, never socket.view.
+  defp lc_component_tag(%{component: component}), do: %{component: component}
+  defp lc_component_tag(_metadata), do: %{component: :unknown}
 
   def metrics do
     [
