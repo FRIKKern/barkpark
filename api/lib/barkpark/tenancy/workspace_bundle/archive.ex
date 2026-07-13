@@ -54,7 +54,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
             {content, acc}
 
           String.starts_with?(name, "tables/") and String.ends_with?(name, ".copy") ->
-            table = name |> String.replace_prefix("tables/", "") |> String.replace_suffix(".copy", "")
+            table =
+              name |> String.replace_prefix("tables/", "") |> String.replace_suffix(".copy", "")
+
             {mf, Map.put(acc, table, content)}
 
           true ->

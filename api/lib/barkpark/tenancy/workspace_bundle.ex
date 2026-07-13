@@ -52,7 +52,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Tenancy.{Dataset, Project, Workspace}
   alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog}
 
-  @type stats :: %{tables: %{optional(String.t()) => non_neg_integer()}, total_rows: non_neg_integer()}
+  @type stats :: %{
+          tables: %{optional(String.t()) => non_neg_integer()},
+          total_rows: non_neg_integer()
+        }
 
   # @canonical capability:workspace-bundle aka:export_workspace,import_workspace,tenant_bundle,per_workspace_export doc:.claude/workflows/bp-cloud-build-charter.md
 
@@ -187,13 +190,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   defp e3_kind(table) do
     cond do
-      table in Catalog.e3_doc_keyed() -> :e3_doc
-      table in Catalog.e3_dataset_keyed() -> :e3_dataset
-      true -> raise "WorkspaceBundle: live E3 table #{inspect(table)} has no keyed extraction shape"
+      table in Catalog.e3_doc_keyed() ->
+        :e3_doc
+
+      table in Catalog.e3_dataset_keyed() ->
+        :e3_dataset
+
+      true ->
+        raise "WorkspaceBundle: live E3 table #{inspect(table)} has no keyed extraction shape"
     end
   end
 
-  defp import_strategy(kind) when kind in [:e3_doc, :e3_dataset, :allowlist], do: "insert_on_conflict"
+  defp import_strategy(kind) when kind in [:e3_doc, :e3_dataset, :allowlist],
+    do: "insert_on_conflict"
+
   defp import_strategy(_), do: "copy"
 
   # Build the `COPY (SELECT … WHERE <scope>) TO STDOUT` for a table. The SELECT

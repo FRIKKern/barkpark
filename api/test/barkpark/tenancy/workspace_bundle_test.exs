@@ -215,12 +215,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       # couple of A-exclusive string-keyed rows (proving they are RESTORED, not
       # silently lost — data_keys is the worst case: its DEKs).
       purge_workspace!(ws_a.id, manifest_before)
-      Repo.query!("DELETE FROM authoring_exemptions WHERE doc_id=$1 AND dataset='prod-a'", [only_a_doc])
+
+      Repo.query!("DELETE FROM authoring_exemptions WHERE doc_id=$1 AND dataset='prod-a'", [
+        only_a_doc
+      ])
+
       Repo.query!("DELETE FROM data_keys WHERE scope='dataset:prod-a'", [])
 
       # A is gone; B untouched.
-      assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_a.id]) == 0
-      assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_b.id]) > 0
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_a.id]) ==
+               0
+
+      assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_b.id]) >
+               0
+
       assert scalar("SELECT count(*) FROM data_keys WHERE scope='dataset:prod-a'", []) == 0
 
       # Re-import.
@@ -239,6 +247,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
       # The A-exclusive rows were restored…
       assert scalar("SELECT count(*) FROM data_keys WHERE scope='dataset:prod-a'", []) == 1
+
       assert scalar(
                "SELECT count(*) FROM authoring_exemptions WHERE doc_id=$1 AND dataset='prod-a'",
                [only_a_doc]
@@ -290,17 +299,56 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     seed_dataset!(proj_b.id, "prod-b")
 
     # A: two docs sharing (doc_id, dataset) but different type → fan-out shape.
-    {:ok, a1} = create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "shared-1", "title" => "A post"}, "prod-a")
-    {:ok, _a2} = create_document_in!(ws_a, proj_a, "note", %{"doc_id" => "shared-1", "title" => "A note"}, "prod-a")
-    {:ok, a3} = create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "only-a", "title" => "only A"}, "prod-a")
+    {:ok, a1} =
+      create_document_in!(
+        ws_a,
+        proj_a,
+        "post",
+        %{"doc_id" => "shared-1", "title" => "A post"},
+        "prod-a"
+      )
+
+    {:ok, _a2} =
+      create_document_in!(
+        ws_a,
+        proj_a,
+        "note",
+        %{"doc_id" => "shared-1", "title" => "A note"},
+        "prod-a"
+      )
+
+    {:ok, a3} =
+      create_document_in!(
+        ws_a,
+        proj_a,
+        "post",
+        %{"doc_id" => "only-a", "title" => "only A"},
+        "prod-a"
+      )
+
     {:ok, _} = create_media_file_in!(ws_a, proj_a, %{}, "prod-a")
 
     # B: shares the (doc_id, dataset='prod-a') tuple of A's shared doc → the
     # shared authoring_exemptions row belongs to B too. Plus a B-only doc.
     # (create_document stamps a `drafts.` prefix, so `a1.doc_id` is the real
     # stored key the (doc_id, dataset) semi-join must match.)
-    {:ok, _b1} = create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "shared-1", "title" => "B post"}, "prod-a")
-    {:ok, b2} = create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "only-b", "title" => "only B"}, "prod-b")
+    {:ok, _b1} =
+      create_document_in!(
+        ws_b,
+        proj_b,
+        "post",
+        %{"doc_id" => "shared-1", "title" => "B post"},
+        "prod-a"
+      )
+
+    {:ok, b2} =
+      create_document_in!(
+        ws_b,
+        proj_b,
+        "post",
+        %{"doc_id" => "only-b", "title" => "only B"},
+        "prod-b"
+      )
 
     # E2 doc-anchored: a content edge between two of A's documents.
     Repo.query!(
@@ -371,7 +419,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
     try do
       for m <- e2, do: delete_e2!(m["name"], ws_id)
-      for m <- e1, do: Repo.query!("DELETE FROM #{quote_ident(m["name"])} WHERE workspace_id = $1::text::uuid", [ws_id])
+
+      for m <- e1,
+          do:
+            Repo.query!(
+              "DELETE FROM #{quote_ident(m["name"])} WHERE workspace_id = $1::text::uuid",
+              [ws_id]
+            )
+
       Repo.query!("DELETE FROM workspaces WHERE id = $1::text::uuid", [ws_id])
     after
       Repo.query!("SET session_replication_role = DEFAULT", [])
@@ -400,6 +455,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
   defp independent_count(%{"partition" => "E2", "name" => t}, ws, _slugs) do
     {join, pred} = Map.fetch!(Catalog.e2_joins(), t)
+
     scalar("SELECT count(*) FROM #{quote_ident(t)} t #{join} WHERE #{pred} = $1::text::uuid", [ws])
   end
 
