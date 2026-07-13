@@ -166,10 +166,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     Archive.pack(manifest, dumps)
   end
 
-  # Fail-CLOSED dataset-slug map (charter D8): scope the workspace's PROJECTS
-  # through `Scope.scope_to_workspace/2` (where(false) on nil), then read the
-  # datasets under them. Never `scope_to_workspace_or_global`.
-  defp dataset_slugs_for(ws_id) do
+  @doc """
+  The distinct dataset slugs a workspace owns — the fail-CLOSED slug map that
+  drives E3/allowlist membership (charter D8): scope the workspace's PROJECTS
+  through `Scope.scope_to_workspace/2` (`where(false)` on nil), then read the
+  datasets under them. NEVER `scope_to_workspace_or_global` (which routes nil to
+  a fully-unscoped, all-tenant read → a cross-tenant leak). Public so the
+  teardown path (`Tenancy.delete_workspace/1`, which sweeps the same string-keyed
+  E3/allowlist tables the exporter copies) derives the slug set from ONE source
+  of truth instead of re-deriving it.
+  """
+  @spec dataset_slugs_for(binary()) :: [String.t()]
+  def dataset_slugs_for(ws_id) do
     project_ids =
       Project
       |> Scope.scope_to_workspace(ws_id)
