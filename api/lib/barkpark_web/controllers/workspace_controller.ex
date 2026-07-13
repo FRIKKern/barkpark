@@ -26,6 +26,7 @@ defmodule BarkparkWeb.WorkspaceController do
 
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.WorkspaceBundle
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -112,6 +113,59 @@ defmodule BarkparkWeb.WorkspaceController do
       nil -> {:error, :not_found}
       {:error, :not_found} -> {:error, :not_found}
       {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  GET /api/workspaces/:workspace_slug/export — stream the complete bp-export-v1
+  bundle for a workspace as an `application/x-tar` attachment (admin-gated).
+
+  SYNC: `WorkspaceBundle.export/2` materializes the whole tar binary in memory,
+  sent in one `send_resp/3`. An unknown slug collapses to 404 (no existence leak
+  beyond the admin gate); the resolved workspace always carries a valid UUID, so
+  the engine's fail-closed `:workspace_id_required` guard is never reached here.
+  """
+  def export(conn, %{"workspace_slug" => slug}) do
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         {:ok, bundle} <- WorkspaceBundle.export(workspace.id) do
+      conn
+      |> put_resp_content_type("application/x-tar", nil)
+      |> put_resp_header("content-disposition", "attachment; filename=#{workspace.slug}.tar")
+      |> send_resp(200, bundle)
+    else
+      nil -> {:error, :not_found}
+      # export/2 only errors on a nil/non-UUID id or a missing workspace — both
+      # unreachable once get_workspace_by_slug returns a real %Workspace{} — but
+      # fold any error into 404 rather than leak an engine tuple.
+      {:error, _} -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  POST /api/workspaces/:workspace_slug/import — read the raw tar request body and
+  re-import it via `WorkspaceBundle.import_bundle/2` (admin-gated).
+
+  The bundle is SELF-DESCRIBING (its manifest carries the workspace identity and
+  per-table import strategy). Its string-keyed members (E3/allowlist) re-import
+  idempotently via INSERT ON CONFLICT DO NOTHING, but the copy-strategy members
+  (root/E1/E2) assume a CLEAN target — so this is a restore into an empty scope,
+  NOT a repeatable upsert: a second import over a still-populated workspace
+  PK-conflicts. Returns the import stats — `{tables, total_rows}` — as JSON.
+  """
+  def import(conn, %{"workspace_slug" => _slug}) do
+    {bundle, conn} = read_full_body(conn)
+    {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
+    json(conn, %{tables: stats.tables, total_rows: stats.total_rows})
+  end
+
+  # Drain the entire raw request body (the tar bundle) — a POST body can arrive in
+  # multiple chunks, so loop on `:more`. The `application/x-tar` content-type
+  # matches no configured Plug.Parser (parsers pass `*/*` through unread), so the
+  # bytes are still here to read. iolist accumulation avoids O(n^2) concatenation.
+  defp read_full_body(conn, acc \\ []) do
+    case Plug.Conn.read_body(conn, length: 100_000_000) do
+      {:ok, chunk, conn} -> {IO.iodata_to_binary([acc, chunk]), conn}
+      {:more, chunk, conn} -> read_full_body(conn, [acc, chunk])
     end
   end
 
