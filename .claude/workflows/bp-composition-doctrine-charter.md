@@ -94,6 +94,78 @@ content on the doctrine, not showcases.
   producer by design), and no section golden exists — real gaps, but off the card-loop
   critical path. Backlog: cd-11, cd-12.
 
+### Wave 3 decisions (2026-07-13) — finish the two filed section-layout legs
+
+- **D-W3-1 — reconciliation: cd-10 and the cd-5 split are DONE on main; do not re-touch.**
+  Verified five ways (survey `cd10-reconcile`: 30 tests pass in section_layout_test.exs;
+  the `_layout when style != :article` degrade branch is live at compose.ex:394-395). The
+  cd-5 Constraints half shipped (#1244); its owed Template half stays the honest open child
+  cd-5b. This wave's genuinely-open, filed-not-built work is exactly cd-11 (web render) +
+  cd-12 (section golden leg), plus one concrete bug (media-picker asset-JSON src). The
+  wish's framing of cd-10 as unbuilt is wrong.
+- **D-W3-2 — the shared layout-projection SHAPE is authored-echo, breakpoints EXCLUDED.**
+  Handed identically to cd-11 and cd-12:
+  `{"container_role":"section","mode":"grid","tracks":N,"gap":"md","cells":[{"span":S|null,"order":K|null,"type":"<child-type>"}]}`.
+  It echoes AUTHORED span/order (the literal integers the author wrote), NOT rendered bytes,
+  because the surfaces intentionally diverge on render: Elixir :article emits
+  `grid-column:span 3` UNCLAMPED (compose.ex:1540 guards `n>0` only) while Go clamps span to
+  `[1,tracks]` (joincols.go:327-329) — PROVEN by running both (`cellSpan(3,tracks:2)=2` vs
+  literal `span 3`). A projection built from rendered bytes would bake that difference into
+  the gate and red it. Breakpoints are excluded because only Go honors them — Elixir :article
+  renders byte-identical HTML with and without an authored breakpoints array
+  (`IDENTICAL_BYTES=true`), using one fixed `@media(max-width:720px)` collapse; web honors
+  nothing. Breakpoints stay a Go-only superset, out of the shared projection.
+- **D-W3-3 — the section fixture authors all spans ≤ tracks (plus an order:-1 child).** At
+  span≤tracks, Elixir-unclamped == Go-clamped, so every cross-surface realization assert is
+  clean. Order (including negatives) is honored identically on both surfaces, so the fixture
+  carries an `order:-1` child to exercise ordering. span>tracks is safe ONLY in a
+  projection-only (authored-echo) assert and is NOT used this wave — no cross-surface
+  rendered-equality assert may run on a span>tracks child, or the new gate reds on a
+  pre-existing intentional difference.
+- **D-W3-4 — cd-11 web renders a REAL CSS grid, not a degrade; responsive via the reader's
+  exact model.** The Elixir reader and Go TUI both render the real grid; a web degrade would
+  be a THIRD behavior and defeat "renders as a REAL CSS grid on the web demo, exactly as it
+  already does on the Elixir reader and Go TUI." Mechanism (survey `cd11-web-render`): web
+  does NOT import paper-surface.css (layout.tsx imports only globals.css), so cd-11 injects a
+  two-rule CSS block —
+  `.bp-section__grid{display:grid;grid-template-columns:repeat(var(--bp-tracks,2),minmax(0,1fr));gap:var(--bp-grid-gap,1.6rem)}`
+  + `@media(max-width:720px){.bp-section__grid{grid-template-columns:1fr}}` — via the in-file
+  React-19 hoisted `<style href precedence="default">` precedent (portable-doc.tsx:741,
+  deduped to one head emission). Section renders `className="bp-section__grid"` with inline
+  custom props `--bp-tracks:N;--bp-grid-gap:…` (never the grid-template declaration itself,
+  so the 720px MQ is free to override → graceful mobile collapse for free), one
+  `bp-section__cell` wrapper per child carrying inline `grid-column:span N;order:K`. Span is
+  UNCLAMPED to match the reader (CSS clamps at layout time; the golden gate encodes authored
+  intent, so unclamped render does not trip it). NOT static `sm:grid-cols-N` (inline
+  grid-template would beat the utility class), NOT container-query, NOT JS breakpoint. The web
+  `columns` case (portable-doc.tsx:1180-1201) is itself non-responsive inline-grid — cd-11
+  must NOT copy that pattern.
+- **D-W3-5 — cd-12 is scoped to the CORE gate; the web render-realization leg is split out as
+  cd-12b, sequenced last.** cd-12 = add `section` to gen_golden_parity `types/0` +
+  `@section_input` + `section_projection/1`, regenerate all 3 mirrors, and land HAND-WRITTEN
+  realization asserts on Elixir (via `raw_html/1`, the columns/terminal container precedent —
+  `section` is a Compose container → `_raw` html, NOT a `Components.*_html` emitter), Go (via
+  `renderComponent`, asserting child prose + ordering only — NOT the authored span integer,
+  the span-clamp carve-out analogous to the colour carve-outs at component_golden_test.go
+  L494-498), and the web PROJECTOR leg C1 (`sectionProjection` in component-projections.ts
+  registered in S2_CASES → `deepEqual` against the golden). cd-12b adds the web
+  RENDER-realization leg C2 (drives the real `renderBlock` against section.golden.json) — it
+  needs BOTH cd-11's render AND cd-12's fixture merged, and it touches the same
+  component-golden-parity.test.ts file as cd-12's C1, so it is sequenced strictly after both.
+  This is what makes plan step-6's literal "the parity gate covers layout across surfaces, not
+  just content" TRUE for the web surface — the last surface that silently ignores block.layout.
+- **D-W3-6 — the media-picker asset-JSON bug (task-dec3959cd2a1cc35) fixes card-node.js
+  ONLY.** onMediaChange writes `coercePickerValue(e.detail)` (a pure identity fn) straight
+  into `attrs.media.src`; on an asset-library pick the picker emits `JSON.stringify({url,
+  assetId})`, so `src` becomes the literal JSON blob → broken `<img>`. Fix: read
+  `e.target.meta.url` (the picker's public parsed accessor, bp-media-picker.js:165-167), with
+  a JSON-tolerant fallback — the exact precedent root.html.heex:5746-5769 already uses. Do NOT
+  touch field-node.js's `coercePickerValue`: the field-image path's identity-coercion is
+  correct BY DESIGN (its render path is JSON-tolerant via `media_field_url/1`) and is pinned by
+  field-pickers.mjs smoke; the card path is the sole defect because it reused a coercion built
+  for a JSON-tolerant destination and pointed it at a JSON-intolerant one. Fail-before test:
+  extract a pure `mediaUrlFromValue(raw)` helper, smoke-assert JSON-in → url-out.
+
 ## Roadmap
 
 Wave 2 (this wave — 5 slices, integration-ordered):
@@ -109,19 +181,41 @@ Wave 2 (this wave — 5 slices, integration-ordered):
    migration mix task (dry-run first), then lead-gated --apply on guerrilla's 4 real
    papers; crown = composition-doctrine-plan on the new widgets.
 
+Wave 3 (this wave — finish the two filed section-layout legs, 4 slices; opus-only, Fable
+exhausted). Wave paper: `composition-doctrine-wave-2026-07-13`. Coupling: cd-11 ∥ cd-12
+build in parallel (disjoint files); cd-12b sequenced after BOTH; media-picker independent.
+1. **cd-11-web-section-grid-parity** (medium, opus) — web portable-doc.tsx `case "section"`
+   renders a real CSS grid (custom-prop + 720px MQ per D-W3-4) + a self-contained fail-before
+   web test; JS-only, does NOT wait Elixir Test. Parallel.
+2. **cd-12-section-golden-layout-leg** (large, opus, capstone) — `section` type +
+   authored-echo `section_projection/1` (D-W3-2/3) in gen_golden_parity, regen 3 mirrors,
+   Elixir + Go realization asserts + web projector leg C1; .ex/.exs wait Elixir Test. Parallel.
+3. **cd-12b-web-section-render-realization** (small, opus) — web RENDER-realization leg C2
+   in component-golden-parity.test.ts, driving the real renderBlock against section.golden.json;
+   sequenced after cd-11 + cd-12 merge. JS-only.
+4. **cd-card-media-picker-asset-json-src** (task-dec3959cd2a1cc35) (small, opus) — parse the
+   serialized `{url,assetId}` picker value in card-node.js (D-W3-6); JS + smoke. Independent.
+
 Backlog (filed, published, not this wave):
 - **cd-5b-template-generalization** (p2) — the general Template capability (save any node
   at any tier as reusable master, linked/detached) — plan §4 mechanism #3, cd-5's owed half.
-- **cd-11-web-section-grid-parity** (p3) — web portable-doc.tsx renders section
-  layout (grid tracks/span/order) or a designed degrade, with tests; coordinate with
-  p-web-tsx (sibling epic parity-s7-identical).
-- **cd-12-section-golden-layout-leg** (p3) — add a `section` entry + layout projection to
-  gen_golden_parity + realization asserts in all 3 owning test files; makes plan step-6's
-  literal "layout across surfaces" true.
 - **ct-tasknodes-dedicated** (p4) — dedicated editable nodes for task-detail/task-board/
   roadmap; parked until real corpus demand exists (today: showcase-only).
 - **cd-gov-required-checks** (p3) — GitHub required_status_checks on main for mix-test (at
   minimum) so the golden/parity gates become mechanically blocking.
 
 ## Wave log
+
+**Wave 3 (2026-07-13) — DECIDED, building.** Finish the two filed section-layout legs +
+one bug. Two rounds of ground truth proved the fixture-design pivot: the shared golden
+projection MUST echo AUTHORED span/order (Elixir :article emits `grid-column:span 3`
+unclamped; Go clamps to tracks — same input, different bytes), and breakpoints stay a
+Go-only superset (Elixir renders byte-identical HTML with/without a breakpoints array). Web
+does not import paper-surface.css, so cd-11 injects the reader's exact `.bp-section__grid`
+rule + 720px collapse MQ via a React-19 hoisted `<style precedence>`; span unclamped to match
+the reader. cd-12 is scoped to the core gate (generator + fixture + Elixir/Go realization +
+web projector C1); the web render-realization leg is split out as cd-12b, sequenced after
+cd-11 + cd-12. Slices: cd-11 ∥ cd-12 (disjoint files) → cd-12b (after both); media-picker
+bug independent. All opus (Fable exhausted). cd-10 email degrade + cd-5 split confirmed DONE
+on main — not re-touched.
 
