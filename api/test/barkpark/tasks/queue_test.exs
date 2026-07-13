@@ -310,6 +310,37 @@ defmodule Barkpark.Tasks.QueueTest do
       assert absent.id in ready_ids
     end
 
+    test "legacy non-array dependencies are treated as no dependencies", %{scope: scope} do
+      phase_id = "phase-dep-legacy-#{System.unique_integer([:positive])}"
+      id = Ecto.UUID.generate()
+      now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      {1, nil} =
+        Repo.insert_all(Document, [
+          %{
+            id: id,
+            doc_id: "main-dep-legacy-#{System.unique_integer([:positive])}",
+            type: "task",
+            dataset: @dataset,
+            title: "legacy non-array dependencies",
+            status: "draft",
+            content: %{
+              "kind" => "task",
+              "lifecycle_status" => "open",
+              "parent_id" => phase_id,
+              "dependencies" => "legacy-dependency-id"
+            },
+            workspace_id: scope[:workspace_id],
+            project_id: scope[:project_id],
+            inserted_at: now,
+            updated_at: now,
+            rev: "legacy-non-array"
+          }
+        ])
+
+      assert id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+    end
+
     test "dependency match tolerates a drafts. prefix on either side", %{scope: scope} do
       phase_id = "phase-dep-prefix-#{System.unique_integer([:positive])}"
       u = System.unique_integer([:positive])
