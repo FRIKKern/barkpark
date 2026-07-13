@@ -3241,7 +3241,7 @@ test("OC25: usageMeterDisplay — a rate meter has state + tint but NO bar (quot
 
 test("OC25: usageMeterHtml — a bar-less rate meter over its threshold tints the ROW, no Manage-plan", () => {
   const over = hooks.usageMeterHtml(reqSpec(), { value: 300, warn_at: 210, over_at: 270 });
-  assert.match(over, /class="fleet-row usage-row usage-row--over"/); // the row tints
+  assert.match(over, /class="usage-card usage-card--over"/); // the card tints
   assert.ok(!over.includes("usage-bar"), "a rate meter draws no bar (no quota ceiling)");
   assert.ok(!over.includes("#settings/billing"), "a capacity meter is not a billing dead-end");
 });
@@ -3342,11 +3342,11 @@ test("W4/OC19: usageMetersHtml — series threads per-meter; a gappy series stil
   assert.ok(!hooks.usageMetersHtml(meters).includes("usage-spark"), "no sparks until history lands");
 });
 
-test("W4/OC19: usageMeterHtml — an over-limit meter carries the danger tint via its row class", () => {
-  // The .usage-row--over class (already on the row for a quota bar) also tints the
-  // spark danger through currentColor — one tone vocabulary, no new colour.
+test("W4/OC19: usageMeterHtml — an over-limit meter carries the danger tint via its card class", () => {
+  // The .usage-card--over class (on the stat card) tints the value, the spark
+  // (currentColor) and the bar danger — one tone vocabulary, no new colour.
   const over = hooks.usageMeterHtml(instSpec(), { value: 12, quota: 10, warn_at: 8 }, [9, 11, 12]);
-  assert.match(over, /class="fleet-row usage-row usage-row--over"/);
+  assert.match(over, /class="usage-card usage-card--over"/);
   assert.match(over, /class="usage-spark"/);
 });
 

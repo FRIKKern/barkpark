@@ -599,6 +599,67 @@ const fleetUsageSummary = {
   ],
 };
 
+// ── lifecycle capabilities (GET /v1/providers/capabilities) ──────────────────
+// The S11b conduit that drives the lifecycle action row: a prod-tier Hetzner
+// provider whose archive/resurrect/adopt/audit are CLI affordances, with pause
+// gapped by the SERVER-OWNED reason (rendered verbatim). Decommission is always
+// console-wired regardless of this payload.
+const lifecycleCapabilities = {
+  providers: {
+    hetzner: {
+      tier: "prod",
+      capabilities: { archive: true, resurrect: true, adopt: true, audit: true, pause: false },
+      gaps: { pause: "Hetzner has no pause primitive — a stopped server still bills, so archive it instead." },
+    },
+  },
+  default_gap: "Not supported by this provider.",
+};
+
+// ── domain status (GET /v1/barkparks/:id/domain-status — a DNS-pending host) ──
+// A platform host mid-propagation: DNS hasn't resolved (the failed front rung
+// carries its own evidence + fix), and the three downstream rungs are all
+// blocked on it — they share ONE remediation string. This exercises the render
+// dedup: the repeated "Not checked yet…" evidence collapses to the front rung,
+// and the three identical remediations collapse to a single amber note.
+const dnsPendingDomain = {
+  ok: false,
+  checked_at: T,
+  instance: { id: IDS.liveInstance, host: "production-5b2c1e.barkpark.cloud" },
+  domains: [{
+    host: "acme.barkpark.cloud", kind: "platform", overall: "failed",
+    stages: [
+      { stage: "dns", label: "DNS resolves", status: "failed",
+        evidence: "No A/AAAA record for acme.barkpark.cloud has propagated yet.",
+        remediation: "DNS records take up to a minute to propagate — give it a moment and re-check." },
+      { stage: "points", label: "Points to this instance", status: "pending",
+        evidence: "Not checked yet — an earlier step isn't passing.",
+        remediation: "This domain isn't resolving publicly yet." },
+      { stage: "tls", label: "TLS certificate", status: "pending",
+        evidence: "Not checked yet — an earlier step isn't passing.",
+        remediation: "This domain isn't resolving publicly yet." },
+      { stage: "serving", label: "Serving traffic", status: "pending",
+        evidence: "Not checked yet — an earlier step isn't passing.",
+        remediation: "This domain isn't resolving publicly yet." },
+    ],
+  }],
+};
+
+// ── metrics (GET /v1/barkparks/:id/metrics — a live beat with four vitals) ────
+// The S12 Metrics-tab envelope: a live beat + four series (cpu/mem/disk/load).
+// Rendered as the aligned stat-card grid with area-filled sparklines.
+const metricsLive = {
+  ok: true,
+  beat: { status: "live", age_seconds: 12 },
+  instance: { id: IDS.liveInstance, host: "production-5b2c1e.barkpark.cloud" },
+  service_health: { pass: 3, total: 3, failing: [] },
+  series: {
+    cpu: histPts([21, 28, 24, 39, 52, 47, 63, 58]),
+    mem: histPts([46, 48, 49, 51, 53, 54, 55, 57]),
+    disk: histPts([69, 70, 71, 71, 72, 73, 74, 74]),
+    load: histPts([0.4, 0.7, 0.5, 0.9, 1.2, 0.8, 1.0, 1.1]),
+  },
+};
+
 // ── the scenario table ───────────────────────────────────────────────────────
 // authed:   whether mock.js should seed a session token (false = logged out).
 // deepLink: the hash a shot / smoke should open to exercise the scenario's view.
@@ -674,6 +735,40 @@ export const SCENARIOS = {
       audit: [],
       usage: quotaBarsUsage,
       usageHistory: usageQuotaHistory,
+    },
+  },
+  // ── Instance Overview — the full restructured panel ───────────────────────
+  // A live box whose Overview shows the styled S11b lifecycle action cluster
+  // (archive/resurrect/adopt/audit CLI chips + a single "via the bp CLI" caption,
+  // pause disabled with its server reason, danger Decommission), the grouped
+  // Details rail (Identity / Runtime / Platform / Activity), and the per-host
+  // domain checklist with the deduped evidence + collapsed amber remediation.
+  "panel-overview": {
+    label: "Instance Overview — lifecycle cluster + grouped rail + DNS checklist",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      capabilities: lifecycleCapabilities,
+      domainStatus: dnsPendingDomain,
+    },
+  },
+  // ── Metrics tab — the aligned stat-card grid ──────────────────────────────
+  "metrics": {
+    label: "Metrics tab — CPU / Memory / Disk / Load cards with area-filled sparklines",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/metrics",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      metrics: metricsLive,
     },
   },
   // ── Wave 3: Overview fleet usage strip (OC16/OC18/OC6) ────────────────────
@@ -1172,6 +1267,26 @@ export function route(name, method, path) {
   }
   if (/^\/v1\/sites\/[^/]+\/deployments$/.test(p)) return { status: 200, body: { deployments: d.deployments || [] } };
   if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: [] } };
+
+  // S11b: the lifecycle-capabilities conduit. A scenario without a `capabilities`
+  // fixture answers the empty shape → the row degrades to "capabilities
+  // unavailable" (exactly as an older control plane would).
+  if (p === "/v1/providers/capabilities") {
+    return { status: 200, body: d.capabilities || {} };
+  }
+
+  // S13: the per-host DNS/TLS checklist. A scenario without a `domainStatus`
+  // fixture answers the honest no-attached-domains shape → the rail keeps its
+  // static Domain row (no checklist card).
+  if (/^\/v1\/barkparks\/[^/]+\/domain-status$/.test(p)) {
+    return { status: 200, body: d.domainStatus || { ok: true, domains: [] } };
+  }
+
+  // S12: the Metrics-tab beat + series. A scenario without a `metrics` fixture
+  // answers empty → the tab shows the honest "waiting for the first beat" panel.
+  if (/^\/v1\/barkparks\/[^/]+\/metrics$/.test(p)) {
+    return { status: 200, body: d.metrics || {} };
+  }
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.

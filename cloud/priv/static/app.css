@@ -1270,6 +1270,53 @@ select.form-input {
 .copy-btn:hover { color: var(--text); background: var(--muted-surface); }
 .copy-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring-soft); }
 
+/* ── Instance Overview rhythm + sectioned Details rail ────────────────────────
+   .inst-overview gives the Overview main column a uniform vertical rhythm so the
+   update panel + Sites read as evenly-spaced sections, not a flat equal-weight
+   stack. The rail is grouped into labelled sub-sections (Identity / Runtime /
+   Platform / Activity) instead of one long flat list — it scans as chunks. */
+.inst-overview > * + * { margin-top: 20px; }
+.rail-group + .rail-group { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.rail-group-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-text);
+  margin-bottom: 4px;
+}
+
+/* ── S11b lifecycle action row — the persistent "operate this box" cluster ─────
+   Previously UNSTYLED (raw inline spans); rendered here as one compact cluster:
+   a state pill + the verb controls, with a single "via the bp CLI" caption. The
+   pill mirrors .status-pill; the .bp-inst--<state> class tints its colour and the
+   dot reads that hue through currentColor while the label stays neutral. */
+.inst-lifecycle-actions { margin: 18px 0 4px; }
+.inst-life-head { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 10px; }
+.inst-life-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--pill);
+  background: var(--muted-surface);
+  font-size: 12px;
+  font-weight: 600;
+}
+.inst-life-dot { width: 7px; height: 7px; border-radius: var(--pill); background: currentColor; flex: 0 0 auto; }
+.inst-life-label { color: var(--text); }
+.inst-life-status { display: inline-flex; align-items: center; gap: 8px; }
+.inst-life-note { font-size: 12px; color: var(--muted-text); }
+.inst-life-note--warn { color: var(--warn-strong); }
+.inst-life-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.inst-life-cli { display: inline-flex; align-items: center; gap: 8px; }
+.inst-life-verb { font-size: 13px; font-weight: 500; color: var(--text); }
+.inst-life-via { margin-top: 8px; font-size: 12px; color: var(--muted-text); }
+.inst-life-disabled { display: inline-flex; align-items: center; gap: 8px; }
+.inst-life-reason { font-size: 12px; color: var(--muted-text); }
+
 .site-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .site-row + .site-row { margin-top: 10px; }
 .site-main { flex: 1; min-width: 0; }
@@ -2096,25 +2143,29 @@ select.form-input {
 }
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
+/* Aligned to the C10 .usage-card chrome so Metrics + Usage read as one system:
+   the same radius/padding/shadow, the label + headline value on one row, and a
+   full-width area-filled hero sparkline. */
 .metric-card {
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
   background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
 .metric-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
-.metric-label { font-size: 13px; color: var(--muted-text); }
-.metric-value { font-size: 20px; font-weight: 650; color: var(--text); }
-.metric-spark { margin-top: 8px; color: var(--muted-text); }
-.metric-spark .spark { display: block; width: 100%; height: 40px; }
+.metric-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.metric-value { font-size: 22px; font-weight: 650; color: var(--text); font-variant-numeric: tabular-nums; }
+.metric-spark { margin-top: 12px; color: var(--muted-text); }
+.metric-spark .spark { display: block; width: 100%; height: 44px; }
 .metric--info .metric-spark { color: var(--info); }
 .metric--ok .metric-spark { color: var(--ok); }
 .metric--warn .metric-spark { color: var(--warn); }
@@ -2906,3 +2957,50 @@ select.form-input {
    role tokens (no new literals); append-only, no token-block/index edits. */
 .usage-row--warn .fleet-badges strong { color: var(--warn); }
 .usage-row--over .fleet-badges strong { color: var(--danger); }
+
+/* ── C10 Usage tab: the meter grid rendered as stat cards ─────────────────────
+   Mirrors the S12 .metrics-grid/.metric-card language so Usage and Metrics read
+   as one system. Each meter is a card: label + headline value on one row, the
+   freshness sub, a full-width hero sparkline (area-filled via sparklineSvg's
+   opts.area), then the quota bar when a real ceiling exists. warn/over tint the
+   value + spark (currentColor) + bar through ONE --usage-card-- tone vocabulary
+   (the S4 role tokens — no new literals). The pre-card .usage-row/.fleet-row
+   rules above still serve the Overview fleet strip; these are additive. */
+.usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.usage-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.usage-card-label { font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; }
+.usage-card-value {
+  font-size: 22px;
+  font-weight: 650;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+.usage-card-value .dim { font-size: 13px; font-weight: 500; }
+.usage-card-sub { margin-top: 2px; font-size: 12px; color: var(--muted-text); }
+.usage-card .usage-spark { display: block; margin-top: 12px; }
+.usage-card .usage-spark .spark { display: block; width: 100%; height: 44px; }
+.usage-card--warn .usage-card-value,
+.usage-card--warn .usage-spark { color: var(--warn); }
+.usage-card--over .usage-card-value,
+.usage-card--over .usage-spark { color: var(--danger); }
+.usage-card--warn .usage-bar-quota { color: var(--warn); }
+.usage-card--over .usage-bar-quota { color: var(--danger); }

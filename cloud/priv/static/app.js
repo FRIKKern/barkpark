@@ -820,10 +820,11 @@
         '" data-life-name="' + esc(a.resourceName || "") + '">' + esc(a.label) + "</button>";
     }
     if (a.mode === "cli") {
-      // Capability true but console-unwired: the exact command + a static
-      // "via the bp CLI" label (presentation, SPA-authored — allowed).
+      // Capability true but console-unwired: the verb label + the exact command
+      // chip. The "via the bp CLI" caption is rendered ONCE at the row level
+      // (lifecycleActionRowHtml) instead of repeated per verb — density cut.
       return '<div class="inst-life-cli"><span class="inst-life-verb">' + esc(a.label) + "</span>" +
-        cliChipHtml(a.cli) + '<span class="inst-life-via">via the bp CLI</span></div>';
+        cliChipHtml(a.cli) + "</div>";
     }
     // Capability false: disabled control carrying the SERVER-OWNED gap reason.
     // JS never invents copy — an absent reason shows the label alone.
@@ -835,8 +836,12 @@
   // Pure render of the whole action row from its model.
   function lifecycleActionRowHtml(model) {
     if (!model) return "";
+    // The label sits in its own span so it stays neutral (--text) while the dot
+    // carries the S4 state hue (the model.pill.cls bp-inst--<state> tints color,
+    // the dot reads it through currentColor) — mirrors .status-pill.
     var pill = '<span class="inst-life-pill ' + model.pill.cls + '">' +
-      '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(model.pill.label) + "</span>";
+      '<span class="inst-life-dot" aria-hidden="true"></span>' +
+      '<span class="inst-life-label">' + esc(model.pill.label) + "</span></span>";
 
     var status = "";
     if (model.loading) {
@@ -849,9 +854,15 @@
         (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
     }
 
+    // One "via the bp CLI" caption for the whole row when any verb is a CLI
+    // affordance — replaces the per-verb repetition (four → one).
+    var hasCli = (model.actions || []).some(function (a) { return a && a.mode === "cli"; });
+    var via = hasCli ? '<div class="inst-life-via">via the bp CLI</div>' : "";
+
     return '<div class="inst-life-head">' + pill +
       (status ? '<div class="inst-life-status">' + status + "</div>" : "") + "</div>" +
-      '<div class="inst-life-actions">' + model.actions.map(lifecycleActionHtml).join("") + "</div>";
+      '<div class="inst-life-actions">' + model.actions.map(lifecycleActionHtml).join("") + "</div>" +
+      via;
   }
 
   // ---- S14 portable-archives pure helpers (azure-hetzner hosting) ------------
@@ -2967,31 +2978,46 @@
     // A4/D60: pre-host the timeline is the primary surface — the whole Sites
     // block stays quiet (no floating "Sites" heading over an empty slot, no
     // loading flash). loadInstanceSites keeps the slot honest either way.
+    // The rail is grouped into labelled sub-sections instead of one flat list, so
+    // it scans as chunks (identity / runtime / platform / activity). railGroup is
+    // a thin local wrapper — same railRow* helpers, same #instance-domains slot.
+    var railGroup = function (label, rows) {
+      return '<div class="rail-group"><div class="rail-group-label">' + esc(label) + "</div>" + rows + "</div>";
+    };
     return timeline + verifySlot +
       // detail-grid--instance widens the rail (the domain checklist lives there);
       // the site-deploys grid keeps the bare .detail-grid (byte-identical).
       '<div class="detail-grid detail-grid--instance">' +
-        '<div class="detail-main">' +
+        // .inst-overview gives the main column a uniform vertical rhythm so the
+        // update panel + Sites read as evenly-spaced sections, not a flat stack.
+        '<div class="detail-main inst-overview">' +
           // isu-w5: the operator update panel is the face of the Overview for a
           // live box — update truth + policy controls sit above Sites.
-          (hasHost ? updatePanelHtml(bp) + "<h2>Sites</h2>" : "") +
-          '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
-        '<aside class="detail-rail"><h2>Details</h2>' +
-          railRowCopy("ID", bp.id) +
-          railRowCopy("Host", bp.host || "—") +
+          (hasHost
+            ? updatePanelHtml(bp) +
+              '<section><h2>Sites</h2><div id="instance-sites"><div class="loading">Loading sites&hellip;</div></div></section>'
+            : '<div id="instance-sites"></div>') +
+        "</div>" +
+        '<aside class="detail-rail">' +
+          railGroup("Identity",
+            railRowCopy("ID", bp.id) +
+            railRowCopy("Host", bp.host || "—") +
+            railRow("Slug", bp.slug || "—")) +
+          railGroup("Runtime",
+            railRow("Mode", bp.mode || "—") +
+            railRow("Health", railValue(cap(health), hasHost)) +
+            railRow("Agent", railValue(cap(agent), hasHost)) +
+            railRow("Version", bp.version ? "v" + bp.version : "—") +
+            railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—")) +
           // S13 (azure-hetzner hosting): the Domain rail row GROWS into the live
           // per-host DNS/TLS checklist. The slot renders the static value first
           // (no layout jump); loadInstanceDomains replaces it with the checklist
           // when the box has attached domains (GET /v1/barkparks/:id/domain-status).
-          '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div>" +
-          railRow("Mode", bp.mode || "—") +
-          railRow("Health", railValue(cap(health), hasHost)) +
-          railRow("Agent", railValue(cap(agent), hasHost)) +
-          railRow("Version", bp.version ? "v" + bp.version : "—") +
-          railRow("Git commit", bp.git_commit ? shortSha(bp.git_commit) : "—") +
-          railRow("Slug", bp.slug || "—") +
-          railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
-          railRowPlain("Created", fmtWhen(bp.inserted_at)) +
+          '<div class="rail-group"><div class="rail-group-label">Platform</div>' +
+            '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div></div>" +
+          railGroup("Activity",
+            railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
+            railRowPlain("Created", fmtWhen(bp.inserted_at))) +
         "</aside>" +
       "</div>";
   }
@@ -5012,7 +5038,8 @@
   // is styled without new CSS: ok → pass (✓), failed → fail (✗), pending/active
   // → the neutral "unknown" chip (·). The accessible name carries the state in
   // WORDS, never colour alone.
-  function domainRungChip(row) {
+  function domainRungChip(row, showEvidence) {
+    if (showEvidence === undefined) showEvidence = true;
     var vfRole = row.role === "ok" ? "pass" : row.role === "failed" ? "fail" : "unknown";
     var glyph = vfRole === "pass" ? "&#10003;" : vfRole === "fail" ? "&#10007;" : "&middot;";
     var state = row.role === "ok" ? "done"
@@ -5022,7 +5049,7 @@
       esc(row.label + " — " + state) + '">' +
       '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +
       esc(row.label) +
-      (row.evidence ? '<span class="vf-chip-code">' + esc(row.evidence) + "</span>" : "") +
+      (showEvidence && row.evidence ? '<span class="vf-chip-code">' + esc(row.evidence) + "</span>" : "") +
       "</span>";
   }
 
@@ -5037,9 +5064,25 @@
     return model.domains.map(function (d) {
       var head = esc(d.host) +
         (domainKindChip(d.kind) ? ' <span class="vf-chip-code">' + esc(domainKindChip(d.kind)) + "</span>" : "");
-      var rungs = d.rows.map(domainRungChip).join("");
+      // Evidence dedup: keep it on ok / failed / the FRONT non-ok rung; drop the
+      // repeated "…an earlier step isn't passing." filler on downstream pending
+      // rungs (render layer only — the pure domainStageRows model is untouched).
+      var frontSeen = false;
+      var rungs = d.rows.map(function (row) {
+        var showEvidence = true;
+        if (row.role !== "ok") {
+          if (frontSeen && row.role === "pending") showEvidence = false;
+          frontSeen = true;
+        }
+        return domainRungChip(row, showEvidence);
+      }).join("");
+      // Collapse identical remediation strings so two rungs with the same fix
+      // render ONE amber note instead of a stack.
+      var seenRem = {};
       var remedies = d.rows.filter(function (r) { return r.showRemediation; })
-        .map(function (r) { return '<div class="vf-note">' + esc(r.remediation) + "</div>"; }).join("");
+        .map(function (r) { return r.remediation; })
+        .filter(function (t) { if (seenRem[t]) return false; seenRem[t] = true; return true; })
+        .map(function (t) { return '<div class="vf-note">' + esc(t) + "</div>"; }).join("");
       var when = model.checkedAt
         ? '<div class="vf-meta">checked ' + esc(relTime(model.checkedAt)) + "</div>"
         : "";
@@ -9092,7 +9135,7 @@
     // dot, flat-midline all already pinned there); the .usage-spark wrapper tints
     // it (muted, or the row's quota tone) and sizes it ~120×32.
     var sparkHtml = d.spark
-      ? '<div class="usage-spark">' + sparklineSvg(d.spark, { width: 120, height: 32 }) + "</div>"
+      ? '<div class="usage-spark">' + sparklineSvg(d.spark, { width: 240, height: 44, area: true }) + "</div>"
       : "";
     // The quota bar (when present) lives under the meter name. Manage-plan is the
     // ONE recovery action (D25) for the BILLING quota meter's over state — the
@@ -9117,15 +9160,26 @@
     // The row tint follows the OC25 state (not the bar) so a bar-less rate/latency
     // meter over its threshold reddens the value badge too. "ok" carries no tint —
     // only warn/over colour the row (a healthy meter reads neutral).
-    var rowTone = d.state === "warn" || d.state === "over" ? d.state : "";
-    return '<div class="fleet-row' + (rowTone ? " usage-row usage-row--" + rowTone : "") + '">' +
-      '<div class="fleet-main"><div class="fleet-name">' + esc(d.label) + "</div>" +
-      (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") +
-      barHtml + "</div>" +
-      '<div class="fleet-badges">' +
+    // The tone modifier is ALWAYS present (mirrors statusPill's role) so the
+    // static head reads "usage-card usage-card--" for the CSS checker; "ok" is the
+    // untinted neutral (no rule needed), warn/over carry the S4 role tint.
+    var toneCls = d.state === "warn" || d.state === "over" ? d.state : "ok";
+    var valueHtml = d.unmetered
+      ? '<span class="dim">' + esc(d.value) + "</span>"
+      : "<strong>" + esc(d.value) + "</strong>";
+    // C10 stat card (mirrors .metric-card): the label + headline value on one
+    // row, the freshness sub, the hero (area-filled) sparkline, then the quota
+    // bar when a real ceiling exists. One tone vocabulary (warn/over) tints the
+    // value, the spark (currentColor) and the bar through --usage-card-- .
+    return '<div class="usage-card usage-card--' + toneCls + '">' +
+      '<div class="usage-card-head">' +
+        '<span class="usage-card-label">' + esc(d.label) + "</span>" +
+        '<span class="usage-card-value">' + valueHtml + "</span>" +
+      "</div>" +
+      (sub ? '<div class="usage-card-sub">' + esc(sub) + "</div>" : "") +
       sparkHtml +
-      (d.unmetered ? '<span class="dim">' + esc(d.value) + "</span>" : "<strong>" + esc(d.value) + "</strong>") +
-      "</div></div>";
+      barHtml +
+      "</div>";
   }
 
   // Pure: normalise the /usage/history envelope to its meter→points `series` map.
@@ -9157,9 +9211,9 @@
   // failed fetch) → today's bar-less grid, unchanged (progressive fill).
   function usageMetersHtml(meters, series) {
     meters = meters || {};
-    return USAGE_METERS.map(function (spec) {
+    return '<div class="usage-grid">' + USAGE_METERS.map(function (spec) {
       return usageMeterHtml(spec, meters[spec.key], series ? usageHistoryValues(series, spec.key) : null);
-    }).join("");
+    }).join("") + "</div>";
   }
 
   // The loading skeleton — a hung box can hold /usage ~15s (D51), so the tab
@@ -9531,6 +9585,22 @@
       }
     }
     if (cur.length) runs.push(cur);
+    // Optional soft area fill under each run (opts.area) — a token-neutral
+    // currentColor wash at low opacity, drawn BEHIND the stroke so the line still
+    // reads crisp. Uses <path d> (never <polygon points>) so the run-counting
+    // sparkline tests are unaffected; a single-point run draws no area (its dot
+    // stands alone). Off by default — only the C10/S12 stat cards opt in.
+    var area = "";
+    if (opts.area) {
+      var baseY = rnd(h - pad);
+      area = runs.map(function (run) {
+        if (run.length < 2) return "";
+        var d = "M" + run[0].x + "," + baseY +
+          run.map(function (p) { return " L" + p.x + "," + p.y; }).join("") +
+          " L" + run[run.length - 1].x + "," + baseY + " Z";
+        return '<path d="' + d + '" fill="currentColor" fill-opacity="0.13" stroke="none"/>';
+      }).join("");
+    }
     var body = runs.map(function (run) {
       if (run.length === 1) {
         return '<circle cx="' + run[0].x + '" cy="' + run[0].y + '" r="1.5" fill="currentColor"/>';
@@ -9539,7 +9609,7 @@
       return '<polyline points="' + pts + '" fill="none" stroke="currentColor" stroke-width="1.5" ' +
         'stroke-linejoin="round" stroke-linecap="round"/>';
     }).join("");
-    return frame + body + "</svg>";
+    return frame + area + body + "</svg>";
   }
 
   // Pure: the headline value string for one metric card. A holes-only series → the
@@ -9554,7 +9624,7 @@
 
   // Pure: one metric card — headline value + label + the role-tinted sparkline.
   function metricsCardHtml(m) {
-    var spark = sparklineSvg(m.values, { width: 180, height: 40 });
+    var spark = sparklineSvg(m.values, { width: 180, height: 40, area: true });
     return '<div class="metric-card metric--' + esc(m.role) + '">' +
       '<div class="metric-head"><span class="metric-label">' + esc(m.label) + "</span>" +
       '<span class="metric-value">' + esc(metricsValueText(m)) + "</span></div>" +
