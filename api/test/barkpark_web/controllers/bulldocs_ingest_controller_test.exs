@@ -12,6 +12,7 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
+  alias Barkpark.Content.Papers.Hollow
   alias Barkpark.LabelFixtures
   import Ecto.Query, only: [from: 2]
 
@@ -414,6 +415,18 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       # Delta frame landed on the per-doc topic BulldocsLive subscribes to.
       assert_receive {:paper_block, %{op_kind: "append-block", block_id: "b-new", rev: rev}}
       assert rev == rev0 + 1
+    end
+
+    test "removing the last content block is halted and leaves the paper unchanged",
+         %{conn: conn, slug: slug} do
+      paper_before = Content.get_paper(slug)
+
+      conn = auth_post(conn, slug, %{"op" => "remove-block", "id" => "intro"})
+
+      resp = json_response(conn, 409)
+      assert resp["error"]["code"] == "halted"
+      assert resp["error"]["message"] == Hollow.ratchet_message()
+      assert Content.get_paper(slug) == paper_before
     end
 
     test "bad token → 401, no mutation", %{conn: conn, slug: slug} do
