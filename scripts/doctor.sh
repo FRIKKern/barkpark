@@ -36,6 +36,46 @@ else
   skip "fetch failed (offline?) — behind-check skipped"
 fi
 
+# ── 1b. Release cadence — has releases/latest drifted behind main? ───────────
+# `bp upgrade` and install-cli.sh resolve published cli-v* releases from the
+# GitHub API rather than trusting releases/latest or local tags. Do the same
+# here: draft/unpublished, prerelease, and non-CLI releases must not make stale
+# cadence look current. Advisory only (exit stays 0); the fix is to cut a fresh
+# CLI release.
+RELEASES_API_URL="${BARKPARK_RELEASES_API_URL:-https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30}"
+RELEASES_JSON="$( { curl -fsSL "$RELEASES_API_URL" 2>/dev/null || wget -qO- "$RELEASES_API_URL" 2>/dev/null || true; } )"
+NEWEST_CLI_TAG=""
+if [ -n "$RELEASES_JSON" ] && command -v jq >/dev/null 2>&1; then
+  NEWEST_CLI_TAG="$(printf '%s' "$RELEASES_JSON" | jq -r '
+    [.[]
+      | select((.draft // false) == false)
+      | select((.prerelease // false) == false)
+      | .tag_name
+      | select(test("^cli-v[0-9]+([.][0-9]+)*$"))
+      | . as $tag
+      | (ltrimstr("cli-v") | split(".") | map(try tonumber catch null)) as $version
+      | select(all($version[]; type == "number"))
+      | select(all($version[]; . >= 0 and . <= 4294967295 and floor == .))
+      | {tag: $tag, version: $version}]
+    | sort_by(.version) | last | .tag // empty
+  ' 2>/dev/null)"
+fi
+if [ -n "$NEWEST_CLI_TAG" ] \
+   && git rev-parse --verify --quiet "$NEWEST_CLI_TAG" >/dev/null 2>&1 \
+   && git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+  TAG_DRIFT="$(git rev-list --count "$NEWEST_CLI_TAG"..origin/main 2>/dev/null || echo 0)"
+  TAG_EPOCH="$(git log -1 --format=%ct "$NEWEST_CLI_TAG" 2>/dev/null || echo 0)"
+  TAG_AGE_DAYS=0
+  [ "$TAG_EPOCH" -gt 0 ] 2>/dev/null && TAG_AGE_DAYS=$(( ( $(date +%s) - TAG_EPOCH ) / 86400 ))
+  if [ "$TAG_DRIFT" -gt 250 ] || [ "$TAG_AGE_DAYS" -gt 14 ]; then
+    bad "release $NEWEST_CLI_TAG is $TAG_DRIFT commit(s) / ${TAG_AGE_DAYS}d behind origin/main — cut a fresh cli release (unpinned installs get releases/latest)"
+  else
+    ok "release cadence current ($NEWEST_CLI_TAG: $TAG_DRIFT commit(s) / ${TAG_AGE_DAYS}d behind main)"
+  fi
+else
+  skip "published stable cli release, jq, or origin/main ref unavailable — release-cadence check skipped"
+fi
+
 # ── 2. Installed bp binary stale? ────────────────────────────────────────────
 # bp embeds its build commit; it is stale only if Go-side inputs changed since.
 if command -v bp >/dev/null 2>&1; then

@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -70,6 +73,205 @@ func TestLatestReleaseVersionRedirect(t *testing.T) {
 	}
 	if got != "1.2.3" {
 		t.Errorf("latestReleaseVersion = %q, want %q", got, "1.2.3")
+	}
+}
+
+// TestLatestReleaseVersionAPIWinsOverDecoyLatest proves the API path is
+// preferred over releases/latest: the API lists a build-<sha> server-artifact
+// release at the top and the real cli-v1.5.0 below, while releases/latest
+// points at the decoy build release (which would 404 bp assets). Resolution
+// must return the highest cli-v* (1.5.0), skipping the newer prerelease.
+func TestLatestReleaseVersionAPIWinsOverDecoyLatest(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/releases", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[
+			{"tag_name":"build-deadbeef","draft":false,"prerelease":false},
+			{"tag_name":"cli-v1.7.0","draft":true,"prerelease":false},
+			{"tag_name":"cli-v1.6.0-rc.1","draft":false,"prerelease":true},
+			{"tag_name":"cli-v1.5.0","draft":false,"prerelease":false},
+			{"tag_name":"cli-v1.4.0","draft":false,"prerelease":false}
+		]`)
+	})
+	// releases/latest points at the decoy build release the API path must beat.
+	mux.HandleFunc("/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/releases/tag/build-deadbeef", http.StatusFound)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	got, err := latestReleaseVersion(srv.URL)
+	if err != nil {
+		t.Fatalf("latestReleaseVersion: %v", err)
+	}
+	if got != "1.5.0" {
+		t.Errorf("latestReleaseVersion = %q, want %q (API cli-v* must win over decoy latest; prerelease skipped)", got, "1.5.0")
+	}
+}
+
+func TestLatestReleaseVersionAPIIgnoresMalformedStableTags(t *testing.T) {
+	cases := []struct {
+		name string
+		tag  string
+	}{
+		{"nonnumeric component", "cli-v2.x"},
+		{"empty component", "cli-v2..0"},
+		{"integer overflow", "cli-v999999999999999999999999999999999999"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/releases", func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `[
+					{"tag_name":%q,"draft":false,"prerelease":false},
+					{"tag_name":"cli-v1.5.0","draft":false,"prerelease":false}
+				]`, tc.tag)
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			got, err := latestReleaseVersionAPI(srv.URL)
+			if err != nil {
+				t.Fatalf("latestReleaseVersionAPI: %v", err)
+			}
+			if got != "1.5.0" {
+				t.Fatalf("latestReleaseVersionAPI = %q, want %q; malformed %q masked the valid stable release", got, "1.5.0", tc.tag)
+			}
+		})
+	}
+}
+
+func TestLatestReleaseVersionRedirectRejectsMalformedStableTags(t *testing.T) {
+	for _, tag := range []string{
+		"cli-v2.x",
+		"cli-v2..0",
+		"cli-v2.0-rc.1",
+		"cli-v999999999999999999999999999999999999",
+	} {
+		t.Run(tag, func(t *testing.T) {
+			srv := fakeReleaseTree(t, tag, nil)
+			if _, err := latestReleaseVersionRedirect(srv.URL); err == nil {
+				t.Fatalf("latestReleaseVersionRedirect accepted malformed stable tag %q", tag)
+			}
+		})
+	}
+}
+
+// TestDoctorReleaseCadenceUsesPublishedStableRelease proves the shell doctor
+// ignores newer local unpublished/prerelease tags and newer API draft/
+// prerelease/non-CLI releases. The published stable 1.5.0 must remain the
+// cadence anchor, matching latestReleaseVersionAPI.
+func TestDoctorReleaseCadenceUsesPublishedStableRelease(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	doctor, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "doctor.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doctorPath := filepath.Join(root, "scripts", "doctor.sh")
+	if err := os.WriteFile(doctorPath, doctor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	bin := filepath.Join(root, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitLog := filepath.Join(root, "git.log")
+	fakeGit := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_GIT_LOG"
+case "$1 $2" in
+  "fetch --quiet") exit 0 ;;
+  "rev-list --count")
+    case "$3" in
+      HEAD..origin/main|origin/main..HEAD) echo 0 ;;
+      cli-v1.5.0..origin/main) echo 300 ;;
+      *) echo 0 ;;
+    esac
+    ;;
+  "rev-parse --verify") exit 0 ;;
+  "log -1") echo 1 ;;
+  "tag -l") printf 'cli-v1.6.0\ncli-v1.6.0-rc.1\ncli-v1.5.0\n' ;;
+  "status --porcelain") exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(fakeGit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeCurl := `#!/bin/sh
+cat <<'JSON'
+[
+  {"tag_name":"build-deadbeef","draft":false,"prerelease":false},
+  {"tag_name":"cli-v1.7.0","draft":true,"prerelease":false},
+  {"tag_name":"cli-v1.6.0-rc.1","draft":false,"prerelease":true},
+  {"tag_name":"cli-v2.x","draft":false,"prerelease":false},
+  {"tag_name":"cli-v999999999999999999999999999999999999","draft":false,"prerelease":false},
+  {"tag_name":"cli-v1.5.0","draft":false,"prerelease":false}
+]
+JSON
+`
+	if err := os.WriteFile(filepath.Join(bin, "curl"), []byte(fakeCurl), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("/bin/bash", doctorPath)
+	cmd.Env = append(os.Environ(),
+		"PATH="+bin+":/usr/bin:/bin",
+		"FAKE_GIT_LOG="+gitLog,
+		"BARKPARK_RELEASES_API_URL=https://example.invalid/releases",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("doctor failed: %v\n%s", err, out)
+	}
+	text := string(out)
+	if !strings.Contains(text, "release cli-v1.5.0 is 300 commit(s)") {
+		t.Fatalf("doctor did not anchor cadence to published stable 1.5.0:\n%s", text)
+	}
+	if strings.Contains(text, "release cli-v1.6.0") || strings.Contains(text, "release cli-v1.7.0") {
+		t.Fatalf("draft/prerelease/unpublished release masked stable cadence:\n%s", text)
+	}
+	invocations, err := os.ReadFile(gitLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(invocations), "tag -l") {
+		t.Fatalf("doctor consulted local tags instead of published releases:\n%s", invocations)
+	}
+}
+
+// TestLatestReleaseVersionFallsBackToRedirect proves that when the API path
+// yields nothing (no /releases endpoint), resolution falls back to the
+// /releases/latest redirect.
+func TestLatestReleaseVersionFallsBackToRedirect(t *testing.T) {
+	srv := fakeReleaseTree(t, "cli-v1.2.3", nil) // serves only /releases/latest
+	got, err := latestReleaseVersion(srv.URL)
+	if err != nil {
+		t.Fatalf("latestReleaseVersion: %v", err)
+	}
+	if got != "1.2.3" {
+		t.Errorf("latestReleaseVersion = %q, want %q (redirect fallback)", got, "1.2.3")
+	}
+}
+
+func TestReleaseAPIURL(t *testing.T) {
+	cases := []struct{ base, want string }{
+		{"https://github.com/FRIKKern/barkpark", "https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30"},
+		{"https://github.com/FRIKKern/barkpark/", "https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30"},
+		{"http://127.0.0.1:8080", "http://127.0.0.1:8080/releases?per_page=30"},
+	}
+	for _, c := range cases {
+		if got := releaseAPIURL(c.base); got != c.want {
+			t.Errorf("releaseAPIURL(%q) = %q, want %q", c.base, got, c.want)
+		}
 	}
 }
 

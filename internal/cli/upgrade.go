@@ -3,6 +3,7 @@ package cli
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,6 +21,12 @@ import (
 // releases/latest (the npm pipeline creates no GitHub Releases — see
 // .github/workflows/cli-release.yml).
 const defaultReleaseRepo = "https://github.com/FRIKKern/barkpark"
+
+// Stable release components are bounded to uint32 so the Go resolver and the
+// jq-based doctor can validate and order them identically on every platform.
+// Real CLI versions are tiny; the bound exists to reject hostile/accidental
+// numeric overflow rather than silently coercing it during comparison.
+const maxStableVersionComponent = 1<<32 - 1
 
 // installerOneLiner is printed when the install dir is not writable. Never
 // escalate from inside the binary — the user re-runs the installer with sudo.
@@ -50,12 +57,88 @@ var upgradeExecutable = func() (string, error) {
 	return filepath.EvalSymlinks(p)
 }
 
-// latestReleaseVersion resolves the newest released CLI version WITHOUT the
-// GitHub API (no rate-limit JSON, no auth): GET <base>/releases/latest and
+// latestReleaseVersion resolves the newest released CLI version. It prefers
+// the GitHub Releases API (which lists every tag, so a cli-v* is always
+// findable) and falls back to the /releases/latest redirect only when the API
+// call fails. The API is preferred because this repo ALSO cuts build-<sha>
+// server-artifact releases that carry no bp assets — one of those can own the
+// releases/latest slot and 404 every unpinned resolve. install-cli.sh:27-38
+// learned the same lesson; this mirrors it so `bp upgrade` and the installer
+// resolve the same version.
+func latestReleaseVersion(base string) (string, error) {
+	if ver, err := latestReleaseVersionAPI(base); err == nil {
+		return ver, nil
+	}
+	return latestReleaseVersionRedirect(base)
+}
+
+// releaseAPIURL maps the release-tree root to its GitHub Releases API list
+// endpoint: github.com/OWNER/REPO → api.github.com/repos/OWNER/REPO/releases.
+// Any other host (a test server, a mirror) is asked for /releases?per_page=30
+// directly, so the API code path stays exercisable without api.github.com.
+func releaseAPIURL(base string) string {
+	if u, err := url.Parse(base); err == nil && u.Host == "github.com" {
+		return "https://api.github.com/repos" + strings.TrimRight(u.Path, "/") + "/releases?per_page=30"
+	}
+	return strings.TrimRight(base, "/") + "/releases?per_page=30"
+}
+
+// latestReleaseVersionAPI lists the newest releases and returns the highest
+// cli-v* version, skipping drafts, prereleases (cli-v1.2.0-rc.1), and non-cli
+// tags (build-<sha> server artifacts) — matching the public installer feed.
+func latestReleaseVersionAPI(base string) (string, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(releaseAPIURL(base))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("releases API returned HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return "", err
+	}
+	var releases []struct {
+		TagName    string `json:"tag_name"`
+		Draft      bool   `json:"draft"`
+		Prerelease bool   `json:"prerelease"`
+	}
+	if err := json.Unmarshal(body, &releases); err != nil {
+		return "", err
+	}
+	best := ""
+	var bestParts []uint64
+	for _, r := range releases {
+		if r.Draft || r.Prerelease {
+			continue
+		}
+		ver, ok := strings.CutPrefix(r.TagName, "cli-v")
+		if !ok {
+			continue
+		}
+		parts, ok := parseStableVersion(ver)
+		if !ok { // skip prerelease, malformed, and overflowing cli-v* tags
+			continue
+		}
+		if best == "" || compareStableVersions(parts, bestParts) > 0 {
+			best = ver
+			bestParts = parts
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("releases API listed no cli-v* release")
+	}
+	return best, nil
+}
+
+// latestReleaseVersionRedirect resolves the newest released CLI version WITHOUT
+// the GitHub API (no rate-limit JSON, no auth): GET <base>/releases/latest and
 // read the redirect Location — its final path segment is the tag
 // (cli-v1.0.1). Prereleases never win because GitHub's latest endpoint
-// skips them.
-func latestReleaseVersion(base string) (string, error) {
+// skips them. Used as the fallback when the API path fails.
+func latestReleaseVersionRedirect(base string) (string, error) {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -80,10 +163,61 @@ func latestReleaseVersion(base string) (string, error) {
 	}
 	tag := path.Base(u.Path)
 	ver, ok := strings.CutPrefix(tag, "cli-v")
-	if !ok || ver == "" {
+	if !ok {
 		return "", fmt.Errorf("latest release tag %q is not a cli-v* tag", tag)
 	}
+	if _, ok := parseStableVersion(ver); !ok {
+		return "", fmt.Errorf("latest release tag %q is not a numeric dotted stable cli-v* tag", tag)
+	}
 	return ver, nil
+}
+
+// parseStableVersion accepts the same release grammar as doctor.sh:
+// one or more dot-separated decimal components, with no prerelease/build
+// suffixes and every component fitting in uint32. The explicit bound keeps
+// ordering portable and prevents malformed overflow from masking a real
+// published stable release.
+func parseStableVersion(version string) ([]uint64, bool) {
+	if version == "" {
+		return nil, false
+	}
+	parts := strings.Split(version, ".")
+	parsed := make([]uint64, len(parts))
+	for i, part := range parts {
+		if part == "" {
+			return nil, false
+		}
+		for _, ch := range part {
+			if ch < '0' || ch > '9' {
+				return nil, false
+			}
+		}
+		n, err := strconv.ParseUint(part, 10, 32)
+		if err != nil || n > maxStableVersionComponent {
+			return nil, false
+		}
+		parsed[i] = n
+	}
+	return parsed, true
+}
+
+func compareStableVersions(a, b []uint64) int {
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var na, nb uint64
+		if i < len(a) {
+			na = a[i]
+		}
+		if i < len(b) {
+			nb = b[i]
+		}
+		if na < nb {
+			return -1
+		}
+		if na > nb {
+			return 1
+		}
+	}
+	return 0
 }
 
 // compareVersions orders two semver-ish strings: -1 when a < b, 0 when
