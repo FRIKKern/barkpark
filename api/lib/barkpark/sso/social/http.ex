@@ -18,7 +18,16 @@ defmodule Barkpark.Sso.Social.HTTP do
     @impl true
     def post_form(url, params) do
       # Accept: json so GitHub returns JSON (not form-encoded) for the token.
-      case Req.post(url, form: params, headers: [{"accept", "application/json"}]) do
+      # Login-path outbound: isolate onto Barkpark.Auth.Finch and cap the wait
+      # for the provider token endpoint at an explicit, tunable 10s (a hung
+      # provider must never stall social login). receive_timeout is a top-level
+      # Req option — NEVER connect_options, which Req rejects alongside :finch.
+      case Req.post(url,
+             form: params,
+             headers: [{"accept", "application/json"}],
+             finch: Barkpark.Auth.Finch,
+             receive_timeout: 10_000
+           ) do
         {:ok, %{status: s, body: b}} when s in 200..299 and is_map(b) -> {:ok, b}
         {:ok, %{status: s}} -> {:error, {:http_status, s}}
         {:error, e} -> {:error, e}
@@ -33,7 +42,8 @@ defmodule Barkpark.Sso.Social.HTTP do
         {"user-agent", "barkpark"}
       ]
 
-      case Req.get(url, headers: headers) do
+      # Same isolation + explicit 10s cap for the userinfo fetch (see post_form/2).
+      case Req.get(url, headers: headers, finch: Barkpark.Auth.Finch, receive_timeout: 10_000) do
         {:ok, %{status: s, body: b}} when s in 200..299 and is_map(b) -> {:ok, b}
         {:ok, %{status: s}} -> {:error, {:http_status, s}}
         {:error, e} -> {:error, e}
