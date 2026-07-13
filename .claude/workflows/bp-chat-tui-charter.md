@@ -96,4 +96,20 @@ Integration order; slices 1–5 build in parallel (disjoint files), slice 6 runs
 
 ## Wave log
 
-(empty — Review appends per wave)
+### Wave 2026-07-13 — founding wave (transport + harness + working MVP)
+
+**Landed (5 green slices, all gates re-run green on review; grade A−).**
+
+- `ct-w1-transport` — `/v1/chat` controller: 8 admin-gated routes, strict Recorder/ClaudeChat adapter (no adopt_sink, no launcher controls, no shed-and-close), SSE replay→live, public `{status,reason}` exit (D23). Gate green: chat_controller 39/39 + 7-file baseline 521/521. Branch `loop-epic/v1-chat-transport-session-crud-send-inte-0`. No review fixes.
+- `ct-w1-golden-harness` — Mechanism-A reply-body parity: pure generator + two byte-identical mirrors + ExUnit freshness lock + Go projection test. 10 ExUnit + 3 Go subtests green; regen zero-drift verified. Branch `loop-epic/golden-transcript-parity-harness-mechani-1`. No review fixes.
+- `ct-w1-apiclient` — Go `apiclient` chat bindings (8 methods + SSE), 17 httptest cases, cwd/launcher exclusion + public-exit asserted. Branch `loop-epic/go-apiclient-chat-bindings-crud-send-int-2`. No review fixes.
+- `ct-w1-tui-client` — `bp chat` native builtin: picker, pdrender transcript, streaming tail, Esc-interrupt wedge, queued badge, draft round-trip, read-only cards. 27 tests + docs gates green. **Review fix:** exit reducer decoded a `stderr_tail` field the transport never emits (contradicts D23) and dropped the public `reason` enum (null-status crash misreported as "status 0"); corrected to `{status,reason}` + pinned the previously-untested exit path. Final branch `loop-epic/bp-chat-mvp-native-tui-client-sessions-p-3-r`.
+- `ct-w1-charple` — charmtone-seeded 4th theme through `derive()`, emitted to all 16 surfaces, ratchet `charple:2` (surface.dark + an AA fg-dim pin, both reasoned). `check.mjs` PASS (216 AA checks), `emit --write` zero drift. Branch `loop-epic/charple-theme-charmtone-seeded-fourth-th-4`. No review fixes.
+
+**Stalled.** `ct-w1-live-smoke` — blocked exactly as its gate anticipates: guerrilla returns 404 pre-merge (no `/v1/chat` deployed). Honestly left in_progress, 0/5, all misses stamped. Runs after transport+apiclient+tui-client merge and auto-deploy.
+
+**Ledger audit.** Two premature "PR merged" stamps reset by the reviewer (golden-harness crit 5, tui-client crit 8 — merge-gated, LEAD owns); tui-client crit 0 (native-builtin dispatch, genuinely proven) flipped to met. All slices left in_progress — the LEAD closes merge-gated criteria on merge.
+
+**Discovered / filed.** `ct-bl-tui-apiclient-dedup` — the TUI ships its own `httpTransport`+`readSSE`+wire-types instead of consuming the apiclient bindings; the tree now carries two Go SSE parsers. Not blocking (the `Transport` interface makes the swap clean); filed as backlog.
+
+**Next wave takes:** the live smoke (once slices merge + deploy), then `ct-bl-tui-apiclient-dedup` (collapse to one SSE parser) and `ct-bl-cards-interactive`/`ct-bl-toolrow-renderers` toward full Studio parity.
