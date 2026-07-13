@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -259,6 +260,35 @@ func TestFreshSendStartsWaiting(t *testing.T) {
 	}
 	if st.Local[0].Queued {
 		t.Fatal("a fresh send must not be badged queued")
+	}
+}
+
+// TestExitFrameSurfacesReason proves the public exit frame (charter D23
+// {status, reason}) settles honestly: a null-status crash names its reason (not
+// a misleading "status 0"), an integer exit shows the code, and the turn ends
+// relaunchable — never carrying a stderr tail (the transport drops it).
+func TestExitFrameSurfacesReason(t *testing.T) {
+	// A crash with no integer status: reason must speak, status must NOT read 0.
+	crash := FrameEvent{Name: "exit", Data: []byte(`{"status":null,"reason":"crashed"}`)}
+	st, effs := drive(State{SessionID: "s1", Phase: TurnStreaming}, t0, crash)
+	if !st.Exited || st.Phase != TurnIdle {
+		t.Fatalf("exit must end the turn and mark exited, got exited=%v phase=%v", st.Exited, st.Phase)
+	}
+	if len(effs) != 0 {
+		t.Fatalf("exit does no IO, got %d effects", len(effs))
+	}
+	if !strings.Contains(st.Notice, "crashed") {
+		t.Fatalf("a null-status crash must name its reason, got %q", st.Notice)
+	}
+	if strings.Contains(st.Notice, "status 0") {
+		t.Fatalf("a null-status exit must NOT misreport as status 0, got %q", st.Notice)
+	}
+
+	// An integer exit shows the code alongside the reason.
+	clean := FrameEvent{Name: "exit", Data: []byte(`{"status":0,"reason":"clean"}`)}
+	st, _ = drive(State{SessionID: "s1"}, t0, clean)
+	if !strings.Contains(st.Notice, "status 0") || !strings.Contains(st.Notice, "clean") {
+		t.Fatalf("an integer exit must show status + reason, got %q", st.Notice)
 	}
 }
 

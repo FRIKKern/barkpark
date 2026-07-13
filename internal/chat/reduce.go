@@ -204,15 +204,19 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		st.Settling = true
 		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
 	case "exit":
+		// The public exit frame is EXACTLY {status, reason} over the fixed enum
+		// (charter D23): the transport DROPS the stderr tail, so it is never a
+		// field here. status is null for a non-integer exit (crash/reap), so it is
+		// a pointer; reason carries the honest cause the notice surfaces.
 		var body struct {
-			Status     int    `json:"status"`
-			StderrTail string `json:"stderr_tail"`
+			Status *int   `json:"status"`
+			Reason string `json:"reason"`
 		}
 		_ = json.Unmarshal(ev.Data, &body)
 		st.Exited = true
 		st.Phase = TurnIdle
 		st.WedgeAt = time.Time{}
-		st.Notice = fmt.Sprintf("session process exited (status %d) — send to relaunch", body.Status)
+		st.Notice = exitNotice(body.Status, body.Reason)
 		return st, nil
 	}
 	return st, nil
@@ -315,6 +319,20 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 		st.Tail = ""
 	}
 	return st, nil
+}
+
+// exitNotice renders the public exit frame (charter D23 {status, reason}) as one
+// honest footer line. reason is the fixed enum (clean/failed_start/crashed/
+// idle_reaped/unknown); status is shown only when the subprocess reported a real
+// integer code (null otherwise). A session is always relaunchable by sending.
+func exitNotice(status *int, reason string) string {
+	if reason == "" {
+		reason = "unknown"
+	}
+	if status != nil {
+		return fmt.Sprintf("session process exited (%s, status %d) — send to relaunch", reason, *status)
+	}
+	return fmt.Sprintf("session process exited (%s) — send to relaunch", reason)
 }
 
 // dropSettledLocal removes optimistic echoes whose persisted user row just
