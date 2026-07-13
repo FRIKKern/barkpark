@@ -50,8 +50,8 @@ concurrency:
 jobs:
   sobelow:
     name: Sobelow static analysis (regression gate, baseline .sobelow-skips)
-    # Advisory: fingerprint baseline is not stable across Elixir toolchains
-    # (dev vs CI 1.18.1). Flip to blocking once baselined in CI or findings fixed.
+    # Advisory: fingerprint baselines drift across toolchains. Reconciliation
+    # stays pinned to CI and produces a human-reviewed artifact, never a commit.
     continue-on-error: true
     runs-on: ubuntu-latest
     strategy:
@@ -90,12 +90,31 @@ jobs:
         working-directory: .
 
       - name: Sobelow (--skip reads api/.sobelow-skips baseline; --exit Low reds on any NEW finding)
-        # Green on the current tree (all 98 current findings are baselined in
-        # .sobelow-skips). A newly-introduced insecure pattern is NOT in the
-        # baseline and reds the job. Regenerate the baseline deliberately after a
-        # reviewed cleanup: `cd api && mix sobelow --mark-skip-all` then commit
-        # .sobelow-skips (shrinking it as findings are truly fixed).
+        # A newly introduced insecure pattern is not in the reviewed baseline and
+        # reds this advisory job. Never regenerate/commit the baseline on a dev
+        # toolchain; the matched-toolchain artifact below is for human review.
         run: mix sobelow --skip --exit Low
+
+      - name: Reconcile baseline on the pinned CI toolchain
+        if: always()
+        run: bash scripts/sobelow-baseline-reconcile.sh "${{ runner.temp }}/sobelow-baseline-reconcile"
+
+      - name: Prove a fresh String.to_atom finding still reds
+        if: always()
+        run: bash scripts/sobelow-fresh-finding-guard.sh
+
+      - name: Upload reconciled Sobelow baseline for human review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sobelow-baseline-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}
+          path: ${{ runner.temp }}/sobelow-baseline-reconcile
+          # The reconcile script writes the baseline as a dotfile (.sobelow-skips);
+          # upload-artifact@v4 excludes hidden files by default, which would ship
+          # only metadata.txt + sobelow-skips.diff and silently drop the baseline
+          # itself. include-hidden-files keeps the reconciled baseline in the artifact.
+          include-hidden-files: true
+          if-no-files-found: error
 
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)
