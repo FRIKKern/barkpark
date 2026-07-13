@@ -62,8 +62,7 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaTest do
       # The wall being hit is observable on the tamper-evident audit chain.
       assert Repo.exists?(
                from(e in Event,
-                 where:
-                   e.action == "workspace.quota_exceeded" and e.workspace_id == ^ws.id
+                 where: e.action == "workspace.quota_exceeded" and e.workspace_id == ^ws.id
                )
              )
     end
@@ -85,7 +84,9 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaTest do
       refute conn.halted
     end
 
-    test "no resolved workspace fails OPEN — the plug never crashes on a nil assign", %{conn: conn} do
+    test "no resolved workspace fails OPEN — the plug never crashes on a nil assign", %{
+      conn: conn
+    } do
       # No :current_workspace assign at all (share_public / anonymous path).
       conn = RequireWithinQuota.call(conn, RequireWithinQuota.init([]))
 
@@ -118,7 +119,10 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaTest do
       conn = call(conn, ws, meter: :media)
 
       refute conn.halted
-      assert_receive {:media_mutate, [:barkpark, :media, :mutate], %{count: 1}, %{workspace_id: id}}
+
+      assert_receive {:media_mutate, [:barkpark, :media, :mutate], %{count: 1},
+                      %{workspace_id: id}}
+
       assert id == ws.id
     end
 
