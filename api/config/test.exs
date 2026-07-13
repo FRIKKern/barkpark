@@ -65,6 +65,17 @@ config :barkpark, Oban, testing: :manual
 # Search analytics inserts run synchronously in tests (no Task race).
 config :barkpark, :search_analytics_async, false
 
+# The post-commit audit-webhook fan-out runs SYNCHRONOUSLY in the test's process
+# (no unawaited `Task.Supervisor.start_child` spawn on the shared
+# `Barkpark.TaskSupervisor`). The async spawn's DataCase drain is scoped to its
+# ORIGINATING test, and ExUnit gives no ordering guarantee it finishes before a
+# concurrent raw-DDL test opens its window — so the leaked audit SELECT
+# (AccessShareLock on webhooks/search_synonyms) deadlocks the `ALTER TABLE`
+# (AccessExclusiveLock) with a Postgrex 40P01. Inline delivery joins the caller's
+# sandbox connection and dies with the test. Read by
+# `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
+config :barkpark, :audit_dispatch_async, false
+
 # Self-update stays OFF (no Checker in the tree) and the upstream client is
 # the scripted Fake — tests prime it per-call via Application env.
 config :barkpark, Barkpark.SelfUpdate,
