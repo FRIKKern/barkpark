@@ -35,7 +35,7 @@ All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/del
 
 ### Safe delete — NEVER `Repo.delete/1` on a Workspace
 
-Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table FKs are `nilify_all` (not `CASCADE`), so a raw `Repo.delete(workspace)` orphans blobs/CDN cache and skips lifecycle hooks. In order: (1) walk `media_files` → `Media.delete_file/2` (blob + CDN purge + renditions + `:after_media_delete`); (2) walk `documents` → `Content.delete_document/4` (`:before/:after_delete` hooks); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest (projects, datasets, memberships, revisions, schema_definitions, webhooks, mutation_events, search intel, paper_events). No `delete_project/1` exists yet.
+Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table scope FKs are `CASCADE`, so a raw `Repo.delete(workspace)` deletes rows but skips the blob/CDN purge + lifecycle hooks. In order: (1) walk `media_files` → `Media.delete_file/2` (blob + CDN purge + renditions + `:after_media_delete`); (2) walk `documents` → `Content.delete_document/4` (`:before/:after_delete` hooks); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest (projects, datasets, memberships, revisions, schema_definitions, webhooks, mutation_events, search intel, paper_events). No `delete_project/1` exists yet.
 
 ## Roles & enforcement
 
@@ -58,7 +58,7 @@ When `multi_tenant?/0` is true, the content-edge projection path uses strict `sc
 
 ### The dataset string↔id duality (in-progress migration)
 
-Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`, etc.). `dataset_id` is **nullable everywhere** and FKs use `nilify_all`, so deleting a Dataset row only NULLs dependents' `dataset_id` — it does not delete them.
+Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`, etc.). `dataset_id` is **nullable everywhere**; its FKs are now `CASCADE`, so deleting a Dataset row deletes its content rows (was `nilify_all` pre-160000).
 
 `Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (defined in `api/lib/barkpark/content/write_scope.ex`; there is no `scope_to_dataset` delegated on the `Content` facade):
 
@@ -68,13 +68,13 @@ resolve_read_dataset_id(dataset, opts) → id | nil
   nil → WHERE dataset = $string
 ```
 
-The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visible via the string path until backfill completes. So a `dataset_id IS NULL` row is **not** invisible to dataset scoping (the OR catches it) — though it *is* invisible under strict `scope_to_workspace/3` with a nil workspace_id. (`api/CLAUDE.md`'s "NO NULL-fallback — a NULL-scope row is invisible" holds only for workspace scoping, not dataset.)
+The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visible via the string path until backfill completes. So a `dataset_id IS NULL` row is **not** invisible to dataset scoping (the OR catches it) — though it *is* invisible under strict `scope_to_workspace/3` with a nil workspace_id. (`api/CLAUDE.md`'s strict-invisibility note is workspace scoping, not dataset.)
 
 **Known asymmetry:** `resolve_read_dataset_id/2` deliberately returns `nil` when scoped by workspace **without** a project — falling back to the string path — to prevent cross-tenant bleed into the Default project. A caller that wants id-precise dataset scoping must supply `project_id`.
 
 ## Tables & constraints
 
-`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content tables carry nullable `workspace_id`/`project_id`/`dataset_id` FKs as `ON DELETE NILIFY_ALL`. The literal column is `dataset` on content tables (including `documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
+`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content/scope tables' nullable `workspace_id`/`project_id`/`dataset_id` FKs are also `CASCADE` (17 workspace_id tables, flipped from `nilify_all`); only `audit_events` + `audit_export_sinks` carry `workspace_id` with no FK. The literal column is `dataset` on content tables (including `documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
 
 ## Canonical homes (link, don't duplicate)
 

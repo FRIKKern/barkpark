@@ -41,7 +41,7 @@ Session deltas: `{:sheets_op, %{rev, tab, changed}}` on `doc_topic <> ":sheets:o
 
 ## Adding a document type: plugin-declared vs ad-hoc
 
-Schemas are tenant-scoped (`workspace_id`/`project_id`; docs also carry `dataset_id`). Scoped reads filter `WHERE dataset_id = <id>` with NO NULL-fallback — a NULL-scope row is invisible.
+Schemas are tenant-scoped (`workspace_id`/`project_id`; docs add `dataset_id`). A NULL-`dataset_id` row is visible via its `dataset` string; invisible only when that string mismatches.
 
 | | Plugin-declared (preferred) | Ad-hoc (fallback) |
 |---|---|---|
