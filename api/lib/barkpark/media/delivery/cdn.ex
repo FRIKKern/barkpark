@@ -62,7 +62,20 @@ defmodule Barkpark.Media.Delivery.Cdn do
   @doc "Mark asset CDN publish complete and purge stale edge cache."
   @spec publish(%MediaFile{}, struct() | nil) :: :ok
   def publish(%MediaFile{} = file, doc) do
-    _ = invalidate(file)
+    # Fire the edge purge in the BACKGROUND so a slow or hung third-party CDN
+    # never stalls the upload/callback response. Both publish-path callers —
+    # Processing.process/1 (media/processing.ex) and the transcoder "ready"
+    # callback (media_processing_controller.ex) — return to their caller
+    # immediately; the purge itself keeps its bounded Dispatcher.http_post
+    # (10s timeout + SSRF guard) inside the supervised task.
+    #
+    # Fire-and-forget is safe: every caller discards publish's return, the
+    # invalidate chain unconditionally returns :ok (network/HTTP failures are
+    # logged, never raised), so a backgrounded purge cannot change an outcome
+    # the caller observes. The delete-path Cdn.invalidate (media.ex, D36
+    # after-commit deferral) is unaffected — it still runs inline under its own
+    # transaction-boundary policy.
+    purge_edge_cache_async(file)
 
     status =
       if base_url() do
@@ -72,6 +85,15 @@ defmodule Barkpark.Media.Delivery.Cdn do
       end
 
     if doc, do: patch_cdn_status(doc, file, status)
+    :ok
+  end
+
+  # Background the CDN round-trip on the general-purpose supervised task pool
+  # (mirrors Media.Delivery.Events.dispatch/4's fire-and-forget seam). The task
+  # is unlinked from the caller, so a purge crash can never take down the upload
+  # process; a lost result is acceptable — the next asset change re-purges.
+  defp purge_edge_cache_async(%MediaFile{} = file) do
+    Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn -> invalidate(file) end)
     :ok
   end
 
