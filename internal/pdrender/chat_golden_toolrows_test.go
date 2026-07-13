@@ -14,38 +14,63 @@ import (
 // Law 1 — Mechanism A, the sibling of chat_golden_parity_test.go). Where that
 // test covers the settled assistant REPLY BODY, this one covers the three
 // structural chat rows that used to be GUI-only bespoke HEEx: chat-tool-diff,
-// chat-todo, chat-thinking. The shared truth is the typed block maps — the
-// Elixir generator (`mix barkpark.chat.gen_golden_toolrows`) writes them from
-// the SAME derivations Studio renders (TextDiff.diff_lines/2, the todo
-// glyph/progress logic, the thinking token count) and mirrors them byte-for-byte
-// into api/test/support/fixtures + this testdata dir. THIS leg proves the TUI's
-// render path (Decode -> DefaultRegistry(...).RenderDoc) realizes that same
-// projection with ZERO unknown-block fallback — the Law-1 promise that every
-// chat affordance renders on BOTH surfaces made a CI fact.
+// chat-todo, chat-thinking.
 //
-// Technique mirrors chat_golden_parity_test.go exactly: decode the shared JSON,
-// render through the real seam, strip ANSI, and assert every projection
-// significant word appears (whitespace-collapsed, case-insensitive). The struct
-// types, wordRe, significantWords, and collapse helpers are REUSED from that
-// sibling test (same package) — one projection technique, not a fork.
+// ONE fixture, ONE schema: the Elixir generator (`mix
+// barkpark.chat.gen_golden_toolrows`) is the sole authoritative writer of the
+// fixture and mirrors it BYTE-FOR-BYTE into api/test/support/fixtures + this
+// testdata dir (the Elixir freshness test asserts both mirrors decode
+// term-identical). This Go leg therefore consumes THAT schema verbatim — a
+// variant is `{kind, name, source, block, projection:{type,text}}` with a
+// SINGLE typed block per variant — so the two halves lock one fixture and the
+// golden gate spans both surfaces on merge (charter's two-halves-one-deliverable
+// contract). We do NOT keep a second, divergent Go-authored fixture: that would
+// conflict with the generator's mirror and split the "one truth."
+//
+// The proof: each variant's block decodes through the real Decode -> RenderDoc
+// seam with ZERO unknown-block fallback, and every significant word of the
+// Elixir-derived projection text is realized in the terminal render — the
+// Law-1 promise that every chat affordance renders on BOTH surfaces, made a CI
+// fact. Technique (significantWords / collapse / ANSI strip) is REUSED from the
+// reply-body sibling; chatProjEntry is shared. Only the top-level variant shape
+// differs (single block + single projection object), so it gets its own struct.
+
+// chatToolrowsFixture mirrors the generator's toolrows schema (distinct from the
+// reply-body chatGoldenFixture: one block + one projection object per variant).
+type chatToolrowsFixture struct {
+	Scope    string                `json:"scope"`
+	Comment  string                `json:"_comment"`
+	Variants []chatToolrowsVariant `json:"variants"`
+}
+
+type chatToolrowsVariant struct {
+	Kind       string          `json:"kind"`
+	Name       string          `json:"name"`
+	Block      json.RawMessage `json:"block"`
+	Projection chatProjEntry   `json:"projection"`
+}
 
 // loadChatToolrowsGolden reads the toolrows fixture and floor-guards it: a gutted
-// or truncated regen must RED here instead of silently shrinking coverage.
-func loadChatToolrowsGolden(t *testing.T) chatGoldenFixture {
+// or truncated regen must RED here instead of silently shrinking coverage. The
+// scope + generator-name guards also make a schema DRIFT (a hand-swap to some
+// other fixture) red loudly rather than parse to zero variants.
+func loadChatToolrowsGolden(t *testing.T) chatToolrowsFixture {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("testdata", "chat_golden_toolrows.json"))
 	if err != nil {
 		t.Fatalf("read chat toolrows golden fixture: %v", err)
 	}
-	var fx chatGoldenFixture
+	var fx chatToolrowsFixture
 	if err := json.Unmarshal(raw, &fx); err != nil {
 		t.Fatalf("decode chat toolrows golden fixture: %v", err)
 	}
-	if fx.Scope != "chat-toolrows-only" {
-		t.Fatalf("fixture floor: scope = %q, want chat-toolrows-only (D25)", fx.Scope)
+	// The generator stamps this scope on BOTH mirrors; a mismatch means the Go
+	// leg is reading a different/older fixture than Studio locked.
+	if fx.Scope != "chat-tool-todo-thinking-rows" {
+		t.Fatalf("fixture floor: scope = %q, want chat-tool-todo-thinking-rows (D25)", fx.Scope)
 	}
 	if !strings.Contains(fx.Comment, "gen_golden_toolrows") {
-		t.Fatalf("fixture floor: comment must name the sibling generator so a hand-edit is caught")
+		t.Fatalf("fixture floor: comment must name the generator so a hand-edit is caught")
 	}
 	if len(fx.Variants) < 3 {
 		t.Fatalf("fixture floor: %d variants, want >= 3 (one per structural block type)", len(fx.Variants))
@@ -53,11 +78,11 @@ func loadChatToolrowsGolden(t *testing.T) chatGoldenFixture {
 	return fx
 }
 
-// TestChatGoldenToolrowsParity is the toolrows render-parity proof: every variant
-// decodes to exactly the projected type sequence, renders through the real
-// Decode -> RenderDoc seam with zero unknown-block fallback, and every block's
-// key projection text is realized in the terminal output — the same rows Studio
-// draws, now drawn in the terminal.
+// TestChatGoldenToolrowsParity is the toolrows render-parity proof: every
+// variant's single typed block decodes to exactly the projected type, renders
+// through the real Decode -> RenderDoc seam with zero unknown-block fallback,
+// and every significant word of the projection text is realized in the terminal
+// output — the same rows Studio draws, now drawn in the terminal.
 func TestChatGoldenToolrowsParity(t *testing.T) {
 	fx := loadChatToolrowsGolden(t)
 	reg := DefaultRegistry(DarkTheme())
@@ -70,26 +95,26 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 	for _, v := range fx.Variants {
 		v := v
 		t.Run(v.Name, func(t *testing.T) {
-			if len(v.Projection) == 0 {
-				t.Fatalf("variant %q has an empty projection", v.Name)
+			if strings.TrimSpace(v.Projection.Text) == "" {
+				t.Fatalf("variant %q has an empty projection text", v.Name)
 			}
 
-			blocks, err := Decode(v.Blocks)
+			// A variant carries ONE block; wrap it in an array for the shared
+			// Decode seam (which accepts a bare block array).
+			blocks, err := Decode([]byte("[" + string(v.Block) + "]"))
 			if err != nil {
-				t.Fatalf("decode blocks: %v", err)
+				t.Fatalf("decode block: %v", err)
 			}
 
-			// (1) Structural parity: the decoded top-level type sequence equals the
-			// projection's — the shared JSON decodes to exactly the projected shape.
-			if len(blocks) != len(v.Projection) {
-				t.Fatalf("decoded %d blocks, projection has %d entries", len(blocks), len(v.Projection))
+			// (1) Structural parity: the block decodes to exactly one block whose
+			// type equals the projection's type.
+			if len(blocks) != 1 {
+				t.Fatalf("variant %q decoded %d blocks, want exactly 1", v.Name, len(blocks))
 			}
-			for i, entry := range v.Projection {
-				if blocks[i].Type != entry.Type {
-					t.Fatalf("block %d: decoded type %q, projection type %q", i, blocks[i].Type, entry.Type)
-				}
-				seenTypes[entry.Type] = true
+			if blocks[0].Type != v.Projection.Type {
+				t.Fatalf("variant %q: decoded type %q, projection type %q", v.Name, blocks[0].Type, v.Projection.Type)
 			}
+			seenTypes[v.Projection.Type] = true
 
 			// (2) No fallback: every structural block type has a real renderer — the
 			// whole point of promoting these rows to block types (Law 1).
@@ -99,21 +124,19 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 				t.Fatalf("variant %q fell through to the unknown-block box:\n%s", v.Name, stripped)
 			}
 
-			// (3) Realization: every block's key projection text appears in the
+			// (3) Realization: every significant projection word appears in the
 			// render (whitespace-collapsed, case-insensitive per-word presence).
 			hay := collapse(out)
-			for _, entry := range v.Projection {
-				words := significantWords(entry.Text)
-				if len(words) == 0 {
-					t.Fatalf("projection %q/%q carries no significant (>=4-char) word", v.Name, entry.Type)
-				}
-				for _, w := range words {
-					if !strings.Contains(hay, strings.ToLower(w)) {
-						t.Fatalf(
-							"variant %q %q block: projection word %q not realized in render:\n%s",
-							v.Name, entry.Type, w, stripped,
-						)
-					}
+			words := significantWords(v.Projection.Text)
+			if len(words) == 0 {
+				t.Fatalf("projection %q/%q carries no significant (>=4-char) word", v.Name, v.Projection.Type)
+			}
+			for _, w := range words {
+				if !strings.Contains(hay, strings.ToLower(w)) {
+					t.Fatalf(
+						"variant %q %q block: projection word %q not realized in render:\n%s",
+						v.Name, v.Projection.Type, w, stripped,
+					)
 				}
 			}
 		})
@@ -130,11 +153,11 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 
 // TestChatToolDiffPathFromInput pins the tolerant file-path read: the LIVE
 // Elixir controller (chat_tool_diff_block) nests the tool call under `input`,
-// so the mutated path arrives as `input.file_path`, NOT a flat `path` like the
-// golden fixture carries. Without the nested fallback the diff card header is
-// path-less on real /v1/chat data — a silent Law-1 parity break the fixture
-// (flat-path only) cannot catch. This renders the real server shape and asserts
-// the path is drawn.
+// so the mutated path arrives as `input.file_path`, NOT a flat `path`. Without
+// the nested fallback the diff card header is path-less on real /v1/chat data —
+// a silent Law-1 parity break the projection-text asserts do not cover (the
+// generator's projection omits the path). This renders the real server shape and
+// asserts the path is drawn.
 func TestChatToolDiffPathFromInput(t *testing.T) {
 	reg := DefaultRegistry(DarkTheme())
 	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
