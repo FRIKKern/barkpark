@@ -188,6 +188,13 @@ config :barkpark, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"30 3 * * *", Barkpark.Search.Workers.Crystallize},
+       # authoring-excellence D45 — daily per-type tag-count distribution
+       # heartbeat over the published corpus (paper/task). Pure/derivable read
+       # (Barkpark.Content.TagDistribution) that only Logger.info's the top-N
+       # tags per type — no table, no persisted artifact. Placed one minute
+       # after Crystallize (both nightly, disjoint queries) so the two heavy
+       # nightly reads never kick off in the same tick.
+       {"31 3 * * *", Barkpark.Workers.TagDistribution},
        {"0 4 * * *", Barkpark.Search.Workers.Prune},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
