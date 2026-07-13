@@ -54,6 +54,14 @@ defmodule Barkpark.Media.ImageBackend.Magick do
   # brutal-kills the child so render returns immediately with a bounded error
   # instead of blocking. The `System.cmd` FORM is unchanged (no shell string —
   # injection is not the vector; src is a server-controlled Media.file_path).
+  #
+  # Sobelow CI.System is a false-positive here: `bin` is resolved by magick_bin/0
+  # (a fixed "magick"/"convert" lookup or a test-only config override, never
+  # request data) and `args` is a server-built token list — no shell string, no
+  # client input. This durable inline skip replaces the line-anchored
+  # `.sobelow-skips` fingerprint (`magick.ex:30`), which the deadline refactor
+  # moved System.cmd off of — the exact fingerprint-drift the #2641 pattern cures.
+  # sobelow_skip ["CI.System"]
   defp run_bounded(bin, args) do
     task =
       Task.async(fn -> System.cmd(bin, args, stderr_to_stdout: true, env: portable_env(bin)) end)
