@@ -359,7 +359,10 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
           project_id: project.id
         )
 
-      {file, _on_disk} = upload_media!(ws, project, "atom.png")
+      {file, on_disk} = upload_media!(ws, project, "atom.png")
+
+      assert File.exists?(on_disk),
+             "upload should have placed the blob on disk at #{on_disk}"
 
       # Sanity: prove the halt hook IS wired in for this test before we
       # blame Tenancy.delete_workspace for not propagating it.
@@ -379,10 +382,7 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       assert {:error, _} = Tenancy.delete_workspace(ws)
 
-      # Every DB row survives the rolled-back delete. (Side-effects outside
-      # the transaction — File.rm, the CDN HTTP purge — cannot be un-done;
-      # see the moduledoc on `delete_workspace/1`. The contract this test
-      # pins is the DATABASE state.)
+      # Every DB row survives the rolled-back delete.
       assert Repo.get(Workspace, ws.id),
              "workspace must survive a rolled-back delete"
 
@@ -394,6 +394,19 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       assert Repo.get(MediaFile, file.id),
              "media_file row must survive a rolled-back delete"
+
+      # PHANTOM-MEDIA GATE (felix-phantom-media-atomicity): the media_file ROW
+      # survives (asserted above) AND its on-disk blob survives WITH it. Before
+      # the deferred-effects fix, `delete_workspace_media` ran `File.rm` eagerly
+      # inside the transaction, so a later rollback (the halted document delete)
+      # left the row alive but the blob GONE — a phantom. The blob's four
+      # irreversible non-DB effects (File.rm / CDN purge / media.deleted webhook /
+      # rendition removal) are now DEFERRED until commit and DROPPED on rollback,
+      # so row and blob stay consistent. This assertion goes RED on the unfixed
+      # tree (blob already removed) and GREEN once the effects are deferred.
+      assert File.exists?(on_disk),
+             "on rollback the media blob at #{on_disk} must survive alongside its " <>
+               "surviving row — a live row with a deleted blob is the phantom this fix closes"
     end
   end
 

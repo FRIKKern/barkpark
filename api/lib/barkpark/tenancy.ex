@@ -929,10 +929,16 @@ defmodule Barkpark.Tenancy do
   The whole sequence runs inside a single `Repo.transaction`. If ANY step
   fails — a hook returns an error, a Repo write blows up, the workspace
   delete races — the transaction rolls back and nothing partial-deletes.
-  Side-effects that already ran outside the transaction (a `File.rm` on
-  disk, an HTTP CDN purge) cannot be un-done; those run on rows that the
-  rollback will leave alive, so the next retry re-fires them. This is the
-  same trade-off `Media.delete_file/2` makes on its own.
+
+  Media-delete side effects are ATOMIC with the transaction: while inside it,
+  `Media.delete_file/2` DEFERS its four irreversible non-DB effects (on-disk
+  `File.rm`, CDN purge, the `media.deleted` webhook, rendition removal) into a
+  process-dict queue instead of firing them eagerly. This function FLUSHES that
+  queue only on `{:ok, _}` (commit) and DROPS it on rollback/rescue — so an
+  aborted teardown leaves each surviving `media_file` row's blob, CDN entry, and
+  renditions intact (no phantom media). The single in-transaction DB write those
+  deletes still make — the `:after_media_delete` plugin hook — rolls back with
+  the rest (its contract is DB-writes-only; see `Media.delete_file/2`).
 
   Accepts a `%Workspace{}` struct or a workspace id binary. Returns
   `{:ok, workspace}` on success or `{:error, term}` on rollback.
@@ -942,12 +948,33 @@ defmodule Barkpark.Tenancy do
   @spec delete_workspace(Workspace.t() | binary()) ::
           {:ok, Workspace.t()} | {:error, :not_found | term()}
   def delete_workspace(%Workspace{} = workspace) do
-    Repo.transaction(fn ->
-      case do_delete_workspace(workspace) do
-        {:ok, ws} -> ws
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+    # Media-delete effects (File.rm / CDN purge / media.deleted webhook /
+    # rendition removal) fired by `Media.delete_file/2` inside the transaction
+    # below are DEFERRED (it detects `Repo.in_transaction?/0`) so a mid-delete
+    # rollback — e.g. a halted document delete — cannot strand a surviving
+    # media_file row's blob. Clear any stale queue, then FLUSH on commit /
+    # DROP on rollback. Mirrors Content.Mutations.apply_mutations' broadcast
+    # triad.
+    Media.clear_deferred_media_effects()
+
+    result =
+      Repo.transaction(fn ->
+        case do_delete_workspace(workspace) do
+          {:ok, ws} -> ws
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, _} -> Media.flush_deferred_media_effects()
+      _ -> Media.clear_deferred_media_effects()
+    end
+
+    result
+  rescue
+    e ->
+      Media.clear_deferred_media_effects()
+      reraise(e, __STACKTRACE__)
   end
 
   def delete_workspace(id) when is_binary(id) do
