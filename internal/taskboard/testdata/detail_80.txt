@@ -36,11 +36,14 @@ criteria 2/3
     ↳ internal/taskboard/live.go:42
   ✓ Connection dot renders live/polling/offline honestly
   ○ A stuck reconnect can never keep reading ConnLive
+    ↳ proxy held the socket open · 35m ago (Jul 04, 16:55) · fable-2
+    ↳ backoff fixture still races · 20m ago (Jul 04, 17:10) · fable-3
 
 labels  proj:task-tui · area:live · wave:5
 blocks 2 tasks · blocked by 1
 
 claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:26)
+       ⠋ fable-3 · checking reconnect backoff · 1m
        lease expires in 1m
        previously opus-2
 

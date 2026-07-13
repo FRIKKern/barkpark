@@ -180,7 +180,7 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	}
 
 	// (6) Acceptance-criteria checklist.
-	b.emitCriteria(d, width)
+	b.emitCriteria(d, width, now)
 
 	// (7)+(8) Labels + deps — flat dim facts, one line each.
 	b.emitFacts(d, width)
@@ -419,10 +419,10 @@ func portableDocLines(raw []byte, width int) []string {
 }
 
 // emitCriteria is section (6): a `criteria met/total` header plus a ✓/○
-// checklist with per-item evidence. When only the {met,total} counter
-// survived decoding (no items), the header alone renders — never emptier
-// than the wire was honest about.
-func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
+// checklist with per-item evidence and the ordered honest-miss attempts trail.
+// When only the {met,total} counter survived decoding (no items), the header
+// alone renders — never emptier than the wire was honest about.
+func (b *detailBuilder) emitCriteria(d TaskDetail, width int, now time.Time) {
 	items := d.CriteriaItems
 	hasCounter := d.Criteria != nil && d.Criteria.Total > 0
 	if len(items) == 0 && !hasCounter {
@@ -453,6 +453,28 @@ func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
 		}
 		if i < len(d.Evidence) && d.Evidence[i] != "" {
 			b.add(dimStyle.Render(truncate("    ↳ "+d.Evidence[i], width)))
+		}
+		for _, attempt := range it.Attempts {
+			var parts []string
+			if note := strings.TrimSpace(attempt.Note); note != "" {
+				parts = append(parts, note)
+			}
+			if stamp := hybridStamp(attempt.At, now); stamp != "" {
+				parts = append(parts, stamp)
+			}
+			if worker := strings.TrimSpace(attempt.Worker); worker != "" {
+				parts = append(parts, worker)
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			for j, line := range detailWrap(strings.Join(parts, " · "), width-6) {
+				prefix := "      "
+				if j == 0 {
+					prefix = "    ↳ "
+				}
+				b.add(dimStyle.Render(prefix + line))
+			}
 		}
 	}
 }
@@ -502,11 +524,11 @@ func pluralTask(n int) string {
 	return "tasks"
 }
 
-// emitClaim is section (9): worker · epoch · ticking claimed age, the lease
-// expiry (warn tint when leaning, danger when spent), and the previous
-// worker. A TERMINAL task keeps the who-did-it facts but never a lease
-// alarm — finished work cannot have an expiring lease (mirrors staleRole's
-// terminal-neutral rule).
+// emitClaim is section (9): worker · epoch · ticking claimed age, the shared
+// pulseLine now-line, the lease expiry (warn tint when leaning, danger when
+// spent), and the previous worker. A TERMINAL task keeps the who-did-it facts
+// but never a lease alarm — finished work cannot have an expiring lease
+// (mirrors staleRole's terminal-neutral rule).
 func (b *detailBuilder) emitClaim(d TaskDetail, width int, now time.Time) {
 	if d.Claim == nil || d.Claim.Worker == "" {
 		return
@@ -517,6 +539,9 @@ func (b *detailBuilder) emitClaim(d TaskDetail, width int, now time.Time) {
 		parts = append(parts, "claimed "+s)
 	}
 	b.add(dimStyle.Render(truncate("claim  "+strings.Join(parts, " · "), width)))
+	if d.Claim.Now != nil && strings.TrimSpace(d.Claim.Now.Text) != "" {
+		b.add("       " + pulseLine(d.Task, d.Claim.Now, 0, width-7, now))
+	}
 
 	terminal := d.Lifecycle == "done" || d.Lifecycle == "closed" || d.Lifecycle == "cancelled"
 	if !d.ClaimExpiredAt.IsZero() && !terminal {

@@ -80,12 +80,23 @@ func richDetail() (TaskDetail, []Task) {
 				Worker:    "fable-3",
 				Epoch:     4,
 				ClaimedAt: at("2026-07-04T17:26:00Z"),
+				Now: &ClaimPulse{
+					Text: "checking reconnect backoff",
+					At:   at("2026-07-04T17:29:00Z"),
+				},
 			},
 			Criteria: &Criteria{Met: 2, Total: 3},
 			CriteriaItems: []CriterionItem{
 				{Criterion: "SSE dirty-bit triggers a debounced full snapshot refetch within 750ms", Met: true},
 				{Criterion: "Connection dot renders live/polling/offline honestly", Met: true},
-				{Criterion: "A stuck reconnect can never keep reading ConnLive", Met: false},
+				{
+					Criterion: "A stuck reconnect can never keep reading ConnLive",
+					Met:       false,
+					Attempts: []CriterionAttempt{
+						{Note: "proxy held the socket open", At: at("2026-07-04T16:55:00Z"), Worker: "fable-2"},
+						{Note: "backoff fixture still races", At: at("2026-07-04T17:10:00Z"), Worker: "fable-3"},
+					},
+				},
 			},
 			TwinOf:          "sse-bridge-dup",
 			TwinTitle:       "Wire the SSE bridge (duplicate filing)",
@@ -433,6 +444,61 @@ func TestDetailDoneSuppressesLeaseAlarm(t *testing.T) {
 	}
 	if strings.Contains(frame, "lease expired") || strings.Contains(frame, "expires in") {
 		t.Errorf("done task rendered a lease alarm:\n%s", frame)
+	}
+}
+
+func TestRenderTaskDetailAttemptsAndNowPulse(t *testing.T) {
+	d := TaskDetail{Task: Task{
+		Title:     "Render honest criterion history",
+		Lifecycle: "in_progress",
+		Claim: &Claim{
+			Worker:    "fable-3",
+			Epoch:     7,
+			ClaimedAt: detailNow.Add(-time.Minute),
+			Now: &ClaimPulse{
+				Text: "writing focused tests",
+				At:   detailNow.Add(-time.Minute),
+			},
+		},
+		CriteriaItems: []CriterionItem{{
+			Criterion: "The detail frame preserves honest misses",
+			Attempts: []CriterionAttempt{
+				{Note: "API returned 503", At: detailNow.Add(-2 * time.Hour), Worker: "fable-1"},
+				{Note: "fixture still missing", At: detailNow.Add(-30 * time.Minute), Worker: "fable-2"},
+			},
+		}},
+	}}
+
+	lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	first := "↳ API returned 503 · 2h ago (Jul 04, 15:30) · fable-1"
+	second := "↳ fixture still missing · 30m ago (Jul 04, 17:00) · fable-2"
+	if !strings.Contains(frame, first) || !strings.Contains(frame, second) {
+		t.Fatalf("detail frame omitted attempt note/ts/worker:\n%s", frame)
+	}
+	if strings.Index(frame, first) > strings.Index(frame, second) {
+		t.Fatalf("detail frame reordered attempts:\n%s", frame)
+	}
+
+	// The detail view must use the board's exact pulseLine vocabulary and
+	// claimRole TTL grading, not a lookalike. Compare the styled line itself at
+	// fresh, leaning, and stale ages so role/color/motion parity stays pinned.
+	for _, age := range []time.Duration{time.Minute, 4 * time.Minute, 6 * time.Minute} {
+		d.Claim.Now.At = detailNow.Add(-age)
+		lines, _ = RenderTaskDetail(d, nil, 0, 100, detailNow)
+		want := "       " + pulseLine(d.Task, d.Claim.Now, 0, 100-7, detailNow)
+		found := false
+		for _, line := range lines {
+			if strings.Contains(ansi.Strip(line), d.Claim.Now.Text) {
+				found = true
+				if line != want {
+					t.Errorf("pulse age %s rendered outside pulseLine/claimRole contract\n got: %q\nwant: %q", age, line, want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("pulse age %s missing from detail frame", age)
+		}
 	}
 }
 
