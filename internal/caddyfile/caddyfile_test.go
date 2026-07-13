@@ -285,6 +285,125 @@ func TestRender_AllValidGolden(t *testing.T) {
 	}
 }
 
+func TestRender_StaticKindGolden(t *testing.T) {
+	// A static-kind site renders the on_demand tls block + root/file_server
+	// (NOT reverse_proxy) and — unlike a proxied site — carries no maintenance
+	// handler, so file_server's own 404 surfaces instead of a fake deploy page.
+	got := Render(Box{
+		AskGateURL: "https://cloud.barkpark.cloud/v1/tls/ask",
+		Sites: []Site{
+			{Slug: "blog", Domains: []string{"www.blog.com", "blog.com"}, Kind: KindStatic, Root: "/srv/sites/blog/current"},
+		},
+	})
+	want := "{\n  on_demand_tls {\n    ask https://cloud.barkpark.cloud/v1/tls/ask\n  }\n}\n\n" +
+		"# site blog (static /srv/sites/blog/current)\n" +
+		"blog.com, www.blog.com {\n" +
+		"  tls {\n    on_demand\n  }\n" +
+		"  root * /srv/sites/blog/current\n" +
+		"  file_server\n" +
+		"}\n\n"
+	if got != want {
+		t.Errorf("static-kind render drifted from golden:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if strings.Contains(got, "reverse_proxy") {
+		t.Errorf("static site must not emit reverse_proxy:\n%s", got)
+	}
+	if strings.Contains(got, "handle_errors") {
+		t.Errorf("static site must not emit the maintenance handler (404s must surface):\n%s", got)
+	}
+}
+
+func TestRender_MixedBox_StaticAndReverseProxy(t *testing.T) {
+	// One static + one reverse_proxy site render correctly together, slug-sorted.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "proxied", Domains: []string{"app.com"}, Port: 7001},
+			{Slug: "flat", Domains: []string{"docs.com"}, Kind: KindStatic, Root: "/srv/sites/flat/current"},
+		},
+	})
+
+	// Static block: root + file_server, no proxy, no maintenance handler.
+	if !strings.Contains(got, "# site flat (static /srv/sites/flat/current)\n") {
+		t.Errorf("static site header missing:\n%s", got)
+	}
+	if !strings.Contains(got, "docs.com {\n  tls {\n    on_demand\n  }\n  root * /srv/sites/flat/current\n  file_server\n}") {
+		t.Errorf("static block malformed:\n%s", got)
+	}
+	// Proxied block: reverse_proxy + its maintenance handler, no root/file_server.
+	if !strings.Contains(got, "app.com {\n  tls {\n    on_demand\n  }\n  reverse_proxy 127.0.0.1:7001\n") {
+		t.Errorf("reverse_proxy block malformed:\n%s", got)
+	}
+	// The static site contributes no reverse_proxy and no file_server leaks into
+	// the proxied one. Exactly one of each directive across the whole box.
+	if n := strings.Count(got, "file_server"); n != 1 {
+		t.Errorf("expected exactly one file_server (static only), got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "reverse_proxy"); n != 1 {
+		t.Errorf("expected exactly one reverse_proxy (proxied only), got %d:\n%s", n, got)
+	}
+	// Maintenance handler rides the proxied site only, not the static one.
+	if n := strings.Count(got, "handle_errors {"); n != 1 {
+		t.Errorf("expected exactly one maintenance handler (proxied only), got %d:\n%s", n, got)
+	}
+	// Slug order: flat (f) before proxied (p).
+	if iFlat, iProxied := strings.Index(got, "site flat"), strings.Index(got, "site proxied"); !(iFlat >= 0 && iFlat < iProxied) {
+		t.Errorf("sites not slug-ordered: flat=%d proxied=%d", iFlat, iProxied)
+	}
+}
+
+func TestRender_StaticSkippedWhenRootMissingOrUnsafe(t *testing.T) {
+	// A static site is gated on a safe, non-empty Root (mirroring Port>0 for
+	// proxied sites), so an empty/unsafe Root is skipped and never squats its
+	// domains — a serving site that also lists them keeps them.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "no-root", Domains: []string{"a.com"}, Kind: KindStatic, Root: ""},
+			{Slug: "bad-root", Domains: []string{"b.com"}, Kind: KindStatic, Root: "/srv/evil\n} :6000 {"},
+			{Slug: "good", Domains: []string{"c.com"}, Kind: KindStatic, Root: "/srv/sites/good/current"},
+		},
+	})
+	if strings.Contains(got, "no-root") || strings.Contains(got, "bad-root") {
+		t.Errorf("static sites with empty/unsafe Root should be skipped:\n%s", got)
+	}
+	if strings.Contains(got, ":6000 {") {
+		t.Errorf("unsafe Root fragment leaked into output:\n%s", got)
+	}
+	if !strings.Contains(got, "root * /srv/sites/good/current") {
+		t.Errorf("static site with a safe Root should render:\n%s", got)
+	}
+}
+
+func TestRender_StaticNotReadySiteDoesNotSquatDomain(t *testing.T) {
+	// A not-ready static site (empty Root) and a serving static site both list
+	// the same domain. Since sites are slug-sorted and the not-ready one is
+	// skipped BEFORE consuming domains, the serving site keeps the domain.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "aaa-notready", Domains: []string{"shared.com"}, Kind: KindStatic, Root: ""},
+			{Slug: "zzz-serving", Domains: []string{"shared.com"}, Kind: KindStatic, Root: "/srv/z/current"},
+		},
+	})
+	if n := strings.Count(got, "shared.com"); n != 1 {
+		t.Errorf("shared domain should render exactly once (serving site keeps it), got %d:\n%s", n, got)
+	}
+	if !strings.Contains(got, "shared.com {") {
+		t.Errorf("serving site should own the domain:\n%s", got)
+	}
+}
+
+func TestRender_StaticKind_Deterministic(t *testing.T) {
+	box := Box{
+		AskGateURL: "https://x/ask",
+		Sites: []Site{
+			{Slug: "s2", Domains: []string{"b.com", "a.com"}, Kind: KindStatic, Root: "/srv/s2/current"},
+			{Slug: "s1", Domains: []string{"x.com"}, Port: 7001},
+		},
+	}
+	if a, b := Render(box), Render(box); a != b {
+		t.Errorf("mixed static/proxy render is not deterministic:\n--- a ---\n%s\n--- b ---\n%s", a, b)
+	}
+}
+
 func TestRender_BlueGreen_SamePortConfig(t *testing.T) {
 	// Simulating a blue/green swap: same site, different port → renders
 	// different upstream. (The agent will then `caddy reload`, drain old.)
