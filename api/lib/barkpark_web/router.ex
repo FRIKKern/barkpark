@@ -540,8 +540,21 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
+    # Close the flat :media_mutate quota hole (bpb-flat-media-quota-hole, D14/D30).
+    # This pipeline has no ResolveWorkspace, so it would fall to AssignDefaultScope
+    # and meter EVERY flat media write against the singleton Default Workspace.
+    # Derive :current_workspace from the just-assigned api_token BEFORE
+    # AssignDefaultScope (which no-ops once the assign is set) so the write meters
+    # to its OWN workspace. A nil-workspace_id token falls through untouched and
+    # keeps today's Default-Workspace behavior.
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    # Per-workspace quota gate — mirrors :scoped_media_mutate. The media write
+    # path bypasses Content (Media.upload/3 = raw Repo.insert), so this router
+    # seam is the only point that gates it; `meter: :media` emits the one
+    # [:barkpark, :media, :mutate] telemetry event per allowed write (charter D12).
+    plug(BarkparkWeb.Plugs.RequireWithinQuota, meter: :media)
     # Write-gate: media upload/update/delete are mutations — a read-only token
     # (or read-only session member) must be denied 403 before the controller.
     # RequireBearerOrSessionToken always assigns :api_token on success, so the
