@@ -1793,3 +1793,13 @@ before declaring failure. All agents on Opus. `@canonical capability:github-inbo
 `needs-human`/flips ownership/posts a backlink), conflict quarantine (D7 `github_sync_conflicts`
 record-then-converge), deleted-issue → `detached`. The `github.state == "intake"` bookkeeping value this
 wave stamps is the wave-4 adopt action's find-key.
+
+### Wave 2026-07-13 — Wave 9 landed (steward-merged, grade A-)
+
+**Landed.** The 2-slice named-failure wave shipped; the exposure spine stays human-gated (per D16 — building a specific eligibility predicate would front-run the open `github-bridge-mirror-exposure-decision` task's crit-1, a human choice among five options). **#2908** (`28b43636`) = D17 conflict-source dedup: `Conflicts.open_row/1` AND the partial unique index now key on `{repo,issue,kind,COALESCE(detail->>'source','')}` (lockstep migration; COALESCE guards the null-is-distinct trap; NO new kind — D14 held) so two co-occurring distinct-source problems on one issue stay two operator rows instead of silently collapsing to one. **#2909** (`47bbf463`) = D18 status dataset read-scope: `GET /v1/plugins/github/status` no longer leaks whole-fleet sync health to any operator token — `Health.snapshot/1` now honors its dataset arg (was a dead `_opts` param) and the controller constrains to `conn.assigns.api_token.dataset` (NOT ScopeHelpers, which returns the seeded Default on flat `:token` routes) — a cross-tenant read-leak sealed. Both merge-gated criteria closed with evidence; both slices carried fail-before protective tests, gates green.
+
+**Steward notes.** (1) The Decide-phase charter commit `8c6c2974` (D16-D18 + wave-9 cut) never reached origin/main — the recurring "charter never pushed" trap; recovered by cherry-pick onto main (`32942c08`) before the fix PRs. (2) #2909's Sobelow reddened on a baseline DRIFT (not a new risk): D18's ~53 added lines shifted the two safe `@queue_states` `String.to_atom` findings from health.ex:255/266 → 308/319 (bounded module-attribute list, Low Confidence) — baseline refreshed on-branch.
+
+**Backlog filed:** `github-bridge-spine-outbound-scoping` (the fully-specified but human-gated mirror-eligibility predicate — build only after the exposure decision rules), `github-bridge-w9-health-workspace-isolation`.
+
+**Next wave takes:** resolve `github-bridge-mirror-exposure-decision` (needs a human ruling among the five scoping options) → then build `github-bridge-spine-outbound-scoping` + the reconcile-over-shared path for the ~277 already-mirrored issues; `github-bridge-w9-health-workspace-isolation`.
