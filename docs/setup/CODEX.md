@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: codex-onramp | budget: 1600tok -->
+<!-- doc-tier: human | canonical-for: codex-onramp | budget: 2600tok -->
 # Barkpark in Codex (CLI + Desktop)
 
 Give your Codex agent a real task board: lifecycle, priorities, and an atomic
