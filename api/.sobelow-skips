@@ -69,7 +69,7 @@ Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:326,3D7BA
 Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:284,4CCC2D5
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/tenancy/workspace_bundle/archive.ex:38,4CE988E
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:231,5C04A3E
-Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2107,603364D
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2160,2BEB0D
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:453,6AFB241
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/tenancy/workspace_bundle/archive.ex:36,73FD054
 Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:369,7E46C5D

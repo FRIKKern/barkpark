@@ -2058,6 +2058,23 @@ defmodule BarkparkWeb.Router do
     delete("/workspaces/:workspace_slug", WorkspaceController, :delete)
   end
 
+  # ── Playground front door — provision a disposable workspace + scoped token ─
+  # perfect-plan-build W2c (charter D25/D27). One call mints a real, ephemeral
+  # `tier: "playground"` workspace (expires_at = now + 48h, document quota 100)
+  # plus a workspace-scoped NON-admin visitor token — the top-of-funnel "try it
+  # now" experience. Same admin gate as DELETE above this wave; the public,
+  # rate-limited anon exposure is W3 backlog (`bpb-playground-rate-limit`).
+  #
+  # DELIBERATELY a bare router+controller route with NO capabilities manifest
+  # command: `docs/openapi.json` is manifest-derived, so a bare route is
+  # invisible to the OpenAPI drift gate (mirrors DELETE above, also absent from
+  # the spec) — zero drift trip, zero local-OOM spec regen (charter D22).
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    post("/playground", PlaygroundController, :provision)
+  end
+
   # ── Workspace bundle transfer — admin-gated export / import ──────────────
   # The HTTP surface over the shipped `Barkpark.Tenancy.WorkspaceBundle` keystone
   # engine (bp-export-v1): a complete, self-describing, round-trippable dump of
