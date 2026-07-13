@@ -22,6 +22,15 @@ at the repo root with its own `package-lock.json`, deliberately **outside** the 
 `pnpm-workspace.yaml`. Do not add a nested `pnpm-workspace.yaml` here — it shadows
 the root one and breaks `pnpm install` for the whole repo. (Charter D27.)
 
+## Deploy shape
+
+A **persistent, always-on Node process** — not Vercel serverless functions
+(charter D32). Telegram's `getUpdates` polling wants a long-lived loop, P3's
+Discord needs a persistent Gateway websocket, and the streaming glue is itself a
+long-lived SSE client. There is deliberately **no `vercel.json`**: it would imply
+a deploy shape this wave explicitly rejected. Webhook-only providers could get one
+later. The host is not a commitment of this wave.
+
 ## The one piece of state
 
 The bridge holds exactly **one** piece of per-conversation state:

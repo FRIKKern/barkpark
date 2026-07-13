@@ -4,9 +4,11 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
-    // The map + streaming glue are pure logic tested against pg-mem (an
-    // in-process Postgres) and a faithful SSE mock — never Barkpark's real DB
-    // and never a live BEAM. See test/thread-session-map.test.ts.
+    // The state-layer proofs run against a REAL, ephemeral Postgres that the
+    // suite creates and drops — never Barkpark's own database, and never an
+    // in-memory fake (which cannot prove schema isolation; see
+    // test/thread-session-map.test.ts). The transport runs against a byte-exact
+    // SSE mock, never a live BEAM.
     globals: false,
   },
 });

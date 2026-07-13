@@ -21,9 +21,12 @@ import {
 export { CHAT_BRIDGE_SCHEMA } from "./schema.js";
 
 /**
- * The subset of `pg.Pool` the bridge depends on. Declaring it explicitly lets
- * tests inject an in-process Postgres (pg-mem) whose Pool is structurally
- * compatible, without dragging in a running database.
+ * The structural subset of `pg.Pool` the bridge's own modules depend on.
+ * Depending on this rather than the concrete `pg.Pool` keeps the map and the
+ * installs lookup honest about what they actually need (a `query`), and lets a
+ * test substitute a store double at that seam. The schema-isolation proofs
+ * themselves run against a REAL Postgres — see test/thread-session-map.test.ts
+ * for why an in-memory fake cannot prove them.
  */
 export interface BridgePool {
   query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
@@ -38,11 +41,6 @@ export interface BridgePoolClient {
 
 export interface CreateBridgePoolOptions {
   connectionString: string;
-  /**
-   * Injectable Pool constructor (defaults to `pg.Pool`). Tests pass pg-mem's
-   * adapter here so the exact same wiring runs against an in-memory Postgres.
-   */
-  poolCtor?: new (config: pg.PoolConfig) => pg.Pool;
 }
 
 /**
@@ -51,14 +49,12 @@ export interface CreateBridgePoolOptions {
  * boot to create the schema + tables idempotently.
  */
 export function createBridgePool(options: CreateBridgePoolOptions): pg.Pool {
-  const PoolCtor = options.poolCtor ?? pg.Pool;
-  const pool = new PoolCtor({
+  return new pg.Pool({
     connectionString: options.connectionString,
     // Startup parameter: server-side, applied at connection open, ahead of any
     // query. This is the guarantee that state-pg's unqualified DDL is isolated.
     options: `-c search_path=${CHAT_BRIDGE_SCHEMA}`,
   });
-  return pool;
 }
 
 /**
