@@ -1760,6 +1760,13 @@ defmodule Barkpark.StudioChat do
   """
   @spec store_attachment(String.t(), binary(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
+  # Sobelow Traversal.FileModule (File.mkdir_p/1, File.write/2) is a
+  # false-positive: neither path segment is client-controlled. `session_id` is a
+  # server-set UUID (socket.assigns, never a request param) and the leaf is the
+  # sha256 of the bytes computed here — so `dir`/`abs` can never be walked outside
+  # the attachments root. (Was line-anchored in .sobelow-skips; that fingerprint
+  # drifts on any edit above — the inline skip is durable, matching #2641.)
+  # sobelow_skip ["Traversal.FileModule"]
   def store_attachment(session_id, bytes, media_type)
       when is_binary(session_id) and is_binary(bytes) do
     sha = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
@@ -1785,6 +1792,12 @@ defmodule Barkpark.StudioChat do
   honest miss so replay renders a placeholder instead of crashing.
   """
   @spec read_attachment(String.t() | nil) :: {:ok, binary()} | {:error, :missing}
+  # Sobelow Traversal.FileModule (File.read/1) is a false-positive: `rel_path` is
+  # validated by `safe_rel_path?/1` — the two-segment guard rejects any path with
+  # an empty/"."/".." segment or an embedded "/", so File.read can never escape
+  # the attachments root even if the stored pointer were tampered with. (Was
+  # line-anchored in .sobelow-skips; the inline skip is durable, matching #2641.)
+  # sobelow_skip ["Traversal.FileModule"]
   def read_attachment(rel_path) when is_binary(rel_path) do
     if safe_rel_path?(rel_path) do
       case File.read(Path.join(attachments_dir(), rel_path)) do
@@ -1804,6 +1817,12 @@ defmodule Barkpark.StudioChat do
   an attachment (a missing dir is a clean success). Never raises.
   """
   @spec delete_session_attachments(String.t()) :: :ok
+  # Sobelow Traversal.FileModule (File.rm_rf/1) is a false-positive: the target is
+  # only removed when `uuid_like?/1` (Ecto.UUID.cast) confirms `session_id` is a
+  # bare UUID — no separators, no "..", so rm_rf can only ever delete a single
+  # session dir inside the attachments root. (Was line-anchored in .sobelow-skips;
+  # the inline skip is durable, matching #2641.)
+  # sobelow_skip ["Traversal.FileModule"]
   def delete_session_attachments(session_id) when is_binary(session_id) do
     if uuid_like?(session_id) do
       File.rm_rf(Path.join(attachments_dir(), session_id))
