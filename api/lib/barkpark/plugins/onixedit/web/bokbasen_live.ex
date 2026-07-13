@@ -48,34 +48,30 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   @all_states ~w(pending staging staged polling accepted rejected failed cancelled cannot_cancel)
   @retryable_states ~w(failed rejected cancelled cannot_cancel)
 
-  # d07 F2 scar-class bound: `load_submissions/0` selects EVERY book-type
-  # document in `production` and holds one row per submission in the
-  # `all_submissions` assign for the life of the socket. Unbounded, that assign
-  # grows with the total ONIX book count across every workspace, so each open
-  # console pins O(total-books) into the LiveView process heap. Cap the read at
-  # the most-recently-updated page — a sane admin window (the console is a
-  # triage surface, not an export). Raise deliberately, never remove.
+  # d07 F2 scar-class bound: `load_submissions/1` selects book-type documents in
+  # `production` and holds one row per submission in the `all_submissions` assign
+  # for the life of the socket. Unbounded, that assign would grow with the total
+  # ONIX book count across every workspace, pinning O(total-books) into the
+  # LiveView process heap. This is the PAGE SIZE: every read is a single
+  # LIMIT/OFFSET window (see `next_page`/`prev_page`), so the heap holds exactly
+  # one page no matter how deep the operator pages. Raise deliberately, never remove.
   @page_limit 200
 
   @impl true
   def mount(_params, _session, socket) do
     # d07 F2 mount gate: mount/3 runs TWICE — once for the discarded
     # disconnected HTTP render, once for the live WebSocket mount. Running
-    # `load_submissions/0` unconditionally doubled the DB projection per console
+    # `load_submissions/1` unconditionally doubled the DB projection per console
     # open (and the dead render is thrown away). This surface is admin-gated, so
     # no crawler consumes the disconnected HTML — load ONLY on the live mount and
     # subscribe to the loaded rows there; the dead render carries an empty page.
-    submissions =
+    {submissions, has_next?, subscribed} =
       if connected?(socket) do
-        subs = load_submissions()
-
-        Enum.each(subs, fn sub ->
-          Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{sub.doc_id}")
-        end)
-
-        subs
+        {subs, has_next?} = load_submissions(0)
+        subscribed = resubscribe(MapSet.new(), subs)
+        {subs, has_next?, subscribed}
       else
-        []
+        {[], false, MapSet.new()}
       end
 
     {:ok,
@@ -83,6 +79,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
      |> assign(
        page_title: "Bokbasen Submissions",
        all_submissions: submissions,
+       page: 0,
+       has_next_page: has_next?,
        sort_field: :last_action_at,
        sort_direction: :desc,
        state_filter: MapSet.new(@all_states),
@@ -91,7 +89,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
        expanded_errors: MapSet.new(),
        all_states: @all_states,
        retryable_states: @retryable_states,
-       subscribed: subscribed_set(submissions)
+       subscribed: subscribed
      )}
   end
 
@@ -176,6 +174,29 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
         else
           {:noreply, put_flash(socket, :error, "Cannot retry from state #{inspect(sub.state)}")}
         end
+    end
+  end
+
+  # PINNED design: OFFSET-based pagination (NOT cursor). The @page_limit cap on
+  # `load_submissions/1` bounds the socket heap to one page, but rows past the
+  # cap were unreachable. `next_page`/`prev_page` re-run the projection at a new
+  # OFFSET, preserving `updated_at desc` order and the per-page bound. The
+  # `subscribed` set is the subscription ledger: `resubscribe/2` unsubscribes the
+  # outgoing page's doc topics and subscribes the incoming page's, so PubSub
+  # subscriptions do NOT leak per socket across navigation.
+  def handle_event("next_page", _params, socket) do
+    if socket.assigns.has_next_page do
+      {:noreply, change_page(socket, socket.assigns.page + 1)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("prev_page", _params, socket) do
+    if socket.assigns.page > 0 do
+      {:noreply, change_page(socket, socket.assigns.page - 1)}
+    else
+      {:noreply, socket}
     end
   end
 
@@ -320,20 +341,97 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
           </table>
         <% end %>
       <% end %>
+
+      <%= if @page > 0 or @has_next_page do %>
+        <nav class="bp-pager" data-test-id="bokbasen-pager" aria-label="Submissions pages">
+          <button
+            type="button"
+            phx-click="prev_page"
+            disabled={@page == 0}
+            data-test-action="prev-page"
+          >
+            ← Newer
+          </button>
+          <span data-test-id="bokbasen-page-number">Page {@page + 1}</span>
+          <button
+            type="button"
+            phx-click="next_page"
+            disabled={not @has_next_page}
+            data-test-action="next-page"
+          >
+            Older →
+          </button>
+        </nav>
+      <% end %>
     </div>
     """
   end
 
   # ---- Helpers ---------------------------------------------------------------
 
-  defp load_submissions do
-    Document
-    |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
-    |> order_by([d], desc: d.updated_at)
-    |> limit(^@page_limit)
-    |> Repo.all()
-    |> Enum.map(&document_to_row/1)
-    |> Enum.reject(fn row -> is_nil(row.state) end)
+  # Load one @page_limit-sized page (0-based) of the most-recently-updated book
+  # submissions. Returns `{rows, has_next_page?}`. The heap bound is per-page:
+  # exactly one LIMIT window is ever held, so `all_submissions` never grows with
+  # the total book count (d07 F2 scar class) regardless of how deep the operator
+  # pages. `has_next_page?` is derived from the RAW row count (before the nil-state
+  # reject) so a page whose last rows lack an export status still advertises the
+  # next page correctly — never an unbounded `Repo.all`.
+  defp load_submissions(page) when is_integer(page) and page >= 0 do
+    docs =
+      Document
+      |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
+      |> order_by([d], desc: d.updated_at)
+      |> limit(^@page_limit)
+      |> offset(^(page * @page_limit))
+      |> Repo.all()
+
+    rows =
+      docs
+      |> Enum.map(&document_to_row/1)
+      |> Enum.reject(fn row -> is_nil(row.state) end)
+
+    {rows, length(docs) == @page_limit}
+  end
+
+  # Move to `new_page`: re-project at the new OFFSET, hand the subscription
+  # ledger to `resubscribe/2` (which unsubscribes the outgoing page's doc topics
+  # and subscribes the incoming page's — no per-socket leak), and reset the
+  # per-row expanded-error UI state, which is keyed on doc_ids that no longer
+  # exist on the new page.
+  defp change_page(socket, new_page) do
+    {rows, has_next?} = load_submissions(new_page)
+    subscribed = resubscribe(socket.assigns.subscribed, rows)
+
+    assign(socket,
+      all_submissions: rows,
+      page: new_page,
+      has_next_page: has_next?,
+      subscribed: subscribed,
+      expanded_errors: MapSet.new()
+    )
+  end
+
+  # Reconcile the socket's PubSub subscriptions with the doc_ids on the current
+  # page: unsubscribe every topic that is leaving, subscribe every topic that is
+  # arriving, leave overlaps untouched. Returns the new subscribed doc_id set.
+  # Without this, `mount/3`'s per-doc subscribe would accumulate one leaked
+  # subscription per doc_id per page turn for the life of the socket.
+  defp resubscribe(%MapSet{} = old_ids, rows) do
+    new_ids = rows |> Enum.map(& &1.doc_id) |> MapSet.new()
+
+    old_ids
+    |> MapSet.difference(new_ids)
+    |> Enum.each(fn doc_id ->
+      Phoenix.PubSub.unsubscribe(Barkpark.PubSub, "bokbasen:document:#{doc_id}")
+    end)
+
+    new_ids
+    |> MapSet.difference(old_ids)
+    |> Enum.each(fn doc_id ->
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{doc_id}")
+    end)
+
+    new_ids
   end
 
   defp document_to_row(%Document{} = doc) do
@@ -488,12 +586,6 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     else
       truncate(text, 60)
     end
-  end
-
-  defp subscribed_set(subs) do
-    subs
-    |> Enum.map(& &1.doc_id)
-    |> MapSet.new()
   end
 
   # Scoped deep link (P5 of Scoped-by-URL): on the /w/:ws/p/:proj/admin
