@@ -11,8 +11,6 @@ XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/sheets/web/export_controll
 Traversal.FileModule: Directory Traversal in `File.cp`,lib/barkpark/media.ex:62,323F7CD
 XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/share_link_controller.ex:128,755DB9A
 XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/controllers/saml_controller.ex:119,159DB05
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/studio_chat.ex:1769,391BF73
-Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/studio_chat.ex:1749,7B625AD
 Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:14,573850F
 Traversal.FileModule: Directory Traversal in `File.chmod!`,lib/barkpark/release/secrets.ex:98,5A4F670
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/onixedit/export/validator.ex:79,1029F9E
@@ -72,9 +70,7 @@ Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark_web/studi
 Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:61,5D00D6
 RCE.CodeModule: Code Execution in `Code.eval_file`,lib/barkpark/release.ex:23,5B901F4
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github.ex:192,15B2898
-Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/studio_chat.ex:1748,6593101
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/indx/persistence.ex:92,3F75C2B
-Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/studio_chat.ex:1788,4BFD5DB
 Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/share_link_controller.ex:134,2C625F2
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/search/golden_eval.ex:23,4D27E0F
 CI.System: Command Injection via `System` function,lib/barkpark/media/image_backend/magick.ex:30,3BBFB5A
@@ -101,12 +97,8 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/s
 Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1972,14DFC44
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:247,1F69695
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:3581,2E794C0
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/studio_chat.ex:1790,311FD33
 XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2841,323875D
-Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/studio_chat.ex:1770,5282FF4
-Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/studio_chat.ex:1809,54CBAF3
 XSS.ContentType: XSS in `put_resp_content_type`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:214,681A8C5
-Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/studio_chat.ex:1769,6D40EF1
 XSS.SendResp: XSS in `send_resp`,lib/barkpark_web/plugs/idempotency.ex:79,6F2CFF5
 Traversal.SendFile: Directory Traversal in `send_file`,lib/barkpark_web/controllers/tickets_attachments_controller.ex:217,72AA425
 Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:1975,223DD4C
