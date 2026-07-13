@@ -1,55 +1,27 @@
 package chat
 
-import "encoding/json"
+import "github.com/FRIKKern/barkpark/internal/apiclient"
 
-// Wire types for the /v1/chat contract (charter §Wire contract v1). Field
-// names mirror the server's chat_sessions/chat_messages JSON verbatim so the
-// decoder is a straight unmarshal — no projection layer (charter D8).
-
-// SessionSummary is one row of GET /v1/chat/sessions — the sidebar shape
-// (`list_sessions/1`). It deliberately OMITS draft/model_choice/effort_choice:
-// only the full GET carries those (charter D14's documented vacuous-green
-// trap), so resume must always re-GET the session.
-type SessionSummary struct {
-	ID               string `json:"id"`
-	Title            string `json:"title"`
-	Status           string `json:"status"`
-	MessageCount     int    `json:"message_count"`
-	PendingApprovals int    `json:"pending_approvals"`
-	LastActiveAt     string `json:"last_active_at"`
-	Summary          string `json:"summary"`
-}
-
-// Session is the FULL session struct from GET /v1/chat/sessions/:id —
-// including the D14 continuity set (draft, mode, model_choice, effort_choice)
-// and the message rows seq-asc.
-type Session struct {
-	ID           string    `json:"id"`
-	Title        string    `json:"title"`
-	Draft        string    `json:"draft"`
-	Mode         string    `json:"mode"`
-	Model        string    `json:"model"`
-	ModelChoice  string    `json:"model_choice"`
-	EffortChoice string    `json:"effort_choice"`
-	Status       string    `json:"status"`
-	Cwd          string    `json:"cwd"`
-	Messages     []Message `json:"messages"`
-}
-
-// Message is one persisted chat_messages row. Assistant rows additionally
-// carry `blocks` — the server-computed PortableDoc block array
-// (FromMarkdown.blocks/1, charter D8) — alongside the raw source_markdown.
-// Role is a free string: user/assistant plus the structural rows the Recorder
-// persists (tool, todo, thinking, approval, question, plan, system).
-type Message struct {
-	Seq            int             `json:"seq"`
-	Role           string          `json:"role"`
-	SourceMarkdown string          `json:"source_markdown"`
-	Blocks         json.RawMessage `json:"blocks"`
-	Metadata       map[string]any  `json:"metadata"`
-}
-
-// sessionsEnvelope is the GET /v1/chat/sessions response body.
-type sessionsEnvelope struct {
-	Sessions []SessionSummary `json:"sessions"`
-}
+// Wire types for the /v1/chat contract are OWNED by internal/apiclient — the ONE
+// shared chat client (charter D26 / ct-bl-tui-apiclient-dedup). The chat package
+// consumes them by ALIAS so the reducer, the shell, and render.go keep their
+// short local names (Session/SessionSummary/Message) while there is exactly ONE
+// set of wire structs and ONE SSE decoder in the tree — no fork, no second
+// projection to drift.
+//
+// The apiclient structs are a 3-way merge against the live server projection
+// (chat_controller full_session_json / sidebar_json / message_json): the fork's
+// render-bearing shape (Message.Metadata; the summary counters
+// MessageCount/PendingApprovals/LastActiveAt) is preserved, rail_snapshot + the
+// flat usage metrics are added, and the fields the server never emits are
+// dropped. See internal/apiclient/chat.go for the per-field wire docs.
+type (
+	// Session is the FULL GET /v1/chat/sessions/:id struct — the D14 continuity
+	// set + message tail + rail_snapshot + usage metrics.
+	Session = apiclient.ChatSession
+	// SessionSummary is the sidebar row (GET /v1/chat/sessions): NO
+	// draft/rail/choices (the D14 vacuous-green trap), so resume must re-GET.
+	SessionSummary = apiclient.ChatSessionSummary
+	// Message is one persisted transcript row; assistant rows carry `blocks`.
+	Message = apiclient.ChatMessage
+)

@@ -36,13 +36,23 @@ import (
 	"time"
 )
 
-// ChatSession is the FULL session struct returned by GET /v1/chat/sessions/:id.
-// It carries the D14 Law-2 continuity round-trip set (draft, rail_snapshot,
-// mode, model_choice, effort_choice) plus title/status/metrics and the message
-// tail. The lighter sidebar shape returned by ListChatSessions is
-// ChatSessionSummary — list_sessions deliberately OMITS draft/choices (the
+// ChatSession is the FULL session struct returned by GET /v1/chat/sessions/:id
+// (chat_controller full_session_json). It carries the D14 Law-2 continuity
+// round-trip set (draft, rail_snapshot, mode/model_choice/effort_choice) plus
+// title/status, the FLAT usage metrics the TUI status rail reads, and the
+// message tail. The lighter sidebar shape returned by ListChatSessions is
+// ChatSessionSummary — list_sessions deliberately OMITS draft/rail/choices (the
 // documented vacuous-green trap, D14), so the two shapes are distinct types on
 // purpose: never read continuity state off a summary.
+//
+// This is the ONE wire struct set for /v1/chat (charter D26 / the dedup slice):
+// the TUI aliases these instead of forking its own. The field set is a 3-WAY
+// MERGE against the live server projection — the fork's render-bearing shape is
+// preserved, rail_snapshot + the flat metrics the server actually emits are
+// added, and the keys the server NEVER sends (token_metrics/context_metrics/an
+// `archived` bool/`created_at`) are dropped: a wholesale swap would have decoded
+// them to nil forever while missing the real ones. Timestamps are `inserted_at`,
+// not created_at.
 type ChatSession struct {
 	ID     string `json:"id"`
 	Title  string `json:"title,omitempty"`
@@ -52,54 +62,101 @@ type ChatSession struct {
 	Model  string `json:"model,omitempty"`
 
 	// D14 continuity round-trip set (present on GET :id, absent on list).
+	// RailSnapshot stays raw JSON so an unknown future rail key never breaks the
+	// whole session decode; Rail() is the typed view.
 	Draft        string          `json:"draft,omitempty"`
 	RailSnapshot json.RawMessage `json:"rail_snapshot,omitempty"`
 	ModelChoice  string          `json:"model_choice,omitempty"`
 	EffortChoice string          `json:"effort_choice,omitempty"`
 
-	Archived  bool   `json:"archived,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	// Denormalised sidebar counters the full struct also carries.
+	Summary          string `json:"summary,omitempty"`
+	MessageCount     int    `json:"message_count,omitempty"`
+	PendingApprovals int    `json:"pending_approvals,omitempty"`
 
-	// Token/context usage metrics are passed through untyped: the server slice
-	// owns their exact shape, and the client only forwards them to the TUI's
-	// status rail. Unknown/renamed metric fields decode away harmlessly (a
-	// missing key leaves this nil) rather than breaking the whole struct.
-	TokenMetrics   json.RawMessage `json:"token_metrics,omitempty"`
-	ContextMetrics json.RawMessage `json:"context_metrics,omitempty"`
+	// FLAT usage metrics — the server emits these TOP-LEVEL (not nested under
+	// token_metrics/context_metrics, which it never sends). The TUI status rail
+	// reads them directly; an absent key is a harmless zero.
+	InputTokens       int     `json:"input_tokens,omitempty"`
+	OutputTokens      int     `json:"output_tokens,omitempty"`
+	TotalCostUSD      float64 `json:"total_cost_usd,omitempty"`
+	ContextWindow     int     `json:"context_window,omitempty"`
+	LastContextTokens int     `json:"last_context_tokens,omitempty"`
+
+	LastActiveAt string `json:"last_active_at,omitempty"`
+	InsertedAt   string `json:"inserted_at,omitempty"`
+	UpdatedAt    string `json:"updated_at,omitempty"`
 
 	// Messages is the seq-ascending transcript tail. On a ?since= refetch it
 	// holds only rows newer than the supplied seq.
 	Messages []ChatMessage `json:"messages,omitempty"`
 }
 
-// ChatMessage is one persisted transcript row (seq-ascending). Assistant rows
-// carry `blocks` — the server-side FromMarkdown.blocks JSON — which this client
-// forwards UNTYPED (D8) so the TUI hands it straight to pdrender.Decode with no
-// projection layer. SourceMarkdown is the same body pre-render, kept for the
-// golden-transcript parity harness.
+// ChatMessage is one persisted transcript row (seq-ascending) from
+// chat_controller message_json. Assistant rows carry `blocks` — the server-side
+// FromMarkdown.blocks JSON — which this client forwards UNTYPED (D8) so the TUI
+// hands it straight to pdrender.Decode with no projection layer. SourceMarkdown
+// is the same body pre-render (kept for the golden-transcript parity harness);
+// Metadata is the raw per-row map the read-only cards read
+// (approval/question/plan). There is NO `content` field on the wire — the server
+// emits source_markdown only — and the row timestamp is `inserted_at`.
 type ChatMessage struct {
 	Seq            int             `json:"seq"`
 	Role           string          `json:"role"`
-	Content        string          `json:"content,omitempty"`
 	SourceMarkdown string          `json:"source_markdown,omitempty"`
 	Blocks         json.RawMessage `json:"blocks,omitempty"`
-	CreatedAt      string          `json:"created_at,omitempty"`
+	Metadata       map[string]any  `json:"metadata,omitempty"`
+	InsertedAt     string          `json:"inserted_at,omitempty"`
 }
 
 // ChatSessionSummary is the sidebar shape from GET /v1/chat/sessions (the
-// list_sessions/1 projection). It intentionally lacks draft and the model/effort
-// choices — those live only on the full GET :id struct (D14). Keeping it a
-// separate type makes "don't trust the list for continuity" a compile-time fact.
+// list_sessions/1 → sidebar_json projection). It intentionally lacks draft, the
+// rail, and the model/effort choices — those live only on the full GET :id
+// struct (D14). Keeping it a separate type makes "don't trust the list for
+// continuity" a compile-time fact. The counters (message_count/pending_approvals)
+// and last_active_at are what the picker renders per row.
 type ChatSessionSummary struct {
-	ID        string `json:"id"`
-	Title     string `json:"title,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Cwd       string `json:"cwd,omitempty"`
-	Mode      string `json:"mode,omitempty"`
-	Archived  bool   `json:"archived,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
-	UpdatedAt string `json:"updated_at,omitempty"`
+	ID               string `json:"id"`
+	Title            string `json:"title,omitempty"`
+	Status           string `json:"status,omitempty"`
+	Summary          string `json:"summary,omitempty"`
+	MessageCount     int    `json:"message_count,omitempty"`
+	PendingApprovals int    `json:"pending_approvals,omitempty"`
+	LastActiveAt     string `json:"last_active_at,omitempty"`
+	InsertedAt       string `json:"inserted_at,omitempty"`
+	UpdatedAt        string `json:"updated_at,omitempty"`
+}
+
+// ChatRailEntry is one task's cell of the agents-rail snapshot (charter D47):
+// rail_snapshot is a task_id-keyed map of these, replayed for free on resume so
+// a reopened mid-run session shows what every spawned task was doing (Law 2
+// continuity). Fields mirror the server rail entry (studio_chat rail_entry/*):
+// the lifecycle status, the optional background origin + description, the seq
+// the rail sorts by, and the last-known usage/workflow passed through untyped.
+type ChatRailEntry struct {
+	Status      string          `json:"status,omitempty"`
+	Origin      string          `json:"origin,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Seq         int             `json:"seq,omitempty"`
+	Usage       json.RawMessage `json:"usage,omitempty"`
+	Workflow    json.RawMessage `json:"workflow,omitempty"`
+}
+
+// Rail decodes the session's rail_snapshot into its task_id-keyed entries. An
+// absent/empty/`{}` snapshot yields a nil map and no error (the common idle
+// case) — RailSnapshot is left untouched for callers wanting the bytes verbatim.
+// This is the ONE typed view of the rail; the transport keeps it as RawMessage
+// so an unknown future rail key never breaks the whole session decode.
+func (s ChatSession) Rail() (map[string]ChatRailEntry, error) {
+	trimmed := bytes.TrimSpace(s.RailSnapshot)
+	if len(trimmed) == 0 || string(trimmed) == "{}" || string(trimmed) == "null" {
+		return nil, nil
+	}
+	var rail map[string]ChatRailEntry
+	if err := json.Unmarshal(trimmed, &rail); err != nil {
+		return nil, fmt.Errorf("decode rail_snapshot: %w", err)
+	}
+	return rail, nil
 }
 
 // ChatSessionPatch is the PATCH body for UpdateChatSession. Every field is a

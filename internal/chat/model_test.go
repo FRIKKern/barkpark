@@ -25,6 +25,7 @@ type fakeTransport struct {
 	patchedID   string
 	sent        []string
 	interrupted bool
+	approved    []string
 	listErr     error
 	getErr      error
 }
@@ -52,6 +53,10 @@ func (f *fakeTransport) SendMessage(id, content string) error {
 	return nil
 }
 func (f *fakeTransport) Interrupt(id string) error { f.interrupted = true; return nil }
+func (f *fakeTransport) Approve(id, requestID, decision string) error {
+	f.approved = append(f.approved, requestID+":"+decision)
+	return nil
+}
 func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(string, []byte)) error {
 	<-ctx.Done()
 	return nil
