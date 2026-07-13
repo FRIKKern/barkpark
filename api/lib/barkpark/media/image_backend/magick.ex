@@ -55,7 +55,8 @@ defmodule Barkpark.Media.ImageBackend.Magick do
   # instead of blocking. The `System.cmd` FORM is unchanged (no shell string —
   # injection is not the vector; src is a server-controlled Media.file_path).
   defp run_bounded(bin, args) do
-    task = Task.async(fn -> System.cmd(bin, args, stderr_to_stdout: true, env: portable_env(bin)) end)
+    task =
+      Task.async(fn -> System.cmd(bin, args, stderr_to_stdout: true, env: portable_env(bin)) end)
 
     case Task.yield(task, timeout_ms()) || Task.shutdown(task, :brutal_kill) do
       {:ok, {_out, 0}} ->
