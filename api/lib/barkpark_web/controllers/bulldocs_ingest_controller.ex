@@ -81,8 +81,37 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # the doc shows native typography at /papers/:slug. `style` defaults to
   # "article" since this endpoint only ingests article-grammar docs;
   # an explicit `style` in the body overrides it.
-  def ingest(conn, %{"slug" => slug, "blocks" => blocks} = params)
-      when is_binary(slug) and slug != "" and is_list(blocks) do
+  def ingest(conn, params) do
+    case params do
+      %{"slug" => slug, "blocks" => blocks} = accepted
+      when is_binary(slug) and slug != "" and is_list(blocks) ->
+        if valid_ingest_text?(accepted) do
+          ingest_blocks(conn, slug, blocks, accepted)
+        else
+          invalid_text(conn)
+        end
+
+      %{"slug" => slug, "body_html" => body_html} = accepted
+      when is_binary(slug) and slug != "" and is_binary(body_html) ->
+        if valid_ingest_text?(accepted) do
+          ingest_html(conn, slug, body_html, accepted)
+        else
+          invalid_text(conn)
+        end
+
+      _malformed ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          error: %{
+            code: "malformed",
+            message: "slug plus either blocks (list) or body_html (string) are required"
+          }
+        })
+    end
+  end
+
+  defp ingest_blocks(conn, slug, blocks, params) do
     attrs =
       %{
         "slug" => slug,
@@ -162,8 +191,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   end
 
   # Raw HTML path (legacy fallback). Stored verbatim — no article projection.
-  def ingest(conn, %{"slug" => slug, "body_html" => body_html} = params)
-      when is_binary(slug) and slug != "" and is_binary(body_html) do
+  defp ingest_html(conn, slug, body_html, params) do
     attrs =
       %{
         "slug" => slug,
@@ -224,17 +252,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
         |> put_status(:unprocessable_entity)
         |> json(%{error: %{code: "invalid_paper", message: "could not store paper"}})
     end
-  end
-
-  def ingest(conn, _params) do
-    conn
-    |> put_status(:bad_request)
-    |> json(%{
-      error: %{
-        code: "malformed",
-        message: "slug plus either blocks (list) or body_html (string) are required"
-      }
-    })
   end
 
   @doc """
@@ -557,6 +574,33 @@ defmodule BarkparkWeb.BulldocsIngestController do
       [] -> body
       warnings -> Map.put(body, :warnings, warnings)
     end
+  end
+
+  defp valid_ingest_text?(value) when is_binary(value) do
+    String.valid?(value) and not String.contains?(value, <<0>>)
+  end
+
+  defp valid_ingest_text?(value) when is_list(value) do
+    Enum.all?(value, &valid_ingest_text?/1)
+  end
+
+  defp valid_ingest_text?(value) when is_map(value) do
+    Enum.all?(value, fn {key, nested_value} ->
+      valid_ingest_text?(key) and valid_ingest_text?(nested_value)
+    end)
+  end
+
+  defp valid_ingest_text?(_value), do: true
+
+  defp invalid_text(conn) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{
+      error: %{
+        code: "invalid_text",
+        message: "paper text must be valid UTF-8 and cannot contain NUL bytes"
+      }
+    })
   end
 
   # A minimally well-formed op: a map whose "op" is one of the five kinds.

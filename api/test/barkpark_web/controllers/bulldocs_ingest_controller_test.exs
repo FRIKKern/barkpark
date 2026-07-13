@@ -11,7 +11,7 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.Content
-  alias Barkpark.Content.Errors
+  alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.LabelFixtures
   import Ecto.Query, only: [from: 2]
 
@@ -144,6 +144,127 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
 
       assert json_response(conn, 400)["error"]["code"] == "malformed"
     end
+  end
+
+  describe "invalid ingest text" do
+    @tag :invalid_text
+    @tag :nul_ingest
+    test "wall-compliant nested block NUL returns typed 422 without writing", %{conn: conn} do
+      slug = "invalid-text-block-nul-#{System.unique_integer([:positive])}"
+
+      payload =
+        LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "blocks" => [
+            %{
+              "id" => "tpl-title",
+              "type" => "heading",
+              "level" => 1,
+              "role" => "title",
+              "locked" => true,
+              "text" => "NUL regression"
+            },
+            %{
+              "id" => "body",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "before\0after"}]
+            }
+          ]
+        })
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @token)
+        |> put_req_header("content-type", "application/json")
+        |> post(@path, payload)
+
+      assert_invalid_text(conn)
+      refute Content.get_paper(slug)
+    end
+
+    @tag :invalid_text
+    @tag :nul_ingest
+    test "wall-compliant body_html NUL returns typed 422 without writing", %{conn: conn} do
+      slug = "invalid-text-html-nul-#{System.unique_integer([:positive])}"
+
+      payload =
+        LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "body_html" => "<article>before\0after</article>"
+        })
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @token)
+        |> put_req_header("content-type", "application/json")
+        |> post(@path, payload)
+
+      assert_invalid_text(conn)
+      refute Content.get_paper(slug)
+    end
+
+    @tag :invalid_text
+    test "direct decoded params reject malformed UTF-8 in a recursive map key before warnings reset",
+         %{conn: conn} do
+      slug = "invalid-text-map-key-#{System.unique_integer([:positive])}"
+
+      params =
+        LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "blocks" => [
+            %{
+              "id" => "body",
+              "type" => "paragraph",
+              "content" => [%{<<0xFF>> => "nested key", "type" => "text", "value" => "safe"}]
+            }
+          ]
+        })
+
+      Warnings.reset()
+      Warnings.put("sentinel", "must survive invalid ingest")
+
+      conn = BarkparkWeb.BulldocsIngestController.ingest(conn, params)
+
+      assert_invalid_text(conn)
+
+      assert Warnings.drain() == [
+               %{code: "sentinel", severity: "advisory", message: "must survive invalid ingest"}
+             ]
+
+      refute Content.get_paper(slug)
+    end
+
+    @tag :invalid_text
+    test "direct decoded params reject malformed UTF-8 in a recursive map value inside a list",
+         %{conn: conn} do
+      slug = "invalid-text-map-value-#{System.unique_integer([:positive])}"
+
+      params =
+        LabelFixtures.paper_attrs(%{
+          "slug" => slug,
+          "blocks" => [
+            %{
+              "id" => "body",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => <<0xC3>>}]
+            }
+          ]
+        })
+
+      conn = BarkparkWeb.BulldocsIngestController.ingest(conn, params)
+
+      assert_invalid_text(conn)
+      refute Content.get_paper(slug)
+    end
+  end
+
+  defp assert_invalid_text(conn) do
+    assert %{
+             "error" => %{
+               "code" => "invalid_text",
+               "message" => "paper text must be valid UTF-8 and cannot contain NUL bytes"
+             }
+           } = json_response(conn, 422)
   end
 
   describe "M1 template halt envelope (title-only / locked-block violations)" do
@@ -352,7 +473,12 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
                 "locked" => true,
                 "text" => "T"
               },
-              %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
+              %{
+                "id" => "tpl-featured",
+                "type" => "image",
+                "role" => "featured",
+                "locked" => true
+              },
               # A real body block: skeleton-only papers are refused by the
               # hollow-body quality gate (p-quality-gate); this test targets the
               # constraint vocabulary veto.
@@ -734,7 +860,8 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
         # A non-trivial description so the label SPINE passes (E1/E2) and the
         # publish reaches E3 — the gate under test here. Without it the spine's
         # description check 422s first as label_spine, never exercising E3.
-        "description" => "A description long enough to satisfy the label spine's non-trivial rule.",
+        "description" =>
+          "A description long enough to satisfy the label spine's non-trivial rule.",
         "tags" => [
           %{
             "tag" => "nonexistent-#{System.unique_integer([:positive])}",
