@@ -127,3 +127,27 @@ func TestChatGoldenToolrowsParity(t *testing.T) {
 		}
 	}
 }
+
+// TestChatToolDiffPathFromInput pins the tolerant file-path read: the LIVE
+// Elixir controller (chat_tool_diff_block) nests the tool call under `input`,
+// so the mutated path arrives as `input.file_path`, NOT a flat `path` like the
+// golden fixture carries. Without the nested fallback the diff card header is
+// path-less on real /v1/chat data — a silent Law-1 parity break the fixture
+// (flat-path only) cannot catch. This renders the real server shape and asserts
+// the path is drawn.
+func TestChatToolDiffPathFromInput(t *testing.T) {
+	reg := DefaultRegistry(DarkTheme())
+	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
+
+	// The exact shape ChatController.message_json emits for a file-mutating tool
+	// row: whole tool input under "input", derived lines/added/removed flat.
+	raw := []byte(`[{"type":"chat-tool-diff","input":{"file_path":"lib/barkpark/chat.ex","old_string":"a","new_string":"b"},"lines":[{"op":"=","text":"keep"},{"op":"-","text":"a"},{"op":"+","text":"b"}],"added":1,"removed":1}]`)
+	blocks, err := Decode(raw)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
+	if !strings.Contains(out, "lib/barkpark/chat.ex") {
+		t.Fatalf("nested input.file_path not rendered in diff header:\n%s", out)
+	}
+}

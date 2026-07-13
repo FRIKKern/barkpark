@@ -62,7 +62,7 @@ func (chatToolDiffRenderer) Render(b Block, ctx RenderCtx) []string {
 		removed = countDiffOp(lines, "-")
 	}
 	tally := addStyle.Render("+"+itoa(added)) + " " + delStyle.Render("−"+itoa(removed))
-	if path := sanitizeText(attrStr(b.Attrs, "path")); path != "" {
+	if path := sanitizeText(chatDiffPath(b.Attrs)); path != "" {
 		head := lipgloss.NewStyle().Bold(true).Foreground(pal.ChromeInk).Render(path)
 		out = append(out, truncateANSI(head+"  "+tally, w))
 	} else {
@@ -94,6 +94,23 @@ func (chatToolDiffRenderer) Render(b Block, ctx RenderCtx) []string {
 		out = append(out, ctxStyle.Render("… +"+itoa(over)+" more lines"))
 	}
 	return out
+}
+
+// chatDiffPath reads the mutated file path tolerantly. The Go golden fixture
+// carries a flat `path`, but the LIVE Elixir controller (chat_tool_diff_block)
+// nests the whole tool call under `input`, so the file path arrives as
+// `input.file_path`. Preferring the flat key and falling back into the nested
+// input keeps both the fixture leg and real server data rendering the header —
+// the same "prefer the live key, fall back" discipline as attrStrFirst. Without
+// this the diff card is path-less on real /v1/chat data (Law-1 parity break).
+func chatDiffPath(attrs map[string]any) string {
+	if p := attrStr(attrs, "path"); p != "" {
+		return p
+	}
+	if input, ok := attrs["input"].(map[string]any); ok {
+		return attrStrFirst(input, "file_path", "path")
+	}
+	return ""
 }
 
 // diffLineStyle maps an op to its display prefix + style. Context lines are dim
