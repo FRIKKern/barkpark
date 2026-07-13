@@ -113,7 +113,8 @@ defmodule Barkpark.Tasks.Stamp do
     {:ok, put_guard(%{"index" => index, "met" => true, "evidence" => evidence}, text), "met"}
   end
 
-  defp build_update(_index, {:met, _no_evidence}, _worker, _text), do: {:error, :evidence_required}
+  defp build_update(_index, {:met, _no_evidence}, _worker, _text),
+    do: {:error, :evidence_required}
 
   defp build_update(index, {:miss, note}, worker, text) when is_binary(note) and note != "" do
     attempt = %{

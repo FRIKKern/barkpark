@@ -198,6 +198,7 @@ defmodule Barkpark.Tasks.StampTest do
                )
 
       reloaded = Repo.get!(Document, task.id)
+
       assert reloaded.content["acceptance_criteria"] == three_criteria(),
              "a mismatched guard aborts the whole write — no partial flip"
 
