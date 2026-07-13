@@ -228,6 +228,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
           )
 
         # Fuzzy title arm only for tokens long enough to be meaningful.
+        #
+        # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this). This
+        # `similarity(?, ?) > ?` arm is index-OPAQUE but rewriting it to the
+        # GIN-engaging `%` operator (the D46 idiom) buys NOTHING here: it is OR-d
+        # (`^clause or …`) with the UNINDEXED `coalesce(?->>'slug') ILIKE ?`
+        # sibling built into `clause` above. A BitmapOr can only form when EVERY
+        # branch is independently indexable, so the slug-ILIKE poisons the whole
+        # disjunction into a Seq Scan — PROVEN live: the full chain Seq-Scans even
+        # with the prod jsonb_path_ops slug index present, and dropping ONLY the
+        # slug arm restores a 3-way BitmapOr. A `%` rewrite here plans byte-
+        # identically to the Seq Scan; a full-path EXPLAIN "proving" a win is the
+        # vacuous-green trap. Un-poisoning needs a trgm expression index on
+        # content->>'slug' (backlog ae-search-or-arm-restructure). See D49(c).
         clause =
           if String.length(term) >= min_fuzzy_len do
             dynamic([d], ^clause or fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold))
@@ -267,6 +280,15 @@ defmodule Barkpark.Search.DocumentsRetriever do
     Enum.reduce(excludes, nil, fn term, dyn ->
       pattern = like_pattern(term)
 
+      # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this exclude
+      # arm). This whole clause is NEGATED at `where_match/5` via
+      # `not(^exclude_dyn)` — the query asks "which rows do NOT match this
+      # term". A trgm GIN answers "which rows MATCH" (it enumerates candidates
+      # ABOVE the similarity floor), never the complement; `NOT (title % ?)`
+      # alone Seq-Scans even under `enable_seqscan=off` (proven live), because
+      # the planner has no index that lists non-matching rows. Rewriting the
+      # `similarity() > ?` to `%` changes nothing — the negation is the hard
+      # disqualifier, not the operator form. See D49(b).
       clause =
         dynamic(
           [d],
@@ -322,6 +344,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
         #    blowing up the ::int cast mid-query. Untagged docs get +0, and
         #    the pool is where_match-gated, so non-matching docs never enter.
         #    Perf: subplan ~0.032ms/row over the 500-row bounded pool.
+        #
+        #    WHY-LEFT (authoring-excellence D49 — this `similarity()` is NOT
+        #    trgm-index material). It lives in an ORDER BY GREATEST(ts_rank, …)
+        #    composite ranking key, not a WHERE candidate filter. A GIN trgm
+        #    index accelerates set MEMBERSHIP (`% ` / `similarity() > floor`),
+        #    never a KNN/ranked ORDER BY — only a GiST `<->` distance operator
+        #    can drive an ordered index scan, and this is a GREATEST of two
+        #    signals (a scalar composite), not a single-column distance. The
+        #    pool is already bounded to 500 rows upstream, so the per-row cost is
+        #    negligible; leave it. See D49(d).
         desc:
           fragment(
             "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?)) + 0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
