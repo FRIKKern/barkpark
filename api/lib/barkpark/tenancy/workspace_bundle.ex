@@ -57,8 +57,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           total_rows: non_neg_integer()
         }
 
-  # @canonical capability:workspace-bundle aka:export_workspace,import_workspace,tenant_bundle,per_workspace_export doc:.claude/workflows/bp-cloud-build-charter.md
-
   @doc """
   Export a workspace to a bp-export-v1 bundle binary.
 
@@ -68,6 +66,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   """
   @spec export(binary() | nil, keyword()) ::
           {:ok, binary()} | {:error, :workspace_id_required | :workspace_not_found}
+  # @canonical capability:workspace-bundle aka:export_workspace,import_workspace,tenant_bundle,per_workspace_export doc:.claude/workflows/bp-cloud-build-charter.md
   def export(workspace_id, opts \\ [])
 
   def export(workspace_id, opts) when is_binary(workspace_id) do
