@@ -533,6 +533,58 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
     end
   end
 
+  # ── 6. E3-dataset / allowlist bare-slug collision (bpb-e3-dataset-slug-collision) ──
+
+  describe "delete_workspace/1 project-qualifies the E3-dataset/allowlist bare-slug sweep" do
+    test "a dataset slug SHARED with a sibling workspace is NOT swept from the bare-keyed tables; an exclusive slug IS" do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      # A dataset slug is unique only per (project_id, slug) — so "shared-prod"
+      # legitimately names a DISTINCT dataset in EACH workspace (charter D21).
+      # The E3-dataset tables (sync_cursors, …) and the scope-column allowlist
+      # (data_keys, search_surface_config) carry ONLY that bare slug/scope with
+      # no project/dataset column, so a bare `dataset = ANY(slugs)` sweep of A
+      # would strip B's rows under the SAME slug too — a cross-tenant delete.
+      tag = System.unique_integer([:positive])
+      shared = "shared-prod-#{tag}"
+      excl = "excl-a-#{tag}"
+
+      seed_dataset!(proj_a.id, excl)
+      seed_dataset!(proj_a.id, shared)
+      seed_dataset!(proj_b.id, shared)
+
+      # A's OWN row under its exclusive slug — MUST still be swept (no over-narrow).
+      insert_sync_cursor!("src-a-#{tag}", excl)
+
+      # Rows under the slug A SHARES with B — MUST survive A's teardown.
+      insert_sync_cursor!("src-b-#{tag}", shared)
+      insert_data_key!("dataset:#{shared}")
+      insert_surface_config!(shared)
+
+      assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
+
+      # No over-narrow: A's exclusive-slug bare-keyed row is gone.
+      assert sync_cursor_count("src-a-#{tag}", excl) == 0,
+             "A's exclusive-slug sync cursor must still be swept on teardown"
+
+      # No cross-tenant over-deletion: on origin/main the bare
+      # `dataset = ANY([excl, shared])` sweep also deletes the shared-slug rows
+      # → these counts are 0 → RED. The project-qualified fix excludes `shared`
+      # (owned by B too) so B's rows SURVIVE.
+      assert sync_cursor_count("src-b-#{tag}", shared) == 1,
+             "a sync cursor under a slug SHARED with workspace B must survive A's teardown"
+
+      assert data_key_count("dataset:#{shared}") == 1,
+             "a per-dataset DEK under a slug SHARED with B must survive A's teardown"
+
+      assert surface_config_count(shared) == 1,
+             "a search surface config under a slug SHARED with B must survive A's teardown"
+    end
+  end
+
   # ── helpers ───────────────────────────────────────────────────────────────
 
   # Insert a raw authoring_exemptions row (no Ecto schema — a FK-less E3
@@ -564,5 +616,61 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       from(r in schema, where: r.id == ^id and is_nil(r.workspace_id)),
       :count
     )
+  end
+
+  # ── E3-dataset / allowlist bare-slug raw seed + count helpers ───────────────
+  # These tables carry ONLY a bare dataset/scope string (no Ecto tenancy scope),
+  # so they are seeded and counted with raw SQL.
+
+  defp seed_dataset!(project_id, slug) do
+    Repo.query!(
+      "INSERT INTO datasets (id, project_id, slug, name, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1::text::uuid, $2, $2, now(), now())",
+      [project_id, slug]
+    )
+  end
+
+  defp insert_sync_cursor!(source, dataset) do
+    Repo.query!(
+      "INSERT INTO sync_cursors (source, dataset, event_id, inserted_at, updated_at) " <>
+        "VALUES ($1, $2, 0, now(), now())",
+      [source, dataset]
+    )
+  end
+
+  defp sync_cursor_count(source, dataset) do
+    scalar("SELECT count(*) FROM sync_cursors WHERE source = $1 AND dataset = $2", [
+      source,
+      dataset
+    ])
+  end
+
+  defp insert_data_key!(scope) do
+    Repo.query!(
+      "INSERT INTO data_keys (id, scope, wrapped_key, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1, 'ciphertext', now(), now())",
+      [scope]
+    )
+  end
+
+  defp data_key_count(scope) do
+    scalar("SELECT count(*) FROM data_keys WHERE scope = $1", [scope])
+  end
+
+  defp insert_surface_config!(scope) do
+    Repo.query!(
+      "INSERT INTO search_surface_config (id, surface, scope, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), 'search', $1, now(), now())",
+      [scope]
+    )
+  end
+
+  defp surface_config_count(scope) do
+    scalar("SELECT count(*) FROM search_surface_config WHERE scope = $1", [scope])
+  end
+
+  defp scalar(sql, params) do
+    %{rows: [[n]]} = Repo.query!(sql, params)
+    n
   end
 end

@@ -167,14 +167,35 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   end
 
   @doc """
-  The distinct dataset slugs a workspace owns — the fail-CLOSED slug map that
-  drives E3/allowlist membership (charter D8): scope the workspace's PROJECTS
-  through `Scope.scope_to_workspace/2` (`where(false)` on nil), then read the
-  datasets under them. NEVER `scope_to_workspace_or_global` (which routes nil to
-  a fully-unscoped, all-tenant read → a cross-tenant leak). Public so the
-  teardown path (`Tenancy.delete_workspace/1`, which sweeps the same string-keyed
-  E3/allowlist tables the exporter copies) derives the slug set from ONE source
-  of truth instead of re-deriving it.
+  The distinct dataset slugs a workspace owns EXCLUSIVELY — the fail-CLOSED,
+  project-qualified slug map that drives E3/allowlist membership (charter
+  D8/D21).
+
+  Scope the workspace's PROJECTS through `Scope.scope_to_workspace/2`
+  (`where(false)` on nil), read the datasets under them, then DROP any slug that
+  is ALSO owned by a project of a DIFFERENT workspace.
+
+  ## Why exclusive, not merely owned (charter D21)
+
+  A dataset slug is unique only per `(project_id, slug)` (`datasets` unique
+  index), NOT globally — every workspace gets a `"production"` dataset, so
+  `"production"` collides across tenants. The E3-dataset tables
+  (`sync_cursors`, `preview_token_jti`, …) and the `scope`-column allowlist
+  (`data_keys` = `"dataset:" <> slug`, `search_surface_config` = slug) carry
+  ONLY that bare slug/scope — no `project_id` / `dataset_id` / `workspace_id`
+  column — so a row under a SHARED slug is genuinely unattributable to a single
+  workspace. The bare `dataset = ANY(slugs)` / `scope = ANY(...)` predicate that
+  BOTH the exporter (`copy_where/4`) and the teardown sweep
+  (`Tenancy.delete_workspace/1`) run over that slug set therefore MUST NOT match
+  a shared slug, else it becomes a cross-tenant COPY (leak into a
+  single-workspace bundle) or a cross-tenant DELETE (stripping a co-tenant's
+  DEKs / cursors on teardown). Dropping shared slugs here narrows BOTH callers
+  in lockstep — fail-CLOSED: an ambiguous slug's bare-keyed rows are left
+  untouched (an orphan is recoverable; a cross-tenant delete is not).
+
+  NEVER `scope_to_workspace_or_global` (which routes nil to a fully-unscoped,
+  all-tenant read → a cross-tenant leak). Public so the teardown path derives
+  the slug set from ONE source of truth instead of re-deriving it.
   """
   @spec dataset_slugs_for(binary()) :: [String.t()]
   def dataset_slugs_for(ws_id) do
@@ -187,8 +208,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     if project_ids == [] do
       []
     else
+      # Slugs owned by a project NOT belonging to this workspace — because
+      # `project_ids` is the COMPLETE set of this workspace's projects, "not in
+      # project_ids" is exactly "owned by another workspace". A slug the same
+      # workspace owns via a second project is still ITS own (both projects are
+      # in `project_ids`), so it is never treated as shared.
+      shared_slugs =
+        Dataset
+        |> where([d], d.project_id not in ^project_ids)
+        |> select([d], d.slug)
+        |> distinct(true)
+        |> Repo.all()
+
       Dataset
       |> where([d], d.project_id in ^project_ids)
+      |> where([d], d.slug not in ^shared_slugs)
       |> select([d], d.slug)
       |> distinct(true)
       |> Repo.all()

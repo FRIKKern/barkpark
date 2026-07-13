@@ -121,6 +121,52 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── E3-dataset / allowlist bare-slug collision (bpb-e3-dataset-slug-collision) ──
+
+  describe "export project-qualifies the E3-dataset/allowlist bare-slug copy" do
+    test "a slug SHARED with a sibling workspace does NOT leak its bare-keyed rows into the bundle; an exclusive slug does" do
+      ws_a = create_workspace!(unique("wsa"))
+      proj_a = create_project!(ws_a, unique("proja"))
+      ws_b = create_workspace!(unique("wsb"))
+      proj_b = create_project!(ws_b, unique("projb"))
+
+      # A owns an EXCLUSIVE slug + a slug that COLLIDES with B (unique only per
+      # project_id — charter D21). The E3-dataset/allowlist tables carry the bare
+      # slug/scope with no project column, so a bare `dataset = ANY(slugs)` copy
+      # of A would pull B's shared-slug rows into A's single-workspace bundle.
+      tag = System.unique_integer([:positive])
+      shared = "shared-prod-#{tag}"
+      excl = "excl-a-#{tag}"
+
+      seed_dataset!(proj_a.id, excl)
+      seed_dataset!(proj_a.id, shared)
+      seed_dataset!(proj_b.id, shared)
+
+      # A's own exclusive-slug row — MUST be carried in A's bundle.
+      insert_sync_cursor!("EXCL-A-CURSOR-#{tag}", excl)
+
+      # B's rows under the SHARED slug, uniquely marked — MUST NOT leak into A.
+      insert_sync_cursor!("B-ONLY-CURSOR-#{tag}", shared)
+      insert_data_key!("dataset:#{shared}", "B-ONLY-CIPHERTEXT-#{tag}")
+      insert_surface_config!(shared, "B-ONLY-SURFACE-#{tag}")
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      # No over-narrow: A's exclusive-slug row IS carried.
+      assert "excl-a-#{tag}" in manifest["dataset_slugs"]
+      assert dumps["sync_cursors"] =~ "EXCL-A-CURSOR-#{tag}"
+
+      # No cross-tenant leak: the shared slug is excluded, so B's bare-keyed rows
+      # are categorically absent from A's bundle. On origin/main the bare copy
+      # pulls them in (and lists the shared slug) → these refutes FAIL → RED.
+      refute "shared-prod-#{tag}" in manifest["dataset_slugs"]
+      refute dumps["sync_cursors"] =~ "B-ONLY-CURSOR-#{tag}"
+      refute dumps["data_keys"] =~ "B-ONLY-CIPHERTEXT-#{tag}"
+      refute dumps["search_surface_config"] =~ "B-ONLY-SURFACE-#{tag}"
+    end
+  end
+
   # ── criterion 4b/4c: count-parity + md5 parity across EVERY table ─────────────
 
   describe "completeness diff — count + md5 parity (charter D10b/D10c)" do
@@ -198,11 +244,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
   describe "round-trip: export → clean reimport → completeness diff (charter D2/D7)" do
     test "byte-identical round-trip with 0 FK orphans and idempotent E3 upsert" do
-      %{ws_a: ws_a, ws_b: ws_b, shared_doc: shared_doc, only_a_doc: only_a_doc} =
+      %{ws_a: ws_a, ws_b: ws_b, proj_a: proj_a, shared_doc: shared_doc, only_a_doc: only_a_doc} =
         seed_two_workspaces!()
+
+      # `prod-a` is SHARED: B created a `prod-a` document, which get_or_creates a
+      # (proj_b, "prod-a") dataset, so both workspaces own the slug. A slug is
+      # unique only per (project_id, slug), and the E3-dataset/allowlist tables
+      # carry the bare slug/scope with no project column — so a `prod-a` DEK is
+      # genuinely shared/global and MUST be excluded from A's single-workspace
+      # bundle (charter D21; `dataset_slugs_for/1` is project-qualified). Give A
+      # its OWN exclusive slug — the realistic keystone case where the D4
+      # DEK-decryptability guarantee holds — and prove THAT DEK round-trips.
+      seed_dataset!(proj_a.id, "solo-a")
+      insert_data_key!("dataset:solo-a", "solo-a-dek-ciphertext")
 
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
       {manifest_before, _} = Archive.unpack(bundle)
+
+      # D21: the SHARED slug is project-qualified OUT of A's bundle; its DEK is
+      # not A's to carry. The EXCLUSIVE slug IS carried.
+      refute "prod-a" in manifest_before["dataset_slugs"]
+      assert "solo-a" in manifest_before["dataset_slugs"]
 
       # The shared authoring_exemptions row belongs to BOTH A and B (each has a
       # matching document) — it survives the purge.
@@ -213,14 +275,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
       # Simulate a CLEAN target: purge A's copy-strategy rows entirely, plus a
       # couple of A-exclusive string-keyed rows (proving they are RESTORED, not
-      # silently lost — data_keys is the worst case: its DEKs).
+      # silently lost — data_keys is the worst case: its DEKs). The DEK proof
+      # uses the EXCLUSIVE slug `solo-a`, which A's bundle actually carries.
       purge_workspace!(ws_a.id, manifest_before)
 
       Repo.query!("DELETE FROM authoring_exemptions WHERE doc_id=$1 AND dataset='prod-a'", [
         only_a_doc
       ])
 
-      Repo.query!("DELETE FROM data_keys WHERE scope='dataset:prod-a'", [])
+      Repo.query!("DELETE FROM data_keys WHERE scope='dataset:solo-a'", [])
 
       # A is gone; B untouched.
       assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_a.id]) ==
@@ -229,7 +292,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert scalar("SELECT count(*) FROM documents WHERE workspace_id=$1::text::uuid", [ws_b.id]) >
                0
 
-      assert scalar("SELECT count(*) FROM data_keys WHERE scope='dataset:prod-a'", []) == 0
+      assert scalar("SELECT count(*) FROM data_keys WHERE scope='dataset:solo-a'", []) == 0
 
       # Re-import.
       {:ok, stats} = WorkspaceBundle.import_bundle(bundle)
@@ -246,7 +309,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
              ) == 0
 
       # The A-exclusive rows were restored…
-      assert scalar("SELECT count(*) FROM data_keys WHERE scope='dataset:prod-a'", []) == 1
+      assert scalar("SELECT count(*) FROM data_keys WHERE scope='dataset:solo-a'", []) == 1
 
       assert scalar(
                "SELECT count(*) FROM authoring_exemptions WHERE doc_id=$1 AND dataset='prod-a'",
@@ -396,6 +459,31 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       "INSERT INTO datasets (id, project_id, slug, name, inserted_at, updated_at) " <>
         "VALUES (gen_random_uuid(), $1::text::uuid, $2, $2, now(), now())",
       [project_id, slug]
+    )
+  end
+
+  # E3-dataset / allowlist bare-slug raw seed helpers (bpb-e3-dataset-slug-collision).
+  defp insert_sync_cursor!(source, dataset) do
+    Repo.query!(
+      "INSERT INTO sync_cursors (source, dataset, event_id, inserted_at, updated_at) " <>
+        "VALUES ($1, $2, 0, now(), now())",
+      [source, dataset]
+    )
+  end
+
+  defp insert_data_key!(scope, ciphertext) do
+    Repo.query!(
+      "INSERT INTO data_keys (id, scope, wrapped_key, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1, $2, now(), now())",
+      [scope, ciphertext]
+    )
+  end
+
+  defp insert_surface_config!(scope, surface) do
+    Repo.query!(
+      "INSERT INTO search_surface_config (id, surface, scope, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1, $2, now(), now())",
+      [surface, scope]
     )
   end
 
