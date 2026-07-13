@@ -54,6 +54,22 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :git_ref, :string
     field :artifact_url, :string
 
+    # site-spawner W1 (charter D3): the content-bound static-build identity.
+    #
+    #   * build_id     — hash(code_rev + content_rev + config). Names
+    #     releases/<build_id>/ on disk AND is the PLAN idempotency key: a repeat
+    #     build_id for the same site is an enforceable no-op (unique (site_id,
+    #     build_id) index). Null for pre-W1 container deployments.
+    #   * content_rev  — the Barkpark content revision baked into this build. Lets
+    #     a content-only change (same code) mint a fresh build_id → a new build.
+    #   * stage        — nullable STAGE telemetry: the current phase of the
+    #     six-stage deploy pipeline (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE). Rides
+    #     ALONGSIDE the coarse `status` enum (which is deliberately NOT widened);
+    #     latest-wins, best-effort, overwritten by the builder at each phase.
+    field :build_id, :string
+    field :content_rev, :string
+    field :stage, :string
+
     # dwb-18: GitHub's X-GitHub-Delivery header — unique per redelivery-chain.
     # Cast on CREATE only (never on a transition) and backed by a partial unique
     # index so a redelivered push mints at most one Deployment even under a race.
@@ -151,10 +167,17 @@ defmodule BarkparkCloud.Registry.Deployment do
   """
   def changeset(deployment, attrs) do
     deployment
-    |> cast(attrs, [:git_ref, :artifact_url, :site_id, :delivery_id])
+    |> cast(attrs, [:git_ref, :artifact_url, :site_id, :delivery_id, :build_id, :content_rev])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
     |> assoc_constraint(:site)
+    # site-spawner W1: PLAN idempotency backstop. A repeat build_id for the same
+    # site surfaces as a changeset error (the router can turn it into a 200
+    # no-op) rather than a raised Ecto.ConstraintError.
+    |> unique_constraint(:build_id,
+      name: :deployments_site_build_id_index,
+      message: "a deployment with this build_id already exists"
+    )
     # dwb-18: the DB idempotency backstop. A lost race (concurrent redelivery, or
     # a second active build of the same commit) surfaces as a changeset error the
     # router turns into a 200 duplicate — never a raised Ecto.ConstraintError.
@@ -181,6 +204,8 @@ defmodule BarkparkCloud.Registry.Deployment do
       :artifact_url,
       :site_id,
       :delivery_id,
+      :build_id,
+      :content_rev,
       :environment,
       :branch,
       :preview_slug,
@@ -199,6 +224,11 @@ defmodule BarkparkCloud.Registry.Deployment do
       name: :deployments_active_preview_branch_index,
       message: "active preview already exists for this branch"
     )
+    # site-spawner W1: the same PLAN idempotency backstop on the preview path.
+    |> unique_constraint(:build_id,
+      name: :deployments_site_build_id_index,
+      message: "a deployment with this build_id already exists"
+    )
   end
 
   @doc """
@@ -216,6 +246,10 @@ defmodule BarkparkCloud.Registry.Deployment do
       :became_live_at,
       :console,
       :detail,
+      # site-spawner W1: STAGE telemetry — the builder overwrites `stage` at each
+      # phase of the six-stage pipeline (latest-wins). Distinct from the coarse
+      # `status` lifecycle it rides alongside.
+      :stage,
       :claim_worker,
       :claimed_at,
       :claim_epoch

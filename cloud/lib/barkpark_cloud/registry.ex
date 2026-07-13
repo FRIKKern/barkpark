@@ -3252,6 +3252,12 @@ defmodule BarkparkCloud.Registry do
   Create a Site under `barkpark`. The Site's `team_id` is taken from the
   Barkpark — sites can never belong to a different team than their box.
 
+  site-spawner W1: a plaintext `:read_token` (the public-read-scoped content
+  token a static build fetches with) is Vault-encrypted here and stored ONLY as
+  `read_token_encrypted` ciphertext — the plaintext never touches the DB, exactly
+  like the env blob. `kind` + the `bootstrap_*` dataset triple pass straight
+  through the changeset.
+
   Returns `{:ok, %Site{}}` or `{:error, %Ecto.Changeset{}}`.
   """
   @spec create_site(Barkpark.t(), map()) ::
@@ -3260,11 +3266,42 @@ defmodule BarkparkCloud.Registry do
     %Site{}
     |> Site.changeset(
       attrs
+      |> put_site_read_token()
       |> Map.put_new(:barkpark_id, barkpark.id)
       |> Map.put_new(:team_id, barkpark.team_id)
     )
     |> Repo.insert()
   end
+
+  # site-spawner W1: fold a plaintext read token into the changeset as its
+  # Vault-encrypted ciphertext (the same at-rest seam as `set_site_env/2`).
+  # Accepts either atom or string key; a blank/absent token leaves attrs
+  # untouched (a container site has no content read token). The plaintext key is
+  # dropped so it can never be cast onto the row.
+  defp put_site_read_token(attrs) do
+    token = Map.get(attrs, :read_token) || Map.get(attrs, "read_token")
+
+    case token do
+      t when is_binary(t) and t != "" ->
+        attrs
+        |> Map.drop([:read_token, "read_token"])
+        |> Map.put(:read_token_encrypted, Vault.encrypt(t))
+
+      _ ->
+        attrs
+    end
+  end
+
+  @doc """
+  Decrypt a Site's public-read content token. `{:ok, token}` when set,
+  `{:ok, nil}` when the site carries none (every container site), or `:error`
+  when the ciphertext fails to decrypt (`Vault.decrypt/1` fails closed).
+  """
+  @spec reveal_site_read_token(Site.t()) :: {:ok, String.t() | nil} | :error
+  def reveal_site_read_token(%Site{read_token_encrypted: nil}), do: {:ok, nil}
+
+  def reveal_site_read_token(%Site{read_token_encrypted: ciphertext}),
+    do: Vault.decrypt(ciphertext)
 
   @doc "List a Team's sites across all of its barkparks, newest first."
   @spec list_sites_for_team(Team.t() | binary()) :: [Site.t()]
