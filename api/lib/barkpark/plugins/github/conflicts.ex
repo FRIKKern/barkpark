@@ -14,12 +14,22 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   ## Dedup
 
   `record/1` collapses repeats: an already-OPEN conflict for the same
-  `{repo, issue, kind}` is UPDATED in place (its `detail` MERGED — never
-  overwritten — and its `updated_at` bumped) rather than piling a second row. A
-  human editing an issue five times is ONE open `out_of_band_edit`, never five;
-  and two independent sources touching that one row (a drift fingerprint plus a
-  later GraphQL projection note) both survive on its `detail`. A row only
-  re-opens as a fresh record once the prior one is `resolve/1`-d.
+  `{repo, issue, kind, COALESCE(detail->>'source', '')}` is UPDATED in place (its
+  `detail` MERGED — never overwritten — and its `updated_at` bumped) rather than
+  piling a second row. A human editing an issue five times is ONE open
+  `out_of_band_edit`, never five (human drift carries NO `detail.source`, so all
+  five share the empty-string discriminator).
+
+  The `detail.source` 4th component matters because four distinct problems reuse
+  the frozen `out_of_band_edit` kind (D14), discriminated ONLY by `detail.source`
+  — human drift (no source key), `graphql`, `sub_issue_rejected`, `client_error`.
+  Two co-occurring distinct-source problems on ONE issue must stay TWO operator
+  rows: collapsing them to one meant a single Resolve silently cleared both and
+  the operator missed one. `COALESCE(..., '')` is load-bearing — Postgres treats
+  NULL as DISTINCT in a unique index, so a bare `detail->>'source'` would break
+  the five-human-edits-is-one-row invariant.
+
+  A row only re-opens as a fresh record once the prior one is `resolve/1`-d.
   """
 
   import Ecto.Query
@@ -29,7 +39,7 @@ defmodule Barkpark.Plugins.Github.Conflicts do
 
   @doc """
   Record a conflict, deduping an already-open one for the same
-  `{repo, issue, kind}`.
+  `{repo, issue, kind, COALESCE(detail->>'source', '')}`.
 
   If an unresolved row for that key exists, its `detail` (and `updated_at`) are
   updated in place; otherwise a new row is inserted. Runs in a transaction with
@@ -88,13 +98,21 @@ defmodule Barkpark.Plugins.Github.Conflicts do
     end)
   end
 
-  # Find + lock an open row for this dedup key (nil when there is none).
-  defp open_row(%{repo: repo, issue: issue, kind: kind})
+  # Find + lock an open row for this dedup key (nil when there is none). The key
+  # includes COALESCE(detail->>'source', '') as a 4th component — kept in exact
+  # lockstep with the github_sync_conflicts_open_key partial unique index — so
+  # two co-occurring distinct-source problems on ONE issue stay two rows. The
+  # incoming source is coalesced to '' the SAME way, so a no-source (human-drift)
+  # record matches other no-source rows and dedups, never piling.
+  defp open_row(%{repo: repo, issue: issue, kind: kind} = attrs)
        when is_binary(repo) and is_integer(issue) and is_binary(kind) do
+    source = source_key(attrs)
+
     from(c in Conflict,
       where:
         c.repo == ^repo and c.issue == ^issue and c.kind == ^kind and
-          is_nil(c.resolved_at),
+          is_nil(c.resolved_at) and
+          fragment("COALESCE(?->>'source', '')", c.detail) == ^source,
       order_by: [desc: c.id],
       limit: 1,
       lock: "FOR UPDATE"
@@ -106,6 +124,19 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   # changeset produce the validation error on insert.
   defp open_row(_attrs), do: nil
 
+  # The dedup discriminator: detail.source coalesced to "" for a missing key, so
+  # it matches the DB's COALESCE(detail->>'source', ''). detail is stored as
+  # jsonb (string keys), but an internal caller may hand an atom :source before
+  # it lands — read both so the pre-insert dedup key equals the post-insert one.
+  defp source_key(%{detail: detail}) when is_map(detail) do
+    case Map.get(detail, "source", Map.get(detail, :source)) do
+      s when is_binary(s) -> s
+      _ -> ""
+    end
+  end
+
+  defp source_key(_attrs), do: ""
+
   defp insert_new(attrs) do
     %Conflict{}
     |> Conflict.changeset(attrs)
@@ -113,15 +144,15 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   end
 
   # Merge the incoming detail INTO the recorded one rather than overwriting it.
-  # The same open `{repo, issue, kind}` row can be refreshed from independent
-  # sources — e.g. an `out_of_band_edit` first recorded with the observed
-  # title/state fingerprint, then re-touched by a Projects-v2 GraphQL projection
-  # error carrying a `source: "graphql"` note. Overwriting would clobber the
-  # human-drift detail with the last writer's payload, hiding half the story
-  # from the operator reading the quarantine. Map.merge keeps both; a colliding
-  # key takes the newest value (last write wins per-key, not per-map). A nil
-  # incoming detail is treated as an empty map so it never nulls the accumulated
-  # detail.
+  # The same open row (matched on `{repo, issue, kind, source}`) can be refreshed
+  # repeatedly from the SAME source — e.g. a `graphql` projection error observed
+  # twice, or five human-drift edits — each carrying an updated fingerprint.
+  # Overwriting would clobber the earlier payload with the last writer's, hiding
+  # half the story from the operator reading the quarantine. Map.merge keeps
+  # both; a colliding key takes the newest value (last write wins per-key, not
+  # per-map). A nil incoming detail is treated as an empty map so it never nulls
+  # the accumulated detail. (A DIFFERENT source on the same issue is a distinct
+  # row, not a refresh — see open_row/1's 4th key component.)
   defp refresh(existing, attrs) do
     merged = Map.merge(existing.detail || %{}, Map.get(attrs, :detail) || %{})
 

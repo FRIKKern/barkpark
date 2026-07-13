@@ -3,10 +3,11 @@ defmodule Barkpark.Plugins.Github.ConflictsTest do
   Wave-4 slice-1: the `github_sync_conflicts` quarantine substrate (epic D7).
 
   Proves the recorder INSERTS an open row, DEDUPS a repeat for the same
-  `{repo, issue, kind}` into ONE open row (update-in-place, never a pile),
-  LISTS open rows newest-first with repo/kind filters, and that `resolve/1`
-  drops a row out of the open list. DB-only — no `Content.*`, no
-  `mutation_events`, no network.
+  `{repo, issue, kind, COALESCE(detail->>'source', '')}` into ONE open row
+  (update-in-place, never a pile) while keeping co-occurring distinct-source
+  problems as DISTINCT rows (D17), LISTS open rows newest-first with repo/kind
+  filters, and that `resolve/1` drops a row out of the open list. DB-only — no
+  `Content.*`, no `mutation_events`, no network.
   """
   use Barkpark.DataCase, async: false
 
@@ -98,31 +99,73 @@ defmodule Barkpark.Plugins.Github.ConflictsTest do
                Conflicts.record(base(%{detail: nil}))
     end
 
-    test "a refresh MERGES detail from independent sources — no source clobbers another" do
+    test "a no-source human-drift record and a graphql record are DISTINCT rows (source discriminates)" do
       # First record: an out_of_band_edit carrying the observed drift fingerprint
       # + the ledger-owned GitHub fields that diverged (the MirrorJob update path).
-      assert {:ok, first} =
+      # Human drift carries NO detail.source.
+      assert {:ok, drift} =
                Conflicts.record(
                  base(%{
                    detail: %{"observed_fp" => 7, "github_fields" => %{"title" => "hand-edited"}}
                  })
                )
 
-      # A LATER touch on the SAME {repo,issue,kind} from a DIFFERENT source — e.g.
-      # a Projects-v2 GraphQL projection error folded into the frozen
-      # out_of_band_edit kind — must not clobber the human-drift detail.
-      assert {:ok, second} =
+      # A LATER touch on the SAME {repo,issue,kind} from a DIFFERENT source — a
+      # Projects-v2 GraphQL projection error folded into the frozen
+      # out_of_band_edit kind. It is a SEPARATE operator problem, NOT the same
+      # conflict: it must NOT collapse onto the human-drift row (D17). Otherwise
+      # one Resolve silently clears both and the operator misses one.
+      assert {:ok, gql} =
                Conflicts.record(
                  base(%{detail: %{"source" => "graphql", "graphql_error" => "RATE_LIMITED"}})
                )
 
-      # Same open row, and BOTH sources survive on it.
-      assert first.id == second.id
-      assert second.detail["observed_fp"] == 7
-      assert second.detail["github_fields"] == %{"title" => "hand-edited"}
-      assert second.detail["source"] == "graphql"
-      assert second.detail["graphql_error"] == "RATE_LIMITED"
+      # Two distinct open rows, each keeping ONLY its own detail.
+      refute drift.id == gql.id
+      assert Repo.aggregate(Conflict, :count, :id) == 2
+      assert length(Conflicts.list()) == 2
+
+      drift_row = Repo.get(Conflict, drift.id)
+      assert drift_row.detail["observed_fp"] == 7
+      assert drift_row.detail["github_fields"] == %{"title" => "hand-edited"}
+      refute Map.has_key?(drift_row.detail, "source")
+
+      assert gql.detail["source"] == "graphql"
+      assert gql.detail["graphql_error"] == "RATE_LIMITED"
+    end
+
+    test "co-occurring distinct-source problems on ONE issue are DISTINCT open rows (fail-before D17)" do
+      # Two of the four problems that reuse the frozen out_of_band_edit kind,
+      # discriminated only by detail.source. Before the source-widened dedup key
+      # they collapsed to ONE {repo,issue,kind} row — and a single Resolve cleared
+      # BOTH, so the sub-issue never got linked and nobody knew. This FAILS on
+      # main (count == 1) and passes after the fix (count == 2).
+      assert {:ok, gql} =
+               Conflicts.record(
+                 base(%{detail: %{"source" => "graphql", "graphql_error" => "RATE_LIMITED"}})
+               )
+
+      assert {:ok, sub} =
+               Conflicts.record(
+                 base(%{detail: %{"source" => "sub_issue_rejected", "parent" => 12}})
+               )
+
+      refute gql.id == sub.id
+      assert Repo.aggregate(Conflict, :count, :id) == 2
+      assert length(Conflicts.list()) == 2
+    end
+
+    test "five no-source human-drift records still dedup to ONE open row (COALESCE empty-string guard)" do
+      # Human drift carries NO detail.source. COALESCE(detail->>'source','') maps
+      # all five to the SAME discriminator '' — a bare detail->>'source' would let
+      # Postgres treat each NULL as DISTINCT and pile five rows, so the
+      # empty-string coalesce is load-bearing for the five-edits-is-one-row rule.
+      for n <- 1..5 do
+        assert {:ok, _} = Conflicts.record(base(%{detail: %{"edit" => n}}))
+      end
+
       assert Repo.aggregate(Conflict, :count, :id) == 1
+      assert length(Conflicts.list()) == 1
     end
 
     test "a nil incoming detail never nulls the accumulated detail" do
