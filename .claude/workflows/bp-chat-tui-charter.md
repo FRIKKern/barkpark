@@ -140,7 +140,7 @@ Still backlog after wave 2:
 
 **Next wave takes:** the live smoke (once slices merge + deploy), then `ct-bl-tui-apiclient-dedup` (collapse to one SSE parser) and `ct-bl-cards-interactive`/`ct-bl-toolrow-renderers` toward full Studio parity.
 
-### Wave 2026-07-13 (wave 2) — parity + proof — IN FLIGHT
+### Wave 2026-07-13 (wave 2) — parity + proof — COMPLETE (reviewed, grade B+)
 
 Wave paper `bp-chat-tui-wave-2026-07-13`. 16 Sonnet scouts → 8 verifiers (run-proofs) → this Decide. Base state reconciled: chat MVP merged to origin/main; `/v1/chat` LIVE on guerrilla (unauth 401, admin bearer 200); Law-1 gap is TOTAL (tool/todo/thinking collapse to one dim line, cards read-only); `rail_snapshot` carries real production data (8/28 sessions) the fork Session struct drops; apiclient bindings are dead code today (`bp chat` runs the fork). Decisions D25–D31 ratified above.
 
@@ -153,3 +153,19 @@ Wave paper `bp-chat-tui-wave-2026-07-13`. 16 Sonnet scouts → 8 verifiers (run-
 - `ct-bl-manifest-commands` (Bet 4 substrate, opus) — `chat` core noun + 7 core_cmd (D30).
 
 Elixir slices (S2, S6) do NOT merge before the Elixir Test CI gate; LEAD closes merge-gated criteria on merge. Newly filed backlog: `ct-bl-question-updatedinput`, `ct-bl-picker-window`, `ct-bl-chat-theme-select`, `ct-bl-chat-help-overlay`, `ct-bl-stream-rich`.
+
+**Landed (6 green slices, all gates re-run green on review; grade B+).** Debrief in the wave paper.
+- `ct-w1-live-smoke` — interactive E2E witnessed live on a disposable guerrilla session (send→first SSE delta→Esc interrupt→`aborted_streaming` notice→follow-up→settled render→resume) + TUI→GET→Studio draft continuity across all three surfaces; archived Studio-UI-only. Ledger 4/5, crit 4 (wave debrief) LEAD-owned. Branch `loop-epic/live-smoke-on-guerrilla-witness-bp-chat--0`. No code.
+- `ct-blk-elixir-toolrows` — three chat rows → PortableDoc block types; chat_live routes them through the reply-body article path (D8), closing the Law-1 fork; controller emits typed blocks. Gate green 23/23. Branch `…tool-todo-thinking-rows-as-dual-surface--1`.
+- `ct-bl-tui-apiclient-dedup` — collapsed the forked transport + 2nd SSE parser onto `internal/apiclient` (3-way merge verified vs live projection). Gate green. Branch `…one-wire-truth-collapse-internal-chat-on-2`.
+- `ct-bl-cards-interactive` — answerable approval/plan/question cards + rail band; update-in-place tail-refetch reducer. Gate green. Branch `…interactive-cards-rail-render-answer-app-3`.
+- `ct-blk-tui-toolrows` — Go pdrender renderers + render.go dispatch. **Reviewer-fixed** (final branch `…tool-todo-thinking-rows-as-dual-surface--4-r`): diff renderer now reads `input.file_path` (live shape, not just flat `path`); AND consumed the authoritative Elixir fixture to end the fixture collision (below). Gate green.
+- `ct-bl-manifest-commands` — chat noun + 7 verbs in `/v1/capabilities` (SSE carve-out named, admin-tiered, writes:false, no scoped_prefix). Gate green 51/51. Branch `…chat-capabilities-noun-7-commands-so-mcp-5`.
+
+**Reviewer-fixed cross-slice defect.** Bet 2's two halves had written INCOMPATIBLE fixtures to the same path (`internal/pdrender/testdata/chat_golden_toolrows.json`): Elixir generator `scope=chat-tool-todo-thinking-rows` / `{kind,block,projection{}}` vs Go hand-written `scope=chat-toolrows-only` / `{blocks[],projection[]}` — they could not co-merge green, silently breaking the Law-1 CI-fact. Fix: the Elixir generator is the sole authoritative writer of both mirrors, so the Go leg now consumes that fixture byte-identically and its test parses that schema. Post-merge: identical bytes → no conflict, both golden tests green. The two toolrows halves MUST merge together.
+
+**Merge order (LEAD).** dedup → cards-interactive (drop its self-contained httpTransport.Approval/RailSnapshot for apiclient's) → tui-toolrows-r (render.go dispatch); the two toolrows halves together. Elixir slices wait for the Elixir Test gate; Go slices on their Go gate. Re-run the live smoke post-deploy and close `ct-w1-live-smoke` crit 4.
+
+**Discovered / filed.** `ct-bl-approval-controller-flip` (P1) — controller `approval/2` unblocks the agent but omits `update_approval_status/3`, so a TUI-origin answer leaves its own card visually pending; Studio-origin answers flip correctly today. `task-846ae5a9e4e236b0` — extract `classify/parse_todos/todo_glyph` into a core module so `Components` stops reaching into web (no behavior change).
+
+**Next wave takes:** ship the two backlog fixes above (real approval parity + clean layering), then `ct-bl-toolrow-renderers` (approval rows as blocks), `ct-bl-question-updatedinput`, and the native-utilization reach.
