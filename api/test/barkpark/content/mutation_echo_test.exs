@@ -11,7 +11,7 @@ defmodule Barkpark.Content.MutationEchoTest do
   needed); `patch.set` / `patch.unset` route through the identical line, and the
   per-field redaction itself is covered by `Barkpark.Content.EnvelopeTest`.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext

@@ -7,7 +7,7 @@ defmodule Barkpark.Plugins.Tickets.ThreadTest do
   close; the seen stamp; the 200-message cap; and fail-closed key scoping
   (a foreign key gets `:not_found`, never a leak).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document

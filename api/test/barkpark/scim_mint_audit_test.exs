@@ -1,6 +1,6 @@
 defmodule Barkpark.ScimMintAuditTest do
   @moduledoc "Minting a SCIM token emits an audit event (era-w5-portal-mutation-audit)."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Audit, Repo, Scim, Tenancy}
   alias Barkpark.Audit.Event

@@ -16,7 +16,7 @@ defmodule Barkpark.Content.Papers.HollowTest do
       freely editable (fresh papers are hollow by construction).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document

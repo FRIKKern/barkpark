@@ -9,7 +9,7 @@ defmodule Barkpark.Search.MediaSearchScopeTest do
       the dataset string. The facet must be scoped to the same workspace as
       the primary results (mirror of the Ecto `scope_to_workspace/3` path).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 

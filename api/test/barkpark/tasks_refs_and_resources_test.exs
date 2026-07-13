@@ -12,7 +12,7 @@ defmodule Barkpark.TasksRefsAndResourcesTest do
   so they're pinned first. Mirrors tasks_ready_test conventions (per-test
   sandbox, TenancyFixtures scope, schema registration in setup).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document

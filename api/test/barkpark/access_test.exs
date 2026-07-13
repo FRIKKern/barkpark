@@ -5,7 +5,7 @@ defmodule Barkpark.AccessTest do
   or un-permitted action is refused, claim binds exactly once, and UUID-guarded
   reads never crash.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
   import Ecto.Query

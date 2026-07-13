@@ -10,7 +10,7 @@ defmodule Barkpark.ContentProjectionTest do
       the synthesized→projected values match the originals, and the stored row
       is NOT rewritten by a read.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Envelope

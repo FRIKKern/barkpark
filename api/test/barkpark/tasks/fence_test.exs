@@ -17,7 +17,7 @@ defmodule Barkpark.Tasks.FenceTest do
     * a DIFFERENT worker's targeted claim on an in_progress task still :not_ready.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query
 

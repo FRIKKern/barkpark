@@ -13,7 +13,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       Sanity-shaped mutations + legacy create controller use) stores blocks that
       all carry ids.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Document

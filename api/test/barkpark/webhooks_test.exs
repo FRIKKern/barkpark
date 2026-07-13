@@ -1,5 +1,5 @@
 defmodule Barkpark.WebhooksTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Webhooks
   alias Barkpark.Webhooks.{Webhook, Dispatcher}

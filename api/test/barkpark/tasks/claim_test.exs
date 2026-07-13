@@ -12,7 +12,7 @@ defmodule Barkpark.Tasks.ClaimTest do
     6. claim_by_id/3 — resource conflict: refuses when the requested resource is held.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document

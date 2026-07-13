@@ -28,7 +28,7 @@ defmodule Barkpark.Papers.PublicPaperScopeTest do
     4. fail-closed: with no seeded Default workspace the public read is `nil`,
        never an unscoped all-tenant read.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 

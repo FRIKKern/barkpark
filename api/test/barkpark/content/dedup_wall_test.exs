@@ -8,7 +8,7 @@ defmodule Barkpark.Content.DedupWallTest do
       trgm candidate query, exercised end-to-end against real published rows,
       including the fail-open guarantee.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.{DedupWall, Document}
   alias Barkpark.Repo

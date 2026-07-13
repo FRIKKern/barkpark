@@ -1,6 +1,6 @@
 defmodule Barkpark.Sso.SamlTest do
   @moduledoc "SAML SP assertion consumption + SLO — we play the IdP with a test cert (era-w3-saml, era-w7 SLO)."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Sso.Saml, Tenancy}
 

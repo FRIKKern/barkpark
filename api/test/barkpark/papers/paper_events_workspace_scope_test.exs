@@ -18,7 +18,7 @@ defmodule Barkpark.Papers.PaperEventsWorkspaceScopeTest do
   Isolation must come from `workspace_id`, never the dataset leaf — both
   workspaces share `@dataset`.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 
