@@ -16,7 +16,7 @@ defmodule Barkpark.Tasks.ExpectationsTest do
        `reverse_referencers/2` posture.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
   use Oban.Testing, repo: Barkpark.Repo
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}

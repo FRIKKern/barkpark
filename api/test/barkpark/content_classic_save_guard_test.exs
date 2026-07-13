@@ -14,7 +14,7 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
       bound title block, while every FREE block and the block ORDER stay
       byte-identical. The save provably cannot drop or reorder free blocks.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.PortableDoc.Projection

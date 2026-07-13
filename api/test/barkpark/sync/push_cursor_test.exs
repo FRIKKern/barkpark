@@ -6,7 +6,7 @@ defmodule Barkpark.Sync.PushCursorTest do
   is idempotent/never-rewinding (invariant #3), and is dataset-scoped. No worker,
   no network (invariant #7).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo

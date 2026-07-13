@@ -7,7 +7,7 @@ defmodule Barkpark.Tasks.QueryRowsTest do
   done ladder, straight from the substrate. No phx.server — just the Repo
   sandbox, so this is honest verification, not a stub.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
   alias Barkpark.Tasks.Query, as: TaskQuery
@@ -141,7 +141,7 @@ end
 
 defmodule Barkpark.Content.PapersTaskResolveTest do
   @moduledoc "End-to-end: a paper block's query resolves to a live snapshot from the substrate."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
   alias Barkpark.Content.Papers

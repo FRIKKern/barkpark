@@ -16,7 +16,7 @@ defmodule Barkpark.Content.EncryptionTest do
     * DEK rotation is transparent (old ciphertext still reveals).
     * No behaviour change when nothing is marked encrypted.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Document, Encryption, SchemaDefinition}

@@ -18,7 +18,7 @@ defmodule Barkpark.TasksTest do
        `documents.status="draft"` flow on the SAME row (choice (b)).
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.{Document, SchemaDefinition}

@@ -5,7 +5,7 @@ defmodule Barkpark.Content.Papers.TemplateTest do
   template shape, and the op backstops (no remove/move/unlock of a locked
   block by any client).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
@@ -288,7 +288,7 @@ defmodule Barkpark.Content.Papers.TemplateStyleTest do
   template papers are ARTICLE papers (the reader's h1 must match the canvas'
   h1 — rule 3), and block ops resolve the paper in the CALLER'S workspace.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
@@ -356,7 +356,7 @@ end
 
 defmodule Barkpark.Content.Papers.WriterSeamTest do
   @moduledoc "pdd-t16: the Writer/mutate path gives papers the same birth guarantee as upsert_paper."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
 

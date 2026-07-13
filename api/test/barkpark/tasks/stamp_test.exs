@@ -16,7 +16,7 @@ defmodule Barkpark.Tasks.StampTest do
        transaction, carrying the criterion_stamp payload.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.{Document, MutationEvent}

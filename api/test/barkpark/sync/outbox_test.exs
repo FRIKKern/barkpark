@@ -5,7 +5,7 @@ defmodule Barkpark.Sync.OutboxTest do
   pulled mutation is never pushed back. No network. Events are inserted directly
   into `mutation_events` so the test controls `source` precisely.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo

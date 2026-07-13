@@ -1,6 +1,6 @@
 defmodule Barkpark.Sso.LoginAuditTest do
   @moduledoc "Every SSO/social login emits an sso_login audit event (era-w3-sso-login-audit)."
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Accounts, Audit, Repo, Sso, Tenancy}
   alias Barkpark.Audit.Event

@@ -9,7 +9,7 @@ defmodule Barkpark.Content.PatchContentNestingWarningTest do
   only emits a non-blocking `Warnings` advisory. These tests pin that the
   advisory fires for the map-valued `content` shape and stays quiet otherwise.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Warnings

@@ -10,7 +10,7 @@ defmodule Barkpark.Tasks.AggQueryTest do
   aggregate scoped to workspace A must NEVER count workspace B's rows. Written
   so that dropping `Scope.scope_to_workspace/3` makes A's count include B → RED.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Barkpark.TenancyFixtures
 

@@ -1,5 +1,5 @@
 defmodule Barkpark.TenancyTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Workspace, Project, Membership}

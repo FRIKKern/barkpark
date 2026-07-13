@@ -16,7 +16,7 @@ defmodule Barkpark.EdgeProjector.NilWorkspaceFailClosedTest do
   `where: false`), so `add_edge/4` returns `{:error, :no_target}` and NO row
   is written.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.Edge

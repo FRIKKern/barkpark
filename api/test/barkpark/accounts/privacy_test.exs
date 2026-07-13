@@ -1,5 +1,5 @@
 defmodule Barkpark.Accounts.PrivacyTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.{Privacy, User, UserSession, UserEmailToken}

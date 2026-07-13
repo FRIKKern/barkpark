@@ -1,5 +1,5 @@
 defmodule Barkpark.Search.QueryPipelineTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Search.{QueryParser, QueryPipeline, SurfaceConfigs}

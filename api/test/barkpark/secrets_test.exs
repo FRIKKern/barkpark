@@ -1,5 +1,5 @@
 defmodule Barkpark.SecretsTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Secrets
   alias Barkpark.Secrets.SecretAudit

@@ -5,7 +5,7 @@ defmodule Barkpark.StatusTest do
   A valid id still resolves the row; a non-UUID string (or a well-formed but
   absent UUID) folds to `nil` — never an `Ecto.CastError` 500.
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Status
 

@@ -10,7 +10,7 @@ defmodule Barkpark.Content.SchemaSurfaceRuntimeTest do
   #
   # plus the demo seed profile: every stored seed field re-parses with only
   # valid surface values (catches a typo like "side-bar" at seed-author time).
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
   alias Barkpark.Content.SchemaDefinition
