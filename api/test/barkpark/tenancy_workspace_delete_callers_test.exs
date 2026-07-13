@@ -150,9 +150,29 @@ defmodule Barkpark.TenancyWorkspaceDeleteAuditSweepTest do
     bystander = make_workspace("Bystander")
 
     # Audit history for BOTH workspaces (Audit.emit is the append-only writer).
-    {:ok, %Event{}} = Audit.emit(%{category: "auth", action: "login_succeeded", workspace_id: target.id, actor_id: "u1"})
-    {:ok, %Event{}} = Audit.emit(%{category: "auth", action: "session_revoked", workspace_id: target.id, actor_id: "u1"})
-    {:ok, %Event{}} = Audit.emit(%{category: "auth", action: "login_succeeded", workspace_id: bystander.id, actor_id: "u2"})
+    {:ok, %Event{}} =
+      Audit.emit(%{
+        category: "auth",
+        action: "login_succeeded",
+        workspace_id: target.id,
+        actor_id: "u1"
+      })
+
+    {:ok, %Event{}} =
+      Audit.emit(%{
+        category: "auth",
+        action: "session_revoked",
+        workspace_id: target.id,
+        actor_id: "u1"
+      })
+
+    {:ok, %Event{}} =
+      Audit.emit(%{
+        category: "auth",
+        action: "login_succeeded",
+        workspace_id: bystander.id,
+        actor_id: "u2"
+      })
 
     # A SIEM export sink for BOTH workspaces.
     {:ok, %ExportSink{}} =
