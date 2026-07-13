@@ -818,4 +818,104 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       refute Content.get_paper(dup_slug)
     end
   end
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # D36/D42 — ingest advisory dead-letter. The publish wall's advise band (an
+  # off-norm tag count, a soft-dup near-miss) queues NON-blocking warnings via
+  # Warnings.put. Before this wiring the ingest controller never opened the
+  # request-scoped channel (Warnings.reset/drain), so every ingest advisory was
+  # silently dropped (collect-only-when-listening, warnings.ex) — a real signal
+  # lost. This proves the band now rides the 200 SUCCESS envelope, and that a
+  # compliant in-norm ingest keeps the byte-identical warnings-free body.
+  # ───────────────────────────────────────────────────────────────────────────
+  describe "D36 ingest advisory dead-letter" do
+    test "an off-norm tag count rides the 200 success envelope as a label_norm warning",
+         %{conn: conn} do
+      n = System.unique_integer([:positive])
+      # FIVE registered weighted labels: a legal count (1–12) OUTSIDE the 2–4
+      # norm, so the wall PASSES (200) yet emits the `label_norm` advisory.
+      names = for i <- 1..5, do: "advinorm#{n}x#{i}"
+      labels = LabelFixtures.with_named_labels(%{}, "production", names)
+
+      slug = "d36-advisory-#{n}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "Distinctive advisory-band paper about tag-count norms #{n}"
+          },
+          %{
+            "id" => "body",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Real body content."}]
+          }
+        ],
+        "tags" => labels["tags"],
+        "description" => labels["description"]
+      }
+
+      conn = auth_ingest(conn, payload)
+      resp = json_response(conn, 200)
+
+      # The paper is BORN — an advisory NEVER blocks (charter D5) …
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      assert Content.get_paper(slug)
+
+      # … and the advisory rides the SUCCESS envelope (was silently dropped
+      # before the Warnings.reset/drain wiring).
+      assert is_list(resp["warnings"])
+      assert resp["warnings"] != []
+
+      entry = Enum.find(resp["warnings"], &(&1["code"] == "label_norm"))
+      assert entry, "expected a label_norm advisory in #{inspect(resp["warnings"])}"
+      assert entry["severity"] == "advisory"
+      assert is_binary(entry["message"]) and entry["message"] != ""
+    end
+
+    test "a compliant in-norm ingest omits the warnings key (byte-identical body)",
+         %{conn: conn} do
+      n = System.unique_integer([:positive])
+      # THREE registered weighted labels — squarely IN the 2–4 norm, no advisory.
+      names = for i <- 1..3, do: "advinnorm#{n}x#{i}"
+      labels = LabelFixtures.with_named_labels(%{}, "production", names)
+
+      slug = "d36-noadvisory-#{n}"
+
+      payload = %{
+        "slug" => slug,
+        "blocks" => [
+          %{
+            "id" => "tpl-title",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "Distinctive in-norm paper about tag counts #{n}"
+          },
+          %{
+            "id" => "body",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Real body content."}]
+          }
+        ],
+        "tags" => labels["tags"],
+        "description" => labels["description"]
+      }
+
+      conn = auth_ingest(conn, payload)
+      resp = json_response(conn, 200)
+
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      # No advisory ⇒ the additive key is OMITTED (never an empty array).
+      refute Map.has_key?(resp, "warnings")
+    end
+  end
 end

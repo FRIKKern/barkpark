@@ -71,7 +71,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Content
-  alias Barkpark.Content.Errors
+  alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Tenancy
 
   # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
@@ -101,11 +101,17 @@ defmodule BarkparkWeb.BulldocsIngestController do
       }
       |> put_scope(conn, params)
 
+    # Open the advisory channel before the wall runs (authoring-excellence
+    # D36/D42) — mirrors MutateController. The wall's advise band (soft-dup
+    # similarity 0.30–0.55, off-norm tag count) queues [{code, severity,
+    # message}] via Warnings.put/3 while upsert_paper writes; with_warnings/1
+    # drains it into the SUCCESS body below. Reset first so a prior request on a
+    # reused test process can never leak advisories in.
+    Warnings.reset()
+
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
-        conn
-        |> put_status(:ok)
-        |> json(%{
+        body = %{
           ok: true,
           slug: paper.doc_id,
           rev: to_string(get_in(paper.content, ["rev"])),
@@ -114,7 +120,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
           # tenancy resolves; liveview_path stays byte-identical forever
           # (locked paper-ingest contract).
           scoped_liveview_path: scoped_liveview_path(paper)
-        })
+        }
+
+        conn
+        |> put_status(:ok)
+        |> json(with_warnings(body))
 
       # A server veto from BlockOps.upsert_paper arrives as {:halted, reason} —
       # the M1 template halt (locked-block / structure) and the hollow-body
@@ -169,11 +179,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
       }
       |> put_scope(conn, params)
 
+    # Advisory channel — see the blocks head (authoring-excellence D36/D42).
+    Warnings.reset()
+
     case Content.upsert_paper(attrs) do
       {:ok, paper} ->
-        conn
-        |> put_status(:ok)
-        |> json(%{
+        body = %{
           ok: true,
           slug: paper.doc_id,
           # The monotonic streaming rev lives in content["rev"] (an integer);
@@ -183,7 +194,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
           liveview_path: "/papers/#{paper.doc_id}",
           # ADDITIVE (P4) — see scoped_liveview_path/1.
           scoped_liveview_path: scoped_liveview_path(paper)
-        })
+        }
+
+        conn
+        |> put_status(:ok)
+        |> json(with_warnings(body))
 
       # Server veto (template / hollow-body gate) — surface the reason
       # VERBATIM (see the blocks path).
@@ -527,6 +542,21 @@ defmodule BarkparkWeb.BulldocsIngestController do
     conn
     |> put_status(env.status)
     |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # Fold any advisory-band warnings the publish wall queued during upsert_paper
+  # into the SUCCESS body (authoring-excellence D36/D42) — mirrors
+  # MutateController. Warnings.reset/0 opened the request-scoped queue before the
+  # upsert; this drains it after. Without the reset+drain pair the wall's
+  # advisories (a real signal — soft-dup near-misses, off-norm tag counts) were
+  # silently dropped on every ingest (collect-only-when-listening, warnings.ex).
+  # The `warnings` key is OMITTED when the drain is empty, so a compliant ingest
+  # with no advisory keeps the byte-identical pre-wall body.
+  defp with_warnings(body) do
+    case Warnings.drain() do
+      [] -> body
+      warnings -> Map.put(body, :warnings, warnings)
+    end
   end
 
   # A minimally well-formed op: a map whose "op" is one of the five kinds.
