@@ -25,9 +25,14 @@ type fakeTransport struct {
 	patchedID   string
 	sent        []string
 	interrupted bool
-	approved    []string
+	approvals   []approvalCall
+	approveErr  error
 	listErr     error
 	getErr      error
+}
+
+type approvalCall struct {
+	id, requestID, decision string
 }
 
 type getCall struct {
@@ -54,8 +59,8 @@ func (f *fakeTransport) SendMessage(id, content string) error {
 }
 func (f *fakeTransport) Interrupt(id string) error { f.interrupted = true; return nil }
 func (f *fakeTransport) Approve(id, requestID, decision string) error {
-	f.approved = append(f.approved, requestID+":"+decision)
-	return nil
+	f.approvals = append(f.approvals, approvalCall{id: id, requestID: requestID, decision: decision})
+	return f.approveErr
 }
 func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(string, []byte)) error {
 	<-ctx.Done()
@@ -240,6 +245,73 @@ func TestSessionsLoadErrorShowsHonestState(t *testing.T) {
 	}
 	if got.loading {
 		t.Fatal("loading must clear after a failed load")
+	}
+}
+
+// TestCardKeyAnswersFocusedCard proves the end-to-end key path: Ctrl+A on a
+// conversation with a pending card resolves the focused card's request_id into
+// an approval POST through the transport (allow), and Ctrl+R denies.
+func TestCardKeyAnswersFocusedCard(t *testing.T) {
+	f := &fakeTransport{}
+	m := newTestModel(f)
+	m.screen = screenChat
+	m.st = State{
+		SessionID: "s1",
+		Messages: []Message{{
+			Seq: 4, Role: "approval", SourceMarkdown: "run rm?",
+			Metadata: map[string]any{"request_id": "req-42", "approval_status": "pending"},
+		}},
+		LastSeq: 4,
+	}
+
+	// Ctrl+A allows the focused card.
+	nm, cmd := m.handleChatKey(tea.KeyMsg{Type: tea.KeyCtrlA})
+	m = nm.(Model)
+	if m.st.AnswerInFlight["req-42"] != "allow" {
+		t.Fatalf("Ctrl+A must mark the focused card allowing, got %v", m.st.AnswerInFlight)
+	}
+	// The batch contains the AnswerEffect's POST command; run it and assert the call.
+	runCmd(cmd)
+	if len(f.approvals) != 1 || f.approvals[0].requestID != "req-42" || f.approvals[0].decision != "allow" {
+		t.Fatalf("Ctrl+A must POST the approval {req-42, allow}, got %+v", f.approvals)
+	}
+
+	// Ctrl+R on a fresh model denies.
+	f2 := &fakeTransport{}
+	m2 := newTestModel(f2)
+	m2.screen = screenChat
+	m2.st = m.st
+	m2.st.AnswerInFlight = nil
+	nm2, cmd2 := m2.handleChatKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	_ = nm2
+	runCmd(cmd2)
+	if len(f2.approvals) != 1 || f2.approvals[0].decision != "deny" {
+		t.Fatalf("Ctrl+R must POST the deny decision, got %+v", f2.approvals)
+	}
+}
+
+// TestAnswerDoneErrorSurfaces proves a transport-level approval failure lands an
+// honest notice through the shell (not a crash, not a stuck badge).
+func TestAnswerDoneErrorSurfaces(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	m.screen = screenChat
+	m.st = State{SessionID: "s1", AnswerInFlight: map[string]string{"req-1": "allow"}}
+	nm, _ := m.Update(answerDoneMsg{requestID: "req-1", err: errString("boom")})
+	if got := nm.(Model).st.Notice; got == "" {
+		t.Fatal("an approval error must surface a notice")
+	}
+}
+
+// TestResumeHydratesRail proves Law-2: opening a session decodes its
+// rail_snapshot into the rail so a surface switch lands on the same rail.
+func TestResumeHydratesRail(t *testing.T) {
+	m := newTestModel(&fakeTransport{})
+	m = m.openSession(Session{
+		ID:           "s1",
+		RailSnapshot: json.RawMessage(`{"t1":{"status":"running","row":{"description":"builder"}}}`),
+	})
+	if len(m.st.Rail) != 1 || m.st.Rail[0].Label != "builder" {
+		t.Fatalf("resume must hydrate the rail from the snapshot, got %+v", m.st.Rail)
 	}
 }
 

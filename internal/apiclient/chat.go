@@ -109,6 +109,40 @@ type ChatMessage struct {
 	InsertedAt     string          `json:"inserted_at,omitempty"`
 }
 
+// metaString reads a string field off the row's raw metadata map — "" when the
+// key is absent or non-string. The approval/question/plan rows carry their
+// answer state here verbatim from the Recorder (persist_approval_ask): the wire
+// keys are request_id, tool_name, input, and approval_status.
+func (m ChatMessage) metaString(key string) string {
+	if m.Metadata == nil {
+		return ""
+	}
+	if v, ok := m.Metadata[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// RequestID is the approval ask's request_id — the id the answer POST carries so
+// the engine (and the persisted row) resolve the SAME ask (Law-2: one truth).
+func (m ChatMessage) RequestID() string { return m.metaString("request_id") }
+
+// ApprovalStatus is the card's lifecycle: "pending" until answered, then the
+// server terminal enum "allowed" | "denied" | "canceled"
+// (StudioChat.@approval_terminal). A Studio answer flips it via
+// update_approval_status/3, so the TUI reads the resolution off the same row.
+func (m ChatMessage) ApprovalStatus() string { return m.metaString("approval_status") }
+
+// Resolved is true once a card has reached a terminal decision (allowed/denied/
+// canceled) — the render flips from an answer affordance to a resolution badge.
+func (m ChatMessage) Resolved() bool {
+	switch m.ApprovalStatus() {
+	case "allowed", "denied", "canceled":
+		return true
+	}
+	return false
+}
+
 // ChatSessionSummary is the sidebar shape from GET /v1/chat/sessions (the
 // list_sessions/1 → sidebar_json projection). It intentionally lacks draft, the
 // rail, and the model/effort choices — those live only on the full GET :id

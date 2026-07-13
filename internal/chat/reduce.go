@@ -61,6 +61,17 @@ type State struct {
 	Local    []LocalSend // optimistic sends not yet settled into Messages
 	WedgeAt  time.Time   // interrupt wedge deadline (zero unless interrupting)
 
+	// Rail is the decoded agents-rail (charter D47) hydrated from the session's
+	// rail_snapshot — task-keyed mission control that survives a surface switch
+	// (Law-2). Re-decoded on every full session load / turn-boundary refetch.
+	Rail []RailEntry
+
+	// AnswerInFlight maps a card's request_id → the decision ("allow"/"deny")
+	// POSTed but not yet confirmed by a refetch — the immediate-feedback layer:
+	// the card reads "answering: allow…" until the server-resolved row lands and
+	// flips it (or the POST errors and it clears).
+	AnswerInFlight map[string]string
+
 	Notice string // one-line footer status (never an error screen)
 	Exited bool   // the session process exited (event:exit)
 }
@@ -90,16 +101,38 @@ type TailFetchedEvent struct {
 	Err     error
 }
 
+// AnswerEvent is the user answering the focused card via a keystroke (charter
+// D27/D28): Decision is "allow" or "deny" ONLY (allow = approve / plan-approve /
+// answer-allow; deny = reject / plan-keep). No caller-supplied updatedInput —
+// rich AskUserQuestion input is deferred (ct-bl-question-updatedinput, D28).
+type AnswerEvent struct {
+	RequestID string
+	Decision  string
+}
+
+// AnsweredEvent is the answer POST completing. On success it triggers a FULL
+// refetch so the server-resolved card flips pending → allowed/denied in place (a
+// resolved row keeps its seq — only its metadata changes — so a since=0 refetch,
+// not a since=LastSeq tail, is what surfaces the flip).
+type AnsweredEvent struct {
+	RequestID string
+	Err       error
+}
+
 func (FrameEvent) isChatEvent()       {}
 func (SendEvent) isChatEvent()        {}
 func (InterruptEvent) isChatEvent()   {}
 func (TickEvent) isChatEvent()        {}
 func (TailFetchedEvent) isChatEvent() {}
+func (AnswerEvent) isChatEvent()      {}
+func (AnsweredEvent) isChatEvent()    {}
 
 // Effect is an IO instruction the shell executes (the reducer never does IO).
 type Effect interface{ isChatEffect() }
 
-// FetchTailEffect — GET the session with ?since=SinceSeq (turn boundary).
+// FetchTailEffect — GET the session with ?since=SinceSeq (turn boundary). A
+// SinceSeq of 0 is a FULL refetch (every row, so an in-place metadata flip like
+// a resolved approval is picked up); a positive SinceSeq returns only newer rows.
 type FetchTailEffect struct{ SinceSeq int }
 
 // SendEffect — POST the message body.
@@ -108,9 +141,18 @@ type SendEffect struct{ Content string }
 // InterruptEffect — POST the interrupt.
 type InterruptEffect struct{}
 
+// AnswerEffect — POST {request_id, decision} to /v1/chat/sessions/:id/approval
+// (charter wire contract): allow/deny only, no updatedInput. Answered by an
+// AnsweredEvent carrying the same request_id.
+type AnswerEffect struct {
+	RequestID string
+	Decision  string
+}
+
 func (FetchTailEffect) isChatEffect() {}
 func (SendEffect) isChatEffect()      {}
 func (InterruptEffect) isChatEffect() {}
+func (AnswerEffect) isChatEffect()    {}
 
 // Reduce is the single transition function. It never blocks, never does IO,
 // and never panics on malformed frames — an unknown or unparseable frame is
@@ -127,8 +169,44 @@ func Reduce(st State, ev Event, now time.Time) (State, []Effect) {
 		return reduceTick(st, now)
 	case TailFetchedEvent:
 		return reduceTailFetched(st, ev)
+	case AnswerEvent:
+		return reduceAnswer(st, ev)
+	case AnsweredEvent:
+		return reduceAnswered(st, ev)
 	}
 	return st, nil
+}
+
+// reduceAnswer records the in-flight decision (immediate feedback) and emits the
+// POST. It is a no-op for a blank request_id (nothing to answer) or a decision
+// other than allow/deny (the scope fence, charter D28). The card's terminal flip
+// is server truth, arriving on the AnsweredEvent's full refetch — never guessed
+// locally, so a Studio answer and a TUI answer converge on the SAME row.
+func reduceAnswer(st State, ev AnswerEvent) (State, []Effect) {
+	if ev.RequestID == "" || (ev.Decision != "allow" && ev.Decision != "deny") {
+		return st, nil
+	}
+	if st.AnswerInFlight == nil {
+		st.AnswerInFlight = map[string]string{}
+	}
+	st.AnswerInFlight[ev.RequestID] = ev.Decision
+	st.Notice = answeringNotice(ev.Decision)
+	return st, []Effect{AnswerEffect{RequestID: ev.RequestID, Decision: ev.Decision}}
+}
+
+// reduceAnswered handles the POST completing. A transport error clears the
+// in-flight badge and surfaces honestly (the card stays pending — the operator
+// can retry). On success it fires a FULL refetch (SinceSeq 0) so the resolved
+// row's metadata flip lands in place; the in-flight badge lingers until that
+// refetch confirms the terminal status (reduceTailFetched drops it).
+func reduceAnswered(st State, ev AnsweredEvent) (State, []Effect) {
+	if ev.Err != nil {
+		delete(st.AnswerInFlight, ev.RequestID)
+		st.Notice = "answer failed — " + ev.Err.Error()
+		return st, nil
+	}
+	st.Settling = true
+	return st, []Effect{FetchTailEffect{SinceSeq: 0}}
 }
 
 // reduceSend appends the optimistic echo and always POSTs immediately — the
@@ -199,8 +277,8 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 		return reduceClaudeFrame(st, ev.Data)
 	case "permission":
 		// The ask row is persisted by the Recorder — refetch the tail so the
-		// read-only card renders from replay truth (the interactive answer
-		// flow is backlog ct-bl-interactive-cards).
+		// answerable card renders from replay truth (request_id + pending status
+		// in its metadata); the operator then answers it with the card keys.
 		st.Settling = true
 		return st, []Effect{FetchTailEffect{SinceSeq: st.LastSeq}}
 	case "exit":
@@ -303,15 +381,40 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 		st.Notice = "refetch failed — transcript may lag (" + ev.Err.Error() + ")"
 		return st, nil
 	}
+	// Merge by seq: a row we already hold is UPDATED in place (an approval card
+	// flips its approval_status metadata WITHOUT changing its seq, so a full
+	// refetch must replace it, not skip it); a genuinely newer row appends and
+	// advances the cursor. A since=LastSeq tail refetch returns only new rows, so
+	// this loop degrades to the append-only behaviour there.
+	bySeq := make(map[int]int, len(st.Messages))
+	for i, m := range st.Messages {
+		bySeq[m.Seq] = i
+	}
 	fresh := make([]Message, 0, len(ev.Session.Messages))
 	for _, m := range ev.Session.Messages {
-		if m.Seq > st.LastSeq {
+		if idx, ok := bySeq[m.Seq]; ok {
+			st.Messages[idx] = m
+		} else if m.Seq > st.LastSeq {
 			fresh = append(fresh, m)
 			st.LastSeq = m.Seq
 		}
 	}
 	st.Messages = append(st.Messages, fresh...)
 	st.Local = dropSettledLocal(st.Local, fresh)
+	// Law-2 rail continuity: re-hydrate the agents rail from the refetched
+	// snapshot so a resumed session (and every turn boundary) shows the same
+	// mission control Studio shows.
+	if len(ev.Session.RailSnapshot) > 0 {
+		st.Rail = decodeRail(ev.Session.RailSnapshot)
+	}
+	// Any in-flight answer whose card is no longer pending has been resolved
+	// server-side (by this TUI's POST or by a Studio answer to the SAME row) —
+	// drop its badge so the card reads its terminal state.
+	for rid := range st.AnswerInFlight {
+		if !cardPending(st.Messages, rid) {
+			delete(st.AnswerInFlight, rid)
+		}
+	}
 	if t := strings.TrimSpace(ev.Session.Title); t != "" {
 		st.Title = t
 	}
@@ -319,6 +422,28 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 		st.Tail = ""
 	}
 	return st, nil
+}
+
+// cardPending reports whether the row carrying request_id is still awaiting a
+// decision. An absent row (or one already resolved) reads not-pending, so its
+// in-flight badge clears.
+func cardPending(msgs []Message, requestID string) bool {
+	for _, m := range msgs {
+		if m.RequestID() == requestID {
+			return m.ApprovalStatus() == "pending"
+		}
+	}
+	return false
+}
+
+// answeringNotice is the immediate-feedback footer line for an answer POST in
+// flight — honest present-tense, replaced by the card's terminal badge once the
+// refetch confirms it.
+func answeringNotice(decision string) string {
+	if decision == "deny" {
+		return "denying…"
+	}
+	return "allowing…"
 }
 
 // exitNotice renders the public exit frame (charter D23 {status, reason}) as one

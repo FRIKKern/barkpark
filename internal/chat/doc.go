@@ -41,8 +41,22 @@
 // The golden-transcript parity harness (ct-w1-golden-harness) covers exactly the
 // ASSISTANT REPLY BODY projection: renderAssistantDoc is the seam it diffs
 // against the Studio reader. User echoes, the live tail, and the bespoke
-// read-only approval/question/plan cards are DELIBERATELY out of golden scope —
-// the cards are replay-only (answering is ct-bl-cards-interactive), and the tail
+// approval/question/plan cards are DELIBERATELY out of golden scope — the tail
 // is transient truth that settles into a golden-covered assistant body at the
 // result boundary. One projection, one parity contract.
+//
+// # Interactive cards + the agents rail (charter D27/D28, Law-1/Law-2)
+//
+// approval/question/plan cards are answerable in-canvas: the focused pending
+// card takes Ctrl+A (allow / approve / plan-approve) or Ctrl+R (deny / keep
+// planning); Tab cycles the focus ring. An answer POSTs {request_id, decision}
+// to /v1/chat/sessions/:id/approval (allow/deny ONLY — rich AskUserQuestion
+// updatedInput is deferred, ct-bl-question-updatedinput) and then FULL-refetches
+// the tail. The resolved row keeps its seq — only its approval_status metadata
+// flips pending → allowed/denied — so the turn-boundary merge UPDATES rows in
+// place, not append-only. Because the flip is a Postgres row (server-side
+// update_approval_status/3), a Studio answer and a TUI answer converge on the
+// SAME card with no sync engine (Law-2, one truth). The session's rail_snapshot
+// decodes into a task-keyed agents rail band below the transcript, so a
+// mid-session surface switch keeps the same mission control Studio shows.
 package chat

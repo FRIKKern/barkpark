@@ -91,6 +91,20 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Interrupt the active turn. Reduce makes an idle Esc a no-op, so the key
 		// is safe to press any time.
 		return m.apply(InterruptEvent{})
+	case tea.KeyCtrlA:
+		// Allow / approve / plan-approve the focused pending card (charter D27).
+		return m.answerFocused("allow")
+	case tea.KeyCtrlR:
+		// Deny / reject / plan-keep the focused pending card. Non-printable keys
+		// so the composer stays fully typable (a/d/r are ordinary text).
+		return m.answerFocused("deny")
+	case tea.KeyTab:
+		// Cycle the focus ring to the next pending card. A no-op with 0/1 cards.
+		if n := len(m.answerableCards()); n > 0 {
+			m.cardCursor = (m.cardCursor + 1) % n
+			m.scroll = -1
+		}
+		return m, nil
 	case tea.KeyCtrlB:
 		return m.leaveSession()
 	case tea.KeyBackspace:
@@ -121,6 +135,19 @@ func (m Model) handleChatKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// answerFocused answers the currently focused pending card with the given
+// decision ("allow"/"deny"). A no-op when no card is focused (the keys are safe
+// to press any time). It re-follows so the card's flip stays in view, and the
+// reducer owns the POST + the pending → resolved refetch.
+func (m Model) answerFocused(decision string) (tea.Model, tea.Cmd) {
+	card, ok := m.focusedCard()
+	if !ok {
+		return m, nil
+	}
+	m.scroll = -1
+	return m.apply(AnswerEvent{RequestID: card.RequestID(), Decision: decision})
 }
 
 // scrollBy moves the manual viewport by delta lines. Scrolling up leaves follow
