@@ -1,4 +1,3 @@
-
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/content/validation.ex:109,FD6035
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/sheets.ex:113,1FB65CC
@@ -166,3 +165,4 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/sh
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:4130,7966598
 XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2843,3D6DB5F
+Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2082,657F8CA
