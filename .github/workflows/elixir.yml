@@ -30,7 +30,7 @@ name: elixir
 on:
   pull_request:
   push:
-    branches: [main, steward/fix-main-red-tiers-errors]
+    branches: [main]
 
 concurrency:
   group: elixir-${{ github.ref }}
@@ -188,13 +188,6 @@ jobs:
           git add -N docs/openapi.json
           git diff --exit-code docs/openapi.json \
             || (echo "::error::docs/openapi.json is stale — run 'cd api && mix barkpark.openapi' and commit" && exit 1)
-
-      - name: Capture regenerated openapi.json (steward artifact — temporary)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openapi-regenerated
-          path: docs/openapi.json
 
       - name: Paper-component golden-parity freshness (3 mirrors must match the emitter)
         # Same drift-gate shape as the OpenAPI check above, for the cross-surface
