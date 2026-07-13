@@ -173,6 +173,34 @@ defmodule BarkparkWeb.Telemetry do
         unit: {:native, :millisecond},
         description:
           "LiveComponent handle_event latency — p95 via histogram_quantile; tag :component = the module."
+      ),
+      # ── Authoring wall — curator legibility (charter D44) ───────────────────
+      # Q: "how often is the publish wall rejecting a publish, and for what?"
+      # Waves 1–5 sealed the wall; every rejection fired
+      # [:barkpark, :authoring, :wall_rejection] (authoring_wall.ex emit_wall_rejection)
+      # into a total production VOID — no Prometheus series, no attached handler
+      # (proven on the deployed build). Before this, an operator could only raw-grep
+      # journalctl for "Sent 422", which drifts with slot + log retention and cannot
+      # answer "how often" reproducibly. The RULED consumer is the already-live,
+      # Bearer-gated `GET /v1/instance/metrics` scrape (charter D44 inverts D29's
+      # inventory doctrine — the consumer now EXISTS, so no novel findings store).
+      # Tagged ONLY by BOUNDED keys: :code (label_spine | unknown_tag | duplicate_of),
+      # :type (paper | task), :dataset. The emitter carries no other metadata.
+      sum("barkpark.authoring.wall_rejection.count",
+        tags: [:code, :type, :dataset],
+        description:
+          "Publish-wall rejections — tags :code=gate (label_spine|unknown_tag|duplicate_of), :type, :dataset."
+      ),
+      # Q: "how often does a just-published doc fail to retrieve ITSELF by its own
+      # labels?" The D9 findability post-test (an Oban worker) fires
+      # [:barkpark, :authoring, :findability_miss] (findability_posttest.ex emit_miss)
+      # into the same void. Tagged ONLY by BOUNDED :type/:dataset — the emitter's
+      # :doc_id, :query and :rank_diagnostics are UNBOUNDED cardinality and are
+      # deliberately DROPPED here (never Prometheus tags; they live in the log line).
+      sum("barkpark.authoring.findability_miss.count",
+        tags: [:type, :dataset],
+        description:
+          "Post-publish self-retrieval misses — a published doc absent from top-N for its own labels; tags :type, :dataset."
       )
     ]
   end
