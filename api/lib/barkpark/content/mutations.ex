@@ -14,7 +14,7 @@ defmodule Barkpark.Content.Mutations do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, CallerContext, DraftId, Envelope, Writer}
+  alias Barkpark.Content.{Broadcast, CallerContext, DraftId, Envelope, Warnings, Writer}
 
   @doc """
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
@@ -296,6 +296,8 @@ defmodule Barkpark.Content.Mutations do
        ) do
     with {:ok, existing} <- get_patch_base(id, type, dataset, opts),
          :ok <- ensure_rev(existing, if_rev(patch)) do
+      warn_on_nested_content(fields)
+
       merged =
         Map.merge(
           existing.content || %{},
@@ -333,6 +335,29 @@ defmodule Barkpark.Content.Mutations do
       _ -> Content.get_document(id, type, dataset, opts)
     end
   end
+
+  # Double-nest trap advisory (option 1 — make it LOUD, do NOT change semantics).
+  # A `patch.set` map is merged INTO the document's `content`, so a `set` field
+  # literally named `content` lands the caller's data at `content.content.*` —
+  # the classic `--set 'content:={"blocks":…}'` mistake, which silently no-ops
+  # the real `blocks` (they never reach `content.blocks` where the renderer reads
+  # them). The merge stays byte-identical (option 2 — unwrapping — was NOT
+  # approved); we only emit a non-blocking Warnings advisory so the CLI/SDK
+  # success envelope surfaces the footgun. Guard on a MAP value only: a scalar
+  # `content` field (a legitimate content-level string/number named "content")
+  # is not the double-nest shape and must stay quiet. Warnings.put is
+  # collect-only-when-listening, so this is inert unless a controller opened the
+  # queue with reset/0.
+  defp warn_on_nested_content(%{"content" => value}) when is_map(value) do
+    Warnings.put(
+      "patch.content_nested",
+      "patch `set` fields are merged INTO document content; a field named `content` " <>
+        "created a nested `content.content` — did you mean to set the inner fields " <>
+        "directly, e.g. --set 'blocks:=[…]'?"
+    )
+  end
+
+  defp warn_on_nested_content(_fields), do: :ok
 
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []
