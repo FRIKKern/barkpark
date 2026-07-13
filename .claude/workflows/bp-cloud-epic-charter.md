@@ -653,7 +653,147 @@ shared default pool); `task-felix-stamp-index-guard` (kill Mode A at source — 
 `internal.ex` criteria-text guard or add 0-based `--criterion` validation so a wrong-index stamp is
 REJECTED with `:criteria_mismatch` instead of silently corrupting a neighbor criterion).
 
+## Wave 10 Decisions (2026-07-13) — FINISH THE THREE W9 CHILDREN + ONE FRESH AUDIT (already-good)
+
+Wave Paper: **`felix-pristine-wave-10-2026-07-13`** (guerrilla, style=article). Wave 9 LANDED and
+MERGED all four opus slices — #3038 (sobelow reconcile), #3039 (close.ex Mode-B autostamp), #3040
+(CDN publish-path async), #3041 (D35 audit-dispatch land) — plus charter b8afeaa3; origin/main tip
+at decide = `2862108d`. The three D50-seeded children (`task-felix-sso-explicit-timeout`,
+`task-felix-outbound-pool-isolation`, `task-felix-stamp-index-guard`) are OPEN + unclaimed. Twelve
+surveys + SIX RUN verifiers (proofs with pasted output) OVERTURNED/REFINED three baked-in premises;
+the corrections are the load-bearing content below. Builders branch from ORIGIN/main (the local
+checkout is at parity NOW but is a SHARED main other sessions re-diverge — `git fetch && branch off
+origin/main` at claim time). Fable exhausted — all builders opus.
+
+- **D51 — Wave 10 = FINISH-THE-BACKLOG + ONE-FRESH-AUDIT, TWO opus build slices (not three) + an
+  already-good audit verdict.** The three filed children collapse to two PRs because pool-isolation
+  and sso-explicit-timeout are the SAME edit to the SAME SSO call sites (D52), and the fresh audit
+  yields no crisp buildable finding (D55). No fresh scouts; the 12 domains stay closed; do NOT
+  re-handle wave-9 landed work.
+- **D52 — Slices A + B are MERGED into ONE keystone PR — `task-felix-outbound-pool-isolation`, which
+  ALSO closes `task-felix-sso-explicit-timeout`.** Why (V2): both edit the identical 4 SSO call
+  sites (`oidc/http.ex:20,29` + `social/http.ex:21,36`), and the pool routing has a HARD RUNTIME
+  dependency on the pool existing — a separate sso-timeout PR branched off origin/main that passes
+  `finch: Barkpark.Auth.Finch` would crash on the unstarted pool. Merging beats sequencing: the one
+  PR defines the pool, routes all 5 modules to it, AND adds explicit `receive_timeout: 10_000` to
+  the 2 SSO modules (Slice B's entire content). The LEAD closes BOTH children's merge gate on merge.
+- **D53 — Slice A framing is DEFENSE-IN-DEPTH, not a login-starvation crash-fix — D48's flat
+  "queue behind the storm on the shared default pool" framing is an OVERCLAIM (V2 refuted by
+  probe).** Finch 0.21.0 partitions pools per `{scheme,host,port}` (probe: 3 hosts → 3 distinct pool
+  PIDs; same host twice → same pool); a webhook/CDN storm to CUSTOMER/CDN hosts physically cannot
+  consume the IdP host pool's 50 slots — different SHP keys share the Req.Finch INSTANCE, not the
+  connection slots. Honest residual value: (a) an owned/tunable/observable connection budget for the
+  auth/login path decoupled from Req.Finch's global default (mirrors Sync.Finch's own rationale);
+  (b) bounds BEAM-global socket/FD/ephemeral-port/scheduler pressure under a real 100-concurrent
+  storm (partial, real); (c) deterministically fixes the same-host edge (a self-hosted IdP behind
+  the same reverse-proxy host as a webhook target WOULD share an SHP pool today). The PR MUST be
+  framed as availability-hardening; "fixes active pool-exhaustion login starvation" is refuted.
+- **D54 — Slice A boundary: exactly 5 modules IN, pool name `Barkpark.Auth.Finch` (free name),
+  child-spec mirrors `Sync.Finch` (`application.ex:51`).** IN (add `finch: Barkpark.Auth.Finch`):
+  `sso/oidc/http.ex`, `sso/social/http.ex`, `plugins/github/auth.ex`, `plugins/indx/auth.ex`,
+  `plugins/onixedit/bokbasen/auth.ex` (note the bokbasen path nests under `onixedit/` — the digest's
+  `plugins/*/auth.ex` glob MISSES it). OUT — correctly: `*/client.ex` (already ride a Req-auto
+  md5-keyed dedicated pool via `connect_options` — adding `finch:` RAISES ArgumentError),
+  `webhooks/dispatcher.ex` + `net/safe_outbound.ex` (the contention SOURCE, stays on default),
+  `hibp`/`judge`/`titles`/`self_update`/`sync` (unrelated domain or already isolated). CRITICAL: Req
+  RAISES if BOTH `:finch` and `:connect_options` are set — none of the 5 IN targets set
+  `connect_options` today, and the SSO explicit timeout MUST be a top-level `receive_timeout:` (a
+  plain Req option), NEVER `connect_options`, so the co-edit is collision-safe. Prove isolation by a
+  child-spec/config assertion (mirror `application_child_specs_test.exs`) + assert each of the 5 call
+  sites carries `finch: Barkpark.Auth.Finch`; no live-traffic test (no Finch test exists — greenfield).
+- **D55 — Slice D (fresh audit — Oban worker retry-idempotency) is an ALREADY-GOOD verdict; NOTHING
+  is built.** Why (V4 ratified, prior-art overrides the S10 rec): GenServer-blocking-in-handle_call,
+  Ecto.Multi, PubSub/LiveView are ALL already swept + rejected in the domain papers. Oban is the
+  only fresh ground and the honest verdict is 13–15/15 workers exemplary — every effectful worker
+  carries `unique:` + `max_attempts`; the create-then-stamp crash window in `mirror_job`/
+  `publish_worker` is a DOCUMENTED, accepted at-least-once residual. The one outlier
+  (`pulse/sweep_worker` has no `unique:`) is PROVABLY idempotent (pure `Repo.delete_all(where
+  inserted_at < cutoff)`, zero external effect) → any "assert `unique:` present" test is tidiness,
+  not protection = vacuous green, REJECTED. The verdict is recorded in the wave Paper; the deferred
+  findings are filed as backlog (D56). Forcing a build would violate improvement-only doctrine or
+  ship vacuous green.
+- **D56 — Slice C (`task-felix-stamp-index-guard`): the fix is SERVER-SIDE text-guard threading, NOT
+  CLI range-validation (V3 CONFIRMED the in-range corruption reproduces on origin/main TODAY).** Why:
+  `internal.ex` ALREADY rejects out-of-range indices (`:criteria_index_out_of_range`, tested at
+  `stamp_test.exs:121`); the residual is an IN-RANGE wrong index (1-based-passed-into-0-based) that
+  silently flips a NEIGHBOR criterion with no error — V3's probe stamped `criterion: 2` into a
+  3-criterion task, flipped index 2, left index 1 untouched, returned `{:ok}` ("1 test, 0 failures").
+  Pure CLI 0-based range-validation is VACUOUS here (the wrong index IS in range). FIX: thread an
+  OPTIONAL criterion-TEXT through the stamp seam (`params.ex` → `tasks_controller.ex` →
+  `Stamp.build_update` sets the `"criterion"` key) so `internal.ex`'s dormant `:criteria_mismatch`
+  guard finally fires for stamp callers; and state the 0-based convention FORCEFULLY where builders
+  learn it wrong (`onramp_cmd.go:335` has ZERO 0-based mention today; the manifest `plugins/tasks.ex`
+  stamp verb; the MCP schema). Scope is opt-in-but-reachable, NOT mandatory-text (forcing text on
+  every caller breaks #3039's index-only autostamp — wide blast radius). Fail-before = V3's in-range
+  silent-corruption probe (non-vacuous; the existing suite only guards out-of-range). Collision with
+  #3039 is MOOT (that PR touched only `close.ex`). No OpenAPI drift expected (stamp params ride the
+  generic passthrough like close's `landed`/`criteria`) — capture the CI regen artifact if drift appears.
+- **D57 — Backlog seeded this wave (published children of the epic):**
+  `task-felix-auth-genserver-async-fetch` (the 3 plugin-auth GenServers block their OWN mailbox on
+  synchronous outbound HTTP inside `handle_call` for up to 30s, serializing ALL of that plugin's
+  callers behind one slow token fetch — a blast-radius availability scar DISTINCT from Slice A's
+  cross-subsystem pool contention. The OTP-domain paper rejected the PATTERN's existence
+  ("de-dup is intended"), but this targets the 30s WINDOW and preserves de-dup via a monitored-Task
+  + waiters redesign — subtle OTP design best built when Fable is available; buildable fail-before =
+  a slow token endpoint, assert a SECOND concurrent client op is blocked ~2s; P2/medium);
+  `task-felix-sweep-worker-unique-guard` (defense-in-depth WATCH-ITEM only — no current failure
+  mode, becomes real ONLY if `Pulse.sweep` ever gains an external effect; NO protective-test
+  criterion — filing it as a bug would be vacuous green; P4);
+  `task-felix-pusher-explicit-timeout` (`sync/pusher.ex`'s finch-isolated `Req.post` lacks an
+  explicit `receive_timeout` — tiny consistency nit on an ALREADY-isolated pool, low-sev; P4).
+- **D58 — Guardrails (unchanged from D50): all opus, branch from ORIGIN/main, main checkout stays
+  on main, isolated worktrees, `CC=/usr/bin/clang`, borrow-warm `_build`.** V6-timed reality: a
+  fresh worktree pays a ONE-TIME ~100s full recompile on first `mix test` (absolute-path manifest
+  mismatch) — that is NOT gate breakage; the second run in the same worktree is incremental (~15s).
+  The 2 build slices are file-disjoint (slice 1: `application.ex` + the 5 auth modules + new pool/
+  timeout tests; slice 2: `tasks/stamp.ex` + `tasks/internal.ex` + `tasks_controller{.ex,/params.ex}`
+  + `stamp_test.exs` + `plugins/tasks.ex` + `internal/cli/{onramp_cmd,mcp_tasks}.go`) → dispatch in
+  parallel. Sobelow stays advisory.
+
+### Wave 10 roadmap (2 opus slices, parallel — disjoint files)
+
+1. **[P1, medium/large] Auth/login outbound Finch-pool isolation + SSO explicit timeout** —
+   `task-felix-outbound-pool-isolation` (ALSO closes `task-felix-sso-explicit-timeout`) — opus.
+   Files: `api/lib/barkpark/application.ex`, `api/lib/barkpark/sso/oidc/http.ex`,
+   `api/lib/barkpark/sso/social/http.ex`, `api/lib/barkpark/plugins/github/auth.ex`,
+   `api/lib/barkpark/plugins/indx/auth.ex`, `api/lib/barkpark/plugins/onixedit/bokbasen/auth.ex`,
+   `api/test/barkpark/auth_finch_pool_test.exs` (new), `api/test/barkpark/sso/sso_http_timeout_test.exs`
+   (new). Gate: `cd api && CC=/usr/bin/clang mix test test/barkpark/auth_finch_pool_test.exs
+   test/barkpark/sso/sso_http_timeout_test.exs test/barkpark/application_child_specs_test.exs`.
+2. **[P2, medium] Stamp in-range wrong-index guard — server-side text-guard reachable + loud 0-based
+   docs** — `task-felix-stamp-index-guard` — opus. Files: `api/lib/barkpark/tasks/stamp.ex`,
+   `api/lib/barkpark/tasks/internal.ex`, `api/lib/barkpark_web/controllers/tasks_controller.ex`,
+   `api/lib/barkpark_web/controllers/tasks_controller/params.ex`,
+   `api/test/barkpark/tasks/stamp_test.exs`, `api/lib/barkpark/plugins/tasks.ex`,
+   `internal/cli/onramp_cmd.go`, `internal/cli/mcp_tasks.go`. Gates: `cd api && CC=/usr/bin/clang mix
+   test test/barkpark/tasks/stamp_test.exs` AND `CC=clang go build ./... && go vet ./internal/cli/...`.
+
+Backlog seeded this wave (published children): `task-felix-auth-genserver-async-fetch`,
+`task-felix-sweep-worker-unique-guard`, `task-felix-pusher-explicit-timeout` (see D57).
+
 ## Wave log
+
+- **Wave 10 — 2026-07-13 — DECIDED (building).** Ratified D51–D58. TWO opus build slices under
+  `task-96a908af98698118`, both linked to `felix-pristine-wave-10-2026-07-13`, file-disjoint
+  (parallel): (1) auth/login outbound Finch-pool isolation — MERGES `task-felix-outbound-pool-isolation`
+  + `task-felix-sso-explicit-timeout` into one PR (same 4 SSO call sites + hard runtime pool
+  dependency; V2), framed DEFENSE-IN-DEPTH not crash-fix (Finch partitions per {scheme,host,port} —
+  D48's flat framing overclaimed; 5 modules IN, `Barkpark.Auth.Finch`, `:finch`+`:connect_options`
+  co-set RAISES so SSO timeout uses top-level `receive_timeout`); (2) stamp in-range wrong-index
+  guard — SERVER-SIDE text-guard threading (CLI range-validation is vacuous; V3 reproduced the
+  in-range silent neighbour corruption on origin/main). Fresh audit (Oban idempotency) = ALREADY-GOOD
+  verdict, NOTHING built (V4; sweep_worker's missing `unique:` is provably idempotent → a test would
+  be vacuous green). Backlog seeded: auth-genserver async-fetch (30s mailbox stall, Fable-class OTP
+  redesign), sweep-worker unique watch-item, pusher explicit-timeout. Six RUN verifiers overturned
+  three wish premises (SSO crash-headline, pool-contention magnitude, CLI-validation sufficiency).
+  Fable exhausted — all builders opus. Grade: pending build+review.
+
+- **Wave 9 — 2026-07-13 — MERGED.** All four opus slices merged to origin/main (#3038 sobelow
+  reconcile, #3039 close.ex Mode-B autostamp, #3040 CDN publish-path async, #3041 D35 audit-dispatch
+  land) + charter b8afeaa3; origin/main tip `2862108d` (verified via `gh pr list --state merged` +
+  `git log origin/main`). The full close-out review entry was not written before Wave 10; the three
+  D50-seeded named-failure children carried forward and are finished by Wave 10. Grade: pending the
+  W9 review debrief.
 
 - **Wave 9 — 2026-07-13 — DECIDED (building).** Ratified D45–D50. Four opus slices under
   `task-96a908af98698118`, all linked to `felix-pristine-wave-9-2026-07-13`, all file-disjoint
