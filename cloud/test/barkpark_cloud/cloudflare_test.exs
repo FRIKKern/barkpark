@@ -67,7 +67,10 @@ defmodule BarkparkCloud.CloudflareTest do
   describe "Fake.upsert_dns_record/2" do
     test "creates a record with a deterministic id and records the upsert" do
       rec = %{type: "A", name: "acme.example.com", content: "203.0.113.10", proxied: true}
-      assert {:ok, %{record_id: id, name: "acme.example.com"}} = Cloudflare.upsert_dns_record("zone1", rec)
+
+      assert {:ok, %{record_id: id, name: "acme.example.com"}} =
+               Cloudflare.upsert_dns_record("zone1", rec)
+
       assert String.starts_with?(id, "rec_fake_")
       # Deterministic: same zone+name → same id.
       assert {:ok, %{record_id: ^id}} = Cloudflare.upsert_dns_record("zone1", rec)
@@ -93,7 +96,8 @@ defmodule BarkparkCloud.CloudflareTest do
     end
 
     test "the invalid-record sentinel is not_found" do
-      assert {:error, :not_found} = Cloudflare.ensure_zone_proxied("zone1", Fake.invalid_record_id())
+      assert {:error, :not_found} =
+               Cloudflare.ensure_zone_proxied("zone1", Fake.invalid_record_id())
     end
   end
 
@@ -193,7 +197,11 @@ defmodule BarkparkCloud.CloudflareTest do
     test "a connected-instance callback returns :not_configured with no token" do
       # No config token → token/0 fails closed BEFORE any request is built.
       assert {:error, :not_configured} =
-               Real.upsert_dns_record("zone1", %{type: "A", name: "a.example.com", content: "1.1.1.1"})
+               Real.upsert_dns_record("zone1", %{
+                 type: "A",
+                 name: "a.example.com",
+                 content: "1.1.1.1"
+               })
 
       assert {:error, :not_configured} = Real.ensure_zone_proxied("zone1", "rec_1")
       assert {:error, :not_configured} = Real.create_origin_ca_cert(["example.com"], "CSR")
@@ -203,6 +211,76 @@ defmodule BarkparkCloud.CloudflareTest do
       # verify_token authenticates with the passed token, so it skips token/0 and
       # reaches request/1 — which fails closed when no http_client is configured.
       assert {:error, :http_client_not_configured} = Real.verify_token("cf_supplied")
+    end
+  end
+
+  ## Real client — request/1 decode paths (stub transport, no wire)
+  #
+  # request/1 is the module's only non-trivial runtime logic (2xx → decode →
+  # extract; non-2xx → typed error). Exercise it at €0 with a stub http_client
+  # fn injected via config — the GitHub.Real real_test precedent. No real
+  # credential, no byte to api.cloudflare.com.
+
+  # A stub transport that returns `resp` for any request and echoes the request
+  # map back to the test process so the built shape can be asserted end-to-end.
+  defp stub_http_client(resp) do
+    test = self()
+    fn req -> send(test, {:cf_req, req}) && resp end
+  end
+
+  describe "Real request/1 decode (stub transport)" do
+    test "verify_token maps a 200 CF envelope to {:ok, %{status: ...}}" do
+      put_cf_config(
+        http_client:
+          stub_http_client({:ok, %{status: 200, body: ~s({"result":{"status":"active"}})}})
+      )
+
+      assert {:ok, %{status: "active"}} = Real.verify_token("cf_supplied")
+      # The exact request the transport received is the connect-time verify call.
+      assert_received {:cf_req, %{method: :get, url: url}}
+      assert url == "https://api.cloudflare.com/client/v4/user/tokens/verify"
+    end
+
+    test "a connected-instance upsert threads config token → transport → decoded result" do
+      put_cf_config(
+        token: "cf_stored",
+        http_client:
+          stub_http_client(
+            {:ok, %{status: 200, body: ~s({"result":{"id":"rec_live","name":"a.example.com"}})}}
+          )
+      )
+
+      assert {:ok, %{record_id: "rec_live", name: "a.example.com"}} =
+               Real.upsert_dns_record("zone1", %{
+                 type: "A",
+                 name: "a.example.com",
+                 content: "203.0.113.9"
+               })
+
+      # The stored config token (not an arg) authenticated the call.
+      assert_received {:cf_req, %{headers: headers}}
+      assert {"Authorization", "Bearer cf_stored"} in headers
+    end
+
+    test "a non-2xx status becomes a typed {:cloudflare_http_error, status, body}" do
+      put_cf_config(
+        http_client: stub_http_client({:ok, %{status: 403, body: ~s({"success":false})}})
+      )
+
+      assert {:error, {:cloudflare_http_error, 403, ~s({"success":false})}} =
+               Real.verify_token("cf_supplied")
+    end
+
+    test "a 200 whose body lacks the expected shape is :unexpected_response" do
+      put_cf_config(http_client: stub_http_client({:ok, %{status: 200, body: ~s({"result":{}})}}))
+
+      assert {:error, :unexpected_response} = Real.verify_token("cf_supplied")
+    end
+
+    test "a transport-level failure is surfaced verbatim" do
+      put_cf_config(http_client: stub_http_client({:error, {:http_client, :timeout}}))
+
+      assert {:error, {:http_client, :timeout}} = Real.verify_token("cf_supplied")
     end
   end
 end
