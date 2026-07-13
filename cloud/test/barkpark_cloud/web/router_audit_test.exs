@@ -991,7 +991,12 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       {user, team, token} = logged_in()
 
       conn =
-        call(:post, "/v1/env-vars", %{key: "API_TOKEN", value: "super-secret", scope: "team"}, token)
+        call(
+          :post,
+          "/v1/env-vars",
+          %{key: "API_TOKEN", value: "super-secret", scope: "team"},
+          token
+        )
 
       assert conn.status == 201
 
@@ -1074,7 +1079,11 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert ev.metadata["enabled"] == true
       # The channel credentials (chat webhook URL) never reach the audit row.
       refute Map.has_key?(ev.metadata, "credentials")
-      refute Enum.any?(Map.values(ev.metadata), &(&1 == "https://hooks.slack.com/services/secret-hook"))
+
+      refute Enum.any?(
+               Map.values(ev.metadata),
+               &(&1 == "https://hooks.slack.com/services/secret-hook")
+             )
     end
 
     test "PUT /v1/notifications/events writes notifications.events_changed" do
