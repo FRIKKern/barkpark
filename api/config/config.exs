@@ -109,6 +109,15 @@ config :barkpark, :media_cdn,
 
 config :barkpark, :media_webhooks, endpoints: []
 
+# Audit-webhook fan-out mode (era-w7 bridge). TRUE = the post-commit audit
+# bridge dispatches on a supervised fire-and-forget task so a slow endpoint
+# never blocks `Audit.emit`. config/test.exs flips it FALSE so the fan-out runs
+# SYNCHRONOUSLY in the test's own process — an unawaited task on the shared
+# `Barkpark.TaskSupervisor` outlives its DataCase sandbox drain and its leaked
+# audit SELECT deadlocks a concurrent raw-DDL test (Postgrex 40P01). Read by
+# `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
+config :barkpark, :audit_dispatch_async, true
+
 # Auto-disable a webhook endpoint after this many CONSECUTIVE terminal delivery
 # give-ups (permanent 4xx / SSRF block / retry exhaustion). The counter resets to
 # 0 on any successful delivery, so only a persistently-dead endpoint trips it.

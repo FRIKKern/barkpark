@@ -304,7 +304,35 @@ defmodule Barkpark.Webhooks.Dispatcher do
   """
   def dispatch_audit_async(%Barkpark.Audit.Event{} = event) do
     {webhooks, body} = audit_targets(event)
-    fan_out(webhooks, fn wh -> deliver_audit(wh, body) end)
+    deliver_fun = fn wh -> deliver_audit(wh, body) end
+
+    if audit_dispatch_async?() do
+      fan_out(webhooks, deliver_fun)
+    else
+      # SYNC toggle (test env, `:audit_dispatch_async` false): run the audit
+      # fan-out INLINE in the caller's process instead of the unawaited
+      # `Task.Supervisor.start_child` spawn `fan_out/2` does. The async spawn is
+      # a fire-and-forget task on the shared `Barkpark.TaskSupervisor`; the
+      # DataCase drain is scoped to its ORIGINATING test, and ExUnit gives no
+      # ordering guarantee it finishes before a CONCURRENT raw-DDL test
+      # (extend_workspace_delete_cascade_test) opens its window — so a leaked
+      # audit SELECT (AccessShareLock on webhooks/search_synonyms) deadlocks the
+      # `ALTER TABLE` (AccessExclusiveLock) = Postgrex 40P01. Delivering inline
+      # keeps the work owner-scoped: it joins the caller's Ecto sandbox
+      # connection and dies with the test, leaving nothing on the supervisor.
+      # Only the audit path toggles — content fan-out keeps `fan_out/2` verbatim
+      # (its async-webhook tests depend on the spawn), so blast radius is nil.
+      Enum.each(webhooks, deliver_fun)
+      :ok
+    end
+  end
+
+  # Audit fan-out mode. Default TRUE everywhere (prod/dev): the post-commit audit
+  # bridge must never block `Audit.emit`. Flipped FALSE in config/test.exs so the
+  # fan-out runs synchronously in the test's process (no unawaited task to leak a
+  # DB query past its sandbox owner and deadlock a concurrent DDL test).
+  defp audit_dispatch_async? do
+    Application.get_env(:barkpark, :audit_dispatch_async, true)
   end
 
   @doc """
