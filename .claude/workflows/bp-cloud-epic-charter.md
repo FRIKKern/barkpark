@@ -525,7 +525,152 @@ checkout diverged ~114/−109 with omx commits — never build from it).
    CC=/usr/bin/clang mix test test/barkpark/repo/migrations/codelist_issue_version_test.exs
    test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs --include flaky`.
 
+## Wave 9 Decisions (2026-07-13) — FINISH-THE-BACKLOG + ONE FRESH AUDIT
+
+Wave Paper: **`felix-pristine-wave-9-2026-07-13`** (guerrilla, style=article). Wave 8 LANDED and
+MERGED its two slices — #3015 (suite-order deflake) and #3016 (migrator/DDL Fixture-E
+`migration_lock:false`) — plus charter commit 17f5b3ca; both W8 tasks are lifecycle=done, do NOT
+re-handle. Wave 9 closes the remaining CI-hardening carryover, kills the recurring ledger-close
+off-by-one AT THE TOOL, and runs one fresh outbound-I/O audit pass. Six RUN verifiers (proofs with
+pasted output) OVERTURNED two wish premises — the corrections are the load-bearing content below.
+Builders branch from ORIGIN/main (local checkout diverged ~114 with unrelated omx commits — NEVER
+build from it); origin/main tip at decide = `3cbbe26b`.
+
+- **D45 — Wave 9 = FINISH + ONE-FRESH-AUDIT, 4 opus slices, all file-disjoint.** Three fronts +
+  one opportunistic land: (1) land the sobelow reconcile carryover branch; (2) auto-stamp the
+  merge-gate criterion at close so no future wave hand-patches the ledger; (3) one fresh outbound-I/O
+  audit shipping the CDN sync-block fix + backlog; (3b) land the D35 audit-dispatch fix. All builders
+  opus (Fable exhausted). No fresh scouts; the 12 domains stay closed.
+- **D46 — Front 1 (sobelow, `task-felix-sobelow-baseline-reconcile`): LAND the existing branch
+  `wave8-carryover/sobelow-reconcile-candidate` (b48fb6c1, off 607aea46 = ancestor of origin/main)
+  WITH ONE PROVEN HARDENING — the digest's "clean land, no code" read is REFUTED by the on-pin CI
+  proof.** On-pin CI (run 29274393147, OTP 27 / Elixir 1.18.1) proved the reconcile step (clear-skip
+  THEN mark-skip-all → live 112-line baseline vs committed 84) and the fresh-finding guard both
+  correct; version-guard did not trip; continue-on-error shielded the job. BUT the reconciled
+  `.sobelow-skips` — a DOTFILE the script writes to `$ARTIFACT_DIR/.sobelow-skips` — is SILENTLY
+  DROPPED from the human-review artifact by `upload-artifact@v4` (`include-hidden-files: false`
+  logged verbatim); the artifact ships only `metadata.txt` + `sobelow-skips.diff`, so the human never
+  gets the baseline to commit — defeating the slice's purpose. FIX = add `include-hidden-files: true`
+  to the "Upload reconciled Sobelow baseline" step (security.yml:106-112) OR write the baseline to a
+  non-dotfile name; the branch does NOT touch tracked `api/.sobelow-skips` (byte-safe) — keep it so.
+  CLAIM-STATE CORRECTION (verify beats prose): the wish said this task is held by a LIVE
+  cross-session claim; `bp task get` proves it RELEASED (worker=null, epoch 5, released_by
+  worker-1-team424-author, lifecycle=open, in `bp task ready`). Builder claims by EXPLICIT ID
+  (epoch 5→6), NEVER `bp task next`; does NOT rebuild the reconcile (the branch is the deliverable).
+  Sobelow stays ADVISORY (continue-on-error) — never a merge-blocker.
+- **D47 — Front 2 (ledger close auto-stamp, NEW `task-felix-close-merge-gate-autostamp`): fix Mode B
+  ONLY, at a LEAD/merge-time seam, via an EXPLICIT criterion marker — never a text/index heuristic.**
+  The recurring bug is TWO modes and the wish conflates them. Mode A: builders pass a 1-based
+  `--criterion N` into the 0-based stamp tool → wrong criterion; in observed incidents the merge-gate
+  went falsely met=TRUE (the OPPOSITE polarity from the wish's "left met=false") — Wave-7 log:568-572
+  documents it independently. Mode B: the final LEAD-CLOSED criterion is intentionally left met=false
+  at builder-close time (builders can't know a PR is merged) — this is the design toil the wish wants
+  automated. Verify PROVED `bp task stamp` CANNOT touch a done task
+  (`{:error, {:not_in_progress, "done"}}` → HTTP 409; the ledger is sealed by close) — so a
+  post-merge external stamp is architecturally impossible; the ONLY working seam is close.ex's own
+  `apply_close_update`. Verify ALSO proved the "last acceptance_criteria entry contains 'MERGE GATE'"
+  convention is UNRELIABLE (only 14/34 Felix children carry it as the last-entry substring). DESIGN:
+  add an explicit `"merge_gate": true` marker on the criterion entry (author-set at task creation);
+  in `apply_close_update`, when `new_status` is terminal (done) AND a non-empty `landed` map is
+  present (the LEAD's merge close, never a builder's pre-merge close — this is what prevents
+  recreating Mode A) AND the marked criterion is still met=false and the caller's `criteria` payload
+  did not already touch it, inject a synthetic `{index, met:true, evidence}` into the `criteria` list
+  so it rides the SAME `merge_criteria` + rev-CAS write. Composed evidence = `worker_id` +
+  `claim.epoch` + `landed.prs`/commit + `ts_iso`. Pure server-side, derived from data already flowing
+  → ZERO OpenAPI drift, no bp CLI change (close-route survey confirmed `landed`/`criteria` already
+  ride the generic passthrough and never surface in the OpenAPI requestBody). Mode-A hardening
+  (expose the existing `internal.ex` criteria-text guard / add 0-based `--criterion` validation to
+  REJECT a wrong-index stamp with `:criteria_mismatch`) is filed BACKLOG, not built this wave.
+- **D48 — Front 3 (fresh audit — outbound-I/O boundary): the wish's SSO headline is REFUTED; ship
+  the CDN sync-block fix instead (NEW `task-felix-cdn-sync-block-async`).** Verify REFUTED the
+  "SSO unbounded-timeout availability scar": Req 0.5.17 / Finch 0.21.0 apply a bounded 15_000ms
+  `receive_timeout` default (live probe errored at 15164ms, did NOT hang to 25s) — SSO omitting the
+  option is a low-sev consistency nit (BACKLOG), not a hang. The crispest CONFIRMED finding is
+  `Cdn.invalidate_http`: synchronous, single-attempt, inline in BOTH the media-upload pipeline
+  (`media/processing.ex:38`) AND the external transcoder callback
+  (`media_processing_controller.ex:25`, before `json(conn,…)`) — a slow/hung CDN purge stalls the
+  upload/callback response for the full round-trip (a third-party-edge availability scar). Fail-before
+  PROVEN (slow-CDN Bypass: `Cdn.publish` 916/1103ms vs 0-7ms noop control); async-safety DOUBLY
+  confirmed (all 3 call sites discard the return value; the whole invalidate chain unconditionally
+  returns `:ok`, carrying no signal any caller could branch on). FIX: async-ize the publish-path CDN
+  purge (fire-and-forget or bounded background) on the TWO upload sites ONLY. The delete-path
+  (`media.ex:398 Cdn.invalidate`) is owned by D36's after-commit deferral — do NOT double-handle it
+  (avoid a collision on media.ex). Backlog seeded: SSO explicit-timeout consistency; dedicated
+  auth/plugin Finch pool (auth+plugin outbound share Req's default pool with up-to-100-concurrent
+  webhook/CDN delivery → cross-tenant/cross-subsystem contention the dedicated `Sync.Finch` pool was
+  carved out to avoid).
+- **D49 — Front 3b (D35 land, `task-felix-migration-ddl-audit-deadlock`): CHERRY-PICK 60966bdc onto
+  origin/main (NOT merge the 40-behind branch).** Verify PROVED the pick is conflict-free (exit 0,
+  4 files, config.exs 3-way auto-merged), green (5 tests 0 failures with the fix), and a real
+  fail-before (flip `:audit_dispatch_async` true → `dispatch_audit_async` returns `{:ok, #PID}` async
+  → 3 failures, the decisive `:ok` vs `{:ok,pid}` semantic). PR #2917 concern DISPELLED — the 40-commit
+  gap touched NEITHER `dispatcher.ex` NOR `data_case.ex`; the audit test pins `async:false` so any
+  DataCase default flip is moot. Task is RELEASED (worker=null, epoch 16, 2/4 met) — builder
+  re-claims by EXPLICIT ID (epoch 16→17). Criterion 2 (N≥10 full-suite `--include flaky`, 0 40P01)
+  may stay a `--miss` note if the full-suite grant is unavailable (the HOLD note on the task still
+  stands); the merge gate (criterion 3) is lead-closed. Landing this clears the still-unmerged
+  audit-dispatch 40P01 source that blocks any trustworthy `--include-flaky` sweep.
+- **D50 — Guardrails (unchanged from D37/D44): all opus, branch from ORIGIN/main, main checkout
+  stays on main, isolated worktrees, `CC=/usr/bin/clang`, borrow-warm `_build`.** The 4 slices are
+  file-disjoint → dispatch in parallel (slice 1: `.github/workflows/security.yml` + the two
+  `api/scripts/sobelow-*.sh` + `docs/ops/merge-gates.md`; slice 2: `tasks/close.ex` +
+  `tasks/internal.ex` + `close_test.exs`; slice 3: `media/processing.ex` +
+  `media_processing_controller.ex` + `media/delivery/cdn.ex` + a new cdn test; slice 4:
+  `config/{config,test}.exs` + `webhooks/dispatcher.ex` + `audit_dispatch_test.exs`). The Decide
+  phase COMMITS this charter before fan-out (builders see only committed state). Backlog seeded
+  (published children of the epic): `task-felix-sso-explicit-timeout`,
+  `task-felix-outbound-pool-isolation`, `task-felix-stamp-index-guard`.
+
+### Wave 9 roadmap (4 opus slices, parallel — disjoint files)
+
+1. **[P1, small] sobelow reconcile — LAND branch + artifact-payload hardening** —
+   `task-felix-sobelow-baseline-reconcile` — opus. Land `wave8-carryover/sobelow-reconcile-candidate`
+   (b48fb6c1) + add `include-hidden-files: true` (or non-dotfile name) so the reconciled baseline
+   actually ships in the artifact. Files: `.github/workflows/security.yml`,
+   `api/scripts/sobelow-baseline-reconcile.sh`, `api/scripts/sobelow-fresh-finding-guard.sh`,
+   `docs/ops/merge-gates.md`. Gate: `cd api && CC=/usr/bin/clang mix sobelow --skip --exit Low`
+   (advisory) + confirm the branch's `if:always()` steps + the upload step now names the baseline.
+2. **[P1, medium] ledger close merge-gate auto-stamp (Mode B)** —
+   `task-felix-close-merge-gate-autostamp` — opus. Files: `api/lib/barkpark/tasks/close.ex`,
+   `api/lib/barkpark/tasks/internal.ex`, `api/test/barkpark/tasks/close_test.exs`. Gate:
+   `cd api && CC=/usr/bin/clang mix test test/barkpark/tasks/close_test.exs`.
+3. **[P1, medium] CDN publish-path async-ize (upload sites only)** —
+   `task-felix-cdn-sync-block-async` — opus. Files: `api/lib/barkpark/media/processing.ex`,
+   `api/lib/barkpark_web/controllers/v1/media_processing_controller.ex`,
+   `api/lib/barkpark/media/delivery/cdn.ex`, `api/test/barkpark/media/cdn_sync_block_test.exs` (new).
+   Gate: `cd api && CC=/usr/bin/clang mix test test/barkpark/media/cdn_sync_block_test.exs`.
+4. **[P2, small] D35 audit-dispatch land — cherry-pick 60966bdc** —
+   `task-felix-migration-ddl-audit-deadlock` — opus. Files: `api/config/config.exs`,
+   `api/config/test.exs`, `api/lib/barkpark/webhooks/dispatcher.ex`,
+   `api/test/barkpark/webhooks/audit_dispatch_test.exs`. Gate:
+   `cd api && CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs`.
+
+Backlog seeded this wave (published children): `task-felix-sso-explicit-timeout` (SSO OIDC/Social
+are the lone outbound modules leaving `receive_timeout` implicit — set an explicit ≤15s bound for
+consistency/faster-failure on the login path); `task-felix-outbound-pool-isolation` (dedicated
+auth/plugin Finch pool so logins/plugin calls don't queue behind a webhook/CDN delivery storm on the
+shared default pool); `task-felix-stamp-index-guard` (kill Mode A at source — require/expose the
+`internal.ex` criteria-text guard or add 0-based `--criterion` validation so a wrong-index stamp is
+REJECTED with `:criteria_mismatch` instead of silently corrupting a neighbor criterion).
+
 ## Wave log
+
+- **Wave 9 — 2026-07-13 — DECIDED (building).** Ratified D45–D50. Four opus slices under
+  `task-96a908af98698118`, all linked to `felix-pristine-wave-9-2026-07-13`, all file-disjoint
+  (parallel): (1) sobelow reconcile — LAND branch b48fb6c1 + the proven artifact-payload hardening
+  (`include-hidden-files:true` — the reconciled dotfile baseline was being dropped from the
+  human-review artifact; on-pin CI run 29274393147 proved reconcile+guard otherwise correct); claim
+  RELEASED not live (verify beat the wish) → claim by explicit ID epoch 5→6; (2) ledger close
+  auto-stamp — Mode B only, at close.ex's `apply_close_update`, gated on a terminal status + a
+  non-empty `landed` map + an explicit `"merge_gate":true` criterion marker (stamp on a done task is
+  sealed — 409; the last-entry "MERGE GATE" convention is unreliable at 14/34); zero OpenAPI drift;
+  (3) CDN sync-block — the wish's SSO headline REFUTED (Req/Finch bounded 15s default, live-probed at
+  15164ms), crispest fix is async-izing the synchronous CDN purge on the two upload sites
+  (fail-before 916/1103ms vs 0-7ms), delete-path left to D36; (4) D35 land — cherry-pick 60966bdc
+  (conflict-free, green, fail-before proven), re-claim epoch 16→17. Six RUN verifiers overturned two
+  wish premises (SSO-timeout, sobelow clean-land). Backlog seeded: `task-felix-sso-explicit-timeout`,
+  `task-felix-outbound-pool-isolation`, `task-felix-stamp-index-guard`. Fable exhausted — all
+  builders opus. Grade: pending build+review.
 
 - **Wave 8 — 2026-07-13 — DECIDED (building).** Ratified D39–D44. Three opus slices under
   `task-96a908af98698118`, each 1:1 with an open D38 CI-hardening child, all linked to
