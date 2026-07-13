@@ -166,3 +166,5 @@ XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark_web/live/studio/chat_live.ex:4130,7966598
 XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2843,3D6DB5F
 Config.Headers: Missing Secure Browser Headers,lib/barkpark_web/router.ex:2082,657F8CA
+
+XSS.Raw: XSS,lib/barkpark_web/layouts/root.html.heex:2901,6FC7966
