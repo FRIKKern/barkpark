@@ -315,7 +315,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # happens after counts as "while away".
         socket = socket |> capture_draft() |> stamp_visited_on_leave()
 
-        case StudioChat.get_session(sid) do
+        case StudioChat.get_session(sid, :global) do
           nil ->
             # Unknown/deleted session — fall back to the new-chat state with an
             # honest notice. (A mount-time push_patch would fight the initial
@@ -846,19 +846,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("session-archive", %{"id" => id}, socket) do
-    StudioChat.archive_session(id)
+    # Admin LiveView is the `:global` superuser path (charter D17/D18) — the
+    # sidebar sees every workspace's sessions, unchanged from today.
+    StudioChat.archive_session(id, :global)
     {:noreply, after_lifecycle_mutation(socket, id)}
   end
 
   # Unarchive keeps an on-screen session on screen (store_session_id unchanged);
   # it only leaves the archived shelf, so a refresh is enough — no push_patch.
   def handle_event("session-unarchive", %{"id" => id}, socket) do
-    StudioChat.unarchive_session(id)
+    StudioChat.unarchive_session(id, :global)
     {:noreply, socket |> assign(open_menu_session: nil) |> refresh_sessions()}
   end
 
   def handle_event("session-delete", %{"id" => id}, socket) do
-    StudioChat.delete_session(id)
+    StudioChat.delete_session(id, :global)
     {:noreply, after_lifecycle_mutation(socket, id)}
   end
 
@@ -3452,11 +3454,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
         # go offline; the caller withdraws the echo and hands the words back.
-        case StudioChat.create_session(%{
-               id: id,
-               cwd: ClaudeChat.cwd(),
-               mode: socket.assigns.mode
-             }) do
+        case StudioChat.create_session(
+               %{
+                 id: id,
+                 cwd: ClaudeChat.cwd(),
+                 mode: socket.assigns.mode
+               },
+               :global
+             ) do
           {:ok, _} ->
             socket
             |> assign(store_session_id: id, session_id: id, status: :working)
@@ -3932,7 +3937,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp refresh_sessions(socket) do
-    sessions = StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true)
+    sessions =
+      StudioChat.list_sessions([archived: socket.assigns[:show_archived] == true], :global)
 
     # The needs-you strip's store-truth half (wave 12): the pending ask ROLES of
     # every listed session whose denormalised counter says the agent needs the
@@ -4263,7 +4269,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Recording here too would double-sum the lifetime token totals.
   defp record_result(socket, _ev) do
     with store_id when is_binary(store_id) <- socket.assigns.store_session_id,
-         %{} = session <- StudioChat.get_session(store_id) do
+         %{} = session <- StudioChat.get_session(store_id, :global) do
       assign(socket, ring: ring_from_session(session))
     else
       _ -> socket
@@ -4279,8 +4285,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the full durable history, so nothing is lost — only the on-screen window is
   # bounded. `assign_messages/2` keeps it bounded across subsequent live appends.
   defp replay_messages(session_id, live?) do
-    session_id
-    |> StudioChat.list_messages(@transcript_window)
+    StudioChat.list_messages(session_id, @transcript_window, :global)
     |> Enum.map(&replay_message(&1, live?))
   end
 

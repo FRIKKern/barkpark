@@ -6153,6 +6153,42 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # Connectors epic wave 1 (charter D17/D18): the admin chat LiveView is the
+  # `:global` superuser path — the tenant seam added to the store MUST NOT change
+  # what the admin sidebar sees. It surfaces sessions of EVERY owner (a
+  # workspace-owned one and a NULL-owner/global one alike), exactly as today.
+  describe "tenant seam — admin sidebar is the :global superuser (charter D17/D18)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "the admin sidebar lists sessions of every owner (workspace + global)", %{conn: conn} do
+      ws_a = Ecto.UUID.generate()
+
+      {:ok, tenant} =
+        StudioChat.create_session(
+          %{id: Ecto.UUID.generate(), cwd: "/tmp/x"},
+          {:workspace, ws_a}
+        )
+
+      {:ok, global} =
+        StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: "/tmp/y"}, :global)
+
+      assert tenant.owner_workspace_id == ws_a
+      assert is_nil(global.owner_workspace_id)
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      html = render(view)
+
+      # Both owners' sessions render in the sidebar — the admin path is unfiltered.
+      assert html =~ "/studio/chat/#{tenant.id}"
+      assert html =~ "/studio/chat/#{global.id}"
+      assert has_element?(view, ~s([data-test-id="chat-session-row"]))
+    end
+  end
+
   # The busy/pulse rows wear a random park word (the chat's spinner
   # personality) — assert against the canonical list, never a pinned word.
   defp spinner_word_shown?(html) do

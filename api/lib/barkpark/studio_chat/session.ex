@@ -39,6 +39,14 @@ defmodule Barkpark.StudioChat.Session do
     field :title, :string, default: "New chat"
     field :title_source, :string, default: "default"
 
+    # The workspace that OWNS this session (Connectors epic wave 1, charter
+    # D14/D15). Nullable, no FK: a pre-migration / admin-`:global` session reads
+    # NULL and is invisible to any workspace-scoped caller (a NULL never matches
+    # an `owner_workspace_id == ^ws` equality — fail-closed by construction).
+    # Stamped by `StudioChat.create_session/2` from the caller's scope; the
+    # `:global` superuser path stamps NULL. See `Barkpark.StudioChat` store seal.
+    field :owner_workspace_id, Ecto.UUID
+
     field :cwd, :string
     field :mode, :string
     field :model, :string
@@ -115,7 +123,7 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Modes `set_mode/2` may persist — the offered six plus the legacy `default`."
   def persistable_modes, do: @persistable_modes
 
-  @create_fields ~w(id title title_source cwd mode model status last_active_at summary)a
+  @create_fields ~w(id owner_workspace_id title title_source cwd mode model status last_active_at summary)a
 
   @doc """
   Changeset for creating a session. `id` is REQUIRED — the caller mints the UUID
