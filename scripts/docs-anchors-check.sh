@@ -280,10 +280,11 @@ tripwire 'barkpark-dev-token' \
 echo "== @canonical capability markers =="
 # (a) uniqueness
 CANON_DUPES=$(
-  grep -rhoE '@canonical capability:[A-Za-z0-9._-]+' \
+  grep -rHoE '@canonical capability:[A-Za-z0-9._-]+' \
     --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
     --exclude-dir='.claude' \
-    . 2>/dev/null | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
+    . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' \
+    | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
 )
 if [ -n "$CANON_DUPES" ]; then
   for d in $CANON_DUPES; do
