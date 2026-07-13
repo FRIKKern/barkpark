@@ -76,11 +76,19 @@ defmodule Barkpark.Plugins.ContentProbeTest do
 
     test "does not raise nor mint a new atom for a key that has no existing atom twin" do
       # A random key whose atom was never created must read blank, not blow up
-      # String.to_existing_atom. Assert atom table does not grow.
+      # String.to_existing_atom — and content_get must never MINT the key's atom.
+      #
+      # This invariant is KEY-SCOPED, not a whole-VM :atom_count delta. This
+      # module is async:true, so `:erlang.system_info(:atom_count) == before`
+      # was a false flake: any co-scheduled async test that mints an unrelated
+      # atom in the window breaks the global count with zero bug in content_get
+      # (this reddened rebased merge-train Test runs — felix wave-8). The real,
+      # local claim is proved directly: after the read, the key's atom STILL does
+      # not exist, so its existing-atom lookup raises. That reads blank whatever
+      # the rest of the VM does.
       key = "zzz_no_such_atom_#{System.unique_integer([:positive])}"
-      before = :erlang.system_info(:atom_count)
       assert ContentProbe.content_get(%{"content" => %{}}, [key]) == nil
-      assert :erlang.system_info(:atom_count) == before
+      assert_raise ArgumentError, fn -> String.to_existing_atom(key) end
     end
   end
 end
