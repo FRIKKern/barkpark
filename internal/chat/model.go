@@ -47,9 +47,10 @@ type Model struct {
 	loading    bool
 
 	// conversation
-	st     State  // the pure reducer's state
-	input  string // the composer draft (charter D14 continuity — PATCHed on quit/switch)
-	scroll int    // -1 = follow mode (bottom); >=0 = pinned top line
+	st         State  // the pure reducer's state
+	input      string // the composer draft (charter D14 continuity — PATCHed on quit/switch)
+	scroll     int    // -1 = follow mode (bottom); >=0 = pinned top line
+	cardCursor int    // focus ring index into the pending answerable cards (Tab cycles)
 
 	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
 	mode         string
@@ -146,6 +147,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.st.Notice = "interrupt request failed — " + msg.err.Error()
 		}
 		return m, nil
+	case answerDoneMsg:
+		// The POST landed; the reducer turns success into a full refetch (so the
+		// server-resolved card flips) or an honest error notice.
+		return m.apply(AnsweredEvent{RequestID: msg.requestID, Err: msg.err})
 	case patchedMsg:
 		return m, nil
 	}
@@ -197,6 +202,11 @@ func (m Model) execEffect(e Effect) tea.Cmd {
 		return func() tea.Msg { return sendDoneMsg{err: tr.SendMessage(id, content)} }
 	case InterruptEffect:
 		return func() tea.Msg { return interruptDoneMsg{err: tr.Interrupt(id)} }
+	case AnswerEffect:
+		rid, dec := e.RequestID, e.Decision
+		return func() tea.Msg {
+			return answerDoneMsg{requestID: rid, err: tr.Approve(id, rid, dec)}
+		}
 	}
 	return nil
 }
@@ -219,13 +229,45 @@ func (m Model) openSession(s Session) Model {
 		Title:     s.Title,
 		Messages:  s.Messages,
 		LastSeq:   last,
+		// Law-2: hydrate the agents rail from the resumed session's snapshot so a
+		// surface switch lands on the same mission control Studio last showed.
+		Rail: decodeRail(s.RailSnapshot),
 	}
 	m.input = s.Draft
 	m.mode, m.modelChoice, m.effortChoice = s.Mode, s.ModelChoice, s.EffortChoice
 	m.screen = screenChat
 	m.scroll = -1
+	m.cardCursor = 0
 	m.pickErr = ""
 	return m
+}
+
+// answerableCards is the ordered focus ring: the pending, answerable card rows in
+// seq order. The card keys (Tab/Ctrl+A/Ctrl+R) act on this slice, so what the
+// paint highlights and what a keystroke answers can never disagree.
+func (m Model) answerableCards() []Message {
+	var out []Message
+	for _, msg := range m.st.Messages {
+		if answerable(msg) {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+// focusedCard resolves the currently focused pending card. The cursor clamps
+// into range (a resolved card shrinks the ring), so it is always the oldest
+// pending card when the cursor drifts past the end.
+func (m Model) focusedCard() (Message, bool) {
+	cards := m.answerableCards()
+	if len(cards) == 0 {
+		return Message{}, false
+	}
+	i := m.cardCursor
+	if i < 0 || i >= len(cards) {
+		i = 0
+	}
+	return cards[i], true
 }
 
 // leaveSession PATCHes the writable continuity set (draft/mode/model/effort)
@@ -306,7 +348,11 @@ type streamErrMsg struct{ err error }
 type (
 	sendDoneMsg      struct{ err error }
 	interruptDoneMsg struct{ err error }
-	patchedMsg       struct{}
+	answerDoneMsg    struct {
+		requestID string
+		err       error
+	}
+	patchedMsg struct{}
 )
 
 // loadSessionsCmd fetches the sidebar list off the update loop.

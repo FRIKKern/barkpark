@@ -63,19 +63,91 @@ func TestAssistantEmptyBlocksFallBackToSource(t *testing.T) {
 	}
 }
 
-// TestCardRolesRenderReadOnly proves the approval/question/plan rows render as
-// bespoke read-only cards carrying the honest "answer in Studio" footnote — the
-// scope fence (answering is ct-bl-cards-interactive).
-func TestCardRolesRenderReadOnly(t *testing.T) {
+// TestCardRolesRenderLabels proves the approval/question/plan rows carry their
+// card label. A row with no request_id is not answerable and honestly reads
+// read-only (the malformed/legacy fallback).
+func TestCardRolesRenderLabels(t *testing.T) {
 	for role, label := range cardRoles {
 		m := Message{Role: role, SourceMarkdown: "please approve running rm -rf"}
-		out := strings.Join(renderMessage(80, m), "\n")
+		out := strings.Join(renderMessage(80, m, false, ""), "\n")
 		if !strings.Contains(out, label) {
 			t.Fatalf("%s row must carry its card label %q, got:\n%s", role, label, out)
 		}
 		if !strings.Contains(out, "read-only") {
-			t.Fatalf("%s card must state it is read-only (no answering scope creep), got:\n%s", role, out)
+			t.Fatalf("%s card with no request_id must read read-only, got:\n%s", role, out)
 		}
+	}
+}
+
+// pendingCard is a pending, answerable card fixture (request_id + pending status
+// in metadata — the shape the Recorder persists via persist_approval_ask).
+func pendingCard(role string) Message {
+	return Message{
+		Seq:            7,
+		Role:           role,
+		SourceMarkdown: "run `rm -rf build`?",
+		Metadata: map[string]any{
+			"request_id":      "req-1",
+			"approval_status": "pending",
+		},
+	}
+}
+
+// TestPendingCardShowsAnswerAffordance proves a pending card advertises the
+// answer keys, and a FOCUSED one is marked so the operator sees which card a
+// keystroke acts on. Plan cards read approve/keep-planning; the others allow/deny.
+func TestPendingCardShowsAnswerAffordance(t *testing.T) {
+	for role := range cardRoles {
+		out := strings.Join(renderMessage(80, pendingCard(role), false, ""), "\n")
+		if !strings.Contains(out, "ctrl+a") || !strings.Contains(out, "ctrl+r") {
+			t.Fatalf("%s pending card must advertise the answer keys, got:\n%s", role, out)
+		}
+		if strings.Contains(out, "read-only") {
+			t.Fatalf("%s pending card must NOT read read-only (it is answerable), got:\n%s", role, out)
+		}
+		allow, deny := cardVerbs(role)
+		if !strings.Contains(out, allow) || !strings.Contains(out, deny) {
+			t.Fatalf("%s card must name its verbs %q/%q, got:\n%s", role, allow, deny, out)
+		}
+		// A focused card is visibly marked.
+		fout := strings.Join(renderMessage(80, pendingCard(role), true, ""), "\n")
+		if !strings.Contains(fout, "focused") {
+			t.Fatalf("%s focused card must be marked focused, got:\n%s", role, fout)
+		}
+	}
+	// Plan cards specifically read approve / keep planning (charter D27).
+	plan := strings.Join(renderMessage(80, pendingCard("plan"), true, ""), "\n")
+	if !strings.Contains(plan, "approve") || !strings.Contains(plan, "keep planning") {
+		t.Fatalf("plan card must read approve/keep-planning, got:\n%s", plan)
+	}
+}
+
+// TestResolvedCardShowsBadge proves a card whose approval_status flipped to a
+// terminal state (a Studio answer, or this TUI's own answer landing on refetch)
+// shows the resolution badge instead of the answer affordance — one Postgres
+// truth, both surfaces (Law-2).
+func TestResolvedCardShowsBadge(t *testing.T) {
+	cases := map[string]string{"allowed": "allowed", "denied": "denied", "canceled": "canceled"}
+	for status, want := range cases {
+		m := pendingCard("approval")
+		m.Metadata["approval_status"] = status
+		out := strings.Join(renderMessage(80, m, false, ""), "\n")
+		if !strings.Contains(out, want) {
+			t.Fatalf("a %s card must show its resolution badge, got:\n%s", status, out)
+		}
+		if strings.Contains(out, "ctrl+a") {
+			t.Fatalf("a resolved (%s) card must NOT offer the answer keys, got:\n%s", status, out)
+		}
+	}
+}
+
+// TestInFlightCardShowsAnsweringState proves the immediate-feedback layer: a card
+// whose answer is POSTed but not yet confirmed reads "answering…" rather than the
+// affordance or a premature terminal badge.
+func TestInFlightCardShowsAnsweringState(t *testing.T) {
+	out := strings.Join(renderMessage(80, pendingCard("approval"), true, "allow"), "\n")
+	if !strings.Contains(out, "allowing") {
+		t.Fatalf("an in-flight allow must read 'allowing…', got:\n%s", out)
 	}
 }
 
@@ -116,6 +188,61 @@ func TestWindowFollowsBottom(t *testing.T) {
 	got = window([]string{"a", "b"}, 5, 0)
 	if strings.Join(got, ",") != "a,b" {
 		t.Fatalf("short content returns as-is, got %v", got)
+	}
+}
+
+// TestRailBandRendersEntries proves the agents rail band paints one row per
+// decoded entry with its status label and token count, and shows nothing for an
+// empty rail (honest absence, not an empty box).
+func TestRailBandRendersEntries(t *testing.T) {
+	if renderRail(80, nil) != nil {
+		t.Fatal("an empty rail must render no band")
+	}
+	rail := []RailEntry{
+		{TaskID: "t1", Status: "completed", Label: "survey", Tokens: 1500, HasTokens: true},
+		{TaskID: "t2", Status: "running", Label: "build"},
+	}
+	out := strings.Join(renderRail(80, rail), "\n")
+	if !strings.Contains(out, "agents") {
+		t.Fatalf("rail band must be headed 'agents', got:\n%s", out)
+	}
+	if !strings.Contains(out, "survey") || !strings.Contains(out, "build") {
+		t.Fatalf("rail band must list each entry's label, got:\n%s", out)
+	}
+	if !strings.Contains(out, "done") || !strings.Contains(out, "running") {
+		t.Fatalf("rail band must show each entry's status, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1.5k") {
+		t.Fatalf("rail band must show token usage (1.5k), got:\n%s", out)
+	}
+}
+
+// TestRailBandEatsTranscriptHeight proves the rail band is a fixed band that
+// reduces the transcript viewport rather than overrunning the frame — the
+// composer keeps its stable bottom seat.
+func TestRailBandEatsTranscriptHeight(t *testing.T) {
+	msgs := make([]Message, 0, 40)
+	for i := 1; i <= 40; i++ {
+		msgs = append(msgs, Message{Seq: i, Role: "user", SourceMarkdown: "line"})
+	}
+	withRail := Model{width: 80, height: 24, screen: screenChat, scroll: -1,
+		st: State{Messages: msgs, Rail: []RailEntry{{TaskID: "t1", Status: "running", Label: "a"}}}}
+	noRail := withRail
+	noRail.st.Rail = nil
+	if lines := strings.Count(withRail.renderChat(), "\n"); lines != strings.Count(noRail.renderChat(), "\n") {
+		t.Fatalf("rail must keep the total frame height stable (with=%d without=%d)",
+			strings.Count(withRail.renderChat(), "\n"), strings.Count(noRail.renderChat(), "\n"))
+	}
+}
+
+// TestFooterAdvertisesPendingCard proves the answer affordance is discoverable
+// from the footer even when the card scrolled out of view.
+func TestFooterAdvertisesPendingCard(t *testing.T) {
+	m := Model{width: 80, height: 24, screen: screenChat,
+		st: State{Messages: []Message{pendingCard("approval")}}}
+	foot := m.chatFooter()
+	if !strings.Contains(foot, "card waiting") || !strings.Contains(foot, "ctrl+a") {
+		t.Fatalf("footer must advertise a pending card's answer keys, got:\n%s", foot)
 	}
 }
 

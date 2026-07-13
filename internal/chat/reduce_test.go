@@ -292,6 +292,153 @@ func TestExitFrameSurfacesReason(t *testing.T) {
 	}
 }
 
+// pendingCardRow builds a persisted, pending approval-family row (the shape the
+// Recorder writes via persist_approval_ask): request_id + pending status in the
+// raw metadata map.
+func pendingCardRow(seq int, role, requestID string) Message {
+	return Message{
+		Seq:            seq,
+		Role:           role,
+		SourceMarkdown: "run `rm -rf build`?",
+		Metadata: map[string]any{
+			"request_id":      requestID,
+			"approval_status": "pending",
+		},
+	}
+}
+
+// TestAnswerPostsThenFullRefetch proves the Law-1 answer contract: a card answer
+// emits the approval POST (an AnswerEffect carrying request_id + decision) with
+// an immediate in-flight badge, and the POST completing fires a FULL refetch
+// (SinceSeq 0) — the only refetch that surfaces an in-place metadata flip.
+func TestAnswerPostsThenFullRefetch(t *testing.T) {
+	st := State{SessionID: "s1", Messages: []Message{pendingCardRow(3, "approval", "req-1")}, LastSeq: 3}
+
+	st, effs := drive(st, t0, AnswerEvent{RequestID: "req-1", Decision: "allow"})
+	var ae AnswerEffect
+	found := false
+	for _, e := range effs {
+		if a, ok := e.(AnswerEffect); ok {
+			ae, found = a, true
+		}
+	}
+	if !found || ae.RequestID != "req-1" || ae.Decision != "allow" {
+		t.Fatalf("answer must emit an AnswerEffect{req-1, allow}, got %+v", effs)
+	}
+	if st.AnswerInFlight["req-1"] != "allow" {
+		t.Fatalf("answer must record the in-flight decision, got %v", st.AnswerInFlight)
+	}
+	if st.Notice != "allowing…" {
+		t.Fatalf("answer must give immediate feedback, got %q", st.Notice)
+	}
+
+	st, effs = drive(st, t0, AnsweredEvent{RequestID: "req-1"})
+	f, ok := hasFetchTail(effs)
+	if !ok || f.SinceSeq != 0 {
+		t.Fatalf("a successful answer must trigger a FULL refetch (SinceSeq 0), got %+v", effs)
+	}
+}
+
+// TestAnswerRefetchFlipsCardInPlace proves the pending → allowed flip: the
+// resolved row keeps its seq (only metadata changed), so the turn-boundary merge
+// must UPDATE it in place, not skip it — and the in-flight badge clears once the
+// terminal status lands.
+func TestAnswerRefetchFlipsCardInPlace(t *testing.T) {
+	st := State{
+		SessionID:      "s1",
+		Messages:       []Message{pendingCardRow(3, "approval", "req-1")},
+		LastSeq:        3,
+		AnswerInFlight: map[string]string{"req-1": "allow"},
+	}
+	// The full refetch returns the SAME seq-3 row, now allowed.
+	resolved := pendingCardRow(3, "approval", "req-1")
+	resolved.Metadata["approval_status"] = "allowed"
+	sess := Session{ID: "s1", Messages: []Message{resolved}}
+
+	st, _ = drive(st, t0, TailFetchedEvent{Session: sess})
+
+	if len(st.Messages) != 1 {
+		t.Fatalf("an in-place flip must not duplicate the row, got %d messages", len(st.Messages))
+	}
+	if !st.Messages[0].Resolved() || st.Messages[0].ApprovalStatus() != "allowed" {
+		t.Fatalf("the card must flip to allowed in place, got status %q", st.Messages[0].ApprovalStatus())
+	}
+	if _, still := st.AnswerInFlight["req-1"]; still {
+		t.Fatal("the in-flight badge must clear once the card resolves")
+	}
+}
+
+// TestStudioAnswerResolvesSameCard proves Law-2 one-truth: a card resolved by
+// ANOTHER surface (Studio calling update_approval_status/3) shows as resolved in
+// the TUI purely from a refetch — no local answer, no sync engine.
+func TestStudioAnswerResolvesSameCard(t *testing.T) {
+	st := State{SessionID: "s1", Messages: []Message{pendingCardRow(5, "question", "q-9")}, LastSeq: 5}
+	answered := pendingCardRow(5, "question", "q-9")
+	answered.Metadata["approval_status"] = "denied"
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1", Messages: []Message{answered}}})
+	if st.Messages[0].ApprovalStatus() != "denied" {
+		t.Fatalf("a Studio-denied card must read denied in the TUI on refetch, got %q", st.Messages[0].ApprovalStatus())
+	}
+}
+
+// TestAnswerScopeIsAllowDenyOnly proves the D28 scope fence: a blank request_id
+// or a decision outside allow/deny is a silent no-op (no POST, no state change).
+func TestAnswerScopeIsAllowDenyOnly(t *testing.T) {
+	base := State{SessionID: "s1"}
+	for _, ev := range []AnswerEvent{
+		{RequestID: "", Decision: "allow"},
+		{RequestID: "req-1", Decision: "approve"}, // not allow/deny
+		{RequestID: "req-1", Decision: ""},
+	} {
+		st, effs := drive(base, t0, ev)
+		if len(effs) != 0 || len(st.AnswerInFlight) != 0 {
+			t.Fatalf("out-of-scope answer %+v must be a silent no-op, got effects=%d inflight=%v", ev, len(effs), st.AnswerInFlight)
+		}
+	}
+}
+
+// TestAnswerErrorClearsInFlight proves an answer POST failure surfaces honestly
+// and drops the badge so the card stays pending (retryable), never stuck
+// "answering…".
+func TestAnswerErrorClearsInFlight(t *testing.T) {
+	st := State{SessionID: "s1", AnswerInFlight: map[string]string{"req-1": "deny"}}
+	st, effs := drive(st, t0, AnsweredEvent{RequestID: "req-1", Err: errString("403 forbidden")})
+	if len(effs) != 0 {
+		t.Fatalf("a failed answer must not refetch, got %d effects", len(effs))
+	}
+	if _, still := st.AnswerInFlight["req-1"]; still {
+		t.Fatal("a failed answer must clear the in-flight badge (retryable)")
+	}
+	if !strings.Contains(st.Notice, "answer failed") {
+		t.Fatalf("a failed answer must surface an honest notice, got %q", st.Notice)
+	}
+}
+
+// TestRailContinuityHydratesFromRefetch proves Law-2 rail continuity: a session
+// GET carrying a rail_snapshot decodes into the task-keyed rail, sorted stably by
+// task_id, with Studio's label/status/token fields.
+func TestRailContinuityHydratesFromRefetch(t *testing.T) {
+	snap := json.RawMessage(`{
+	  "task-b": {"status":"running","row":{"description":"survey the tree"},"usage":{"total_tokens":4200}},
+	  "task-a": {"status":"completed","row":{"task_type":"verify"},"usage":{"total_tokens":900}}
+	}`)
+	st := State{SessionID: "s1"}
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1", RailSnapshot: snap}})
+	if len(st.Rail) != 2 {
+		t.Fatalf("rail must decode both entries, got %d", len(st.Rail))
+	}
+	// Sorted by task_id: task-a before task-b.
+	if st.Rail[0].TaskID != "task-a" || st.Rail[1].TaskID != "task-b" {
+		t.Fatalf("rail must sort by task_id, got %q,%q", st.Rail[0].TaskID, st.Rail[1].TaskID)
+	}
+	if st.Rail[0].Status != "completed" || st.Rail[0].Label != "verify" || st.Rail[0].Tokens != 900 {
+		t.Fatalf("rail entry must carry status/label/tokens, got %+v", st.Rail[0])
+	}
+	if st.Rail[1].Label != "survey the tree" {
+		t.Fatalf("rail label must prefer row.description, got %q", st.Rail[1].Label)
+	}
+}
+
 // errString is a tiny error for the failed-fetch test.
 type errString string
 

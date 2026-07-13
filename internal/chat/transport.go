@@ -33,9 +33,13 @@ type Transport interface {
 	// Interrupt POSTs the interrupt; the ack is semantically EMPTY (charter D11)
 	// — the real signal is the result frame on the event stream.
 	Interrupt(id string) error
-	// Approve answers a pending permission (allow/deny). The rail-carrying full
-	// GetSession + this verb are the seam the interactive cards slice
-	// (ct-bl-cards-interactive) answers approvals through — no fork.
+	// Approve answers a pending approval/question/plan card: POST
+	// /v1/chat/sessions/:id/approval {request_id, decision} → 204. decision is
+	// "allow" or "deny" ONLY (charter D22/D28 — allow echoes the server-held
+	// original ask, no caller-supplied updatedInput). The persisted row flips to
+	// allowed/denied server-side, so a full refetch surfaces the resolution. The
+	// rail-carrying full GetSession + this verb are the seam the interactive
+	// cards slice (ct-bl-cards-interactive) answers approvals through — no fork.
 	Approve(id, requestID, decision string) error
 	// Events opens the per-session SSE stream and hands every frame to
 	// onFrame(event, data). Replayed persisted rows arrive as event "message"

@@ -43,17 +43,20 @@ var (
 	badgeStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	noticeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	cardBar     = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
+	focusBar    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+	allowStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	cursorStyle = lipgloss.NewStyle().Reverse(true)
 )
 
-// cardRoles are the replay-only interactive rows (charter: approval/question/
-// plan render as bespoke READ-ONLY cards). Answering them is out of scope
-// (ct-bl-cards-interactive); they are EXCLUDED from golden parity, which is
-// deliberately assistant reply-body projection only.
+// cardRoles are the interactive card rows (charter D27/D28: approval/question/
+// plan render as bespoke cards, answerable in-canvas from the TUI). They are
+// EXCLUDED from golden parity, which is deliberately assistant reply-body
+// projection only. The engine routes one wire ask to one of these three roles by
+// its tool_name (permission_role/1) — the store IS the router.
 var cardRoles = map[string]string{
 	"approval": "Approval requested",
 	"question": "Question",
-	"plan":     "Plan",
+	"plan":     "Plan proposed",
 }
 
 // blockRoles are the structural rows now promoted to dual-surface PortableDoc
@@ -104,8 +107,16 @@ func (m Model) transcriptLines(width int) []string {
 		}
 		lines = append(lines, ls...)
 	}
+	// The focused pending card's request_id — its card wears the active border +
+	// the answer hint; the others stay quiet answerable cards.
+	focusRID := ""
+	if card, ok := m.focusedCard(); ok {
+		focusRID = card.RequestID()
+	}
 	for _, msg := range m.st.Messages {
-		if r := renderMessage(width, msg); len(r) > 0 {
+		focused := focusRID != "" && msg.RequestID() == focusRID && answerable(msg)
+		inflight := m.st.AnswerInFlight[msg.RequestID()]
+		if r := renderMessage(width, msg, focused, inflight); len(r) > 0 {
 			push(r...)
 		}
 	}
@@ -123,9 +134,11 @@ func (m Model) transcriptLines(width int) []string {
 
 // renderMessage renders one settled Postgres row (charter D8). Assistant rows
 // go through pdrender; user rows echo as a marked prompt; approval/question/
-// plan render as read-only cards; other structural rows collapse to one dim
-// provenance line. Assistant is the ONLY role in golden parity's scope.
-func renderMessage(width int, msg Message) []string {
+// plan render as interactive cards (answerable when pending, resolution badge
+// when terminal); other structural rows collapse to one dim provenance line.
+// Assistant is the ONLY role in golden parity's scope. focused marks the card
+// the answer keys act on; inflight is the decision POSTed but not yet confirmed.
+func renderMessage(width int, msg Message, focused bool, inflight string) []string {
 	w := bodyWidth(width)
 	switch {
 	case msg.Role == "assistant":
@@ -133,7 +146,7 @@ func renderMessage(width int, msg Message) []string {
 	case msg.Role == "user":
 		return renderUserEcho(w, msg.SourceMarkdown)
 	case cardRoles[msg.Role] != "":
-		return readonlyCard(w, cardRoles[msg.Role], cardBody(msg))
+		return cardView(w, msg, focused, inflight)
 	case blockRoles[msg.Role]:
 		return renderStructuralDoc(chatRegistry, width, msg)
 	case structuralRoles[msg.Role]:
@@ -237,18 +250,158 @@ func renderTail(w int, tail string) []string {
 	return out
 }
 
-// readonlyCard boxes a replay-only interactive row (approval/question/plan) as a
-// bespoke read-only card with a left rule and an honest footnote. It is NOT an
-// answer surface (ct-bl-cards-interactive owns that) and is excluded from
-// golden parity.
-func readonlyCard(w int, title, body string) []string {
+// cardView boxes an approval/question/plan row as a bespoke card with a left
+// rule and a state-dependent footer (charter D27/D28). The footer is the honest
+// state:
+//   - resolved (allowed/denied/canceled): a terminal badge — the same row Studio
+//     answered flips here on refetch (Law-2, one Postgres truth).
+//   - answering in flight: an immediate "answering: allow…" line.
+//   - pending + focused: the answer affordance (ctrl+a/ctrl+r + tab).
+//   - pending + not focused: a quiet "tab to answer" nudge.
+//   - not answerable (no request_id): the read-only replay footnote.
+//
+// A focused pending card wears a bold top bar so the operator sees which card a
+// keystroke acts on. Excluded from golden parity (assistant-reply-only).
+func cardView(w int, msg Message, focused bool, inflight string) []string {
 	bar := cardBar.Render("│ ")
-	out := []string{cardBar.Render("┌ ") + titleStyle.Render(title)}
-	for _, ln := range wrap(body, w-2) {
+	title := cardRoles[msg.Role]
+	topBar := cardBar.Render("┌ ")
+	if focused {
+		topBar = focusBar.Render("┌ ")
+		title += "  " + focusBar.Render("◀ focused")
+	}
+	out := []string{topBar + titleStyle.Render(title)}
+	for _, ln := range wrap(cardBody(msg), w-2) {
 		out = append(out, bar+ln)
 	}
-	out = append(out, cardBar.Render("└ ")+dimStyle.Render("read-only replay — answer in Studio"))
+
+	var foot string
+	switch {
+	case msg.Resolved():
+		foot = cardResolutionBadge(msg.ApprovalStatus())
+	case inflight != "":
+		foot = badgeStyle.Render(answeringNotice(inflight))
+	case answerable(msg):
+		allow, deny := cardVerbs(msg.Role)
+		if focused {
+			foot = dimStyle.Render(fmt.Sprintf("ctrl+a %s · ctrl+r %s · tab next", allow, deny))
+		} else {
+			foot = dimStyle.Render(fmt.Sprintf("tab to focus · ctrl+a %s · ctrl+r %s", allow, deny))
+		}
+	default:
+		// No request_id to answer (malformed/legacy row) — honest read-only note.
+		foot = dimStyle.Render("read-only replay — answer in Studio")
+	}
+	out = append(out, cardBar.Render("└ ")+foot)
 	return out
+}
+
+// cardVerbs names the allow/deny actions per card role. A plan proposal reads
+// approve / keep planning (charter: plan-approve=allow, plan-keep=deny); an
+// approval or a question reads allow / deny (scope is allow/deny only this wave).
+func cardVerbs(role string) (allow, deny string) {
+	if role == "plan" {
+		return "approve", "keep planning"
+	}
+	return "allow", "deny"
+}
+
+// cardResolutionBadge is the terminal-state footer for a resolved card.
+func cardResolutionBadge(status string) string {
+	switch status {
+	case "allowed":
+		return allowStyle.Render("✓ allowed")
+	case "denied":
+		return noticeStyle.Render("⊘ denied")
+	case "canceled":
+		return dimStyle.Render("— canceled (no runtime to answer)")
+	default:
+		return dimStyle.Render(status)
+	}
+}
+
+// ── the agents rail (Law-2 continuity) ───────────────────────────────────────
+
+// renderRail paints the task-keyed agents rail below the transcript (charter
+// D47) from the session's decoded rail_snapshot — the SAME mission control
+// Studio shows, so a mid-session surface switch keeps it (Law-2). Empty snapshot
+// → no band (honest absence, never an empty box). Capped to a handful of rows
+// with a "+N more" overflow so it never crowds the transcript.
+func renderRail(width int, rail []RailEntry) []string {
+	if len(rail) == 0 {
+		return nil
+	}
+	w := clamp(width, 8, 100)
+	const maxRows = 5
+	out := []string{
+		dimStyle.Render(strings.Repeat("─", w)),
+		titleStyle.Render("agents") + dimStyle.Render(fmt.Sprintf("  ·  %d in session", len(rail))),
+	}
+	for i, e := range rail {
+		if i >= maxRows {
+			out = append(out, dimStyle.Render(fmt.Sprintf("  … +%d more", len(rail)-maxRows)))
+			break
+		}
+		out = append(out, railLine(w, e))
+	}
+	return out
+}
+
+// railLine is one agent row: a status glyph, the sub-agent label, then its
+// status and token usage — mirroring Studio's rail_entry header line
+// (rail_label + rail_header_summary) for the non-workflow case.
+func railLine(w int, e RailEntry) string {
+	meta := railStatusLabel(e.Status)
+	if e.HasTokens {
+		meta += " · " + formatTokens(e.Tokens) + " tok"
+	}
+	head := railGlyph(e.Status) + " " + e.Label
+	line := head + dimStyle.Render("  ·  "+meta)
+	return truncate(line, w)
+}
+
+// railGlyph is the status glyph, matching Studio's rail_entry_glyph: a settled
+// cycle ✓, an interrupted one ✕, a live one ● (no fake breathing in a static
+// paint — the glyph alone carries the state).
+func railGlyph(status string) string {
+	switch status {
+	case "completed":
+		return allowStyle.Render("✓")
+	case "interrupted":
+		return noticeStyle.Render("✕")
+	default:
+		return badgeStyle.Render("●")
+	}
+}
+
+// railStatusLabel mirrors Studio's rail_status_label: completed → done,
+// interrupted → interrupted, anything else → running.
+func railStatusLabel(status string) string {
+	switch status {
+	case "completed":
+		return "done"
+	case "interrupted":
+		return "interrupted"
+	default:
+		return "running"
+	}
+}
+
+// formatTokens is the compact token count Studio's format_tokens renders:
+// <1k verbatim, <10k one decimal (1.2k), <1M whole (42k), else 1.3M.
+func formatTokens(n int) string {
+	switch {
+	case n < 0:
+		return "—"
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 10000:
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	case n < 1000000:
+		return fmt.Sprintf("%dk", n/1000)
+	default:
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
 }
 
 // cardBody extracts a display string for a card row: a well-known metadata
@@ -330,16 +483,25 @@ func (m Model) pickerRows() []string {
 func (m Model) renderChat() string {
 	header := m.chatHeader()
 	footer := m.chatFooter()
-	bodyH := m.bodyHeight()
+	rail := renderRail(m.width, m.st.Rail)
 
+	// The rail band eats transcript height so the total frame stays fixed and the
+	// composer keeps its stable bottom seat.
+	bodyH := m.bodyHeight() - len(rail)
+	if bodyH < 1 {
+		bodyH = 1
+	}
 	all := m.transcriptLines(m.width)
 	body := window(all, bodyH, m.scroll)
-	// Pad the body to a fixed height so the composer sits at a stable bottom.
 	for len(body) < bodyH {
 		body = append(body, "")
 	}
 
-	return header + "\n" + strings.Join(body, "\n") + "\n" + footer
+	out := header + "\n" + strings.Join(body, "\n")
+	if len(rail) > 0 {
+		out += "\n" + strings.Join(rail, "\n")
+	}
+	return out + "\n" + footer
 }
 
 // chatHeader is the two-line title band: session title (or "untitled") + a live
@@ -381,6 +543,15 @@ func (m Model) chatFooter() string {
 	composer := prompt + m.composerView()
 
 	hints := "enter send · esc interrupt · ctrl+b sessions · ctrl+c quit"
+	if n := len(m.answerableCards()); n > 0 {
+		// A pending card is waiting — advertise the answer keys so the affordance
+		// is discoverable even when the card scrolled out of view.
+		label := fmt.Sprintf("%d card waiting: ctrl+a allow · ctrl+r deny", n)
+		if n > 1 {
+			label += " · tab next"
+		}
+		hints = label + "  ·  " + hints
+	}
 	return notice + "\n" + composer + "\n" + dimStyle.Render(hints)
 }
 
@@ -443,7 +614,11 @@ func (m Model) bodyHeight() int {
 // at the current geometry — the scroll handler clamps against it.
 func (m Model) maxScrollTop() int {
 	n := len(m.transcriptLines(m.width))
-	top := n - m.bodyHeight()
+	bodyH := m.bodyHeight() - len(renderRail(m.width, m.st.Rail))
+	if bodyH < 1 {
+		bodyH = 1
+	}
+	top := n - bodyH
 	if top < 0 {
 		top = 0
 	}
