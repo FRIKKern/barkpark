@@ -14,6 +14,14 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLiveTest do
 
   @url "/admin/onixedit/bokbasen"
 
+  # Default Ecto telemetry event for a repo with `otp_app: :barkpark`.
+  @repo_query_event [:barkpark, :repo, :query]
+
+  # Mirrors @page_limit in BokbasenLive — the LIMIT that caps `load_submissions`
+  # so `all_submissions` cannot grow with the total book-document count. Keep in
+  # sync with the source constant.
+  @page_limit 200
+
   setup %{conn: conn} do
     {:ok, _} =
       Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
@@ -192,6 +200,112 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLiveTest do
       conn = get(conn, "/admin/bokbasen")
       assert conn.status == 301
       assert Plug.Conn.get_resp_header(conn, "location") == ["/admin/onixedit/bokbasen"]
+    end
+  end
+
+  # PROTECTIVE TEST (task-felix-bokbasen-unbounded-mount, d07 F2 scar class):
+  # mount/3 used to call `load_submissions/0` UNCONDITIONALLY — projecting the
+  # full `documents` table on BOTH the discarded disconnected render AND the live
+  # mount (2× DB projection per console open). The load is now gated behind
+  # `connected?/1`. These tests count queries against the `documents` source —
+  # the unique signature of `load_submissions` (nothing else on this mount reads
+  # documents) — to prove 2× → 1× and zero on the dead render.
+  describe "disconnected mount elides the DB projection" do
+    test "the disconnected (dead) render runs ZERO documents-projection queries and paints no rows",
+         %{conn: conn} do
+      seed_book("dead-render-row", %{
+        "state" => "accepted",
+        "updated_at" => "2026-04-30T10:00:00.000000Z"
+      })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {conn, doc_reads} = count_document_queries(fn -> get(conn, @url) end)
+
+      body = html_response(conn, 200)
+      # The dead render carries the empty page, NOT the projected submission.
+      assert body =~ ~s(data-test-id="bokbasen-empty")
+      refute body =~ "dead-render-row"
+
+      assert doc_reads == 0,
+             "the disconnected mount must issue zero documents-projection queries, " <>
+               "got #{doc_reads}"
+    end
+
+    test "the connected mount runs load_submissions exactly once (2x -> 1x)", %{conn: conn} do
+      seed_book("live-projection-row", %{
+        "state" => "accepted",
+        "updated_at" => "2026-04-30T10:00:00.000000Z"
+      })
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+
+      # `live/2` does the disconnected render THEN connects. The disconnected leg
+      # now contributes 0 documents queries (the fix), so the ONE documents query
+      # across the whole flow proves the projection runs a single time — on connect.
+      {{:ok, _view, html}, doc_reads} =
+        count_document_queries(fn -> live(conn, @url) end)
+
+      # Behavior parity: the connected view shows the row as before.
+      assert html =~ "live-projection-row"
+
+      assert doc_reads == 1,
+             "load_submissions must run exactly once (on connect), got #{doc_reads} documents queries"
+    end
+  end
+
+  # PROTECTIVE TEST (task-felix-bokbasen-unbounded-mount): `load_submissions/0`
+  # had NO limit — `all_submissions` grew with the total book-document count,
+  # pinning O(total-books) into the LiveView process for the life of the socket.
+  # It is now capped at @page_limit. Seed more than the cap and prove the assign
+  # (and therefore the rendered table) never exceeds it.
+  describe "load_submissions is bounded" do
+    test "the connected mount caps all_submissions at the page limit", %{conn: conn} do
+      total = @page_limit + 5
+
+      for i <- 1..total do
+        seed_book("cap-#{i}", %{
+          "state" => "accepted",
+          "updated_at" => "2026-04-30T10:00:00.000000Z"
+        })
+      end
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, @url)
+
+      # All loaded rows pass the default (all-states, no-date) filter, so the
+      # rendered row count equals the loaded count — which must be the cap.
+      rendered_rows = length(Regex.scan(~r/data-test-doc-id=/, html))
+
+      assert rendered_rows == @page_limit,
+             "the bounded mount must render exactly @page_limit (#{@page_limit}) rows out of " <>
+               "#{total} seeded, got #{rendered_rows}"
+    end
+  end
+
+  # Count Repo queries that touch the `documents` table within `fun` — the unique
+  # signature of `load_submissions/0` on this mount. No pid filter: the connected
+  # mount runs in a spawned LiveView process, so the counter must see queries from
+  # ANY process during the block (safe — this module is async: false, so nothing
+  # else runs concurrently).
+  defp count_document_queries(fun) do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    handler_id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      handler_id,
+      @repo_query_event,
+      fn _event, _measurements, %{source: source}, _config ->
+        if source == "documents", do: Agent.update(counter, &(&1 + 1))
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, Agent.get(counter, & &1)}
+    after
+      :telemetry.detach(handler_id)
+      Agent.stop(counter)
     end
   end
 end
