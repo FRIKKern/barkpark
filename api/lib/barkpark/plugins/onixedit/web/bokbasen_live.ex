@@ -48,15 +48,35 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   @all_states ~w(pending staging staged polling accepted rejected failed cancelled cannot_cancel)
   @retryable_states ~w(failed rejected cancelled cannot_cancel)
 
+  # d07 F2 scar-class bound: `load_submissions/0` selects EVERY book-type
+  # document in `production` and holds one row per submission in the
+  # `all_submissions` assign for the life of the socket. Unbounded, that assign
+  # grows with the total ONIX book count across every workspace, so each open
+  # console pins O(total-books) into the LiveView process heap. Cap the read at
+  # the most-recently-updated page — a sane admin window (the console is a
+  # triage surface, not an export). Raise deliberately, never remove.
+  @page_limit 200
+
   @impl true
   def mount(_params, _session, socket) do
-    submissions = load_submissions()
+    # d07 F2 mount gate: mount/3 runs TWICE — once for the discarded
+    # disconnected HTTP render, once for the live WebSocket mount. Running
+    # `load_submissions/0` unconditionally doubled the DB projection per console
+    # open (and the dead render is thrown away). This surface is admin-gated, so
+    # no crawler consumes the disconnected HTML — load ONLY on the live mount and
+    # subscribe to the loaded rows there; the dead render carries an empty page.
+    submissions =
+      if connected?(socket) do
+        subs = load_submissions()
 
-    if connected?(socket) do
-      Enum.each(submissions, fn sub ->
-        Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{sub.doc_id}")
-      end)
-    end
+        Enum.each(subs, fn sub ->
+          Phoenix.PubSub.subscribe(Barkpark.PubSub, "bokbasen:document:#{sub.doc_id}")
+        end)
+
+        subs
+      else
+        []
+      end
 
     {:ok,
      socket
@@ -309,6 +329,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   defp load_submissions do
     Document
     |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
+    |> order_by([d], desc: d.updated_at)
+    |> limit(^@page_limit)
     |> Repo.all()
     |> Enum.map(&document_to_row/1)
     |> Enum.reject(fn row -> is_nil(row.state) end)
