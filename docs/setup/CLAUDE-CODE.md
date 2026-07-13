@@ -100,6 +100,11 @@ Verify:
 claude mcp list   # barkpark should appear, "connected"
 ```
 
+A real live MCP client detects the emitted config: `claude mcp get barkpark`
+reads the committed `.mcp.json` and reports it back byte-correct (command `bp`,
+args `mcp serve`, both env vars). `scripts/onramp-live-client-smoke.sh` proves
+this end-to-end against the `claude` CLI (manual, not CI).
+
 ### Retargeting
 
 The `env` block is the whole instance override. `bp`'s environment layer sits
