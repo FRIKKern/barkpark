@@ -240,9 +240,15 @@ echo "== duplication tripwires (WARN) =="
 tripwire() {
   # $1 = literal, $2 = space-separated allowlist
   local literal="$1" allow="$2" hits f allowed a
+  # Exclude worktree/scratch trees: .claude (git worktrees + charters), .omx and
+  # .tmp-bp89 (nested-checkout scratch). Use the ANCHORED (^|/)\.claude/ form —
+  # after `sed 's|^\./||'` a top-level hit reads '.claude/…' with NO leading
+  # slash, so an unanchored '/\.claude/' would miss it and leave thousands of
+  # worktree-copy WARNs (D26).
   hits=$(grep -rlF "$literal" --include='*.md' . 2>/dev/null |
     sed 's|^\./||' | grep -v '^_attic/' | grep -v node_modules | grep -v '^\.artifacts/' \
-    | grep -v '/_build/' | grep -v '/deps/' || true)
+    | grep -v '/_build/' | grep -v '/deps/' \
+    | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)\.omx/' | grep -vE '(^|/)\.tmp-bp89/' || true)
   for f in $hits; do
     allowed=0
     for a in $allow; do
