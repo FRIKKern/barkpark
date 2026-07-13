@@ -97,9 +97,11 @@ defmodule BarkparkWeb.BulldocsLiveIdlessBlocksTest do
     test "the live /papers/:slug stream renders ALL id-less blocks (Option B)", %{conn: conn} do
       slug = "r2-idless-render-#{System.unique_integer([:positive])}"
 
-      # Paragraph text lives in the `content` inline-node array (render.ex
-      # compose_block(paragraph) reads "content", NOT a bare "text"). The
-      # heading reads "text". None carry an "id" — the exact R2 shape.
+      # Paragraph text here lives in the `content` inline-node array; since
+      # PR #2882 compose_block(paragraph) PREFERS `content` and falls back to a
+      # non-blank bare `text` (compose.ex paragraph_inline/1), so both authoring
+      # shapes render. The heading reads `text`. None carry an "id" — the exact
+      # R2 shape.
       blocks = [
         %{"type" => "heading", "level" => 1, "text" => "Heading line"},
         %{

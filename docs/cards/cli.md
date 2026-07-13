@@ -1,14 +1,13 @@
 <!-- doc-tier: agent | canonical-for: bp-cli-overview | budget: 450tok -->
 # bp CLI
 
-Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches builtins then manifest verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object, stored verbatim), `--file`/stdin overrides all. Write verbs (`doc create/patch/delete/publish/unpublish`) ride manifest `mutation_op`+`set_key` → `{mutations:[{op:…}]}` (buildBody).
+Plugin-dynamic Go CLI in `internal/cli/`. The verb tree is a pure function of the server's capabilities manifest (`/v1/capabilities`); `Execute()` in cli.go dispatches builtins then manifest verbs. Write bodies: declared args seed, `--set k=v` merges strings, `--set k:=json` sends TYPED values (number/bool/array/object, verbatim), `--file`/stdin overrides all. Write verbs (`doc create/patch/delete/publish/unpublish`) ride manifest `mutation_op`+`set_key` → `{mutations:[{op:…}]}` (buildBody). `--set` writes into `content` — use `--set 'blocks:=[…]'`, never `--set 'content:={…}'` (double-nests to content.content, no-op; server warns). Single-quote JSON args with spaces.
 
-Dev-loop builtins (hand-rolled scoped URLs `/w/<ws>/p/<project>/v1/…`, not flat BuildURL): `bp make schema <name>` prints a schema v2 skeleton (no network); `bp seed <type> [--count N]` fabricates sample drafts; `bp tinker` is a query/doc/mutate REPL. Errors carry a `hint()` line; exit ladder (0–8) unchanged.
+Dev-loop builtins (scoped URLs `/w/<ws>/p/<project>/v1/…`, not flat BuildURL): `bp make schema <name>` prints a schema v2 skeleton; `bp seed <type> [--count N]` fabricates drafts; `bp tinker` is a query/doc/mutate REPL. Errors carry a `hint()`; exit ladder (0–8) unchanged.
 
-- New builtin verb: copy builtins.go's `runWhoami`/`runCapabilities` (`*writer`+`globals`+`manifest.Context` in, exit int out).
 - Full-screen (→ docs/cards/tui.md): `bp paper` renders portable-docs; `bp tasks` opens the live task board.
 - Error→exit-code mapping in errors.go (canonical table below).
-- Support desk: `bp ticket` (operator-only: inbox·show·answer·close), `bp ticket-key` (mint·ls·rotate·pause·unpause·revoke). A `bptk_` key is tier `none`; submitters file/list/reply via curl on the `mint` handoff card (api-v1.md §8a), which `bp ticket-key mint` prints by default.
+- Support desk: `bp ticket` (operator-only: inbox·show·answer·close), `bp ticket-key` (mint·ls·rotate·pause·unpause·revoke). A `bptk_` key is tier `none`; submitters file/list/reply via curl on the `mint` handoff card (api-v1.md §8a, printed by `bp ticket-key mint`).
 - `docs/cli/**` is PATH FROZEN — cli.go references it; never move these files.
 
 Canonical references:
