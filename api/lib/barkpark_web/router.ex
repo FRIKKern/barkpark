@@ -2032,6 +2032,20 @@ defmodule BarkparkWeb.Router do
     post("/workspaces/:workspace_slug/projects", WorkspaceController, :create_project)
   end
 
+  # ── Workspace DELETE — admin-gated destructive teardown ─────────────────
+  # Separate scope (NOT the membership-scoped switcher above) because delete is
+  # the destructive primitive eject / backup / abuse-isolation build on: it
+  # requires the GLOBAL `admin` permission, not mere membership. The
+  # `:require_admin` pipeline (RequireToken + RequireAdmin) 401s an absent token
+  # and 403s a non-admin BEFORE the action runs; the action delegates to
+  # `Tenancy.delete_workspace/1`, which cascades across every workspace_id-scoped
+  # table inside one rollback-on-failure transaction (zero orphans).
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+
+    delete("/workspaces/:workspace_slug", WorkspaceController, :delete)
+  end
+
   # ── Legacy compat ──────────────────────────────────────────────────────
   # Deprecated back-compat for the Go TUI's original endpoints — the TUI
   # migrated OFF these (Goal barkpark-qprk, B14). Now token-gated (`:require_token`)

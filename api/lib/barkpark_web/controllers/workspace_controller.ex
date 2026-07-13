@@ -12,6 +12,12 @@ defmodule BarkparkWeb.WorkspaceController do
       unknown slug) both return 404 so the endpoint never leaks whether a
       workspace exists. `:require_token` already 401s an absent/invalid token.
 
+    * `DELETE /api/workspaces/:workspace_slug` — permanently delete a workspace
+      and everything scoped to it. This one is ADMIN-gated (the `:require_admin`
+      pipeline), NOT membership-scoped — it is the destructive primitive eject /
+      backup / abuse-isolation build on, so it needs the global `admin`
+      permission, not mere membership.
+
   Token is assigned to `conn.assigns[:api_token]` by the `:require_token`
   pipeline. The JSON envelope mirrors the flat `/v1` controllers — a plain map
   rendered with `json/2`, no separate view module.
@@ -72,6 +78,40 @@ defmodule BarkparkWeb.WorkspaceController do
       # (unknown slug / non-member) collapses to 404 — no existence leak.
       {:error, %Ecto.Changeset{}} = err -> err
       _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  DELETE /api/workspaces/:workspace_slug — permanently delete a Workspace and
+  everything scoped to it.
+
+  Admin-gated by the router's `:require_admin` pipeline (RequireToken +
+  RequireAdmin — a caller without the global `admin` permission is refused 403
+  before this action runs; NOT membership-scoped like the LIST/create surface).
+  This is the HTTP primitive the destructive keystone consumers (eject, backup,
+  abuse-isolation) assume; `Tenancy.delete_workspace/1` already exists and is
+  tested but was unreachable over HTTP until now.
+
+  Delegates to `Tenancy.delete_workspace/1`, which cascades inside a single
+  transaction — media blobs (File.rm + CDN purge via `Media.delete_file/2`),
+  documents (both draft and published variants, with plugin hooks), and every
+  `workspace_id`-scoped table — rolling the whole thing back on any failure.
+
+  Unknown slug → 404 (`{:error, :not_found}` via the FallbackController). On
+  success → 200 echoing the deleted workspace so the caller has immediate,
+  concrete confirmation of exactly what was removed.
+  """
+  def delete(conn, %{"workspace_slug" => slug}) do
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         {:ok, deleted} <- Tenancy.delete_workspace(workspace) do
+      json(conn, %{workspace: render_workspace(deleted), deleted: true})
+    else
+      # Unknown slug (get returns nil) OR delete_workspace resolving :not_found
+      # both collapse to 404. A rollback term ({:error, reason}) flows to the
+      # FallbackController, which maps it to the structured error envelope.
+      nil -> {:error, :not_found}
+      {:error, :not_found} -> {:error, :not_found}
+      {:error, _} = err -> err
     end
   end
 
