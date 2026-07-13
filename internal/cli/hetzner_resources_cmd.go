@@ -570,6 +570,7 @@ USAGE
   bp cloud status                       triage your fleet (ranked, bucketed)
   bp cloud providers                    the capability matrix for every provider
   bp cloud instance <verb>              provider-neutral fleet control (any provider)
+  bp cloud workspace <export|import>    per-workspace bundle over the content API
   bp cloud open <target>                open a dashboard deep link
   bp cloud verify <instance>            re-run the golden-path probe suite
   bp cloud deploy <target>              push any git ref to an instance over SSH
