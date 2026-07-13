@@ -242,7 +242,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{
       "kind" => "PdParagraph",
       "_role" => "ingress",
-      "children" => compose_inline_children(Map.get(b, "content", []))
+      "children" => compose_inline_children(paragraph_inline(b))
     }
   end
 
@@ -252,7 +252,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # both beat the bare `<span>`s email used to get, which collapsed every
     # paragraph into one unbroken run (gp-w3 email-view wave).
     _ = style
-    %{"kind" => "PdParagraph", "children" => compose_inline_children(Map.get(b, "content", []))}
+    %{"kind" => "PdParagraph", "children" => compose_inline_children(paragraph_inline(b))}
   end
 
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
@@ -266,7 +266,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       "kind" => "PdParagraph",
       "_role" => "pullquote",
       "italic" => true,
-      "children" => compose_inline_children(Map.get(b, "content", []))
+      "children" => compose_inline_children(paragraph_inline(b))
     }
   end
 
@@ -1176,6 +1176,34 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp heading_level("2"), do: 2
   defp heading_level("3"), do: 3
   defp heading_level(_), do: 2
+
+  # Inline source for text-bearing prose blocks (paragraph / ingress / pullquote):
+  # prefer the `content` inline-node array, fall back to a bare `text` string
+  # (heading-style authoring — the shape the repo's own tests and the Hollow
+  # publish predicate already treat as content, but which used to render as an
+  # EMPTY <p> because these clauses read `content` only). compose_inline_children/1
+  # accepts either a list OR a bare string, so this is STRICTLY ADDITIVE at the
+  # Pd-tree level:
+  #   * a non-empty `content` array composes byte-identically to before;
+  #   * an empty/absent `content` with NON-BLANK `text` now yields that text
+  #     (the previously-empty case that gains output — the whole bugfix);
+  #   * an empty/absent `content` with no usable `text` returns [] exactly as
+  #     `compose_inline_children([])` did, so the fresh-paper empty `tpl-body`
+  #     paragraph and every other empty scaffold stay byte-identical.
+  # The `text` branch requires a non-blank BINARY so a non-string `text` (map /
+  # list a raw mutate may persist) falls through to [] rather than being coerced.
+  defp paragraph_inline(b) do
+    case Map.get(b, "content") do
+      list when is_list(list) and list != [] ->
+        list
+
+      _ ->
+        case Map.get(b, "text") do
+          text when is_binary(text) and text != "" -> text
+          _ -> []
+        end
+    end
+  end
 
   # Fail-soft leaf coercion for AUTHOR-CONTROLLED block fields (text / caption /
   # src / value / label / byline & sheet cells …). Binaries pass through and

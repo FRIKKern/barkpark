@@ -275,6 +275,127 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
     end
   end
 
+  # A paragraph / ingress / pullquote authored the HEADING way — a bare `text`
+  # string instead of a `content` inline-node array — used to render as an EMPTY
+  # <p> on the /papers reader, because these three clauses read `content` only.
+  # The Hollow publish predicate counts a bare-`text` paragraph as content, so
+  # such a paragraph passed the publish gate as "has content" yet showed nothing.
+  # The `paragraph_inline/1` fallback fixes it while staying strictly additive:
+  # `content`-form and empty scaffolds compose byte-identically.
+  describe "compose_block bare-`text` fallback for paragraph / ingress / pullquote" do
+    test "paragraph with a bare `text` composes to a PdParagraph carrying the text (email)" do
+      b = %{"type" => "paragraph", "text" => "Hi"}
+      assert Compose.compose_block(b) == %{"kind" => "PdParagraph", "children" => ["Hi"]}
+    end
+
+    test "paragraph with a bare `text` composes IDENTICALLY to its `content` inline-array form" do
+      text_form = %{"type" => "paragraph", "text" => "Hi"}
+
+      content_form = %{
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Hi"}]
+      }
+
+      # The bugfix: the text-form no longer collapses to [] children.
+      assert Compose.compose_block(text_form) == Compose.compose_block(content_form)
+
+      # And the content-form is byte-UNCHANGED from what it has always emitted.
+      assert Compose.compose_block(content_form) ==
+               %{"kind" => "PdParagraph", "children" => ["Hi"]}
+    end
+
+    test "a `content`-form paragraph ignores a stray `text` sibling (content wins, byte-unchanged)" do
+      b = %{
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "real"}],
+        "text" => "ignored"
+      }
+
+      assert Compose.compose_block(b) == %{"kind" => "PdParagraph", "children" => ["real"]}
+    end
+
+    test "an empty scaffold paragraph (no content, no text) stays [] children (byte-identical)" do
+      # The fresh-paper `tpl-body` seed and any empty paragraph must NOT change:
+      # paragraph_inline/1 returns [] exactly as compose_inline_children([]) did.
+      assert Compose.compose_block(%{"type" => "paragraph"}) ==
+               %{"kind" => "PdParagraph", "children" => []}
+
+      assert Compose.compose_block(%{"type" => "paragraph", "content" => []}) ==
+               %{"kind" => "PdParagraph", "children" => []}
+
+      assert Compose.compose_block(%{"type" => "paragraph", "text" => ""}) ==
+               %{"kind" => "PdParagraph", "children" => []}
+
+      # A non-string `text` (map/list a raw mutate may persist) falls through
+      # to [] rather than being coerced into a leaf.
+      assert Compose.compose_block(%{"type" => "paragraph", "text" => %{}}) ==
+               %{"kind" => "PdParagraph", "children" => []}
+    end
+
+    test "ingress with a bare `text` renders its text (text-fallback), content-form unchanged" do
+      text_form = Compose.compose_block(%{"type" => "ingress", "text" => "Lead"}, :article)
+      assert text_form["kind"] == "PdParagraph"
+      assert text_form["_role"] == "ingress"
+      assert text_form["children"] == ["Lead"]
+
+      content_form =
+        Compose.compose_block(
+          %{"type" => "ingress", "content" => [%{"type" => "text", "value" => "Lead"}]},
+          :article
+        )
+
+      assert content_form["children"] == ["Lead"]
+    end
+
+    test "pullquote with a bare `text` renders its text (text-fallback), content-form unchanged" do
+      text_form = Compose.compose_block(%{"type" => "pullquote", "text" => "Quote"}, :article)
+      assert text_form["kind"] == "PdParagraph"
+      assert text_form["_role"] == "pullquote"
+      assert text_form["italic"] == true
+      assert text_form["children"] == ["Quote"]
+
+      content_form =
+        Compose.compose_block(
+          %{"type" => "pullquote", "content" => [%{"type" => "text", "value" => "Quote"}]},
+          :article
+        )
+
+      assert content_form["children"] == ["Quote"]
+    end
+
+    # The end-to-end proof: a whole-paper render of a bare-`text` paragraph emits
+    # a real <p> carrying the prose (was <p></p> before the fix), while the
+    # `content`-form render is byte-identical to today.
+    test "render_blocks: a bare-`text` paragraph emits a <p> containing its prose (article)" do
+      opts = %{style: :article}
+
+      text_html =
+        Render.render_blocks(
+          [%{"id" => "p-1", "type" => "paragraph", "text" => "Some prose"}],
+          opts
+        )
+
+      assert text_html =~ "<p"
+      assert text_html =~ "Some prose"
+      refute text_html =~ "<p></p>"
+
+      content_html =
+        Render.render_blocks(
+          [
+            %{
+              "id" => "p-1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Some prose"}]
+            }
+          ],
+          opts
+        )
+
+      # View↔Edit / cross-form parity: the two authoring shapes render identically.
+      assert text_html == content_html
+    end
+  end
+
   # A schemaless paper can carry a block type this engine has no clause for, a
   # map with no `"type"` at all, or (inside a section / figure child, which call
   # compose_block directly) a non-map entry. Each USED to FunctionClauseError /
