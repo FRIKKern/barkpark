@@ -19,13 +19,23 @@ defmodule BarkparkWeb.ChatController do
   enum, an out-of-bounds value) is rejected with the canonical 400 envelope
   BEFORE any store/runtime call.
 
-  ## Authority (D21)
+  ## Authority (D21 + Connectors D18/D19a)
 
-  INSTANCE-GLOBAL ADMIN. `chat_sessions`/`chat_messages` have no tenant/owner
-  column; every route rides `[:api, :require_admin]`, so any data-plane bearer
-  with the global `admin` permission may list/read/control every chat session on
-  the instance. No workspace header/query/path narrows or expands this — there
-  are no scoped chat routes.
+  Every route rides `[:api, :require_chat_access]`, which resolves
+  `conn.assigns.chat_scope` (`RequireChatAccess`):
+
+    * `:global` — a global-admin bearer keeps INSTANCE-WIDE authority (D21
+      unchanged): it may list/read/control every chat session on the instance.
+    * `{:workspace, ws}` — a workspace-bound `chat` Connector is CONFINED to the
+      sessions its workspace owns (`owner_workspace_id`). Every fetch is passed
+      through `authorize/2` before any store/runtime work, so a wrong-tenant read
+      joins the not-found oracle (`not_found/1`) — indistinguishable from a
+      missing id, NOT a distinct 403 — and the SSE `:events` route runs that
+      check BEFORE subscribing to `Recorder.topic/1`, so tenant B cannot join
+      tenant A's live stream by guessing a UUID.
+
+  Ownership is stamped at create from the scope (`owner_for/1`); a session an
+  admin creates is `nil`-owned (instance-global, visible only to `:global`).
 
   ## Secret safety (D23)
 
@@ -89,7 +99,15 @@ defmodule BarkparkWeb.ChatController do
     with {:ok, attrs} <- validate_create(params) do
       id = Ecto.UUID.generate()
 
-      case StudioChat.create_session(%{id: id, cwd: ClaudeChat.cwd(), mode: attrs.mode}) do
+      case StudioChat.create_session(%{
+             id: id,
+             cwd: ClaudeChat.cwd(),
+             mode: attrs.mode,
+             # Stamp tenant ownership from the caller's scope (Connectors
+             # D18/D19a): a workspace Connector owns what it creates; an admin
+             # creates a `nil`-owned instance-global session.
+             owner_workspace_id: owner_for(scope(conn))
+           }) do
         {:ok, _session} ->
           if attrs.model, do: StudioChat.set_model_choice(id, attrs.model)
           if attrs.effort, do: StudioChat.set_effort_choice(id, attrs.effort)
@@ -118,7 +136,13 @@ defmodule BarkparkWeb.ChatController do
   @doc "List sessions in the sidebar shape (`list_sessions/1`); omits draft/choices."
   def index(conn, params) do
     with {:ok, archived?} <- validate_archived(params) do
-      sessions = StudioChat.list_sessions(archived: archived?)
+      scope = scope(conn)
+
+      sessions =
+        [archived: archived?]
+        |> StudioChat.list_sessions()
+        |> Enum.filter(&visible?(&1, scope))
+
       json(conn, %{sessions: Enum.map(sessions, &sidebar_json/1)})
     else
       {:error, message} -> bad_request(conn, message)
@@ -136,7 +160,7 @@ defmodule BarkparkWeb.ChatController do
   """
   def show(conn, %{"id" => id} = params) do
     with {:ok, since} <- validate_since(params),
-         %StudioChat.Session{} = session <- StudioChat.get_session(id) do
+         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
       messages = id |> StudioChat.list_messages() |> filter_since(since)
       json(conn, full_session_json(session, messages))
     else
@@ -158,7 +182,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, ops} <- validate_patch(body),
-         %StudioChat.Session{} <- StudioChat.get_session(id) do
+         %StudioChat.Session{} <- fetch_scoped(id, scope(conn)) do
       Enum.each(ops, &apply_patch_op(id, &1))
       json(conn, full_session_json(StudioChat.get_session(id), []))
     else
@@ -179,7 +203,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, content} <- validate_content(body),
-         %StudioChat.Session{} = session <- StudioChat.get_session(id) do
+         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
       case ensure_and_send(id, session, content, conn) do
         :ok ->
           conn |> put_status(:accepted) |> json(%{accepted: true})
@@ -202,7 +226,7 @@ defmodule BarkparkWeb.ChatController do
   spawn one just to interrupt it.
   """
   def interrupt(conn, %{"id" => id}) do
-    with %StudioChat.Session{} <- StudioChat.get_session(id) do
+    with %StudioChat.Session{} <- fetch_scoped(id, scope(conn)) do
       request_id =
         with recorder when is_pid(recorder) <- Recorder.whereis(id),
              {:ok, session} <- Recorder.session_pid(recorder),
@@ -230,7 +254,7 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, decision}} <- validate_approval(body),
-         %StudioChat.Session{} <- StudioChat.get_session(id) do
+         %StudioChat.Session{} <- fetch_scoped(id, scope(conn)) do
       with recorder when is_pid(recorder) <- Recorder.whereis(id),
            {:ok, session} <- Recorder.session_pid(recorder) do
         :ok = ClaudeChat.respond_permission(session, request_id, decision)
@@ -274,7 +298,10 @@ defmodule BarkparkWeb.ChatController do
     # guard, not a replay promise.
     Process.flag(:max_heap_size, %{size: sse_max_heap_words(), kill: true, error_logger: true})
 
-    case StudioChat.get_session(id) do
+    # SCOPE THE SESSION BEFORE SUBSCRIBING (Connectors D18/D19a): a wrong-tenant
+    # (or missing) id 404s here, so tenant B can never join tenant A's live
+    # `Recorder.topic/1` stream by guessing a UUID.
+    case fetch_scoped(id, scope(conn)) do
       nil ->
         not_found(conn)
 
@@ -448,6 +475,40 @@ defmodule BarkparkWeb.ChatController do
   def sse_max_heap_words do
     Application.get_env(:barkpark, __MODULE__, [])[:max_heap_words] || @default_max_heap_words
   end
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # tenant scoping (Connectors D18/D19a)
+  #
+  # `RequireChatAccess` puts `:global` or `{:workspace, ws}` on the conn; every
+  # id-bearing route fetches through `fetch_scoped/2` so a wrong-tenant read
+  # returns the SAME not-found oracle as a missing id. `owner_workspace_id` is
+  # read with `Map.get/2` (never `session.owner_workspace_id`) so this is total
+  # and forward-compatible: it is `nil` until the tenant-seam column lands, at
+  # which point a workspace caller resolves to its own owned rows automatically.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  defp scope(conn), do: conn.assigns.chat_scope
+
+  # Fetch a session and confine it to the caller's scope — `nil` (⇒ 404) when the
+  # session does not exist OR is owned by another tenant.
+  defp fetch_scoped(id, scope) do
+    case StudioChat.get_session(id) do
+      %StudioChat.Session{} = session -> if visible?(session, scope), do: session, else: nil
+      _ -> nil
+    end
+  end
+
+  # A `:global` caller sees every session; a `{:workspace, ws}` caller sees only
+  # sessions its workspace owns.
+  defp visible?(_session, :global), do: true
+
+  defp visible?(%StudioChat.Session{} = session, {:workspace, ws}),
+    do: Map.get(session, :owner_workspace_id) == ws
+
+  # The owner stamped at create from the caller's scope (nil ⇒ instance-global,
+  # visible only to `:global`).
+  defp owner_for(:global), do: nil
+  defp owner_for({:workspace, ws}), do: ws
 
   # ─────────────────────────────────────────────────────────────────────────
   # writes: strict Recorder/ClaudeChat adapter
