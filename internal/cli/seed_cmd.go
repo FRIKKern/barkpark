@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -200,9 +201,77 @@ type seedField struct {
 	Options    []string                   `json:"options"`
 	RefType    string                     `json:"refType"`
 	Fields     []seedField                `json:"fields"`
-	Of         *seedField                 `json:"of"`
+	Of         *seedField                 `json:"-"` // populated by UnmarshalJSON (object OR array)
 	Format     string                     `json:"format"`
 	Validation map[string]json.RawMessage `json:"validation"`
+}
+
+// UnmarshalJSON tolerates an arrayOf `of` in BOTH shapes a v2 schema legitimately
+// uses: the common single element-shape OBJECT (`"of": {"type": "reference"}`)
+// and the multi-member ARRAY (`"of": [{"type": "object"}]` — e.g. the tickets
+// plugin's arrayOf-of-union, api/lib/barkpark/plugins/tickets.ex). `bp seed`
+// fetches and parses EVERY registered type in the dataset, so a single
+// array-shaped `of` ANYWHERE must not abort the whole parse: with a plain
+// `Of *seedField` the standard decoder errored `json: cannot unmarshal array
+// into Go struct field seedField.schemas.fields.of`, which broke `bp seed`
+// (and the AGENT-ONRAMPS CREATE arc) against any instance carrying such a
+// schema. The array form collapses to its FIRST member shape — enough for the
+// generator to fabricate a representative element; an empty/absent/scalar `of`
+// yields no element shape (a valid empty-array draft).
+func (f *seedField) UnmarshalJSON(data []byte) error {
+	// A distinct alias type (no custom unmarshaler) decodes every field EXCEPT
+	// `of` by reflection — including nested `fields`, which recurse back through
+	// this method — while `of` arrives raw for shape-aware handling below.
+	type rawSeedField struct {
+		Name       string                     `json:"name"`
+		Type       string                     `json:"type"`
+		Options    []string                   `json:"options"`
+		RefType    string                     `json:"refType"`
+		Fields     []seedField                `json:"fields"`
+		Of         json.RawMessage            `json:"of"`
+		Format     string                     `json:"format"`
+		Validation map[string]json.RawMessage `json:"validation"`
+	}
+	var r rawSeedField
+	if err := json.Unmarshal(data, &r); err != nil {
+		return err
+	}
+	f.Name = r.Name
+	f.Type = r.Type
+	f.Options = r.Options
+	f.RefType = r.RefType
+	f.Fields = r.Fields
+	f.Format = r.Format
+	f.Validation = r.Validation
+	f.Of = decodeOfShape(r.Of)
+	return nil
+}
+
+// decodeOfShape resolves an arrayOf `of` value that may be an OBJECT (one element
+// shape) or an ARRAY (a union of member shapes — collapsed to the first). Absent,
+// null, an empty array, or any non-object/non-array form yields nil, which the
+// arrayOf generator renders as a valid empty array.
+func decodeOfShape(raw json.RawMessage) *seedField {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	switch trimmed[0] {
+	case '{':
+		var one seedField
+		if err := json.Unmarshal(trimmed, &one); err != nil {
+			return nil
+		}
+		return &one
+	case '[':
+		var many []seedField
+		if err := json.Unmarshal(trimmed, &many); err != nil || len(many) == 0 {
+			return nil
+		}
+		return &many[0]
+	default:
+		return nil
+	}
 }
 
 // seedSchema is one content type's parsed schema.
