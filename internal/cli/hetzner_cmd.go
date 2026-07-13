@@ -106,6 +106,8 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudVerify(out, g, args[1:])
 	case "deploy":
 		return runCloudDeploy(out, g, args[1:])
+	case "site", "sites":
+		return runCloudSite(out, g, args[1:])
 	case "domain", "domains":
 		return runCloudDomain(out, g, args[1:])
 	case "usage":
