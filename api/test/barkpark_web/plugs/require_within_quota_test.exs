@@ -213,5 +213,34 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaTest do
       refute back.suspended
       refute back.suspended_reason
     end
+
+    test "set_quota/2 writes a cap that check/1 enforces, and nil restores unlimited" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+
+      # A fresh workspace is uncapped (NULL) → within quota regardless of count.
+      assert ws.quota == nil
+      assert Quota.within_quota?(ws)
+
+      # Set a cap of 1, then create 2 documents scoped to the workspace so usage
+      # (2) exceeds the cap (1) — check/1 blocks at N+1 documents.
+      {:ok, capped} = Quota.set_quota(ws, 1)
+      assert capped.quota == 1
+
+      {:ok, _} = create_document_in!(ws, proj)
+      {:ok, _} = create_document_in!(ws, proj)
+
+      # Round-trips through the DB — the cap is persisted, not just in-struct.
+      reloaded = Repo.get!(Workspace, ws.id)
+      assert reloaded.quota == 1
+      assert Quota.check(reloaded) == {:error, :quota_exceeded}
+
+      # nil clears the cap back to unlimited (NULL) → within quota, unbounded.
+      {:ok, cleared} = Quota.set_quota(reloaded, nil)
+      assert cleared.quota == nil
+      assert Repo.get!(Workspace, ws.id).quota == nil
+      assert Quota.within_quota?(cleared)
+      assert Quota.check(cleared) == :ok
+    end
   end
 end
