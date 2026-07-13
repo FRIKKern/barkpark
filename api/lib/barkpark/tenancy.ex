@@ -1031,8 +1031,11 @@ defmodule Barkpark.Tenancy do
   #     sibling-guard `NOT EXISTS` so a `(doc_id, dataset)` row ALSO owned by a
   #     DIFFERENT workspace (charter D7 — the key is not workspace-unique)
   #     SURVIVES this workspace's teardown.
-  #   * E3 dataset-keyed — `t.dataset = ANY(slugs)`, the exporter's bare-slug
-  #     predicate (project-qualified narrowing is filed separately).
+  #   * E3 dataset-keyed — `t.dataset = ANY(slugs)`, where `slugs` is the
+  #     PROJECT-QUALIFIED (workspace-EXCLUSIVE) set from
+  #     `WorkspaceBundle.dataset_slugs_for/1`: a slug shared with another
+  #     workspace is dropped, so this bare-slug sweep can never cross-tenant
+  #     delete a co-tenant's rows under the same slug (charter D21).
   #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix
   #     (`data_keys` → `"dataset:"`, `search_surface_config` → `""`).
   defp delete_workspace_string_keyed(ws_id) do
