@@ -83,6 +83,38 @@ Unhealthy = fail closed: slot re-disabled, Caddy untouched, checkout reset
 back, exit 24. Schema stays forward — rolling back code does NOT undo a
 migration; write a compensating one.
 
+**Spawned static sites (`deploy/site-deploy.sh`).** A content-bound static site
+(Astro adapter × static symlink-swap target, Site-Spawner W1) builds and serves
+NEXT TO Phoenix on a content box, at `https://<instance>/sites/<slug>/`. It is a
+NEW state machine — deliberately not a parameterization of `instance-deploy.sh`
+(that one is Phoenix-specific: mix/ecto, port-pair slots, `/api/schemas` gate,
+git-reset rollback) — but it mirrors the same proven skeleton: per-slug `flock`
+serialize (queue depth 1), typed exit codes, Caddy backup+`validate`+reload-or-
+revert, fail-closed on any error. Deploy is one state machine over an immutable
+`sites/<slug>/releases/<build_id>/` layout: **PLAN** (caller passes `BUILD_ID`;
+already-live ⇒ exit 0 no-op) → **BUILD** (`npm ci && npm run build` under
+`systemd-run --scope -p MemoryMax=1500M -p CPUQuota=150%` with a SCRUBBED env —
+only the injected `BARKPARK_*` build vars reach Vite, because its `process.env`
+precedence would let an ambient `BARKPARK_TOKEN` silently shadow the per-site
+token) → **STAGE** (copy ONLY `dist/` — ~16K — into `releases/<build_id>/`;
+`node_modules` stays in the ephemeral sandbox) → **HEALTH** (throwaway static
+server on a loopback ephemeral port over the release dir: assert `200` AND grep
+the `bp-build-id`/`bp-content-rev` `<meta>` markers baked into `index.html` —
+content-truth, not vacuous reachability; fail ⇒ no switch) → **SWITCH** (atomic
+`current` symlink `rename(2)` — via `perl` so it is portable past BSD/GNU `mv`'s
+symlink-to-dir follow; no Caddy reload in the flip) → **RETIRE** (keep newest
+`N=5` release dirs, never `current`/`.previous`). It also arms ONCE a marker-
+guarded (`BARKPARK_SITE_ROUTE:<slug>`) Caddy `handle_path /sites/<slug>/* { root
+* <root>/current; file_server }` into the live FQDN block (mirrors the `/mcp`
+route arming) — never re-flipped per deploy. `--rollback` repoints `current` to
+the previous release in sub-second with NO rebuild (typed `--rollback-preflight`:
+exit 0 prints `TARGET_BUILD=`; refusals 21 `no_previous`, 22 `not_supported`, 23
+lock held). Typed deploy exits: 11 missing input, 12 BUILD, 13 STAGE, 14 HEALTH,
+15 lock wait, 16 SWITCH. Node/npm are already on guerrilla (asdf). Offline gate
+(no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` — 15 checks over
+fixture release dirs proving the symlink flip, forward/back rollback, and
+retire-N.
+
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 
 The control plane's `cloud/docker-compose.yml` also ships a self-hosted mail
