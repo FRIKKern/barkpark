@@ -18,6 +18,12 @@ defmodule Barkpark.Crypto.DataKey do
     field :wrapped_key, :string
     field :kek_version, :integer, default: 1
     field :active, :boolean, default: true
+    # Per-workspace attribution (bpb-shared-slug-dek-export-gap, charter
+    # D42/D43): NULLABLE FK to `workspaces` so a shared-slug DEK travels via the
+    # E1 `workspace_id` export/teardown path. The runtime write-path that STAMPS
+    # this is a separate backlog task (D44/D45); it is NOT in `changeset/2`'s
+    # cast list yet, so today every row is written NULL (the D44 forward-guard).
+    field :workspace_id, :binary_id
 
     timestamps(type: :utc_datetime_usec)
   end

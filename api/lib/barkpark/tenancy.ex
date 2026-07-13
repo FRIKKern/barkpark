@@ -890,15 +890,18 @@ defmodule Barkpark.Tenancy do
 
   Ordered cleanup in a single `Repo.transaction`:
 
-    0. Sweep the 11 E3/allowlist string-keyed tables the keystone exporter
+    0. Sweep the 10 E3/allowlist string-keyed tables the keystone exporter
        copies (charter D4/D5) — the FK-less `(doc_id, dataset)`- and
-       `scope`-keyed tables (`authoring_exemptions`, `data_keys`, …) the SQL
-       cascade never reaches. Runs FIRST because its `(doc_id, dataset)`
+       `scope`-keyed tables (`authoring_exemptions`, `search_surface_config`, …)
+       the SQL cascade never reaches. Runs FIRST because its `(doc_id, dataset)`
        semi-join needs the workspace's own `documents` still present and its
        slug derivation needs its projects/datasets still present. A
        `(doc_id, dataset)` row ALSO owned by a sibling workspace is guarded and
        SURVIVES. Reuses the keystone enumeration + slug derivation, so export
        and teardown share ONE source of truth for a workspace's tables.
+       (`data_keys` is NO LONGER swept here — once workspace-attributed it
+       became an E1 table swept by the step-3 FK cascade, which touches ONLY
+       this workspace's own DEKs; see `bpb-shared-slug-dek-export-gap`.)
     1. For every media_file scoped to the workspace, call
        `Barkpark.Media.delete_file/2` so the disk blob is removed
        (`File.rm`), CDN edge cache is invalidated (`Cdn.invalidate`),
@@ -1009,14 +1012,17 @@ defmodule Barkpark.Tenancy do
     end
   end
 
-  # Sweep the 11 E3/allowlist string-keyed tables the keystone exporter copies
+  # Sweep the 10 E3/allowlist string-keyed tables the keystone exporter copies
   # (charter D4/D5): the 4 E3 doc-keyed (Catalog.e3_doc_keyed/0), the 5 E3
-  # dataset-keyed (Catalog.e3_dataset_keyed/0), and the 2 scope-column allowlist
-  # tables (Catalog.allowlist/0). NONE of them carries `workspace_id` — their
+  # dataset-keyed (Catalog.e3_dataset_keyed/0), and the 1 scope-column allowlist
+  # table (Catalog.allowlist/0). NONE of them carries `workspace_id` — their
   # tenant key is a `(doc_id, dataset)` leaf or a `scope` string — so the SQL
   # CASCADE on `Repo.delete(workspace)` NEVER reaches them; without this explicit
   # step a torn-down workspace silently orphans (e.g.) its authoring_exemptions
-  # ledger and its per-dataset DEKs (`data_keys`).
+  # ledger. (`data_keys` is EXCLUDED from this sweep: once workspace-attributed
+  # it became an E1 table with an `on_delete: :delete_all` FK, so the step-3
+  # cascade sweeps ONLY this workspace's own DEKs and a sibling's shared-slug DEK
+  # survives — bpb-shared-slug-dek-export-gap, charter D42/D43.)
   #
   # POSITION IS LOAD-BEARING — this runs FIRST, before media/documents/audit and
   # before the final cascade: the E3 doc-keyed semi-join needs the workspace's
@@ -1037,7 +1043,7 @@ defmodule Barkpark.Tenancy do
   #     workspace is dropped, so this bare-slug sweep can never cross-tenant
   #     delete a co-tenant's rows under the same slug (charter D21).
   #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix
-  #     (`data_keys` → `"dataset:"`, `search_surface_config` → `""`).
+  #     (`search_surface_config` → `""`).
   defp delete_workspace_string_keyed(ws_id) do
     ws_lit = Catalog.uuid_literal!(ws_id)
     slugs = WorkspaceBundle.dataset_slugs_for(ws_id)

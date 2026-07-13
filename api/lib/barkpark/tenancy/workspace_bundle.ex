@@ -181,17 +181,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   index), NOT globally — every workspace gets a `"production"` dataset, so
   `"production"` collides across tenants. The E3-dataset tables
   (`sync_cursors`, `preview_token_jti`, …) and the `scope`-column allowlist
-  (`data_keys` = `"dataset:" <> slug`, `search_surface_config` = slug) carry
-  ONLY that bare slug/scope — no `project_id` / `dataset_id` / `workspace_id`
-  column — so a row under a SHARED slug is genuinely unattributable to a single
-  workspace. The bare `dataset = ANY(slugs)` / `scope = ANY(...)` predicate that
-  BOTH the exporter (`copy_where/4`) and the teardown sweep
-  (`Tenancy.delete_workspace/1`) run over that slug set therefore MUST NOT match
-  a shared slug, else it becomes a cross-tenant COPY (leak into a
-  single-workspace bundle) or a cross-tenant DELETE (stripping a co-tenant's
-  DEKs / cursors on teardown). Dropping shared slugs here narrows BOTH callers
-  in lockstep — fail-CLOSED: an ambiguous slug's bare-keyed rows are left
-  untouched (an orphan is recoverable; a cross-tenant delete is not).
+  (`search_surface_config` = slug) carry ONLY that bare slug/scope — no
+  `project_id` / `dataset_id` / `workspace_id` column — so a row under a SHARED
+  slug is genuinely unattributable to a single workspace. The bare
+  `dataset = ANY(slugs)` / `scope = ANY(...)` predicate that BOTH the exporter
+  (`copy_where/4`) and the teardown sweep (`Tenancy.delete_workspace/1`) run
+  over that slug set therefore MUST NOT match a shared slug, else it becomes a
+  cross-tenant COPY (leak into a single-workspace bundle) or a cross-tenant
+  DELETE (stripping a co-tenant's cursors / config on teardown). Dropping shared
+  slugs here narrows BOTH callers in lockstep — fail-CLOSED: an ambiguous slug's
+  bare-keyed rows are left untouched (an orphan is recoverable; a cross-tenant
+  delete is not).
+
+  `data_keys` (the per-dataset DEK store) USED to sit in this bare-slug
+  allowlist, which is exactly why a shared-slug DEK was silently dropped from a
+  single-workspace bundle (a D4 exception). It now carries a `workspace_id` FK
+  and rides E1 — copied via `WHERE workspace_id = $ws` and swept via the FK
+  cascade — so a shared-slug DEK travels by attribution, not by slug
+  (`bpb-shared-slug-dek-export-gap`, charter D42/D43).
 
   NEVER `scope_to_workspace_or_global` (which routes nil to a fully-unscoped,
   all-tenant read → a cross-tenant leak). Public so the teardown path derives

@@ -545,9 +545,14 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       # A dataset slug is unique only per (project_id, slug) — so "shared-prod"
       # legitimately names a DISTINCT dataset in EACH workspace (charter D21).
       # The E3-dataset tables (sync_cursors, …) and the scope-column allowlist
-      # (data_keys, search_surface_config) carry ONLY that bare slug/scope with
-      # no project/dataset column, so a bare `dataset = ANY(slugs)` sweep of A
-      # would strip B's rows under the SAME slug too — a cross-tenant delete.
+      # (search_surface_config) carry ONLY that bare slug/scope with no
+      # project/dataset column, so a bare `dataset = ANY(slugs)` sweep of A would
+      # strip B's rows under the SAME slug too — a cross-tenant delete.
+      #
+      # `data_keys` is now workspace-ATTRIBUTED (E1, swept by the teardown FK
+      # cascade — bpb-shared-slug-dek-export-gap), so its non-over-deletion is
+      # proven by cascade scoping (workspace_id = A) rather than slug narrowing:
+      # A's own shared-slug DEK is cascade-swept while B's survives.
       tag = System.unique_integer([:positive])
       shared = "shared-prod-#{tag}"
       excl = "excl-a-#{tag}"
@@ -561,8 +566,12 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       # Rows under the slug A SHARES with B — MUST survive A's teardown.
       insert_sync_cursor!("src-b-#{tag}", shared)
-      insert_data_key!("dataset:#{shared}")
       insert_surface_config!(shared)
+
+      # A's own shared-slug DEK (attributed to A) + B's under the SAME shared
+      # scope (attributed to B, distinct version for the (scope, version) index).
+      insert_data_key!("dataset:#{shared}", ws_a.id, 1)
+      insert_data_key!("dataset:#{shared}", ws_b.id, 2)
 
       assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
 
@@ -577,8 +586,11 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       assert sync_cursor_count("src-b-#{tag}", shared) == 1,
              "a sync cursor under a slug SHARED with workspace B must survive A's teardown"
 
+      # data_keys: A's own DEK is cascade-swept (workspace_id = A) and B's DEK
+      # under the SAME shared scope SURVIVES — the #3036 non-over-deletion
+      # invariant, now enforced by the FK cascade's workspace_id scoping.
       assert data_key_count("dataset:#{shared}") == 1,
-             "a per-dataset DEK under a slug SHARED with B must survive A's teardown"
+             "only sibling workspace B's per-dataset DEK survives A's teardown; A's own is cascade-swept"
 
       assert surface_config_count(shared) == 1,
              "a search surface config under a slug SHARED with B must survive A's teardown"
@@ -645,11 +657,15 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
     ])
   end
 
-  defp insert_data_key!(scope) do
+  # `workspace_id` attributes the DEK (E1 path, swept by the teardown FK
+  # cascade); `version` keeps sibling rows under the SAME shared scope distinct
+  # for the `(scope, version)` unique index (kept — runtime write-path is
+  # separate backlog D44/D45).
+  defp insert_data_key!(scope, workspace_id, version) do
     Repo.query!(
-      "INSERT INTO data_keys (id, scope, wrapped_key, inserted_at, updated_at) " <>
-        "VALUES (gen_random_uuid(), $1, 'ciphertext', now(), now())",
-      [scope]
+      "INSERT INTO data_keys (id, scope, version, wrapped_key, workspace_id, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1, $3, 'ciphertext', $2::text::uuid, now(), now())",
+      [scope, workspace_id, version]
     )
   end
 
