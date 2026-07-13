@@ -373,4 +373,54 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     assert html =~ ~s|<div class="bp-term__foot">#{ex["footer"]}</div>|
     assert html =~ "Inside the frame."
   end
+
+  # ── section (cd-12-section-golden-layout-leg): the grid layout realizes ───────
+  #
+  # A grid `section` composes to a `_raw` HTML node (like columns/terminal — the
+  # SAME `raw_html/1` :article seam, NOT a `Components.section_html` — no such
+  # emitter exists; `Compose.compose_block(section, :article)` owns the grid path).
+  # The projection ECHOES the AUTHORED span/order (D-W3-2); on :article the article
+  # cell wrapper renders them UNCLAMPED, so at span<=tracks (D-W3-3) authored ==
+  # rendered — a `grid-column:span N` / `order:K` per cell that carried it. A drop
+  # of the grid class, a mis-emitted track count, or a dropped span/order style reds
+  # this leg. Child prose realizes in AUTHORED source order (CSS `order:` reorders
+  # the VISUAL flow, not the DOM — so the article HTML stays authored-ordered).
+  test "section: the composer realizes the grid layout (grid class · tracks/gap vars · per-cell span/order · ordered prose)" do
+    fx = decode!(@api_dir, "section")
+    html = raw_html(fx["input"])
+    ex = fx["expected"]
+
+    assert ex["mode"] == "grid", "projection floor: section fixture must be a grid section"
+    assert html =~ ~s|class="bp-section__grid"|, "grid container class not realized"
+
+    # Structural grid vars — the track count + the gap TOKEN var (never a px, D2).
+    assert html =~ ~s|--bp-tracks:#{ex["tracks"]}|, "track count var not realized"
+    assert html =~ ~s|--bp-grid-gap:|, "gap var not realized"
+
+    cells = ex["cells"]
+    assert length(cells) >= 2, "projection floor: fewer than 2 cells — coverage lost"
+
+    # Exactly the projection's cells — no smeared/dropped cell (geometry guard).
+    assert occurrences(html, ~s|class="bp-section__cell"|) == length(cells),
+           "rendered cell count diverged from the projection"
+
+    # Per-cell placement realizes UNCLAMPED on :article (authored == rendered at
+    # span<=tracks). A cell carrying NEITHER key stays a bare wrapper (byte-stable).
+    for cell <- cells do
+      if cell["span"], do: assert(html =~ ~s|grid-column:span #{cell["span"]}|, "span #{cell["span"]}")
+      if cell["order"], do: assert(html =~ ~s|order:#{cell["order"]}|, "order #{cell["order"]}")
+    end
+
+    # Non-vacuous: the fixture MUST exercise both a span cell AND an order cell.
+    assert Enum.any?(cells, & &1["span"]), "fixture lost its span cell"
+    assert Enum.any?(cells, & &1["order"]), "fixture lost its order cell"
+
+    # Ordered child prose — each card's title, in AUTHORED source order (the DOM
+    # order the article grid preserves; a reorder or drop reds the ordered-spine).
+    prose =
+      fx["input"]["blocks"]
+      |> Enum.map(fn b -> b["slots"]["title"] |> List.first() |> Map.get("text") end)
+
+    assert_ordered(html, prose)
+  end
 end

@@ -202,6 +202,18 @@ export interface TerminalProjection {
   footer: string;
   children: string[];
 }
+/** A grid section's AUTHORED-ECHO layout projection (cd-12): the grid mode, the
+ * resolved track count + gap TOKEN, and one cell per child echoing its AUTHORED
+ * span/order (NOT the rendered/clamped value — D-W3-2) + child type. `breakpoints`
+ * are EXCLUDED (surface-local adaptive collapse). Byte-mirrors the Elixir
+ * `section_projection/1` golden; span/order absent → `null`. */
+export interface SectionProjection {
+  container_role: "section";
+  mode: string;
+  tracks: number;
+  gap: string;
+  cells: Array<{ span: number | null; order: number | null; type: string }>;
+}
 
 /* ── projectors ─────────────────────────────────────────────────────────────── */
 
@@ -404,5 +416,80 @@ export function terminalProjection(block: Block): TerminalProjection {
     live,
     footer: str(block.footer),
     children: childTypes(children),
+  };
+}
+
+/* ── section layout coercions (mirror compose.ex — grid_layout/1, grid_tracks/1,
+ * span_int/1, order_int/1 + the gap_token_var/1 vocabulary) ─────────────────── */
+
+/** The layout iff its `mode` is exactly "grid", else null (mirrors
+ * `Compose.grid_layout/1`). Fail-soft on a non-object layout. */
+function gridLayout(block: Block): Record<string, unknown> | null {
+  const layout = block.layout;
+  if (!layout || typeof layout !== "object") return null;
+  const l = layout as Record<string, unknown>;
+  return l.mode === "grid" ? l : null;
+}
+
+/** tracks → a positive int (mirrors `Compose.grid_tracks/1`): int or WHOLE-string
+ * int, anything else → 2 (the CSS `repeat(var(--bp-tracks,2),…)` default). */
+function gridTracks(v: unknown): number {
+  if (typeof v === "number") return Number.isInteger(v) && v > 0 ? v : 2;
+  if (typeof v === "string") {
+    const m = /^(\d+)$/.exec(v);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n > 0) return n;
+    }
+  }
+  return 2;
+}
+
+/** span → a positive int (mirrors `Compose.span_int/1`): int or WHOLE-string int,
+ * 0/neg/non-int → null (JSON null). */
+function spanInt(v: unknown): number | null {
+  if (typeof v === "number") return Number.isInteger(v) && v > 0 ? v : null;
+  if (typeof v === "string") {
+    const m = /^(-?\d+)$/.exec(v);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      return n > 0 ? n : null;
+    }
+  }
+  return null;
+}
+
+/** order → ANY int (0/negative legal; mirrors `Compose.order_int/1`): int or
+ * WHOLE-string int, else null (JSON null). */
+function orderInt(v: unknown): number | null {
+  if (typeof v === "number") return Number.isInteger(v) ? v : null;
+  if (typeof v === "string") {
+    const m = /^(-?\d+)$/.exec(v);
+    if (m) return parseInt(m[1], 10);
+  }
+  return null;
+}
+
+/** gap TOKEN name (none|sm|md|lg; absent/unknown → md) — the token half of the
+ * emitter's `Compose.gap_token_var/1` (never a px literal — D2). */
+const GAP_TOKENS = new Set(["none", "sm", "md", "lg"]);
+function gapToken(v: unknown): string {
+  const t = str(v);
+  return GAP_TOKENS.has(t) ? t : "md";
+}
+
+export function sectionProjection(block: Block): SectionProjection {
+  const layout = gridLayout(block) ?? {};
+  const blocks = Array.isArray(block.blocks) ? (block.blocks as Block[]) : [];
+  return {
+    container_role: "section",
+    mode: str(layout.mode),
+    tracks: gridTracks(layout.tracks),
+    gap: gapToken(layout.gap),
+    cells: blocks.map((child) => ({
+      span: spanInt(child.span),
+      order: orderInt(child.order),
+      type: str(child.type),
+    })),
   };
 }

@@ -307,6 +307,33 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     ]
   }
 
+  # section: a grid-section-of-cards — the composition-doctrine ladder's Section
+  # tier over a structured grid layout (D1 Elements-only-slots does NOT apply; a
+  # section holds Widget/Element children, here `card` widgets). The layout is
+  # `{mode:grid, tracks:2, gap:md}`; the three card children exercise the per-cell
+  # placement contract: cell 0 plain, cell 1 `span:2` (== tracks, the D-W3-3 floor:
+  # ALL spans <= tracks), cell 2 `order:-1` (a CSS-order hoist). Each card carries a
+  # distinct title so the ordered-prose realization legs are non-vacuous. The
+  # projection ECHOES the AUTHORED span/order (not the RENDERED, clamped value —
+  # D-W3-2) so the surfaces can each realize placement in their native idiom.
+  @section_input %{
+    "type" => "section",
+    "layout" => %{"mode" => "grid", "tracks" => 2, "gap" => "md"},
+    "blocks" => [
+      %{"type" => "card", "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}},
+      %{
+        "type" => "card",
+        "span" => 2,
+        "slots" => %{"title" => [%{"type" => "heading", "text" => "Beta cell"}]}
+      },
+      %{
+        "type" => "card",
+        "order" => -1,
+        "slots" => %{"title" => [%{"type" => "heading", "text" => "Gamma cell"}]}
+      }
+    ]
+  }
+
   # The board's column ROLES, in white-ladder order — mirrors the PRIVATE column
   # list in `Components.task_board_html/1`. Labels are DERIVED (canonical manifest
   # label, sentence-cased), never a second hardcoded copy — the fold. The freshness
@@ -340,7 +367,8 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       "task-detail",
       "roadmap",
       "columns",
-      "terminal"
+      "terminal",
+      "section"
     ]
 
   @impl Mix.Task
@@ -425,6 +453,10 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
 
   def build("terminal") do
     fixture("terminal", @terminal_input, terminal_projection(@terminal_input))
+  end
+
+  def build("section") do
+    fixture("section", @section_input, section_projection(@section_input))
   end
 
   defp fixture(type, input, expected) do
@@ -698,6 +730,91 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     do: Enum.map(list, fn c -> c |> Map.get("type") |> to_string() end)
 
   defp child_types(_), do: []
+
+  # section (grid): the AUTHORED-ECHO layout projection — the container role, the
+  # grid mode, the resolved track count + gap TOKEN, and one cell per child echoing
+  # its AUTHORED span/order (NOT the rendered/clamped value — D-W3-2) + child type.
+  # Every scalar is read through the SAME coercions the emitter uses (mirrors the
+  # PRIVATE `Compose.grid_layout/1`, `grid_tracks/1`, `span_int/1`, `order_int/1` +
+  # the `gap_token_var/1` vocabulary), so a coercion drift in the render seam reds
+  # the realization legs, not this pure projection. `breakpoints` are EXCLUDED — a
+  # section's adaptive collapse is surface-local (the Go TUI's width floor), not a
+  # shared structural fact. span/order absent → null (JSON), the present-only
+  # contract the `.bp-section__cell` wrapper honors byte-for-byte.
+  defp section_projection(block) do
+    layout = grid_layout(block) || %{}
+
+    %{
+      "container_role" => "section",
+      "mode" => layout |> Map.get("mode") |> to_string(),
+      "tracks" => grid_tracks(Map.get(layout, "tracks")),
+      "gap" => gap_token(Map.get(layout, "gap")),
+      "cells" => section_cells(block)
+    }
+  end
+
+  defp section_cells(block) do
+    block
+    |> Map.get("blocks", [])
+    |> List.wrap()
+    |> Enum.map(fn child ->
+      %{
+        "span" => span_int(Map.get(child, "span")),
+        "order" => order_int(Map.get(child, "order")),
+        "type" => child |> Map.get("type") |> to_string()
+      }
+    end)
+  end
+
+  # The ONE grid predicate (mirrors `Compose.grid_layout/1`): the layout iff its
+  # mode is exactly "grid", else nil → the stack path (no grid projection).
+  defp grid_layout(%{"layout" => %{"mode" => "grid"} = layout}), do: layout
+  defp grid_layout(_), do: nil
+
+  # tracks → a positive int column count (mirrors `Compose.grid_tracks/1`): int or
+  # stringy-int, anything else → 2 (the CSS `repeat(var(--bp-tracks,2),…)` default).
+  defp grid_tracks(n) when is_integer(n) and n > 0, do: n
+
+  defp grid_tracks(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} when i > 0 -> i
+      _ -> 2
+    end
+  end
+
+  defp grid_tracks(_), do: 2
+
+  # span → a positive int (mirrors `Compose.span_int/1`): the WHOLE string must
+  # parse (a trailing `;background:url(x)` fails), 0/neg/non-int → nil (JSON null).
+  defp span_int(n) when is_integer(n) and n > 0, do: n
+
+  defp span_int(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} when i > 0 -> i
+      _ -> nil
+    end
+  end
+
+  defp span_int(_), do: nil
+
+  # order → ANY int (0/negative are legal CSS `order`; mirrors `Compose.order_int/1`):
+  # int or whole-string int, else nil (JSON null).
+  defp order_int(n) when is_integer(n), do: n
+
+  defp order_int(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} -> i
+      _ -> nil
+    end
+  end
+
+  defp order_int(_), do: nil
+
+  # gap TOKEN name (none|sm|md|lg; absent/unknown → md) — the token half of the
+  # emitter's `Compose.gap_token_var/1` (which maps the SAME vocabulary to a CSS
+  # `--bp-space-*` var). The projection carries the token, never a px literal (D2).
+  defp gap_token(g) when g in ~w(none sm md lg), do: g
+  defp gap_token(_), do: "md"
 
   defp as_list(l) when is_list(l), do: l
   defp as_list(_), do: []

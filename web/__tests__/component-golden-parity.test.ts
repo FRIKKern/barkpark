@@ -184,6 +184,7 @@ import {
   roadmapProjection,
   columnsProjection,
   terminalProjection,
+  sectionProjection,
   type LegendProjection,
   type NotesProjection,
   type NoteProjection,
@@ -222,6 +223,11 @@ const S2_CASES: Array<{
   // recursive containers last — their projection expresses child NESTING.
   { type: "columns", project: columnsProjection },
   { type: "terminal", project: terminalProjection },
+  // section (cd-12): the projector leg C1 ONLY — the deepEqual proof that the web
+  // projector realizes the golden layout projection (mode · tracks · gap ·
+  // authored-echo cells). The web RENDER leg (portable-doc.tsx renders the grid) is
+  // cd-12b — filed, not built here; NO section render-assert is added below.
+  { type: "section", project: sectionProjection },
 ];
 
 for (const { type, project } of S2_CASES) {

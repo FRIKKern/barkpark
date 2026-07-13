@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -531,4 +532,107 @@ func TestTerminalGoldenParity(t *testing.T) {
 	}
 	// The nested child block renders inside the frame.
 	mustContain(t, out, "Inside the frame.", "terminal child")
+}
+
+// TestSectionGoldenParity proves the TUI grid-section renderer (sectionRenderer.
+// gridBody) realizes the projection's SHARED facts at the strictness the terminal
+// can hold: every cell's child prose survives to the render, AND the cells render
+// in CSS-`order` sequence (a stable sort — the reader emits `order:`, so a terminal
+// reorder is parity-correct). The AUTHORED `span` integer is NOT asserted here — the
+// TUI CLAMPS span to the track budget and expresses width as geometry, not text (a
+// carve-out analogous to the roadmap lane-bar / card-tone COLOUR carve-outs above:
+// the Elixir/web legs own the unclamped span assertion). A drop of the order-honoring
+// reorder reds this leg (the fixture's order:-1 cell hoists to the front).
+func TestSectionGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "section")
+	var proj struct {
+		ContainerRole string `json:"container_role"`
+		Mode          string `json:"mode"`
+		Tracks        int    `json:"tracks"`
+		Gap           string `json:"gap"`
+		Cells         []struct {
+			Span  *int   `json:"span"`
+			Order *int   `json:"order"`
+			Type  string `json:"type"`
+		} `json:"cells"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	if proj.ContainerRole != "section" {
+		t.Fatalf("container_role = %q, want section", proj.ContainerRole)
+	}
+	if proj.Mode != "grid" {
+		t.Fatalf("mode = %q, want grid", proj.Mode)
+	}
+	if proj.Tracks < 2 {
+		t.Fatalf("projection floor: tracks=%d, want >= 2 (a grid needs multiple tracks)", proj.Tracks)
+	}
+	if len(proj.Cells) < 2 {
+		t.Fatalf("projection floor: %d cells, want >= 2", len(proj.Cells))
+	}
+
+	// Each cell's authored child prose (the card's title), aligned by index with the
+	// projection cells (cell[i] ↔ input.blocks[i]) — read from the input, never hand-typed.
+	var in struct {
+		Blocks []struct {
+			Slots struct {
+				Title []struct {
+					Text string `json:"text"`
+				} `json:"title"`
+			} `json:"slots"`
+		} `json:"blocks"`
+	}
+	if err := json.Unmarshal(fx.Input, &in); err != nil {
+		t.Fatalf("decode section input: %v", err)
+	}
+	if len(in.Blocks) != len(proj.Cells) {
+		t.Fatalf("fixture inconsistent: %d input blocks but %d projection cells", len(in.Blocks), len(proj.Cells))
+	}
+
+	out := renderComponent(t, fx.Input)
+
+	// Child prose: every cell's title survives the grid recursion.
+	type cell struct {
+		prose string
+		order int
+	}
+	cells := make([]cell, len(proj.Cells))
+	sawOrderHoist := false
+	for i, c := range proj.Cells {
+		if len(in.Blocks[i].Slots.Title) == 0 {
+			t.Fatalf("fixture floor: block %d carries no title prose", i)
+		}
+		prose := in.Blocks[i].Slots.Title[0].Text
+		mustContain(t, out, prose, "section cell prose")
+		ord := 0
+		if c.Order != nil {
+			ord = *c.Order
+			sawOrderHoist = true
+		}
+		cells[i] = cell{prose: prose, order: ord}
+	}
+	// Non-vacuous: the fixture MUST carry an explicit `order` cell to prove the reorder.
+	if !sawOrderHoist {
+		t.Fatalf("fixture lost its order cell — the CSS-order reorder assertion would be vacuous")
+	}
+
+	// ORDERING: the cells render in CSS-`order` sequence (stable — mirrors the
+	// gridBody `sort.SliceStable(cellOrder)`). Build the expected rendered order and
+	// assert each prose appears at a strictly increasing offset. A reader that
+	// IGNORED order would render authored order and red here (the order:-1 cell moves).
+	expected := make([]cell, len(cells))
+	copy(expected, cells)
+	sort.SliceStable(expected, func(i, j int) bool { return expected[i].order < expected[j].order })
+
+	prev := -1
+	for _, c := range expected {
+		idx := strings.Index(out, c.prose)
+		if idx < 0 {
+			t.Errorf("section cell prose %q missing from render:\n%s", c.prose, out)
+			continue
+		}
+		if idx <= prev {
+			t.Errorf("section cell %q rendered out of CSS-order sequence (idx %d <= %d):\n%s", c.prose, idx, prev, out)
+		}
+		prev = idx
+	}
 }
