@@ -1,0 +1,338 @@
+package chat
+
+import (
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// model.go — the Bubble Tea SHELL. It is deliberately thin: all conversation
+// truth lives in the pure reducer (reduce.go), and this file only translates
+// tea.Msg → Event, runs Reduce, and executes the returned Effects as commands.
+// The shell owns exactly the UI concerns the reducer must NOT know about: which
+// screen is showing, the composer text, the scroll viewport, and the sessions
+// picker. Every seam that touches the network (Transport) or the clock (now) is
+// injected, so the whole shell drives deterministically under test against a
+// fake Transport and a fixed clock — no terminal, no server (charter's test
+// seam discipline, mirrored from taskboard).
+
+// tickCadence is the heartbeat: a 100ms tick drives the interrupt wedge timer
+// and repaints the streaming tail (charter: 100ms tick). Unlike the taskboard's
+// aliveness budget, chat ticks steadily while open — a live stream is inherently
+// animated, and the wedge timer needs a reliable clock.
+const tickCadence = 100 * time.Millisecond
+
+// screen is which surface is foregrounded.
+type screen int
+
+const (
+	screenPicker screen = iota // launch: list / resume / new (charter: sessions picker)
+	screenChat                 // an open conversation
+)
+
+// Model is the shell. State is the reduced conversation truth; everything else
+// is UI the reducer is intentionally blind to.
+type Model struct {
+	tr     Transport
+	stream *streamer
+	cfg    Config
+
+	width, height int
+	screen        screen
+
+	// picker
+	sessions   []SessionSummary
+	pickCursor int
+	pickErr    string
+	loading    bool
+
+	// conversation
+	st     State  // the pure reducer's state
+	input  string // the composer draft (charter D14 continuity — PATCHed on quit/switch)
+	scroll int    // -1 = follow mode (bottom); >=0 = pinned top line
+
+	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
+	mode         string
+	modelChoice  string
+	effortChoice string
+
+	// now is the injected clock (tests fix it; Run wires time.Now).
+	now func() time.Time
+}
+
+// newModel builds a shell wired to a Transport and streamer. Screen starts on
+// the picker — launch always lists sessions first (charter).
+func newModel(tr Transport, stream *streamer, cfg Config) Model {
+	return Model{
+		tr:      tr,
+		stream:  stream,
+		cfg:     cfg,
+		screen:  screenPicker,
+		scroll:  -1,
+		loading: true,
+		now:     time.Now,
+	}
+}
+
+// ── tea.Model ────────────────────────────────────────────────────────────────
+
+// Init fires the sessions load and starts the tick chain. It never blocks: a
+// dead server just lands an error state on the picker, never a frozen prompt.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(m.loadSessionsCmd(), m.tickCmd())
+}
+
+// Update is the one message entry point.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
+	case tickMsg:
+		if m.screen == screenChat {
+			var cmd tea.Cmd
+			m, cmd = m.apply(TickEvent{})
+			return m, tea.Batch(cmd, m.tickCmd())
+		}
+		return m, m.tickCmd()
+	case sessionsLoadedMsg:
+		m.loading = false
+		if msg.err != nil {
+			m.pickErr = msg.err.Error()
+			return m, nil
+		}
+		m.pickErr = ""
+		m.sessions = msg.sessions
+		if m.pickCursor > len(m.sessions) {
+			m.pickCursor = len(m.sessions)
+		}
+		return m, nil
+	case sessionOpenedMsg:
+		if msg.err != nil {
+			m.pickErr = msg.err.Error()
+			m.screen = screenPicker
+			return m, nil
+		}
+		m = m.openSession(msg.session)
+		// Subscribe the live stream to this session from the hydrated cursor
+		// (charter D5: resume by turn boundary). The stream restarts cleanly if
+		// one was already running for another session.
+		m.stream.start(m.st.SessionID, m.st.LastSeq)
+		return m, nil
+	case streamFrameMsg:
+		return m.apply(FrameEvent{Name: msg.name, Data: msg.data})
+	case streamErrMsg:
+		// A stream failure degrades locally to a footer notice — never an error
+		// screen (the transport already retries; this is the terminal give-up).
+		if m.screen == screenChat {
+			m.st.Notice = "live stream lost — " + msg.err.Error()
+		}
+		return m, nil
+	case tailFetchedMsg:
+		return m.apply(TailFetchedEvent{Session: msg.session, Err: msg.err})
+	case sendDoneMsg:
+		if msg.err != nil {
+			m.st.Notice = "send failed — " + msg.err.Error()
+		}
+		return m, nil
+	case interruptDoneMsg:
+		// The control ack is semantically EMPTY (charter D11) — truth is the
+		// result frame. A transport-level error still surfaces honestly.
+		if msg.err != nil {
+			m.st.Notice = "interrupt request failed — " + msg.err.Error()
+		}
+		return m, nil
+	case patchedMsg:
+		return m, nil
+	}
+	return m, nil
+}
+
+// View paints the foregrounded screen.
+func (m Model) View() string {
+	if m.screen == screenPicker {
+		return m.renderPicker()
+	}
+	return m.renderChat()
+}
+
+// ── the reducer bridge ───────────────────────────────────────────────────────
+
+// apply runs the pure reducer for one Event and turns every returned Effect into
+// a command. This is the ONLY place chat state advances — the shell never
+// mutates State by hand, so the acceptance-criteria invariants proven against
+// Reduce hold at runtime verbatim.
+func (m Model) apply(ev Event) (Model, tea.Cmd) {
+	st, effects := Reduce(m.st, ev, m.now())
+	m.st = st
+	// Any new content while following keeps us pinned to the bottom; a manual
+	// scroll (scroll>=0) is respected until the user presses End.
+	var cmds []tea.Cmd
+	for _, e := range effects {
+		if c := m.execEffect(e); c != nil {
+			cmds = append(cmds, c)
+		}
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// execEffect maps a reducer Effect to the Transport call that satisfies it,
+// delivered back as a tea.Msg. IO lives here, never in Reduce.
+func (m Model) execEffect(e Effect) tea.Cmd {
+	id := m.st.SessionID
+	tr := m.tr
+	switch e := e.(type) {
+	case FetchTailEffect:
+		since := e.SinceSeq
+		return func() tea.Msg {
+			s, err := tr.GetSession(id, since)
+			return tailFetchedMsg{session: s, err: err}
+		}
+	case SendEffect:
+		content := e.Content
+		return func() tea.Msg { return sendDoneMsg{err: tr.SendMessage(id, content)} }
+	case InterruptEffect:
+		return func() tea.Msg { return interruptDoneMsg{err: tr.Interrupt(id)} }
+	}
+	return nil
+}
+
+// ── session lifecycle ────────────────────────────────────────────────────────
+
+// openSession hydrates the shell from a FULL session GET (charter D14/D15): the
+// message tail, the seq cursor, the title, the writable continuity set, and the
+// draft restored into the composer. Screen flips to the conversation and the
+// viewport re-follows.
+func (m Model) openSession(s Session) Model {
+	last := 0
+	for _, mm := range s.Messages {
+		if mm.Seq > last {
+			last = mm.Seq
+		}
+	}
+	m.st = State{
+		SessionID: s.ID,
+		Title:     s.Title,
+		Messages:  s.Messages,
+		LastSeq:   last,
+	}
+	m.input = s.Draft
+	m.mode, m.modelChoice, m.effortChoice = s.Mode, s.ModelChoice, s.EffortChoice
+	m.screen = screenChat
+	m.scroll = -1
+	m.pickErr = ""
+	return m
+}
+
+// leaveSession PATCHes the writable continuity set (draft/mode/model/effort)
+// back to the server (charter D14) and returns to the picker, stopping the live
+// stream. It returns the command that persists the draft so a quit/switch never
+// loses in-flight composer text.
+func (m Model) leaveSession() (Model, tea.Cmd) {
+	patch := m.patchContinuityCmd()
+	m.stream.stop()
+	m.screen = screenPicker
+	m.loading = true
+	m.input = ""
+	m.st = State{}
+	return m, tea.Batch(patch, m.loadSessionsCmd())
+}
+
+// patchContinuityCmd persists the writable continuity set. Nil when there is no
+// open session (nothing to persist). It is fire-and-forget — a failed PATCH is
+// not worth blocking a quit over (the next resume re-GETs truth anyway).
+func (m Model) patchContinuityCmd() tea.Cmd {
+	if m.st.SessionID == "" {
+		return nil
+	}
+	tr := m.tr
+	id := m.st.SessionID
+	fields := map[string]any{"draft": m.input}
+	if m.mode != "" {
+		fields["mode"] = m.mode
+	}
+	if m.modelChoice != "" {
+		fields["model_choice"] = m.modelChoice
+	}
+	if m.effortChoice != "" {
+		fields["effort_choice"] = m.effortChoice
+	}
+	return func() tea.Msg { _ = tr.PatchSession(id, fields); return patchedMsg{} }
+}
+
+// ── commands + messages ──────────────────────────────────────────────────────
+
+// tickMsg is one 100ms heartbeat.
+type tickMsg struct{}
+
+// tickCmd schedules the next heartbeat.
+func (m Model) tickCmd() tea.Cmd {
+	return tea.Tick(tickCadence, func(time.Time) tea.Msg { return tickMsg{} })
+}
+
+// sessionsLoadedMsg carries the picker list (or its load error).
+type sessionsLoadedMsg struct {
+	sessions []SessionSummary
+	err      error
+}
+
+// sessionOpenedMsg carries a full session (from create or resume GET).
+type sessionOpenedMsg struct {
+	session Session
+	err     error
+}
+
+// tailFetchedMsg carries the turn-boundary GET (?since=) result.
+type tailFetchedMsg struct {
+	session Session
+	err     error
+}
+
+// streamFrameMsg is one SSE frame pushed from the stream goroutine.
+type streamFrameMsg struct {
+	name string
+	data []byte
+}
+
+// streamErrMsg is the stream goroutine's terminal give-up.
+type streamErrMsg struct{ err error }
+
+// sendDoneMsg / interruptDoneMsg / patchedMsg are verb-call completions (their
+// only job is to surface a transport error honestly; the truth is elsewhere).
+type (
+	sendDoneMsg      struct{ err error }
+	interruptDoneMsg struct{ err error }
+	patchedMsg       struct{}
+)
+
+// loadSessionsCmd fetches the sidebar list off the update loop.
+func (m Model) loadSessionsCmd() tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		ss, err := tr.ListSessions()
+		return sessionsLoadedMsg{sessions: ss, err: err}
+	}
+}
+
+// createSessionCmd creates a new session and opens it.
+func (m Model) createSessionCmd() tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		s, err := tr.CreateSession()
+		return sessionOpenedMsg{session: s, err: err}
+	}
+}
+
+// resumeSessionCmd re-GETs the FULL session (charter D14: the summary omits
+// draft/model/effort, so resume MUST re-GET) and opens it.
+func (m Model) resumeSessionCmd(id string) tea.Cmd {
+	tr := m.tr
+	return func() tea.Msg {
+		s, err := tr.GetSession(id, 0)
+		return sessionOpenedMsg{session: s, err: err}
+	}
+}

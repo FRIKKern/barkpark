@@ -143,6 +143,12 @@ func Execute(args []string) int {
 		// because it is a full-screen interactive TUI, not a manifest JSON verb.
 		// Distinct from the singular `bp task …` manifest noun (help cross-refs both).
 		return runTasksBoard(out, g, ctx, rest[1:])
+	case "chat":
+		// `bp chat` — the native terminal chat client (internal/chat), the second
+		// surface of One Chat, Two Surfaces. A built-in because it is a full-screen
+		// interactive Bubble Tea program with its own SSE stream, not a manifest
+		// JSON verb.
+		return runChat(out, g, ctx, rest[1:])
 	case "task":
 		// `bp task tui` is the discoverable singular-noun spelling of the same
 		// full-screen reader as `bp tasks`. Keep one implementation and one
