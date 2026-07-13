@@ -90,6 +90,7 @@ defmodule Barkpark.Content.Errors do
   @public_inline_codes MapSet.new([
                          # Papers ingest / block-ops / proposals — bulldocs_ingest_controller.ex
                          "invalid_paper",
+                         "invalid_text",
                          "malformed_op",
                          "invalid_op",
                          "malformed_proposal",

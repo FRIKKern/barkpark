@@ -123,6 +123,7 @@
                   "invalid_paper",
                   "invalid_proposal",
                   "invalid_request_id",
+                  "invalid_text",
                   "label_spine",
                   "malformed",
                   "malformed_op",
@@ -6777,6 +6778,75 @@
           }
         ],
         "summary": "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/tasks/{doc_id}/release": {
+      "post": {
+        "operationId": "task.release",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: worker_id, observed_epoch.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Release a held task claim without waiting for its lease to expire.",
         "tags": [
           "task"
         ],
