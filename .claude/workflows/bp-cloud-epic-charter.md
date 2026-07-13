@@ -130,6 +130,100 @@ Verify-and-close (no build): `task-2c74954d53781113` (ready_query) — fixed by 
 Backlog seeded this wave (future): phantom-media atomicity (D7), LiveView telemetry consumer (D8),
 Part XI corpus gap (D9), ledger-hygiene re-stamp (D10).
 
+## Wave 5 Decisions (2026-07-13) — SHIP THE FILED BACKLOG
+
+Wave Paper for this wave: **`felix-pristine-wave-5-2026-07-13`** (guerrilla, style=article).
+Wave 4 shipped and MERGED on origin/main: Magick bound (#2868/4ce8c471), bokbasen mount-gate
+(#2869/0641b1d3), sobelow durable inline skip (#2870/821fcada). D6's `task-f0bdb914d63a2e84`
+is CLOSED (criteria 4/4 met) — roadmap item 4 above is done.
+
+- **D13 — Wave 5 is SHIP-THE-BACKLOG, not re-audit.** Build the 5 filed backlog tasks + 1
+  optional as opus slices, each its own worktree/PR with a fail-before protective test and a green
+  `CC=/usr/bin/clang mix test`. The 12 domains stay closed; no fresh scouts.
+- **D14 — async flip (`task-5a5e2c939a33a621`): the monolithic 230-file flip is EMPIRICALLY
+  UNSAFE — re-scope to graduated tranches.** Why: V5 flipped the prior stalled worker's 230-file
+  "SAFE" list and got NON-DETERMINISTIC breakage — two runs at the SAME seed gave 38 then 27
+  DIFFERENT failures vs 0 failures / 154.5s serial baseline. Root cause is a NEW hazard class no
+  grep heuristic caught: `on_exit` callbacks calling Repo helpers directly (sandbox-ownership
+  violation via `ExUnit.OnExitHandler`) in `v1_media_search_suggestions_test.exs` /
+  `v1_media_collections_test.exs`, plus `codelist_issue_version_test.exs` (self-documented racy).
+  Even minus those 3, 227 files still gave 31 failures. DECISION: re-derive the candidate set off
+  origin/main, flip in graduated tranches, run each twice with different seeds, keep ONLY what is
+  green across both. A smaller proven-safe subset committed is an HONEST outcome. Re-parented from
+  the d11 audit to the epic for wave coherence.
+- **D15 — vix ceiling (`task-vix-bomb-explicit-ceiling`): SHIP (was a D2 "confirm/park" note).**
+  Why: V6 proved it viable against the real NIF — libvips does NOT reject an inflated header;
+  `Image.open` reports declared w/h LAZILY before any decode (50000² PNG opens ~1ms/0.2MB warm),
+  and `Image.thumbnail` is ALSO lazy so the guard cannot lean on it failing. Fix = explicit
+  pre-decode guard between `Image.open` (vix.ex:19) and `Image.thumbnail` (:20), reject when
+  `width*height*bands` exceeds a config ceiling mirroring Magick's 256MiB, return
+  `{:error, :vix_dimensions_exceeded}` (flows untouched through `Renditions.generate/6`). Fixture =
+  checked-in ~68-byte PNG bomb. MECHANISM DIFFERS from the Magick twin (in-process header guard vs
+  CLI `-limit`; libvips has no per-call limit) — call that out in the PR.
+- **D16 — LiveView telemetry (`task-felix-liveview-telemetry-consumer`): SHIP (was D8 backlog).**
+  Why: V7 proved the contract. Exactly 4 event families
+  (`live_view mount|handle_params|handle_event` + `live_component handle_event`); `tag_values` is a
+  1-arity metadata→map fn read via `Map.take` against declared `:tags` (a missing key SILENTLY
+  DROPS the sample). ASYMMETRY: the 3 live_view metrics extract `socket.view` from the raw
+  `%Socket{}`; the live_component metric tags off `metadata.component` (top-level) — do NOT reuse
+  one generic fn. Template = `write_hotpath_telemetry_test.exs`; harness = `board_live_test.exs`.
+- **D17 — Part XI (`task-felix-part-xi-corpus-gap`): SHIP as a bounded verdict-table Paper (was D9
+  future-audit backlog).** Why: survey established the verdicts by grep — GraphQL not-applicable
+  (no Absinthe), Mailers already-good (Swoosh env-gated), i18n decorative/not-applicable (0 real
+  gettext call sites), Assets applies-differently (3 JS bundlers), File-storage applies
+  (phantom-media parked), Interop live (produced Magick+vix). Deliverable is a per-concept verdict
+  table published as a Paper — a distillation, NOT new digging; file gap tasks only if a real gap
+  lands (expected: none).
+- **D18 — Ledger re-stamp (`task-felix-ledger-restamp`): SHIP (was D10 backlog). Scope is the
+  authoritative 24-target table (V1), NOT "~20".** Restamp via `/v1/data/mutate` patch+publish in
+  one batch (V3-proven: patch writes `drafts.<id>`, the publish op promotes it; GET full array,
+  flip only provable entries, PATCH whole array back, `ifRevisionID` from the doc endpoint).
+  NEVER FABRICATE: `task-d328fb91ff55b743` (OTP) IS genuinely fixed by `fc9665e4/#2403` — RESTAMP
+  not reopen (V1/V2 REFUTED the digest's "no landing commit" landmine); `task-a9adc82f820db065`
+  shares #2390 with `task-9e21c3f285b3d7d0` — partial-stamp, its N=2000 wall-time criterion stays
+  met:false with a duplicate-of note; `task-f0bdb914d63a2e84` is NOT a 25th target (already 4/4 met
+  — V1 REFUTED the "wave-4 residue" claim). `task-6e819f39fe3aa9e6` does NOT block (done tasks have
+  no live claim; mutate is self-serve).
+- **D19 — Bokbasen pagination (`task-5dbbbe2efc44e48e`): SHIP in-wave as the 6th opus slice.**
+  Why: the #2869 heap bound (`@page_limit=200`) made rows beyond the cap unreachable — a UX gap, no
+  urgency risk, clean single-file. Design PINNED: offset-based pagination (`@page` +
+  `next_page/prev_page` → `load_submissions/1` offset variant, page size = @page_limit) with a
+  PubSub re-subscribe guard on page change; preserve the connected? gate + per-page heap bound.
+- **D20 — Phantom-media atomicity (`task-felix-phantom-media-atomicity`) STAYS backlog.** Why: the
+  after-commit-side-effects redesign is Fable-class judgment and Fable is exhausted — do NOT cut it
+  into under-specified opus slices. Already filed/parked.
+- **D21 — New backlog seeded this wave:** `task-felix-roothtml-durable-sobelow-skip` (root.html.heex
+  XSS.Raw still fingerprint-only, drifted twice — durable inline skip owed) and
+  `task-felix-interop-resource-bound-sweep` (the remaining System.cmd/Port sites — self_update,
+  xmllint, studio_chat titles/probe — same scar-class as Magick/vix, out of this wave's scope).
+- **D22 — Stale contradiction items retired.** The digest's two fabrication landmines (OTP
+  "no landing commit"; `task-f0bdb914d63a2e84` "ledger-open 25th target") were BOTH refuted by
+  V1/V2 — do NOT pass them to the restamp builder as open risks. D11 (all builders opus) and D12
+  (gate in isolated worktree, `CC=/usr/bin/clang`, borrow-warm-`_build`) hold unchanged.
+
+### Wave 5 roadmap (6 opus slices, integration-ordered)
+
+1. **[P2] vix pixel/memory ceiling** — `task-vix-bomb-explicit-ceiling` — opus. Files: `vix.ex` +
+   `vix_test.exs`. Gate: `CC=/usr/bin/clang mix test test/barkpark/media/image_backend/vix_test.exs`.
+2. **[P2] LiveView telemetry consumer** — `task-felix-liveview-telemetry-consumer` — opus. Files:
+   `telemetry.ex` + new `liveview_telemetry_test.exs`. Gate: `CC=/usr/bin/clang mix test <new test>`.
+3. **[P2] BokbasenLive pagination** — `task-5dbbbe2efc44e48e` — opus. Files: `bokbasen_live.ex` +
+   `bokbasen_live_test.exs`. Gate: `CC=/usr/bin/clang mix test .../bokbasen_live_test.exs`.
+4. **[P3] Part XI verdict table** — `task-felix-part-xi-corpus-gap` — opus. Deliverable: a Barkpark
+   Paper (no repo files). Gate: verdict-table Paper published + linked; any gap filed as a child.
+5. **[P1] Ledger re-stamp (24 targets)** — `task-felix-ledger-restamp` — opus. No repo files
+   (ledger writes). Gate: `bp task get` on a sample shows criteria_progress reflecting the restamp.
+6. **[P1] async flip — validated subset + wall-clock** — `task-5a5e2c939a33a621` — opus. Files:
+   `api/test/` (broad; excludes every keep-serial + sibling-edited file). Merges LAST (rebases on
+   top; re-derives its subset against the then-current origin/main). Gate: two seed-varied green
+   `CC=/usr/bin/clang mix test` runs + before/after wall-clock.
+
 ## Wave log
 
-<!-- append one entry per wave: date, decisions ratified, slices shipped, grade -->
+- **Wave 5 — 2026-07-13 — DECIDED (building).** Ratified D13–D22. Six opus slices filed/perfected
+  under `task-96a908af98698118`, all linked to `felix-pristine-wave-5-2026-07-13`: vix ceiling,
+  LV telemetry, bokbasen pagination, Part XI verdict table, ledger re-stamp (24 targets), async
+  flip (graduated-tranche re-scope). Backlog seeded: root.html.heex durable skip, interop
+  resource-bound sweep. Phantom-media stays parked. Grade: pending build+review.
+- **Wave 4 — 2026-07-13 — SHIPPED (grade recorded prior).** Magick bound #2868, bokbasen
+  mount-gate #2869, sobelow durable inline skip #2870 — all merged to origin/main.
