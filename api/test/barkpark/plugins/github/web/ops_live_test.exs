@@ -13,6 +13,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
 
   alias Barkpark.Auth
   alias Barkpark.Plugins.Github.Conflicts
+  alias Barkpark.Plugins.Github.Web.OpsLive
 
   @admin_token "github-ops-admin-test-token"
 
@@ -136,6 +137,56 @@ defmodule Barkpark.Plugins.Github.Web.OpsLiveTest do
       # No :ops on_mount admin gate satisfied → the LiveView must not mount for
       # an anonymous conn (redirect away, never a 200 render).
       assert {:error, {:redirect, _}} = live(build_conn(), "/admin/github")
+    end
+  end
+
+  # The DB-outage honesty path CANNOT be exercised via a full mount: the
+  # in-process test Repo is always up, so `db_ok` is always true under `live/2`.
+  # The precedence lives in the pure `health_banner/1` helper, unit-tested here
+  # over synthetic snapshot maps.
+  describe "health_banner/1 (pure)" do
+    test ":db_down when the DB is unreachable — regardless of active" do
+      # A DB outage drags BOTH db_ok AND active to false through the same safe/2
+      # wrapper; the banner must NOT read that as "not provisioned".
+      assert OpsLive.health_banner(%{active: false, db_ok: false}) == :db_down
+      # even a snapshot that still reports active must surface :db_down when blind.
+      assert OpsLive.health_banner(%{active: true, db_ok: false}) == :db_down
+    end
+
+    test ":inactive only when the DB is reachable AND the plugin is un-provisioned" do
+      assert OpsLive.health_banner(%{active: false, db_ok: true}) == :inactive
+    end
+
+    test ":ok when the DB is reachable and the plugin is provisioned" do
+      assert OpsLive.health_banner(%{active: true, db_ok: true}) == :ok
+    end
+  end
+
+  describe "db_status_label/1 (pure)" do
+    test "distinguishes reachable from unreachable" do
+      assert OpsLive.db_status_label(%{db_ok: true}) == "reachable"
+      assert OpsLive.db_status_label(%{db_ok: false}) == "unreachable"
+    end
+  end
+
+  describe "db-reachability indicator + lag/pending caption" do
+    test "renders the db-status indicator (reachable under the live test Repo)", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/github")
+
+      # distinct from the provisioning banner — always shown, not conditional
+      assert html =~ ~s(data-role="github-db-status")
+      assert html =~ ~s(data-db-ok="true")
+      assert html =~ "reachable"
+      # a healthy test Repo is never blind
+      refute html =~ ~s(data-role="github-health-db-down")
+    end
+
+    test "captions lag vs pending so a high-lag/zero-pending reading is not misread", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/github")
+
+      assert html =~ ~s(data-role="github-lag-caption")
+      assert html =~ "mutation_events"
+      assert html =~ "task subset"
     end
   end
 end

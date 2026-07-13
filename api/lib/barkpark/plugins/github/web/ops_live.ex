@@ -73,20 +73,50 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
           <span :if={@health.repo} data-role="github-repo">
             Mirror target: <strong><%= @health.repo %></strong>.
           </span>
+          <%!-- DB reachability is a distinct signal from provisioning: it tells a
+                genuinely-quiet all-zero snapshot (db reachable) from a BLIND one
+                (db unreachable → every section degraded to zeros by Health.safe/2). --%>
+          <span data-role="github-db-status" data-db-ok={to_string(@health.db_ok)}>
+            Database: <strong><%= db_status_label(@health) %></strong>.
+          </span>
         </small>
       </p>
 
-      <div :if={not @health.active} data-role="github-health-inactive"
+      <%!-- One banner-state decision, made once by the pure health_banner/1 helper
+            and consumed by both banners below — no branch logic duplicated in HEEx.
+            A DB outage degrades Settings.active?() to false through the same safe/2
+            wrapper as db_ok, so keying "not provisioned" on active alone MISREADS an
+            outage as missing credentials. :db_down wins over :inactive for that reason. --%>
+      <% banner = health_banner(@health) %>
+
+      <div :if={banner == :db_down} data-role="github-health-db-down"
+           style="border:1px solid var(--danger, #d13); background:hsl(0 70% 50% / 0.10); border-radius:8px; padding:0.8rem 1rem; margin:1rem 0;">
+        <strong>Cannot reach the database — readings are blind, not necessarily zero.</strong>
+        <span style="opacity:0.85;">
+          A trivial <code>SELECT 1</code> liveness probe failed, so every count below
+          degraded to zero. This is NOT a healthy quiet state — the true sync backlog
+          is unknown until the database is reachable again.
+        </span>
+      </div>
+
+      <div :if={banner == :inactive} data-role="github-health-inactive"
            style="border:1px solid var(--warn); background:hsl(var(--warn-hsl) / 0.10); border-radius:8px; padding:0.8rem 1rem; margin:1rem 0;">
         <strong>Plugin not provisioned.</strong>
         <span style="opacity:0.85;">
           The GitHub App credentials are missing or blank — the bridge is dark.
-          The health below reflects local ledger state only.
+          The database is reachable, so the health below reflects real local ledger state.
         </span>
       </div>
 
       <section style="margin:1.6rem 0;">
         <h2 style="font-size:0.95rem; letter-spacing:0.03em; text-transform:uppercase; opacity:0.6;">Datasets</h2>
+        <p data-role="github-lag-caption" style="margin:0 0 0.6rem;">
+          <small style="opacity:0.6;">
+            <strong>lag</strong> = every <code>mutation_events</code> row since the cursor;
+            <strong>pending</strong> = only the mirrorable task subset the drain actually consumes.
+            High lag with zero pending is caught-up, not a stall.
+          </small>
+        </p>
         <div style="overflow-x:auto;">
           <table style="width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums;">
             <thead>
@@ -179,6 +209,41 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
     </main>
     """
   end
+
+  # ---------------------------------------------------------------------------
+  # Banner state (pure) — public so it is unit-testable without a full mount
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Decide the single top-of-console banner state from the health snapshot.
+
+  A DB outage degrades BOTH `Settings.active?()` and `db_ok` to `false` through
+  the same `Health.safe/2` wrapper, so keying "not provisioned" on `active`
+  alone misreports an outage as missing credentials. `db_ok` is the tiebreaker:
+
+    * `:db_down`  — `db_ok == false` (regardless of `active`): the DB is
+      unreachable, so every count is blind zeros, not a healthy quiet state.
+    * `:inactive` — `db_ok == true` AND `active == false`: the DB is fine but the
+      plugin is genuinely un-provisioned (credentials missing/blank).
+    * `:ok`       — otherwise: DB reachable and the plugin is provisioned.
+
+  `render/1` calls this once and drives both banners off the result, so the
+  precedence lives here (unit-testable) rather than duplicated in HEEx.
+  """
+  @spec health_banner(map()) :: :db_down | :inactive | :ok
+  def health_banner(%{db_ok: false}), do: :db_down
+  def health_banner(%{active: false}), do: :inactive
+  def health_banner(_), do: :ok
+
+  @doc """
+  Human label for the DB-reachability indicator, distinct from provisioning.
+  Pure so both the reachable and unreachable copy are unit-testable without a
+  full mount (the in-process test Repo is always up, so `db_ok` is always true
+  under a real mount).
+  """
+  @spec db_status_label(map()) :: String.t()
+  def db_status_label(%{db_ok: true}), do: "reachable"
+  def db_status_label(_), do: "unreachable"
 
   # ---------------------------------------------------------------------------
   # Render helpers
