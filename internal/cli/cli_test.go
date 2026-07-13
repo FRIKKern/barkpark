@@ -316,6 +316,81 @@ func TestAuthHeaders(t *testing.T) {
 	}
 }
 
+func TestBuildManifestRequestAuthenticatesNonPublishedPerspective(t *testing.T) {
+	m, tree := loadFixtureTree(t)
+	baseCtx := manifest.Context{
+		Server:  "https://api.barkpark.cloud",
+		Dataset: "production",
+		Token:   "draft-reader-token",
+	}
+
+	for _, verb := range []string{"ls", "query"} {
+		verb := verb
+		cmd, ok := tree.Lookup("doc", verb)
+		if !ok {
+			t.Fatalf("doc %s missing", verb)
+		}
+		cmd.AuthTier = "none"
+		cmd.Flags = append(cmd.Flags, manifest.Flag{Name: "perspective", Type: "string"})
+
+		for _, perspective := range []string{"drafts", "raw"} {
+			perspective := perspective
+			t.Run(verb+"_"+perspective, func(t *testing.T) {
+				req, derr := buildManifestRequest(
+					globals{}, baseCtx, m, *cmd,
+					[]string{"post", "--perspective", perspective},
+					false,
+				)
+				if derr != nil {
+					t.Fatalf("buildManifestRequest: %v", derr)
+				}
+				if got := req.headers["Authorization"]; got != "Bearer draft-reader-token" {
+					t.Errorf("Authorization = %q, want bearer for %s perspective", got, perspective)
+				}
+			})
+		}
+
+		t.Run(verb+"_published_stays_public", func(t *testing.T) {
+			req, derr := buildManifestRequest(
+				globals{}, baseCtx, m, *cmd,
+				[]string{"post", "--perspective", "published"},
+				false,
+			)
+			if derr != nil {
+				t.Fatalf("buildManifestRequest: %v", derr)
+			}
+			if got := req.headers["Authorization"]; got != "" {
+				t.Errorf("published Authorization = %q, want public request unchanged", got)
+			}
+		})
+	}
+}
+
+func TestBuildManifestRequestRejectsNonPublishedPerspectiveWithoutToken(t *testing.T) {
+	m, tree := loadFixtureTree(t)
+	cmd, ok := tree.Lookup("doc", "ls")
+	if !ok {
+		t.Fatal("doc ls missing")
+	}
+	cmd.AuthTier = "none"
+	cmd.Flags = append(cmd.Flags, manifest.Flag{Name: "perspective", Type: "string"})
+
+	_, derr := buildManifestRequest(
+		globals{},
+		manifest.Context{Server: "https://api.barkpark.cloud", Dataset: "production"},
+		m,
+		*cmd,
+		[]string{"post", "--perspective", "drafts"},
+		false,
+	)
+	if derr == nil {
+		t.Fatal("drafts perspective without token must fail loudly")
+	}
+	if !strings.Contains(derr.Error(), "requires an API token") {
+		t.Fatalf("error = %q, want requires an API token", derr)
+	}
+}
+
 // --- exit-code mapping -------------------------------------------------------
 
 func TestExitForCode(t *testing.T) {

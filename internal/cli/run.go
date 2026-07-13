@@ -81,6 +81,15 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		return nil, &dispatchError{msg: err.Error(), withUsage: true}
 	}
 
+	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
+	if needsPerspectiveAuth && ctx.Token == "" {
+		perspective := cmdFlags["perspective"][len(cmdFlags["perspective"])-1]
+		return nil, &dispatchError{
+			msg:       fmt.Sprintf("--perspective %s requires an API token", perspective),
+			withUsage: false,
+		}
+	}
+
 	// Build the absolute URL (fills :placeholders + prepends scoped_prefix).
 	rawURL, err := m.BuildURL(cmd, ctx, argMap)
 	if err != nil {
@@ -102,6 +111,15 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
+	if needsPerspectiveAuth {
+		// doc get/ls/query are public at their default published perspective,
+		// so their manifest tier must remain `none`. Drafts and raw are
+		// identity-sensitive, however: OptionalToken intentionally pins an
+		// anonymous request back to published. Attach the already-resolved bearer
+		// only for those explicit perspectives so the flag cannot be silently
+		// downgraded while the public published request stays byte-for-byte public.
+		headers["Authorization"] = "Bearer " + ctx.Token
+	}
 	if contentType != "" {
 		headers["Content-Type"] = contentType
 	}
@@ -113,6 +131,28 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		body:    body,
 		stream:  stream,
 	}, nil
+}
+
+func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string][]string) bool {
+	if cmd.AuthTier != "none" {
+		return false
+	}
+	switch cmd.ID {
+	case "doc.get", "doc.ls", "doc.query":
+	default:
+		return false
+	}
+
+	values := flags["perspective"]
+	if len(values) == 0 {
+		return false
+	}
+	switch values[len(values)-1] {
+	case "drafts", "raw":
+		return true
+	default:
+		return false
+	}
 }
 
 // sendManifestRequest is the send half of the dispatch seam: it performs the

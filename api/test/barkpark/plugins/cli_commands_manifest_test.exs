@@ -58,6 +58,21 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end)
   end
 
+  test "public document reads retain a published default and advertise non-published perspectives" do
+    commands =
+      Capabilities.manifest("admin", project: false)["commands"]
+      |> Map.new(&{&1["id"], &1})
+
+    for id <- ~w(doc.get doc.ls doc.query) do
+      command = Map.fetch!(commands, id)
+      assert command["auth_tier"] == "none"
+
+      perspective = Enum.find(command["flags"], &(&1["name"] == "perspective"))
+      assert perspective["default"] == "published"
+      assert perspective["type"] == "string"
+    end
+  end
+
   describe "Bulldocs.cli_commands/0" do
     test "declares six verbs, all ingest-tier, all grounded in a real route" do
       cmds = Bulldocs.cli_commands()
