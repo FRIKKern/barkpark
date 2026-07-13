@@ -190,3 +190,5 @@ SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:298,6D4449E
 SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:308,75C680D
 SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:278,7F2F037
 SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:295,B3AC33
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:319,2C2D0EA
+DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:308,3288FF6
