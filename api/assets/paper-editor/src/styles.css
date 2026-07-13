@@ -210,6 +210,62 @@
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 
+:root[data-bp-theme="charple"], :host([data-bp-theme="charple"]) {
+  --paper-bg: #f9fafe;
+  --paper-bg-deep: #ebedf5;
+  --paper-ink: #1d202a;
+  --paper-ink-soft: #50525c;
+  --paper-ink-faint: #797b83;
+  --paper-rule: rgba(29, 32, 42, 0.09);
+  --paper-edit-hover: rgba(29, 32, 42, 0.08);
+  --paper-accent: #3431b4;
+  --paper-accent-soft: rgba(52, 49, 180, 0.10);
+  --paper-chrome-bg: #f9fafe;
+  --paper-chrome-border: rgba(29, 32, 42, 0.12);
+  --paper-reading-accent: #218bc4;
+  --ok-hsl: 145.27 88.36% 28.41%;
+  --warn-hsl: 40.11 100% 29.89%;
+  --danger-hsl: 2.15 59.33% 48.33%;
+  --info-hsl: 221.63 58.56% 52.81%;
+  --ok: hsl(var(--ok-hsl));
+  --warn: hsl(var(--warn-hsl));
+  --danger: hsl(var(--danger-hsl));
+  --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --warn-soft: hsl(var(--warn-hsl) / 0.15);
+  --danger-soft: hsl(var(--danger-hsl) / 0.15);
+  --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+
+:root[data-bp-theme="charple"][data-theme="dark"], :host([data-bp-theme="charple"][data-theme="dark"]) {
+  --paper-bg: #08090e;
+  --paper-bg-deep: #121219;
+  --paper-ink: #dddee5;
+  --paper-ink-soft: #9e9ea7;
+  --paper-ink-faint: #6b6c72;
+  --paper-rule: rgba(221, 222, 229, 0.10);
+  --paper-edit-hover: rgba(221, 222, 229, 0.09);
+  --paper-accent: #6c52ff;
+  --paper-accent-soft: rgba(108, 82, 255, 0.16);
+  --paper-chrome-bg: #121219;
+  --paper-chrome-border: rgba(221, 222, 229, 0.13);
+  --paper-reading-accent: #52abff;
+  --ok-hsl: 136.37 45.27% 53.58%;
+  --warn-hsl: 40.62 100% 42.95%;
+  --danger-hsl: 4.54 100% 70.09%;
+  --info-hsl: 220.77 100% 73.06%;
+  --ok: hsl(var(--ok-hsl));
+  --warn: hsl(var(--warn-hsl));
+  --danger: hsl(var(--danger-hsl));
+  --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --warn-soft: hsl(var(--warn-hsl) / 0.2);
+  --danger-soft: hsl(var(--danger-hsl) / 0.2);
+  --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+
 :root[data-bp-theme="ember"], :host([data-bp-theme="ember"]) {
   --paper-bg: #fef9f7;
   --paper-bg-deep: #f4ece9;

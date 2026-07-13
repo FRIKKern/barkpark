@@ -25,7 +25,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
 
   # Known theme ids (evergreen only this wave). resolve/1 folds an unknown /
   # empty / binary theme onto :evergreen so every accessor is total.
-  @themes [:evergreen, :ember, :fjord]
+  @themes [:evergreen, :charple, :ember, :fjord]
   @doc "Known theme ids (evergreen this wave)."
   def themes, do: @themes
   defp resolve(theme) when theme in @themes, do: theme
@@ -36,14 +36,14 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   defp resolve(_), do: :evergreen
 
   # Semantic status tones (design/tokens.json color.status, light theme → hex).
-  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}, ember: %{ok: "#2c8647", info: "#486ec0", warn: "#986600", danger: "#ba453d"}, fjord: %{ok: "#32854a", info: "#4a6ebc", warn: "#986600", danger: "#b74941"}}
+  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}, charple: %{ok: "#08883e", info: "#406bcd", warn: "#986600", danger: "#c43732"}, ember: %{ok: "#2c8647", info: "#486ec0", warn: "#986600", danger: "#ba453d"}, fjord: %{ok: "#32854a", info: "#4a6ebc", warn: "#986600", danger: "#b74941"}}
   def tone_ok(theme \\ :evergreen), do: @status[resolve(theme)].ok
   def tone_info(theme \\ :evergreen), do: @status[resolve(theme)].info
   def tone_warn(theme \\ :evergreen), do: @status[resolve(theme)].warn
   def tone_danger(theme \\ :evergreen), do: @status[resolve(theme)].danger
 
   # Warm reading accent — the paper terracotta, tokenized.
-  @reading_accent %{evergreen: "#a23925", ember: "#bf321d", fjord: "#0f8299"}
+  @reading_accent %{evergreen: "#a23925", charple: "#218bc4", ember: "#bf321d", fjord: "#0f8299"}
   def reading_accent(theme \\ :evergreen), do: @reading_accent[resolve(theme)]
 
   # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.
@@ -63,6 +63,16 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       text: "#15211d",
       muted: "#55635e",
       code_bg: "#eaf1ee"
+    },
+    charple: %{
+      brand: "#3431b4",
+      brand_text: "#ffffff",
+      rule: "#dcdee2",
+      page_bg: "#ebedf5",
+      paper: "#f8f8fc",
+      text: "#1d202a",
+      muted: "#50525c",
+      code_bg: "#ebedf5"
     },
     ember: %{
       brand: "#c34e13",
@@ -104,6 +114,13 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       danger: %{bg: "#f7e9e6", fg: "#a63a2e"},
       info: %{bg: "#e9eff7", fg: "#2d5e8f"},
       neutral: %{bg: "#edf0ee", fg: "#4a544f"}
+    },
+    charple: %{
+      success: %{bg: "#daf8df", fg: "#106630"},
+      warning: %{bg: "#ffecd2", fg: "#734c00"},
+      danger: %{bg: "#ffe9e6", fg: "#8a3630"},
+      info: %{bg: "#e7efff", fg: "#335295"},
+      neutral: %{bg: "#eeeff0", fg: "#545558"}
     },
     ember: %{
       success: %{bg: "#ddf7e1", fg: "#236436"},
