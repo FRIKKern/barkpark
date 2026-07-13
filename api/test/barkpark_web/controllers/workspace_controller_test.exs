@@ -416,7 +416,9 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       # Sanity: BEFORE the delete, the workspace really does own scoped rows —
       # otherwise a zero-orphan assertion would prove nothing.
       before_total = total_scoped_rows(scoped_tables, ws_id)
-      assert before_total > 0, "fixture seeded no workspace_id-scoped rows — sweep would be vacuous"
+
+      assert before_total > 0,
+             "fixture seeded no workspace_id-scoped rows — sweep would be vacuous"
 
       resp =
         conn
