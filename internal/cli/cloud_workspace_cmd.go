@@ -17,12 +17,14 @@ package cli
 //
 // export STREAMS the tar body straight to a file (a workspace bundle can be
 // large — the client caps only the connection phase, never the body, exactly
-// like the media-transfer client). import is a DESTRUCTIVE consumer: it REPLACES
-// the target workspace's content, so it is gated behind --yes and honours the
-// global --dry-run as a preview default (print the request it WOULD send, send
-// nothing). Both surface honest states — a missing file, a refused write, a
-// server error map onto the CLI's stable exit-code scheme through the shared
-// error seam, never a silent success.
+// like the media-transfer client). import is a DESTRUCTIVE consumer: it RESTORES
+// a bundle into a workspace scope that the engine assumes is CLEAN — the
+// string-keyed members are ON CONFLICT idempotent but the copy-strategy members
+// (root/E1/E2) collide if the target still holds content — so it is gated behind
+// --yes and honours the global --dry-run as a preview default (print the request
+// it WOULD send, send nothing). Both surface honest states — a missing file, a
+// refused write, a server error map onto the CLI's stable exit-code scheme
+// through the shared error seam, never a silent success.
 
 import (
 	"encoding/json"
@@ -178,11 +180,12 @@ func exportDest(path string) string {
 }
 
 // runCloudWorkspaceImport is `bp cloud workspace import <slug> --file <tar>`:
-// POST the tar body to the import route, which REPLACES the target workspace's
-// content (idempotent ON CONFLICT server-side). Destructive, so it is gated:
-// --dry-run (or the global --dry-run) previews the request and sends nothing;
-// without --yes it refuses; with --yes it posts the bytes and prints the
-// {tables,total_rows} receipt.
+// POST the tar body to the import route, which RESTORES the bundle into the
+// workspace scope (the engine assumes a CLEAN target — E3/allowlist members are
+// ON CONFLICT idempotent, but the copy-strategy members collide against existing
+// content). Destructive, so it is gated: --dry-run (or the global --dry-run)
+// previews the request and sends nothing; without --yes it refuses; with --yes
+// it posts the bytes and prints the {tables,total_rows} receipt.
 func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 	const usage = "bp cloud workspace import <slug> --file <tar> --yes"
 	a, err := parseHzArgs(args, []string{"file"}, nil, usage)
@@ -208,15 +211,16 @@ func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 	// sends nothing. This is checked BEFORE the --yes gate so an operator can
 	// always preview a destructive import without first arming it.
 	if g.dryRun {
-		out.progressf("DRY RUN — would POST %s (%s) → %s", file, url, "REPLACE workspace "+slug)
+		out.progressf("DRY RUN — would POST %s (%s) → %s", file, url, "RESTORE into workspace "+slug)
 		return exitOK
 	}
 
-	// Destructive gate: import REPLACES the workspace's content, so it refuses
-	// without an explicit --yes (the same write-guard the prod-mutating verbs use).
+	// Destructive gate: import WRITES bundle content into the workspace, so it
+	// refuses without an explicit --yes (the same write-guard the prod-mutating
+	// verbs use).
 	if !g.yes {
 		return useError(out, "usage",
-			fmt.Sprintf("refusing to import into workspace %q without --yes — this REPLACES its content; pass --yes to proceed or --dry-run to preview", slug),
+			fmt.Sprintf("refusing to import into workspace %q without --yes — this writes bundle content into it (a restore into a clean scope); pass --yes to proceed or --dry-run to preview", slug),
 			exitUsage)
 	}
 
@@ -314,9 +318,11 @@ EXPORT
   twin of the shipped Barkpark.Tenancy.WorkspaceBundle engine.
 
 IMPORT
-  POSTs the tar body to /api/workspaces/<slug>/import, which REPLACES the target
-  workspace's content (idempotent ON CONFLICT server-side). Because it is
-  destructive it is gated:
+  POSTs the tar body to /api/workspaces/<slug>/import, which RESTORES the bundle
+  into the workspace scope. The engine assumes a CLEAN target — E3/allowlist
+  members are ON CONFLICT idempotent, but the copy-strategy members collide
+  against existing content, so restore into an empty scope. Because it writes it
+  is gated:
     --dry-run   preview the request, send nothing (also honoured via the global --dry-run)
     --yes       required to actually apply — without it the command refuses
   On success it prints the {tables,total_rows} the engine reported.
