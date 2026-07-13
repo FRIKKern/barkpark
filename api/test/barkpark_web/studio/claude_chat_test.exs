@@ -757,6 +757,32 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute "PATH" in scrubbed
     end
 
+    test "the denylist tracks secret-shaped env reads in runtime.exs" do
+      runtime =
+        "../../../config/runtime.exs"
+        |> Path.expand(__DIR__)
+        |> File.read!()
+
+      runtime_secrets =
+        ~r/System\.(?:get_env|fetch_env!?)\(\s*"([A-Z][A-Z0-9_]*)"/
+        |> Regex.scan(runtime, capture: :all_but_first)
+        |> List.flatten()
+        |> Enum.filter(fn name ->
+          name == "DATABASE_URL" or
+            Regex.match?(~r/(?:^|_)(?:TOKEN|SECRET|PASSWORD|KEY|COOKIE)$/, name)
+        end)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      missing = runtime_secrets -- ClaudeChat.scrubbed_env_names()
+
+      assert missing == [],
+             "secret-shaped runtime env reads missing from ClaudeChat.scrubbed_env_names/0: #{inspect(missing)}"
+
+      refute "HOME" in ClaudeChat.scrubbed_env_names()
+      refute "PATH" in ClaudeChat.scrubbed_env_names()
+    end
+
     test "worker_id/1 is claude-chat-<sid8> (cmux precedent — one worker per chat tab)" do
       assert ClaudeChat.worker_id(@sid) == "claude-chat-3f9a1c2e"
       assert ClaudeChat.worker_id(@sid) =~ ~r/^claude-chat-[0-9a-f]{8}$/
