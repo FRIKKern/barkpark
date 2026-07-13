@@ -475,7 +475,87 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
     end
   end
 
+  # ── 5. E3 string-keyed sweep (bpb-delete-e3-string-keyed-sweep) ────────────
+
+  describe "delete_workspace/1 sweeps the FK-less E3 string-keyed tables" do
+    test "an authoring_exemptions row keyed by (doc_id, dataset) is GONE post-delete" do
+      ws = create_workspace!()
+      project = create_project!(ws)
+
+      # A real document establishes the (doc_id, dataset) leaf the E3 doc-keyed
+      # semi-join keys on. authoring_exemptions carries NO workspace_id and NO
+      # FK to workspaces — the SQL cascade on Repo.delete(workspace) never
+      # reaches it, so ONLY the new string-keyed sweep can remove this row.
+      {:ok, doc} =
+        create_document_in!(ws, project, "post", %{"doc_id" => "sweep-me"})
+
+      insert_exemption!(doc.doc_id, doc.dataset, doc.type)
+
+      assert exemption_count(doc.doc_id, doc.dataset) == 1,
+             "precondition: the exemption row must exist before delete"
+
+      assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws)
+
+      # The proof is the ROW BEING GONE (count == 0), never "no crash". On the
+      # unfixed tree (no string-keyed sweep) this row survives → count == 1 → RED.
+      assert exemption_count(doc.doc_id, doc.dataset) == 0,
+             "the workspace's authoring_exemptions row must be swept on teardown"
+    end
+
+    test "a (doc_id, dataset) exemption ALSO owned by a sibling workspace SURVIVES" do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      # The SAME (doc_id, dataset) leaf in TWO workspaces — legal because
+      # documents' unique key is (doc_id, type, dataset_id) and each workspace
+      # has its OWN dataset_id for the shared "test" slug (charter D6/D7). One
+      # exemption row therefore maps to both workspaces.
+      {:ok, doc_a} =
+        create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "shared-exemption"})
+
+      {:ok, doc_b} =
+        create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "shared-exemption"})
+
+      assert doc_a.doc_id == doc_b.doc_id and doc_a.dataset == doc_b.dataset,
+             "the two workspaces must share the exact (doc_id, dataset) leaf"
+
+      insert_exemption!(doc_a.doc_id, doc_a.dataset, doc_a.type)
+
+      assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
+
+      # The sibling-guard (AND NOT EXISTS another workspace's document) keeps the
+      # shared row alive — deleting workspace A must NOT clobber a row workspace
+      # B still references. Without the guard this would be 0 → RED.
+      assert exemption_count(doc_a.doc_id, doc_a.dataset) == 1,
+             "a shared exemption still referenced by workspace B must survive A's teardown"
+    end
+  end
+
   # ── helpers ───────────────────────────────────────────────────────────────
+
+  # Insert a raw authoring_exemptions row (no Ecto schema — a FK-less E3
+  # doc-keyed table). PK is (doc_id, dataset).
+  defp insert_exemption!(doc_id, dataset, type) do
+    Repo.query!(
+      "INSERT INTO authoring_exemptions (doc_id, dataset, type, exempted_at) " <>
+        "VALUES ($1, $2, $3, now()) ON CONFLICT (doc_id, dataset) DO NOTHING",
+      [doc_id, dataset, type]
+    )
+  end
+
+  # Count authoring_exemptions rows for a (doc_id, dataset) leaf — the GONE /
+  # SURVIVES proof (never "no crash").
+  defp exemption_count(doc_id, dataset) do
+    %{rows: [[n]]} =
+      Repo.query!(
+        "SELECT count(*) FROM authoring_exemptions WHERE doc_id = $1 AND dataset = $2",
+        [doc_id, dataset]
+      )
+
+    n
+  end
 
   # Count rows for `schema` matching `id` with workspace_id IS NULL — the
   # orphan shape we MUST NOT produce on a workspace delete.

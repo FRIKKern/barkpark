@@ -18,6 +18,8 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership, Organization}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.WorkspaceBundle
+  alias Barkpark.Tenancy.WorkspaceBundle.Catalog
 
   @default_slug "default"
   @default_org_slug "default"
@@ -888,6 +890,15 @@ defmodule Barkpark.Tenancy do
 
   Ordered cleanup in a single `Repo.transaction`:
 
+    0. Sweep the 11 E3/allowlist string-keyed tables the keystone exporter
+       copies (charter D4/D5) — the FK-less `(doc_id, dataset)`- and
+       `scope`-keyed tables (`authoring_exemptions`, `data_keys`, …) the SQL
+       cascade never reaches. Runs FIRST because its `(doc_id, dataset)`
+       semi-join needs the workspace's own `documents` still present and its
+       slug derivation needs its projects/datasets still present. A
+       `(doc_id, dataset)` row ALSO owned by a sibling workspace is guarded and
+       SURVIVES. Reuses the keystone enumeration + slug derivation, so export
+       and teardown share ONE source of truth for a workspace's tables.
     1. For every media_file scoped to the workspace, call
        `Barkpark.Media.delete_file/2` so the disk blob is removed
        (`File.rm`), CDN edge cache is invalidated (`Cdn.invalidate`),
@@ -987,7 +998,8 @@ defmodule Barkpark.Tenancy do
   # Ordered cleanup inside the transaction. Each step short-circuits on
   # error so the transaction rolls back via Repo.rollback in the wrapper.
   defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do
-    with :ok <- delete_workspace_media(ws_id),
+    with :ok <- delete_workspace_string_keyed(ws_id),
+         :ok <- delete_workspace_media(ws_id),
          :ok <- delete_workspace_documents(ws_id),
          :ok <- delete_workspace_audit_sinks(ws_id),
          {:ok, _} <- Repo.delete(workspace) do
@@ -996,6 +1008,84 @@ defmodule Barkpark.Tenancy do
       {:error, _} = err -> err
     end
   end
+
+  # Sweep the 11 E3/allowlist string-keyed tables the keystone exporter copies
+  # (charter D4/D5): the 4 E3 doc-keyed (Catalog.e3_doc_keyed/0), the 5 E3
+  # dataset-keyed (Catalog.e3_dataset_keyed/0), and the 2 scope-column allowlist
+  # tables (Catalog.allowlist/0). NONE of them carries `workspace_id` — their
+  # tenant key is a `(doc_id, dataset)` leaf or a `scope` string — so the SQL
+  # CASCADE on `Repo.delete(workspace)` NEVER reaches them; without this explicit
+  # step a torn-down workspace silently orphans (e.g.) its authoring_exemptions
+  # ledger and its per-dataset DEKs (`data_keys`).
+  #
+  # POSITION IS LOAD-BEARING — this runs FIRST, before media/documents/audit and
+  # before the final cascade: the E3 doc-keyed semi-join needs the workspace's
+  # OWN `documents` rows still present, and the dataset-slug derivation
+  # (`WorkspaceBundle.dataset_slugs_for/1`) needs its projects+datasets still
+  # present — both leave only at `Repo.delete(workspace)`.
+  #
+  # The predicate shapes are the EXACT keystone extraction shapes
+  # (`WorkspaceBundle.copy_where/4`), so export and teardown agree on membership:
+  #   * E3 doc-keyed — a `(doc_id, dataset)` semi-join (EXISTS, never a JOIN,
+  #     which would fan out on the 2-document case — charter D6), PLUS a
+  #     sibling-guard `NOT EXISTS` so a `(doc_id, dataset)` row ALSO owned by a
+  #     DIFFERENT workspace (charter D7 — the key is not workspace-unique)
+  #     SURVIVES this workspace's teardown.
+  #   * E3 dataset-keyed — `t.dataset = ANY(slugs)`, the exporter's bare-slug
+  #     predicate (project-qualified narrowing is filed separately).
+  #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix
+  #     (`data_keys` → `"dataset:"`, `search_surface_config` → `""`).
+  defp delete_workspace_string_keyed(ws_id) do
+    ws_lit = Catalog.uuid_literal!(ws_id)
+    slugs = WorkspaceBundle.dataset_slugs_for(ws_id)
+
+    Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, ws_lit))
+    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, slugs))
+
+    for {table, prefix} <- Catalog.allowlist() do
+      delete_allowlist_scoped(table, prefix, slugs)
+    end
+
+    :ok
+  end
+
+  # E3 doc-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_doc, …)`
+  # verbatim (the `(doc_id, dataset)` EXISTS semi-join) + the sibling-guard.
+  defp delete_e3_doc_keyed(table, ws_lit) do
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t " <>
+        "WHERE EXISTS (SELECT 1 FROM documents d " <>
+        "WHERE d.workspace_id = #{ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset) " <>
+        "AND NOT EXISTS (SELECT 1 FROM documents d2 " <>
+        "WHERE d2.doc_id = t.doc_id AND d2.dataset = t.dataset AND d2.workspace_id <> #{ws_lit})",
+      []
+    )
+  end
+
+  # E3 dataset-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_dataset, …)`.
+  # An empty slug set yields `ANY(ARRAY[]::text[])`, which matches nothing.
+  defp delete_e3_dataset_keyed(table, slugs) do
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})",
+      []
+    )
+  end
+
+  # allowlist sweep: mirrors `WorkspaceBundle.copy_where(_, :allowlist, …)` —
+  # the `scope`-column tables prefixed per `Catalog.allowlist/0`.
+  defp delete_allowlist_scoped(table, prefix, slugs) do
+    scopes = Enum.map(slugs, &(prefix <> &1))
+
+    Repo.query!(
+      "DELETE FROM #{qi(table)} t WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})",
+      []
+    )
+  end
+
+  # Double-quote a catalog-derived table name (every value originates from
+  # `Catalog`'s pinned constants, never user input; the quote-doubling is
+  # belt-and-suspenders, matching `WorkspaceBundle.qi/1`).
+  defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 
   # Sweep the workspace's audit_export_sinks. This table carries workspace_id as
   # a plain binary_id with NO foreign key (migration 20260705140000), so the SQL
