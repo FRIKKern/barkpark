@@ -183,3 +183,10 @@ SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:291,755EA42
 SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:309,773228E
 Config.CSP: Missing Content-Security-Policy,lib/barkpark_web/router.ex:369,7E46C5D
 Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/studio_chat.ex:1837,94B637
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:304,1C846A4
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:249,2D7E42E
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:290,344D9EA
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:298,6D4449E
+SQL.Query: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:308,75C680D
+SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:278,7F2F037
+SQL.Stream: SQL injection,lib/barkpark/tenancy/workspace_bundle.ex:295,B3AC33
