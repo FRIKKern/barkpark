@@ -14,6 +14,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
   use Barkpark.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.MutationEvent
@@ -371,6 +372,32 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # The dead-letter seam only fires on a dedup refusal — a normal birth
       # leaves it untouched (fail-open preserved).
       refute_receive {:conflict, _attrs}
+    end
+  end
+
+  describe "lifecycle-gate refusal — deterministic vetoes do not redeliver" do
+    test "a before_save-vetoed issue is logged as a clean refusal and writes nothing",
+         %{scope: scope} do
+      payload = opened_payload(54, %{"issue" => %{"title" => "   "}})
+
+      log =
+        capture_log(fn ->
+          assert {:refused, "gh-54"} = Intake.ingest(payload, opts(scope))
+        end)
+
+      assert log =~ "github intake: lifecycle gate refused gh-54"
+      assert log =~ "task title is required"
+      assert task_rows(54) == []
+      assert fetch_task(54, scope) == nil
+      refute_receive {:comment, _, _, _}
+    end
+
+    test "positive control: a normally titled issue still births its task", %{scope: scope} do
+      assert {:ok, :born, doc} = Intake.ingest(opened_payload(55), opts(scope))
+
+      assert doc.doc_id == Content.draft_id("gh-55")
+      assert fetch_task(55, scope).id == doc.id
+      assert_receive {:comment, "FRIKKern/barkpark", 55, _body}
     end
   end
 

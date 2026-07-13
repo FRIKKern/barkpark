@@ -43,8 +43,11 @@ defmodule Barkpark.Plugins.Github.Intake do
        issue, a findable `dedup_refused` dead-letter row via `Github.Conflicts`,
        and a DISTINCT `{:refused, doc_id}` outcome the controller maps to 2xx
        (accepted — GitHub never re-delivers, so the comment posts exactly once).
-       A genuine NON-dedup create error stays `{:error, reason}` → the
-       controller answers 5xx (retryable — that transient IS worth retrying).
+       A deterministic lifecycle-gate veto (`{:halted, reason}`) is logged and
+       returned as the same clean `{:refused, doc_id}` 2xx outcome: retrying an
+       unchanged issue can never make that write succeed. A genuine OTHER
+       create error stays `{:error, reason}` → the controller answers 5xx
+       (retryable — that transient IS worth retrying).
        On RE-DELIVERY the `gh-<num>` doc already
        exists, so intake SHORT-CIRCUITS to `{:ok, :exists, doc}` and never
        touches the write path at all — the outsider issue is read EXACTLY ONCE,
@@ -110,9 +113,10 @@ defmodule Barkpark.Plugins.Github.Intake do
 
     * `{:ok, :born, doc}`   — a fresh task was born (backlink comment attempted)
     * `{:ok, :exists, doc}` — re-delivery; the task already existed (idempotent no-op)
-    * `{:refused, doc_id}`  — the Dedup seam judged the issue a look-alike (D6):
-      no task born, but a maintainer comment was posted and a `dedup_refused`
-      dead-letter row recorded; the controller maps this to 2xx (accepted)
+    * `{:refused, doc_id}`  — the birth was deterministically refused: either
+      Dedup judged it a look-alike (and surfaced a maintainer comment plus a
+      `dedup_refused` dead-letter row), or a lifecycle gate vetoed it (and the
+      reason was logged). The controller maps both to 2xx (accepted)
     * `:ignored`            — not an `issues.opened` event (D6)
     * `:dropped`            — the App's own `[bot]` sender (D4 cut #1)
     * `{:error, reason}`    — a genuine (non-dedup) Content create failure; the
@@ -201,7 +205,17 @@ defmodule Barkpark.Plugins.Github.Intake do
           {:error, {:duplicate_task, verdict}} ->
             refused(doc_id, number, dataset, verdict, opts)
 
-          # A genuine, non-dedup failure (transient DB, etc.) stays an error so
+          # A lifecycle gate veto is deterministic for this unchanged webhook:
+          # GitHub redelivery would only hit the same veto forever. Log the
+          # server-owned reason and return the controller's clean 2xx refusal;
+          # Writer already stopped before persistence, so there is no task or
+          # backlink side effect to undo.
+          {:error, {:halted, reason}} ->
+            Logger.warning("github intake: lifecycle gate refused #{doc_id}: #{inspect(reason)}")
+
+            {:refused, doc_id}
+
+          # A genuine, non-dedup/non-gate failure (transient DB, etc.) stays an error so
           # the controller answers 5xx and GitHub redelivers — the deterministic
           # `gh-<num>` doc_id keeps that redelivery idempotent.
           {:error, reason} ->
