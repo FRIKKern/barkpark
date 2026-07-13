@@ -100,13 +100,44 @@ type Box struct {
 	Sites []Site
 }
 
+// Site kinds. Kind selects how the per-site block serves traffic. The empty
+// string is the zero value and means KindReverseProxy, so existing callers that
+// only set Slug/Domains/Port keep emitting a reverse_proxy block unchanged.
+const (
+	// KindReverseProxy proxies to a loopback container port (the P3 blue/green
+	// container path). Requires Port > 0.
+	KindReverseProxy = "reverse_proxy"
+	// KindStatic serves files from a directory with file_server (the static-site
+	// runtime target — subdomain-ready foundation, charter D9). Requires
+	// Root != ""; there is no upstream port.
+	KindStatic = "static"
+)
+
 // Site describes one hosted site's runtime state for Caddy: which domains it
-// answers on, and which loopback port serves it.
+// answers on, and how it serves them.
+//
+// Kind selects the serving strategy. For KindReverseProxy (the default / empty
+// string) the block proxies to loopback Port. For KindStatic the block serves
+// files from Root with file_server and ignores Port. A site is only rendered
+// when it is "ready" for its kind — a reverse_proxy needs a live Port, a static
+// site needs a served Root — so a not-yet-ready site never squats a domain a
+// serving site also lists.
 type Site struct {
 	Slug    string
 	Domains []string
 	Port    int
+
+	// Kind is the serving strategy: "" / KindReverseProxy (default) or
+	// KindStatic. Any other value is treated as reverse_proxy.
+	Kind string
+	// Root is the served directory for a KindStatic site (e.g. the site's
+	// `current` release symlink). Ignored for reverse_proxy sites.
+	Root string
 }
+
+// isStatic reports whether s serves files with file_server rather than
+// proxying to a container port.
+func (s Site) isStatic() bool { return s.Kind == KindStatic }
 
 // Render produces the Caddyfile text for box. Deterministic: sites are emitted
 // in slug order, domains within a site are sorted — same input → byte-identical
@@ -147,10 +178,18 @@ func Render(box Box) string {
 	seen := map[string]bool{}
 
 	for _, s := range sites {
-		// Skip a site with no upstream before consuming its domains, so a
-		// not-yet-ready site can't squat a domain and steal it from a serving
-		// site that also lists it.
-		if s.Port <= 0 {
+		// Skip a not-yet-ready site before consuming its domains, so it can't
+		// squat a domain and steal it from a serving site that also lists it.
+		// Readiness is kind-specific: a static site needs a served Root; a
+		// reverse_proxy site needs a live upstream Port. A static site's Root is
+		// also spliced verbatim into `root * <Root>`, so a Root that would break
+		// Caddyfile syntax (whitespace, braces, control bytes) fails closed —
+		// the whole file must never be wedged by one bad value.
+		if s.isStatic() {
+			if !safeRoot(s.Root) {
+				continue
+			}
+		} else if s.Port <= 0 {
 			continue
 		}
 		// Filter customer-supplied domains: a hostile or malformed domain
@@ -169,17 +208,50 @@ func Render(box Box) string {
 		}
 		sort.Strings(clean)
 
-		fmt.Fprintf(&sb, "# site %s (port %d)\n", s.Slug, s.Port)
+		if s.isStatic() {
+			fmt.Fprintf(&sb, "# site %s (static %s)\n", s.Slug, s.Root)
+		} else {
+			fmt.Fprintf(&sb, "# site %s (port %d)\n", s.Slug, s.Port)
+		}
 		fmt.Fprintf(&sb, "%s {\n", strings.Join(clean, ", "))
 		sb.WriteString("  tls {\n")
 		sb.WriteString("    on_demand\n")
 		sb.WriteString("  }\n")
-		fmt.Fprintf(&sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)
-		sb.WriteString(MaintenanceHandler("  "))
+		if s.isStatic() {
+			// Serve the immutable release directory. A static site has no
+			// process to restart — the deploy swaps the `current` symlink
+			// atomically (charter D11), so there is no unreachable window and
+			// therefore NO MaintenanceHandler: file_server's own 404 for a
+			// missing page must surface as a real 404, not get masked into the
+			// "Back in a moment" deploy page that handle_errors would impose.
+			fmt.Fprintf(&sb, "  root * %s\n", s.Root)
+			sb.WriteString("  file_server\n")
+		} else {
+			fmt.Fprintf(&sb, "  reverse_proxy 127.0.0.1:%d\n", s.Port)
+			sb.WriteString(MaintenanceHandler("  "))
+		}
 		sb.WriteString("}\n\n")
 	}
 
 	return sb.String()
+}
+
+// safeRoot reports whether root is safe to splice verbatim into a Caddyfile
+// `root * <root>` directive. It rejects the empty string and anything carrying
+// whitespace, control bytes, or the Caddyfile-structural characters "{", "}",
+// so a malformed served path can neither break the file's syntax (one bad
+// value fails the whole file) nor inject directives. The served path is an
+// on-box release directory, so a legitimate value never contains these.
+func safeRoot(root string) bool {
+	if root == "" {
+		return false
+	}
+	for _, r := range root {
+		if r <= ' ' || r == 0x7f || r == '{' || r == '}' {
+			return false
+		}
+	}
+	return true
 }
 
 // validDomain reports whether d is safe to splice into a Caddyfile host key.

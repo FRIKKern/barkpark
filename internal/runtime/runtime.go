@@ -560,7 +560,11 @@ func statusError(resp *http.Response) error {
 }
 
 // mergeSite replaces or appends s by slug in sites — pure function, returns a
-// new slice (input untouched, safe to call with shared state).
+// new slice (input untouched, safe to call with shared state). It operates on
+// whole caddyfile.Site values, so every field — including a static site's
+// Kind/Root (charter D9) — rides through untouched: a KindStatic entry already
+// in state.LiveSites survives a reverse_proxy deploy of a different slug, and
+// the container path here keeps constructing Kind-empty (reverse_proxy) sites.
 func mergeSite(sites []caddyfile.Site, s caddyfile.Site) []caddyfile.Site {
 	out := make([]caddyfile.Site, 0, len(sites)+1)
 	replaced := false

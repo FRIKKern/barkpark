@@ -687,6 +687,40 @@ func TestMergeSite_AppendsIfNew(t *testing.T) {
 	}
 }
 
+func TestMergeSite_PreservesStaticKindAndRoot(t *testing.T) {
+	// A static site already live in state.LiveSites (charter D9) must survive a
+	// reverse_proxy deploy of a DIFFERENT slug: mergeSite operates on whole
+	// caddyfile.Site values, so Kind/Root ride through untouched and the
+	// rendered Caddyfile keeps its file_server block.
+	existing := []caddyfile.Site{
+		{Slug: "flat", Domains: []string{"docs.com"}, Kind: caddyfile.KindStatic, Root: "/srv/flat/current"},
+	}
+	out := mergeSite(existing, caddyfile.Site{Slug: "app", Domains: []string{"app.com"}, Port: 7001})
+	if len(out) != 2 {
+		t.Fatalf("len = %d, want 2", len(out))
+	}
+	var static *caddyfile.Site
+	for i := range out {
+		if out[i].Slug == "flat" {
+			static = &out[i]
+		}
+	}
+	if static == nil {
+		t.Fatal("static site dropped by mergeSite")
+	}
+	if static.Kind != caddyfile.KindStatic || static.Root != "/srv/flat/current" {
+		t.Errorf("static Kind/Root not preserved: %+v", *static)
+	}
+	// And it renders as file_server, not reverse_proxy, alongside the proxied one.
+	rendered := caddyfile.Render(caddyfile.Box{Sites: out})
+	if !strings.Contains(rendered, "root * /srv/flat/current\n  file_server\n") {
+		t.Errorf("static block missing after merge:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "reverse_proxy 127.0.0.1:7001") {
+		t.Errorf("proxied block missing after merge:\n%s", rendered)
+	}
+}
+
 func TestDefaultPortAllocator_PicksLowestFree(t *testing.T) {
 	a := DefaultPortAllocator{}
 	p, err := a.Allocate(map[int]bool{7001: true, 7002: true, 7004: true})
