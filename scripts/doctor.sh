@@ -48,7 +48,7 @@ if command -v bp >/dev/null 2>&1; then
     ok "installed bp ($BP_COMMIT) is current"
   fi
 else
-  skip "no bp on PATH — install: make cli-build && cp dist/bp ~/.local/bin/bp"
+  skip "no bp on PATH — install: make cli-build && install -m 0755 dist/bp ~/.local/bin/bp"
 fi
 
 # ── 3. Pending migrations on the local dev DB? ──────────────────────────────

@@ -58,7 +58,7 @@ if changed '*.go' go.mod go.sum internal cmd; then
       BP_TARGET="$(command -v bp)"
     fi
     if [ -n "$BP_TARGET" ]; then
-      cp dist/bp "$BP_TARGET"
+      install -m 0755 dist/bp "$BP_TARGET"
       did "bp CLI rebuilt at $(git rev-parse --short HEAD) and installed to $BP_TARGET"
     else
       did "bp CLI rebuilt -> dist/bp (no writable bp on PATH; set BP_INSTALL=<path> to auto-install)"
