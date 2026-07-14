@@ -385,7 +385,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         :if={!@connect_configured?}
         data-test-id="connectors-readonly-banner"
         class="card"
-        style="border: 1px solid var(--border); border-left: 3px solid var(--warning, #b7791f); border-radius: 8px; padding: 12px 16px; margin: 16px 0; background: var(--bg-card);"
+        style="border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 8px; padding: 12px 16px; margin: 16px 0; background: var(--bg-card);"
       >
         <strong>Connect is not configured on this instance.</strong>
         <p class="text-sm" style="color: var(--fg-muted); margin: 4px 0 0;">
@@ -563,7 +563,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           :if={@dialog.error}
           data-test-id="connectors-dialog-error"
           class="text-sm"
-          style="margin: 0; color: var(--danger, #c53030); border-left: 2px solid var(--danger, #c53030); padding-left: 10px;"
+          style="margin: 0; color: var(--danger); border-left: 2px solid var(--danger); padding-left: 10px;"
         >
           {@dialog.error}
         </p>
@@ -632,6 +632,6 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   defp status_label(nil, true), do: "Not connected"
   defp status_label(nil, false), do: "Loading…"
 
-  defp status_color(%{}, _loaded?), do: "var(--success, #2f855a)"
+  defp status_color(%{}, _loaded?), do: "var(--ok)"
   defp status_color(nil, _loaded?), do: "var(--fg-muted)"
 end
