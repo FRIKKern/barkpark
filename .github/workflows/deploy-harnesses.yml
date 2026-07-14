@@ -15,11 +15,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install and assert Caddy
+        # From the OFFICIAL Caddy repo, never Ubuntu's — universe ships 2.6.2,
+        # which predates Caddy's heredoc syntax (>= 2.7). The maintenance block
+        # in instance-deploy.sh uses a heredoc (`body <<BARKPARK_MAINTENANCE`),
+        # so a 2.6 `caddy validate` REJECTS it — and arm_caddy_maintenance then
+        # silently reverts (it never fails a deploy), leaving the box to serve
+        # raw 502s during a deploy instead of the maintenance page. This harness
+        # exists to do REAL caddy validation, so it must validate against a Caddy
+        # that can actually parse the config we ship. Assert the floor, loudly.
         run: |
+          sudo apt-get update
+          sudo apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+            | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+          curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+            | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
           sudo apt-get update
           sudo apt-get install -y caddy
           command -v caddy
           caddy version
+          # Heredoc floor (>= 2.7): fail LOUDLY here rather than let the deploy
+          # script's silent revert turn into a green harness on a broken config.
+          ver="$(caddy version | grep -oE 'v[0-9]+\.[0-9]+' | head -1 | tr -d v)"
+          major="${ver%%.*}"; minor="${ver##*.}"
+          if [ "$major" -lt 2 ] || { [ "$major" -eq 2 ] && [ "$minor" -lt 7 ]; }; then
+            echo "::error title=Caddy too old::caddy $ver cannot parse the heredoc maintenance block (needs >= 2.7)"
+            exit 1
+          fi
       - name: Instance deploy harness
         run: bash deploy/instance-deploy_test.sh
       - name: Control-plane deploy harness
