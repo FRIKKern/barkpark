@@ -46,6 +46,7 @@ defmodule Barkpark.Sites.DeployRequest do
     BARKPARK_WORKSPACE
     BARKPARK_PROJECT
     BARKPARK_SITE_BASE
+    BARKPARK_DOC_TYPE
   )
 
   # Same regexes site-deploy.sh enforces (SITE_SLUG / BUILD_ID). Anchored with
