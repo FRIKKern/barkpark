@@ -162,16 +162,30 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
       "type": "string",
       "description": "Stable worker identity, e.g. \"cursor-alice\". Reuse the same id for the matching close."
     },
-    "phase_id": {
-      "type": "string",
-      "description": "Optional: restrict the claim to tasks under this phase/goal slug."
-    }
-  }
-}`),
+	    "phase_id": {
+	      "type": "string",
+	      "description": "Optional: restrict the claim to tasks under this phase/goal slug."
+	    },
+	    "execution_policy_override": {
+	      "type": "object",
+	      "additionalProperties": false,
+	      "required": ["version"],
+	      "properties": {
+	        "version": { "type": "integer", "const": 1 },
+	        "agent_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+	        "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+	        "reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh"] },
+	        "resource_class": { "type": "string", "enum": ["light", "standard", "heavy"] }
+	      },
+	      "description": "Highest-precedence advisory override, frozen into the claim snapshot."
+	    }
+	  }
+	}`),
 	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var in struct {
-			WorkerID string `json:"worker_id"`
-			PhaseID  string `json:"phase_id"`
+			WorkerID                string          `json:"worker_id"`
+			PhaseID                 string          `json:"phase_id"`
+			ExecutionPolicyOverride json.RawMessage `json:"execution_policy_override"`
 		}
 		if err := decodeMCPArgs(req, &in); err != nil {
 			return mcpArgError(err), nil
@@ -185,7 +199,15 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if in.PhaseID != "" {
 			tail = append(tail, in.PhaseID)
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, nextCmd, tail)), nil
+		var policy map[string]any
+		if len(in.ExecutionPolicyOverride) > 0 && string(in.ExecutionPolicyOverride) != "null" {
+			var err error
+			policy, err = parseTaskExecutionPolicyJSON(in.ExecutionPolicyOverride)
+			if err != nil {
+				return mcpArgError(fmt.Errorf("execution_policy_override: %w", err)), nil
+			}
+		}
+		return mcpRun(execTaskNextWithPolicy(g, ctx, m, nextCmd, tail, policy)), nil
 	})
 
 	// task_show — full detail for one task id (children + child_count).
@@ -330,7 +352,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     "description": { "type": "string" },
     "parent_id": { "type": "string", "description": "Parent task/goal slug for a nested tree." },
     "priority": { "type": "integer", "minimum": 0, "maximum": 4, "description": "0 = highest .. 4 = lowest." },
-    "acceptance_criteria": {
+	    "acceptance_criteria": {
       "type": "array",
       "description": "Proof obligations.",
       "items": {
@@ -342,9 +364,22 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
           "met": { "type": "boolean" },
           "evidence": { "type": "string" }
         }
-      }
-    },
-    "tags": {
+	      }
+	    },
+	    "execution_policy": {
+	      "type": "object",
+	      "additionalProperties": false,
+	      "required": ["version"],
+	      "properties": {
+	        "version": { "type": "integer", "const": 1 },
+	        "agent_type": { "type": "string", "minLength": 1, "maxLength": 64 },
+	        "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+	        "reasoning_effort": { "type": "string", "enum": ["minimal", "low", "medium", "high", "xhigh"] },
+	        "resource_class": { "type": "string", "enum": ["light", "standard", "heavy"] }
+	      },
+	      "description": "Optional strict advisory routing policy stored on the Task."
+	    },
+	    "tags": {
       "type": "array",
       "description": "Weighted labels. Hard bounds 1-12 (advisory norm 2-4); strengths must be distinct with a single unique maximum (the main tag).",
       "minItems": 1,
@@ -370,6 +405,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			ParentID           string            `json:"parent_id"`
 			Priority           *int              `json:"priority"`
 			AcceptanceCriteria []json.RawMessage `json:"acceptance_criteria"`
+			ExecutionPolicy    json.RawMessage   `json:"execution_policy"`
 			Tags               []json.RawMessage `json:"tags"`
 			Publish            *bool             `json:"publish"`
 		}
@@ -403,6 +439,13 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 				crit = append(crit, v)
 			}
 			body["acceptance_criteria"] = crit
+		}
+		if len(in.ExecutionPolicy) > 0 && string(in.ExecutionPolicy) != "null" {
+			policy, err := parseTaskExecutionPolicyJSON(in.ExecutionPolicy)
+			if err != nil {
+				return mcpArgError(fmt.Errorf("execution_policy: %w", err)), nil
+			}
+			body["execution_policy"] = policy
 		}
 		if len(in.Tags) > 0 {
 			tags := make([]any, 0, len(in.Tags))
@@ -640,6 +683,33 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	})
 
 	return nil
+}
+
+// execTaskNextWithPolicy extends the live task.next manifest request only at
+// the MCP boundary. The server manifest intentionally remains backwards
+// compatible; this curated tool adds the typed override to the JSON body after
+// the shared dispatcher has resolved auth, scope, and the standard arguments.
+func execTaskNextWithPolicy(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string, policy map[string]any) (int, []byte, error) {
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, false)
+	if derr != nil {
+		return 0, nil, derr
+	}
+	if policy != nil {
+		body := map[string]any{}
+		if len(req.body) > 0 {
+			if err := json.Unmarshal(req.body, &body); err != nil {
+				return 0, nil, fmt.Errorf("decode task.next body: %w", err)
+			}
+		}
+		body["execution_policy_override"] = policy
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, fmt.Errorf("encode task.next policy: %w", err)
+		}
+		req.body = encoded
+		req.headers["Content-Type"] = "application/json"
+	}
+	return sendManifestRequest(req)
 }
 
 // mcpBoolPtr returns a pointer to b — for the SDK's *bool annotation fields
