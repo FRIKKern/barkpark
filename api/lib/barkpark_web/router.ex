@@ -1954,6 +1954,19 @@ defmodule BarkparkWeb.Router do
     post("/v1/tokens", TokenController, :create)
   end
 
+  # Scoped CHAT token mint (admin) — mints a workspace-bound token whose
+  # permission set is HARDCODED to ["chat"] (Connectors D36). Deliberately a
+  # separate controller from TokenController above (whose allowlist is read-only
+  # by contract): a connector install needs a per-tenant chat credential, and an
+  # `admin` entry would resolve to `:global` chat scope and stamp NULL-owner
+  # sessions. Same :scoped_admin gate (owner/admin role in the resolved
+  # workspace), so this can never be a privilege-mint.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    post("/v1/chat/tokens", ChatTokenController, :create)
+  end
+
   # Scoped webhooks (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
