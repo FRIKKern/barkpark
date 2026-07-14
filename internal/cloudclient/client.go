@@ -1266,7 +1266,11 @@ type SiteStage struct {
 // failed / cancelled (see SiteDeploymentTerminal); Stage names the visible stage
 // currently in flight; Stages carries the per-stage progress the CLI streams, each
 // with the engine's own `detail` line. BuildID is the isolated, reproducible build;
-// URL is the live path url once SWITCH flips the symlink.
+// URL is the live path url once SWITCH flips the symlink. Trigger is the deploy's
+// provenance — "manual" (a `bp cloud site deploy` / API call) or "content-auto" (a
+// content publish on the bound dataset fired the debounced auto-rebuild); it is
+// omitempty because the control plane only started emitting it in wave 5 and Go's
+// json.Unmarshal would otherwise silently drop the unknown key.
 type SiteDeployment struct {
 	ID            string      `json:"id"`
 	SiteID        string      `json:"site_id"`
@@ -1275,6 +1279,7 @@ type SiteDeployment struct {
 	Stages        []SiteStage `json:"stages"`
 	BuildID       string      `json:"build_id"`
 	URL           string      `json:"url"`
+	Trigger       string      `json:"trigger,omitempty"`
 	FailureReason string      `json:"failure_reason"`
 	BecameLiveAt  string      `json:"became_live_at"`
 	InsertedAt    string      `json:"inserted_at"`
