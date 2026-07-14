@@ -210,6 +210,10 @@ defmodule Barkpark.StudioChat.Runtime do
       os_pid: nil,
       memory_bytes: nil,
       reductions: nil,
+      message_queue_len: nil,
+      provider_memory_bytes: nil,
+      provider_cpu_percent: nil,
+      metric_provenance: %{},
       sampled_at: DateTime.utc_now() |> DateTime.to_iso8601(),
       limitations: RuntimeTelemetry.registered_host_limitations()
     }
@@ -231,9 +235,18 @@ defmodule Barkpark.StudioChat.Runtime do
           memory_bytes: info[:memory],
           reductions: info[:reductions],
           message_queue_len: info[:message_queue_len],
+          provider_memory_bytes: nil,
+          provider_cpu_percent: nil,
+          metric_provenance: %{
+            beam_pid: "beam_adapter_process",
+            memory_bytes: "beam_adapter_process",
+            reductions: "beam_adapter_process",
+            message_queue_len: "beam_adapter_process",
+            os_pid: "provider_process"
+          },
           node: node(pid) |> Atom.to_string(),
           sampled_at: sampled_at,
-          limitations: []
+          limitations: RuntimeTelemetry.managed_runtime_limitations()
         }
 
       _ ->
@@ -245,8 +258,15 @@ defmodule Barkpark.StudioChat.Runtime do
           os_pid: nil,
           memory_bytes: nil,
           reductions: nil,
+          message_queue_len: nil,
+          provider_memory_bytes: nil,
+          provider_cpu_percent: nil,
+          metric_provenance: %{},
           sampled_at: sampled_at,
-          limitations: ["managed runtime process was not alive when sampled"]
+          limitations: [
+            "managed runtime process was not alive when sampled"
+            | RuntimeTelemetry.managed_runtime_limitations()
+          ]
         }
     end
   end
