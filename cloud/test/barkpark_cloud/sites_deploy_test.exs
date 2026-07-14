@@ -106,6 +106,31 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       refute d1.build_id == d2.build_id
     end
+
+    # charter D36 — the force nonce. Without it a re-deploy of UNCHANGED content
+    # returns the cached duplicate (the no-op above) and can never re-run: a
+    # genuinely-new build is impossible. `force: true` folds a nonce into the
+    # build_id so a brand-new releases/<build_id>/ is minted, WITHOUT changing the
+    # default (no-op) path — the two live side by side.
+    test "force: true mints a NEW build on unchanged content, while the default path stays a no-op" do
+      {bp, site} = setup_site()
+
+      assert {:ok, d1} = Deploy.enqueue(site, bp)
+      # The tripwire: same code+content+config is STILL a no-op by default.
+      assert {:duplicate, ^d1} = Deploy.enqueue(site, bp)
+
+      # …but a forced deploy of that same content is a real, distinct build.
+      assert {:ok, forced} = Deploy.enqueue(site, bp, true)
+      refute forced.id == d1.id
+      refute forced.build_id == d1.build_id
+      assert byte_size(forced.build_id) == 16
+      assert length(Registry.list_deployments(site, 10)) == 2
+
+      # Two forced deploys are each distinct too (a fresh nonce every time) — so a
+      # rollback proof can stand up two live builds to flip between.
+      assert {:ok, forced2} = Deploy.enqueue(site, bp, true)
+      refute forced2.build_id == forced.build_id
+    end
   end
 
   describe "run/1 — the six-stage walk" do
@@ -164,6 +189,53 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert env[:BARKPARK_API_URL] == "#{@instance_url}/w/acme/p/blog"
       assert env[:BARKPARK_DATASET] == "production"
       assert env[:BARKPARK_SITE_BASE] == "/sites/#{site.slug}/"
+      # charter D35: the content type the build's flagship fetch reads — the
+      # canonical default "post" when the site was created without --doc-type.
+      assert env[:BARKPARK_DOC_TYPE] == "post"
+    end
+
+    # charter D35 — DOC_TYPE end-to-end. A site created with `doc_type: "paper"`
+    # drives the box with BARKPARK_DOC_TYPE=paper, so a real Astro build reads
+    # papers (100 docs on guerrilla) instead of the default "post" (0 docs there,
+    # which hard-fails the build). Proves the per-site type reaches argv.
+    test "a site bound to doc_type=paper drives the box with BARKPARK_DOC_TYPE=paper" do
+      bp = team_fixture() |> live_barkpark()
+      site = static_site(bp, %{doc_type: "paper"})
+      assert site.doc_type == "paper"
+
+      {:ok, d} = Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      assert payload.env[:BARKPARK_DOC_TYPE] == "paper"
+    end
+
+    # charter D37 — a nil/undecryptable read token FAILS CLOSED. The build fetches
+    # over the scoped route with this token; a nil one would build UNAUTHENTICATED
+    # (empty content, an empty bp-doc-id marker, a false-green live page). So the
+    # driver refuses BEFORE touching the box: the deployment settles failed with an
+    # honest reason and start_deploy is never called.
+    test "a site whose read token is missing settles failed and never touches the box" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # Simulate a row whose token was never stored / cannot be revealed.
+      site
+      |> Ecto.Changeset.change(read_token_encrypted: nil)
+      |> Repo.update!()
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "read token"
+
+      # The box was NEVER driven — no build ran unauthenticated.
+      assert FakeBoxRelay.calls() == []
+      # …and the site's live pointer never moved.
+      assert is_nil(Repo.get(Site, site.id).current_deployment_id)
     end
 
     test "a build that fails HEALTH never switches — the live pointer does not move" do

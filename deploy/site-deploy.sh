@@ -100,7 +100,8 @@ HEALTH_HOST="${BARKPARK_HEALTH_HOST:-guerrilla.barkpark.cloud}"
 RETAIN="${BARKPARK_SITE_RETAIN:-5}"
 # The ONLY env vars BUILD may see (Vite process.env-precedence scrub, D7).
 BUILD_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
-             BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE)
+             BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE \
+             BARKPARK_DOC_TYPE)
 # Dropped INSIDE a release dir whose bytes failed HEALTH but which we must not
 # delete (it is the live or the rollback target).  PLAN refuses to re-gate a
 # release carrying it — it rebuilds instead.  See purge_failed_release.

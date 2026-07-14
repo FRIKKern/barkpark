@@ -8323,7 +8323,13 @@ defmodule BarkparkCloud.Web.Router do
         })
 
       true ->
-        case Sites.Deploy.enqueue(site, bp) do
+        # site-spawner W4 (charter D36): `{force: true}` mints a genuinely new
+        # build on unchanged content (a nonce varies the build_id), so a re-deploy
+        # can actually re-run instead of returning the cached duplicate. Anything
+        # but a literal `true` keeps the idempotent default.
+        force = conn.body_params["force"] == true
+
+        case Sites.Deploy.enqueue(site, bp, force) do
           {:ok, deployment} ->
             _ =
               Accounts.record_audit(%{
@@ -8546,6 +8552,11 @@ defmodule BarkparkCloud.Web.Router do
       {:bootstrap_workspace, ["bootstrap_workspace", "workspace"]},
       {:bootstrap_project, ["bootstrap_project", "project"]},
       {:bootstrap_dataset, ["bootstrap_dataset", "dataset"]},
+      # site-spawner W4 (charter D35): the content type the build reads. OPTIONAL
+      # — a create with no `doc_type` keeps the schema default "post"; it is NOT
+      # part of require_content_binding (the content binding is workspace/project/
+      # dataset, doc_type just selects which type within it).
+      {:doc_type, ["doc_type"]},
       {:read_token, ["read_token"]}
     ]
     |> Enum.reduce(attrs, fn {key, params}, acc ->

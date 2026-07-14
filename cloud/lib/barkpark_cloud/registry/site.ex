@@ -67,6 +67,13 @@ defmodule BarkparkCloud.Registry.Site do
     field :bootstrap_project, :string
     field :bootstrap_dataset, :string
 
+    # site-spawner W4 (charter D35): the content TYPE the static build's flagship
+    # fetch reads (baked into BARKPARK_DOC_TYPE at build time). "post" is the
+    # canonical default; a site created with `--doc-type paper` reads papers
+    # instead — the guerrilla live proof needs `paper` because `production/post`
+    # has zero docs there and a real Astro build hard-fails on the empty type.
+    field :doc_type, :string, default: "post"
+
     # A public-read-scoped token the static build uses to read that dataset.
     # `Vault.encrypt/1`'d exactly like `env_encrypted`; the plaintext is never
     # persisted and never serialized. Set through `Registry.create_site/2`
@@ -131,6 +138,7 @@ defmodule BarkparkCloud.Registry.Site do
       :bootstrap_workspace,
       :bootstrap_project,
       :bootstrap_dataset,
+      :doc_type,
       :read_token_encrypted,
       :github_repo,
       :github_branch,

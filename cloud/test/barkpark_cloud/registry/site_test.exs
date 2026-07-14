@@ -135,6 +135,20 @@ defmodule BarkparkCloud.Registry.SiteTest do
     end
   end
 
+  describe "doc_type (charter D35)" do
+    test "defaults to the canonical 'post' when unspecified" do
+      cs = changeset(kind: "static", framework: "astro")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :doc_type) == "post"
+    end
+
+    test "an explicit doc_type is cast onto the site" do
+      cs = changeset(kind: "static", framework: "astro", doc_type: "paper")
+      assert cs.valid?, inspect(errors_on(cs))
+      assert Ecto.Changeset.get_field(cs, :doc_type) == "paper"
+    end
+  end
+
   describe "read_token_encrypted (encrypted-at-rest field)" do
     test "the changeset accepts ciphertext as the read_token_encrypted binary" do
       cipher = <<1, 2, 3, 4>>
