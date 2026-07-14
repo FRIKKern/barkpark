@@ -85,7 +85,7 @@ defmodule Barkpark.Repo.Migrations.CreateEpicAssignments do
 
     create constraint(:epic_assignment_results, :epic_assignment_results_completed_evidence,
              check:
-               "status <> 'completed' OR (length(trim(evidence)) > 0 AND length(trim(evidence_revision)) > 0)"
+               "status <> 'completed' OR (evidence IS NOT NULL AND evidence_revision IS NOT NULL AND length(trim(evidence)) > 0 AND length(trim(evidence_revision)) > 0)"
            )
 
     execute """

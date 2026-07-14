@@ -142,6 +142,33 @@ defmodule Barkpark.EpicFleetTest do
         ])
       end
     end
+
+    test "database rejects result DELETE", %{scope: scope} do
+      {:ok, assignment} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+      {:ok, result} = EpicFleet.record_result(assignment, "terminal-1", result_attrs())
+
+      assert_raise Postgrex.Error, ~r/append-only/, fn ->
+        Repo.query!("DELETE FROM epic_assignment_results WHERE id = $1", [
+          Ecto.UUID.dump!(result.id)
+        ])
+      end
+    end
+
+    test "database requires pinned evidence for completed results", %{scope: scope} do
+      {:ok, assignment} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+      digest = String.duplicate("a", 64)
+
+      assert_raise Postgrex.Error, ~r/epic_assignment_results_completed_evidence/, fn ->
+        Repo.query!(
+          """
+          INSERT INTO epic_assignment_results
+            (id, assignment_id, idempotency_key, status, evidence_digest, payload, payload_digest, inserted_at)
+          VALUES (gen_random_uuid(), $1, 'raw-complete', 'completed', $2, '{}'::jsonb, $2, now())
+          """,
+          [Ecto.UUID.dump!(assignment.id), digest]
+        )
+      end
+    end
   end
 
   describe "fleet reduction" do
@@ -214,7 +241,10 @@ defmodule Barkpark.EpicFleetTest do
     end
   end
 
-  defp assignment_attrs(scope, assignment_id, snapshot \\ %{"task" => assignment_id}) do
+  defp assignment_attrs(scope, assignment_id),
+    do: assignment_attrs(scope, assignment_id, %{"task" => assignment_id})
+
+  defp assignment_attrs(scope, assignment_id, snapshot) do
     Map.merge(scope, %{
       assignment_id: assignment_id,
       phase: "build",
