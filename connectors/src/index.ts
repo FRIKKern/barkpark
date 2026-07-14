@@ -15,6 +15,12 @@ import type {
   InboundEvent,
   InstallsLookup,
 } from "./connector/types.js";
+import { createDiscordConnector, DISCORD_PROVIDER } from "./connectors/discord.js";
+import {
+  createIMessageConnector,
+  IMESSAGE_PROVIDER,
+  isSelfHostedProfile,
+} from "./connectors/imessage.js";
 import {
   createTelegramConnector,
   TELEGRAM_PROVIDER,
@@ -43,13 +49,38 @@ import { createInstallsLookup } from "./tenant/installs.js";
  * constructed from another tenant's secret.
  */
 
-/** P3 adds its channels HERE and nowhere else. */
-export function registerBuiltinConnectors(registry: ConnectorRegistry): void {
+/**
+ * P3 adds its channels HERE and nowhere else — one line each, and not one edit to
+ * the core loop (`core/dispatch.ts`, `tenant/resolve.ts`, `connector/registry.ts`,
+ * `turn/`). That invariant is the wave's acceptance bar, and `test/tenant.test.ts`
+ * keeps a structural tripwire on it.
+ *
+ * `env` is injectable so the PROFILE gate below is testable without mutating the
+ * process environment.
+ */
+export function registerBuiltinConnectors(
+  registry: ConnectorRegistry,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
   if (!registry.has(TELEGRAM_PROVIDER)) {
     registry.register(createTelegramConnector({ mode: "polling" }));
   }
-  // P3: registry.register(createSlackConnector());   // payload-team-id
-  // P3: registry.register(createDiscordConnector()); // credential-bound
+
+  // Discord: credential-bound, BYO-bot, Gateway-only (D41). NOT a shared app —
+  // a shared app would mean one bot token serving every tenant.
+  if (!registry.has(DISCORD_PROVIDER)) {
+    registry.register(createDiscordConnector());
+  }
+
+  // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
+  // it needs a dedicated Mac signed into an Apple ID, so it has no multi-tenant
+  // story at all. FAIL-CLOSED — an unset/other profile does not get it, so a
+  // Cloud deployment can never offer iMessage by accident.
+  if (isSelfHostedProfile(env) && !registry.has(IMESSAGE_PROVIDER)) {
+    registry.register(createIMessageConnector());
+  }
+
+  // P3: registry.register(createSlackConnector()); // payload-team-id
 }
 
 export interface BridgeDeps {

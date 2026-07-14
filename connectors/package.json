@@ -2,7 +2,7 @@
   "name": "@barkpark/connectors",
   "version": "0.0.0",
   "private": true,
-  "description": "Barkpark Connectors \u2014 the provider-agnostic bridge between chat channels and a Barkpark Session. A standalone Node/TypeScript service on Vercel's Chat SDK: write bot logic once, deploy everywhere. Client of the /v1/chat HTTP+SSE API; the BEAM stays the engine.",
+  "description": "Barkpark Connectors — the provider-agnostic bridge between chat channels and a Barkpark Session. A standalone Node/TypeScript service on Vercel's Chat SDK: write bot logic once, deploy everywhere. Client of the /v1/chat HTTP+SSE API; the BEAM stays the engine.",
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -17,9 +17,11 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "chat": "4.34.0",
-    "@chat-adapter/telegram": "4.34.0",
+    "@chat-adapter/discord": "4.34.0",
     "@chat-adapter/state-pg": "4.34.0",
+    "@chat-adapter/telegram": "4.34.0",
+    "chat": "4.34.0",
+    "chat-adapter-imessage": "1.1.0",
     "pg": "^8.13"
   },
   "devDependencies": {
