@@ -15,7 +15,7 @@
  * Full walkthrough: connectors/docs/telegram-smoke.md
  */
 import { createChatClient } from "../src/chat-client/client.js";
-import { MissingConfigError } from "../src/config.js";
+import { loadWebhookConfig, MissingConfigError } from "../src/config.js";
 import { createConnectorRegistry } from "../src/connector/registry.js";
 import type { ConnectorInstall } from "../src/connector/types.js";
 import {
@@ -247,6 +247,9 @@ async function main(): Promise<void> {
       credentialKey: env.CONNECTORS_CREDENTIAL_KEY as string,
       previousCredentialKeys: [],
       userName: env.BRIDGE_USER_NAME?.trim() || "barkpark",
+      // Inert here: the smoke drives Telegram by POLLING and never starts the
+      // inbound HTTP listener. Carried so the config stays one shape.
+      webhook: loadWebhookConfig(env),
     },
     registry,
     installs,

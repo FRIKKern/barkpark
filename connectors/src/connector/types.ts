@@ -154,6 +154,49 @@ export interface TenantContext {
 }
 
 /**
+ * Where the inbound HTTP transport finds the install key (charter D39).
+ *
+ * - `path` — the provider registers a per-install URL, so the key IS a path
+ *   segment: `POST|GET {prefix}/webhooks/:provider/:installKey`. WhatsApp (each
+ *   workspace's Meta app points at its own URL) and Telegram in webhook mode.
+ * - `payload` — the provider's request_url is APP-WIDE (one URL for every
+ *   workspace), so the key must be dug out of the body: Slack's `team_id`,
+ *   Teams' tenant id. Route: `POST|GET {prefix}/webhooks/:provider`.
+ */
+export type WebhookKeySource = "path" | "payload";
+
+/**
+ * A connector's inbound-webhook declaration — the ONE generic member the HTTP
+ * seam needs. This is the whole contract addition P3's webhook channels required:
+ * Slack, Teams and WhatsApp all land as a registry entry with a `webhook` block,
+ * and `core/dispatch.ts` / `tenant/resolve.ts` / `connector/registry.ts` /
+ * `turn/turn-loop.ts` are untouched.
+ *
+ * Connectors with no `webhook` (Telegram polling, Discord's gateway socket) are
+ * simply not routable over HTTP — their URLs 404, opaquely, like any other
+ * unknown route.
+ */
+export interface ConnectorWebhook {
+  keySource: WebhookKeySource;
+  /**
+   * Extract the install key from the RAW body bytes (required for
+   * `keySource: "payload"`, ignored for `"path"`).
+   *
+   * Handed the raw body EXACTLY as it arrived — never a re-serialised parse —
+   * because the same bytes are what the adapter's signature verification will
+   * HMAC. Return `null` when the key is absent or unparseable: a null key is a
+   * fail-closed 404, never a guess at "the only workspace".
+   *
+   * Demuxing BEFORE the signature is verified is safe by construction: the key
+   * only SELECTS which secret to verify against. A forged key points at another
+   * tenant's install whose secret will not verify the attacker's body, so the
+   * adapter rejects it cryptographically (proven: an A-signed body handed to B's
+   * adapter -> 401).
+   */
+  extractInstallKey?(rawBody: string, headers: Headers): string | null;
+}
+
+/**
  * A channel or tool connector (charter D30).
  *
  * Telegram registers as a first-class Connector, identical in shape to every
@@ -166,6 +209,15 @@ export interface Connector<TPayload = unknown> {
   auth: ConnectorAuth;
   /** Declares which routing strategy `resolveTenant` implements. */
   tenantResolution: TenantResolution;
+  /**
+   * Inbound HTTP transport, for the channels whose transport IS an HTTP request
+   * (Slack, Teams, WhatsApp). Absent for poll/socket channels (Telegram polling,
+   * Discord gateway) — they start their transport in `listen()` instead.
+   *
+   * Declaring it is the ONLY thing a webhook channel does to become routable:
+   * `http/webhook-server.ts` reads this member off the registry and nothing else.
+   */
+  webhook?: ConnectorWebhook;
   /**
    * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
    * Called once per install; the adapter is handed to `new Chat({ adapters })`.
