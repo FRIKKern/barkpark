@@ -66,7 +66,7 @@ bp task claim t1 agent-1            # <doc_id> <worker_id>
 bp task release t1 agent-1 1        # <doc_id> <worker> <epoch>
 
 # Mid-claim: stamp a criterion — met or honestly missed
-bp task stamp t1 agent-1 1 --criterion 0 --met --evidence "gate green"
+bp task stamp t1 agent-1 1 --criterion 0 --criterion-text "gate passes" --met --evidence "gate green"
 bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
 
 # ... pulse the now-line as you work (renews the lease)
@@ -76,19 +76,19 @@ bp task pulse t1 agent-1 --now "warm-up pinned, rerunning" --criterion 2
 bp task close t1 agent-1 1          # <doc_id> <worker> <epoch> [status] [reason]
 
 # Close with evidence: flip criteria met/evidence ATOMICALLY with the close (same rev-CAS).
-bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"PR #123"}]'
+bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"PR #123","criterion":"gate passes"}]'
 ```
 
 The contract, precisely:
 
-- **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, and bumps the epoch (race loss → `stale_claim`).
-- **Release** — `POST /v1/tasks/:id/release` takes holder `worker_id` + `observed_epoch`; flips `in_progress`→`open`; clears `claim.worker` and `assignee`; bumps the epoch; stamps `released_by`/`released_at`; emits `task.released`. Wrong holder → `not_holder`; stale epoch → `fenced_off`; row-rev loss → `stale_claim`.
-- **Stamp** — holder + epoch fenced. `--met` requires evidence; `--miss` records one of the last 5 attempts without flipping `met`. Emits `task.criterion`; does not trip the work-digest fence.
-- **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat that renews the lease and emits `task.pulse`. It has no epoch arg; a lost lease returns `not_holder`.
-- **Close** needs holder + epoch (`fenced_off` on mismatch). Optional status defaults to `done`; reason and criterion updates commit in the same rev-CAS. Unmet criteria warn, never gate. By default, brief drift returns `doc_changed_since_claim`; pass `observed_rev` for strict full-rev CAS.
+- **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, and bumps the epoch.
+- **Release** — `POST /v1/tasks/:id/release` takes holder `worker_id` + `observed_epoch`; flips `in_progress`→`open`; clears `claim.worker` and `assignee`; bumps the epoch; stamps `released_by`/`released_at`; emits `task.released`.
+- **Stamp** — holder + epoch fenced. `--met` requires evidence **and** `--criterion-text` (the row's exact wording; an index-only met-flip → 409 `criterion_text_required`). `--miss` needs neither: it records one of the last 5 attempts without flipping `met`. Emits `task.criterion`; does not trip the work-digest fence.
+- **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat that renews the lease and emits `task.pulse`. It has no epoch arg.
+- **Close** needs holder + epoch (`fenced_off` on mismatch). Optional status defaults to `done`; reason and criterion updates (`met:true` needs its `criterion` text) commit in the same rev-CAS. Unmet criteria warn, never gate. By default, brief drift returns `doc_changed_since_claim`; pass `observed_rev` for strict full-rev CAS.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **2700**, env-tunable), emitting `task.lease_expired` (reap keeps `assignee`). Finish, pulse, or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
-- **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` — only `met:true` counts; omitted when absent (never `0/0`). A `done` close with unmet criteria warns but commits.
+- **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` — only `met:true` counts; omitted when absent (never `0/0`).
 - **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + `blocks` edges); prime carries `rails: {parent_id → rail_rev}`. `notices`: `blocked_while_claimed`, and `rail_changed` when body `observed_rail_rev` ≠ current. **Allow-and-fence (L4):** a blocker edge or `move` onto an `in_progress` task bumps its epoch (mutator never rejected); the holder's stale close → `fenced_off`; fix = same-worker re-claim (renewal: epoch bump, digest kept).
 - **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev`. Guards: bad parent → 409 `invalid_parent`; self/descendant → `cycle`; same-parent → no-op.
 

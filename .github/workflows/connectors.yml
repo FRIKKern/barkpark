@@ -88,6 +88,18 @@ jobs:
       - name: Install
         run: npm ci
 
+      # BLOCKING, unlike js-tests.yml's and elixir.yml's advisory format jobs —
+      # and deliberately so. Those two are advisory for reasons connectors/ does
+      # not have: js-tests.yml checks a partial glob (a parity signal, not the
+      # whole tree) and elixir.yml's `mix format` tracks a pinned toolchain whose
+      # formatter drifts between versions. connectors/ pins prettier ^3.3 in its
+      # own package.json, `format:check` covers the WHOLE package, and the tree is
+      # clean today — so a red here always means a real, one-command-fixable drift
+      # (`npm run format`), never a false alarm. Cheapest possible step: no
+      # Postgres, no build, runs before typecheck so a formatting red fails fast.
+      - name: Format check (prettier)
+        run: npm run format:check
+
       - name: Typecheck
         run: npm run typecheck
 

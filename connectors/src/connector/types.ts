@@ -84,8 +84,18 @@ export interface ConnectorInstall {
    * `adapterFactory` — LOUDLY, at mount. A silent fallback to an ambient
    * `TELEGRAM_BOT_TOKEN`/`DISCORD_BOT_TOKEN` env var would send one workspace's
    * messages in another's name: this wave's headline bug, wearing a hat.
+   *
+   * OPTIONAL on the WRITE path (D52), and that is the whole point of the `?`: it
+   * is the only way a caller can say "do not touch the credential". Until this
+   * wave the key was REQUIRED, so `upsertInstall` could not distinguish "set it to
+   * NULL" from "leave it alone" — and `isBlankSecret(undefined)` is true, so the
+   * Slack OAuth callback (which supplies no `chatToken`) silently WIPED the
+   * sibling column on every re-auth. ABSENT now means PRESERVE (where preserving
+   * is safe — see `tenant/installs.ts`), and NULL/`""` still mean "no secret".
+   * On the READ path `tenant/installs.ts#toInstall` always sets it (string or
+   * null), so a mounted install never carries `undefined` here.
    */
-  credentialRef: string | null;
+  credentialRef?: string | null;
   /**
    * THIS workspace's Barkpark `chat`-permission ApiToken, OPENED. Sealed at rest
    * in `connector_installs.chat_token_ref`.
@@ -163,6 +173,64 @@ export interface InstallsLookup {
   ): Promise<WorkspaceId | null>;
   /** Every install of a connector — the boot path mounts one Chat per install. */
   listInstalls(provider: string): Promise<ConnectorInstall[]>;
+}
+
+/**
+ * The WRITE half of the installs table — deliberately NOT part of
+ * {@link InstallsLookup} (D51/D52).
+ *
+ * The core (`core/dispatch.ts`) hands connectors a WITNESSED, read-only lookup; a
+ * required `deleteInstall` on `InstallsLookup` would push a destructive verb into
+ * the one seam every inbound event passes through, for no caller's benefit. So
+ * disconnect takes this narrower capability instead, and only the two real lookups
+ * ({@link InstallsLookup} implementations built by `tenant/installs.ts`) carry it.
+ *
+ * It exists at all because a DISCONNECT has to be durable: before this wave the
+ * bridge had NO SQL DELETE anywhere — `Bridge.removeInstall` unmounts in memory
+ * only, so the next restart re-read the row and mounted the "disconnected" bot
+ * straight back. And since D52 made SQL NULL mean PRESERVE, revoking a secret can
+ * no longer be spelled as an upsert with a null: it needs its own verb.
+ */
+export interface InstallsWriter {
+  /** Remove the row. `true` when a row was actually deleted, `false` when none matched. */
+  deleteInstall(provider: string, installKey: string): Promise<boolean>;
+}
+
+/** An installs lookup that can also delete — what `tenant/installs.ts` returns. */
+export type MutableInstallsLookup = InstallsLookup & InstallsWriter;
+
+/** The verdict of a paste-mode credential check, BEFORE anything is written. */
+export type ConnectValidation =
+  | { ok: true; installKey: string; displayName: string }
+  | { ok: false; reason: string };
+
+/**
+ * PASTE-MODE CONNECT (charter D51) — the optional member that makes a connector
+ * connectable from Studio in two minutes.
+ *
+ * A connector WITHOUT it is catalog-visible but not connectable: Slack installs
+ * over OAuth (a different flow), Teams needs per-org Azure admin consent, iMessage
+ * is a self-hosted operator profile. Telegram and Discord are BYO-bot — the whole
+ * credential IS a string the operator pastes — so `validate` is the entire
+ * onboarding step.
+ *
+ * `validate` runs BEFORE any write, for two load-bearing reasons:
+ *   (i) a revoked or fat-fingered token is refused AT PASTE TIME, in the UI, with
+ *       a reason — not at the next restart, as a crash-looping unit (D53);
+ *  (ii) it yields the `installKey`, which Studio needs BEFORE it mints the chat
+ *       token so the token can be labelled `connector:<provider>:<install_key>` —
+ *       the only thing that lets DISCONNECT revoke exactly that token later.
+ *
+ * It MUST NOT write anything and MUST NOT throw for a bad credential: a bad
+ * credential is `{ok:false, reason}`, a typed refusal the route turns into a 422.
+ */
+export interface ConnectorConnect {
+  mode: "paste";
+  /** What Studio labels the paste box (e.g. "Bot token from @BotFather"). */
+  credentialLabel: string;
+  /** Where the operator gets the credential. Rendered as a link, never fetched. */
+  helpUrl?: string;
+  validate(credential: string): Promise<ConnectValidation>;
 }
 
 /** Per-dispatch context handed to a connector's `resolveTenant`. */
@@ -267,6 +335,11 @@ export interface Connector<TPayload = unknown> {
    * `http/webhook-server.ts` reads this member off the registry and nothing else.
    */
   webhook?: ConnectorWebhook;
+  /**
+   * Paste-mode connect (D51). Absent ⇒ catalog-visible, not connectable — the
+   * connect routes answer the same opaque 404 they answer for an unknown provider.
+   */
+  connect?: ConnectorConnect;
   /**
    * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
    * Called once per install; the adapter is handed to `new Chat({ adapters })`.

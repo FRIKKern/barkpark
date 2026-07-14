@@ -128,6 +128,16 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       # highlights itself (a page must tell you where you are).
       active: "Settings"
     },
+    # Connectors (connectors D49) — the same shape as settings: scoped-in-substance
+    # (an install belongs to ONE workspace), so the canonical route is scoped and
+    # the flat `/studio/connectors` is a 302 that reflects out of this table. It
+    # has its own top-menu tab, so it highlights itself.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/connectors",
+      disposition: :mount,
+      url: {:scoped, "/studio/connectors"},
+      active: "Connectors"
+    },
     %{route: "/studio/org-admin", disposition: :mount, url: "/studio/org-admin", active: :none},
     %{
       route: "/studio/styleguide",

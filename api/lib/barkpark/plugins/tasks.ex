@@ -680,12 +680,15 @@ defmodule Barkpark.Plugins.Tasks do
             summary:
               "Extra close-body fields as key=value (key:=json for typed). The expectation " <>
                 "close-out (task-proves-paper): --set 'criteria:=[{\"index\":0,\"met\":true," <>
-                "\"evidence\":\"PR #1234\"}]' flips acceptance_criteria met/evidence atomically " <>
-                "with the close (same rev CAS — no separate racing mutation). Optional " <>
+                "\"evidence\":\"PR #1234\",\"criterion\":\"<the criterion's exact stored wording>\"}]' " <>
+                "flips acceptance_criteria met/evidence atomically " <>
+                "with the close (same rev CAS — no separate racing mutation). \"criterion\" is " <>
+                "REQUIRED on every entry with met=true: the 0-based index alone is unverifiable, so an " <>
+                "unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently " <>
+                "flipping a neighbouring criterion, and a text that does not match the row at that index " <>
+                "is REJECTED too (409 criteria_mismatch). An entry with met=false needs no text. Optional " <>
                 "evidence is presence-sensitive: omit the key to preserve stored evidence, or " <>
-                "send evidence:\"\" to clear it. Optional " <>
-                "\"criterion\" per entry text-guards against a reordered/edited list (409 " <>
-                "criteria_mismatch). Unmet criteria never block a close (soft warning only). " <>
+                "send evidence:\"\" to clear it. Unmet criteria never block a close (soft warning only). " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },
@@ -743,7 +746,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). Optionally add --criterion-text \"<the criterion's exact wording>\" to guard against an off-by-one index: if the text doesn't match the row at N the whole stamp is REJECTED (409) instead of silently flipping a neighbour. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "read",
         args: [
@@ -777,7 +780,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "criterion-text",
             type: "string",
             summary:
-              "Optional off-by-one guard: the criterion's exact stored wording. When set, a stamp whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch) instead of silently flipping a neighbour. Omit for the permissive index-only path."
+              "REQUIRED with --met (optional with --miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[N].criterion. It is the off-by-one guard — a --met stamp with NO text is REJECTED (409 criterion_text_required), and one whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour."
           },
           %{
             name: "met",

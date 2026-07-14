@@ -398,9 +398,7 @@ defmodule BarkparkWeb.TasksController do
           })
 
         {:error, reason} ->
-          conn
-          |> put_status(:conflict)
-          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          conflict(conn, reason, :close)
       end
     else
       {:error, :missing, field} ->
@@ -484,11 +482,12 @@ defmodule BarkparkWeb.TasksController do
 
         {:error, reason} ->
           # Every failure here is a state conflict (not_holder / fenced_off /
-          # stale_claim / index out of range / not in_progress) — shape
-          # errors were already 400'd by parse_stamp above.
-          conn
-          |> put_status(:conflict)
-          |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+          # stale_claim / index out of range / criterion-text guard / not
+          # in_progress) — shape errors were already 400'd by parse_stamp above.
+          # The criteria-grain conflicts ride an actionable `message` (D56): a
+          # guard that refuses without saying what to type is a guard agents
+          # route around.
+          conflict(conn, reason, :stamp)
       end
     else
       {:error, :missing, field} ->
@@ -500,6 +499,23 @@ defmodule BarkparkWeb.TasksController do
       {:error, :not_found} ->
         not_found(conn, "task not found")
     end
+  end
+
+  # 409 envelope: the reason token stays the machine-readable contract; a
+  # criteria-grain reason ALSO carries a top-level `message` telling the caller
+  # exactly what to pass next (the bp CLI prints it in place of the token).
+  defp conflict(conn, reason, surface) do
+    body = %{ok: false, reason: Params.reason_to_string(reason)}
+
+    body =
+      case Params.criteria_hint(reason, surface) do
+        nil -> body
+        message -> Map.put(body, :message, message)
+      end
+
+    conn
+    |> put_status(:conflict)
+    |> json(body)
   end
 
   # ─── POST /v1/tasks/:doc_id/pulse ───────────────────────────────────────

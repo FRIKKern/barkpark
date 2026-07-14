@@ -226,7 +226,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_close",
 		Title:       "Close a claimed task",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
-		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence} — so the ledger records WHAT you proved and HOW. If the close returns 409 doc_changed_since_claim, the brief changed under your claim: task_show it again, reconcile, then close again. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
+		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence, criterion} — so the ledger records WHAT you proved and HOW. `criterion` (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[index].criterion) is REQUIRED on every entry with met:true: the 0-based index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping a NEIGHBOURING criterion, and a text that does not match the row at index is REJECTED (409 criteria_mismatch) with nothing written. An entry with met:false needs no text. If the close returns 409 doc_changed_since_claim, the brief changed under your claim: task_show it again, reconcile, then close again. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -256,15 +256,16 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "criteria": {
       "type": "array",
-      "description": "Acceptance criteria to flip in the same atomic write.",
+      "description": "Acceptance criteria to flip in the same atomic write. Every entry with met:true MUST also carry criterion (its exact stored wording) — an unguarded met-flip is REJECTED (409 criterion_text_required).",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": ["index", "met"],
         "properties": {
-          "index": { "type": "integer", "description": "0-based position in the task's acceptance_criteria." },
+          "index": { "type": "integer", "description": "0-based position in the task's acceptance_criteria. The FIRST criterion is 0." },
           "met": { "type": "boolean" },
-          "evidence": { "type": "string", "description": "Concrete proof: test names, gate output, branch, commit." }
+          "evidence": { "type": "string", "description": "Concrete proof: test names, gate output, branch, commit." },
+          "criterion": { "type": "string", "description": "REQUIRED when met is true: the criterion's exact stored wording, copied verbatim from acceptance_criteria[index].criterion. It is the off-by-one guard — without it the close is REJECTED (409 criterion_text_required); with a text that does not match the row at index it is REJECTED (409 criteria_mismatch) and nothing is written. An entry with met:false needs no text." }
         }
       }
     }
@@ -480,7 +481,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_stamp",
 		Title:       "Stamp a criterion mid-claim",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(false)},
-		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the ZERO-BASED index into acceptance_criteria: the FIRST criterion is 0, the second is 1 — do NOT pass a 1-based number (that silently stamps the wrong row). Optionally pass criterion_text (the criterion's exact wording) as an off-by-one guard: if it does not match the row at criterion the stamp is REJECTED (409 criteria_mismatch) instead of flipping a neighbour. Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
+		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the ZERO-BASED index into acceptance_criteria: the FIRST criterion is 0, the second is 1 — do NOT pass a 1-based number. criterion_text (the criterion's EXACT stored wording, copied verbatim from acceptance_criteria[criterion].criterion) is REQUIRED whenever you pass met:true — it is the off-by-one guard: WITHOUT it the stamp is REJECTED (409 criterion_text_required, nothing written), and WITH a text that does not match the row at criterion it is REJECTED (409 criteria_mismatch) instead of silently flipping a NEIGHBOURING criterion. A miss needs no text (it flips nothing). Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -505,11 +506,11 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     },
     "criterion_text": {
       "type": "string",
-      "description": "Optional off-by-one guard: the criterion's exact stored wording. When set, a stamp whose text does not match the row at criterion is REJECTED (409 criteria_mismatch) instead of silently flipping a neighbour."
+      "description": "REQUIRED with met (optional with miss): the criterion's exact stored wording, copied verbatim from acceptance_criteria[criterion].criterion. It is the off-by-one guard — a met stamp with NO criterion_text is REJECTED (409 criterion_text_required), and one whose text does not match the row at criterion is REJECTED (409 criteria_mismatch), instead of silently flipping a neighbour. Nothing is written on either rejection."
     },
     "met": {
       "type": "boolean",
-      "description": "Flip the criterion to met. REQUIRES a non-empty evidence. Pass EITHER met (with evidence) OR miss (with note), never both."
+      "description": "Flip the criterion to met. REQUIRES a non-empty evidence AND criterion_text. Pass EITHER met (with evidence + criterion_text) OR miss (with note), never both."
     },
     "evidence": {
       "type": "string",

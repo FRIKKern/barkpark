@@ -151,9 +151,21 @@ defmodule Barkpark.Tasks.ExpectationsTest do
     assert {:ok, _closed} =
              Tasks.close(published.id, "fable-w8",
                observed_epoch: epoch,
+               # D56: a met-flip names its criterion — the 0-based index alone is
+               # unverifiable, so an unguarded flip is :criterion_text_required.
                criteria: [
-                 %{"index" => 0, "met" => true, "evidence" => "expectations_test.exs demo loop"},
-                 %{"index" => 1, "met" => true, "evidence" => "this very assertion"}
+                 %{
+                   "index" => 0,
+                   "met" => true,
+                   "evidence" => "expectations_test.exs demo loop",
+                   "criterion" => "the reverse view lists this task"
+                 },
+                 %{
+                   "index" => 1,
+                   "met" => true,
+                   "evidence" => "this very assertion",
+                   "criterion" => "closing with evidence flips satisfied"
+                 }
                ]
              )
 

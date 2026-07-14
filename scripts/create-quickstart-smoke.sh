@@ -33,6 +33,22 @@
 # 0 failures.
 
 set -euo pipefail
+
+# Hand bp a CLOSED stdin, not the pipe a CI runner gives a `run:` step.
+#
+# bp guards against silently swallowing piped input: `--file <path>` with data on
+# stdin is a hard error ("piped stdin is unused; pass --file - to consume it"),
+# which is right. But the check is `stdin is not a char device` — and an EMPTY
+# pipe satisfies that just as a pipe carrying data does. GitHub Actions hands each
+# step a pipe, so `bp schema apply --file …` dies on the guard with no data in
+# sight, and this harness reds on a false positive it exists to rule out.
+#
+# This script never pipes into bp (12 invocations, zero `--file -`), so /dev/null
+# — a char device — is both honest and the shape a non-interactive harness should
+# have had all along. The underlying CLI bug (an empty pipe must not read as
+# "unused piped input"; it burns every user who runs bp from CI, cron, or a
+# Makefile recipe) is filed separately as bp-cli-empty-pipe-false-positive.
+exec 0</dev/null
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 

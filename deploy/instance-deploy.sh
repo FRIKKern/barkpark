@@ -316,6 +316,21 @@ if ! grep -q '^CONNECTORS_CREDENTIAL_KEY=' .env 2>/dev/null; then
   echo "CONNECTORS_CREDENTIAL_KEY=$(openssl rand -base64 32)" >> .env
   log "added CONNECTORS_CREDENTIAL_KEY to .env (connectors bridge credential cipher)"
 fi
+
+# The CONNECT seam's shared HMAC secret (connectors D50). BOTH sides read it:
+# the BEAM (Barkpark.Connectors, via runtime.exs) signs a connect ticket, and the
+# bridge verifies it — same value, same box, loopback only. Backfilled ONCE (a
+# regenerated secret would 401 every connect until both processes restart) and
+# COPIED into /etc/barkpark/connectors.env below.
+#
+# ABSENT is a supported state, not an error: no secret ⇒ the bridge does not
+# mount its connect routes and Studio's Connectors catalog renders read-only with
+# a banner. That is what removes the merge-order hazard between the bridge slice
+# and this step.
+if ! grep -q '^CONNECTORS_CONNECT_SECRET=' .env 2>/dev/null; then
+  echo "CONNECTORS_CONNECT_SECRET=$(openssl rand -base64 32)" >> .env
+  log "added CONNECTORS_CONNECT_SECRET to .env (Studio -> bridge connect tickets)"
+fi
 set -a; . ./.env; set +a
 
 # ---- Arm the Caddy maintenance page (branded 503 + Retry-After) so ANY window
@@ -759,6 +774,9 @@ else
         printf 'CONNECTORS_HTTP_ADDR=127.0.0.1:%s\n' "$CONNECTORS_PORT"
         printf 'CONNECTORS_PATH_PREFIX=%s\n' "$CONNECTORS_PATH_PREFIX"
         printf 'CONNECTORS_CREDENTIAL_KEY=%s\n' "${CONNECTORS_CREDENTIAL_KEY:-}"
+        # The SAME value Barkpark.Connectors signs tickets with (D50). If these
+        # two ever disagree, every connect 401s and nothing else would catch it.
+        printf 'CONNECTORS_CONNECT_SECRET=%s\n' "${CONNECTORS_CONNECT_SECRET:-}"
       } > "$CONNECTORS_ENV_FILE"
       install -m 0644 "$APP/deploy/systemd/barkpark-connectors.service" /etc/systemd/system/barkpark-connectors.service
       systemctl daemon-reload
@@ -774,6 +792,30 @@ else
           # serves no HTTP): does the path route actually reach the bridge?
           code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health" || true)"
           log "connectors health probe: 127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health = ${code:-000} (000 = no HTTP surface yet; provider webhooks would land on the maintenance 503 — see docs/ops/connectors-deploy.md)"
+
+          # INSURANCE, NOT A GATE (connectors D54). The BRIDGE creates chat_bridge
+          # at its own boot, so whoever it connects as OWNS the schema — and on
+          # every path we actually run (prod, CI, local) that is the same role the
+          # BEAM reads with, which makes this a strict no-op. It exists for the day
+          # a second, non-owning Postgres role appears: without USAGE+SELECT, the
+          # Studio Connectors catalog dies on `permission denied for schema
+          # chat_bridge`. It runs AFTER the health gate (the schema does not exist
+          # until the bridge has booted at least once) and it is GUARDED and
+          # NON-FATAL — a missing psql, a role we cannot name, or a permission error
+          # logs a warning and the deploy continues. A GRANT must never take an
+          # instance down.
+          if command -v psql >/dev/null 2>&1 && [ -n "${DATABASE_URL:-}" ]; then
+            db_role="$(psql "$DATABASE_URL" -tAc 'SELECT current_user' 2>/dev/null || true)"
+            if [ -n "$db_role" ]; then
+              if psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+                   -c "GRANT USAGE ON SCHEMA chat_bridge TO \"$db_role\"" \
+                   -c "GRANT SELECT ON chat_bridge.connector_installs TO \"$db_role\"" >/dev/null 2>&1; then
+                log "connectors: GRANT USAGE/SELECT on chat_bridge to $db_role (no-op for the schema owner)"
+              else
+                log "WARN: could not GRANT on chat_bridge to $db_role (schema may not exist yet, or we are not its owner) — continuing"
+              fi
+            fi
+          fi
         else
           log "WARN: barkpark-connectors did not stay active — disabling it (no crash-loop); $CONNECTORS_PATH_PREFIX stays on the maintenance 503. Check: journalctl -u barkpark-connectors"
           systemctl disable --now barkpark-connectors >/dev/null 2>&1 || true

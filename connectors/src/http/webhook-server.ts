@@ -62,6 +62,11 @@ import {
 
 import type { ConnectorRegistry } from "../connector/registry.js";
 import type { ConnectorInstall, InstallsLookup } from "../connector/types.js";
+import {
+  handleConnectRequest,
+  type ConnectAction,
+  type ConnectDeps,
+} from "./connect.js";
 import type { WebhookHandler, WebhookMountIndex } from "./mounts.js";
 
 /** GET is not optional: it is WhatsApp's verification handshake (rule 3). */
@@ -86,6 +91,25 @@ export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
 
 export const DEFAULT_PATH_PREFIX = "/connectors";
 
+/**
+ * THE TIME BOUND (charter D57). Node's stock defaults are not "forever", but they
+ * are far too generous for a loopback seam: headersTimeout 60s, requestTimeout
+ * 300s, and a `connectionsCheckingInterval` sweep every 30s.
+ *
+ * INVARIANT — `requestTimeout >= headersTimeout`, and it is enforced, not hoped
+ * for. Once headers have arrived node evicts at `max(headersTimeout, requestTimeout)`,
+ * so a "tighter" requestTimeout below headersTimeout is silently ignored: you would
+ * set 5s, measure 20s, and conclude the setting does nothing.
+ *
+ * The sweep interval is the OTHER half, and it is the one a naive fix misses:
+ * setting `headersTimeout` alone does not evict promptly, because eviction happens
+ * on the sweep — a slow-loris was measured surviving 30 006 ms against a 20 s
+ * headersTimeout. 5 s here bounds that overshoot.
+ */
+export const DEFAULT_HEADERS_TIMEOUT_MS = 20_000;
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+export const DEFAULT_CONNECTIONS_CHECKING_INTERVAL_MS = 5_000;
+
 export interface WebhookServerOptions {
   /** Where a provider id resolves to its Connector (and its `webhook` block). */
   registry: ConnectorRegistry;
@@ -93,6 +117,24 @@ export interface WebhookServerOptions {
   installs: InstallsLookup;
   /** The install-keyed mount index. `handlerFor` takes the row this lookup returned. */
   mounts: WebhookMountIndex;
+  /**
+   * The connect/disconnect routes (D50/D51). ABSENT ⇒ they are NOT MOUNTED and
+   * every one of their paths is the same opaque 404 as any unknown route.
+   *
+   * Optional on purpose, and it is a deployment-safety property, not a style
+   * choice: `CONNECTORS_CONNECT_SECRET` is written by the deploy, and a `required()`
+   * here would mean the bridge REFUSES TO BOOT on any host that has not been
+   * re-deployed yet — i.e. `/connectors` becomes the maintenance 503 for every
+   * tenant, fleet-wide, because a feature nobody is using yet has no env var. An
+   * unmounted route is a non-event; a dead bridge is an outage.
+   */
+  connect?: ConnectDeps;
+  /** Node's `server.headersTimeout`, ms. Default 20 s. */
+  headersTimeoutMs?: number;
+  /** Node's `server.requestTimeout`, ms. Default 30 s. MUST be >= headersTimeout. */
+  requestTimeoutMs?: number;
+  /** Node's connection sweep, ms. Default 5 s — this is what makes eviction PROMPT. */
+  connectionsCheckingIntervalMs?: number;
   /** Default `/connectors`. The bridge owns the FULL path — Caddy does not strip it. */
   pathPrefix?: string;
   /** Public https origin (behind a proxy). Falls back to x-forwarded-proto/host. */
@@ -208,6 +250,52 @@ function segmentsUnderPrefix(
 function isHealthRoute(rawTarget: string, pathPrefix: string): boolean {
   const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
   return rest !== null && rest.length === 1 && rest[0] === "health";
+}
+
+/**
+ * `{prefix}/connect`, `{prefix}/connect/validate`, `{prefix}/disconnect` — the
+ * connect loop (D50/D51), or null when this is not one of them.
+ *
+ * Parsed HERE, inside the webhook server, because `decodeSegments` /
+ * `segmentsUnderPrefix` / `normalisePathPrefix` are the security-hardened path
+ * parsing this seam already owns (dot segments rejected AFTER percent-decoding,
+ * empty segments refused, NUL and separator bytes refused). A connect router
+ * mounted elsewhere would have to duplicate all of it, and the copy is where the
+ * traversal bug would live.
+ */
+function parseConnectRoute(
+  rawTarget: string,
+  pathPrefix: string,
+): ConnectAction | null {
+  const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
+  if (rest === null) return null;
+
+  if (rest.length === 1 && rest[0] === "connect") return "connect";
+  if (rest.length === 1 && rest[0] === "disconnect") return "disconnect";
+  if (rest.length === 2 && rest[0] === "connect" && rest[1] === "validate") {
+    return "validate";
+  }
+  return null;
+}
+
+/**
+ * LOOPBACK-ONLY BY CONSTRUCTION (D50).
+ *
+ * Caddy appends `x-forwarded-for` and `x-forwarded-host` to everything it proxies,
+ * so their presence PROVES a request came through the public path route — and the
+ * connect routes are not for the public. Refusing them is not defence-in-depth on
+ * top of the bind address; it is the load-bearing control, because the same
+ * `node:http` server also serves the webhook routes, which MUST be reachable from
+ * the internet and which trust those very headers to build the adapter's URL.
+ *
+ * Note the asymmetry deliberately: a webhook WITH x-forwarded-* is normal traffic;
+ * a connect WITH x-forwarded-* is an opaque 404, valid ticket or not.
+ */
+function isProxied(req: IncomingMessage): boolean {
+  return (
+    req.headers["x-forwarded-for"] !== undefined ||
+    req.headers["x-forwarded-host"] !== undefined
+  );
 }
 
 /**
@@ -406,6 +494,7 @@ export function createWebhookRequestHandler(
     registry,
     installs,
     mounts,
+    connect,
     publicBaseUrl,
     onError,
     waitUntil = defaultWaitUntil,
@@ -463,6 +552,47 @@ export function createWebhookRequestHandler(
           return;
         }
         send(res, 200, HEALTH_BODY);
+        return;
+      }
+
+      // The connect loop (D50/D51). Every refusal below is the SAME opaque 404 the
+      // webhook demux gives, and it is reached BEFORE any body is read whenever
+      // that is possible at all.
+      const connectAction = parseConnectRoute(req.url ?? "/", pathPrefix);
+      if (connectAction !== null) {
+        // Not mounted (no CONNECTORS_CONNECT_SECRET), came through the proxy, or
+        // arrived as a GET: indistinguishable from "there is no such route". A
+        // stranger cannot even learn that a connect seam exists here.
+        if (connect === undefined || isProxied(req) || method !== "POST") {
+          drain(req);
+          notFound(res);
+          return;
+        }
+
+        const read = await readBody(req, maxBodyBytes);
+        if (!read.ok) {
+          send(
+            res,
+            read.reason === "too_large" ? 413 : 400,
+            read.reason === "too_large" ? TOO_LARGE_BODY : BAD_REQUEST_BODY,
+            { connection: "close" },
+          );
+          return;
+        }
+
+        const reply = await handleConnectRequest(
+          connectAction,
+          read.body.toString("utf8"),
+          connect,
+        );
+        // `null` => the handler declined (unknown/unconnectable provider, or a
+        // cross-tenant disconnect). It never spells the 404 itself, so it cannot
+        // drift from this one.
+        if (reply === null) {
+          notFound(res);
+          return;
+        }
+        send(res, reply.status, JSON.stringify(reply.body));
         return;
       }
 
@@ -624,9 +754,61 @@ export interface WebhookServer {
   close(): Promise<void>;
 }
 
-/** Build (but do not listen on) the webhook server. */
+/**
+ * `connectionsCheckingInterval` is a REAL, documented runtime property of
+ * `http.Server` — and `@types/node@22.20.1` does not declare it (it is missing from
+ * the `Server` interface, though `createServer`'s options bag has it). Casting
+ * through this local interface is the honest spelling: it says "the type is wrong,
+ * the runtime is right", and it stays checked (a typo is still a compile error)
+ * rather than an `any` that would swallow one.
+ *
+ * It is set on the SERVER, not passed to `createServer`, so that a server the
+ * caller built elsewhere can be bounded too — and because the three timeouts then
+ * live in one place a reader can see at once.
+ */
+interface ServerWithConnectionsChecking extends Server {
+  connectionsCheckingInterval: number;
+}
+
+/**
+ * Build (but do not listen on) the webhook server, TIME-BOUNDED (D57).
+ *
+ * The byte bound already shipped (1 MiB, drained, never a socket teardown). This
+ * is the other half: without it a slow-loris — a connection that sends half a
+ * header line and then nothing — holds a socket for 60 s on node's defaults, and
+ * the eviction lands whenever the 30 s sweep next happens to run.
+ */
 export function createWebhookServer(options: WebhookServerOptions): Server {
-  return createServer(createWebhookRequestHandler(options));
+  const headersTimeout = options.headersTimeoutMs ?? DEFAULT_HEADERS_TIMEOUT_MS;
+  const requestTimeout = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const connectionsCheckingInterval =
+    options.connectionsCheckingIntervalMs ??
+    DEFAULT_CONNECTIONS_CHECKING_INTERVAL_MS;
+
+  // THE INVARIANT (D57), enforced rather than commented: once headers have
+  // arrived, node evicts at max(headersTimeout, requestTimeout). A requestTimeout
+  // BELOW headersTimeout is therefore not "stricter" — it is inert, and the
+  // operator who set it would measure the headers value and disbelieve their own
+  // config. Refuse it at construction, where the mistake is cheap.
+  if (requestTimeout < headersTimeout) {
+    throw new Error(
+      `webhook server: requestTimeout (${requestTimeout}ms) must be >= headersTimeout ` +
+        `(${headersTimeout}ms) — node evicts at max(headersTimeout, requestTimeout) once ` +
+        "headers have arrived, so a lower requestTimeout is silently ignored.",
+    );
+  }
+
+  const server = createServer(createWebhookRequestHandler(options));
+
+  server.headersTimeout = headersTimeout;
+  server.requestTimeout = requestTimeout;
+  // The sweep. WITHOUT this, headersTimeout alone does not evict promptly: the
+  // check runs on this interval, so a 20 s bound with node's stock 30 s sweep was
+  // measured letting a slow-loris live 30 006 ms.
+  (server as ServerWithConnectionsChecking).connectionsCheckingInterval =
+    connectionsCheckingInterval;
+
+  return server;
 }
 
 export interface StartWebhookServerOptions extends WebhookServerOptions {

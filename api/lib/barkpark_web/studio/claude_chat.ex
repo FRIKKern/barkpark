@@ -399,6 +399,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     PREVIEW_JWT_SECRET
     BARKPARK_INGEST_TOKEN PAPERFLOW_INGEST_TOKEN
     HETZNER_API_TOKEN HCLOUD_TOKEN
+    CONNECTORS_CONNECT_SECRET
   )
 
   @doc "The secret env var names scrubbed from every chat child (charter D3)."
