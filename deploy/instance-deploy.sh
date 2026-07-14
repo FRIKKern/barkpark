@@ -559,11 +559,26 @@ else
 fi
 log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 
-# ---- Install/refresh the slot units + per-slot env (idempotent).
+# ---- Install/refresh the slot units + per-slot env (idempotent). The env files
+# are truncate-regenerated every deploy, so any operator-set
+# BARKPARK_SITE_DEPLOY_APPLY=1 — the site-deploy seam-enable flag, read at BEAM
+# boot from .slots/%i.env via the unit's EnvironmentFile — must be CARRIED
+# FORWARD or a redeploy silently drops it and the site-deploy admin route
+# reverts to 503, re-breaking the finish line (D38). Mirror the backfill
+# discipline used for the $APP/.env durable flags above: preserve what the prior
+# file held, never hardcode the flag on (absent stays absent — fail-closed).
 install -m 0644 "$APP/deploy/systemd/barkpark-slot@.service" /etc/systemd/system/barkpark-slot@.service
 mkdir -p "$APP/.slots"
-printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$BLUE_PORT" "$APP/api/_build_blue" > "$APP/.slots/blue.env"
-printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$GREEN_PORT" "$APP/api/_build_green" > "$APP/.slots/green.env"
+write_slot_env() { # $1=slot  $2=port  $3=build_root
+  local f="$APP/.slots/$1.env" apply=""
+  [ -f "$f" ] && apply="$(grep -E '^BARKPARK_SITE_DEPLOY_APPLY=' "$f" 2>/dev/null | tail -1)"
+  {
+    printf 'BARKPARK_PORT_OVERRIDE=%s\nMIX_BUILD_ROOT=%s\n' "$2" "$3"
+    [ -n "$apply" ] && printf '%s\n' "$apply"
+  } > "$f"
+}
+write_slot_env blue  "$BLUE_PORT"  "$APP/api/_build_blue"
+write_slot_env green "$GREEN_PORT" "$APP/api/_build_green"
 # Per-slot version stamp (W6 D12): record what THIS deploy puts into the target
 # slot, so --rollback knows what the idle slot holds after the next flip. STATE
 # is one global sha and the env files carry only port+build-root — without the

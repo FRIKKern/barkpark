@@ -605,5 +605,29 @@ EOF
   rm -rf "$TMP"
 fi
 
+echo "== Case 14: slot-env regen PRESERVES an operator-set BARKPARK_SITE_DEPLOY_APPLY (D38) =="
+# The seam-enable flag lives in .slots/%i.env (read at BEAM boot via the unit's
+# EnvironmentFile). The generator truncate-regenerates both env files EVERY
+# deploy — before this fix the flag was silently dropped, reverting the
+# site-deploy admin route to 503. Seed the flag BEFORE a deploy, prove it
+# survives the regen, and prove the untouched slot does NOT get it hardcoded on.
+setup_case
+mkdir -p "$APP/.slots"
+printf 'BARKPARK_SITE_DEPLOY_APPLY=1\n' > "$APP/.slots/green.env"   # operator opt-in, pre-deploy
+rc="$(run_deploy 200 seedsha1)"                                    # blue active -> deploys green
+check "exit 0"                                    "[ '$rc' = '0' ]"
+check "seeded flag survives regen (green.env)"    "grep -q '^BARKPARK_SITE_DEPLOY_APPLY=1\$' '$APP/.slots/green.env'"
+check "slot env files still written (regression anchor)" "grep -q 'BARKPARK_PORT_OVERRIDE=4001' '$APP/.slots/green.env' && grep -q '_build_blue' '$APP/.slots/blue.env'"
+check "flag NOT hardcoded onto the unseeded slot (fail-closed)" "! grep -q 'BARKPARK_SITE_DEPLOY_APPLY' '$APP/.slots/blue.env'"
+# Survives a SECOND deploy too — the one that TARGETS blue still rewrites
+# green.env, the exact truncation that dropped the flag before.
+: > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rm -f "$APP/.instance-deploy-last"
+rc="$(run_deploy 200 seedsha2)"                                    # green active -> deploys blue, rewrites green.env
+check "second deploy exit 0"                      "[ '$rc' = '0' ]"
+check "flag still present after a full regen cycle" "grep -q '^BARKPARK_SITE_DEPLOY_APPLY=1\$' '$APP/.slots/green.env'"
+check "unseeded blue slot still has no flag"      "! grep -q 'BARKPARK_SITE_DEPLOY_APPLY' '$APP/.slots/blue.env'"
+rm -rf "$TMP"
+
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi
