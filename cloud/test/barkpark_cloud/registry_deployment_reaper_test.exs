@@ -262,4 +262,112 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     kept = Repo.get(Deployment, d.id)
     assert kept.status == "queued"
   end
+
+  ## 7. (site-spawner D28) The no-build-source pass is KIND-SCOPED.
+  ##
+  ## A content-bound STATIC deploy is artifact-less AND repo-less — it builds from
+  ## a Barkpark dataset. That is EXACTLY the shape the container pass matched, and
+  ## this sweep runs every 60 seconds, so an unscoped pass terminally failed every
+  ## static deploy within a minute of it being minted, mislabelled with copy about
+  ## artifacts and GitHub repos. These three tests pin both halves of the fix: the
+  ## legitimate row must SURVIVE, and the un-buildable one must still DIE (with an
+  ## honest reason) rather than spinning `queued` forever.
+
+  defp static_site_fixture(barkpark, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    {:ok, site} =
+      Registry.create_site(
+        barkpark,
+        Enum.into(attrs, %{
+          name: "S #{n}",
+          slug: "s-#{n}",
+          kind: "static",
+          framework: "astro",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production"
+        })
+      )
+
+    site
+  end
+
+  test "a content-bound STATIC queued row SURVIVES the sweep (the container predicate must not match it)" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = static_site_fixture(bp)
+
+    # The normal shape of a legitimate static deploy: no artifact, no repo, a
+    # dataset binding. Un-scoped, the container pass fails this row within 60s.
+    {:ok, d} = Registry.create_deployment(site, %{build_id: "b0", content_rev: "c0"})
+    assert d.status == "queued"
+    assert is_nil(site.github_repo)
+
+    assert {:ok, %{no_source_failed: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    kept = Repo.get(Deployment, d.id)
+    assert kept.status == "queued"
+    assert is_nil(kept.failure_reason)
+  end
+
+  test "an UNBOUND static queued row is still terminally failed — with the honest content-binding reason" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = static_site_fixture(bp, %{bootstrap_dataset: nil})
+
+    {:ok, d} = Registry.create_deployment(site, %{})
+
+    # The trap the naive one-predicate kind-scope falls into: this row matches
+    # NOTHING and spins queued forever. It must die, and say why.
+    assert {:ok, %{no_source_failed: 1}} = perform_job(StaleDeploymentReaper, %{})
+
+    failed = Repo.get(Deployment, d.id)
+    assert failed.status == "failed"
+    assert failed.failure_reason =~ "no content binding"
+    assert failed.failure_reason =~ "--dataset"
+    # And it is NOT told to upload an artifact or connect a GitHub repo — neither
+    # is a thing a static site can do.
+    refute failed.failure_reason =~ "no build source"
+  end
+
+  test "the two passes sum into ONE no_source_failed count (the worker's return shape is unchanged)" do
+    bp = team_fixture() |> barkpark_fixture()
+    container = site_fixture(bp)
+    unbound_static = static_site_fixture(bp, %{bootstrap_dataset: nil})
+
+    {:ok, c} = Registry.create_deployment(container, %{git_ref: "main"})
+    {:ok, s} = Registry.create_deployment(unbound_static, %{})
+
+    assert {:ok, %{no_source_failed: 2}} = perform_job(StaleDeploymentReaper, %{})
+
+    assert Repo.get(Deployment, c.id).failure_reason =~ "no build source"
+    assert Repo.get(Deployment, s.id).failure_reason =~ "no content binding"
+  end
+
+  ## 8. (site-spawner D22) The other half of crash safety: the sweep REQUEUES an
+  ##    orphaned static row, and nothing in the fleet claims static rows — so the
+  ##    reaper re-drives them itself, or the "recovery" would just be a slower
+  ##    eternal spinner.
+
+  test "a requeued (orphaned) static row is re-driven, and the container builder can never claim it" do
+    bp = team_fixture() |> barkpark_fixture()
+    site = static_site_fixture(bp)
+    {:ok, d} = Registry.create_deployment(site, %{build_id: "b1", content_rev: "c1"})
+
+    # It was claimed once by a driver that died with the control plane: the reaper
+    # already swept it back to `queued`, leaving claim_epoch > 0 behind.
+    Repo.update_all(
+      from(x in Deployment, where: x.id == ^d.id),
+      set: [claim_epoch: 1]
+    )
+
+    # The off-box CONTAINER builder must not be able to pick it up — it has no way
+    # to build a static site, and a row it claimed would wedge `building` forever.
+    assert {:error, :no_queued} = Registry.claim_next_deployment("container-builder-1")
+
+    # The reaper re-drives it (the test starter is a no-op, so nothing runs —
+    # what's proven is that the row is FOUND and handed on).
+    assert {:ok, %{resumed: 1}} = perform_job(StaleDeploymentReaper, %{})
+    assert [%Deployment{id: id}] = Registry.list_orphaned_static_deployments()
+    assert id == d.id
+  end
 end

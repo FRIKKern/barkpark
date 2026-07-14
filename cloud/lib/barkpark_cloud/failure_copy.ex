@@ -68,6 +68,16 @@ defmodule BarkparkCloud.FailureCopy do
       String.contains?(down, "github push builds") ->
         "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming."
 
+      # site-spawner D28: the STATIC twin of "no build source". A content-bound
+      # site builds from a Barkpark dataset, so its missing build source is a
+      # missing CONTENT BINDING — telling its owner to "connect a repo or run bp
+      # deploy" would name neither the cause nor the cure. Checked BEFORE the
+      # generic clause below (whose "no build source" token this string does not
+      # carry, but the ordering keeps the intent explicit). The output re-matches
+      # no clause, so a second client-side `failureCopy()` pass is idempotent.
+      String.contains?(reason, "no content binding") ->
+        "This site isn't bound to any content yet. Create it with --dataset <workspace>/<project>/<dataset>."
+
       String.contains?(reason, "no build source") ->
         "This site has no build source yet. Connect a repo or run bp deploy."
 

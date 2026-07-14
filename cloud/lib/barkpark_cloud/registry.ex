@@ -2725,11 +2725,36 @@ defmodule BarkparkCloud.Registry do
           | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
   def trigger_rollback(bp, _opts \\ []), do: relay_admin_post(bp, "/v1/admin/rollback")
 
-  # The shared instance-admin relay: reveal the stored admin token, POST an
-  # empty object to <instance_url><path>, hand back the instance's verdict
-  # with its semantics intact (undecodable body degrades to %{} — the status
-  # alone is the verdict). Both admin triggers ride this one seam.
-  defp relay_admin_post(%Barkpark{url: url} = bp, path) when is_binary(url) and url != "" do
+  # The shared instance-admin relay: reveal the stored admin token, POST `body`
+  # (default: an empty object) to <instance_url><path>, hand back the instance's
+  # verdict with its semantics intact (undecodable body degrades to %{} — the
+  # status alone is the verdict). Both admin triggers ride this one seam.
+  defp relay_admin_post(bp, path, body \\ %{}), do: relay_admin(bp, :post, path, body)
+
+  @doc """
+  The PUBLIC instance-admin relay (site-spawner D22/D29): reveal `bp`'s stored
+  admin token and issue `method` `path` against it, carrying `body` (a map,
+  JSON-encoded; `nil` sends no body).
+
+  This is `relay_admin_post/2`'s generalization — the self-update / rollback
+  triggers hard-coded `method: :post, body: "{}"`, which is precisely the shape
+  that CANNOT mint a token or start a site deploy (both need argv). Same
+  semantics, same transport seam (`:studio_link_http_client`, faked in test), so
+  the instance's verdict travels intact: `{:ok, status, decoded_body}` on ANY
+  instance response, or `{:error, :not_live | :no_admin_token | :decrypt_failed |
+  :instance_error}`.
+
+  Callers: `mint_public_read_token/5` (the scoped `/w/:ws/p/:proj/v1/tokens`
+  mint) and `BarkparkCloud.Sites.BoxRelay.HTTP` (the `/v1/admin/site-deploy`
+  drive + poll + rollback).
+  """
+  @spec relay_admin(Barkpark.t(), :get | :post, String.t(), map() | nil) ::
+          {:ok, non_neg_integer(), map()}
+          | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
+  def relay_admin(bp, method, path, body \\ nil)
+
+  def relay_admin(%Barkpark{url: url} = bp, method, path, body)
+      when is_binary(url) and url != "" and method in [:get, :post] do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
         {:error, :no_admin_token}
@@ -2739,10 +2764,10 @@ defmodule BarkparkCloud.Registry do
 
       {:ok, admin_token} ->
         request = %{
-          method: :post,
+          method: method,
           url: String.trim_trailing(url, "/") <> path,
           headers: instance_headers(admin_token),
-          body: "{}"
+          body: encode_relay_body(body)
         }
 
         case studio_link_http_client().request(request) do
@@ -2758,7 +2783,55 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  defp relay_admin_post(_bp, _path), do: {:error, :not_live}
+  def relay_admin(_bp, _method, _path, _body), do: {:error, :not_live}
+
+  defp encode_relay_body(nil), do: ""
+  defp encode_relay_body(body) when is_map(body), do: Jason.encode!(body)
+  defp encode_relay_body(body) when is_binary(body), do: body
+
+  @doc """
+  site-spawner D29: mint a `public-read` content token on `bp` for the
+  `workspace`/`project`/`dataset` triple a static site is bound to, over the
+  instance's SCOPED token route (`POST /w/:ws/p/:proj/v1/tokens`) — the UNSCOPED
+  `/v1/tokens` 404s, and scoping is what pins the token to one workspace's
+  membership. The prod-proven precedent is `vercelMintReadToken`
+  (internal/cli/vercel_cmd.go).
+
+  The instance answers `{"token": "..."}`; the plaintext is returned to the
+  caller, which hands it straight to `create_site/2` (Vault-encrypted at rest as
+  `read_token_encrypted`, never persisted in the clear, never serialized back).
+  It is a READ credential clamped to published + public-visibility content by the
+  instance's `PublicRead` plug (charter D6) — the site build is the only consumer.
+
+  `{:error, {:instance, status, body}}` on a non-2xx / token-less instance reply
+  so the router can answer honestly (which box, which status) instead of minting
+  a 201 ghost with no content binding.
+  """
+  @spec mint_public_read_token(Barkpark.t(), String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, String.t()}
+          | {:error,
+             :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :instance_error
+             | {:instance, non_neg_integer(), map()}}
+  def mint_public_read_token(%Barkpark{} = bp, workspace, project, dataset, label)
+      when is_binary(workspace) and is_binary(project) and is_binary(dataset) do
+    path = "/w/#{URI.encode(workspace)}/p/#{URI.encode(project)}/v1/tokens"
+    body = %{label: label, permissions: ["public-read"], dataset: dataset}
+
+    case relay_admin(bp, :post, path, body) do
+      {:ok, status, %{"token" => token}}
+      when status in 200..299 and is_binary(token) and token != "" ->
+        {:ok, token}
+
+      {:ok, status, decoded} ->
+        {:error, {:instance, status, decoded}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   ## Fleet autoupdate (isu-w4) — the control plane's OPT-OUT auto-rollout. The
   ## isu-6 machinery above already (a) mirrors each instance's own `behind`
@@ -4229,9 +4302,20 @@ defmodule BarkparkCloud.Registry do
           {:ok, Deployment.t()} | {:error, :no_queued}
   def claim_next_deployment(worker_id) when is_binary(worker_id) and worker_id != "" do
     Repo.transaction(fn ->
+      # site-spawner D22: CONTAINER rows only. A static deploy runs ON the box
+      # (site-deploy.sh, driven by the control plane over the admin relay) — the
+      # off-box container builder has no way to build one, and a row it claimed
+      # would be stuck `building` under a worker that will never finish it. The
+      # kind guard is what keeps the two pipelines from stealing each other's work.
+      #
+      # A subquery, NOT a join: `FOR UPDATE` over a join locks the joined `sites`
+      # row too, which would put the builder's claim in the lock path of every
+      # ordinary site update. The filter only needs to READ the kind.
+      container_sites = from(s in Site, where: s.kind == "container", select: s.id)
+
       query =
         from(d in Deployment,
-          where: d.status == "queued",
+          where: d.status == "queued" and d.site_id in subquery(container_sites),
           order_by: [asc: d.inserted_at],
           limit: 1,
           lock: "FOR UPDATE SKIP LOCKED"
@@ -4255,6 +4339,119 @@ defmodule BarkparkCloud.Registry do
           claimed
       end
     end)
+  end
+
+  @doc """
+  site-spawner D22: claim ONE specific Deployment for `worker_id` — the static
+  driver's claim, the targeted twin of `claim_next_deployment/1`.
+
+  A static deploy is DRIVEN (the control plane already knows which row it just
+  minted); a container deploy is POLLED FOR (the off-box builder asks "what's
+  next?"). Same fencing either way: the epoch bumps on every claim, `claimed_at`
+  is stamped (so the stale reaper can sweep an abandoned lease), and every
+  subsequent write CASes on the observed epoch via
+  `transition_deployment_fenced/4`. Runs under `FOR UPDATE` so two drivers racing
+  the same row (a retry crossing a reaper-resume) cannot both win.
+
+  Returns `{:ok, deployment}` (status `queued → building`), `{:error, :not_queued}`
+  when the row has already moved on, or `{:error, :not_found}`.
+  """
+  @spec claim_deployment(binary(), String.t()) ::
+          {:ok, Deployment.t()} | {:error, :not_found | :not_queued}
+  def claim_deployment(deployment_id, worker_id)
+      when is_binary(deployment_id) and is_binary(worker_id) and worker_id != "" do
+    case uuid_or_nil(deployment_id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
+        Repo.transaction(fn ->
+          case Repo.one(from(d in Deployment, where: d.id == ^uuid, lock: "FOR UPDATE")) do
+            nil ->
+              Repo.rollback(:not_found)
+
+            %Deployment{status: "queued"} = d ->
+              {:ok, claimed} =
+                d
+                |> Deployment.transition_changeset(%{
+                  status: "building",
+                  stage: "PLAN",
+                  claim_worker: worker_id,
+                  claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
+                  claim_epoch: d.claim_epoch + 1
+                })
+                |> Repo.update()
+
+              claimed
+
+            %Deployment{} ->
+              Repo.rollback(:not_queued)
+          end
+        end)
+    end
+  end
+
+  @doc """
+  Find a Site's deployment by `build_id` — the PLAN idempotency lookup (a repeat
+  build of unchanged code+content+config) and the rollback's "which row owns the
+  build the box just flipped to?" resolution. Nil when nothing matches.
+  """
+  @spec find_deployment_by_build_id(binary(), String.t()) :: Deployment.t() | nil
+  def find_deployment_by_build_id(site_id, build_id)
+      when is_binary(site_id) and is_binary(build_id) do
+    case uuid_or_nil(site_id) do
+      nil ->
+        nil
+
+      uuid ->
+        Deployment
+        |> where([d], d.site_id == ^uuid and d.build_id == ^build_id)
+        |> order_by([d], desc: d.inserted_at)
+        |> limit(1)
+        |> Repo.one()
+    end
+  end
+
+  @doc """
+  site-spawner D22: the STATIC deployments the reaper requeued — rows that were
+  claimed at least once (`claim_epoch > 0`) and are back at `queued` because their
+  driver died with the control plane.
+
+  Nothing else in the fleet claims a static row (`claim_next_deployment/1` is
+  kind-scoped to container), so without this the reaper's requeue would hand the
+  row to nobody and it would sit `queued` forever — an eternal spinner wearing the
+  reaper's own uniform. `Sites.Deploy.resume_orphaned/0` re-drives each.
+
+  Content-bound only: an UNBOUND static row is not an orphan, it is un-buildable,
+  and the sweep's static no-source pass terminates it with an honest reason.
+  """
+  @spec list_orphaned_static_deployments() :: [Deployment.t()]
+  def list_orphaned_static_deployments do
+    from(d in Deployment,
+      join: s in Site,
+      on: s.id == d.site_id,
+      where:
+        d.status == "queued" and d.claim_epoch > 0 and s.kind == "static" and
+          not is_nil(s.bootstrap_dataset),
+      order_by: [asc: d.inserted_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  Repoint a Site's live deployment pointer — the static ROLLBACK's flip (charter
+  D5). The box has already repointed its `current` symlink; this makes the control
+  plane's view agree immediately, so `bp cloud site status` never reports the
+  build it just rolled AWAY from.
+
+  Deliberately narrow (`runtime_changeset`): it cannot rename or re-team a site.
+  """
+  @spec set_site_current_deployment(Site.t(), binary() | nil) ::
+          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def set_site_current_deployment(%Site{} = site, deployment_id) do
+    site
+    |> Site.runtime_changeset(%{current_deployment_id: deployment_id})
+    |> Repo.update()
   end
 
   @doc """
@@ -4496,8 +4693,20 @@ defmodule BarkparkCloud.Registry do
   `update_all` passes (the first NOT staleness-gated) against
   `stale_before = now - deployment_stale_after_seconds`:
 
-    * (0) FAIL a `queued` row with NO build source — no `artifact_url` AND a site
-      with no `github_repo`. Such a row can NEVER build regardless of fleet
+    * (0) FAIL a `queued` row with NO build source. KIND-SCOPED (site-spawner
+      D28): "no build source" means something DIFFERENT for each Site kind, so
+      this is two status-guarded passes summed into one `no_source_failed` count.
+      A CONTAINER row is un-buildable with no `artifact_url` AND a site with no
+      `github_repo`. A STATIC row is content-bound, not artifact-bound: it is
+      un-buildable exactly when its site has no `bootstrap_dataset` (nothing to
+      read content from) — a legitimate static row (bound dataset, no artifact,
+      no repo) matches the CONTAINER predicate exactly, so a single un-scoped
+      pass would terminally fail every static deploy within 60s with a message
+      about artifacts and GitHub repos that names neither the cause nor the cure.
+      Kind-scoping the container pass ALONE is the other half of the trap: an
+      UNBOUND static row would then match nothing and spin `queued` forever —
+      the eternal spinner this sweep exists to kill. Hence: two passes, each with
+      its own honest reason. Such a row can NEVER build regardless of fleet
       (nothing to build from), so it would otherwise sit queued forever behind an
       eternal dashboard spinner. NOT staleness-gated (it is un-buildable the
       instant it exists). Repo-backed queued rows (a `github_repo` is set) are
@@ -4541,18 +4750,28 @@ defmodule BarkparkCloud.Registry do
     stale_before = DateTime.add(now, -deployment_stale_after_seconds(), :second)
     max_claims = max_deploy_claims()
 
-    # (0) No build source: a queued row with no artifact_url whose site has no
-    # connected github_repo can never build regardless of fleet. Terminate it
+    # (0) No build source — KIND-SCOPED (site-spawner D28). Two status-guarded
+    # passes, summed into ONE `no_source_failed` count so the worker's asserted
+    # return shape is unchanged. Both terminate a row that can NEVER build
     # (queued → failed) so the dashboard renders a real failure instead of an
-    # eternal spinner. NOT staleness-gated — it is un-buildable the instant it
-    # exists. Repo-backed queued rows are excluded by the join predicate. Run
-    # FIRST so it only fails rows genuinely queued at sweep start — never a row
-    # the requeue pass (ii) moves building → queued in this same sweep.
-    {no_source_failed, _} =
+    # eternal spinner. NOT staleness-gated — such a row is un-buildable the
+    # instant it exists. Run FIRST so they only fail rows genuinely queued at
+    # sweep start — never a row the requeue pass (ii) moves building → queued in
+    # this same sweep.
+    #
+    # (0a) CONTAINER: no artifact_url AND a site with no connected github_repo.
+    # `s.kind == "container"` is LOAD-BEARING, not cosmetic: a legitimate static
+    # row (content-bound, artifact-less, repo-less) matches this predicate
+    # exactly, so without the kind guard the sweep terminally fails every static
+    # deploy within 60s — mislabelled with artifact/GitHub copy that names
+    # neither its cause nor its cure.
+    {container_failed, _} =
       from(d in Deployment,
         join: s in Site,
         on: s.id == d.site_id,
-        where: d.status == "queued" and is_nil(d.artifact_url) and is_nil(s.github_repo)
+        where:
+          d.status == "queued" and s.kind == "container" and is_nil(d.artifact_url) and
+            is_nil(s.github_repo)
       )
       |> Repo.update_all(
         set: [
@@ -4562,6 +4781,30 @@ defmodule BarkparkCloud.Registry do
           updated_at: now
         ]
       )
+
+    # (0b) STATIC: the twin, and the half a naive kind-scope forgets. A static
+    # build reads its content from a Barkpark dataset, so its build source IS the
+    # content binding — a site with no `bootstrap_dataset` has nothing to build
+    # from and can never succeed. Without this pass an unbound static row matches
+    # NOTHING (0a excludes it by kind) and spins `queued` forever: the exact
+    # eternal-spinner disease the reaper exists to cure. The reason names the
+    # cure the user can actually run.
+    {static_failed, _} =
+      from(d in Deployment,
+        join: s in Site,
+        on: s.id == d.site_id,
+        where: d.status == "queued" and s.kind == "static" and is_nil(s.bootstrap_dataset)
+      )
+      |> Repo.update_all(
+        set: [
+          status: "failed",
+          failure_reason:
+            "no content binding (create the site with `--dataset <workspace>/<project>/<dataset>`)",
+          updated_at: now
+        ]
+      )
+
+    no_source_failed = container_failed + static_failed
 
     # (i) Over budget: fail it (don't requeue). Run before the requeue pass so an
     # exhausted row terminates — the requeue pass's status guard then skips it.

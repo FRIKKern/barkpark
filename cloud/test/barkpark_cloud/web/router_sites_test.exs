@@ -18,11 +18,15 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   import Plug.Test
   import Plug.Conn
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Registry, Sites, StudioLinkFakeHttpClient}
+  alias BarkparkCloud.Registry.Vault
+  alias BarkparkCloud.Sites.FakeBoxRelay
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
   @password "correct-horse-battery"
+  @instance_url "https://acme.barkpark.cloud"
+  @instance_admin_token "instance-admin-token-plaintext"
 
   ## Fixtures
 
@@ -68,6 +72,44 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   defp login_token(user) do
     {:ok, token} = Accounts.create_user_session_token(user)
     token
+  end
+
+  # site-spawner: a LIVE instance — url + encrypted admin token, i.e. what the
+  # provision-succeed path writes. Both are required before the control plane can
+  # mint a token on it or drive a deploy.
+  defp live_barkpark(team) do
+    team
+    |> barkpark_fixture()
+    |> Ecto.Changeset.change(
+      url: @instance_url,
+      host: "203.0.113.10",
+      git_commit: "abc123",
+      admin_token_encrypted: Vault.encrypt(@instance_admin_token)
+    )
+    |> BarkparkCloud.Repo.update!()
+  end
+
+  # A content-bound static site with its read token already at rest (the mint is
+  # exercised separately, through the create route).
+  defp static_site(bp, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    {:ok, site} =
+      Registry.create_site(
+        bp,
+        Enum.into(attrs, %{
+          name: "Blog #{n}",
+          slug: "blog-#{n}",
+          kind: "static",
+          framework: "astro",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production",
+          read_token: "bpt_public_read_xyz"
+        })
+      )
+
+    site
   end
 
   ## Request helpers
@@ -486,6 +528,376 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     test "without auth → 401" do
       conn = call_binary(:post, "/v1/sites/x/artifact", "x", nil)
       assert conn.status == 401
+    end
+  end
+
+  ## site-spawner (D28/D29/D30) — the STATIC spawn spine.
+  ##
+  ## Everything below is the wire the `bp cloud site` CLI already speaks. The CLI
+  ## is merged and green against its own fakes, and was NEVER run against a real
+  ## router — so every shape mismatch here is a SILENT failure in the product (a
+  ## blank progress bar, a checkmark for a rollback that never happened). These
+  ## tests are the contract.
+
+  describe "site-spawner: POST /v1/sites (create + content binding + read-token mint)" do
+    test "accepts the CLI's OWN keys (workspace/project/dataset), mints the read token, and 201s a CONTENT-BOUND site" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      # The instance mints the site's public-read token over the SCOPED route.
+      # (The unscoped /v1/tokens 404s — the scoping is the tenant isolation.)
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          # EXACTLY what cloudclient.SpawnSiteCreate sends — not bootstrap_*.
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 201
+      site_json = json_body(conn)["site"]
+
+      # The binding was STORED (Ecto's cast/3 used to discard these keys silently,
+      # producing a cheerful 201 for a site bound to nothing).
+      assert site_json["bootstrap_workspace"] == "acme"
+      assert site_json["bootstrap_dataset"] == "production"
+      # …and echoed back in the CLI's vocabulary.
+      assert site_json["workspace"] == "acme"
+      assert site_json["dataset"] == "production"
+      assert site_json["url"] == "#{@instance_url}/sites/blog/"
+
+      # A 201 MEANS content-bound: the token was minted and encrypted at rest.
+      assert site_json["content_bound"] == true
+      site = Registry.get_site(site_json["id"])
+      assert is_binary(site.read_token_encrypted)
+      assert {:ok, "bpt_public_read_minted"} = Registry.reveal_site_read_token(site)
+
+      # The plaintext token NEVER appears on the wire.
+      refute conn.resp_body =~ "bpt_public_read_minted"
+
+      # It was minted over the SCOPED route with the instance's admin token.
+      assert [%{url: url, headers: headers, body: body}] = StudioLinkFakeHttpClient.requests()
+      assert url == "#{@instance_url}/w/acme/p/blog/v1/tokens"
+
+      assert {"Authorization", "Bearer " <> @instance_admin_token} =
+               List.keyfind(headers, "Authorization", 0)
+
+      # …and the relay carried a real BODY (the self-update relay hard-codes "{}",
+      # which cannot mint anything).
+      decoded = Jason.decode!(body)
+      assert decoded["permissions"] == ["public-read"]
+      assert decoded["dataset"] == "production"
+    end
+
+    test "an instance that refuses the mint → 502 naming the box, and NO ghost site row" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" => {:ok, %{status: 403, body: ~s({"error":"forbidden"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          token
+        )
+
+      assert conn.status == 502
+      body = json_body(conn)
+      assert body["error"] == "read_token_mint_failed"
+      assert body["detail"] =~ bp.slug
+      # A site that cannot read its content is not a site. Nothing was written.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    # The ghost 201 this route exists to kill has a second door: a static site
+    # created with NO content binding at all. It used to insert cleanly, and the
+    # deploy reaper would terminally fail it ~60s later — long after the user
+    # could act on the advice ("create the site with --dataset …"), because the
+    # site already existed. Refuse it at the door instead.
+    test "a static site with no content binding is refused at CREATE, not by the reaper a minute later" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "blog", kind: "static", framework: "astro"},
+          token
+        )
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "content_binding_required"
+      # The message names the FLAG that fixes it, and exactly what is missing.
+      assert body["detail"] =~ "--dataset"
+      assert body["detail"] =~ "workspace"
+      assert body["detail"] =~ "dataset"
+
+      # No ghost row.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    test "a PARTIAL content binding is refused too — a build needs all three" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "blog", kind: "static", workspace: "acme"},
+          token
+        )
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "content_binding_required"
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    # A container site has no content binding BY DESIGN (it builds from a repo or
+    # an artifact) — the new guard must not touch it.
+    test "a CONTAINER site still creates with no content binding" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "api", kind: "container"},
+          token
+        )
+
+      assert conn.status == 201
+    end
+
+    test "a missing barkpark_id says BARKPARK_REQUIRED — not the lying 'name_required'" do
+      {user, _team} = user_with_team()
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites", %{name: "blog"}, token)
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "barkpark_required"
+      refute body["error"] == "name_required"
+    end
+  end
+
+  describe "site-spawner: POST /v1/sites/:id/deploy (kind-branched)" do
+    test "a content-bound STATIC site → 201 with a build_id (never 422 no_build_source)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+
+      assert conn.status == 201
+      d = json_body(conn)["deployment"]
+      assert d["status"] == "queued"
+      assert is_binary(d["build_id"])
+      # The container refusal must NEVER be what a static site hears — it is not
+      # what it builds from.
+      refute d["error"] == "no_build_source"
+
+      # The six-stage bar is present from the very first response (all pending).
+      assert Enum.map(d["stages"], & &1["name"]) ==
+               ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
+    end
+
+    test "an UNBOUND static site → 422 no_content_binding, naming the cure (not no_build_source)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp, %{bootstrap_dataset: nil})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "no_content_binding"
+      assert body["detail"] =~ "--dataset"
+      # No un-buildable row was minted.
+      assert Registry.list_deployments(site, 10) == []
+    end
+
+    test "a static site is NOT promotable — it rolls back instantly instead" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      {:ok, d} = Registry.create_deployment(site, %{build_id: "b1"})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deployments/#{d.id}/promote", %{}, token)
+
+      assert conn.status == 422
+      body = json_body(conn)
+      # The twin guard: without the kind branch this 422s `no_build_source` — the
+      # SAME lie the deploy route told.
+      assert body["error"] == "not_promotable"
+      assert body["detail"] =~ "rollback"
+    end
+  end
+
+  describe "site-spawner: GET /v1/sites/:id/deployments/:dep_id (the CLI's poll)" do
+    test "returns {deployment: {stages: [{name,status}]}} with the LITERAL words the CLI renders" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE))])
+      assert {:ok, :live} = Sites.Deploy.run(d.id)
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      assert conn.status == 200
+
+      dep = json_body(conn)["deployment"]
+      assert dep["id"] == d.id
+      assert dep["site_id"] == site.id
+      assert dep["status"] == "live"
+      assert dep["stage"] == "RETIRE"
+      assert dep["url"] == "#{@instance_url}/sites/#{site.slug}/"
+
+      stages = dep["stages"]
+      assert Enum.map(stages, & &1["name"]) == ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
+
+      # THE contract: the CLI's stream prints a stage line ONLY for done|failed|
+      # skipped. An `ok` / `passed` / `running` here renders NOTHING — a blank
+      # six-stage bar, with no error anywhere to explain it.
+      assert Enum.all?(stages, &(&1["status"] == "done")),
+             "want every stage literally 'done', got #{inspect(Enum.map(stages, & &1["status"]))}"
+
+      assert Enum.all?(stages, &is_binary(&1["started_at"]))
+    end
+
+    test "a failed build reports the failing stage as `failed` and the un-run ones as `skipped`" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.failed_at("HEALTH", "probe returned 500")])
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      dep = json_body(conn)["deployment"]
+
+      assert dep["status"] == "failed"
+      assert dep["failure_reason"] =~ "probe returned 500"
+      by_name = Map.new(dep["stages"], &{&1["name"], &1["status"]})
+      assert by_name["HEALTH"] == "failed"
+      assert by_name["SWITCH"] == "skipped"
+      # A failed build has NO url — sending the user to the site would show them
+      # the build that is still (correctly) serving, as if the broken one shipped.
+      assert is_nil(dep["url"])
+    end
+
+    test "another site's deployment → 404 (no existence leak)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      other = static_site(bp)
+      {:ok, d} = Registry.create_deployment(other, %{build_id: "b9"})
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      assert conn.status == 404
+    end
+  end
+
+  describe "site-spawner: POST /v1/sites/:id/rollback (the sub-second flip)" do
+    test "answers a FLAT body (never enveloped) after the box has really flipped" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000001"}}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 200
+
+      body = json_body(conn)
+      # FLAT. Wrapped as {"deployment": …}, Go leaves every field at its zero value
+      # and the CLI STILL prints "✓ site rolled back" — naming no build, erroring
+      # nowhere.
+      refute Map.has_key?(body, "deployment")
+      assert body["ok"] == true
+      assert body["status"] == "rolled_back"
+      assert body["deployment_id"] == prev.id
+      assert body["previous_deployment_id"] == live.id
+      assert body["url"] == "#{@instance_url}/sites/#{site.slug}/"
+
+      # The control plane's view agrees with the box immediately.
+      assert Registry.get_site(site.id).current_deployment_id == prev.id
+    end
+
+    test "a rollback that CANNOT happen answers non-2xx — the CLI gates success on the status alone" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "no_previous"}})
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+
+      refute conn.status in 200..299
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["detail"] =~ "no previous build"
+    end
+
+    test "a container site is not rollbackable this way → 422 (the two verbs stay unblurred)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "App", slug: "app"})
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "not_rollbackable"
     end
   end
 
