@@ -23,6 +23,9 @@ on:
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
+      # connectors catalog connectable-drift gate — the .sh itself (its sources,
+      # catalog.ex + connectors/src/**/*.ts, ride the **/*.ex + **/*.ts globs).
+      - "scripts/connectors-catalog-drift-check.sh"
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
@@ -102,6 +105,9 @@ on:
       # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
       # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
       - "scripts/connectors-ddl-drift-check.sh"
+      # connectors catalog connectable-drift gate — the .sh itself (its sources,
+      # catalog.ex + connectors/src/**/*.ts, ride the **/*.ex + **/*.ts globs).
+      - "scripts/connectors-catalog-drift-check.sh"
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
@@ -202,6 +208,24 @@ jobs:
         run: |
           bash scripts/connectors-ddl-drift-check.sh --selftest
           bash scripts/connectors-ddl-drift-check.sh
+
+      # Connectors catalog connectable-drift gate (connectors D75). There is
+      # deliberately NO catalog endpoint on the connect wire (catalog.ex moduledoc
+      # defends this), so Barkpark.Connectors.Catalog DECLARES each provider's
+      # connect_mode statically — a hand-mirror of the bridge registry. This
+      # DB-free static check reds when catalog.ex's connectable set (connect_mode
+      # :paste|:oauth) disagrees with the bridge's actual connect capability
+      # (a `connect: {` member in connectors/src/connectors/<p>.ts for paste, a
+      # <p>-oauth.ts callback for oauth), so a provider can never show a button
+      # the bridge can't honor nor hide one it can. Sources ride the **/*.ex +
+      # **/*.ts triggers above; the .sh has its own trigger. The bundled
+      # --selftest is a durable tripwire (distrust vacuous green): it proves the
+      # gate REDs on a dropped connect member and plants nothing in the tree. The
+      # static list in catalog.ex stays the fail-closed runtime fallback.
+      - name: Connectors catalog drift gate (blocking)
+        run: |
+          bash scripts/connectors-catalog-drift-check.sh --selftest
+          bash scripts/connectors-catalog-drift-check.sh
 
       - name: Paper-editor style mirror lockstep (blocking)
         run: bash scripts/paper-editor-mirror-check.sh
