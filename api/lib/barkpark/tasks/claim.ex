@@ -20,14 +20,12 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edges, Queue, WorkDigest}
+  alias Barkpark.Tasks.{Edges, ExecutionPolicy, Queue, WorkDigest}
 
   @event_task_claimed "task.claimed"
   @ready_lifecycle_statuses ~w(open blocked)
 
   def claim(worker_id, opts \\ []) when is_binary(worker_id) do
-    caller_token_id = Keyword.get(opts, :caller_token_id)
-
     result =
       Repo.transaction(fn ->
         case opts
@@ -38,7 +36,7 @@ defmodule Barkpark.Tasks.Claim do
             {:ok, nil}
 
           %Document{} = doc ->
-            do_claim(doc, worker_id, [], caller_token_id)
+            do_claim(doc, worker_id, [], opts)
         end
       end)
 
@@ -93,7 +91,7 @@ defmodule Barkpark.Tasks.Claim do
               with :ok <- check_ready_for_targeted_claim(doc),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
-                do_claim(doc, worker_id, resources, caller_token_id)
+                do_claim(doc, worker_id, resources, opts)
               end
             end
         end
@@ -228,7 +226,30 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim(%Document{} = doc, worker_id, resources, caller_token_id) do
+  defp do_claim(%Document{} = doc, worker_id, resources, opts) do
+    task_policy = Map.get(doc.content || %{}, "execution_policy")
+
+    case ExecutionPolicy.resolve(
+           Keyword.get(opts, :execution_policy_override),
+           task_policy,
+           Keyword.get(opts, :session_execution_policy),
+           Keyword.get(opts, :provider_execution_policy)
+         ) do
+      {:ok, snapshot} ->
+        do_claim_resolved(
+          doc,
+          worker_id,
+          resources,
+          Keyword.get(opts, :caller_token_id),
+          snapshot
+        )
+
+      {:error, errors} ->
+        {:error, {:invalid_execution_policy, errors}}
+    end
+  end
+
+  defp do_claim_resolved(%Document{} = doc, worker_id, resources, caller_token_id, snapshot) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     next_epoch = current_epoch(doc) + 1
@@ -252,6 +273,9 @@ defmodule Barkpark.Tasks.Claim do
       }
       |> then(fn claim ->
         if resources == [], do: claim, else: Map.put(claim, "resources", resources)
+      end)
+      |> then(fn claim ->
+        if is_nil(snapshot), do: claim, else: Map.put(claim, "execution_policy", snapshot)
       end)
 
     new_content =
