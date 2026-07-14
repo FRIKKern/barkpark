@@ -1,0 +1,12 @@
+{
+  "package": "@openai/codex",
+  "version": "0.144.1",
+  "transport": "stdio-jsonl",
+  "schema_profile": "stable",
+  "schema_file_count": 267,
+  "canonical_sha256": "64f262b851d8af04d6290bcbd4e1c187b88f677037c787d1a37c46a96af5fc0f",
+  "canonicalization": "Sort relative JSON file paths; recursively sort object keys and compact JSON; SHA-256 length-prefixed relative path and canonical document bytes.",
+  "generated_with": "npx --yes @openai/codex@0.144.1 app-server generate-json-schema",
+  "paid_turn_required": false,
+  "experimental": false
+}
