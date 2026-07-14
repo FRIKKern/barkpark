@@ -10,24 +10,30 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (21 today; the two
+    * **E1** — every table carrying a `workspace_id` column (26 today; the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
-      column with no FK to `workspaces`, `roles` is one, and both
+      column with no FK to `workspaces`, `roles` is one, both
       `search_surface_config` (Wave 5 Slice A, charter D45/D49) and `data_keys`
       (the per-dataset DEK store, bpb-datakeys-write-path-workspace-attribution)
-      were re-pinned from the allowlist so a shared-slug row travels via the
-      `workspace_id` path instead of a bare, project-ambiguous `scope`).
+      were re-pinned from the allowlist, and the five `sync_*` bare-slug tables
+      (`sync_cursors` / `sync_dead_letters` / `sync_push_cursors` /
+      `sync_push_doc_revs` / `sync_push_conflicts`) gained a nullable
+      `workspace_id` attribution column (Wave 5 Slice B, charter D55) — so a
+      shared-slug row travels via the `workspace_id` path instead of a bare,
+      project-ambiguous `scope`/`dataset`).
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
       that do NOT themselves carry `workspace_id` (6: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
       `webhook_deliveries`). Reached via a real FK, extracted through a
       parent-join to the nearest `workspace_id`-bearing ancestor.
-    * **E3** — the `dataset`-column tables minus E1 (9), keyed by a `dataset`
-      slug (and, for four of them, a `doc_id`). The `scope`-column allowlist is
+    * **E3** — the `dataset`-column tables minus E1 (4), keyed by a `dataset`
+      slug (and, for two of them, a `doc_id`). The `scope`-column allowlist is
       now EMPTY: both former members (`search_surface_config`, `data_keys`)
-      gained a `workspace_id` column and moved to E1, so a shared-slug row —
-      including a per-dataset DEK — is exported and torn down via
-      `WHERE workspace_id = $ws` and is never silently dropped.
+      gained a `workspace_id` column and moved to E1, and the five `sync_*`
+      bare-slug tables moved to E1 too (charter D55), so a shared-slug row —
+      including a per-dataset DEK or a workspace's sync cursors / dead-letters /
+      push-ledger — is exported and torn down via `WHERE workspace_id = $ws` and
+      is never silently dropped.
 
   ## The reviewed extraction specs
 
@@ -54,21 +60,29 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
 
   @root_table "workspaces"
 
+  # The five `sync_*` tables carry `workspace_id` (charter D55): they were
+  # bare-slug E3 tables (project-ambiguous `dataset` grain) until per-workspace
+  # attribution promoted `workspace_id` into their primary keys, moving the whole
+  # dormant family from E3 → E1 (export keys `WHERE workspace_id=$ws`, delete
+  # rides the FK cascade — the same clean path every other E1 table uses).
   @pinned_e1 ~w(
     access_grants api_tokens audit_events audit_export_sinks data_keys documents
     media_files mutation_events paper_events projects revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
-    share_links webhooks workspace_memberships
+    share_links sync_cursors sync_dead_letters sync_push_conflicts
+    sync_push_cursors sync_push_doc_revs webhooks workspace_memberships
   )
 
   @pinned_e2 ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
 
   # E3 tables that carry a `doc_id` → filtered by a (doc_id, dataset) semi-join.
-  @e3_doc_keyed ~w(authoring_exemptions github_sync_conflicts sync_push_conflicts sync_push_doc_revs)
+  # (`sync_push_conflicts` / `sync_push_doc_revs` moved to E1 — charter D55.)
+  @e3_doc_keyed ~w(authoring_exemptions github_sync_conflicts)
 
   # E3 tables with no `doc_id` → filtered by dataset-slug membership.
-  @e3_dataset_keyed ~w(preview_token_jti shares sync_cursors sync_dead_letters sync_push_cursors)
+  # (`sync_cursors` / `sync_dead_letters` / `sync_push_cursors` moved to E1 — D55.)
+  @e3_dataset_keyed ~w(preview_token_jti shares)
 
   # The `scope`-column allowlist (charter D4/D5): tables whose tenant key is a
   # bare `scope` string, not a `dataset` column, so the mechanical dataset scan

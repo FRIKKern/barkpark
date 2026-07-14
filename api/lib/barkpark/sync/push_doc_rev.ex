@@ -22,6 +22,10 @@ defmodule Barkpark.Sync.PushDocRev do
 
   @primary_key false
   schema "sync_push_doc_revs" do
+    # Stamped per-workspace attribution column (charter D55) — E1 export + FK
+    # cascade delete. NOT a key component; the `{source, dataset, doc_id}` PK and
+    # conflict target are unchanged (D57). Nullable (workspace-agnostic NULL).
+    field :workspace_id, :binary_id
     field :source, :string, primary_key: true
     field :dataset, :string, primary_key: true
     field :doc_id, :string, primary_key: true
@@ -41,9 +45,9 @@ defmodule Barkpark.Sync.PushDocRev do
     |> Repo.one()
   end
 
-  @doc "Record the remote's last-known rev for a doc (last-write-wins upsert)."
-  @spec put(String.t(), String.t(), String.t(), String.t() | nil) :: :ok
-  def put(source, dataset, doc_id, remote_rev)
+  @doc "Record the remote's last-known rev for a doc (last-write-wins upsert), stamping workspace_id."
+  @spec put(binary() | nil, String.t(), String.t(), String.t(), String.t() | nil) :: :ok
+  def put(workspace_id, source, dataset, doc_id, remote_rev)
       when is_binary(source) and is_binary(dataset) and is_binary(doc_id) do
     now = DateTime.utc_now()
 
@@ -51,6 +55,7 @@ defmodule Barkpark.Sync.PushDocRev do
       __MODULE__,
       [
         %{
+          workspace_id: workspace_id,
           source: source,
           dataset: dataset,
           doc_id: doc_id,

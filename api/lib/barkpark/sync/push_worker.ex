@@ -71,7 +71,7 @@ defmodule Barkpark.Sync.PushWorker do
   @impl true
   def handle_continue(:schedule, state) do
     %{source: source, dataset: dataset} = state.ctx
-    PushCursor.bootstrap_if_absent(source, dataset)
+    PushCursor.bootstrap_if_absent(Map.get(state.ctx, :workspace_id), source, dataset)
     schedule(state, 0)
     {:noreply, state}
   end
