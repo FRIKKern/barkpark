@@ -202,9 +202,12 @@ def validate_fleet(paper: dict[str, Any], phase: str, require_debrief: bool) -> 
             errors.append(f"fleet {fleet_phase} completed count does not match typed evidence")
         if isinstance(started, int) and started < len(valid_assignments):
             errors.append(f"fleet {fleet_phase} started count is below completed count")
-        if record.get("missing") != planned - len(valid_assignments):
+        missing = max(0, planned - len(valid_assignments))
+        if record.get("missing") != missing:
             errors.append(f"fleet {fleet_phase} missing count is inconsistent")
-        if fleet_phase in required and len(valid_assignments) != planned:
+        if fleet_phase == "review" and len(valid_assignments) > planned and len(valid_assignments) % planned:
+            errors.append("fleet review contains an incomplete repeated review wave")
+        if fleet_phase in required and len(valid_assignments) < planned:
             errors.append(f"fleet {fleet_phase} requires {planned} completed typed assignments before {phase}")
     return errors
 

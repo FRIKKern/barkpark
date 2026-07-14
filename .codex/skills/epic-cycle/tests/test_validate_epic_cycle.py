@@ -282,6 +282,41 @@ class EpicCyclePreflightTest(unittest.TestCase):
         paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
         self.assertEqual([], MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)))
 
+    def test_post_review_gate_accepts_complete_repeated_review_wave(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
+        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
+        repeated = [
+            {
+                "id": f"review-2-{index + 1}",
+                "agent_type": "code-reviewer",
+                "status": "completed",
+                "evidence": f"paper://review/round-2/reviewer-{index + 1}",
+            }
+            for index in range(3)
+        ]
+        fleet["review"]["assignments"].extend(repeated)
+        fleet["review"].update({"started": 6, "completed": 6, "missing": 0})
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)))
+
+    def test_post_review_gate_rejects_incomplete_repeated_review_wave(self):
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"].append({"type": "heading", "text": "Debrief"})
+        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
+        fleet["review"]["assignments"].append(
+            {
+                "id": "review-2-1",
+                "agent_type": "code-reviewer",
+                "status": "completed",
+                "evidence": "paper://review/round-2/reviewer-1",
+            }
+        )
+        fleet["review"].update({"started": 4, "completed": 4, "missing": 0})
+        self.assertIn(
+            "fleet review contains an incomplete repeated review wave",
+            MODULE.validate(self.args(paper=paper, phase="review", require_debrief=True)),
+        )
+
     def test_literal_escaped_newline_fails(self):
         errors = MODULE.validate(self.args(pr_body="Summary\\n\\nTask: slice-1"))
         self.assertIn("PR body contains a literal escaped newline before its Task trailer", errors)
@@ -305,6 +340,8 @@ class EpicCyclePreflightTest(unittest.TestCase):
         self.assertIn("3 Review", skill)
         self.assertIn("model_reasoning_effort = \"high\"", builder)
         self.assertIn("Fleet gate", fleet)
+        self.assertIn('"fleet": {', fleet)
+        self.assertIn("Never overwrite earlier review evidence", fleet)
 
 
 if __name__ == "__main__":
