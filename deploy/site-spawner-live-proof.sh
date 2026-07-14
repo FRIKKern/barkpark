@@ -58,11 +58,16 @@ INSTANCE="${INSTANCE:-guerrilla}"
 LIVE_HOST="${LIVE_HOST:-${INSTANCE}.barkpark.cloud}"
 DATASET="${DATASET:-default/default/production}"
 
-# CONTENT REALITY [charter D31]: there is NO `post` type on guerrilla, and an
+# CONTENT REALITY [charter D31/D35]: there is NO `post` type on guerrilla, and an
 # undefined type answers 200 with count:0 — NOT 404. The Astro starter's default
-# BARKPARK_DOC_TYPE=post therefore builds a silently EMPTY page. `paper` is
-# public + published + real. DOC_ID is PINNED, not "newest": concurrent sessions
-# write the corpus, so "newest published" shifts mid-run and the build would race.
+# doc type `post` therefore builds a silently EMPTY page. `paper` is public +
+# published + real (100 docs). The type is now bound at CREATE via the
+# `--doc-type` flag (D35: it becomes `sites.doc_type`, injected into the build's
+# BARKPARK_DOC_TYPE by deploy_payload) — the old `BARKPARK_DOC_TYPE=… bp cloud
+# site create` env prefix is INERT (the CLI swallowed it; BUILD_ALLOW dropped it).
+# DOC_ID is only an example the preflight surfaces to PROVE published content
+# exists — create binds a TYPE, and the build picks the featured doc itself, so
+# the live check asserts bp-doc-id is NON-EMPTY, never equal to a pinned id.
 DOC_TYPE="${BARKPARK_DOC_TYPE:-paper}"
 DOC_ID="${BARKPARK_DOC_ID:-}"
 
@@ -215,14 +220,19 @@ PY
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/site-proof.XXXXXX")"
 CREATED_SITE=""
+CREATED_BROKEN=""
 cleanup() {
-  if [ -n "$CREATED_SITE" ] && [ "$KEEP" -eq 0 ]; then
-    say ""
-    note "cleanup: the demo site '$CREATED_SITE' was created on the live fleet."
-    note "         There is no DELETE /v1/sites/:id route yet (see site-spawner-backlog-token-revoke),"
-    note "         so it is LEFT IN PLACE deliberately, along with its releases dir and Caddy block."
-    note "         Remove by hand: on $LIVE_HOST → rm -rf /opt/barkpark/sites/$CREATED_SITE and drop the"
-    note "         '# barkpark-site:$CREATED_SITE' guarded handle_path block from /etc/caddy/Caddyfile."
+  if [ "$KEEP" -eq 0 ]; then
+    local s
+    for s in "$CREATED_SITE" "$CREATED_BROKEN"; do
+      [ -n "$s" ] || continue
+      say ""
+      note "cleanup: the demo site '$s' was created on the live fleet."
+      note "         There is no DELETE /v1/sites/:id route yet (see site-spawner-backlog-token-revoke),"
+      note "         so it is LEFT IN PLACE deliberately, along with its releases dir and Caddy block."
+      note "         Remove by hand: on $LIVE_HOST → rm -rf /opt/barkpark/sites/$s and drop the"
+      note "         '# barkpark-site:$s' guarded handle_path block from /etc/caddy/Caddyfile."
+    done
   fi
   [ -n "${TMP:-}" ] && rm -rf "$TMP"
 }
@@ -257,17 +267,19 @@ judge_stages() {
   return 0
 }
 
-# judge_live <http_code> <served_build_id> <expected_build_id> <content_rev> <doc_id>
-# Assert by VALUE, not by reachability. A build with bp-build-id=TOTALLY-WRONG
-# went live on this box a day ago and a reachability check called it green —
-# hence the equality, and hence the non-empty content-rev/doc-id (a page that
-# rendered with NO content still returns a cheerful 200).
+# judge_live <http_code> <served_build_id> <expected_build_id> <content_rev> <doc_id> <doc_title> <site_base>
+# Assert by VALUE, not by reachability, over ALL FIVE markers Base.astro bakes.
+# A build with bp-build-id=TOTALLY-WRONG went live on this box a day ago and a
+# reachability check called it green — hence the equality on bp-build-id, and
+# hence the non-empty bp-content-rev/bp-doc-id/bp-doc-title/bp-site-base (a page
+# that rendered with NO content still returns a cheerful 200). The four
+# content-truth markers are asserted TOGETHER: any one empty is a vacuous green.
 judge_live() {
-  local code="$1" served="$2" expect="$3" rev="$4" doc="$5"
+  local code="$1" served="$2" expect="$3" rev="$4" doc="$5" title="$6" base="$7"
   [ "$code" = "200" ] || return "$E_LIVE_NOT_200"
   [ -n "$expect" ] || return "$E_LIVE_BUILD_MISMATCH"
   [ "$served" = "$expect" ] || return "$E_LIVE_BUILD_MISMATCH"
-  [ -n "$rev" ] && [ -n "$doc" ] || return "$E_LIVE_CONTENT_EMPTY"
+  [ -n "$rev" ] && [ -n "$doc" ] && [ -n "$title" ] && [ -n "$base" ] || return "$E_LIVE_CONTENT_EMPTY"
   return 0
 }
 
@@ -348,12 +360,14 @@ self_check() {
   expect_code "$E_DEPLOY_STAGES" "six stages but OUT of order"        judge_stages live PLAN BUILD HEALTH STAGE SWITCH RETIRE
   expect_code "$E_DEPLOY_FAILED" "all six stages, but never went live" judge_stages queued PLAN BUILD STAGE HEALTH SWITCH RETIRE
 
-  note "live URL (assert by VALUE)"
-  expect_pass      "200, build-id matches, content present"          judge_live 200 b-abc b-abc rev-1 doc-1
-  expect_code "$E_LIVE_NOT_200"        "the URL 404s"                judge_live 404 b-abc b-abc rev-1 doc-1
-  expect_code "$E_LIVE_BUILD_MISMATCH" "the TOTALLY-WRONG build went live" judge_live 200 TOTALLY-WRONG b-abc rev-1 doc-1
-  expect_code "$E_LIVE_CONTENT_EMPTY"  "200 but bp-doc-id is empty (empty page)"  judge_live 200 b-abc b-abc rev-1 ""
-  expect_code "$E_LIVE_CONTENT_EMPTY"  "200 but bp-content-rev is empty"          judge_live 200 b-abc b-abc "" doc-1
+  note "live URL (assert by VALUE, all five markers)"
+  expect_pass      "200, build-id matches, all four content markers present" judge_live 200 b-abc b-abc rev-1 doc-1 title-1 /sites/x/
+  expect_code "$E_LIVE_NOT_200"        "the URL 404s"                judge_live 404 b-abc b-abc rev-1 doc-1 title-1 /sites/x/
+  expect_code "$E_LIVE_BUILD_MISMATCH" "the TOTALLY-WRONG build went live" judge_live 200 TOTALLY-WRONG b-abc rev-1 doc-1 title-1 /sites/x/
+  expect_code "$E_LIVE_CONTENT_EMPTY"  "200 but bp-doc-id is empty (empty page)"  judge_live 200 b-abc b-abc rev-1 "" title-1 /sites/x/
+  expect_code "$E_LIVE_CONTENT_EMPTY"  "200 but bp-content-rev is empty"          judge_live 200 b-abc b-abc "" doc-1 title-1 /sites/x/
+  expect_code "$E_LIVE_CONTENT_EMPTY"  "200 but bp-doc-title is empty"            judge_live 200 b-abc b-abc rev-1 doc-1 "" /sites/x/
+  expect_code "$E_LIVE_CONTENT_EMPTY"  "200 but bp-site-base is empty"            judge_live 200 b-abc b-abc rev-1 doc-1 title-1 ""
 
   note "rollback"
   expect_pass      "flipped to the previous build in 40ms"           judge_rollback 40 b-new b-old 1000
@@ -520,10 +534,13 @@ live_proof() {
   # ---- 1. CREATE ------------------------------------------------------------
   step "1/5 CREATE — a content-bound static site (not the ghost 201)"
 
+  # doc_type is bound HERE (D35) via the --doc-type flag — it lands in
+  # sites.doc_type and deploy_payload injects it as BARKPARK_DOC_TYPE at BUILD.
+  # The old `BARKPARK_DOC_TYPE=… bp cloud site create` env prefix is INERT.
   local cx=0
-  BARKPARK_DOC_TYPE="$DOC_TYPE" BARKPARK_DOC_ID="$DOC_ID" \
-    "$BP" cloud site create --name "$SLUG" --dataset "$DATASET" \
+  "$BP" cloud site create --name "$SLUG" --dataset "$DATASET" \
     --framework astro --kind static --instance "$INSTANCE" \
+    --doc-type "$DOC_TYPE" \
     -o json >"$TMP/create.json" 2>"$TMP/create.err" || cx=$?
   [ "$cx" -eq 0 ] ||
     fail "$E_CREATE_FAILED" "\`bp cloud site create\` exited $cx: $(head -c 400 "$TMP/create.err")" \
@@ -599,35 +616,46 @@ PY
   # ---- 3. THE LIVE URL, ASSERTED BY VALUE -----------------------------------
   step "3/5 LIVE — the URL serves THIS build, with REAL content"
 
+  # This curl is the FIRST live exercise of the SWITCH stage's Caddy arm
+  # (arm_caddy_site_route, non-fatal `|| true` in the engine). A green SWITCH
+  # stage is NOT trusted — only an actual 200 from the public FQDN, carrying the
+  # deployment's own build_id, proves the path-handle block armed and reloaded.
+  # The live Caddyfile anchor (reverse_proxy localhost:4001) is confirmed present.
   local url="https://$LIVE_HOST/sites/$SLUG/"
   curl -sS -m 30 -o "$TMP/live.html" -w '%{http_code}' "$url" >"$TMP/live.code" 2>/dev/null || true
   hc="$(cat "$TMP/live.code" 2>/dev/null || echo 000)"
 
-  local served rev doc
+  local served rev doc title base
   served="$(meta_content "$TMP/live.html" bp-build-id)"
   rev="$(meta_content "$TMP/live.html" bp-content-rev)"
   doc="$(meta_content "$TMP/live.html" bp-doc-id)"
+  title="$(meta_content "$TMP/live.html" bp-doc-title)"
+  base="$(meta_content "$TMP/live.html" bp-site-base)"
 
-  judge_live "$hc" "$served" "$build_id" "$rev" "$doc" ||
-    fail $? "$url answered HTTP $hc, serving bp-build-id='$served' (want '$build_id'), bp-content-rev='$rev', bp-doc-id='$doc'. A 200 alone proves nothing — a build with bp-build-id=TOTALLY-WRONG went live on this box, and a page that fetched NO content still returns a cheerful 200." \
-      "the served build-id must EQUAL the deployment's build_id, and the content markers must be non-empty"
-  ok "$url → 200"
-  ok "bp-build-id  = $served  (== the deployment's build_id)"
+  judge_live "$hc" "$served" "$build_id" "$rev" "$doc" "$title" "$base" ||
+    fail $? "$url answered HTTP $hc, serving bp-build-id='$served' (want '$build_id'), bp-content-rev='$rev', bp-doc-id='$doc', bp-doc-title='$title', bp-site-base='$base'. A 200 alone proves nothing — a build with bp-build-id=TOTALLY-WRONG went live on this box, and a page that fetched NO content still returns a cheerful 200." \
+      "the served build-id must EQUAL the deployment's build_id, and all four content markers (bp-content-rev/bp-doc-id/bp-doc-title/bp-site-base) must be non-empty"
+  ok "$url → 200  (SWITCH's Caddy arm armed for real)"
+  ok "bp-build-id   = $served  (== the deployment's build_id)"
   ok "bp-content-rev = $rev"
-  ok "bp-doc-id    = $doc  (real Barkpark content)"
+  ok "bp-doc-id     = $doc"
+  ok "bp-doc-title  = $title  (real Barkpark content)"
+  ok "bp-site-base  = $base"
 
   # ---- 4. ROLLBACK ----------------------------------------------------------
   step "4/5 ROLLBACK — under one second, and the live page actually flips"
 
-  # Rollback needs a PREVIOUS build to flip back to. Cut a second one, so the
-  # flip has somewhere to go — otherwise we would be "proving" a rollback that
-  # the engine correctly refuses (exit 21 no_previous) and calling it a red.
-  note "cutting a second build so there is a previous release to flip back to…"
-  "$BP" cloud site deploy "$SLUG" -o json >"$TMP/deploy2.json" 2>"$TMP/deploy2.stream" || true
+  # Rollback needs a PREVIOUS build to flip back to. Cut a second one with --force
+  # (D36) so the flip has somewhere to go. --force folds a fresh nonce into the
+  # build_id config, minting a genuinely NEW build_id even on UNCHANGED content —
+  # WITHOUT it a re-deploy of identical inputs is an idempotent PLAN no-op (it
+  # returns the SAME build_id) and there would be nothing to roll back FROM.
+  note "cutting a second build with --force so there is a previous release to flip back to…"
+  "$BP" cloud site deploy "$SLUG" --force -o json >"$TMP/deploy2.json" 2>"$TMP/deploy2.stream" || true
   local build2; build2="$(jget "$TMP/deploy2.json" deployment.build_id)"
   [ -n "$build2" ] && [ "$build2" != "$build_id" ] ||
-    fail "$E_DEPLOY_FAILED" "the second deploy did not produce a NEW build_id (got '${build2:-none}', first was '$build_id') — with no second release there is nothing to roll back FROM." \
-      "build_id = hash(code_rev + content_rev + config); a re-deploy of identical inputs is an idempotent PLAN no-op by design, so the proof needs the content or config to differ"
+    fail "$E_DEPLOY_FAILED" "the second (--force) deploy did not produce a NEW build_id (got '${build2:-none}', first was '$build_id') — with no second release there is nothing to roll back FROM." \
+      "--force must fold a nonce into build_id = hash(code_rev + content_rev + config + nonce); if build2 == build_id the force nonce is not being minted (see site-spawner-w4-deploy-inputs / site-spawner-deploy-force-rebuild)"
   ok "second build live — $build2"
 
   local before after t0 t1 elapsed rbx=0
@@ -656,19 +684,31 @@ PY
   step "5/5 BROKEN BUILD — dies at its named stage, visitors never see it"
 
   local live_before; live_before="$after"
-  note "deploying with a deliberately poisoned content binding…"
 
-  # The poison is a doc type that does not exist. This is the REAL failure mode
-  # this fleet has (an undefined type answers 200 with count:0 — it does NOT
-  # 404), so the build "succeeds" and emits a page with an EMPTY bp-doc-id. That
-  # is precisely what HEALTH's marker assertion exists to catch, and precisely
-  # what a reachability-only gate would wave through. If HEALTH is real, this
-  # dies there; if HEALTH is theatre, this reaches visitors and we say so.
-  # A non-zero exit here is the CORRECT outcome, so it is not an error — the
-  # judgement is on the deployment's own status/stage/reason and, above all, on
-  # whether the live page moved. `|| true` keeps `set -e`-less flow explicit.
-  BARKPARK_DOC_TYPE="__no_such_type__" BARKPARK_DOC_ID="" \
-    "$BP" cloud site deploy "$SLUG" -o json >"$TMP/broken.json" 2>"$TMP/broken.stream" || true
+  # doc_type is bound at CREATE (D35), so the poison is a SEPARATE site bound to a
+  # type that does not exist — NOT a deploy-time env override (which is inert now
+  # the CLI drops it). This is the REAL failure mode this fleet has: an undefined
+  # type answers 200 with count:0 (it does NOT 404), so the build "succeeds" and
+  # emits a page with an EMPTY bp-doc-id. That is precisely what HEALTH's marker
+  # assertion exists to catch, and precisely what a reachability-only gate would
+  # wave through. If HEALTH is real, the poison dies there and never gets a
+  # `current` symlink; if HEALTH is theatre, it reaches visitors and we say so.
+  local broken_slug="${SLUG}-broken"
+  note "creating a poison site '$broken_slug' bound to a doc type that does not exist…"
+  local pcx=0
+  "$BP" cloud site create --name "$broken_slug" --dataset "$DATASET" \
+    --framework astro --kind static --instance "$INSTANCE" \
+    --doc-type "__no_such_type__" \
+    -o json >"$TMP/broken-create.json" 2>"$TMP/broken-create.err" || pcx=$?
+  [ "$pcx" -eq 0 ] ||
+    fail "$E_CREATE_FAILED" "could not create the poison site to prove HEALTH containment: $(head -c 300 "$TMP/broken-create.err")"
+  CREATED_BROKEN="$broken_slug"
+
+  # A non-zero deploy exit here is the CORRECT outcome, so it is not an error —
+  # the judgement is on the deployment's own status/stage/reason, on whether the
+  # poison ever served, and above all on whether the GOOD site's page moved.
+  note "deploying the poison site — it must die at HEALTH and never serve…"
+  "$BP" cloud site deploy "$broken_slug" -o json >"$TMP/broken.json" 2>"$TMP/broken.stream" || true
   say ""
   sed 's/^/    │ /' "$TMP/broken.stream" >&2 || true
   say ""
@@ -678,14 +718,32 @@ PY
   bstage="$(jget "$TMP/broken.json" deployment.stage)"
   breason="$(jget "$TMP/broken.json" deployment.failure_reason)"
 
+  # Containment, part 1: the GOOD proof site is UNCHANGED — a broken deploy of any
+  # site must never disturb a live one.
   curl -sS -m 30 -o "$TMP/live4.html" "https://$LIVE_HOST/sites/$SLUG/" >/dev/null 2>&1 || true
   local live_after; live_after="$(meta_content "$TMP/live4.html" bp-build-id)"
 
   judge_broken "$bstatus" "$(printf '%s' "${bstage:-}" | tr '[:lower:]' '[:upper:]')" "$breason" "$live_before" "$live_after" ||
-    fail $? "the broken build: status=$bstatus stage=${bstage:-none} reason='${breason:-none}'; live bp-build-id went '$live_before' → '$live_after'. A broken build must fail at a NAMED stage with a REAL reason, and it must NEVER change what a visitor sees." \
+    fail $? "the broken build: status=$bstatus stage=${bstage:-none} reason='${breason:-none}'; the GOOD site's live bp-build-id went '$live_before' → '$live_after'. A broken build must fail at a NAMED stage with a REAL reason, and it must NEVER change what a visitor sees." \
       "HEALTH asserts the baked bp-doc-id/bp-content-rev markers before SWITCH — a build that fetched no content must die there"
   ok "failed at $(printf '%s' "$bstage" | tr '[:lower:]' '[:upper:]') — $breason"
-  ok "live bp-build-id UNCHANGED at $live_after — no visitor ever saw the broken build"
+  ok "the GOOD site's live bp-build-id UNCHANGED at $live_after"
+
+  # Containment, part 2: the poison site NEVER SWITCHED — dying at HEALTH means it
+  # never got a `current` symlink, so its own URL must not serve the broken build.
+  # A poison page that fetched no content would carry an EMPTY bp-doc-id; a real
+  # 404 (no current) is the cleaner outcome. Either way, a served build with a
+  # non-empty bp-doc-id at this URL would mean the broken build reached visitors.
+  local burl="https://$LIVE_HOST/sites/$broken_slug/"
+  curl -sS -m 30 -o "$TMP/broken-live.html" -w '%{http_code}' "$burl" >"$TMP/broken-live.code" 2>/dev/null || true
+  local bhc bdoc
+  bhc="$(cat "$TMP/broken-live.code" 2>/dev/null || echo 000)"
+  bdoc="$(meta_content "$TMP/broken-live.html" bp-doc-id)"
+  if [ "$bhc" = "200" ] && [ -n "$bdoc" ]; then
+    fail "$E_BROKEN_REACHED_VISITORS" "the poison site's own URL ($burl) served HTTP 200 with bp-doc-id='$bdoc' — the broken build REACHED VISITORS. HEALTH did not gate the switch." \
+      "a build that fails HEALTH must never SWITCH — the poison site must have no \`current\` symlink and its URL must 404 (or serve nothing)"
+  fi
+  ok "poison URL never served the broken build (HTTP $bhc, bp-doc-id='${bdoc:-<none>}')"
 
   # ---- verdict --------------------------------------------------------------
   say ""
