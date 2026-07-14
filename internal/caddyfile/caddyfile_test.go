@@ -404,6 +404,257 @@ func TestRender_StaticKind_Deterministic(t *testing.T) {
 	}
 }
 
+// --- Cloudflare Origin CA TLS mode (D18) ---------------------------------
+
+func TestRender_OriginCAGolden(t *testing.T) {
+	// A CF-fronted site loads a pre-issued Origin CA cert from disk and emits NO
+	// on_demand block — behind the Cloudflare proxy an ACME TLS-ALPN-01 challenge
+	// cannot complete, so on_demand there means error 526 for every visitor.
+	// The box also gains the once-only trusted_proxies global option.
+	got := Render(Box{
+		AskGateURL: "https://cloud.barkpark.cloud/v1/tls/ask",
+		Sites: []Site{{
+			Slug:     "shop",
+			Domains:  []string{"www.shop.com", "shop.com"},
+			Port:     7001,
+			TLSMode:  TLSModeOriginCA,
+			CertPath: "/etc/caddy/certs/shop.pem",
+			KeyPath:  "/etc/caddy/certs/shop.key",
+		}},
+	})
+	want := "{\n" +
+		"  on_demand_tls {\n    ask https://cloud.barkpark.cloud/v1/tls/ask\n  }\n" +
+		"  servers {\n" +
+		"    trusted_proxies static " + strings.Join(cloudflareIPRanges, " ") + "\n" +
+		"    client_ip_headers CF-Connecting-IP\n" +
+		"  }\n" +
+		"}\n\n" +
+		"# site shop (port 7001)\n" +
+		"shop.com, www.shop.com {\n" +
+		"  tls /etc/caddy/certs/shop.pem /etc/caddy/certs/shop.key\n" +
+		"  reverse_proxy 127.0.0.1:7001\n" +
+		MaintenanceHandler("  ") +
+		"}\n\n"
+	if got != want {
+		t.Errorf("origin-CA render drifted from golden:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if strings.Contains(got, "on_demand\n") {
+		t.Errorf("CF-fronted site must NOT emit an on_demand cert directive (526 outage):\n%s", got)
+	}
+}
+
+func TestRender_OriginCA_StaticSite(t *testing.T) {
+	// TLSMode is orthogonal to Kind: a static site can be CF-fronted too.
+	got := Render(Box{
+		Sites: []Site{{
+			Slug:     "blog",
+			Domains:  []string{"blog.com"},
+			Kind:     KindStatic,
+			Root:     "/srv/sites/blog/current",
+			TLSMode:  TLSModeOriginCA,
+			CertPath: "/etc/caddy/certs/blog.pem",
+			KeyPath:  "/etc/caddy/certs/blog.key",
+		}},
+	})
+	if !strings.Contains(got, "blog.com {\n  tls /etc/caddy/certs/blog.pem /etc/caddy/certs/blog.key\n  root * /srv/sites/blog/current\n  file_server\n}") {
+		t.Errorf("CF-fronted static block malformed:\n%s", got)
+	}
+	if strings.Contains(got, "on_demand") {
+		t.Errorf("CF-fronted static site must not emit on_demand:\n%s", got)
+	}
+}
+
+func TestRender_ZeroValueAndUnknownTLSMode_StayOnDemand(t *testing.T) {
+	// The zero value is on-demand (that is what keeps every existing caller
+	// byte-identical), an explicit TLSModeOnDemand means the same thing, and an
+	// unrecognized value defaults to on-demand exactly like Kind does.
+	site := func(mode string) Box {
+		return Box{Sites: []Site{{Slug: "s", Domains: []string{"s.com"}, Port: 7001, TLSMode: mode}}}
+	}
+	zero := Render(site(""))
+	explicit := Render(site(TLSModeOnDemand))
+	unknown := Render(site("nonsense"))
+
+	if !strings.Contains(zero, "  tls {\n    on_demand\n  }\n") {
+		t.Errorf("zero-value TLSMode must render the on_demand block:\n%s", zero)
+	}
+	if zero != explicit {
+		t.Errorf("explicit on_demand must be byte-identical to the zero value:\n--- zero ---\n%s\n--- explicit ---\n%s", zero, explicit)
+	}
+	if zero != unknown {
+		t.Errorf("unknown TLSMode must default to on_demand:\n--- zero ---\n%s\n--- unknown ---\n%s", zero, unknown)
+	}
+	// None of these is CF-fronted, so no global servers block appears.
+	for name, out := range map[string]string{"zero": zero, "explicit": explicit, "unknown": unknown} {
+		if strings.Contains(out, "trusted_proxies") || strings.Contains(out, "servers {") {
+			t.Errorf("%s: non-CF box must not emit trusted_proxies:\n%s", name, out)
+		}
+	}
+}
+
+func TestRender_TrustedProxies_EmittedOnceForManyCFSites(t *testing.T) {
+	// trusted_proxies is a GLOBAL option: two CF-fronted sites must still yield
+	// exactly one servers block (a repeat would be a config error), and it must
+	// sit in the global block ahead of every site block.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "b", Domains: []string{"b.com"}, Port: 7002, TLSMode: TLSModeOriginCA, CertPath: "/c/b.pem", KeyPath: "/c/b.key"},
+			{Slug: "a", Domains: []string{"a.com"}, Port: 7001, TLSMode: TLSModeOriginCA, CertPath: "/c/a.pem", KeyPath: "/c/a.key"},
+			{Slug: "c", Domains: []string{"c.com"}, Port: 7003}, // plain on-demand neighbour
+		},
+	})
+	if n := strings.Count(got, "trusted_proxies"); n != 1 {
+		t.Errorf("expected exactly one trusted_proxies stanza, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "servers {"); n != 1 {
+		t.Errorf("expected exactly one servers block, got %d:\n%s", n, got)
+	}
+	if n := strings.Count(got, "client_ip_headers CF-Connecting-IP"); n != 1 {
+		t.Errorf("expected exactly one client_ip_headers line, got %d:\n%s", n, got)
+	}
+	// Global option precedes the first site block.
+	if iProxies, iSite := strings.Index(got, "trusted_proxies"), strings.Index(got, "# site a"); !(iProxies >= 0 && iProxies < iSite) {
+		t.Errorf("trusted_proxies must precede the site blocks: proxies=%d site=%d", iProxies, iSite)
+	}
+	// The CF sites load certs; the on-demand neighbour keeps its on_demand block.
+	if !strings.Contains(got, "a.com {\n  tls /c/a.pem /c/a.key\n") || !strings.Contains(got, "b.com {\n  tls /c/b.pem /c/b.key\n") {
+		t.Errorf("CF sites must load their own cert pairs:\n%s", got)
+	}
+	if n := strings.Count(got, "    on_demand\n"); n != 1 {
+		t.Errorf("only the non-CF site keeps an on_demand block, got %d:\n%s", n, got)
+	}
+	// A well-known CF range and the IPv6 half both made it in.
+	for _, cidr := range []string{"173.245.48.0/20", "104.16.0.0/13", "2400:cb00::/32"} {
+		if !strings.Contains(got, cidr) {
+			t.Errorf("trusted_proxies missing Cloudflare range %s:\n%s", cidr, got)
+		}
+	}
+}
+
+func TestRender_CFBox_WithoutAskGate_StillOpensGlobalBlock(t *testing.T) {
+	// The two halves of the global block are independent: a CF box with no ask
+	// gate still needs one, and it must not carry an empty on_demand_tls stanza.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "s", Domains: []string{"s.com"}, Port: 7001, TLSMode: TLSModeOriginCA, CertPath: "/c/s.pem", KeyPath: "/c/s.key"},
+		},
+	})
+	if !strings.HasPrefix(got, "{\n  servers {\n") {
+		t.Errorf("CF box with no ask gate should open a global block holding only servers:\n%s", got)
+	}
+	if strings.Contains(got, "on_demand_tls") {
+		t.Errorf("no ask gate configured → no on_demand_tls stanza:\n%s", got)
+	}
+}
+
+func TestRender_OriginCA_UnsafeCertOrKeySkipsSite_NeverFallsBackToOnDemand(t *testing.T) {
+	// An Origin-CA site whose cert/key is missing or unsafe must be SKIPPED, not
+	// quietly downgraded to on_demand — that "fallback" is the 526 outage this
+	// mode exists to prevent. And no fragment may splice through into the file.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "no-cert", Domains: []string{"a.com"}, Port: 7001, TLSMode: TLSModeOriginCA, KeyPath: "/c/a.key"},
+			{Slug: "no-key", Domains: []string{"b.com"}, Port: 7002, TLSMode: TLSModeOriginCA, CertPath: "/c/b.pem"},
+			{Slug: "brace-cert", Domains: []string{"c.com"}, Port: 7003, TLSMode: TLSModeOriginCA, CertPath: "/c/evil{.pem", KeyPath: "/c/c.key"},
+			{Slug: "space-key", Domains: []string{"d.com"}, Port: 7004, TLSMode: TLSModeOriginCA, CertPath: "/c/d.pem", KeyPath: "/c/d key.pem"},
+			{Slug: "inject-key", Domains: []string{"e.com"}, Port: 7005, TLSMode: TLSModeOriginCA, CertPath: "/c/e.pem", KeyPath: "/c/e.key\n} :6000 {\n  reverse_proxy 127.0.0.1:9"},
+			{Slug: "good", Domains: []string{"f.com"}, Port: 7006, TLSMode: TLSModeOriginCA, CertPath: "/c/f.pem", KeyPath: "/c/f.key"},
+		},
+	})
+	for _, skipped := range []string{"no-cert", "no-key", "brace-cert", "space-key", "inject-key"} {
+		if strings.Contains(got, skipped) {
+			t.Errorf("origin-CA site %q with an unsafe cert/key must be skipped:\n%s", skipped, got)
+		}
+	}
+	for _, leak := range []string{":6000 {", "reverse_proxy 127.0.0.1:9", "evil{.pem", "d key.pem"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("unsafe cert/key fragment %q leaked into output:\n%s", leak, got)
+		}
+	}
+	// Critically: none of the skipped sites fell back to an on_demand cert.
+	if strings.Contains(got, "on_demand") {
+		t.Errorf("a CF-fronted site must never fall back to on_demand (526):\n%s", got)
+	}
+	// The one well-formed CF site still serves.
+	if !strings.Contains(got, "f.com {\n  tls /c/f.pem /c/f.key\n") {
+		t.Errorf("the safe origin-CA site should render:\n%s", got)
+	}
+}
+
+func TestRender_UnsafeCFSiteAloneEmitsNoTrustedProxies(t *testing.T) {
+	// A CF site that can never render (unsafe key) must not drag in the global
+	// trusted_proxies block on its own — nothing is being served behind CF.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "broken", Domains: []string{"a.com"}, Port: 7001, TLSMode: TLSModeOriginCA, CertPath: "/c/a.pem", KeyPath: ""},
+			{Slug: "plain", Domains: []string{"b.com"}, Port: 7002},
+		},
+	})
+	if strings.Contains(got, "trusted_proxies") || strings.Contains(got, "servers {") {
+		t.Errorf("no renderable CF site → no trusted_proxies:\n%s", got)
+	}
+	if !strings.Contains(got, "b.com {") {
+		t.Errorf("the plain site should still render:\n%s", got)
+	}
+}
+
+func TestRender_UnsafeCFSiteDoesNotSquatDomain(t *testing.T) {
+	// The TLS gate runs BEFORE domains are consumed, so a CF site that cannot
+	// serve (unsafe cert) cannot steal a domain from a site that can.
+	got := Render(Box{
+		Sites: []Site{
+			{Slug: "aaa-broken", Domains: []string{"shared.com"}, Port: 7001, TLSMode: TLSModeOriginCA, CertPath: "", KeyPath: ""},
+			{Slug: "zzz-serving", Domains: []string{"shared.com"}, Port: 7002},
+		},
+	})
+	if n := strings.Count(got, "shared.com"); n != 1 {
+		t.Errorf("shared domain should render exactly once (serving site keeps it), got %d:\n%s", n, got)
+	}
+	if !strings.Contains(got, "site zzz-serving") {
+		t.Errorf("the serving site should own the contested domain:\n%s", got)
+	}
+}
+
+func TestRender_OriginCA_Deterministic(t *testing.T) {
+	box := Box{
+		AskGateURL: "https://x/ask",
+		Sites: []Site{
+			{Slug: "s2", Domains: []string{"b.com", "a.com"}, Kind: KindStatic, Root: "/srv/s2/current", TLSMode: TLSModeOriginCA, CertPath: "/c/s2.pem", KeyPath: "/c/s2.key"},
+			{Slug: "s1", Domains: []string{"x.com"}, Port: 7001},
+		},
+	}
+	if a, b := Render(box), Render(box); a != b {
+		t.Errorf("CF-fronted render is not deterministic:\n--- a ---\n%s\n--- b ---\n%s", a, b)
+	}
+}
+
+func TestSafeCaddyPath(t *testing.T) {
+	// The splice guard for every on-box path (root, cert, key): same rejection
+	// set — empty, whitespace, control bytes, braces.
+	cases := []struct {
+		p    string
+		want bool
+	}{
+		{"/srv/sites/blog/current", true},
+		{"/etc/caddy/certs/shop.pem", true},
+		{"relative/path.pem", true},
+		{"", false},
+		{" ", false},
+		{"/c/has space.pem", false},
+		{"/c/tab\t.pem", false},
+		{"/c/new\nline.pem", false},
+		{"/c/brace{.pem", false},
+		{"/c/brace}.pem", false},
+		{"/c/null\x00.pem", false},
+		{"/c/del\x7f.pem", false},
+	}
+	for _, c := range cases {
+		if got := safeCaddyPath(c.p); got != c.want {
+			t.Errorf("safeCaddyPath(%q) = %v, want %v", c.p, got, c.want)
+		}
+	}
+}
+
 func TestRender_BlueGreen_SamePortConfig(t *testing.T) {
 	// Simulating a blue/green swap: same site, different port → renders
 	// different upstream. (The agent will then `caddy reload`, drain old.)
