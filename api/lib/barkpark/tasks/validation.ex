@@ -17,6 +17,8 @@ defmodule Barkpark.Tasks.Validation do
   @lifecycle_statuses ~w(open in_progress blocked done cancelled)
   @kinds ~w(task)
 
+  alias Barkpark.Tasks.ExecutionPolicy
+
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
   def lifecycle_statuses, do: @lifecycle_statuses
@@ -133,6 +135,7 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_map(content, "history_summary")
     |> check_optional_map_list(content, "worklog")
     |> check_optional_map_list(content, "acceptance_criteria")
+    |> check_execution_policy(content)
   end
 
   # ─── Per-field micro-validators ────────────────────────────────────────────
@@ -235,6 +238,13 @@ defmodule Barkpark.Tasks.Validation do
 
       other ->
         Map.put(errors, key, ["must be a list when set, got #{inspect(other)}"])
+    end
+  end
+
+  defp check_execution_policy(errors, content) do
+    case ExecutionPolicy.validate(fetch(content, "execution_policy")) do
+      :ok -> errors
+      {:error, policy_errors} -> Map.put(errors, "execution_policy", policy_errors)
     end
   end
 end

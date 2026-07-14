@@ -272,6 +272,50 @@ defmodule Barkpark.Tasks.Schema do
           ]
         },
 
+        # Advisory execution routing only. The strict nested contract lives in
+        # Tasks.ExecutionPolicy; no command/env/cwd/secret/security knobs exist.
+        %{
+          "name" => "execution_policy",
+          "title" => "Execution policy",
+          "type" => "composite",
+          "group" => "brief",
+          "description" =>
+            "Optional version-1 advisory routing hints. Claim freezes a resolved snapshot; this policy cannot execute commands or set environment, cwd, secrets, permissions, or security controls.",
+          "fields" => [
+            %{
+              "name" => "version",
+              "title" => "Version",
+              "type" => "number",
+              "validation" => %{"required" => true, "min" => 1, "max" => 1}
+            },
+            %{
+              "name" => "agent_type",
+              "title" => "Agent type",
+              "type" => "string",
+              "description" => "Advisory typed-agent role, such as executor or verifier."
+            },
+            %{
+              "name" => "model",
+              "title" => "Model",
+              "type" => "string",
+              "description" => "Advisory model identifier; provider availability still governs."
+            },
+            %{
+              "name" => "reasoning_effort",
+              "title" => "Reasoning effort",
+              "type" => "select",
+              "options" => ~w(minimal low medium high xhigh)
+            },
+            %{
+              "name" => "resource_class",
+              "title" => "Resource class",
+              "type" => "select",
+              "options" => ~w(light standard heavy),
+              "description" => "Advisory capacity class; it does not directly control a process."
+            }
+          ]
+        },
+
         # Native datetime-local picker in Studio. Engine-inert by design;
         # agents/humans set it. (Started/closed timestamps live in the
         # engine-owned claim map — NOT duplicated here to avoid drift.)
