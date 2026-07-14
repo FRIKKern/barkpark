@@ -9,6 +9,13 @@ config :barkpark_cloud,
   ecto_repos: [BarkparkCloud.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true]
 
+# site-spawner W5 (charter D45): the control plane's OWN public origin — the host a
+# co-located box POSTs a content-publish webhook back to (guerrilla →
+# barkpark.cloud). Used to build the per-site receiver URL registered on the box.
+# Prod overrides from PUBLIC_URL / CONTROL_PLANE_URL in runtime.exs; this default
+# is the prod API host so an unset env still points at a real receiver.
+config :barkpark_cloud, :public_url, "https://api.barkpark.cloud"
+
 # Configure Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
@@ -174,7 +181,13 @@ config :barkpark_cloud, Oban,
   repo: BarkparkCloud.Repo,
   queues: [
     default: 10,
-    maintenance: 2
+    maintenance: 2,
+    # site-spawner W5 (charter D44): the publish-to-live auto-rebuild queue.
+    # Concurrency 1 so the debounced auto-deploy enqueue+start step is serial per
+    # box — the trailing rebuild after an in-flight build never races it (the box
+    # additionally flock-serializes the build itself). AutoDeployWorker names this
+    # queue via `use Oban.Worker, queue: :site_deploy`.
+    site_deploy: 1
   ],
   plugins: [
     # Reap finished/discarded job rows after 7 days so oban_jobs never grows

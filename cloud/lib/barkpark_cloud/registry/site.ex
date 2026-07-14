@@ -87,6 +87,14 @@ defmodule BarkparkCloud.Registry.Site do
     field :github_branch, :string, default: "main"
     field :github_webhook_secret_encrypted, :string
 
+    # site-spawner W5 (charter D47): the per-site HMAC secret the CP mints at
+    # create, registers on the box's dataset webhook, and verifies inbound
+    # content-publish deliveries against (POST /v1/sites/webhooks/content-publish/
+    # :site_id). `Vault.encrypt/1`'d at rest exactly like
+    # github_webhook_secret_encrypted; the plaintext is never persisted and never
+    # serialized. Null on container sites (no content webhook).
+    field :content_webhook_secret_encrypted, :binary
+
     # gh-6: per-site kill switch for branch previews. Default ON — a connected
     # repo previews non-production branches unless the team opts out. When false,
     # the inbound webhook ignores non-`github_branch` pushes (the pre-gh-6
@@ -143,6 +151,7 @@ defmodule BarkparkCloud.Registry.Site do
       :github_repo,
       :github_branch,
       :github_webhook_secret_encrypted,
+      :content_webhook_secret_encrypted,
       :previews_enabled,
       :barkpark_id,
       :team_id

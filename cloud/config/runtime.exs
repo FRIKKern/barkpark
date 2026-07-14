@@ -355,4 +355,11 @@ if config_env() == :prod do
   if dashboard_url = System.get_env("DASHBOARD_URL") do
     config :barkpark_cloud, dashboard_url: dashboard_url
   end
+
+  # site-spawner W5 (charter D45): the control plane's own public origin, the host
+  # a co-located box POSTs a content-publish webhook back to. Falls back to the
+  # config.exs default (the prod API host).
+  if public_url = System.get_env("PUBLIC_URL") || System.get_env("CONTROL_PLANE_URL") do
+    config :barkpark_cloud, :public_url, public_url
+  end
 end

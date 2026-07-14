@@ -91,13 +91,22 @@ defmodule BarkparkCloud.Sites.Deploy do
   # idempotent no-op is the norm; force is the escape hatch for "re-run this
   # exact content" (a stuck/failed build, or two distinct builds for a rollback
   # proof).
-  @spec enqueue(Site.t(), Barkpark.t(), boolean()) ::
+  #
+  # `trigger` (charter D49) is the deploy's PROVENANCE — "manual" (the default,
+  # every `bp cloud site deploy`) or "content-auto" (the publish-to-live receiver
+  # via AutoDeployWorker). It rides straight onto the Deployment row so the
+  # deployment stream can show WHY the build ran (the wish's "observable" bar).
+  @spec enqueue(Site.t(), Barkpark.t(), boolean(), String.t()) ::
           {:ok, Deployment.t()} | {:duplicate, Deployment.t()} | {:error, Ecto.Changeset.t()}
-  def enqueue(%Site{} = site, %Barkpark{} = bp, force \\ false) do
+  def enqueue(%Site{} = site, %Barkpark{} = bp, force \\ false, trigger \\ "manual") do
     content_rev = content_rev(site, bp)
     build_id = build_id(site, bp, content_rev, force)
 
-    case Registry.create_deployment(site, %{build_id: build_id, content_rev: content_rev}) do
+    case Registry.create_deployment(site, %{
+           build_id: build_id,
+           content_rev: content_rev,
+           trigger: trigger
+         }) do
       {:ok, deployment} ->
         {:ok, deployment}
 

@@ -30,6 +30,14 @@ defmodule BarkparkCloud.Registry.Deployment do
   # and NEVER touches `sites.current_deployment_id` / `sites.port`.
   @environments ~w(production preview)
 
+  # site-spawner W5 (charter D49): the deploy's PROVENANCE. "manual" (a human ran
+  # `bp cloud site deploy` — the pre-W5 default, so every existing row backfills to
+  # it) or "content-auto" (a content publish on the bound dataset fired the per-site
+  # content-publish receiver, which enqueued this build). The wish's "observable —
+  # content-triggered, not manual" bar reads straight off this column; it rides
+  # through `deployment_json/1` (the SOLE base serializer) to every deployment view.
+  @triggers ~w(manual content-auto)
+
   # The legal from → to status graph the moduledoc promises. `live`, `failed`,
   # and `cancelled` are terminal (no outgoing edges). A same-status write is
   # always legal (see `legal_transition?/2`) so field-only updates — image_tag,
@@ -88,6 +96,11 @@ defmodule BarkparkCloud.Registry.Deployment do
     field :preview_slug, :string
     field :preview_host, :string
 
+    # site-spawner W5 (charter D49): "manual" | "content-auto" — WHY this build
+    # ran. Set at create; never mutated by a transition. Null-safe by column
+    # default ("manual"), so a container/pre-W5 row reads as manual.
+    field :trigger, :string, default: "manual"
+
     field :claim_worker, :string
     field :claimed_at, :utc_datetime_usec
     field :claim_epoch, :integer, default: 0
@@ -121,6 +134,9 @@ defmodule BarkparkCloud.Registry.Deployment do
 
   @doc "The valid deployment environments."
   def environments, do: @environments
+
+  @doc "The valid deploy triggers (provenance): manual | content-auto (charter D49)."
+  def triggers, do: @triggers
 
   @doc "The legal from → to status transition graph."
   def transitions, do: @transitions
@@ -167,9 +183,21 @@ defmodule BarkparkCloud.Registry.Deployment do
   """
   def changeset(deployment, attrs) do
     deployment
-    |> cast(attrs, [:git_ref, :artifact_url, :site_id, :delivery_id, :build_id, :content_rev])
+    |> cast(attrs, [
+      :git_ref,
+      :artifact_url,
+      :site_id,
+      :delivery_id,
+      :build_id,
+      :content_rev,
+      # site-spawner W5 (charter D49): provenance is set at create (manual by
+      # default; the content-publish receiver stamps "content-auto"). Not a
+      # transition field — a build never changes WHY it was created.
+      :trigger
+    ])
     |> validate_required([:site_id])
     |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:trigger, @triggers)
     |> assoc_constraint(:site)
     # site-spawner W1: PLAN idempotency backstop. A repeat build_id for the same
     # site surfaces as a changeset error (the router can turn it into a 200
