@@ -88,6 +88,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites            user      create a hosted Site under a Barkpark
       GET     /v1/sites            user      list the team's sites (across all boxes)
       GET     /v1/sites/:id        user      one site
+      GET     /v1/sites/:id/domain-status user  per-domain DNS/TLS/serving checklist, CF-mode-aware (team-scoped)
       POST    /v1/sites/:id/deploy user      enqueue a Deployment (the build job)
       GET     /v1/sites/:id/deployments user list a site's PRODUCTION deployments, newest first
       POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
@@ -6087,6 +6088,41 @@ defmodule BarkparkCloud.Web.Router do
         case resolve_team_barkpark(conn.assigns.current_team, conn.path_params["id"]) do
           nil -> json(conn, 404, %{error: "not_found"})
           %Barkpark{} = bp -> json(conn, 200, DomainStatus.check(bp))
+        end
+    end
+  end
+
+  # GET /v1/sites/:id/domain-status → 200 {ok, checked_at, instance, domains} —
+  # the Site sibling of the barkparks checklist above (charter D56, CF-in-front
+  # wave). Probes each of the site's custom `domains` dns_found → points_here →
+  # tls → serving against the box it runs on (`site.barkpark.host`).
+  #
+  # MODE-AWARE: a :cf_proxied site (behind Cloudflare's orange cloud) resolves to
+  # CF edge anycast IPs, not the origin, so `points_here` is classified :proxied
+  # (informational) instead of compared — the mode is read from the Site record,
+  # NEVER inferred from the resolved IP. A :direct site (the default, and every
+  # standalone box) is the exact addr == box intersection, unchanged.
+  #
+  # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
+  # barkparks route (wrong-team / absent / malformed id are indistinguishable).
+  # Reads only public DNS + the box's own TLS/HTTP — no admin token, no zone read.
+  get "/v1/sites/:id/domain-status" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site ->
+            json(conn, 200, DomainStatus.check(Repo.preload(site, :barkpark)))
+
+          nil ->
+            json(conn, 404, %{error: "not_found"})
         end
     end
   end
