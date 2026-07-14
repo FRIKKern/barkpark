@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "types": ["node"]
+  },
+  // scripts/ is included on purpose: smoke-telegram.ts IS the human-gate
+  // deliverable. `node --check` only validates syntax, so without this the smoke
+  // harness could call a function that no longer exists and the gate would stay
+  // green — a fabricated proof of the one thing we cannot test automatically.
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "vitest.config.ts"]
+}
