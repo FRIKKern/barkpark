@@ -1009,14 +1009,17 @@ defmodule Barkpark.Tenancy do
     end
   end
 
-  # Sweep the 11 E3/allowlist string-keyed tables the keystone exporter copies
+  # Sweep the 10 E3/allowlist string-keyed tables the keystone exporter copies
   # (charter D4/D5): the 4 E3 doc-keyed (Catalog.e3_doc_keyed/0), the 5 E3
-  # dataset-keyed (Catalog.e3_dataset_keyed/0), and the 2 scope-column allowlist
-  # tables (Catalog.allowlist/0). NONE of them carries `workspace_id` — their
-  # tenant key is a `(doc_id, dataset)` leaf or a `scope` string — so the SQL
-  # CASCADE on `Repo.delete(workspace)` NEVER reaches them; without this explicit
-  # step a torn-down workspace silently orphans (e.g.) its authoring_exemptions
-  # ledger and its per-dataset DEKs (`data_keys`).
+  # dataset-keyed (Catalog.e3_dataset_keyed/0), and the 1 scope-column allowlist
+  # table (Catalog.allowlist/0 = data_keys). NONE of them carries `workspace_id`
+  # — their tenant key is a `(doc_id, dataset)` leaf or a `scope` string — so the
+  # SQL CASCADE on `Repo.delete(workspace)` NEVER reaches them; without this
+  # explicit step a torn-down workspace silently orphans (e.g.) its
+  # authoring_exemptions ledger and its per-dataset DEKs (`data_keys`).
+  # (`search_surface_config` left this sweep in Wave 5 Slice A — it gained a
+  # `workspace_id` FK and now cascade-deletes with the workspace, charter
+  # D45/D49.)
   #
   # POSITION IS LOAD-BEARING — this runs FIRST, before media/documents/audit and
   # before the final cascade: the E3 doc-keyed semi-join needs the workspace's
@@ -1037,7 +1040,7 @@ defmodule Barkpark.Tenancy do
   #     workspace is dropped, so this bare-slug sweep can never cross-tenant
   #     delete a co-tenant's rows under the same slug (charter D21).
   #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix
-  #     (`data_keys` → `"dataset:"`, `search_surface_config` → `""`).
+  #     (`data_keys` → `"dataset:"`).
   defp delete_workspace_string_keyed(ws_id) do
     ws_lit = Catalog.uuid_literal!(ws_id)
     slugs = WorkspaceBundle.dataset_slugs_for(ws_id)

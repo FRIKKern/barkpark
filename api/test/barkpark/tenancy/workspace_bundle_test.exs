@@ -17,10 +17,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 19 workspace_id tables incl roles + the two zero-FK audit tables" do
+    test "E1 = the 20 workspace_id tables incl roles + search_surface_config + the two zero-FK audit tables" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 19
+      assert length(e1) == 20
       assert "roles" in e1
+      # search_surface_config gained a workspace_id column in Wave 5 Slice A
+      # (charter D45/D49) to close a LIVE cross-tenant config bleed — it is the
+      # 20th E1 table, re-pinned out of the scope-column allowlist.
+      assert "search_surface_config" in e1
       # audit_events / audit_export_sinks carry workspace_id with ZERO FK to workspaces
       assert "audit_events" in e1
       assert "audit_export_sinks" in e1
@@ -32,16 +36,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
     end
 
-    test "E3 = the 9 dataset-column tables; data_keys + search_surface_config are the scope allowlist, NOT in E3" do
+    test "E3 = the 9 dataset-column tables; data_keys is the scope allowlist; search_surface_config is now E1" do
       e3 = Catalog.live_e3(Repo)
       assert length(e3) == 9
       assert "authoring_exemptions" in e3
-      # The two scope-column tables are invisible to the dataset scan and MUST be
-      # carried by the explicit allowlist (dropping data_keys = undecryptable ciphertext).
+      # data_keys is invisible to the dataset scan and MUST be carried by the
+      # explicit allowlist (dropping it = undecryptable ciphertext).
       refute "data_keys" in e3
-      refute "search_surface_config" in e3
       assert Map.has_key?(Catalog.allowlist(), "data_keys")
-      assert Map.has_key?(Catalog.allowlist(), "search_surface_config")
+      # search_surface_config has neither a `dataset` column (never in E3) nor the
+      # allowlist any more — Wave 5 Slice A moved it to E1 via a real workspace_id
+      # column (charter D45/D49).
+      refute "search_surface_config" in e3
+      refute Map.has_key?(Catalog.allowlist(), "search_surface_config")
+      assert "search_surface_config" in Catalog.live_e1(Repo)
     end
   end
 
@@ -146,9 +154,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       insert_sync_cursor!("EXCL-A-CURSOR-#{tag}", excl)
 
       # B's rows under the SHARED slug, uniquely marked — MUST NOT leak into A.
+      # (search_surface_config is no longer bare-slug-keyed — it moved to E1 in
+      # Wave 5 Slice A, so its cross-tenant isolation is proven by the dedicated
+      # "search_surface_config per-workspace E1 attribution" describe below.)
       insert_sync_cursor!("B-ONLY-CURSOR-#{tag}", shared)
       insert_data_key!("dataset:#{shared}", "B-ONLY-CIPHERTEXT-#{tag}")
-      insert_surface_config!(shared, "B-ONLY-SURFACE-#{tag}")
 
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
       {manifest, dumps} = Archive.unpack(bundle)
@@ -163,7 +173,33 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       refute "shared-prod-#{tag}" in manifest["dataset_slugs"]
       refute dumps["sync_cursors"] =~ "B-ONLY-CURSOR-#{tag}"
       refute dumps["data_keys"] =~ "B-ONLY-CIPHERTEXT-#{tag}"
-      refute dumps["search_surface_config"] =~ "B-ONLY-SURFACE-#{tag}"
+    end
+  end
+
+  # ── search_surface_config per-workspace E1 attribution (Wave 5 Slice A) ───────
+
+  describe "search_surface_config is exported per-workspace (charter D45/D49)" do
+    test "A's workspace-keyed surface config IS carried; B's row on the SAME scope is NOT" do
+      ws_a = create_workspace!(unique("wsa"))
+      proj_a = create_project!(ws_a, unique("proja"))
+      ws_b = create_workspace!(unique("wsb"))
+      _proj_b = create_project!(ws_b, unique("projb"))
+
+      # Both workspaces own a config on the universally-shared "production" scope
+      # — the exact bleed shape. They are now DISTINCT physical rows keyed by
+      # workspace_id, so A's bundle carries A's row and never B's.
+      seed_dataset!(proj_a.id, "production")
+      insert_surface_config_ws!(ws_a.id, "documents", "production", "A-ONLY-FIELD")
+      insert_surface_config_ws!(ws_b.id, "documents", "production", "B-ONLY-FIELD")
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      member = Enum.find(manifest["tables"], &(&1["name"] == "search_surface_config"))
+      assert member["partition"] == "E1"
+
+      assert dumps["search_surface_config"] =~ "A-ONLY-FIELD"
+      refute dumps["search_surface_config"] =~ "B-ONLY-FIELD"
     end
   end
 
@@ -431,17 +467,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       []
     )
 
-    # allowlist: A's per-dataset DEK + surface config (scope-keyed, invisible to the dataset scan).
+    # allowlist: A's per-dataset DEK (scope-keyed, invisible to the dataset scan).
     Repo.query!(
       "INSERT INTO data_keys (id, scope, wrapped_key, inserted_at, updated_at) " <>
         "VALUES (gen_random_uuid(), 'dataset:prod-a', 'ciphertext-xyz', now(), now())",
       []
     )
 
+    # E1: A's search surface config — now workspace_id-keyed (Wave 5 Slice A,
+    # charter D45/D49). A NULL workspace_id here would be invisible to A's E1
+    # bundle (WHERE workspace_id = $ws), so it MUST carry ws_a.id.
     Repo.query!(
-      "INSERT INTO search_surface_config (id, surface, scope, inserted_at, updated_at) " <>
-        "VALUES (gen_random_uuid(), 'search', 'prod-a', now(), now())",
-      []
+      "INSERT INTO search_surface_config (id, workspace_id, surface, scope, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1::text::uuid, 'documents', 'prod-a', now(), now())",
+      [ws_a.id]
     )
 
     %{
@@ -479,11 +518,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     )
   end
 
-  defp insert_surface_config!(scope, surface) do
+  # Workspace-keyed surface config (Wave 5 Slice A E1 attribution). The distinctive
+  # `marker` lands in the zero_hit_strategy text column so it appears in the COPY
+  # text dump (searchable_fields is a jsonb[] — awkward to grep).
+  defp insert_surface_config_ws!(workspace_id, surface, scope, marker) do
     Repo.query!(
-      "INSERT INTO search_surface_config (id, surface, scope, inserted_at, updated_at) " <>
-        "VALUES (gen_random_uuid(), $1, $2, now(), now())",
-      [surface, scope]
+      "INSERT INTO search_surface_config " <>
+        "(id, workspace_id, surface, scope, zero_hit_strategy, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1::text::uuid, $2, $3, $4, now(), now())",
+      [workspace_id, surface, scope, marker]
     )
   end
 

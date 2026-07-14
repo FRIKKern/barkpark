@@ -545,9 +545,10 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       # A dataset slug is unique only per (project_id, slug) — so "shared-prod"
       # legitimately names a DISTINCT dataset in EACH workspace (charter D21).
       # The E3-dataset tables (sync_cursors, …) and the scope-column allowlist
-      # (data_keys, search_surface_config) carry ONLY that bare slug/scope with
-      # no project/dataset column, so a bare `dataset = ANY(slugs)` sweep of A
-      # would strip B's rows under the SAME slug too — a cross-tenant delete.
+      # (data_keys) carry ONLY that bare slug/scope with no project/dataset
+      # column, so a bare `dataset = ANY(slugs)` sweep of A would strip B's rows
+      # under the SAME slug too — a cross-tenant delete. (search_surface_config
+      # left this class in Wave 5 Slice A — see the dedicated E1-cascade test.)
       tag = System.unique_integer([:positive])
       shared = "shared-prod-#{tag}"
       excl = "excl-a-#{tag}"
@@ -562,7 +563,6 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       # Rows under the slug A SHARES with B — MUST survive A's teardown.
       insert_sync_cursor!("src-b-#{tag}", shared)
       insert_data_key!("dataset:#{shared}")
-      insert_surface_config!(shared)
 
       assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
 
@@ -579,9 +579,29 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       assert data_key_count("dataset:#{shared}") == 1,
              "a per-dataset DEK under a slug SHARED with B must survive A's teardown"
+    end
+  end
 
-      assert surface_config_count(shared) == 1,
-             "a search surface config under a slug SHARED with B must survive A's teardown"
+  # ── 7. search_surface_config per-workspace E1 attribution (Wave 5 Slice A) ──
+
+  describe "delete_workspace/1 tears down only the deleted workspace's surface config" do
+    test "B's config on the SAME 'production' scope SURVIVES A's teardown (charter D45/D49)" do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+
+      # Both own a config on the universally-shared "production" scope. They are
+      # DISTINCT workspace_id-keyed rows now, so A's cascade delete removes only
+      # A's; B's SURVIVES (and a NULL-workspace global default, if any, too).
+      insert_surface_config_ws!(ws_a.id, "documents", "production")
+      insert_surface_config_ws!(ws_b.id, "documents", "production")
+
+      assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
+
+      assert surface_config_count_ws(ws_a.id, "documents", "production") == 0,
+             "A's workspace-keyed surface config must be cascade-deleted on teardown"
+
+      assert surface_config_count_ws(ws_b.id, "documents", "production") == 1,
+             "B's surface config on the same scope must survive A's teardown"
     end
   end
 
@@ -657,16 +677,20 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
     scalar("SELECT count(*) FROM data_keys WHERE scope = $1", [scope])
   end
 
-  defp insert_surface_config!(scope) do
+  # Workspace-keyed surface config (Wave 5 Slice A E1 attribution).
+  defp insert_surface_config_ws!(workspace_id, surface, scope) do
     Repo.query!(
-      "INSERT INTO search_surface_config (id, surface, scope, inserted_at, updated_at) " <>
-        "VALUES (gen_random_uuid(), 'search', $1, now(), now())",
-      [scope]
+      "INSERT INTO search_surface_config (id, workspace_id, surface, scope, inserted_at, updated_at) " <>
+        "VALUES (gen_random_uuid(), $1::text::uuid, $2, $3, now(), now())",
+      [workspace_id, surface, scope]
     )
   end
 
-  defp surface_config_count(scope) do
-    scalar("SELECT count(*) FROM search_surface_config WHERE scope = $1", [scope])
+  defp surface_config_count_ws(workspace_id, surface, scope) do
+    scalar(
+      "SELECT count(*) FROM search_surface_config WHERE workspace_id = $1::text::uuid AND surface = $2 AND scope = $3",
+      [workspace_id, surface, scope]
+    )
   end
 
   defp scalar(sql, params) do
