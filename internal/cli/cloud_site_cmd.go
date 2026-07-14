@@ -246,10 +246,11 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 // reaches a terminal state (live / failed / cancelled). Progress rides progressf so
 // `-o json` keeps stdout a single envelope; the final deployment is the return value.
 func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.SiteDeployment, follow bool) int {
+	prov := siteTriggerNarration(dep.Trigger)
 	if b := strings.TrimSpace(dep.BuildID); b != "" {
-		out.progressf("→ deploy queued for %s (build %s)", ref, sanitizeCell(b))
+		out.progressf("→ deploy queued for %s (build %s)%s", ref, sanitizeCell(b), prov)
 	} else {
-		out.progressf("→ deploy queued for %s", ref)
+		out.progressf("→ deploy queued for %s%s", ref, prov)
 	}
 
 	// printed is keyed by (name + status), NOT name alone: a stage that walks
@@ -304,10 +305,11 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 		}
 		return exitGeneric
 	case strings.EqualFold(d.Status, "live"):
+		prov := siteTriggerNarration(d.Trigger)
 		if u := siteOr(d.URL, ""); u != "" {
-			out.outf("✓ site live — %s", u)
+			out.outf("✓ site live — %s%s", u, prov)
 		} else {
-			out.outf("✓ site live")
+			out.outf("✓ site live%s", prov)
 		}
 		return exitOK
 	default:
@@ -324,6 +326,36 @@ func siteDeployExit(d cloudclient.SiteDeployment) int {
 		return exitGeneric
 	}
 	return exitOK
+}
+
+// siteTriggerNarration is the provenance suffix on the deploy stream's queued and
+// terminal lines: a content-auto deploy announces it was fired by a publish on the
+// bound dataset (the CMS self-updating), a manual one says so plainly. Empty when
+// the control plane omitted the field (a pre-wave-5 box) so the CLI never claims a
+// provenance it wasn't told — the wish's "observable, auto-vs-manual" bar.
+func siteTriggerNarration(trigger string) string {
+	switch strings.ToLower(strings.TrimSpace(trigger)) {
+	case "content-auto":
+		return " — auto: content publish"
+	case "":
+		return ""
+	default:
+		return " — manual"
+	}
+}
+
+// siteTriggerLabel is the human status-table value for the deploy's provenance:
+// content-auto reads as a self-triggered rebuild, manual as a hand-run deploy;
+// any other non-empty value passes through sanitized rather than being dropped.
+func siteTriggerLabel(trigger string) string {
+	switch strings.ToLower(strings.TrimSpace(trigger)) {
+	case "content-auto":
+		return "content publish (auto)"
+	case "manual":
+		return "manual"
+	default:
+		return sanitizeCell(trigger)
+	}
 }
 
 // siteDeployCancelled reports the control plane's `cancelled` deploy status. Both
@@ -670,6 +702,12 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep *cloudclient.SiteDeployment
 		if st := strings.TrimSpace(dep.Stage); st != "" {
 			m["stage"] = st
 		}
+		// Provenance: was this deploy hand-triggered or fired by a content publish
+		// on the bound dataset? Only surface it when the control plane sent it (a
+		// pre-wave-5 box omits the key entirely).
+		if tr := strings.TrimSpace(dep.Trigger); tr != "" {
+			m["trigger"] = siteTriggerLabel(tr)
+		}
 		// A deploy that did not go live owes the reader a reason — the deployment's
 		// failure_reason, else the failed stage's streamed detail.
 		if strings.EqualFold(dep.Status, "failed") || siteDeployCancelled(dep.Status) {
@@ -708,6 +746,9 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.URL != "" {
 		m["url"] = d.URL
+	}
+	if d.Trigger != "" {
+		m["trigger"] = d.Trigger
 	}
 	if d.FailureReason != "" {
 		m["failure_reason"] = d.FailureReason

@@ -426,6 +426,96 @@ func TestRunCloudSiteDeployNoForce(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteDeployContentAutoTrigger is the D49 provenance proof for a
+// content-fired rebuild: when the control plane stamps trigger="content-auto"
+// (a publish on the bound dataset kicked the debounced auto-deploy), the stream
+// narrates the auto label on the queued and live lines, and `-o json` surfaces
+// the trigger so a script can tell an auto-rebuild from a hand-run deploy.
+func TestRunCloudSiteDeployContentAutoTrigger(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"b-1","trigger":"content-auto","stages":[{"name":"PLAN","status":"running"}]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"live","stage":"RETIRE","build_id":"b-1","trigger":"content-auto","url":"https://acme.barkpark.cloud/sites/blog/","stages":[` +
+		`{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"},{"name":"STAGE","status":"done"},` +
+		`{"name":"HEALTH","status":"done"},{"name":"SWITCH","status":"done"},{"name":"RETIRE","status":"done"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "auto: content publish") {
+		t.Fatalf("content-auto deploy must narrate the auto provenance:\n%s", stdout)
+	}
+
+	// -o json must carry the trigger — Go's Unmarshal drops unknown keys, so this
+	// fails until SiteDeployment.Trigger + siteDeploymentMap thread it through.
+	jstdout, _, jcode := runSite(t, "json", "deploy", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Deployment struct {
+			Trigger string `json:"trigger"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Deployment.Trigger != "content-auto" {
+		t.Fatalf("json deployment.trigger = %q, want content-auto\n%s", env.Deployment.Trigger, jstdout)
+	}
+}
+
+// TestRunCloudSiteDeployManualTriggerNoAutoLabel is the complement: a hand-run
+// deploy (trigger="manual") says "manual", never the content-auto label — the
+// provenance must not lie in the other direction either.
+func TestRunCloudSiteDeployManualTriggerNoAutoLabel(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","site_id":"` + testSiteID + `","status":"queued","stage":"PLAN","build_id":"b-1","trigger":"manual","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if strings.Contains(stdout, "auto: content publish") {
+		t.Fatalf("a manual deploy must NOT claim content-auto provenance:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "manual") {
+		t.Fatalf("a manual deploy should narrate its manual provenance:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteStatusShowsTrigger proves the human status table surfaces the
+// deploy provenance (D49) — a user checking `bp cloud site status` sees whether
+// the live build came from a publish or a manual run, and `-o json` carries it.
+func TestRunCloudSiteStatusShowsTrigger(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","url":"https://acme.barkpark.cloud/sites/blog/","current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","trigger":"content-auto","stages":[{"name":"PLAN","status":"done"},{"name":"BUILD","status":"done"}]}}}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "trigger") || !strings.Contains(stdout, "content publish (auto)") {
+		t.Fatalf("status table must surface the deploy trigger:\n%s", stdout)
+	}
+
+	jstdout, _, _ := runSite(t, "json", "status", testSiteID)
+	var env struct {
+		Deployment struct {
+			Trigger string `json:"trigger"`
+		} `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, jstdout)
+	}
+	if env.Deployment.Trigger != "content-auto" {
+		t.Fatalf("status -o json deployment.trigger = %q, want content-auto\n%s", env.Deployment.Trigger, jstdout)
+	}
+}
+
 // TestRunCloudSiteDeployNarratesRunningThenDone is the D39 proof: a stage that
 // walks running → done prints TWO distinct lines (the "started" narration then the
 // terminal line), and the terminal done-line is NEVER swallowed. The bug D39 kills
