@@ -292,6 +292,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   defp complete_pending(state, {:thread_open, from, readiness}, {:ok, result}) do
     thread_id = get_in(result, ["thread", "id"])
+    state = emit(state, Protocol.acknowledgement(result, context(state)))
     GenServer.reply(from, {:ok, %{provider_session_id: thread_id, readiness: readiness}})
     %{state | thread_id: thread_id}
   end

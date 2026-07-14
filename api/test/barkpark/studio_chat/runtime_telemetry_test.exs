@@ -4,6 +4,7 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.Runtime
+  alias Barkpark.StudioChat.Runtime.Codex.Session, as: CodexSession
   alias Barkpark.StudioChat.Runtime.Codex.Protocol
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry}
@@ -96,26 +97,33 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
     assert session.observed_context_window == nil
   end
 
-  test "thread acknowledgements persist actual model and nullable effort" do
+  test "thread start emits and persists the app-server acknowledged model and effort" do
     session_id = create_session()
-    context = %{session_id: session_id, thread_id: nil, sequence: 1}
+    binary = acknowledgement_fixture()
 
-    event =
-      Protocol.acknowledgement(
-        %{
-          "thread" => %{"id" => "thread-ack"},
-          "model" => "gpt-observed",
-          "reasoningEffort" => nil
-        },
-        context
-      )
+    assert {:ok, runtime} =
+             CodexSession.start(%{
+               binary: binary,
+               args: [],
+               sink: self(),
+               session_id: session_id,
+               timeout_ms: 500
+             })
+
+    assert_receive {:studio_chat_runtime_event,
+                    %Event{
+                      kind: :runtime_acknowledged,
+                      observed_model: "gpt-observed",
+                      observed_effort: "high"
+                    } = event}
 
     assert :recorded = RuntimeTelemetry.observe(session_id, event)
     assert :duplicate = RuntimeTelemetry.observe(session_id, event)
 
     session = StudioChat.get_session(session_id)
     assert session.observed_model == "gpt-observed"
-    assert session.observed_effort == nil
+    assert session.observed_effort == "high"
+    assert :ok = CodexSession.close(runtime)
   end
 
   test "Recorder projects normalized usage end to end" do
@@ -155,7 +163,8 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
   end
 
   test "managed identity is opaque and registered-host limitations stay explicit" do
-    {:ok, registry} = Registry.start_link(keys: :unique)
+    registry = __MODULE__.IdentityRegistry
+    start_supervised!({Registry, keys: :unique, name: registry})
 
     {:ok, lease} =
       RuntimeAdmission.acquire("identity-session", %{
@@ -196,5 +205,38 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
       })
 
     id
+  end
+
+  defp acknowledgement_fixture do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "codex_acknowledgement_#{System.unique_integer([:positive])}.py"
+      )
+
+    File.write!(path, """
+    #!/usr/bin/env python3
+    import json
+    import sys
+
+    for raw in sys.stdin:
+        message = json.loads(raw)
+        method = message.get("method")
+        if method == "initialize":
+            result = {"codexHome": "/tmp/codex", "platformFamily": "unix",
+                      "platformOs": "linux", "userAgent": "codex-cli/test"}
+        elif method == "account/read":
+            result = {"account": {"type": "apiKey"}, "requiresOpenaiAuth": True}
+        elif method == "thread/start":
+            result = {"thread": {"id": "thread-ack"}, "model": "gpt-observed",
+                      "reasoningEffort": "high"}
+        else:
+            continue
+        print(json.dumps({"id": message["id"], "result": result}), flush=True)
+    """)
+
+    File.chmod!(path, 0o755)
+    on_exit(fn -> File.rm(path) end)
+    path
   end
 end

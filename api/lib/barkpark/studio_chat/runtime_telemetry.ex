@@ -79,7 +79,7 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
           @receipt_table,
           [
             %{
-              session_id: session_id,
+              session_id: Ecto.UUID.dump!(session_id),
               event_key: event_key,
               kind: to_string(kind),
               payload_hash: digest(payload),
