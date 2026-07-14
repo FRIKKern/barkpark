@@ -10,7 +10,8 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
 
   Registered-host processes are outside this node. Their local PID, memory and
   CPU data therefore remain unavailable rather than being synthesized from the
-  Barkpark dispatcher process.
+  Barkpark dispatcher process. Managed-process memory, reductions and queue
+  depth describe the local BEAM adapter, not the linked provider process.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -19,10 +20,34 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.Session
 
-  @receipt_table "chat_runtime_telemetry_events"
+  defmodule Receipt do
+    @moduledoc false
+    use Ecto.Schema
+
+    @primary_key false
+    schema "chat_runtime_telemetry_events" do
+      field :session_id, Ecto.UUID, primary_key: true
+      field :event_key, :string, primary_key: true
+      field :kind, :string
+      field :payload_hash, :string
+      field :inserted_at, :utc_datetime_usec
+    end
+  end
+
+  @usage_counter_fields [
+    :observed_input_tokens,
+    :observed_cached_input_tokens,
+    :observed_output_tokens,
+    :observed_reasoning_output_tokens,
+    :observed_total_tokens
+  ]
   @registered_host_limitations [
     "registered-host process identity is owned by the remote host",
     "registered-host CPU and memory telemetry are unavailable to this node"
+  ]
+  @managed_runtime_limitations [
+    "memory_bytes, reductions, and message_queue_len describe the local BEAM adapter process",
+    "provider-process CPU and memory telemetry are unavailable; os_pid is identity only"
   ]
 
   @type observation_result :: :recorded | :duplicate | :ignored | {:error, term()}
@@ -70,19 +95,23 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
   @doc "The explicit limitations persisted for registered-host sessions."
   def registered_host_limitations, do: @registered_host_limitations
 
+  @doc "The metric provenance limitations persisted for managed sessions."
+  def managed_runtime_limitations, do: @managed_runtime_limitations
+
   defp persist_once(session_id, event_key, kind, payload, fields) do
     now = DateTime.utc_now()
+    payload_hash = digest(payload)
 
     Repo.transaction(fn ->
       {inserted, _} =
         Repo.insert_all(
-          @receipt_table,
+          Receipt,
           [
             %{
-              session_id: Ecto.UUID.dump!(session_id),
+              session_id: session_id,
               event_key: event_key,
               kind: to_string(kind),
-              payload_hash: digest(payload),
+              payload_hash: payload_hash,
               inserted_at: now
             }
           ],
@@ -91,12 +120,9 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
         )
 
       if inserted == 0 do
-        :duplicate
+        resolve_replay(session_id, event_key, payload_hash)
       else
-        {updated, _} =
-          Repo.update_all(from(s in Session, where: s.id == ^session_id), set: fields)
-
-        if updated == 1, do: :recorded, else: Repo.rollback(:session_not_found)
+        project_observation(session_id, kind, fields)
       end
     end)
     |> case do
@@ -104,6 +130,48 @@ defmodule Barkpark.StudioChat.RuntimeTelemetry do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp resolve_replay(session_id, event_key, payload_hash) do
+    stored_hash =
+      Repo.one(
+        from(r in Receipt,
+          where: r.session_id == ^session_id and r.event_key == ^event_key,
+          select: r.payload_hash
+        )
+      )
+
+    if stored_hash == payload_hash do
+      :duplicate
+    else
+      Repo.rollback({:idempotency_conflict, event_key})
+    end
+  end
+
+  defp project_observation(session_id, kind, fields) do
+    session =
+      Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE")) ||
+        Repo.rollback(:session_not_found)
+
+    fields = if kind == :usage, do: usage_high_water(session, fields), else: fields
+
+    {1, _} = Repo.update_all(from(s in Session, where: s.id == ^session_id), set: fields)
+    :recorded
+  end
+
+  defp usage_high_water(session, fields) do
+    Enum.map(fields, fn
+      {field, value} when field in @usage_counter_fields ->
+        {field, high_water(Map.get(session, field), value)}
+
+      {:observed_context_window = field, value} ->
+        {field, value || Map.get(session, field)}
+    end)
+  end
+
+  defp high_water(nil, nil), do: nil
+  defp high_water(current, nil), do: current
+  defp high_water(nil, value), do: value
+  defp high_water(current, value), do: max(current, value)
 
   defp event_key(%Event{idempotency_key: key}) when is_binary(key) and key != "", do: key
   defp event_key(%Event{} = event), do: "runtime-event:" <> digest(event)
