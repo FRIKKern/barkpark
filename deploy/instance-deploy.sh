@@ -68,6 +68,46 @@ CONNECTORS_ENV_FILE="${BARKPARK_CONNECTORS_ENV_FILE:-/etc/barkpark/connectors.en
 NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
 
+# ---- ONE shared Caddyfile lock (site-spawner D27) --------------------------
+# $CADDYFILE has a SECOND writer: deploy/site-deploy.sh arms a `handle_path
+# /sites/<slug>/*` block into the same file. Both scripts do read -> backup ->
+# rewrite -> mv, and an interleave silently DISCARDS one of them. A lost update
+# is syntactically VALID, so the backup + `caddy validate` + revert discipline
+# both scripts already have is structurally BLIND to it. Reproduced: site-deploy's
+# losing write dropped this script's blue/green port flip and then reloaded Caddy
+# onto the slot we were about to `systemctl disable --now` — a hard 502 on the
+# content API that does not self-heal until the next deploy.
+#
+# So EVERY Caddyfile read-modify-write in this script (three route armings + two
+# flip regions) runs under this leaf lock on fd 8, and site-deploy.sh takes the
+# SAME lock around its whole arming function. Acquire order is identical in both
+# (own lock fd 9 -> caddy lock fd 8) and the caddy lock is a leaf neither holds
+# while waiting on the other's, so they cannot deadlock. It is deliberately NOT
+# this script's own lock (fd 9): that one is held for the whole multi-minute run
+# and would stall a site deploy for ten minutes.
+CADDY_LOCK="${BARKPARK_CADDYFILE_LOCK:-/var/lock/barkpark-caddyfile.lock}"
+if ! ( : > "$CADDY_LOCK" ) 2>/dev/null; then
+  # Unwritable /var/lock (dev box, unprivileged CI) — still serialize, in TMPDIR.
+  CADDY_LOCK="${TMPDIR:-/tmp}/barkpark-caddyfile.lock"
+  # LOUD, because the failure mode is silent: the two writers only exclude each
+  # other if they resolve the SAME path. Both run as root on the box and both get
+  # /var/lock; if one falls back and the other does not, they serialize against
+  # nothing. Pin BARKPARK_CADDYFILE_LOCK identically on both.
+  log "WARN: /var/lock is not writable — Caddyfile lock falls back to $CADDY_LOCK; site-deploy.sh MUST resolve the same path (set BARKPARK_CADDYFILE_LOCK) or the two Caddyfile writers do not serialize"
+fi
+with_caddy_lock() { # <fn> [args…] — run a whole Caddyfile read-modify-write serialized
+  exec 8>"$CADDY_LOCK" || { log "cannot open the Caddyfile lock $CADDY_LOCK — leaving Caddy untouched"; return 1; }
+  if ! flock -w 120 8; then
+    log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — leaving Caddy untouched"
+    exec 8>&-
+    return 1
+  fi
+  "$@"
+  local rc=$?
+  exec 8>&-
+  return "$rc"
+}
+
 MODE=deploy
 case "${1:-}" in
   --rollback)           MODE=rollback ;;
@@ -174,8 +214,22 @@ if [ "$MODE" != "deploy" ]; then
 
   # Hot swap back (mirrors the forward flip; the post-flip public curl below
   # is LOG-ONLY and must never gate — the pre-flip own-port loop above is the gate).
+  # UNDER THE SHARED CADDYFILE LOCK (fd 8, D27): site-deploy.sh rewrites this same
+  # file. Bracketed inline rather than wrapped in a function because every failure
+  # path below EXITS — and an exit releases fd 8 with the process.
+  exec 8>"$CADDY_LOCK"
+  if ! flock -w 120 8; then
+    log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — no flip, fail closed"
+    systemctl disable --now "barkpark-slot@$TARGET_SLOT" 2>/dev/null || true
+    git reset --hard "$OLD"; exit 24
+  fi
+  # Re-read the live upstream INSIDE the lock: ACTIVE_PORT was read before the
+  # slot reboot + health gate, and the flip must rewrite what is in the file NOW
+  # (that read was the time-of-check half of the race).
+  FLIP_FROM="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2)"
+  FLIP_FROM="${FLIP_FROM:-$ACTIVE_PORT}"
   cp -a "$CADDYFILE" "$CADDYFILE.pre-rollback"
-  sed -i "s/localhost:${ACTIVE_PORT}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
+  sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
   if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
     log "Caddyfile invalid after rollback flip — restoring, fail closed"
     cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"
@@ -188,6 +242,7 @@ if [ "$MODE" != "deploy" ]; then
     systemctl disable --now "barkpark-slot@$TARGET_SLOT" 2>/dev/null || true
     git reset --hard "$OLD"; exit 24
   fi
+  exec 8>&-   # leaf lock: released the moment the file is written + reloaded
   code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
   log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 
@@ -327,7 +382,7 @@ MAINT
     mv "$bak" "$CADDYFILE"
   fi
 }
-arm_caddy_maintenance
+with_caddy_lock arm_caddy_maintenance
 
 # ---- Arm the /mcp Caddy route for the remote MCP endpoint (viable-everywhere
 # charter D19): path-based on the EXISTING public site — never a new subdomain —
@@ -387,7 +442,7 @@ MCPROUTE
     mv "$bak" "$CADDYFILE"
   fi
 }
-arm_caddy_mcp_route
+with_caddy_lock arm_caddy_mcp_route
 
 # ---- Arm the /connectors Caddy route for the Connectors bridge (connectors
 # charter D34/D46): path-based on the EXISTING public site — never a new
@@ -455,7 +510,7 @@ CONNROUTE
     mv "$bak" "$CADDYFILE"
   fi
 }
-arm_caddy_connectors_route
+with_caddy_lock arm_caddy_connectors_route
 
 # ---- Which slot serves now? Caddy's upstream port is the source of truth
 # (on the pre-blue/green layout it reads 4000, which maps to legacy-as-blue).
@@ -537,8 +592,25 @@ if [ "$ok" != "1" ]; then
 fi
 
 # ---- Hot swap: point Caddy at the new slot (graceful reload, no drops).
+# UNDER THE SHARED CADDYFILE LOCK (fd 8, D27): site-deploy.sh rewrites this same
+# file, and a concurrent arm-vs-flip interleave DISCARDS this flip while Caddy is
+# reloaded onto the slot we retire below (a reproduced hard 502 — and `caddy
+# validate` passes in BOTH processes, because a lost update is valid config).
+# Bracketed inline, not wrapped in a function: every failure path below EXITS,
+# and an exit releases fd 8 with the process.
+exec 8>"$CADDY_LOCK"
+if ! flock -w 120 8; then
+  log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — no swap; slot $TARGET stopped, :$ACTIVE_PORT still serving (no downtime)"
+  systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  git reset --hard "$OLD"; exit 14
+fi
+# Re-read the live upstream INSIDE the lock. ACTIVE_PORT was read BEFORE a
+# multi-minute build — that read was the time-of-check half of the race, and the
+# flip must rewrite whatever the file actually holds now.
+FLIP_FROM="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2)"
+FLIP_FROM="${FLIP_FROM:-$ACTIVE_PORT}"
 cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"
-sed -i "s/localhost:${ACTIVE_PORT}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
+sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
 if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
   log "Caddyfile invalid after port flip — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
@@ -551,6 +623,8 @@ if ! systemctl reload caddy; then
   systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
   git reset --hard "$OLD"; exit 14
 fi
+exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
+            # the long non-Caddy tail below (go builds, npm ci) never holds it
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
 log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
 

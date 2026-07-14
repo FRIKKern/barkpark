@@ -98,22 +98,67 @@ only the injected `BARKPARK_*` build vars reach Vite, because its `process.env`
 precedence would let an ambient `BARKPARK_TOKEN` silently shadow the per-site
 token) → **STAGE** (copy ONLY `dist/` — ~16K — into `releases/<build_id>/`;
 `node_modules` stays in the ephemeral sandbox) → **HEALTH** (throwaway static
-server on a loopback ephemeral port over the release dir: assert `200` AND grep
-the `bp-build-id`/`bp-content-rev` `<meta>` markers baked into `index.html` —
-content-truth, not vacuous reachability; fail ⇒ no switch) → **SWITCH** (atomic
-`current` symlink `rename(2)` — via `perl` so it is portable past BSD/GNU `mv`'s
-symlink-to-dir follow; no Caddy reload in the flip) → **RETIRE** (keep newest
-`N=5` release dirs, never `current`/`.previous`). It also arms ONCE a marker-
-guarded (`BARKPARK_SITE_ROUTE:<slug>`) Caddy `handle_path /sites/<slug>/* { root
-* <root>/current; file_server }` into the live FQDN block (mirrors the `/mcp`
-route arming) — never re-flipped per deploy. `--rollback` repoints `current` to
-the previous release in sub-second with NO rebuild (typed `--rollback-preflight`:
+server on a loopback ephemeral port over the release dir: assert `200` AND that
+the `bp-build-id` / `bp-content-rev` / `bp-doc-id` `<meta>` markers in the bytes
+it **serves** carry the **values** this deploy ships — `bp-build-id ==
+$BUILD_ID`, `bp-content-rev` non-empty and `== $CONTENT_REV`, `bp-doc-id`
+non-empty. Presence is vacuous: the old name-only grep passed a build whose
+`bp-build-id` said `TOTALLY-WRONG` and whose `bp-content-rev` was the empty
+string, and it went live. Fail ⇒ no switch **and the release is purged**, so a
+retry of the same `build_id` rebuilds instead of re-gating the same broken bytes
+forever; if those bytes are the live/rollback target they are kept and marked
+`.bp-health-failed`, which PLAN refuses) → **SWITCH** (atomic `current` symlink
+`rename(2)` — via `perl` so it is portable past BSD/GNU `mv`'s symlink-to-dir
+follow; no Caddy reload in the flip) → **RETIRE** (keep newest `N=5` release
+dirs, never `current`/`.previous`). It also arms ONCE a marker-guarded
+(`BARKPARK_SITE_ROUTE:<slug>`) Caddy `handle_path /sites/<slug>/* { root *
+<root>/current; file_server }` into the live FQDN block (mirrors the `/mcp` route
+arming) — never re-flipped per deploy. `--rollback` repoints `current` to the
+previous release in sub-second with NO rebuild (typed `--rollback-preflight`:
 exit 0 prints `TARGET_BUILD=`; refusals 21 `no_previous`, 22 `not_supported`, 23
-lock held). Typed deploy exits: 11 missing input, 12 BUILD, 13 STAGE, 14 HEALTH,
-15 lock wait, 16 SWITCH. Node/npm are already on guerrilla (asdf). Offline gate
-(no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` — 15 checks over
-fixture release dirs proving the symlink flip, forward/back rollback, and
-retire-N.
+lock held). Because rollback is a pointer flip it does **not** health-gate — so
+it refuses (21) a previous release marked `.bp-health-failed`, which would
+otherwise walk a build already proven broken back in front of visitors. Typed
+deploy exits: 11 missing input, 12 BUILD, 13 STAGE, 14 HEALTH, 15 lock wait, 16
+SWITCH. Node/npm are already on guerrilla (asdf).
+
+**Machine stage protocol.** A deploy prints, next to the human prose, one line
+per stage boundary on **stdout**:
+
+```
+BPSTAGE name=<PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> status=<started|ok|skipped|noop|failed> build_id=<id> [detail="…"]
+```
+
+A stage that runs emits `started` then one terminal line (`ok`/`failed`); a stage
+that does not run emits one terminal line (`skipped`, or `noop` for a PLAN that
+finds the build already live). A successful deploy speaks for all six stages, in
+order. A `failed` line is the last stage line of the run and **carries the
+reason** (`detail=`) — BUILD's own output is merged onto stdout for exactly that
+purpose, so a stdout-only caller can always say *why*. The three paths that used
+to be silent — a PLAN no-op, a SKIP_BUILD redeploy, a RETIRE that removes nothing
+— all speak, so a stage-watching caller cannot hang. `--rollback` keeps its own
+contract (`TARGET_BUILD=` + typed exits), not `BPSTAGE`.
+
+**One Caddyfile, one lock.** `site-deploy.sh` and `instance-deploy.sh` both
+read-modify-write `/etc/caddy/Caddyfile` (route arming; blue/green port flip). An
+interleave silently discards one writer — and a lost update is *syntactically
+valid*, so `caddy validate` cannot see it (reproduced: a losing write dropped the
+port flip, then reloaded Caddy onto the slot the deploy was about to disable — a
+hard 502). Every read-modify-write in **both** scripts therefore runs under one
+shared leaf lock, `/var/lock/barkpark-caddyfile.lock` on fd 8 (`with_caddy_lock`;
+`BARKPARK_CADDYFILE_LOCK` overrides, TMPDIR fallback when `/var/lock` is not
+writable). Both acquire in the same order — own lock (fd 9) → Caddyfile lock (fd
+8) — and the Caddyfile lock is a leaf, never held across a build, so a site
+deploy never waits on the instance deploy's multi-minute run.
+
+Offline gate (no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` —
+77 checks: the symlink flip, forward/back rollback and retire-N over fixture
+release dirs, the marker reader, then the real script driven end-to-end against a
+fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
+being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout).
+`bash deploy/instance-deploy_test.sh` covers the blue/green script, including the
+Caddyfile-lock regression (fail-before: the flip is lost; fixed: both writers
+survive) — it needs a real `caddy` and `flock(1)`, so that case skips on macOS.
 
 A change to `deploy/**` redeploys both (the deploy logic itself changed).
 

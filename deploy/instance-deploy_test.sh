@@ -184,6 +184,7 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+    BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
     BARKPARK_MCP_ENV_FILE="$TMP/mcp.env" \
     BARKPARK_CONNECTORS_ENV_FILE="$TMP/connectors.env" \
     BARKPARK_NODE_LINK="$TMP/barkpark-node" \
@@ -199,6 +200,7 @@ run_rollback() { # $1=health code  $2=fake sha (live HEAD)
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+    BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
     bash "$SCRIPT" --rollback > "$TMP/rollback.log" 2>&1
   echo $?
@@ -207,6 +209,7 @@ run_preflight() { # $1=fake sha (live HEAD); stdout kept for TARGET_* asserts
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+    BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
     HOME="$TMP/home" FAKE_SHA="$1" HEALTH_CODE=200 \
     bash "$SCRIPT" --rollback-preflight > "$TMP/preflight.log" 2>&1
   echo $?
@@ -503,6 +506,104 @@ check "healthy bridge: exit 0"                    "[ '$rc' = '0' ]"
 check "healthy bridge: unit stays enabled"        "grep -q 'systemctl enable barkpark-connectors' '$SYSCTLLOG' && ! grep -q 'disable --now barkpark-connectors' '$SYSCTLLOG'"
 check "healthy bridge: health probe logged 200"   "grep -q '/connectors/health = 200' '$TMP/out.log'"
 rm -rf "$TMP"
+
+echo "== Case 13: the shared Caddyfile lock (site-spawner D27) — a concurrent site-deploy cannot lose the port flip =="
+# THE RACE, reproduced against the REAL scripts. $CADDYFILE has two writers:
+# this script's blue/green port flip and site-deploy.sh's /sites/<slug>/ route
+# arming. Both do read -> backup -> rewrite -> mv. If site-deploy READS before
+# our flip lands and WRITES after it, its stale write silently discards the flip
+# — and then reloads Caddy onto the slot we are about to `disable --now`: a hard
+# 502 on the content API. `caddy validate` passes in BOTH processes, because a
+# lost update is syntactically VALID config — which is why the backup/validate/
+# revert discipline both scripts already had could never catch this.
+#
+# Determinism: a slow-awk shim makes site-deploy read the Caddyfile NOW, touch a
+# sentinel, and write 6s LATER. The test waits for the sentinel, then runs the
+# deploy — so the interleave is forced, not raced.
+# FAIL-BEFORE vs FIXED is the SAME code both times; the only difference is
+# whether flock is real (fixed) or a no-op stub (locking defeated = the old
+# behaviour). Needs a real flock(1) — absent on macOS.
+if ! command -v flock >/dev/null 2>&1; then
+  echo "  SKIP: flock(1) required (absent on macOS) — run this case on Linux/CI"
+elif ! command -v python3 >/dev/null 2>&1; then
+  echo "  SKIP: python3 required (site-deploy's throwaway health server)"
+else
+  race_setup() {
+    setup_case
+    run_deploy 200 racebase >/dev/null     # arms maintenance/mcp/connectors, flips :4000 -> :4001
+    rm -f "$APP/.instance-deploy-last"     # so the racing deploy is not coalesced away
+    # A staged, healthy site release: site-deploy takes its SKIP_BUILD path (no
+    # npm) and goes PLAN -> HEALTH -> arm -> SWITCH.
+    SITES="$TMP/sites"; mkdir -p "$SITES/racesite/releases/r1"
+    printf '<meta name="bp-build-id" content="r1"><meta name="bp-content-rev" content="rev1"><meta name="bp-doc-id" content="doc1">' \
+      > "$SITES/racesite/releases/r1/index.html"
+    SENT="$TMP/site-read-done"; rm -f "$SENT"
+    SLOW="$TMP/slowbin"; mkdir -p "$SLOW" "$TMP/nolock" "$TMP/empty"
+    REAL_AWK="$(command -v awk)"
+    # Read the input NOW, signal, sleep, THEN write: the read-early/write-late
+    # half of a lost update. /bin/sleep by absolute path — a fake `sleep` on PATH
+    # would make the window vanish.
+    # ONLY the Caddyfile read is slowed. site-deploy also awks the SERVED html in
+    # its health gate (meta_value): slowing that fired the sentinel during HEALTH,
+    # long before the Caddyfile was ever read — which let both halves of this case
+    # pass for the wrong reason. A green that proves nothing is worse than a red.
+    cat > "$SLOW/awk" <<EOF
+#!/usr/bin/env bash
+slow=0
+for a in "\$@"; do [ "\$a" = "$CADDY" ] && slow=1; done
+[ "\$slow" = 0 ] && exec "$REAL_AWK" "\$@"
+out="\$("$REAL_AWK" "\$@")"
+: > "$SENT"
+/bin/sleep "\${RACE_AWK_DELAY:-6}"
+printf '%s\n' "\$out"
+EOF
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$SLOW/systemctl"   # never touch the host's caddy
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$TMP/nolock/flock" # locking DEFEATED
+    chmod +x "$SLOW"/* "$TMP/nolock/flock"
+  }
+  # site-deploy in the background. $1 = a PATH dir prepended for lock behaviour
+  # (nolock/ = stubbed flock; empty/ = the REAL flock). Everything else it needs
+  # (curl, python3, perl, caddy) is real.
+  run_site_arm() {
+    env PATH="$1:$SLOW:$PATH" \
+      SITE_SLUG=racesite BUILD_ID=r1 CONTENT_REV=rev1 \
+      BARKPARK_SITES_DIR="$SITES" BARKPARK_CADDYFILE="$CADDY" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TMP/site.lock" \
+      BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
+      bash "$HERE/site-deploy.sh" > "$TMP/site.log" 2>&1 &
+  }
+  await_read() { local i; for i in $(seq 1 400); do [ -f "$SENT" ] && return 0; /bin/sleep 0.05; done; return 1; }
+
+  # --- FAIL-BEFORE: locking defeated on both sides -> the flip is LOST.
+  race_setup
+  run_site_arm "$TMP/nolock"; sitepid=$!            # $FAKE/flock (no-op) is still on instance-deploy's PATH
+  check "fail-before: site-deploy reached its Caddyfile read" "await_read"
+  rc="$(run_deploy 200 raceflip)"                   # flips :4001 -> :4000 while site-deploy sleeps
+  wait "$sitepid"
+  check "fail-before: instance-deploy believes it flipped (exit 0)" "[ '$rc' = '0' ]"
+  check "fail-before: the port flip is LOST (upstream still :4001)" "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+  check "fail-before: the lost update is still caddy-VALID (validate is blind to it)" \
+    "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+  rm -rf "$TMP"
+
+  # --- FIXED: both writers take the REAL shared lock -> both mutations survive.
+  race_setup
+  rm -f "$FAKE/flock"                               # instance-deploy takes the REAL lock
+  run_site_arm "$TMP/empty"; sitepid=$!             # ... and so does site-deploy
+  check "fixed: site-deploy reached its Caddyfile read" "await_read"
+  rc="$(run_deploy 200 raceflip)"                   # must BLOCK on fd 8 until the arm completes
+  wait "$sitepid"; site_rc=$?
+  check "fixed: site-deploy exit 0"                 "[ '$site_rc' = '0' ]"
+  check "fixed: instance-deploy exit 0"             "[ '$rc' = '0' ]"
+  check "fixed: the port flip SURVIVED (upstream :4000)" "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+  check "fixed: the site route SURVIVED too (neither writer lost)" "grep -q 'BARKPARK_SITE_ROUTE:racesite' '$CADDY'"
+  check "fixed: the /mcp + /connectors routes survived" \
+    "[ \"\$(grep -c 'localhost:4010' '$CADDY')\" = '1' ] && [ \"\$(grep -c 'localhost:4020' '$CADDY')\" = '1' ]"
+  check "fixed: Caddyfile still caddy-valid"        "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+  check "fixed: site-deploy actually armed under the lock (it waited, nobody deadlocked)" \
+    "grep -q 'armed caddy /sites/racesite route' '$TMP/site.log' || grep -q 'caddy reload failed (config valid)' '$TMP/site.log'"
+  rm -rf "$TMP"
+fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi
