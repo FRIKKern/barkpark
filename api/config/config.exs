@@ -307,6 +307,26 @@ config :barkpark, Barkpark.SelfUpdate.Runner,
   cd: nil,
   max_log_lines: 500
 
+# Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner) — runs deploy/site-deploy.sh
+# for a content-bound STATIC site (site-spawner charter D22/D23/D24). Same
+# fail-closed default as the self-update Runner: `enabled: false` means
+# POST /v1/admin/site-deploy answers 503 and nothing can ever execute; prod's
+# runtime.exs flips it on ONLY when BARKPARK_SITE_DEPLOY_APPLY=1.
+#
+# Deliberately a SEPARATE runner from Barkpark.SelfUpdate.Runner: the slug and
+# build_id come from each REQUEST (the self-update command is compile-time
+# config), and the single-flight slot is per-slug (self-update's is global, and
+# a box auto-deploys itself on every merge). `cd: nil` resolves to the repo root
+# at runtime — the BEAM's cwd is api/, so the parent is /opt/barkpark, where
+# `bash deploy/site-deploy.sh` resolves.
+config :barkpark, Barkpark.Sites.DeployRunner,
+  enabled: false,
+  command: {"bash", ["deploy/site-deploy.sh"]},
+  rollback_command: {"bash", ["deploy/site-deploy.sh", "--rollback"]},
+  cd: nil,
+  max_log_lines: 500,
+  run_deadline_ms: 1_800_000
+
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). This is the
 # compile-time DEV/TEST default — a deterministic, non-secret 32-byte key.
 # Production OVERRIDES it from BARKPARK_KEK in runtime.exs (which raises if the

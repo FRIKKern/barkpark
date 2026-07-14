@@ -1,0 +1,505 @@
+defmodule Barkpark.Sites.DeployRunnerTest do
+  @moduledoc """
+  Unit tests for `Barkpark.Sites.DeployRunner` — the site-deploy remote-exec
+  executor (site-spawner charter D22/D23/D24).
+
+  Stub commands only, never the real `deploy/site-deploy.sh`. The four things
+  that MUST hold, each of which is a live-deploy bug if it does not:
+
+    * the single-flight slot is PER SLUG (not global like SelfUpdate.Runner's,
+      which a box's own post-merge self-update would occupy);
+    * the child's env PRESERVES PATH (asdf's npm) and REMOVES BARKPARK_KEK /
+      BARKPARK_CLOAK_KEY — proven by a stub that dumps its OWN env, because an
+      allow-list-shaped `env: [...]` reads like a scrub and leaks;
+    * the six BPSTAGE stages survive a 900-line log flood (the log ring evicts
+      the oldest — the stages must not live in it);
+    * a typed exit code carries the REAL reason line out of the child's stream.
+  """
+  # async: false — mutates the singleton Runner + Application/OS env.
+  use ExUnit.Case, async: false
+
+  alias Barkpark.Sites.DeployRequest
+  alias Barkpark.Sites.DeployRunner
+
+  # ── helpers ─────────────────────────────────────────────────────────────
+
+  defp put_cfg(overrides) do
+    prior = Application.get_env(:barkpark, DeployRunner)
+    Application.put_env(:barkpark, DeployRunner, Keyword.merge(prior || [], overrides))
+
+    on_exit(fn ->
+      if prior,
+        do: Application.put_env(:barkpark, DeployRunner, prior),
+        else: Application.delete_env(:barkpark, DeployRunner)
+    end)
+  end
+
+  defp put_self_update_cfg(overrides) do
+    prior = Application.get_env(:barkpark, Barkpark.SelfUpdate.Runner)
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.SelfUpdate.Runner,
+      Keyword.merge(prior || [], overrides)
+    )
+
+    on_exit(fn ->
+      if prior,
+        do: Application.put_env(:barkpark, Barkpark.SelfUpdate.Runner, prior),
+        else: Application.delete_env(:barkpark, Barkpark.SelfUpdate.Runner)
+    end)
+  end
+
+  # A stub `bash -c` command standing in for deploy/site-deploy.sh.
+  defp stub(script), do: {"bash", ["-c", script]}
+
+  defp req(slug, opts \\ []) do
+    params =
+      %{
+        "slug" => slug,
+        "build_id" => Keyword.get(opts, :build_id, "b1"),
+        "mode" => Keyword.get(opts, :mode, "deploy")
+      }
+      |> maybe_put("content_rev", Keyword.get(opts, :content_rev))
+      |> maybe_put("env", Keyword.get(opts, :env))
+
+    {:ok, request} = DeployRequest.new(params)
+    request
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp await_done(slug, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + 15_000
+
+    case DeployRunner.status(slug) do
+      %{state: :done} = status ->
+        status
+
+      status ->
+        if System.monotonic_time(:millisecond) >= deadline do
+          status
+        else
+          Process.sleep(25)
+          await_done(slug, deadline)
+        end
+    end
+  end
+
+  # `env` output → a map. Only well-formed NAME=VALUE lines (a multi-line value
+  # would spill, and none of the vars we assert on has one).
+  defp parse_env_dump(text) do
+    text
+    |> String.split("\n", trim: true)
+    |> Enum.flat_map(fn line ->
+      case Regex.run(~r/\A([A-Za-z_][A-Za-z0-9_]*)=(.*)\z/s, line) do
+        [_all, key, value] -> [{key, value}]
+        _no_match -> []
+      end
+    end)
+    |> Map.new()
+  end
+
+  # ── fail-closed ─────────────────────────────────────────────────────────
+
+  describe "enabled?/0 (fail-closed)" do
+    test "config.exs default is OFF — a trigger can execute nothing" do
+      refute DeployRunner.enabled?()
+      assert DeployRunner.trigger(req("off-by-default")) == {:error, :disabled}
+    end
+  end
+
+  # ── per-slug single-flight (charter D23) ────────────────────────────────
+
+  describe "single-flight is PER SLUG" do
+    test "the same slug twice while in flight is :already_running" do
+      put_cfg(enabled: true, command: stub("sleep 0.6; exit 0"))
+
+      assert DeployRunner.trigger(req("same-slug")) == {:ok, :started}
+      assert DeployRunner.trigger(req("same-slug", build_id: "b2")) == {:error, :already_running}
+
+      assert %{state: :done, exit_code: 0} = await_done("same-slug")
+    end
+
+    test "two different slugs run concurrently — neither blocks the other" do
+      put_cfg(enabled: true, command: stub("sleep 0.4; exit 0"))
+
+      assert DeployRunner.trigger(req("site-alpha")) == {:ok, :started}
+      assert DeployRunner.trigger(req("site-bravo")) == {:ok, :started}
+
+      assert %{state: :running} = DeployRunner.status("site-alpha")
+      assert %{state: :running} = DeployRunner.status("site-bravo")
+
+      assert %{state: :done, exit_code: 0} = await_done("site-alpha")
+      assert %{state: :done, exit_code: 0} = await_done("site-bravo")
+    end
+
+    test "a self-update in flight does NOT block a site deploy" do
+      # This is exactly the live failure this runner exists to avoid: guerrilla
+      # auto-deploys on every merge, so SelfUpdate.Runner's GLOBAL slot is
+      # routinely busy for reasons that have nothing to do with a site.
+      put_self_update_cfg(enabled: true, command: stub("sleep 0.5; exit 0"))
+      put_cfg(enabled: true, command: stub("exit 0"))
+
+      assert Barkpark.SelfUpdate.Runner.trigger() == {:ok, :started}
+      assert Barkpark.SelfUpdate.Runner.running?()
+
+      assert DeployRunner.trigger(req("unblocked-site")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("unblocked-site")
+
+      # Leave the self-update singleton at rest for the next test.
+      await_self_update_idle()
+    end
+
+    test "a finished run's slot is released — the same slug can deploy again" do
+      put_cfg(enabled: true, command: stub("exit 0"))
+
+      assert DeployRunner.trigger(req("redeployable", build_id: "b1")) == {:ok, :started}
+      assert %{state: :done} = await_done("redeployable")
+
+      assert DeployRunner.trigger(req("redeployable", build_id: "b2")) == {:ok, :started}
+      assert %{state: :done, build_id: "b2"} = await_done("redeployable")
+    end
+  end
+
+  defp await_self_update_idle(attempts \\ 100) do
+    case Barkpark.SelfUpdate.Runner.status() do
+      %{state: :running} when attempts > 0 ->
+        Process.sleep(25)
+        await_self_update_idle(attempts - 1)
+
+      _ ->
+        :ok
+    end
+  end
+
+  # ── the child's environment (charter D24) ───────────────────────────────
+
+  describe "child environment" do
+    test "PATH is preserved; BARKPARK_KEK/BARKPARK_CLOAK_KEY are REMOVED; ambient build vars cannot shadow" do
+      dump = Path.join(System.tmp_dir!(), "bp-site-env-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(dump) end)
+
+      # The box's real condition: master keys AND stale build vars in the BEAM's
+      # own environment. `npm ci` runs third-party postinstall code, so an
+      # inherited env is a key leak; an inherited BARKPARK_TOKEN/DATASET would
+      # silently build the site against the WRONG content (site-deploy.sh reads
+      # them ambiently via ${!v}).
+      System.put_env("BARKPARK_KEK", "kek-master-secret")
+      System.put_env("BARKPARK_CLOAK_KEY", "cloak-master-secret")
+      System.put_env("BARKPARK_TOKEN", "ambient-token-must-not-leak")
+      System.put_env("BARKPARK_DATASET", "ambient-dataset-must-not-leak")
+
+      on_exit(fn ->
+        System.delete_env("BARKPARK_KEK")
+        System.delete_env("BARKPARK_CLOAK_KEY")
+        System.delete_env("BARKPARK_TOKEN")
+        System.delete_env("BARKPARK_DATASET")
+      end)
+
+      put_cfg(enabled: true, command: stub("env > #{dump}; exit 0"))
+
+      request =
+        req("envprobe",
+          build_id: "bid-42",
+          content_rev: "rev-7",
+          env: %{
+            "BARKPARK_API_URL" => "http://127.0.0.1:4000",
+            "BARKPARK_TOKEN" => "per-site-token"
+          }
+        )
+
+      assert DeployRunner.trigger(request) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("envprobe")
+
+      child = dump |> File.read!() |> parse_env_dump()
+
+      # PATH survives — this is where asdf's npm shims live. Removing it (or
+      # rebuilding the env from scratch) is how you get a phantom "npm: command
+      # not found" on a box that has npm.
+      assert Map.has_key?(child, "PATH")
+      assert child["PATH"] != ""
+
+      # The scrub. `{~c"NAME", false}` is the ONLY thing that removes a var —
+      # an allow-list-shaped `env:` would leave both of these in the child.
+      refute Map.has_key?(child, "BARKPARK_KEK")
+      refute Map.has_key?(child, "BARKPARK_CLOAK_KEY")
+
+      # Request wins over ambient…
+      assert child["BARKPARK_TOKEN"] == "per-site-token"
+      assert child["BARKPARK_API_URL"] == "http://127.0.0.1:4000"
+      # …and an ambient build var the request did NOT supply is REMOVED, not
+      # inherited — no silent shadowing of the per-site content binding.
+      refute Map.has_key?(child, "BARKPARK_DATASET")
+
+      # The engine reads slug/build/rev from the environment (site-deploy.sh).
+      assert child["SITE_SLUG"] == "envprobe"
+      assert child["BUILD_ID"] == "bid-42"
+      assert child["CONTENT_REV"] == "rev-7"
+    end
+
+    test "a rollback carries no BUILD_ID (the engine reads .previous)" do
+      dump = Path.join(System.tmp_dir!(), "bp-site-env-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(dump) end)
+
+      put_cfg(enabled: true, rollback_command: stub("env > #{dump}; exit 0"))
+
+      assert DeployRunner.trigger(req("rb-env", mode: "rollback")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("rb-env")
+
+      child = dump |> File.read!() |> parse_env_dump()
+
+      assert child["SITE_SLUG"] == "rb-env"
+      refute Map.has_key?(child, "BUILD_ID")
+    end
+  end
+
+  # ── BPSTAGE parsing (charter D23 — stages outlive the log ring) ─────────
+
+  describe "stage parsing" do
+    test "all six stages survive a 900-line log flood that evicts the log ring" do
+      put_cfg(
+        enabled: true,
+        # PLAN + BUILD:started are printed BEFORE 900 lines of npm noise — with
+        # a 500-line ring they are provably gone from `log` by the time the run
+        # ends. The stage list must be untouched by that.
+        command:
+          stub("""
+          echo 'BPSTAGE name=PLAN status=ok build_id=b9'
+          echo 'BPSTAGE name=BUILD status=started build_id=b9'
+          for i in $(seq 1 900); do echo "npm noise line $i"; done
+          echo 'BPSTAGE name=BUILD status=ok build_id=b9'
+          echo 'BPSTAGE name=STAGE status=ok build_id=b9'
+          echo 'BPSTAGE name=HEALTH status=ok build_id=b9'
+          echo 'BPSTAGE name=SWITCH status=ok build_id=b9'
+          echo 'BPSTAGE name=RETIRE status=ok build_id=b9'
+          exit 0
+          """)
+      )
+
+      assert DeployRunner.trigger(req("flooded", build_id: "b9")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = status = await_done("flooded")
+
+      assert Enum.map(status.stages, & &1.name) == ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
+      assert Enum.all?(status.stages, &(&1.status == "ok"))
+      assert Enum.all?(status.stages, &(&1.build_id == "b9"))
+
+      # Protective: the ring DID evict the early lines — so the six stages above
+      # are not passing by accident on an accidentally-unbounded log.
+      assert length(status.log) == 500
+      refute Enum.any?(status.log, &String.contains?(&1, "name=PLAN"))
+      refute Enum.any?(status.log, &(String.trim(&1) == "npm noise line 1"))
+      # …while the tail (where a failure reason comes from) is intact.
+      assert Enum.any?(status.log, &String.contains?(&1, "name=RETIRE"))
+    end
+
+    test "a stage is upserted, not appended — started is superseded by its outcome" do
+      put_cfg(
+        enabled: true,
+        command:
+          stub("""
+          echo 'BPSTAGE name=BUILD status=started build_id=b1'
+          echo 'BPSTAGE name=BUILD status=failed build_id=b1'
+          exit 12
+          """)
+      )
+
+      assert DeployRunner.trigger(req("upsert")) == {:ok, :started}
+      assert %{state: :done} = status = await_done("upsert")
+
+      assert [%{name: "BUILD", status: "failed"}] = status.stages
+    end
+
+    test "a garbage or unknown BPSTAGE line is log, never a stage" do
+      put_cfg(
+        enabled: true,
+        command:
+          stub("""
+          echo 'BPSTAGE name=PWNED status=ok build_id=b1'
+          echo 'BPSTAGE name=BUILD status=bogus build_id=b1'
+          echo 'BPSTAGE garbage'
+          echo 'BPSTAGE name=PLAN status=ok build_id=b1'
+          exit 0
+          """)
+      )
+
+      assert DeployRunner.trigger(req("garbage")) == {:ok, :started}
+      assert %{state: :done} = status = await_done("garbage")
+
+      assert Enum.map(status.stages, & &1.name) == ["PLAN"]
+    end
+  end
+
+  # ── typed exit codes → honest failure reasons ───────────────────────────
+
+  describe "failure_reason" do
+    test "exit 12 carries the REAL npm reason line, not a generic message" do
+      put_cfg(
+        enabled: true,
+        command:
+          stub("""
+          echo 'BPSTAGE name=BUILD status=started build_id=b1'
+          echo 'npm ERR! code E401'
+          echo 'npm ERR! 401 Unauthorized - GET https://registry.example/@scope%2fpkg'
+          echo 'BPSTAGE name=BUILD status=failed build_id=b1'
+          echo "[site-deploy] BUILD failed for 'reason-401' build b1 — live release untouched"
+          exit 12
+          """)
+      )
+
+      assert DeployRunner.trigger(req("reason-401")) == {:ok, :started}
+      assert %{state: :done, exit_code: 12} = status = await_done("reason-401")
+
+      assert status.failure_reason =~ "BUILD failed (exit 12)"
+      assert status.failure_reason =~ "401 Unauthorized"
+      assert status.failure_reason =~ "live release untouched"
+      assert [%{name: "BUILD", status: "failed"}] = status.stages
+    end
+
+    test "every typed exit code maps to its own honest label + the stream's reason" do
+      for {code, fragment, slug} <- [
+            {13, "STAGE failed", "exit-13"},
+            {14, "HEALTH gate failed", "exit-14"},
+            {15, "gave up waiting for the deploy lock", "exit-15"},
+            {16, "SWITCH failed", "exit-16"},
+            {21, "rollback: no previous release", "exit-21"},
+            {22, "rollback: not supported", "exit-22"},
+            {23, "rollback: a deploy is in flight", "exit-23"},
+            {24, "rollback failed", "exit-24"}
+          ] do
+        put_cfg(enabled: true, command: stub("echo 'the real reason #{code}'; exit #{code}"))
+
+        assert DeployRunner.trigger(req(slug)) == {:ok, :started}
+        assert %{state: :done, exit_code: ^code} = status = await_done(slug)
+
+        assert status.failure_reason =~ fragment
+        assert status.failure_reason =~ "the real reason #{code}"
+      end
+    end
+
+    test "exit 0 has no failure_reason" do
+      put_cfg(enabled: true, command: stub("echo fine; exit 0"))
+
+      assert DeployRunner.trigger(req("clean")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0, failure_reason: nil} = await_done("clean")
+    end
+
+    test "a run that outlives its deadline is force-closed — the slug's slot cannot wedge" do
+      put_cfg(enabled: true, command: stub("sleep 30"), run_deadline_ms: 60)
+
+      assert DeployRunner.trigger(req("wedged")) == {:ok, :started}
+      assert %{state: :done, exit_code: -2} = status = await_done("wedged")
+      assert status.failure_reason =~ "deadline"
+
+      # The slot is free again.
+      put_cfg(enabled: true, command: stub("exit 0"), run_deadline_ms: 60_000)
+      assert DeployRunner.trigger(req("wedged", build_id: "b2")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("wedged")
+    end
+
+    test "a missing executable is a start failure, never a Runner crash" do
+      pid = Process.whereis(DeployRunner)
+      put_cfg(enabled: true, command: {"bp-no-such-executable-9f2a", []})
+
+      assert DeployRunner.trigger(req("no-exe")) == {:error, :start_failed}
+      assert Process.whereis(DeployRunner) == pid
+      assert %{state: :idle} = DeployRunner.status("no-exe")
+    end
+  end
+
+  # ── mode ────────────────────────────────────────────────────────────────
+
+  describe "mode" do
+    test "rollback runs the rollback command, deploy runs the deploy command" do
+      put_cfg(
+        enabled: true,
+        command: stub("echo DEPLOY_RAN; exit 0"),
+        rollback_command: stub("echo ROLLBACK_RAN; exit 0")
+      )
+
+      assert DeployRunner.trigger(req("mode-d")) == {:ok, :started}
+      assert %{state: :done, mode: :deploy} = deployed = await_done("mode-d")
+      assert Enum.any?(deployed.log, &String.contains?(&1, "DEPLOY_RAN"))
+
+      assert DeployRunner.trigger(req("mode-r", mode: "rollback")) == {:ok, :started}
+      assert %{state: :done, mode: :rollback} = rolled = await_done("mode-r")
+      assert Enum.any?(rolled.log, &String.contains?(&1, "ROLLBACK_RAN"))
+    end
+  end
+
+  # ── status ──────────────────────────────────────────────────────────────
+
+  describe "status/1" do
+    test "a slug that has never deployed is :idle, not an error" do
+      assert %{state: :idle, slug: "never-seen", stages: [], log: []} =
+               DeployRunner.status("never-seen")
+    end
+  end
+
+  # ── request validation (nothing reaches argv/env unvalidated) ───────────
+
+  describe "DeployRequest.new/1" do
+    test "accepts a well-formed deploy" do
+      assert {:ok, %DeployRequest{slug: "my-blog", build_id: "a1.b2_c3-d4", mode: :deploy}} =
+               DeployRequest.new(%{"slug" => "my-blog", "build_id" => "a1.b2_c3-d4"})
+    end
+
+    test "rejects a path-traversing or shell-ish slug" do
+      for bad <- [
+            "../etc",
+            "My-Blog",
+            "-leading",
+            "a/b",
+            "a;rm -rf /",
+            "",
+            String.duplicate("a", 64)
+          ] do
+        assert {:error, "invalid_slug", _} =
+                 DeployRequest.new(%{"slug" => bad, "build_id" => "b1"})
+      end
+    end
+
+    test "a trailing newline cannot smuggle past the slug regex" do
+      # `^…$` in Elixir also matches before a trailing \n — \A…\z is why this fails.
+      assert {:error, "invalid_slug", _} =
+               DeployRequest.new(%{"slug" => "ok\n../../etc", "build_id" => "b1"})
+    end
+
+    test "rejects a bad or missing build_id on a deploy" do
+      assert {:error, "invalid_build_id", _} = DeployRequest.new(%{"slug" => "s"})
+
+      assert {:error, "invalid_build_id", _} =
+               DeployRequest.new(%{"slug" => "s", "build_id" => "../x"})
+    end
+
+    test "a rollback needs no build_id and drops one that is passed" do
+      assert {:ok, %DeployRequest{mode: :rollback, build_id: nil}} =
+               DeployRequest.new(%{"slug" => "s", "mode" => "rollback", "build_id" => "b1"})
+    end
+
+    test "rejects an unknown mode (never String.to_atom on request data)" do
+      assert {:error, "invalid_mode", _} = DeployRequest.new(%{"slug" => "s", "mode" => "nuke"})
+    end
+
+    test "rejects an unknown env var rather than silently dropping it" do
+      assert {:error, "invalid_env", message} =
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b1",
+                 "env" => %{"BARKPARK_KEK" => "nice try"}
+               })
+
+      assert message =~ "BARKPARK_KEK"
+    end
+
+    test "rejects a control character in an env value" do
+      assert {:error, "invalid_env", _} =
+               DeployRequest.new(%{
+                 "slug" => "s",
+                 "build_id" => "b1",
+                 "env" => %{"BARKPARK_TOKEN" => "tok\nBPSTAGE name=SWITCH status=ok"}
+               })
+    end
+  end
+end

@@ -134,7 +134,9 @@ defmodule Barkpark.Application do
   Indx (Auth→Recovery) before Oban; PubSub before the Sheets/StudioChat tiers
   and the Endpoint; Endpoint last.
   """
-  @spec child_specs(list(), keyword(), list(), list()) :: [Supervisor.child_spec() | {module(), term()} | module()]
+  @spec child_specs(list(), keyword(), list(), list()) :: [
+          Supervisor.child_spec() | {module(), term()} | module()
+        ]
   def child_specs(plugin_children, oban_config, sync_children, self_update_children)
       when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
     [
@@ -229,6 +231,12 @@ defmodule Barkpark.Application do
         # execute anything. Unconditional so the admin endpoint degrades to
         # a clean "feature_not_configured" instead of a dead-process call.
         Barkpark.SelfUpdate.Runner,
+        # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Same always-in-the-
+        # tree, fail-closed-on-trigger contract as the self-update Runner above
+        # (OFF unless BARKPARK_SITE_DEPLOY_APPLY=1), but a SEPARATE process: its
+        # single-flight slot is per-site-slug, so a box auto-deploying itself on
+        # merge can never 409 a site deploy that has nothing to do with it.
+        Barkpark.Sites.DeployRunner,
         # Start to serve requests, typically the last entry
         BarkparkWeb.Endpoint
       ]
