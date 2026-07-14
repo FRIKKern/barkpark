@@ -55,7 +55,7 @@ func main() {
 		defer stop()
 		runner := &chathost.Runner{
 			Client:       &chathost.Client{BaseURL: state.ServerURL, Credential: state.Credential, AllowInsecureLoopback: state.AllowInsecureLoopback},
-			Handler:      chathost.LocalHandler{ApprovedRoots: state.Host.ApprovedRoots},
+			Handler:      chathost.NewLocalHandler(state.Host.ApprovedRoots),
 			Capabilities: capabilities(),
 		}
 		if err := runner.Run(ctx); err != nil && ctx.Err() == nil {
@@ -69,9 +69,16 @@ func main() {
 
 func capabilities() map[string]any {
 	providers := map[string]any{}
+	_, taskHandsErr := exec.LookPath("bp")
+	taskHandsReady := taskHandsErr == nil
 	for _, name := range []string{"claude", "codex"} {
 		path, err := exec.LookPath(name)
-		metadata := map[string]any{"installed": err == nil, "auth_ready": false}
+		metadata := map[string]any{
+			"installed":  err == nil,
+			"auth_ready": false,
+			"operations": []string{"send_turn", "steer", "interrupt", "answer_approval", "close"},
+			"task_hands": taskHandsReady,
+		}
 		if err == nil {
 			if output, versionErr := exec.Command(path, "--version").Output(); versionErr == nil {
 				metadata["version"] = strings.TrimSpace(string(output))
@@ -87,7 +94,11 @@ func capabilities() map[string]any {
 		}
 		providers[name] = metadata
 	}
-	return map[string]any{"protocol_version": 1, "providers": providers}
+	return map[string]any{
+		"protocol_version": 1,
+		"chat_runtime":     map[string]any{"protocol": "bidirectional-v2"},
+		"providers":        providers,
+	}
 }
 
 func authReady(provider string, output []byte, err error) bool {

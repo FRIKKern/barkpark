@@ -77,12 +77,6 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) start(parent context.Context, command RemoteCommand) {
-	operation, _ := command.Command["operation"].(string)
-	if operation == "interrupt" || operation == "close" {
-		sessionID, _ := command.Command["session_id"].(string)
-		r.cancelSession(sessionID)
-	}
-
 	r.mu.Lock()
 	if _, exists := r.active[command.LeaseID]; exists {
 		r.mu.Unlock()

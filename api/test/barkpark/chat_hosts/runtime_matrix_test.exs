@@ -26,11 +26,20 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
          workspace_id: "ws-1",
          capabilities: %{
            "providers" => %{
-             "claude" => %{"installed" => true, "auth_ready" => true},
-             "codex" => %{"installed" => true, "auth_ready" => true}
+             "claude" => ready_provider(),
+             "codex" => ready_provider()
            }
          }
        }}
+    end
+
+    defp ready_provider do
+      %{
+        "installed" => true,
+        "auth_ready" => true,
+        "operations" => ~w(send_turn steer interrupt answer_approval close),
+        "task_hands" => true
+      }
     end
   end
 
@@ -121,14 +130,14 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
       assert Runtime.alive?(ref)
       assert :ok = Runtime.send_turn(provider, ref, "hello")
 
-      assert {:error, {:unsupported_registered_host_operation, :steer}} =
-               Runtime.steer(provider, ref, %{mode: "plan"})
+      steer = if provider == "codex", do: %{content: "focus"}, else: %{mode: "plan"}
+      assert {:ok, steer_id} = Runtime.steer(provider, ref, steer)
+      assert is_binary(steer_id)
 
       assert {:ok, request_id} = Runtime.interrupt(provider, ref)
       assert is_binary(request_id)
 
-      assert {:error, {:unsupported_registered_host_operation, :answer_approval}} =
-               Runtime.answer_approval(provider, ref, "approval-1", :allow)
+      assert :ok = Runtime.answer_approval(provider, ref, "approval-1", :allow)
 
       assert :ok = Runtime.close(provider, ref)
     end
@@ -144,5 +153,32 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
                host_directory: NotReadyDirectory,
                remote_dispatch: LifecycleDispatch
              })
+  end
+
+  test "registered host fails closed when its chat runtime predates bidirectional controls" do
+    assert {:error, {:provider_protocol_incompatible, "codex"}} =
+             Runtime.open("codex", %{
+               session_id: "session-codex",
+               execution_target: "registered_host",
+               execution_host_id: "host-1",
+               workspace_id: "ws-1",
+               host_directory: Barkpark.ChatHosts.RuntimeMatrixTest.LegacyDirectory,
+               remote_dispatch: LifecycleDispatch
+             })
+  end
+
+  defmodule LegacyDirectory do
+    @behaviour Runtime.HostDirectory
+
+    def resolve("ws-1", "host-1") do
+      {:ok,
+       %{
+         id: "host-1",
+         workspace_id: "ws-1",
+         capabilities: %{
+           "providers" => %{"codex" => %{"installed" => true, "auth_ready" => true}}
+         }
+       }}
+    end
   end
 end

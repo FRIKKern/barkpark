@@ -15,6 +15,8 @@ defmodule Barkpark.StudioChat.Runtime do
   @type provider :: String.t()
   @type execution_target :: String.t()
   @type runtime_ref :: term()
+  @remote_operations ~w(send_turn steer interrupt answer_approval close)
+  @no_task_hands "__BARKPARK_CHAT_NO_TASK_HANDS__"
 
   defmodule Adapter do
     @moduledoc "Lifecycle contract implemented by each managed provider runtime."
@@ -119,7 +121,15 @@ defmodule Barkpark.StudioChat.Runtime do
       :cwd,
       :host_directory,
       :remote_dispatch,
-      :lease_id
+      :lease_id,
+      :task_hands,
+      :task_token,
+      :task_secret_id,
+      :developer_instructions,
+      :mode,
+      :model,
+      :effort,
+      :bypass_armed
     ]
   end
 
@@ -159,7 +169,7 @@ defmodule Barkpark.StudioChat.Runtime do
   def worker_id(provider, session_id),
     do: optional_call(adapter(provider), :worker_id, [session_id], nil)
 
-  def task_hands(_provider, %RemoteRef{}), do: :not_attempted
+  def task_hands(_provider, %RemoteRef{task_hands: status}), do: status || :not_attempted
 
   def task_hands(provider, runtime_ref),
     do: optional_call(adapter(provider), :task_hands, [runtime_ref], :not_attempted)
@@ -169,7 +179,11 @@ defmodule Barkpark.StudioChat.Runtime do
   def runtime_pid(%{runtime: pid}) when is_pid(pid), do: pid
   def runtime_pid(_runtime_ref), do: nil
 
-  def alive?(%RemoteRef{}), do: true
+  def alive?(%RemoteRef{} = ref) do
+    match?({:ok, _host}, ref.host_directory.resolve(ref.workspace_id, ref.execution_host_id))
+  rescue
+    _ -> false
+  end
 
   def alive?(runtime_ref) do
     case runtime_pid(runtime_ref) do
@@ -194,8 +208,8 @@ defmodule Barkpark.StudioChat.Runtime do
   def send_turn(provider, runtime_ref, content),
     do: adapter(provider).send_turn(runtime_ref, content)
 
-  def steer(_provider, %RemoteRef{}, _command),
-    do: {:error, {:unsupported_registered_host_operation, :steer}}
+  def steer(_provider, %RemoteRef{} = runtime_ref, command),
+    do: dispatch_remote(runtime_ref, :steer, command)
 
   def steer(provider, runtime_ref, command), do: adapter(provider).steer(runtime_ref, command)
 
@@ -204,14 +218,20 @@ defmodule Barkpark.StudioChat.Runtime do
 
   def interrupt(provider, runtime_ref), do: adapter(provider).interrupt(runtime_ref)
 
-  def answer_approval(_provider, %RemoteRef{}, _approval_id, _decision),
-    do: {:error, {:unsupported_registered_host_operation, :answer_approval}}
+  def answer_approval(_provider, %RemoteRef{} = runtime_ref, approval_id, decision),
+    do:
+      dispatch_remote(runtime_ref, :answer_approval, %{decision: remote_decision(decision)},
+        approval_id: approval_id
+      )
 
   def answer_approval(provider, runtime_ref, approval_id, decision),
     do: adapter(provider).answer_approval(runtime_ref, approval_id, decision)
 
-  def close(_provider, %RemoteRef{} = runtime_ref),
-    do: dispatch_remote(runtime_ref, :close, %{})
+  def close(_provider, %RemoteRef{} = runtime_ref) do
+    result = dispatch_remote(runtime_ref, :close, %{})
+    cleanup_remote_task_hands(runtime_ref)
+    result
+  end
 
   def close(provider, runtime_ref), do: adapter(provider).close(runtime_ref)
 
@@ -237,6 +257,8 @@ defmodule Barkpark.StudioChat.Runtime do
 
   @doc "Start or resume a managed runtime using one provider-neutral entry point."
   def open(provider, %{execution_target: "registered_host"} = opts) do
+    session_opts = Map.get(opts, :session_opts, %{})
+
     ref = %RemoteRef{
       provider: to_string(provider),
       session_id: Map.fetch!(opts, :session_id),
@@ -245,13 +267,27 @@ defmodule Barkpark.StudioChat.Runtime do
       execution_host_id: Map.fetch!(opts, :execution_host_id),
       cwd: Map.get(opts, :cwd),
       host_directory: Map.get(opts, :host_directory, Barkpark.ChatHosts),
-      remote_dispatch: Map.get(opts, :remote_dispatch, Barkpark.ChatHosts.RemoteDispatch)
+      remote_dispatch: Map.get(opts, :remote_dispatch, Barkpark.ChatHosts.RemoteDispatch),
+      developer_instructions: Map.get(opts, :developer_instructions),
+      mode: Map.get(opts, :mode),
+      model: Map.get(session_opts, :model),
+      effort: Map.get(session_opts, :effort),
+      bypass_armed: Map.get(session_opts, :bypass_armed, false)
     }
 
     case ref.host_directory.resolve(ref.workspace_id, ref.execution_host_id) do
       {:ok, host} ->
         with :ok <- registered_provider_ready(host, ref.provider) do
-          {:ok, %{ref | cwd: registered_host_cwd(host, ref.cwd)}}
+          task_hands = setup_remote_task_hands(opts, ref)
+
+          {:ok,
+           %{
+             ref
+             | cwd: registered_host_cwd(host, ref.cwd),
+               task_hands: task_hands.status,
+               task_token: task_hands.token,
+               task_secret_id: task_hands.secret_id
+           }}
         end
 
       error ->
@@ -324,7 +360,19 @@ defmodule Barkpark.StudioChat.Runtime do
     do: {:error, {:unsupported_runtime_operation, operation}}
 
   defp dispatch_remote(%RemoteRef{} = ref, operation, payload, command_opts \\ []) do
-    payload = if operation == :send_turn, do: Map.put(payload, :cwd, ref.cwd), else: payload
+    payload =
+      if operation == :send_turn do
+        payload
+        |> Map.put(:cwd, ref.cwd)
+        |> maybe_put_developer_instructions(ref.developer_instructions)
+        |> maybe_put_runtime_option(:mode, ref.mode)
+        |> maybe_put_runtime_option(:model, ref.model)
+        |> maybe_put_runtime_option(:effort, ref.effort)
+        |> maybe_put_runtime_option(:bypass_armed, ref.bypass_armed)
+        |> maybe_put_task_env(remote_task_env(ref))
+      else
+        payload
+      end
 
     command = %Command{
       operation: operation,
@@ -372,13 +420,118 @@ defmodule Barkpark.StudioChat.Runtime do
     readiness =
       Map.get(providers, provider) || Map.get(providers, String.to_atom(provider)) || %{}
 
-    if value(readiness, :installed) == true and value(readiness, :auth_ready) == true,
-      do: :ok,
-      else: {:error, {:provider_not_ready, provider}}
+    cond do
+      value(readiness, :installed) != true or value(readiness, :auth_ready) != true ->
+        {:error, {:provider_not_ready, provider}}
+
+      not Enum.all?(@remote_operations, &(&1 in value(readiness, :operations, []))) ->
+        {:error, {:provider_protocol_incompatible, provider}}
+
+      value(readiness, :task_hands) != true ->
+        {:error, {:provider_protocol_incompatible, provider}}
+
+      true ->
+        :ok
+    end
   end
 
-  defp value(map, key) when is_map(map),
-    do: Map.get(map, key, Map.get(map, Atom.to_string(key)))
+  defp value(map, key, default \\ nil) when is_map(map),
+    do: Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+
+  defp setup_remote_task_hands(opts, ref) do
+    minter = Map.get(opts, :minter)
+
+    if is_nil(minter) do
+      %{status: :not_attempted, token: nil, secret_id: nil}
+    else
+      case Barkpark.Auth.create_claude_session_token(minter, ref.session_id,
+             workspace_id: ref.workspace_id
+           ) do
+        {:ok, {raw, token}} ->
+          env = remote_task_env(raw, ref)
+          secret_id = Barkpark.StudioChat.Runtime.RemoteSecrets.put(env)
+          %{status: :minted, token: token, secret_id: secret_id}
+
+        {:error, _reason} ->
+          %{status: :mint_refused, token: nil, secret_id: nil}
+      end
+    end
+  rescue
+    _ -> %{status: :mint_refused, token: nil, secret_id: nil}
+  end
+
+  defp remote_task_env(raw, ref) do
+    %{
+      "BARKPARK_API_TOKEN" => raw,
+      "BARKPARK_API_URL" => remote_mcp_api_url(),
+      "BARKPARK_WORKER_ID" => "#{ref.provider}-chat-#{ref.session_id}"
+    }
+  end
+
+  defp remote_task_env(%RemoteRef{task_secret_id: secret_id} = ref) do
+    case Barkpark.StudioChat.Runtime.RemoteSecrets.fetch(secret_id) do
+      env when is_map(env) -> env
+      _ -> no_task_hands_env(ref)
+    end
+  end
+
+  defp no_task_hands_env(ref) do
+    %{
+      "BARKPARK_API_TOKEN" => @no_task_hands,
+      "BARKPARK_API_URL" => remote_mcp_api_url(),
+      "BARKPARK_WORKER_ID" => "#{ref.provider}-chat-#{ref.session_id}"
+    }
+  end
+
+  defp maybe_put_task_env(payload, env) when is_map(env) and map_size(env) > 0,
+    do: Map.put(payload, :task_env, env)
+
+  defp maybe_put_task_env(payload, _env), do: payload
+
+  defp maybe_put_developer_instructions(payload, instructions)
+       when is_binary(instructions) and instructions != "",
+       do: Map.put(payload, :developer_instructions, instructions)
+
+  defp maybe_put_developer_instructions(payload, _instructions), do: payload
+
+  defp maybe_put_runtime_option(payload, _key, nil), do: payload
+  defp maybe_put_runtime_option(payload, _key, false), do: payload
+  defp maybe_put_runtime_option(payload, key, value), do: Map.put(payload, key, value)
+
+  defp remote_mcp_api_url do
+    studio_config = Application.get_env(:barkpark, :studio_chat, [])
+
+    Keyword.get(studio_config, :remote_mcp_api_url) || BarkparkWeb.Endpoint.url()
+  end
+
+  defp remote_decision(:allow), do: "allow"
+  defp remote_decision(:allow_session), do: "allow_session"
+  defp remote_decision(:cancel), do: "cancel"
+
+  defp remote_decision({:allow, value}) when is_map(value),
+    do: %{"kind" => "allow", "value" => value}
+
+  defp remote_decision({:deny, message}), do: %{"kind" => "deny", "value" => to_string(message)}
+  defp remote_decision(value) when is_binary(value), do: value
+  defp remote_decision(_value), do: "deny"
+
+  defp cleanup_remote_task_token(nil), do: :ok
+
+  defp cleanup_remote_task_token(%{id: id}) when is_binary(id) do
+    Barkpark.Auth.revoke_token(id)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp cleanup_remote_task_hands(%RemoteRef{} = ref) do
+    cleanup_remote_task_token(ref.task_token)
+    Barkpark.StudioChat.Runtime.RemoteSecrets.delete(ref.task_secret_id)
+  catch
+    :exit, _ -> :ok
+  end
 
   defp configured_adapter(provider, default) do
     :barkpark
@@ -392,6 +545,7 @@ defmodule Barkpark.StudioChat.Runtime do
       _ -> {:error, {:missing_runtime_contract, key}}
     end
   end
+
   defp optional_call(module, function, args, default \\ :ok) do
     if Code.ensure_loaded?(module) and function_exported?(module, function, length(args)),
       do: apply(module, function, args),
