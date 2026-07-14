@@ -50,7 +50,8 @@ defmodule BarkparkCloud.Cloudflare.Fake do
         {:error, :invalid_record}
 
       true ->
-        record_id = record[:id] || record["id"] || "rec_fake_" <> digest(zone_id <> to_string(name))
+        record_id =
+          record[:id] || record["id"] || "rec_fake_" <> digest(zone_id <> to_string(name))
 
         record(@records_key, %{
           zone_id: zone_id,
@@ -68,8 +69,12 @@ defmodule BarkparkCloud.Cloudflare.Fake do
   def ensure_zone_proxied(zone_id, record_id)
       when is_binary(zone_id) and is_binary(record_id) do
     cond do
-      fail?(zone_id) -> {:error, :proxy_failed}
-      record_id == invalid_record_id() -> {:error, :not_found}
+      fail?(zone_id) ->
+        {:error, :proxy_failed}
+
+      record_id == invalid_record_id() ->
+        {:error, :not_found}
+
       true ->
         record(@proxied_key, %{zone_id: zone_id, record_id: record_id, proxied: true})
         {:ok, %{proxied: true}}
@@ -88,7 +93,13 @@ defmodule BarkparkCloud.Cloudflare.Fake do
       true ->
         id = "cert_fake_" <> digest(Enum.join(hostnames, ",") <> csr)
         record(@certs_key, %{id: id, hostnames: hostnames})
-        {:ok, %{id: id, certificate: "-----BEGIN CERTIFICATE-----\nfake-" <> id <> "\n-----END CERTIFICATE-----"}}
+
+        {:ok,
+         %{
+           id: id,
+           certificate:
+             "-----BEGIN CERTIFICATE-----\nfake-" <> id <> "\n-----END CERTIFICATE-----"
+         }}
     end
   end
 
