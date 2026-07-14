@@ -45,3 +45,44 @@ func TestSpawnSiteStagesOrder(t *testing.T) {
 		}
 	}
 }
+
+// TestCloudErrorCarriesDetail pins the CLI's half of the honest-failure promise.
+//
+// The control plane puts the machine code in `error` and the human sentence in
+// `detail` — "which box refused and what it said", "which flag fixes this". The
+// site-spawner routes invest heavily in that copy (read_token_mint_failed names
+// the instance and quotes it; content_binding_required names --dataset). If
+// cloudError drops `detail`, every one of those becomes a bare slug on screen and
+// the investment is invisible. This is the whole "real failure messages" bar.
+func TestCloudErrorCarriesDetail(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "code and detail are both surfaced",
+			body: `{"error":"read_token_mint_failed","detail":"acme refused to mint the site's read token (HTTP 403): forbidden"}`,
+			want: "read_token_mint_failed: acme refused to mint the site's read token (HTTP 403): forbidden",
+		},
+		{
+			name: "a code with no detail is unchanged",
+			body: `{"error":"barkpark_not_found"}`,
+			want: "barkpark_not_found",
+		},
+		{
+			// `details` (an object, from a changeset) must NOT poison the decode
+			// and dump the raw body — degrade to the code alone.
+			name: "a non-string detail degrades to the code, never a raw body dump",
+			body: `{"error":"invalid","detail":{"name":["can't be blank"]}}`,
+			want: "invalid",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cloudError(422, []byte(tc.body)).Error()
+			if got != tc.want {
+				t.Fatalf("cloudError = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

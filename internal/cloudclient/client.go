@@ -248,6 +248,22 @@ func cloudError(status int, body []byte) error {
 	msg := ""
 	if json.Unmarshal(body, &env) == nil && env.Error != "" {
 		msg = env.Error
+		// The control plane puts the machine CODE in `error` and the human
+		// SENTENCE in `detail` — which box refused, what it said, and which flag
+		// fixes it ("acme refused to mint the site's read token (HTTP 403):
+		// forbidden"; "bind it with --dataset <workspace>/<project>/<dataset>").
+		// Dropping `detail` reduced every one of those to a bare slug the user
+		// cannot act on. Decoded SEPARATELY so a route that sends a non-string
+		// `detail` (an object) degrades to the code alone rather than poisoning
+		// the whole decode and falling back to a raw body dump.
+		var det struct {
+			Detail string `json:"detail"`
+		}
+		if json.Unmarshal(body, &det) == nil {
+			if d := strings.TrimSpace(det.Detail); d != "" {
+				msg = msg + ": " + d
+			}
+		}
 	}
 	if msg == "" {
 		raw := strings.TrimSpace(string(body))
