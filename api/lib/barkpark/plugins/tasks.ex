@@ -743,7 +743,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). Optionally add --criterion-text \"<the criterion's exact wording>\" to guard against an off-by-one index: if the text doesn't match the row at N the whole stamp is REJECTED (409) instead of silently flipping a neighbour. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "read",
         args: [
@@ -770,7 +770,14 @@ defmodule Barkpark.Plugins.Tasks do
           %{
             name: "criterion",
             type: "int",
-            summary: "Zero-based index into acceptance_criteria — the criterion to stamp."
+            summary:
+              "ZERO-BASED index into acceptance_criteria — the first criterion is 0, the second is 1 (do NOT pass a 1-based number). This is the criterion to stamp."
+          },
+          %{
+            name: "criterion-text",
+            type: "string",
+            summary:
+              "Optional off-by-one guard: the criterion's exact stored wording. When set, a stamp whose text does not match the row at --criterion N is REJECTED (409 criteria_mismatch) instead of silently flipping a neighbour. Omit for the permissive index-only path."
           },
           %{
             name: "met",

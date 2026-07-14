@@ -480,7 +480,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		Name:        "task_stamp",
 		Title:       "Stamp a criterion mid-claim",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(false)},
-		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the 0-based index into the task's acceptance_criteria. Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
+		Description: "Record evidence on ONE acceptance criterion the MOMENT it is proven — do NOT batch to the close. Stamp is progress; close is the seal. Pass the SAME worker_id you claimed with and the observed_epoch from your claim (doc.claim.epoch) — stamp is holder-only under the SAME epoch fence as close (a lapsed claim can't stamp: re-claim to renew the epoch, then re-stamp). criterion is the ZERO-BASED index into acceptance_criteria: the FIRST criterion is 0, the second is 1 — do NOT pass a 1-based number (that silently stamps the wrong row). Optionally pass criterion_text (the criterion's exact wording) as an off-by-one guard: if it does not match the row at criterion the stamp is REJECTED (409 criteria_mismatch) instead of flipping a neighbour. Then pass EXACTLY ONE outcome: `met:true` WITH a non-empty `evidence` (concrete proof — test names, gate output, branch, commit) FLIPS the criterion's lock (a met with empty evidence is rejected); OR `miss:true` WITH a non-empty `note` records an honest failed attempt on the criterion's attempts trail (5 most recent kept) WITHOUT flipping met. Stamp does NOT bump the epoch, so the same observed_epoch is still valid for your next stamp or the close. On success the response carries the fresh doc. A wrong holder / stale epoch / bad index returns 409.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
   "additionalProperties": false,
@@ -501,7 +501,11 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
     "criterion": {
       "type": "integer",
       "minimum": 0,
-      "description": "0-based index into the task's acceptance_criteria — the one criterion to stamp."
+      "description": "ZERO-BASED index into the task's acceptance_criteria — the first criterion is 0, the second is 1. Do NOT pass a 1-based number."
+    },
+    "criterion_text": {
+      "type": "string",
+      "description": "Optional off-by-one guard: the criterion's exact stored wording. When set, a stamp whose text does not match the row at criterion is REJECTED (409 criteria_mismatch) instead of silently flipping a neighbour."
     },
     "met": {
       "type": "boolean",
@@ -527,6 +531,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 			WorkerID      string `json:"worker_id"`
 			ObservedEpoch *int   `json:"observed_epoch"`
 			Criterion     *int   `json:"criterion"`
+			CriterionText string `json:"criterion_text"`
 			Met           bool   `json:"met"`
 			Evidence      string `json:"evidence"`
 			Miss          bool   `json:"miss"`
@@ -561,6 +566,9 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		// criterion + the met/evidence | miss/note outcome ride as manifest flags
 		// (query params) exactly as the CLI types them after the positionals.
 		tail := []string{in.DocID, in.WorkerID, strconv.Itoa(*in.ObservedEpoch), "--criterion", strconv.Itoa(*in.Criterion)}
+		if strings.TrimSpace(in.CriterionText) != "" {
+			tail = append(tail, "--criterion-text", in.CriterionText)
+		}
 		if in.Met {
 			tail = append(tail, "--met", "--evidence", in.Evidence)
 		} else {

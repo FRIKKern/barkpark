@@ -370,14 +370,21 @@ defmodule BarkparkWeb.TasksController.Params do
   # ─── Mid-claim criterion stamp (expressive-agent-loops D8) ───────────────
 
   # Parses the stamp body/query into `{:ok, index, {:met, evidence} | {:miss,
-  # note}}`. The bp CLI sends flags as query strings ("true", "0"); curl sends
-  # typed JSON — both shapes are accepted. Exactly one of met/miss; --met
-  # REQUIRES non-empty evidence (evidence or nothing, D3); --miss REQUIRES a
-  # non-empty note (an honest attempt has words). SHAPE-only validation (→
-  # 400); state conflicts are the stamp transaction's to detect under its lock.
+  # note}, criterion_text}`. The bp CLI sends flags as query strings ("true",
+  # "0"); curl sends typed JSON — both shapes are accepted. Exactly one of
+  # met/miss; --met REQUIRES non-empty evidence (evidence or nothing, D3);
+  # --miss REQUIRES a non-empty note (an honest attempt has words).
+  # `criterion_text` is the OPTIONAL 0-based/off-by-one guard: the criterion's
+  # expected stored text, threaded into the stamp's criteria-grain CAS so a
+  # wrong (in-range) index is rejected (`:criteria_mismatch`) instead of
+  # flipping a neighbour. Read from BOTH `criterion_text` (JSON body) and
+  # `criterion-text` (the kebab manifest flag → query key). SHAPE-only
+  # validation (→ 400); state conflicts are the stamp transaction's to detect
+  # under its lock.
   def parse_stamp(params) do
     met = stamp_flag?(Map.get(params, "met"))
     miss = stamp_flag?(Map.get(params, "miss"))
+    criterion_text = stamp_criterion_text(params)
 
     with {:ok, index} <- parse_stamp_index(Map.get(params, "criterion")) do
       cond do
@@ -386,13 +393,13 @@ defmodule BarkparkWeb.TasksController.Params do
 
         met ->
           case Map.get(params, "evidence") do
-            e when is_binary(e) and e != "" -> {:ok, index, {:met, e}}
+            e when is_binary(e) and e != "" -> {:ok, index, {:met, e}, criterion_text}
             _ -> {:error, :invalid_stamp, "--met requires non-empty --evidence"}
           end
 
         miss ->
           case Map.get(params, "note") do
-            n when is_binary(n) and n != "" -> {:ok, index, {:miss, n}}
+            n when is_binary(n) and n != "" -> {:ok, index, {:miss, n}, criterion_text}
             _ -> {:error, :invalid_stamp, "--miss requires non-empty --note"}
           end
 
@@ -403,6 +410,15 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   defp stamp_flag?(v), do: v in [true, "true", "1"]
+
+  # The optional criterion-text guard, from either wire shape. A non-string /
+  # blank value is treated as absent (nil) — the permissive index-only path.
+  defp stamp_criterion_text(params) do
+    case Map.get(params, "criterion_text") || Map.get(params, "criterion-text") do
+      s when is_binary(s) and s != "" -> s
+      _ -> nil
+    end
+  end
 
   defp parse_stamp_index(n) when is_integer(n) and n >= 0, do: {:ok, n}
 

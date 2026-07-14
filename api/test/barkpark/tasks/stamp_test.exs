@@ -136,6 +136,115 @@ defmodule Barkpark.Tasks.StampTest do
     end
   end
 
+  # ─── (1b) In-range wrong-index guard (felix-stamp-index-guard / D56) ────────
+  #
+  # The out-of-range guard above (:criteria_index_out_of_range) only catches an
+  # index PAST the end. The residual scar is a 1-based value passed into the
+  # 0-based tool: a wrong index that IS in range silently flips the NEIGHBOUR
+  # criterion with no error. The OPTIONAL criterion-TEXT threads a CAS at
+  # criteria grain — internal.ex's :criteria_mismatch guard — so a mis-based
+  # stamp that carries the intended criterion's text is REJECTED, while an
+  # unguarded stamp stays permissive (#3039's index-only autostamp must not
+  # break).
+
+  defp three_criteria do
+    [
+      %{"criterion" => "criterion A: gate passes", "met" => false, "evidence" => ""},
+      %{"criterion" => "criterion B: docs updated", "met" => false, "evidence" => ""},
+      %{"criterion" => "criterion C: PR merged", "met" => false, "evidence" => ""}
+    ]
+  end
+
+  describe "stamp/3 — in-range wrong-index (0-based/1-based off-by-one)" do
+    # The REPRODUCTION: without a text guard, an in-range wrong index is
+    # silently permitted (the honest permissive path #3039 depends on). This
+    # documents the corruption an unguarded stamp still allows AND proves the
+    # guard is opt-in, not mandatory.
+    test "no text guard → an in-range wrong index still flips the neighbour, no error",
+         %{scope: scope} do
+      doc_id = uniq("stamp-inrange-noguard")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      # Intent was criterion B (index 1); a 1-based "2" lands on index 2.
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 2,
+                 outcome: {:met, "proof for crit B"}
+               )
+
+      [a, b, c] = stamped.content["acceptance_criteria"]
+      assert a["met"] == false
+      assert b["met"] == false, "the INTENDED criterion (index 1) was left untouched"
+      assert c["met"] == true, "the NEIGHBOUR (index 2) was silently flipped"
+    end
+
+    # The FIX (fail-before RED without the text-thread): the same off-by-one
+    # stamp that carries the INTENDED criterion's stored text is REJECTED with
+    # :criteria_mismatch and writes nothing.
+    test "text guard at the wrong index → :criteria_mismatch, no write", %{scope: scope} do
+      doc_id = uniq("stamp-inrange-guard")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      # Off-by-one index 2, but the caller names criterion B (the intended one).
+      assert {:error, :criteria_mismatch} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 2,
+                 criterion_text: "criterion B: docs updated",
+                 outcome: {:met, "proof for crit B"}
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+
+      assert reloaded.content["acceptance_criteria"] == three_criteria(),
+             "a mismatched guard aborts the whole write — no partial flip"
+
+      assert criterion_events(task.doc_id) == [], "no event for a rejected stamp"
+    end
+
+    # The text guard at the RIGHT index still succeeds — the CAS is exact-match,
+    # not a blanket block.
+    test "text guard at the right index → succeeds and flips it", %{scope: scope} do
+      doc_id = uniq("stamp-inrange-ok")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 criterion_text: "criterion B: docs updated",
+                 outcome: {:met, "proof for crit B"}
+               )
+
+      [_a, b, _c] = stamped.content["acceptance_criteria"]
+      assert b["met"] == true
+      assert b["evidence"] == "proof for crit B"
+    end
+
+    # A blank / nil text guard is inert — the permissive path is preserved so
+    # the index-only autostamp (#3039) never regresses.
+    test "blank text guard is inert (permissive path preserved)", %{scope: scope} do
+      doc_id = uniq("stamp-inrange-blank")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 criterion_text: "",
+                 outcome: {:met, "proof"}
+               )
+
+      [_a, b, _c] = stamped.content["acceptance_criteria"]
+      assert b["met"] == true
+    end
+  end
+
   # ─── (2) Evidence or nothing ───────────────────────────────────────────────
 
   describe "stamp/3 — met REQUIRES non-empty evidence" do
