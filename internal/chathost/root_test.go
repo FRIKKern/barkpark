@@ -18,8 +18,12 @@ func TestResolveApprovedPathAllowsRealChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != child {
-		t.Fatalf("got %q want %q", got, child)
+	want, err := filepath.EvalSymlinks(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
 	}
 }
 
