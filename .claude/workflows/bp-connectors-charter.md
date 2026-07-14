@@ -389,3 +389,82 @@ Retired this wave: `connectors-credential-key-rewrap-sweep` + `connectors-creden
 
 ### Wave 2026-07-14 — P4b (Wave 6) DECIDE — the last gated card becomes a button; the shared master key retires
 Two verify rounds RE-PROVED the baseline (`npm ci` from scratch, real Postgres — **387/387, zero skips**) and corrected FOUR carried premises. **D52 is already fixed** (V1: `install-write-path.test.ts` drives the REAL callback and asserts `chat_token_ref` preserved) — so S1's pending-connect exists for MINTING-AUTHORITY (the bridge cannot mint a chat token, the public callback has no channel to Studio) and fresh-install-NULL, not a live wipe (D61). The Slack callback mounts as a FOURTH route class inside `webhook-server.ts` — GET, state-authenticated, NEVER loopback-gated (Caddy always adds `x-forwarded-*`, which the loopback gate 404s) (D62). A bridge-owned `pending_connect` row joins the loopback-staged sealed token with the public `code` in ONE write (D63). **The load-bearing verify finding**: server-derive `install_key` is already present, but the `resolveWorkspace → 409 install_owned_elsewhere` guard is ABSENT — S1 must replicate `connect.ts:288-303` inside the callback, because `workspace_id` is still repointed unconditionally and this is a PUBLIC entry (D64). The ticket unify folds in and is not optional (`{w,n,t}` vs `{w,p,n,t}`); the golden vector is INLINE constants, `connect-ticket-golden.json` does not exist (D65). The Studio flip needs a new `connect_mode` + external-link render branch, real tokens no hex (D66). S2 takes per-workspace-DEK + rewrap as ONE slice with a BLOB-INTERNAL version tag (V2: no Elixir decodes the blob, so no cross-language column edit) and a byte-pinned CAS (the strategy's `key_version`-CAS would ship a rollback bug); three duplicate DEK tasks dedup to one; the false "undecryptable on rotate" claim is fixed in BOTH the doc and the deploy script (D67). S3 is a DB-free static drift gate on the twice-transcribed DDL (D68). Three opus slices, file-partitioned, true parallel. Paper: `connectors-wave-6-2026-07-14`.
+
+### Wave 2026-07-14 — P4b (Wave 6) BUILT + REVIEWED — the LAST gated card is a button; the shared master key retires (grade A−)
+
+**Three slices, all green, all file-partitioned with zero write-write overlap** (no integration
+branch needed — the D59 law held this wave). The reviewer re-ran every gate independently and made
+**zero code fixes** — the builders shipped clean. Final branches for the lead:
+`loop-epic/add-to-slack-mount-the-built-but-unroute-0` (W6-1),
+`loop-epic/per-workspace-dek-rewrap-sweep-key-custo-1` (W6-2),
+`loop-epic/chat-bridge-ddl-drift-gate-a-db-free-che-2` (W6-3).
+
+**W6-1 — Add to Slack (the headliner).** The built-but-unrouted OAuth callback is now a FOURTH route
+class inside `webhook-server.ts` — GET, state-authenticated by the signed connect ticket, NEVER
+`isProxied`-gated (D62), reusing the unexported traversal-safe path helpers. A bridge-owned
+`pending_connect` table (sealed under a DISTINCT `pending:<nonce>` identity, single-use
+`DELETE…RETURNING`, TTL-checked in SQL, fail-closed) joins the loopback-staged chat token to the
+public `code` in ONE `upsertInstall` write (D63) — zero `installs.ts` edit. **The load-bearing
+verify finding was honoured**: the ABSENT `resolveWorkspace → 409 install_owned_elsewhere` guard is
+now present, checked BEFORE the pending row is consumed, so a public re-auth cannot repoint a victim's
+row (D64). The ticket unify folded in cleanly — `signOAuthState`/`verifyOAuthState` deleted, one
+`signConnectTicket`/`verifyConnectTicket({provider:'slack'})` path, provider mismatch enforced,
+future-skew tightened 10min→30s, golden vector preserved (D65). Studio's Slack card flips to a real
+external Add-to-Slack `<a>` carrying an Elixir-signed `{w,p:'slack',n,t}` ticket, `connect_mode:oauth`
+disjoint from the paste handlers, honest not-configured note, real tokens no hex (D66). Node gate
+**397/397 zero skips + format clean** (independently re-run on real Postgres); `studio-literal-check`
+PASS (356 files, independently re-run — bash, no Elixir); the Elixir tests are real and pin the
+security-critical behaviour (raw token NOT in the URL, HMAC signature match, `["chat"]`
+workspace-bound token, D49 non-admin gate mints/stages NOTHING, ≤1 live OAuth token). Human gate named
+exactly in `docs/ops/slack-app.md`; live Slack round trip left OPEN, no install fabricated.
+
+**W6-2 — per-workspace DEK + rewrap (the one with teeth).** Each workspace's DEK is
+`HKDF-SHA256(instance KEK, salt, "workspace|"+wsId)` derived INSIDE the cipher closure — seal/open
+signature byte-stable, ZERO call-site edits, `schema.ts`/`install.ex`/`test_helper.exs` verified
+untouched. Key-version is the blob-internal AAD prefix (`bpc1|`/`bpc2|`), recovered by trying each
+scheme; **V1 backward-compat verified against main** (the pre-wave cipher sealed `bpc1|` + instance
+key directly; the new V1 open path reproduces it byte-for-byte). The rewrap sweep is a bridge-owned
+module with a byte-pinned CAS (`IS NOT DISTINCT FROM` on the OLD ciphertext) — idempotent, resumable,
+concurrency-safe; real-Postgres tests PROVE old-key-drop (seal under A → rewrap → open with ONLY B),
+second-run no-op, resume, a mid-sweep concurrent write surviving un-rolled-back, and unopenable rows
+left alone. Custody story added and the FALSE "rotating makes credentials undecryptable" claim fixed
+in BOTH the doc and the deploy script. Gate fully green: **395/395 zero skips + format +
+`instance-deploy_test.sh` ALL PASS**. Canonical marker unique and preserved.
+
+**W6-3 — DDL drift gate.** DB-free bash+awk extractor for the `connector_installs` column set from
+both sources of truth, NAMED diff on mismatch, bundled `--selftest` tripwire, wired into
+`doc-gates.yml` on both push+pull_request. Verified: real check green, selftest green, tripwire
+proven on the REAL `test_helper.exs` (phantom column → `exit 1` with the named diff, reverted clean),
+and — the cross-slice check — it correctly IGNORES W6-1's new `pending_connect` table and stays green
+on the integrated tree.
+
+**LEDGER — HONEST.** All three tasks `in_progress`, claimed with truthful now-lines, parented to the
+epic, `wave_paper` linked, build criteria stamped with real evidence, each MERGE-GATE criterion
+correctly left `met=false`/empty for the lead. `connectors-slack-oauth-connect-loop` was already
+cancelled as a wave-5 duplicate. The Slack token-label follow-up
+(`connectors-slack-oauth-token-relabel`) exists as a DRAFT with correct content but could NOT be
+published — the bp-CLI/publish-wall `label_spine` rejection (known `bp-cli-stale-vs-guerrilla` issue);
+the item is fully captured in `docs/ops/slack-app.md`, code comments, and the draft, just not in the
+published projection.
+
+**HONEST GAPS.** (1) The Elixir half was gate-confirmed by the builder's clean 740-file recompile and
+by the reviewer's independent `studio-literal-check` + reading the tests, but the full `mix test`
+partition was NOT re-run at review (homebrew OTP-28 vs the pinned OTP-27 + a shared-`_build` clobber
+risk) — CI's Elixir Test gate is authoritative and the lead must see it green before merge (D66,
+`dont-merge-before-elixir-test`). (2) The Add-to-Slack surface MINTS + stages a chat token at Studio
+PAGE-LOAD (bounded to ≤1 unattached token per workspace, revoked on the next visit) — a design smell
+that couples page render to a loopback bridge call; deferring the stage to a click is a filed
+refinement candidate. (3) The OAuth-minted chat token is labelled `connector:slack:oauth` (the install
+key is unknown pre-callback), asymmetric with Telegram/Discord — compensated by disconnect revoking
+BOTH labels; relabel-by-install_key is the drafted follow-up. (4) No channel is live — the live
+Telegram round trip stays the sole open item on `task-6c358e166b6c7eaf`, a parked human gate, NOT
+driven this wave by design.
+
+**NEXT WAVE.** (1) **Deploy + drive Telegram (or Slack) to a live round trip** — everything up to the
+provider token is built and proven across two languages; this needs a merged main, a deploy, and one
+human token. It is the wave's real remaining risk and the only thing keeping
+`task-6c358e166b6c7eaf` open. (2) **TOOL connectors** (`connectors-p4-tool-connectors-mcp`, its own
+wave per D58 — the runner passes `--strict-mcp-config` and nothing plays the MCP client role yet).
+(3) The dormant/latent availability backlog: `connectors-webhook-mount-fanout`,
+`connectors-telegram-poll-supervision`, plus the Add-to-Slack page-load-mint refinement and the Slack
+token relabel. Paper: `connectors-wave-6-2026-07-14`.
