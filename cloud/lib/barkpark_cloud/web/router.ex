@@ -4619,6 +4619,9 @@ defmodule BarkparkCloud.Web.Router do
              # build fetches with. create_site encrypts the token at rest; only
              # present keys are folded in so a container site stays unchanged.
              attrs <- put_site_content_binding(attrs, conn.body_params),
+             # A static site IS its content binding — refuse an unbound one AT THE
+             # DOOR rather than writing a row the deploy path can never build.
+             :ok <- require_content_binding(kind, attrs),
              # site-spawner D29: MINT the public-read content token on the box
              # BEFORE the row exists, so a 201 can never be a ghost (a site with a
              # binding but no token can't build, and nothing downstream would say
@@ -4670,6 +4673,14 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, :name_required} ->
             json(conn, 422, %{error: "name_required"})
+
+          {:error, {:binding_required, missing}} ->
+            json(conn, 422, %{
+              error: "content_binding_required",
+              detail:
+                "a static site builds FROM your content — bind it with " <>
+                  "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+            })
 
           {:error, {:mint_failed, detail}} ->
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
@@ -8560,6 +8571,28 @@ defmodule BarkparkCloud.Web.Router do
   # theirs (BYO-token stays possible). Everything else — a container site, a
   # static site with an incomplete triple — passes straight through, and the
   # changeset/reaper give the honest verdict for a half-bound row.
+  # A static site with no content binding is the GHOST this route exists to
+  # prevent: `Site.changeset` would happily insert it, the CLI would print a
+  # cheerful 201, and ~60s later the deploy reaper would terminally fail it with
+  # a message the user can no longer act on (the site already exists). The build
+  # fetches from workspace/project/dataset and has literally nothing to render
+  # without all three, so the honest answer is a 422 at the door naming the flag.
+  # The reaper's static pass stays as the safety net for rows that predate this.
+  defp require_content_binding("static", attrs) do
+    missing =
+      [
+        {:bootstrap_workspace, "workspace"},
+        {:bootstrap_project, "project"},
+        {:bootstrap_dataset, "dataset"}
+      ]
+      |> Enum.reject(fn {key, _label} -> is_binary(attrs[key]) end)
+      |> Enum.map(fn {_key, label} -> label end)
+
+    if missing == [], do: :ok, else: {:error, {:binding_required, missing}}
+  end
+
+  defp require_content_binding(_kind, _attrs), do: :ok
+
   defp mint_site_read_token(bp, %{kind: "static"} = attrs, slug) do
     ws = attrs[:bootstrap_workspace]
     proj = attrs[:bootstrap_project]

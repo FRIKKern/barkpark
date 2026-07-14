@@ -677,7 +677,7 @@ defmodule BarkparkCloud.Sites.Deploy do
       end
 
     %{
-      state: normalize_state(body["state"] || body["status"], stages),
+      state: normalize_state(body, stages),
       stages: stages,
       url: nonblank(body["url"]),
       failure_reason: nonblank(body["failure_reason"] || body["error"])
@@ -709,13 +709,37 @@ defmodule BarkparkCloud.Sites.Deploy do
     |> Enum.filter(& &1)
   end
 
+  # The engine's REAL marker is key=value —
+  # `BPSTAGE name=BUILD status=failed build_id=b1 detail="…"` — so it is matched
+  # first, and matched exactly (status and detail are read, never guessed from
+  # prose). The looser prose form below is the genuine fallback: site-deploy.sh's
+  # own `[site-deploy hh:mm:ss] BUILD: …` narration, where the verdict has to be
+  # inferred from the words.
   defp parse_line(line) do
     stripped = Regex.replace(~r/^\[site-deploy [^\]]*\]\s*/, line, "")
 
-    case Regex.run(
-           ~r/^(?:BPSTAGE\s+)?(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE)\b[:\s]*(.*)$/,
-           stripped
-         ) do
+    marker =
+      Regex.run(
+        ~r/^BPSTAGE\s+name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE)\s+status=([a-z]+)(?:\s+build_id=\S*)?(?:\s+detail="([^"]*)")?/,
+        stripped,
+        capture: :all_but_first
+      )
+
+    case marker do
+      [name, status | rest] ->
+        %{
+          name: name,
+          status: normalize_status(status),
+          detail: rest |> List.first() |> nonblank()
+        }
+
+      _ ->
+        parse_prose_line(stripped)
+    end
+  end
+
+  defp parse_prose_line(stripped) do
+    case Regex.run(~r/^(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE)\b[:\s]*(.*)$/, stripped) do
       [_, name, rest] ->
         %{name: name, status: line_status(rest), detail: nonblank(String.trim(rest))}
 
@@ -760,23 +784,50 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   defp normalize_status(_), do: "pending"
 
-  defp normalize_state(state, stages) do
-    case state && String.downcase(to_string(state)) do
-      s when s in ["succeeded", "success", "done", "live", "ok", "complete", "completed"] ->
-        :succeeded
+  # FAILURE SIGNALS BEAT THE LIFECYCLE WORD — this ordering is the whole
+  # "a broken build never reaches a visitor" promise, so it is not cosmetic.
+  #
+  # The instance's `state` is a RUN LIFECYCLE (`idle` | `running` | `done`),
+  # mirroring SelfUpdateController: `done` means "the process exited", NOT "the
+  # deploy worked". The VERDICT lives in `exit_code` / `failure_reason`. Reading
+  # `done` as success meant a build that died at BUILD or HEALTH (exit 12/14,
+  # `state: "done"`) settled as `live` — the box correctly refused to switch, so
+  # visitors kept the previous release, but the control plane flipped
+  # `current_deployment_id`, marked the deployment live, and `bp cloud site`
+  # printed a success line and a URL for a build that never shipped. A false
+  # green is worse than a red.
+  #
+  # So: any failure signal wins, whatever the box calls its lifecycle.
+  defp normalize_state(body, stages) when is_map(body) do
+    lifecycle = (body["state"] || body["status"]) |> then(&(&1 && String.downcase(to_string(&1))))
 
-      s when s in ["failed", "fail", "error"] ->
+    cond do
+      failed?(body, stages) ->
         :failed
 
-      _ ->
-        # No explicit state: infer from the stages — a failed stage is terminal,
-        # a done RETIRE is a finished run, anything else is still going.
-        cond do
-          Enum.any?(stages, &(&1.status == "failed")) -> :failed
-          Enum.any?(stages, &(&1.name == "RETIRE" and &1.status == "done")) -> :succeeded
-          true -> :running
-        end
+      lifecycle in ["succeeded", "success", "live", "ok", "complete", "completed", "done"] ->
+        :succeeded
+
+      lifecycle in ["failed", "fail", "error"] ->
+        :failed
+
+      true ->
+        # No usable lifecycle word: infer from the stages — a done RETIRE is a
+        # finished run, anything else is still going.
+        if Enum.any?(stages, &(&1.name == "RETIRE" and &1.status == "done")),
+          do: :succeeded,
+          else: :running
     end
+  end
+
+  # A run is failed if the box said so in ANY of the three honest ways: a
+  # non-zero exit code, a failure reason, or a stage that reported failed.
+  defp failed?(body, stages) do
+    exit_code = body["exit_code"]
+
+    (is_integer(exit_code) and exit_code != 0) or
+      nonblank(body["failure_reason"] || body["error"]) != nil or
+      Enum.any?(stages, &(&1.status == "failed"))
   end
 
   defp nonblank(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)

@@ -339,5 +339,75 @@ defmodule BarkparkCloud.SitesDeployTest do
       # blank six-stage bar with no error anywhere. They are mapped, not trusted.
       assert Enum.map(report.stages, & &1.status) == ["done", "done", "done"]
     end
+
+    # THE FALSE GREEN. The instance's `state` is a RUN LIFECYCLE (idle|running|
+    # done) mirroring SelfUpdateController — `done` means "the process exited",
+    # not "the deploy worked". The verdict is exit_code / failure_reason. Reading
+    # `done` as success settled a build that died at HEALTH as LIVE: the box
+    # refused to switch (so visitors were safe), but the control plane flipped
+    # current_deployment_id and `bp cloud site` printed a success line and a URL
+    # for a build that never shipped. Failure signals must beat the lifecycle word.
+    test "state:done with a non-zero exit_code is FAILED, never succeeded" do
+      report =
+        Deploy.normalize_report(%{
+          "state" => "done",
+          "exit_code" => 14,
+          "failure_reason" => "HEALTH gate failed (exit 14): bp-content-rev marker is empty",
+          "stages" => [
+            %{"name" => "PLAN", "status" => "ok"},
+            %{"name" => "BUILD", "status" => "ok"},
+            %{"name" => "STAGE", "status" => "ok"},
+            %{"name" => "HEALTH", "status" => "failed", "detail" => "bp-content-rev is empty"}
+          ]
+        })
+
+      assert report.state == :failed
+      assert report.failure_reason =~ "bp-content-rev marker is empty"
+      # …and no SWITCH ever happened, so nothing a visitor sees moved.
+      refute Enum.any?(report.stages, &(&1.name == "SWITCH"))
+    end
+
+    test "state:done with a failed stage is FAILED even with no exit_code" do
+      report =
+        Deploy.normalize_report(%{
+          "state" => "done",
+          "stages" => [
+            %{"name" => "BUILD", "status" => "failed", "detail" => "401 Unauthorized"}
+          ]
+        })
+
+      assert report.state == :failed
+    end
+
+    test "state:done with exit_code 0 and no failure is still SUCCEEDED" do
+      report =
+        Deploy.normalize_report(%{
+          "state" => "done",
+          "exit_code" => 0,
+          "stages" => Enum.map(Deploy.stages(), &%{"name" => &1, "status" => "ok"})
+        })
+
+      assert report.state == :succeeded
+    end
+
+    # The engine's real marker is key=value. The prose fallback below it could
+    # never have matched it, so the documented "tolerates the BPSTAGE marker"
+    # was untrue — and a mis-parsed status is a blank stage bar.
+    test "parses the engine's REAL key=value BPSTAGE marker, detail and all" do
+      report =
+        Deploy.normalize_report(%{
+          "console" => [
+            ~s(BPSTAGE name=PLAN status=noop build_id=b1 detail="nothing to do"),
+            ~s(BPSTAGE name=BUILD status=failed build_id=b1 detail="FATAL: 401 Unauthorized")
+          ]
+        })
+
+      assert report.state == :failed
+      by_name = Map.new(report.stages, &{&1.name, {&1.status, &1.detail}})
+      # `noop` is a skip, not a failure — inferring from prose would have read
+      # "nothing to do" and guessed.
+      assert by_name["PLAN"] == {"skipped", "nothing to do"}
+      assert by_name["BUILD"] == {"failed", "FATAL: 401 Unauthorized"}
+    end
   end
 end

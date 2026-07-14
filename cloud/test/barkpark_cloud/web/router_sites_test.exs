@@ -636,6 +636,72 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.list_sites_for_team(team) == []
     end
 
+    # The ghost 201 this route exists to kill has a second door: a static site
+    # created with NO content binding at all. It used to insert cleanly, and the
+    # deploy reaper would terminally fail it ~60s later — long after the user
+    # could act on the advice ("create the site with --dataset …"), because the
+    # site already existed. Refuse it at the door instead.
+    test "a static site with no content binding is refused at CREATE, not by the reaper a minute later" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "blog", kind: "static", framework: "astro"},
+          token
+        )
+
+      assert conn.status == 422
+      body = json_body(conn)
+      assert body["error"] == "content_binding_required"
+      # The message names the FLAG that fixes it, and exactly what is missing.
+      assert body["detail"] =~ "--dataset"
+      assert body["detail"] =~ "workspace"
+      assert body["detail"] =~ "dataset"
+
+      # No ghost row.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    test "a PARTIAL content binding is refused too — a build needs all three" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "blog", kind: "static", workspace: "acme"},
+          token
+        )
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "content_binding_required"
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    # A container site has no content binding BY DESIGN (it builds from a repo or
+    # an artifact) — the new guard must not touch it.
+    test "a CONTAINER site still creates with no content binding" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "api", kind: "container"},
+          token
+        )
+
+      assert conn.status == 201
+    end
+
     test "a missing barkpark_id says BARKPARK_REQUIRED — not the lying 'name_required'" do
       {user, _team} = user_with_team()
       token = login_token(user)
