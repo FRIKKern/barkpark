@@ -25,6 +25,7 @@ defmodule Barkpark.StudioChat.Recorder do
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
+  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry}
 
   @registry Barkpark.StudioChat.RecorderRegistry
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
@@ -124,44 +125,56 @@ defmodule Barkpark.StudioChat.Recorder do
       minter: Map.get(opts, :minter)
     }
 
-    case Runtime.open(provider, %{
-           session_id: id,
-           sink: self(),
-           mode: Map.get(opts, :mode, "plan"),
-           resume: Map.get(opts, :resume, false),
-           execution_target: Map.get(opts, :execution_target, "managed"),
-           execution_host_id: Map.get(opts, :execution_host_id),
-           workspace_id: Map.get(opts, :workspace_id),
-           cwd: Map.get(opts, :cwd),
-           provider_session_id: Map.get(opts, :provider_session_id),
-           minter: Map.get(opts, :minter),
-           developer_instructions: codex_developer_instructions(provider, id),
-           session_opts: session_opts
-         }) do
-      {:ok, session} ->
-        monitor_runtime(session)
-        capture_provider_session_id(id, session)
-        # Ask the CLI for its slash-command list right after spawn (charter D36a)
-        # — the ack lands as {:claude_chat_control, :initialize, …}, which we hold
-        # so a LATE-joining tab still gets the vocabulary (a one-shot broadcast
-        # alone would miss it).
-        Runtime.initialize(provider, session)
-        send(self(), :replay_registered_host_events)
-        {:ok, new_state(id, session, provider)}
+    runtime_opts = %{
+      session_id: id,
+      sink: self(),
+      mode: Map.get(opts, :mode, "plan"),
+      resume: Map.get(opts, :resume, false),
+      execution_target: Map.get(opts, :execution_target, "managed"),
+      execution_host_id: Map.get(opts, :execution_host_id),
+      workspace_id: Map.get(opts, :workspace_id),
+      cwd: Map.get(opts, :cwd),
+      provider_session_id: Map.get(opts, :provider_session_id),
+      minter: Map.get(opts, :minter),
+      developer_instructions: codex_developer_instructions(provider, id),
+      session_opts: session_opts
+    }
 
-      {:error, {:already_started, session}} ->
-        # A Session survived its Recorder (recorder crash). Re-adopt it as our
-        # sink so its frames flow again instead of casting into a dead pid.
-        Runtime.adopt_sink(provider, session, self())
-        monitor_runtime(session)
-        capture_provider_session_id(id, session)
-        Runtime.initialize(provider, session)
-        send(self(), :replay_registered_host_events)
-        {:ok, new_state(id, session, provider)}
+    case RuntimeAdmission.acquire(id, Map.merge(opts, runtime_opts)) do
+      {:ok, admission} ->
+        case Runtime.open(provider, runtime_opts) do
+          {:ok, session} ->
+            initialize_runtime(id, session, provider)
+            RuntimeTelemetry.observe_identity(id, Runtime.runtime_identity(session, admission))
+            {:ok, new_state(id, session, provider, admission)}
+
+          {:error, {:already_started, session}} ->
+            # A Session survived its Recorder (recorder crash). Re-adopt it as
+            # our sink so its frames flow again instead of casting into a dead
+            # pid. The old Recorder-owned admission lease died with its owner.
+            Runtime.adopt_sink(provider, session, self())
+            initialize_runtime(id, session, provider)
+            RuntimeTelemetry.observe_identity(id, Runtime.runtime_identity(session, admission))
+            {:ok, new_state(id, session, provider, admission)}
+
+          {:error, reason} ->
+            RuntimeAdmission.release(admission)
+            {:stop, {:shutdown, reason}}
+        end
 
       {:error, reason} ->
         {:stop, {:shutdown, reason}}
     end
+  end
+
+  defp initialize_runtime(id, session, provider) do
+    monitor_runtime(session)
+    capture_provider_session_id(id, session)
+    # Ask the CLI for its slash-command list right after spawn (charter D36a)
+    # — the ack lands as {:claude_chat_control, :initialize, …}, which we hold
+    # so a LATE-joining tab still gets the vocabulary.
+    Runtime.initialize(provider, session)
+    send(self(), :replay_registered_host_events)
   end
 
   defp codex_developer_instructions("codex", session_id) do
@@ -172,11 +185,12 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp codex_developer_instructions(_, _), do: nil
 
-  defp new_state(id, session, provider) do
+  defp new_state(id, session, provider, admission) do
     %{
       session_id: id,
       provider: provider,
       session: session,
+      admission: admission,
       monitor_pid: Runtime.runtime_pid(session),
       timer: arm_idle(nil),
       activity: nil,
@@ -468,6 +482,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   def handle_info({:claude_chat_exit, _status, _stderr_tail} = msg, state) do
     session_exited(state.session_id)
+    release_admission(state)
     # Rebroadcast verbatim so the stderr tail (charter D54) rides through to
     # every viewer's ChatLive; the tail is what lets it refuse a doomed resume.
     broadcast(state, msg)
@@ -479,6 +494,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # the viewers the same honest story an exit tells.
   def handle_info({:DOWN, _ref, :process, pid, _reason}, %{monitor_pid: pid} = state) do
     session_exited(state.session_id)
+    release_admission(state)
     broadcast(state, {:claude_chat_exit, :crashed, nil})
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil, monitor_pid: nil}}
@@ -491,12 +507,19 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info(:idle_reap, state) do
     if pid = state.session, do: Runtime.close(state.provider, pid)
     session_exited(state.session_id)
+    release_admission(state)
     broadcast(state, {:claude_chat_exit, :idle_reaped, nil})
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    release_admission(state)
+    :ok
+  end
 
   # ── persistence (mirrors the store shapes replay reads back) ───────────────
 
@@ -727,6 +750,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp capture_runtime_event(state, %Event{} = event) do
     maybe_capture_event_provider_session_id(state.session_id, event.provider_session_id)
+    RuntimeTelemetry.observe(state.session_id, event)
 
     state = %{
       state
@@ -845,6 +869,9 @@ defmodule Barkpark.StudioChat.Recorder do
     StudioChat.interrupt_running_tasks(session_id)
     StudioChat.mark_exited(session_id)
   end
+
+  defp release_admission(%{admission: admission}), do: RuntimeAdmission.release(admission)
+  defp release_admission(_state), do: :ok
 
   # ── agent lifecycle (charter D45) ──────────────────────────────────────────
 
