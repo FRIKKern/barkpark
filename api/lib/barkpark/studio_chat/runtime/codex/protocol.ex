@@ -72,7 +72,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
         durable(base, :item_completed)
 
       "thread/tokenUsage/updated" ->
-        durable(base, :usage)
+        durable(base, :usage, usage: normalize_usage(params["tokenUsage"]))
 
       "turn/completed" ->
         status = get_in(params, ["turn", "status"])
@@ -91,6 +91,24 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
       _ ->
         durable(base, :provider_event)
     end
+  end
+
+  @doc "Normalize the authoritative thread start/resume acknowledgement."
+  def acknowledgement(result, context) when is_map(result) do
+    native = scrub(result)
+
+    %Event{
+      provider: "codex",
+      session_id: context.session_id,
+      provider_session_id: get_in(result, ["thread", "id"]) || context.thread_id,
+      sequence: context.sequence,
+      idempotency_key: "codex:runtime_acknowledged:" <> fingerprint(native),
+      durability: :durable,
+      kind: :runtime_acknowledged,
+      observed_model: clean_text(result["model"]),
+      observed_effort: clean_text(result["reasoningEffort"]),
+      native: native
+    }
   end
 
   def process_failed(context, status, stderr \\ nil) do
@@ -146,10 +164,64 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
   defp normalize_decision(decision) when decision in [:cancel, "cancel"], do: "cancel"
   defp normalize_decision(_), do: "decline"
 
-  defp idempotency_key(message, sequence) do
+  defp idempotency_key(message, _sequence) do
     method = message["method"] || "response"
-    id = message["id"] || get_in(message, ["params", "itemId"]) || sequence
-    "codex:#{method}:#{id}:#{sequence}"
+    id = message["id"] || get_in(message, ["params", "itemId"]) || "event"
+    "codex:#{method}:#{id}:#{fingerprint(message)}"
+  end
+
+  defp normalize_usage(token_usage) when is_map(token_usage) do
+    total = token_usage["total"] || token_usage[:total] || token_usage
+    last = token_usage["last"] || token_usage[:last] || token_usage
+
+    %{
+      total: normalize_breakdown(total),
+      last: normalize_breakdown(last),
+      model_context_window:
+        non_negative_integer(
+          token_usage["modelContextWindow"] || token_usage[:model_context_window]
+        )
+    }
+  end
+
+  defp normalize_usage(_),
+    do: %{total: empty_breakdown(), last: empty_breakdown(), model_context_window: nil}
+
+  defp normalize_breakdown(value) when is_map(value) do
+    %{
+      total_tokens: metric(value, "totalTokens", :total_tokens),
+      input_tokens: metric(value, "inputTokens", :input_tokens),
+      cached_input_tokens: metric(value, "cachedInputTokens", :cached_input_tokens),
+      output_tokens: metric(value, "outputTokens", :output_tokens),
+      reasoning_output_tokens:
+        metric(value, "reasoningOutputTokens", :reasoning_output_tokens)
+    }
+  end
+
+  defp normalize_breakdown(_), do: empty_breakdown()
+
+  defp empty_breakdown do
+    %{
+      total_tokens: nil,
+      input_tokens: nil,
+      cached_input_tokens: nil,
+      output_tokens: nil,
+      reasoning_output_tokens: nil
+    }
+  end
+
+  defp metric(map, string_key, atom_key),
+    do: non_negative_integer(Map.get(map, string_key, Map.get(map, atom_key)))
+
+  defp non_negative_integer(value) when is_integer(value) and value >= 0, do: value
+  defp non_negative_integer(_), do: nil
+
+  defp fingerprint(value) do
+    value
+    |> scrub()
+    |> Jason.encode!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
   end
 
   defp sanitize_error(error) when is_map(error) do
@@ -175,4 +247,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
   defp scrub_text(nil), do: nil
   defp scrub_text(value) when not is_binary(value), do: inspect(value, limit: 20)
   defp scrub_text(value), do: String.slice(value, 0, 2_000)
+
+  defp clean_text(value) when is_binary(value) and value != "", do: value
+  defp clean_text(_), do: nil
 end

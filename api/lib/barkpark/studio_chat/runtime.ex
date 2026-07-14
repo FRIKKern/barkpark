@@ -10,6 +10,8 @@ defmodule Barkpark.StudioChat.Runtime do
   """
 
   alias Barkpark.StudioChat.Runtime.Claude
+  alias Barkpark.StudioChat.RuntimeAdmission
+  alias Barkpark.StudioChat.RuntimeTelemetry
 
   @typedoc "A provider name persisted on a chat session."
   @type provider :: String.t()
@@ -88,6 +90,9 @@ defmodule Barkpark.StudioChat.Runtime do
               approval_id: nil,
               terminal_state: nil,
               error: nil,
+              usage: nil,
+              observed_model: nil,
+              observed_effort: nil,
               native: %{}
 
     @type t :: %__MODULE__{
@@ -104,6 +109,9 @@ defmodule Barkpark.StudioChat.Runtime do
             approval_id: String.t() | nil,
             terminal_state: atom() | String.t() | nil,
             error: map() | nil,
+            usage: map() | nil,
+            observed_model: String.t() | nil,
+            observed_effort: String.t() | nil,
             native: map()
           }
   end
@@ -189,6 +197,57 @@ defmodule Barkpark.StudioChat.Runtime do
     case runtime_pid(runtime_ref) do
       pid when is_pid(pid) -> Process.alive?(pid)
       _ -> false
+    end
+  end
+
+  @doc "Sample only non-secret, process-local identity for a runtime."
+  def runtime_identity(%RemoteRef{}, :not_managed) do
+    %{
+      execution_target: "registered_host",
+      status: "unsupported",
+      runtime_id: nil,
+      beam_pid: nil,
+      os_pid: nil,
+      memory_bytes: nil,
+      reductions: nil,
+      sampled_at: DateTime.utc_now() |> DateTime.to_iso8601(),
+      limitations: RuntimeTelemetry.registered_host_limitations()
+    }
+  end
+
+  def runtime_identity(runtime_ref, %RuntimeAdmission.Lease{runtime_id: runtime_id}) do
+    sampled_at = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    case runtime_pid(runtime_ref) do
+      pid when is_pid(pid) ->
+        info = Process.info(pid, [:memory, :reductions, :message_queue_len, :links]) || []
+
+        %{
+          execution_target: "managed",
+          status: if(Process.alive?(pid), do: "observed", else: "unknown"),
+          runtime_id: runtime_id,
+          beam_pid: inspect(pid),
+          os_pid: linked_os_pid(info[:links]),
+          memory_bytes: info[:memory],
+          reductions: info[:reductions],
+          message_queue_len: info[:message_queue_len],
+          node: node(pid) |> Atom.to_string(),
+          sampled_at: sampled_at,
+          limitations: []
+        }
+
+      _ ->
+        %{
+          execution_target: "managed",
+          status: "unknown",
+          runtime_id: runtime_id,
+          beam_pid: nil,
+          os_pid: nil,
+          memory_bytes: nil,
+          reductions: nil,
+          sampled_at: sampled_at,
+          limitations: ["managed runtime process was not alive when sampled"]
+        }
     end
   end
 
@@ -297,6 +356,7 @@ defmodule Barkpark.StudioChat.Runtime do
 
   def open(provider, opts) when is_map(opts) do
     runtime = adapter(provider)
+    opts = managed_options(provider, opts)
     if Map.get(opts, :resume, false), do: runtime.resume(opts), else: runtime.start(opts)
   end
 
@@ -358,6 +418,55 @@ defmodule Barkpark.StudioChat.Runtime do
 
   defp dispatch_managed(_adapter, %Command{operation: operation}, _opts),
     do: {:error, {:unsupported_runtime_operation, operation}}
+
+  # Recorder stores user choices under :session_opts for the provider-neutral
+  # registered-host command. Managed adapters historically received that map
+  # unchanged, while Codex's app-server seam reads top-level options. Flatten
+  # the safe model/effort pair and, for the production Codex binary, configure
+  # the per-process app-server so resume and start resolve the same values.
+  defp managed_options(provider, opts) do
+    session_opts = Map.get(opts, :session_opts, %{})
+
+    opts =
+      opts
+      |> maybe_put_runtime_option(:model, Map.get(session_opts, :model))
+      |> maybe_put_runtime_option(:effort, Map.get(session_opts, :effort))
+
+    if provider in ["codex", :codex] and not Map.has_key?(opts, :args) do
+      Map.put(opts, :args, codex_app_server_args(opts))
+    else
+      opts
+    end
+  end
+
+  defp codex_app_server_args(opts) do
+    ["app-server", "--stdio"]
+    |> append_codex_config("model", Map.get(opts, :model))
+    |> append_codex_config("model_reasoning_effort", Map.get(opts, :effort))
+  end
+
+  defp append_codex_config(args, _key, nil), do: args
+
+  defp append_codex_config(args, key, value) when is_binary(value) do
+    args ++ ["--config", "#{key}=#{Jason.encode!(value)}"]
+  end
+
+  defp linked_os_pid(links) when is_list(links) do
+    Enum.find_value(links, fn
+      port when is_port(port) ->
+        case Port.info(port, :os_pid) do
+          {:os_pid, pid} when is_integer(pid) -> pid
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end)
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp linked_os_pid(_), do: nil
 
   defp dispatch_remote(%RemoteRef{} = ref, operation, payload, command_opts \\ []) do
     payload =
