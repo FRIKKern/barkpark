@@ -38,6 +38,24 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     def run(_binary, _args), do: {:error, :disabled_in_tests}
   end
 
+  defmodule FakeCodexAdapter do
+    @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+    def start(_opts), do: {:error, :not_started_by_identity_picker_tests}
+    def resume(_opts), do: {:error, :not_started_by_identity_picker_tests}
+    def send_turn(_runtime, _content), do: :ok
+    def steer(_runtime, _command), do: :ok
+    def interrupt(_runtime), do: {:ok, "interrupt-test"}
+    def answer_approval(_runtime, _approval_id, _decision), do: :ok
+    def close(_runtime), do: :ok
+    def readiness(_opts), do: %{binary: true, authed?: true}
+    def capabilities, do: %{modes: ["read-only"], models: ["gpt-5.6"], efforts: ["high"]}
+    def normalize_mode(value), do: if(value == "read-only", do: value, else: "read-only")
+    def normalize_model(value), do: if(value == "gpt-5.6", do: value)
+    def normalize_effort(value), do: if(value == "high", do: value)
+    def cwd, do: "/tmp/codex-managed"
+  end
+
   setup %{conn: conn} do
     {:ok, _} =
       Auth.create_token(@admin_token, "chat admin", "production", ["read", "write", "admin"])
@@ -84,6 +102,22 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         else: Application.delete_env(:barkpark, :claude_chat)
 
       Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+    end)
+  end
+
+  defp enable_fake_codex_adapter do
+    previous = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat_runtime_adapters,
+      Map.put(previous || %{}, :codex, FakeCodexAdapter)
+    )
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, previous),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
     end)
   end
 
@@ -2152,7 +2186,56 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   describe "sessions become a place (persistence + resume, S3)" do
     setup %{conn: conn} do
       enable_fake_chat()
+      enable_fake_codex_adapter()
       {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "provider and execution identity are selectable only before first send", %{conn: conn} do
+      host_id = Ecto.UUID.generate()
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      assert has_element?(view, ~s(form[phx-change=set-provider]))
+      assert has_element?(view, ~s(form[phx-change=set-execution-target]))
+
+      render_change(element(view, ~s(form[phx-change=set-provider])), %{"provider" => "codex"})
+
+      render_change(element(view, ~s(form[phx-change=set-execution-target])), %{
+        "execution_target" => "registered_host"
+      })
+
+      render_change(element(view, ~s(form[phx-change=set-execution-host])), %{
+        "execution_host_id" => host_id
+      })
+
+      assert lv_assigns(view)[:provider] == "codex"
+      assert lv_assigns(view)[:execution_target] == "registered_host"
+      assert lv_assigns(view)[:execution_host_id] == host_id
+      assert store_id(view) == nil
+    end
+
+    test "reopen restores immutable provider and execution identity without pickers", %{
+      conn: conn
+    } do
+      sid = Ecto.UUID.generate()
+      host_id = Ecto.UUID.generate()
+
+      assert {:ok, _session} =
+               StudioChat.create_session(%{
+                 id: sid,
+                 provider: "codex",
+                 execution_target: "registered_host",
+                 execution_host_id: host_id,
+                 mode: "read-only"
+               })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      assert lv_assigns(view)[:provider] == "codex"
+      assert lv_assigns(view)[:execution_target] == "registered_host"
+      assert lv_assigns(view)[:execution_host_id] == host_id
+      refute has_element?(view, ~s(form[phx-change=set-provider]))
+      refute has_element?(view, ~s(form[phx-change=set-execution-target]))
+      refute has_element?(view, ~s(form[phx-change=set-execution-host]))
     end
 
     test "the sidebar teaches when there are no sessions yet", %{conn: conn} do

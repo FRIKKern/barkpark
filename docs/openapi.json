@@ -1165,7 +1165,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Start a new Claude chat session (id server-minted; cwd is always ClaudeChat.cwd/0).",
+        "summary": "Start a provider-backed chat session with server-minted public and provider identities.",
         "tags": [
           "chat"
         ],

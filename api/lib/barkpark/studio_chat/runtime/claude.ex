@@ -38,6 +38,21 @@ defmodule Barkpark.StudioChat.Runtime.Claude do
   @impl true
   def capabilities, do: Capabilities.claude()
 
+  def enabled?, do: ClaudeChat.enabled?()
+  def normalize_mode(value), do: ClaudeChat.normalize_mode(value)
+  def normalize_model(value), do: ClaudeChat.normalize_model(value)
+  def normalize_effort(value), do: ClaudeChat.normalize_effort(value)
+  def auth_failure?(event), do: ClaudeChat.auth_failure?(event)
+  def result_success?(event), do: ClaudeChat.result_success?(event)
+  def worker_id(session_id), do: ClaudeChat.worker_id(session_id)
+  def task_hands(session), do: ClaudeChat.task_hands(session)
+  def initialize(session), do: ClaudeChat.initialize(session)
+  def adopt_sink(session, sink), do: ClaudeChat.adopt_sink(session, sink)
+  def auto_approve?(%{tool_name: tool_name}), do: ClaudeChat.mcp_auto_approved?(tool_name)
+  def auto_approve?(_), do: false
+  def cwd, do: ClaudeChat.cwd()
+  def tool_name(name), do: ClaudeChat.mcp_tool_name(name)
+
   defp start_session(opts, resume?) do
     session_opts =
       opts

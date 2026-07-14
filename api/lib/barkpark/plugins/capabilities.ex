@@ -1781,7 +1781,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "read",
         default_output: "table"
       ),
-      # ── Claude chat transport (charter bp-chat-tui, D21-D24) ──────────────
+      # ── Provider-neutral chat transport (charter bp-chat-tui, D21-D24) ───
       # The seven non-streaming verbs behind the `/v1/chat` scope, which is
       # `pipe_through [:api, :require_admin]` — every route needs a data-plane
       # bearer with the global `admin` permission (D21: instance-global scope,
@@ -1797,14 +1797,25 @@ defmodule Barkpark.Plugins.Capabilities do
         "chat.create_session",
         "chat",
         "create-session",
-        "Start a new Claude chat session (id server-minted; cwd is always ClaudeChat.cwd/0).",
+        "Start a provider-backed chat session with server-minted public and provider identities.",
         "POST",
         "/v1/chat/sessions",
         "admin",
         flags: [
-          flag("mode", "string", "Permission mode (must pass the Session/ClaudeChat allowlist)."),
-          flag("model", "string", "Model choice (allowlisted)."),
-          flag("effort", "string", "Effort choice (allowlisted).")
+          flag("provider", "string", "Runtime provider (claude or codex; defaults to claude)."),
+          flag(
+            "execution_target",
+            "string",
+            "Execution location (managed or registered_host; defaults to managed)."
+          ),
+          flag(
+            "execution_host_id",
+            "string",
+            "Registered host UUID; required only when execution_target is registered_host."
+          ),
+          flag("mode", "string", "Provider-scoped permission mode (allowlisted)."),
+          flag("model", "string", "Provider-scoped model choice (allowlisted)."),
+          flag("effort", "string", "Provider-scoped effort choice (allowlisted).")
         ],
         default_output: "json"
       ),

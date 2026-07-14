@@ -121,6 +121,77 @@ defmodule Barkpark.StudioChat.Runtime do
   @doc "Provider-scoped capability matrix."
   def capabilities(provider), do: adapter(provider).capabilities()
 
+  @doc "Whether the selected provider runtime is available on this host."
+  def enabled?(provider), do: optional_call(adapter(provider), :enabled?, [], false)
+
+  def normalize_mode(provider, value),
+    do: optional_call(adapter(provider), :normalize_mode, [value], value)
+
+  def normalize_model(provider, value),
+    do: optional_call(adapter(provider), :normalize_model, [value], nil)
+
+  def normalize_effort(provider, value),
+    do: optional_call(adapter(provider), :normalize_effort, [value], nil)
+
+  def auth_failure?(provider, event),
+    do: optional_call(adapter(provider), :auth_failure?, [event], false)
+
+  def result_success?(provider, event),
+    do: optional_call(adapter(provider), :result_success?, [event], false)
+
+  def worker_id(provider, session_id),
+    do: optional_call(adapter(provider), :worker_id, [session_id], nil)
+
+  def task_hands(provider, runtime_ref),
+    do: optional_call(adapter(provider), :task_hands, [runtime_ref], :not_attempted)
+
+  @doc "Extract the supervised process behind an adapter-specific runtime reference."
+  def runtime_pid(runtime_ref) when is_pid(runtime_ref), do: runtime_ref
+  def runtime_pid(%{runtime: pid}) when is_pid(pid), do: pid
+  def runtime_pid(_runtime_ref), do: nil
+
+  def alive?(runtime_ref) do
+    case runtime_pid(runtime_ref) do
+      pid when is_pid(pid) -> Process.alive?(pid)
+      _ -> false
+    end
+  end
+
+  @doc "Extract an adapter-returned opaque provider session id when already known."
+  def provider_session_id(%{provider_session_id: id}) when is_binary(id) and id != "", do: id
+  def provider_session_id(_runtime_ref), do: nil
+
+  def send_turn(provider, runtime_ref, content),
+    do: adapter(provider).send_turn(runtime_ref, content)
+
+  def steer(provider, runtime_ref, command), do: adapter(provider).steer(runtime_ref, command)
+  def interrupt(provider, runtime_ref), do: adapter(provider).interrupt(runtime_ref)
+
+  def answer_approval(provider, runtime_ref, approval_id, decision),
+    do: adapter(provider).answer_approval(runtime_ref, approval_id, decision)
+
+  def close(provider, runtime_ref), do: adapter(provider).close(runtime_ref)
+
+  @doc "Run an optional provider initialization handshake."
+  def initialize(provider, runtime_ref),
+    do: optional_call(adapter(provider), :initialize, [runtime_ref])
+
+  @doc "Move an existing runtime's event sink after Recorder recovery."
+  def adopt_sink(provider, runtime_ref, sink),
+    do: optional_call(adapter(provider), :adopt_sink, [runtime_ref, sink])
+
+  @doc "Whether a provider-specific approval may be answered automatically."
+  def auto_approve?(provider, approval),
+    do: optional_call(adapter(provider), :auto_approve?, [approval], false)
+
+  def cwd(provider), do: optional_call(adapter(provider), :cwd, [], nil)
+  def tool_name(provider, name), do: optional_call(adapter(provider), :tool_name, [name], nil)
+
+  def normalize_choice(provider, field, value) when field in [:models, :efforts] do
+    allowed = Map.fetch!(capabilities(provider), field)
+    if value in allowed, do: value, else: nil
+  end
+
   @doc "Start or resume a managed runtime using one provider-neutral entry point."
   def open(provider, opts) when is_map(opts) do
     runtime = adapter(provider)
@@ -197,5 +268,11 @@ defmodule Barkpark.StudioChat.Runtime do
       module when is_atom(module) -> {:ok, module}
       _ -> {:error, {:missing_runtime_contract, key}}
     end
+  end
+
+  defp optional_call(module, function, args, default \\ :ok) do
+    if Code.ensure_loaded?(module) and function_exported?(module, function, length(args)),
+      do: apply(module, function, args),
+      else: default
   end
 end

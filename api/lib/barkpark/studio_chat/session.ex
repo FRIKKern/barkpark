@@ -1,11 +1,12 @@
 defmodule Barkpark.StudioChat.Session do
   @moduledoc """
-  A Studio Claude chat SESSION — the index record for one resumable conversation
-  (epic studio-claude-chat, charter D6/D8).
+  A provider-neutral Studio chat SESSION — the index record for one resumable
+  conversation (epic studio-claude-chat, charter D6/D8).
 
-  The primary key is the minted claude session UUID (`autogenerate: false`): we
-  generate it before the first byte via `--session-id`, and the SAME value is the
-  `--resume` key. One identity, no cursor column.
+  The primary key is Barkpark's public UUID (`autogenerate: false`). Provider,
+  execution location, and opaque provider-native resume identity are durable,
+  independent fields. Legacy managed-Claude sessions intentionally reuse the
+  public UUID as their provider identity.
 
   Denormalised fields (`summary`, `message_count`, `input_tokens`,
   `output_tokens`, `total_cost_usd`, `last_active_at`) let the sidebar render
@@ -145,8 +146,9 @@ defmodule Barkpark.StudioChat.Session do
   )a
 
   @doc """
-  Changeset for creating a session. `id` is REQUIRED — the caller mints the UUID
-  (it doubles as the --resume key). Defaults supply title/title_source/status.
+  Changeset for creating a session. `id` is REQUIRED — the caller mints the
+  public UUID. Defaults supply the legacy managed-Claude identity plus
+  title/title_source/status.
   """
   def create_changeset(session, attrs) do
     session
@@ -175,10 +177,13 @@ defmodule Barkpark.StudioChat.Session do
       |> put_default(:provider, "claude")
       |> put_default(:execution_target, "managed")
 
-    case {get_field(changeset, :provider), get_field(changeset, :provider_session_id),
-          get_field(changeset, :id)} do
-      {"claude", nil, id} when is_binary(id) -> put_change(changeset, :provider_session_id, id)
-      _ -> changeset
+    case {get_field(changeset, :provider), get_field(changeset, :execution_target),
+          get_field(changeset, :provider_session_id), get_field(changeset, :id)} do
+      {"claude", "managed", nil, id} when is_binary(id) ->
+        put_change(changeset, :provider_session_id, id)
+
+      _ ->
+        changeset
     end
   end
 

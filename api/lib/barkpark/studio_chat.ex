@@ -1,7 +1,7 @@
 defmodule Barkpark.StudioChat do
   @moduledoc """
-  The **Studio Claude chat** context — the session index + display history behind
-  the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
+  The provider-neutral Studio chat context — the session index + display history
+  behind the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
 
   Two tables, `chat_sessions` + `chat_messages`, with **no HTTP route ever**: the
   admin LiveView reads `Repo` directly, so transcripts (cwd, tool inputs, host
@@ -10,10 +10,10 @@ defmodule Barkpark.StudioChat do
 
   ## Identity + resume (D8)
 
-  A session's primary key is the minted claude session UUID. We generate it
-  before the first byte (`--session-id`), and the SAME value is the `--resume`
-  key — one identity, no cursor column. `create_session/1` is called on the
-  FIRST user send, never on mount (no empty rows).
+  A session's primary key is Barkpark's public UUID. The independent,
+  provider-owned resume cursor lives in `provider_session_id`; legacy Claude
+  rows intentionally use the public UUID for both. `create_session/1` is called
+  on the FIRST user send, never on mount (no empty rows).
 
   ## Display history (D7)
 
@@ -102,8 +102,8 @@ defmodule Barkpark.StudioChat do
   defp owner_ws_from_scope(_), do: nil
 
   @doc """
-  Create a session from `attrs`. `id` (the minted claude session UUID) is
-  REQUIRED — the caller mints it so it doubles as the `--resume` key.
+  Create a session from `attrs`. `id` is Barkpark's REQUIRED public UUID;
+  provider-native resume identity is persisted separately and set at most once.
 
   `scope` (charter D17) stamps `owner_workspace_id`: `{:workspace, ws}` (or a
   bare `ws` binary) stamps that workspace; `:global` (the default) stamps NULL —
@@ -186,6 +186,10 @@ defmodule Barkpark.StudioChat do
     |> limit(^@sidebar_cap)
     |> select([s], %Session{
       id: s.id,
+      provider: s.provider,
+      execution_target: s.execution_target,
+      execution_host_id: s.execution_host_id,
+      provider_session_id: s.provider_session_id,
       title: s.title,
       title_source: s.title_source,
       status: s.status,
@@ -509,6 +513,29 @@ defmodule Barkpark.StudioChat do
       |> Ecto.Changeset.change(status: status, last_active_at: DateTime.utc_now())
       |> Ecto.Changeset.validate_inclusion(:status, Session.statuses())
       |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc "Persist the opaque provider-native session id once; later changes are rejected."
+  @spec set_provider_session_id(String.t(), String.t()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found | :immutable}
+  def set_provider_session_id(session_id, provider_session_id)
+      when is_binary(provider_session_id) and provider_session_id != "" do
+    with %Session{} = session <- get_session(session_id) do
+      case session.provider_session_id do
+        nil ->
+          session
+          |> Ecto.Changeset.change(provider_session_id: provider_session_id)
+          |> Repo.update()
+
+        ^provider_session_id ->
+          {:ok, session}
+
+        _other ->
+          {:error, :immutable}
+      end
     else
       nil -> {:error, :not_found}
     end

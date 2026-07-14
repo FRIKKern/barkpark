@@ -3,7 +3,7 @@
 // send over the transport (charter D26/D33). SSE reads live in `sse.ts`.
 //
 // Contract transcribed from api/lib/barkpark_web/controllers/chat_controller.ex:
-//   POST   /v1/chat/sessions            {mode?,model?,effort?} -> 201 full session
+//   POST   /v1/chat/sessions            {provider?,execution_target?,execution_host_id?,mode?,model?,effort?} -> 201 full session
 //   GET    /v1/chat/sessions/:id        [?since=<seq>]         -> 200 full session
 //   POST   /v1/chat/sessions/:id/messages {content}            -> 202 {accepted:true}
 // Auth: Bearer = a workspace-bound `chat`-permission ApiToken. A `chat` token
@@ -155,6 +155,11 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
      */
     async createSession(input: CreateSessionInput = {}): Promise<ChatSession> {
       const payload: CreateSessionInput = {};
+      if (input.provider !== undefined) payload.provider = input.provider;
+      if (input.execution_target !== undefined)
+        payload.execution_target = input.execution_target;
+      if (input.execution_host_id !== undefined)
+        payload.execution_host_id = input.execution_host_id;
       if (input.mode !== undefined) payload.mode = input.mode;
       if (input.model !== undefined) payload.model = input.model;
       if (input.effort !== undefined) payload.effort = input.effort;

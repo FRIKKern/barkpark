@@ -32,6 +32,19 @@ defmodule Barkpark.StudioChat.SessionProviderIdentityTest do
     assert Ecto.Changeset.get_field(changeset, :provider_session_id) == nil
   end
 
+  test "registered-host Claude identity stays unset until the host runtime reports it" do
+    changeset =
+      Session.create_changeset(%Session{}, %{
+        id: @session_id,
+        provider: "claude",
+        execution_target: "registered_host",
+        execution_host_id: @host_id
+      })
+
+    assert changeset.valid?
+    assert Ecto.Changeset.get_field(changeset, :provider_session_id) == nil
+  end
+
   test "invalid providers and target/host combinations fail before persistence" do
     invalid_provider =
       Session.create_changeset(%Session{}, %{id: @session_id, provider: "other"})
