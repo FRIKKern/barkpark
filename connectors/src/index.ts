@@ -18,9 +18,24 @@ import type {
 } from "./connector/types.js";
 import { createCredentialCipher } from "./crypto/credential-cipher.js";
 import {
+  createDiscordConnector,
+  DISCORD_PROVIDER,
+} from "./connectors/discord.js";
+import {
+  createIMessageConnector,
+  IMESSAGE_PROVIDER,
+  isSelfHostedProfile,
+} from "./connectors/imessage.js";
+import { createSlackConnector, SLACK_PROVIDER } from "./connectors/slack.js";
+import { createTeamsConnector, TEAMS_PROVIDER } from "./connectors/teams.js";
+import {
   createTelegramConnector,
   TELEGRAM_PROVIDER,
 } from "./connectors/telegram.js";
+import {
+  createWhatsappConnector,
+  WHATSAPP_PROVIDER,
+} from "./connectors/whatsapp.js";
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
 import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
@@ -52,13 +67,104 @@ import { createInstallsLookup } from "./tenant/installs.js";
  * serve one tenant's traffic on another tenant's credential.
  */
 
-/** P3 adds its channels HERE and nowhere else. */
-export function registerBuiltinConnectors(registry: ConnectorRegistry): void {
+/**
+ * What a builtin connector may ask the bridge for at REGISTRATION time.
+ *
+ * Telegram needs nothing (its credential arrives per-install, in
+ * `adapterFactory`). A `payload-team-id` connector needs more: Slack resolves a
+ * team's bot token from `connector_installs` on EVERY inbound event, so its
+ * `installationProvider` has to close over the installs lookup before any adapter
+ * exists. That is a GENERIC need of the strategy, not a Slack quirk — Teams will
+ * want the same — so it is a deps bag, never an `if (provider === "slack")`.
+ *
+ * Deliberately optional: `registerBuiltinConnectors(registry)` with no deps still
+ * works and registers every connector that needs nothing. A connector whose deps
+ * are absent is SKIPPED LOUDLY (warn), because half-registering it would mean an
+ * adapter that cannot resolve a token — silence there would look like "Slack is
+ * broken" instead of "Slack is not configured".
+ */
+export interface BuiltinConnectorDeps {
+  /**
+   * `chat_bridge.connector_installs` — the tenant map, with both secrets ALREADY
+   * OPENED (`createInstallsLookup(pool, cipher)`, D35/D37). A connector that
+   * reads a credential reads it from here and never learns the cipher.
+   */
+  installs?: InstallsLookup;
+  /** Slack app credentials. Absent ⇒ Slack is not registered. */
+  slack?: {
+    signingSecret: string;
+    clientId: string;
+    clientSecret: string;
+  };
+  /** Read for the operator-profile gate (`CONNECTORS_PROFILE=self-hosted`, D44). */
+  env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * P3 adds its channels HERE and nowhere else.
+ *
+ * Six channels, five shapes, ONE core loop — and the diff below is the whole of
+ * the epic's acceptance bar (D30): `core/dispatch.ts`, `tenant/resolve.ts`,
+ * `connector/registry.ts` and `turn/turn-loop.ts` are untouched by every one of
+ * them. Between them they exercise BOTH tenant strategies (credential-bound and
+ * payload-team-id), BOTH credential models (per-install and one-operator-app) and
+ * BOTH transports (webhook and socket), which is what makes the invariant real
+ * rather than asserted.
+ */
+export function registerBuiltinConnectors(
+  registry: ConnectorRegistry,
+  deps: BuiltinConnectorDeps = {},
+): void {
+  const env = deps.env ?? process.env;
+
+  // Telegram — credential-bound BYO-bot, getUpdates poll loop (D29).
   if (!registry.has(TELEGRAM_PROVIDER)) {
     registry.register(createTelegramConnector({ mode: "polling" }));
   }
-  // P3: registry.register(createSlackConnector());   // payload-team-id
-  // P3: registry.register(createDiscordConnector()); // credential-bound
+
+  // Slack — payload-team-id, webhook + Add-to-Slack OAuth, per-install bot token
+  // via installationProvider (D40). Needs the installs table BEFORE any adapter
+  // exists, which is why the deps bag exists at all: that is a GENERIC need of
+  // the strategy, never an `if (provider === "slack")`.
+  if (!registry.has(SLACK_PROVIDER)) {
+    if (deps.slack && deps.installs) {
+      registry.register(
+        createSlackConnector({ ...deps.slack, installs: deps.installs }),
+      );
+    } else if (deps.slack) {
+      console.warn(
+        "[bridge] slack: app credentials present but no installs lookup — not registered. " +
+          "A Slack adapter with no install table could not resolve any tenant's bot token.",
+      );
+    }
+  }
+
+  // Discord — credential-bound BYO-bot, Gateway socket, no webhook (D41). A
+  // shared app would mean ONE bot token serving every tenant: the headline bug.
+  if (!registry.has(DISCORD_PROVIDER)) {
+    registry.register(createDiscordConnector());
+  }
+
+  // Teams — ONE operator Azure app (MultiTenant), payload-tenant routing, NO
+  // per-workspace provider credential (D42).
+  if (!registry.has(TEAMS_PROVIDER)) {
+    registry.register(createTeamsConnector());
+  }
+
+  // WhatsApp — credential-bound BYO Meta app; all four creds per-install, so the
+  // webhook key rides the PATH (the body must not choose the secret that verifies
+  // the body) (D43).
+  if (!registry.has(WHATSAPP_PROVIDER)) {
+    registry.register(createWhatsappConnector());
+  }
+
+  // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
+  // it needs a dedicated Mac signed into an Apple ID, so it has no multi-tenant
+  // story at all. FAIL-CLOSED — an unset/other/misspelled profile does not get
+  // it, so a Cloud deployment can never offer iMessage by accident.
+  if (isSelfHostedProfile(env) && !registry.has(IMESSAGE_PROVIDER)) {
+    registry.register(createIMessageConnector());
+  }
 }
 
 export interface BridgeDeps {
@@ -182,6 +288,7 @@ export function mountInstall(
 
 export interface Bridge {
   pool: pg.Pool;
+  registry: ConnectorRegistry;
   installs: InstallsLookup;
   mounted: MountedInstall[];
   /** The install-keyed webhook mount index (D39). Empty when no webhook channel is installed. */
@@ -189,16 +296,33 @@ export interface Bridge {
   /** The inbound HTTP listener, or undefined when `config.webhook.enabled` is false. */
   webhookServer?: WebhookServer;
   /**
-   * Mount an install AFTER boot — no restart. This is what makes an OAuth
-   * "Add to Slack" callback work: upsertInstall (row) -> addInstall (Chat +
-   * webhook mount) and the very next provider event routes. Without it the mount
-   * index would be a boot snapshot and a freshly-installed workspace would 404
-   * until someone restarted the process.
+   * Mount an install that appeared AFTER boot — no restart. This is what makes
+   * an OAuth "Add to Slack" callback work: upsertInstall (row) -> addInstall
+   * (Chat + webhook mount) and the very next provider event routes. Without it
+   * the mount index would be a boot snapshot and a freshly-installed workspace
+   * would 404 until someone restarted the process.
+   *
+   * Provider-agnostic: it takes a `ConnectorInstall` and looks the connector up
+   * in the registry. Slack's OAuth callback uses it; Discord's and Teams' will
+   * use the SAME function, unchanged.
    */
   addInstall(install: ConnectorInstall): Promise<MountedInstall>;
   /** Stop routing an install — the disconnect half of the same promise. */
   removeInstall(provider: string, installKey: string): Promise<boolean>;
+  /** @deprecated alias of {@link Bridge.addInstall} — kept for the OAuth callsites. */
+  mount(install: ConnectorInstall): Promise<MountedInstall>;
   shutdown(): Promise<void>;
+}
+
+/** Slack app credentials from the environment. Absent ⇒ Slack simply isn't registered. */
+function slackDepsFromEnv(
+  env: NodeJS.ProcessEnv,
+): BuiltinConnectorDeps["slack"] | undefined {
+  const signingSecret = env["SLACK_SIGNING_SECRET"]?.trim();
+  const clientId = env["SLACK_CLIENT_ID"]?.trim();
+  const clientSecret = env["SLACK_CLIENT_SECRET"]?.trim();
+  if (!signingSecret || !clientId || !clientSecret) return undefined;
+  return { signingSecret, clientId, clientSecret };
 }
 
 /**
@@ -239,7 +363,9 @@ export async function startBridge(
   const map = createThreadSessionMap(createPgThreadSessionStore(pool));
 
   const registry = overrides.registry ?? createConnectorRegistry();
-  if (!overrides.registry) registerBuiltinConnectors(registry);
+  if (!overrides.registry) {
+    registerBuiltinConnectors(registry, { installs, env: process.env });
+  }
 
   const deps: BridgeDeps = {
     config,
@@ -350,6 +476,7 @@ export async function startBridge(
 
   return {
     pool,
+    registry,
     installs,
     mounted,
     mounts,
