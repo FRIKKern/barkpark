@@ -113,7 +113,13 @@ defmodule BarkparkCloud.Registry.ProviderTest do
 
   describe "cloudflare credential shape" do
     test "a bare API token string is valid" do
-      cs = changeset(%{kind: "cloudflare", credential: "cf-bare-token-abc123", encrypted_token: "ct"})
+      cs =
+        changeset(%{
+          kind: "cloudflare",
+          credential: "cf-bare-token-abc123",
+          encrypted_token: "ct"
+        })
+
       assert cs.valid?
     end
 
