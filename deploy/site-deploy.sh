@@ -23,26 +23,51 @@
 #   STAGE  copy ONLY dist/ (12-16K) into releases/<build_id>/; node_modules
 #          (~148M) stays in the ephemeral build sandbox.
 #   HEALTH throwaway static file server on a loopback ephemeral port rooted at
-#          releases/<build_id>/: assert HTTP 200 AND grep the bp-build-id /
-#          bp-content-rev <meta> markers baked into index.html (content-truth,
-#          not vacuous reachability).  A marker-missing or non-200 build does NOT
-#          switch.
+#          releases/<build_id>/: assert HTTP 200 AND that the bp-build-id /
+#          bp-content-rev / bp-doc-id <meta> markers in the SERVED bytes carry
+#          the VALUES this deploy intends to ship (D26 content-truth — see
+#          health_gate).  Fail => the release is PURGED and NOTHING switches.
 #   SWITCH atomic `current` symlink swap (rename(2)) — no Caddy reload in the flip.
 #   RETIRE keep the newest N=5 release dirs, remove older (never current/previous).
 # It also arms ONCE, idempotently, a marker-guarded Caddy `handle_path
 # /sites/<slug>/*` block into the live FQDN block (mirrors arm_caddy_mcp_route):
-# backup + caddy validate + reload-or-revert, never re-flipped per deploy.
+# backup + caddy validate + reload-or-revert, never re-flipped per deploy — under
+# the SHARED Caddyfile lock instance-deploy.sh also takes (D27, see with_caddy_lock).
 #
-# ROLLBACK (D5 — instant, symlink repoint, NO rebuild):
+# MACHINE STAGE PROTOCOL (D25) — alongside the human prose, stdout carries ONE
+# machine line at every stage boundary:
+#
+#   BPSTAGE name=<PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> status=<started|ok|skipped|noop|failed> build_id=<id> [detail="…"]
+#
+# The contract an orchestrator may rely on (deploy mode):
+#   * A stage that RUNS emits `started`, then exactly one terminal line (`ok` or
+#     `failed`).  A stage that does NOT run emits exactly one terminal line —
+#     `skipped`, or `noop` for a PLAN that finds the build already live.
+#   * A successful deploy emits a terminal line for ALL SIX stages, in order.
+#   * A `failed` line is the LAST stage line of the run: the process then exits
+#     with that stage's typed code.  The REASON rides on the line (detail="…"),
+#     so a stdout-only caller can always tell the user WHY — BUILD's own output
+#     (npm/Vite, e.g. `FATAL: 401 Unauthorized … the site read token is invalid`)
+#     is merged onto stdout for the same reason, and its last error line becomes
+#     the detail.
+#   * The three paths that used to be SILENT — a PLAN no-op, a SKIP_BUILD
+#     redeploy, a RETIRE that removes nothing — all speak.  Nothing hangs a
+#     stage-watching orchestrator.
+#
+# ROLLBACK (D5 — instant, symlink repoint, NO rebuild).  Machine contract here is
+# the TARGET_BUILD= line + the typed exits, NOT BPSTAGE (rollback is not a deploy):
 #   --rollback-preflight  read-only: is a rollback possible right now?  Typed
 #                         exits (21 no_previous, 22 not_supported, 23 lock held);
 #                         exit 0 prints TARGET_BUILD= (machine-parsed by the CLI).
 #   --rollback            repoint `current` to the previous release dir in
 #                         sub-second; a second --rollback flips forward again.
 #
-# --self-test  builds fixture release dirs in a tmpdir and PROVES the symlink
-#              flip + retire-N + rollback logic WITHOUT npm/caddy/systemd, so the
-#              gate (`bash deploy/site-deploy.sh --self-test`) runs anywhere.
+# --self-test  fixture release dirs in a tmpdir PROVE the symlink flip + retire-N
+#              + rollback primitives and the marker reader; then the REAL script
+#              is driven end-to-end as a subprocess against a fake npm/flock,
+#              proving the stage protocol, the content-truth HEALTH gate and the
+#              poison purge.  No caddy/systemd/network, so the gate
+#              (`bash deploy/site-deploy.sh --self-test`) runs anywhere.
 #
 # TYPED EXIT CODES:
 #    0 success / no-op        11 missing required input
@@ -66,6 +91,8 @@
 #   BARKPARK_HEALTH_HOST  live FQDN (for logging). Default guerrilla.barkpark.cloud
 set -uo pipefail
 
+SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
+
 # ---- Config ----------------------------------------------------------------
 SITES_DIR="${BARKPARK_SITES_DIR:-/opt/barkpark/sites}"
 CADDYFILE="${BARKPARK_CADDYFILE:-/etc/caddy/Caddyfile}"
@@ -74,8 +101,32 @@ RETAIN="${BARKPARK_SITE_RETAIN:-5}"
 # The ONLY env vars BUILD may see (Vite process.env-precedence scrub, D7).
 BUILD_ALLOW=(BARKPARK_API_URL BARKPARK_TOKEN BARKPARK_DATASET BARKPARK_WORKSPACE \
              BARKPARK_PROJECT BARKPARK_BUILD_ID BARKPARK_CONTENT_REV BARKPARK_SITE_BASE)
+# Dropped INSIDE a release dir whose bytes failed HEALTH but which we must not
+# delete (it is the live or the rollback target).  PLAN refuses to re-gate a
+# release carrying it — it rebuilds instead.  See purge_failed_release.
+HEALTH_FAIL_MARK=".bp-health-failed"
 
 log() { echo "[site-deploy $(date -u +%H:%M:%S)] $*"; }
+
+# ---------------------------------------------------------------------------
+# emit — the machine stage protocol (D25; contract in the header).  ONE line per
+# stage boundary on STDOUT, next to (never instead of) the human prose, so an
+# orchestrator can render six honest stages by regexing `^BPSTAGE `.  The old
+# engine announced some stages before the work, logged others after it, and said
+# NOTHING at all on three normal paths (PLAN no-op, SKIP_BUILD redeploy, a RETIRE
+# with nothing to remove) — a stage-watching caller hung forever on those.
+# Precedent for a KEY=VALUE machine line on stdout: --rollback-preflight's
+# TARGET_BUILD=.  detail= is free text (quotes normalised, one line, clipped).
+emit() { # <PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> <started|ok|skipped|noop|failed> [detail…]
+  local name="$1" status="$2"; shift 2
+  local detail="$*"
+  if [ -n "$detail" ]; then
+    detail="$(printf '%s' "$detail" | tr '\n\r\t"' '   '"'" | tr -s ' ' | sed -e 's/^ //' -e 's/ $//' | cut -c1-240)"
+    printf 'BPSTAGE name=%s status=%s build_id=%s detail="%s"\n' "$name" "$status" "${BUILD_ID:-}" "$detail"
+  else
+    printf 'BPSTAGE name=%s status=%s build_id=%s\n' "$name" "$status" "${BUILD_ID:-}"
+  fi
+}
 
 # ---- Mode dispatch ---------------------------------------------------------
 MODE=deploy
@@ -123,13 +174,19 @@ do_switch() {
 }
 
 # RETIRE: keep the newest RETAIN release dirs (mtime), remove older — but NEVER
-# the live target or the .previous rollback target.
+# the live target or the .previous rollback target.  RETIRED counts what it
+# actually removed, so the RETIRE stage line is honest when the answer is zero
+# (the common case — and the one that used to print nothing at all).
+RETIRED=0
 do_retire() {
+  RETIRED=0
   [ -d "$RELEASES" ] || return 0
   local livecur="" prev="" d id i=0
   [ -L "$CURRENT" ] && livecur="$(basename "$(readlink "$CURRENT")")"
   [ -f "$ROOT/.previous" ] && prev="$(cat "$ROOT/.previous")"
   # ls -1dt: newest-first by mtime.  Trailing slash restricts to directories.
+  # A process substitution (never a pipe) — the loop must run in THIS shell or
+  # the RETIRED count would die with a subshell.
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     id="$(basename "$d")"
@@ -137,7 +194,7 @@ do_retire() {
     [ "$i" -le "$RETAIN" ] && continue
     [ "$id" = "$livecur" ] && continue
     [ "$id" = "$prev" ] && continue
-    rm -rf "$d" && log "RETIRE: removed old release $id"
+    if rm -rf "$d"; then RETIRED=$((RETIRED + 1)); log "RETIRE: removed old release $id"; fi
   done < <(ls -1dt "$RELEASES"/*/ 2>/dev/null)
 }
 
@@ -150,6 +207,16 @@ do_rollback() {
   prev="$(cat "$ROOT/.previous")"
   [ -n "$prev" ] || { log "rollback: empty .previous (no_previous)"; return 21; }
   [ -d "$RELEASES/$prev" ] || { log "rollback: previous release '$prev' dir is gone (no_previous)"; return 21; }
+  # Rollback does NOT health-gate (that is the whole point — it is a sub-second
+  # pointer flip, no rebuild).  So it must at least refuse a target the engine
+  # ALREADY KNOWS is broken: a release that failed HEALTH while it was the
+  # live/rollback target keeps its bytes but carries the poison marker (see
+  # purge_failed_release).  Flipping onto it would put a build we proved bad in
+  # front of visitors — the one thing this engine promises never to do.
+  if [ -f "$RELEASES/$prev/$HEALTH_FAIL_MARK" ]; then
+    log "rollback: previous release '$prev' FAILED its health gate and is marked broken — refusing to serve it (no_previous). Redeploy that build_id: PLAN will rebuild it from source."
+    return 21
+  fi
   livenow="$(basename "$(readlink "$CURRENT")")"
   if [ "$prev" = "$livenow" ]; then log "rollback: previous == current ($prev) — nothing to do"; return 0; fi
   ln -sfn "releases/$prev" "$CURRENT.tmp" || return 24
@@ -162,6 +229,127 @@ do_rollback() {
 
 # Basename of the live release, or "" if none.
 live_build() { [ -L "$CURRENT" ] && basename "$(readlink "$CURRENT")" || true; }
+
+# Read the VALUE of a <meta name="…" content="…"> marker out of an HTML document.
+# Prints "" when the tag is absent OR its content is empty — the caller asserts on
+# the VALUE and never on presence, which is the whole point (D26): the old gate
+# grepped the marker NAME, so a build whose bp-build-id said TOTALLY-WRONG and
+# whose bp-content-rev was the EMPTY STRING sailed through it and went LIVE.
+# Tolerates attribute order, single/double/unquoted values and minified HTML.
+meta_value() { # <html-file> <marker-name>
+  local f="$1" n="$2"
+  [ -f "$f" ] || return 0
+  # ONE tag per line first (awk RS='>', never `tr` — tr maps characters 1:1 and
+  # cannot insert a newline, so a minified <meta a><meta b> stayed one line and
+  # the greedy content= match below read the LAST tag's value for EVERY marker).
+  awk 'BEGIN { RS = ">" } { print $0 ">" }' "$f" 2>/dev/null \
+    | grep -Ei "<meta[^>]*name=[\"']?${n}[\"'[:space:]/>]" \
+    | head -1 \
+    | sed -E -e 's/.*content="([^"]*)".*/\1/' -e t \
+             -e "s/.*content='([^']*)'.*/\1/" -e t \
+             -e "s/.*content=([^\"'[:space:]/>]+).*/\1/" -e t \
+             -e 's/.*//'
+}
+
+# HEALTH (D11 + D26).  Serve the release exactly as a visitor would receive it —
+# throwaway static server on a loopback ephemeral port — then assert on the BYTES
+# WE SERVED, not on the bytes on disk:
+#   * HTTP 200,
+#   * bp-build-id  == the BUILD_ID this deploy ships (an artifact from another
+#     build, or a marker the adapter failed to bake, is NOT this release),
+#   * bp-content-rev non-empty AND == CONTENT_REV when the caller supplied one
+#     (an empty content rev means the build lost its content link — it PASSED
+#     the old gate and went live with it),
+#   * bp-doc-id non-empty (the adapter bakes five markers; the old engine read
+#     the names of two).
+# Sets HEALTH_DETAIL on both paths — the reason rides the BPSTAGE line.
+HEALTH_DETAIL=""
+health_gate() { # 0 healthy, 1 not
+  HEALTH_DETAIL=""
+  local idx="$RELDIR/index.html"
+  if [ ! -f "$idx" ]; then
+    HEALTH_DETAIL="no index.html in releases/$BUILD_ID"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+
+  local port srv=0 body code=000 i
+  port="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()' 2>/dev/null || true)"
+  [ -n "$port" ] || port=$(( (RANDOM % 20000) + 20000 ))
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -m http.server "$port" --bind 127.0.0.1 --directory "$RELDIR" >/dev/null 2>&1 &
+    srv=$!
+  elif command -v caddy >/dev/null 2>&1; then
+    caddy file-server --listen "127.0.0.1:$port" --root "$RELDIR" >/dev/null 2>&1 &
+    srv=$!
+  else
+    HEALTH_DETAIL="no python3 or caddy to run the throwaway health server — cannot gate"
+    log "HEALTH: $HEALTH_DETAIL"; return 1
+  fi
+  body="$(mktemp "${TMPDIR:-/tmp}/site-health.XXXXXX")"
+  for i in $(seq 1 25); do
+    code="$(curl -s -o "$body" -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port/index.html" 2>/dev/null || true)"
+    [ "$code" = 200 ] && break
+    sleep 0.2
+  done
+  kill "$srv" 2>/dev/null || true
+  wait "$srv" 2>/dev/null || true
+  if [ "$code" != 200 ]; then
+    rm -f "$body"
+    HEALTH_DETAIL="throwaway server returned $code (want 200)"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+
+  # Content-truth: the markers in the SERVED html must be the ones we ship.
+  local got_build got_rev got_doc
+  got_build="$(meta_value "$body" bp-build-id)"
+  got_rev="$(meta_value "$body" bp-content-rev)"
+  got_doc="$(meta_value "$body" bp-doc-id)"
+  rm -f "$body"
+  if [ "$got_build" != "$BUILD_ID" ]; then
+    HEALTH_DETAIL="bp-build-id marker is '${got_build:-<missing>}' but this deploy ships '$BUILD_ID' — the served html is not this build"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -z "$got_rev" ]; then
+    HEALTH_DETAIL="bp-content-rev marker is empty — the build lost its content link"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -n "${CONTENT_REV:-}" ] && [ "$got_rev" != "$CONTENT_REV" ]; then
+    HEALTH_DETAIL="bp-content-rev marker is '$got_rev' but this deploy ships content_rev '$CONTENT_REV'"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -z "$got_doc" ]; then
+    HEALTH_DETAIL="bp-doc-id marker is empty — the build rendered no content document"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -z "${CONTENT_REV:-}" ]; then
+    log "HEALTH: no CONTENT_REV supplied — asserting bp-content-rev is non-empty only (nothing to cross-check against)"
+  fi
+  HEALTH_DETAIL="200 + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc"
+  log "HEALTH: $HEALTH_DETAIL (build $BUILD_ID)"
+  return 0
+}
+
+# A HEALTH-failed release must NEVER stay staged (D26).  PLAN's SKIP_BUILD test
+# is "the dir exists and has an index.html" — which a broken release satisfies —
+# so leaving it behind POISONED the build_id: every retry re-gated the same
+# broken bytes and failed 14 forever, with no way back short of a manual rm.
+# Purge it.  The one exception is a release that is ALSO the live or the
+# .previous rollback target (a re-gate of an already-staged build): deleting
+# those bytes would destroy the rollback path, so we keep them and drop a poison
+# marker PLAN refuses instead.  Either way the next deploy of this build_id
+# REBUILDS from source.
+purge_failed_release() {
+  local livecur="" prev=""
+  [ -L "$CURRENT" ] && livecur="$(basename "$(readlink "$CURRENT")")"
+  [ -f "$ROOT/.previous" ] && prev="$(cat "$ROOT/.previous" 2>/dev/null || true)"
+  if [ -d "$RELDIR" ] && { [ "$BUILD_ID" = "$livecur" ] || [ "$BUILD_ID" = "$prev" ]; }; then
+    : > "$RELDIR/$HEALTH_FAIL_MARK" 2>/dev/null || true
+    log "HEALTH: release $BUILD_ID is the live/rollback target — keeping its bytes, marking it health-failed (a redeploy REBUILDS it, never re-gates it)"
+    return 0
+  fi
+  rm -rf "$RELDIR"
+  log "HEALTH: purged releases/$BUILD_ID — a redeploy of this build_id rebuilds from source instead of re-gating broken bytes"
+}
 
 # ---------------------------------------------------------------------------
 # SELF-TEST — fixtures in a tmpdir; proves the real primitives, no npm/caddy.
@@ -217,6 +405,201 @@ if [ "$MODE" = selftest ]; then
   echo "[selftest] no-op rollback when previous == current is safe"
   echo b7 > "$ROOT/.previous"; do_rollback
   check "current still b7 after no-op rollback" [ "$(live_build)" = b7 ]
+
+  echo "[selftest] ROLLBACK refuses a previous release the engine KNOWS is broken"
+  # Rollback never health-gates (it is a pointer flip, by design) — so it must
+  # refuse a target already proven bad, or a build that failed HEALTH reaches
+  # visitors through the back door.
+  echo b3 > "$ROOT/.previous"
+  : > "$RELEASES/b3/$HEALTH_FAIL_MARK"
+  do_rollback; rb_rc=$?
+  check "refuses a health-failed target (21 no_previous)" [ "$rb_rc" = 21 ]
+  check "current unmoved (still b7)"    [ "$(live_build)" = b7 ]
+  rm -f "$RELEASES/b3/$HEALTH_FAIL_MARK"
+  do_rollback
+  check "rolls back once the target is no longer marked" [ "$(live_build)" = b3 ]
+  BUILD_ID=b7; do_switch   # restore: current=b7 for the checks below
+
+  # -------------------------------------------------------------------------
+  # meta_value — the marker READER the content-truth HEALTH gate rests on.  The
+  # old gate grepped the marker NAME; every check here is about the VALUE.
+  # -------------------------------------------------------------------------
+  echo "[selftest] meta_value reads marker VALUES (the old gate only saw names)"
+  MV="$TD/markers.html"
+  {
+    printf '<meta name="bp-build-id" content="abc123">\n'
+    printf '<meta name=bp-content-rev content=r7>\n'
+    printf "<meta content='d9' name='bp-doc-id'>\n"
+    printf '<meta name="bp-doc-title" content="">\n'
+  } > "$MV"
+  check "double-quoted value"                [ "$(meta_value "$MV" bp-build-id)" = abc123 ]
+  check "unquoted value"                     [ "$(meta_value "$MV" bp-content-rev)" = r7 ]
+  check "single-quoted, reversed attr order" [ "$(meta_value "$MV" bp-doc-id)" = d9 ]
+  check "EMPTY content reads as empty"       [ -z "$(meta_value "$MV" bp-doc-title)" ]
+  check "absent marker reads as empty"       [ -z "$(meta_value "$MV" bp-site-base)" ]
+  # Minified: EVERY marker must read its OWN value.  Asserting only the last tag
+  # here would have missed a real bug — a character-mapping split that left the
+  # tags on one line and gave every marker the LAST tag's content.
+  printf '<meta name="bp-build-id" content="x1"><meta name="bp-content-rev" content="x2"><meta name="bp-doc-id" content="x3">' > "$MV"
+  check "minified: first marker"             [ "$(meta_value "$MV" bp-build-id)" = x1 ]
+  check "minified: middle marker"            [ "$(meta_value "$MV" bp-content-rev)" = x2 ]
+  check "minified: last marker"              [ "$(meta_value "$MV" bp-doc-id)" = x3 ]
+
+  # -------------------------------------------------------------------------
+  # ENGINE E2E — drive the REAL script as a subprocess against a fake npm/flock.
+  # This is what proves the stage protocol, the content-truth HEALTH gate and
+  # the poison purge on the paths that actually ship (the primitives above only
+  # prove the flip).  flock(1) and systemd-run do not exist on macOS: the lock
+  # is stubbed (serialization is not what these cases prove) and the cap is
+  # disabled via the engine's own BARKPARK_SITE_NO_CAP knob.  The throwaway
+  # health server needs python3; without it the block skips honestly.
+  # -------------------------------------------------------------------------
+  if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+    echo "[selftest] SKIP engine e2e — needs python3 + curl (the throwaway health server)"
+  else
+    E2E="$TD/e2e"; FAKEBIN="$E2E/bin"; SRC="$E2E/src"
+    mkdir -p "$FAKEBIN" "$SRC"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKEBIN/flock"
+    # Fake npm.  It sees ONLY the scrubbed env the engine injects (that is the
+    # point of the scrub), so the lie/fail switches ride in FILES in the source
+    # dir — cwd is the one channel a scrub cannot close.
+    cat > "$FAKEBIN/npm" <<'FAKENPM'
+#!/usr/bin/env bash
+echo "npm $*" >> ./.npm-calls
+[ "${1:-}" = ci ] && exit 0
+if [ -f ./.fail-build ]; then
+  echo "npm ERR! code ELIFECYCLE" >&2
+  echo "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid" >&2
+  exit 1
+fi
+bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"
+# The exact build that WENT LIVE on guerrilla: a wrong build id and an EMPTY
+# content rev, both of which the old name-only gate waved through.
+[ -f ./.lie ] && { bid=TOTALLY-WRONG; rev=""; }
+mkdir -p dist
+{
+  printf '<!doctype html><html><head>\n'
+  printf '<meta name="bp-build-id" content="%s">\n' "$bid"
+  printf '<meta name="bp-content-rev" content="%s">\n' "$rev"
+  printf '<meta name="bp-doc-id" content="%s">\n' "$doc"
+  printf '</head><body><h1>hello</h1></body></html>\n'
+} > dist/index.html
+exit 0
+FAKENPM
+    chmod +x "$FAKEBIN"/*
+    printf '{"name":"selftest-site","private":true}\n' > "$SRC/package.json"
+    E2E_SITE="$E2E/sites/selftest"
+
+    e2e_deploy() { # <build_id> -> exit code; stdout at $E2E/out.log, stderr at $E2E/err.log
+      env PATH="$FAKEBIN:$PATH" \
+        SITE_SLUG=selftest BUILD_ID="$1" CONTENT_REV="${E2E_REV:-rev-1}" \
+        SITE_SRC="$SRC" \
+        BARKPARK_SITES_DIR="$E2E/sites" \
+        BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$E2E/deploy.lock" \
+        BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$E2E/out.log" 2> "$E2E/err.log"
+      echo $?
+    }
+    # The stage protocol is a STDOUT contract — assert against stdout alone.
+    saw()   { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$E2E/out.log"; }
+    nosaw() { ! grep -q "^BPSTAGE name=$1 " "$E2E/out.log"; }
+    livenow() { readlink "$E2E_SITE/current" 2>/dev/null || true; }
+
+    echo "[selftest] e2e: a full deploy walks all six stages"
+    rc="$(e2e_deploy e1)"
+    check "full deploy exit 0"                 [ "$rc" = 0 ]
+    check "PLAN started"                       saw PLAN started e1
+    check "PLAN ok"                            saw PLAN ok e1
+    check "BUILD started"                      saw BUILD started e1
+    check "BUILD ok"                           saw BUILD ok e1
+    check "STAGE ok"                           saw STAGE ok e1
+    check "HEALTH started"                     saw HEALTH started e1
+    check "HEALTH ok"                          saw HEALTH ok e1
+    check "SWITCH ok"                          saw SWITCH ok e1
+    check "RETIRE ok (a retire that removes NOTHING still speaks)" saw RETIRE ok e1
+    check "current -> releases/e1"             [ "$(livenow)" = releases/e1 ]
+    check "npm really ran"                     grep -q 'npm run build' "$SRC/.npm-calls"
+
+    echo "[selftest] e2e: a no-op redeploy of the live build speaks on every stage"
+    : > "$SRC/.npm-calls"
+    rc="$(e2e_deploy e1)"
+    check "no-op exit 0"                       [ "$rc" = 0 ]
+    check "PLAN noop"                          saw PLAN noop e1
+    check "no-op: BUILD skipped"               saw BUILD skipped e1
+    check "no-op: STAGE skipped"               saw STAGE skipped e1
+    check "no-op: HEALTH skipped"              saw HEALTH skipped e1
+    check "no-op: SWITCH skipped"              saw SWITCH skipped e1
+    check "no-op: RETIRE skipped"              saw RETIRE skipped e1
+    check "no-op built nothing"                [ ! -s "$SRC/.npm-calls" ]
+
+    echo "[selftest] e2e: a SKIP_BUILD redeploy says BUILD/STAGE skipped and still HEALTH-gates"
+    rc="$(e2e_deploy e2)"
+    check "e2 deploy exit 0"                   [ "$rc" = 0 ]
+    : > "$SRC/.npm-calls"
+    rc="$(e2e_deploy e1)"                      # e1 is staged but not live
+    check "skip-build exit 0"                  [ "$rc" = 0 ]
+    check "BUILD skipped"                      saw BUILD skipped e1
+    check "STAGE skipped"                      saw STAGE skipped e1
+    check "still HEALTH-gated"                 saw HEALTH ok e1
+    check "switched to the staged release"     saw SWITCH ok e1
+    check "skip-build ran no npm"              [ ! -s "$SRC/.npm-calls" ]
+    check "current -> releases/e1"             [ "$(livenow)" = releases/e1 ]
+
+    echo "[selftest] e2e: a LYING build fails HEALTH (14), never switches, is PURGED"
+    : > "$SRC/.lie"
+    rc="$(e2e_deploy e3)"
+    rm -f "$SRC/.lie"
+    check "lying build exit 14"                [ "$rc" = 14 ]
+    check "HEALTH failed"                      saw HEALTH failed e3
+    check "the reason names the wrong marker value" grep -q 'bp-build-id marker is .TOTALLY-WRONG' "$E2E/out.log"
+    check "no SWITCH stage line at all"        nosaw SWITCH
+    check "current did NOT move (still e1)"    [ "$(livenow)" = releases/e1 ]
+    check "the poisoned release is purged"     [ ! -d "$E2E_SITE/releases/e3" ]
+
+    echo "[selftest] e2e: redeploying the SAME build_id after a health failure REBUILDS"
+    : > "$SRC/.npm-calls"
+    rc="$(e2e_deploy e3)"
+    check "retry exit 0"                       [ "$rc" = 0 ]
+    check "retry REBUILT (npm ran again)"      grep -q 'npm run build' "$SRC/.npm-calls"
+    check "retry BUILD ok"                     saw BUILD ok e3
+    check "retry went live"                    [ "$(livenow)" = releases/e3 ]
+
+    echo "[selftest] e2e: a health-failed ROLLBACK TARGET keeps its bytes but is never re-gated"
+    # current=e3, .previous=e1.  Corrupt e1's staged bytes: purging them would
+    # destroy the rollback path, so the engine must mark, not delete.
+    perl -pi -e 's/content="e1"/content="WRONG"/' "$E2E_SITE/releases/e1/index.html"
+    : > "$SRC/.npm-calls"
+    rc="$(e2e_deploy e1)"
+    check "corrupted rollback target: exit 14" [ "$rc" = 14 ]
+    check "its bytes are KEPT (rollback stays possible)" [ -d "$E2E_SITE/releases/e1" ]
+    check "it is marked health-failed"         [ -f "$E2E_SITE/releases/e1/.bp-health-failed" ]
+    check "current unmoved (still e3)"         [ "$(livenow)" = releases/e3 ]
+    check "that run re-gated staged bytes (no npm)" [ ! -s "$SRC/.npm-calls" ]
+    : > "$SRC/.npm-calls"
+    rc="$(e2e_deploy e1)"
+    check "the marked release REBUILDS on redeploy" grep -q 'npm run build' "$SRC/.npm-calls"
+    check "rebuilt rollback target goes live"  [ "$rc" = 0 ]
+    check "poison marker cleared by the rebuild" [ ! -f "$E2E_SITE/releases/e1/.bp-health-failed" ]
+
+    echo "[selftest] e2e: a BUILD failure carries the REAL reason on STDOUT"
+    : > "$SRC/.fail-build"
+    rc="$(e2e_deploy e4)"
+    rm -f "$SRC/.fail-build"
+    check "build failure exit 12"              [ "$rc" = 12 ]
+    check "BUILD failed"                       saw BUILD failed e4
+    check "the 401 reason rides the stage line (stdout, not stderr)" \
+      grep -q '^BPSTAGE name=BUILD status=failed .*401 Unauthorized' "$E2E/out.log"
+    check "no SWITCH stage line at all"        nosaw SWITCH
+    check "no release dir left behind"         [ ! -d "$E2E_SITE/releases/e4" ]
+    check "current unmoved (still e1)"         [ "$(livenow)" = releases/e1 ]
+
+    echo "[selftest] e2e: RETIRE reports what it actually removed"
+    rc="$(BARKPARK_SITE_RETAIN=1 e2e_deploy e5)"
+    check "retain=1 deploy exit 0"             [ "$rc" = 0 ]
+    check "RETIRE names a real removal"        grep -qE '^BPSTAGE name=RETIRE status=ok build_id=e5 detail="removed [1-9]' "$E2E/out.log"
+  fi
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
@@ -293,12 +676,22 @@ fi
 # ---- PLAN ------------------------------------------------------------------
 # Already live?  Idempotent no-op (mirrors the sites(site_id,build_id) unique
 # index that makes a re-deploy of an unchanged code+content+config a no-op).
+# This path used to print ONE prose line and exit 0 — no SWITCH, no HEALTHY, no
+# stage words at all.  It now speaks for every stage: PLAN noop, the rest skipped.
+emit PLAN started
 if [ "$(live_build)" = "$BUILD_ID" ]; then
   log "PLAN: build_id $BUILD_ID is already live for '$SITE_SLUG' — nothing to do"
+  emit PLAN noop "build $BUILD_ID is already live"
+  for s in BUILD STAGE HEALTH SWITCH RETIRE; do emit "$s" skipped "build $BUILD_ID is already live"; done
   exit 0
 fi
 RELDIR="$RELEASES/$BUILD_ID"
-if [ -d "$RELDIR" ] && [ -f "$RELDIR/index.html" ]; then
+if [ -f "$RELDIR/$HEALTH_FAIL_MARK" ]; then
+  # A release we could not delete (it is the live/rollback target) but whose
+  # bytes FAILED health.  Never re-gate poison — rebuild it.
+  log "PLAN: release $BUILD_ID is marked health-failed — rebuilding from source (never re-gating broken bytes)"
+  SKIP_BUILD=0
+elif [ -d "$RELDIR" ] && [ -f "$RELDIR/index.html" ]; then
   # A previously-staged but not-live build (e.g. a rollback target): skip the
   # rebuild, re-health-gate + switch straight to it.
   log "PLAN: release $BUILD_ID already staged — re-gating, skipping BUILD/STAGE"
@@ -307,14 +700,38 @@ else
   SKIP_BUILD=0
 fi
 log "PLAN: deploy '$SITE_SLUG' build $BUILD_ID (live now: $(live_build))"
+if [ "$SKIP_BUILD" = 1 ]; then
+  emit PLAN ok "release $BUILD_ID is already staged — BUILD and STAGE will be skipped"
+else
+  emit PLAN ok "building '$SITE_SLUG' build $BUILD_ID from source"
+fi
 
 # ---- BUILD -----------------------------------------------------------------
 # Serialized (flock, above) + capped (systemd-run scope) + env-SCRUBBED.  Only
 # the BUILD_ALLOW vars reach npm/Vite; ambient BARKPARK_TOKEN cannot shadow the
 # per-site token (D7).  cwd is inherited into the scrubbed child, so we cd first.
+
+# The most useful line of a failed build, for the BUILD failed stage line.  The
+# real reason (`FATAL: 401 Unauthorized … the site read token is invalid`) used
+# to go to STDERR while the generic "BUILD failed" went to stdout — a stdout-only
+# orchestrator could never tell the user WHY.
+build_failure_reason() { # <build-log>
+  local f="$1" r
+  r="$(grep -a 'FATAL' "$f" 2>/dev/null | tail -1)"
+  [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
+  [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
+  [ -n "$r" ] || r="npm ci / npm run build failed with no output"
+  printf '%s' "$r"
+}
+
 if [ "$SKIP_BUILD" = 0 ]; then
-  if [ ! -d "$SITE_SRC" ]; then log "BUILD: no site source dir $SITE_SRC"; exit 10; fi
-  if [ ! -f "$SITE_SRC/package.json" ]; then log "BUILD: $SITE_SRC has no package.json"; exit 11; fi
+  emit BUILD started
+  if [ ! -d "$SITE_SRC" ]; then
+    log "BUILD: no site source dir $SITE_SRC"; emit BUILD failed "no site source dir $SITE_SRC"; exit 10
+  fi
+  if [ ! -f "$SITE_SRC/package.json" ]; then
+    log "BUILD: $SITE_SRC has no package.json"; emit BUILD failed "$SITE_SRC has no package.json"; exit 11
+  fi
 
   # Build the scrubbed env allow-list.  BUILD_ID + base path + content rev are
   # exported under their BARKPARK_ build-var names so the adapter can bake the
@@ -328,7 +745,7 @@ if [ "$SKIP_BUILD" = 0 ]; then
   done
 
   log "BUILD: npm ci && npm run build in $SITE_SRC (scrubbed env, capped)"
-  cd "$SITE_SRC" || { log "BUILD: cannot cd $SITE_SRC"; exit 10; }
+  cd "$SITE_SRC" || { log "BUILD: cannot cd $SITE_SRC"; emit BUILD failed "cannot cd $SITE_SRC"; exit 10; }
   # systemd-run --scope caps memory+cpu and inherits cwd; env -i inside scrubs.
   # On a non-systemd box (dev) run the scrubbed env directly — capping is
   # best-effort, the scrub is not.
@@ -336,72 +753,111 @@ if [ "$SKIP_BUILD" = 0 ]; then
     cap=(systemd-run --scope --quiet --collect -p MemoryMax=1500M -p CPUQuota=150%)
   else
     log "BUILD: systemd-run unavailable (or capping disabled) — running uncapped, still scrubbed"
-    cap=()
+    # `command` is a no-op prefix, NOT an empty array: expanding an empty array
+    # under `set -u` is an "unbound variable" fatal on bash 3.2 (stock macOS),
+    # which is exactly the shell the self-test drives this path with.
+    cap=(command)
   fi
-  if ! "${cap[@]}" "${scrub[@]}" bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build'; then
-    log "BUILD failed for '$SITE_SLUG' build $BUILD_ID — live release untouched"
+  # The build's stdout AND stderr are merged onto OUR stdout (and tee'd to a log
+  # we mine for the failure reason) ON PURPOSE: the machine stage lines and the
+  # real explanation must reach the same stream, or a stdout-only caller can
+  # report a failure it cannot explain.  PIPESTATUS, never $?, is the build's own
+  # exit code — tee always succeeds.
+  BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/site-build.XXXXXX")"
+  "${cap[@]}" "${scrub[@]}" bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build' 2>&1 | tee "$BUILD_LOG"
+  build_rc="${PIPESTATUS[0]}"
+  if [ "$build_rc" -ne 0 ]; then
+    reason="$(build_failure_reason "$BUILD_LOG")"
+    rm -f "$BUILD_LOG"
+    log "BUILD failed (exit $build_rc) for '$SITE_SLUG' build $BUILD_ID — live release untouched: $reason"
+    emit BUILD failed "$reason"
     exit 12
   fi
+  rm -f "$BUILD_LOG"
+  emit BUILD ok "npm ci && npm run build"
 
   # ---- STAGE — copy ONLY dist/ (D8) ---------------------------------------
-  if [ ! -d "$SITE_SRC/dist" ]; then log "STAGE: build produced no $SITE_SRC/dist — abort"; exit 13; fi
-  if [ ! -f "$SITE_SRC/dist/index.html" ]; then log "STAGE: $SITE_SRC/dist has no index.html — abort"; exit 13; fi
+  emit STAGE started
+  if [ ! -d "$SITE_SRC/dist" ]; then
+    log "STAGE: build produced no $SITE_SRC/dist — abort"; emit STAGE failed "build produced no dist/"; exit 13
+  fi
+  if [ ! -f "$SITE_SRC/dist/index.html" ]; then
+    log "STAGE: $SITE_SRC/dist has no index.html — abort"; emit STAGE failed "dist/ has no index.html"; exit 13
+  fi
   # Stage into a .partial dir then rename, so a crash mid-copy never leaves a
   # half-populated releases/<build_id>/ that a later PLAN mistakes for staged.
   rm -rf "$RELDIR" "$RELDIR.partial"
   mkdir -p "$RELDIR.partial"
   if ! cp -a "$SITE_SRC/dist/." "$RELDIR.partial/"; then
-    log "STAGE: copy of dist/ failed"; rm -rf "$RELDIR.partial"; exit 13
+    log "STAGE: copy of dist/ failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "copy of dist/ failed"; exit 13
   fi
-  mv "$RELDIR.partial" "$RELDIR" || { log "STAGE: rename into place failed"; rm -rf "$RELDIR.partial"; exit 13; }
-  log "STAGE: dist/ -> releases/$BUILD_ID/ ($(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?'))"
+  mv "$RELDIR.partial" "$RELDIR" || {
+    log "STAGE: rename into place failed"; rm -rf "$RELDIR.partial"; emit STAGE failed "rename into releases/$BUILD_ID failed"; exit 13
+  }
+  staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
+  log "STAGE: dist/ -> releases/$BUILD_ID/ ($staged_size)"
+  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size)"
+else
+  # A SKIP_BUILD redeploy used to emit NEITHER a BUILD nor a STAGE line — the
+  # second path that hung a stage-watching orchestrator forever.
+  emit BUILD skipped "release $BUILD_ID is already staged"
+  emit STAGE skipped "release $BUILD_ID is already staged"
 fi
 
-# ---- HEALTH — content-truth, not vacuous reachability (D11) ----------------
-# Throwaway static server on a loopback ephemeral port over the release dir:
-# assert 200 AND grep the baked bp-build-id / bp-content-rev markers.  Fail =>
-# NO switch (fail closed).
-health_gate() { # sets nothing; returns 0 healthy, 1 not
-  local idx="$RELDIR/index.html"
-  if [ ! -f "$idx" ]; then log "HEALTH: no index.html in releases/$BUILD_ID"; return 1; fi
-  if ! grep -Eiq 'name=["'"'"']?bp-build-id' "$idx"; then
-    log "HEALTH: bp-build-id <meta> marker missing from index.html — refusing to switch"; return 1
-  fi
-  if ! grep -Eiq 'name=["'"'"']?bp-content-rev' "$idx"; then
-    log "HEALTH: bp-content-rev <meta> marker missing from index.html — refusing to switch"; return 1
-  fi
-  # Ephemeral loopback port.
-  local port
-  port="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()' 2>/dev/null || true)"
-  [ -n "$port" ] || port=$(( (RANDOM % 20000) + 20000 ))
-  local srv=0
-  if command -v python3 >/dev/null 2>&1; then
-    python3 -m http.server "$port" --bind 127.0.0.1 --directory "$RELDIR" >/dev/null 2>&1 &
-    srv=$!
-  elif command -v caddy >/dev/null 2>&1; then
-    caddy file-server --listen "127.0.0.1:$port" --root "$RELDIR" >/dev/null 2>&1 &
-    srv=$!
-  else
-    log "HEALTH: no python3 or caddy to run the throwaway server — cannot gate"; return 1
-  fi
-  local code=000 i
-  for i in $(seq 1 25); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port/index.html" 2>/dev/null || true)"
-    [ "$code" = 200 ] && break
-    sleep 0.2
-  done
-  kill "$srv" 2>/dev/null || true
-  wait "$srv" 2>/dev/null || true
-  if [ "$code" != 200 ]; then log "HEALTH: throwaway server returned $code (want 200) — refusing to switch"; return 1; fi
-  log "HEALTH: 200 + bp-build-id/bp-content-rev markers present (build $BUILD_ID)"
-  return 0
-}
-
+# ---- HEALTH (D11 + D26) — content-truth, not vacuous reachability ----------
+# health_gate lives with the other state-machine primitives (above the
+# self-test), so the gate the self-test proves IS the gate the deploy runs.
+emit HEALTH started
 if ! health_gate; then
+  emit HEALTH failed "$HEALTH_DETAIL"
   log "HEALTH gate FAILED for build $BUILD_ID — live release untouched, no switch (fail closed)"
-  # Leave the staged dir for inspection; the next healthy deploy retires it.
+  # The failed bytes do NOT stay staged: PLAN would accept them forever and every
+  # retry of this build_id would re-gate the same broken release (D26).
+  purge_failed_release
   exit 14
 fi
+emit HEALTH ok "$HEALTH_DETAIL"
+
+# ---- ONE shared Caddyfile lock (D27) ---------------------------------------
+# /etc/caddy/Caddyfile has TWO writers: this engine's route arming and
+# instance-deploy.sh's blue/green port flip (+ its maintenance / mcp / connectors
+# arming).  Both do read -> backup -> rewrite -> mv.  An interleave silently
+# DISCARDS one of them, and a lost update is syntactically VALID — so the
+# backup + `caddy validate` + revert discipline both scripts already have is
+# structurally blind to it.  Reproduced: this script's stale write dropped
+# instance-deploy's port flip and then reloaded Caddy onto the slot
+# instance-deploy was about to `systemctl disable --now` — a hard 502 on the
+# content API that does not self-heal until the next deploy.
+#
+# Both scripts now take THIS leaf lock (fd 8) around every Caddyfile
+# read-modify-write, in the same order (own lock fd 9 -> caddy lock fd 8), so
+# neither can deadlock the other.  It is deliberately NOT instance-deploy's own
+# lock: that one is held for its whole multi-minute run and would stall a site
+# deploy for ten minutes.  The lock is a LEAF — taken, used, released, never
+# held across a build.
+CADDY_LOCK="${BARKPARK_CADDYFILE_LOCK:-/var/lock/barkpark-caddyfile.lock}"
+if ! ( : > "$CADDY_LOCK" ) 2>/dev/null; then
+  # Unwritable /var/lock (dev box, unprivileged CI) — same fallback idiom as the
+  # per-slug deploy lock above, so we still serialize with anyone else on the box.
+  CADDY_LOCK="${TMPDIR:-/tmp}/barkpark-caddyfile.lock"
+  # LOUD, because the failure mode is silent: the two writers only exclude each
+  # other if they resolve the SAME path.  On the real box both run as root and
+  # both get /var/lock; if one falls back and the other does not, they serialize
+  # against nothing.  Pin BARKPARK_CADDYFILE_LOCK identically on both.
+  log "WARN: /var/lock is not writable — Caddyfile lock falls back to $CADDY_LOCK; instance-deploy.sh MUST resolve the same path (set BARKPARK_CADDYFILE_LOCK) or the two Caddyfile writers do not serialize"
+fi
+with_caddy_lock() { # <fn> [args…] — run a Caddyfile read-modify-write serialized
+  exec 8>"$CADDY_LOCK" || { log "cannot open the Caddyfile lock $CADDY_LOCK — leaving Caddy untouched"; return 1; }
+  if ! flock -w 120 8; then
+    log "gave up waiting for the Caddyfile lock ($CADDY_LOCK) — leaving Caddy untouched"
+    exec 8>&-
+    return 1
+  fi
+  "$@"
+  local rc=$?
+  exec 8>&-
+  return "$rc"
+}
 
 # ---- Arm the Caddy path handle ONCE (D4) -----------------------------------
 # Marker-guarded `handle_path /sites/<slug>/*` into the live FQDN block, mirrors
@@ -409,6 +865,10 @@ fi
 # per deploy (the swap below is just a symlink flip Caddy already follows).
 # Non-fatal — the release is served the moment `current` flips; the route just
 # exposes it publicly, and a Caddy hiccup must not fail a healthy build.
+# The WHOLE function runs under the shared lock (never just the mv): the marker
+# `grep -q` below is a time-of-check read, and re-arming a route another writer
+# just added — or rewriting the file from a snapshot taken before their write —
+# is exactly the lost update.
 arm_caddy_site_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG route"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping /sites/$SITE_SLUG route"; return 0; }
@@ -450,17 +910,26 @@ SITEROUTE
     mv "$bak" "$CADDYFILE"
   fi
 }
-arm_caddy_site_route
+# Non-fatal by contract: a Caddy hiccup (or a lock we could not take) must never
+# fail a healthy build — the release goes live on the symlink flip either way.
+with_caddy_lock arm_caddy_site_route || true
 
 # ---- SWITCH (D11) — atomic symlink flip, no Caddy reload -------------------
+emit SWITCH started
 if ! do_switch; then
   log "SWITCH failed for build $BUILD_ID — live release untouched (fail closed)"
+  emit SWITCH failed "atomic swap of current -> releases/$BUILD_ID failed"
   exit 16
 fi
 log "SWITCH: '$SITE_SLUG' current -> releases/$BUILD_ID (atomic)"
+emit SWITCH ok "current -> releases/$BUILD_ID"
 
 # ---- RETIRE (D8) — keep newest N=5 ----------------------------------------
+# Emits even when it removes nothing — measured SILENT on 3 of 6 live deploys,
+# the third path that hung a stage-watching orchestrator.
+emit RETIRE started
 do_retire
+emit RETIRE ok "removed $RETIRED old release(s), keeping the newest $RETAIN"
 
 log "HEALTHY — '$SITE_SLUG' live at build $BUILD_ID (https://$HEALTH_HOST/sites/$SITE_SLUG/)"
 exit 0
