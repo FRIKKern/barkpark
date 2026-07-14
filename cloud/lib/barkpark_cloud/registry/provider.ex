@@ -1,11 +1,13 @@
 defmodule BarkparkCloud.Registry.Provider do
   @moduledoc """
   A connected cloud account a Team links so the control plane can provision
-  Barkparks into it. Belongs to one Team. Two kinds ship today:
+  Barkparks into it. Belongs to one Team. Three kinds ship today:
 
-    * `hetzner` — the account's Hetzner Cloud API token (a bare string).
-    * `azure`   — a service principal, stored as a JSON blob of
+    * `hetzner`    — the account's Hetzner Cloud API token (a bare string).
+    * `azure`      — a service principal, stored as a JSON blob of
       `{tenant_id, client_id, client_secret, subscription_id}`.
+    * `cloudflare` — a free-superpower account, stored as EITHER a bare API
+      token OR a JSON blob `{api_token, account_id?, zone_id?}`.
 
   ## One credential home — `encrypted_token`
 
@@ -37,7 +39,7 @@ defmodule BarkparkCloud.Registry.Provider do
   # The provider kinds we know how to provision into. Kept as a list (not a free
   # string) so a typo can't silently create a dead provider row; grow it when a
   # backend actually lands (YAGNI).
-  @kinds ~w(hetzner azure)
+  @kinds ~w(hetzner azure cloudflare)
 
   # The four fields an azure service-principal credential blob must carry. The
   # control plane exchanges these for a token and lists a tagged resource before
@@ -120,9 +122,38 @@ defmodule BarkparkCloud.Registry.Provider do
     end
   end
 
+  # Cloudflare accepts EITHER a bare API-token string OR a JSON blob
+  # `{api_token, account_id?, zone_id?}` (a pasted token is the common case; the
+  # blob carries the optional account/zone scope). Both ride the same
+  # `encrypted_token` column. The only hard requirement is a non-blank token: if
+  # the credential is a JSON object it MUST carry a non-blank `api_token`;
+  # otherwise a non-blank string is enough.
+  defp validate_credential_shape(changeset, "cloudflare", credential) do
+    cond do
+      not is_binary(credential) or String.trim(credential) == "" ->
+        add_error(changeset, :credential, "a Cloudflare API token can't be blank")
+
+      cloudflare_blob_missing_token?(credential) ->
+        add_error(changeset, :credential, "cloudflare credentials as JSON require api_token")
+
+      true ->
+        changeset
+    end
+  end
+
   # Unknown kind: validate_inclusion already flags it; don't double-error the
   # credential.
   defp validate_credential_shape(changeset, _kind, _credential), do: changeset
+
+  # True only when the credential parses as a JSON object that lacks a non-blank
+  # `api_token`. A bare token (not valid JSON, or non-object JSON) is not a blob
+  # and passes — the non-blank check above already guards it.
+  defp cloudflare_blob_missing_token?(credential) do
+    case Jason.decode(credential) do
+      {:ok, blob} when is_map(blob) -> not present_field?(blob, "api_token")
+      _ -> false
+    end
+  end
 
   defp present_field?(blob, field) do
     case Map.get(blob, field) do
