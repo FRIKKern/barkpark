@@ -59,14 +59,26 @@ export interface ConnectorInstall {
   /** The workspace that owns this install. */
   workspaceId: WorkspaceId;
   /**
-   * Reference to the provider secret (bot token, signing secret).
+   * Reference to the provider secret (bot token, signing secret) — or NULL when the
+   * connector has NO per-workspace provider credential.
+   *
+   * NULL is a first-class case, not an error (D42): Microsoft Teams runs on ONE
+   * operator Azure app for every customer org (`appType: "MultiTenant"`), so a Teams
+   * install has no per-workspace secret to store. The `credential_ref` column was
+   * already nullable in `db/schema.ts`; the TYPE said otherwise, which would have
+   * fail-closed every Teams row out of `lookupInstall`/`listInstalls`. The tenant-safety
+   * fail-closed rule lives on `workspace_id` (a routable install MUST have one), not on
+   * the credential.
+   *
+   * A connector that DOES need a credential (Telegram's bot token, WhatsApp's Meta
+   * four) must reject a null here in its own `adapterFactory` — loudly, at mount.
    *
    * KNOWN GAP: today this column holds the raw secret in plaintext. Encrypting it
    * (or pointing it at a real per-workspace credential store) is filed as
    * `connectors-encrypt-install-credentials` and blocked on D9's run-secrets
    * workspace scoping. Named here so nobody mistakes the name for a promise.
    */
-  credentialRef: string;
+  credentialRef: string | null;
 }
 
 /**

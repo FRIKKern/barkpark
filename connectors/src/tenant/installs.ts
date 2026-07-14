@@ -92,29 +92,35 @@ function isBlankKey(installKey: string | null | undefined): boolean {
 }
 
 /**
- * Coerce a row to a usable install, or null. A row missing its workspace or its
- * credential is NOT a tenant we can serve — it cannot be routed and cannot build
- * an adapter — so it fails closed rather than yielding a half-install.
+ * Coerce a row to a usable install, or null.
+ *
+ * A row missing its WORKSPACE fails closed: it cannot be routed to a tenant, and a
+ * half-install that resolves to no workspace is exactly the leak this table exists to
+ * prevent.
+ *
+ * A row missing its CREDENTIAL does NOT fail closed (D42). `credential_ref` is nullable
+ * by design: Teams serves every customer org from ONE operator Azure app, so a Teams
+ * install genuinely has no per-workspace provider secret. Dropping those rows here
+ * would have made Teams invisible to `listInstalls` — the connector would register, and
+ * then silently never mount. A connector that DOES need a credential rejects the null in
+ * its own `adapterFactory` (Telegram, WhatsApp both do, loudly, at mount) — which is
+ * where the error belongs, because only the connector knows whether it needs one.
  */
 function toInstall(row: InstallRow | undefined): ConnectorInstall | null {
   if (!row) return null;
   const workspaceId = row.workspace_id;
-  const credentialRef = row.credential_ref;
   if (workspaceId === null || workspaceId === undefined || workspaceId === "") {
     return null;
   }
-  if (
-    credentialRef === null ||
-    credentialRef === undefined ||
-    credentialRef === ""
-  ) {
-    return null;
-  }
+  const credentialRef = row.credential_ref;
   return {
     provider: row.provider,
     installKey: row.install_key,
     workspaceId,
-    credentialRef,
+    // Normalise "" to null: an empty credential is an absent one, and two spellings of
+    // "no credential" is one spelling too many for a fail-closed check to get right.
+    credentialRef:
+      credentialRef === undefined || credentialRef === "" ? null : credentialRef,
   };
 }
 

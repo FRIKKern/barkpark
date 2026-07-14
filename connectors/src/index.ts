@@ -15,10 +15,15 @@ import type {
   InboundEvent,
   InstallsLookup,
 } from "./connector/types.js";
+import { createTeamsConnector, TEAMS_PROVIDER } from "./connectors/teams.js";
 import {
   createTelegramConnector,
   TELEGRAM_PROVIDER,
 } from "./connectors/telegram.js";
+import {
+  createWhatsappConnector,
+  WHATSAPP_PROVIDER,
+} from "./connectors/whatsapp.js";
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
 import { createBridgeState } from "./state/state-adapter.js";
@@ -43,10 +48,31 @@ import { createInstallsLookup } from "./tenant/installs.js";
  * constructed from another tenant's secret.
  */
 
-/** P3 adds its channels HERE and nowhere else. */
+/**
+ * P3 adds its channels HERE and nowhere else.
+ *
+ * The heavy pair (D42/D43) proves the invariant: Teams and WhatsApp are ONE line each,
+ * and between them they exercise BOTH tenant-routing strategies and BOTH credential
+ * models — payload-team-id with no per-workspace secret (Teams), credential-bound with
+ * four per-install secrets (WhatsApp). Neither forced an edit to `core/dispatch.ts`,
+ * `tenant/resolve.ts`, `connector/registry.ts` or `turn/`.
+ *
+ * Registration is unconditional and free: a connector with no rows in
+ * `connector_installs` mounts nothing. Teams' operator credentials are read from the
+ * environment (`TEAMS_APP_ID` / `TEAMS_APP_PASSWORD`) at ADAPTER construction, i.e. only
+ * when an install actually exists.
+ */
 export function registerBuiltinConnectors(registry: ConnectorRegistry): void {
   if (!registry.has(TELEGRAM_PROVIDER)) {
     registry.register(createTelegramConnector({ mode: "polling" }));
+  }
+  if (!registry.has(TEAMS_PROVIDER)) {
+    // ONE operator Azure app, MultiTenant. No per-workspace credential (D42).
+    registry.register(createTeamsConnector());
+  }
+  if (!registry.has(WHATSAPP_PROVIDER)) {
+    // BYO Meta app: all four credentials are per-install (D43).
+    registry.register(createWhatsappConnector());
   }
   // P3: registry.register(createSlackConnector());   // payload-team-id
   // P3: registry.register(createDiscordConnector()); // credential-bound
@@ -232,10 +258,19 @@ export async function startBridge(
   for (const install of mounted) {
     await install.chat.initialize();
     // The core never learns the channel: Telegram starts a poll loop here,
-    // P3's Discord will start a gateway socket, Slack does nothing at all.
+    // P3's Discord will start a gateway socket, Teams/WhatsApp/Slack do nothing
+    // at all — their transport IS the inbound HTTP request.
     await install.connector.listen?.(install.adapter);
+
+    // Say what is actually true. A webhook connector is MOUNTED, not "listening":
+    // nothing reaches it until the HTTP seam routes a request into
+    // `chat.webhooks[provider]`. Logging "listening" for a channel that owns no
+    // socket is the kind of comfortable lie that costs an afternoon.
+    const transport = install.connector.listen
+      ? "listening"
+      : "mounted (webhook transport — inbound arrives via the HTTP seam)";
     console.log(
-      `[bridge] listening: ${install.connector.id} install=${install.install.installKey} ` +
+      `[bridge] ${transport}: ${install.connector.id} install=${install.install.installKey} ` +
         `workspace=${install.install.workspaceId}`,
     );
   }
