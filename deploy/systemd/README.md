@@ -5,6 +5,8 @@ Rotates the weekly `public-read` API token consumed by the hosted demo at `barkp
 
 For prod host identity (IP, paths, service name) see `docs/ops/PROD_OPS.md`.
 
+Other units here are installed **by the deploy**, not by hand: `barkpark-slot@` (blue/green app slots), `barkpark-agent` (monitoring beat), `barkpark-mcp` (`/mcp`), `barkpark-connectors` (the Connectors bridge behind `/connectors` — runbook: `docs/ops/connectors-deploy.md`). See `deploy/README.md`.
+
 ## What the units do
 
 `barkpark-rotate-public-token.service` (Type=oneshot) runs `api/start.sh rotate-public-read`, which:

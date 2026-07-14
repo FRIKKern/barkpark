@@ -155,7 +155,11 @@ export class ChatClientError extends Error {
 export interface ChatClientConfig {
   /** Barkpark API origin, e.g. `https://guerrilla.barkpark.cloud`. */
   baseUrl: string;
-  /** A workspace-bound `chat`-permission ApiToken (BARKPARK_CHAT_TOKEN). */
+  /**
+   * A workspace-bound `chat`-permission ApiToken — THIS install's own, opened
+   * from `connector_installs.chat_token_ref` (D35). Never a process-wide
+   * operator token: the bridge no longer has one.
+   */
   token: string;
   /** Injectable fetch (tests/mocks); defaults to the global `fetch`. */
   fetch?: typeof fetch;

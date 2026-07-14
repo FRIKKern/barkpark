@@ -99,7 +99,9 @@ describe("auth failures", () => {
     expect((err as ChatClientError).code).toBe("forbidden");
     // The operator's real problem is legible from the message alone.
     expect((err as ChatClientError).message).toMatch(/workspace-bound/i);
-    expect((err as ChatClientError).message).toMatch(/BARKPARK_CHAT_TOKEN/);
+    // …and it names WHERE the token lives now: the install's sealed column, not
+    // a process-wide BARKPARK_CHAT_TOKEN (retired, D35).
+    expect((err as ChatClientError).message).toMatch(/chat_token_ref/);
   });
 
   it("never retries a 403 (auth is terminal)", async () => {

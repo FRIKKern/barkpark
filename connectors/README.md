@@ -126,25 +126,67 @@ on for concurrent first messages. A green from it would be a fabricated green.
 |---|---|
 | `DATABASE_URL` | Postgres for the bridge's `chat_bridge` schema. |
 | `BARKPARK_API_URL` | Base URL of the Barkpark API serving `/v1/chat`. |
-| `BARKPARK_CHAT_TOKEN` | An ApiToken with the `chat` permission **and** a `workspace_id`. A `chat` token without a workspace is `403` (D33). |
+| `CONNECTORS_CREDENTIAL_KEY` | **Required.** Base64 32-byte AES-256-GCM key sealing every install's secrets. `openssl rand -base64 32`. Missing ⇒ the bridge refuses to boot; there is no plaintext fallback. |
+| `CONNECTORS_CREDENTIAL_KEY_PREVIOUS` | Optional, comma-separated. Tried only *after* the current key fails to open a blob — the rotation window. Never used to seal. |
 | `BRIDGE_USER_NAME` | The agent's display name in a channel. Default `barkpark`. |
+
+`BARKPARK_CHAT_TOKEN` is **retired** (D35). There is no process-wide chat token any
+more: each install carries its own, sealed in its row. If it is still exported,
+`loadConfig()` warns that it is ignored rather than letting a stale `.env` look
+like it is doing something.
+
+## Per-workspace credentials (D35)
+
+A `chat_bridge.connector_installs` row is the whole of a tenant's isolation:
+
+```
+(provider, install_key) ─PK─▶ workspace_id
+                              credential_ref   ← SEALED provider secret (bot token)
+                              chat_token_ref   ← SEALED Barkpark `chat` ApiToken, workspace-bound
+```
+
+The turn loop resolves the tenant from that row and then takes the token **from
+the same row**. Routing key and credential are two columns of one record, so
+"workspace A's traffic on workspace B's token" is not a bug you can introduce —
+it is a state you cannot construct.
+
+**Sealing.** `src/crypto/credential-cipher.ts`, AES-256-GCM over `node:crypto`
+(zero new deps). Wire format `Base64(iv‖tag‖ciphertext)` — byte-identical to
+`api/lib/barkpark/crypto/local_kek.ex`. The associated data is the **row identity**:
+
+```
+AAD = "bpc1|" + JSON.stringify([provider, install_key, workspace_id])
+```
+
+`workspace_id` is in the AAD even though it is not in the primary key, and that is
+the point: an attacker who repoints a row at their own workspace leaves the PK
+intact. With `workspace_id` bound in, the blobs stop opening — the row is dropped,
+not served. (This is exactly why `@chat-adapter/shared`'s `encryptToken` is **not**
+used: it never calls `setAAD`, so a ciphertext minted for tenant A decrypts cleanly
+in tenant B's row.)
+
+**Fail-closed, always.** A blob that does not open ⇒ the install is dropped and the
+failure is logged loudly. An install with no `chat_token_ref` ⇒ `dropped_no_chat_token`
+with **zero** HTTP calls. There is no operator-token fallback anywhere in the
+request path. `test/cross-tenant-token.test.ts` proves this on the wire (msw records
+every `Authorization` header), and reverting to the single-token closure turns it red.
+
+**Rotation.** Set the new key as `CONNECTORS_CREDENTIAL_KEY`, move the old one to
+`CONNECTORS_CREDENTIAL_KEY_PREVIOUS`, then re-`upsertInstall` each row — new seals
+take the current key, so the window drains instead of living forever. Lose the
+current key with no previous set and the rows can never be opened again.
 
 ## Known gaps — read before trusting the isolation story
 
-These are real, filed, and deliberately not papered over:
+Real, filed, and deliberately not papered over:
 
-- **One chat token serves every tenant.** `chatClientFor(workspaceId)` in
-  `src/index.ts` currently **ignores** its argument and hands back a client built
-  from the single `BARKPARK_CHAT_TOKEN`. The multi-tenant *seam* is right, but
-  today isolation of `/v1/chat` reads is only as strong as that one token — and a
-  `:global` one would see every workspace's sessions. Filed:
-  `connectors-per-workspace-chat-token`.
-- **`credential_ref` is plaintext.** The BotFather token is stored as-is in
-  `connector_installs`. Filed: `connectors-encrypt-install-credentials`.
-- **No self-serve install flow.** `upsertInstall()` is an operator/smoke write
-  path; a workspace cannot connect a bot for itself. That is the P3 connect UX.
-  Filed: `connectors-p3-install-write-credentials`.
-
-What *is* structurally enforced today: an inbound event never resolves to a tenant
-it does not belong to (fail-closed reads, no default-workspace fallback anywhere),
-and one workspace's adapter is only ever built from that workspace's own credential.
+- **No self-serve install flow.** `upsertInstall()` is an operator/OAuth write path;
+  a workspace cannot connect a bot for itself from Studio yet. That is the P3
+  connect UX (`connectors-p3-install-write-credentials`).
+- **No HTTP endpoint mints the per-install chat token.** `Auth.create_token/5`
+  already mints workspace-bound `chat` tokens, but only from a console — the
+  operator seals one into the install out of band. A self-serve mint endpoint is an
+  isolated Elixir slice behind the Elixir Test gate.
+- **`CONNECTORS_CREDENTIAL_KEY` is instance-global.** One key seals every tenant's
+  rows (the AAD, not the key, is what separates tenants). A per-workspace KEK would
+  need D9's workspace-scoped secrets.

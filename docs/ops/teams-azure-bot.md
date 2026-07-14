@@ -3,19 +3,18 @@
 
 Teams is one of the six first-focus Connectors channels, and the **heaviest onboarding pole** of the
 group — an Azure AD app + a Bot Framework registration, none of which a script can create for you.
-This runbook exists so that human cost can start **in parallel with P0** and gate nothing in the build:
-the whole Teams flow is **code-dark until P3b**, so all P0 needs from Teams is the identity pair
-(`teams.app_id` + `teams.app_password`) sitting in the drawer. No routing code ships here — the Teams
-channel connector stays dark through the P0/P1/P2 waves precisely so this registration is the only
-long-lead item between "planned" and "buildable." Design: `.claude/workflows/bp-connectors-charter.md`
-(D3 heavy-pair onboarding), paper `/papers/personal-agent-provider-bridge`.
+**The code shipped in P3b** (`connectors/src/connectors/teams.ts`: adapter, tenant routing, registry
+entry, smoke harness). What is left is exactly this runbook: the Azure registration, and — once per
+customer org, irreducibly — that org's own Teams admin consenting inside their tenant. The cost of
+Teams was never the code; it is the onboarding. Design: `.claude/workflows/bp-connectors-charter.md`
+(D3 heavy-pair onboarding, D42 one-operator-app), paper `/papers/personal-agent-provider-bridge`.
 
 Product shape, for reference: Teams is an inbound **Channel connector** (you talk to the agent from
 Teams; the agent runs sandboxed per workspace and streams back via `/v1/chat` SSE). Barkpark exposes
 **one** shared multi-tenant Azure Bot; each customer org's Teams admin consents/installs it into their
 own tenant; inbound activities carry the org's Teams tenant id, which maps to a Barkpark workspace —
-the same `provider_team_id → workspace` shape Slack and Discord use (charter D9). The Bot Framework
-adapter itself lives in the Vercel Chat SDK bridge (charter D4), not in the BEAM.
+the same `provider_team_id → workspace` shape Slack uses (charter D29). The Bot Framework adapter
+itself lives in the Vercel Chat SDK bridge (charter D4), not in the BEAM.
 
 ## The irreducible human/browser gates
 
@@ -59,15 +58,19 @@ Azure Portal → **Create a resource → Azure Bot**.
 
 ## 3. Messaging endpoint
 
-Azure Bot → **Configuration → Messaging endpoint**:
+Azure Bot → **Configuration → Messaging endpoint** — the REAL one, as of P3b:
 
 ```
-https://<public-host>/api/messages
+https://guerrilla.barkpark.cloud/connectors/webhooks/teams
 ```
 
-`<public-host>` is the bridge's public HTTPS host. This is where Bot Framework POSTs inbound Teams
-activities; the bridge validates the JWT (issued for the App ID) and hands the turn to the agent.
-Until the bridge ships (P3b) this endpoint 404s — expected, code-dark.
+This is where Bot Framework POSTs inbound Teams activities. The adapter validates the JWT (issued for
+the App ID) and hands the turn to the agent; **an activity with no valid Bot Framework JWT is rejected
+401 in ~2 ms, before any handler runs** — that is the shipped fail-closed behaviour, not a fault.
+
+For a laptop smoke, run `cd connectors && npm run smoke:teams` (it prints exactly what is missing) and
+point the endpoint at an HTTPS tunnel that forwards to it. Bot Framework will not deliver to plain
+HTTP or to a bare IP.
 
 ## 4. Enable the Microsoft Teams channel
 
@@ -125,27 +128,53 @@ customer. Instead:
   the multi-tenant AAD app **in their own tenant** — the irreducible per-org human gate (see gate #3).
 - Every inbound activity carries the org's **Teams tenant id** (`activity.channelData.tenant.id`).
 - The bridge maps `teams_tenant_id → workspace` — the **same `provider_team_id → workspace` shape**
-  Slack (`team_id`) and Discord (`guild_id`) use (charter D9). That mapping is **code-dark until P3b**;
-  this task produces the runbook + the identity pair, **not** the mapping code.
+  Slack (`team_id`) uses (charter D29). That mapping SHIPPED in P3b: `connectors/src/connectors/teams.ts`,
+  `tenantResolution: "payload-team-id"`, one row per org in `chat_bridge.connector_installs`.
 
-## Secrets to provision (workspace-scoped run-secrets)
+## Credentials — ONE operator app, NOT per workspace (charter D42)
 
-Once steps 1–2 yield the identity pair, provision these under the workspace's run-secrets (the
-encrypted run-secret mechanism is documented in [`PROD_OPS.md`](./PROD_OPS.md); secrets are stored
-masked/password-typed). Per charter D9 these are **workspace-scoped** — each installing org's identity
-and tenant map live under that workspace.
+This section **supersedes** the earlier plan to store `teams.app_id` / `teams.app_password` as
+*workspace-scoped* run-secrets. That was wrong, and the correction saves a week of OAuth work:
 
-| Setting | Value | Notes |
+`TeamsAdapterConfig` is `apiUrl / appId / appPassword / appTenantId / appType / federated / logger /
+userName`. There is **no `installationProvider`** and **no per-tenant credential map** (contrast Slack,
+whose adapter takes one), and `appTenantId` is the **bot's own** Azure home tenant — never a customer's.
+So with `appType: "MultiTenant"`, **one operator Azure app serves every customer org**, and the
+customer's tenancy arrives in the payload.
+
+| Setting | Where it lives | Notes |
 |---|---|---|
-| `teams.app_id` | MicrosoftAppId (App/client ID from step 1) | the bot identity |
-| `teams.app_password` | client secret value from step 1 | **masked/secret** |
-| `teams.tenant_id` | home tenant id of the AAD app | for token/authority config |
-| `teams_tenant_id → workspace` | one map row **per installed org** | the org's Teams tenant id → its Barkpark workspace; added as each org onboards (step 7), not up front |
+| `TEAMS_APP_ID` | **operator process env** (one value, all tenants) | MicrosoftAppId from step 1 |
+| `TEAMS_APP_PASSWORD` | **operator process env** | client secret from step 1 — **secret** |
+| `connector_installs.install_key` | one row **per installed org** | the org's Microsoft **tenant id** |
+| `connector_installs.credential_ref` | **NULL** | there is no per-workspace Teams secret to store |
+| `connector_installs.chat_token_ref` | **required** | the workspace-bound `chat` ApiToken (D35) — this, not a Teams credential, is what isolates tenants |
 
-## Fakes-first: what this task delivers vs. what stays dark
+There is therefore **no Add-to-Teams OAuth flow to build**. The per-org install is an act of that org's
+own Teams admin inside their tenant (step 7); it hands Barkpark no token to keep.
 
-This runbook and the resulting **app id / secret pair** are the deliverable. Everything downstream —
-the Bot Framework adapter, the JWT validation on `/api/messages`, the `teams_tenant_id → workspace`
-resolution, streaming replies back through `/v1/chat` — is **code-dark until P3b** (charter D3/D4).
-Doing the Azure registration now means P3b starts with the credentials already in hand rather than
-blocked on a multi-day Azure + Teams-admin loop. Blocks nothing in P0/P1/P2.
+Tenant precedence, in exactly one place (`teamsTenantId()` in `connectors/src/connectors/teams.ts`):
+
+```
+activity.conversation?.tenantId  ??  activity.channelData?.tenant?.id
+```
+
+The same function backs both the webhook's install-key extraction and the event's workspace
+resolution. Two derivations with different precedence would be a confused-deputy vector — a payload
+carrying both fields with different values would verify as one tenant and open a Session as another.
+
+## Status — what is proven, and what is NOT
+
+**Live Teams round-trip: NOT PASSED.** It cannot be proven from CI, and nobody should claim otherwise.
+
+| | |
+|---|---|
+| Adapter + tenant routing + registry entry | **shipped** (P3b) — `connectors/test/teams-connector.test.ts` |
+| Fail-closed on a missing Bot Framework JWT | **proven**: 401 in ~2 ms, no handler, no Session |
+| A SUCCESSFUL Teams turn | **NOT PROVEN** — the JWT is signed by Microsoft; we cannot mint one |
+| Runnable harness | `cd connectors && npm run smoke:teams` |
+
+Everything between here and a live turn is the human gate: the Azure app, the secret, the Azure Bot
+resource, the messaging endpoint, the Teams channel, the manifest — and, once per customer org and
+irreducibly, **that org's own Teams admin consenting inside their tenant**. Barkpark can never do that
+last one on a customer's behalf.

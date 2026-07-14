@@ -1,0 +1,114 @@
+name: connectors
+
+# The connectors/ bridge's merge gate (charter D45). BLOCKING — no
+# continue-on-error anywhere in this file, on purpose.
+#
+# Why this workflow had to exist: the state-layer proofs (schema isolation,
+# resolveOrMint idempotency, tenant install resolution) can only be proven
+# against a REAL Postgres — pg-mem treats `SET search_path` as a no-op and
+# diverges from Postgres on `ON CONFLICT DO NOTHING ... RETURNING`, so a green
+# from a fake would be a fabricated green. The suite therefore SKIPS those
+# proofs (loudly) when no database is reachable, which is honest locally but
+# lethal in CI: before this file, zero of the repo's 29 workflows touched
+# connectors/, and a runner without Postgres would have reported GREEN while
+# running none of the proofs.
+#
+# Reproduced on main, 2026-07-14:
+#   CONNECTORS_TEST_DATABASE_URL=postgres://localhost:1/nope npx vitest run
+#   → exit 0 · "Test Files 8 passed (8)" · "Tests 103 passed | 15 skipped (118)"
+#
+# So this job does two things a plain `vitest run` does not:
+#   1. Stands up a real postgres:15 service and sets CONNECTORS_REQUIRE_DB=1,
+#      which turns an unreachable database from a skip into a hard failure.
+#   2. Asserts skipped == 0 from the JSON reporter. The exit code alone is NOT
+#      enough: the protective proof for the search_path pin surfaces as a
+#      SUITE-level failure plus a skip-count anomaly rather than per-test reds,
+#      so a misconfigured service container could otherwise fool an
+#      exit-code-only gate into a hollow green. The skip count is the tripwire.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "connectors/**"
+      - ".github/workflows/connectors.yml"
+  pull_request:
+    paths:
+      - "connectors/**"
+      - ".github/workflows/connectors.yml"
+
+concurrency:
+  group: connectors-${{ github.ref }}
+  # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
+  # superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Typecheck + tests (real Postgres, zero skips)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: connectors
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # An ADMIN url on purpose: the state-layer tests CREATE and DROP an
+      # ephemeral database of their own (connectors_bridge_test_<pid>_<ts>) and
+      # connect the bridge pool to that, never to this one.
+      CONNECTORS_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Unreachable database ⇒ hard failure, not a skip. This is the flag the
+      # suite reads (test/thread-session-map.test.ts, test/tenant.test.ts).
+      CONNECTORS_REQUIRE_DB: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # npm, NOT pnpm — connectors/ is a standalone service with its own
+      # package-lock.json (the js/ monorepo is the pnpm one).
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Two reporters: `default` keeps the run readable in the CI log, `json`
+      # writes the machine-readable results the skip assertion below consumes.
+      - name: Test (real Postgres, CONNECTORS_REQUIRE_DB=1)
+        run: npx vitest run --reporter=default --reporter=json --outputFile.json=vitest-results.json
+
+      # The zero-skip assertion — the reason this gate is not vacuous.
+      # A skipped DB proof means the service container never came up, and that
+      # must be RED, not a quiet 103/118 green.
+      - name: "Assert zero skipped tests (no vacuous green)"
+        run: |
+          node -e "
+          const r = require('./vitest-results.json');
+          const all = r.testResults.flatMap((f) => f.assertionResults);
+          const skipped = all.filter((a) => a.status === 'pending' || a.status === 'skipped');
+          console.log('tests', all.length, 'skipped', skipped.length);
+          if (skipped.length > 0) {
+            for (const a of skipped) console.error('  skipped:', a.fullName);
+            console.error('VACUOUS GREEN: DB tests were skipped — Postgres was not reachable, so the schema-isolation and tenant-resolution proofs never ran.');
+            process.exit(1);
+          }
+          "

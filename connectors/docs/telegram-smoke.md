@@ -110,6 +110,24 @@ export BARKPARK_WORKSPACE_ID='<the ws uuid the token is bound to>'  # default: s
 export BRIDGE_PERSIST_INSTALL=1   # write the install row to connector_installs
 ```
 
+## 4b. Set the credential key (D35)
+
+```bash
+export CONNECTORS_CREDENTIAL_KEY=$(openssl rand -base64 32)
+```
+
+Both secrets in an install row — the bot token **and** the chat token — are sealed
+with AES-256-GCM, bound by AAD to `(provider, install_key, workspace_id)`. Missing
+key ⇒ the bridge refuses to boot; there is deliberately no plaintext fallback.
+
+Keep the key. Rows sealed under a key you lose can never be opened again (rotate
+by moving the old key to `CONNECTORS_CREDENTIAL_KEY_PREVIOUS` and re-writing the
+rows — never by dropping it).
+
+The chat token you exported above is sealed into **this bot's** install row
+(`chat_token_ref`). The running bridge reads it from there and nowhere else: there
+is no process-wide operator token any more.
+
 ## 5. Run it
 
 ```bash
@@ -180,6 +198,8 @@ SELECT workspace_id, thread_id, session_uuid FROM chat_bridge.thread_session_map
 | `FAILED to create a session on /v1/chat` + `401`/`403` | the token lacks the `chat` permission, or carries no `workspace_id` |
 | `FAILED …` + `ECONNREFUSED` | nothing is listening at `BARKPARK_API_URL` |
 | `outcome  dropped_no_tenant` | no install row matches this bot id — the fail-closed path working as designed |
+| `outcome  dropped_no_install` | the row's sealed refs did not open — wrong `CONNECTORS_CREDENTIAL_KEY`, or the row was sealed under another key (or moved between workspaces) |
+| `outcome  dropped_no_chat_token` | the install has no `chat_token_ref` sealed. The bridge will **not** fall back to an operator token (D35) |
 | `outcome  empty_reply` | the turn produced no text; we post nothing rather than an empty bubble |
 | No `[smoke] inbound` at all | the bot never received the update. Another process may be polling the same bot, or a webhook is registered (polling and webhooks are mutually exclusive on Telegram) |
 
@@ -188,6 +208,9 @@ SELECT workspace_id, thread_id, session_uuid FROM chat_bridge.thread_session_map
 - Slack / Discord / Teams / WhatsApp / iMessage — **P3**, deliberately not wired.
 - Webhook mode (`mode: "webhook"`) — the connector supports it; only polling is smoked.
 - The sandboxed runner (**P1**) and tool connectors (**P4**).
-- Real per-workspace token resolution: the bridge currently uses one operator
-  token for every tenant (`chatClientFor` ignores its `workspaceId`). The seam
-  is there; wiring per-workspace tokens is follow-up work.
+- A self-serve install flow: `upsertInstall()` (what this smoke calls) is an
+  operator write path. Connecting a bot from Studio is P3 connect UX.
+- A self-serve **mint** for the per-install chat token: `Auth.create_token/5`
+  still has to be called from a console. The smoke seals whatever
+  `BARKPARK_CHAT_TOKEN` you export into *this install's* `chat_token_ref` — it is
+  an install-provisioning input, not a process-wide token (D35).

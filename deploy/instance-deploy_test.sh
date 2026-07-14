@@ -26,6 +26,13 @@
 #     the built bp binary advertises `mcp serve --http` (fake go emits a fake
 #     bp; GO_HTTP=1 flips the advertisement); the written mcp.env pins the
 #     stable front and carries NO token line
+#   - the /connectors route + barkpark-connectors install guard (connectors
+#     D34/D46): the route is injected once, idempotently, BEFORE the bare slot
+#     reverse_proxy, and its localhost:4020 survives the port-flip sed and the
+#     rollback flip; the unit is installed ONLY when node resolves, `npm ci`
+#     succeeds and the tsx runner exists, and is DISABLED again if it does not
+#     stay active (no crash-loop); connectors.env is 0600, pins the stable
+#     public front, and carries NO chat token (the multi-tenant hole)
 # The fake git records every invocation to $GITLOG so the channel asserts can
 # see which git verb ran. Never touches a real server.
 # Run: bash deploy/instance-deploy_test.sh
@@ -68,16 +75,40 @@ exit 0
 EOF
   cat > "$dir/systemctl" <<'EOF'
 #!/usr/bin/env bash
-echo "systemctl $*" >> "$SYSCTLLOG"; exit 0
+echo "systemctl $*" >> "$SYSCTLLOG"
+# `is-active <unit>` answers the connectors health gate; UNIT_ACTIVE=failed
+# simulates a bridge that boots and immediately dies (crash-loop).
+[ "${1:-}" = "is-active" ] && echo "${UNIT_ACTIVE:-active}"
+exit 0
 EOF
   cat > "$dir/install" <<'EOF'
 #!/usr/bin/env bash
 echo "install $*" >> "$SYSCTLLOG"; exit 0
 EOF
+  # URL-aware: the connectors health probe (:4020) answers with its OWN code, so
+  # a healthy app slot and a silent bridge can be simulated in the same run.
   cat > "$dir/curl" <<'EOF'
 #!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in *:4020*) printf '%s' "${CONNECTORS_HEALTH_CODE:-000}"; exit 0 ;; esac
+done
 printf '%s' "${HEALTH_CODE:-200}"
 EOF
+  # Fake asdf: `asdf where nodejs` locates the node install below.
+  # NODE_MISSING=1 makes it fail (box without an asdf nodejs).
+  cat > "$dir/asdf" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "where" ]; then
+  [ -n "${NODE_MISSING:-}" ] && exit 1
+  echo "$HOME/.asdf/installs/nodejs/26.5.0"
+  exit 0
+fi
+exit 0
+EOF
+  # A bare asdf SHIM on PATH: exits non-zero exactly like the real box's
+  # `node -v` (=> "command not found"/no version set). resolve_node_bin MUST
+  # reject it rather than point the unit at a binary that cannot run.
+  printf '#!/usr/bin/env bash\nexit 126\n' > "$dir/node"
   # GNU-style `sed -i "expr" file` shim for macOS (the script targets Linux).
   cat > "$dir/sed" <<'EOF'
 #!/usr/bin/env bash
@@ -121,24 +152,46 @@ setup_case() {
   # fake go in the shims dir (HOME is $TMP/home), which the script puts FIRST.
   mkdir -p "$TMP/home/.asdf/shims"
   cp "$FAKE/go" "$TMP/home/.asdf/shims/go"
-  APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd"
-  printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\n' > "$APP/.env"
+  # The asdf-managed node the box actually has (bare `node` is NOT on its PATH).
+  # resolve_node_bin must find THIS one, via `asdf where nodejs`.
+  NODEDIR="$TMP/home/.asdf/installs/nodejs/26.5.0/bin"; mkdir -p "$NODEDIR"
+  printf '#!/usr/bin/env bash\n[ "${1:-}" = "-v" ] && { echo v26.5.0; exit 0; }\nexit 0\n' > "$NODEDIR/node"
+  # Fake npm: records the call, and `npm ci` materializes the tsx runner the
+  # install guard demands. NPM_FAIL=1 fails the install; NPM_NO_TSX=1 installs
+  # deps WITHOUT tsx (a --omit=dev regression) — the guard must catch both.
+  cat > "$NODEDIR/npm" <<'EOF'
+#!/usr/bin/env bash
+echo "npm $*" >> "$SYSCTLLOG"
+[ -n "${NPM_FAIL:-}" ] && exit 1
+if [ "${1:-}" = "ci" ] && [ -z "${NPM_NO_TSX:-}" ]; then
+  mkdir -p node_modules/tsx/dist && : > node_modules/tsx/dist/cli.mjs
+fi
+exit 0
+EOF
+  chmod +x "$NODEDIR"/*
+  APP="$TMP/app"; mkdir -p "$APP/api" "$APP/deploy/systemd" "$APP/connectors"
+  printf 'BARKPARK_KEK=x\nBARKPARK_CLOAK_KEY=y\nPREVIEW_JWT_SECRET=z\nDATABASE_URL=postgres://bp:pw@localhost/bp\n' > "$APP/.env"
   cp "$HERE/systemd/barkpark-slot@.service" "$APP/deploy/systemd/"
   cp "$HERE/systemd/barkpark-mcp.service" "$APP/deploy/systemd/"
+  cp "$HERE/systemd/barkpark-connectors.service" "$APP/deploy/systemd/"
   CADDY="$TMP/Caddyfile"
   printf 'guerrilla.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n' > "$CADDY"
   export MIXLOG="$TMP/mix.log" SYSCTLLOG="$TMP/sysctl.log" GITLOG="$TMP/git.log"
   : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
 }
 
-run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_* from env)
+run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NODE_*/NPM_*/UNIT_ACTIVE from env)
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
     BARKPARK_MCP_ENV_FILE="$TMP/mcp.env" \
+    BARKPARK_CONNECTORS_ENV_FILE="$TMP/connectors.env" \
+    BARKPARK_NODE_LINK="$TMP/barkpark-node" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
     GO_HTTP="${GO_HTTP:-}" GO_FAIL="${GO_FAIL:-}" \
+    NODE_MISSING="${NODE_MISSING:-}" NPM_FAIL="${NPM_FAIL:-}" NPM_NO_TSX="${NPM_NO_TSX:-}" \
+    UNIT_ACTIVE="${UNIT_ACTIVE:-active}" CONNECTORS_HEALTH_CODE="${CONNECTORS_HEALTH_CODE:-000}" \
     bash "$SCRIPT" > "$TMP/out.log" 2>&1
   echo $?
 }
@@ -184,6 +237,35 @@ check "flip sed left :4010 untouched"     "grep -q 'reverse_proxy localhost:4010
 check "mcp unit NOT enabled (bp lacks --http)" "! grep -q 'enable barkpark-mcp' '$SYSCTLLOG'"
 check "guard skip logged honestly"        "grep -q 'skipping barkpark-mcp install' '$TMP/out.log'"
 check "no mcp.env written on skip"        "[ ! -f '$TMP/mcp.env' ]"
+check "connectors route armed once"       "[ \"\$(grep -c 'BARKPARK_CONNECTORS_ROUTE' '$CADDY')\" = '1' ]"
+check "connectors route proxies :4020, exactly one line" "[ \"\$(grep -c 'localhost:4020' '$CADDY')\" = '1' ]"
+check "connectors matcher covers /connectors and its subtree" "grep -q '@barkpark_connectors path /connectors /connectors/\*' '$CADDY'"
+check "connectors handle sits before the bare slot proxy" "[ \"\$(grep -n 'handle @barkpark_connectors' '$CADDY' | head -1 | cut -d: -f1)\" -lt \"\$(grep -nE 'reverse_proxy localhost:400[01]' '$CADDY' | head -1 | cut -d: -f1)\" ]"
+check "flip sed left :4020 untouched"     "grep -q 'reverse_proxy localhost:4020' '$CADDY'"
+check "node resolved via asdf, symlinked" "[ \"\$(readlink '$TMP/barkpark-node')\" = '$TMP/home/.asdf/installs/nodejs/26.5.0/bin/node' ]"
+check "npm ci ran in the connectors dir"  "grep -q '^npm ci' '$SYSCTLLOG' && [ -f '$APP/connectors/node_modules/tsx/dist/cli.mjs' ]"
+check "connectors unit installed"         "grep -q 'barkpark-connectors.service /etc/systemd/system/barkpark-connectors.service' '$SYSCTLLOG'"
+check "connectors unit enabled + restarted" "grep -q 'systemctl enable barkpark-connectors' '$SYSCTLLOG' && grep -q 'systemctl restart barkpark-connectors' '$SYSCTLLOG'"
+check "connectors unit health-gated on is-active" "grep -q 'systemctl is-active barkpark-connectors' '$SYSCTLLOG'"
+check "active bridge stays enabled"       "! grep -q 'disable --now barkpark-connectors' '$SYSCTLLOG'"
+# GNU stat FIRST, BSD second — never the reverse. On Linux `stat -f` is a
+# *filesystem* stat: it SUCCEEDS on a file and prints something that is not a
+# mode, so a `stat -f ... || stat -c ...` fallback never reaches the GNU form
+# and silently compares garbage to '600'. `stat -c` fails cleanly on macOS
+# (illegal option), so probing it first is the only ordering that works on both.
+check "connectors.env is 0600 (holds real secrets)" "[ \"\$(stat -c '%a' '$TMP/connectors.env' 2>/dev/null || stat -f '%Lp' '$TMP/connectors.env')\" = '600' ]"
+check "connectors.env pins the STABLE public front" "grep -q '^BARKPARK_API_URL=https://test.example\$' '$TMP/connectors.env'"
+check "connectors.env carries the loopback listen addr" "grep -q '^CONNECTORS_HTTP_ADDR=127.0.0.1:4020\$' '$TMP/connectors.env'"
+check "connectors.env carries the path prefix" "grep -q '^CONNECTORS_PATH_PREFIX=/connectors\$' '$TMP/connectors.env'"
+check "connectors.env sources DATABASE_URL from .env" "grep -q '^DATABASE_URL=postgres://bp:pw@localhost/bp\$' '$TMP/connectors.env'"
+check "connectors.env carries a NON-EMPTY credential key" "grep -qE '^CONNECTORS_CREDENTIAL_KEY=.+\$' '$TMP/connectors.env'"
+check "credential key persisted in .env (stable across deploys)" "grep -q '^CONNECTORS_CREDENTIAL_KEY=' '$APP/.env'"
+check "connectors.env NEVER carries a chat token (the multi-tenant hole)" "! grep -qi 'chat_token\|BARKPARK_CHAT_TOKEN' '$TMP/connectors.env'"
+check "connectors.env holds no bare operator token line" "! grep -qiE '^[A-Z_]*TOKEN=' '$TMP/connectors.env'"
+check "committed unit holds NO token env line" "! grep -qiE '^(Environment|ExecStart).*TOKEN' '$HERE/systemd/barkpark-connectors.service'"
+check "committed unit is PLAIN (never the slot@ template)" "! grep -q '%i' '$HERE/systemd/barkpark-connectors.service'"
+check "committed unit ExecStart uses the deploy-resolved node link" "grep -q '^ExecStart=/usr/local/bin/barkpark-node ' '$HERE/systemd/barkpark-connectors.service'"
+check "committed unit hardcodes NO node version" "! grep -qE 'ExecStart=.*(asdf|nodejs/[0-9])' '$HERE/systemd/barkpark-connectors.service'"
 check "old slot + legacy unit retired"    "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG' && grep -q 'disable --now barkpark' '$SYSCTLLOG'"
 check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"
@@ -202,7 +284,10 @@ check "green root left in place (instant rollback)" "[ -f '$APP/api/_build_green
 check "Caddy flipped back to :4000"       "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
 check "no double arm (idempotent)"        "[ \"\$(grep -c 'handle_errors {' '$CADDY')\" = '1' ]"
 check "no double mcp arm (idempotent)"    "[ \"\$(grep -c 'BARKPARK_MCP_ROUTE' '$CADDY')\" = '1' ]"
+check "no double connectors arm (idempotent)" "[ \"\$(grep -c 'BARKPARK_CONNECTORS_ROUTE' '$CADDY')\" = '1' ]"
 check "second flip sed left :4010 untouched" "[ \"\$(grep -c 'localhost:4010' '$CADDY')\" = '1' ]"
+check "second flip sed left :4020 untouched" "[ \"\$(grep -c 'localhost:4020' '$CADDY')\" = '1' ]"
+check "credential key NOT regenerated on redeploy" "[ \"\$(grep -c '^CONNECTORS_CREDENTIAL_KEY=' '$APP/.env')\" = '1' ]"
 check "flipped Caddyfile still caddy-valid" "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
 check "green slot retired"                "grep -q 'disable --now barkpark-slot@green' '$SYSCTLLOG'"
 check "blue stamp written, green stamp kept" "[ \"\$(cat '$APP/.slots/blue.sha' 2>/dev/null)\" = 'newsha2' ] && [ \"\$(cat '$APP/.slots/green.sha' 2>/dev/null)\" = 'newsha' ]"
@@ -325,6 +410,7 @@ check "checkout reset to the stamp sha"   "grep -q 'reset --hard v1sha' '$GITLOG
 check "old slot rebooted"                 "grep -q 'restart barkpark-slot@green' '$SYSCTLLOG'"
 check "Caddy flipped back to :4001"       "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
 check "rollback flip sed left :4010 untouched" "[ \"\$(grep -c 'localhost:4010' '$CADDY')\" = '1' ]"
+check "rollback flip sed left :4020 untouched" "[ \"\$(grep -c 'localhost:4020' '$CADDY')\" = '1' ]"
 check "rolled-back Caddyfile caddy-valid" "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
 check "STATE rewritten to rolled-back sha" "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'v1sha' ]"
 check "rolled-back slot enabled (reboot-safe)" "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
@@ -366,6 +452,56 @@ rc="$(GO_FAIL=1 run_deploy 200 mcpsha2)"
 check "go build failure: deploy still exit 0 (non-fatal)" "[ '$rc' = '0' ]"
 check "go build failure: unit NOT enabled" "! grep -q 'enable barkpark-mcp' '$SYSCTLLOG'"
 check "go build failure: no mcp.env written" "[ ! -f '$TMP/mcp.env' ]"
+rm -rf "$TMP"
+
+echo "== Case 12: barkpark-connectors install guard — node / npm / tsx / crash-loop =="
+setup_case
+# (a) no usable node: asdf has no nodejs and the bare `node` on PATH is a shim
+# that cannot run. The unit must NOT be installed and the deploy must still pass.
+rm -rf "$TMP/home/.asdf/installs"
+rc="$(NODE_MISSING=1 run_deploy 200 nonodesha)"
+check "no node: deploy still exit 0 (non-fatal)"  "[ '$rc' = '0' ]"
+check "no node: unit NOT enabled"                 "! grep -q 'enable barkpark-connectors' '$SYSCTLLOG'"
+check "no node: no connectors.env written"        "[ ! -f '$TMP/connectors.env' ]"
+check "no node: refused honestly in the log"      "grep -q 'no usable node' '$TMP/out.log'"
+check "no node: route STILL armed (upstream just dead -> maintenance 503)" "[ \"\$(grep -c 'BARKPARK_CONNECTORS_ROUTE' '$CADDY')\" = '1' ]"
+rm -rf "$TMP"
+
+# (b) npm ci fails: no unit, no env file, deploy survives.
+setup_case
+rc="$(NPM_FAIL=1 run_deploy 200 npmfailsha)"
+check "npm ci failure: deploy still exit 0"       "[ '$rc' = '0' ]"
+check "npm ci failure: unit NOT enabled"          "! grep -q 'enable barkpark-connectors' '$SYSCTLLOG'"
+check "npm ci failure: no connectors.env written" "[ ! -f '$TMP/connectors.env' ]"
+check "npm ci failure logged honestly"            "grep -q 'npm ci failed' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (c) deps installed but no tsx runner (an --omit=dev regression): the unit's
+# ExecStart would point at a missing file, so the guard must refuse.
+setup_case
+rc="$(NPM_NO_TSX=1 run_deploy 200 notsxsha)"
+check "no tsx runner: deploy still exit 0"        "[ '$rc' = '0' ]"
+check "no tsx runner: unit NOT enabled"           "! grep -q 'enable barkpark-connectors' '$SYSCTLLOG'"
+check "no tsx runner: refused honestly"           "grep -q 'no tsx runner' '$TMP/out.log'"
+rm -rf "$TMP"
+
+# (d) the bridge boots and immediately dies (missing config): systemd would
+# Restart=on-failure it forever, so the deploy DISABLES it again and says so.
+setup_case
+rc="$(UNIT_ACTIVE=failed run_deploy 200 crashsha)"
+check "crash-looping bridge: deploy still exit 0" "[ '$rc' = '0' ]"
+check "crash-looping bridge: unit disabled again" "grep -q 'disable --now barkpark-connectors' '$SYSCTLLOG'"
+check "crash-looping bridge: named honestly"      "grep -q 'did not stay active' '$TMP/out.log'"
+check "crash-looping bridge: app slot still flipped (:4001)" "[ \"\$(first_upstream)\" = 'localhost:4001' ]"
+rm -rf "$TMP"
+
+# (e) healthy bridge WITH an HTTP surface: the health probe is log-only, and a
+# 200 on the path prefix is what the post-merge live check asks for.
+setup_case
+rc="$(CONNECTORS_HEALTH_CODE=200 run_deploy 200 healthsha)"
+check "healthy bridge: exit 0"                    "[ '$rc' = '0' ]"
+check "healthy bridge: unit stays enabled"        "grep -q 'systemctl enable barkpark-connectors' '$SYSCTLLOG' && ! grep -q 'disable --now barkpark-connectors' '$SYSCTLLOG'"
+check "healthy bridge: health probe logged 200"   "grep -q '/connectors/health = 200' '$TMP/out.log'"
 rm -rf "$TMP"
 
 echo

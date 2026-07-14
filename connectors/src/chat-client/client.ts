@@ -211,7 +211,7 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
  */
 function augmentMessage(code: string, status: number, message: string): string {
   if (status === 403 && code === "forbidden") {
-    return `${message} — a chat token must be workspace-bound (mint BARKPARK_CHAT_TOKEN with a workspace_id and the \`chat\` permission).`;
+    return `${message} — a chat token must be workspace-bound (mint it with a workspace_id and the \`chat\` permission, then seal it into that install's chat_token_ref).`;
   }
   return message;
 }

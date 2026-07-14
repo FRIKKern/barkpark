@@ -41,11 +41,17 @@ export type TenantResolution = "credential-bound" | "payload-team-id";
 
 /**
  * One workspace's install of one connector — a row of
- * `chat_bridge.connector_installs` (D29).
+ * `chat_bridge.connector_installs` (D29/D35), with both secrets OPENED.
  *
  * This is what `adapterFactory` is handed, and it is the whole of per-workspace
  * credential isolation (D1): a tenant's adapter is constructed from that tenant's
- * credential and nothing else. The core never logs or forwards `credentialRef`.
+ * provider secret, and its /v1/chat traffic travels on that tenant's OWN chat
+ * token — both read from the SAME row that routed the event. The core never logs
+ * or forwards either secret.
+ *
+ * At REST both secrets are sealed (AES-256-GCM, AAD-bound to this row's
+ * identity — see `src/crypto/credential-cipher.ts`). They are plaintext only in
+ * this in-memory shape, opened by `tenant/installs.ts` on the way out of SQL.
  */
 export interface ConnectorInstall {
   /** The connector id this install belongs to (e.g. "telegram"). */
@@ -56,18 +62,54 @@ export interface ConnectorInstall {
    * secret must never be used here.
    */
   installKey: string;
-  /** The workspace that owns this install. */
+  /** The workspace that owns this install. Part of the seal's AAD. */
   workspaceId: WorkspaceId;
   /**
-   * Reference to the provider secret (bot token, signing secret).
+   * The provider secret (bot token, signing secret), OPENED — or NULL when the
+   * connector has NO per-workspace provider credential.
    *
-   * KNOWN GAP: today this column holds the raw secret in plaintext. Encrypting it
-   * (or pointing it at a real per-workspace credential store) is filed as
-   * `connectors-encrypt-install-credentials` and blocked on D9's run-secrets
-   * workspace scoping. Named here so nobody mistakes the name for a promise.
+   * Sealed at rest in `connector_installs.credential_ref` (AES-256-GCM, AAD-bound
+   * to this row's identity — D35/D37). Plaintext only in this in-memory shape.
+   *
+   * NULL is a first-class case, not an error (D42): Microsoft Teams runs on ONE
+   * operator Azure app for every customer org (`appType: "MultiTenant"`), so a
+   * Teams install has no per-workspace secret to store. The `credential_ref`
+   * column was already nullable in `db/schema.ts`; a non-nullable TYPE would have
+   * fail-closed every Teams row out of `lookupInstall`/`listInstalls`. The
+   * tenant-safety fail-closed rule lives on `workspace_id` (a routable install
+   * MUST have one), not on the credential.
+   *
+   * A connector that DOES need a credential (Telegram's bot token, Discord's
+   * triple, WhatsApp's Meta four) must reject a null here in its own
+   * `adapterFactory` — LOUDLY, at mount. A silent fallback to an ambient
+   * `TELEGRAM_BOT_TOKEN`/`DISCORD_BOT_TOKEN` env var would send one workspace's
+   * messages in another's name: this wave's headline bug, wearing a hat.
    */
-  credentialRef: string;
+  credentialRef: string | null;
+  /**
+   * THIS workspace's Barkpark `chat`-permission ApiToken, OPENED. Sealed at rest
+   * in `connector_installs.chat_token_ref`.
+   *
+   * Nullable on purpose: an install can exist before its chat token is minted (an
+   * OAuth callback lands the provider secret first). A missing token is a
+   * fail-closed DROP at dispatch (`dropped_no_chat_token`) — there is no operator
+   * -token fallback anywhere in the request path, because a fallback is exactly
+   * how one token silently comes to serve every tenant.
+   *
+   * Optional in the TYPE only so the connectors that never mint a client (an
+   * adapterFactory needs the provider secret, not this) can build an install
+   * literal without it. Absent and null mean the same thing: drop.
+   */
+  chatToken?: string | null;
 }
+
+/**
+ * An install whose chat token is PRESENT — the only shape allowed to mint a
+ * ChatClient. Narrowing to this type at the one place it is checked (dispatch)
+ * is what makes "no token => no HTTP call" a compile-time property rather than a
+ * convention someone can forget.
+ */
+export type AuthorizedInstall = ConnectorInstall & { chatToken: string };
 
 /**
  * A raw inbound provider event as it reaches the bridge (webhook body or poll
@@ -129,6 +171,81 @@ export interface TenantContext {
 }
 
 /**
+ * Where the inbound HTTP transport finds the install key (charter D39).
+ *
+ * - `path` — the provider registers a per-install URL, so the key IS a path
+ *   segment: `POST|GET {prefix}/webhooks/:provider/:installKey`. WhatsApp (each
+ *   workspace's Meta app points at its own URL) and Telegram in webhook mode.
+ * - `payload` — the provider's request_url is APP-WIDE (one URL for every
+ *   workspace), so the key must be dug out of the body: Slack's `team_id`,
+ *   Teams' tenant id. Route: `POST|GET {prefix}/webhooks/:provider`.
+ */
+export type WebhookKeySource = "path" | "payload";
+
+/**
+ * A connector's inbound-webhook declaration — the ONE generic member the HTTP
+ * seam needs. This is the whole contract addition P3's webhook channels required:
+ * Slack, Teams and WhatsApp all land as a registry entry with a `webhook` block,
+ * and `core/dispatch.ts` / `tenant/resolve.ts` / `connector/registry.ts` /
+ * `turn/turn-loop.ts` are untouched.
+ *
+ * Connectors with no `webhook` (Telegram polling, Discord's gateway socket) are
+ * simply not routable over HTTP — their URLs 404, opaquely, like any other
+ * unknown route.
+ */
+export interface ConnectorWebhook {
+  keySource: WebhookKeySource;
+  /**
+   * Extract the install key from the RAW body bytes (required for
+   * `keySource: "payload"`, ignored for `"path"`).
+   *
+   * Handed the raw body EXACTLY as it arrived — never a re-serialised parse —
+   * because the same bytes are what the adapter's signature verification will
+   * HMAC. Return `null` when the key is absent or unparseable: a null key is a
+   * fail-closed 404 (or the handshake below), never a guess at "the only
+   * workspace".
+   *
+   * May be async: Slack verifies the app-wide HMAC before it will name a team, and
+   * WebCrypto's `verify` is a promise.
+   *
+   * Demuxing BEFORE the signature is verified is safe by construction: the key
+   * only SELECTS which secret to verify against. A forged key points at another
+   * tenant's install whose secret will not verify the attacker's body, so the
+   * adapter rejects it cryptographically (proven: an A-signed body handed to B's
+   * adapter -> 401).
+   */
+  extractInstallKey?(
+    rawBody: string,
+    headers: Headers,
+  ): string | null | Promise<string | null>;
+  /**
+   * Answer a request that legitimately carries NO install key — the provider's
+   * endpoint-VERIFICATION handshake.
+   *
+   * This member exists because without it the seam is unusable for Slack: Slack
+   * pings the Events request_url with `{"type":"url_verification","challenge":…}`
+   * BEFORE any workspace has installed the app, and that payload carries no
+   * `team_id`. `extractInstallKey` correctly returns null, the demux correctly
+   * finds no install — and the app could then never be configured at all. The
+   * generic fix is a tenant-less hook, not a `if (provider === "slack")` in the
+   * router.
+   *
+   * CONTRACT, and it is narrow on purpose:
+   *   - consulted ONLY when `extractInstallKey` yielded null, so it can never
+   *     shadow a real tenant's traffic;
+   *   - it MUST NOT touch a tenant credential or a Chat — it has no install row
+   *     and is not entitled to one. Slack's implementation verifies the APP-WIDE
+   *     signing secret and echoes the challenge; that is the whole of it;
+   *   - returning `null` falls through to the SAME opaque 404 as everything else,
+   *     so a connector that does not implement it loses nothing and leaks nothing.
+   */
+  handleUnkeyed?(
+    rawBody: string,
+    headers: Headers,
+  ): Response | null | Promise<Response | null>;
+}
+
+/**
  * A channel or tool connector (charter D30).
  *
  * Telegram registers as a first-class Connector, identical in shape to every
@@ -141,6 +258,15 @@ export interface Connector<TPayload = unknown> {
   auth: ConnectorAuth;
   /** Declares which routing strategy `resolveTenant` implements. */
   tenantResolution: TenantResolution;
+  /**
+   * Inbound HTTP transport, for the channels whose transport IS an HTTP request
+   * (Slack, Teams, WhatsApp). Absent for poll/socket channels (Telegram polling,
+   * Discord gateway) — they start their transport in `listen()` instead.
+   *
+   * Declaring it is the ONLY thing a webhook channel does to become routable:
+   * `http/webhook-server.ts` reads this member off the registry and nothing else.
+   */
+  webhook?: ConnectorWebhook;
   /**
    * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
    * Called once per install; the adapter is handed to `new Chat({ adapters })`.

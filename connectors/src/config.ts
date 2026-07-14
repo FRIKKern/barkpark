@@ -2,9 +2,15 @@
  * Typed environment configuration for the connectors bridge.
  *
  * The bridge is a standalone, PERSISTENT Node service (charter D27/D32) and a
- * CLIENT of Barkpark's /v1/chat HTTP+SSE API (D33). It holds exactly one piece of
- * per-conversation state — the thread_id -> Session UUID map (D28) — in its OWN
- * Postgres schema (`chat_bridge`), never in a Barkpark/Ecto-owned table.
+ * CLIENT of Barkpark's /v1/chat HTTP+SSE API (D33). It holds two pieces of
+ * per-tenant state, both in its OWN Postgres schema (`chat_bridge`), never in a
+ * Barkpark/Ecto-owned table: the thread_id -> Session UUID map (D28) and the
+ * connector_installs routing table (D29).
+ *
+ * There is NO process-wide chat token any more. Each install carries its OWN
+ * workspace-bound `chat` ApiToken, sealed in its `connector_installs` row and
+ * opened per turn (D35) — so the credential a tenant's traffic travels on is
+ * derived from the same row that routed it, and nothing else.
  *
  * Nothing here reads secrets eagerly at import time: `loadConfig()` is called by
  * the composition root, so tests inject their own values without a populated
@@ -17,18 +23,70 @@ export interface BridgeConfig {
   /** Base URL of the Barkpark API exposing /v1/chat (e.g. https://guerrilla.barkpark.cloud). */
   apiUrl: string;
   /**
-   * A workspace-bound ApiToken carrying the `chat` permission (D33).
+   * Base64 32-byte AES-256-GCM key sealing every install's secrets
+   * (`CONNECTORS_CREDENTIAL_KEY`). An INDEPENDENT key — not `BARKPARK_KEK`, not
+   * an ApiToken.
    *
-   * KNOWN GAP: this is ONE operator token for the whole process. Per-tenant
-   * isolation of /v1/chat reads is therefore only as strong as this token — a
-   * `:global` one would see every workspace's sessions. The per-workspace token
-   * store is filed as `connectors-per-workspace-chat-token`; `chatClientFor()` in
-   * index.ts is the seam it plugs into.
+   * Read through `required()` on purpose: a missing key is a BOOT FAILURE, never
+   * a plaintext fallback. Encryption you can accidentally turn off by unsetting
+   * a variable is not encryption.
    */
-  chatToken: string;
+  credentialKey: string;
+  /**
+   * Base64 keys tried only AFTER `credentialKey` fails to open a blob
+   * (`CONNECTORS_CREDENTIAL_KEY_PREVIOUS`, comma-separated for a rotation chain).
+   * Never used to seal. Lets a key rotation drain as rows are rewritten instead
+   * of demanding a flag day.
+   */
+  previousCredentialKeys: string[];
   /** The agent's display name in a channel. */
   userName: string;
+  /** The inbound HTTP transport for webhook channels (Slack/Teams/WhatsApp). */
+  webhook: WebhookConfig;
 }
+
+/**
+ * Inbound webhook transport config (charter D34/D39).
+ *
+ * `host`/`port` come from `CONNECTORS_HTTP_ADDR` — the ONE name the deploy writes
+ * into `/etc/barkpark/connectors.env` (`127.0.0.1:4020`, D34). It is `host:port`,
+ * not a bare port, and the host half is load-bearing: on guerrilla the bridge must
+ * bind LOOPBACK only, because Caddy fronts it on a path route and a bridge
+ * listening on 0.0.0.0 would put every provider webhook — and the `x-forwarded-*`
+ * headers the seam trusts — directly on the public internet.
+ *
+ * `pathPrefix` is load-bearing too: Caddy's `handle` does NOT strip the prefix, so
+ * the bridge's router owns the FULL `/connectors/...` path. If the proxy and the
+ * bridge disagree about it, EVERY webhook 404s silently.
+ *
+ * `publicBaseUrl` is equally load-bearing behind a proxy: the socket speaks plain
+ * http, but adapters that validate the audience/URL (Teams' Bot Framework JWT)
+ * need the PUBLIC https URL in the request they are handed.
+ */
+export interface WebhookConfig {
+  /** Poll/socket-only deployments (Telegram, Discord) can turn the listener off. */
+  enabled: boolean;
+  /** The interface to bind. `127.0.0.1` behind Caddy — never `0.0.0.0` in Cloud. */
+  host: string;
+  port: number;
+  /** Default `/connectors`. Must match the path the provider is configured with. */
+  pathPrefix: string;
+  /** e.g. `https://guerrilla.barkpark.cloud`. Unset = derive from x-forwarded-proto/host. */
+  publicBaseUrl?: string;
+  /** Bodies larger than this are rejected with a 413 (never a socket teardown). */
+  maxBodyBytes: number;
+}
+
+/**
+ * Loopback by default, and deliberately so: the seam trusts `x-forwarded-proto` /
+ * `x-forwarded-host` when `publicBaseUrl` is unset (that is what makes Teams' JWT
+ * audience check work behind Caddy), and those headers are only trustworthy from a
+ * proxy. A bridge that defaulted to 0.0.0.0 would let a stranger spoof them.
+ */
+const DEFAULT_WEBHOOK_HOST = "127.0.0.1";
+const DEFAULT_WEBHOOK_PORT = 4020;
+const DEFAULT_WEBHOOK_PATH_PREFIX = "/connectors";
+const DEFAULT_WEBHOOK_MAX_BODY_BYTES = 1_048_576;
 
 export class MissingConfigError extends Error {
   constructor(key: string) {
@@ -46,15 +104,167 @@ function required(env: NodeJS.ProcessEnv, key: string): string {
 }
 
 /**
+ * MIGRATION NOTE — `BARKPARK_CHAT_TOKEN` is DEAD on the request path.
+ *
+ * It used to be one operator token that served every tenant: `chatClientFor()`
+ * ignored its `workspaceId` argument entirely, so a `:global` token would have
+ * read every workspace's sessions. The token now lives per install, sealed in
+ * `chat_bridge.connector_installs.chat_token_ref` (D35). An operator whose old
+ * `.env` still exports it deserves to be told it does nothing, rather than to
+ * discover it silently by a tenant reading another tenant's Session.
+ */
+const RETIRED_ENV = "BARKPARK_CHAT_TOKEN";
+
+function warnRetiredEnv(env: NodeJS.ProcessEnv): void {
+  if (env[RETIRED_ENV]?.trim()) {
+    console.warn(
+      `[bridge] ${RETIRED_ENV} is set but IGNORED — the bridge no longer uses a ` +
+        "process-wide chat token. Each install carries its own workspace-bound " +
+        "token, sealed in chat_bridge.connector_installs.chat_token_ref. " +
+        "Provision one per install (see connectors/README.md) and unset this.",
+    );
+  }
+}
+
+/** Split a comma-separated key list, tolerating whitespace and trailing commas. */
+function splitKeys(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(",")
+    .map((k) => k.trim())
+    .filter((k) => k !== "");
+}
+
+/**
  * Read and validate the bridge configuration from the environment.
  * Fail-closed: a missing required variable throws rather than booting a
  * half-configured bridge. `env` is injectable for tests.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
+  warnRetiredEnv(env);
+
   return {
     databaseUrl: required(env, "DATABASE_URL"),
     apiUrl: required(env, "BARKPARK_API_URL"),
-    chatToken: required(env, "BARKPARK_CHAT_TOKEN"),
+    credentialKey: required(env, "CONNECTORS_CREDENTIAL_KEY"),
+    previousCredentialKeys: splitKeys(env["CONNECTORS_CREDENTIAL_KEY_PREVIOUS"]),
     userName: env["BRIDGE_USER_NAME"]?.trim() || "barkpark",
+    webhook: loadWebhookConfig(env),
   };
+}
+
+/**
+ * Parse `CONNECTORS_HTTP_ADDR` — `host:port`, or a bare `port`.
+ *
+ * This is the name `deploy/instance-deploy.sh` writes into
+ * `/etc/barkpark/connectors.env` (D34), so it is the name that has to work: a
+ * bridge that silently ignored it would bind its default port while Caddy
+ * reverse-proxied :4020, and EVERY provider webhook would land on the maintenance
+ * 503 — with a green deploy and a running unit to look at.
+ *
+ * A malformed value is an ERROR, never a silent fallback, for the same reason.
+ * IPv6 is accepted in bracket form (`[::1]:4020`).
+ */
+function httpAddrFromEnv(env: NodeJS.ProcessEnv): {
+  host: string;
+  port: number;
+} {
+  const raw = env["CONNECTORS_HTTP_ADDR"]?.trim();
+  if (raw === undefined || raw === "") {
+    return {
+      host: env["CONNECTORS_WEBHOOK_HOST"]?.trim() || DEFAULT_WEBHOOK_HOST,
+      port: intFromEnv(
+        env,
+        "CONNECTORS_WEBHOOK_PORT",
+        DEFAULT_WEBHOOK_PORT,
+        1,
+        65535,
+      ),
+    };
+  }
+
+  // `[::1]:4020` | `127.0.0.1:4020` | `4020`
+  const bracketed = /^\[(.+)\]:(\d+)$/.exec(raw);
+  const hostPort = bracketed ?? /^([^:]*):(\d+)$/.exec(raw);
+  const bare = /^(\d+)$/.exec(raw);
+
+  const host = hostPort ? (hostPort[1] as string) : DEFAULT_WEBHOOK_HOST;
+  const portText = hostPort ? hostPort[2] : bare?.[1];
+  if (portText === undefined) {
+    throw new InvalidConfigError(
+      "CONNECTORS_HTTP_ADDR",
+      `expected "host:port" (e.g. 127.0.0.1:4020) or a bare port, got "${raw}"`,
+    );
+  }
+
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new InvalidConfigError(
+      "CONNECTORS_HTTP_ADDR",
+      `port must be an integer in [1, 65535], got "${portText}"`,
+    );
+  }
+
+  return { host: host === "" ? DEFAULT_WEBHOOK_HOST : host, port };
+}
+
+/**
+ * Webhook transport config. Every value has a working default — a bridge with no
+ * webhook channels installed still boots, and one with them needs only an address.
+ * A malformed number is an ERROR, never a silent fallback: a bridge listening on
+ * the wrong port is a bridge that 404s every provider event.
+ */
+export function loadWebhookConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): WebhookConfig {
+  const { host, port } = httpAddrFromEnv(env);
+
+  return {
+    enabled: boolFromEnv(env["CONNECTORS_WEBHOOK_ENABLED"], true),
+    host,
+    port,
+    pathPrefix:
+      env["CONNECTORS_PATH_PREFIX"]?.trim() || DEFAULT_WEBHOOK_PATH_PREFIX,
+    publicBaseUrl: env["CONNECTORS_PUBLIC_BASE_URL"]?.trim() || undefined,
+    maxBodyBytes: intFromEnv(
+      env,
+      "CONNECTORS_MAX_BODY_BYTES",
+      DEFAULT_WEBHOOK_MAX_BODY_BYTES,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+/** `0`/`false`/`no`/`off` disable; anything else set is on; unset takes the default. */
+function boolFromEnv(raw: string | undefined, fallback: boolean): boolean {
+  const value = raw?.trim().toLowerCase();
+  if (value === undefined || value === "") return fallback;
+  return !["0", "false", "no", "off"].includes(value);
+}
+
+function intFromEnv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const raw = env[key]?.trim();
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new InvalidConfigError(
+      key,
+      `expected an integer in [${min}, ${max}], got "${raw}"`,
+    );
+  }
+  return value;
+}
+
+export class InvalidConfigError extends Error {
+  constructor(key: string, detail: string) {
+    super(`connectors: environment variable ${key} is invalid — ${detail}`);
+    this.name = "InvalidConfigError";
+  }
 }

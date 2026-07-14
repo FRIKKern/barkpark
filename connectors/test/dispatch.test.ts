@@ -34,6 +34,10 @@ const install: ConnectorInstall = {
   installKey: BOT_ID,
   workspaceId: "ws-alpha",
   credentialRef: BOT_TOKEN,
+  // THIS install's own workspace-bound chat token (D35). The mock /v1/chat only
+  // accepts this bearer, so a turn that went out on some other install's token
+  // would 401 rather than pass — see cross-tenant-token.test.ts for the full proof.
+  chatToken: "test-token",
 };
 
 const mock = createMockChat();
@@ -79,8 +83,10 @@ function harness(seedInstall = true) {
     registry,
     installs: { installs },
     map: createThreadSessionMap(store),
-    chatClientFor: () =>
-      createChatClient({ baseUrl: API_URL, token: "test-token" }),
+    // The production wiring: the token is read off the install the event routed
+    // to, never from a process-wide config value (D35).
+    chatClientForInstall: (routed) =>
+      createChatClient({ baseUrl: API_URL, token: routed.chatToken }),
     reply,
     timeoutMs: 5_000,
   };
@@ -232,6 +238,10 @@ describe("core dispatch — the loop that must not change when P3 adds channels"
         installKey: "987654321",
         workspaceId: "ws-beta",
         credentialRef: "987654321:AAOther",
+        // Same bearer here only because this mock accepts exactly one; the proof
+        // that two tenants travel on two DIFFERENT tokens lives in
+        // cross-tenant-token.test.ts, which records the wire.
+        chatToken: "test-token",
       },
     ]);
 

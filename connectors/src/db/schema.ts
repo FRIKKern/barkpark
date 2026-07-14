@@ -36,12 +36,33 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.thread_session_map (
 )`;
 
 /**
- * connector_installs — the tenant-routing seam P3/OAuth writes into (D29).
- * (provider, install_key) -> workspace_id + a reference to the tenant's stored
- * credential. Designed now so all six P3 channels land with zero core changes.
+ * connector_installs — the tenant-routing seam P3/OAuth writes into (D29/D35).
+ * (provider, install_key) -> workspace_id + the tenant's TWO sealed secrets.
+ * Designed so all six P3 channels land with zero core changes.
+ *
  * `install_key` is the provider's per-installation identity (a Telegram bot id,
- * a Slack team_id, …); `credential_ref` points at where the credential lives
- * (never the raw secret in this column).
+ * a Slack team_id, …) — non-secret by construction, since it is a PRIMARY KEY
+ * column and the routing query matches on it.
+ *
+ * `credential_ref` — the PROVIDER secret (bot token / signing secret).
+ * `chat_token_ref` — THIS workspace's Barkpark `chat`-permission ApiToken, the
+ *                    bearer the bridge presents to /v1/chat for this tenant.
+ *
+ * Both columns hold a SEALED blob, never plaintext: `Base64(iv‖tag‖ciphertext)`
+ * from `src/crypto/credential-cipher.ts`, AES-256-GCM with the row's identity
+ * (provider, install_key, workspace_id) as AAD. Flipping `workspace_id` on a row
+ * therefore makes both blobs un-openable — the migration of a sealed token across
+ * tenants fails closed instead of succeeding silently.
+ *
+ * (The names end in `_ref` for the same reason they always did: a later store
+ * may hold a POINTER — a run-secret name, a KMS handle — rather than the sealed
+ * bytes. Today they hold the sealed bytes. Earlier prose in this file claimed
+ * "never the raw secret in this column" while the code wrote plaintext; the
+ * claim is true now, and the code is what makes it true.)
+ *
+ * `chat_token_ref` is NULLABLE: an install can exist before its chat token is
+ * provisioned (an OAuth callback lands the provider secret first). A NULL token
+ * is a fail-closed DROP at dispatch, never a fallback to an operator token.
  */
 export const CREATE_CONNECTOR_INSTALLS_SQL = `
 CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_installs (
@@ -49,9 +70,22 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_installs (
   install_key    text NOT NULL,
   workspace_id   text NOT NULL,
   credential_ref text,
+  chat_token_ref text,
   created_at     timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (provider, install_key)
 )`;
+
+/**
+ * chat_token_ref for a table that already exists (D35).
+ *
+ * `CREATE TABLE IF NOT EXISTS` is a no-op against P2's four-column table, so the
+ * new column would never appear on any deployment that already booted the bridge.
+ * `ADD COLUMN IF NOT EXISTS` is the idempotent forward path — and it is why the
+ * bridge still needs no Ecto migration.
+ */
+export const ADD_CHAT_TOKEN_REF_SQL = `
+ALTER TABLE ${CHAT_BRIDGE_SCHEMA}.connector_installs
+  ADD COLUMN IF NOT EXISTS chat_token_ref text`;
 
 /**
  * All bridge-owned DDL, in dependency order, to run once the schema exists.
@@ -64,4 +98,7 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_installs (
 export const BRIDGE_TABLE_DDL: readonly string[] = [
   CREATE_THREAD_SESSION_MAP_SQL,
   CREATE_CONNECTOR_INSTALLS_SQL,
+  // AFTER the create: on a fresh database the column is already there and this is
+  // a no-op; on a P2 database it is the only thing that adds it.
+  ADD_CHAT_TOKEN_REF_SQL,
 ];

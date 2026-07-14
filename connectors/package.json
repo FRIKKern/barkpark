@@ -10,6 +10,8 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "smoke:telegram": "tsx scripts/smoke-telegram.ts",
+    "smoke:teams": "tsx scripts/smoke-teams.ts",
+    "smoke:whatsapp": "tsx scripts/smoke-whatsapp.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -17,9 +19,15 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "chat": "4.34.0",
-    "@chat-adapter/telegram": "4.34.0",
+    "@chat-adapter/discord": "4.34.0",
+    "@chat-adapter/slack": "4.34.0",
+    "@chat-adapter/state-memory": "4.34.0",
     "@chat-adapter/state-pg": "4.34.0",
+    "@chat-adapter/teams": "4.34.0",
+    "@chat-adapter/telegram": "4.34.0",
+    "@chat-adapter/whatsapp": "4.34.0",
+    "chat": "4.34.0",
+    "chat-adapter-imessage": "1.1.0",
     "pg": "^8.13"
   },
   "devDependencies": {
