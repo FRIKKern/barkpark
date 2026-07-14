@@ -498,8 +498,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       </p>
 
       <div style="display: flex; gap: 8px; margin-top: auto; padding-top: 4px;">
+        <%!-- `@loaded?` is not decoration: until the install read lands we do not
+        KNOW that this provider is unconnected, and a Connect button offered beside
+        a "Loading…" chip is the UI asserting something it has not read yet. --%>
         <button
-          :if={@provider.connectable? and is_nil(@install) and @connect_configured?}
+          :if={@provider.connectable? and @loaded? and is_nil(@install) and @connect_configured?}
           type="button"
           class="btn btn-primary"
           phx-click="open_connect"

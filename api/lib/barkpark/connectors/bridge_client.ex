@@ -16,10 +16,15 @@ defmodule Barkpark.Connectors.BridgeClient do
 
     * `{:error, :unreachable}` — the bridge is not running / the socket refused.
       The operator sees "the connectors bridge is not answering", not "Connected".
-    * `{:error, {:refused, reason}}` — the bridge said no (a 4xx with a reason:
-      an invalid bot token, an already-claimed install, a cross-tenant
-      disconnect). The operator sees the bridge's own reason.
-    * `{:error, {:http, status}}` — anything else.
+    * `{:error, {:refused, reason}}` — the bridge said no, and `reason` is always
+      a SENTENCE. When the bridge explains itself (`invalid_credential` quoting
+      Telegram, `install_owned_elsewhere`, a 502 `mount_failed`) that explanation
+      is passed through verbatim. When it answers with one of its deliberately
+      OPAQUE codes (`not_found` is byte-identical for four different refusals, so
+      that it is not an enumeration oracle) the code is translated HERE — a wire
+      token must never surface as UI copy ("Could not disconnect: not_found").
+    * `{:error, {:http, status}}` — a non-2xx below 400, which this bridge does
+      not emit. Kept as the honest catch-all rather than a `raise`.
 
   `retry: false` is deliberate: `/connect` WRITES (an install row + a live mount).
   A blind retry of a half-applied write is how you end up with two installs and
@@ -108,9 +113,13 @@ defmodule Barkpark.Connectors.BridgeClient do
       {:ok, %Req.Response{status: status, body: resp}} when status in 200..299 ->
         {:ok, normalize(resp)}
 
-      {:ok, %Req.Response{status: status, body: resp}} when status in 400..499 ->
-        {:error,
-         {:refused, reason_from(normalize(resp), "the bridge rejected the request (#{status})")}}
+      # EVERY failing status, not just 4xx. A `502 mount_failed` carries the one
+      # sentence the operator most needs ("the credential was accepted by the
+      # provider but the adapter refused to mount it — nothing was installed"),
+      # and routing 5xx to `{:http, status}` threw it away and showed them
+      # "The bridge returned HTTP 502." instead.
+      {:ok, %Req.Response{status: status, body: resp}} when status >= 400 ->
+        {:error, {:refused, reason_from(normalize(resp), status)}}
 
       {:ok, %Req.Response{status: status}} ->
         {:error, {:http, status}}
@@ -125,12 +134,46 @@ defmodule Barkpark.Connectors.BridgeClient do
   defp normalize(body) when is_map(body), do: body
   defp normalize(_), do: %{}
 
-  defp reason_from(%{"reason" => reason}, _default) when is_binary(reason) and reason != "",
+  # The bridge speaks TWO kinds of failure body, and only one of them is for a
+  # human:
+  #
+  #   * `{"error": "<code>", "reason": "<sentence>"}` — a refusal it can explain
+  #     (invalid_credential, install_owned_elsewhere, mount_failed). The sentence
+  #     IS the message; it is written for the operator and often quotes the
+  #     provider ("Unauthorized", straight from Telegram).
+  #   * `{"error": "<code>"}` alone — the seam's OPAQUE refusals. `not_found` is
+  #     deliberately byte-identical for an unknown route, an unmounted connect
+  #     seam, an unconnectable provider and a cross-tenant disconnect, precisely
+  #     so it is not an enumeration oracle — which makes it a machine token, and
+  #     "Could not disconnect: not_found" is not a sentence anyone should read in
+  #     a product. Translate it here, where the wire is owned, rather than let a
+  #     wire code become UI copy.
+  defp reason_from(%{"reason" => reason}, _status) when is_binary(reason) and reason != "",
     do: reason
 
-  defp reason_from(%{"error" => %{"message" => msg}}, _default) when is_binary(msg) and msg != "",
+  defp reason_from(%{"error" => %{"message" => msg}}, _status) when is_binary(msg) and msg != "",
     do: msg
 
-  defp reason_from(%{"error" => err}, _default) when is_binary(err) and err != "", do: err
-  defp reason_from(_body, default), do: default
+  defp reason_from(%{"error" => code}, status) when is_binary(code) and code != "",
+    do: humanize(code, status)
+
+  defp reason_from(_body, status), do: humanize(nil, status)
+
+  defp humanize("not_found", _status),
+    do:
+      "The bridge did not recognise that request. Either its connect routes are not " <>
+        "mounted on this instance, or the install no longer exists."
+
+  defp humanize("unauthorized", _status),
+    do: "The bridge rejected the connect ticket — it may have expired. Close this and try again."
+
+  defp humanize("bad_request", _status), do: "The bridge could not read the request."
+
+  defp humanize("payload_too_large", _status), do: "That credential is too large for the bridge."
+
+  defp humanize("internal_error", _status),
+    do: "The bridge hit an internal error. Nothing was connected — check its journal."
+
+  defp humanize(nil, status), do: "The bridge refused the request (HTTP #{status})."
+  defp humanize(code, status), do: "The bridge refused the request (#{code}, HTTP #{status})."
 end
