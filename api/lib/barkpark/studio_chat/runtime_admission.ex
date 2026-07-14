@@ -16,6 +16,13 @@ defmodule Barkpark.StudioChat.RuntimeAdmission do
     @moduledoc false
     @enforce_keys [:runtime_id, :registry, :key, :limit]
     defstruct [:runtime_id, :registry, :key, :limit]
+
+    @type t :: %__MODULE__{
+            runtime_id: String.t(),
+            registry: atom(),
+            key: term(),
+            limit: pos_integer()
+          }
   end
 
   @type lease :: Lease.t() | :not_managed
@@ -38,8 +45,7 @@ defmodule Barkpark.StudioChat.RuntimeAdmission do
 
           case Registry.register(registry, key, %{session_id: session_id}) do
             {:ok, _} ->
-              {:ok,
-               %Lease{runtime_id: runtime_id, registry: registry, key: key, limit: limit}}
+              {:ok, %Lease{runtime_id: runtime_id, registry: registry, key: key, limit: limit}}
 
             {:error, {:already_registered, _pid}} ->
               {:error, :admission_registration_conflict}
