@@ -13,6 +13,8 @@ Use this checklist to keep phase boundaries observable and resumable.
 | Build | claimable slice tasks | committed, gated branches; criterion stamps | accepted slices green and truthful |
 | Review | branches and ledger | reviewed branches; grade; charter log; Paper debrief | wave stop condition proven |
 
+Every phase also updates the Paper's **Agent fleet** counts. The fleet gate is 24 completed typed child assignments: Survey 12, Verify 6, Build 3 at high effort, Review 3. The leader and retries do not count.
+
 ## Invariants
 
 - Preserve the user's wish verbatim in the wave Paper.
@@ -25,6 +27,10 @@ Use this checklist to keep phase boundaries observable and resumable.
 - A passing test proves only the behavior it actually exercises.
 - Builders claim before edits, pulse while active, and stamp evidence immediately.
 - Merge-gated criteria remain open until the merge is authoritative.
+- A published, claimed Barkpark task is a precondition to implementation, not retrospective bookkeeping.
+- Every claim pulse invalidates cached epochs; reread before stamp or close.
+- PR bodies are file-backed and contain one exact physical `Task: <id>` line.
+- Typed subagents are used only when the surface can explicitly select their `agent_type`; fallback remains phase-separated and honest.
 
 ## Minimum wave Paper sections
 
@@ -41,3 +47,5 @@ Use this checklist to keep phase boundaries observable and resumable.
 ## Task quality check
 
 A slice is ready only when its published task has one parent epic, an outcome-shaped title, sufficient cold-start context, exact file ownership, checkable criteria, a runnable gate, real blockers, and a link to the wave Paper. Read it back from the server before dispatch.
+
+Use `../scripts/validate_epic_cycle.py` to enforce the machine-checkable subset before dispatch and before PR creation. A root epic is valid for the Strategize preflight even when it has no parent or criteria, but Strategize always requires `--wish-file` to prove verbatim preservation. Review has two gates: `--phase review` checks its prerequisites, while `--phase review --require-debrief` proves its output after the debrief is published.
