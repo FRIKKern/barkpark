@@ -13,6 +13,10 @@ defmodule Barkpark.Sync.DeadLetter do
 
   @primary_key false
   schema "sync_dead_letters" do
+    # Stamped per-workspace attribution column (charter D55) — E1 export + FK
+    # cascade delete. NOT a key component; the `{source, dataset, event_id}` PK
+    # and conflict target are unchanged (D57). Nullable (workspace-agnostic NULL).
+    field :workspace_id, :binary_id
     field :source, :string, primary_key: true
     field :dataset, :string, primary_key: true
     field :event_id, :integer, primary_key: true
@@ -24,9 +28,10 @@ defmodule Barkpark.Sync.DeadLetter do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @doc "Insert-or-increment; returns the post-state attempt count. envelope set on INSERT only (never overwritten)."
-  @spec record_failure(String.t(), String.t(), non_neg_integer(), map(), term()) :: pos_integer()
-  def record_failure(source, dataset, event_id, envelope, reason) do
+  @doc "Insert-or-increment; returns the post-state attempt count. envelope + workspace_id set on INSERT only (never overwritten)."
+  @spec record_failure(binary() | nil, String.t(), String.t(), non_neg_integer(), map(), term()) ::
+          pos_integer()
+  def record_failure(workspace_id, source, dataset, event_id, envelope, reason) do
     now = DateTime.utc_now()
 
     {1, [%{attempts: attempts}]} =
@@ -34,6 +39,7 @@ defmodule Barkpark.Sync.DeadLetter do
         __MODULE__,
         [
           %{
+            workspace_id: workspace_id,
             source: source,
             dataset: dataset,
             event_id: event_id,

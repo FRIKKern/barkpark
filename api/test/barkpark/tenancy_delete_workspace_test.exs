@@ -544,10 +544,10 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       # A dataset slug is unique only per (project_id, slug) — so "shared-prod"
       # legitimately names a DISTINCT dataset in EACH workspace (charter D21).
-      # The E3-dataset tables (sync_cursors, …) carry ONLY that bare slug with no
-      # project/dataset column, so a bare `dataset = ANY(slugs)` sweep of A would
-      # strip B's rows under the SAME slug too — a cross-tenant delete. The
-      # project-qualified slug set is what prevents that.
+      # The E3-dataset tables (preview_token_jti, shares) carry ONLY that bare
+      # slug with no project/dataset column, so a bare `dataset = ANY(slugs)`
+      # sweep of A would strip B's rows under the SAME slug too — a cross-tenant
+      # delete. The project-qualified slug set is what prevents that.
       #
       # The former scope-column allowlist is now EMPTY — both members moved to E1
       # and are swept by the teardown FK cascade (workspace_id = A), NOT by slug:
@@ -557,6 +557,9 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       #     non-over-deletion is proven by cascade scoping (workspace_id = A)
       #     rather than slug narrowing: A's own shared-slug DEK is cascade-swept
       #     while B's survives.
+      #
+      # (The sync_* family also moved to E1/FK-cascade in charter D55 and is
+      # proved separately in the sync_* describe below.)
       tag = System.unique_integer([:positive])
       shared = "shared-prod-#{tag}"
       excl = "excl-a-#{tag}"
@@ -566,10 +569,10 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       seed_dataset!(proj_b.id, shared)
 
       # A's OWN row under its exclusive slug — MUST still be swept (no over-narrow).
-      insert_sync_cursor!("src-a-#{tag}", excl)
+      insert_preview_jti!("jti-a-#{tag}", excl)
 
       # Rows under the slug A SHARES with B — MUST survive A's teardown.
-      insert_sync_cursor!("src-b-#{tag}", shared)
+      insert_preview_jti!("jti-b-#{tag}", shared)
 
       # A's own shared-slug DEK (attributed to A) + B's under the SAME shared
       # scope (attributed to B, distinct version for the (workspace_id, scope,
@@ -580,15 +583,15 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
       assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
 
       # No over-narrow: A's exclusive-slug bare-keyed row is gone.
-      assert sync_cursor_count("src-a-#{tag}", excl) == 0,
-             "A's exclusive-slug sync cursor must still be swept on teardown"
+      assert preview_jti_count!("jti-a-#{tag}", excl) == 0,
+             "A's exclusive-slug preview jti must still be swept on teardown"
 
       # No cross-tenant over-deletion: on origin/main the bare
       # `dataset = ANY([excl, shared])` sweep also deletes the shared-slug rows
       # → these counts are 0 → RED. The project-qualified fix excludes `shared`
       # (owned by B too) so B's rows SURVIVE.
-      assert sync_cursor_count("src-b-#{tag}", shared) == 1,
-             "a sync cursor under a slug SHARED with workspace B must survive A's teardown"
+      assert preview_jti_count!("jti-b-#{tag}", shared) == 1,
+             "a preview jti under a slug SHARED with workspace B must survive A's teardown"
 
       # data_keys: A's own DEK is cascade-swept (workspace_id = A) and B's DEK
       # under the SAME shared scope SURVIVES — non-over-deletion now enforced by
@@ -618,6 +621,60 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       assert surface_config_count_ws(ws_b.id, "documents", "production") == 1,
              "B's surface config on the same scope must survive A's teardown"
+    end
+  end
+
+  # ── 7. sync_* family E1 attribution — FK cascade, per-workspace (charter D55) ──
+
+  describe "delete_workspace/1 cascades the sync_* family by workspace_id" do
+    test "a sync_cursors row is GONE post-delete; a sibling workspace's under the SAME slug SURVIVES" do
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+      ws_b = create_workspace!()
+      proj_b = create_project!(ws_b)
+
+      # Both workspaces own the SAME slug (bare-slug collision D55 fixes). The
+      # sync cursors are told apart ONLY by workspace_id (the old bare
+      # {source, dataset} key could not represent both at once).
+      tag = System.unique_integer([:positive])
+      shared = "shared-prod-#{tag}"
+      seed_dataset!(proj_a.id, shared)
+      seed_dataset!(proj_b.id, shared)
+
+      insert_sync_cursor_ws!(ws_a.id, "sync-a-#{tag}", shared)
+      insert_sync_cursor_ws!(ws_b.id, "sync-b-#{tag}", shared)
+
+      assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws_a)
+
+      # A's cursor is swept by the workspace_id FK cascade…
+      assert sync_cursor_count("sync-a-#{tag}", shared) == 0,
+             "workspace A's sync cursor must be cascade-deleted on teardown"
+
+      # …and B's cursor under the SAME shared slug is UNTOUCHED (per-workspace
+      # attribution — the pre-D55 bare-slug delete could not distinguish them).
+      assert sync_cursor_count("sync-b-#{tag}", shared) == 1,
+             "workspace B's sync cursor under the shared slug must survive A's teardown"
+    end
+
+    test "a workspace-agnostic (NULL workspace_id) sync_push_cursors row survives any workspace delete" do
+      ws = create_workspace!()
+      tag = System.unique_integer([:positive])
+
+      # The GitHub outbound mirror stamps NULL workspace_id (per-dataset, not
+      # per-workspace) — a workspace teardown must NOT sweep it (no matching FK).
+      Repo.query!(
+        "INSERT INTO sync_push_cursors (workspace_id, source, dataset, event_id, inserted_at, updated_at) " <>
+          "VALUES (NULL, 'github:outbound', 'ds-#{tag}', 0, now(), now())",
+        []
+      )
+
+      assert {:ok, %Workspace{}} = Tenancy.delete_workspace(ws)
+
+      assert scalar(
+               "SELECT count(*) FROM sync_push_cursors WHERE source = 'github:outbound' AND dataset = $1",
+               ["ds-#{tag}"]
+             ) == 1,
+             "a NULL-workspace (workspace-agnostic) push cursor must survive a workspace delete"
     end
   end
 
@@ -666,11 +723,28 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
     )
   end
 
-  defp insert_sync_cursor!(source, dataset) do
+  # preview_token_jti is the E3-dataset exemplar (sync_* moved to E1/FK-cascade — D55).
+  defp insert_preview_jti!(jti, dataset) do
     Repo.query!(
-      "INSERT INTO sync_cursors (source, dataset, event_id, inserted_at, updated_at) " <>
-        "VALUES ($1, $2, 0, now(), now())",
-      [source, dataset]
+      "INSERT INTO preview_token_jti (jti, dataset, issued_at, expires_at) " <>
+        "VALUES ($1, $2, now(), now() + interval '1 hour')",
+      [jti, dataset]
+    )
+  end
+
+  defp preview_jti_count!(jti, dataset) do
+    scalar("SELECT count(*) FROM preview_token_jti WHERE jti = $1 AND dataset = $2", [
+      jti,
+      dataset
+    ])
+  end
+
+  # A workspace-attributed sync_cursors row (charter D55 — sync_* is E1 now).
+  defp insert_sync_cursor_ws!(ws_id, source, dataset) do
+    Repo.query!(
+      "INSERT INTO sync_cursors (workspace_id, source, dataset, event_id, inserted_at, updated_at) " <>
+        "VALUES ($1::text::uuid, $2, $3, 0, now(), now())",
+      [ws_id, source, dataset]
     )
   end
 

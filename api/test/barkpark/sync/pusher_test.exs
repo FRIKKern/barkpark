@@ -30,7 +30,10 @@ defmodule Barkpark.Sync.PusherTest do
     %{source: "push-#{System.unique_integer([:positive])}", dataset: @dataset}
   end
 
-  defp ctx(source), do: %{source: source, dataset: @dataset}
+  # workspace_id (charter D55) is a stamped attribution column on the push
+  # ledger tables, NOT part of the {source, dataset[, …]} keys — nil here keeps
+  # the drain mechanics identical while exercising the stamped write path.
+  defp ctx(source), do: %{workspace_id: nil, source: source, dataset: @dataset}
 
   defp doc_event(id, doc_id, rev, opts \\ []) do
     %MutationEvent{
@@ -159,7 +162,7 @@ defmodule Barkpark.Sync.PusherTest do
   test "phantom double-push: rev_mismatch whose actual == intended rev reconciles, no conflict",
        %{source: source} do
     # Ledger is stale ("stale-base"); the remote ALREADY holds our intended rev.
-    PushDocRev.put(source, @dataset, "p", "stale-base")
+    PushDocRev.put(nil, source, @dataset, "p", "stale-base")
     event = doc_event(9, "p", "rp")
 
     # actual == the rev we intended to land ("rp") → phantom, not a conflict.

@@ -25,6 +25,12 @@ defmodule Barkpark.Sync.PushCursor do
 
   @primary_key false
   schema "sync_push_cursors" do
+    # Stamped per-workspace attribution column (charter D55) — E1 export + FK
+    # cascade delete. NOT a key component; the `{source, dataset}` PK and the
+    # monotonic-upsert conflict target are unchanged (D57). Nullable: the LIVE
+    # per-dataset caller `Barkpark.Plugins.Github.Cursor` (source
+    # `"github:outbound"`) is workspace-agnostic and stamps NULL.
+    field :workspace_id, :binary_id
     field :source, :string, primary_key: true
     field :dataset, :string, primary_key: true
     field :event_id, :integer, default: 0
@@ -47,11 +53,12 @@ defmodule Barkpark.Sync.PushCursor do
   end
 
   @doc """
-  Monotonically advance the stored push high-water mark to `event_id`. A no-op
-  when the stored value is already `>= event_id`.
+  Monotonically advance the stored push high-water mark to `event_id`, stamping
+  `workspace_id` for per-workspace attribution. A no-op when the stored value is
+  already `>= event_id`; the workspace_id is written on INSERT only.
   """
-  @spec put(String.t(), String.t(), non_neg_integer()) :: :ok
-  def put(source, dataset, event_id)
+  @spec put(binary() | nil, String.t(), String.t(), non_neg_integer()) :: :ok
+  def put(workspace_id, source, dataset, event_id)
       when is_binary(source) and is_binary(dataset) and is_integer(event_id) and event_id >= 0 do
     now = DateTime.utc_now()
 
@@ -59,6 +66,7 @@ defmodule Barkpark.Sync.PushCursor do
       __MODULE__,
       [
         %{
+          workspace_id: workspace_id,
           source: source,
           dataset: dataset,
           event_id: event_id,
@@ -92,8 +100,8 @@ defmodule Barkpark.Sync.PushCursor do
   `on_conflict: :nothing` makes this a NO-OP once a row exists — it never rewinds
   an already-advanced cursor and is safe to call on every boot.
   """
-  @spec bootstrap_if_absent(String.t(), String.t()) :: :ok
-  def bootstrap_if_absent(source, dataset)
+  @spec bootstrap_if_absent(binary() | nil, String.t(), String.t()) :: :ok
+  def bootstrap_if_absent(workspace_id, source, dataset)
       when is_binary(source) and is_binary(dataset) do
     now = DateTime.utc_now()
 
@@ -101,6 +109,7 @@ defmodule Barkpark.Sync.PushCursor do
       __MODULE__,
       [
         %{
+          workspace_id: workspace_id,
           source: source,
           dataset: dataset,
           event_id: head_event_id(dataset),
