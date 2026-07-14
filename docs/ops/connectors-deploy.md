@@ -38,10 +38,26 @@ Order every time:
 
 1. Merge the bridge code → the deploy runs (see below) → the unit is up.
 2. `curl -i https://guerrilla.barkpark.cloud/connectors/health` — the **bridge**
-   must answer. A `503` with the "Back in a moment" body means Caddy is
-   answering, i.e. the bridge is down. Do **not** proceed.
+   must answer `200 {"status":"ok"}`. A `503` with the "Back in a moment" body
+   means *Caddy* is answering, i.e. the bridge is down. Do **not** proceed.
 3. Only then paste the URL into Slack's Event Subscriptions / Meta's webhook
    config / the Azure Bot messaging endpoint.
+
+`/connectors/health` is the ONE unauthenticated surface and it deliberately says
+nothing else: no install count, no provider list, no version. It is a liveness
+probe, not a status page — an enumerable one would tell a stranger which tenants
+exist here.
+
+**The address is one contract, written once.** `CONNECTORS_HTTP_ADDR` (`host:port`)
+is the only name in play: `instance-deploy.sh` writes `127.0.0.1:4020` into
+`connectors.env`, Caddy reverse-proxies `:4020`, and `src/config.ts` parses that
+exact variable. It binds **loopback**, not `0.0.0.0` — the webhook seam trusts
+`x-forwarded-proto`/`x-forwarded-host` when `CONNECTORS_PUBLIC_BASE_URL` is unset
+(that is what makes Teams' Bot Framework JWT audience check work behind Caddy), and
+those headers are only trustworthy coming from the proxy. A malformed value is a
+**boot failure**, never a silent fallback to a default port: a bridge listening on
+the wrong port is a bridge whose every webhook 404s, with a green deploy and an
+active unit to look at. `connectors/test/config.test.ts` is the tripwire.
 
 ## What the deploy does (no hand-editing on the box — ever)
 
