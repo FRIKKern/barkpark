@@ -147,13 +147,13 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def search_settings(conn, %{"dataset" => dataset}) do
     json(conn, %{
-      result: SurfaceConfigs.get("media", dataset),
+      result: SurfaceConfigs.get("media", dataset, workspace_id(conn)),
       syncTags: ["bp:ds:#{dataset}:media:search:settings"]
     })
   end
 
   def update_search_settings(conn, %{"dataset" => dataset} = params) do
-    case SurfaceConfigs.upsert("media", dataset, params) do
+    case SurfaceConfigs.upsert("media", dataset, params, workspace_id(conn)) do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:settings"]})
 
@@ -495,5 +495,19 @@ defmodule BarkparkWeb.V1.MediaController do
   # shape this used to hand-roll. Keep the "validation failed" message override.
   defp validation_error(conn, changeset) do
     error_json(conn, {:error, changeset}, "validation failed")
+  end
+
+  # The resolved tenant for per-workspace media surface-config attribution
+  # (charter D45/D49). The bespoke `:search_settings_admin` pipeline derives
+  # `:current_workspace` from the admin token BEFORE `AssignDefaultScope`, so on
+  # a multi-tenant instance this is the caller's OWN workspace — workspace A can
+  # no longer overwrite workspace B's media config on a shared dataset slug.
+  # `nil` on a fresh DB with no Default Workspace → the workspace-agnostic global
+  # config (pre-tenancy behaviour preserved).
+  defp workspace_id(conn) do
+    case conn.assigns[:current_workspace] do
+      %{id: id} -> id
+      _ -> nil
+    end
   end
 end

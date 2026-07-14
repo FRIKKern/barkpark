@@ -10,20 +10,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (19 today; the two
+    * **E1** — every table carrying a `workspace_id` column (20 today; the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
-      column with no FK to `workspaces`, and `roles` is the 19th).
+      column with no FK to `workspaces`, `roles` is the 19th, and
+      `search_surface_config` is the 20th — re-pinned from the allowlist in
+      Wave 5 Slice A, charter D45/D49).
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
       that do NOT themselves carry `workspace_id` (6: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
       `webhook_deliveries`). Reached via a real FK, extracted through a
       parent-join to the nearest `workspace_id`-bearing ancestor.
     * **E3** — the `dataset`-column tables minus E1 (9), keyed by a `dataset`
-      slug (and, for four of them, a `doc_id`). PLUS an explicit two-table
-      allowlist (`data_keys`, `search_surface_config`) whose tenant key is a
-      `scope` column, not `dataset` — the mechanical `dataset` scan cannot see
-      them, and dropping `data_keys` would render every exported ciphertext
-      permanently undecryptable (it holds the per-dataset DEKs).
+      slug (and, for four of them, a `doc_id`). PLUS an explicit allowlist
+      (`data_keys`) whose tenant key is a `scope` column, not `dataset` — the
+      mechanical `dataset` scan cannot see it, and dropping `data_keys` would
+      render every exported ciphertext permanently undecryptable (it holds the
+      per-dataset DEKs).
 
   ## The reviewed extraction specs
 
@@ -54,8 +56,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     access_grants api_tokens audit_events audit_export_sinks documents
     media_files mutation_events paper_events projects revisions roles
     schema_definitions search_intel_crystals search_intel_events
-    search_intel_merge_patterns search_synonyms share_links webhooks
-    workspace_memberships
+    search_intel_merge_patterns search_surface_config search_synonyms
+    share_links webhooks workspace_memberships
   )
 
   @pinned_e2 ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
@@ -67,11 +69,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @e3_dataset_keyed ~w(preview_token_jti shares sync_cursors sync_dead_letters sync_push_cursors)
 
   # The `scope`-column allowlist (charter D4/D5). Cannot be dataset-scanned.
-  #   data_keys.scope             = "dataset:" <> slug   (per-dataset DEKs)
-  #   search_surface_config.scope = slug
+  #   data_keys.scope = "dataset:" <> slug   (per-dataset DEKs)
+  #
+  # `search_surface_config` was here until Wave 5 Slice A (charter D45/D49): it
+  # gained a real `workspace_id` column to close a LIVE cross-tenant
+  # config-overwrite bleed, so it is now a plain E1 table (`@pinned_e1`) exported
+  # and torn down via `WHERE workspace_id = $ws`, not by its bare `scope` slug.
   @allowlist %{
-    "data_keys" => "dataset:",
-    "search_surface_config" => ""
+    "data_keys" => "dataset:"
   }
 
   # Every base table that rolls ABOVE or OUTSIDE the workspace grain (charter

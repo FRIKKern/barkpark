@@ -598,6 +598,34 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireAdmin)
   end
 
+  # Admin gate for the FLAT search-surface-config settings routes that must
+  # attribute per-workspace (charter D45/D49 — close the LIVE cross-tenant
+  # config-overwrite bleed). A naive `[:api, :require_admin]` cannot: `:api`
+  # runs `AssignDefaultScope` (stamps `current_workspace = Default`) BEFORE the
+  # admin gate, and `DeriveWorkspaceFromToken` is no-op-if-set, so appending it
+  # after `:api` would be a pure no-op (Default always wins). This bespoke
+  # pipeline mirrors `:media_mutate`'s ordering — token-resolve →
+  # DeriveWorkspaceFromToken → AssignDefaultScope → admin — so the admin token's
+  # OWN workspace is resolved and `SurfaceConfigs.get/upsert` key on it. It
+  # re-includes every `:api` security plug (AcceptBarkparkVendor, accepts json,
+  # ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit, TenantLogMetadata)
+  # so the surface is byte-identical to `:api` apart from the derivation order.
+  # ONE plug (DeriveWorkspaceFromToken) is controller-agnostic (reads only
+  # :api_token + :current_workspace) so it attributes BOTH the documents and
+  # media settings routes.
+  pipeline :search_settings_admin do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
+    plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    plug(BarkparkWeb.Plugs.RequireAdmin)
+  end
+
   # Chat tenancy gate (Connectors charter D18/D19a). RequireToken sets
   # `:api_token`; RequireChatAccess resolves `:chat_scope` (`:global` for a
   # global-admin token — D21 authority preserved — or `{:workspace, ws}` for a
@@ -1606,12 +1634,22 @@ defmodule BarkparkWeb.Router do
     delete("/access/:id", AccessController, :revoke)
   end
 
+  # search-surface-config settings — per-workspace attributed (charter D45/D49).
+  # These two routes run the bespoke admin pipeline that derives the caller's
+  # OWN workspace before the admin gate, so a shared dataset slug no longer means
+  # a shared config row. The sibling insights/synonyms routes stay on
+  # `[:api, :require_admin]` below (different tables, not part of this bleed).
+  scope "/v1/data", BarkparkWeb do
+    pipe_through(:search_settings_admin)
+
+    get("/search/:dataset/settings", SearchController, :search_settings)
+    put("/search/:dataset/settings", SearchController, :update_search_settings)
+  end
+
   scope "/v1/data", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
     get("/search/:dataset/insights", SearchController, :search_insights)
-    get("/search/:dataset/settings", SearchController, :search_settings)
-    put("/search/:dataset/settings", SearchController, :update_search_settings)
     get("/search/:dataset/synonyms", SearchController, :search_synonyms)
     get("/search/:dataset/synonyms/preview", SearchController, :preview_search_synonym)
     post("/search/:dataset/synonyms", SearchController, :create_search_synonym)
@@ -1759,12 +1797,19 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── v1 Media — unified blob + mediaAsset metadata ───────────────────────
+  # media search-surface-config settings — per-workspace attributed (charter
+  # D45/D49), same bespoke admin pipeline as the documents settings routes.
+  scope "/v1/media", BarkparkWeb do
+    pipe_through(:search_settings_admin)
+
+    get("/:dataset/search/settings", V1.MediaController, :search_settings)
+    put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
+  end
+
   scope "/v1/media", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
     get("/:dataset/search/insights", V1.MediaController, :search_insights)
-    get("/:dataset/search/settings", V1.MediaController, :search_settings)
-    put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
     get("/:dataset/search/synonyms", V1.MediaController, :search_synonyms)
     get("/:dataset/search/synonyms/preview", V1.MediaController, :preview_search_synonym)
     post("/:dataset/search/synonyms", V1.MediaController, :create_search_synonym)

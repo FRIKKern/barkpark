@@ -181,9 +181,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   index), NOT globally — every workspace gets a `"production"` dataset, so
   `"production"` collides across tenants. The E3-dataset tables
   (`sync_cursors`, `preview_token_jti`, …) and the `scope`-column allowlist
-  (`data_keys` = `"dataset:" <> slug`, `search_surface_config` = slug) carry
-  ONLY that bare slug/scope — no `project_id` / `dataset_id` / `workspace_id`
-  column — so a row under a SHARED slug is genuinely unattributable to a single
+  (`data_keys` = `"dataset:" <> slug`) carry ONLY that bare slug/scope — no
+  `project_id` / `dataset_id` / `workspace_id` column — so a row under a SHARED
+  slug is genuinely unattributable to a single
   workspace. The bare `dataset = ANY(slugs)` / `scope = ANY(...)` predicate that
   BOTH the exporter (`copy_where/4`) and the teardown sweep
   (`Tenancy.delete_workspace/1`) run over that slug set therefore MUST NOT match
@@ -280,7 +280,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     "WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})"
   end
 
-  # data_keys.scope = "dataset:" <> slug ; search_surface_config.scope = slug.
+  # data_keys.scope = "dataset:" <> slug (search_surface_config left the allowlist
+  # in Wave 5 Slice A — it is now a plain E1 workspace_id table, charter D45/D49).
   defp copy_where(table, :allowlist, _ws_lit, slugs) do
     prefix = Map.fetch!(Catalog.allowlist(), table)
     scopes = Enum.map(slugs, &(prefix <> &1))
