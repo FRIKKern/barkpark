@@ -9,7 +9,7 @@ a server.
 ```
 merge to main
    ├─ cloud/**  changed → deploy CONTROL PLANE  (barkpark.cloud / barkpark-cp)
-   └─ api/** | internal/** changed → deploy CONTENT INSTANCE (guerrilla)
+   └─ api/** | internal/** | connectors/** changed → deploy CONTENT INSTANCE (guerrilla)
         every deploy: build the IDLE blue/green slot (active one keeps serving)
         → health-gate it → flip Caddy's upstream (graceful reload) → stop old.
         Unhealthy new slot = it's stopped again, no swap — ZERO downtime either way.
@@ -24,7 +24,7 @@ skipped), while a docs-only stretch still resolves to a no-op.
 | Target | Trigger paths | Script | Mechanism |
 |---|---|---|---|
 | Control plane | `cloud/**` | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for instant `docker start` rollback). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `api/**`, `internal/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/api/schemas` → flip Caddy → retire old slot + legacy `barkpark` unit. |
+| Content instance | `api/**`, `internal/**`, `connectors/**` | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/api/schemas` → flip Caddy → retire old slot + legacy `barkpark` unit. |
 
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
@@ -38,9 +38,9 @@ seamless, this covers crashes/restarts outside deploys. Baked into the renderers
 armed on running boxes by `instance-deploy.sh` (idempotent, `caddy validate`d,
 auto-reverting; port-flip-safe). Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script (121 checks: slot selection, flip, failure semantics, channel seam,
+script (169 checks: slot selection, flip, failure semantics, channel seam,
 coalesce, rollback happy flip-back + typed refusals + unhealthy fail-closed,
-/mcp route idempotence + the barkpark-mcp install guard):
+/mcp + /connectors route idempotence and their install guards):
 `deploy/instance-deploy_test.sh`.
 
 **Remote MCP endpoint (`/mcp`).** `instance-deploy.sh` arms an idempotent
@@ -53,6 +53,22 @@ independently of the bearer transport slice. Forward-through auth: the unit and
 credential and a bogus one fails closed downstream. Port 4010 is deliberately
 outside the blue/green slot ports — the flip sed and ACTIVE_PORT greps match
 slot ports exactly and pass over it.
+
+**Connectors bridge (`/connectors`).** Same shape as `/mcp`, one port over:
+`instance-deploy.sh` arms an idempotent path route (`handle /connectors
+/connectors/*` → `localhost:4020`, marker `BARKPARK_CONNECTORS_ROUTE`) and —
+GUARDED, non-fatal — `npm ci`s `connectors/` and installs/enables
+`deploy/systemd/barkpark-connectors.service` (a persistent Node process, not the
+BEAM). The unit's `ExecStart` points at `/usr/local/bin/barkpark-node`, a symlink
+the deploy aims at the asdf node (`asdf where nodejs`; the box has no `node` on
+`PATH`, and systemd cannot expand a variable in the executable position). Guards:
+no node / no `DATABASE_URL` / failed `npm ci` / missing tsx runner / a unit that
+does not stay `active` (it is disabled again rather than left crash-looping) —
+each logs a WARN and leaves the bridge off, with `/connectors` on the maintenance
+503. `/etc/barkpark/connectors.env` is **0600** (it holds `DATABASE_URL` + the
+credential cipher key) and carries **no** chat token: one ambient operator token
+would serve every tenant. Runbook, including the "bring the unit up BEFORE you
+register a provider webhook URL" hazard: `docs/ops/connectors-deploy.md`.
 
 **Rollback (W6).** Every deploy stamps `.slots/<target>.sha` so the box knows
 what its idle slot holds. `instance-deploy.sh --rollback-preflight` (read-only)
