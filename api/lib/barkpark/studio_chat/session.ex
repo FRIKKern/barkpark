@@ -96,6 +96,21 @@ defmodule Barkpark.StudioChat.Session do
     field :output_tokens, :integer, default: 0
     field :total_cost_usd, :float, default: 0.0
 
+    # Provider-observed runtime facts. Unlike the legacy Claude counters above,
+    # these stay nullable: no event means unknown, never a fabricated zero.
+    # Codex token usage is a cumulative snapshot and is SET idempotently by
+    # RuntimeTelemetry rather than incremented by record_result_metrics/2.
+    field :observed_model, :string
+    field :observed_effort, :string
+    field :observed_input_tokens, :integer
+    field :observed_cached_input_tokens, :integer
+    field :observed_output_tokens, :integer
+    field :observed_reasoning_output_tokens, :integer
+    field :observed_total_tokens, :integer
+    field :observed_context_window, :integer
+    field :runtime_identity, :map
+    field :runtime_telemetry_limitations, {:array, :string}
+
     # Per-turn context snapshot (charter D19) — the LATEST result frame's window
     # occupancy, SET (never inc). Nullable: unknown until the first result, and
     # the header ring renders hollow rather than a fake arc when they are nil.
