@@ -93,6 +93,35 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_installs (
 )`;
 
 /**
+ * pending_connect — the short-lived join for Add-to-Slack's OAuth flow (D63).
+ *
+ * A Slack OAuth install crosses a browser redirect, so the workspace-bound chat
+ * token (which only Studio can mint) has to be handed to the bridge over LOOPBACK
+ * AHEAD of the redirect, then joined to the public callback's one-time `code`.
+ * This row is that join: keyed by the ticket `nonce`, carrying the SEALED chat
+ * token and a short expiry. The public callback consumes it (single-use, D63) and
+ * writes the install once with both secrets. A missing/expired row fails closed.
+ *
+ * `chat_token_ref` is SEALED (AES-256-GCM) under the PENDING identity
+ * `(provider, "pending:<nonce>", workspace_id)` — a distinct AAD from the install
+ * row, so a pending blob can never open as an install blob (see
+ * `src/connect/pending-connect.ts`). It is NOT NULL: a pending row with no token
+ * could never complete a connect, so there is no honest "provisioned later" state.
+ *
+ * This is a SEPARATE table from `connector_installs`: it does not change that
+ * table's column set, so the DDL drift gate (connectors D68) is unaffected.
+ */
+export const CREATE_PENDING_CONNECT_SQL = `
+CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.pending_connect (
+  nonce          text        NOT NULL,
+  workspace_id   text        NOT NULL,
+  provider       text        NOT NULL,
+  chat_token_ref text        NOT NULL,
+  expires_at     timestamptz NOT NULL,
+  PRIMARY KEY (nonce)
+)`;
+
+/**
  * chat_token_ref for a table that already exists (D35).
  *
  * `CREATE TABLE IF NOT EXISTS` is a no-op against P2's four-column table, so the
@@ -118,4 +147,5 @@ export const BRIDGE_TABLE_DDL: readonly string[] = [
   // AFTER the create: on a fresh database the column is already there and this is
   // a no-op; on a P2 database it is the only thing that adds it.
   ADD_CHAT_TOKEN_REF_SQL,
+  CREATE_PENDING_CONNECT_SQL,
 ];

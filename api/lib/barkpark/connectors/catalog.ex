@@ -46,16 +46,25 @@ defmodule Barkpark.Connectors.Catalog do
   A provider card.
 
     * `:connectable?` — the bridge declares a paste-mode `connect` for it.
+    * `:connect_mode` — HOW a connectable provider connects. `:paste` opens the
+      credential modal (Telegram, Discord). `:oauth` renders an external
+      "Add to Slack" link carrying a signed connect ticket (Slack). `nil` means
+      catalog-visible but not connectable (Teams/WhatsApp/iMessage show `:gate`).
+      `:oauth` and `:connectable?` are DISJOINT: OAuth does not reuse the paste
+      handlers, so a Slack card must NOT grow a paste Connect button.
     * `:gate` — the honest, human-readable reason a non-connectable provider is
       not connectable. Rendered on the card in place of the button.
     * `:effort` — the onboarding weight, stated up front.
   """
+  @type connect_mode :: :paste | :oauth | nil
+
   @type provider :: %{
           id: String.t(),
           name: String.t(),
           blurb: String.t(),
           effort: String.t(),
           connectable?: boolean(),
+          connect_mode: connect_mode(),
           credential_label: String.t() | nil,
           credential_hint: String.t() | nil,
           help_url: String.t() | nil,
@@ -69,6 +78,7 @@ defmodule Barkpark.Connectors.Catalog do
       blurb: "Talk to your agent in a Telegram DM or group.",
       effort: "About 60 seconds — message @BotFather, create a bot, paste its token.",
       connectable?: true,
+      connect_mode: :paste,
       credential_label: "Bot token",
       credential_hint: "Looks like 123456789:AA… — BotFather hands it to you once.",
       help_url: "https://core.telegram.org/bots/features#botfather",
@@ -82,6 +92,7 @@ defmodule Barkpark.Connectors.Catalog do
         "About five steps in the Discord developer portal — create an application, add a bot, " <>
           "enable the Message Content intent, invite it to your server, then paste its token.",
       connectable?: true,
+      connect_mode: :paste,
       credential_label: "Bot token",
       credential_hint: "From Developer Portal → your application → Bot → Reset Token.",
       help_url: "https://discord.com/developers/applications",
@@ -91,19 +102,21 @@ defmodule Barkpark.Connectors.Catalog do
       id: "slack",
       name: "Slack",
       blurb: "Talk to your agent from a Slack channel or DM.",
-      effort: "One click — once Add to Slack is wired.",
+      effort:
+        "One click — Add to Slack, pick your workspace, and approve the bot. No token to paste.",
+      # OAuth, not paste: Slack connects by the Add-to-Slack redirect, which does
+      # not reuse the paste modal — so `connectable?` (which drives the paste
+      # Connect button) stays false while `connect_mode` names the real flow.
       connectable?: false,
+      connect_mode: :oauth,
       credential_label: nil,
       credential_hint: nil,
-      help_url: nil,
-      # Say it plainly. The Slack channel SHIPPED (registry entry, webhook seam,
-      # per-install token) — what has not shipped is the OAuth "Add to Slack"
-      # button that would create the install. Claiming a Connect button here
-      # would be the two-minute promise as a lie.
-      gate:
-        "Add to Slack (OAuth) is not wired yet. The Slack channel itself ships — " <>
-          "an install created by the OAuth callback works today — but nothing in Studio " <>
-          "can create one, so there is no honest button to show you."
+      help_url: "https://api.slack.com/apps",
+      # No gate: the OAuth button IS the connect surface now. The card falls back
+      # to an honest "needs a Slack app configured" note only when the instance has
+      # no Slack client id / public URL (see `connectors_live.ex`) — never a lie
+      # about a working button.
+      gate: nil
     },
     %{
       id: "teams",
@@ -111,6 +124,7 @@ defmodule Barkpark.Connectors.Catalog do
       blurb: "Talk to your agent from Teams.",
       effort: "Your organisation's Azure admin must consent to the Barkpark bot.",
       connectable?: false,
+      connect_mode: nil,
       credential_label: nil,
       credential_hint: nil,
       help_url: nil,
@@ -127,6 +141,7 @@ defmodule Barkpark.Connectors.Catalog do
         "Weeks, not minutes — Meta Business verification, a WABA phone number, " <>
           "and App Review for Advanced Access.",
       connectable?: false,
+      connect_mode: nil,
       credential_label: nil,
       credential_hint: nil,
       help_url: nil,
@@ -141,6 +156,7 @@ defmodule Barkpark.Connectors.Catalog do
       blurb: "Talk to your agent from Messages on Apple devices.",
       effort: "Needs a Mac you own, running all the time, with Full Disk Access.",
       connectable?: false,
+      connect_mode: nil,
       credential_label: nil,
       credential_hint: nil,
       help_url: nil,
@@ -167,6 +183,64 @@ defmodule Barkpark.Connectors.Catalog do
       %{connectable?: true} -> true
       _ -> false
     end
+  end
+
+  # The bot scopes the Add-to-Slack flow requests — the SAME list as the bridge's
+  # `connectors/src/oauth/slack-oauth.ts#SLACK_BOT_SCOPES`, kept in lockstep so the
+  # authorize URL and the app manifest never drift.
+  @slack_scopes ~w(
+    app_mentions:read channels:history channels:read chat:write
+    groups:history groups:read im:history im:read mpim:history mpim:read
+    reactions:read reactions:write users:read
+  )
+
+  @slack_authorize_url "https://slack.com/oauth/v2/authorize"
+
+  @doc """
+  The Slack Add-to-Slack OAuth config for THIS instance, or `nil` when it is not
+  configured (D62).
+
+  Reads the same `Barkpark.Connectors` app config the connect secret lives in.
+  `slack_client_id` and `slack_redirect_uri` are set by the operator as part of
+  the Slack app human gate (the client id from api.slack.com, the redirect_uri
+  byte-matching the app's registered OAuth redirect URL —
+  `https://<public>/connectors/oauth/slack/callback`). `nil` ⇒ the Slack card
+  shows an honest "needs a Slack app" note, never a broken button.
+  """
+  @spec slack_oauth_config() ::
+          %{client_id: String.t(), redirect_uri: String.t(), scopes: [String.t()]} | nil
+  def slack_oauth_config do
+    cfg = Application.get_env(:barkpark, Barkpark.Connectors, [])
+
+    with client_id when is_binary(client_id) and client_id != "" <- cfg[:slack_client_id],
+         redirect when is_binary(redirect) and redirect != "" <- cfg[:slack_redirect_uri] do
+      %{client_id: client_id, redirect_uri: redirect, scopes: @slack_scopes}
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The Add-to-Slack authorize URL carrying `state` — a signed connect ticket
+  (D62/D65).
+
+  The `state` is minted by `ConnectTicket.sign` and its NONCE joins the
+  pending-connect row staged over loopback (D63); the raw chat token NEVER rides
+  this URL. `redirect_uri` MUST byte-match the bridge's own — both derive from the
+  instance's public base URL + `/connectors/oauth/slack/callback`.
+  """
+  @spec slack_authorize_url(String.t(), map()) :: String.t()
+  def slack_authorize_url(state, %{client_id: cid, redirect_uri: redirect, scopes: scopes})
+      when is_binary(state) do
+    query =
+      URI.encode_query(%{
+        "client_id" => cid,
+        "scope" => Enum.join(scopes, ","),
+        "redirect_uri" => redirect,
+        "state" => state
+      })
+
+    @slack_authorize_url <> "?" <> query
   end
 
   @doc """

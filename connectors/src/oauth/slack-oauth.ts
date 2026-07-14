@@ -1,5 +1,8 @@
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-
+import {
+  signConnectTicket,
+  verifyConnectTicket,
+  type SignConnectTicketOptions,
+} from "../connect/ticket.js";
 import type { ConnectorInstall, WorkspaceId } from "../connector/types.js";
 import { SLACK_PROVIDER, slackInstallKey } from "../connectors/slack.js";
 
@@ -30,7 +33,7 @@ import { SLACK_PROVIDER, slackInstallKey } from "../connectors/slack.js";
  * above.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * HOW THE WORKSPACE IS BOUND — AND WHY THE `state` MUST BE SIGNED
+ * HOW THE WORKSPACE IS BOUND — AND WHY THE `state` IS A SIGNED CONNECT TICKET
  * ─────────────────────────────────────────────────────────────────────────────
  * Slack's callback tells us WHICH SLACK TEAM installed the app. It cannot tell us
  * which BARKPARK WORKSPACE that install belongs to — only the operator who
@@ -40,9 +43,19 @@ import { SLACK_PROVIDER, slackInstallKey } from "../connectors/slack.js";
  * An UNSIGNED state is an open tenant-assignment hole: anyone who can get a user
  * to hit `…/callback?code=…&state=<victim-workspace>` mounts their Slack team
  * inside someone else's workspace, and from then on their messages open Sessions
- * there. So `state` is HMAC-SHA256(workspaceId | nonce | issuedAt) with a
- * bridge-held secret, compared in constant time, and expired after 10 minutes.
- * The bridge is the only party that can mint one.
+ * there. So the `state` IS a `connect/ticket.ts` CONNECT TICKET — the same
+ * HMAC-signed `{w,p,n,t}` primitive Studio mints for the paste flow (connectors
+ * D65). One signer, one verifier, one golden vector across two languages: the
+ * Elixir Studio catalog signs a `{w,p:"slack",n,t}` ticket and this module
+ * verifies it with `provider:"slack"`. That unification is why the ticket's
+ * `nonce` is available here to JOIN the pending-connect row (D63) — the OAuth
+ * `state` and the loopback-staged chat token share ONE nonce.
+ *
+ * NAMED BEHAVIOUR DELTA (connectors D65): the connect ticket tolerates future
+ * clock-skew of only 30 s (`CONNECT_TICKET_MAX_SKEW_MS`), where the retired
+ * `verifyOAuthState` tolerated the full 10-minute TTL in both directions. No
+ * existing test future-dates a Slack state, so the tighten is invisible except in
+ * the (correct) direction.
  */
 
 /** Slack's authorize endpoint (where "Add to Slack" points). */
@@ -73,142 +86,43 @@ export const SLACK_BOT_SCOPES: readonly string[] = [
   "users:read",
 ];
 
-/** How long a minted `state` stays valid. Long enough to click through, no longer. */
-export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
-
-export class SlackOAuthStateError extends Error {
-  constructor(message: string) {
-    super(`slack oauth state: ${message}`);
-    this.name = "SlackOAuthStateError";
-  }
-}
-
-function base64url(input: Buffer): string {
-  return input.toString("base64url");
-}
-
-function hmac(secret: string, body: string): Buffer {
-  return createHmac("sha256", secret).update(body).digest();
-}
-
-/**
- * Mint an integrity-protected `state` binding this install flow to ONE workspace.
- *
- * Wire shape: `<base64url(json)>.<base64url(hmac-sha256)>`. The payload is
- * readable (it is not a secret — it is a workspace id the operator already knows);
- * it is the SIGNATURE that makes it unforgeable. The nonce keeps two flows for the
- * same workspace from producing an identical, replayable string.
- */
-export function signOAuthState(
-  workspaceId: WorkspaceId,
-  stateSecret: string,
-  options: { now?: () => number; nonce?: string } = {},
-): string {
-  if (!stateSecret || stateSecret.trim() === "") {
-    throw new SlackOAuthStateError(
-      "a state secret is required — an unsigned state lets anyone mount their " +
-        "Slack team into another tenant's workspace",
-    );
-  }
-  if (!workspaceId || workspaceId.trim() === "") {
-    throw new SlackOAuthStateError("workspaceId is required");
-  }
-
-  const payload = JSON.stringify({
-    w: workspaceId,
-    n: options.nonce ?? base64url(randomBytes(12)),
-    t: (options.now ?? Date.now)(),
-  });
-  const body = base64url(Buffer.from(payload, "utf8"));
-  return `${body}.${base64url(hmac(stateSecret, body))}`;
-}
-
-/**
- * Verify a `state` and return the workspace it was minted for.
- *
- * Throws on ANY doubt — bad shape, bad signature, expired. The caller answers 400
- * and installs nothing: an install we cannot attribute to a workspace must never
- * be written, because the only alternatives are guessing a tenant or leaving an
- * orphan row that a later flow could adopt.
- */
-export function verifyOAuthState(
-  state: string | null | undefined,
-  stateSecret: string,
-  options: { now?: () => number; maxAgeMs?: number } = {},
-): WorkspaceId {
-  if (!state || state.trim() === "") {
-    throw new SlackOAuthStateError("missing");
-  }
-
-  const dot = state.indexOf(".");
-  if (dot <= 0 || dot === state.length - 1) {
-    throw new SlackOAuthStateError("malformed");
-  }
-
-  const body = state.slice(0, dot);
-  const signature = Buffer.from(state.slice(dot + 1), "base64url");
-  const expected = hmac(stateSecret, body);
-
-  // Length-check first: timingSafeEqual THROWS on a length mismatch, and an
-  // attacker-supplied signature controls that length.
-  if (
-    signature.length !== expected.length ||
-    !timingSafeEqual(signature, expected)
-  ) {
-    throw new SlackOAuthStateError("bad signature — not minted by this bridge");
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-  } catch {
-    throw new SlackOAuthStateError("malformed payload");
-  }
-
-  if (typeof parsed !== "object" || parsed === null) {
-    throw new SlackOAuthStateError("malformed payload");
-  }
-  const { w, t } = parsed as { w?: unknown; t?: unknown };
-  if (typeof w !== "string" || w.trim() === "") {
-    throw new SlackOAuthStateError("no workspace bound");
-  }
-  if (typeof t !== "number") {
-    throw new SlackOAuthStateError("no issued-at");
-  }
-
-  const now = (options.now ?? Date.now)();
-  const maxAgeMs = options.maxAgeMs ?? OAUTH_STATE_TTL_MS;
-  // A future-dated state is as suspicious as an expired one (clock skew or a
-  // replay with a tampered — but somehow valid — payload).
-  if (now - t > maxAgeMs || t - now > maxAgeMs) {
-    throw new SlackOAuthStateError("expired");
-  }
-
-  return w;
-}
-
 export interface SlackInstallUrlOptions {
   clientId: string;
   redirectUri: string;
   workspaceId: WorkspaceId;
+  /** The connect-ticket HMAC secret (`CONNECTORS_CONNECT_SECRET`). */
   stateSecret: string;
   scopes?: readonly string[];
   now?: () => number;
   nonce?: string;
 }
 
-/** The "Add to Slack" URL for ONE workspace, carrying its signed state. */
+/**
+ * The "Add to Slack" URL for ONE workspace, carrying a signed connect ticket as
+ * its `state`.
+ *
+ * The bridge itself has no reason to build this in production — the Elixir Studio
+ * catalog does, so it can stage the pending-connect row under the SAME nonce
+ * first. This exists so the wire has one executable definition and a smoke script
+ * can drive the flow without Studio.
+ */
 export function buildSlackInstallUrl(options: SlackInstallUrlOptions): string {
   const url = new URL(SLACK_AUTHORIZE_URL);
   url.searchParams.set("client_id", options.clientId);
   url.searchParams.set("scope", (options.scopes ?? SLACK_BOT_SCOPES).join(","));
   url.searchParams.set("redirect_uri", options.redirectUri);
+
+  const ticketOptions: SignConnectTicketOptions = {};
+  if (options.now) ticketOptions.now = options.now;
+  if (options.nonce) ticketOptions.nonce = options.nonce;
   url.searchParams.set(
     "state",
-    signOAuthState(options.workspaceId, options.stateSecret, {
-      ...(options.now ? { now: options.now } : {}),
-      ...(options.nonce ? { nonce: options.nonce } : {}),
-    }),
+    signConnectTicket(
+      options.workspaceId,
+      SLACK_PROVIDER,
+      options.stateSecret,
+      ticketOptions,
+    ),
   );
   return url.toString();
 }
@@ -293,8 +207,33 @@ export interface SlackOAuthCallbackDeps {
   clientSecret: string;
   /** MUST byte-match the redirect URL registered in the Slack app. */
   redirectUri: string;
-  /** The HMAC key that makes the workspace binding unforgeable. */
+  /** The connect-ticket HMAC key that makes the workspace binding unforgeable. */
   stateSecret: string;
+  /**
+   * Consume the LOOPBACK-staged pending-connect row by the ticket's `nonce`
+   * (`connect/pending-connect.ts#consumePendingConnect`), returning the OPENED
+   * chat token this workspace's traffic will authenticate with — single-use, so a
+   * replayed callback consumes it at most once.
+   *
+   * A missing/expired row is `null`, and the callback then installs NOTHING: the
+   * bridge cannot mint a chat token itself (D48), so an install with no chat token
+   * would be a routable-but-unreachable tenant. Fail closed.
+   */
+  consumePendingConnect(
+    nonce: string,
+  ): Promise<{ workspaceId: WorkspaceId; chatToken: string } | null>;
+  /**
+   * THE INCUMBENT-OWNER CHECK (connectors D64). `tenant/installs.ts#resolveWorkspace`
+   * reads `workspace_id` ALONE for `(provider, installKey)`. This is a PUBLIC entry
+   * and `UPSERT_INSTALL` repoints `workspace_id` unconditionally, so without this
+   * an attacker with a valid state for their OWN workspace could re-auth a Slack
+   * team another tenant owns and REPOINT the victim's row. Returns the owning
+   * workspace, or null when nobody owns the key yet.
+   */
+  resolveWorkspace(
+    provider: string,
+    installKey: string,
+  ): Promise<WorkspaceId | null>;
   /** Write (or replace) the install row. `tenant/installs.ts#upsertInstall`. */
   upsertInstall(install: ConnectorInstall): Promise<void>;
   /**
@@ -305,8 +244,10 @@ export interface SlackOAuthCallbackDeps {
   mountInstall(install: ConnectorInstall): Promise<unknown>;
   /**
    * Seal the bot token for `credential_ref`. The credential-cipher injection
-   * point; defaults to identity, which is the honest current state of the column
-   * (plaintext — see `tenant/installs.ts`).
+   * point; defaults to identity because the production `upsertInstall` seals both
+   * columns itself (`createInstallsLookup(pool, cipher)` — D35/D37), so the
+   * callback hands it PLAINTEXT. The hook survives only for a test that supplies a
+   * non-sealing `upsertInstall`.
    */
   sealCredential?(botToken: string): string | Promise<string>;
   fetch?: typeof fetch;
@@ -353,22 +294,37 @@ export async function handleSlackOAuthCallback(
     return { status: 400, installed: false, error: "missing code" };
   }
 
-  // The workspace binding — verified BEFORE the code is spent, so a forged state
-  // never even reaches Slack.
+  // The workspace binding — a signed CONNECT TICKET, verified BEFORE the code is
+  // spent, so a forged state never even reaches Slack. The ticket also carries the
+  // `nonce` that joins the loopback-staged pending-connect row.
   let workspaceId: WorkspaceId;
+  let nonce: string;
   try {
-    workspaceId = verifyOAuthState(
+    const ticket = verifyConnectTicket(
       url.searchParams.get("state"),
       deps.stateSecret,
       {
+        provider: SLACK_PROVIDER,
         ...(deps.now ? { now: deps.now } : {}),
       },
     );
+    workspaceId = ticket.workspaceId;
+    nonce = ticket.nonce;
   } catch (err) {
     return {
       status: 400,
       installed: false,
       error: err instanceof Error ? err.message : "invalid state",
+    };
+  }
+
+  if (!nonce || nonce.trim() === "") {
+    // A ticket with no nonce cannot join a pending row — there is no chat token to
+    // install, and the bridge cannot mint one (D48). Fail closed.
+    return {
+      status: 400,
+      installed: false,
+      error: "connect ticket carried no nonce",
     };
   }
 
@@ -399,12 +355,62 @@ export async function handleSlackOAuthCallback(
     };
   }
 
+  // THE INCUMBENT-OWNER CHECK (D64), BEFORE we consume the pending row or write
+  // anything. `resolveWorkspace` reads `workspace_id` alone, so a row whose seals
+  // no longer open still guards its tenant. A key another workspace owns is a typed
+  // 409 — never a silent takedown of the incumbent's install via the unconditional
+  // `workspace_id = EXCLUDED.workspace_id`.
+  const owner = await deps.resolveWorkspace(SLACK_PROVIDER, installKey);
+  if (owner !== null && owner !== workspaceId) {
+    return {
+      status: 409,
+      installed: false,
+      installKey,
+      error:
+        "install_owned_elsewhere: that Slack team is already connected to a " +
+        "different Barkpark workspace. Disconnect it there first.",
+    };
+  }
+
+  // Join the loopback-staged pending row by the ticket's nonce (D63). This is
+  // where the workspace-bound chat token — which only Studio could mint — enters
+  // the flow. Single-use: consuming deletes the row. Missing/expired ⇒ fail closed.
+  const pending = await deps.consumePendingConnect(nonce);
+  if (pending === null) {
+    return {
+      status: 400,
+      installed: false,
+      installKey,
+      error:
+        "this connect session has expired or was already used — start again from " +
+        "the Studio Connectors page.",
+    };
+  }
+
+  // Defence in depth: the workspace the ticket authorises and the workspace the
+  // pending row was staged for MUST agree. They are minted together by Studio, so
+  // a mismatch is either a bug or a crossed-wire attack — either way, install
+  // nothing.
+  if (pending.workspaceId !== workspaceId) {
+    return {
+      status: 400,
+      installed: false,
+      installKey,
+      error: "connect session workspace mismatch",
+    };
+  }
+
   const seal = deps.sealCredential ?? ((token: string) => token);
   const install: ConnectorInstall = {
     provider: SLACK_PROVIDER,
     installKey,
     workspaceId,
+    // BOTH secrets in ONE write (D63): a non-blank credential AND a non-blank chat
+    // token fire the `EXCLUDED IS NOT NULL` arm for both columns, so the sibling
+    // preserve never runs on the Slack path and a fresh install lands with both
+    // columns populated (the D61 fresh-install-NULL gap, closed).
     credentialRef: await seal(exchange.access_token),
+    chatToken: pending.chatToken,
   };
 
   await deps.upsertInstall(install);

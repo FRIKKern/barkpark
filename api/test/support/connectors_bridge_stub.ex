@@ -86,6 +86,12 @@ defmodule Barkpark.Test.ConnectorsBridgeStub do
   end
 
   @impl true
+  def stage_pending(ticket, chat_token) do
+    record({:stage_pending, ticket, chat_token})
+    reply_or(:stage_pending, {:ok, %{}})
+  end
+
+  @impl true
   def disconnect(ticket, install_key) do
     record({:disconnect, ticket, install_key})
 
@@ -120,6 +126,13 @@ defmodule Barkpark.Test.ConnectorsBridgeStub do
 
   defp reply(key) do
     Agent.get(@agent, &Map.fetch!(&1.script, key))
+  end
+
+  # Like `reply/1` but tolerant of a script that did not set this key — the
+  # OAuth staging reply is optional and defaults to success, so a test scripting
+  # only validate/connect/disconnect still exercises the Add-to-Slack path.
+  defp reply_or(key, default) do
+    Agent.get(@agent, &Map.get(&1.script, key, default))
   end
 
   defp script_workspace, do: Agent.get(@agent, &Map.fetch!(&1.script, :workspace_id))

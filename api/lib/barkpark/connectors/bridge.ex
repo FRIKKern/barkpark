@@ -37,4 +37,18 @@ defmodule Barkpark.Connectors.Bridge do
 
   @callback disconnect(ticket :: String.t(), install_key :: String.t()) ::
               {:ok, %{removed: boolean()}} | {:error, reason()}
+
+  @doc """
+  STAGE a pending-connect row for the Add-to-Slack OAuth flow (D63).
+
+  Slack's OAuth install crosses a browser redirect, so the chat token (which only
+  Studio can mint) cannot ride the OAuth `state` — it is handed to the bridge over
+  LOOPBACK, ahead of the redirect, keyed by the ticket's nonce. The public OAuth
+  callback later JOINS it by that nonce and writes the install once. The raw chat
+  token rides THIS body over loopback, never a URL.
+
+  `POST {bridge}/connect/pending {ticket, chat_token}` -> `{ok}`.
+  """
+  @callback stage_pending(ticket :: String.t(), chat_token :: String.t()) ::
+              {:ok, map()} | {:error, reason()}
 end

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { connect as netConnect, type AddressInfo } from "node:net";
 
 import { createSlackAdapter, type SlackAdapter } from "@chat-adapter/slack";
 import { Chat } from "chat";
@@ -37,10 +37,16 @@ import {
   buildSlackInstallUrl,
   handleSlackOAuthCallback,
   installKeyFromOAuth,
-  signOAuthState,
   SLACK_OAUTH_CALLBACK_PATH,
-  verifyOAuthState,
 } from "../src/oauth/slack-oauth.js";
+import { signConnectTicket, verifyConnectTicket } from "../src/connect/ticket.js";
+import {
+  consumePendingConnect,
+  stagePendingConnect,
+} from "../src/connect/pending-connect.js";
+import { createWebhookMountIndex } from "../src/http/mounts.js";
+import { startWebhookServer } from "../src/http/webhook-server.js";
+import type { SlackOAuthCallbackDeps } from "../src/oauth/slack-oauth.js";
 import { createBridgeState } from "../src/state/state-adapter.js";
 import {
   createPgThreadSessionStore,
@@ -307,6 +313,30 @@ function recordingChatClientFor(
     } as unknown as ChatClient;
   };
 }
+
+/**
+ * An in-memory stand-in for `pending_connect` (D63) for the callback unit tests
+ * that run without Postgres. `stage`/`consume` mirror the real single-use join:
+ * consuming a nonce removes it, so a replay yields null.
+ */
+function inMemoryPending() {
+  const rows = new Map<string, { workspaceId: string; chatToken: string }>();
+  return {
+    stage(nonce: string, workspaceId: string, chatToken: string): void {
+      rows.set(nonce, { workspaceId, chatToken });
+    },
+    consume: async (nonce: string) => {
+      const row = rows.get(nonce);
+      if (!row) return null;
+      rows.delete(nonce);
+      return row;
+    },
+    has: (nonce: string) => rows.has(nonce),
+  };
+}
+
+/** No workspace owns any install key — the callback's incumbent check passes. */
+const noIncumbent = async (): Promise<null> => null;
 
 // ───────────────────────────────────────────────────────────────────────────────
 // PART 1 — registration shape. Slack is ONE registry entry.
@@ -972,39 +1002,54 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
 // PART 5 — Add-to-Slack OAuth: signed state, sealed install, dynamic mount.
 // ───────────────────────────────────────────────────────────────────────────────
 
-describe("slack oauth — the workspace binding is integrity-protected", () => {
-  it("round-trips the workspace through a signed state", () => {
-    const state = signOAuthState(WS_A, STATE_SECRET);
-    expect(verifyOAuthState(state, STATE_SECRET)).toBe(WS_A);
+describe("slack oauth — the workspace binding is a signed connect ticket (D65)", () => {
+  const verifySlack = (state: string | null) =>
+    verifyConnectTicket(state, STATE_SECRET, { provider: SLACK_PROVIDER });
+
+  it("round-trips the workspace through a signed connect ticket carrying p:'slack'", () => {
+    const state = signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET);
+    expect(verifySlack(state).workspaceId).toBe(WS_A);
+    expect(verifySlack(state).provider).toBe(SLACK_PROVIDER);
   });
 
-  it("rejects a state this bridge did not mint — the tenant-assignment hole, closed", () => {
+  it("rejects a state this bridge's peer did not mint — the tenant-assignment hole, closed", () => {
     // The attack an unsigned state allows: hand the callback a state naming the
     // VICTIM's workspace, and your Slack team mounts inside it.
-    const forged = Buffer.from(JSON.stringify({ w: WS_B, n: "x", t: Date.now() }))
+    const forged = Buffer.from(
+      JSON.stringify({ w: WS_B, p: SLACK_PROVIDER, n: "x", t: Date.now() }),
+    )
       .toString("base64url")
       .concat(".", Buffer.from("not-a-signature").toString("base64url"));
 
-    expect(() => verifyOAuthState(forged, STATE_SECRET)).toThrow(/bad signature/);
+    expect(() => verifySlack(forged)).toThrow(/bad signature/);
   });
 
   it("rejects a state signed with a different secret", () => {
-    const state = signOAuthState(WS_A, "some-other-secret");
-    expect(() => verifyOAuthState(state, STATE_SECRET)).toThrow(/bad signature/);
+    const state = signConnectTicket(WS_A, SLACK_PROVIDER, "some-other-secret");
+    expect(() => verifySlack(state)).toThrow(/bad signature/);
+  });
+
+  it("rejects a ticket minted for another provider used on the slack callback", () => {
+    // A valid ticket for telegram must not authorise a Slack install — the
+    // provider is on the wire precisely so a body/route cannot re-aim it.
+    const state = signConnectTicket(WS_A, "telegram", STATE_SECRET);
+    expect(() => verifySlack(state)).toThrow(/provider mismatch/);
   });
 
   it("expires a stale state", () => {
-    const state = signOAuthState(WS_A, STATE_SECRET, {
+    const state = signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, {
       now: () => Date.now() - 60 * 60 * 1000,
     });
-    expect(() => verifyOAuthState(state, STATE_SECRET)).toThrow(/expired/);
+    expect(() => verifySlack(state)).toThrow(/expired/);
   });
 
-  it("refuses to mint an unsigned state at all", () => {
-    expect(() => signOAuthState(WS_A, "")).toThrow(/state secret is required/);
+  it("refuses to mint an unsigned ticket at all", () => {
+    expect(() => signConnectTicket(WS_A, SLACK_PROVIDER, "")).toThrow(
+      /secret is required/,
+    );
   });
 
-  it("puts the signed state, the scopes and the redirect into the Add-to-Slack URL", () => {
+  it("puts the signed ticket, the scopes and the redirect into the Add-to-Slack URL", () => {
     const url = new URL(
       buildSlackInstallUrl({
         clientId: CLIENT_ID,
@@ -1017,9 +1062,11 @@ describe("slack oauth — the workspace binding is integrity-protected", () => {
     expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2/authorize");
     expect(url.searchParams.get("client_id")).toBe(CLIENT_ID);
     expect(url.searchParams.get("scope")).toContain("chat:write");
-    expect(verifyOAuthState(url.searchParams.get("state"), STATE_SECRET)).toBe(
-      WS_A,
-    );
+    const ticket = verifySlack(url.searchParams.get("state"));
+    expect(ticket.workspaceId).toBe(WS_A);
+    expect(ticket.provider).toBe(SLACK_PROVIDER);
+    // The nonce is present — that is what the pending-connect join keys on (D63).
+    expect(ticket.nonce).not.toBe("");
   });
 });
 
@@ -1045,21 +1092,31 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
     }) as unknown as typeof fetch;
   }
 
-  it("upserts a SEALED install bound to the state's workspace, and mounts it live", async () => {
+  const NONCE_A = "nonce-callback-a";
+  const NONCE_B = "nonce-callback-b";
+
+  it("joins the pending row and upserts a SEALED install with BOTH secrets, then mounts it live (D63)", async () => {
     const upserted: ConnectorInstall[] = [];
     const mountedNow: ConnectorInstall[] = [];
     const seen: { body?: URLSearchParams } = {};
 
+    const pending = inMemoryPending();
+    pending.stage(NONCE_A, WS_A, "bp_chat_ws_a");
+
     const result = await handleSlackOAuthCallback(
       callbackRequest({
         code: "one-time-code",
-        state: signOAuthState(WS_A, STATE_SECRET),
+        state: signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, {
+          nonce: NONCE_A,
+        }),
       }),
       {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
         redirectUri,
         stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        resolveWorkspace: noIncumbent,
         upsertInstall: async (i) => void upserted.push(i),
         mountInstall: async (i) => void mountedNow.push(i),
         sealCredential: (token) => `sealed:${token}`,
@@ -1084,17 +1141,21 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
       teamName: "Acme",
     });
 
-    // The row: keyed by team, owned by the state's workspace, credential SEALED.
+    // The row: keyed by team, owned by the state's workspace, BOTH secrets present
+    // — credential SEALED, chat token the plaintext joined from the pending row.
     expect(upserted).toEqual([
       {
         provider: SLACK_PROVIDER,
         installKey: TEAM_A,
         workspaceId: WS_A,
         credentialRef: `sealed:${TOKEN_A}`,
+        chatToken: "bp_chat_ws_a",
       },
     ]);
     // Live without a restart — the same row, straight into the running bridge.
     expect(mountedNow).toEqual(upserted);
+    // Single-use: the pending row is gone.
+    expect(pending.has(NONCE_A)).toBe(false);
 
     // The client secret went in the BODY, never the query string.
     expect(seen.body?.get("client_secret")).toBe(CLIENT_SECRET);
@@ -1103,14 +1164,23 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
 
   it("keys an ORG-WIDE install by enterprise_id", async () => {
     const upserted: ConnectorInstall[] = [];
+    const pending = inMemoryPending();
+    pending.stage(NONCE_B, WS_B, "bp_chat_ws_b");
 
     await handleSlackOAuthCallback(
-      callbackRequest({ code: "c", state: signOAuthState(WS_B, STATE_SECRET) }),
+      callbackRequest({
+        code: "c",
+        state: signConnectTicket(WS_B, SLACK_PROVIDER, STATE_SECRET, {
+          nonce: NONCE_B,
+        }),
+      }),
       {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
         redirectUri,
         stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        resolveWorkspace: noIncumbent,
         upsertInstall: async (i) => void upserted.push(i),
         mountInstall: async () => undefined,
         fetch: oauthFetch({
@@ -1126,8 +1196,9 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
     expect(upserted[0]?.installKey).toBe(ENTERPRISE);
   });
 
-  it("installs NOTHING when the state is forged", async () => {
+  it("installs NOTHING when the state is forged — and never spends the code", async () => {
     const upserted: ConnectorInstall[] = [];
+    const pending = inMemoryPending();
     let exchanged = false;
 
     const result = await handleSlackOAuthCallback(
@@ -1137,6 +1208,8 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
         clientSecret: CLIENT_SECRET,
         redirectUri,
         stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        resolveWorkspace: noIncumbent,
         upsertInstall: async (i) => void upserted.push(i),
         mountInstall: async () => undefined,
         fetch: (async () => {
@@ -1155,14 +1228,23 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
 
   it("installs NOTHING when Slack refuses the exchange", async () => {
     const upserted: ConnectorInstall[] = [];
+    const pending = inMemoryPending();
+    pending.stage("nonce-refused", WS_A, "bp_chat_ws_a");
 
     const result = await handleSlackOAuthCallback(
-      callbackRequest({ code: "bad", state: signOAuthState(WS_A, STATE_SECRET) }),
+      callbackRequest({
+        code: "bad",
+        state: signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, {
+          nonce: "nonce-refused",
+        }),
+      }),
       {
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
         redirectUri,
         stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        resolveWorkspace: noIncumbent,
         upsertInstall: async (i) => void upserted.push(i),
         mountInstall: async () => undefined,
         fetch: oauthFetch({ ok: false, error: "invalid_code" }),
@@ -1172,10 +1254,14 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
     expect(result.status).toBe(400);
     expect(result.error).toContain("invalid_code");
     expect(upserted).toEqual([]);
+    // The exchange failed BEFORE the pending row was consumed — the operator can
+    // retry from Studio without the staged token being burned.
+    expect(pending.has("nonce-refused")).toBe(true);
   });
 
   it("installs NOTHING when the user cancels", async () => {
     const upserted: ConnectorInstall[] = [];
+    const pending = inMemoryPending();
 
     const result = await handleSlackOAuthCallback(
       callbackRequest({ error: "access_denied" }),
@@ -1184,6 +1270,8 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
         clientSecret: CLIENT_SECRET,
         redirectUri,
         stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        resolveWorkspace: noIncumbent,
         upsertInstall: async (i) => void upserted.push(i),
         mountInstall: async () => undefined,
       },
@@ -1192,6 +1280,77 @@ describe("slack oauth — the callback installs, seals and mounts", () => {
     expect(result.status).toBe(400);
     expect(result.installed).toBe(false);
     expect(upserted).toEqual([]);
+  });
+
+  it("fails closed when there is NO pending row — the bridge cannot mint a chat token (D48/D63)", async () => {
+    const upserted: ConnectorInstall[] = [];
+    const pending = inMemoryPending(); // nothing staged
+
+    const result = await handleSlackOAuthCallback(
+      callbackRequest({
+        code: "c",
+        state: signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, {
+          nonce: "nonce-missing",
+        }),
+      }),
+      {
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUri,
+        stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        resolveWorkspace: noIncumbent,
+        upsertInstall: async (i) => void upserted.push(i),
+        mountInstall: async () => undefined,
+        fetch: oauthFetch({
+          ok: true,
+          access_token: TOKEN_A,
+          team: { id: TEAM_A, name: "Acme" },
+        }),
+      },
+    );
+
+    expect(result.status).toBe(400);
+    expect(result.installed).toBe(false);
+    expect(upserted).toEqual([]);
+  });
+
+  it("refuses a Slack team another workspace owns — 409, install nothing (D64)", async () => {
+    const upserted: ConnectorInstall[] = [];
+    const pending = inMemoryPending();
+    pending.stage("nonce-owned", WS_B, "bp_chat_ws_b");
+
+    const result = await handleSlackOAuthCallback(
+      callbackRequest({
+        code: "c",
+        state: signConnectTicket(WS_B, SLACK_PROVIDER, STATE_SECRET, {
+          nonce: "nonce-owned",
+        }),
+      }),
+      {
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUri,
+        stateSecret: STATE_SECRET,
+        consumePendingConnect: pending.consume,
+        // WS_A already owns TEAM_A — a re-auth from WS_B must be refused.
+        resolveWorkspace: async () => WS_A,
+        upsertInstall: async (i) => void upserted.push(i),
+        mountInstall: async () => undefined,
+        fetch: oauthFetch({
+          ok: true,
+          access_token: TOKEN_A,
+          team: { id: TEAM_A, name: "Acme" },
+        }),
+      },
+    );
+
+    expect(result.status).toBe(409);
+    expect(result.installed).toBe(false);
+    expect(result.error).toContain("install_owned_elsewhere");
+    expect(upserted).toEqual([]);
+    // The check runs BEFORE the join, so the attacker's staged token is not spent.
+    expect(pending.has("nonce-owned")).toBe(true);
   });
 });
 
@@ -1259,11 +1418,21 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
 
     it("the OAuth callback writes the row AND mounts it into the live bridge", async () => {
       const pool = bridge.pool;
+      const NONCE = "nonce-live-mount";
 
+      // Studio stages the workspace-bound chat token over loopback first (D63).
+      await stagePendingConnect(pool, cipher, {
+        nonce: NONCE,
+        workspaceId: WS_A,
+        provider: SLACK_PROVIDER,
+        chatToken: "bp_chat_ws_a_live",
+      });
+
+      const lookup = createInstallsLookup(pool, cipher);
       const result = await handleSlackOAuthCallback(
         new Request(
           `https://bridge.test${SLACK_OAUTH_CALLBACK_PATH}?code=c&state=${encodeURIComponent(
-            signOAuthState(WS_A, STATE_SECRET),
+            signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, { nonce: NONCE }),
           )}`,
         ),
         {
@@ -1271,6 +1440,10 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
           clientSecret: CLIENT_SECRET,
           redirectUri: `https://bridge.test${SLACK_OAUTH_CALLBACK_PATH}`,
           stateSecret: STATE_SECRET,
+          consumePendingConnect: (nonce) =>
+            consumePendingConnect(pool, cipher, nonce),
+          resolveWorkspace: (provider, installKey) =>
+            lookup.resolveWorkspace(provider, installKey),
           upsertInstall: (install) => upsertInstall(pool, cipher, install),
           mountInstall: (install) => bridge.mount(install),
           fetch: (async () =>
@@ -1354,3 +1527,179 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
     });
   },
 );
+
+// ───────────────────────────────────────────────────────────────────────────────
+// PART 7 — THE MOUNT. The OAuth callback is a real, reachable route (D62): GET,
+// state-authenticated, and NEVER loopback-gated — proven over a raw socket, the
+// only honest way to send the bytes fetch would rewrite.
+// ───────────────────────────────────────────────────────────────────────────────
+
+describe("slack oauth — the callback route is MOUNTED, public, and traversal-safe (D62)", () => {
+  const REDIRECT =
+    "https://guerrilla.barkpark.cloud/connectors/oauth/slack/callback";
+
+  function oauthDeps(
+    overrides: Partial<SlackOAuthCallbackDeps> = {},
+  ): SlackOAuthCallbackDeps {
+    const pending = inMemoryPending();
+    return {
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      redirectUri: REDIRECT,
+      stateSecret: STATE_SECRET,
+      consumePendingConnect: pending.consume,
+      resolveWorkspace: noIncumbent,
+      upsertInstall: async () => undefined,
+      mountInstall: async () => undefined,
+      ...overrides,
+    };
+  }
+
+  async function bootServer(slackOAuth?: SlackOAuthCallbackDeps) {
+    const registry = createConnectorRegistry();
+    const server = await startWebhookServer({
+      registry,
+      installs: createInMemoryInstallsLookup([]),
+      mounts: createWebhookMountIndex(),
+      port: 0,
+      host: "127.0.0.1",
+      pathPrefix: "/connectors",
+      publicBaseUrl: "https://guerrilla.barkpark.cloud",
+      ...(slackOAuth ? { slackOAuth } : {}),
+    });
+    return server;
+  }
+
+  /** Speak HTTP over a raw socket — the ONLY way to send bytes fetch would rewrite. */
+  function rawRequest(port: number, raw: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      const socket = netConnect({ host: "127.0.0.1", port }, () =>
+        socket.write(raw),
+      );
+      socket.on("data", (c: Buffer) => chunks.push(c));
+      socket.on("close", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      socket.on("error", reject);
+      socket.setTimeout(5_000, () => {
+        socket.destroy();
+        reject(new Error("raw request timed out"));
+      });
+    });
+  }
+
+  it("is REACHED (not the opaque 404) with x-forwarded-* present — it is NOT loopback-gated", async () => {
+    const server = await bootServer(oauthDeps());
+    try {
+      // A browser redirect through Caddy ALWAYS carries x-forwarded-*. The connect
+      // routes 404 on those; this route must NOT — it authenticates by state.
+      // `error=access_denied` makes the handler answer without any exchange, so a
+      // 400 HTML page (not the JSON 404) PROVES the handler ran.
+      const raw = await rawRequest(
+        server.port,
+        "GET /connectors/oauth/slack/callback?error=access_denied HTTP/1.1\r\n" +
+          `Host: 127.0.0.1:${server.port}\r\n` +
+          "X-Forwarded-For: 203.0.113.7\r\n" +
+          "X-Forwarded-Host: guerrilla.barkpark.cloud\r\n" +
+          "X-Forwarded-Proto: https\r\n" +
+          "Connection: close\r\n\r\n",
+      );
+      expect(raw.split("\r\n")[0]).toContain("400");
+      expect(raw).toContain("text/html");
+      // The handler ran — this is its page, not the seam's opaque JSON 404.
+      expect(raw).toContain("Could not connect Slack");
+      expect(raw).not.toContain('{"error":"not_found"}');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("answers the opaque 404 when the OAuth deps are absent (unconfigured box)", async () => {
+    const server = await bootServer(undefined);
+    try {
+      const raw = await rawRequest(
+        server.port,
+        "GET /connectors/oauth/slack/callback?error=access_denied HTTP/1.1\r\n" +
+          `Host: 127.0.0.1:${server.port}\r\nConnection: close\r\n\r\n`,
+      );
+      expect(raw.split("\r\n")[0]).toContain("404");
+      expect(raw).toContain('{"error":"not_found"}');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("404s a POST to the callback — a browser redirect is a GET", async () => {
+    const server = await bootServer(oauthDeps());
+    try {
+      const raw = await rawRequest(
+        server.port,
+        "POST /connectors/oauth/slack/callback HTTP/1.1\r\n" +
+          `Host: 127.0.0.1:${server.port}\r\n` +
+          "content-length: 0\r\nConnection: close\r\n\r\n",
+      );
+      expect(raw.split("\r\n")[0]).toContain("404");
+      expect(raw).toContain('{"error":"not_found"}');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("404s a LITERAL dot-segment traversal at the callback path (raw socket)", async () => {
+    const server = await bootServer(oauthDeps());
+    try {
+      const raw = await rawRequest(
+        server.port,
+        "GET /connectors/oauth/slack/../slack/callback?error=x HTTP/1.1\r\n" +
+          `Host: 127.0.0.1:${server.port}\r\nConnection: close\r\n\r\n`,
+      );
+      expect(raw.split("\r\n")[0]).toContain("404");
+      expect(raw).toContain('{"error":"not_found"}');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("drives a REAL install end to end through the mounted route (GET, state-authenticated)", async () => {
+    const pending = inMemoryPending();
+    const NONCE = "nonce-route-e2e";
+    pending.stage(NONCE, WS_A, "bp_chat_route_e2e");
+    const upserted: ConnectorInstall[] = [];
+
+    const server = await bootServer(
+      oauthDeps({
+        consumePendingConnect: pending.consume,
+        upsertInstall: async (i) => void upserted.push(i),
+        fetch: (async () =>
+          new Response(
+            JSON.stringify({
+              ok: true,
+              access_token: TOKEN_A,
+              team: { id: TEAM_A, name: "Acme" },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          )) as unknown as typeof fetch,
+      }),
+    );
+    try {
+      const state = signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, {
+        nonce: NONCE,
+      });
+      const raw = await rawRequest(
+        server.port,
+        `GET /connectors/oauth/slack/callback?code=c&state=${encodeURIComponent(state)} HTTP/1.1\r\n` +
+          `Host: 127.0.0.1:${server.port}\r\n` +
+          "X-Forwarded-Host: guerrilla.barkpark.cloud\r\n" +
+          "X-Forwarded-Proto: https\r\n" +
+          "Connection: close\r\n\r\n",
+      );
+      expect(raw.split("\r\n")[0]).toContain("200");
+      expect(raw).toContain("Connected to Slack");
+      expect(upserted).toHaveLength(1);
+      expect(upserted[0]?.installKey).toBe(TEAM_A);
+      expect(upserted[0]?.workspaceId).toBe(WS_A);
+      expect(upserted[0]?.chatToken).toBe("bp_chat_route_e2e");
+    } finally {
+      await server.close();
+    }
+  });
+});

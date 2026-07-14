@@ -4,6 +4,10 @@ import { pathToFileURL } from "node:url";
 
 import { createChatClient } from "./chat-client/client.js";
 import type { ChatClient } from "./chat-client/types.js";
+import {
+  consumePendingConnect,
+  stagePendingConnect,
+} from "./connect/pending-connect.js";
 import { loadConfig, type BridgeConfig } from "./config.js";
 import {
   createConnectorRegistry,
@@ -36,6 +40,7 @@ import {
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
 import type { ConnectDeps } from "./http/connect.js";
+import type { SlackOAuthCallbackDeps } from "./oauth/slack-oauth.js";
 import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
 import { createBridgeState } from "./state/state-adapter.js";
@@ -372,15 +377,18 @@ export async function startBridge(
   const installs = createInstallsLookup(pool, cipher);
   const map = createThreadSessionMap(createPgThreadSessionStore(pool));
 
+  // The Slack app credentials, read ONCE — the registry needs them to build the
+  // adapter, and the OAuth callback deps below need them to exchange the code.
+  const slackApp = slackDepsFromEnv(process.env);
+
   const registry = overrides.registry ?? createConnectorRegistry();
   if (!overrides.registry) {
-    const slack = slackDepsFromEnv(process.env);
     registerBuiltinConnectors(registry, {
       installs,
       env: process.env,
       // Absent SLACK_* env ⇒ Slack is simply not registered. Spreading rather than
       // passing `undefined` keeps `exactOptionalPropertyTypes` happy.
-      ...(slack ? { slack } : {}),
+      ...(slackApp ? { slack: slackApp } : {}),
     });
   }
 
@@ -550,6 +558,9 @@ export async function startBridge(
         // rather than a "connected!" about a bot that will never answer.
         mountInstall: addInstall,
         unmountInstall: takeDown,
+        // Stage the OAuth flow's pending-connect row (D63) — seals the raw chat
+        // token under the ticket nonce so the public callback can join it.
+        stagePending: (input) => stagePendingConnect(pool, cipher, input),
       }
     : undefined;
 
@@ -563,6 +574,43 @@ export async function startBridge(
     );
   }
 
+  /**
+   * THE ADD-TO-SLACK OAUTH CALLBACK deps (D62/D63). Mounted only when the bridge
+   * has a Slack app (client id/secret), a connect secret (the ticket HMAC key),
+   * AND a public base URL (Slack redirects a browser to an exact registered URL —
+   * a loopback address could never be that). Any one missing ⇒ the callback route
+   * answers the opaque 404, which is the honest state on an unconfigured box.
+   *
+   * `redirectUri` is derived from the SAME public base + path prefix the Elixir
+   * Studio catalog builds its authorize URL from; the two MUST byte-match Slack's
+   * registration (the human gate names it).
+   */
+  const publicBaseUrl = config.webhook.publicBaseUrl;
+  const slackOAuth: SlackOAuthCallbackDeps | undefined =
+    slackApp && config.connectSecret && publicBaseUrl
+      ? {
+          clientId: slackApp.clientId,
+          clientSecret: slackApp.clientSecret,
+          redirectUri: `${publicBaseUrl.replace(/\/+$/, "")}${config.webhook.pathPrefix}/oauth/slack/callback`,
+          stateSecret: config.connectSecret,
+          consumePendingConnect: (nonce) =>
+            consumePendingConnect(pool, cipher, nonce),
+          resolveWorkspace: (provider, installKey) =>
+            installs.resolveWorkspace(provider, installKey),
+          upsertInstall: (install) => upsertInstall(pool, cipher, install),
+          mountInstall: addInstall,
+        }
+      : undefined;
+
+  if (!slackOAuth) {
+    console.warn(
+      "[bridge] Add-to-Slack OAuth callback is NOT MOUNTED — needs SLACK_CLIENT_ID/" +
+        "SLACK_CLIENT_SECRET, CONNECTORS_CONNECT_SECRET, and CONNECTORS_PUBLIC_BASE_URL. " +
+        `${config.webhook.pathPrefix}/oauth/slack/callback answers 404 until they are set. ` +
+        "The Slack channel itself still works for any install written another way.",
+    );
+  }
+
   // The listener comes up even with zero webhook installs today: the whole point
   // of dynamic mounting is that the FIRST install must not need a restart.
   let webhookServer: WebhookServer | undefined;
@@ -572,6 +620,7 @@ export async function startBridge(
       installs,
       mounts,
       ...(connectDeps ? { connect: connectDeps } : {}),
+      ...(slackOAuth ? { slackOAuth } : {}),
       // LOOPBACK behind Caddy (D34). Binding every interface would expose the
       // seam — and the x-forwarded-* headers it trusts — straight to the internet.
       host: config.webhook.host,

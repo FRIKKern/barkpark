@@ -32,11 +32,15 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 
+import { signConnectTicket } from "../src/connect/ticket.js";
+import {
+  consumePendingConnect,
+  stagePendingConnect,
+} from "../src/connect/pending-connect.js";
 import { SLACK_PROVIDER } from "../src/connectors/slack.js";
 import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import { createBridgePool, ensureBridgeSchema } from "../src/db/pool.js";
 import { handleSlackOAuthCallback } from "../src/oauth/slack-oauth.js";
-import { signOAuthState } from "../src/oauth/slack-oauth.js";
 import {
   createInstallsLookup,
   deleteInstall,
@@ -102,6 +106,7 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
     // Every test owns the whole table — the rows are the unit under test.
     afterEach(async () => {
       await pool.query("DELETE FROM chat_bridge.connector_installs");
+      await pool.query("DELETE FROM chat_bridge.pending_connect");
     });
 
     /** The raw columns, unopened. What the SQL actually landed. */
@@ -120,31 +125,40 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
     };
 
     // ───────────────────────────────────────────────────────────────────────
-    // THE FAIL-BEFORE: the Slack re-auth wipe, through the REAL callback.
+    // THE SLACK OAUTH CALLBACK: ONE write, BOTH secrets, the pending row consumed.
     // ───────────────────────────────────────────────────────────────────────
 
-    it("a Slack RE-AUTH no longer wipes chat_token_ref — driven through the REAL handleSlackOAuthCallback", async () => {
+    it("writes BOTH secrets in ONE write by joining the pending-connect row, and consumes it (D63) — driven through the REAL handleSlackOAuthCallback", async () => {
       const TEAM = "T_REAUTH";
       const CHAT_TOKEN = "bp_chat_ws_a_token";
-      const STATE_SECRET = "slack-state-secret";
+      const STATE_SECRET = "slack-connect-secret";
+      const NONCE = "nonce-oauth-both-secrets";
 
-      // The install as it stands AFTER Studio has minted and sealed its chat token:
-      // both columns populated. This is the steady state a working Slack tenant is in.
-      await upsertInstall(pool, cipher, {
-        provider: SLACK_PROVIDER,
-        installKey: TEAM,
+      // 1. Studio has minted a workspace-bound chat token and STAGED it over
+      //    loopback into a pending row keyed by the ticket's nonce. The raw token
+      //    never rides the OAuth `state`; it is sealed at rest here.
+      await stagePendingConnect(pool, cipher, {
+        nonce: NONCE,
         workspaceId: WS_A,
-        credentialRef: "xoxb-original",
+        provider: SLACK_PROVIDER,
         chatToken: CHAT_TOKEN,
       });
-      expect((await rawRow(SLACK_PROVIDER, TEAM))?.chat_token_ref).not.toBeNull();
 
-      // Now the operator re-authorises the app (a scope change, a rotation, a
-      // re-install). Slack calls back. The callback supplies a NEW bot token and —
-      // because it has no idea a chat token exists — NO `chatToken` key at all.
-      // THIS IS THE ONLY PRODUCTION CALLER, and on origin/main this line NULLed the
-      // agent's token while leaving routing perfectly intact.
-      const state = signOAuthState(WS_A, STATE_SECRET);
+      // The pending row is really there — and its column holds a SEALED blob, not
+      // the raw token.
+      const pendingBefore = await pool.query<{ chat_token_ref: string }>(
+        "SELECT chat_token_ref FROM chat_bridge.pending_connect WHERE nonce = $1",
+        [NONCE],
+      );
+      expect(pendingBefore.rows[0]?.chat_token_ref).toBeDefined();
+      expect(pendingBefore.rows[0]?.chat_token_ref).not.toContain(CHAT_TOKEN);
+
+      // 2. Slack redirects the PUBLIC callback back with `code` + the signed state
+      //    (a connect ticket carrying the SAME nonce). The callback exchanges the
+      //    code, JOINS the pending row by nonce, and writes the install ONCE.
+      const state = signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, {
+        nonce: NONCE,
+      });
       const result = await handleSlackOAuthCallback(
         new Request(
           `https://example.test/connectors/oauth/slack/callback?code=CODE&state=${encodeURIComponent(state)}`,
@@ -154,13 +168,17 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
           clientSecret: "csec",
           redirectUri: "https://example.test/connectors/oauth/slack/callback",
           stateSecret: STATE_SECRET,
+          consumePendingConnect: (nonce) =>
+            consumePendingConnect(pool, cipher, nonce),
+          resolveWorkspace: (provider, installKey) =>
+            lookup.resolveWorkspace(provider, installKey),
           upsertInstall: (install) => upsertInstall(pool, cipher, install),
           mountInstall: async () => undefined,
           fetch: (async () =>
             new Response(
               JSON.stringify({
                 ok: true,
-                access_token: "xoxb-rotated",
+                access_token: "xoxb-bot",
                 team: { id: TEAM, name: "Acme" },
               }),
               { status: 200, headers: { "content-type": "application/json" } },
@@ -169,14 +187,138 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       );
       expect(result.installed).toBe(true);
 
-      // The credential rotated — that is what a re-auth is FOR.
-      const install = await lookup.lookupInstall(SLACK_PROVIDER, TEAM);
-      expect(install?.credentialRef).toBe("xoxb-rotated");
+      // BOTH columns landed non-null in ONE write — the fresh-install-NULL gap
+      // (D61) is closed and the sibling preserve never had to run.
+      const raw = await rawRow(SLACK_PROVIDER, TEAM);
+      expect(raw?.credential_ref).not.toBeNull();
+      expect(raw?.chat_token_ref).not.toBeNull();
 
-      // …and the SIBLING SECRET SURVIVED, still openable, still the same token.
-      // On origin/main this was `null` and the agent went silently unreachable.
+      // …and both open to the right plaintext for THIS row's identity.
+      const install = await lookup.lookupInstall(SLACK_PROVIDER, TEAM);
+      expect(install?.credentialRef).toBe("xoxb-bot");
       expect(install?.chatToken).toBe(CHAT_TOKEN);
-      expect((await rawRow(SLACK_PROVIDER, TEAM))?.chat_token_ref).not.toBeNull();
+
+      // 3. The pending row is GONE — single-use, replay-proof.
+      const pendingAfter = await pool.query(
+        "SELECT nonce FROM chat_bridge.pending_connect WHERE nonce = $1",
+        [NONCE],
+      );
+      expect(pendingAfter.rows).toEqual([]);
+    });
+
+    it("a MISSING or expired pending row fails closed — no install written", async () => {
+      const TEAM = "T_NOPENDING";
+      const STATE_SECRET = "slack-connect-secret";
+      const NONCE = "nonce-never-staged";
+
+      // No pending row is staged for this nonce.
+      const result = await handleSlackOAuthCallback(
+        new Request(
+          `https://example.test/connectors/oauth/slack/callback?code=CODE&state=${encodeURIComponent(
+            signConnectTicket(WS_A, SLACK_PROVIDER, STATE_SECRET, { nonce: NONCE }),
+          )}`,
+        ),
+        {
+          clientId: "cid",
+          clientSecret: "csec",
+          redirectUri: "https://example.test/connectors/oauth/slack/callback",
+          stateSecret: STATE_SECRET,
+          consumePendingConnect: (nonce) =>
+            consumePendingConnect(pool, cipher, nonce),
+          resolveWorkspace: (provider, installKey) =>
+            lookup.resolveWorkspace(provider, installKey),
+          upsertInstall: (install) => upsertInstall(pool, cipher, install),
+          mountInstall: async () => undefined,
+          fetch: (async () =>
+            new Response(
+              JSON.stringify({
+                ok: true,
+                access_token: "xoxb-bot",
+                team: { id: TEAM, name: "Acme" },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            )) as unknown as typeof fetch,
+        },
+      );
+
+      expect(result.installed).toBe(false);
+      expect(result.status).toBe(400);
+      expect(await rawRow(SLACK_PROVIDER, TEAM)).toBeNull();
+    });
+
+    it("refuses a Slack team another workspace already owns — 409, and the incumbent row is untouched (D64)", async () => {
+      const TEAM = "T_OWNED";
+      const STATE_SECRET = "slack-connect-secret";
+      const NONCE = "nonce-owned-elsewhere";
+
+      // WS_A already owns this Slack team, with both secrets.
+      await upsertInstall(pool, cipher, {
+        provider: SLACK_PROVIDER,
+        installKey: TEAM,
+        workspaceId: WS_A,
+        credentialRef: "xoxb-incumbent",
+        chatToken: "bp_chat_incumbent",
+      });
+
+      // WS_B stages a pending row and re-auths the SAME team with a legit ticket
+      // for its OWN workspace. Without the incumbent check, ON CONFLICT would
+      // repoint WS_A's row to WS_B (a silent takedown).
+      await stagePendingConnect(pool, cipher, {
+        nonce: NONCE,
+        workspaceId: WS_B,
+        provider: SLACK_PROVIDER,
+        chatToken: "bp_chat_attacker",
+      });
+
+      const result = await handleSlackOAuthCallback(
+        new Request(
+          `https://example.test/connectors/oauth/slack/callback?code=CODE&state=${encodeURIComponent(
+            signConnectTicket(WS_B, SLACK_PROVIDER, STATE_SECRET, { nonce: NONCE }),
+          )}`,
+        ),
+        {
+          clientId: "cid",
+          clientSecret: "csec",
+          redirectUri: "https://example.test/connectors/oauth/slack/callback",
+          stateSecret: STATE_SECRET,
+          consumePendingConnect: (nonce) =>
+            consumePendingConnect(pool, cipher, nonce),
+          resolveWorkspace: (provider, installKey) =>
+            lookup.resolveWorkspace(provider, installKey),
+          upsertInstall: (install) => upsertInstall(pool, cipher, install),
+          mountInstall: async () => undefined,
+          fetch: (async () =>
+            new Response(
+              JSON.stringify({
+                ok: true,
+                access_token: "xoxb-attacker",
+                team: { id: TEAM, name: "Acme" },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            )) as unknown as typeof fetch,
+        },
+      );
+
+      expect(result.status).toBe(409);
+      expect(result.installed).toBe(false);
+      expect(result.error).toContain("install_owned_elsewhere");
+
+      // The incumbent's row is untouched: still WS_A, still WS_A's secrets.
+      const raw = await rawRow(SLACK_PROVIDER, TEAM);
+      expect(raw?.workspace_id).toBe(WS_A);
+      const install = await lookup.lookupInstall(SLACK_PROVIDER, TEAM);
+      expect(install?.workspaceId).toBe(WS_A);
+      expect(install?.credentialRef).toBe("xoxb-incumbent");
+      expect(install?.chatToken).toBe("bp_chat_incumbent");
+
+      // …and the pending row for the refused workspace is left in place (not
+      // consumed), because the check runs BEFORE the join — so the attacker's own
+      // staged token is never spent on a refusal it should learn about.
+      const pending = await pool.query(
+        "SELECT nonce FROM chat_bridge.pending_connect WHERE nonce = $1",
+        [NONCE],
+      );
+      expect(pending.rows).toHaveLength(1);
     });
 
     it("is SYMMETRIC: supplying only the chat token preserves the credential", async () => {

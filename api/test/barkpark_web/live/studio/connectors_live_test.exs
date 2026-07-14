@@ -136,9 +136,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
         assert html =~ name
       end
 
-      # The gates are stated, not hidden. Slack's honesty is the load-bearing one:
-      # the channel ships, the button does not.
-      assert html =~ "Add to Slack (OAuth) is not wired yet"
+      # The gates are stated, not hidden. Slack now connects over OAuth, so with no
+      # Slack app configured on this instance its card shows the honest
+      # not-configured note — never a broken button.
+      assert html =~ "Add to Slack is not configured on this instance"
+      assert html =~ ~s(data-test-id="connector-oauth-gate-slack")
       assert html =~ "your org&#39;s Azure admin"
       assert html =~ "App Review"
       assert html =~ "Self-hosted only"
@@ -552,6 +554,128 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       # would leave a live bot that 401s on every message.
       assert [%ApiToken{revoked_at: nil}] = live_tokens(ws, "telegram", @telegram_key)
       assert [%{install_key: @telegram_key}] = Catalog.installs_for_workspace(ws)
+    end
+  end
+
+  # ── ADD TO SLACK (OAuth) ───────────────────────────────────────────────────
+
+  defp script_slack(ws, overrides \\ %{}) do
+    Stub.start(
+      Map.merge(
+        %{
+          workspace_id: ws.id,
+          provider: "slack",
+          stage_pending: {:ok, %{}},
+          validate: {:ok, %{install_key: "T_X", display_name: "X"}},
+          connect: {:ok, %{install_key: "T_X", mounted: true}},
+          disconnect: {:ok, %{removed: true}}
+        },
+        overrides
+      )
+    )
+
+    configure(
+      bridge: Stub,
+      connect_secret: @secret,
+      slack_client_id: "123.456",
+      slack_redirect_uri: "https://guerrilla.barkpark.cloud/connectors/oauth/slack/callback"
+    )
+  end
+
+  describe "add to slack (oauth)" do
+    test "the Slack card renders an external Add-to-Slack link carrying a signed ticket, and stages the chat token over loopback (D62/D63)",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      {:ok, view, html} = live(as(conn, raw), path)
+
+      # No paste Connect button, no gate — a real external link instead.
+      refute html =~ ~s(data-test-id="connector-connect-slack")
+      refute html =~ ~s(data-test-id="connector-oauth-gate-slack")
+      assert html =~ ~s(data-test-id="connector-add-to-slack-slack")
+      assert html =~ ~s(href=")
+      assert html =~ "slack.com/oauth/v2/authorize"
+
+      # The href IS a Slack authorize URL carrying a valid signed connect ticket.
+      url = :sys.get_state(view.pid).socket.assigns.slack_add_url
+      assert is_binary(url)
+      uri = URI.parse(url)
+      assert uri.host == "slack.com"
+      assert uri.path == "/oauth/v2/authorize"
+      q = URI.decode_query(uri.query)
+      assert q["client_id"] == "123.456"
+      assert q["scope"] =~ "chat:write"
+
+      state = q["state"]
+      # The state is a connect ticket for THIS workspace + slack, with a nonce.
+      [body, sig] = String.split(state, ".")
+
+      assert sig ==
+               :crypto.mac(:hmac, :sha256, @secret, body) |> Base.url_encode64(padding: false)
+
+      {:ok, json} = Base.url_decode64(body, padding: false)
+      %{"w" => w, "p" => p, "n" => n} = Jason.decode!(json)
+      assert w == ws.id
+      assert p == "slack"
+      assert n != ""
+
+      # Studio staged the chat token over LOOPBACK under that SAME ticket, ahead of
+      # the redirect (D63) — the raw token rode the stage, NEVER the URL.
+      assert [{:stage_pending, ^state, chat_token}] = Stub.calls()
+      assert is_binary(chat_token) and byte_size(chat_token) > 20
+      refute url =~ chat_token
+
+      # …and the staged token is a real workspace-bound `chat` token.
+      assert {:ok, %ApiToken{permissions: ["chat"], workspace_id: ws_id}} =
+               Auth.verify_token(chat_token)
+
+      assert ws_id == ws.id
+
+      # It is labelled for the OAuth flow (the callback learns install_key only
+      # after the redirect, so it cannot be labelled by install_key yet).
+      assert [%ApiToken{label: "connector:slack:oauth"}] =
+               live_tokens(ws, "slack", "oauth")
+    end
+
+    test "a non-admin gets NO Add-to-Slack link and NOTHING is minted or staged (D49)",
+         %{conn: conn, path: path, outsider_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      refute html =~ ~s(data-test-id="connector-add-to-slack-slack")
+      assert Stub.calls() == []
+      assert live_tokens(ws, "slack", "oauth") == []
+    end
+
+    test "with no Slack app configured, the card shows the honest note — never a broken button",
+         %{conn: conn, path: path, admin_raw: raw} do
+      # setup's `configure` has a connect secret but no slack client id.
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      assert html =~ ~s(data-test-id="connector-oauth-gate-slack")
+      assert html =~ "Add to Slack is not configured on this instance"
+      refute html =~ ~s(data-test-id="connector-add-to-slack-slack")
+    end
+
+    test "a fresh page visit revokes the prior unclicked OAuth token before minting a new one",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_slack(ws)
+
+      {:ok, view1, _html} = live(as(conn, raw), path)
+      first = :sys.get_state(view1.pid).socket.assigns.slack_add_url
+      assert [%ApiToken{revoked_at: nil} = t1] = live_tokens(ws, "slack", "oauth")
+
+      # A second visit mints a fresh token and revokes the stale one — at most one
+      # unattached credential at a time.
+      {:ok, view2, _html} = live(as(conn, raw), path)
+      second = :sys.get_state(view2.pid).socket.assigns.slack_add_url
+      refute second == first
+
+      tokens = live_tokens(ws, "slack", "oauth")
+      # The first is now revoked; exactly one live token remains.
+      assert Enum.any?(tokens, fn t -> t.id == t1.id and not is_nil(t.revoked_at) end)
+      assert Enum.count(tokens, &is_nil(&1.revoked_at)) == 1
     end
   end
 

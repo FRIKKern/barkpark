@@ -63,6 +63,10 @@ import {
 import type { ConnectorRegistry } from "../connector/registry.js";
 import type { ConnectorInstall, InstallsLookup } from "../connector/types.js";
 import {
+  handleSlackOAuthCallback,
+  type SlackOAuthCallbackDeps,
+} from "../oauth/slack-oauth.js";
+import {
   handleConnectRequest,
   type ConnectAction,
   type ConnectDeps,
@@ -129,6 +133,17 @@ export interface WebhookServerOptions {
    * unmounted route is a non-event; a dead bridge is an outage.
    */
   connect?: ConnectDeps;
+  /**
+   * The Add-to-Slack OAuth callback deps (D62). ABSENT ⇒ the callback route is
+   * NOT MOUNTED and answers the same opaque 404 as any unknown path — the honest
+   * state on an instance with no Slack app configured. Present only when the
+   * bridge has Slack app credentials AND a connect secret (see `index.ts`).
+   *
+   * Unlike the connect routes this is PUBLIC (Slack redirects a browser to it) and
+   * is NEVER loopback-gated: it authenticates by the signed connect ticket in
+   * `state`, not by network topology.
+   */
+  slackOAuth?: SlackOAuthCallbackDeps;
   /** Node's `server.headersTimeout`, ms. Default 20 s. */
   headersTimeoutMs?: number;
   /** Node's `server.requestTimeout`, ms. Default 30 s. MUST be >= headersTimeout. */
@@ -275,7 +290,30 @@ function parseConnectRoute(
   if (rest.length === 2 && rest[0] === "connect" && rest[1] === "validate") {
     return "validate";
   }
+  if (rest.length === 2 && rest[0] === "connect" && rest[1] === "pending") {
+    return "pending";
+  }
   return null;
+}
+
+/**
+ * `GET {prefix}/oauth/slack/callback` — the Add-to-Slack OAuth callback (D62).
+ *
+ * A FOURTH route class, distinct from the connect family: it is PUBLIC and
+ * `GET`, authenticated by a signed connect ticket in `state` (crypto, not network
+ * topology), never by loopback. It reuses the SAME hardened path parsing
+ * (`segmentsUnderPrefix` — dot segments rejected after percent-decoding) so the
+ * traversal defence is not duplicated.
+ */
+function isSlackOAuthCallbackRoute(rawTarget: string, pathPrefix: string): boolean {
+  const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
+  return (
+    rest !== null &&
+    rest.length === 3 &&
+    rest[0] === "oauth" &&
+    rest[1] === "slack" &&
+    rest[2] === "callback"
+  );
 }
 
 /**
@@ -337,6 +375,47 @@ function send(
 /** The one opaque failure. Byte-identical for every reason it can happen. */
 function notFound(res: ServerResponse): void {
   send(res, 404, NOT_FOUND_BODY);
+}
+
+/** Escape the only thing that reaches the page from a string — the error text. */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * The OAuth callback answers a BROWSER, not a provider — so it renders a tiny HTML
+ * page a human can read, never a JSON envelope. It never carries a token or a
+ * stack trace: `installed` and the bridge's own one-line `error` are the whole of
+ * it. The status is the callback's own (200 installed, 4xx refused, 409 owned).
+ */
+function sendOAuthPage(
+  res: ServerResponse,
+  status: number,
+  installed: boolean,
+  error: string | undefined,
+): void {
+  if (res.writableEnded) return;
+  const heading = installed ? "Connected to Slack" : "Could not connect Slack";
+  const detail = installed
+    ? "Your Slack workspace is now connected to Barkpark. You can close this tab and return to Studio."
+    : escapeHtml(
+        error ??
+          "The connect could not be completed. Return to Studio and try again.",
+      );
+  const body =
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width, initial-scale=1">` +
+    `<title>${escapeHtml(heading)}</title></head>` +
+    `<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto; padding: 0 1.5rem;">` +
+    `<h1>${escapeHtml(heading)}</h1><p>${detail}</p></body></html>`;
+  res.statusCode = status;
+  res.setHeader("content-type", "text/html; charset=utf-8");
+  res.setHeader("content-length", Buffer.byteLength(body));
+  res.end(body);
 }
 
 type BodyRead =
@@ -495,6 +574,7 @@ export function createWebhookRequestHandler(
     installs,
     mounts,
     connect,
+    slackOAuth,
     publicBaseUrl,
     onError,
     waitUntil = defaultWaitUntil,
@@ -593,6 +673,28 @@ export function createWebhookRequestHandler(
           return;
         }
         send(res, reply.status, JSON.stringify(reply.body));
+        return;
+      }
+
+      // THE ADD-TO-SLACK OAUTH CALLBACK (D62) — a fourth route class, between the
+      // connect family and the webhook demux. It is PUBLIC and GET (Slack
+      // redirects a browser here through Caddy, so x-forwarded-* is ALWAYS present
+      // — an isProxied gate would 404 it permanently), and it authenticates by the
+      // signed connect ticket in `state`, never by loopback. A body is never read:
+      // everything rides the query string.
+      if (isSlackOAuthCallbackRoute(req.url ?? "/", pathPrefix)) {
+        drain(req);
+        // Not configured (no Slack app / no connect secret) ⇒ indistinguishable
+        // from "there is no such route". A non-GET is the same: a browser redirect
+        // is a GET, and anything else is a probe.
+        if (slackOAuth === undefined || method !== "GET") {
+          notFound(res);
+          return;
+        }
+
+        const request = buildRequest(req, undefined, publicBaseUrl);
+        const result = await handleSlackOAuthCallback(request, slackOAuth);
+        sendOAuthPage(res, result.status, result.installed, result.error);
         return;
       }
 
