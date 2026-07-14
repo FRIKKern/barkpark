@@ -1,8 +1,18 @@
 package caddyfile
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRender_EmptyBox(t *testing.T) {
@@ -670,4 +680,139 @@ func TestRender_BlueGreen_SamePortConfig(t *testing.T) {
 	if blue == green {
 		t.Errorf("blue and green should differ (different upstream port)")
 	}
+}
+
+// TestRenderedConfigIsValidCaddyfile hands the rendered config to a REAL caddy
+// binary. Everything else in this file asserts that we produce the bytes we
+// intended; none of it can tell whether Caddy can actually PARSE them. That gap
+// is the dangerous one: the global `servers { trusted_proxies … }` +
+// `client_ip_headers` block is written from knowledge of Caddy's global options,
+// and a syntax error there does not degrade the CF sites — it fails the whole
+// config to load and wedges EVERY site on the box. A string test would stay
+// cheerfully green through that.
+//
+// Skips when caddy is not installed (so the unit suite stays hermetic); runs for
+// real on any dev box or CI image that has it.
+func TestRenderedConfigIsValidCaddyfile(t *testing.T) {
+	bin, err := exec.LookPath("caddy")
+	if err != nil {
+		t.Skip("caddy binary not on PATH — skipping real-parser validation")
+	}
+
+	certPath, keyPath := selfSignedPair(t)
+
+	cases := []struct {
+		name string
+		box  Box
+	}{
+		{
+			name: "cloudflare-fronted origin-ca site (the new path)",
+			box: Box{
+				AskGateURL:     "https://cloud.barkpark.cloud/v1/tls/ask",
+				StudioUpstream: "localhost:4000",
+				Sites: []Site{{
+					Slug:     "blog",
+					Domains:  []string{"blog.example.com"},
+					Kind:     KindStatic,
+					Root:     "/opt/barkpark/sites/blog/current",
+					TLSMode:  TLSModeOriginCA,
+					CertPath: certPath,
+					KeyPath:  keyPath,
+				}},
+			},
+		},
+		{
+			// A mixed box is the realistic one: the global trusted_proxies block
+			// fires for the whole server, so a non-CF site must still parse.
+			name: "mixed box — an origin-ca site beside an on-demand proxied site",
+			box: Box{
+				AskGateURL:     "https://cloud.barkpark.cloud/v1/tls/ask",
+				StudioUpstream: "localhost:4000",
+				Sites: []Site{
+					{
+						Slug:     "blog",
+						Domains:  []string{"blog.example.com"},
+						Kind:     KindStatic,
+						Root:     "/opt/barkpark/sites/blog/current",
+						TLSMode:  TLSModeOriginCA,
+						CertPath: certPath,
+						KeyPath:  keyPath,
+					},
+					{Slug: "app", Domains: []string{"app.example.com"}, Port: 8081},
+				},
+			},
+		},
+		{
+			// The zero value — today's live shape. If this ever fails to parse we
+			// have broken a running box, not a new feature.
+			name: "the default on-demand box (byte-identical to today)",
+			box: Box{
+				AskGateURL:     "https://cloud.barkpark.cloud/v1/tls/ask",
+				StudioUpstream: "localhost:4000",
+				Sites:          []Site{{Slug: "app", Domains: []string{"app.example.com"}, Port: 8081}},
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "Caddyfile")
+			cfg := Render(tc.box)
+			if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
+				t.Fatalf("write Caddyfile: %v", err)
+			}
+			cmd := exec.Command(bin, "validate", "--adapter", "caddyfile", "--config", path)
+			// Keep caddy from touching the real data/config dirs.
+			cmd.Env = append(os.Environ(),
+				"XDG_DATA_HOME="+t.TempDir(),
+				"XDG_CONFIG_HOME="+t.TempDir(),
+			)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("caddy validate REJECTED the rendered config: %v\n--- config ---\n%s\n--- caddy said ---\n%s",
+					err, cfg, out)
+			}
+		})
+	}
+}
+
+// selfSignedPair writes a throwaway cert/key pair and returns their paths. Caddy's
+// `validate` provisions the TLS app, which actually OPENS the files named by
+// `tls <cert> <key>` — so validating the origin-CA path needs real PEMs on disk.
+// They are never served; they exist so the parser can get all the way through.
+func selfSignedPair(t *testing.T) (certPath, keyPath string) {
+	t.Helper()
+
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "blog.example.com"},
+		DNSNames:     []string{"blog.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+
+	dir := t.TempDir()
+	certPath = filepath.Join(dir, "origin.pem")
+	keyPath = filepath.Join(dir, "origin.key")
+
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	return certPath, keyPath
 }
