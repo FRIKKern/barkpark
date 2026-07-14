@@ -196,14 +196,16 @@ defmodule Barkpark.Sync.ApplierTest do
       source = "cur-#{System.unique_integer([:positive])}"
       assert Cursor.get(source, @dataset) == 0
 
-      assert :ok = Cursor.put(source, @dataset, 5)
+      # workspace_id (charter D55) is a stamped attribution column, NOT in the
+      # {source, dataset} key — nil here exercises the monotonic mechanics.
+      assert :ok = Cursor.put(nil, source, @dataset, 5)
       assert Cursor.get(source, @dataset) == 5
 
       # A lower value never rewinds the high-water mark.
-      assert :ok = Cursor.put(source, @dataset, 3)
+      assert :ok = Cursor.put(nil, source, @dataset, 3)
       assert Cursor.get(source, @dataset) == 5
 
-      assert :ok = Cursor.put(source, @dataset, 9)
+      assert :ok = Cursor.put(nil, source, @dataset, 9)
       assert Cursor.get(source, @dataset) == 9
     end
   end
@@ -412,7 +414,12 @@ defmodule Barkpark.Sync.ApplierTest do
         {:ok, "remote-after-edit-#{ev.id}"}
       end
 
-      push_ctx = %{source: ctx.source, dataset: @dataset}
+      push_ctx = %{
+        workspace_id: Keyword.get(ctx.scope, :workspace_id),
+        source: ctx.source,
+        dataset: @dataset
+      }
+
       funs = %{push_fun: push_fun, claim_fun: nil, close_fun: nil}
 
       {results, _cursor} = Pusher.drain([edit], push_ctx, funs)

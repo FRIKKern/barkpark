@@ -17,9 +17,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 21 workspace_id tables incl roles + data_keys + search_surface_config + the two zero-FK audit tables" do
+    test "E1 = the 26 workspace_id tables incl roles + data_keys + search_surface_config + the two zero-FK audit tables + the 5 sync_* tables" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 21
+      assert length(e1) == 26
       assert "roles" in e1
       # search_surface_config gained a workspace_id column in Wave 5 Slice A
       # (charter D45/D49) to close a LIVE cross-tenant config bleed — re-pinned
@@ -33,6 +33,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert "audit_events" in e1
       assert "audit_export_sinks" in e1
       refute "audit_events" in Catalog.live_e2(Repo)
+      # The full sync_* family gained a workspace_id attribution column (charter D55).
+      for t <-
+            ~w(sync_cursors sync_dead_letters sync_push_cursors sync_push_conflicts sync_push_doc_revs) do
+        assert t in e1, "#{t} must be E1 after per-workspace attribution"
+      end
     end
 
     test "E2 = the 6 FK-transitive children without a workspace_id column" do
@@ -40,13 +45,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
                ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
     end
 
-    test "E3 = the 9 dataset-column tables; the scope allowlist is EMPTY; both data_keys and search_surface_config rode into E1" do
+    test "E3 = the 4 dataset-column tables; the scope allowlist is EMPTY; data_keys, search_surface_config and the 5 sync_* tables all rode into E1" do
       e3 = Catalog.live_e3(Repo)
-      assert length(e3) == 9
+      assert length(e3) == 4
       assert "authoring_exemptions" in e3
       # The scope-column allowlist is now EMPTY — both former members gained a
       # real workspace_id column and moved to E1.
       assert Catalog.allowlist() == %{}
+      # The 5 sync_* tables left E3 for E1 (they carry workspace_id now — D55).
+      refute "sync_cursors" in e3
+      refute "sync_push_doc_revs" in e3
       # data_keys is NEITHER dataset-scanned E3 NOR allowlist any more — once
       # workspace-attributed it moved to E1 (bpb-datakeys-write-path-workspace-attribution),
       # so a shared-slug DEK travels by workspace_id instead of a bare project-ambiguous scope.
@@ -160,13 +168,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       seed_dataset!(proj_b.id, shared)
 
       # A's own exclusive-slug row — MUST be carried in A's bundle.
-      insert_sync_cursor!("EXCL-A-CURSOR-#{tag}", excl)
+      # (preview_token_jti is a remaining E3-dataset table; the sync_* family
+      # moved to E1 in charter D55 and is proved separately below.)
+      insert_preview_jti!("EXCL-A-JTI-#{tag}", excl)
 
       # B's rows under the SHARED slug, uniquely marked — MUST NOT leak into A.
-      # (search_surface_config is no longer bare-slug-keyed — it moved to E1 in
-      # Wave 5 Slice A, so its cross-tenant isolation is proven by the dedicated
-      # "search_surface_config per-workspace E1 attribution" describe below.)
-      insert_sync_cursor!("B-ONLY-CURSOR-#{tag}", shared)
+      # (search_surface_config and the sync_* family are no longer bare-slug-keyed —
+      # they moved to E1, so their cross-tenant isolation is proven by dedicated
+      # per-workspace E1 attribution describe blocks; preview_token_jti remains an
+      # E3-dataset table and stands in for the bare-slug leak here.)
+      insert_preview_jti!("B-ONLY-JTI-#{tag}", shared)
       insert_data_key!("dataset:#{shared}", "B-ONLY-CIPHERTEXT-#{tag}")
 
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
@@ -174,13 +185,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
 
       # No over-narrow: A's exclusive-slug row IS carried.
       assert "excl-a-#{tag}" in manifest["dataset_slugs"]
-      assert dumps["sync_cursors"] =~ "EXCL-A-CURSOR-#{tag}"
+      assert dumps["preview_token_jti"] =~ "EXCL-A-JTI-#{tag}"
 
       # No cross-tenant leak: the shared slug is excluded, so B's bare-keyed rows
       # are categorically absent from A's bundle. On origin/main the bare copy
       # pulls them in (and lists the shared slug) → these refutes FAIL → RED.
       refute "shared-prod-#{tag}" in manifest["dataset_slugs"]
-      refute dumps["sync_cursors"] =~ "B-ONLY-CURSOR-#{tag}"
+      refute dumps["preview_token_jti"] =~ "B-ONLY-JTI-#{tag}"
       refute dumps["data_keys"] =~ "B-ONLY-CIPHERTEXT-#{tag}"
     end
   end
@@ -252,6 +263,38 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       refute dumps["data_keys"] =~ "B-ATTRIBUTED-DEK-#{tag}"
       # …and the NULL-workspace legacy row is excluded (the D44 forward-guard).
       refute dumps["data_keys"] =~ "NULL-LEGACY-DEK-#{tag}"
+    end
+  end
+
+  # ── sync_* family E1 attribution (charter D55) ────────────────────────────────
+
+  describe "export attributes the sync_* family via workspace_id (E1), even on a SHARED slug" do
+    test "a sync_cursors row under a slug SHARED with a sibling is carried by its OWNER's bundle only" do
+      ws_a = create_workspace!(unique("wsa"))
+      proj_a = create_project!(ws_a, unique("proja"))
+      ws_b = create_workspace!(unique("wsb"))
+      proj_b = create_project!(ws_b, unique("projb"))
+
+      # Both workspaces own the SAME slug — the exact bare-slug collision D55 fixes.
+      tag = System.unique_integer([:positive])
+      shared = "shared-prod-#{tag}"
+      seed_dataset!(proj_a.id, shared)
+      seed_dataset!(proj_b.id, shared)
+
+      # One sync cursor per workspace under the shared slug, distinguished ONLY by
+      # workspace_id (the old bare {source, dataset} key could not tell them apart).
+      insert_sync_cursor_ws!(ws_a.id, "A-SYNC-#{tag}", shared)
+      insert_sync_cursor_ws!(ws_b.id, "B-SYNC-#{tag}", shared)
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {_manifest, dumps} = Archive.unpack(bundle)
+
+      # E1 keys on workspace_id, so A's row IS carried even though the slug is
+      # shared (on origin/main the sync_cursors E3-dataset copy drops the shared
+      # slug entirely → A's row is ABSENT → this assertion is RED before D55).
+      assert dumps["sync_cursors"] =~ "A-SYNC-#{tag}"
+      # …and B's row under the same slug never leaks into A's single-workspace bundle.
+      refute dumps["sync_cursors"] =~ "B-SYNC-#{tag}"
     end
   end
 
@@ -515,10 +558,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     seed_exemption!(a3.doc_id, "prod-a", "post")
     seed_exemption!(b2.doc_id, "prod-b", "post")
 
-    # E3 dataset-keyed: A's sync cursor.
+    # E1 (charter D55): A's sync cursor, attributed to A via workspace_id.
     Repo.query!(
-      "INSERT INTO sync_cursors (source, dataset, inserted_at, updated_at) VALUES ('sync-a', 'prod-a', now(), now())",
-      []
+      "INSERT INTO sync_cursors (workspace_id, source, dataset, inserted_at, updated_at) " <>
+        "VALUES ($1::text::uuid, 'sync-a', 'prod-a', now(), now())",
+      [ws_a.id]
     )
 
     # allowlist: A's per-dataset DEK (scope-keyed, invisible to the dataset scan).
@@ -556,11 +600,21 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   end
 
   # E3-dataset / allowlist bare-slug raw seed helpers (bpb-e3-dataset-slug-collision).
-  defp insert_sync_cursor!(source, dataset) do
+  # preview_token_jti is the E3-dataset exemplar (the sync_* family moved to E1 — D55).
+  defp insert_preview_jti!(jti, dataset) do
     Repo.query!(
-      "INSERT INTO sync_cursors (source, dataset, event_id, inserted_at, updated_at) " <>
-        "VALUES ($1, $2, 0, now(), now())",
-      [source, dataset]
+      "INSERT INTO preview_token_jti (jti, dataset, issued_at, expires_at) " <>
+        "VALUES ($1, $2, now(), now() + interval '1 hour')",
+      [jti, dataset]
+    )
+  end
+
+  # A workspace-attributed sync_cursors row (charter D55 — sync_* is E1 now).
+  defp insert_sync_cursor_ws!(ws_id, source, dataset) do
+    Repo.query!(
+      "INSERT INTO sync_cursors (workspace_id, source, dataset, event_id, inserted_at, updated_at) " <>
+        "VALUES ($1::text::uuid, $2, $3, 0, now(), now())",
+      [ws_id, source, dataset]
     )
   end
 

@@ -17,6 +17,10 @@ defmodule Barkpark.Sync.PushConflict do
 
   @primary_key false
   schema "sync_push_conflicts" do
+    # Stamped per-workspace attribution column (charter D55) — E1 export + FK
+    # cascade delete. NOT a key component; the `{source, dataset, event_id}` PK
+    # and conflict target are unchanged (D57). Nullable (workspace-agnostic NULL).
+    field :workspace_id, :binary_id
     field :source, :string, primary_key: true
     field :dataset, :string, primary_key: true
     field :event_id, :integer, primary_key: true
@@ -40,8 +44,8 @@ defmodule Barkpark.Sync.PushConflict do
   event_id) updates `last_error`/`updated_at` ONLY — it never overwrites the
   loser.
   """
-  @spec record(String.t(), String.t(), non_neg_integer(), map()) :: :ok
-  def record(source, dataset, event_id, attrs)
+  @spec record(binary() | nil, String.t(), String.t(), non_neg_integer(), map()) :: :ok
+  def record(workspace_id, source, dataset, event_id, attrs)
       when is_binary(source) and is_binary(dataset) and is_integer(event_id) do
     now = DateTime.utc_now()
 
@@ -49,6 +53,7 @@ defmodule Barkpark.Sync.PushConflict do
       __MODULE__,
       [
         %{
+          workspace_id: workspace_id,
           source: source,
           dataset: dataset,
           event_id: event_id,

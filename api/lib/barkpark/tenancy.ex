@@ -890,17 +890,20 @@ defmodule Barkpark.Tenancy do
 
   Ordered cleanup in a single `Repo.transaction`:
 
-    0. Sweep the 10 E3/allowlist string-keyed tables the keystone exporter
-       copies (charter D4/D5) — the FK-less `(doc_id, dataset)`- and
-       `scope`-keyed tables (`authoring_exemptions`, `search_surface_config`, …)
-       the SQL cascade never reaches. Runs FIRST because its `(doc_id, dataset)`
+    0. Sweep the 4 E3/allowlist string-keyed tables the keystone exporter
+       copies (charter D4/D5) — the FK-less `(doc_id, dataset)`-keyed tables
+       (`authoring_exemptions`, `github_sync_conflicts`) and bare-dataset-keyed
+       tables (`preview_token_jti`, `shares`) the SQL cascade never reaches. The
+       `scope`-column allowlist is EMPTY: both `data_keys` /
+       `search_surface_config` AND the five `sync_*` tables are E1 after their
+       per-workspace attribution (charter D45/D49, D51-D54, D55) — the step-3 FK
+       cascade sweeps them, touching ONLY this workspace's own rows (its DEKs,
+       cursors, dead-letters and push-ledger). Runs FIRST because its
+       `(doc_id, dataset)`
        semi-join needs the workspace's own `documents` still present and its
        slug derivation needs its projects/datasets still present. A
        `(doc_id, dataset)` row ALSO owned by a sibling workspace is guarded and
        SURVIVES. Reuses the keystone enumeration + slug derivation, so export
-       (`data_keys` is NO LONGER swept here — once workspace-attributed it became
-       an E1 table swept by the step-3 FK cascade, which touches ONLY this
-       workspace's own DEKs; see `bpb-datakeys-write-path-workspace-attribution`.)
        and teardown share ONE source of truth for a workspace's tables.
     1. For every media_file scoped to the workspace, call
        `Barkpark.Media.delete_file/2` so the disk blob is removed
@@ -1012,8 +1015,8 @@ defmodule Barkpark.Tenancy do
     end
   end
 
-  # Sweep the 9 E3 string-keyed tables the keystone exporter copies
-  # (charter D4/D5): the 4 E3 doc-keyed (Catalog.e3_doc_keyed/0) and the 5 E3
+  # Sweep the 4 E3 string-keyed tables the keystone exporter copies
+  # (charter D4/D5): the 2 E3 doc-keyed (Catalog.e3_doc_keyed/0) and the 2 E3
   # dataset-keyed (Catalog.e3_dataset_keyed/0). The scope-column allowlist
   # (Catalog.allowlist/0) is now EMPTY, so its sweep loop below is a no-op over
   # zero tables. NONE of the swept tables carries `workspace_id` — their tenant
@@ -1027,6 +1030,10 @@ defmodule Barkpark.Tenancy do
   #   * `data_keys` — the per-dataset DEK store; a sibling's shared-slug DEK now
   #     survives via the FK cascade instead of a bare-scope delete
   #     (bpb-datakeys-write-path-workspace-attribution, charter D51-D54).
+  #
+  # The five `sync_*` tables are NOT here: per-workspace attribution (charter
+  # D55) gave them a `workspace_id` FK, so they are E1 now and the SQL CASCADE on
+  # `Repo.delete(workspace)` sweeps them like any other E1 table.
   #
   # POSITION IS LOAD-BEARING — this runs FIRST, before media/documents/audit and
   # before the final cascade: the E3 doc-keyed semi-join needs the workspace's

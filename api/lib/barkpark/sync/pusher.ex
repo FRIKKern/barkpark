@@ -46,6 +46,7 @@ defmodule Barkpark.Sync.Pusher do
   @type ctx :: %{
           required(:source) => String.t(),
           required(:dataset) => String.t(),
+          optional(:workspace_id) => String.t() | nil,
           optional(:url) => String.t() | nil,
           optional(:token) => String.t() | nil
         }
@@ -106,7 +107,7 @@ defmodule Barkpark.Sync.Pusher do
 
     case push_fun.(ctx, event, base_rev) do
       {:ok, remote_rev} ->
-        PushDocRev.put(ctx.source, ctx.dataset, event.doc_id, remote_rev)
+        PushDocRev.put(ws_id(ctx), ctx.source, ctx.dataset, event.doc_id, remote_rev)
         {:ok, remote_rev}
 
       {:error, {:rev_mismatch, %{expected: expected, actual: actual}}} ->
@@ -115,12 +116,12 @@ defmodule Barkpark.Sync.Pusher do
           # acked, we crashed between ack and cursor-advance; on replay the
           # stale ledger triggers a spurious mismatch whose `actual` is exactly
           # the rev we intended). Reconcile the ledger, advance, NO conflict.
-          PushDocRev.put(ctx.source, ctx.dataset, event.doc_id, actual)
+          PushDocRev.put(ws_id(ctx), ctx.source, ctx.dataset, event.doc_id, actual)
           {:ok, :reconciled}
         else
           # A TRUE stale-base conflict: PRESERVE the local loser, never
           # overwrite the remote (invariant #5). write-then-advance.
-          PushConflict.record(ctx.source, ctx.dataset, event.id, %{
+          PushConflict.record(ws_id(ctx), ctx.source, ctx.dataset, event.id, %{
             doc_id: event.doc_id,
             type: event.type,
             kind: "rev_mismatch",
@@ -179,7 +180,7 @@ defmodule Barkpark.Sync.Pusher do
         {:ok, remote_rev}
 
       {:error, {kind, _meta}} when kind in [:fenced_off, :stale_claim, :resource_conflict] ->
-        PushConflict.record(ctx.source, ctx.dataset, event.id, %{
+        PushConflict.record(ws_id(ctx), ctx.source, ctx.dataset, event.id, %{
           doc_id: event.doc_id,
           type: event.type,
           kind: to_string(kind),
@@ -230,7 +231,12 @@ defmodule Barkpark.Sync.Pusher do
     }
   end
 
-  defp advance(ctx, event), do: PushCursor.put(ctx.source, ctx.dataset, event.id)
+  defp advance(ctx, event),
+    do: PushCursor.put(ws_id(ctx), ctx.source, ctx.dataset, event.id)
+
+  # The stamped per-workspace attribution id (charter D55), nil when the ctx is
+  # workspace-agnostic (the id is NOT part of the {source, dataset[, …]} key).
+  defp ws_id(ctx), do: Map.get(ctx, :workspace_id)
 
   # ── default transport (real Req.post; NEVER exercised in tests) ──────────────
 

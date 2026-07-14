@@ -180,14 +180,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   A dataset slug is unique only per `(project_id, slug)` (`datasets` unique
   index), NOT globally — every workspace gets a `"production"` dataset, so
   `"production"` collides across tenants. The E3-dataset tables
-  (`sync_cursors`, `preview_token_jti`, …) carry ONLY that bare slug — no
+  (`preview_token_jti`, `shares`) carry ONLY that bare slug — no
   `project_id` / `dataset_id` / `workspace_id` column — so a row under a SHARED
   slug is genuinely unattributable to a single workspace. The bare
   `dataset = ANY(slugs)` predicate that BOTH the exporter (`copy_where/4`) and
   the teardown sweep (`Tenancy.delete_workspace/1`) run over that slug set
   therefore MUST NOT match a shared slug, else it becomes a cross-tenant COPY
   (leak into a single-workspace bundle) or a cross-tenant DELETE (stripping a
-  co-tenant's cursors on teardown). Dropping shared slugs here narrows BOTH
+  co-tenant's rows on teardown). Dropping shared slugs here narrows BOTH
   callers in lockstep — fail-CLOSED: an ambiguous slug's bare-keyed rows are left
   untouched (an orphan is recoverable; a cross-tenant delete is not).
 

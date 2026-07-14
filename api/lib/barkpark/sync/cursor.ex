@@ -20,6 +20,11 @@ defmodule Barkpark.Sync.Cursor do
 
   @primary_key false
   schema "sync_cursors" do
+    # Stamped per-workspace ATTRIBUTION column (charter D55): drives E1 export
+    # (`WHERE workspace_id=$ws`) + FK-cascade delete. NOT a key component — the
+    # `{source, dataset}` PK and the monotonic-upsert conflict target are
+    # unchanged (D57). Nullable so the workspace-agnostic caller can stamp NULL.
+    field :workspace_id, :binary_id
     field :source, :string, primary_key: true
     field :dataset, :string, primary_key: true
     field :event_id, :integer, default: 0
@@ -42,11 +47,12 @@ defmodule Barkpark.Sync.Cursor do
   end
 
   @doc """
-  Monotonically advance the stored high-water mark to `event_id`. A no-op when
-  the stored value is already `>= event_id`.
+  Monotonically advance the stored high-water mark to `event_id`, stamping
+  `workspace_id` for per-workspace attribution. A no-op when the stored value is
+  already `>= event_id`; the workspace_id is written on INSERT only.
   """
-  @spec put(String.t(), String.t(), non_neg_integer()) :: :ok
-  def put(source, dataset, event_id)
+  @spec put(binary() | nil, String.t(), String.t(), non_neg_integer()) :: :ok
+  def put(workspace_id, source, dataset, event_id)
       when is_binary(source) and is_binary(dataset) and is_integer(event_id) and event_id >= 0 do
     now = DateTime.utc_now()
 
@@ -54,6 +60,7 @@ defmodule Barkpark.Sync.Cursor do
       __MODULE__,
       [
         %{
+          workspace_id: workspace_id,
           source: source,
           dataset: dataset,
           event_id: event_id,
