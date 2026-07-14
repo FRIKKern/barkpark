@@ -207,6 +207,8 @@ def validate_fleet(paper: dict[str, Any], phase: str, require_debrief: bool) -> 
             errors.append(f"fleet {fleet_phase} missing count is inconsistent")
         if fleet_phase == "review" and len(valid_assignments) > planned and len(valid_assignments) % planned:
             errors.append("fleet review contains an incomplete repeated review wave")
+        if fleet_phase != "review" and len(valid_assignments) > planned:
+            errors.append(f"fleet {fleet_phase} exceeds its exact {planned}-assignment contract")
         if fleet_phase in required and len(valid_assignments) < planned:
             errors.append(f"fleet {fleet_phase} requires {planned} completed typed assignments before {phase}")
     return errors

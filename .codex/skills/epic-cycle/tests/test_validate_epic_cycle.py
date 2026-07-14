@@ -157,6 +157,23 @@ class EpicCyclePreflightTest(unittest.TestCase):
         errors = MODULE.validate(self.args(paper=paper))
         self.assertIn("fleet survey requires 12 completed typed assignments before build", errors)
 
+    def test_review_preflight_rejects_extra_build_assignment(self):
+        paper = copy.deepcopy(self.paper)
+        fleet = next(block["fleet"] for block in paper["body"]["blocks"] if "fleet" in block)
+        fleet["build"]["assignments"].append(
+            {
+                "id": "build-4",
+                "agent_type": "epic-builder",
+                "status": "completed",
+                "evidence": "paper://build/4",
+            }
+        )
+        fleet["build"].update({"started": 4, "completed": 4, "missing": 0})
+        self.assertIn(
+            "fleet build exceeds its exact 3-assignment contract",
+            MODULE.validate(self.args(paper=paper, phase="review")),
+        )
+
     def test_top_level_paper_blocks_pass(self):
         paper = copy.deepcopy(self.paper)
         paper["blocks"] = paper.pop("body")["blocks"]
