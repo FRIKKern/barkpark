@@ -266,6 +266,42 @@ async function connect(
     };
   }
 
+  // AND NEVER OVERWRITE ANOTHER TENANT'S ROW. `UPSERT_INSTALL` sets
+  // `workspace_id = EXCLUDED.workspace_id` unconditionally, so without this check a
+  // connect against an install key that already belongs to workspace A would REPOINT
+  // A's row to B — A's adapter is taken down by `addInstall`, A's sealed chat token
+  // is replaced, and A's install simply disappears. Nothing about that is a leak (the
+  // AAD sees to it that no secret of A's ever opens for B) but it is a silent
+  // cross-tenant DESTRUCTION, and the operator on the other end deserves to be told
+  // what happened rather than to succeed at it.
+  //
+  // `resolveWorkspace`, deliberately, not `lookupInstall`: it reads `workspace_id`
+  // ALONE, so a row whose seals no longer open (a botched key rotation) still guards
+  // its tenant instead of silently becoming free real estate.
+  //
+  // This is NOT an enumeration oracle: reaching this line already required a valid
+  // ticket (Studio + workspace-admin) AND a credential the PROVIDER just
+  // authenticated as owning this exact install key. Someone holding the bot's live
+  // credential learning "this bot is connected to another workspace" learns nothing
+  // they could not learn from the bot — and it is the only message that lets them
+  // act (disconnect it there first).
+  const owner = await deps.installs.resolveWorkspace(
+    ticket.provider,
+    verdict.installKey,
+  );
+  if (owner !== null && owner !== ticket.workspaceId) {
+    return {
+      status: 409,
+      body: {
+        error: "install_owned_elsewhere",
+        reason:
+          "that bot is already connected to a different Barkpark workspace. " +
+          "Disconnect it there first — moving it from here would silently take the " +
+          "other workspace's install down.",
+      },
+    };
+  }
+
   const install: ConnectorInstall = {
     provider: ticket.provider,
     installKey: verdict.installKey,

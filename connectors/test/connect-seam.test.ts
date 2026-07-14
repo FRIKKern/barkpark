@@ -183,6 +183,37 @@ describe("paste-mode validate — Discord (users/@me), no network (D41/D51)", ()
       reason: "401: Unauthorized",
     });
   });
+
+  it("REFUSES an applicationId that is not the token's OWN bot — a public app id must not become a caller-chosen install key", async () => {
+    // THE TENANT BOUNDARY. An application id is PUBLIC (it is in every bot's invite
+    // URL), and the bot token here is the CALLER'S OWN, perfectly valid one — so
+    // Discord answers 200 and nothing about this request is unauthenticated.
+    //
+    // Taking the install key from the pasted `applicationId` would therefore let
+    // workspace B name workspace A's install key: `upsertInstall`'s ON CONFLICT
+    // repoints A's row to B, `addInstall` takes A's Gateway down, and A's install is
+    // GONE — with no secret of A's ever changing hands. The route re-validates
+    // server-side exactly so the key cannot be caller-chosen; an unverified field of
+    // the pasted blob would hand that choice straight back.
+    const victimsAppId = "999888777";
+    const { fetch: doFetch } = recordingFetch(() =>
+      // The caller's own bot. Live, authentic — and a DIFFERENT application.
+      json({ id: "111222333", username: "attacker_bot" }),
+    );
+    const discord = createDiscordConnector({ fetch: doFetch });
+
+    const verdict = await discord.connect?.validate(
+      JSON.stringify({
+        applicationId: victimsAppId,
+        botToken: "the-callers-own-valid-token",
+        publicKey: "pubkey",
+      }),
+    );
+
+    expect(verdict?.ok).toBe(false);
+    expect((verdict as { reason: string }).reason).toContain("111222333");
+    expect((verdict as { reason: string }).reason).toContain(victimsAppId);
+  });
 });
 
 describe("catalog-visible but NOT connectable (D51)", () => {
@@ -525,6 +556,75 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       // B's row is untouched.
       const victim = await h.rawRow("victim-key");
       expect(victim?.workspace_id).toBe(WS_B);
+    });
+
+    it("REFUSES to connect over an install that belongs to ANOTHER workspace — the row is not repointed, and the incumbent stays mounted", async () => {
+      // The residue of the same hole. Even with a provider-authenticated install key,
+      // `UPSERT_INSTALL` sets `workspace_id = EXCLUDED.workspace_id` UNCONDITIONALLY:
+      // so a connect from workspace A against a key workspace B already owns would
+      // repoint B's row, take B's adapter down, and replace B's sealed chat token.
+      // No secret of B's leaks (the AAD sees to that) — B's install simply vanishes.
+      const h = await boot(registryWith(pasteConnector()));
+
+      // B owns GOOD_KEY — the very key the provider will hand back to A.
+      await upsertInstall(pool, cipher, {
+        provider: "paste",
+        installKey: GOOD_KEY,
+        workspaceId: WS_B,
+        credentialRef: GOOD_TOKEN,
+        chatToken: "bp_chat_ws_b",
+      });
+
+      const response = await h.post("/connectors/connect", {
+        ticket: ticketFor(WS_A),
+        credential: GOOD_TOKEN,
+        chat_token: "bp_chat_ws_a",
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: "install_owned_elsewhere",
+      });
+
+      // B's row is EXACTLY as it was: still B's, still B's chat token.
+      const row = await h.rawRow(GOOD_KEY);
+      expect(row?.workspace_id).toBe(WS_B);
+      expect(
+        cipher.open(row?.chat_token_ref as string, {
+          provider: "paste",
+          installKey: GOOD_KEY,
+          workspaceId: WS_B,
+        }),
+      ).toBe("bp_chat_ws_b");
+    });
+
+    it("a re-connect by the SAME workspace still lands — the guard is a tenant boundary, not a write-once lock", async () => {
+      const h = await boot(registryWith(pasteConnector()));
+
+      await upsertInstall(pool, cipher, {
+        provider: "paste",
+        installKey: GOOD_KEY,
+        workspaceId: WS_A,
+        credentialRef: "an-older-token",
+        chatToken: "bp_chat_ws_a_old",
+      });
+
+      const response = await h.post("/connectors/connect", {
+        ticket: ticketFor(WS_A),
+        credential: GOOD_TOKEN,
+        chat_token: "bp_chat_ws_a_new",
+      });
+
+      expect(response.status).toBe(200);
+      const row = await h.rawRow(GOOD_KEY);
+      expect(row?.workspace_id).toBe(WS_A);
+      expect(
+        cipher.open(row?.chat_token_ref as string, {
+          provider: "paste",
+          installKey: GOOD_KEY,
+          workspaceId: WS_A,
+        }),
+      ).toBe("bp_chat_ws_a_new");
     });
 
     it("a FAILED MOUNT deletes the row it just wrote and answers 502 mount_failed — never a row that crash-loops the next boot", async () => {

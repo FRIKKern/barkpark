@@ -173,11 +173,20 @@ interface DiscordSelfUser {
  * actually authenticate. Discord answers 401 `{"message":"401: Unauthorized"}` for
  * a revoked or mistyped token.
  *
- * The install key is the APPLICATION ID from the pasted credential, not
- * `users/@me`'s `id` — those are the same value for a bot user, but the
- * application id is the one `adapterFactory` will use, and taking it from the thing
- * we are about to store keeps the key and the credential in agreement even if
- * Discord's response shape drifts.
+ * The install key is the APPLICATION ID — and it is CROSS-CHECKED against the id
+ * `users/@me` returns for the authenticated bot. Discord gives a bot user the SAME
+ * snowflake as its application, so those two must agree, and DEMANDING that they do
+ * is what makes the install key provider-authenticated rather than caller-chosen.
+ *
+ * That check is a TENANT BOUNDARY, not a nicety. An application id is PUBLIC — it
+ * is in every bot's invite URL. Without the cross-check, a workspace-B admin could
+ * paste `{"applicationId":"<workspace A's app id>","botToken":"<B's OWN valid
+ * token>","publicKey":"…"}`: validation would pass (B's token really does
+ * authenticate), the install key would be A's, and `upsertInstall`'s
+ * `ON CONFLICT` would repoint A's row to workspace B — destroying A's install and
+ * seizing its key, with no secret of A's ever changing hands. The route re-validates
+ * server-side precisely so the key cannot be caller-chosen; taking it from an
+ * UNVERIFIED field of the pasted blob handed that choice straight back.
  *
  * Honest gap, and it is Discord's, not ours: `users/@me` proves the token is live;
  * it does NOT prove the app has the MESSAGE CONTENT INTENT enabled. That is a
@@ -234,6 +243,28 @@ async function validateDiscordCredential(
       reason:
         payload.message ??
         `Discord rejected the bot token (HTTP ${response.status})`,
+    };
+  }
+
+  // THE TENANT BOUNDARY (see the note above). The bot user's snowflake IS the
+  // application's, so a pasted `applicationId` that does not match the token's own
+  // bot is not a typo to be tolerated — it is the one input that would let a caller
+  // choose another workspace's install key. Refuse, and say exactly what disagreed.
+  if (typeof payload.id !== "string" || payload.id.trim() === "") {
+    return {
+      ok: false,
+      reason:
+        "Discord accepted the bot token but returned no bot id, so the applicationId " +
+        "you pasted cannot be verified against it. Refusing to install an unverified key.",
+    };
+  }
+  if (payload.id !== parsed.applicationId) {
+    return {
+      ok: false,
+      reason:
+        `that bot token belongs to application ${payload.id}, not to the ` +
+        `applicationId you pasted (${parsed.applicationId}). Copy the Application ID ` +
+        "from the SAME app you copied the bot token from.",
     };
   }
 
