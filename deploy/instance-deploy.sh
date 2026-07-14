@@ -57,6 +57,15 @@ GREEN_PORT="${BARKPARK_PORT_GREEN:-4001}"
 # deploy, and the ACTIVE_PORT greps match slot ports exactly.
 MCP_PORT="${BARKPARK_PORT_MCP:-4010}"
 MCP_ENV_FILE="${BARKPARK_MCP_ENV_FILE:-/etc/barkpark/mcp.env}"
+# Connectors bridge (connectors charter D34/D46) — the persistent Node process
+# behind the /connectors PATH route. Same rule as :4010: OUTSIDE the slot ports.
+CONNECTORS_PORT="${BARKPARK_PORT_CONNECTORS:-4020}"
+CONNECTORS_PATH_PREFIX="${BARKPARK_CONNECTORS_PATH_PREFIX:-/connectors}"
+CONNECTORS_ENV_FILE="${BARKPARK_CONNECTORS_ENV_FILE:-/etc/barkpark/connectors.env}"
+# Stable node path the committed unit's ExecStart points at (systemd cannot
+# expand a variable in the executable position, and asdf's node lives under a
+# versioned dir). The deploy symlinks this at the resolved node.
+NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
 
 MODE=deploy
@@ -105,8 +114,8 @@ if [ "$MODE" != "deploy" ]; then
     exit 22
   fi
   # Slot ports ONLY (never 40[0-9]{2}): the Caddyfile also carries the /mcp
-  # route's localhost:4010, which a loose grep + head -1 would misread as the
-  # active slot.
+  # route's localhost:4010 and the /connectors route's localhost:4020, which a
+  # loose grep + head -1 would misread as the active slot.
   ACTIVE_PORT="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" 2>/dev/null | head -1 | cut -d: -f2)"
   ACTIVE_PORT="${ACTIVE_PORT:-$BLUE_PORT}"
   if [ "$ACTIVE_PORT" = "$BLUE_PORT" ]; then
@@ -242,6 +251,16 @@ if ! grep -q '^BARKPARK_CLOUD_URL=' .env 2>/dev/null; then
   echo 'BARKPARK_CLOUD_URL=https://barkpark.cloud' >> .env
   log "added BARKPARK_CLOUD_URL to .env"
 fi
+
+# The Connectors bridge ciphers each install's per-workspace credentials with
+# this key. It MUST be STABLE across deploys — regenerating it makes every stored
+# connector credential undecryptable — so it is backfilled ONCE into .env (the
+# box's durable secret store, same mechanism as BARKPARK_KEK above) and only
+# COPIED into /etc/barkpark/connectors.env on each deploy.
+if ! grep -q '^CONNECTORS_CREDENTIAL_KEY=' .env 2>/dev/null; then
+  echo "CONNECTORS_CREDENTIAL_KEY=$(openssl rand -base64 32)" >> .env
+  log "added CONNECTORS_CREDENTIAL_KEY to .env (connectors bridge credential cipher)"
+fi
 set -a; . ./.env; set +a
 
 # ---- Arm the Caddy maintenance page (branded 503 + Retry-After) so ANY window
@@ -370,12 +389,80 @@ MCPROUTE
 }
 arm_caddy_mcp_route
 
+# ---- Arm the /connectors Caddy route for the Connectors bridge (connectors
+# charter D34/D46): path-based on the EXISTING public site — never a new
+# subdomain (barkpark.cloud has NO wildcard DNS; a subdomain would re-arm the
+# separate Hetzner DNS-token human gate for nothing) — proxying to
+# 127.0.0.1:$CONNECTORS_PORT where barkpark-connectors.service listens (guarded
+# install below). :4020, like the MCP route's :4010, sits OUTSIDE the blue/green
+# slot ports {4000,4001} ON PURPOSE: the ACTIVE_PORT greps and the port-flip sed
+# match slot ports exactly, so they pass over this route untouched. Same contract
+# as the maintenance + /mcp arming: idempotent (marker), backed up, `caddy
+# validate`d, auto-reverting, NEVER fails the deploy. Until the unit is up,
+# /connectors requests hit a dead upstream and land on the maintenance 503 —
+# never a raw 502. THAT is the ordering hazard docs/ops/connectors-deploy.md
+# names: bring the unit UP before registering a provider webhook URL, because a
+# provider disables a webhook after repeated non-2xx.
+arm_caddy_connectors_route() {
+  command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping $CONNECTORS_PATH_PREFIX route"; return 0; }
+  [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — skipping $CONNECTORS_PATH_PREFIX route"; return 0; }
+  if grep -q 'BARKPARK_CONNECTORS_ROUTE' "$CADDYFILE"; then log "caddy $CONNECTORS_PATH_PREFIX route already armed"; return 0; fi
+  if [ "$CONNECTORS_PORT" = "$BLUE_PORT" ] || [ "$CONNECTORS_PORT" = "$GREEN_PORT" ]; then
+    log "refusing $CONNECTORS_PATH_PREFIX route on a blue/green slot port (:$CONNECTORS_PORT) — the port-flip sed would rewrite it"
+    return 0
+  fi
+  if [ "$CONNECTORS_PORT" = "$MCP_PORT" ]; then
+    log "refusing $CONNECTORS_PATH_PREFIX route on the MCP port (:$CONNECTORS_PORT) — two units cannot bind one port"
+    return 0
+  fi
+  if ! grep -qE "reverse_proxy[[:space:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:space:]]|\$)" "$CADDYFILE"; then
+    log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — leaving Caddy untouched ($CONNECTORS_PATH_PREFIX route not armed)"
+    return 0
+  fi
+  local block; block="$(cat <<CONNROUTE
+	# BARKPARK_CONNECTORS_ROUTE — the Connectors bridge
+	# (barkpark-connectors.service). Matcher covers the bare prefix AND its
+	# subtree — provider webhooks POST ${CONNECTORS_PATH_PREFIX}/<provider>.
+	@barkpark_connectors path ${CONNECTORS_PATH_PREFIX} ${CONNECTORS_PATH_PREFIX}/*
+	handle @barkpark_connectors {
+		reverse_proxy localhost:${CONNECTORS_PORT}
+	}
+CONNROUTE
+)"
+  local bak; bak="${CADDYFILE}.bak.connectors.$(date -u +%Y%m%d%H%M%S)"
+  cp -a "$CADDYFILE" "$bak"
+  local tmp; tmp="$(mktemp)"
+  # Insert right BEFORE the first slot `reverse_proxy localhost:<port>` line, so
+  # the handle sits inside that site block ahead of the bare fallback proxy.
+  # SLOT PORTS ONLY: the anchor regex must never match the /mcp block's own
+  # `localhost:4010` line (nor this block's :4020 on a re-run) — that trap is
+  # documented on arm_caddy_mcp_route. The marker guard above is the first line
+  # of defence; the tight regex is belt-and-braces.
+  BP_BLOCK="$block" BP_SLOT_RE="reverse_proxy[[:blank:]]+localhost:(${BLUE_PORT}|${GREEN_PORT})([[:blank:]]|\$)" awk '
+    BEGIN { blk=ENVIRON["BP_BLOCK"]; re=ENVIRON["BP_SLOT_RE"] }
+    !ins && $0 ~ re { print blk; ins=1 }
+    { print }
+  ' "$CADDYFILE" > "$tmp" && mv "$tmp" "$CADDYFILE"
+  # mktemp files are 0600 and mv preserves that — keep the file readable for the
+  # caddy user (same lesson as the maintenance + /mcp arming).
+  chmod --reference="$bak" "$CADDYFILE" 2>/dev/null || chmod 644 "$CADDYFILE"
+  chown --reference="$bak" "$CADDYFILE" 2>/dev/null || true
+  if caddy validate --adapter caddyfile --config "$CADDYFILE" >/dev/null 2>&1; then
+    if systemctl reload caddy 2>/dev/null; then log "armed caddy $CONNECTORS_PATH_PREFIX route -> localhost:$CONNECTORS_PORT"; else log "caddy reload failed (config valid) — $CONNECTORS_PATH_PREFIX route live on next reload"; fi
+    rm -f "$bak"
+  else
+    log "caddy validate rejected the $CONNECTORS_PATH_PREFIX route — reverting, Caddy untouched"
+    mv "$bak" "$CADDYFILE"
+  fi
+}
+arm_caddy_connectors_route
+
 # ---- Which slot serves now? Caddy's upstream port is the source of truth
 # (on the pre-blue/green layout it reads 4000, which maps to legacy-as-blue).
-# Slot ports ONLY (never 40[0-9]{2}): the /mcp route above put a
-# localhost:4010 line in the Caddyfile ahead of the site upstream — a loose
-# grep + head -1 would misread it as the active slot and the flip sed would
-# then destroy the route.
+# Slot ports ONLY (never 40[0-9]{2}): the /mcp and /connectors routes above put
+# localhost:4010 / localhost:4020 lines in the Caddyfile ahead of the site
+# upstream — a loose grep + head -1 would misread one as the active slot and the
+# flip sed would then destroy the route.
 ACTIVE_PORT="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" | head -1 | cut -d: -f2)"
 ACTIVE_PORT="${ACTIVE_PORT:-$BLUE_PORT}"
 if [ "$ACTIVE_PORT" = "$BLUE_PORT" ]; then
@@ -533,6 +620,97 @@ if command -v go >/dev/null 2>&1; then
     log "bp binary does not advertise 'mcp serve --http' — skipping barkpark-mcp install (bearer transport slice not merged yet)"
   fi
   rm -rf "$MCP_TMPD"
+fi
+
+# ---- Refresh the Connectors bridge (connectors charter D34/D46), best-effort
+# + GUARDED. barkpark-connectors.service runs the standalone Node/TS bridge in
+# $APP/connectors behind the /connectors Caddy route armed above, on the
+# loopback :$CONNECTORS_PORT. NON-FATAL throughout — the app is already live on
+# the new slot, and a bridge hiccup must never brick a good deploy.
+#
+# node is NOT on this box's PATH (bare `node -v` => command not found): asdf
+# manages it, and systemd cannot expand a variable in the ExecStart executable
+# position. So resolve node HERE and point a stable /usr/local/bin/barkpark-node
+# symlink at it (same shape as /usr/local/bin/barkpark-mcp) — the committed unit
+# never carries a version.
+resolve_node_bin() {
+  local d b
+  if command -v asdf >/dev/null 2>&1; then
+    d="$(asdf where nodejs 2>/dev/null || true)"
+    if [ -n "$d" ] && [ -x "$d/bin/node" ]; then printf '%s\n' "$d/bin/node"; return 0; fi
+  fi
+  # Newest asdf install, for a box where no version is pinned for this dir.
+  b="$(ls -1d "$HOME"/.asdf/installs/nodejs/*/bin/node 2>/dev/null | sort -V | tail -1)"
+  if [ -n "$b" ] && [ -x "$b" ]; then printf '%s\n' "$b"; return 0; fi
+  # A REAL node on PATH — never a bare shim: an asdf shim with no version set
+  # exits non-zero, and installing a unit that points at it would crash-loop.
+  b="$(command -v node 2>/dev/null || true)"
+  if [ -n "$b" ] && "$b" -v >/dev/null 2>&1; then printf '%s\n' "$b"; return 0; fi
+  return 1
+}
+
+CONNECTORS_DIR="$APP/connectors"
+if [ ! -d "$CONNECTORS_DIR" ]; then
+  log "no $CONNECTORS_DIR in this checkout — skipping barkpark-connectors"
+elif ! NODE_BIN="$(resolve_node_bin)"; then
+  log "WARN: no usable node (asdf nodejs not installed and none on PATH) — barkpark-connectors NOT installed; $CONNECTORS_PATH_PREFIX stays on the maintenance 503"
+elif [ -z "${DATABASE_URL:-}" ]; then
+  log "WARN: no DATABASE_URL in $APP/.env — barkpark-connectors NOT installed (the bridge owns the chat_bridge schema and cannot boot without it)"
+else
+  NODE_DIR="$(dirname "$NODE_BIN")"
+  log "refreshing barkpark-connectors (node $("$NODE_BIN" -v 2>/dev/null || echo '?') at $NODE_BIN)"
+  ln -sfn "$NODE_BIN" "$NODE_LINK"
+  # FULL install (not --omit=dev) ON PURPOSE: the bridge has no build step yet —
+  # its entrypoint is `tsx src/index.ts`, and tsx is a devDependency. When
+  # connectors/ grows a real `build` (tsc -> dist/), switch this to
+  # `npm ci --omit=dev` and point the unit at `node dist/index.js`.
+  # npm's own shebang is `#!/usr/bin/env node`, which cannot work on a box with
+  # no node on PATH — so prepend the resolved node dir for this call only.
+  if ( cd "$CONNECTORS_DIR" && PATH="$NODE_DIR:$PATH" "$NODE_DIR/npm" ci --no-audit --no-fund ); then
+    if [ ! -f "$CONNECTORS_DIR/node_modules/tsx/dist/cli.mjs" ]; then
+      log "WARN: connectors deps installed but no tsx runner (node_modules/tsx/dist/cli.mjs) — barkpark-connectors NOT enabled"
+    else
+      # 0600 — this file holds DATABASE_URL and the credential cipher key. (mcp.env
+      # is 0644 because it deliberately holds NO secret; that is the exception.)
+      # There is deliberately NO BARKPARK_CHAT_TOKEN line: one ambient operator
+      # token would serve EVERY tenant — the exact multi-tenant hole this wave
+      # closes. Each install authenticates with its own workspace-bound token,
+      # ciphered at rest under CONNECTORS_CREDENTIAL_KEY.
+      mkdir -p "$(dirname "$CONNECTORS_ENV_FILE")"
+      ( umask 077; : > "$CONNECTORS_ENV_FILE" )
+      chmod 0600 "$CONNECTORS_ENV_FILE"
+      {
+        printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+        printf 'BARKPARK_API_URL=https://%s\n' "$HEALTH_HOST"
+        printf 'CONNECTORS_HTTP_ADDR=127.0.0.1:%s\n' "$CONNECTORS_PORT"
+        printf 'CONNECTORS_PATH_PREFIX=%s\n' "$CONNECTORS_PATH_PREFIX"
+        printf 'CONNECTORS_CREDENTIAL_KEY=%s\n' "${CONNECTORS_CREDENTIAL_KEY:-}"
+      } > "$CONNECTORS_ENV_FILE"
+      install -m 0644 "$APP/deploy/systemd/barkpark-connectors.service" /etc/systemd/system/barkpark-connectors.service
+      systemctl daemon-reload
+      if systemctl enable barkpark-connectors >/dev/null 2>&1 && systemctl restart barkpark-connectors; then
+        # Health gate: a bridge that cannot boot (missing config, bad DB) exits
+        # and Restart=on-failure would crash-loop it forever. Give it a moment,
+        # then demand systemd still calls it active; otherwise DISABLE it again
+        # and say so. Fail closed, stay non-fatal.
+        sleep 5
+        if [ "$(systemctl is-active barkpark-connectors 2>/dev/null)" = "active" ]; then
+          log "barkpark-connectors up (https://$HEALTH_HOST$CONNECTORS_PATH_PREFIX -> 127.0.0.1:$CONNECTORS_PORT)"
+          # LOG-ONLY probe (never a gate — a polling-only bridge legitimately
+          # serves no HTTP): does the path route actually reach the bridge?
+          code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health" || true)"
+          log "connectors health probe: 127.0.0.1:${CONNECTORS_PORT}${CONNECTORS_PATH_PREFIX}/health = ${code:-000} (000 = no HTTP surface yet; provider webhooks would land on the maintenance 503 — see docs/ops/connectors-deploy.md)"
+        else
+          log "WARN: barkpark-connectors did not stay active — disabling it (no crash-loop); $CONNECTORS_PATH_PREFIX stays on the maintenance 503. Check: journalctl -u barkpark-connectors"
+          systemctl disable --now barkpark-connectors >/dev/null 2>&1 || true
+        fi
+      else
+        log "WARN: barkpark-connectors enable/restart failed — bridge down until next deploy"
+      fi
+    fi
+  else
+    log "WARN: npm ci failed in $CONNECTORS_DIR — barkpark-connectors NOT (re)installed; the running unit (if any) keeps its old deps"
+  fi
 fi
 
 # ---- Install the bp CLI so every Studio chat session can wield Barkpark tasks
