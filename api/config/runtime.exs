@@ -776,6 +776,21 @@ if config_env() == :prod do
 
   config :barkpark, Barkpark.Sites.DeployRunner, site_deploy_runner_env
 
+  # Site SOURCE PROVISIONER (Barkpark.Sites.Provisioner) — materializes the
+  # shipped Astro template into `<sites_dir>/<slug>/src` before BUILD (charter
+  # D33/D34). BARKPARK_SITES_DIR MUST match what site-deploy.sh resolves (same
+  # default `/opt/barkpark/sites`) or the template lands where the engine won't
+  # look. BARKPARK_SITE_TEMPLATE_DIR overrides the template source (default: the
+  # repo's `templates/astro-starter`). Both unset ⇒ the module's defaults.
+  site_provisioner_env =
+    [
+      sites_dir: System.get_env("BARKPARK_SITES_DIR"),
+      template_dir: System.get_env("BARKPARK_SITE_TEMPLATE_DIR")
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+  config :barkpark, Barkpark.Sites.Provisioner, site_provisioner_env
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key
