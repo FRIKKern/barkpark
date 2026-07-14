@@ -48,12 +48,31 @@ defmodule Barkpark.Tasks.Internal do
   #     written, never inherited from the met→true default above, which would
   #     flip a lock on an honest miss (the proven footgun D8 names).
   #
-  # The stored `criterion` text is never touched. The optional `"criterion"`
-  # guard is a CAS at criteria grain: when given, it must equal the stored
-  # text at that index or the whole write aborts with :criteria_mismatch (the
-  # caller's view of the list is stale — rows reordered/edited since read).
+  # The stored `criterion` text is never touched. The `"criterion"` guard is a
+  # CAS at criteria grain: it must equal the stored text at that index or the
+  # whole write aborts with :criteria_mismatch (the caller's view of the list is
+  # stale — rows reordered/edited since read, or the index is off by one).
   # Conflicts (index out of range, guard mismatch) abort the CALLER's whole
   # transaction — deliberate race handling, not silent partial state.
+  #
+  # FAIL CLOSED ON A MET-FLIP (D56, wave 5). The guard used to be OPTIONAL, so
+  # in the wild it never fired: an index-only `met: true` update landed silently
+  # on whatever row the (frequently 1-based-by-habit) index happened to hit, and
+  # five of eight Wave-4 builders shifted their evidence onto a NEIGHBOUR — one
+  # of them fabricating a met=true on a merge-gated criterion it could not
+  # possibly have proven. A guard that reads as protection and is not is worse
+  # than no guard. So: ANY update whose effective `met` is `true` MUST carry a
+  # non-empty `"criterion"` text, or it is `{:error, :criterion_text_required}`.
+  # The two permissive paths that flip NOTHING are untouched:
+  #
+  #   * `--miss` (an `"attempt"` key) — records an honest attempt, pins `met` to
+  #     its stored value. Nothing to fabricate, no text needed.
+  #   * an explicit `met: false` — un-flipping / an honest unmet close.
+  #
+  # Blast radius is accepted and named: every caller that flips a lock by index
+  # alone now gets a 409 telling it exactly what to pass (see the controller's
+  # `criteria_hint/2`). Close's own merge-gate autostamp threads the stored text
+  # in (close.ex `autostamp_merge_gate/6`) rather than riding the old hole.
   @attempts_bound 5
 
   def merge_criteria(content, []), do: {:ok, content}
@@ -86,12 +105,21 @@ defmodule Barkpark.Tasks.Internal do
       %{} = entry ->
         guard = Map.get(update, "criterion")
 
-        if is_binary(guard) and guard != Map.get(entry, "criterion") do
-          {:error, :criteria_mismatch}
-        else
-          with {:ok, entry} <- apply_entry_update(entry, update) do
-            {:ok, List.replace_at(list, index, entry)}
-          end
+        cond do
+          # Stale/off-by-one view of the list: the caller named a criterion, and
+          # it is not the one stored at `index`. Abort the whole write.
+          is_binary(guard) and guard != Map.get(entry, "criterion") ->
+            {:error, :criteria_mismatch}
+
+          # Fail closed: a met-flip with no text to CAS against is exactly the
+          # false-done vector (an unverifiable index landing on a neighbour).
+          flips_met_true?(update) and not guarded?(guard) ->
+            {:error, :criterion_text_required}
+
+          true ->
+            with {:ok, entry} <- apply_entry_update(entry, update) do
+              {:ok, List.replace_at(list, index, entry)}
+            end
         end
 
       _ ->
@@ -100,6 +128,17 @@ defmodule Barkpark.Tasks.Internal do
   end
 
   defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
+
+  # A guard only guards when it has words: `nil` and `""` are no guard at all.
+  # (An `""` that "matches" a text-less criterion row must not buy a free flip.)
+  defp guarded?(guard), do: is_binary(guard) and guard != ""
+
+  # Does this update flip the lock to true? The miss path (an `"attempt"` key)
+  # never flips — it pins met to the stored value. Everything else is the
+  # met/evidence path, where an ABSENT `"met"` key means true (close's
+  # back-compat default), so an index+evidence update flips too.
+  defp flips_met_true?(%{"attempt" => %{}}), do: false
+  defp flips_met_true?(update), do: Map.get(update, "met", true) == true
 
   # Miss path: append the attempt, bound the list, PIN met explicitly to its
   # current stored value (normalized to a boolean — only a stored `true` is

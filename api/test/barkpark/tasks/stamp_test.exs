@@ -5,6 +5,10 @@ defmodule Barkpark.Tasks.StampTest do
 
   Covers:
     1. `--met` lands evidence atomically; other entries + the claim untouched.
+    1b. D56 FAIL-CLOSED: a `--met` stamp with NO criterion text is REJECTED
+       (`:criterion_text_required`) — the index alone can silently flip a
+       neighbour, and it did (five of eight Wave-4 builders). A text that does
+       not match the row at N is `:criteria_mismatch`, and neither writes.
     2. Evidence or nothing: a met without non-empty evidence never reaches the DB.
     3. `--miss` appends {note,ts,worker} WITHOUT flipping met — met pinned
        explicitly (never the parse default), attempts bounded to the 5 most recent.
@@ -103,6 +107,7 @@ defmodule Barkpark.Tasks.StampTest do
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 0,
+                 criterion_text: "gate passes",
                  outcome: {:met, "42 tests green: stamp_test.exs"}
                )
 
@@ -127,6 +132,7 @@ defmodule Barkpark.Tasks.StampTest do
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 9,
+                 criterion_text: "gate passes",
                  outcome: {:met, "phantom"}
                )
 
@@ -134,18 +140,38 @@ defmodule Barkpark.Tasks.StampTest do
       assert reloaded.content["acceptance_criteria"] == default_criteria()
       assert criterion_events(task.doc_id) == [], "no event for a refused stamp"
     end
+
+    # The out-of-range guard fires BEFORE the text guard can (there is no row to
+    # CAS against), so an index-only out-of-range stamp still reports the honest
+    # range error rather than the (also true) missing-text one.
+    test "an out-of-range index with no text still reports the range error", %{scope: scope} do
+      doc_id = uniq("stamp-range-notext")
+      task = mk_task!(doc_id, scope)
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      assert {:error, :criteria_index_out_of_range} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 9,
+                 outcome: {:met, "phantom"}
+               )
+    end
   end
 
-  # ─── (1b) In-range wrong-index guard (felix-stamp-index-guard / D56) ────────
+  # ─── (1b) In-range wrong-index guard — FAIL CLOSED (D56) ───────────────────
   #
   # The out-of-range guard above (:criteria_index_out_of_range) only catches an
-  # index PAST the end. The residual scar is a 1-based value passed into the
-  # 0-based tool: a wrong index that IS in range silently flips the NEIGHBOUR
-  # criterion with no error. The OPTIONAL criterion-TEXT threads a CAS at
-  # criteria grain — internal.ex's :criteria_mismatch guard — so a mis-based
-  # stamp that carries the intended criterion's text is REJECTED, while an
-  # unguarded stamp stays permissive (#3039's index-only autostamp must not
-  # break).
+  # index PAST the end. The scar this block owns is a 1-based value passed into
+  # the 0-based tool: a wrong index that IS in range used to silently flip the
+  # NEIGHBOUR criterion with no error, because the criterion-TEXT CAS was
+  # OPTIONAL and nothing forced it. In the wild the guard therefore never fired:
+  # five of eight Wave-4 builders shifted their evidence, one of them fabricating
+  # a met=true on a merge-gated criterion it could not have proven.
+  #
+  # So the guard now FAILS CLOSED: a met-flip with NO text is REJECTED
+  # (:criterion_text_required) and a met-flip whose text does not match the row
+  # at N is REJECTED (:criteria_mismatch). Neither writes anything. A miss stays
+  # permissive — it flips no lock, so there is nothing to fabricate.
 
   defp three_criteria do
     [
@@ -156,33 +182,53 @@ defmodule Barkpark.Tasks.StampTest do
   end
 
   describe "stamp/3 — in-range wrong-index (0-based/1-based off-by-one)" do
-    # The REPRODUCTION: without a text guard, an in-range wrong index is
-    # silently permitted (the honest permissive path #3039 depends on). This
-    # documents the corruption an unguarded stamp still allows AND proves the
-    # guard is opt-in, not mandatory.
-    test "no text guard → an in-range wrong index still flips the neighbour, no error",
+    # THE FIX, fail-before: the exact false-done vector — an index-only --met —
+    # is now REJECTED. Before D56 this returned {:ok, …} with the NEIGHBOUR
+    # flipped (the assertion below on the untouched list is what used to fail).
+    test "no text guard → an in-range wrong index is REJECTED, nothing flips",
          %{scope: scope} do
       doc_id = uniq("stamp-inrange-noguard")
       task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
       {_claimed, epoch} = claim!(doc_id, "w", scope)
 
       # Intent was criterion B (index 1); a 1-based "2" lands on index 2.
-      assert {:ok, stamped} =
+      assert {:error, :criterion_text_required} =
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 2,
                  outcome: {:met, "proof for crit B"}
                )
 
-      [a, b, c] = stamped.content["acceptance_criteria"]
-      assert a["met"] == false
-      assert b["met"] == false, "the INTENDED criterion (index 1) was left untouched"
-      assert c["met"] == true, "the NEIGHBOUR (index 2) was silently flipped"
+      reloaded = Repo.get!(Document, task.id)
+
+      assert reloaded.content["acceptance_criteria"] == three_criteria(),
+             "an unguarded met-flip writes NOTHING — no neighbour is flipped"
+
+      assert criterion_events(task.doc_id) == [], "no event for a refused stamp"
     end
 
-    # The FIX (fail-before RED without the text-thread): the same off-by-one
-    # stamp that carries the INTENDED criterion's stored text is REJECTED with
-    # :criteria_mismatch and writes nothing.
+    # The same refusal applies to the RIGHT index: the rule is not "guess whether
+    # the index looks wrong" (unknowable), it is "a met-flip must name its
+    # criterion". Otherwise the guard would still be optional in practice.
+    test "no text guard → even the CORRECT index is REJECTED (the rule has no hole)",
+         %{scope: scope} do
+      doc_id = uniq("stamp-inrange-right-noguard")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      assert {:error, :criterion_text_required} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 outcome: {:met, "proof for crit B"}
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["acceptance_criteria"] == three_criteria()
+    end
+
+    # An off-by-one stamp that carries the INTENDED criterion's stored text is
+    # REJECTED with :criteria_mismatch and writes nothing.
     test "text guard at the wrong index → :criteria_mismatch, no write", %{scope: scope} do
       doc_id = uniq("stamp-inrange-guard")
       task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
@@ -225,14 +271,14 @@ defmodule Barkpark.Tasks.StampTest do
       assert b["evidence"] == "proof for crit B"
     end
 
-    # A blank / nil text guard is inert — the permissive path is preserved so
-    # the index-only autostamp (#3039) never regresses.
-    test "blank text guard is inert (permissive path preserved)", %{scope: scope} do
+    # A blank text guard is NOT a guard — it must not buy a free flip (the
+    # trivial bypass: pass --criterion-text "" and the old code waved it through).
+    test "a blank text guard is REJECTED on a met (no trivial bypass)", %{scope: scope} do
       doc_id = uniq("stamp-inrange-blank")
       task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
       {_claimed, epoch} = claim!(doc_id, "w", scope)
 
-      assert {:ok, stamped} =
+      assert {:error, :criterion_text_required} =
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 1,
@@ -240,8 +286,30 @@ defmodule Barkpark.Tasks.StampTest do
                  outcome: {:met, "proof"}
                )
 
-      [_a, b, _c] = stamped.content["acceptance_criteria"]
-      assert b["met"] == true
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["acceptance_criteria"] == three_criteria()
+    end
+
+    # …and a MISS with no text still records. The guard only defends the LOCK;
+    # an honest attempt has nothing to fabricate, so it must stay frictionless
+    # (a miss that 409s would push agents back to batching honesty to the end).
+    test "a miss with no text still records the attempt (permissive, flips nothing)",
+         %{scope: scope} do
+      doc_id = uniq("stamp-inrange-miss-notext")
+      task = mk_task!(doc_id, scope, %{"acceptance_criteria" => three_criteria()})
+      {_claimed, epoch} = claim!(doc_id, "w", scope)
+
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "w",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 outcome: {:miss, "adapter smoke still red — retrying"}
+               )
+
+      [a, b, c] = stamped.content["acceptance_criteria"]
+      assert b["met"] == false, "a miss never flips the lock"
+      assert [%{"note" => "adapter smoke still red — retrying"}] = b["attempts"]
+      assert a["met"] == false and c["met"] == false, "neighbours untouched"
     end
   end
 
@@ -317,6 +385,7 @@ defmodule Barkpark.Tasks.StampTest do
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 0,
+                 criterion_text: "gate passes",
                  outcome: {:met, "proved once"}
                )
 
@@ -389,6 +458,7 @@ defmodule Barkpark.Tasks.StampTest do
                Stamp.stamp(task.id, "w",
                  observed_epoch: fresh_epoch,
                  criterion: 0,
+                 criterion_text: "gate passes",
                  outcome: {:met, "restamped after renewal"}
                )
     end
@@ -428,6 +498,7 @@ defmodule Barkpark.Tasks.StampTest do
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 0,
+                 criterion_text: "gate passes",
                  outcome: {:met, "gate output: 12 tests, 0 failures"}
                )
 
@@ -490,6 +561,7 @@ defmodule Barkpark.Tasks.StampTest do
                Stamp.stamp(task.id, "w",
                  observed_epoch: epoch,
                  criterion: 0,
+                 criterion_text: "gate passes",
                  outcome: {:met, "proof attached"}
                )
 

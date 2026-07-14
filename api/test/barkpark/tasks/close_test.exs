@@ -316,7 +316,14 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
-                 criteria: [%{"index" => 0, "met" => true, "evidence" => "PR #123 + test run"}]
+                 criteria: [
+                   %{
+                     "index" => 0,
+                     "met" => true,
+                     "evidence" => "PR #123 + test run",
+                     "criterion" => "renders live value"
+                   }
+                 ]
                )
 
       assert closed.content["lifecycle_status"] == "done"
@@ -346,7 +353,11 @@ defmodule Barkpark.Tasks.CloseTest do
                  observed_epoch: 0,
                  lifecycle_status: "done",
                  criteria: [
-                   %{"index" => 0, "evidence" => "close_test.exs"},
+                   %{
+                     "index" => 0,
+                     "evidence" => "close_test.exs",
+                     "criterion" => "renders live value"
+                   },
                    %{"index" => 1, "met" => false}
                  ]
                )
@@ -446,7 +457,12 @@ defmodule Barkpark.Tasks.CloseTest do
                  observed_epoch: 0,
                  lifecycle_status: "done",
                  criteria: [
-                   %{"index" => 0, "met" => true, "evidence" => "would have landed"},
+                   %{
+                     "index" => 0,
+                     "met" => true,
+                     "evidence" => "would have landed",
+                     "criterion" => "renders live value"
+                   },
                    %{"index" => 9}
                  ]
                )
@@ -489,6 +505,104 @@ defmodule Barkpark.Tasks.CloseTest do
     end
   end
 
+  # ─── (7b) The close path fails CLOSED on an unguarded met-flip (D56) ───────
+  #
+  # merge_criteria is SHARED by close and stamp, so the false-done vector the
+  # stamp guard closes exists identically here: `--set 'criteria:=[{"index":1,
+  # "met":true,…}]'` with a 1-based-by-habit index flips a NEIGHBOUR criterion
+  # and the close reports success. A met-flip must NAME its criterion.
+
+  describe "close/3 — :criteria met-flip requires the criterion text" do
+    @guard_criteria [
+      %{"criterion" => "criterion A: built", "met" => false},
+      %{"criterion" => "criterion B: proven", "met" => false},
+      %{"criterion" => "criterion C: PR merged", "met" => false}
+    ]
+
+    test "an index-only met:true entry is REJECTED and the whole close aborts", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-noguard"), scope, %{"acceptance_criteria" => @guard_criteria})
+
+      # Intent was criterion B (index 1); a 1-based "2" lands on index 2 — the
+      # merge-gated criterion the closer cannot possibly have proven.
+      assert {:error, :criterion_text_required} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 2, "met" => true, "evidence" => "proof for B"}]
+               )
+
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["lifecycle_status"] == "open", "the close must not land"
+      assert reloaded.content["acceptance_criteria"] == @guard_criteria, "nothing flipped"
+      assert reloaded.rev == task.rev, "rev untouched on abort"
+    end
+
+    test "an index-only entry with NO met key (the met→true default) is REJECTED too", %{
+      scope: scope
+    } do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("crit-default-met"), scope, %{"acceptance_criteria" => @guard_criteria})
+
+      # The close body's back-compat default is met→true — the guard must see
+      # through it, or the whole fix is bypassed by omitting one key.
+      assert {:error, :criterion_text_required} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [%{"index" => 0, "evidence" => "implicitly met"}]
+               )
+
+      assert Repo.get!(Document, task.id).content["acceptance_criteria"] == @guard_criteria
+    end
+
+    test "an honest met:false entry still needs no text (it flips no lock)", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-unmet-ok"), scope, %{"acceptance_criteria" => @guard_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "cancelled",
+                 criteria: [%{"index" => 2, "met" => false, "evidence" => "never got there"}]
+               )
+
+      assert Enum.at(closed.content["acceptance_criteria"], 2) == %{
+               "criterion" => "criterion C: PR merged",
+               "met" => false,
+               "evidence" => "never got there"
+             }
+    end
+
+    test "a guarded met:true entry lands exactly where it says", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("crit-guarded-ok"), scope, %{"acceptance_criteria" => @guard_criteria})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 criteria: [
+                   %{
+                     "index" => 1,
+                     "met" => true,
+                     "evidence" => "close_test.exs",
+                     "criterion" => "criterion B: proven"
+                   }
+                 ]
+               )
+
+      [a, b, c] = closed.content["acceptance_criteria"]
+      assert b["met"] == true and b["evidence"] == "close_test.exs"
+      assert a["met"] == false and c["met"] == false, "neighbours untouched"
+    end
+  end
+
   describe "close/3 — :criteria vs concurrent content mutation (rev-CAS race)" do
     test "a mutation between the caller's read and its close loses the CAS atomically, and the re-read retry recovers BOTH writes",
          %{scope: scope} do
@@ -516,7 +630,14 @@ defmodule Barkpark.Tasks.CloseTest do
                  observed_epoch: 0,
                  observed_rev: observed_rev,
                  lifecycle_status: "done",
-                 criteria: [%{"index" => 0, "met" => true, "evidence" => "PR #999"}]
+                 criteria: [
+                   %{
+                     "index" => 0,
+                     "met" => true,
+                     "evidence" => "PR #999",
+                     "criterion" => "close carries evidence"
+                   }
+                 ]
                )
 
       reloaded = Repo.get!(Document, task.id)
@@ -532,7 +653,14 @@ defmodule Barkpark.Tasks.CloseTest do
                Close.close(task.id, "w",
                  observed_epoch: 0,
                  lifecycle_status: "done",
-                 criteria: [%{"index" => 0, "met" => true, "evidence" => "PR #999"}]
+                 criteria: [
+                   %{
+                     "index" => 0,
+                     "met" => true,
+                     "evidence" => "PR #999",
+                     "criterion" => "close carries evidence"
+                   }
+                 ]
                )
 
       assert closed.content["lifecycle_status"] == "done"
@@ -559,7 +687,14 @@ defmodule Barkpark.Tasks.CloseTest do
           Close.close(task.id, "w",
             observed_epoch: 0,
             lifecycle_status: "done",
-            criteria: [%{"index" => 0, "met" => true, "evidence" => "interleaved"}]
+            criteria: [
+              %{
+                "index" => 0,
+                "met" => true,
+                "evidence" => "interleaved",
+                "criterion" => "survives interleaving"
+              }
+            ]
           )
         end)
 
@@ -779,7 +914,11 @@ defmodule Barkpark.Tasks.CloseTest do
   describe "close/3 — merge-gate auto-stamp" do
     @merge_gate_criteria [
       %{"criterion" => "feature built + tests green", "met" => true, "evidence" => "PR #123"},
-      %{"criterion" => "MERGE GATE: PR merged to origin/main", "met" => false, "merge_gate" => true}
+      %{
+        "criterion" => "MERGE GATE: PR merged to origin/main",
+        "met" => false,
+        "merge_gate" => true
+      }
     ]
 
     test "(a) a done-close WITH a landed digest flips the merge_gate criterion met=true with composed evidence",
@@ -811,13 +950,78 @@ defmodule Barkpark.Tasks.CloseTest do
       # Criterion text (the paper-claim citation) is NEVER rewritten.
       assert gate["criterion"] == "MERGE GATE: PR merged to origin/main"
       assert gate["merge_gate"] == true
-      assert String.starts_with?(gate["evidence"], "auto: lead-closed on merge by lead-w (epoch 5)")
+
+      assert String.starts_with?(
+               gate["evidence"],
+               "auto: lead-closed on merge by lead-w (epoch 5)"
+             )
+
       assert gate["evidence"] =~ "landed PR #456"
 
       # One atomic write — persisted row matches the returned struct.
       reloaded = Repo.get!(Document, task.id)
       assert reloaded.content["acceptance_criteria"] == closed.content["acceptance_criteria"]
       assert reloaded.rev == closed.rev
+    end
+
+    # D56 COMPANION — the guard's mandatory blast-radius test. merge_criteria now
+    # REFUSES any met-flip that carries no criterion text, and the autostamp used
+    # to build exactly that (`%{"index" => i, "met" => true, "evidence" => …}`).
+    # If it did not thread the stored text in, THIS is where the fix would have
+    # silently broken #3039 the day it shipped: every lead merge-close would 409
+    # criterion_text_required instead of stamping the gate.
+    test "(a2) the auto-stamp survives the fail-closed guard — it threads the stored text",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task =
+        mk_task!(uniq("mg-guarded"), scope, %{
+          "acceptance_criteria" => @merge_gate_criteria,
+          "claim" => %{"worker" => "lead-w", "epoch" => 2}
+        })
+
+      # No caller `criteria` payload at all — the synthetic update is the ONLY
+      # criteria write, so a missing guard would abort the whole close.
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 2,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [3157]}
+               )
+
+      assert closed.content["lifecycle_status"] == "done", "the close still lands"
+
+      gate = Enum.at(closed.content["acceptance_criteria"], 1)
+      assert gate["met"] == true, "the merge gate is still auto-stamped"
+      assert gate["criterion"] == "MERGE GATE: PR merged to origin/main"
+      assert gate["evidence"] =~ "landed PR #3157"
+    end
+
+    # A merge_gate criterion with no wording is UNGUARDABLE: rather than stamp it
+    # through a hole (the exact exemption that made the guard fail open), the
+    # auto-stamp skips it — and the close still succeeds.
+    test "(a3) a merge_gate criterion with NO text is skipped, not stamped through a hole",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      textless = [
+        %{"criterion" => "feature built", "met" => true, "evidence" => "PR #1"},
+        %{"criterion" => "", "met" => false, "merge_gate" => true}
+      ]
+
+      task = mk_task!(uniq("mg-textless"), scope, %{"acceptance_criteria" => textless})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "lead-w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{"prs" => [999]}
+               )
+
+      assert closed.content["lifecycle_status"] == "done", "the close is never blocked by this"
+
+      gate = Enum.at(closed.content["acceptance_criteria"], 1)
+      assert gate["met"] == false, "a text-less gate is left for a human, never auto-flipped"
     end
 
     test "(b) a done-close with NO landed digest does NOT auto-stamp (builder pre-merge close)",
@@ -875,11 +1079,19 @@ defmodule Barkpark.Tasks.CloseTest do
                  observed_epoch: 0,
                  lifecycle_status: "done",
                  landed: %{"prs" => [456]},
-                 criteria: [%{"index" => 1, "met" => true, "evidence" => "hand-written proof"}]
+                 criteria: [
+                   %{
+                     "index" => 1,
+                     "met" => true,
+                     "evidence" => "hand-written proof",
+                     "criterion" => "MERGE GATE: PR merged to origin/main"
+                   }
+                 ]
                )
 
       gate = Enum.at(closed.content["acceptance_criteria"], 1)
       assert gate["met"] == true
+
       assert gate["evidence"] == "hand-written proof",
              "the caller's explicit evidence must not be clobbered by the auto-stamp"
     end
