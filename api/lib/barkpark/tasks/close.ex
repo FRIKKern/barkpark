@@ -325,10 +325,22 @@ defmodule Barkpark.Tasks.Close do
   #     'MERGE GATE' text convention, so a heuristic would both miss and misfire),
   #   * it is still `met` != true (idempotent — an already-stamped gate is left alone),
   #   * the caller's `criteria` payload did NOT already target that index (an
-  #     explicit caller update always wins; we never overwrite it).
+  #     explicit caller update always wins; we never overwrite it),
+  #   * the criterion carries a non-empty `criterion` TEXT — see below.
   # The synthetic update rides the SAME merge_criteria + rev-CAS write as every
   # other close-time criteria flip, so it lands atomically with the close or not
   # at all.
+  #
+  # D56 (wave 5): merge_criteria now FAILS CLOSED on any met-flip that carries no
+  # `"criterion"` text guard. This autostamp used to be the one blessed index-only
+  # met-flip in the codebase — the exact hole that let a wrong index fabricate a
+  # done — so it now threads the STORED text of the very row it is stamping into
+  # the update. The guard is trivially satisfiable here (the index and the text
+  # are read from the same in-lock list, so they cannot disagree), and threading
+  # it keeps ONE rule with ZERO internal exemptions. A merge_gate criterion with
+  # no text is UNGUARDABLE, so it is skipped rather than stamped through a hole —
+  # authoring a merge-gate criterion with no wording is degenerate, and the close
+  # still succeeds (that criterion is simply left for a human to stamp).
   defp autostamp_merge_gate(criteria, %Document{} = doc, worker_id, "done", landed, ts_iso)
        when is_map(landed) and map_size(landed) > 0 and is_list(criteria) do
     targeted = MapSet.new(criteria, &Map.get(&1, "index"))
@@ -341,14 +353,26 @@ defmodule Barkpark.Tasks.Close do
       |> Enum.with_index()
       |> Enum.filter(fn {entry, i} ->
         is_map(entry) and Map.get(entry, "merge_gate") == true and
-          Map.get(entry, "met") != true and not MapSet.member?(targeted, i)
+          Map.get(entry, "met") != true and not MapSet.member?(targeted, i) and
+          guardable_text(entry) != nil
       end)
-      |> Enum.map(fn {_entry, i} -> %{"index" => i, "met" => true, "evidence" => evidence} end)
+      |> Enum.map(fn {entry, i} ->
+        %{
+          "index" => i,
+          "met" => true,
+          "evidence" => evidence,
+          "criterion" => guardable_text(entry)
+        }
+      end)
 
     criteria ++ synthetic
   end
 
   defp autostamp_merge_gate(criteria, _doc, _worker, _status, _landed, _ts_iso), do: criteria
+
+  # The stored criterion wording, or nil when there is nothing to CAS against.
+  defp guardable_text(%{"criterion" => text}) when is_binary(text) and text != "", do: text
+  defp guardable_text(_entry), do: nil
 
   defp merge_gate_criteria_list(content) do
     case Map.get(content, "acceptance_criteria") do

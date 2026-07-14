@@ -9,7 +9,10 @@ defmodule Barkpark.Tasks.Stamp do
   #
   #   * `{:met, evidence}` — flips the criterion's `met` to true and writes the
   #     (REQUIRED, non-empty) evidence. A met without evidence is rejected
-  #     before any DB work — a lock never flips on an empty claim.
+  #     before any DB work — a lock never flips on an empty claim. It ALSO
+  #     requires `:criterion_text` (D56): the index alone is not enough to
+  #     identify a criterion, and an unguarded index-only met-flip is the
+  #     proven false-done vector (`:criterion_text_required`).
   #   * `{:miss, note}` — records the honest attempt WITHOUT flipping: appends
   #     `%{"note","ts","worker"}` to the criterion's `attempts` list (bounded
   #     to the 5 most recent, app-enforced) and PINS `met` explicitly to its
@@ -67,19 +70,20 @@ defmodule Barkpark.Tasks.Stamp do
       * `:criterion` (required integer ≥ 0) — index into
         `content.acceptance_criteria`.
       * `:outcome` (required) — `{:met, evidence}` | `{:miss, note}`.
-      * `:criterion_text` (optional string) — the criterion's EXPECTED stored
-        text. When a non-empty string, it is threaded into the merge as the
-        `"criterion"` CAS key so `Internal.merge_criteria`'s
-        `:criteria_mismatch` guard fires — a mis-based / off-by-one index whose
-        text does not match the row at that index is REJECTED instead of
-        silently flipping the neighbour. Absent/blank keeps the permissive
-        index-only path (the merge-gate autostamp never passes text).
+      * `:criterion_text` — the criterion's EXPECTED stored text, threaded into
+        the merge as the `"criterion"` CAS key. **REQUIRED for `{:met, _}`**
+        (D56): without it the merge fails closed with
+        `:criterion_text_required`, because an index-only met-flip silently
+        lands on whatever row the index hits (the 1-based-habit off-by-one that
+        fabricated a done in Wave 4). With it, a mis-based index whose text does
+        not match the row is REJECTED (`:criteria_mismatch`) instead of flipping
+        the neighbour. OPTIONAL for `{:miss, _}` — a miss flips nothing.
       * `:caller_token_id` (optional) — audit stamp on the event row.
 
   Errors: `:not_found`, `{:not_in_progress, status}`, `:not_holder`,
   `:fenced_off`, `:stale_claim`, `:criteria_index_out_of_range`,
-  `:criteria_mismatch`, `:evidence_required`, `:note_required`,
-  `:invalid_criteria`.
+  `:criteria_mismatch`, `:criterion_text_required`, `:evidence_required`,
+  `:note_required`, `:invalid_criteria`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
@@ -98,12 +102,14 @@ defmodule Barkpark.Tasks.Stamp do
   # its attempt. Validation is here (not just the controller) so internal
   # callers get the same evidence-or-nothing contract.
   #
-  # The optional `criterion_text` is the criteria-grain CAS: `put_guard` sets
-  # the `"criterion"` key on the update map ONLY when a non-empty string is
-  # given, so `Internal.merge_criteria` rejects a mis-based / off-by-one index
-  # (`:criteria_mismatch`) whose text does not match the stored row. A blank /
-  # nil guard leaves the update untouched — the permissive index-only path the
-  # merge-gate autostamp depends on.
+  # `criterion_text` is the criteria-grain CAS: `put_guard` sets the `"criterion"`
+  # key on the update map ONLY when a non-empty string is given, so
+  # `Internal.merge_criteria` rejects a mis-based / off-by-one index
+  # (`:criteria_mismatch`) whose text does not match the stored row. A blank / nil
+  # guard leaves the update unguarded — which merge_criteria now REFUSES on a
+  # met-flip (`:criterion_text_required`, D56). The refusal lives in
+  # merge_criteria, not here, so EVERY write path (stamp AND close) fails closed
+  # from one definition; a miss carries no lock to flip and stays permissive.
   defp build_update(index, _outcome, _worker, _text)
        when not (is_integer(index) and index >= 0),
        do: {:error, :invalid_criteria}

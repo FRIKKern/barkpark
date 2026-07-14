@@ -369,7 +369,14 @@ defmodule BarkparkWeb.TasksControllerTest do
         Jason.encode!(%{
           worker_id: "bd-shim",
           observed_epoch: 1,
-          criteria: [%{index: 0, met: true, evidence: "tasks_controller_test.exs"}]
+          criteria: [
+            %{
+              index: 0,
+              met: true,
+              evidence: "tasks_controller_test.exs",
+              criterion: "close mutates criteria in the close CAS"
+            }
+          ]
         })
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
@@ -450,7 +457,9 @@ defmodule BarkparkWeb.TasksControllerTest do
         Jason.encode!(%{
           worker_id: "bd-shim",
           observed_epoch: 1,
-          criteria: [%{index: 0, met: true, evidence: "partial"}]
+          criteria: [
+            %{index: 0, met: true, evidence: "partial", criterion: "will be met"}
+          ]
         })
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
@@ -672,7 +681,10 @@ defmodule BarkparkWeb.TasksControllerTest do
       resp =
         conn
         |> authed()
-        |> post("/v1/tasks/#{doc_id}/stamp?criterion=0&met=true&evidence=81+tests+green", body)
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=gate+green&met=true&evidence=81+tests+green",
+          body
+        )
 
       assert resp.status == 200
       payload = Jason.decode!(resp.resp_body)
@@ -684,6 +696,99 @@ defmodule BarkparkWeb.TasksControllerTest do
       # Claim untouched — stamp is progress, not the seal.
       assert payload["doc"]["lifecycle_status"] == "in_progress"
       assert payload["doc"]["claim"]["epoch"] == epoch
+    end
+
+    # D56 — the guard on the WIRE. An index-only --met stamp (the exact shape
+    # five of eight Wave-4 builders sent) is a 409 whose message tells the caller
+    # what to type, and it writes nothing. The message is not decoration: the bp
+    # CLI prints a `message` in place of the bare reason token, so a blocked agent
+    # is taught instead of stuck.
+    test "an index-only --met stamp is 409 criterion_text_required with an actionable message",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{"criterion" => "criterion A", "met" => false},
+          %{"criterion" => "criterion B", "met" => false}
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      # A 1-based "2" against a 2-criterion list would be out of range, so use
+      # the 1-based "1" that lands on criterion B — in range, and wrong.
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{doc_id}/stamp?criterion=1&met=true&evidence=proof+for+A", body)
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "criterion_text_required"
+      assert payload["message"] =~ "--criterion-text"
+      assert payload["message"] =~ "0-BASED"
+
+      # Nothing was written: both criteria are still unmet.
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      criteria = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert Enum.all?(criteria, &(&1["met"] == false)), "a refused stamp writes nothing"
+    end
+
+    test "a --criterion-text that does not match the row is 409 criteria_mismatch, no write",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{"criterion" => "criterion A", "met" => false},
+          %{"criterion" => "criterion B", "met" => false}
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=1&criterion-text=criterion+A&met=true&evidence=proof",
+          body
+        )
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "criteria_mismatch"
+      assert payload["message"] =~ "off by one"
+
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      criteria = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert Enum.all?(criteria, &(&1["met"] == false))
+    end
+
+    test "an index-only met:true CLOSE entry is 409 criterion_text_required with its own hint",
+         %{conn: conn, scope: scope} do
+      task =
+        mk_task!(uniq("close-noguard"), scope, %{
+          "acceptance_criteria" => [%{"criterion" => "the one criterion", "met" => false}]
+        })
+
+      close_body =
+        Jason.encode!(%{
+          worker_id: "bd-shim",
+          observed_epoch: 1,
+          criteria: [%{index: 0, met: true, evidence: "no text passed"}]
+        })
+
+      resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "criterion_text_required"
+      # The close hint names the CLOSE fix (a "criterion" key per entry), not the
+      # stamp flag — a caller who follows it must not get a second 409.
+      assert payload["message"] =~ ~s("criterion")
+      assert payload["message"] =~ "criteria:="
+
+      show = conn |> authed() |> get("/v1/tasks/#{task.doc_id}")
+      doc = Jason.decode!(show.resp_body)["doc"]
+      assert doc["lifecycle_status"] == "open", "the close aborted"
+      assert [%{"met" => false}] = doc["content"]["acceptance_criteria"]
     end
 
     test "miss records the attempt without flipping met", %{conn: conn, scope: scope} do

@@ -310,6 +310,41 @@ defmodule BarkparkWeb.TasksController.Params do
   def reason_to_string({:not_in_progress, s}), do: "not_in_progress:#{s}"
   def reason_to_string(other), do: inspect(other)
 
+  # ─── Criteria-conflict hints (D56 — the guard must TEACH, not just refuse) ──
+  #
+  # A guard is only worth shipping if the caller it blocks knows exactly what to
+  # type next. These strings ride the 409 as a top-level `message`, which the bp
+  # CLI prints in place of the bare reason token (internal/cli/errors.go
+  # `bodyMessage`). Surface-specific because the fix differs: `--criterion-text`
+  # on a stamp, a `"criterion"` key per entry on a close's `--set criteria:=…`.
+  # Any other reason returns nil → the response keeps its historical shape.
+  def criteria_hint(reason, surface)
+
+  def criteria_hint(:criterion_text_required, :stamp),
+    do:
+      ~s|--met requires --criterion-text "<the criterion's exact stored wording>". | <>
+        ~s|--criterion N is a 0-BASED index — the FIRST criterion is 0 — and is unverifiable on its own: | <>
+        ~s|an unguarded index silently flips whatever row it lands on. Read the wording from | <>
+        ~s|`bp task get <id>` at acceptance_criteria[N].criterion and pass it verbatim. --miss needs no text.|
+
+  def criteria_hint(:criterion_text_required, :close),
+    do:
+      ~s|every criteria entry with met=true must carry its "criterion" — the exact stored wording — e.g. | <>
+        ~s|--set 'criteria:=[{"index":0,"met":true,"evidence":"…","criterion":"<acceptance_criteria[0].criterion, verbatim>"}]'. | <>
+        ~s|The 0-BASED index alone is unverifiable and can flip a neighbouring criterion. An entry with met=false needs no text.|
+
+  def criteria_hint(:criteria_mismatch, _surface),
+    do:
+      ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>
+        ~s|— it is 0-BASED, the FIRST criterion is 0 — or the list changed since you read it. Nothing was written. | <>
+        ~s|Re-read `bp task get <id>` and pass the index and the wording of the SAME row.|
+
+  def criteria_hint(:criteria_index_out_of_range, _surface),
+    do:
+      ~s|that criterion index is past the end of acceptance_criteria. The index is 0-BASED: the FIRST criterion is 0. Nothing was written.|
+
+  def criteria_hint(_reason, _surface), do: nil
+
   # ─── Acceptance-criteria close-out (living-values §8/§9) ─────────────────
 
   # Parses the optional close-body `criteria` list: each update targets one
