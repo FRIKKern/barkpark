@@ -937,6 +937,64 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
+  describe "sup-w5 — the footer echoes the REAL save_status (no more hardcoded '✓ Auto-saved' lie)" do
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    defp save_footer(save_status, paper_halt \\ nil) do
+      render_component(&PaperEditor.paper_block_editor/1,
+        slug: "p-save",
+        blocks: [para("p1")],
+        canvas_eligible: true,
+        save_status: save_status,
+        paper_halt: paper_halt
+      )
+    end
+
+    # THE non-vacuous guard: reverting the footer to the literal "✓ Auto-saved"
+    # makes THIS fail — a "Save failed" write can only surface verbatim if the
+    # footer actually reads @save_status.
+    test "a 'Save failed' status is echoed verbatim in the footer save region" do
+      html = save_footer("Save failed")
+
+      assert html =~ ~s(data-test-id="bp-paper-footer-save")
+      assert html =~ "Save failed"
+      # the old hardcoded calm token must NOT appear when the write failed
+      refute html =~ "✓ Auto-saved"
+    end
+
+    test "the calm 'Auto-saved' token keeps its premium ✓ affix" do
+      html = save_footer("Auto-saved")
+      assert html =~ "✓ Auto-saved"
+    end
+
+    test "a fresh pre-write open (unassigned save_status ⇒ \"\") shows an empty, non-lying save region" do
+      html = save_footer("")
+      # the region is present and accessible, but carries no false 'Auto-saved'
+      assert html =~ ~s(data-test-id="bp-paper-footer-save")
+      refute html =~ "Auto-saved"
+      refute html =~ "Save failed"
+    end
+
+    test "the save region is an accessible live status (role=status, aria-live=polite)" do
+      html = save_footer("Auto-saved")
+      assert html =~ ~s(role="status")
+      assert html =~ ~s(aria-live="polite")
+    end
+
+    test "a paper_halt reason raises the shared server-truth banner near the top" do
+      reason = "document is hollow — add a content block beyond the title"
+      html = save_footer("Save failed", reason)
+
+      assert html =~ ~s(data-test-id="paper-halt-banner")
+      assert html =~ reason
+    end
+
+    test "no paper_halt ⇒ no banner (a clean edit renders nothing)" do
+      html = save_footer("Auto-saved", nil)
+      refute html =~ ~s(data-test-id="paper-halt-banner")
+    end
+  end
+
   describe "task_block_preview/1 — retained boundary widget still paints the reader's producer (D8/rule 3)" do
     alias Barkpark.PortableDoc.Render
     alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
