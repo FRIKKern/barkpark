@@ -1,8 +1,12 @@
 defmodule Barkpark.EpicFleetTest do
   use Barkpark.DataCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.EpicFleet
   alias Barkpark.EpicFleet.{Assignment, Result}
+  alias Barkpark.Tenancy
 
   setup do
     {workspace, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
@@ -55,6 +59,63 @@ defmodule Barkpark.EpicFleetTest do
       assert_raise Postgrex.Error, ~r/append-only/, fn ->
         Repo.query!("DELETE FROM epic_assignments WHERE id = $1", [Ecto.UUID.dump!(assignment.id)])
       end
+    end
+
+    test "replacement keeps the original phase and agent type", %{scope: scope} do
+      {:ok, original} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+
+      base =
+        scope
+        |> assignment_attrs("build-1-retry")
+        |> Map.put(:replaces_assignment_id, original.id)
+
+      assert {:error, :replacement_phase_mismatch} =
+               base
+               |> Map.merge(%{phase: "review", agent_type: "code-reviewer"})
+               |> EpicFleet.create_assignment()
+
+      assert {:error, :replacement_agent_type_mismatch} =
+               base
+               |> Map.put(:agent_type, "other-builder")
+               |> EpicFleet.create_assignment()
+
+      assert Repo.aggregate(Assignment, :count) == 1
+    end
+
+    test "concurrent direct successors admit exactly one replacement", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+      {:ok, original} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
+
+      outcomes =
+        1..12
+        |> Task.async_stream(
+          fn ordinal ->
+            scope
+            |> assignment_attrs("build-1-retry-#{ordinal}")
+            |> Map.put(:replaces_assignment_id, original.id)
+            |> EpicFleet.create_assignment()
+          end,
+          max_concurrency: 12,
+          ordered: false,
+          timeout: 5_000
+        )
+        |> Enum.map(fn {:ok, outcome} -> outcome end)
+
+      assert 1 == Enum.count(outcomes, &match?({:ok, %Assignment{}}, &1))
+
+      assert 11 ==
+               Enum.count(outcomes, fn
+                 {:error, %Ecto.Changeset{} = changeset} ->
+                   "has already been taken" in errors_on(changeset).replaces_assignment_id
+
+                 _ ->
+                   false
+               end)
+
+      assert Repo.aggregate(
+               from(a in Assignment, where: a.replaces_assignment_id == ^original.id),
+               :count
+             ) == 1
     end
   end
 
@@ -168,6 +229,79 @@ defmodule Barkpark.EpicFleetTest do
           [Ecto.UUID.dump!(assignment.id), digest]
         )
       end
+    end
+  end
+
+  describe "forward hardening migration" do
+    test "an already-created ledger receives the corrected evidence and cascade constraints" do
+      version = 20_260_715_000_300
+
+      assert %{rows: [[^version]]} =
+               Repo.query!("SELECT version FROM schema_migrations WHERE version = $1", [version])
+
+      assert %{rows: [[evidence_check]]} =
+               Repo.query!("""
+               SELECT pg_get_constraintdef(oid)
+               FROM pg_constraint
+               WHERE conname = 'epic_assignment_results_completed_evidence'
+               """)
+
+      assert evidence_check =~ "evidence IS NOT NULL"
+      assert evidence_check =~ "evidence_revision IS NOT NULL"
+
+      assert %{rows: [["c"], ["c"]]} =
+               Repo.query!("""
+               SELECT confdeltype::text
+               FROM pg_constraint
+               WHERE conname IN (
+                 'epic_assignments_workspace_id_fkey',
+                 'epic_assignment_results_assignment_id_fkey'
+               )
+               ORDER BY conname
+               """)
+
+      assert %{rows: [[true]]} =
+               Repo.query!(
+                 "SELECT to_regclass('epic_assignments_replaces_assignment_index') IS NOT NULL"
+               )
+    end
+  end
+
+  describe "workspace teardown" do
+    test "canonical deletion cascades only the target workspace ledger" do
+      deleted_workspace = create_workspace!()
+      survivor_workspace = create_workspace!()
+
+      deleted_scope = %{
+        workspace_id: deleted_workspace.id,
+        epic_id: "epic-delete",
+        wave_id: "wave-1"
+      }
+
+      survivor_scope = %{
+        workspace_id: survivor_workspace.id,
+        epic_id: "epic-survive",
+        wave_id: "wave-1"
+      }
+
+      {:ok, deleted_assignment} =
+        EpicFleet.create_assignment(assignment_attrs(deleted_scope, "build-delete"))
+
+      {:ok, deleted_result} =
+        EpicFleet.record_result(deleted_assignment, "terminal-delete", result_attrs())
+
+      {:ok, survivor_assignment} =
+        EpicFleet.create_assignment(assignment_attrs(survivor_scope, "build-survive"))
+
+      {:ok, survivor_result} =
+        EpicFleet.record_result(survivor_assignment, "terminal-survive", result_attrs())
+
+      assert {:ok, _workspace} = Tenancy.delete_workspace(deleted_workspace)
+
+      assert is_nil(EpicFleet.get_assignment(deleted_assignment.id))
+      assert is_nil(Repo.get(Result, deleted_result.id))
+      assert EpicFleet.get_assignment(survivor_assignment.id).id == survivor_assignment.id
+      assert Repo.get(Result, survivor_result.id).id == survivor_result.id
     end
   end
 

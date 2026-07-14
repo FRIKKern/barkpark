@@ -68,6 +68,9 @@ defmodule Barkpark.EpicFleet.Assignment do
     |> unique_constraint([:workspace_id, :epic_id, :wave_id, :assignment_id],
       name: :epic_assignments_scope_assignment_index
     )
+    |> unique_constraint(:replaces_assignment_id,
+      name: :epic_assignments_replaces_assignment_index
+    )
     |> check_constraint(:phase, name: :epic_assignments_phase)
     |> check_constraint(:effort, name: :epic_assignments_effort)
     |> check_constraint(:snapshot_digest, name: :epic_assignments_snapshot_digest)
