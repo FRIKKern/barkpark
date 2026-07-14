@@ -3336,14 +3336,96 @@ defmodule BarkparkCloud.Registry do
   @spec create_site(Barkpark.t(), map()) ::
           {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
   def create_site(%Barkpark{} = barkpark, attrs) do
-    %Site{}
-    |> Site.changeset(
+    # site-spawner W5 (charter D47): mint the per-site content-publish webhook
+    # secret BEFORE the insert so its ciphertext lands on the row; the plaintext is
+    # carried out here to register on the box AFTER the row exists (the receiver URL
+    # needs the site id). A container / unbound site mints nothing.
+    {content_secret, attrs} = maybe_mint_content_secret(attrs)
+
+    prepared =
       attrs
       |> put_site_read_token()
       |> Map.put_new(:barkpark_id, barkpark.id)
       |> Map.put_new(:team_id, barkpark.team_id)
-    )
-    |> Repo.insert()
+
+    case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
+      {:ok, site} ->
+        # Best-effort: register the dataset-scoped webhook on the box so a publish
+        # fires the CP receiver. NEVER fails the create — the site row is the truth;
+        # a box that is not yet live (or refuses) just means auto-rebuild is wired
+        # on the next successful registration path. Fires only for a live static
+        # site with a bootstrap_dataset (charter D42/D47).
+        _ = maybe_register_content_webhook(barkpark, site, content_secret)
+        {:ok, site}
+
+      {:error, _cs} = error ->
+        error
+    end
+  end
+
+  # Mint + Vault-encrypt the content-publish secret when this is a content-bound
+  # static site. Returns `{plaintext | nil, attrs}` — the plaintext travels to the
+  # box registration; only the ciphertext is folded into the insert attrs. Accepts
+  # atom or string keys (the router sends atoms, the HTTP-mutate path strings).
+  defp maybe_mint_content_secret(attrs) do
+    kind = Map.get(attrs, :kind) || Map.get(attrs, "kind")
+    dataset = Map.get(attrs, :bootstrap_dataset) || Map.get(attrs, "bootstrap_dataset")
+
+    if kind == "static" and is_binary(dataset) and dataset != "" do
+      secret = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+      {secret, Map.put(attrs, :content_webhook_secret_encrypted, Vault.encrypt(secret))}
+    else
+      {nil, attrs}
+    end
+  end
+
+  # Register ONE dataset-scoped webhook on the box (via the admin-token relay — the
+  # `wire_site_url` prior art) pointed at THIS site's content-publish receiver, so
+  # a publish on the bound dataset fires the CP auto-deploy. events =
+  # {publish,unpublish,delete} (charter D43 — the three lifecycle actions that
+  # touch the PUBLISHED row). Best-effort by contract; the caller ignores the
+  # result. Skips a nil secret (non-static/unbound) and a non-live box.
+  defp maybe_register_content_webhook(_barkpark, _site, nil), do: :noop
+
+  defp maybe_register_content_webhook(%Barkpark{} = barkpark, %Site{} = site, secret)
+       when is_binary(secret) do
+    with box_url when is_binary(box_url) and box_url != "" <- barkpark.url,
+         dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
+         url when is_binary(url) <- content_receiver_url(site) do
+      body = %{
+        events: ["publish", "unpublish", "delete"],
+        url: url,
+        secret: secret
+      }
+
+      case relay_admin(barkpark, :post, "/v1/webhooks/#{URI.encode(dataset)}", body) do
+        {:ok, status, _resp} when status in 200..299 ->
+          :ok
+
+        other ->
+          Logger.warning(
+            "content-publish webhook registration for site #{site.id} did not take: #{inspect(other)}"
+          )
+
+          :error
+      end
+    else
+      _ -> :noop
+    end
+  end
+
+  # The public URL the box POSTs a content-publish delivery to. Per-site receiver
+  # (charter D45): `<control-plane public origin>/v1/sites/webhooks/content-publish/
+  # <site_id>`. The origin is config-driven (`:public_url`, PUBLIC_URL /
+  # CONTROL_PLANE_URL in prod) so it is a genuine cross-host public call
+  # (guerrilla → barkpark.cloud), never loopback.
+  defp content_receiver_url(%Site{id: id}) do
+    base =
+      Application.get_env(:barkpark_cloud, :public_url, "https://api.barkpark.cloud")
+      |> to_string()
+      |> String.trim_trailing("/")
+
+    base <> "/v1/sites/webhooks/content-publish/#{id}"
   end
 
   # site-spawner W1: fold a plaintext read token into the changeset as its
@@ -3784,6 +3866,26 @@ defmodule BarkparkCloud.Registry do
   def reveal_site_github_secret(%Site{github_webhook_secret_encrypted: nil}), do: {:ok, nil}
 
   def reveal_site_github_secret(%Site{github_webhook_secret_encrypted: ciphertext}) do
+    case Vault.decrypt(ciphertext) do
+      {:ok, plain} -> {:ok, plain}
+      :error -> :error
+    end
+  end
+
+  @doc """
+  site-spawner W5 (charter D46/D47): decrypt a Site's content-publish webhook
+  secret back to plaintext — the secret the CP verifies inbound
+  `POST /v1/sites/webhooks/content-publish/:site_id` deliveries against.
+
+  Returns `{:ok, plaintext}` when set, `{:ok, nil}` when never configured (every
+  container site + any static site that predates W5 / had no live box at create),
+  or `:error` when the stored ciphertext is tampered (fail closed). Mirrors
+  `reveal_site_github_secret/1` exactly.
+  """
+  @spec reveal_site_content_secret(Site.t()) :: {:ok, binary() | nil} | :error
+  def reveal_site_content_secret(%Site{content_webhook_secret_encrypted: nil}), do: {:ok, nil}
+
+  def reveal_site_content_secret(%Site{content_webhook_secret_encrypted: ciphertext}) do
     case Vault.decrypt(ciphertext) do
       {:ok, plain} -> {:ok, plain}
       :error -> :error

@@ -216,7 +216,10 @@ defmodule BarkparkCloud.Web.Router do
   plug(:dispatch)
 
   @raw_body_paths ["/v1/billing/webhook"]
-  @raw_body_path_prefixes ["/v1/webhooks/github/"]
+  # site-spawner W5 (charter D46): the content-publish receiver verifies an HMAC
+  # over the EXACT bytes the box signed, so its raw body must be cached too
+  # (the parsed JSON map is not stable enough to re-derive the signature).
+  @raw_body_path_prefixes ["/v1/webhooks/github/", "/v1/sites/webhooks/content-publish/"]
 
   # RemoteIp resolver options, built once at compile time. Only X-Forwarded-For
   # is honored (Caddy's forwarding header); `proxies` lists the loopback CIDRs of
@@ -5330,6 +5333,61 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/sites/webhooks/content-publish/:site_id — NO bearer auth (HMAC IS the
+  # auth). site-spawner W5 (charter D45/D46): the publish-to-live receiver.
+  #
+  # The box fires this off a content publish/unpublish/delete on the site's bound
+  # dataset (the box's existing Webhooks.Dispatcher delivers one signed POST per
+  # registered webhook row, each to its own :site_id endpoint — the fan-out is
+  # free, the routing is exact). The route:
+  #   1. Loads the Site by id (404 silently when missing or unconfigured).
+  #   2. Verifies x-barkpark-signature (`t=<unix>,v1=<hex>` = HMAC-SHA256 over
+  #      "<t>.<raw-body>", ±300s) against the site's own stored secret — a
+  #      StripeGateway-clone scheme, NOT the GitHub sha256= scheme. 401 on a bad
+  #      OR expired signature (no detail — don't help an attacker tune guesses).
+  #   3. On a valid delivery, enqueues the DEBOUNCED AutoDeployWorker for THIS
+  #      site (a burst coalesces to one rebuild; a publish mid-build mints one
+  #      trailing rebuild) and answers 202.
+  #
+  # Per-site (not per-dataset) on purpose (charter D45): (workspace,project,dataset)
+  # is NOT unique across the sites table, so a dataset→sites resolver would
+  # cross-trigger two boxes sharing default slugs; :site_id is the PK, unambiguous.
+  post "/v1/sites/webhooks/content-publish/:site_id" do
+    site_id = conn.path_params["site_id"]
+    site = Registry.get_site(site_id)
+
+    cond do
+      is_nil(site) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.reveal_site_content_secret(site) do
+          {:ok, nil} ->
+            # No content webhook configured — same shape as "not found" so a probe
+            # cannot distinguish unconfigured from nonexistent.
+            json(conn, 404, %{error: "not_found"})
+
+          :error ->
+            json(conn, 500, %{error: "secret_unreadable"})
+
+          {:ok, secret} when is_binary(secret) ->
+            raw = raw_request_body(conn)
+            sig = get_first_header(conn, "x-barkpark-signature")
+
+            case Sites.ContentPublishVerifier.verify(raw, sig, [secret]) do
+              :ok ->
+                # Debounced (charter D44): N publishes in the window = ONE rebuild.
+                _ = Sites.AutoDeployWorker.enqueue(site.id)
+                json(conn, 202, %{ok: true, trigger: "content-auto"})
+
+              {:error, _reason} ->
+                # A bad OR expired signature is the same 401 — never leak which.
+                json(conn, 401, %{error: "bad_signature"})
+            end
+        end
+    end
+  end
+
   # GET /v1/tls/ask?domain=... → 200 (registered) | 404 (not). NO AUTH on
   # purpose: this is the Caddy `on_demand_tls.ask` gate. Caddy calls this
   # BEFORE attempting a cert issuance for a hostname; a 200 says "we own this,
@@ -8082,6 +8140,11 @@ defmodule BarkparkCloud.Web.Router do
       branch: d.branch,
       preview_host: d.preview_host,
       preview_url: preview_url(d),
+      # site-spawner W5 (charter D49): deploy provenance — "manual" | "content-auto".
+      # The wish's "observable — content-triggered, not manual" bar reads off this;
+      # emitted from the SOLE base serializer so list/get/deploy-response/agent-claim
+      # all carry it.
+      trigger: d.trigger,
       # gh-5: the live build-console lines ride along so the site-detail deploy
       # row renders them and a refresh recovers mid-build console state.
       console: d.console || [],
