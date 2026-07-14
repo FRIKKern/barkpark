@@ -761,6 +761,21 @@ if config_env() == :prod do
 
   config :barkpark, Barkpark.SelfUpdate.Runner, self_update_runner_env
 
+  # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner). Fail-closed, and gated
+  # SEPARATELY from self-update: a box may accept instance self-updates without
+  # accepting site builds (npm runs third-party postinstall code) and vice
+  # versa. BARKPARK_SITE_DEPLOY_APPLY=1 is the only way to turn it on.
+  # BARKPARK_SITE_DEPLOY_CD overrides the working directory (default: the repo
+  # root, resolved from the BEAM's cwd — see the DeployRunner moduledoc).
+  site_deploy_runner_env =
+    [
+      enabled: System.get_env("BARKPARK_SITE_DEPLOY_APPLY") == "1",
+      cd: System.get_env("BARKPARK_SITE_DEPLOY_CD")
+    ]
+    |> Enum.reject(fn {_k, v} -> is_nil(v) or v == "" end)
+
+  config :barkpark, Barkpark.Sites.DeployRunner, site_deploy_runner_env
+
   # ## SSL Support
   #
   # To get SSL working, you will need to add the `https` key

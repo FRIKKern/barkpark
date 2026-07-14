@@ -1745,6 +1745,16 @@ defmodule BarkparkWeb.Router do
     post("/self-update", SelfUpdateController, :trigger)
     get("/self-update", SelfUpdateController, :status)
     post("/rollback", SelfUpdateController, :rollback)
+
+    # Site deploy — the control plane's remote-exec seam for a content-bound
+    # STATIC site (charter D22). Same admin door as self-update (that is the
+    # point: the CP already holds a per-instance admin token), but its OWN
+    # runner: per-SLUG single-flight and a per-REQUEST build_id, which
+    # SelfUpdate.Runner (global slot, compile-time command) cannot carry.
+    # POST body: {slug, build_id, content_rev, mode, env}; GET takes ?slug=.
+    # 503 unless BARKPARK_SITE_DEPLOY_APPLY=1. See Barkpark.Sites.DeployRunner.
+    post("/site-deploy", SiteDeployController, :trigger)
+    get("/site-deploy", SiteDeployController, :status)
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────
