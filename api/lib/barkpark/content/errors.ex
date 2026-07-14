@@ -88,6 +88,7 @@ defmodule Barkpark.Content.Errors do
   # THIS module builds; the emitting controllers own their own messages), so they
   # are kept separate from @hints rather than diluting it.
   @public_inline_codes MapSet.new([
+                         "invalid_enrollment",
                          # Papers ingest / block-ops / proposals — bulldocs_ingest_controller.ex
                          "invalid_paper",
                          "invalid_text",

@@ -16,9 +16,10 @@ import (
 var ErrRevoked = errors.New("chat host credential revoked")
 
 type Client struct {
-	BaseURL    string
-	Credential string
-	HTTPClient *http.Client
+	BaseURL               string
+	Credential            string
+	HTTPClient            *http.Client
+	AllowInsecureLoopback bool
 }
 
 type HostInfo struct {
@@ -83,6 +84,9 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 	if err != nil {
 		return fmt.Errorf("parse server URL: %w", err)
 	}
+	if err := validateServerURL(base, c.AllowInsecureLoopback); err != nil {
+		return err
+	}
 	base.Path = strings.TrimRight(base.Path, "/") + path
 
 	var body io.Reader
@@ -117,6 +121,9 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 		return err
 	}
 	defer resp.Body.Close()
+	if err := validateServerURL(resp.Request.URL, c.AllowInsecureLoopback); err != nil {
+		return fmt.Errorf("unsafe redirect: %w", err)
+	}
 	if resp.StatusCode == http.StatusUnauthorized {
 		return ErrRevoked
 	}
@@ -129,4 +136,17 @@ func (c *Client) do(ctx context.Context, method, path string, authenticate bool,
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(response)
+}
+
+func validateServerURL(value *url.URL, allowInsecureLoopback bool) error {
+	if value.Scheme == "https" && value.Hostname() != "" {
+		return nil
+	}
+	if value.Scheme == "http" && allowInsecureLoopback {
+		host := value.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil
+		}
+	}
+	return fmt.Errorf("chat host server URL must use https (http loopback requires explicit opt-in)")
 }

@@ -2,6 +2,7 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.ChatHosts
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @impl true
   def mount(_params, _session, socket) do
@@ -25,12 +26,15 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
 
   @impl true
   def handle_event("enroll", %{"host" => params}, socket) do
-    case ChatHosts.issue_enrollment(socket.assigns.current_workspace.id, params) do
-      {:ok, result} ->
-        {:noreply,
-         socket
-         |> assign(enrollment: result.enrollment_token)
-         |> assign(hosts: ChatHosts.list_hosts(socket.assigns.current_workspace.id))}
+    with {:ok, workspace} <- authorize(socket, :enroll),
+         {:ok, result} <- ChatHosts.issue_enrollment(workspace.id, params) do
+      {:noreply,
+       socket
+       |> assign(enrollment: result.enrollment_token)
+       |> assign(hosts: ChatHosts.list_hosts(workspace.id))}
+    else
+      {:error, :forbidden} ->
+        {:noreply, deny(socket)}
 
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Could not create enrollment")}
@@ -38,8 +42,40 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
   end
 
   def handle_event("revoke", %{"id" => id}, socket) do
-    _ = ChatHosts.revoke(socket.assigns.current_workspace.id, id)
-    {:noreply, assign(socket, hosts: ChatHosts.list_hosts(socket.assigns.current_workspace.id))}
+    case authorize(socket, :revoke) do
+      {:ok, workspace} ->
+        _ = ChatHosts.revoke(workspace.id, id)
+        {:noreply, assign(socket, hosts: ChatHosts.list_hosts(workspace.id))}
+
+      {:error, :forbidden} ->
+        {:noreply, deny(socket)}
+    end
+  end
+
+  defp authorize(socket, action) do
+    workspace = socket.assigns[:current_workspace]
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    authorized? =
+      is_map(workspace) and not is_nil(principal) and
+        case action do
+          :enroll -> TenancyAuth.membership_role(principal, workspace.id) == "owner"
+          :revoke -> TenancyAuth.workspace_admin?(principal, workspace.id)
+        end
+
+    if authorized? do
+      {:ok, workspace}
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  defp deny(socket) do
+    put_flash(
+      socket,
+      :error,
+      "Only the workspace owner can enroll a trusted machine; owners and admins may revoke one."
+    )
   end
 
   @impl true
@@ -48,7 +84,11 @@ defmodule BarkparkWeb.Studio.ChatHostsLive do
     <div class="mx-auto max-w-5xl space-y-6 p-6">
       <div>
         <h1 class="text-2xl font-semibold">Registered Chat hosts</h1>
-        <p class="text-sm opacity-70">Provider credentials remain on each enrolled machine.</p>
+        <p class="text-sm opacity-70">
+          Provider credentials remain on each enrolled machine. Enrollment is an explicit
+          trusted-machine ceremony: the local coding CLI can read anything its operating-system
+          account can read. Approved roots select working directories; they are not a read sandbox.
+        </p>
       </div>
 
       <form phx-submit="enroll" class="flex gap-2">

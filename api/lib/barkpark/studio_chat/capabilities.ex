@@ -160,7 +160,7 @@ defmodule Barkpark.StudioChat.Runtime.Capabilities do
       mcp_tools: true,
       agent_spawn_names: [],
       todo_write: false,
-      user_input: true
+      user_input: false
     }
   end
 

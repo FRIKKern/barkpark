@@ -138,6 +138,12 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: {:scoped, "/studio/connectors"},
       active: "Connectors"
     },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/chat-hosts",
+      disposition: :mount,
+      url: {:scoped, "/studio/chat-hosts"},
+      active: :none
+    },
     %{route: "/studio/org-admin", disposition: :mount, url: "/studio/org-admin", active: :none},
     %{
       route: "/studio/styleguide",
@@ -168,6 +174,16 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
     %{route: "/studio/tmux", disposition: :skip_env_gated, gated: :tmux},
     %{route: "/studio/chat", disposition: :skip_env_gated, gated: :chat},
     %{route: "/studio/chat/:session_id", disposition: :skip_env_gated, gated: :chat},
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/chat",
+      disposition: :skip_env_gated,
+      gated: :chat
+    },
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/chat/:session_id",
+      disposition: :skip_env_gated,
+      gated: :chat
+    },
 
     # ── representative plugin routes (mounted behind :plugin_routes tag) ──
     %{

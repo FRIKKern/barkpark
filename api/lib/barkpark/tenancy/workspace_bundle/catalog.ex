@@ -10,7 +10,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (26 today; the two
+    * **E1** — every table carrying a `workspace_id` column (29 today; the three
+      registered Chat host / execution tables are workspace-owned, the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
       column with no FK to `workspaces`, `roles` is one, both
       `search_surface_config` (Wave 5 Slice A, charter D45/D49) and `data_keys`
@@ -66,8 +67,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # dormant family from E3 → E1 (export keys `WHERE workspace_id=$ws`, delete
   # rides the FK cascade — the same clean path every other E1 table uses).
   @pinned_e1 ~w(
-    access_grants api_tokens audit_events audit_export_sinks data_keys documents
-    media_files mutation_events paper_events projects revisions roles
+    access_grants api_tokens audit_events audit_export_sinks chat_execution_events
+    chat_execution_leases data_keys documents media_files mutation_events paper_events
+    projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
     share_links sync_cursors sync_dead_letters sync_push_conflicts

@@ -117,6 +117,7 @@
                   "halted",
                   "idempotency_key_in_use",
                   "internal_error",
+                  "invalid_enrollment",
                   "invalid_filter",
                   "invalid_grant",
                   "invalid_op",

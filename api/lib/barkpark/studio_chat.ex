@@ -921,6 +921,70 @@ defmodule Barkpark.StudioChat do
 
   def rail_apply_background(rail, _ev), do: rail
 
+  @doc "Fold a Codex app-server collaboration item into the shared agent rail."
+  def rail_apply_codex_item(rail, item, lifecycle)
+      when is_map(rail) and is_map(item) and lifecycle in [:started, :completed] do
+    case item["type"] do
+      type when type in ["collabAgentToolCall", "collab_agent_tool_call"] ->
+        ids =
+          case item["receiverThreadIds"] || item["receiver_thread_ids"] do
+            ids when is_list(ids) -> Enum.filter(ids, &is_binary/1)
+            _ -> []
+          end
+
+        Enum.reduce(ids, rail, fn thread_id, acc ->
+          entry =
+            acc
+            |> rail_entry(thread_id)
+            |> Map.put("row", %{
+              "task_type" => item["tool"] || "codex_subagent",
+              "description" => item["prompt"] || "Codex subagent"
+            })
+            |> Map.put("origin", "codex")
+            |> Map.put("model", item["model"])
+            |> Map.put("status", codex_agent_status(item["status"], lifecycle))
+
+          Map.put(acc, thread_id, entry)
+        end)
+        |> cap_rail()
+
+      type when type in ["subAgentActivity", "sub_agent_activity"] ->
+        case item["agentThreadId"] || item["agent_thread_id"] do
+          thread_id when is_binary(thread_id) ->
+            entry =
+              rail
+              |> rail_entry(thread_id)
+              |> Map.put("row", %{
+                "task_type" => "codex_subagent",
+                "description" => item["agentPath"] || item["agent_path"] || "Codex subagent"
+              })
+              |> Map.put("origin", "codex")
+              |> Map.put("status", codex_activity_status(item["kind"], lifecycle))
+
+            rail |> Map.put(thread_id, entry) |> cap_rail()
+
+          _ ->
+            rail
+        end
+
+      _ ->
+        rail
+    end
+  end
+
+  def rail_apply_codex_item(rail, _item, _lifecycle), do: rail
+
+  defp codex_agent_status(status, :completed)
+       when status in ["completed", "failed", "cancelled", "interrupted"],
+       do: if(status == "completed", do: "completed", else: "interrupted")
+
+  defp codex_agent_status(_, :completed), do: "completed"
+  defp codex_agent_status(_, :started), do: "running"
+
+  defp codex_activity_status("subagentStop", _), do: "completed"
+  defp codex_activity_status(_, :completed), do: "completed"
+  defp codex_activity_status(_, _), do: "running"
+
   # A rail entry only earns the vanish→completed flip when a
   # `background_tasks_changed` snapshot is its provenance — workflow and
   # foreground entries never ride that frame, so their absence is not a signal.

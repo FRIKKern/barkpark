@@ -803,8 +803,8 @@ defmodule BarkparkWeb.Router do
       # on TmuxConsole.enabled? (dev-only PTY dep + config flag). Hidden in
       # prod/test where the flag is off and the backend isn't compiled.
       live("/tmux", TmuxLive)
-      # Claude chat — admin-gated here; ChatLive.mount also hard-gates on
-      # ClaudeChat.enabled? (host `claude` binary + config flag; refused on
+      # Provider-neutral agent chat — admin-gated here; ChatLive.mount also
+      # requires at least one enabled Claude Code or Codex runtime (refused on
       # public-demo hosts). Both routes share this live_session + module, so a
       # session switch is a `push_patch` with NO remount (charter D14):
       # `/chat` is the new-chat empty state; `/chat/:session_id` replays a
@@ -1160,6 +1160,8 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
       live("/chat-hosts", ChatHostsLive)
+      live("/chat", ChatLive)
+      live("/chat/:session_id", ChatLive)
 
       # Connectors catalog + the connect loop (connectors D49). It MUST be in
       # THIS session, not the flat `/studio/*` one: the flat live_session carries

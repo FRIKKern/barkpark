@@ -85,7 +85,7 @@ defmodule Barkpark.StudioChat.Runtime.CapabilitiesTest do
       assert c.images == true
       assert c.mcp_tools == true
       assert c.todo_write == false
-      assert c.user_input == true
+      assert c.user_input == false
     end
 
     test "agent_spawn_names/1 reads the (empty) codex set without special-casing" do

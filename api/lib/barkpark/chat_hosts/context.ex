@@ -71,7 +71,7 @@ defmodule Barkpark.ChatHosts do
       credential_hash: Security.hash_secret(credential),
       credential_version: 1,
       credential_expires_at: DateTime.add(now, @credential_ttl),
-      approved_roots: value(attrs, :approved_roots, host.approved_roots),
+      approved_roots: host.approved_roots,
       protocol_version: value(attrs, :protocol_version, host.protocol_version),
       capabilities: value(attrs, :capabilities, host.capabilities),
       last_seen_at: now
@@ -102,15 +102,37 @@ defmodule Barkpark.ChatHosts do
     credential = Security.mint_secret()
     now = DateTime.utc_now()
 
-    attrs = %{
-      credential_hash: Security.hash_secret(credential),
-      credential_version: host.credential_version + 1,
-      credential_expires_at: DateTime.add(now, @credential_ttl)
-    }
+    Repo.transaction(fn ->
+      current =
+        RegisteredHost
+        |> where([h], h.id == ^host.id)
+        |> lock("FOR UPDATE")
+        |> Repo.one()
 
-    case host |> RegisteredHost.rotate_changeset(attrs) |> Repo.update() do
-      {:ok, rotated} -> {:ok, %{host: public_host(rotated), credential: credential}}
-      error -> error
+      cond do
+        is_nil(current) or not is_nil(current.revoked_at) ->
+          Repo.rollback(:invalid_credential)
+
+        current.credential_hash != host.credential_hash or
+            current.credential_version != host.credential_version ->
+          Repo.rollback(:stale_credential)
+
+        true ->
+          attrs = %{
+            credential_hash: Security.hash_secret(credential),
+            credential_version: current.credential_version + 1,
+            credential_expires_at: DateTime.add(now, @credential_ttl)
+          }
+
+          case current |> RegisteredHost.rotate_changeset(attrs) |> Repo.update() do
+            {:ok, rotated} -> %{host: public_host(rotated), credential: credential}
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+      end
+    end)
+    |> case do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -263,15 +285,22 @@ defmodule Barkpark.ChatHosts do
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
+    |> case do
+      {:ok, {:accepted, execution_event, lease}} ->
+        project_event(execution_event, lease)
+        {:ok, :accepted}
+
+      other ->
+        other
+    end
   end
 
   defp reconcile_event(%ExecutionLease{last_cursor: current} = lease, cursor, key, event)
        when cursor == current + 1 do
-    with :ok <- persist_event(lease, cursor, key, event),
+    with {:ok, execution_event} <- persist_event(lease, cursor, key, event),
          :ok <- persist_cursor(lease, cursor, event) do
-      broadcast_event(lease, cursor, key, event)
       if status_for(event) == "completed", do: Transport.complete(lease.id)
-      :accepted
+      {:accepted, execution_event, lease}
     else
       :duplicate -> :duplicate
       {:error, reason} -> Repo.rollback(reason)
@@ -312,8 +341,8 @@ defmodule Barkpark.ChatHosts do
     }
 
     case %ExecutionEvent{} |> ExecutionEvent.changeset(attrs) |> Repo.insert() do
-      {:ok, _} ->
-        :ok
+      {:ok, execution_event} ->
+        {:ok, execution_event}
 
       {:error, changeset} ->
         case Repo.get_by(ExecutionEvent, lease_id: lease.id, cursor: cursor) do
@@ -339,11 +368,27 @@ defmodule Barkpark.ChatHosts do
   end
 
   defp status_for(%{"kind" => kind})
-       when kind in ["terminal", "completed", "turn_completed", "control_completed"],
+       when kind in [
+              "terminal",
+              "completed",
+              "turn_completed",
+              "control_completed",
+              "error",
+              "process_failed",
+              "protocol_error"
+            ],
        do: "completed"
 
   defp status_for(%{kind: kind})
-       when kind in [:terminal, :completed, :turn_completed, :control_completed],
+       when kind in [
+              :terminal,
+              :completed,
+              :turn_completed,
+              :control_completed,
+              :error,
+              :process_failed,
+              :protocol_error
+            ],
        do: "completed"
 
   defp status_for(_), do: "running"
@@ -394,42 +439,121 @@ defmodule Barkpark.ChatHosts do
     kind = value(event, :kind, "event")
 
     native =
-      case value(event, :delta) do
-        delta when is_binary(delta) -> Map.put(event, "params", %{"delta" => delta})
-        _ -> event
+      cond do
+        is_binary(value(event, :delta)) ->
+          Map.put(event, "params", %{"delta" => value(event, :delta)})
+
+        is_map(value(event, :item)) ->
+          Map.put(event, "params", %{"item" => value(event, :item)})
+
+        true ->
+          event
       end
 
     normalized = %Barkpark.StudioChat.Runtime.Event{
       provider: lease.provider,
       session_id: lease.session_id,
+      provider_session_id: value(event, :provider_session_id),
+      turn_id: value(event, :turn_id),
+      item_id: value(event, :item_id),
       sequence: cursor,
       idempotency_key: key,
       durability: :durable,
-      kind: normalize_host_kind(kind),
+      kind: normalize_host_kind(kind, event),
       approval_id: value(event, :approval_id),
-      terminal_state: value(event, :terminal_state),
+      terminal_state: normalize_terminal_state(value(event, :terminal_state)),
       error: value(event, :error),
       native: native
     }
 
-    case Barkpark.StudioChat.Recorder.whereis(lease.session_id) do
-      recorder when is_pid(recorder) ->
-        send(recorder, {:studio_chat_runtime_event, normalized})
-
-      _ ->
-        :ok
-    end
+    normalized
   catch
-    :exit, _ -> :ok
+    :exit, _ -> nil
   end
 
-  defp normalize_host_kind("session_started"), do: :session_started
-  defp normalize_host_kind("turn_started"), do: :turn_started
-  defp normalize_host_kind("text_delta"), do: :text_delta
-  defp normalize_host_kind("approval_requested"), do: :approval_requested
-  defp normalize_host_kind("turn_completed"), do: :turn_completed
-  defp normalize_host_kind("error"), do: :error
-  defp normalize_host_kind(kind), do: kind
+  @doc false
+  def replay_unprojected(session_id) when is_binary(session_id) do
+    ExecutionEvent
+    |> join(:inner, [e], l in ExecutionLease, on: l.id == e.lease_id)
+    |> where([e, l], l.session_id == ^session_id and is_nil(e.projected_at))
+    |> order_by([e, l], asc: e.inserted_at, asc: e.cursor)
+    |> select([e, l], {e, l})
+    |> Repo.all()
+    |> Enum.map(fn {event, lease} ->
+      normalized = broadcast_event(lease, event.cursor, event.idempotency_key, event.payload)
+      {event.id, normalized}
+    end)
+  end
+
+  @doc false
+  def mark_projected(event_id) when is_binary(event_id) do
+    ExecutionEvent
+    |> where([e], e.id == ^event_id and is_nil(e.projected_at))
+    |> Repo.update_all(set: [projected_at: DateTime.utc_now()])
+
+    :ok
+  end
+
+  defp project_event(%ExecutionEvent{projected_at: projected_at}, _lease)
+       when not is_nil(projected_at),
+       do: :ok
+
+  defp project_event(%ExecutionEvent{} = execution_event, %ExecutionLease{} = lease) do
+    normalized =
+      broadcast_event(
+        lease,
+        execution_event.cursor,
+        execution_event.idempotency_key,
+        execution_event.payload
+      )
+
+    case {normalized, Barkpark.StudioChat.Recorder.whereis(lease.session_id)} do
+      {%Barkpark.StudioChat.Runtime.Event{} = event, recorder} when is_pid(recorder) ->
+        case GenServer.call(recorder, {:project_runtime_event, event}) do
+          :ok ->
+            execution_event
+            |> Ecto.Changeset.change(projected_at: DateTime.utc_now())
+            |> Repo.update()
+            |> case do
+              {:ok, _} -> :ok
+              _ -> :retry
+            end
+
+          _ ->
+            :retry
+        end
+
+      _ ->
+        :retry
+    end
+  catch
+    :exit, _ -> :retry
+  end
+
+  defp normalize_host_kind("session_started", _event), do: :session_started
+  defp normalize_host_kind("turn_started", _event), do: :turn_started
+  defp normalize_host_kind("text_delta", _event), do: :text_delta
+  defp normalize_host_kind("approval_requested", _event), do: :approval_requested
+  defp normalize_host_kind("turn_completed", _event), do: :turn_completed
+  defp normalize_host_kind("control_completed", _event), do: :control_completed
+  defp normalize_host_kind("item_started", _event), do: :item_started
+  defp normalize_host_kind("item_completed", _event), do: :item_completed
+  defp normalize_host_kind("error", _event), do: :error
+
+  defp normalize_host_kind("terminal", event) do
+    case value(event, :terminal_state) do
+      state when state in ["completed", "interrupted", "cancelled"] -> :turn_completed
+      _ -> :error
+    end
+  end
+
+  defp normalize_host_kind(kind, _event), do: kind
+
+  defp normalize_terminal_state("completed"), do: :completed
+  defp normalize_terminal_state("interrupted"), do: :interrupted
+  defp normalize_terminal_state("cancelled"), do: :interrupted
+  defp normalize_terminal_state("failed"), do: :failed
+  defp normalize_terminal_state(state), do: state
 
   defp value(map, key, default \\ nil),
     do: Map.get(map, key, Map.get(map, Atom.to_string(key), default))

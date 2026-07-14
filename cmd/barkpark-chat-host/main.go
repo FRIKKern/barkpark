@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -26,17 +27,18 @@ func main() {
 		server := flags.String("url", "", "Barkpark server URL")
 		token := flags.String("token", "", "one-time enrollment token")
 		root := flags.String("root", "", "absolute approved root")
+		allowHTTP := flags.Bool("allow-http-loopback", false, "allow plaintext HTTP only for a loopback development server")
 		statePath := flags.String("state", stateDefault, "credential state path")
 		_ = flags.Parse(os.Args[2:])
 		if *server == "" || *token == "" || *root == "" {
 			fatal("enroll requires --url, --token, and --root")
 		}
-		client := &chathost.Client{BaseURL: *server}
+		client := &chathost.Client{BaseURL: *server, AllowInsecureLoopback: *allowHTTP}
 		result, err := client.Enroll(context.Background(), *token, []string{*root}, capabilities())
 		if err != nil {
 			fatal(err.Error())
 		}
-		if err := chathost.SaveState(*statePath, chathost.State{ServerURL: *server, Credential: result.Credential, Host: result.Host}); err != nil {
+		if err := chathost.SaveState(*statePath, chathost.State{ServerURL: *server, Credential: result.Credential, Host: result.Host, AllowInsecureLoopback: *allowHTTP}); err != nil {
 			fatal(err.Error())
 		}
 		fmt.Printf("enrolled host %s (%s)\n", result.Host.Name, result.Host.ID)
@@ -52,7 +54,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		runner := &chathost.Runner{
-			Client:       &chathost.Client{BaseURL: state.ServerURL, Credential: state.Credential},
+			Client:       &chathost.Client{BaseURL: state.ServerURL, Credential: state.Credential, AllowInsecureLoopback: state.AllowInsecureLoopback},
 			Handler:      chathost.LocalHandler{ApprovedRoots: state.Host.ApprovedRoots},
 			Capabilities: capabilities(),
 		}
@@ -69,15 +71,36 @@ func capabilities() map[string]any {
 	providers := map[string]any{}
 	for _, name := range []string{"claude", "codex"} {
 		path, err := exec.LookPath(name)
-		metadata := map[string]any{"installed": err == nil, "auth_ready": "unknown"}
+		metadata := map[string]any{"installed": err == nil, "auth_ready": false}
 		if err == nil {
 			if output, versionErr := exec.Command(path, "--version").Output(); versionErr == nil {
 				metadata["version"] = strings.TrimSpace(string(output))
 			}
+			var authOutput []byte
+			var authErr error
+			if name == "claude" {
+				authOutput, authErr = exec.Command(path, "auth", "status", "--json").CombinedOutput()
+			} else {
+				authOutput, authErr = exec.Command(path, "login", "status").CombinedOutput()
+			}
+			metadata["auth_ready"] = authReady(name, authOutput, authErr)
 		}
 		providers[name] = metadata
 	}
 	return map[string]any{"protocol_version": 1, "providers": providers}
+}
+
+func authReady(provider string, output []byte, err error) bool {
+	if err != nil {
+		return false
+	}
+	if provider == "claude" {
+		var status struct {
+			LoggedIn bool `json:"loggedIn"`
+		}
+		return json.Unmarshal(output, &status) == nil && status.LoggedIn
+	}
+	return strings.Contains(strings.ToLower(string(output)), "logged in")
 }
 
 func userHome() string {

@@ -15,6 +15,7 @@ defmodule Barkpark.ChatHosts.ExecutionEvent do
     field :idempotency_key, :string
     field :kind, :string
     field :payload, :map, default: %{}
+    field :projected_at, :utc_datetime_usec
     timestamps(type: :utc_datetime_usec, updated_at: false)
   end
 
@@ -27,7 +28,8 @@ defmodule Barkpark.ChatHosts.ExecutionEvent do
       :cursor,
       :idempotency_key,
       :kind,
-      :payload
+      :payload,
+      :projected_at
     ])
     |> validate_required([
       :lease_id,

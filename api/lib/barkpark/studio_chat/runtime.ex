@@ -159,6 +159,8 @@ defmodule Barkpark.StudioChat.Runtime do
   def worker_id(provider, session_id),
     do: optional_call(adapter(provider), :worker_id, [session_id], nil)
 
+  def task_hands(_provider, %RemoteRef{}), do: :not_attempted
+
   def task_hands(provider, runtime_ref),
     do: optional_call(adapter(provider), :task_hands, [runtime_ref], :not_attempted)
 
@@ -192,25 +194,18 @@ defmodule Barkpark.StudioChat.Runtime do
   def send_turn(provider, runtime_ref, content),
     do: adapter(provider).send_turn(runtime_ref, content)
 
-  def steer(_provider, %RemoteRef{} = runtime_ref, command),
-    do: dispatch_remote(runtime_ref, :steer, command)
+  def steer(_provider, %RemoteRef{}, _command),
+    do: {:error, {:unsupported_registered_host_operation, :steer}}
 
   def steer(provider, runtime_ref, command), do: adapter(provider).steer(runtime_ref, command)
 
-  def interrupt(_provider, %RemoteRef{} = runtime_ref) do
-    case dispatch_remote(runtime_ref, :interrupt, %{}) do
-      :ok -> {:ok, Ecto.UUID.generate()}
-      error -> error
-    end
-  end
+  def interrupt(_provider, %RemoteRef{} = runtime_ref),
+    do: dispatch_remote(runtime_ref, :interrupt, %{})
 
   def interrupt(provider, runtime_ref), do: adapter(provider).interrupt(runtime_ref)
 
-  def answer_approval(_provider, %RemoteRef{} = runtime_ref, approval_id, decision),
-    do:
-      dispatch_remote(runtime_ref, :answer_approval, %{decision: decision},
-        approval_id: approval_id
-      )
+  def answer_approval(_provider, %RemoteRef{}, _approval_id, _decision),
+    do: {:error, {:unsupported_registered_host_operation, :answer_approval}}
 
   def answer_approval(provider, runtime_ref, approval_id, decision),
     do: adapter(provider).answer_approval(runtime_ref, approval_id, decision)
@@ -254,8 +249,13 @@ defmodule Barkpark.StudioChat.Runtime do
     }
 
     case ref.host_directory.resolve(ref.workspace_id, ref.execution_host_id) do
-      {:ok, host} -> {:ok, %{ref | cwd: registered_host_cwd(host, ref.cwd)}}
-      error -> error
+      {:ok, host} ->
+        with :ok <- registered_provider_ready(host, ref.provider) do
+          {:ok, %{ref | cwd: registered_host_cwd(host, ref.cwd)}}
+        end
+
+      error ->
+        error
     end
   end
 
@@ -344,9 +344,17 @@ defmodule Barkpark.StudioChat.Runtime do
     ]
 
     case dispatch("registered_host", ref.provider, command, opts) do
-      {:ok, result} when operation in [:start, :resume] -> {:ok, result}
-      {:ok, _result} -> :ok
-      other -> other
+      {:ok, result} when operation in [:start, :resume] ->
+        {:ok, result}
+
+      {:ok, _result} when operation in [:steer, :interrupt] ->
+        {:ok, command.idempotency_key}
+
+      {:ok, _result} ->
+        :ok
+
+      other ->
+        other
     end
   end
 
@@ -356,6 +364,21 @@ defmodule Barkpark.StudioChat.Runtime do
       _ -> fallback
     end
   end
+
+  defp registered_provider_ready(host, provider) do
+    capabilities = Map.get(host, :capabilities) || Map.get(host, "capabilities") || %{}
+    providers = Map.get(capabilities, "providers") || Map.get(capabilities, :providers) || %{}
+
+    readiness =
+      Map.get(providers, provider) || Map.get(providers, String.to_atom(provider)) || %{}
+
+    if value(readiness, :installed) == true and value(readiness, :auth_ready) == true,
+      do: :ok,
+      else: {:error, {:provider_not_ready, provider}}
+  end
+
+  defp value(map, key) when is_map(map),
+    do: Map.get(map, key, Map.get(map, Atom.to_string(key)))
 
   defp configured_adapter(provider, default) do
     :barkpark

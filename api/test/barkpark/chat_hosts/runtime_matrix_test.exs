@@ -19,12 +19,39 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
 
   defmodule Directory do
     @behaviour Runtime.HostDirectory
-    def resolve("ws-1", "host-1"), do: {:ok, %{id: "host-1", workspace_id: "ws-1"}}
+    def resolve("ws-1", "host-1") do
+      {:ok,
+       %{
+         id: "host-1",
+         workspace_id: "ws-1",
+         capabilities: %{
+           "providers" => %{
+             "claude" => %{"installed" => true, "auth_ready" => true},
+             "codex" => %{"installed" => true, "auth_ready" => true}
+           }
+         }
+       }}
+    end
   end
 
   defmodule Dispatch do
     @behaviour Runtime.RemoteDispatch
     def dispatch(host, command, _opts), do: {:ok, {:registered_host, host.id, command.provider}}
+  end
+
+  defmodule NotReadyDirectory do
+    @behaviour Runtime.HostDirectory
+
+    def resolve("ws-1", "host-1") do
+      {:ok,
+       %{
+         id: "host-1",
+         workspace_id: "ws-1",
+         capabilities: %{
+           "providers" => %{"codex" => %{"installed" => true, "auth_ready" => false}}
+         }
+       }}
+    end
   end
 
   defmodule LifecycleDispatch do
@@ -93,11 +120,29 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
       assert is_nil(ref.lease_id)
       assert Runtime.alive?(ref)
       assert :ok = Runtime.send_turn(provider, ref, "hello")
-      assert :ok = Runtime.steer(provider, ref, %{mode: "plan"})
+
+      assert {:error, {:unsupported_registered_host_operation, :steer}} =
+               Runtime.steer(provider, ref, %{mode: "plan"})
+
       assert {:ok, request_id} = Runtime.interrupt(provider, ref)
       assert is_binary(request_id)
-      assert :ok = Runtime.answer_approval(provider, ref, "approval-1", :allow)
+
+      assert {:error, {:unsupported_registered_host_operation, :answer_approval}} =
+               Runtime.answer_approval(provider, ref, "approval-1", :allow)
+
       assert :ok = Runtime.close(provider, ref)
     end
+  end
+
+  test "registered host fails closed when the selected provider is not authenticated" do
+    assert {:error, {:provider_not_ready, "codex"}} =
+             Runtime.open("codex", %{
+               session_id: "session-codex",
+               execution_target: "registered_host",
+               execution_host_id: "host-1",
+               workspace_id: "ws-1",
+               host_directory: NotReadyDirectory,
+               remote_dispatch: LifecycleDispatch
+             })
   end
 end

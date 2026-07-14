@@ -52,6 +52,22 @@ defmodule Barkpark.StudioChat.Runtime.Codex do
   @impl true
   def capabilities, do: Capabilities.codex()
 
+  def enabled? do
+    binary = configured_binary()
+
+    with {:ok, path} <- Readiness.resolve_binary(binary),
+         {:ok, _version} <- Readiness.verify_version(path, 2_000) do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  def worker_id(session_id) when is_binary(session_id), do: "codex-chat-#{session_id}"
+  def worker_id(_), do: nil
+
+  def task_hands(runtime), do: Session.task_hands(runtime)
+
   defp open(opts) do
     binary = Map.get(opts, :binary) || configured_binary()
     timeout = Map.get(opts, :timeout_ms, 15_000)

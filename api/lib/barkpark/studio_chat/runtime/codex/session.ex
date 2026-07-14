@@ -48,6 +48,12 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     :exit, reason -> {:error, {:app_server_exit, reason}}
   end
 
+  def task_hands(runtime) do
+    GenServer.call(unwrap(runtime), :task_hands)
+  catch
+    :exit, _ -> :unknown
+  end
+
   def close(runtime) do
     GenServer.stop(unwrap(runtime), :normal)
     :ok
@@ -64,6 +70,9 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   @impl true
   def init(opts) do
     Process.flag(:trap_exit, true)
+
+    task_hands = setup_task_hands(opts)
+    opts = Map.put(opts, :task_hands_env, task_hands.env)
 
     with {:ok, port} <- open_port(opts) do
       sink = Map.get(opts, :sink)
@@ -83,13 +92,22 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
          session_id: Map.get(opts, :session_id),
          thread_id: Map.get(opts, :provider_session_id),
          turn_id: nil,
-         sequence: 0
+         sequence: 0,
+         task_hands: task_hands.status,
+         task_token: task_hands.token,
+         thread_config: task_hands.config
        }}
+    else
+      error ->
+        cleanup_task_token(task_hands.token)
+        error
     end
   end
 
   @impl true
   def handle_call({:open, opts}, from, state) do
+    opts = Map.put(opts, :thread_config, state.thread_config)
+
     params = %{
       "clientInfo" => %{
         "name" => "barkpark",
@@ -101,6 +119,8 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
     {:noreply, send_request(state, "initialize", params, {:initialize, from, opts})}
   end
+
+  def handle_call(:task_hands, _from, state), do: {:reply, state.task_hands, state}
 
   def handle_call({:request, _operation, _params}, _from, %{failure: reason} = state)
       when not is_nil(reason) do
@@ -184,8 +204,9 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
-  def terminate(_reason, %{port: port}) do
+  def terminate(_reason, %{port: port} = state) do
     if Port.info(port), do: Port.close(port)
+    cleanup_task_token(state[:task_token])
     :ok
   rescue
     _ -> :ok
@@ -331,7 +352,13 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp thread_request(opts) do
     case Map.get(opts, :provider_session_id) do
       id when is_binary(id) and id != "" ->
-        {"thread/resume", %{"threadId" => id, "cwd" => Map.get(opts, :cwd)}}
+        {"thread/resume",
+         %{
+           "threadId" => id,
+           "cwd" => Map.get(opts, :cwd),
+           "developerInstructions" => Map.get(opts, :developer_instructions),
+           "config" => Map.get(opts, :thread_config)
+         }}
 
       _ ->
         {"thread/start",
@@ -340,7 +367,8 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
            "model" => Map.get(opts, :model),
            "approvalPolicy" => Map.get(opts, :approval_policy, "on-request"),
            "sandbox" => Map.get(opts, :sandbox, "workspace-write"),
-           "developerInstructions" => Map.get(opts, :developer_instructions)
+           "developerInstructions" => Map.get(opts, :developer_instructions),
+           "config" => Map.get(opts, :thread_config)
          }}
     end
   end
@@ -419,6 +447,12 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
         ]
 
         port_opts =
+          case Map.get(opts, :task_hands_env) do
+            env when is_list(env) and env != [] -> [{:env, env} | port_opts]
+            _ -> port_opts
+          end
+
+        port_opts =
           case Map.get(opts, :cwd) do
             cwd when is_binary(cwd) -> [{:cd, String.to_charlist(cwd)} | port_opts]
             _ -> port_opts
@@ -439,4 +473,52 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp executable_path(path) when is_binary(path) do
     if Path.type(path) == :absolute and File.exists?(path), do: path
   end
+
+  defp setup_task_hands(opts) do
+    minter = Map.get(opts, :minter)
+    session_id = Map.get(opts, :session_id)
+    workspace_id = Map.get(opts, :workspace_id)
+
+    if is_nil(minter) or not is_binary(session_id) do
+      %{status: :not_attempted, token: nil, config: nil, env: []}
+    else
+      case Barkpark.Auth.create_claude_session_token(minter, session_id,
+             workspace_id: workspace_id
+           ) do
+        {:ok, {raw, token}} ->
+          worker_id = "codex-chat-#{session_id}"
+          api_url = BarkparkWeb.Studio.ClaudeChat.mcp_api_url()
+
+          %{
+            status: :minted,
+            token: token,
+            env: [
+              {~c"BARKPARK_API_TOKEN", String.to_charlist(raw)},
+              {~c"BARKPARK_API_URL", String.to_charlist(api_url)},
+              {~c"BARKPARK_WORKER_ID", String.to_charlist(worker_id)}
+            ],
+            config: %{
+              "mcp_servers" => %{
+                "barkpark" => %{
+                  "command" => "bp",
+                  "args" => ["mcp", "serve", "--tools", "all"],
+                  "env_vars" => [
+                    "BARKPARK_API_TOKEN",
+                    "BARKPARK_API_URL",
+                    "BARKPARK_WORKER_ID"
+                  ],
+                  "required" => true
+                }
+              }
+            }
+          }
+
+        {:error, _reason} ->
+          %{status: :mint_refused, token: nil, config: nil, env: []}
+      end
+    end
+  end
+
+  defp cleanup_task_token(nil), do: :ok
+  defp cleanup_task_token(token), do: Barkpark.Auth.revoke_token(token)
 end

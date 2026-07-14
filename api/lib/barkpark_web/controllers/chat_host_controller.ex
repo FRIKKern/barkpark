@@ -2,6 +2,7 @@ defmodule BarkparkWeb.ChatHostController do
   use BarkparkWeb, :controller
 
   alias Barkpark.ChatHosts
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   def index(conn, _params) do
     json(conn, %{hosts: ChatHosts.list_hosts(conn.assigns.current_workspace.id)})
@@ -10,9 +11,15 @@ defmodule BarkparkWeb.ChatHostController do
   def create_enrollment(conn, params) do
     workspace_id = conn.assigns.current_workspace.id
 
-    case ChatHosts.issue_enrollment(workspace_id, params) do
-      {:ok, result} -> conn |> put_status(:created) |> json(result)
-      {:error, changeset} -> unprocessable(conn, changeset)
+    if TenancyAuth.membership_role(conn.assigns.api_token, workspace_id) == "owner" do
+      case ChatHosts.issue_enrollment(workspace_id, params) do
+        {:ok, result} -> conn |> put_status(:created) |> json(result)
+        {:error, changeset} -> unprocessable(conn, changeset)
+      end
+    else
+      conn
+      |> put_status(:forbidden)
+      |> json(%{error: %{code: "forbidden", message: "workspace owner required"}})
     end
   end
 

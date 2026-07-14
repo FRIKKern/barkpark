@@ -1,7 +1,8 @@
 defmodule BarkparkWeb.Studio.ChatLive do
   @moduledoc """
-  Studio **Claude chat** at `/studio/chat` — admin-only agent chat backed by
-  the host's Claude Code CLI. Sessions are a PLACE: every conversation is
+  Studio agent chat at `/studio/chat` (or its workspace-scoped route) — an
+  admin-only control plane backed by the selected Claude Code or Codex runtime.
+  Sessions are a PLACE: every conversation is
   persisted (`Barkpark.StudioChat`), listed in the sidebar, addressable at
   `/studio/chat/:session_id`, and resumable via the CLI's `--resume`.
 
@@ -137,7 +138,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # CLI's memory on the next send via `--resume`.
   @impl true
   def mount(params, _session, socket) do
-    if Runtime.enabled?("claude") do
+    enabled_provider = Enum.find(StudioChat.Session.providers(), &Runtime.enabled?/1)
+
+    if enabled_provider do
       {:ok,
        socket
        |> assign(
@@ -153,6 +156,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # affordance can land the admin back in the SAME scope instead of the
          # `/studio` session funnel. nil when arrived at flat/directly.
          return_to: ReturnTo.sanitize(params["return_to"]),
+         chat_base_path: chat_base_path(params),
          session: nil,
          store_session_id: nil,
          session_id: nil,
@@ -185,8 +189,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
          rail: %{},
          rail_sig: [],
          rail_expanded: %{},
-         mode: "plan",
-         provider: "claude",
+         mode: List.first(Runtime.capabilities(enabled_provider).modes) || "default",
+         provider: enabled_provider,
          execution_target: "managed",
          execution_host_id: nil,
          execution_hosts: execution_hosts(socket),
@@ -295,7 +299,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # the truthful scope over the session-resolving redirect.
       {:ok,
        socket
-       |> put_flash(:error, "Claude chat is not enabled on this instance.")
+       |> put_flash(:error, "No Studio Chat provider is enabled on this instance.")
        |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end
@@ -364,6 +368,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case socket.assigns[:current_workspace] do
       %{id: workspace_id} -> ChatHosts.list_hosts(workspace_id)
       _ -> []
+    end
+  end
+
+  defp chat_base_path(params) do
+    case {params["workspace_slug"], params["project_slug"]} do
+      {workspace, project} when is_binary(workspace) and is_binary(project) ->
+        "/w/#{workspace}/p/#{project}/studio/chat"
+
+      _ ->
+        "/studio/chat"
     end
   end
 
@@ -1202,6 +1216,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
      socket
      |> assign(status: :ready, streaming: nil, interrupt_requested: false)
      |> refresh_sessions()}
+  end
+
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, native: native}},
+        socket
+      )
+      when kind in [:item_started, :item_completed] do
+    lifecycle = if kind == :item_started, do: :started, else: :completed
+    item = get_in(native, ["params", "item"]) || %{}
+
+    {:noreply,
+     fold_rail(
+       socket,
+       StudioChat.rail_apply_codex_item(socket.assigns.rail, item, lifecycle)
+     )}
   end
 
   def handle_info({:studio_chat_runtime_event, %Runtime.Event{}}, socket),
@@ -2383,7 +2412,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <.icon name="message-circle" size={15} /> chats
           </span>
           <.link
-            patch={ReturnTo.with_return_to("/studio/chat", @return_to)}
+            patch={ReturnTo.with_return_to(@chat_base_path, @return_to)}
             class="btn btn-primary text-xs"
             style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
           >
@@ -2419,7 +2448,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
           <.link
             :for={e <- strip}
-            patch={ReturnTo.with_return_to("/studio/chat/#{e.session.id}", @return_to)}
+            patch={ReturnTo.with_return_to("#{@chat_base_path}/#{e.session.id}", @return_to)}
             class="bp-chat-strip-row"
             data-test-id={"chat-strip-#{e.session.id}"}
           >
@@ -2506,7 +2535,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   />
                 </form>
               <% else %>
-                <.link patch={ReturnTo.with_return_to("/studio/chat/#{s.id}", @return_to)} class="bp-chat-session-link">
+                <.link patch={ReturnTo.with_return_to("#{@chat_base_path}/#{s.id}", @return_to)} class="bp-chat-session-link">
                   <% act = @activity[s.id] %>
                   <% {pill_class, pill_text} = session_pill(s, act) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
@@ -3641,7 +3670,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           {:ok, _} ->
             socket
             |> assign(store_session_id: id, session_id: id, status: :working)
-            |> push_patch(to: chat_patch_to("/studio/chat/#{id}", socket))
+            |> push_patch(to: chat_patch_to("#{socket.assigns.chat_base_path}/#{id}", socket))
             |> spawn_session(id, false)
 
           {:error, reason} ->
@@ -4167,7 +4196,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
 
     if socket.assigns.store_session_id == id do
-      push_patch(socket, to: chat_patch_to("/studio/chat", socket))
+      push_patch(socket, to: chat_patch_to(socket.assigns.chat_base_path, socket))
     else
       socket
     end

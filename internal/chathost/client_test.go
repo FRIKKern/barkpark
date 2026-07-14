@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -38,7 +39,7 @@ func TestClientAuthenticatedLifecycle(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &Client{BaseURL: server.URL, HTTPClient: server.Client()}
+	client := &Client{BaseURL: server.URL, HTTPClient: server.Client(), AllowInsecureLoopback: true}
 	result, err := client.Enroll(context.Background(), "one-time", []string{"/tmp"}, map[string]any{"providers": map[string]any{}})
 	if err != nil {
 		t.Fatal(err)
@@ -65,9 +66,16 @@ func TestClientTreatsUnauthorizedAsRevocation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &Client{BaseURL: server.URL, Credential: "revoked", HTTPClient: server.Client()}
+	client := &Client{BaseURL: server.URL, Credential: "revoked", HTTPClient: server.Client(), AllowInsecureLoopback: true}
 	if err := client.Heartbeat(context.Background(), nil); !errors.Is(err, ErrRevoked) {
 		t.Fatalf("got %v want ErrRevoked", err)
+	}
+}
+
+func TestClientRejectsPlaintextRemoteServer(t *testing.T) {
+	client := &Client{BaseURL: "http://example.test", Credential: "secret"}
+	if err := client.Heartbeat(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "must use https") {
+		t.Fatalf("expected TLS validation error, got %v", err)
 	}
 }
 
@@ -151,7 +159,7 @@ func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 
 	handler := &blockingHandler{started: make(chan struct{}), canceled: make(chan struct{})}
 	runner := Runner{
-		Client:            &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: server.Client()},
+		Client:            &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: server.Client(), AllowInsecureLoopback: true},
 		Handler:           handler,
 		PollInterval:      time.Millisecond,
 		HeartbeatInterval: 20 * time.Millisecond,
@@ -204,6 +212,45 @@ func TestRunnerInterruptCancelsActiveSession(t *testing.T) {
 	}
 }
 
+func TestRunnerPublishesInterruptedTerminalAfterCancel(t *testing.T) {
+	event := make(chan map[string]any, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Event map[string]any `json:"event"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		event <- payload.Event
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"accepted":true}`))
+	}))
+	defer server.Close()
+
+	handler := &blockingHandler{started: make(chan struct{}), canceled: make(chan struct{})}
+	runner := Runner{
+		Client:  &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: server.Client(), AllowInsecureLoopback: true},
+		Handler: handler,
+		active:  make(map[string]activeCommand),
+	}
+	runner.start(context.Background(), RemoteCommand{
+		LeaseID: "turn-lease",
+		Epoch:   1,
+		Command: map[string]any{"operation": "send_turn", "session_id": "session-1"},
+	})
+	<-handler.started
+	runner.cancelSession("session-1")
+
+	select {
+	case got := <-event:
+		if got["kind"] != "terminal" || got["terminal_state"] != "interrupted" {
+			t.Fatalf("unexpected terminal event: %#v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("interrupted terminal event was not published")
+	}
+}
+
 func TestRunnerResumesEventCursorAfterReconnect(t *testing.T) {
 	var commandSent atomic.Bool
 	cursorSeen := make(chan uint64, 1)
@@ -234,7 +281,7 @@ func TestRunnerResumesEventCursorAfterReconnect(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	runner := Runner{
-		Client:       &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: server.Client()},
+		Client:       &Client{BaseURL: server.URL, Credential: "host-secret", HTTPClient: server.Client(), AllowInsecureLoopback: true},
 		Handler:      emittingHandler{},
 		PollInterval: time.Millisecond,
 	}

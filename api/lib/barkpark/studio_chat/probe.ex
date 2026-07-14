@@ -35,10 +35,10 @@ defmodule Barkpark.StudioChat.Probe do
       (`no_task_hands` / `task_token_expired`, charter D2) are surfaced at spawn
       time by the mint, not here.
 
-    * **`:codex`** — a real binary check for a provider that is **designed, not
-      built** (charter D5: the provider-horizon trigger is CLOSED this wave).
-      On every real host `binary: false`; `authed?: false`. The honest
-      capability flags for codex live in `Barkpark.StudioChat.Runtime.Capabilities.codex/0`.
+    * **`:codex`** — resolves the pinned Codex CLI, verifies the app-server
+      version contract, and performs its account-read readiness handshake.
+      The honest capability flags live in
+      `Barkpark.StudioChat.Runtime.Capabilities.codex/0`.
 
   ## LATENCY — callers MUST run this ASYNC (this is not optional)
 

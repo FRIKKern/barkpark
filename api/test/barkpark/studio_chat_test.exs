@@ -1059,6 +1059,26 @@ defmodule Barkpark.StudioChatTest do
   end
 
   describe "agents rail: signature + pure folds (charter D47)" do
+    test "rail_apply_codex_item exposes native Codex subagent lifecycle" do
+      item = %{
+        "type" => "collabAgentToolCall",
+        "tool" => "spawn_agent",
+        "prompt" => "Review the provider boundary",
+        "model" => "gpt-5.6-sol",
+        "receiverThreadIds" => ["thread-child-1"],
+        "status" => "inProgress"
+      }
+
+      rail = StudioChat.rail_apply_codex_item(%{}, item, :started)
+      assert rail["thread-child-1"]["status"] == "running"
+      assert rail["thread-child-1"]["row"]["description"] == "Review the provider boundary"
+
+      completed =
+        StudioChat.rail_apply_codex_item(rail, %{item | "status" => "completed"}, :completed)
+
+      assert completed["thread-child-1"]["status"] == "completed"
+    end
+
     test "set_rail_snapshot round-trips the jsonb column and get_session carries it" do
       s = new_session()
       rail = %{"t" => %{"row" => %{"description" => "run"}, "status" => "running"}}

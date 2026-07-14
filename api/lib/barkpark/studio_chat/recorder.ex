@@ -134,6 +134,8 @@ defmodule Barkpark.StudioChat.Recorder do
            workspace_id: Map.get(opts, :workspace_id),
            cwd: Map.get(opts, :cwd),
            provider_session_id: Map.get(opts, :provider_session_id),
+           minter: Map.get(opts, :minter),
+           developer_instructions: codex_developer_instructions(provider, id),
            session_opts: session_opts
          }) do
       {:ok, session} ->
@@ -144,6 +146,7 @@ defmodule Barkpark.StudioChat.Recorder do
         # so a LATE-joining tab still gets the vocabulary (a one-shot broadcast
         # alone would miss it).
         Runtime.initialize(provider, session)
+        send(self(), :replay_registered_host_events)
         {:ok, new_state(id, session, provider)}
 
       {:error, {:already_started, session}} ->
@@ -153,12 +156,21 @@ defmodule Barkpark.StudioChat.Recorder do
         monitor_runtime(session)
         capture_provider_session_id(id, session)
         Runtime.initialize(provider, session)
+        send(self(), :replay_registered_host_events)
         {:ok, new_state(id, session, provider)}
 
       {:error, reason} ->
         {:stop, {:shutdown, reason}}
     end
   end
+
+  defp codex_developer_instructions("codex", session_id) do
+    """
+    You are Barkpark Studio Chat worker codex-chat-#{session_id}. Be Task obsessed: for non-trivial repository work, use the repository's AGENTS.md and bp task workflow as the operating contract. Claim the relevant task before implementation, pulse at phase boundaries, stamp acceptance criteria with concrete evidence, and close only after fresh verification. Use Codex native subagents for independent bounded work when that materially improves quality or throughput, and preserve their lifecycle evidence.
+    """
+  end
+
+  defp codex_developer_instructions(_, _), do: nil
 
   defp new_state(id, session, provider) do
     %{
@@ -222,6 +234,12 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
+  def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
+    state = capture_runtime_event(state, event)
+    broadcast(state, {:studio_chat_runtime_event, event})
+    {:reply, :ok, touch(state)}
+  end
+
   # Late-join query (charter D36a): a tab that opens AFTER the initialize ack
   # already fired still gets the held vocabulary. Returns the best available
   # list of `%{"name", "description", "argumentHint"}` maps (rich, then the
@@ -236,6 +254,24 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:studio_chat_runtime_event, %Event{} = event} = msg, state) do
     state = capture_runtime_event(state, event)
     broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  def handle_info(:replay_registered_host_events, state) do
+    state =
+      state.session_id
+      |> Barkpark.ChatHosts.replay_unprojected()
+      |> Enum.reduce(state, fn
+        {event_id, %Event{} = event}, acc ->
+          acc = capture_runtime_event(acc, event)
+          broadcast(acc, {:studio_chat_runtime_event, event})
+          Barkpark.ChatHosts.mark_projected(event_id)
+          acc
+
+        _, acc ->
+          acc
+      end)
+
     {:noreply, touch(state)}
   end
 
@@ -720,7 +756,17 @@ defmodule Barkpark.StudioChat.Recorder do
         StudioChat.update_status(state.session_id, "active")
         %{state | runtime_text: ""} |> publish_activity(%{state: :idle, line: nil})
 
+      :control_completed ->
+        state
+
+      kind when kind in [:item_started, :item_completed] ->
+        lifecycle = if kind == :item_started, do: :started, else: :completed
+        item = get_in(event.native, ["params", "item"]) || %{}
+        commit_rail(state, StudioChat.rail_apply_codex_item(state.rail_snapshot, item, lifecycle))
+
       kind when kind in [:error, :process_failed, :protocol_error] ->
+        persist_runtime_text(state)
+        StudioChat.update_status(state.session_id, "exited")
         publish_activity(state, %{state: :offline, line: nil})
 
       _ ->

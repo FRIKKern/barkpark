@@ -17,10 +17,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
   describe "Catalog live enumerations (charter D4)" do
-    test "E1 = the 26 workspace_id tables incl roles + data_keys + search_surface_config + the two zero-FK audit tables + the 5 sync_* tables" do
+    test "E1 = the 29 workspace_id tables including registered chat-host execution state" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 26
+      assert length(e1) == 29
       assert "roles" in e1
+      assert "registered_chat_hosts" in e1
+      assert "chat_execution_leases" in e1
+      assert "chat_execution_events" in e1
       # search_surface_config gained a workspace_id column in Wave 5 Slice A
       # (charter D45/D49) to close a LIVE cross-tenant config bleed — re-pinned
       # out of the scope-column allowlist into E1.

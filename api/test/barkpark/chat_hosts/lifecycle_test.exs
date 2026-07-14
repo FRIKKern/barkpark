@@ -17,7 +17,7 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
              ChatHosts.issue_enrollment(ws_a.id, %{
                name: "laptop",
                approved_roots: [root],
-               capabilities: %{"providers" => %{"claude" => %{"ready" => true}}}
+               capabilities: readiness_capabilities()
              })
 
     stored = Repo.get!(RegisteredHost, issued.host.id)
@@ -26,9 +26,11 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
 
     assert {:ok, enrolled} =
              ChatHosts.enroll(issued.enrollment_token, %{
-               approved_roots: [root],
-               capabilities: %{"providers" => %{"claude" => %{"ready" => true}}}
+               approved_roots: ["/host-cannot-expand-server-roots"],
+               capabilities: readiness_capabilities()
              })
+
+    assert enrolled.host.approved_roots == [root]
 
     assert {:error, :invalid_enrollment} = ChatHosts.enroll(issued.enrollment_token)
     assert {:ok, authenticated} = ChatHosts.authenticate(enrolled.credential)
@@ -71,11 +73,22 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
       epoch: epoch,
       cursor: 1,
       idempotency_key: "event-1",
-      event: %{"kind" => "started"}
+      event: %{
+        "kind" => "session_started",
+        "provider_session_id" => "provider-thread-1"
+      }
     }
 
-    assert {:ok, _} =
-             Registry.register(Barkpark.StudioChat.RecorderRegistry, session_id, :test_recorder)
+    parent = self()
+
+    recorder =
+      spawn_link(fn ->
+        Registry.register(Barkpark.StudioChat.RecorderRegistry, session_id, :test_recorder)
+        send(parent, :recorder_ready)
+        fake_recorder(parent)
+      end)
+
+    assert_receive :recorder_ready
 
     assert {:error, :stale_fence} =
              ChatHosts.accept_event(authenticated, %{event | epoch: epoch + 1})
@@ -88,10 +101,30 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
                       session_id: ^session_id,
                       sequence: 1,
                       idempotency_key: "event-1",
-                      kind: "started"
+                      provider_session_id: "provider-thread-1",
+                      kind: :session_started
                     }}
 
     assert {:ok, :duplicate} = ChatHosts.accept_event(authenticated, event)
+
+    Process.unlink(recorder)
+    Process.exit(recorder, :shutdown)
+
+    gap_event = %{
+      event
+      | cursor: 2,
+        idempotency_key: "event-2",
+        event: %{"kind" => "text_delta", "delta" => "survives recorder gap"}
+    }
+
+    assert {:ok, :accepted} = ChatHosts.accept_event(authenticated, gap_event)
+
+    assert [{event_id, %Barkpark.StudioChat.Runtime.Event{kind: :text_delta} = replayed}] =
+             ChatHosts.replay_unprojected(session_id)
+
+    assert get_in(replayed.native, ["params", "delta"]) == "survives recorder gap"
+    assert :ok = ChatHosts.mark_projected(event_id)
+    assert [] = ChatHosts.replay_unprojected(session_id)
 
     assert {:error, :cursor_conflict} =
              ChatHosts.accept_event(authenticated, %{event | idempotency_key: "conflict"})
@@ -99,7 +132,7 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
     assert {:error, :cursor_gap} =
              ChatHosts.accept_event(authenticated, %{
                event
-               | cursor: 3,
+               | cursor: 4,
                  idempotency_key: "event-3"
              })
 
@@ -130,5 +163,23 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
     |> Repo.update!()
 
     assert {:error, :expired_enrollment} = ChatHosts.enroll(issued.enrollment_token)
+  end
+
+  defp readiness_capabilities do
+    %{
+      "protocol_version" => 1,
+      "providers" => %{
+        "claude" => %{"installed" => true, "auth_ready" => true}
+      }
+    }
+  end
+
+  defp fake_recorder(parent) do
+    receive do
+      {:"$gen_call", from, {:project_runtime_event, event}} ->
+        send(parent, {:studio_chat_runtime_event, event})
+        GenServer.reply(from, :ok)
+        fake_recorder(parent)
+    end
   end
 end

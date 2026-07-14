@@ -100,15 +100,30 @@ defmodule Barkpark.ChatHosts.RegisteredHost do
     end)
   end
 
-  @secret_key ~r/(token|secret|credential|password|authorization|cookie|key)$/i
-  defp safe_capabilities?(map) when is_map(map) do
-    Enum.all?(map, fn {key, value} ->
-      not Regex.match?(@secret_key, to_string(key)) and safe_capabilities?(value)
+  defp safe_capabilities?(map) when map == %{}, do: true
+
+  defp safe_capabilities?(%{"protocol_version" => version, "providers" => providers} = map)
+       when is_integer(version) and version > 0 and map_size(map) == 2 and is_map(providers) do
+    Enum.all?(providers, fn
+      {provider, metadata} when provider in ["claude", "codex"] ->
+        safe_provider_metadata?(metadata)
+
+      _ ->
+        false
     end)
   end
 
-  defp safe_capabilities?(list) when is_list(list), do: Enum.all?(list, &safe_capabilities?/1)
+  defp safe_capabilities?(_), do: false
 
-  defp safe_capabilities?(value),
-    do: is_binary(value) or is_number(value) or is_boolean(value) or is_nil(value)
+  defp safe_provider_metadata?(%{"installed" => installed, "auth_ready" => auth_ready} = map)
+       when is_boolean(installed) and is_boolean(auth_ready) and map_size(map) in 2..3 do
+    Enum.all?(Map.keys(map), &(&1 in ["installed", "auth_ready", "version"])) and
+      case Map.get(map, "version") do
+        nil -> true
+        version when is_binary(version) -> byte_size(version) <= 200
+        _ -> false
+      end
+  end
+
+  defp safe_provider_metadata?(_), do: false
 end

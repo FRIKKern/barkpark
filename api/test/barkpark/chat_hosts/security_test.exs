@@ -32,6 +32,31 @@ defmodule Barkpark.ChatHosts.SecurityTest do
     assert "must contain only non-secret readiness metadata" in errors_on(changeset).capabilities
   end
 
+  test "registered hosts reject unknown nested readiness keys" do
+    attrs = %{
+      workspace_id: Ecto.UUID.generate(),
+      name: "laptop",
+      enrollment_hash: :crypto.strong_rand_bytes(32),
+      enrollment_expires_at: DateTime.add(DateTime.utc_now(), 60),
+      approved_roots: [System.tmp_dir!()],
+      capabilities: %{
+        "protocol_version" => 1,
+        "providers" => %{
+          "codex" => %{
+            "installed" => true,
+            "auth_ready" => true,
+            "auth" => "opaque-session-material"
+          }
+        }
+      }
+    }
+
+    changeset = RegisteredHost.enrollment_changeset(%RegisteredHost{}, attrs)
+
+    refute changeset.valid?
+    assert "must contain only non-secret readiness metadata" in errors_on(changeset).capabilities
+  end
+
   test "execution leases validate provider, epoch, and cursor fences" do
     changeset =
       ExecutionLease.changeset(%ExecutionLease{}, %{

@@ -108,9 +108,17 @@ func (r *Runner) start(parent context.Context, command RemoteCommand) {
 			return r.Client.Publish(ctx, command, cursor, key, event)
 		}
 		if err := r.Handler.Handle(ctx, command, emit); err != nil {
-			_ = emit(map[string]any{
+			terminalState := "error"
+			if errors.Is(err, context.Canceled) {
+				terminalState = "interrupted"
+			}
+			publishCtx, publishCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+			defer publishCancel()
+			cursor++
+			key := fmt.Sprintf("%s:%d:%d", command.LeaseID, command.Epoch, cursor)
+			_ = r.Client.Publish(publishCtx, command, cursor, key, map[string]any{
 				"kind":           "terminal",
-				"terminal_state": "error",
+				"terminal_state": terminalState,
 				"error":          map[string]any{"message": err.Error()},
 			})
 		}
