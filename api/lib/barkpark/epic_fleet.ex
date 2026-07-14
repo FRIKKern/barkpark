@@ -49,7 +49,7 @@ defmodule Barkpark.EpicFleet do
     snapshot = Map.get(attrs, :snapshot, %{})
     attrs = Map.merge(attrs, %{snapshot: snapshot, snapshot_digest: digest(snapshot)})
 
-    with :ok <- validate_replacement_scope(attrs) do
+    with :ok <- validate_replacement(attrs) do
       attrs
       |> Assignment.insert_changeset()
       |> Repo.insert()
@@ -180,22 +180,34 @@ defmodule Barkpark.EpicFleet do
       existing.replaces_assignment_id == Map.get(attrs, :replaces_assignment_id)
   end
 
-  defp validate_replacement_scope(%{replaces_assignment_id: replacement_id} = attrs)
+  defp validate_replacement(%{replaces_assignment_id: replacement_id} = attrs)
        when is_binary(replacement_id) do
     case Repo.get(Assignment, replacement_id) do
       %Assignment{} = previous ->
-        if Enum.all?(@scope_fields, &(Map.get(attrs, &1) == Map.get(previous, &1))) do
-          :ok
-        else
-          {:error, :replacement_scope_mismatch}
-        end
+        validate_replacement_contract(attrs, previous)
 
       nil ->
         {:error, :replacement_not_found}
     end
   end
 
-  defp validate_replacement_scope(_attrs), do: :ok
+  defp validate_replacement(_attrs), do: :ok
+
+  defp validate_replacement_contract(attrs, previous) do
+    cond do
+      not Enum.all?(@scope_fields, &(Map.get(attrs, &1) == Map.get(previous, &1))) ->
+        {:error, :replacement_scope_mismatch}
+
+      Map.get(attrs, :phase) != previous.phase ->
+        {:error, :replacement_phase_mismatch}
+
+      Map.get(attrs, :agent_type) != previous.agent_type ->
+        {:error, :replacement_agent_type_mismatch}
+
+      true ->
+        :ok
+    end
+  end
 
   defp result_attrs(assignment_id, idempotency_key, attrs) do
     selected = select_attrs(attrs, @result_fields)
