@@ -591,7 +591,15 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       refute conn.resp_body =~ "bpt_public_read_minted"
 
       # It was minted over the SCOPED route with the instance's admin token.
-      assert [%{url: url, headers: headers, body: body}] = StudioLinkFakeHttpClient.requests()
+      # Create makes TWO outbound calls now: this read-token mint AND a
+      # best-effort content-publish webhook registration (site-spawner W5,
+      # `maybe_register_content_webhook/3`). Pick the mint by its path rather
+      # than asserting a single request — the registration is fire-and-forget.
+      assert %{url: url, headers: headers, body: body} =
+               Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
+                 String.contains?(r.url, "/v1/tokens")
+               end)
+
       assert url == "#{@instance_url}/w/acme/p/blog/v1/tokens"
 
       assert {"Authorization", "Bearer " <> @instance_admin_token} =
