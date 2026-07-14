@@ -80,6 +80,22 @@ describe("telegram connector — registration shape", () => {
       /invalid Telegram bot token/,
     );
   });
+
+  it("rejects a token whose first segment is not the digits-only bot id", () => {
+    // connectors-telegram-token-shape-guard: before this was tightened the
+    // function only rejected an EMPTY first segment, so a paste error like
+    // "not-a-token" derived a bogus install key and failed only at the first
+    // poll. It now throws the same "invalid Telegram bot token" as the empty
+    // case — one shape guard, caught at connect time.
+    expect(() => telegramBotIdFromToken("not-a-token")).toThrow(
+      /invalid Telegram bot token/,
+    );
+    expect(() => telegramBotIdFromToken("abc:secret")).toThrow(
+      /invalid Telegram bot token/,
+    );
+    // The valid shape still parses to the digits-only bot id.
+    expect(telegramBotIdFromToken("123456789:AAE-secret")).toBe("123456789");
+  });
 });
 
 describe("telegram connector — tenant resolution (credential-bound, fail closed)", () => {
