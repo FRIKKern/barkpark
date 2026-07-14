@@ -262,7 +262,10 @@ defmodule Barkpark.EpicFleet do
   defp normalize_scope(scope) do
     normalized = select_attrs(scope, @scope_fields)
 
-    if Enum.all?(@scope_fields, &(is_binary(Map.get(normalized, &1)) and Map.get(normalized, &1) != "")) do
+    if Enum.all?(
+         @scope_fields,
+         &(is_binary(Map.get(normalized, &1)) and Map.get(normalized, &1) != "")
+       ) do
       {:ok, normalized}
     else
       {:error, :invalid_scope}
@@ -313,7 +316,9 @@ defmodule Barkpark.EpicFleet do
 
   defp reduce_rows(rows, plan) do
     Enum.into(plan, %{}, fn {phase, config} ->
-      phase_rows = Enum.filter(rows, fn {assignment, _result} -> assignment.phase == to_string(phase) end)
+      phase_rows =
+        Enum.filter(rows, fn {assignment, _result} -> assignment.phase == to_string(phase) end)
+
       {phase, reduce_phase(phase_rows, config)}
     end)
   end
@@ -337,17 +342,31 @@ defmodule Barkpark.EpicFleet do
 
     completed_rows =
       Enum.filter(verified_rows, fn {assignment, result, verified?} ->
-        verified? and result.status == "completed" and not MapSet.member?(replaced_ids, assignment.id)
+        verified? and result.status == "completed" and
+          not MapSet.member?(replaced_ids, assignment.id)
       end)
 
     state_counts =
-      Enum.reduce(verified_rows, %{completed: 0, failed: 0, cancelled: 0, missing: 0, invalid: 0}, fn
-        {_assignment, nil, _verified?}, counts -> Map.update!(counts, :missing, &(&1 + 1))
-        {_assignment, _result, false}, counts -> Map.update!(counts, :invalid, &(&1 + 1))
-        {_assignment, %Result{status: "completed"}, true}, counts -> Map.update!(counts, :completed, &(&1 + 1))
-        {_assignment, %Result{status: "failed"}, true}, counts -> Map.update!(counts, :failed, &(&1 + 1))
-        {_assignment, %Result{status: "cancelled"}, true}, counts -> Map.update!(counts, :cancelled, &(&1 + 1))
-      end)
+      Enum.reduce(
+        verified_rows,
+        %{completed: 0, failed: 0, cancelled: 0, missing: 0, invalid: 0},
+        fn
+          {_assignment, nil, _verified?}, counts ->
+            Map.update!(counts, :missing, &(&1 + 1))
+
+          {_assignment, _result, false}, counts ->
+            Map.update!(counts, :invalid, &(&1 + 1))
+
+          {_assignment, %Result{status: "completed"}, true}, counts ->
+            Map.update!(counts, :completed, &(&1 + 1))
+
+          {_assignment, %Result{status: "failed"}, true}, counts ->
+            Map.update!(counts, :failed, &(&1 + 1))
+
+          {_assignment, %Result{status: "cancelled"}, true}, counts ->
+            Map.update!(counts, :cancelled, &(&1 + 1))
+        end
+      )
 
     assignments =
       completed_rows

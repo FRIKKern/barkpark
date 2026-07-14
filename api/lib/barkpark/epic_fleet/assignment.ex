@@ -90,8 +90,11 @@ defmodule Barkpark.EpicFleet.Assignment do
 
   defp validate_not_self_replacement(changeset) do
     case {get_field(changeset, :id), get_field(changeset, :replaces_assignment_id)} do
-      {id, id} when not is_nil(id) -> add_error(changeset, :replaces_assignment_id, "cannot replace itself")
-      _ -> changeset
+      {id, id} when not is_nil(id) ->
+        add_error(changeset, :replaces_assignment_id, "cannot replace itself")
+
+      _ ->
+        changeset
     end
   end
 end

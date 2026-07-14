@@ -32,7 +32,10 @@ defmodule Barkpark.EpicFleetTest do
       assert replay.id == assignment.id
 
       changed = put_in(left, ["policy", "effort"], "medium")
-      assert {:error, :assignment_conflict} = EpicFleet.create_assignment(%{attrs | snapshot: changed})
+
+      assert {:error, :assignment_conflict} =
+               EpicFleet.create_assignment(%{attrs | snapshot: changed})
+
       assert Repo.aggregate(Assignment, :count) == 1
     end
 
@@ -64,13 +67,19 @@ defmodule Barkpark.EpicFleetTest do
         {:ok, assignment} = EpicFleet.create_assignment(assignment_attrs(scope, assignment_id))
 
         attrs = result_attrs(status, "paper://#{assignment_id}")
-        assert {:ok, %Result{status: ^status}} = EpicFleet.record_result(assignment, "key-#{status}", attrs)
+
+        assert {:ok, %Result{status: ^status}} =
+                 EpicFleet.record_result(assignment, "key-#{status}", attrs)
       end)
 
       {:ok, assignment} = EpicFleet.create_assignment(assignment_attrs(scope, "build-invalid"))
 
       assert {:error, changeset} =
-               EpicFleet.record_result(assignment, "key-invalid", result_attrs("unknown", "paper://bad"))
+               EpicFleet.record_result(
+                 assignment,
+                 "key-invalid",
+                 result_attrs("unknown", "paper://bad")
+               )
 
       assert "is invalid" in errors_on(changeset).status
     end
@@ -100,7 +109,9 @@ defmodule Barkpark.EpicFleetTest do
       assert Repo.aggregate(Result, :count) == 1
     end
 
-    test "same key with different semantic payload returns a deterministic conflict", %{scope: scope} do
+    test "same key with different semantic payload returns a deterministic conflict", %{
+      scope: scope
+    } do
       {:ok, assignment} = EpicFleet.create_assignment(assignment_attrs(scope, "build-1"))
       attrs = result_attrs("completed", "paper://build/1")
 
