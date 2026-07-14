@@ -146,11 +146,15 @@ defmodule BarkparkWeb.SiteDeployController do
     }
   end
 
+  # `detail` is the failed stage's REAL reason (npm's 401, HEALTH's marker miss).
+  # The control plane reads it straight off this key and `bp cloud site` prints
+  # it; omitting it degrades every failure to a canned line, silently.
   defp render_stage(stage) do
     %{
       name: stage.name,
       status: stage.status,
       build_id: stage.build_id,
+      detail: Map.get(stage, :detail),
       at: iso(stage.at)
     }
   end

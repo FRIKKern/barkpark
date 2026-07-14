@@ -221,7 +221,7 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
           echo 'BPSTAGE name=BUILD status=ok build_id=b1'
           echo 'BPSTAGE name=STAGE status=ok build_id=b1'
           echo 'HEALTH: index.html is missing the bp-build-id marker'
-          echo 'BPSTAGE name=HEALTH status=failed build_id=b1'
+          echo 'BPSTAGE name=HEALTH status=failed build_id=b1 detail="bp-build-id marker is missing but this deploy ships b1"'
           echo 'HEALTH gate FAILED for build b1 — live release untouched, no switch (fail closed)'
           exit 14
           """)
@@ -241,6 +241,11 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
       # A broken build never reaches a visitor: no SWITCH stage was reported.
       refute Enum.any?(done["stages"], &(&1["name"] == "SWITCH"))
       assert %{"name" => "HEALTH", "status" => "failed"} = List.last(done["stages"])
+
+      # …and the WHY travels on the wire. The control plane renders this key as the
+      # failed stage's message and `bp cloud site` prints it; if it is absent the
+      # user gets a canned "the build failed" and the marker miss is invisible.
+      assert List.last(done["stages"])["detail"] =~ "bp-build-id marker is missing"
     end
 
     test "mode=rollback runs the rollback command", %{conn: conn} do

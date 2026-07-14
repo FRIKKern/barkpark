@@ -81,10 +81,19 @@ defmodule Barkpark.Sites.DeployRunner do
   # HEALTH marker miss) is the line or two above it.
   @reason_lines 3
 
-  # `BPSTAGE name=<STAGE> status=<STATUS> build_id=<ID>` — emitted by
+  # `BPSTAGE name=<STAGE> status=<STATUS> build_id=<ID> [detail="…"]` — emitted by
   # site-deploy.sh at every state-machine boundary. Both fields are whitelisted
   # below; a line that does not match is just log.
-  @stage_re ~r/\bBPSTAGE\s+name=([A-Za-z_]+)\s+status=([a-z]+)(?:\s+build_id=(\S+))?/
+  #
+  # `detail` is the REASON and it is load-bearing: the engine hangs npm's real
+  # error (`FATAL: 401 Unauthorized …`) and HEALTH's marker miss off the terminal
+  # stage line, and the control plane + `bp cloud site` render it as the failed
+  # stage's message. Dropping it here does not fail loudly — it silently degrades
+  # every failure to a canned "the build failed", which is precisely the dishonest
+  # status this seam exists to prevent. build_id is `\S*` (not `\S+`) because the
+  # engine emits `build_id=` empty on a PLAN that has not resolved one yet; `\S+`
+  # would refuse the empty value and then swallow the detail with it.
+  @stage_re ~r/\bBPSTAGE\s+name=([A-Za-z_]+)\s+status=([a-z]+)(?:\s+build_id=(\S*))?(?:\s+detail="([^"]*)")?/
   @stage_names ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
   @stage_statuses ~w(started ok skipped noop failed)
 
@@ -414,13 +423,16 @@ defmodule Barkpark.Sites.DeployRunner do
   # overwritten by `ok`/`failed` for the same stage rather than appended, so the
   # list stays exactly the six-stage story of this run — bounded by construction.
   defp parse_stage(run, line) do
-    case Regex.run(@stage_re, line) do
-      [_all, name, status | rest]
+    case Regex.run(@stage_re, line, capture: :all_but_first) do
+      [name, status | rest]
       when name in @stage_names and status in @stage_statuses ->
+        {build_id, detail} = stage_rest(rest)
+
         stage = %{
           name: name,
           status: status,
-          build_id: List.first(rest) || run.build_id,
+          build_id: blank_to_nil(build_id) || run.build_id,
+          detail: blank_to_nil(detail),
           at: DateTime.utc_now()
         }
 
@@ -431,6 +443,16 @@ defmodule Barkpark.Sites.DeployRunner do
         run
     end
   end
+
+  # Trailing optional groups that never participated are dropped by Regex.run; a
+  # skipped MIDDLE group comes back as "". Both shapes mean "absent".
+  defp stage_rest([]), do: {nil, nil}
+  defp stage_rest([build_id]), do: {build_id, nil}
+  defp stage_rest([build_id, detail | _]), do: {build_id, detail}
+
+  defp blank_to_nil(nil), do: nil
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(s) when is_binary(s), do: s
 
   defp upsert_stage(stages, stage) do
     if Enum.any?(stages, &(&1.name == stage.name)) do

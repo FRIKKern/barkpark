@@ -311,6 +311,76 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert [%{name: "BUILD", status: "failed"}] = status.stages
     end
 
+    # The engine hangs the REAL reason off the terminal stage line as detail=…
+    # (npm's 401, HEALTH's marker miss). The control plane reads that key and the
+    # CLI prints it as the failed stage's message — so if it is dropped here, every
+    # failure silently degrades to a canned "the build failed" with the true cause
+    # nowhere on screen. Pin it end to end.
+    test "detail= on a terminal stage line survives into the stage (the real reason)" do
+      put_cfg(
+        enabled: true,
+        command:
+          stub("""
+          echo 'BPSTAGE name=BUILD status=started build_id=b1'
+          echo 'BPSTAGE name=BUILD status=failed build_id=b1 detail="FATAL: 401 Unauthorized - the site read token is invalid"'
+          exit 12
+          """)
+      )
+
+      assert DeployRunner.trigger(req("detail")) == {:ok, :started}
+      assert %{state: :done} = status = await_done("detail")
+
+      assert [
+               %{
+                 name: "BUILD",
+                 status: "failed",
+                 detail: "FATAL: 401 Unauthorized - the site read token is invalid"
+               }
+             ] = status.stages
+    end
+
+    # HEALTH's detail is the marker miss — the one message that explains WHY a
+    # build that compiled fine is being refused. It must not be swallowed.
+    test "detail= rides an empty build_id (the engine emits build_id= before it resolves one)" do
+      put_cfg(
+        enabled: true,
+        command:
+          stub("""
+          echo 'BPSTAGE name=PLAN status=noop build_id= detail="nothing to do"'
+          echo 'BPSTAGE name=HEALTH status=failed build_id=b2 detail="bp-content-rev marker is empty - the build lost its content link"'
+          exit 14
+          """)
+      )
+
+      assert DeployRunner.trigger(req("detail-empty-bid")) == {:ok, :started}
+      assert %{state: :done} = status = await_done("detail-empty-bid")
+
+      assert [
+               %{name: "PLAN", status: "noop", detail: "nothing to do"},
+               %{
+                 name: "HEALTH",
+                 status: "failed",
+                 detail: "bp-content-rev marker is empty - the build lost its content link"
+               }
+             ] = status.stages
+    end
+
+    test "a stage with no detail= reports detail: nil, never a phantom string" do
+      put_cfg(
+        enabled: true,
+        command:
+          stub("""
+          echo 'BPSTAGE name=SWITCH status=ok build_id=b3'
+          exit 0
+          """)
+      )
+
+      assert DeployRunner.trigger(req("no-detail")) == {:ok, :started}
+      assert %{state: :done} = status = await_done("no-detail")
+
+      assert [%{name: "SWITCH", status: "ok", detail: nil, build_id: "b3"}] = status.stages
+    end
+
     test "a garbage or unknown BPSTAGE line is log, never a stage" do
       put_cfg(
         enabled: true,
