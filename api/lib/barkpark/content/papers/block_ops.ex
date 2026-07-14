@@ -174,7 +174,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # published paper. HTML-only writes (no blocks list) stay exempt.
     with [] <- Papers.Template.validate(blocks),
          :ok <- reject_hollow_result(blocks),
-         {:ok, blocks} <- encrypt_paper_blocks(blocks, dataset) do
+         {:ok, blocks} <-
+           encrypt_paper_blocks(
+             blocks,
+             dataset,
+             scope_attrs["workspace_id"] || (existing && existing.workspace_id)
+           ) do
       write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs, opts)
     else
       errors when is_list(errors) ->
@@ -403,7 +408,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
          # encrypted field. No-op when nothing in the "paper" schema is marked;
          # fail closed (HIGH-3) when a marked block cannot be sealed.
-         {:ok, new_blocks} <- encrypt_paper_blocks(new_blocks, dataset),
+         {:ok, new_blocks} <- encrypt_paper_blocks(new_blocks, dataset, doc.workspace_id),
          {:ok, affected} <- locate_paper_affected(op, new_blocks) do
       op_kind = Map.get(op, "op")
       rev = paper_next_rev(doc)
@@ -519,7 +524,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # encrypt marked bound block values before render/project/persist so the
          # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
          # fail closed (HIGH-3) when a marked block cannot be sealed.
-         {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset) do
+         {:ok, new_blocks} <- encrypt_paper_blocks(normalized, dataset, doc.workspace_id) do
       cond do
         ops == [] ->
           # Nothing to apply — report the current rev, no write, no broadcast.
@@ -1420,15 +1425,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Returns `{:ok, blocks}` (the encrypted block list) or `{:error, reason}` when
   # a marked-encrypted bound block cannot be sealed (HIGH-3, fail closed) — the
   # paper write paths surface the error instead of persisting plaintext-at-rest.
-  defp encrypt_paper_blocks(blocks, dataset) when is_list(blocks) and is_binary(dataset) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset) do
+  # `workspace_id` attributes the DEK (charter D51-D54): it MUST be the paper
+  # row's workspace so a later `reveal_fields` resolves the same
+  # (workspace_id, scope) DEK that sealed the bound block. `nil` (an unscoped
+  # write) → the NULL-workspace DEK.
+  defp encrypt_paper_blocks(blocks, dataset, workspace_id)
+       when is_list(blocks) and is_binary(dataset) do
+    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset, workspace_id) do
       {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
       {:ok, _} -> {:ok, blocks}
       {:error, _} = err -> err
     end
   end
 
-  defp encrypt_paper_blocks(blocks, _dataset), do: {:ok, blocks}
+  defp encrypt_paper_blocks(blocks, _dataset, _workspace_id), do: {:ok, blocks}
 
   # Next monotonic streaming rev for a paper. Starts at 1 for a fresh paper;
   # increments the stored integer otherwise.

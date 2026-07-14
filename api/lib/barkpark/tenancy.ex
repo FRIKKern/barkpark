@@ -890,14 +890,17 @@ defmodule Barkpark.Tenancy do
 
   Ordered cleanup in a single `Repo.transaction`:
 
-    0. Sweep the 11 E3/allowlist string-keyed tables the keystone exporter
+    0. Sweep the 10 E3/allowlist string-keyed tables the keystone exporter
        copies (charter D4/D5) — the FK-less `(doc_id, dataset)`- and
-       `scope`-keyed tables (`authoring_exemptions`, `data_keys`, …) the SQL
-       cascade never reaches. Runs FIRST because its `(doc_id, dataset)`
+       `scope`-keyed tables (`authoring_exemptions`, `search_surface_config`, …)
+       the SQL cascade never reaches. Runs FIRST because its `(doc_id, dataset)`
        semi-join needs the workspace's own `documents` still present and its
        slug derivation needs its projects/datasets still present. A
        `(doc_id, dataset)` row ALSO owned by a sibling workspace is guarded and
        SURVIVES. Reuses the keystone enumeration + slug derivation, so export
+       (`data_keys` is NO LONGER swept here — once workspace-attributed it became
+       an E1 table swept by the step-3 FK cascade, which touches ONLY this
+       workspace's own DEKs; see `bpb-datakeys-write-path-workspace-attribution`.)
        and teardown share ONE source of truth for a workspace's tables.
     1. For every media_file scoped to the workspace, call
        `Barkpark.Media.delete_file/2` so the disk blob is removed
@@ -1009,17 +1012,21 @@ defmodule Barkpark.Tenancy do
     end
   end
 
-  # Sweep the 10 E3/allowlist string-keyed tables the keystone exporter copies
-  # (charter D4/D5): the 4 E3 doc-keyed (Catalog.e3_doc_keyed/0), the 5 E3
-  # dataset-keyed (Catalog.e3_dataset_keyed/0), and the 1 scope-column allowlist
-  # table (Catalog.allowlist/0 = data_keys). NONE of them carries `workspace_id`
-  # — their tenant key is a `(doc_id, dataset)` leaf or a `scope` string — so the
-  # SQL CASCADE on `Repo.delete(workspace)` NEVER reaches them; without this
-  # explicit step a torn-down workspace silently orphans (e.g.) its
-  # authoring_exemptions ledger and its per-dataset DEKs (`data_keys`).
-  # (`search_surface_config` left this sweep in Wave 5 Slice A — it gained a
-  # `workspace_id` FK and now cascade-deletes with the workspace, charter
-  # D45/D49.)
+  # Sweep the 9 E3 string-keyed tables the keystone exporter copies
+  # (charter D4/D5): the 4 E3 doc-keyed (Catalog.e3_doc_keyed/0) and the 5 E3
+  # dataset-keyed (Catalog.e3_dataset_keyed/0). The scope-column allowlist
+  # (Catalog.allowlist/0) is now EMPTY, so its sweep loop below is a no-op over
+  # zero tables. NONE of the swept tables carries `workspace_id` — their tenant
+  # key is a `(doc_id, dataset)` leaf or a `scope` string — so the SQL CASCADE on
+  # `Repo.delete(workspace)` NEVER reaches them; without this explicit step a
+  # torn-down workspace silently orphans (e.g.) its authoring_exemptions ledger.
+  # Both former allowlist members left this sweep once they gained a
+  # `workspace_id` FK and moved to E1, cascade-deleting with the workspace in
+  # step 3 (which touches ONLY this workspace's own rows):
+  #   * `search_surface_config` — Wave 5 Slice A (charter D45/D49).
+  #   * `data_keys` — the per-dataset DEK store; a sibling's shared-slug DEK now
+  #     survives via the FK cascade instead of a bare-scope delete
+  #     (bpb-datakeys-write-path-workspace-attribution, charter D51-D54).
   #
   # POSITION IS LOAD-BEARING — this runs FIRST, before media/documents/audit and
   # before the final cascade: the E3 doc-keyed semi-join needs the workspace's
@@ -1039,8 +1046,11 @@ defmodule Barkpark.Tenancy do
   #     `WorkspaceBundle.dataset_slugs_for/1`: a slug shared with another
   #     workspace is dropped, so this bare-slug sweep can never cross-tenant
   #     delete a co-tenant's rows under the same slug (charter D21).
-  #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix
-  #     (`data_keys` → `"dataset:"`).
+  #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix.
+  #     The allowlist is EMPTY as of Wave 5 (both `search_surface_config` and
+  #     `data_keys` gained a `workspace_id` FK and moved to E1), so this loop
+  #     currently matches no table; the shape is retained for any future
+  #     bare-`scope` tenant table.
   defp delete_workspace_string_keyed(ws_id) do
     ws_lit = Catalog.uuid_literal!(ws_id)
     slugs = WorkspaceBundle.dataset_slugs_for(ws_id)

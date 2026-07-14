@@ -48,13 +48,15 @@ defmodule Barkpark.Content.Encryption do
       A marked field is NEVER persisted as plaintext.
   """
   # @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
-  @spec encrypt_marked(map(), String.t(), String.t()) ::
+  @spec encrypt_marked(map(), String.t(), String.t(), binary() | nil) ::
           {:ok, map()} | {:error, {:encryption_failed, term()}}
-  def encrypt_marked(content, type, dataset)
+  def encrypt_marked(content, type, dataset, workspace_id \\ nil)
+
+  def encrypt_marked(content, type, dataset, workspace_id)
       when is_map(content) and is_binary(type) and is_binary(dataset) do
     case Content.get_schema(type, dataset) do
       {:ok, %SchemaDefinition{fields: raw}} when is_list(raw) ->
-        encrypt_against_schema(content, raw, scope(dataset))
+        encrypt_against_schema(content, raw, scope(dataset), workspace_id)
 
       # Schema present with a non-list `fields`, or genuinely absent: there is no
       # DECLARED `encrypted: true` field we could leak, so a no-op is correct.
@@ -73,7 +75,7 @@ defmodule Barkpark.Content.Encryption do
     end
   end
 
-  def encrypt_marked(content, _type, _dataset), do: {:ok, content}
+  def encrypt_marked(content, _type, _dataset, _workspace_id), do: {:ok, content}
 
   # HIGH-3 (red-team): FAIL CLOSED. The pre-hardening code returned `content`
   # verbatim whenever the schema failed to STRICT-parse — persisting an
@@ -81,19 +83,19 @@ defmodule Barkpark.Content.Encryption do
   # the original fast path; a strict-parse failure falls back to `lenient_encrypt`,
   # which protects every encrypted-marked field it can resolve and REJECTS the
   # write the instant one cannot be sealed.
-  defp encrypt_against_schema(content, raw_fields, scope) do
+  defp encrypt_against_schema(content, raw_fields, scope, ws) do
     case parse_fields(raw_fields) do
       {:ok, fields} ->
         # No marked field anywhere → byte-identical no-op (additive guarantee;
         # also skips the content["blocks"] walk for an un-encrypted corpus).
         if any_sensitive?(fields) do
-          encrypt_with_fields(content, fields, scope)
+          encrypt_with_fields(content, fields, scope, ws)
         else
           {:ok, content}
         end
 
       :error ->
-        lenient_encrypt(content, raw_fields, scope)
+        lenient_encrypt(content, raw_fields, scope, ws)
     end
   end
 
@@ -103,7 +105,7 @@ defmodule Barkpark.Content.Encryption do
   # before. Otherwise we MUST protect the secret: parse each encrypted-marked
   # field in isolation, encrypt the ones that resolve, and fail closed if any
   # encrypted-marked field cannot be parsed.
-  defp lenient_encrypt(content, raw_fields, scope) do
+  defp lenient_encrypt(content, raw_fields, scope, ws) do
     marked = Enum.filter(raw_fields, &raw_field_encrypted?/1)
 
     if marked == [] do
@@ -118,18 +120,18 @@ defmodule Barkpark.Content.Encryption do
         end)
 
       if failed == [] do
-        encrypt_with_fields(content, Enum.reverse(fields), scope)
+        encrypt_with_fields(content, Enum.reverse(fields), scope, ws)
       else
         {:error, {:encryption_failed, %{unprocessable_fields: Enum.reverse(failed)}}}
       end
     end
   end
 
-  defp encrypt_with_fields(content, fields, scope) do
-    case transform_map(content, fields, scope, :encrypt) do
+  defp encrypt_with_fields(content, fields, scope, ws) do
+    case transform_map(content, fields, scope, ws, :encrypt) do
       # Encrypt the PROJECTED keys (content[fieldName]) AND the bound block
-      # values they are projected from — see encrypt_bound_blocks/3.
-      {:ok, encrypted} -> {:ok, encrypt_bound_blocks(encrypted, fields, scope)}
+      # values they are projected from — see encrypt_bound_blocks/4.
+      {:ok, encrypted} -> {:ok, encrypt_bound_blocks(encrypted, fields, scope, ws)}
       # encrypt never returns :error today, but fail CLOSED if it ever does —
       # never persist a half-sealed content map.
       :error -> {:error, {:encryption_failed, :encrypt_failed}}
@@ -145,17 +147,20 @@ defmodule Barkpark.Content.Encryption do
   This is the privileged reveal primitive; callers MUST gate it on
   authorization (see `Barkpark.Content.reveal_fields/4`).
   """
-  @spec decrypt_document(Document.t(), SchemaDefinition.t(), String.t()) ::
+  @spec decrypt_document(Document.t(), SchemaDefinition.t(), String.t(), binary() | nil) ::
           {:ok, Document.t()} | :error
+  def decrypt_document(doc, schema, dataset, workspace_id \\ nil)
+
   def decrypt_document(
         %Document{content: content} = doc,
         %SchemaDefinition{fields: raw_fields},
-        dataset
+        dataset,
+        workspace_id
       )
       when is_map(content) and is_list(raw_fields) and is_binary(dataset) do
     case parse_fields(raw_fields) do
       {:ok, fields} ->
-        case transform_map(content, fields, scope(dataset), :decrypt) do
+        case transform_map(content, fields, scope(dataset), workspace_id, :decrypt) do
           {:ok, decrypted} -> {:ok, %{doc | content: decrypted}}
           :error -> :error
         end
@@ -165,7 +170,7 @@ defmodule Barkpark.Content.Encryption do
     end
   end
 
-  def decrypt_document(_doc, _schema, _dataset), do: :error
+  def decrypt_document(_doc, _schema, _dataset, _workspace_id), do: :error
 
   # ── internals ──────────────────────────────────────────────────────────────
 
@@ -198,22 +203,22 @@ defmodule Barkpark.Content.Encryption do
   # encryption stays a SINGLE chokepoint — the four copy/project paths need no
   # encryption call of their own; they only ever propagate already-encrypted
   # content.
-  defp encrypt_bound_blocks(%{"blocks" => blocks} = content, fields, scope)
+  defp encrypt_bound_blocks(%{"blocks" => blocks} = content, fields, scope, ws)
        when is_list(blocks) do
     by_name =
       for %Field{name: n} = f <- fields, is_binary(n) and n != "", into: %{}, do: {n, f}
 
-    Map.put(content, "blocks", Enum.map(blocks, &encrypt_bound_block(&1, by_name, scope)))
+    Map.put(content, "blocks", Enum.map(blocks, &encrypt_bound_block(&1, by_name, scope, ws)))
   end
 
-  defp encrypt_bound_blocks(content, _fields, _scope), do: content
+  defp encrypt_bound_blocks(content, _fields, _scope, _ws), do: content
 
-  defp encrypt_bound_block(%{"fieldName" => name} = block, by_name, scope)
+  defp encrypt_bound_block(%{"fieldName" => name} = block, by_name, scope, ws)
        when is_binary(name) do
     case Map.get(by_name, name) do
       %Field{} = field ->
         if Map.has_key?(block, "value") do
-          case transform_value(Map.get(block, "value"), field, scope, :encrypt) do
+          case transform_value(Map.get(block, "value"), field, scope, ws, :encrypt) do
             {:ok, value} -> Map.put(block, "value", value)
             :error -> block
           end
@@ -226,7 +231,7 @@ defmodule Barkpark.Content.Encryption do
     end
   end
 
-  defp encrypt_bound_block(block, _by_name, _scope), do: block
+  defp encrypt_bound_block(block, _by_name, _scope, _ws), do: block
 
   # Parse a SINGLE raw field in isolation (the lenient per-field fallback). A
   # plugin-namespaced sibling or a missing-`type` field that broke the STRICT
@@ -273,10 +278,10 @@ defmodule Barkpark.Content.Encryption do
   # Walk a keyed content map against a list of %Field{}, transforming each
   # present field's value. Short-circuits to :error on the first decrypt
   # failure (encrypt never fails).
-  defp transform_map(content, fields, scope, mode) when is_map(content) and is_list(fields) do
+  defp transform_map(content, fields, scope, ws, mode) when is_map(content) and is_list(fields) do
     Enum.reduce_while(fields, {:ok, content}, fn %Field{name: name} = field, {:ok, acc} ->
       if is_binary(name) and Map.has_key?(acc, name) do
-        case transform_value(Map.get(acc, name), field, scope, mode) do
+        case transform_value(Map.get(acc, name), field, scope, ws, mode) do
           {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
           :error -> {:halt, :error}
         end
@@ -286,30 +291,30 @@ defmodule Barkpark.Content.Encryption do
     end)
   end
 
-  defp transform_map(value, _fields, _scope, _mode), do: {:ok, value}
+  defp transform_map(value, _fields, _scope, _ws, _mode), do: {:ok, value}
 
   # Transform a single VALUE according to a field's shape. An `encrypted: true`
   # field encrypts/decrypts the whole value as one envelope (works for scalars,
   # maps, and lists — FieldCipher JSON-encodes). A composite recurses into its
   # subfields; an arrayOf applies its `of` descriptor to each item. Anything
   # else passes through unchanged.
-  defp transform_value(value, %Field{encrypted: true}, scope, mode),
-    do: apply_cipher(value, scope, mode)
+  defp transform_value(value, %Field{encrypted: true}, scope, ws, mode),
+    do: apply_cipher(value, scope, ws, mode)
 
-  defp transform_value(value, %Field{type: "composite", fields: subfields}, scope, mode)
+  defp transform_value(value, %Field{type: "composite", fields: subfields}, scope, ws, mode)
        when is_list(subfields) and is_map(value),
-       do: transform_map(value, subfields, scope, mode)
+       do: transform_map(value, subfields, scope, ws, mode)
 
-  defp transform_value(value, %Field{type: "arrayOf", of: %Field{} = of}, scope, mode)
+  defp transform_value(value, %Field{type: "arrayOf", of: %Field{} = of}, scope, ws, mode)
        when is_list(value),
-       do: transform_list(value, of, scope, mode)
+       do: transform_list(value, of, scope, ws, mode)
 
-  defp transform_value(value, _field, _scope, _mode), do: {:ok, value}
+  defp transform_value(value, _field, _scope, _ws, _mode), do: {:ok, value}
 
-  defp transform_list(list, of_field, scope, mode) do
+  defp transform_list(list, of_field, scope, ws, mode) do
     list
     |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
-      case transform_value(item, of_field, scope, mode) do
+      case transform_value(item, of_field, scope, ws, mode) do
         {:ok, value} -> {:cont, {:ok, [value | acc]}}
         :error -> {:halt, :error}
       end
@@ -320,6 +325,6 @@ defmodule Barkpark.Content.Encryption do
     end
   end
 
-  defp apply_cipher(value, scope, :encrypt), do: {:ok, FieldCipher.encrypt(value, scope)}
-  defp apply_cipher(value, scope, :decrypt), do: FieldCipher.decrypt(value, scope)
+  defp apply_cipher(value, scope, ws, :encrypt), do: {:ok, FieldCipher.encrypt(value, scope, ws)}
+  defp apply_cipher(value, scope, ws, :decrypt), do: FieldCipher.decrypt(value, scope, ws)
 end
