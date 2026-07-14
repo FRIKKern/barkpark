@@ -16,6 +16,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,10 @@ import (
 // testSiteID is a valid UUID so resolveOpenSiteID passes it through without a
 // fleet list call.
 const testSiteID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+// --instance is MANDATORY on create; the package-level testInstanceID (declared in
+// cloud_webhook_cmd_test.go) is a valid UUID, so resolveOpenBarkparkID passes it
+// through without a fleet-list call.
 
 // siteCP is a recording fake control plane: it answers the spawner routes with
 // caller-supplied bodies and records the last create request body + the auth
@@ -34,11 +39,11 @@ type siteCP struct {
 	deployHits int
 	pollHits   int
 	// per-route responses (status, body)
-	createResp  fakeResp
-	deployResp  fakeResp
-	pollResp    fakeResp
-	getResp     fakeResp
-	rollResp    fakeResp
+	createResp fakeResp
+	deployResp fakeResp
+	pollResp   fakeResp
+	getResp    fakeResp
+	rollResp   fakeResp
 }
 
 type fakeResp struct {
@@ -127,14 +132,15 @@ func TestRunCloudSiteCreate(t *testing.T) {
 	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","url":"https://acme.barkpark.cloud/sites/blog/"}}`}
 	cp.serve()
 
-	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production")
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID)
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
 	}
 	// The request carried the spawner body: kind static, framework astro (default),
-	// and the dataset triple — Bearer-authed.
+	// the dataset triple, and the mandatory barkpark id — Bearer-authed.
 	var got struct {
 		Kind, Framework, Workspace, Project, Dataset, Name string
+		BarkparkID                                         string `json:"barkpark_id"`
 	}
 	if err := json.Unmarshal(cp.createBody, &got); err != nil {
 		t.Fatalf("decode create body: %v (raw %s)", err, cp.createBody)
@@ -144,6 +150,10 @@ func TestRunCloudSiteCreate(t *testing.T) {
 	}
 	if got.Workspace != "acme" || got.Project != "blog" || got.Dataset != "production" {
 		t.Fatalf("create body dataset triple wrong: %+v", got)
+	}
+	// sites.barkpark_id is NOT NULL server-side: the body must always carry it.
+	if got.BarkparkID != testInstanceID {
+		t.Fatalf("create body barkpark_id=%q want %q", got.BarkparkID, testInstanceID)
 	}
 	if cp.lastAuth != "Bearer sess-abc" {
 		t.Fatalf("auth=%q want the cloud bearer", cp.lastAuth)
@@ -160,7 +170,7 @@ func TestRunCloudSiteCreateJSON(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
 	cp.serve()
-	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--framework", "astro")
+	stdout, _, code := runSite(t, "json", "create", "--name", "blog", "--dataset", "acme/blog/production", "--framework", "astro", "--instance", testInstanceID)
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0", code)
 	}
@@ -178,14 +188,65 @@ func TestRunCloudSiteCreateJSON(t *testing.T) {
 func TestRunCloudSiteCreateUsage(t *testing.T) {
 	withTempConfigHome(t)
 	// missing --name / --dataset are usage errors BEFORE any network call.
-	if _, _, code := runSite(t, "table", "create", "--dataset", "a/b/c"); code != exitUsage {
+	if _, _, code := runSite(t, "table", "create", "--dataset", "a/b/c", "--instance", testInstanceID); code != exitUsage {
 		t.Fatalf("missing --name exit=%d want %d", code, exitUsage)
 	}
-	if _, _, code := runSite(t, "table", "create", "--name", "x"); code != exitUsage {
+	if _, _, code := runSite(t, "table", "create", "--name", "x", "--instance", testInstanceID); code != exitUsage {
 		t.Fatalf("missing --dataset exit=%d want %d", code, exitUsage)
 	}
-	if _, _, code := runSite(t, "table", "create", "--name", "x", "--dataset", "a/b"); code != exitUsage {
+	if _, _, code := runSite(t, "table", "create", "--name", "x", "--dataset", "a/b", "--instance", testInstanceID); code != exitUsage {
 		t.Fatalf("bad triple exit=%d want %d", code, exitUsage)
+	}
+}
+
+// TestRunCloudSiteCreateRequiresInstance is the D29 honesty fix: sites.barkpark_id
+// is validate_required AND NOT NULL, and nothing in the control plane derives an
+// instance from the workspace — so a create with no --instance must fail HERE, with
+// an error that names how to find one, and must never reach the wire (where the
+// server answers with a misleading `name_required` 422).
+func TestRunCloudSiteCreateRequiresInstance(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production")
+	if code != exitUsage {
+		t.Fatalf("create without --instance exit=%d want %d (usage)\nstdout:%s\nstderr:%s", code, exitUsage, stdout, stderr)
+	}
+	if cp.createBody != nil {
+		t.Fatalf("create without --instance must not hit the wire, but POSTed: %s", cp.createBody)
+	}
+	if !strings.Contains(stderr, "--instance is required") {
+		t.Fatalf("missing the required-flag error:\n%s", stderr)
+	}
+	// Actionable: it names where to find an instance.
+	if !strings.Contains(stderr, "bp cloud instances") || !strings.Contains(stderr, "bp cloud status") {
+		t.Fatalf("the error must name how to list instances:\n%s", stderr)
+	}
+}
+
+// TestSiteCreateHasNoWorkspaceResolutionClaim is the tripwire on the deleted lie:
+// neither the CLI nor the cloud client may claim that the server derives an instance
+// from the workspace — no such resolution exists anywhere in the control plane, and
+// a comment that says otherwise is how the bug got written in the first place. This
+// reads the source, so re-introducing the sentence fails the build's own test.
+func TestSiteCreateHasNoWorkspaceResolutionClaim(t *testing.T) {
+	lies := []string{
+		"picks the instance from the workspace",
+		"resolves the target instance from the workspace",
+		"instance from the workspace; the CLI",
+	}
+	for _, src := range []string{"cloud_site_cmd.go", "../cloudclient/client.go"} {
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("read %s: %v", src, err)
+		}
+		body := string(b)
+		for _, lie := range lies {
+			if strings.Contains(body, lie) {
+				t.Fatalf("%s still carries the false claim %q — the control plane never resolves an instance from the workspace", src, lie)
+			}
+		}
 	}
 }
 
@@ -280,6 +341,111 @@ func TestRunCloudSiteDeployNoFollow(t *testing.T) {
 	}
 }
 
+// TestRunCloudSiteDeployCancelled is the D30 honesty fix: `cancelled` is one of the
+// six real deployment statuses and IS terminal. Before, only live|failed were, so a
+// cancelled deploy polled its full 300×2s budget (~10 min) and then printed "deploy
+// in progress". Now: the stream stops on the FIRST poll, says it was cancelled, and
+// exits non-zero.
+func TestRunCloudSiteDeployCancelled(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[{"name":"PLAN","status":"done"}]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"cancelled","stage":"BUILD","stages":[{"name":"PLAN","status":"done"},{"name":"BUILD","status":"skipped","detail":"cancelled by operator"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code == exitOK {
+		t.Fatalf("a cancelled deploy must not exit 0\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	// Terminal on the FIRST poll — not 300 of them.
+	if cp.pollHits != 1 {
+		t.Fatalf("cancelled polled %d times, want exactly 1 (terminal on first read)", cp.pollHits)
+	}
+	if !strings.Contains(stderr, "cancelled") {
+		t.Fatalf("the verdict must say the deploy was cancelled:\n%s", stderr)
+	}
+	if strings.Contains(stdout, "in progress") || strings.Contains(stdout, "site live") {
+		t.Fatalf("a cancelled deploy must claim neither progress nor liveness:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteDeployCancelledJSON proves the machine path agrees with the human
+// one: -o json still emits the envelope, and the exit code is non-zero, so a script
+// that checks $? never treats a cancelled deploy as a shipped one.
+func TestRunCloudSiteDeployCancelledJSON(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"cancelled","stage":"BUILD","stages":[]}}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "json", "deploy", testSiteID)
+	if code != exitGeneric {
+		t.Fatalf("cancelled -o json exit=%d want %d", code, exitGeneric)
+	}
+	var env struct {
+		Deployment struct{ Status string } `json:"deployment"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatalf("json not parseable: %v\n%s", err, stdout)
+	}
+	if env.Deployment.Status != "cancelled" {
+		t.Fatalf("json deployment status=%q want cancelled", env.Deployment.Status)
+	}
+}
+
+// TestRunCloudSiteDeployStreamsStageDetail proves the per-stage `detail` the deploy
+// engine streams reaches the user's screen — both on the stage lines and, when the
+// deployment carries no failure_reason of its own, as the failure verdict. The canned
+// fallback must NOT bury the real reason.
+func TestRunCloudSiteDeployStreamsStageDetail(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+	// No failure_reason at the deployment level — the truth lives in the stage detail.
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"failed","stage":"HEALTH","stages":[` +
+		`{"name":"PLAN","status":"done","detail":"build b-1 from content rev r7"},` +
+		`{"name":"BUILD","status":"done","detail":"astro build in 1.7s"},` +
+		`{"name":"STAGE","status":"done","detail":"12K into releases/b-1"},` +
+		`{"name":"HEALTH","status":"failed","detail":"probe got 500 on / (marker bp-build-id absent)"},` +
+		`{"name":"SWITCH","status":"skipped","detail":"not switched — previous build still live"}]}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitGeneric {
+		t.Fatalf("exit=%d want %d (failed)", code, exitGeneric)
+	}
+	// Every stage's detail is streamed alongside its marker.
+	for _, want := range []string{"astro build in 1.7s", "12K into releases/b-1", "probe got 500 on /", "not switched"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("stage detail %q not streamed:\n%s", want, stdout)
+		}
+	}
+	// The failure verdict quotes the real reason, not the canned health-gate line.
+	if !strings.Contains(stderr, "probe got 500 on /") {
+		t.Fatalf("failure verdict must carry the failed stage's detail:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "did not pass its health gate") {
+		t.Fatalf("the canned fallback must not mask a real reason:\n%s", stderr)
+	}
+	if !strings.Contains(stderr, "HEALTH") {
+		t.Fatalf("failure verdict must name the stage:\n%s", stderr)
+	}
+}
+
+// TestRunCloudSiteDeployFallbackWhenServerSaysNothing keeps the fallback honest: when
+// neither failure_reason nor a stage detail exists, the CLI still explains that
+// nothing was switched — it never invents a reason.
+func TestRunCloudSiteDeployFallbackWhenServerSaysNothing(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"failed","stages":[]}}`}
+	cp.serve()
+	_, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitGeneric {
+		t.Fatalf("exit=%d want %d", code, exitGeneric)
+	}
+	if !strings.Contains(stderr, "visitors still see the previous build") {
+		t.Fatalf("bare failure must still be honest about the blast radius:\n%s", stderr)
+	}
+}
+
 // --- rollback ----------------------------------------------------------------
 
 const rollbackEnvelope = `{"ok":true,"status":"rolled_back","deployment_id":"dep-prev","previous_deployment_id":"dep-1","url":"https://acme.barkpark.cloud/sites/blog/"}`
@@ -332,6 +498,29 @@ func TestRunCloudSiteStatus(t *testing.T) {
 		if !strings.Contains(stdout, stage) {
 			t.Fatalf("stage %s missing from status bar:\n%s", stage, stdout)
 		}
+	}
+}
+
+// TestRunCloudSiteStatusShowsStageDetail proves the status table is as honest as the
+// live stream: the per-stage detail is on the stage bar, and a failed deployment's
+// reason is in the header — so a user who missed the stream can still see WHY.
+func TestRunCloudSiteStatusShowsStageDetail(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"failed","stage":"HEALTH","stages":[` +
+		`{"name":"BUILD","status":"done","detail":"astro build in 1.7s"},` +
+		`{"name":"HEALTH","status":"failed","detail":"probe got 500 on / (marker bp-build-id absent)"}]}}}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	if !strings.Contains(stdout, "astro build in 1.7s") || !strings.Contains(stdout, "probe got 500 on /") {
+		t.Fatalf("status stage bar must carry the per-stage detail:\n%s", stdout)
+	}
+	// The header owes the reader the reason for a deployment that never went live.
+	if !strings.Contains(stdout, "reason") {
+		t.Fatalf("status header must show the failure reason:\n%s", stdout)
 	}
 }
 
@@ -405,7 +594,7 @@ func TestRunCloudSiteUnknownVerb(t *testing.T) {
 func TestRunCloudSiteNoToken(t *testing.T) {
 	withTempConfigHome(t) // logged out
 	for _, verb := range [][]string{
-		{"create", "--name", "x", "--dataset", "a/b/c"},
+		{"create", "--name", "x", "--dataset", "a/b/c", "--instance", testInstanceID},
 		{"deploy", testSiteID},
 		{"rollback", testSiteID},
 		{"status", testSiteID},

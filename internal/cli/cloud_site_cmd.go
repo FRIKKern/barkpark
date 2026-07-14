@@ -7,7 +7,7 @@ package cli
 // (spawnable first); Next.js, TanStack Start, Hugo and others ride the same engine
 // on the roadmap.
 //
-//	bp cloud site create   --name <n> --dataset <ws/proj/ds> [--framework astro] [--kind static] [--instance <id|name>]
+//	bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static]
 //	bp cloud site deploy    <site> [--no-follow]   (alias: build)
 //	bp cloud site rollback  <site>
 //	bp cloud site status    <site>
@@ -117,10 +117,22 @@ func parseDatasetTriple(s string) (ws, proj, ds string, err error) {
 	return ws, proj, ds, nil
 }
 
+// siteInstanceRequired is the actionable error for a `create` with no --instance.
+// A site is spawned ON a specific Barkpark box (sites.barkpark_id is NOT NULL, and
+// nothing in the control plane infers one from the workspace), so the flag is
+// mandatory — the CLI says so HERE rather than letting the server answer with a
+// 422 that names the wrong field.
+const siteInstanceRequired = "--instance is required: a site is spawned on a specific Barkpark instance, " +
+	"and the control plane does not infer one from the workspace. " +
+	"List your fleet with `bp cloud status` (the same id/name list --instance resolves against; " +
+	"`bp cloud instances list` shows the provider-side view), then re-run with --instance <id-or-name>."
+
 // runCloudSiteCreate is `bp cloud site create` — POST /v1/sites with the spawner
-// body (kind + dataset triple + name + framework). Astro/static are the defaults.
+// body (kind + dataset triple + name + framework + the instance it lives on).
+// Astro/static are the defaults; --instance has no default because there is no
+// honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> [--framework astro] [--kind static] [--instance <id|name>]"
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static]"
 	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
@@ -136,6 +148,13 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if derr != nil {
 		return useError(out, "usage", derr.Error(), exitUsage)
 	}
+	// --instance is MANDATORY and is checked before any network call: the server
+	// rejects a missing barkpark_id, and it does so through a shared branch that
+	// reports `name_required` — a misleading answer we refuse to make the user read.
+	inst := strings.TrimSpace(a.val("instance"))
+	if inst == "" {
+		return useError(out, "usage", siteInstanceRequired, exitUsage)
+	}
 	framework := strings.TrimSpace(a.val("framework"))
 	if framework == "" {
 		framework = "astro"
@@ -149,23 +168,20 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if !ok {
 		return exitAuth
 	}
-	req := cloudclient.SpawnSiteCreate{
-		Name:      name,
-		Framework: framework,
-		Kind:      kind,
-		Workspace: ws,
-		Project:   proj,
-		Dataset:   ds,
+	// Resolve the instance id-or-name to its barkpark id — the box the site is
+	// spawned on and builds next to.
+	barkparkID, rerr := resolveOpenBarkparkID(cfg, inst)
+	if rerr != nil {
+		return openResolveFail(out, rerr)
 	}
-	// --instance is optional: when pinned, resolve it to the barkpark id so the
-	// control plane spawns the site on that exact box; otherwise the server picks
-	// the instance from the workspace.
-	if inst := strings.TrimSpace(a.val("instance")); inst != "" {
-		id, rerr := resolveOpenBarkparkID(cfg, inst)
-		if rerr != nil {
-			return openResolveFail(out, rerr)
-		}
-		req.BarkparkID = id
+	req := cloudclient.SpawnSiteCreate{
+		Name:       name,
+		Framework:  framework,
+		Kind:       kind,
+		Workspace:  ws,
+		Project:    proj,
+		Dataset:    ds,
+		BarkparkID: barkparkID,
 	}
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
@@ -219,8 +235,8 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 
 // streamSiteDeploy renders the deploy as a stage-aware progress stream: each
 // completed stage is printed once, in order, then polls the deployment until it
-// reaches a terminal state (live / failed). Progress rides progressf so `-o json`
-// keeps stdout a single envelope; the final deployment is the return value.
+// reaches a terminal state (live / failed / cancelled). Progress rides progressf so
+// `-o json` keeps stdout a single envelope; the final deployment is the return value.
 func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.SiteDeployment, follow bool) int {
 	if b := strings.TrimSpace(dep.BuildID); b != "" {
 		out.progressf("→ deploy queued for %s (build %s)", ref, sanitizeCell(b))
@@ -260,12 +276,18 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 	}
 	switch {
 	case strings.EqualFold(d.Status, "failed"):
-		stage := siteOr(d.Stage, "build")
-		reason := strings.TrimSpace(d.FailureReason)
-		if reason == "" {
-			reason = "the build did not pass its health gate — nothing was switched, visitors still see the previous build"
-		}
+		stage, reason := siteFailure(d)
 		out.userErr("site deploy failed at %s — %s", sanitizeCell(stage), sanitizeCell(reason))
+		return exitGeneric
+	case siteDeployCancelled(d.Status):
+		stage, reason := siteFailure(d)
+		if reason == siteFailureFallback {
+			// Nothing to elaborate: a cancel is not a build failure, so say only
+			// what is true — the deploy stopped and the live build is untouched.
+			out.userErr("site deploy cancelled at %s — nothing was switched, visitors still see the previous build", sanitizeCell(stage))
+		} else {
+			out.userErr("site deploy cancelled at %s — %s (nothing was switched, visitors still see the previous build)", sanitizeCell(stage), sanitizeCell(reason))
+		}
 		return exitGeneric
 	case strings.EqualFold(d.Status, "live"):
 		if u := siteOr(d.URL, ""); u != "" {
@@ -281,12 +303,47 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 }
 
 // siteDeployExit is the exit code for a terminal deployment in machine-output
-// mode: failed → generic, otherwise 0.
+// mode: failed or cancelled → generic, otherwise 0. A deploy that never went live
+// must never exit 0 — a script that greps for success would ship a lie.
 func siteDeployExit(d cloudclient.SiteDeployment) int {
-	if strings.EqualFold(d.Status, "failed") {
+	if strings.EqualFold(d.Status, "failed") || siteDeployCancelled(d.Status) {
 		return exitGeneric
 	}
 	return exitOK
+}
+
+// siteDeployCancelled reports the control plane's `cancelled` deploy status. Both
+// spellings are accepted because the wire word is a human-authored enum and a
+// silent miss here is exactly the bug this function exists to kill: an unmatched
+// terminal status polls the full budget (~10 min) and then reports "in progress".
+func siteDeployCancelled(status string) bool {
+	s := strings.ToLower(strings.TrimSpace(status))
+	return s == "cancelled" || s == "canceled"
+}
+
+// siteFailureFallback is the last-resort explanation when neither the deployment
+// nor its failed stage says anything — the ONLY honest thing left to say.
+const siteFailureFallback = "the build did not pass its health gate — nothing was switched, visitors still see the previous build"
+
+// siteFailure is what actually went wrong, in the order of decreasing truth:
+// the deployment's own failure_reason, then the failed stage's `detail` (the line
+// the deploy engine streamed for that stage), and only then the canned fallback.
+// The stage name likewise prefers the deployment's in-flight stage, then the name
+// of the stage that actually carries the failure.
+func siteFailure(d cloudclient.SiteDeployment) (stage, reason string) {
+	var failedName, failedDetail string
+	for _, st := range d.Stages {
+		s := strings.ToLower(strings.TrimSpace(st.Status))
+		if s != "failed" && s != "error" {
+			continue
+		}
+		failedName = strings.TrimSpace(st.Name)
+		failedDetail = strings.TrimSpace(st.Detail)
+		break
+	}
+	stage = siteOr(d.Stage, siteOr(failedName, "build"))
+	reason = siteOr(strings.TrimSpace(d.FailureReason), siteOr(failedDetail, siteFailureFallback))
+	return stage, reason
 }
 
 // runCloudSiteRollback is `bp cloud site rollback <site>` — the sub-second
@@ -583,6 +640,12 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep *cloudclient.SiteDeployment
 		if st := strings.TrimSpace(dep.Stage); st != "" {
 			m["stage"] = st
 		}
+		// A deploy that did not go live owes the reader a reason — the deployment's
+		// failure_reason, else the failed stage's streamed detail.
+		if strings.EqualFold(dep.Status, "failed") || siteDeployCancelled(dep.Status) {
+			_, reason := siteFailure(*dep)
+			m["reason"] = sanitizeCell(reason)
+		}
 	} else {
 		m["status"] = "never deployed"
 	}
@@ -627,11 +690,14 @@ func printCloudSiteHelp(out *writer) {
 	const help = `bp cloud site — spawn a website that builds and serves next to your Barkpark.
 
 USAGE
-  bp cloud site create   --name <n> --dataset <ws/proj/ds> [--framework astro] [--kind static] [--instance <id|name>]
+  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static]
   bp cloud site deploy    <site> [--no-follow]      (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
+
+  --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
+  builds and serves on that box). List yours with 'bp cloud status'.
 
 WHAT IT DOES
   Spawns a static site (Astro is the flagship; Next.js, TanStack Start, Hugo and
@@ -653,6 +719,6 @@ NOT TO BE CONFUSED WITH
 
 OUTPUT + EXIT
   a stage-aware human stream; -o json emits the deployment / site envelope.
-  0 ok · 1 build failed · 3 not logged in · 4 no such site.`
+  0 ok · 1 build failed or cancelled · 2 usage · 3 not logged in · 4 no such site.`
 	out.outf("%s", help)
 }

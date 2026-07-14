@@ -1186,10 +1186,14 @@ func (c *Client) AddDomain(ctx context.Context, siteID, domain string) (Site, er
 var SpawnSiteStages = []string{"PLAN", "BUILD", "STAGE", "HEALTH", "SWITCH", "RETIRE"}
 
 // SpawnSiteCreate is the body POSTed to /v1/sites for a spawned site: the name,
-// the framework (astro is the flagship), the kind (static), and the dataset
-// triple the build reads content from. BarkparkID is optional — when unset the
-// control plane resolves the target instance from the workspace; the CLI fills it
-// only when the user pins `--instance`.
+// the framework (astro is the flagship), the kind (static), the dataset triple the
+// build reads content from, and the instance it is spawned on.
+//
+// BarkparkID is REQUIRED, not optional: `sites.barkpark_id` is validate_required in
+// the changeset and NOT NULL with an FK at the DB level, and NOTHING in the control
+// plane derives an instance from the workspace. Sending it empty is a 422 — so the
+// CLI demands `--instance` up front rather than shipping a request it knows will
+// be rejected.
 type SpawnSiteCreate struct {
 	Name       string `json:"name"`
 	Framework  string `json:"framework,omitempty"`
@@ -1235,11 +1239,12 @@ type SiteStage struct {
 	Detail     string `json:"detail,omitempty"`
 }
 
-// SiteDeployment is one build-and-release of a spawned site. Status walks
-// queued → building → staging → healthy → live (or failed); Stage names the
-// stage currently in flight; Stages carries the per-stage progress the CLI
-// streams. BuildID is the isolated, reproducible build; URL is the live path url
-// once SWITCH flips the symlink.
+// SiteDeployment is one build-and-release of a spawned site. Status is the control
+// plane's deployment enum — queued → building → pushing → live, or the terminal
+// failed / cancelled (see SiteDeploymentTerminal); Stage names the visible stage
+// currently in flight; Stages carries the per-stage progress the CLI streams, each
+// with the engine's own `detail` line. BuildID is the isolated, reproducible build;
+// URL is the live path url once SWITCH flips the symlink.
 type SiteDeployment struct {
 	ID            string      `json:"id"`
 	SiteID        string      `json:"site_id"`
@@ -1254,11 +1259,16 @@ type SiteDeployment struct {
 	UpdatedAt     string      `json:"updated_at"`
 }
 
-// SiteDeploymentTerminal reports whether a deploy status is final — live
-// (success) or failed. The CLI's stream loop polls until this is true.
+// SiteDeploymentTerminal reports whether a deploy status is final. The status enum
+// has SIX values — queued, building, pushing, live, failed, cancelled — and exactly
+// three of them are the end of the road: live (success), failed (the build died),
+// and cancelled (someone stopped it). The CLI's stream loop polls until this is
+// true, so a terminal status missing from this set is not a cosmetic bug: the loop
+// would poll its full budget (300 × 2s ≈ 10 min) and then report the deploy as
+// still in progress. Both `cancelled` and `canceled` spellings count.
 func SiteDeploymentTerminal(status string) bool {
 	s := strings.ToLower(strings.TrimSpace(status))
-	return s == "live" || s == "failed"
+	return s == "live" || s == "failed" || s == "cancelled" || s == "canceled"
 }
 
 // SiteRollbackResult is a completed spawned-site rollback — the sub-second
