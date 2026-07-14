@@ -147,9 +147,15 @@ defmodule Barkpark.Tasks.ExecutionPolicy do
 
   defp validate_enum(policy, field, allowed) do
     case Map.get(policy, field) do
-      nil -> :ok
-      value when value in allowed -> :ok
-      other -> {:error, %{field => ["must be one of #{inspect(allowed)}, got #{inspect(other)}"]}}
+      nil ->
+        :ok
+
+      value ->
+        if value in allowed do
+          :ok
+        else
+          {:error, %{field => ["must be one of #{inspect(allowed)}, got #{inspect(value)}"]}}
+        end
     end
   end
 
