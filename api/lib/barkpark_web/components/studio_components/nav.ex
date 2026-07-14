@@ -25,10 +25,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   def studio_flash(assigns) do
     ~H"""
     <%= if Phoenix.Flash.get(@flash, :info) do %>
-      <div class="flash flash-info" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
+      <div class="flash flash-info" role="status" aria-live="polite" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
     <% end %>
     <%= if Phoenix.Flash.get(@flash, :error) do %>
-      <div class="flash flash-error" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
+      <div class="flash flash-error" role="alert" aria-live="assertive" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
     <% end %>
     """
   end
