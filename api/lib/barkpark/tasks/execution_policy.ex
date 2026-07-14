@@ -89,13 +89,11 @@ defmodule Barkpark.Tasks.ExecutionPolicy do
       cond do
         is_nil(normalized_key) ->
           {:halt,
-           {:error,
-            %{"execution_policy" => ["keys must be strings, got #{inspect(key)}"]}}}
+           {:error, %{"execution_policy" => ["keys must be strings, got #{inspect(key)}"]}}}
 
         Map.has_key?(acc, normalized_key) ->
           {:halt,
-           {:error,
-            %{normalized_key => ["is duplicated by both atom and string key forms"]}}}
+           {:error, %{normalized_key => ["is duplicated by both atom and string key forms"]}}}
 
         true ->
           {:cont, {:ok, Map.put(acc, normalized_key, value)}}
@@ -105,7 +103,9 @@ defmodule Barkpark.Tasks.ExecutionPolicy do
 
   defp reject_unknown_fields(policy) do
     case Map.keys(policy) -- @allowed_fields do
-      [] -> :ok
+      [] ->
+        :ok
+
       unknown ->
         {:error,
          Map.new(unknown, fn field ->
@@ -130,9 +130,14 @@ defmodule Barkpark.Tasks.ExecutionPolicy do
         trimmed = String.trim(value)
 
         cond do
-          trimmed == "" -> {:error, %{field => ["must not be blank"]}}
-          byte_size(trimmed) > max_bytes -> {:error, %{field => ["must be at most #{max_bytes} bytes"]}}
-          true -> :ok
+          trimmed == "" ->
+            {:error, %{field => ["must not be blank"]}}
+
+          byte_size(trimmed) > max_bytes ->
+            {:error, %{field => ["must be at most #{max_bytes} bytes"]}}
+
+          true ->
+            :ok
         end
 
       other ->
@@ -185,8 +190,11 @@ defmodule Barkpark.Tasks.ExecutionPolicy do
         policies
         |> Enum.zip(@sources)
         |> Enum.flat_map(fn
-          {nil, _source} -> []
-          {policy, source} -> if Map.has_key?(policy, field), do: [{source, policy[field]}], else: []
+          {nil, _source} ->
+            []
+
+          {policy, source} ->
+            if Map.has_key?(policy, field), do: [{source, policy[field]}], else: []
         end)
 
       case candidates do

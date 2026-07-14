@@ -22,6 +22,7 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
     field = Enum.find(Tasks.task_schema().fields, &(&1["name"] == "execution_policy"))
 
     assert field["type"] == "composite"
+
     assert Enum.map(field["fields"], & &1["name"]) ==
              ~w(version agent_type model reasoning_effort resource_class)
   end
@@ -196,6 +197,7 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
     payload = Jason.decode!(resp.resp_body)
     assert payload["doc"]["doc_id"] == task.doc_id
     assert payload["doc"]["execution_policy"]["agent_type"] == "executor"
+
     assert payload["doc"]["claim"]["execution_policy"]["resolved"] == %{
              "agent_type" => "executor",
              "model" => "api-model"
