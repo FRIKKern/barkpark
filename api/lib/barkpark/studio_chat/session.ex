@@ -22,6 +22,8 @@ defmodule Barkpark.StudioChat.Session do
   # exited   — the process died (crash or clean exit); next send lazy-resumes
   @statuses ~w(active working exited)
   @title_sources ~w(default ai human)
+  @providers ~w(claude codex)
+  @execution_targets ~w(managed registered_host)
   # Permission modes the CLI accepts (mirrors BarkparkWeb.Studio.ClaudeChat.modes/0,
   # kept here so the context layer validates a mode without reaching into web).
   # The two constants move TOGETHER (charter D48). `bypassPermissions` is a legal
@@ -46,6 +48,14 @@ defmodule Barkpark.StudioChat.Session do
     # Stamped by `StudioChat.create_session/2` from the caller's scope; the
     # `:global` superuser path stamps NULL. See `Barkpark.StudioChat` store seal.
     field :owner_workspace_id, Ecto.UUID
+
+    # Provider identity and execution location are independent, durable axes.
+    # They are create-only: no update changeset casts them. `provider_session_id`
+    # is the opaque native resume/thread id and is set once by the runtime seam.
+    field :provider, :string, default: "claude"
+    field :execution_target, :string, default: "managed"
+    field :execution_host_id, Ecto.UUID
+    field :provider_session_id, :string
 
     field :cwd, :string
     field :mode, :string
@@ -111,6 +121,12 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Legal title sources."
   def title_sources, do: @title_sources
 
+  @doc "Supported provider identities."
+  def providers, do: @providers
+
+  @doc "Supported execution locations."
+  def execution_targets, do: @execution_targets
+
   @doc "Legal permission modes OFFERED in the picker (mirrors ClaudeChat.modes/0)."
   def modes, do: @modes
 
@@ -123,7 +139,10 @@ defmodule Barkpark.StudioChat.Session do
   @doc "Modes `set_mode/2` may persist — the offered six plus the legacy `default`."
   def persistable_modes, do: @persistable_modes
 
-  @create_fields ~w(id owner_workspace_id title title_source cwd mode model status last_active_at summary)a
+  @create_fields ~w(
+    id owner_workspace_id provider execution_target execution_host_id provider_session_id
+    title title_source cwd mode model status last_active_at summary
+  )a
 
   @doc """
   Changeset for creating a session. `id` is REQUIRED — the caller mints the UUID
@@ -132,12 +151,60 @@ defmodule Barkpark.StudioChat.Session do
   def create_changeset(session, attrs) do
     session
     |> cast(attrs, @create_fields)
+    |> put_legacy_identity_defaults()
     |> maybe_default_last_active()
     |> maybe_default_last_visited()
     |> validate_required([:id])
     |> validate_uuid(:id)
+    |> validate_uuid(:execution_host_id)
+    |> validate_inclusion(:provider, @providers)
+    |> validate_inclusion(:execution_target, @execution_targets)
+    |> validate_execution_host()
+    |> validate_length(:provider_session_id, min: 1)
+    |> check_constraint(:provider, name: :chat_sessions_provider_check)
+    |> check_constraint(:execution_target, name: :chat_sessions_execution_target_check)
+    |> check_constraint(:execution_host_id, name: :chat_sessions_execution_host_check)
+    |> check_constraint(:provider_session_id, name: :chat_sessions_provider_session_id_check)
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:title_source, @title_sources)
+  end
+
+  defp put_legacy_identity_defaults(changeset) do
+    changeset =
+      changeset
+      |> put_default(:provider, "claude")
+      |> put_default(:execution_target, "managed")
+
+    case {get_field(changeset, :provider), get_field(changeset, :provider_session_id),
+          get_field(changeset, :id)} do
+      {"claude", nil, id} when is_binary(id) -> put_change(changeset, :provider_session_id, id)
+      _ -> changeset
+    end
+  end
+
+  defp put_default(changeset, field, value) do
+    if is_nil(get_field(changeset, field)),
+      do: put_change(changeset, field, value),
+      else: changeset
+  end
+
+  defp validate_execution_host(changeset) do
+    case {get_field(changeset, :execution_target), get_field(changeset, :execution_host_id)} do
+      {"managed", nil} ->
+        changeset
+
+      {"managed", _host_id} ->
+        add_error(changeset, :execution_host_id, "must be empty for managed execution")
+
+      {"registered_host", nil} ->
+        add_error(changeset, :execution_host_id, "is required for registered-host execution")
+
+      {"registered_host", _host_id} ->
+        changeset
+
+      _ ->
+        changeset
+    end
   end
 
   defp maybe_default_last_active(changeset) do

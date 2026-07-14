@@ -1,0 +1,53 @@
+defmodule Barkpark.StudioChat.Runtime.Claude do
+  @moduledoc "Claude implementation of the provider-neutral Studio Chat runtime contract."
+
+  @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+  alias Barkpark.StudioChat.Probe
+  alias Barkpark.StudioChat.Runtime.Capabilities
+  alias BarkparkWeb.Studio.ClaudeChat
+
+  @impl true
+  def start(opts), do: start_session(opts, false)
+
+  @impl true
+  def resume(opts), do: start_session(opts, true)
+
+  @impl true
+  def send_turn(session, content), do: ClaudeChat.send_message(session, content)
+
+  @impl true
+  def steer(session, %{mode: mode}), do: ClaudeChat.set_permission_mode(session, mode)
+  def steer(session, %{model: model}), do: ClaudeChat.set_model(session, model)
+  def steer(_session, command), do: {:error, {:unsupported_steer, command}}
+
+  @impl true
+  def interrupt(session), do: ClaudeChat.interrupt(session)
+
+  @impl true
+  def answer_approval(session, request_id, decision) do
+    ClaudeChat.respond_permission(session, request_id, decision)
+  end
+
+  @impl true
+  def close(session), do: ClaudeChat.close(session)
+
+  @impl true
+  def readiness(_opts), do: Probe.probe(:claude)
+
+  @impl true
+  def capabilities, do: Capabilities.claude()
+
+  defp start_session(opts, resume?) do
+    session_opts =
+      opts
+      |> Map.get(:session_opts, %{})
+      |> Map.put(:resume, resume?)
+
+    ClaudeChat.start_session(%{
+      sink: Map.fetch!(opts, :sink),
+      mode: Map.get(opts, :mode, "plan"),
+      session_opts: session_opts
+    })
+  end
+end
