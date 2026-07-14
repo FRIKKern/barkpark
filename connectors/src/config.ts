@@ -39,6 +39,24 @@ export interface BridgeConfig {
    * of demanding a flag day.
    */
   previousCredentialKeys: string[];
+  /**
+   * The HMAC secret that makes a CONNECT TICKET unforgeable
+   * (`CONNECTORS_CONNECT_SECRET`, charter D50). Shared with the BEAM, which mints
+   * the tickets this bridge verifies; generated once by `instance-deploy.sh`,
+   * exactly like `CONNECTORS_CREDENTIAL_KEY`.
+   *
+   * OPTIONAL — and unlike `credentialKey` it is deliberately NOT read through
+   * `required()`. Absent ⇒ the connect routes are simply NOT MOUNTED (with a loud
+   * boot log) and answer the same opaque 404 as any unknown path. A `required()`
+   * here would mean every host whose `.env` predates this feature REFUSES TO BOOT,
+   * turning `/connectors` into the maintenance 503 for every tenant on the box —
+   * an outage caused by a feature nobody is using yet. It also removes the
+   * merge-order hazard between this slice and the deploy slice that writes the env.
+   *
+   * Never a plaintext fallback and never a default value: an empty secret would
+   * make HMAC verify anything an attacker signs with an empty key.
+   */
+  connectSecret?: string;
   /** The agent's display name in a channel. */
   userName: string;
   /** The inbound HTTP transport for webhook channels (Slack/Teams/WhatsApp). */
@@ -143,11 +161,16 @@ function splitKeys(value: string | undefined): string[] {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
   warnRetiredEnv(env);
 
+  // Blank is the same as absent. A whitespace-only CONNECTORS_CONNECT_SECRET must
+  // NOT mount the routes with an effectively empty HMAC key.
+  const connectSecret = env["CONNECTORS_CONNECT_SECRET"]?.trim();
+
   return {
     databaseUrl: required(env, "DATABASE_URL"),
     apiUrl: required(env, "BARKPARK_API_URL"),
     credentialKey: required(env, "CONNECTORS_CREDENTIAL_KEY"),
     previousCredentialKeys: splitKeys(env["CONNECTORS_CREDENTIAL_KEY_PREVIOUS"]),
+    ...(connectSecret ? { connectSecret } : {}),
     userName: env["BRIDGE_USER_NAME"]?.trim() || "barkpark",
     webhook: loadWebhookConfig(env),
   };

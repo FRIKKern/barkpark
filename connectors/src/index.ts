@@ -35,6 +35,7 @@ import {
 } from "./connectors/whatsapp.js";
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
+import type { ConnectDeps } from "./http/connect.js";
 import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
 import { createBridgeState } from "./state/state-adapter.js";
@@ -43,7 +44,11 @@ import {
   createThreadSessionMap,
   type ThreadSessionMap,
 } from "./state/thread-session-map.js";
-import { createInstallsLookup } from "./tenant/installs.js";
+import {
+  createInstallsLookup,
+  deleteInstall,
+  upsertInstall,
+} from "./tenant/installs.js";
 
 /**
  * The Barkpark Connectors bridge (charter D4/D27/D32).
@@ -435,6 +440,50 @@ export async function startBridge(
     return entry;
   };
 
+  /**
+   * ONE BAD TOKEN MUST NOT TAKE THE FLEET DOWN (charter D53).
+   *
+   * `bringUp` awaits `chat.initialize()`, and a revoked Telegram token throws
+   * `AuthenticationError` straight out of it. Before this wave nothing caught it:
+   * the rejection escaped `startBridge`, `main()` called `process.exit(1)`, systemd
+   * `Restart=on-failure` crash-looped the unit, and `instance-deploy.sh` eventually
+   * ran `systemctl disable --now barkpark-connectors` — at which point `/connectors`
+   * was the maintenance 503 FOR EVERY TENANT. And because `listInstalls` is
+   * `ORDER BY install_key`, the LOWEST-SORTING bad row poisoned every install after
+   * it: the healthy tenant never mounted at all.
+   *
+   * This ships WITH the connect loop rather than as later hardening, and that is
+   * the whole argument for its urgency: paste-a-token makes bad tokens ROUTINE, and
+   * a token that is revoked after it was pasted fails at the NEXT RESTART — long
+   * after the operator who could explain it has gone home.
+   *
+   * So: at BOOT, one bad install is skipped, loudly, and everyone else is served. A
+   * bridge with zero healthy installs still comes up and still answers /health —
+   * because the deploy's liveness probe must be able to tell "the process is fine,
+   * one tenant's token is not" from "the process is dead".
+   *
+   * The RUNTIME path (`addInstall`) deliberately still THROWS: the connect route
+   * has a human waiting on the other end of it, and it must answer `mount_failed`
+   * and roll its write back rather than report success about a bot that will never
+   * speak.
+   */
+  const bringUpAtBoot = async (
+    connector: Connector,
+    install: ConnectorInstall,
+  ): Promise<void> => {
+    try {
+      await bringUp(connector, install);
+    } catch (error) {
+      console.error(
+        `[bridge] FAILED to mount ${connector.id} install=${install.installKey} ` +
+          `workspace=${install.workspaceId} — SKIPPING it and continuing to boot. ` +
+          "The credential is most likely revoked or rotated: re-connect this install. " +
+          "Every other install on this bridge is unaffected.",
+        error,
+      );
+    }
+  };
+
   const takeDown = async (
     provider: string,
     installKey: string,
@@ -454,42 +503,6 @@ export async function startBridge(
     return true;
   };
 
-  for (const connector of registry.channels()) {
-    for (const install of await installs.listInstalls(connector.id)) {
-      await bringUp(connector, install);
-    }
-  }
-
-  if (mounted.length === 0) {
-    console.warn(
-      "[bridge] no connector installs found in chat_bridge.connector_installs — " +
-        "nothing to listen on. See connectors/docs/telegram-smoke.md to register a bot.",
-    );
-  }
-
-  // The listener comes up even with zero webhook installs today: the whole point
-  // of dynamic mounting is that the FIRST install must not need a restart.
-  let webhookServer: WebhookServer | undefined;
-  if (config.webhook.enabled) {
-    webhookServer = await startWebhookServer({
-      registry,
-      installs,
-      mounts,
-      // LOOPBACK behind Caddy (D34). Binding every interface would expose the
-      // seam — and the x-forwarded-* headers it trusts — straight to the internet.
-      host: config.webhook.host,
-      port: config.webhook.port,
-      pathPrefix: config.webhook.pathPrefix,
-      publicBaseUrl: config.webhook.publicBaseUrl,
-      maxBodyBytes: config.webhook.maxBodyBytes,
-    });
-    console.log(
-      `[bridge] webhooks on ${config.webhook.host}:${webhookServer.port}` +
-        `${config.webhook.pathPrefix}/webhooks/… (${mounts.size()} mounted); ` +
-        `health: ${config.webhook.pathPrefix}/health`,
-    );
-  }
-
   const addInstall = async (install: ConnectorInstall): Promise<MountedInstall> => {
     const connector = registry.get(install.provider);
     if (!connector) {
@@ -504,6 +517,76 @@ export async function startBridge(
     await takeDown(install.provider, install.installKey);
     return bringUp(connector, install);
   };
+
+  for (const connector of registry.channels()) {
+    for (const install of await installs.listInstalls(connector.id)) {
+      // Contained (D53): a bad row is skipped, not fatal. See `bringUpAtBoot`.
+      await bringUpAtBoot(connector, install);
+    }
+  }
+
+  if (mounted.length === 0) {
+    console.warn(
+      "[bridge] no connector installs found in chat_bridge.connector_installs — " +
+        "nothing to listen on. See connectors/docs/telegram-smoke.md to register a bot.",
+    );
+  }
+
+  /**
+   * The connect loop's deps (D50/D51) — built ONLY when the bridge has a connect
+   * secret. Absent ⇒ `connect` is undefined ⇒ the routes are not mounted and every
+   * one of their paths is the same opaque 404 as any unknown route.
+   */
+  const connectDeps: ConnectDeps | undefined = config.connectSecret
+    ? {
+        secret: config.connectSecret,
+        registry,
+        installs,
+        upsertInstall: (install) => upsertInstall(pool, cipher, install),
+        deleteInstall: (provider, installKey) =>
+          deleteInstall(pool, provider, installKey),
+        // The RUNTIME mount, which throws — so a failed mount becomes a 502
+        // `mount_failed` and the row that caused it is deleted (see http/connect.ts),
+        // rather than a "connected!" about a bot that will never answer.
+        mountInstall: addInstall,
+        unmountInstall: takeDown,
+      }
+    : undefined;
+
+  if (!connectDeps) {
+    console.warn(
+      "[bridge] CONNECTORS_CONNECT_SECRET is not set — the connect routes " +
+        `(${config.webhook.pathPrefix}/connect, /connect/validate, /disconnect) are ` +
+        "NOT MOUNTED and answer 404. Installs must be written to " +
+        "chat_bridge.connector_installs by hand until the deploy provisions the secret. " +
+        "This is not an error: the bridge boots and serves every existing install.",
+    );
+  }
+
+  // The listener comes up even with zero webhook installs today: the whole point
+  // of dynamic mounting is that the FIRST install must not need a restart.
+  let webhookServer: WebhookServer | undefined;
+  if (config.webhook.enabled) {
+    webhookServer = await startWebhookServer({
+      registry,
+      installs,
+      mounts,
+      ...(connectDeps ? { connect: connectDeps } : {}),
+      // LOOPBACK behind Caddy (D34). Binding every interface would expose the
+      // seam — and the x-forwarded-* headers it trusts — straight to the internet.
+      host: config.webhook.host,
+      port: config.webhook.port,
+      pathPrefix: config.webhook.pathPrefix,
+      publicBaseUrl: config.webhook.publicBaseUrl,
+      maxBodyBytes: config.webhook.maxBodyBytes,
+    });
+    console.log(
+      `[bridge] webhooks on ${config.webhook.host}:${webhookServer.port}` +
+        `${config.webhook.pathPrefix}/webhooks/… (${mounts.size()} mounted); ` +
+        `health: ${config.webhook.pathPrefix}/health` +
+        (connectDeps ? `; connect: ${config.webhook.pathPrefix}/connect` : ""),
+    );
+  }
 
   return {
     pool,

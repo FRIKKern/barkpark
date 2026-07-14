@@ -285,7 +285,9 @@ function createScopedInstallationProvider(
       // A Slack install with no bot token is not a token to fall back FROM — it
       // is an install that cannot speak. Return null: `resolveTokenForTeam` then
       // answers 200 and never calls `processEventPayload` (no session, no post).
-      if (row.credentialRef === null) return null;
+      // Absent and null are the same nothing (`credentialRef` is optional in the
+      // TYPE since D52 — absent means "leave the column alone" on the write path).
+      if (!row.credentialRef) return null;
 
       const botToken = blankToNull(await decrypt(row.credentialRef));
       if (!botToken) return null;

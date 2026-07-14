@@ -121,10 +121,11 @@ function requireString(record: Record<string, unknown>, field: string): string {
  * Cloud credentials, loudly.
  */
 export function parseIMessageCredential(
-  credentialRef: string | null,
+  credentialRef: string | null | undefined,
 ): IMessageCredential {
-  // NULL and "" both mean "the Mac this process runs on" — the local relay needs
-  // no stored secret. (NULL is a first-class column state since D42.)
+  // NULL, absent and "" all mean "the Mac this process runs on" — the local relay
+  // needs no stored secret. (NULL is a first-class column state since D42;
+  // `undefined` since D52 made `credentialRef` optional on the write path.)
   const raw = credentialRef?.trim() ?? "";
 
   if (raw === "" || raw === "local") return { mode: "local" };

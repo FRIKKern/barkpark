@@ -5,6 +5,7 @@ import {
 import type { Adapter } from "chat";
 
 import type {
+  ConnectValidation,
   Connector,
   ConnectorInstall,
   InboundEvent,
@@ -34,9 +35,106 @@ import { credentialBoundResolver } from "../tenant/resolve.js";
 
 export const TELEGRAM_PROVIDER = "telegram";
 
+/** Telegram's Bot API. `getMe` is the cheapest authenticated call it has. */
+const TELEGRAM_API_BASE = "https://api.telegram.org";
+
 export interface TelegramConnectorOptions {
   /** getUpdates long-polling (default) needs no public URL. */
   mode?: "polling" | "webhook" | "auto";
+  /** Injected for `connect.validate` — tests NEVER hit the network. */
+  fetch?: typeof fetch;
+  /** Override the Bot API origin (tests point it at a local recorder). */
+  apiBase?: string;
+}
+
+/** The slice of Telegram's `getMe` response the connect flow reads. */
+interface TelegramGetMe {
+  ok?: boolean;
+  description?: string;
+  result?: { id?: number; username?: string; first_name?: string };
+}
+
+/**
+ * PASTE-MODE VALIDATION (D51) — `GET /bot<token>/getMe`.
+ *
+ * The credential is the whole of what Telegram needs, so "is this token good?" is
+ * one authenticated round trip. It answers 401 `{"ok":false,"description":
+ * "Unauthorized"}` for a revoked or mistyped token, which is precisely the failure
+ * we want to surface AT PASTE TIME rather than at the next restart (D53) — where it
+ * would throw out of `chat.initialize()` and, before this wave, crash-loop the unit.
+ *
+ * Nothing is written here, and the token is never logged. Every failure is a TYPED
+ * refusal, not a throw: a bad paste is a 422 with a reason a human can act on, not
+ * a 500.
+ */
+async function validateTelegramToken(
+  botToken: string,
+  doFetch: typeof fetch,
+  apiBase: string,
+): Promise<ConnectValidation> {
+  // Shape first: `<digits>:<secret>`. A bare word is not a token, and asking
+  // Telegram about it is a round trip we can spend on nothing.
+  //
+  // The regex, and NOT `telegramBotIdFromToken`, is the guard here — and that is a
+  // deliberate correction, not a duplication. `telegramBotIdFromToken("not-a-token")`
+  // returns "not-a-token": it splits on ":" and only rejects an EMPTY first
+  // segment, so it accepts any non-empty string. That is harmless where it is used
+  // (deriving a key from a token that has already been proven good) and useless as
+  // a paste-time check. Tightening it is a separate change with its own callers to
+  // consider; filed as `connectors-telegram-token-shape-guard`.
+  if (!/^\d+:.+$/.test(botToken.trim())) {
+    return {
+      ok: false,
+      reason:
+        'that does not look like a Telegram bot token — @BotFather issues them as "<bot_id>:<secret>", e.g. 123456789:AAE…',
+    };
+  }
+  const botId = telegramBotIdFromToken(botToken);
+
+  let response: Response;
+  try {
+    response = await doFetch(`${apiBase}/bot${botToken}/getMe`, { method: "GET" });
+  } catch (error) {
+    // Telegram unreachable is NOT "your token is bad" — say which, or the operator
+    // re-pastes a perfectly good token five times.
+    return {
+      ok: false,
+      reason: `could not reach Telegram to check the token: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  let payload: TelegramGetMe;
+  try {
+    payload = (await response.json()) as TelegramGetMe;
+  } catch {
+    return {
+      ok: false,
+      reason: `Telegram answered HTTP ${response.status} with a body that is not JSON`,
+    };
+  }
+
+  if (!response.ok || payload.ok !== true || !payload.result) {
+    return {
+      ok: false,
+      reason:
+        payload.description ??
+        `Telegram rejected the token (HTTP ${response.status})`,
+    };
+  }
+
+  const username = payload.result.username;
+  return {
+    ok: true,
+    // The BOT ID from the token — not `result.id` — because the bot id is what the
+    // install key must be for `credential-bound` routing to work, and it is the
+    // half of the token we can derive without trusting the response body.
+    installKey: botId,
+    displayName: username
+      ? `@${username}`
+      : (payload.result.first_name ?? `bot ${botId}`),
+  };
 }
 
 /**
@@ -57,12 +155,28 @@ export function createTelegramConnector(
 ): Connector {
   const mode = options.mode ?? "polling";
   const resolver = credentialBoundResolver();
+  // Bound at construction, not read from the global at call time: a test that
+  // injects a fetch must be certain no code path can reach the real network.
+  const doFetch = options.fetch ?? fetch;
+  const apiBase = (options.apiBase ?? TELEGRAM_API_BASE).replace(/\/+$/, "");
 
   return {
     id: TELEGRAM_PROVIDER,
     direction: "channel",
     auth: "token",
     tenantResolution: "credential-bound",
+
+    /**
+     * Two-minute onboarding (D51): the operator pastes the BotFather token and
+     * that is the entire credential. No OAuth app, no admin consent, no public URL.
+     */
+    connect: {
+      mode: "paste",
+      credentialLabel: "Bot token from @BotFather",
+      helpUrl: "https://core.telegram.org/bots/features#botfather",
+      validate: (credential: string) =>
+        validateTelegramToken(credential, doFetch, apiBase),
+    },
 
     /**
      * One adapter per INSTALL — built from that workspace's own bot token.
@@ -77,8 +191,11 @@ export function createTelegramConnector(
      * another workspace's name.
      */
     adapterFactory(install: ConnectorInstall): TelegramAdapter {
+      // `credentialRef` is optional in the TYPE since D52 (absent = "don't touch
+      // this column" on the write path), so absent and null are both "no
+      // credential" here — and for a credential-bound connector that is fatal.
       const botToken = install.credentialRef;
-      if (botToken === null || botToken.trim() === "") {
+      if (!botToken || botToken.trim() === "") {
         throw new Error(
           `telegram: install "${install.installKey}" (workspace ${install.workspaceId}) ` +
             "has no credential_ref — Telegram is bring-your-own-bot and the bot token " +

@@ -32,6 +32,7 @@ import { CredentialOpenError } from "../crypto/credential-cipher.js";
 import type {
   ConnectorInstall,
   InstallsLookup,
+  MutableInstallsLookup,
   WorkspaceId,
 } from "../connector/types.js";
 
@@ -95,6 +96,70 @@ const SELECT_INSTALLS_FOR_PROVIDER = `
     FROM chat_bridge.connector_installs
    WHERE provider = $1
    ORDER BY install_key
+`;
+
+/**
+ * The write path (charter D52) — one atomic statement, NO read-modify-write.
+ *
+ * A NULL parameter now means PRESERVE, not "wipe" — but ONLY where preserving is
+ * possible. Both blobs are AAD-bound to `(provider, install_key, workspace_id)`
+ * (D37), so a preserved blob is openable exactly when the workspace has not
+ * changed. The two constraints — "don't clobber a sibling secret" and "never carry
+ * a secret across a tenant move" — therefore collapse onto ONE predicate, and the
+ * whole fix is a CASE per column:
+ *
+ *   EXCLUDED not null  -> take the new blob            (the caller supplied one)
+ *   same workspace     -> keep the stored blob         (AAD unchanged: it opens)
+ *   otherwise          -> NULL                         (a moved tenant loses it)
+ *
+ * WHY NOT `COALESCE(EXCLUDED.x, connector_installs.x)`, the obvious one-liner: it
+ * is WORSE THAN THE BUG. On a workspace change it retains a blob sealed under the
+ * OLD identity, which can never be opened again — `toInstall()` fails closed on it
+ * and the ENTIRE install disappears from every read. An unrecoverable ciphertext
+ * has replaced a recoverable NULL.
+ *
+ * WHY NOT "re-seal both blobs under the new workspace": re-sealing a
+ * WORKSPACE-BOUND chat token under B's AAD hands B a token that still
+ * AUTHENTICATES AS A. That is the cross-tenant leak D35 exists to prevent, rebuilt
+ * inside its own fix, with the AAD defence disabled because we disabled it
+ * ourselves. A tenant move drops the secrets; it does not launder them.
+ *
+ * Note the ELSE-NULL arm is not merely "safe", it is the ONLY honest answer: after
+ * a workspace move the operator MUST re-paste, because nobody — including us — can
+ * open what the old identity sealed.
+ */
+const UPSERT_INSTALL = `
+  INSERT INTO chat_bridge.connector_installs
+    (provider, install_key, workspace_id, credential_ref, chat_token_ref)
+  VALUES ($1, $2, $3, $4, $5)
+  ON CONFLICT (provider, install_key)
+  DO UPDATE SET
+    workspace_id   = EXCLUDED.workspace_id,
+    credential_ref = CASE
+                       WHEN EXCLUDED.credential_ref IS NOT NULL
+                         THEN EXCLUDED.credential_ref
+                       WHEN connector_installs.workspace_id = EXCLUDED.workspace_id
+                         THEN connector_installs.credential_ref
+                       ELSE NULL
+                     END,
+    chat_token_ref = CASE
+                       WHEN EXCLUDED.chat_token_ref IS NOT NULL
+                         THEN EXCLUDED.chat_token_ref
+                       WHEN connector_installs.workspace_id = EXCLUDED.workspace_id
+                         THEN connector_installs.chat_token_ref
+                       ELSE NULL
+                     END
+`;
+
+/**
+ * The disconnect path (D51/D52). The bridge had no SQL DELETE at all before this
+ * wave: `Bridge.removeInstall` unmounts in memory, so the row survived and the
+ * next restart mounted the "disconnected" bot straight back.
+ */
+const DELETE_INSTALL = `
+  DELETE FROM chat_bridge.connector_installs
+   WHERE provider = $1
+     AND install_key = $2
 `;
 
 /**
@@ -230,8 +295,12 @@ function logOpenFailure(
 export function createInstallsLookup(
   db: Queryable,
   cipher: CredentialCipher,
-): InstallsLookup {
+): MutableInstallsLookup {
   return {
+    async deleteInstall(provider, installKey) {
+      return deleteInstall(db, provider, installKey);
+    },
+
     async lookupInstall(provider, installKey) {
       // Fail closed BEFORE touching the database.
       if (isBlankKey(provider) || isBlankKey(installKey)) return null;
@@ -273,26 +342,44 @@ export function createInstallsLookup(
 }
 
 /**
- * Register (or update) ONE install — the operator/OAuth write path (D35).
+ * Register (or update) ONE install — the operator/OAuth/connect write path
+ * (D35/D52).
  *
  * Seals BOTH secrets against this row's identity before they touch SQL, so
  * `connector_installs` never holds a plaintext provider secret or a plaintext
  * chat token. There is no code path in this module that writes either column
  * unsealed.
  *
- * `chatToken` is optional: an install may be created before its workspace-bound
- * `chat` ApiToken exists (the OAuth callback lands the provider secret first).
- * Absent => the column is set NULL, and the install is routable but not runnable
- * until a token is provisioned. It is never defaulted to an operator token.
+ * THE THREE-WAY MEANING OF A SECRET FIELD, and it is the whole of D52:
  *
- * `credentialRef` is optional for the same structural reason (D42): a Teams
- * install has NO per-workspace provider secret — one operator Azure app serves
- * every customer org. Absent => the column is set NULL. A connector that needs a
- * credential rejects the null at mount, in its own `adapterFactory`.
+ *   - a NON-BLANK string  => seal it and STORE it.
+ *   - ABSENT (`undefined`) => "I am not touching this column."
+ *         On INSERT that lands NULL (there is nothing to preserve). On UPDATE the
+ *         stored blob is PRESERVED — but only when the workspace is unchanged, so
+ *         a preserved blob is always one that can still be opened (its AAD holds).
+ *   - `null` / `""`       => the same as absent, deliberately: `isBlankSecret`
+ *         cannot tell them apart and neither can any caller, so treating them
+ *         differently would be a distinction nobody could rely on. To REVOKE a
+ *         secret, delete the row ({@link deleteInstall}) and re-connect. That is
+ *         what DISCONNECT does.
  *
- * NOTE the seal is IDENTITY-BOUND: moving a row to another `workspace_id` (an
- * UPDATE that leaves the blobs alone) makes both blobs un-openable. That is the
- * intended behaviour — a stolen tenant is a dead tenant, not a served one.
+ * The bug this replaces: the old `ON CONFLICT DO UPDATE` set all three columns
+ * unconditionally, and `isBlankSecret(undefined)` is true — so the Slack OAuth
+ * callback (which builds its install with NO `chatToken` key: `oauth/slack-oauth.ts`,
+ * the ONLY production caller) silently WIPED `chat_token_ref` to NULL on every
+ * re-auth. Routing kept working, the agent went unreachable, and nothing errored.
+ *
+ * `credentialRef` absent is ALSO a legitimate steady state (D42): a Teams install
+ * has NO per-workspace provider secret — one operator Azure app serves every
+ * customer org — so a fresh Teams row lands `credential_ref` NULL and stays that
+ * way. A connector that DOES need a credential rejects the null at mount, in its
+ * own `adapterFactory`.
+ *
+ * NOTE the seal is IDENTITY-BOUND: an install MOVED to another `workspace_id`
+ * cannot carry its old blobs (they would never open again) and must not be re-sealed
+ * into the new tenant (that would hand B a token authenticating as A). Both
+ * un-supplied secrets are therefore NULLed by the move, and the operator re-pastes.
+ * See {@link UPSERT_INSTALL}.
  */
 export async function upsertInstall(
   db: Queryable,
@@ -319,22 +406,43 @@ export async function upsertInstall(
     ? null
     : cipher.seal(install.chatToken as string, identity);
 
-  await db.query(
-    `INSERT INTO chat_bridge.connector_installs
-       (provider, install_key, workspace_id, credential_ref, chat_token_ref)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (provider, install_key)
-     DO UPDATE SET workspace_id   = EXCLUDED.workspace_id,
-                   credential_ref = EXCLUDED.credential_ref,
-                   chat_token_ref = EXCLUDED.chat_token_ref`,
-    [
-      install.provider,
-      install.installKey,
-      install.workspaceId,
-      sealedCredential,
-      sealedChatToken,
-    ],
-  );
+  await db.query(UPSERT_INSTALL, [
+    install.provider,
+    install.installKey,
+    install.workspaceId,
+    sealedCredential,
+    sealedChatToken,
+  ]);
+}
+
+/**
+ * DELETE one install row — the durable half of a disconnect (D51).
+ *
+ * Returns `true` when a row was actually removed. The caller (the disconnect
+ * route) has already checked that the row belongs to the ticket's workspace: this
+ * function is keyed by the PRIMARY KEY alone and is NOT a tenant boundary. Do not
+ * call it with an unverified `(provider, installKey)` pair.
+ *
+ * Deliberately unconditional on the secrets: the row IS the install, and dropping
+ * it drops both sealed blobs with it. There is no "revoke the credential but keep
+ * the row" state, because since D52 a null secret means PRESERVE — so revocation
+ * has to be a DELETE or it is nothing at all.
+ */
+export async function deleteInstall(
+  db: Queryable,
+  provider: string,
+  installKey: string,
+): Promise<boolean> {
+  if (isBlankKey(provider) || isBlankKey(installKey)) return false;
+  const result = (await db.query(DELETE_INSTALL, [provider, installKey])) as {
+    rows: unknown[];
+    rowCount?: number | null;
+  };
+  // `pg` reports rowCount; a structural `Queryable` (a test double) may not, in
+  // which case "a delete was attempted against a real row" is the best we can say.
+  return result.rowCount === undefined || result.rowCount === null
+    ? true
+    : result.rowCount > 0;
 }
 
 /**
@@ -358,7 +466,7 @@ function installKeyOf(provider: string, installKey: string): string {
  */
 export function createInMemoryInstallsLookup(
   installs: Iterable<ConnectorInstall>,
-): InstallsLookup {
+): MutableInstallsLookup {
   const table = new Map<string, ConnectorInstall>();
   for (const install of installs) {
     table.set(installKeyOf(install.provider, install.installKey), install);
@@ -375,6 +483,12 @@ export function createInMemoryInstallsLookup(
   return {
     async lookupInstall(provider, installKey) {
       return find(provider, installKey);
+    },
+
+    /** Same contract as the SQL one: `true` only when a row was really there. */
+    async deleteInstall(provider, installKey) {
+      if (isBlankKey(provider) || isBlankKey(installKey)) return false;
+      return table.delete(installKeyOf(provider, installKey));
     },
 
     async resolveWorkspace(provider, installKey) {
