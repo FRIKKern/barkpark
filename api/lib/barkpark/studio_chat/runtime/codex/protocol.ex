@@ -193,8 +193,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Protocol do
       input_tokens: metric(value, "inputTokens", :input_tokens),
       cached_input_tokens: metric(value, "cachedInputTokens", :cached_input_tokens),
       output_tokens: metric(value, "outputTokens", :output_tokens),
-      reasoning_output_tokens:
-        metric(value, "reasoningOutputTokens", :reasoning_output_tokens)
+      reasoning_output_tokens: metric(value, "reasoningOutputTokens", :reasoning_output_tokens)
     }
   end
 
