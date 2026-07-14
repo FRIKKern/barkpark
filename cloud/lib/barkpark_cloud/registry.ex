@@ -347,6 +347,85 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  The decrypted Cloudflare credential for a `team` — `{:ok, %{token:,
+  account_id:, zone_id:}}` from the newest connected `cloudflare` Provider, or
+  `{:error, :no_cloudflare_provider}` when the team has connected none.
+
+  This is the D52 per-team credential seam: the CF DNS writers thread `token`
+  and `zone_id` in as ARGUMENTS, so a concurrent deploy for a DIFFERENT team can
+  never race over a shared `Application.put_env`. The stored `encrypted_token`
+  is `Vault.decrypt`'d then parsed — Cloudflare accepts EITHER a bare API-token
+  string OR a JSON blob `{api_token, account_id?, zone_id?}` (Provider validates
+  this at connect time), so both shapes decode here to the same map (`account_id`
+  / `zone_id` are `nil` for a bare token). A present-but-undecryptable /
+  unparseable ciphertext fails closed as `{:error, :cloudflare_credential_unreadable}`
+  (never a crash, never a silent standalone-bypass).
+
+  `team` is a `Team`, a team id binary, or anything `team_id/1` resolves.
+  """
+  @spec resolve_cloudflare_credential(Team.t() | binary()) ::
+          {:ok, %{token: String.t(), account_id: String.t() | nil, zone_id: String.t() | nil}}
+          | {:error, :no_cloudflare_provider | :cloudflare_credential_unreadable}
+  def resolve_cloudflare_credential(team) do
+    tid = team_id(team)
+
+    Provider
+    |> where([p], p.team_id == ^tid and p.kind == "cloudflare")
+    |> order_by([p], desc: p.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      %Provider{encrypted_token: ciphertext} ->
+        with {:ok, plaintext} <- Vault.decrypt(ciphertext),
+             {:ok, creds} <- parse_cloudflare_credential(plaintext) do
+          {:ok, creds}
+        else
+          _ -> {:error, :cloudflare_credential_unreadable}
+        end
+
+      _ ->
+        {:error, :no_cloudflare_provider}
+    end
+  end
+
+  # Cloudflare's stored credential is EITHER a JSON blob {api_token, account_id?,
+  # zone_id?} or a bare token string (Provider.validate_credential_shape gates
+  # both). A JSON object without a non-blank api_token is rejected (it can't
+  # authenticate); a non-object / non-JSON string is a bare token.
+  defp parse_cloudflare_credential(plaintext) when is_binary(plaintext) do
+    case Jason.decode(plaintext) do
+      {:ok, %{"api_token" => api_token} = blob} when is_binary(api_token) and api_token != "" ->
+        {:ok,
+         %{
+           token: api_token,
+           account_id: blank_to_nil(blob["account_id"]),
+           zone_id: blank_to_nil(blob["zone_id"])
+         }}
+
+      {:ok, %{}} ->
+        # A JSON object that carries no usable api_token can't authenticate.
+        :error
+
+      _ ->
+        case String.trim(plaintext) do
+          "" -> :error
+          token -> {:ok, %{token: token, account_id: nil, zone_id: nil}}
+        end
+    end
+  end
+
+  defp parse_cloudflare_credential(_), do: :error
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(_), do: nil
+
   @doc "List a Team's Barkparks, newest first. Scoped — never crosses teams."
   @spec list_barkparks(Team.t() | binary()) :: [Barkpark.t()]
   def list_barkparks(team) do
@@ -4633,6 +4712,46 @@ defmodule BarkparkCloud.Registry do
     site
     |> Site.runtime_changeset(%{current_deployment_id: deployment_id})
     |> Repo.update()
+  end
+
+  @doc """
+  Persist a site's Cloudflare-in-front binding (D57) — the serving/TLS mode plus
+  the CF handles (`cf_domain`, `cf_zone_id`, `cf_record_id`) — atomically after
+  the DNS record + proxy flip land. Called ONLY when a `via=cloudflare` deploy
+  has already succeeded on the CF side, so the box's row records "this site is
+  served THROUGH Cloudflare" (serving_mode: `cf_proxied`, tls_mode: `cf_internal`)
+  and the domain-status rung can read it to skip the addr==box check the
+  orange-cloud anycast would otherwise fail.
+
+  Schema-tolerant by design: it writes only the cf_* columns that actually exist
+  on the `sites` schema. The edge-binding schema slice (cf-edge-binding-schema)
+  owns those columns + a narrow changeset; until it merges this degrades to a
+  no-op update rather than crashing on an unknown field, so the deploy path
+  compiles and stays fail-closed. Once the columns land, the same call persists
+  them with no rework.
+  """
+  @spec set_cf_binding(Site.t(), map()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+  def set_cf_binding(%Site{} = site, attrs) when is_map(attrs) do
+    known = Site.__schema__(:fields)
+
+    changes =
+      for {key, value} <- attrs, key = to_existing_field(key), key in known, into: %{} do
+        {key, value}
+      end
+
+    site
+    |> Ecto.Changeset.change(changes)
+    |> Repo.update()
+  end
+
+  # Normalize a binding-attr key to an existing schema field atom without
+  # minting new atoms from arbitrary input (String.to_existing_atom guards it).
+  defp to_existing_field(key) when is_atom(key), do: key
+
+  defp to_existing_field(key) when is_binary(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> :__unknown_cf_field__
   end
 
   @doc """

@@ -64,40 +64,52 @@ defmodule BarkparkCloud.CloudflareTest do
     end
   end
 
-  describe "Fake.upsert_dns_record/2" do
+  describe "Fake.upsert_dns_record/3 (D52 token threaded as an argument)" do
     test "creates a record with a deterministic id and records the upsert" do
       rec = %{type: "A", name: "acme.example.com", content: "203.0.113.10", proxied: true}
 
       assert {:ok, %{record_id: id, name: "acme.example.com"}} =
-               Cloudflare.upsert_dns_record("zone1", rec)
+               Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
 
       assert String.starts_with?(id, "rec_fake_")
-      # Deterministic: same zone+name → same id.
-      assert {:ok, %{record_id: ^id}} = Cloudflare.upsert_dns_record("zone1", rec)
+      # Deterministic + IDEMPOTENT: a re-upsert of the same zone+name PATCHes the
+      # same record (no duplicate row) — the read-then-branch invariant.
+      assert {:ok, %{record_id: ^id}} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
 
       assert [%{proxied: true, name: "acme.example.com"} | _] = Fake.records()
     end
 
     test "an existing :id makes the upsert an update (keeps the id)" do
       rec = %{id: "rec_existing", type: "A", name: "a.example.com", content: "203.0.113.9"}
-      assert {:ok, %{record_id: "rec_existing"}} = Cloudflare.upsert_dns_record("zone1", rec)
+      assert {:ok, %{record_id: "rec_existing"}} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
     end
 
     test "a fail- zone id is rejected" do
       rec = %{type: "A", name: "x.example.com", content: "203.0.113.1"}
-      assert {:error, :upsert_failed} = Cloudflare.upsert_dns_record("fail-zone", rec)
+      assert {:error, :upsert_failed} = Cloudflare.upsert_dns_record("cf_tok", "fail-zone", rec)
+    end
+
+    test "a fail- token is rejected as an invalid credential (fail-closed)" do
+      rec = %{type: "A", name: "x.example.com", content: "203.0.113.1"}
+      assert {:error, :invalid_token} = Cloudflare.upsert_dns_record("fail-token", "zone1", rec)
+      assert Fake.records() == []
     end
   end
 
-  describe "Fake.ensure_zone_proxied/2" do
+  describe "Fake.ensure_zone_proxied/3 (D52 token threaded as an argument)" do
     test "flips a record to proxied and records it" do
-      assert {:ok, %{proxied: true}} = Cloudflare.ensure_zone_proxied("zone1", "rec_1")
+      assert {:ok, %{proxied: true}} = Cloudflare.ensure_zone_proxied("cf_tok", "zone1", "rec_1")
       assert [%{proxied: true, record_id: "rec_1"}] = Fake.proxied()
     end
 
     test "the invalid-record sentinel is not_found" do
       assert {:error, :not_found} =
-               Cloudflare.ensure_zone_proxied("zone1", Fake.invalid_record_id())
+               Cloudflare.ensure_zone_proxied("cf_tok", "zone1", Fake.invalid_record_id())
+    end
+
+    test "a fail- token is rejected as an invalid credential (fail-closed)" do
+      assert {:error, :invalid_token} = Cloudflare.ensure_zone_proxied("fail-token", "zone1", "rec_1")
+      assert Fake.proxied() == []
     end
   end
 
@@ -194,16 +206,20 @@ defmodule BarkparkCloud.CloudflareTest do
   ## Real client — fail-closed guards (never touches the wire unconfigured)
 
   describe "Real fail-closed guards" do
-    test "a connected-instance callback returns :not_configured with no token" do
-      # No config token → token/0 fails closed BEFORE any request is built.
-      assert {:error, :not_configured} =
-               Real.upsert_dns_record("zone1", %{
-                 type: "A",
-                 name: "a.example.com",
-                 content: "1.1.1.1"
-               })
+    test "a blank threaded token fails closed BEFORE any request is built (D52)" do
+      # The DNS callbacks now take the token as an ARGUMENT; a blank/nil one is
+      # :not_configured before the wire, so a caller that failed to resolve a
+      # per-team credential never reaches Cloudflare.
+      rec = %{type: "A", name: "a.example.com", content: "1.1.1.1"}
+      assert {:error, :not_configured} = Real.upsert_dns_record("", "zone1", rec)
+      assert {:error, :not_configured} = Real.upsert_dns_record(nil, "zone1", rec)
+      assert {:error, :not_configured} = Real.ensure_zone_proxied("", "zone1", "rec_1")
+      assert {:error, :not_configured} = Real.ensure_zone_proxied(nil, "zone1", "rec_1")
+    end
 
-      assert {:error, :not_configured} = Real.ensure_zone_proxied("zone1", "rec_1")
+    test "create_origin_ca_cert still fails closed on an unset config token" do
+      # create_origin_ca_cert keeps the config-token path (the TLS slice threads
+      # its own credential later) — no config token → :not_configured.
       assert {:error, :not_configured} = Real.create_origin_ca_cert(["example.com"], "CSR")
     end
 
@@ -241,9 +257,8 @@ defmodule BarkparkCloud.CloudflareTest do
       assert url == "https://api.cloudflare.com/client/v4/user/tokens/verify"
     end
 
-    test "a connected-instance upsert threads config token → transport → decoded result" do
+    test "a connected-instance upsert threads the ARG token → transport → decoded result" do
       put_cf_config(
-        token: "cf_stored",
         http_client:
           stub_http_client(
             {:ok, %{status: 200, body: ~s({"result":{"id":"rec_live","name":"a.example.com"}})}}
@@ -251,15 +266,30 @@ defmodule BarkparkCloud.CloudflareTest do
       )
 
       assert {:ok, %{record_id: "rec_live", name: "a.example.com"}} =
-               Real.upsert_dns_record("zone1", %{
+               Real.upsert_dns_record("cf_arg_token", "zone1", %{
                  type: "A",
                  name: "a.example.com",
                  content: "203.0.113.9"
                })
 
-      # The stored config token (not an arg) authenticated the call.
+      # The THREADED per-team token (D52), not config, authenticated the call —
+      # so two concurrent teams can't race over a shared put_env.
       assert_received {:cf_req, %{headers: headers}}
-      assert {"Authorization", "Bearer cf_stored"} in headers
+      assert {"Authorization", "Bearer cf_arg_token"} in headers
+    end
+
+    test "ensure_zone_proxied threads the ARG token and PATCHes proxied:true" do
+      put_cf_config(
+        http_client:
+          stub_http_client({:ok, %{status: 200, body: ~s({"result":{"proxied":true}})}})
+      )
+
+      assert {:ok, %{proxied: true}} =
+               Real.ensure_zone_proxied("cf_arg_token", "zone1", "rec_9")
+
+      assert_received {:cf_req, %{method: :patch, url: url, headers: headers}}
+      assert url == "https://api.cloudflare.com/client/v4/zones/zone1/dns_records/rec_9"
+      assert {"Authorization", "Bearer cf_arg_token"} in headers
     end
 
     test "a non-2xx status becomes a typed {:cloudflare_http_error, status, body}" do

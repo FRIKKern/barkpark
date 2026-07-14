@@ -21,8 +21,8 @@ defmodule BarkparkCloud.Cloudflare do
   `client/0` resolves the concrete client from config AT CALL TIME (a
   `runtime.exs` override wins), defaulting to `Cloudflare.Fake` — a missing
   config is the safe in-memory double, never a real Cloudflare call. The
-  capability functions (`verify_token/1`, `upsert_dns_record/2`,
-  `ensure_zone_proxied/2`, `create_origin_ca_cert/2`) delegate through it,
+  capability functions (`verify_token/1`, `upsert_dns_record/3`,
+  `ensure_zone_proxied/3`, `create_origin_ca_cert/2`) delegate through it,
   exactly like `Azure.verify/1` delegates to `Azure.client/0`.
   """
 
@@ -62,16 +62,23 @@ defmodule BarkparkCloud.Cloudflare do
   @spec verify_token(Client.token()) :: {:ok, %{status: String.t()}} | {:error, term}
   def verify_token(token), do: client().verify_token(token)
 
-  @doc "Create-or-update a DNS `record` in `zone_id`."
-  @spec upsert_dns_record(Client.zone_id(), Client.dns_record()) ::
+  @doc """
+  Create-or-update a DNS `record` in `zone_id`, authenticating with the
+  per-team `token` threaded in (D52 — never global config).
+  """
+  @spec upsert_dns_record(Client.token(), Client.zone_id(), Client.dns_record()) ::
           {:ok, %{record_id: String.t(), name: String.t()}} | {:error, term}
-  def upsert_dns_record(zone_id, record), do: client().upsert_dns_record(zone_id, record)
+  def upsert_dns_record(token, zone_id, record),
+    do: client().upsert_dns_record(token, zone_id, record)
 
-  @doc "Flip the DNS record `record_id` in `zone_id` to proxied (orange cloud)."
-  @spec ensure_zone_proxied(Client.zone_id(), String.t()) ::
+  @doc """
+  Flip the DNS record `record_id` in `zone_id` to proxied (orange cloud),
+  authenticating with the per-team `token` threaded in (D52).
+  """
+  @spec ensure_zone_proxied(Client.token(), Client.zone_id(), String.t()) ::
           {:ok, %{proxied: boolean()}} | {:error, term}
-  def ensure_zone_proxied(zone_id, record_id),
-    do: client().ensure_zone_proxied(zone_id, record_id)
+  def ensure_zone_proxied(token, zone_id, record_id),
+    do: client().ensure_zone_proxied(token, zone_id, record_id)
 
   @doc "Mint an Origin CA cert for `hostnames` from the PEM `csr`."
   @spec create_origin_ca_cert([String.t()], String.t()) ::

@@ -4772,6 +4772,13 @@ defmodule BarkparkCloud.Web.Router do
   # box through the six stages. The container path below is untouched.
   post "/v1/sites/:id/deploy" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      # cf-in-front (D57): when a deploy asks to go THROUGH Cloudflare
+      # (via=cloudflare + a domain), resolve the team's CF credential, point the
+      # domain at the box origin, flip the record proxied, and persist the
+      # binding — all BEFORE the normal build. With no `via` this is a pure
+      # no-op: the standalone deploy path below is byte-identical to today. A
+      # missing/unreadable CF provider fails closed here and NEVER half-binds.
+      with {:cont, site} <- maybe_bind_cloudflare(conn, site) do
       cond do
         site.kind == "static" ->
           deploy_static_site(conn, site)
@@ -4856,6 +4863,10 @@ defmodule BarkparkCloud.Web.Router do
                   end
               end
           end
+      end
+      else
+        # maybe_bind_cloudflare already sent the fail-closed response (409/422/502).
+        {:halt, conn} -> conn
       end
     end)
   end
@@ -8510,6 +8521,118 @@ defmodule BarkparkCloud.Web.Router do
   #
   # `no_build_source` — the container refusal about artifacts and GitHub repos —
   # is exactly what a static site must NEVER hear: it is not what it builds from.
+  # cf-in-front deploy binding (D57). Returns `{:cont, site}` to let the normal
+  # deploy proceed (the standalone path — the overwhelming common case, since a
+  # deploy WITHOUT `via` is byte-identical to today), or `{:halt, conn}` after
+  # sending a fail-closed response when a Cloudflare cutover was asked for but
+  # can't be completed. The binding is persisted LAST (after the DNS write + the
+  # proxy flip both succeed) so a deploy NEVER half-binds: if any CF step fails
+  # the site's serving_mode is left untouched and the box keeps serving directly.
+  defp maybe_bind_cloudflare(conn, site) do
+    via = conn.body_params["via"]
+    domain = conn.body_params["domain"]
+
+    cond do
+      # No `via` (or any value other than "cloudflare") → standalone, untouched.
+      via != "cloudflare" ->
+        {:cont, site}
+
+      not is_binary(domain) or String.trim(domain) == "" ->
+        {:halt,
+         json(conn, 422, %{
+           error: "cloudflare_domain_required",
+           detail: "`--via cloudflare` needs a `--domain` (the custom hostname to point at this box)"
+         })}
+
+      true ->
+        bind_cloudflare(conn, site, String.trim(domain))
+    end
+  end
+
+  defp bind_cloudflare(conn, site, domain) do
+    case Registry.resolve_cloudflare_credential(site.team_id) do
+      {:ok, %{token: token, zone_id: zone_id}} when is_binary(zone_id) and zone_id != "" ->
+        do_bind_cloudflare(conn, site, domain, token, zone_id)
+
+      {:ok, %{}} ->
+        {:halt,
+         json(conn, 422, %{
+           error: "cloudflare_zone_missing",
+           detail:
+             "the connected Cloudflare provider carries no zone_id — reconnect it with `bp provider add cloudflare` including the zone for #{domain}"
+         })}
+
+      {:error, :no_cloudflare_provider} ->
+        {:halt,
+         json(conn, 409, %{
+           error: "no_cloudflare_provider",
+           detail: "connect Cloudflare first: `bp provider add cloudflare` (the box keeps serving standalone until you do)"
+         })}
+
+      {:error, _reason} ->
+        {:halt,
+         json(conn, 409, %{
+           error: "cloudflare_credential_unreadable",
+           detail: "the stored Cloudflare credential could not be read — reconnect it with `bp provider add cloudflare`"
+         })}
+    end
+  end
+
+  defp do_bind_cloudflare(conn, site, domain, token, zone_id) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    origin = bp && bp.host
+
+    cond do
+      not is_binary(origin) or origin == "" ->
+        {:halt,
+         json(conn, 422, %{
+           error: "instance_no_origin",
+           detail:
+             "the instance hosting this site has no address yet — wait for it to finish provisioning before pointing a domain at it"
+         })}
+
+      true ->
+        # Point the domain at the box origin (A record), flip it PROXIED (orange
+        # cloud), and only THEN persist the binding — the token + zone_id are
+        # THREADED as arguments (D52), never global config.
+        with {:ok, %{record_id: record_id}} <-
+               Cloudflare.upsert_dns_record(token, zone_id, %{
+                 type: "A",
+                 name: domain,
+                 content: origin,
+                 proxied: true
+               }),
+             {:ok, %{proxied: true}} <- Cloudflare.ensure_zone_proxied(token, zone_id, record_id),
+             {:ok, bound_site} <-
+               Registry.set_cf_binding(site, %{
+                 serving_mode: "cf_proxied",
+                 tls_mode: "cf_internal",
+                 cf_domain: domain,
+                 cf_zone_id: zone_id,
+                 cf_record_id: record_id
+               }) do
+          _ =
+            Accounts.record_audit(%{
+              team_id: site.team_id,
+              actor_user_id: conn.assigns.current_user.id,
+              action: "site.cloudflare_bound",
+              target_type: "site",
+              target_id: site.id,
+              metadata: %{site_id: site.id, cf_domain: domain, cf_zone_id: zone_id}
+            })
+
+          {:cont, bound_site}
+        else
+          {:error, reason} ->
+            {:halt,
+             json(conn, 502, %{
+               error: "cloudflare_bind_failed",
+               detail: "Cloudflare rejected the DNS/proxy write: #{inspect(reason)} — the box is still serving standalone"
+             })}
+        end
+    end
+  end
+
   defp deploy_static_site(conn, site) do
     bp = Registry.get_barkpark(site.barkpark_id)
 

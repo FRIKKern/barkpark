@@ -45,7 +45,7 @@ defmodule BarkparkCloud.Billing.HttpClient do
   @connect_timeout 10_000
 
   @type request_map :: %{
-          method: :get | :post | :put | :delete,
+          method: :get | :post | :put | :patch | :delete,
           url: String.t(),
           headers: [{String.t(), String.t()}],
           body: String.t()
@@ -108,6 +108,22 @@ defmodule BarkparkCloud.Billing.HttpClient do
   # POST (content-type + body pulled out), so the JSON body rides alongside the
   # remaining headers.
   def to_httpc(%{method: :put, url: url, headers: headers, body: body}) do
+    {content_type, other_headers} = pop_content_type(headers)
+
+    request_arg =
+      {to_charlist(url), to_header_charlists(other_headers), to_charlist(content_type),
+       to_string(body)}
+
+    {request_arg, http_opts(), opts()}
+  end
+
+  # PATCH — Cloudflare's `ensure_zone_proxied` (PATCH /zones/:zone/dns_records/:id
+  # with `{"proxied": true}`, the orange-cloud flip). `:httpc` accepts the same
+  # 4-tuple form as POST/PUT (content-type + body pulled out), so the JSON body
+  # rides alongside the remaining headers. Without this clause `request/1` would
+  # FunctionClauseError-crash the first time a CF proxy flip reaches the wire
+  # (D59 — the CF scaffold's DNS path emits `:patch` and there is no catch-all).
+  def to_httpc(%{method: :patch, url: url, headers: headers, body: body}) do
     {content_type, other_headers} = pop_content_type(headers)
 
     request_arg =

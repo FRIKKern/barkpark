@@ -216,8 +216,8 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
 // build, then stream the six visible stages until the deploy lands or fails.
 func runCloudSiteDeploy(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site deploy <site> [--no-follow] [--force]"
-	a, err := parseHzArgs(args, nil, []string{"no-follow", "force"}, usage)
+	const usage = "bp cloud site deploy <site> [--no-follow] [--force] [--via cloudflare --domain <host>]"
+	a, err := parseHzArgs(args, []string{"via", "domain"}, []string{"no-follow", "force"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -225,6 +225,17 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("want exactly one <site> (usage: %s)", usage), exitUsage)
 	}
 	ref := a.pos[0]
+
+	// cf-in-front: `--via cloudflare --domain <host>` asks the control plane to
+	// point the domain at the box origin through Cloudflare (DNS + orange-cloud
+	// proxy) BEFORE the build. `--domain` without `--via` is meaningless; catch
+	// it locally rather than letting the server 4xx. Both ride the deploy body
+	// ONLY when set (mirror `--force`), so a plain deploy is byte-identical.
+	via := strings.TrimSpace(a.val("via"))
+	domain := strings.TrimSpace(a.val("domain"))
+	if domain != "" && via == "" {
+		return useError(out, "usage", "--domain needs --via cloudflare (usage: "+usage+")", exitUsage)
+	}
 
 	cfg, ok := siteCloudConfig(out, "deploy a site")
 	if !ok {
@@ -234,7 +245,7 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
-	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id, a.bools["force"])
+	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id, a.bools["force"], via, domain)
 	if derr != nil {
 		return cloudFail(out, "deploy site", derr)
 	}
