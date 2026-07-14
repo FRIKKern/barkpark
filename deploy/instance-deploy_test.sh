@@ -248,7 +248,12 @@ check "connectors unit installed"         "grep -q 'barkpark-connectors.service 
 check "connectors unit enabled + restarted" "grep -q 'systemctl enable barkpark-connectors' '$SYSCTLLOG' && grep -q 'systemctl restart barkpark-connectors' '$SYSCTLLOG'"
 check "connectors unit health-gated on is-active" "grep -q 'systemctl is-active barkpark-connectors' '$SYSCTLLOG'"
 check "active bridge stays enabled"       "! grep -q 'disable --now barkpark-connectors' '$SYSCTLLOG'"
-check "connectors.env is 0600 (holds real secrets)" "[ \"\$(stat -f '%Lp' '$TMP/connectors.env' 2>/dev/null || stat -c '%a' '$TMP/connectors.env')\" = '600' ]"
+# GNU stat FIRST, BSD second — never the reverse. On Linux `stat -f` is a
+# *filesystem* stat: it SUCCEEDS on a file and prints something that is not a
+# mode, so a `stat -f ... || stat -c ...` fallback never reaches the GNU form
+# and silently compares garbage to '600'. `stat -c` fails cleanly on macOS
+# (illegal option), so probing it first is the only ordering that works on both.
+check "connectors.env is 0600 (holds real secrets)" "[ \"\$(stat -c '%a' '$TMP/connectors.env' 2>/dev/null || stat -f '%Lp' '$TMP/connectors.env')\" = '600' ]"
 check "connectors.env pins the STABLE public front" "grep -q '^BARKPARK_API_URL=https://test.example\$' '$TMP/connectors.env'"
 check "connectors.env carries the loopback listen addr" "grep -q '^CONNECTORS_HTTP_ADDR=127.0.0.1:4020\$' '$TMP/connectors.env'"
 check "connectors.env carries the path prefix" "grep -q '^CONNECTORS_PATH_PREFIX=/connectors\$' '$TMP/connectors.env'"

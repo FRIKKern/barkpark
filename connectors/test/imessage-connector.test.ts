@@ -189,9 +189,28 @@ describe("imessage — credentials (Spectrum Cloud is FORBIDDEN)", () => {
   });
 });
 
+/**
+ * Local mode drives the Messages database on the relay Mac, so the vendor's
+ * constructor hard-refuses to build on any other platform. That refusal is the
+ * product truth (D: iMessage is a self-hosted macOS profile, never Cloud), and
+ * CI is Linux — so the local-mode leg asserts what is TRUE on the platform it
+ * runs on. It is never skipped: on Linux, reaching the macOS guard is itself
+ * proof we asked the constructor for `local: true` and handed it no cloud
+ * config, which is the whole claim of this describe block.
+ */
+const ON_MAC = process.platform === "darwin";
+
 describe("imessage — adapter construction reads NO environment", () => {
   it("builds a REAL local iMessageAdapter from the install credential", () => {
     const connector = createIMessageConnector({ logger: silentLogger });
+
+    if (!ON_MAC) {
+      expect(() => connector.adapterFactory(localInstall)).toThrow(
+        /requires macOS/,
+      );
+      return;
+    }
+
     const adapter = connector.adapterFactory(localInstall);
 
     expect(adapter.name).toBe("imessage");
@@ -221,17 +240,37 @@ describe("imessage — adapter construction reads NO environment", () => {
     // in the deployment would silently push messages through photon.codes. We
     // never call that factory; we construct the class directly, which reads
     // nothing from the environment. Poison the env and prove it.
+    //
+    // Proven on the gRPC install: self-host-grpc is the ONLY mode that carries a
+    // remote endpoint at all, so it is the only mode a stray projectId could
+    // actually divert. (Local mode has no network path to divert, and its
+    // constructor is macOS-only — see ON_MAC above.)
     vi.stubEnv("IMESSAGE_PROJECT_ID", "POISON_PROJECT");
     vi.stubEnv("IMESSAGE_PROJECT_SECRET", "POISON_SECRET");
     vi.stubEnv("IMESSAGE_SERVER_URL", "https://api.photon.codes");
     vi.stubEnv("IMESSAGE_API_KEY", "POISON_KEY");
 
     const connector = createIMessageConnector({ logger: silentLogger });
-    const adapter = connector.adapterFactory(localInstall);
+    const adapter = connector.adapterFactory(grpcInstall);
 
-    expect(internals(adapter).local).toBe(true);
+    expect(internals(adapter).local).toBe(false);
     expect(internals(adapter).projectId).toBeUndefined();
     expect(internals(adapter).projectSecret).toBeUndefined();
+    // Still pointed at YOUR Mac, not at photon.codes.
+    expect(internals(adapter).clients).toEqual([
+      {
+        address: "10.0.0.9:443",
+        phone: "+15550001111",
+        token: "relay-token-not-real",
+      },
+    ]);
+
+    if (ON_MAC) {
+      const local = connector.adapterFactory(localInstall);
+      expect(internals(local).local).toBe(true);
+      expect(internals(local).projectId).toBeUndefined();
+      expect(internals(local).projectSecret).toBeUndefined();
+    }
   });
 });
 
