@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -47,11 +48,11 @@ func TestTaskExecutionPolicyMCPCreateAndNextRoundTrip(t *testing.T) {
 
 	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
 		requestCount++
-		switch req.URL.Path {
-		case "/v1/data/mutate/production":
+		switch {
+		case strings.Contains(req.URL.Path, "/v1/data/mutate"):
 			createBody, _ = io.ReadAll(req.Body)
 			_, _ = io.WriteString(rw, `{"results":[{"id":"drafts.policy-task"}]}`)
-		case "/v1/tasks/claim":
+		case req.URL.Path == "/v1/tasks/claim":
 			claimBody, _ = io.ReadAll(req.Body)
 			_, _ = io.WriteString(rw, `{"ok":true,"doc":{"doc_id":"policy-task"}}`)
 		default:
