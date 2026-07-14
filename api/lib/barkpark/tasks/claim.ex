@@ -86,7 +86,9 @@ defmodule Barkpark.Tasks.Claim do
             # recovery path after a fence bump. A DIFFERENT worker falls through
             # to check_ready and still gets :not_ready.
             if renewal?(doc, worker_id) do
-              do_renew(doc, worker_id, caller_token_id)
+              with :ok <- validate_renewal_execution_policy(doc, opts) do
+                do_renew(doc, worker_id, caller_token_id)
+              end
             else
               with :ok <- check_ready_for_targeted_claim(doc),
                    :ok <- check_deps_satisfied(doc),
@@ -246,6 +248,25 @@ defmodule Barkpark.Tasks.Claim do
 
       {:error, errors} ->
         {:error, {:invalid_execution_policy, errors}}
+    end
+  end
+
+  # A renewal keeps the execution-policy snapshot frozen at the original
+  # claim, but caller-supplied layers still have to satisfy the same strict
+  # policy contract as a fresh claim. Resolve all four layers for validation
+  # only, then deliberately discard the newly resolved snapshot so do_renew/3
+  # preserves the existing claim.execution_policy value byte-for-byte.
+  defp validate_renewal_execution_policy(%Document{} = doc, opts) do
+    task_policy = Map.get(doc.content || %{}, "execution_policy")
+
+    case ExecutionPolicy.resolve(
+           Keyword.get(opts, :execution_policy_override),
+           task_policy,
+           Keyword.get(opts, :session_execution_policy),
+           Keyword.get(opts, :provider_execution_policy)
+         ) do
+      {:ok, _snapshot} -> :ok
+      {:error, errors} -> {:error, {:invalid_execution_policy, errors}}
     end
   end
 
