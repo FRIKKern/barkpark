@@ -46,3 +46,9 @@ jobs:
         run: bash deploy/instance-deploy_test.sh
       - name: Control-plane deploy harness
         run: bash deploy/cp-deploy_test.sh
+      # The site-spawner deploy engine ships its own offline proof (--self-test:
+      # fixture release dirs in a tmpdir, no npm/caddy/systemd needed). It is
+      # worthless unless it actually RUNS — an untested deploy engine is the
+      # weakest link in the deploy path, so gate it here alongside its siblings.
+      - name: Site deploy engine self-test
+        run: bash deploy/site-deploy.sh --self-test
