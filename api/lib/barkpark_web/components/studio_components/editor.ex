@@ -457,7 +457,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <% end %>
               <% end %>
               <div class="editor-actions">
-                <span class="save-status"><%= @save_status %></span>
+                <span class="save-status" role="status" aria-live="polite"><%= @save_status %></span>
               </div>
             </form>
           <% end %>
