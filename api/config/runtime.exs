@@ -116,6 +116,30 @@ config :barkpark, Barkpark.Vault,
     }
   ]
 
+# ── Connectors: the connect seam (connectors D50) ──────────────────────────
+#
+# CONNECTORS_CONNECT_SECRET is the SAME value the bridge reads — it is the HMAC
+# key for connect tickets, generated ONCE by deploy/instance-deploy.sh into
+# /opt/barkpark/.env and copied into /etc/barkpark/connectors.env. It is
+# deliberately OPTIONAL: absent ⇒ no connect seam (the bridge does not mount the
+# connect routes, Studio's catalog renders read-only with a banner). NEVER raise
+# on a missing secret — an instance without connectors is a normal instance, and
+# a boot failure here would take the whole app down for a feature it does not use.
+#
+# CONNECTORS_BRIDGE_URL points at the bridge's LOOPBACK listener. The default
+# matches instance-deploy.sh's CONNECTORS_HTTP_ADDR (127.0.0.1:4020) +
+# CONNECTORS_PATH_PREFIX (/connectors); override only if those move.
+connectors_env =
+  [
+    connect_secret: System.get_env("CONNECTORS_CONNECT_SECRET"),
+    bridge_url: System.get_env("CONNECTORS_BRIDGE_URL")
+  ]
+  |> Enum.reject(fn {_k, v} -> is_nil(v) or String.trim(v) == "" end)
+
+if connectors_env != [] do
+  config :barkpark, Barkpark.Connectors, connectors_env
+end
+
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
 # default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
 # REQUIRE it in prod. Base64 of 32 bytes — generate with `mix phx.gen.secret 32`
