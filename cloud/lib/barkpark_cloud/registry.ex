@@ -2204,6 +2204,25 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Disconnect a team's connected provider(s) of `kind` — drops the row(s), and the
+  encrypted credential goes with them (the plugin law: disconnecting a provider
+  degrades gracefully back to standalone). Returns `:ok` when at least one row was
+  removed, `{:error, :not_found}` when the team had none of that kind (no
+  existence leak on the caller side). Team-scoped — never crosses teams.
+  """
+  @spec disconnect_provider(Team.t() | binary(), String.t()) :: :ok | {:error, :not_found}
+  def disconnect_provider(team, kind) when is_binary(kind) do
+    tid = team_id(team)
+
+    {count, _} =
+      Provider
+      |> where([p], p.team_id == ^tid and p.kind == ^kind)
+      |> Repo.delete_all()
+
+    if count > 0, do: :ok, else: {:error, :not_found}
+  end
+
+  @doc """
   Decrypt a stored provider token back to plaintext. Returns `{:ok, token}` or
   `:error` (tampered ciphertext fails closed). Call-site sugar over
   `Vault.decrypt/1` so consumers don't reach into the schema field directly.

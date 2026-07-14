@@ -173,6 +173,10 @@ defmodule BarkparkCloud.FailureCopy do
     "We couldn't authenticate to Azure with those details. In the Azure Portal → App registrations → your app, re-check the Directory (tenant) ID, Application (client) ID and Subscription ID, and that the client secret under Certificates & secrets hasn't expired — then reconnect."
   end
 
+  def connect_remediation("cloudflare") do
+    "We couldn't reach Cloudflare with that API token. Create a token with Zone · DNS · Edit (and DNS · Read) permissions in the Cloudflare dashboard → My Profile → API Tokens → Create Token, then paste it here."
+  end
+
   def connect_remediation(_kind) do
     "We couldn't verify those credentials with the provider. Double-check them and try again."
   end

@@ -57,7 +57,7 @@ defmodule BarkparkCloud.Accounts.AuditEvent do
     barkpark.autoupdate_changed barkpark.domain_attached
     barkpark.vercel_deploy_triggered barkpark.resurrected
     env_var.created env_var.deleted
-    provider.connected
+    provider.connected provider.disconnected
     github.installation_connected github.installation_disconnected github.repo_pushed
     notifications.settings_changed notifications.channels_changed notifications.events_changed
     twofa.enabled twofa.disabled
