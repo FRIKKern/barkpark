@@ -20,6 +20,9 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
+      # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
+      - "scripts/connectors-ddl-drift-check.sh"
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
@@ -96,6 +99,9 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # connectors chat_bridge DDL drift gate — the .sh itself (the DDL sources
+      # ride the **/*.ts + **/*.exs globs, but a .sh edit isn't covered by any).
+      - "scripts/connectors-ddl-drift-check.sh"
       # paper-editor style mirror tripwire — the mirrors + the generated
       # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
@@ -182,6 +188,20 @@ jobs:
 
       - name: Doc anchors + headers (blocking)
         run: bash scripts/docs-anchors-check.sh
+
+      # Connectors chat_bridge DDL drift gate (connectors D54). The bridge OWNS
+      # the chat_bridge.connector_installs DDL (charter D28: no Ecto migration),
+      # but Elixir READS it via an @schema_prefix schema, so api/test/test_helper.exs
+      # TRANSCRIBES the SQL — a second source of truth that has ALREADY drifted
+      # once. This DB-free static check reds when connectors/src/db/schema.ts and
+      # test_helper.exs disagree on the connector_installs column set (a .ts-only
+      # OR a .exs-only change rides the **/*.ts + **/*.exs triggers above and trips
+      # it). The bundled --selftest is a durable tripwire (distrust vacuous green):
+      # it proves the gate REDs on a planted one-column drift, plants nothing.
+      - name: Connectors DDL drift gate (blocking)
+        run: |
+          bash scripts/connectors-ddl-drift-check.sh --selftest
+          bash scripts/connectors-ddl-drift-check.sh
 
       - name: Paper-editor style mirror lockstep (blocking)
         run: bash scripts/paper-editor-mirror-check.sh
