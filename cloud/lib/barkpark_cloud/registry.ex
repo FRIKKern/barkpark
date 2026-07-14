@@ -4714,45 +4714,12 @@ defmodule BarkparkCloud.Registry do
     |> Repo.update()
   end
 
-  @doc """
-  Persist a site's Cloudflare-in-front binding (D57) — the serving/TLS mode plus
-  the CF handles (`cf_domain`, `cf_zone_id`, `cf_record_id`) — atomically after
-  the DNS record + proxy flip land. Called ONLY when a `via=cloudflare` deploy
-  has already succeeded on the CF side, so the box's row records "this site is
-  served THROUGH Cloudflare" (serving_mode: `cf_proxied`, tls_mode: `cf_internal`)
-  and the domain-status rung can read it to skip the addr==box check the
-  orange-cloud anycast would otherwise fail.
-
-  Schema-tolerant by design: it writes only the cf_* columns that actually exist
-  on the `sites` schema. The edge-binding schema slice (cf-edge-binding-schema)
-  owns those columns + a narrow changeset; until it merges this degrades to a
-  no-op update rather than crashing on an unknown field, so the deploy path
-  compiles and stays fail-closed. Once the columns land, the same call persists
-  them with no rework.
-  """
-  @spec set_cf_binding(Site.t(), map()) :: {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
-  def set_cf_binding(%Site{} = site, attrs) when is_map(attrs) do
-    known = Site.__schema__(:fields)
-
-    changes =
-      for {key, value} <- attrs, key = to_existing_field(key), key in known, into: %{} do
-        {key, value}
-      end
-
-    site
-    |> Ecto.Changeset.change(changes)
-    |> Repo.update()
-  end
-
-  # Normalize a binding-attr key to an existing schema field atom without
-  # minting new atoms from arbitrary input (String.to_existing_atom guards it).
-  defp to_existing_field(key) when is_atom(key), do: key
-
-  defp to_existing_field(key) when is_binary(key) do
-    String.to_existing_atom(key)
-  rescue
-    ArgumentError -> :__unknown_cf_field__
-  end
+  # NOTE: `set_cf_binding/2` (the D57 CF-in-front persist) is defined ONCE, above,
+  # by the cf-edge-binding-schema slice — the charter D51 owner of the cf_* columns
+  # and their narrow, inclusion-validated `Site.cf_binding_changeset/2`. The DNS
+  # writer's earlier schema-tolerant stopgap was removed at review to avoid a
+  # duplicate clause (`--warnings-as-errors` merge-gate failure); the canonical
+  # validating+transactional version is call-compatible with the deploy handler.
 
   @doc """
   Transition a claimed Deployment, CASing on the worker's observed epoch. Returns
