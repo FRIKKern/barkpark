@@ -22,6 +22,7 @@ defmodule BarkparkCloud.SitesDeployTest do
   alias BarkparkCloud.Registry.{Deployment, Site, Vault}
   alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Sites.FakeBoxRelay
+  alias BarkparkCloud.StudioLinkFakeHttpClient
 
   @instance_url "https://acme.barkpark.cloud"
   @read_token "bpt_public_read_xyz"
@@ -408,6 +409,89 @@ defmodule BarkparkCloud.SitesDeployTest do
       # "nothing to do" and guessed.
       assert by_name["PLAN"] == {"skipped", "nothing to do"}
       assert by_name["BUILD"] == {"failed", "FATAL: 401 Unauthorized"}
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # BoxRelay.HTTP — the REAL wire, not the in-memory fake.
+  #
+  # Every other rollback test here drives FakeBoxRelay, whose default reply is a
+  # SYNCHRONOUS {:ok, 200, %{"status" => "rolled_back"}} — a shape the real box
+  # never sends. The real /v1/admin/site-deploy is ASYNCHRONOUS: it answers 202
+  # `started` and runs the engine behind a Port. A relay that returned on the 202
+  # would report a successful rollback for a symlink that had not moved, and the
+  # "sub-second rollback" the product promises would be timing the ACCEPT, not the
+  # FLIP. These tests drive the actual HTTP impl over the fake transport.
+  # ---------------------------------------------------------------------------
+  describe "BoxRelay.HTTP.rollback/2 — answers only once the box has really flipped" do
+    setup do
+      prev = Application.get_env(:barkpark_cloud, :site_box_relay)
+      Application.put_env(:barkpark_cloud, :site_box_relay, BarkparkCloud.Sites.BoxRelay.HTTP)
+      on_exit(fn -> Application.put_env(:barkpark_cloud, :site_box_relay, prev) end)
+      :ok
+    end
+
+    test "POLLS past the async 202 and reports the build that is NOW live" do
+      bp = team_fixture() |> live_barkpark()
+
+      StudioLinkFakeHttpClient.program([
+        {:ok,
+         %{status: 202, body: Jason.encode!(%{"ok" => true, "status" => %{"state" => "running"}})}},
+        {:ok, %{status: 200, body: Jason.encode!(%{"state" => "running", "exit_code" => nil})}},
+        {:ok,
+         %{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "state" => "done",
+               "exit_code" => 0,
+               "log" => ["[site-deploy] rolling back", "TARGET_BUILD=b-prev"]
+             })
+         }}
+      ])
+
+      assert {:ok, 200, body} =
+               BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
+
+      assert body["status"] == "rolled_back"
+      # THE point: the previous build's id, scraped from the box's own stream. A
+      # 202 body carries no build_id at all, so a relay that answered on the accept
+      # could only ever have reported nil here.
+      assert body["build_id"] == "b-prev"
+    end
+
+    test "a box that CANNOT roll back is a refusal, never a success" do
+      bp = team_fixture() |> live_barkpark()
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: Jason.encode!(%{"ok" => true})}},
+        {:ok,
+         %{
+           status: 200,
+           body:
+             Jason.encode!(%{
+               "state" => "done",
+               "exit_code" => 21,
+               "failure_reason" => "rollback: no previous release (exit 21)"
+             })
+         }}
+      ])
+
+      assert {:ok, 422, body} =
+               BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
+
+      assert body["error"] =~ "no previous release"
+    end
+
+    test "a 409 from the box (a deploy is in flight) is relayed verbatim, never polled" do
+      bp = team_fixture() |> live_barkpark()
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 409, body: Jason.encode!(%{"error" => %{"code" => "already_running"}})}}
+      ])
+
+      assert {:ok, 409, _body} =
+               BarkparkCloud.Sites.BoxRelay.rollback(bp, %{mode: "rollback", slug: "blog"})
     end
   end
 end

@@ -104,11 +104,88 @@ defmodule BarkparkCloud.Sites.BoxRelay.HTTP do
     Registry.relay_admin(bp, :get, @path <> "?" <> query, nil)
   end
 
+  # The flip is a rename(2) — measured at 25ms on the box — so the wait settles on
+  # the first or second poll. The budget sits far inside the CLI's 15s client
+  # timeout: a rollback we cannot CONFIRM quickly is a rollback we must not claim
+  # happened.
+  @rollback_poll_ms 50
+  @rollback_budget_ms 10_000
+
   @impl true
   def rollback(bp, payload) when is_map(payload) do
     # mode: "rollback" → `site-deploy.sh --rollback` on the box. NEVER
     # Deployment.promotion_attrs (charter D5): a promote is a NEW build (seconds
     # to minutes); a static rollback is a symlink repoint (25ms measured).
-    Registry.relay_admin(bp, :post, @path, Map.put_new(payload, :mode, "rollback"))
+    slug = payload[:slug] || payload["slug"]
+
+    case Registry.relay_admin(bp, :post, @path, Map.put_new(payload, :mode, "rollback")) do
+      {:ok, status, _body} when status in 200..299 ->
+        # /v1/admin/site-deploy is ASYNCHRONOUS: it answers 202 `started` and runs
+        # the engine behind a Port. Returning here would report a successful
+        # rollback for a symlink that has NOT moved yet — and would bake a vacuous
+        # "sub-second" into the wire, since the thing being timed would be the
+        # accept, not the flip. This behaviour promises to answer only once the
+        # flip has really happened (charter D5), so: wait for it.
+        await_flip(bp, slug, @rollback_budget_ms)
+
+      # 409 lock held, 4xx/5xx refusal, unreachable box — relay the box's own
+      # verdict verbatim. Nothing is invented here.
+      other ->
+        other
+    end
+  end
+
+  defp await_flip(_bp, _slug, left_ms) when left_ms <= 0 do
+    {:ok, 504,
+     %{
+       "error" =>
+         "the instance did not confirm the rollback in time — it may still be flipping; " <>
+           "check `bp cloud site status`"
+     }}
+  end
+
+  defp await_flip(bp, slug, left_ms) do
+    # build_id is irrelevant to a rollback (there is exactly one run per slug and
+    # the box's GET keys on slug alone) — the empty string keeps the behaviour's
+    # 3-arity poll contract without inventing a build we do not have.
+    case poll_deploy(bp, slug, "") do
+      {:ok, status, body} when status in 200..299 ->
+        if to_string(body["state"]) == "done" do
+          settle_flip(body)
+        else
+          Process.sleep(@rollback_poll_ms)
+          await_flip(bp, slug, left_ms - @rollback_poll_ms)
+        end
+
+      other ->
+        other
+    end
+  end
+
+  # The box's own verdict, translated into the reply the driver reads. exit_code is
+  # the truth: 0 is a real flip; 21 (no previous release) / 22 / 23 / 24 are honest
+  # refusals that must NOT read as success.
+  defp settle_flip(body) do
+    if body["exit_code"] == 0 do
+      {:ok, 200, %{"status" => "rolled_back", "build_id" => target_build(body)}}
+    else
+      {:ok, 422,
+       %{
+         "error" => body["failure_reason"] || "the instance could not roll this site back"
+       }}
+    end
+  end
+
+  # A rollback emits NO BPSTAGE lines (it is a pointer flip, not a deploy) — the
+  # engine prints `TARGET_BUILD=<build_id>` on stdout instead. That line is how the
+  # control plane learns which build is now live.
+  defp target_build(body) do
+    (body["log"] || [])
+    |> Enum.find_value(fn line ->
+      case Regex.run(~r/^TARGET_BUILD=(\S+)/, String.trim(to_string(line))) do
+        [_, id] -> id
+        _ -> nil
+      end
+    end)
   end
 end
