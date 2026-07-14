@@ -28,7 +28,36 @@ export interface BridgeConfig {
   chatToken: string;
   /** The agent's display name in a channel. */
   userName: string;
+  /** The inbound HTTP transport for webhook channels (Slack/Teams/WhatsApp). */
+  webhook: WebhookConfig;
 }
+
+/**
+ * Inbound webhook transport config (charter D39).
+ *
+ * `pathPrefix` is load-bearing: Caddy's `handle` does NOT strip the prefix, so the
+ * bridge's router owns the FULL `/connectors/...` path. If the proxy and the
+ * bridge disagree about it, EVERY webhook 404s silently.
+ *
+ * `publicBaseUrl` is equally load-bearing behind a proxy: the socket speaks plain
+ * http, but adapters that validate the audience/URL (Teams' Bot Framework JWT)
+ * need the PUBLIC https URL in the request they are handed.
+ */
+export interface WebhookConfig {
+  /** Poll/socket-only deployments (Telegram, Discord) can turn the listener off. */
+  enabled: boolean;
+  port: number;
+  /** Default `/connectors`. Must match the path the provider is configured with. */
+  pathPrefix: string;
+  /** e.g. `https://bridge.barkpark.cloud`. Unset = derive from x-forwarded-proto/host. */
+  publicBaseUrl?: string;
+  /** Bodies larger than this are rejected with a 413 (never a socket teardown). */
+  maxBodyBytes: number;
+}
+
+const DEFAULT_WEBHOOK_PORT = 3000;
+const DEFAULT_WEBHOOK_PATH_PREFIX = "/connectors";
+const DEFAULT_WEBHOOK_MAX_BODY_BYTES = 1_048_576;
 
 export class MissingConfigError extends Error {
   constructor(key: string) {
@@ -56,5 +85,70 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     apiUrl: required(env, "BARKPARK_API_URL"),
     chatToken: required(env, "BARKPARK_CHAT_TOKEN"),
     userName: env["BRIDGE_USER_NAME"]?.trim() || "barkpark",
+    webhook: loadWebhookConfig(env),
   };
+}
+
+/**
+ * Webhook transport config. Every value has a working default — a bridge with no
+ * webhook channels installed still boots, and one with them needs only a port.
+ * A malformed number is an ERROR, never a silent fallback: a bridge listening on
+ * the wrong port is a bridge that 404s every provider event.
+ */
+export function loadWebhookConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): WebhookConfig {
+  return {
+    enabled: boolFromEnv(env["CONNECTORS_WEBHOOK_ENABLED"], true),
+    port: intFromEnv(
+      env,
+      "CONNECTORS_WEBHOOK_PORT",
+      DEFAULT_WEBHOOK_PORT,
+      1,
+      65535,
+    ),
+    pathPrefix:
+      env["CONNECTORS_PATH_PREFIX"]?.trim() || DEFAULT_WEBHOOK_PATH_PREFIX,
+    publicBaseUrl: env["CONNECTORS_PUBLIC_BASE_URL"]?.trim() || undefined,
+    maxBodyBytes: intFromEnv(
+      env,
+      "CONNECTORS_MAX_BODY_BYTES",
+      DEFAULT_WEBHOOK_MAX_BODY_BYTES,
+      1,
+      Number.MAX_SAFE_INTEGER,
+    ),
+  };
+}
+
+/** `0`/`false`/`no`/`off` disable; anything else set is on; unset takes the default. */
+function boolFromEnv(raw: string | undefined, fallback: boolean): boolean {
+  const value = raw?.trim().toLowerCase();
+  if (value === undefined || value === "") return fallback;
+  return !["0", "false", "no", "off"].includes(value);
+}
+
+function intFromEnv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const raw = env[key]?.trim();
+  if (raw === undefined || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new InvalidConfigError(
+      key,
+      `expected an integer in [${min}, ${max}], got "${raw}"`,
+    );
+  }
+  return value;
+}
+
+export class InvalidConfigError extends Error {
+  constructor(key: string, detail: string) {
+    super(`connectors: environment variable ${key} is invalid — ${detail}`);
+    this.name = "InvalidConfigError";
+  }
 }

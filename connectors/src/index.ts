@@ -21,6 +21,8 @@ import {
 } from "./connectors/telegram.js";
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
+import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
+import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
 import { createBridgeState } from "./state/state-adapter.js";
 import {
   createPgThreadSessionStore,
@@ -169,15 +171,41 @@ export interface Bridge {
   pool: pg.Pool;
   installs: InstallsLookup;
   mounted: MountedInstall[];
+  /** The install-keyed webhook mount index (D39). Empty when no webhook channel is installed. */
+  mounts: WebhookMountIndex;
+  /** The inbound HTTP listener, or undefined when `config.webhook.enabled` is false. */
+  webhookServer?: WebhookServer;
+  /**
+   * Mount an install AFTER boot — no restart. This is what makes an OAuth
+   * "Add to Slack" callback work: upsertInstall (row) -> addInstall (Chat +
+   * webhook mount) and the very next provider event routes. Without it the mount
+   * index would be a boot snapshot and a freshly-installed workspace would 404
+   * until someone restarted the process.
+   */
+  addInstall(install: ConnectorInstall): Promise<MountedInstall>;
+  /** Stop routing an install — the disconnect half of the same promise. */
+  removeInstall(provider: string, installKey: string): Promise<boolean>;
   shutdown(): Promise<void>;
 }
 
 /**
+ * Injection seam for the composition root. Production passes nothing; a test
+ * substitutes a registry of stub connectors so the boot path can be proven
+ * end-to-end without a real bot token and a real provider on the other end.
+ */
+export interface StartBridgeOverrides {
+  registry?: ConnectorRegistry;
+  chatClientFor?: BridgeDeps["chatClientFor"];
+}
+
+/**
  * Boot the persistent bridge: schema, state, registry, then one Chat per
- * Telegram install found in `connector_installs`.
+ * install found in `connector_installs`, then the inbound HTTP listener for the
+ * webhook channels among them.
  */
 export async function startBridge(
   config: BridgeConfig = loadConfig(),
+  overrides: StartBridgeOverrides = {},
 ): Promise<Bridge> {
   const pool = createBridgePool({ connectionString: config.databaseUrl });
   // Idempotent, and FAIL-CLOSED: refuses to boot if the pool's search_path is not
@@ -189,8 +217,8 @@ export async function startBridge(
   const installs = createInstallsLookup(pool);
   const map = createThreadSessionMap(createPgThreadSessionStore(pool));
 
-  const registry = createConnectorRegistry();
-  registerBuiltinConnectors(registry);
+  const registry = overrides.registry ?? createConnectorRegistry();
+  if (!overrides.registry) registerBuiltinConnectors(registry);
 
   const deps: BridgeDeps = {
     config,
@@ -203,8 +231,10 @@ export async function startBridge(
     // this single token, and a `:global` one would read every workspace's
     // sessions. The seam is right; the token store is not built.
     // Backlog: task `connectors-per-workspace-chat-token`.
-    chatClientFor: (_workspaceId: string) =>
-      createChatClient({ baseUrl: config.apiUrl, token: config.chatToken }),
+    chatClientFor:
+      overrides.chatClientFor ??
+      ((_workspaceId: string) =>
+        createChatClient({ baseUrl: config.apiUrl, token: config.chatToken })),
     onOutcome: (outcome, event) => {
       console.log(
         `[bridge] ${event.provider} thread=${event.threadId} -> ${outcome.status}` +
@@ -215,10 +245,60 @@ export async function startBridge(
     },
   };
 
+  // The webhook routing table (D39). Keyed by the INSTALL row, so a provider's
+  // request can only ever reach the Chat built from THAT tenant's credential.
+  const mounts = createWebhookMountIndex();
   const mounted: MountedInstall[] = [];
+
+  /**
+   * Mount one install and start its inbound transport. The SAME path is used at
+   * boot and at runtime (an OAuth callback), so a freshly-installed workspace is
+   * routable the moment its row exists — never "after the next restart".
+   */
+  const bringUp = async (
+    connector: Connector,
+    install: ConnectorInstall,
+  ): Promise<MountedInstall> => {
+    const entry = mountInstall(connector, install, deps);
+    await entry.chat.initialize();
+    // The core never learns the channel: Telegram starts a poll loop here,
+    // Discord starts a gateway socket, and a webhook channel does nothing at all
+    // — its transport IS the HTTP request, so it mounts into the index instead.
+    await connector.listen?.(entry.adapter);
+    if (connector.webhook) {
+      mounts.mount({ connector, install, chat: entry.chat });
+    }
+    mounted.push(entry);
+    console.log(
+      `[bridge] listening: ${connector.id} install=${install.installKey} ` +
+        `workspace=${install.workspaceId}` +
+        (connector.webhook ? " (webhook)" : ""),
+    );
+    return entry;
+  };
+
+  const takeDown = async (
+    provider: string,
+    installKey: string,
+  ): Promise<boolean> => {
+    const index = mounted.findIndex(
+      (entry) =>
+        entry.connector.id === provider && entry.install.installKey === installKey,
+    );
+    if (index === -1) return false;
+    const [entry] = mounted.splice(index, 1);
+    if (!entry) return false;
+    // Unroute FIRST: an in-flight webhook must not reach a Chat we are tearing down.
+    mounts.unmount(provider, installKey);
+    await entry.connector.stopListening?.(entry.adapter);
+    await entry.chat.shutdown();
+    console.log(`[bridge] unmounted: ${provider} install=${installKey}`);
+    return true;
+  };
+
   for (const connector of registry.channels()) {
     for (const install of await installs.listInstalls(connector.id)) {
-      mounted.push(mountInstall(connector, install, deps));
+      await bringUp(connector, install);
     }
   }
 
@@ -229,14 +309,22 @@ export async function startBridge(
     );
   }
 
-  for (const install of mounted) {
-    await install.chat.initialize();
-    // The core never learns the channel: Telegram starts a poll loop here,
-    // P3's Discord will start a gateway socket, Slack does nothing at all.
-    await install.connector.listen?.(install.adapter);
+  // The listener comes up even with zero webhook installs today: the whole point
+  // of dynamic mounting is that the FIRST install must not need a restart.
+  let webhookServer: WebhookServer | undefined;
+  if (config.webhook.enabled) {
+    webhookServer = await startWebhookServer({
+      registry,
+      installs,
+      mounts,
+      port: config.webhook.port,
+      pathPrefix: config.webhook.pathPrefix,
+      publicBaseUrl: config.webhook.publicBaseUrl,
+      maxBodyBytes: config.webhook.maxBodyBytes,
+    });
     console.log(
-      `[bridge] listening: ${install.connector.id} install=${install.install.installKey} ` +
-        `workspace=${install.install.workspaceId}`,
+      `[bridge] webhooks on :${webhookServer.port}${config.webhook.pathPrefix}/webhooks/… ` +
+        `(${mounts.size()} mounted)`,
     );
   }
 
@@ -244,11 +332,34 @@ export async function startBridge(
     pool,
     installs,
     mounted,
+    mounts,
+    webhookServer,
+
+    async addInstall(install: ConnectorInstall) {
+      const connector = registry.get(install.provider);
+      if (!connector) {
+        throw new Error(
+          `bridge.addInstall: no connector registered for provider "${install.provider}"`,
+        );
+      }
+      // Replace rather than duplicate: a re-install (OAuth re-authorised, new
+      // credential) must not leave the old Chat running against the old secret.
+      await takeDown(install.provider, install.installKey);
+      return bringUp(connector, install);
+    },
+
+    async removeInstall(provider: string, installKey: string) {
+      return takeDown(provider, installKey);
+    },
+
     async shutdown() {
+      await webhookServer?.close();
       for (const install of mounted) {
         await install.connector.stopListening?.(install.adapter);
         await install.chat.shutdown();
       }
+      mounts.clear();
+      mounted.length = 0;
       await pool.end();
     },
   };
