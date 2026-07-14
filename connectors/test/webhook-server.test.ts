@@ -18,9 +18,17 @@
  *   - "an unmounted install answers the same opaque 404 as an unknown one"
  *
  * The installs lookup here is the REAL `createInstallsLookup` over a stub
- * `Queryable`, not the in-memory double: the half-row case (a row with a
- * workspace but NO credential) is rejected by the SQL lookup's own coercion, and
- * a fake that skipped that coercion would prove nothing about production.
+ * `Queryable`, not the in-memory double, and every stub row's `credential_ref` is
+ * SEALED by the real cipher (D35/D37) — a fake that skipped that coercion would
+ * prove nothing about production.
+ *
+ * NOTE on the half-row (a row with a workspace but NO credential): since D42 that
+ * is a LEGITIMATE state, not a corrupt one — Teams serves every org from ONE
+ * operator app and stores no per-workspace secret — so the lookup RETURNS it and
+ * the fail-closed stop moves one step later: nothing ever mounted it, so
+ * `handlerFor` yields undefined and the request gets the SAME opaque 404. The
+ * observable behaviour is unchanged; the reason is not, and this comment is the
+ * reason.
  *
  * The traversal test uses a RAW SOCKET on purpose. `fetch`/undici normalises dot
  * segments CLIENT-side, so a fetch-based traversal test passes against a server
@@ -41,6 +49,7 @@ import type {
   ConnectorInstall,
   ConnectorWebhook,
 } from "../src/connector/types.js";
+import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import { createBridgePool, ensureBridgeSchema } from "../src/db/pool.js";
 import {
   createWebhookMountIndex,
@@ -59,6 +68,10 @@ import {
   type Queryable,
 } from "../src/tenant/installs.js";
 
+/** The real cipher — every sealed column in this suite goes through it (D35/D37). */
+const CREDENTIAL_KEY = Buffer.alloc(32, 3).toString("base64");
+const cipher = createCredentialCipher({ key: CREDENTIAL_KEY });
+
 const WS_A = "11111111-1111-4111-8111-111111111111";
 const WS_B = "22222222-2222-4222-8222-222222222222";
 
@@ -73,7 +86,7 @@ interface InstallRow {
   credential_ref: string | null;
 }
 
-const ROWS: InstallRow[] = [
+const PLAIN_ROWS: InstallRow[] = [
   // WhatsApp: keySource "path" — each workspace's Meta app points at its own URL.
   {
     provider: "whatsapp",
@@ -117,6 +130,25 @@ const ROWS: InstallRow[] = [
   },
 ];
 
+/**
+ * The same rows as they actually sit in Postgres: `credential_ref` SEALED against
+ * that row's own identity (provider, install_key, workspace_id). Sealing them here
+ * rather than storing plaintext is what makes this stub a faithful stand-in — the
+ * production lookup OPENS the blob, and a plaintext stub would have exercised a
+ * code path that does not exist.
+ */
+const ROWS: InstallRow[] = PLAIN_ROWS.map((row) => ({
+  ...row,
+  credential_ref:
+    row.credential_ref === null
+      ? null
+      : cipher.seal(row.credential_ref, {
+          provider: row.provider,
+          installKey: row.install_key,
+          workspaceId: row.workspace_id as string,
+        }),
+}));
+
 /** A stub `Queryable` so the production SQL lookup runs without Postgres. */
 const stubDb: Queryable = {
   async query<R extends object>(_text: string, values: unknown[] = []) {
@@ -130,7 +162,7 @@ const stubDb: Queryable = {
   },
 };
 
-const installs = createInstallsLookup(stubDb);
+const installs = createInstallsLookup(stubDb, cipher);
 
 // ---------------------------------------------------------------------------
 // Fake Chats. A `Chat` is a big object; the seam only ever touches `.webhooks`.
@@ -216,6 +248,23 @@ const slackConnector = fakeConnector("slack", {
       const parsed: unknown = JSON.parse(rawBody);
       const teamId = (parsed as { team_id?: unknown }).team_id;
       return typeof teamId === "string" ? teamId : null;
+    } catch {
+      return null;
+    }
+  },
+  // The tenant-less handshake. Slack pings the request_url with
+  // `{"type":"url_verification","challenge":…}` BEFORE any workspace has installed
+  // the app, so it carries no team_id: `extractInstallKey` correctly returns null,
+  // and without this hook the seam would 404 and the app could NEVER be configured.
+  handleUnkeyed(rawBody) {
+    try {
+      const parsed = JSON.parse(rawBody) as {
+        type?: unknown;
+        challenge?: unknown;
+      };
+      if (parsed.type !== "url_verification") return null;
+      if (typeof parsed.challenge !== "string") return null;
+      return Response.json({ challenge: parsed.challenge });
     } catch {
       return null;
     }
@@ -650,6 +699,75 @@ describe("webhook seam — the provider's contract", () => {
   });
 });
 
+describe("webhook seam — liveness and the tenant-less handshake", () => {
+  it("answers GET {prefix}/health with 200 and nothing a stranger could use", async () => {
+    const h = await boot();
+
+    const response = await fetch(`${h.base}/connectors/health`);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "ok" });
+
+    // It is the deploy's liveness probe (`deploy/instance-deploy.sh` curls it after
+    // `systemctl restart`), so it must NOT enumerate tenants: no install count, no
+    // provider list, no version. And no adapter is ever touched.
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a POST to /health — a health check is a GET", async () => {
+    const h = await boot();
+    const response = await fetch(`${h.base}/connectors/health`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(response.status).toBe(405);
+    expect(calls).toEqual([]);
+  });
+
+  it("answers Slack's url_verification challenge with NO install and NO tenant", async () => {
+    const h = await boot();
+
+    // No workspace has installed the app yet — that is the whole point of the
+    // handshake. Nothing is mounted, and the payload carries no team_id.
+    const response = await fetch(`${h.base}/connectors/webhooks/slack`, {
+      method: "POST",
+      body: JSON.stringify({ type: "url_verification", challenge: "c-3po" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ challenge: "c-3po" });
+    // …and it reached no adapter, no Chat, no credential. It cannot: it never had
+    // an install row.
+    expect(calls).toEqual([]);
+  });
+
+  it("still 404s an unkeyed body that is NOT a handshake (the hook cannot shadow real traffic)", async () => {
+    const h = await boot();
+    h.mountRow("slack", "T_AAA", WS_A, "A");
+
+    // A body with no team_id and no handshake type: the hook returns null and we
+    // fall through to the SAME opaque 404 as everything else.
+    const response = await fetch(`${h.base}/connectors/webhooks/slack`, {
+      method: "POST",
+      body: JSON.stringify({ type: "event_callback", event: { text: "hi" } }),
+    });
+    expect(response.status).toBe(404);
+    await expect(response.text()).resolves.toBe('{"error":"not_found"}');
+    expect(calls).toEqual([]);
+  });
+
+  it("a connector with NO handleUnkeyed 404s an unkeyed body — absent hook leaks nothing", async () => {
+    const h = await boot();
+    // whatsapp is keySource "path": it has no handleUnkeyed and no payload key at
+    // all, so an app-wide URL is simply not a route it serves.
+    const response = await fetch(`${h.base}/connectors/webhooks/whatsapp`, {
+      method: "POST",
+      body: JSON.stringify({ type: "url_verification", challenge: "nope" }),
+    });
+    expect(response.status).toBe(404);
+    expect(calls).toEqual([]);
+  });
+});
+
 describe("webhook seam — hostile bodies and broken adapters", () => {
   it("rejects an over-cap DECLARED content-length with a 413 the provider actually receives", async () => {
     const h = await boot({ maxBodyBytes: 64 });
@@ -862,10 +980,12 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
         // Never called: the webhook seam ends at the adapter, and this stub adapter
         // does not dispatch a turn. A bogus URL keeps that honest.
         apiUrl: "http://127.0.0.1:1",
-        chatToken: "not-used-by-this-test",
+        credentialKey: CREDENTIAL_KEY,
+        previousCredentialKeys: [],
         userName: "barkpark",
         webhook: {
           enabled: true,
+          host: "127.0.0.1",
           port: 0,
           pathPrefix: "/connectors",
           maxBodyBytes: 65_536,
@@ -889,7 +1009,7 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
         workspaceId: WS_B,
         credentialRef: "secret-B",
       };
-      await upsertInstall(pool, install);
+      await upsertInstall(pool, cipher, install);
       await bridge.addInstall(install);
 
       const routed = await fetch(url, { method: "POST", body: "{}" });

@@ -65,10 +65,27 @@ export interface ConnectorInstall {
   /** The workspace that owns this install. Part of the seal's AAD. */
   workspaceId: WorkspaceId;
   /**
-   * The provider secret (bot token, signing secret), OPENED.
-   * Sealed at rest in `connector_installs.credential_ref`.
+   * The provider secret (bot token, signing secret), OPENED — or NULL when the
+   * connector has NO per-workspace provider credential.
+   *
+   * Sealed at rest in `connector_installs.credential_ref` (AES-256-GCM, AAD-bound
+   * to this row's identity — D35/D37). Plaintext only in this in-memory shape.
+   *
+   * NULL is a first-class case, not an error (D42): Microsoft Teams runs on ONE
+   * operator Azure app for every customer org (`appType: "MultiTenant"`), so a
+   * Teams install has no per-workspace secret to store. The `credential_ref`
+   * column was already nullable in `db/schema.ts`; a non-nullable TYPE would have
+   * fail-closed every Teams row out of `lookupInstall`/`listInstalls`. The
+   * tenant-safety fail-closed rule lives on `workspace_id` (a routable install
+   * MUST have one), not on the credential.
+   *
+   * A connector that DOES need a credential (Telegram's bot token, Discord's
+   * triple, WhatsApp's Meta four) must reject a null here in its own
+   * `adapterFactory` — LOUDLY, at mount. A silent fallback to an ambient
+   * `TELEGRAM_BOT_TOKEN`/`DISCORD_BOT_TOKEN` env var would send one workspace's
+   * messages in another's name: this wave's headline bug, wearing a hat.
    */
-  credentialRef: string;
+  credentialRef: string | null;
   /**
    * THIS workspace's Barkpark `chat`-permission ApiToken, OPENED. Sealed at rest
    * in `connector_installs.chat_token_ref`.
@@ -185,7 +202,11 @@ export interface ConnectorWebhook {
    * Handed the raw body EXACTLY as it arrived — never a re-serialised parse —
    * because the same bytes are what the adapter's signature verification will
    * HMAC. Return `null` when the key is absent or unparseable: a null key is a
-   * fail-closed 404, never a guess at "the only workspace".
+   * fail-closed 404 (or the handshake below), never a guess at "the only
+   * workspace".
+   *
+   * May be async: Slack verifies the app-wide HMAC before it will name a team, and
+   * WebCrypto's `verify` is a promise.
    *
    * Demuxing BEFORE the signature is verified is safe by construction: the key
    * only SELECTS which secret to verify against. A forged key points at another
@@ -193,7 +214,35 @@ export interface ConnectorWebhook {
    * adapter rejects it cryptographically (proven: an A-signed body handed to B's
    * adapter -> 401).
    */
-  extractInstallKey?(rawBody: string, headers: Headers): string | null;
+  extractInstallKey?(
+    rawBody: string,
+    headers: Headers,
+  ): string | null | Promise<string | null>;
+  /**
+   * Answer a request that legitimately carries NO install key — the provider's
+   * endpoint-VERIFICATION handshake.
+   *
+   * This member exists because without it the seam is unusable for Slack: Slack
+   * pings the Events request_url with `{"type":"url_verification","challenge":…}`
+   * BEFORE any workspace has installed the app, and that payload carries no
+   * `team_id`. `extractInstallKey` correctly returns null, the demux correctly
+   * finds no install — and the app could then never be configured at all. The
+   * generic fix is a tenant-less hook, not a `if (provider === "slack")` in the
+   * router.
+   *
+   * CONTRACT, and it is narrow on purpose:
+   *   - consulted ONLY when `extractInstallKey` yielded null, so it can never
+   *     shadow a real tenant's traffic;
+   *   - it MUST NOT touch a tenant credential or a Chat — it has no install row
+   *     and is not entitled to one. Slack's implementation verifies the APP-WIDE
+   *     signing secret and echoes the challenge; that is the whole of it;
+   *   - returning `null` falls through to the SAME opaque 404 as everything else,
+   *     so a connector that does not implement it loses nothing and leaks nothing.
+   */
+  handleUnkeyed?(
+    rawBody: string,
+    headers: Headers,
+  ): Response | null | Promise<Response | null>;
 }
 
 /**

@@ -1,1 +1,1237 @@
-{"numTotalTestSuites":33,"numPassedTestSuites":33,"numFailedTestSuites":0,"numPendingTestSuites":0,"numTotalTests":118,"numPassedTests":118,"numFailedTests":0,"numPendingTests":0,"numTodoTests":0,"snapshot":{"added":0,"failure":false,"filesAdded":0,"filesRemoved":0,"filesRemovedList":[],"filesUnmatched":0,"filesUpdated":0,"matched":0,"total":0,"unchecked":0,"uncheckedKeysByFile":[],"unmatched":0,"updated":0,"didUpdate":false},"startTime":1783996349080,"success":true,"testResults":[{"assertionResults":[{"ancestorTitles":["createSession"],"fullName":"createSession POSTs to /v1/chat/sessions and returns the 201 full session","status":"passed","title":"POSTs to /v1/chat/sessions and returns the 201 full session","duration":18.19916599999999,"failureMessages":[],"meta":{}},{"ancestorTitles":["createSession"],"fullName":"createSession sends ONLY {mode,model,effort} — never id, cwd or workspace","status":"passed","title":"sends ONLY {mode,model,effort} — never id, cwd or workspace","duration":12.52070900000001,"failureMessages":[],"meta":{}},{"ancestorTitles":["createSession"],"fullName":"createSession omits absent options entirely (an empty body, not a body full of nulls)","status":"passed","title":"omits absent options entirely (an empty body, not a body full of nulls)","duration":3.0052080000000387,"failureMessages":[],"meta":{}},{"ancestorTitles":["createSession"],"fullName":"createSession carries the Bearer token","status":"passed","title":"carries the Bearer token","duration":0.7631250000000591,"failureMessages":[],"meta":{}},{"ancestorTitles":["getSession"],"fullName":"getSession reads the full session with its message rows","status":"passed","title":"reads the full session with its message rows","duration":2.193834000000038,"failureMessages":[],"meta":{}},{"ancestorTitles":["getSession"],"fullName":"getSession passes ?since= for the turn-boundary tail refetch","status":"passed","title":"passes ?since= for the turn-boundary tail refetch","duration":0.8074579999999969,"failureMessages":[],"meta":{}},{"ancestorTitles":["postMessage"],"fullName":"postMessage POSTs {content} and resolves the 202 {accepted:true}","status":"passed","title":"POSTs {content} and resolves the 202 {accepted:true}","duration":4.919457999999963,"failureMessages":[],"meta":{}},{"ancestorTitles":["auth failures"],"fullName":"auth failures 403s a chat token with NO workspace binding, and says WHY","status":"passed","title":"403s a chat token with NO workspace binding, and says WHY","duration":1.555417000000034,"failureMessages":[],"meta":{}},{"ancestorTitles":["auth failures"],"fullName":"auth failures never retries a 403 (auth is terminal)","status":"passed","title":"never retries a 403 (auth is terminal)","duration":6.408207999999945,"failureMessages":[],"meta":{}},{"ancestorTitles":["auth failures"],"fullName":"auth failures never retries a 401","status":"passed","title":"never retries a 401","duration":1.0480420000000095,"failureMessages":[],"meta":{}},{"ancestorTitles":["auth failures"],"fullName":"auth failures surfaces the request_id from the error envelope","status":"passed","title":"surfaces the request_id from the error envelope","duration":0.540540999999962,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status retries a transient chat_unavailable and then succeeds","status":"passed","title":"retries a transient chat_unavailable and then succeeds","duration":11.958917000000042,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status gives up after maxRetries and throws the typed error","status":"passed","title":"gives up after maxRetries and throws the typed error","duration":4.5605410000000575,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status does NOT retry a 400 invalid_request (a client bug is terminal)","status":"passed","title":"does NOT retry a 400 invalid_request (a client bug is terminal)","duration":1.2825409999999238,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status does NOT retry an unknown 5xx code (only known-transient codes retry)","status":"passed","title":"does NOT retry an unknown 5xx code (only known-transient codes retry)","duration":10.839583000000061,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status does NOT replay a POST after a transport failure (it may have already landed)","status":"passed","title":"does NOT replay a POST after a transport failure (it may have already landed)","duration":4.346541000000002,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status does NOT replay a postMessage after a transport failure (no double-send)","status":"passed","title":"does NOT replay a postMessage after a transport failure (no double-send)","duration":0.6945000000000618,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status DOES retry a transport failure on an idempotent GET","status":"passed","title":"DOES retry a transport failure on an idempotent GET","duration":2.212582999999995,"failureMessages":[],"meta":{}},{"ancestorTitles":["retry — keyed off error.code, not the raw status"],"fullName":"retry — keyed off error.code, not the raw status still retries a chat_unavailable on a POST (the server proved it refused the work)","status":"passed","title":"still retries a chat_unavailable on a POST (the server proved it refused the work)","duration":3.123583999999937,"failureMessages":[],"meta":{}}],"startTime":1783996349788,"endTime":1783996349884.1235,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/client.test.ts"},{"assertionResults":[{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry registers a connector and gets it back by id","status":"passed","title":"registers a connector and gets it back by id","duration":1.5527080000000524,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry returns undefined for an unregistered provider (never a fallback connector)","status":"passed","title":"returns undefined for an unregistered provider (never a fallback connector)","duration":0.4027499999999691,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry lists connectors in registration order","status":"passed","title":"lists connectors in registration order","duration":0.7847500000000309,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry throws on a duplicate id — a shadowed connector is a tenant-isolation bug","status":"passed","title":"throws on a duplicate id — a shadowed connector is a tenant-isolation bug","duration":1.877791000000002,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry throws on an empty id","status":"passed","title":"throws on an empty id","duration":0.6105839999999034,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry unregisters and clears","status":"passed","title":"unregisters and clears","duration":0.5043749999999818,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry keeps registries isolated from one another","status":"passed","title":"keeps registries isolated from one another","duration":0.14329099999997652,"failureMessages":[],"meta":{}},{"ancestorTitles":["connectorRegistry"],"fullName":"connectorRegistry exposes a process-wide singleton for production registration","status":"passed","title":"exposes a process-wide singleton for production registration","duration":0.08329200000002857,"failureMessages":[],"meta":{}},{"ancestorTitles":["Connector declaration surface (charter D30)"],"fullName":"Connector declaration surface (charter D30) carries direction, auth and tenantResolution as declared metadata","status":"passed","title":"carries direction, auth and tenantResolution as declared metadata","duration":0.1460419999999658,"failureMessages":[],"meta":{}},{"ancestorTitles":["Connector declaration surface (charter D30)"],"fullName":"Connector declaration surface (charter D30) builds an adapter from THAT install's own credential (D1 isolation)","status":"passed","title":"builds an adapter from THAT install's own credential (D1 isolation)","duration":0.20716600000002927,"failureMessages":[],"meta":{}}],"startTime":1783996349647,"endTime":1783996349654.2073,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/connector-registry.test.ts"},{"assertionResults":[{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels drives inbound -> tenant -> session -> turn -> post exactly ONCE","status":"passed","title":"drives inbound -> tenant -> session -> turn -> post exactly ONCE","duration":28.736917000000062,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels subscribes to the SSE stream BEFORE sending the turn","status":"passed","title":"subscribes to the SSE stream BEFORE sending the turn","duration":7.872000000000071,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels never leaks thinking or tool_use blocks into the channel","status":"passed","title":"never leaks thinking or tool_use blocks into the channel","duration":6.883625000000052,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels mints a Session on first contact and RESUMES it thereafter","status":"passed","title":"mints a Session on first contact and RESUMES it thereafter","duration":5.7517500000000155,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels keeps different threads on different Sessions","status":"passed","title":"keeps different threads on different Sessions","duration":6.626209000000017,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels FAILS CLOSED on an unresolvable tenant — no session, no post","status":"passed","title":"FAILS CLOSED on an unresolvable tenant — no session, no post","duration":0.21241599999996197,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels drops an event for a provider nobody registered","status":"passed","title":"drops an event for a provider nobody registered","duration":0.16504199999997127,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels drops an empty inbound message before spending a Session on it","status":"passed","title":"drops an empty inbound message before spending a Session on it","duration":0.11191700000006222,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels posts nothing when a turn produces no text","status":"passed","title":"posts nothing when a turn produces no text","duration":2.176832999999988,"failureMessages":[],"meta":{}},{"ancestorTitles":["core dispatch — the loop that must not change when P3 adds channels"],"fullName":"core dispatch — the loop that must not change when P3 adds channels isolates tenants: the same thread id under two workspaces is two Sessions","status":"passed","title":"isolates tenants: the same thread id under two workspaces is two Sessions","duration":4.268374999999992,"failureMessages":[],"meta":{}}],"startTime":1783996349927,"endTime":1783996349990.2683,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/dispatch.test.ts"},{"assertionResults":[{"ancestorTitles":["eager subscribe (D26 — the stream is a separate GET from the send)"],"fullName":"eager subscribe (D26 — the stream is a separate GET from the send) completes the HTTP handshake on await, BEFORE any frame is read","status":"passed","title":"completes the HTTP handshake on await, BEFORE any frame is read","duration":14.346874999999955,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract parses a message frame and reads its `id:` (the only frame that carries one)","status":"passed","title":"parses a message frame and reads its `id:` (the only frame that carries one)","duration":0.301166999999964,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract parses a chat frame with NO id and passes the payload through VERBATIM","status":"passed","title":"parses a chat frame with NO id and passes the payload through VERBATIM","duration":0.5073330000000169,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract parses a permission frame with NO id","status":"passed","title":"parses a permission frame with NO id","duration":0.1754159999999274,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract parses an exit frame with NO id into {status,reason}","status":"passed","title":"parses an exit frame with NO id into {status,reason}","duration":0.19612500000005184,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract coerces an out-of-enum exit reason to `unknown` and a non-int status to null","status":"passed","title":"coerces an out-of-enum exit reason to `unknown` and a non-int status to null","duration":0.10066699999993034,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract tolerates the `: keepalive` comment frame (yields nothing, never throws)","status":"passed","title":"tolerates the `: keepalive` comment frame (yields nothing, never throws)","duration":0.05812500000001819,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract tolerates an unmodelled event type rather than throwing","status":"passed","title":"tolerates an unmodelled event type rather than throwing","duration":0.04224999999996726,"failureMessages":[],"meta":{}},{"ancestorTitles":["parseFrame — byte-exact wire contract"],"fullName":"parseFrame — byte-exact wire contract NEVER schema-validates a chat payload — malformed JSON still passes through","status":"passed","title":"NEVER schema-validates a chat payload — malformed JSON still passes through","duration":0.16237499999999727,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream replays persisted message rows, then live chat, permission and exit frames","status":"passed","title":"replays persisted message rows, then live chat, permission and exit frames","duration":12.096667000000025,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream resumes with Last-Event-ID: only rows with seq > lastEventId replay","status":"passed","title":"resumes with Last-Event-ID: only rows with seq > lastEventId replay","duration":3.089625000000069,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream sends the Last-Event-ID header only when a cursor is supplied","status":"passed","title":"sends the Last-Event-ID header only when a cursor is supplied","duration":8.039625000000001,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream drives REAL recorded claude stream-json lines through as verbatim chat payloads","status":"passed","title":"drives REAL recorded claude stream-json lines through as verbatim chat payloads","duration":13.239041000000043,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream drives the mcp_tool_success recording through unchanged too","status":"passed","title":"drives the mcp_tool_success recording through unchanged too","duration":1.5064579999999523,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream reassembles frames split across chunk boundaries (the real network case)","status":"passed","title":"reassembles frames split across chunk boundaries (the real network case)","duration":5.133625000000052,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream tolerates a keepalive-only stream (no frames, no throw)","status":"passed","title":"tolerates a keepalive-only stream (no frames, no throw)","duration":11.469749999999976,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream surfaces a workspace-less chat token as a 403 `forbidden` — and does not retry it","status":"passed","title":"surfaces a workspace-less chat token as a 403 `forbidden` — and does not retry it","duration":4.990875000000074,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream surfaces a missing bearer as 401 without retrying","status":"passed","title":"surfaces a missing bearer as 401 without retrying","duration":9.789667000000009,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream 403s the real workspace-less token against the default handler","status":"passed","title":"403s the real workspace-less token against the default handler","duration":2.7065000000000055,"failureMessages":[],"meta":{}},{"ancestorTitles":["openEventStream"],"fullName":"openEventStream yields a permission frame verbatim without an id","status":"passed","title":"yields a permission frame verbatim without an id","duration":0.6665420000000495,"failureMessages":[],"meta":{}}],"startTime":1783996349788,"endTime":1783996349876.7065,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/sse.test.ts"},{"assertionResults":[{"ancestorTitles":["telegram connector — registration shape"],"fullName":"telegram connector — registration shape declares direction=channel, auth=token, tenantResolution=credential-bound","status":"passed","title":"declares direction=channel, auth=token, tenantResolution=credential-bound","duration":0.7711249999999836,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — registration shape"],"fullName":"telegram connector — registration shape registers into the registry as an ordinary channel connector","status":"passed","title":"registers into the registry as an ordinary channel connector","duration":0.38391699999999673,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — registration shape"],"fullName":"telegram connector — registration shape refuses a duplicate registration instead of silently overwriting","status":"passed","title":"refuses a duplicate registration instead of silently overwriting","duration":0.35795900000005076,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — registration shape"],"fullName":"telegram connector — registration shape builds a real @chat-adapter/telegram adapter from the install credential","status":"passed","title":"builds a real @chat-adapter/telegram adapter from the install credential","duration":0.24283300000001873,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — registration shape"],"fullName":"telegram connector — registration shape exposes a listen/stopListening lifecycle so the core never names the channel","status":"passed","title":"exposes a listen/stopListening lifecycle so the core never names the channel","duration":0.056958000000008724,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — registration shape"],"fullName":"telegram connector — registration shape derives the install key from the bot token's non-secret half","status":"passed","title":"derives the install key from the bot token's non-secret half","duration":0.10562500000003183,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — tenant resolution (credential-bound, fail closed)"],"fullName":"telegram connector — tenant resolution (credential-bound, fail closed) resolves the workspace that owns the bot","status":"passed","title":"resolves the workspace that owns the bot","duration":0.2420839999999771,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — tenant resolution (credential-bound, fail closed)"],"fullName":"telegram connector — tenant resolution (credential-bound, fail closed) returns null for a bot nobody installed — never a default workspace","status":"passed","title":"returns null for a bot nobody installed — never a default workspace","duration":0.0985840000000735,"failureMessages":[],"meta":{}},{"ancestorTitles":["telegram connector — tenant resolution (credential-bound, fail closed)"],"fullName":"telegram connector — tenant resolution (credential-bound, fail closed) returns null when the transport could not say which bot received it","status":"passed","title":"returns null when the transport could not say which bot received it","duration":0.126041999999984,"failureMessages":[],"meta":{}}],"startTime":1783996349788,"endTime":1783996349791.2422,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/telegram-connector.test.ts"},{"assertionResults":[{"ancestorTitles":["tenant routing — credential-bound (Telegram)"],"fullName":"tenant routing — credential-bound (Telegram) routes an inbound event to the workspace that owns the bot","status":"passed","title":"routes an inbound event to the workspace that owns the bot","duration":1.802167000000054,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — credential-bound (Telegram)"],"fullName":"tenant routing — credential-bound (Telegram) routes the other workspace's bot to the OTHER workspace (no cross-tenant bleed)","status":"passed","title":"routes the other workspace's bot to the OTHER workspace (no cross-tenant bleed)","duration":0.18966699999998582,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — credential-bound (Telegram)"],"fullName":"tenant routing — credential-bound (Telegram) resolves the tenant WITHOUT inspecting the payload (a Telegram Update has no team id)","status":"passed","title":"resolves the tenant WITHOUT inspecting the payload (a Telegram Update has no team id)","duration":0.08995800000002419,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — payload-team-id (Slack)"],"fullName":"tenant routing — payload-team-id (Slack) extracts team_id from the envelope and routes to that workspace","status":"passed","title":"extracts team_id from the envelope and routes to that workspace","duration":0.08929200000000037,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — payload-team-id (Slack)"],"fullName":"tenant routing — payload-team-id (Slack) routes a different team_id to a different workspace","status":"passed","title":"routes a different team_id to a different workspace","duration":0.11454200000002857,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — payload-team-id (Slack)"],"fullName":"tenant routing — payload-team-id (Slack) fails closed on an unknown team_id","status":"passed","title":"fails closed on an unknown team_id","duration":0.08645899999999074,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — payload-team-id (Slack)"],"fullName":"tenant routing — payload-team-id (Slack) fails closed on a payload with no team_id at all","status":"passed","title":"fails closed on a payload with no team_id at all","duration":0.06200000000001182,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — payload-team-id (Slack)"],"fullName":"tenant routing — payload-team-id (Slack) treats a throwing extractor (malformed/hostile payload) as a miss, not a crash","status":"passed","title":"treats a throwing extractor (malformed/hostile payload) as a miss, not a crash","duration":0.10316699999998491,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves an unknown install_key to null","status":"passed","title":"resolves an unknown install_key to null","duration":0.20391699999993307,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves a null install_key to null","status":"passed","title":"resolves a null install_key to null","duration":0.11275000000000546,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves a missing (undefined) install_key to null","status":"passed","title":"resolves a missing (undefined) install_key to null","duration":0.050292000000013104,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves a blank/whitespace install_key to null","status":"passed","title":"resolves a blank/whitespace install_key to null","duration":0.09720900000002075,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves an unregistered provider to null","status":"passed","title":"resolves an unregistered provider to null","duration":0.0426670000000513,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) normalises a blank workspace id from a sloppy connector to null","status":"passed","title":"normalises a blank workspace id from a sloppy connector to null","duration":0.050917000000026746,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing — fail-closed (no cross-tenant fallback anywhere)"],"fullName":"tenant routing — fail-closed (no cross-tenant fallback anywhere) never routes one provider's install key under another provider","status":"passed","title":"never routes one provider's install key under another provider","duration":0.04087499999991451,"failureMessages":[],"meta":{}},{"ancestorTitles":["zero-core-change: a THIRD connector lands with no core edit (charter D30)"],"fullName":"zero-core-change: a THIRD connector lands with no core edit (charter D30) routes the third connector to the right workspace after a single register() call","status":"passed","title":"routes the third connector to the right workspace after a single register() call","duration":0.04937500000005457,"failureMessages":[],"meta":{}},{"ancestorTitles":["zero-core-change: a THIRD connector lands with no core edit (charter D30)"],"fullName":"zero-core-change: a THIRD connector lands with no core edit (charter D30) the third connector inherits fail-closed semantics for free","status":"passed","title":"the third connector inherits fail-closed semantics for free","duration":0.040124999999989086,"failureMessages":[],"meta":{}},{"ancestorTitles":["zero-core-change: a THIRD connector lands with no core edit (charter D30)"],"fullName":"zero-core-change: a THIRD connector lands with no core edit (charter D30) the core carries NO provider-specific branching (tripwire for a future special-case)","status":"passed","title":"the core carries NO provider-specific branching (tripwire for a future special-case)","duration":0.33370800000000145,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) looks up (provider, install_key) and returns the workspace_id","status":"passed","title":"looks up (provider, install_key) and returns the workspace_id","duration":0.614667000000054,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) returns null when no row matches (unknown install)","status":"passed","title":"returns null when no row matches (unknown install)","duration":0.05208300000003874,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) returns null when the row has a null workspace_id","status":"passed","title":"returns null when the row has a null workspace_id","duration":0.05183400000009897,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) never touches the database for a blank/null install key","status":"passed","title":"never touches the database for a blank/null install key","duration":0.1065000000000964,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) composite install keys cannot collide across a separator (no forged tenant)","status":"passed","title":"composite install keys cannot collide across a separator (no forged tenant)","duration":0.0705000000000382,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) pg.Pool satisfies Queryable, so W3-1's pool drops in unchanged (compile-time)","status":"passed","title":"pg.Pool satisfies Queryable, so W3-1's pool drops in unchanged (compile-time)","duration":0.03049999999996089,"failureMessages":[],"meta":{}},{"ancestorTitles":["connector_installs reads (chat_bridge.connector_installs, charter D29)"],"fullName":"connector_installs reads (chat_bridge.connector_installs, charter D29) W3-1's createBridgePool() output feeds createInstallsLookup directly (compile-time)","status":"passed","title":"W3-1's createBridgePool() output feeds createInstallsLookup directly (compile-time)","duration":0.03729199999997945,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing against a REAL Postgres (chat_bridge.connector_installs)"],"fullName":"tenant routing against a REAL Postgres (chat_bridge.connector_installs) executes this slice's real SQL against the table W3-1's DDL actually creates","status":"passed","title":"executes this slice's real SQL against the table W3-1's DDL actually creates","duration":0.7191249999999627,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing against a REAL Postgres (chat_bridge.connector_installs)"],"fullName":"tenant routing against a REAL Postgres (chat_bridge.connector_installs) routes two workspaces that installed the SAME provider to different tenants","status":"passed","title":"routes two workspaces that installed the SAME provider to different tenants","duration":0.6405839999999898,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing against a REAL Postgres (chat_bridge.connector_installs)"],"fullName":"tenant routing against a REAL Postgres (chat_bridge.connector_installs) fails closed on a real unknown install_key (no row, no fallback)","status":"passed","title":"fails closed on a real unknown install_key (no row, no fallback)","duration":0.206957999999986,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing against a REAL Postgres (chat_bridge.connector_installs)"],"fullName":"tenant routing against a REAL Postgres (chat_bridge.connector_installs) never resolves one provider's key under another provider, against real rows","status":"passed","title":"never resolves one provider's key under another provider, against real rows","duration":0.4836249999999609,"failureMessages":[],"meta":{}},{"ancestorTitles":["tenant routing against a REAL Postgres (chat_bridge.connector_installs)"],"fullName":"tenant routing against a REAL Postgres (chat_bridge.connector_installs) routes a full inbound event end-to-end: event -> registry -> real DB -> workspace","status":"passed","title":"routes a full inbound event end-to-end: event -> registry -> real DB -> workspace","duration":0.8885840000000371,"failureMessages":[],"meta":{}}],"startTime":1783996349806,"endTime":1783996350097.8887,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/tenant.test.ts"},{"assertionResults":[{"ancestorTitles":["bridge state layer (real Postgres)"],"fullName":"bridge state layer (real Postgres) pins search_path on EVERY connection the pool opens, not just the first","status":"passed","title":"pins search_path on EVERY connection the pool opens, not just the first","duration":7.095666999999935,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)"],"fullName":"bridge state layer (real Postgres) fails closed when handed a pool that is NOT pinned to chat_bridge","status":"passed","title":"fails closed when handed a pool that is NOT pinned to chat_bridge","duration":4.638332999999989,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)"],"fullName":"bridge state layer (real Postgres) creates thread_session_map and connector_installs in chat_bridge, not public","status":"passed","title":"creates thread_session_map and connector_installs in chat_bridge, not public","duration":1.8892079999999396,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)"],"fullName":"bridge state layer (real Postgres) lands @chat-adapter/state-pg's five tables in chat_bridge, never public","status":"passed","title":"lands @chat-adapter/state-pg's five tables in chat_bridge, never public","duration":9.611917000000062,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)"],"fullName":"bridge state layer (real Postgres) is idempotent: ensureBridgeSchema can run again on every boot","status":"passed","title":"is idempotent: ensureBridgeSchema can run again on every boot","duration":0.6482910000000857,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)","resolveOrMint"],"fullName":"bridge state layer (real Postgres) resolveOrMint mints exactly ONE session on first message and resumes it thereafter","status":"passed","title":"mints exactly ONE session on first message and resumes it thereafter","duration":1.6294169999999895,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)","resolveOrMint"],"fullName":"bridge state layer (real Postgres) resolveOrMint never calls mint on a resume — the SDK/API is not asked for a second Session","status":"passed","title":"never calls mint on a resume — the SDK/API is not asked for a second Session","duration":1.2349590000000035,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)","resolveOrMint"],"fullName":"bridge state layer (real Postgres) resolveOrMint gives distinct threads distinct sessions","status":"passed","title":"gives distinct threads distinct sessions","duration":1.6303749999999582,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)","resolveOrMint"],"fullName":"bridge state layer (real Postgres) resolveOrMint isolates tenants: the same raw thread id in two workspaces never shares a Session","status":"passed","title":"isolates tenants: the same raw thread id in two workspaces never shares a Session","duration":2.0387920000000577,"failureMessages":[],"meta":{}},{"ancestorTitles":["bridge state layer (real Postgres)","resolveOrMint"],"fullName":"bridge state layer (real Postgres) resolveOrMint survives a concurrent first message without splitting the thread","status":"passed","title":"survives a concurrent first message without splitting the thread","duration":2.1611669999999776,"failureMessages":[],"meta":{}},{"ancestorTitles":["D28 invariant"],"fullName":"D28 invariant never persists the thread->session binding via thread.setState","status":"passed","title":"never persists the thread->session binding via thread.setState","duration":1.2354579999998805,"failureMessages":[],"meta":{}}],"startTime":1783996350096,"endTime":1783996350418.2354,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/thread-session-map.test.ts"},{"assertionResults":[{"ancestorTitles":["runTurn — post-once-per-turn (D12/D26)"],"fullName":"runTurn — post-once-per-turn (D12/D26) subscribes to the stream BEFORE sending the turn","status":"passed","title":"subscribes to the stream BEFORE sending the turn","duration":1.3439160000000356,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — post-once-per-turn (D12/D26)"],"fullName":"runTurn — post-once-per-turn (D12/D26) accumulates assistant text and completes on the stream-json result frame","status":"passed","title":"accumulates assistant text and completes on the stream-json result frame","duration":0.41379200000005767,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — post-once-per-turn (D12/D26)"],"fullName":"runTurn — post-once-per-turn (D12/D26) an event:exit with NO preceding result does NOT complete the turn (D26)","status":"passed","title":"an event:exit with NO preceding result does NOT complete the turn (D26)","duration":0.38008300000001327,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — post-once-per-turn (D12/D26)"],"fullName":"runTurn — post-once-per-turn (D12/D26) does not fabricate a completion when the stream ends with no result frame","status":"passed","title":"does not fabricate a completion when the stream ends with no result frame","duration":0.21870799999999235,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — post-once-per-turn (D12/D26)"],"fullName":"runTurn — post-once-per-turn (D12/D26) never leaks thinking or tool_use blocks into the channel","status":"passed","title":"never leaks thinking or tool_use blocks into the channel","duration":0.6269170000000486,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — post-once-per-turn (D12/D26)"],"fullName":"runTurn — post-once-per-turn (D12/D26) ignores message/permission frames — they are not turn text","status":"passed","title":"ignores message/permission frames — they are not turn text","duration":0.4513329999999769,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — ack-first (D21)"],"fullName":"runTurn — ack-first (D21) fires onAck on the 202, before any model output is consumed","status":"passed","title":"fires onAck on the 202, before any model output is consumed","duration":1.283708000000047,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — ack-first (D21)"],"fullName":"runTurn — ack-first (D21) does NOT post an ack message — the ack is a hook, not a second post (D12)","status":"passed","title":"does NOT post an ack message — the ack is a hook, not a second post (D12)","duration":0.5660000000000309,"failureMessages":[],"meta":{}},{"ancestorTitles":["runTurn — timeouts"],"fullName":"runTurn — timeouts converts a hung turn into a typed TurnTimeoutError","status":"passed","title":"converts a hung turn into a typed TurnTimeoutError","duration":53.36175000000003,"failureMessages":[],"meta":{}}],"startTime":1783996349625,"endTime":1783996349684.3618,"status":"passed","message":"","name":"/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/turn-loop.test.ts"}]}
+{
+  "numTotalTestSuites": 33,
+  "numPassedTestSuites": 33,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 118,
+  "numPassedTests": 118,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1783996349080,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["createSession"],
+          "fullName": "createSession POSTs to /v1/chat/sessions and returns the 201 full session",
+          "status": "passed",
+          "title": "POSTs to /v1/chat/sessions and returns the 201 full session",
+          "duration": 18.19916599999999,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["createSession"],
+          "fullName": "createSession sends ONLY {mode,model,effort} — never id, cwd or workspace",
+          "status": "passed",
+          "title": "sends ONLY {mode,model,effort} — never id, cwd or workspace",
+          "duration": 12.52070900000001,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["createSession"],
+          "fullName": "createSession omits absent options entirely (an empty body, not a body full of nulls)",
+          "status": "passed",
+          "title": "omits absent options entirely (an empty body, not a body full of nulls)",
+          "duration": 3.0052080000000387,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["createSession"],
+          "fullName": "createSession carries the Bearer token",
+          "status": "passed",
+          "title": "carries the Bearer token",
+          "duration": 0.7631250000000591,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["getSession"],
+          "fullName": "getSession reads the full session with its message rows",
+          "status": "passed",
+          "title": "reads the full session with its message rows",
+          "duration": 2.193834000000038,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["getSession"],
+          "fullName": "getSession passes ?since= for the turn-boundary tail refetch",
+          "status": "passed",
+          "title": "passes ?since= for the turn-boundary tail refetch",
+          "duration": 0.8074579999999969,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["postMessage"],
+          "fullName": "postMessage POSTs {content} and resolves the 202 {accepted:true}",
+          "status": "passed",
+          "title": "POSTs {content} and resolves the 202 {accepted:true}",
+          "duration": 4.919457999999963,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["auth failures"],
+          "fullName": "auth failures 403s a chat token with NO workspace binding, and says WHY",
+          "status": "passed",
+          "title": "403s a chat token with NO workspace binding, and says WHY",
+          "duration": 1.555417000000034,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["auth failures"],
+          "fullName": "auth failures never retries a 403 (auth is terminal)",
+          "status": "passed",
+          "title": "never retries a 403 (auth is terminal)",
+          "duration": 6.408207999999945,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["auth failures"],
+          "fullName": "auth failures never retries a 401",
+          "status": "passed",
+          "title": "never retries a 401",
+          "duration": 1.0480420000000095,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["auth failures"],
+          "fullName": "auth failures surfaces the request_id from the error envelope",
+          "status": "passed",
+          "title": "surfaces the request_id from the error envelope",
+          "duration": 0.540540999999962,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status retries a transient chat_unavailable and then succeeds",
+          "status": "passed",
+          "title": "retries a transient chat_unavailable and then succeeds",
+          "duration": 11.958917000000042,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status gives up after maxRetries and throws the typed error",
+          "status": "passed",
+          "title": "gives up after maxRetries and throws the typed error",
+          "duration": 4.5605410000000575,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status does NOT retry a 400 invalid_request (a client bug is terminal)",
+          "status": "passed",
+          "title": "does NOT retry a 400 invalid_request (a client bug is terminal)",
+          "duration": 1.2825409999999238,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status does NOT retry an unknown 5xx code (only known-transient codes retry)",
+          "status": "passed",
+          "title": "does NOT retry an unknown 5xx code (only known-transient codes retry)",
+          "duration": 10.839583000000061,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status does NOT replay a POST after a transport failure (it may have already landed)",
+          "status": "passed",
+          "title": "does NOT replay a POST after a transport failure (it may have already landed)",
+          "duration": 4.346541000000002,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status does NOT replay a postMessage after a transport failure (no double-send)",
+          "status": "passed",
+          "title": "does NOT replay a postMessage after a transport failure (no double-send)",
+          "duration": 0.6945000000000618,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status DOES retry a transport failure on an idempotent GET",
+          "status": "passed",
+          "title": "DOES retry a transport failure on an idempotent GET",
+          "duration": 2.212582999999995,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["retry — keyed off error.code, not the raw status"],
+          "fullName": "retry — keyed off error.code, not the raw status still retries a chat_unavailable on a POST (the server proved it refused the work)",
+          "status": "passed",
+          "title": "still retries a chat_unavailable on a POST (the server proved it refused the work)",
+          "duration": 3.123583999999937,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349788,
+      "endTime": 1783996349884.1235,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/client.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry registers a connector and gets it back by id",
+          "status": "passed",
+          "title": "registers a connector and gets it back by id",
+          "duration": 1.5527080000000524,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry returns undefined for an unregistered provider (never a fallback connector)",
+          "status": "passed",
+          "title": "returns undefined for an unregistered provider (never a fallback connector)",
+          "duration": 0.4027499999999691,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry lists connectors in registration order",
+          "status": "passed",
+          "title": "lists connectors in registration order",
+          "duration": 0.7847500000000309,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry throws on a duplicate id — a shadowed connector is a tenant-isolation bug",
+          "status": "passed",
+          "title": "throws on a duplicate id — a shadowed connector is a tenant-isolation bug",
+          "duration": 1.877791000000002,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry throws on an empty id",
+          "status": "passed",
+          "title": "throws on an empty id",
+          "duration": 0.6105839999999034,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry unregisters and clears",
+          "status": "passed",
+          "title": "unregisters and clears",
+          "duration": 0.5043749999999818,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry keeps registries isolated from one another",
+          "status": "passed",
+          "title": "keeps registries isolated from one another",
+          "duration": 0.14329099999997652,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["connectorRegistry"],
+          "fullName": "connectorRegistry exposes a process-wide singleton for production registration",
+          "status": "passed",
+          "title": "exposes a process-wide singleton for production registration",
+          "duration": 0.08329200000002857,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["Connector declaration surface (charter D30)"],
+          "fullName": "Connector declaration surface (charter D30) carries direction, auth and tenantResolution as declared metadata",
+          "status": "passed",
+          "title": "carries direction, auth and tenantResolution as declared metadata",
+          "duration": 0.1460419999999658,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["Connector declaration surface (charter D30)"],
+          "fullName": "Connector declaration surface (charter D30) builds an adapter from THAT install's own credential (D1 isolation)",
+          "status": "passed",
+          "title": "builds an adapter from THAT install's own credential (D1 isolation)",
+          "duration": 0.20716600000002927,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349647,
+      "endTime": 1783996349654.2073,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/connector-registry.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels drives inbound -> tenant -> session -> turn -> post exactly ONCE",
+          "status": "passed",
+          "title": "drives inbound -> tenant -> session -> turn -> post exactly ONCE",
+          "duration": 28.736917000000062,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels subscribes to the SSE stream BEFORE sending the turn",
+          "status": "passed",
+          "title": "subscribes to the SSE stream BEFORE sending the turn",
+          "duration": 7.872000000000071,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels never leaks thinking or tool_use blocks into the channel",
+          "status": "passed",
+          "title": "never leaks thinking or tool_use blocks into the channel",
+          "duration": 6.883625000000052,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels mints a Session on first contact and RESUMES it thereafter",
+          "status": "passed",
+          "title": "mints a Session on first contact and RESUMES it thereafter",
+          "duration": 5.7517500000000155,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels keeps different threads on different Sessions",
+          "status": "passed",
+          "title": "keeps different threads on different Sessions",
+          "duration": 6.626209000000017,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels FAILS CLOSED on an unresolvable tenant — no session, no post",
+          "status": "passed",
+          "title": "FAILS CLOSED on an unresolvable tenant — no session, no post",
+          "duration": 0.21241599999996197,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels drops an event for a provider nobody registered",
+          "status": "passed",
+          "title": "drops an event for a provider nobody registered",
+          "duration": 0.16504199999997127,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels drops an empty inbound message before spending a Session on it",
+          "status": "passed",
+          "title": "drops an empty inbound message before spending a Session on it",
+          "duration": 0.11191700000006222,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels posts nothing when a turn produces no text",
+          "status": "passed",
+          "title": "posts nothing when a turn produces no text",
+          "duration": 2.176832999999988,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "core dispatch — the loop that must not change when P3 adds channels"
+          ],
+          "fullName": "core dispatch — the loop that must not change when P3 adds channels isolates tenants: the same thread id under two workspaces is two Sessions",
+          "status": "passed",
+          "title": "isolates tenants: the same thread id under two workspaces is two Sessions",
+          "duration": 4.268374999999992,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349927,
+      "endTime": 1783996349990.2683,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/dispatch.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "eager subscribe (D26 — the stream is a separate GET from the send)"
+          ],
+          "fullName": "eager subscribe (D26 — the stream is a separate GET from the send) completes the HTTP handshake on await, BEFORE any frame is read",
+          "status": "passed",
+          "title": "completes the HTTP handshake on await, BEFORE any frame is read",
+          "duration": 14.346874999999955,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract parses a message frame and reads its `id:` (the only frame that carries one)",
+          "status": "passed",
+          "title": "parses a message frame and reads its `id:` (the only frame that carries one)",
+          "duration": 0.301166999999964,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract parses a chat frame with NO id and passes the payload through VERBATIM",
+          "status": "passed",
+          "title": "parses a chat frame with NO id and passes the payload through VERBATIM",
+          "duration": 0.5073330000000169,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract parses a permission frame with NO id",
+          "status": "passed",
+          "title": "parses a permission frame with NO id",
+          "duration": 0.1754159999999274,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract parses an exit frame with NO id into {status,reason}",
+          "status": "passed",
+          "title": "parses an exit frame with NO id into {status,reason}",
+          "duration": 0.19612500000005184,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract coerces an out-of-enum exit reason to `unknown` and a non-int status to null",
+          "status": "passed",
+          "title": "coerces an out-of-enum exit reason to `unknown` and a non-int status to null",
+          "duration": 0.10066699999993034,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract tolerates the `: keepalive` comment frame (yields nothing, never throws)",
+          "status": "passed",
+          "title": "tolerates the `: keepalive` comment frame (yields nothing, never throws)",
+          "duration": 0.05812500000001819,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract tolerates an unmodelled event type rather than throwing",
+          "status": "passed",
+          "title": "tolerates an unmodelled event type rather than throwing",
+          "duration": 0.04224999999996726,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["parseFrame — byte-exact wire contract"],
+          "fullName": "parseFrame — byte-exact wire contract NEVER schema-validates a chat payload — malformed JSON still passes through",
+          "status": "passed",
+          "title": "NEVER schema-validates a chat payload — malformed JSON still passes through",
+          "duration": 0.16237499999999727,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream replays persisted message rows, then live chat, permission and exit frames",
+          "status": "passed",
+          "title": "replays persisted message rows, then live chat, permission and exit frames",
+          "duration": 12.096667000000025,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream resumes with Last-Event-ID: only rows with seq > lastEventId replay",
+          "status": "passed",
+          "title": "resumes with Last-Event-ID: only rows with seq > lastEventId replay",
+          "duration": 3.089625000000069,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream sends the Last-Event-ID header only when a cursor is supplied",
+          "status": "passed",
+          "title": "sends the Last-Event-ID header only when a cursor is supplied",
+          "duration": 8.039625000000001,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream drives REAL recorded claude stream-json lines through as verbatim chat payloads",
+          "status": "passed",
+          "title": "drives REAL recorded claude stream-json lines through as verbatim chat payloads",
+          "duration": 13.239041000000043,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream drives the mcp_tool_success recording through unchanged too",
+          "status": "passed",
+          "title": "drives the mcp_tool_success recording through unchanged too",
+          "duration": 1.5064579999999523,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream reassembles frames split across chunk boundaries (the real network case)",
+          "status": "passed",
+          "title": "reassembles frames split across chunk boundaries (the real network case)",
+          "duration": 5.133625000000052,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream tolerates a keepalive-only stream (no frames, no throw)",
+          "status": "passed",
+          "title": "tolerates a keepalive-only stream (no frames, no throw)",
+          "duration": 11.469749999999976,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream surfaces a workspace-less chat token as a 403 `forbidden` — and does not retry it",
+          "status": "passed",
+          "title": "surfaces a workspace-less chat token as a 403 `forbidden` — and does not retry it",
+          "duration": 4.990875000000074,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream surfaces a missing bearer as 401 without retrying",
+          "status": "passed",
+          "title": "surfaces a missing bearer as 401 without retrying",
+          "duration": 9.789667000000009,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream 403s the real workspace-less token against the default handler",
+          "status": "passed",
+          "title": "403s the real workspace-less token against the default handler",
+          "duration": 2.7065000000000055,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["openEventStream"],
+          "fullName": "openEventStream yields a permission frame verbatim without an id",
+          "status": "passed",
+          "title": "yields a permission frame verbatim without an id",
+          "duration": 0.6665420000000495,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349788,
+      "endTime": 1783996349876.7065,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/sse.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["telegram connector — registration shape"],
+          "fullName": "telegram connector — registration shape declares direction=channel, auth=token, tenantResolution=credential-bound",
+          "status": "passed",
+          "title": "declares direction=channel, auth=token, tenantResolution=credential-bound",
+          "duration": 0.7711249999999836,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["telegram connector — registration shape"],
+          "fullName": "telegram connector — registration shape registers into the registry as an ordinary channel connector",
+          "status": "passed",
+          "title": "registers into the registry as an ordinary channel connector",
+          "duration": 0.38391699999999673,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["telegram connector — registration shape"],
+          "fullName": "telegram connector — registration shape refuses a duplicate registration instead of silently overwriting",
+          "status": "passed",
+          "title": "refuses a duplicate registration instead of silently overwriting",
+          "duration": 0.35795900000005076,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["telegram connector — registration shape"],
+          "fullName": "telegram connector — registration shape builds a real @chat-adapter/telegram adapter from the install credential",
+          "status": "passed",
+          "title": "builds a real @chat-adapter/telegram adapter from the install credential",
+          "duration": 0.24283300000001873,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["telegram connector — registration shape"],
+          "fullName": "telegram connector — registration shape exposes a listen/stopListening lifecycle so the core never names the channel",
+          "status": "passed",
+          "title": "exposes a listen/stopListening lifecycle so the core never names the channel",
+          "duration": 0.056958000000008724,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["telegram connector — registration shape"],
+          "fullName": "telegram connector — registration shape derives the install key from the bot token's non-secret half",
+          "status": "passed",
+          "title": "derives the install key from the bot token's non-secret half",
+          "duration": 0.10562500000003183,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "telegram connector — tenant resolution (credential-bound, fail closed)"
+          ],
+          "fullName": "telegram connector — tenant resolution (credential-bound, fail closed) resolves the workspace that owns the bot",
+          "status": "passed",
+          "title": "resolves the workspace that owns the bot",
+          "duration": 0.2420839999999771,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "telegram connector — tenant resolution (credential-bound, fail closed)"
+          ],
+          "fullName": "telegram connector — tenant resolution (credential-bound, fail closed) returns null for a bot nobody installed — never a default workspace",
+          "status": "passed",
+          "title": "returns null for a bot nobody installed — never a default workspace",
+          "duration": 0.0985840000000735,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "telegram connector — tenant resolution (credential-bound, fail closed)"
+          ],
+          "fullName": "telegram connector — tenant resolution (credential-bound, fail closed) returns null when the transport could not say which bot received it",
+          "status": "passed",
+          "title": "returns null when the transport could not say which bot received it",
+          "duration": 0.126041999999984,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349788,
+      "endTime": 1783996349791.2422,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/telegram-connector.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["tenant routing — credential-bound (Telegram)"],
+          "fullName": "tenant routing — credential-bound (Telegram) routes an inbound event to the workspace that owns the bot",
+          "status": "passed",
+          "title": "routes an inbound event to the workspace that owns the bot",
+          "duration": 1.802167000000054,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — credential-bound (Telegram)"],
+          "fullName": "tenant routing — credential-bound (Telegram) routes the other workspace's bot to the OTHER workspace (no cross-tenant bleed)",
+          "status": "passed",
+          "title": "routes the other workspace's bot to the OTHER workspace (no cross-tenant bleed)",
+          "duration": 0.18966699999998582,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — credential-bound (Telegram)"],
+          "fullName": "tenant routing — credential-bound (Telegram) resolves the tenant WITHOUT inspecting the payload (a Telegram Update has no team id)",
+          "status": "passed",
+          "title": "resolves the tenant WITHOUT inspecting the payload (a Telegram Update has no team id)",
+          "duration": 0.08995800000002419,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — payload-team-id (Slack)"],
+          "fullName": "tenant routing — payload-team-id (Slack) extracts team_id from the envelope and routes to that workspace",
+          "status": "passed",
+          "title": "extracts team_id from the envelope and routes to that workspace",
+          "duration": 0.08929200000000037,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — payload-team-id (Slack)"],
+          "fullName": "tenant routing — payload-team-id (Slack) routes a different team_id to a different workspace",
+          "status": "passed",
+          "title": "routes a different team_id to a different workspace",
+          "duration": 0.11454200000002857,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — payload-team-id (Slack)"],
+          "fullName": "tenant routing — payload-team-id (Slack) fails closed on an unknown team_id",
+          "status": "passed",
+          "title": "fails closed on an unknown team_id",
+          "duration": 0.08645899999999074,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — payload-team-id (Slack)"],
+          "fullName": "tenant routing — payload-team-id (Slack) fails closed on a payload with no team_id at all",
+          "status": "passed",
+          "title": "fails closed on a payload with no team_id at all",
+          "duration": 0.06200000000001182,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["tenant routing — payload-team-id (Slack)"],
+          "fullName": "tenant routing — payload-team-id (Slack) treats a throwing extractor (malformed/hostile payload) as a miss, not a crash",
+          "status": "passed",
+          "title": "treats a throwing extractor (malformed/hostile payload) as a miss, not a crash",
+          "duration": 0.10316699999998491,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves an unknown install_key to null",
+          "status": "passed",
+          "title": "resolves an unknown install_key to null",
+          "duration": 0.20391699999993307,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves a null install_key to null",
+          "status": "passed",
+          "title": "resolves a null install_key to null",
+          "duration": 0.11275000000000546,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves a missing (undefined) install_key to null",
+          "status": "passed",
+          "title": "resolves a missing (undefined) install_key to null",
+          "duration": 0.050292000000013104,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves a blank/whitespace install_key to null",
+          "status": "passed",
+          "title": "resolves a blank/whitespace install_key to null",
+          "duration": 0.09720900000002075,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) resolves an unregistered provider to null",
+          "status": "passed",
+          "title": "resolves an unregistered provider to null",
+          "duration": 0.0426670000000513,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) normalises a blank workspace id from a sloppy connector to null",
+          "status": "passed",
+          "title": "normalises a blank workspace id from a sloppy connector to null",
+          "duration": 0.050917000000026746,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing — fail-closed (no cross-tenant fallback anywhere)"
+          ],
+          "fullName": "tenant routing — fail-closed (no cross-tenant fallback anywhere) never routes one provider's install key under another provider",
+          "status": "passed",
+          "title": "never routes one provider's install key under another provider",
+          "duration": 0.04087499999991451,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "zero-core-change: a THIRD connector lands with no core edit (charter D30)"
+          ],
+          "fullName": "zero-core-change: a THIRD connector lands with no core edit (charter D30) routes the third connector to the right workspace after a single register() call",
+          "status": "passed",
+          "title": "routes the third connector to the right workspace after a single register() call",
+          "duration": 0.04937500000005457,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "zero-core-change: a THIRD connector lands with no core edit (charter D30)"
+          ],
+          "fullName": "zero-core-change: a THIRD connector lands with no core edit (charter D30) the third connector inherits fail-closed semantics for free",
+          "status": "passed",
+          "title": "the third connector inherits fail-closed semantics for free",
+          "duration": 0.040124999999989086,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "zero-core-change: a THIRD connector lands with no core edit (charter D30)"
+          ],
+          "fullName": "zero-core-change: a THIRD connector lands with no core edit (charter D30) the core carries NO provider-specific branching (tripwire for a future special-case)",
+          "status": "passed",
+          "title": "the core carries NO provider-specific branching (tripwire for a future special-case)",
+          "duration": 0.33370800000000145,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) looks up (provider, install_key) and returns the workspace_id",
+          "status": "passed",
+          "title": "looks up (provider, install_key) and returns the workspace_id",
+          "duration": 0.614667000000054,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) returns null when no row matches (unknown install)",
+          "status": "passed",
+          "title": "returns null when no row matches (unknown install)",
+          "duration": 0.05208300000003874,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) returns null when the row has a null workspace_id",
+          "status": "passed",
+          "title": "returns null when the row has a null workspace_id",
+          "duration": 0.05183400000009897,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) never touches the database for a blank/null install key",
+          "status": "passed",
+          "title": "never touches the database for a blank/null install key",
+          "duration": 0.1065000000000964,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) composite install keys cannot collide across a separator (no forged tenant)",
+          "status": "passed",
+          "title": "composite install keys cannot collide across a separator (no forged tenant)",
+          "duration": 0.0705000000000382,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) pg.Pool satisfies Queryable, so W3-1's pool drops in unchanged (compile-time)",
+          "status": "passed",
+          "title": "pg.Pool satisfies Queryable, so W3-1's pool drops in unchanged (compile-time)",
+          "duration": 0.03049999999996089,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "connector_installs reads (chat_bridge.connector_installs, charter D29)"
+          ],
+          "fullName": "connector_installs reads (chat_bridge.connector_installs, charter D29) W3-1's createBridgePool() output feeds createInstallsLookup directly (compile-time)",
+          "status": "passed",
+          "title": "W3-1's createBridgePool() output feeds createInstallsLookup directly (compile-time)",
+          "duration": 0.03729199999997945,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing against a REAL Postgres (chat_bridge.connector_installs)"
+          ],
+          "fullName": "tenant routing against a REAL Postgres (chat_bridge.connector_installs) executes this slice's real SQL against the table W3-1's DDL actually creates",
+          "status": "passed",
+          "title": "executes this slice's real SQL against the table W3-1's DDL actually creates",
+          "duration": 0.7191249999999627,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing against a REAL Postgres (chat_bridge.connector_installs)"
+          ],
+          "fullName": "tenant routing against a REAL Postgres (chat_bridge.connector_installs) routes two workspaces that installed the SAME provider to different tenants",
+          "status": "passed",
+          "title": "routes two workspaces that installed the SAME provider to different tenants",
+          "duration": 0.6405839999999898,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing against a REAL Postgres (chat_bridge.connector_installs)"
+          ],
+          "fullName": "tenant routing against a REAL Postgres (chat_bridge.connector_installs) fails closed on a real unknown install_key (no row, no fallback)",
+          "status": "passed",
+          "title": "fails closed on a real unknown install_key (no row, no fallback)",
+          "duration": 0.206957999999986,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing against a REAL Postgres (chat_bridge.connector_installs)"
+          ],
+          "fullName": "tenant routing against a REAL Postgres (chat_bridge.connector_installs) never resolves one provider's key under another provider, against real rows",
+          "status": "passed",
+          "title": "never resolves one provider's key under another provider, against real rows",
+          "duration": 0.4836249999999609,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": [
+            "tenant routing against a REAL Postgres (chat_bridge.connector_installs)"
+          ],
+          "fullName": "tenant routing against a REAL Postgres (chat_bridge.connector_installs) routes a full inbound event end-to-end: event -> registry -> real DB -> workspace",
+          "status": "passed",
+          "title": "routes a full inbound event end-to-end: event -> registry -> real DB -> workspace",
+          "duration": 0.8885840000000371,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349806,
+      "endTime": 1783996350097.8887,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/tenant.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)"],
+          "fullName": "bridge state layer (real Postgres) pins search_path on EVERY connection the pool opens, not just the first",
+          "status": "passed",
+          "title": "pins search_path on EVERY connection the pool opens, not just the first",
+          "duration": 7.095666999999935,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)"],
+          "fullName": "bridge state layer (real Postgres) fails closed when handed a pool that is NOT pinned to chat_bridge",
+          "status": "passed",
+          "title": "fails closed when handed a pool that is NOT pinned to chat_bridge",
+          "duration": 4.638332999999989,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)"],
+          "fullName": "bridge state layer (real Postgres) creates thread_session_map and connector_installs in chat_bridge, not public",
+          "status": "passed",
+          "title": "creates thread_session_map and connector_installs in chat_bridge, not public",
+          "duration": 1.8892079999999396,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)"],
+          "fullName": "bridge state layer (real Postgres) lands @chat-adapter/state-pg's five tables in chat_bridge, never public",
+          "status": "passed",
+          "title": "lands @chat-adapter/state-pg's five tables in chat_bridge, never public",
+          "duration": 9.611917000000062,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)"],
+          "fullName": "bridge state layer (real Postgres) is idempotent: ensureBridgeSchema can run again on every boot",
+          "status": "passed",
+          "title": "is idempotent: ensureBridgeSchema can run again on every boot",
+          "duration": 0.6482910000000857,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)", "resolveOrMint"],
+          "fullName": "bridge state layer (real Postgres) resolveOrMint mints exactly ONE session on first message and resumes it thereafter",
+          "status": "passed",
+          "title": "mints exactly ONE session on first message and resumes it thereafter",
+          "duration": 1.6294169999999895,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)", "resolveOrMint"],
+          "fullName": "bridge state layer (real Postgres) resolveOrMint never calls mint on a resume — the SDK/API is not asked for a second Session",
+          "status": "passed",
+          "title": "never calls mint on a resume — the SDK/API is not asked for a second Session",
+          "duration": 1.2349590000000035,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)", "resolveOrMint"],
+          "fullName": "bridge state layer (real Postgres) resolveOrMint gives distinct threads distinct sessions",
+          "status": "passed",
+          "title": "gives distinct threads distinct sessions",
+          "duration": 1.6303749999999582,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)", "resolveOrMint"],
+          "fullName": "bridge state layer (real Postgres) resolveOrMint isolates tenants: the same raw thread id in two workspaces never shares a Session",
+          "status": "passed",
+          "title": "isolates tenants: the same raw thread id in two workspaces never shares a Session",
+          "duration": 2.0387920000000577,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["bridge state layer (real Postgres)", "resolveOrMint"],
+          "fullName": "bridge state layer (real Postgres) resolveOrMint survives a concurrent first message without splitting the thread",
+          "status": "passed",
+          "title": "survives a concurrent first message without splitting the thread",
+          "duration": 2.1611669999999776,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["D28 invariant"],
+          "fullName": "D28 invariant never persists the thread->session binding via thread.setState",
+          "status": "passed",
+          "title": "never persists the thread->session binding via thread.setState",
+          "duration": 1.2354579999998805,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996350096,
+      "endTime": 1783996350418.2354,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/thread-session-map.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["runTurn — post-once-per-turn (D12/D26)"],
+          "fullName": "runTurn — post-once-per-turn (D12/D26) subscribes to the stream BEFORE sending the turn",
+          "status": "passed",
+          "title": "subscribes to the stream BEFORE sending the turn",
+          "duration": 1.3439160000000356,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — post-once-per-turn (D12/D26)"],
+          "fullName": "runTurn — post-once-per-turn (D12/D26) accumulates assistant text and completes on the stream-json result frame",
+          "status": "passed",
+          "title": "accumulates assistant text and completes on the stream-json result frame",
+          "duration": 0.41379200000005767,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — post-once-per-turn (D12/D26)"],
+          "fullName": "runTurn — post-once-per-turn (D12/D26) an event:exit with NO preceding result does NOT complete the turn (D26)",
+          "status": "passed",
+          "title": "an event:exit with NO preceding result does NOT complete the turn (D26)",
+          "duration": 0.38008300000001327,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — post-once-per-turn (D12/D26)"],
+          "fullName": "runTurn — post-once-per-turn (D12/D26) does not fabricate a completion when the stream ends with no result frame",
+          "status": "passed",
+          "title": "does not fabricate a completion when the stream ends with no result frame",
+          "duration": 0.21870799999999235,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — post-once-per-turn (D12/D26)"],
+          "fullName": "runTurn — post-once-per-turn (D12/D26) never leaks thinking or tool_use blocks into the channel",
+          "status": "passed",
+          "title": "never leaks thinking or tool_use blocks into the channel",
+          "duration": 0.6269170000000486,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — post-once-per-turn (D12/D26)"],
+          "fullName": "runTurn — post-once-per-turn (D12/D26) ignores message/permission frames — they are not turn text",
+          "status": "passed",
+          "title": "ignores message/permission frames — they are not turn text",
+          "duration": 0.4513329999999769,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — ack-first (D21)"],
+          "fullName": "runTurn — ack-first (D21) fires onAck on the 202, before any model output is consumed",
+          "status": "passed",
+          "title": "fires onAck on the 202, before any model output is consumed",
+          "duration": 1.283708000000047,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — ack-first (D21)"],
+          "fullName": "runTurn — ack-first (D21) does NOT post an ack message — the ack is a hook, not a second post (D12)",
+          "status": "passed",
+          "title": "does NOT post an ack message — the ack is a hook, not a second post (D12)",
+          "duration": 0.5660000000000309,
+          "failureMessages": [],
+          "meta": {}
+        },
+        {
+          "ancestorTitles": ["runTurn — timeouts"],
+          "fullName": "runTurn — timeouts converts a hung turn into a typed TurnTimeoutError",
+          "status": "passed",
+          "title": "converts a hung turn into a typed TurnTimeoutError",
+          "duration": 53.36175000000003,
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1783996349625,
+      "endTime": 1783996349684.3618,
+      "status": "passed",
+      "message": "",
+      "name": "/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_5038b4f1-66a-39/connectors/test/turn-loop.test.ts"
+    }
+  ]
+}

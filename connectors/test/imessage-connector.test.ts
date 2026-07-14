@@ -81,7 +81,7 @@ describe("imessage — the PROFILE gate (fail closed for Cloud)", () => {
     const registry = createConnectorRegistry();
     const env = profile === undefined ? {} : { CONNECTORS_PROFILE: profile };
 
-    registerBuiltinConnectors(registry, env);
+    registerBuiltinConnectors(registry, { env });
 
     expect(registry.has(IMESSAGE_PROVIDER)).toBe(false);
     expect(registry.channels().map((c) => c.id)).not.toContain(IMESSAGE_PROVIDER);
@@ -90,7 +90,7 @@ describe("imessage — the PROFILE gate (fail closed for Cloud)", () => {
   it("IS registered when CONNECTORS_PROFILE=self-hosted", () => {
     const registry = createConnectorRegistry();
     registerBuiltinConnectors(registry, {
-      CONNECTORS_PROFILE: SELF_HOSTED_PROFILE,
+      env: { CONNECTORS_PROFILE: SELF_HOSTED_PROFILE },
     });
 
     expect(registry.has(IMESSAGE_PROVIDER)).toBe(true);

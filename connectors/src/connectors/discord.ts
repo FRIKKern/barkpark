@@ -89,7 +89,21 @@ const REQUIRED_FIELDS = ["applicationId", "botToken", "publicKey"] as const;
  * the vendor's `?? process.env.DISCORD_*` fallback quietly substitute a
  * process-wide credential for a tenant's own (see the module note above).
  */
-export function parseDiscordCredential(credentialRef: string): DiscordCredential {
+export function parseDiscordCredential(
+  credentialRef: string | null,
+): DiscordCredential {
+  if (credentialRef === null || credentialRef.trim() === "") {
+    // NULL is a legitimate column state (Teams has no per-workspace credential,
+    // D42) — but it is NOT legitimate for Discord, which is BYO-bot. Throw at
+    // MOUNT rather than construct an adapter that would silently fall back to the
+    // process-wide DISCORD_* environment and serve one tenant's bot to another.
+    throw new Error(
+      "Discord install has no credential_ref — Discord is BYO-bot (D41): every " +
+        "workspace supplies its own Application id + bot token + public key. " +
+        "Refusing to mount rather than fall back to the process-wide DISCORD_* env.",
+    );
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(credentialRef);

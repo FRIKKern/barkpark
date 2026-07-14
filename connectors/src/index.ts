@@ -17,10 +17,7 @@ import type {
   InstallsLookup,
 } from "./connector/types.js";
 import { createCredentialCipher } from "./crypto/credential-cipher.js";
-import {
-  createDiscordConnector,
-  DISCORD_PROVIDER,
-} from "./connectors/discord.js";
+import { createDiscordConnector, DISCORD_PROVIDER } from "./connectors/discord.js";
 import {
   createIMessageConnector,
   IMESSAGE_PROVIDER,
@@ -364,7 +361,14 @@ export async function startBridge(
 
   const registry = overrides.registry ?? createConnectorRegistry();
   if (!overrides.registry) {
-    registerBuiltinConnectors(registry, { installs, env: process.env });
+    const slack = slackDepsFromEnv(process.env);
+    registerBuiltinConnectors(registry, {
+      installs,
+      env: process.env,
+      // Absent SLACK_* env ⇒ Slack is simply not registered. Spreading rather than
+      // passing `undefined` keeps `exactOptionalPropertyTypes` happy.
+      ...(slack ? { slack } : {}),
+    });
   }
 
   const deps: BridgeDeps = {
@@ -463,16 +467,35 @@ export async function startBridge(
       registry,
       installs,
       mounts,
+      // LOOPBACK behind Caddy (D34). Binding every interface would expose the
+      // seam — and the x-forwarded-* headers it trusts — straight to the internet.
+      host: config.webhook.host,
       port: config.webhook.port,
       pathPrefix: config.webhook.pathPrefix,
       publicBaseUrl: config.webhook.publicBaseUrl,
       maxBodyBytes: config.webhook.maxBodyBytes,
     });
     console.log(
-      `[bridge] webhooks on :${webhookServer.port}${config.webhook.pathPrefix}/webhooks/… ` +
-        `(${mounts.size()} mounted)`,
+      `[bridge] webhooks on ${config.webhook.host}:${webhookServer.port}` +
+        `${config.webhook.pathPrefix}/webhooks/… (${mounts.size()} mounted); ` +
+        `health: ${config.webhook.pathPrefix}/health`,
     );
   }
+
+  const addInstall = async (install: ConnectorInstall): Promise<MountedInstall> => {
+    const connector = registry.get(install.provider);
+    if (!connector) {
+      // Fail closed and loudly: an install with no connector has credentials
+      // and no code to use them safely.
+      throw new Error(
+        `bridge.addInstall: no connector registered for provider "${install.provider}"`,
+      );
+    }
+    // Replace rather than duplicate: a re-install (OAuth re-authorised, new
+    // credential) must not leave the old Chat running against the old secret.
+    await takeDown(install.provider, install.installKey);
+    return bringUp(connector, install);
+  };
 
   return {
     pool,
@@ -482,22 +505,16 @@ export async function startBridge(
     mounts,
     webhookServer,
 
-    async addInstall(install: ConnectorInstall) {
-      const connector = registry.get(install.provider);
-      if (!connector) {
-        throw new Error(
-          `bridge.addInstall: no connector registered for provider "${install.provider}"`,
-        );
-      }
-      // Replace rather than duplicate: a re-install (OAuth re-authorised, new
-      // credential) must not leave the old Chat running against the old secret.
-      await takeDown(install.provider, install.installKey);
-      return bringUp(connector, install);
-    },
+    addInstall,
 
     async removeInstall(provider: string, installKey: string) {
       return takeDown(provider, installKey);
     },
+
+    // `mount` is the name Slack's OAuth callback was written against. Same
+    // function, two names either side of a merge; the alias costs a line and
+    // spares every caller a rename.
+    mount: addInstall,
 
     async shutdown() {
       await webhookServer?.close();

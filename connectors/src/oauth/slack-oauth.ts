@@ -341,7 +341,11 @@ export async function handleSlackOAuthCallback(
   // The user hit "Cancel", or Slack refused. Nothing to install.
   const denied = url.searchParams.get("error");
   if (denied) {
-    return { status: 400, installed: false, error: `slack denied the install: ${denied}` };
+    return {
+      status: 400,
+      installed: false,
+      error: `slack denied the install: ${denied}`,
+    };
   }
 
   const code = url.searchParams.get("code");
@@ -353,9 +357,13 @@ export async function handleSlackOAuthCallback(
   // never even reaches Slack.
   let workspaceId: WorkspaceId;
   try {
-    workspaceId = verifyOAuthState(url.searchParams.get("state"), deps.stateSecret, {
-      ...(deps.now ? { now: deps.now } : {}),
-    });
+    workspaceId = verifyOAuthState(
+      url.searchParams.get("state"),
+      deps.stateSecret,
+      {
+        ...(deps.now ? { now: deps.now } : {}),
+      },
+    );
   } catch (err) {
     return {
       status: 400,
@@ -384,7 +392,11 @@ export async function handleSlackOAuthCallback(
   if (!installKey) {
     // No team id and no enterprise id: nothing to key the row on, so there is no
     // safe row to write.
-    return { status: 400, installed: false, error: "slack returned no team or enterprise id" };
+    return {
+      status: 400,
+      installed: false,
+      error: "slack returned no team or enterprise id",
+    };
   }
 
   const seal = deps.sealCredential ?? ((token: string) => token);

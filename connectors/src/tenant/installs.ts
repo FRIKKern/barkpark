@@ -126,20 +126,29 @@ export function installIdentity(
 /**
  * Coerce a SEALED row to a usable, OPENED install — or null.
  *
- * Fails closed on every one of:
- *   - no workspace          (cannot be routed)
- *   - no provider secret    (cannot mount an adapter)
- *   - a credential blob that does not open for THIS row's identity
+ * Fails closed on:
+ *   - no workspace  (cannot be routed to a tenant)
+ *   - a blob (either column) that does not open for THIS row's identity
  *
- * The last case is the cross-tenant one. A blob sealed for workspace A, pasted
+ * The second case is the cross-tenant one. A blob sealed for workspace A, pasted
  * into workspace B's row, does not open: `workspace_id` is in the AAD. The row is
  * dropped, and B never gets A's bot. That is a `null` here, not an exception —
  * a corrupt or hostile row must not take down the poll loop that read it — but it
  * IS logged, because a failing open is either an incident or a botched rotation
  * and silence would hide both.
  *
- * `chat_token_ref` NULL is NOT a failure: it means "not provisioned yet". The
- * install comes back with `chatToken: null` and dispatch drops it with a typed
+ * A row missing its CREDENTIAL does NOT fail closed (D42). `credential_ref` is
+ * nullable by design: Teams serves every customer org from ONE operator Azure app,
+ * so a Teams install genuinely has no per-workspace provider secret. Dropping
+ * those rows here would make Teams invisible to `listInstalls` — it would register,
+ * route, and then silently never mount. A connector that DOES need a credential
+ * rejects the null in its own `adapterFactory` (Telegram, Discord and WhatsApp all
+ * do, loudly, at mount) — which is where the error belongs, because only the
+ * connector knows whether it needs one. The tenant-safety fail-closed rule lives on
+ * `workspace_id`, not on the credential.
+ *
+ * `chat_token_ref` NULL is likewise NOT a failure: it means "not provisioned yet".
+ * The install comes back with `chatToken: null` and dispatch drops it with a typed
  * `dropped_no_chat_token`. A token blob that fails to OPEN, however, is treated
  * exactly like a credential one: the row is unusable.
  */
@@ -151,7 +160,6 @@ function toInstall(
 
   const workspaceId = row.workspace_id;
   if (isBlankKey(workspaceId)) return null;
-  if (isBlankSecret(row.credential_ref)) return null;
 
   const identity: CredentialIdentity = {
     provider: row.provider,
@@ -159,31 +167,26 @@ function toInstall(
     workspaceId: workspaceId as string,
   };
 
-  let credentialRef: string;
-  try {
-    credentialRef = cipher.open(row.credential_ref as string, identity);
-  } catch (err) {
-    logOpenFailure("credential_ref", identity, err);
-    return null;
+  // Absent OR blank both mean "no credential" — two spellings of nothing is one
+  // too many for a fail-closed check to get right.
+  let credentialRef: string | null = null;
+  if (!isBlankSecret(row.credential_ref)) {
+    try {
+      credentialRef = cipher.open(row.credential_ref as string, identity);
+    } catch (err) {
+      logOpenFailure("credential_ref", identity, err);
+      return null;
+    }
   }
 
-  if (isBlankSecret(row.chat_token_ref)) {
-    // Provisioned adapter, no chat token yet. Routable, not runnable.
-    return {
-      provider: row.provider,
-      installKey: row.install_key,
-      workspaceId: workspaceId as string,
-      credentialRef,
-      chatToken: null,
-    };
-  }
-
-  let chatToken: string;
-  try {
-    chatToken = cipher.open(row.chat_token_ref as string, identity);
-  } catch (err) {
-    logOpenFailure("chat_token_ref", identity, err);
-    return null;
+  let chatToken: string | null = null;
+  if (!isBlankSecret(row.chat_token_ref)) {
+    try {
+      chatToken = cipher.open(row.chat_token_ref as string, identity);
+    } catch (err) {
+      logOpenFailure("chat_token_ref", identity, err);
+      return null;
+    }
   }
 
   return {
@@ -282,6 +285,11 @@ export function createInstallsLookup(
  * Absent => the column is set NULL, and the install is routable but not runnable
  * until a token is provisioned. It is never defaulted to an operator token.
  *
+ * `credentialRef` is optional for the same structural reason (D42): a Teams
+ * install has NO per-workspace provider secret — one operator Azure app serves
+ * every customer org. Absent => the column is set NULL. A connector that needs a
+ * credential rejects the null at mount, in its own `adapterFactory`.
+ *
  * NOTE the seal is IDENTITY-BOUND: moving a row to another `workspace_id` (an
  * UPDATE that leaves the blobs alone) makes both blobs un-openable. That is the
  * intended behaviour — a stolen tenant is a dead tenant, not a served one.
@@ -302,15 +310,11 @@ export async function upsertInstall(
         "all three are part of the seal's AAD.",
     );
   }
-  if (isBlankSecret(install.credentialRef)) {
-    throw new Error(
-      "upsertInstall: credentialRef is required — an install with no provider " +
-        "secret can never mount an adapter.",
-    );
-  }
 
   const identity = installIdentity(install);
-  const sealedCredential = cipher.seal(install.credentialRef, identity);
+  const sealedCredential = isBlankSecret(install.credentialRef)
+    ? null
+    : cipher.seal(install.credentialRef as string, identity);
   const sealedChatToken = isBlankSecret(install.chatToken)
     ? null
     : cipher.seal(install.chatToken as string, identity);

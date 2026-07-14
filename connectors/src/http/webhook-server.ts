@@ -78,6 +78,8 @@ const TOO_LARGE_BODY = '{"error":"payload_too_large"}';
 const BAD_REQUEST_BODY = '{"error":"bad_request"}';
 const METHOD_NOT_ALLOWED_BODY = '{"error":"method_not_allowed"}';
 const INTERNAL_ERROR_BODY = '{"error":"internal_error"}';
+/** Liveness only. Says nothing about tenants, installs, or versions. */
+const HEALTH_BODY = '{"status":"ok"}';
 
 /** 1 MiB. Slack/Teams/WhatsApp event bodies are kilobytes; this is slack in both senses. */
 export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
@@ -170,10 +172,15 @@ export function normalisePathPrefix(prefix: string): string {
 }
 
 /**
- * `{prefix}/webhooks/:provider[/:installKey]` — nothing else. No body has been
- * read at this point, and none will be for a route we do not serve.
+ * Split the request target into the segments BELOW the bridge's path prefix, or
+ * null when the target is malformed or not ours. Shared by the health route and
+ * the webhook route so they agree, byte for byte, on what "under the prefix"
+ * means (Caddy does NOT strip the prefix — the bridge owns the full path).
  */
-function parseRoute(rawTarget: string, pathPrefix: string): WebhookRoute | null {
+function segmentsUnderPrefix(
+  rawTarget: string,
+  pathPrefix: string,
+): string[] | null {
   const segments = decodeSegments(rawTarget);
   if (segments === null) return null;
 
@@ -184,8 +191,32 @@ function parseRoute(rawTarget: string, pathPrefix: string): WebhookRoute | null 
   for (const [index, expected] of prefixSegments.entries()) {
     if (segments[index] !== expected) return null;
   }
+  return segments.slice(prefixSegments.length);
+}
 
-  const rest = segments.slice(prefixSegments.length);
+/**
+ * `GET {prefix}/health` — is the bridge process actually answering?
+ *
+ * Deliberately the ONLY unauthenticated, tenant-less surface, and it says
+ * nothing a stranger could use: no install count, no provider list, no version.
+ * It exists because the deploy needs a truthful liveness probe
+ * (`deploy/instance-deploy.sh` curls it after `systemctl restart`, and the
+ * ordering hazard in `docs/ops/connectors-deploy.md` turns on the answer): before
+ * this route the probe could only ever log `000`, and "is the bridge up?" had no
+ * answer short of reading journalctl.
+ */
+function isHealthRoute(rawTarget: string, pathPrefix: string): boolean {
+  const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
+  return rest !== null && rest.length === 1 && rest[0] === "health";
+}
+
+/**
+ * `{prefix}/webhooks/:provider[/:installKey]` — nothing else. No body has been
+ * read at this point, and none will be for a route we do not serve.
+ */
+function parseRoute(rawTarget: string, pathPrefix: string): WebhookRoute | null {
+  const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
+  if (rest === null) return null;
   if (rest[0] !== "webhooks") return null;
 
   const provider = rest[1];
@@ -423,6 +454,18 @@ export function createWebhookRequestHandler(
         return;
       }
 
+      // Liveness, before anything tenant-shaped. GET only — a POST to /health is
+      // not a health check, it is someone probing.
+      if (isHealthRoute(req.url ?? "/", pathPrefix)) {
+        drain(req);
+        if (method !== "GET") {
+          send(res, 405, METHOD_NOT_ALLOWED_BODY, { allow: "GET" });
+          return;
+        }
+        send(res, 200, HEALTH_BODY);
+        return;
+      }
+
       const route = parseRoute(req.url ?? "/", pathPrefix);
       if (route === null) {
         drain(req);
@@ -504,13 +547,12 @@ export function createWebhookRequestHandler(
         return;
       }
 
+      const rawBody = read.body.toString("utf8");
+      const headers = requestHeaders(req);
+
       let installKey: string | null = null;
       try {
-        installKey =
-          spec.extractInstallKey?.(
-            read.body.toString("utf8"),
-            requestHeaders(req),
-          ) ?? null;
+        installKey = (await spec.extractInstallKey?.(rawBody, headers)) ?? null;
       } catch (error) {
         // A connector's extractor threw on a hostile body. Fail closed, loudly
         // in the log and opaquely on the wire.
@@ -519,6 +561,35 @@ export function createWebhookRequestHandler(
           method: req.method,
           target: req.url,
         });
+        notFound(res);
+        return;
+      }
+
+      // No install key. Before the 404, give the connector its ONE chance to
+      // answer a request that legitimately has no tenant: the provider's endpoint
+      // VERIFICATION handshake (Slack's `url_verification`, which is sent before
+      // any workspace has installed the app and carries no team id). Without this
+      // hook Slack's Events request_url can never be verified and the app can
+      // never be configured — a 404 here would make the seam unusable for the one
+      // channel it was built for. The hook is tenant-less by contract: it sees no
+      // install row and touches no credential.
+      if (installKey === null) {
+        let handshake: Response | null = null;
+        try {
+          handshake = (await spec.handleUnkeyed?.(rawBody, headers)) ?? null;
+        } catch (error) {
+          onError?.(error, {
+            provider: route.provider,
+            method: req.method,
+            target: req.url,
+          });
+          notFound(res);
+          return;
+        }
+        if (handshake !== null) {
+          await writeResponse(res, handshake);
+          return;
+        }
         notFound(res);
         return;
       }

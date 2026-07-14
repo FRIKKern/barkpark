@@ -3,11 +3,15 @@ import {
   type SlackAdapter,
   type SlackInstallation,
 } from "@chat-adapter/slack";
-import { readSlackWebhook } from "@chat-adapter/slack/webhook";
+import {
+  parseSlackWebhookBody,
+  verifySlackSignature,
+} from "@chat-adapter/slack/webhook";
 
 import type {
   Connector,
   ConnectorInstall,
+  ConnectorWebhook,
   InboundEvent,
   InstallsLookup,
   TenantContext,
@@ -77,46 +81,16 @@ import { createPayloadTeamIdResolver } from "../tenant/resolve.js";
 
 export const SLACK_PROVIDER = "slack";
 
-/** The route Slack posts events to. The webhook seam mounts it; we only name it. */
-export const SLACK_WEBHOOK_PATH = "/connectors/webhook/slack";
-
 /**
- * A connector whose inbound transport is an HTTP request rather than a poll loop
- * or a socket.
- *
- * Declared HERE, structurally, rather than as a field on the core `Connector`
- * type: a webhook seam consumes it by duck-typing
- * (`(connector as { webhook?: ConnectorWebhookBinding }).webhook`), so adding
- * Slack still costs the core exactly zero lines. When a second webhook channel
- * lands, lift this shape into `connector/types.ts` once — generically, never as
- * `if (provider === "slack")`.
+ * The route Slack posts events to — one APP-WIDE URL for every tenant, which is
+ * what makes Slack `keySource: "payload"`. The webhook seam owns the routing
+ * (`{prefix}/webhooks/slack`); this constant is what the install doc and the app
+ * manifest quote, so they cannot drift from the router.
  */
-export interface ConnectorWebhookBinding {
-  /**
-   * Where the install key comes from. `"payload"` = the request body carries it
-   * (Slack's `team_id`/`enterprise_id`); a `credential-bound` channel would use a
-   * per-install path segment instead.
-   */
-  keySource: "payload";
-  /** The path this connector's events arrive on. */
-  path: string;
-  /**
-   * Verify the request and extract the install key, or `null` to drop it.
-   *
-   * The router MUST use this to pick which mounted install handles the request.
-   * It is the SAME derivation the adapter's own `resolveTokenForTeam` performs
-   * (`enterprise_id ?? team_id`), so the workspace and the bot token can never be
-   * resolved from two different keys — that divergence is the confused-deputy
-   * vector this single function exists to close.
-   *
-   * A bad signature, an unparseable body or an envelope with no team is a `null`
-   * (drop it), never a throw: a hostile body must not take the bridge down.
-   */
-  extractInstallKey(request: Request): Promise<string | null>;
-}
+export const SLACK_WEBHOOK_PATH = "/connectors/webhooks/slack";
 
 export interface SlackConnector extends Connector<unknown> {
-  webhook: ConnectorWebhookBinding;
+  webhook: ConnectorWebhook;
 }
 
 export interface SlackConnectorOptions {
@@ -136,14 +110,13 @@ export interface SlackConnectorOptions {
    */
   installs: InstallsLookup;
   /**
-   * Open a sealed `credential_ref` into a usable bot token.
+   * OPTIONAL extra unsealing step for `credential_ref`.
    *
-   * The injection point for the credential cipher: the bridge passes its
-   * `decrypt` here and this module never learns the scheme. Defaults to identity,
-   * which is the CURRENT honest state of `connector_installs.credential_ref` —
-   * it holds the raw secret (documented as a KNOWN GAP in `tenant/installs.ts`).
-   * When the cipher lands, this default is replaced at the ONE call site in
-   * `index.ts`; nothing in this file changes.
+   * Normally UNUSED and it should stay that way: `createInstallsLookup(pool,
+   * cipher)` already opens both sealed columns on the way out of SQL (D35/D37), so
+   * the `install.credentialRef` this module reads is already the plaintext bot
+   * token. The hook survives only as an injection point for a test (or a future
+   * store that hands back a POINTER rather than the bytes). Defaults to identity.
    */
   decryptCredential?: (credentialRef: string) => string | Promise<string>;
   /** Override the Slack API base (tests point it at a local recorder). */
@@ -181,23 +154,27 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Verify + parse an inbound Slack request and derive its install key.
  *
- * Uses the SDK's exported `readSlackWebhook` (HMAC verify, timestamp skew check,
- * then a typed parse) rather than a hand-rolled body reader — the signature check
- * is the ONLY thing standing between a forged `team_id` and a tenant's bot token,
- * and it is not ours to reimplement.
+ * Takes the RAW BODY BYTES and the headers, which is the webhook seam's contract
+ * (D39): the seam reads the body exactly once and hands the same bytes to the
+ * extractor and to the adapter, because Slack HMACs the raw bytes and any
+ * re-serialisation (whitespace, unicode escapes) would fail verification for
+ * reasons impossible to debug from the 401.
  *
- * `url_verification` (Slack's endpoint handshake) legitimately carries no team,
- * so it yields `null`. The webhook seam must answer that one directly — the
- * adapter's `handleWebhook` already does, without a token.
+ * `verifySlackSignature` (HMAC over `v0:{ts}:{body}` + a timestamp skew check)
+ * then `parseSlackWebhookBody` — the SDK's own exports, not a hand-rolled reader:
+ * the signature check is the ONLY thing standing between a forged `team_id` and a
+ * tenant's bot token, and it is not ours to reimplement.
+ *
+ * `url_verification` (Slack's endpoint handshake) legitimately carries no team, so
+ * it yields `null` — and {@link createSlackHandshakeResponder} is what answers it.
  */
 export function createSlackInstallKeyExtractor(
   signingSecret: string,
-): (request: Request) => Promise<string | null> {
-  return async (request: Request): Promise<string | null> => {
+): (rawBody: string, headers: Headers) => Promise<string | null> {
+  return async (rawBody: string, headers: Headers): Promise<string | null> => {
     try {
-      // Clones the request: `readSlackWebhook` consumes the body, and the router
-      // must still be able to hand the SAME request to `adapter.handleWebhook`.
-      const payload = await readSlackWebhook(request.clone(), { signingSecret });
+      await verifySlackSignature(rawBody, headers, { signingSecret });
+      const payload = parseSlackWebhookBody(rawBody, { headers });
       if (payload.kind === "url_verification" || payload.kind === "unsupported") {
         return null;
       }
@@ -205,6 +182,38 @@ export function createSlackInstallKeyExtractor(
     } catch {
       // Bad signature, stale timestamp, malformed body → no install key, drop.
       // Never a throw: a hostile request must not take the process down.
+      return null;
+    }
+  };
+}
+
+/**
+ * Answer Slack's endpoint-verification handshake — the ONE inbound request that
+ * has no tenant and must still succeed.
+ *
+ * Slack POSTs `{"type":"url_verification","challenge":"…"}` the moment you set the
+ * Events request_url, BEFORE any workspace has installed the app. It carries no
+ * `team_id`, so the demux finds no install and (correctly) would 404 — and the
+ * app could then never be configured at all. This is the seam's generic
+ * `handleUnkeyed` hook, not a provider branch in the router.
+ *
+ * It is signature-VERIFIED against the app-wide signing secret (so an unsigned
+ * challenge gets nothing) and it touches NO tenant credential and NO Chat: it
+ * echoes the challenge and stops. A non-handshake body returns null and falls
+ * through to the router's opaque 404.
+ */
+export function createSlackHandshakeResponder(
+  signingSecret: string,
+): (rawBody: string, headers: Headers) => Promise<Response | null> {
+  return async (rawBody: string, headers: Headers): Promise<Response | null> => {
+    try {
+      await verifySlackSignature(rawBody, headers, { signingSecret });
+      const payload = parseSlackWebhookBody(rawBody, { headers });
+      if (payload.kind !== "url_verification") return null;
+      // The shape Slack accepts, and the shape the adapter's own handleWebhook
+      // answers with (`index.js:1511` — `Response.json({ challenge })`).
+      return Response.json({ challenge: payload.challenge });
+    } catch {
       return null;
     }
   };
@@ -249,7 +258,12 @@ export function slackInstallKeyFromMessage(payload: unknown): string | null {
 function createScopedInstallationProvider(
   install: ConnectorInstall,
   options: SlackConnectorOptions,
-): { getInstallation: (id: string, isEnterpriseInstall: boolean) => Promise<SlackInstallation | null> } {
+): {
+  getInstallation: (
+    id: string,
+    isEnterpriseInstall: boolean,
+  ) => Promise<SlackInstallation | null>;
+} {
   const decrypt = options.decryptCredential ?? ((ref: string) => ref);
 
   return {
@@ -267,6 +281,11 @@ function createScopedInstallationProvider(
         installationId,
       );
       if (!row) return null;
+
+      // A Slack install with no bot token is not a token to fall back FROM — it
+      // is an install that cannot speak. Return null: `resolveTokenForTeam` then
+      // answers 200 and never calls `processEventPayload` (no session, no post).
+      if (row.credentialRef === null) return null;
 
       const botToken = blankToNull(await decrypt(row.credentialRef));
       if (!botToken) return null;
@@ -362,10 +381,13 @@ export function createSlackConnector(
     // request. The boot path calls `connector.listen?.(adapter)` and, finding
     // nothing, moves on — never learning that Slack is different.
 
+    // The ONE generic member the HTTP seam reads (D39). `keySource: "payload"`
+    // because Slack's request_url is app-wide; `handleUnkeyed` because the
+    // endpoint-verification handshake legitimately has no tenant.
     webhook: {
       keySource: "payload",
-      path: SLACK_WEBHOOK_PATH,
       extractInstallKey,
+      handleUnkeyed: createSlackHandshakeResponder(options.signingSecret),
     },
   };
 }

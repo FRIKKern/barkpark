@@ -76,7 +76,7 @@ oauth_config:
       - users:read
 settings:
   event_subscriptions:
-    request_url: https://PUBLIC_URL/connectors/webhook/slack
+    request_url: https://PUBLIC_URL/connectors/webhooks/slack
     bot_events:
       - app_mention
       - message.im
@@ -201,16 +201,31 @@ no owner.
 - **The live round trip: NOT PASSED.** Blocked on the human gate above, which is
   itself blocked on the public URL (W4-5). No live install has been performed and
   none is claimed.
-- **`credential_ref` is still plaintext.** `sealCredential` / `decryptCredential`
-  are wired as injection points and default to identity — the honest current state
-  of the column, already documented in `tenant/installs.ts`. The credential cipher
-  is a sibling slice; when it lands it plugs into the ONE call site in `index.ts`
-  and nothing in the Slack connector changes.
-- **The per-workspace `/v1/chat` token.** `chatClientFor(workspaceId)` still hands
-  every tenant the one operator token (the P2 known gap). Slack does not make that
-  worse — but it does not fix it either, and a Slack install is not tenant-isolated
-  on the *Barkpark* side until that slice lands.
-- **The HTTP ingress.** This slice ships the connector, its OAuth handler and the
-  `extractInstallKey` the router must use; the HTTP server that mounts
-  `/connectors/webhook/slack` and `/connectors/oauth/slack/callback` is a sibling
-  slice. `SLACK_WEBHOOK_PATH` and `SLACK_OAUTH_CALLBACK_PATH` are exported for it.
+- **Interactivity, slash commands and token rotation.** The manifest ships with
+  `is_enabled: false` for interactivity and `token_rotation_enabled: false`;
+  `extractInstallKey` returns null for an `unsupported` payload, which is a
+  fail-closed 404.
+- **`app_uninstalled` / `tokens_revoked`.** An uninstalled team's row lingers until
+  someone deletes it. The read-through `installationProvider` means a revoked token
+  simply starts failing at Slack — it does not leak — but the row is stale.
+
+## What IS done (corrected 2026-07-14, at wave-4 integration)
+
+Two things this doc previously listed as missing landed in the SAME wave, and the
+integrated branch has them:
+
+- **`credential_ref` and `chat_token_ref` are SEALED at rest** — AES-256-GCM,
+  AAD-bound to `(provider, install_key, workspace_id)` (D35/D37,
+  `src/crypto/credential-cipher.ts`). `createInstallsLookup(pool, cipher)` opens
+  them on the way out of SQL, so the Slack connector reads a plaintext token and
+  never learns the scheme. `decryptCredential` survives only as a test seam.
+- **The per-workspace `/v1/chat` token.** `chatClientForInstall(install)` mints the
+  client from the SAME row that routed the event. There is no operator token in the
+  request path at all; a Slack install with no `chat_token_ref` is a typed
+  fail-closed drop (`dropped_no_chat_token`), never a fallback.
+- **The HTTP ingress**, including the one thing that would otherwise have made the
+  app impossible to configure: Slack's `url_verification` handshake carries no
+  `team_id`, so the demux finds no install. The seam's generic `handleUnkeyed` hook
+  answers it (signature-verified, tenant-less) — see
+  `createSlackHandshakeResponder`. Without it, "Verify URL" in the Slack app config
+  fails and no workspace can ever install.

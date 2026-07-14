@@ -10,18 +10,29 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { ChatClient, ChatSession } from "../src/chat-client/types.js";
 import { createConnectorRegistry } from "../src/connector/registry.js";
-import type { ConnectorInstall, InstallsLookup } from "../src/connector/types.js";
+import type {
+  AuthorizedInstall,
+  ConnectorInstall,
+  InstallsLookup,
+} from "../src/connector/types.js";
 import { dispatchInbound } from "../src/core/dispatch.js";
 import {
   createSlackConnector,
+  createSlackHandshakeResponder,
   createSlackInstallKeyExtractor,
   SLACK_PROVIDER,
+  SLACK_WEBHOOK_PATH,
   slackInstallKey,
   slackInstallKeyFromMessage,
   type SlackConnector,
 } from "../src/connectors/slack.js";
+import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import { createBridgePool, ensureBridgeSchema } from "../src/db/pool.js";
-import { registerBuiltinConnectors, startBridge, type Bridge } from "../src/index.js";
+import {
+  registerBuiltinConnectors,
+  startBridge,
+  type Bridge,
+} from "../src/index.js";
 import {
   buildSlackInstallUrl,
   handleSlackOAuthCallback,
@@ -71,23 +82,41 @@ const TOKEN_B = "xoxb-team-b-token";
 const TOKEN_GRID = "xoxb-grid-token";
 const OPERATOR_TOKEN = "xoxb-OPERATOR-one-token-to-rule-them-all";
 
+/**
+ * The cipher that seals `credential_ref` / `chat_token_ref` (D35/D37). Every row
+ * this suite writes goes through it, and every row it reads is opened by it — the
+ * same path production takes, so a test that passes here means what it says.
+ */
+const CREDENTIAL_KEY = Buffer.alloc(32, 7).toString("base64");
+const cipher = createCredentialCipher({ key: CREDENTIAL_KEY });
+
 const SIGNING_SECRET = "app-wide-signing-secret";
 const CLIENT_ID = "123.456";
 const CLIENT_SECRET = "client-secret";
 const STATE_SECRET = "bridge-state-hmac-secret";
 
+/**
+ * A fully-provisioned install carries BOTH secrets (D35): the SLACK bot token
+ * (`credentialRef` — what the adapter replies with) and THIS workspace's Barkpark
+ * `chat` ApiToken (`chatToken` — what its /v1/chat traffic authenticates with).
+ * An install missing the second one is fail-closed dropped by dispatch with
+ * `dropped_no_chat_token` before a single HTTP call, so a fixture without it would
+ * prove nothing about Slack — it would only re-prove W4-1's drop.
+ */
 const installsTable: ConnectorInstall[] = [
   {
     provider: SLACK_PROVIDER,
     installKey: TEAM_A,
     workspaceId: WS_A,
     credentialRef: TOKEN_A,
+    chatToken: "bp_chat_ws_a",
   },
   {
     provider: SLACK_PROVIDER,
     installKey: TEAM_B,
     workspaceId: WS_B,
     credentialRef: TOKEN_B,
+    chatToken: "bp_chat_ws_b",
   },
   {
     // Enterprise Grid, org-wide: keyed by the ENTERPRISE id, never a team id.
@@ -95,6 +124,7 @@ const installsTable: ConnectorInstall[] = [
     installKey: ENTERPRISE,
     workspaceId: WS_B,
     credentialRef: TOKEN_GRID,
+    chatToken: "bp_chat_ws_b",
   },
 ];
 
@@ -248,8 +278,9 @@ function mentionEnvelope(options: {
  */
 function recordingChatClientFor(
   seen: string[],
-): (workspaceId: string) => ChatClient {
-  return (workspaceId: string) => {
+): (install: AuthorizedInstall) => ChatClient {
+  return (install: AuthorizedInstall) => {
+    const workspaceId = install.workspaceId;
     seen.push(workspaceId);
     const session: ChatSession = {
       id: `sess-${workspaceId}`,
@@ -316,7 +347,16 @@ describe("slack connector — registration shape (zero core change)", () => {
       },
     });
 
-    expect(registry.list().map((c) => c.id)).toEqual(["telegram", "slack"]);
+    // Every P3 channel is a peer here — Slack has no privileged position in the
+    // registry, which is the whole claim. (iMessage is absent: it registers only
+    // under CONNECTORS_PROFILE=self-hosted, D44.)
+    expect(registry.list().map((c) => c.id)).toEqual([
+      "telegram",
+      "slack",
+      "discord",
+      "teams",
+      "whatsapp",
+    ]);
     expect(registry.channels().map((c) => c.id)).toContain("slack");
   });
 
@@ -332,7 +372,11 @@ describe("slack connector — registration shape (zero core change)", () => {
     expect(slack.stopListening).toBeUndefined();
     // …and declares where its events arrive, for the webhook seam to mount.
     expect(slack.webhook.keySource).toBe("payload");
-    expect(slack.webhook.path).toBe("/connectors/webhook/slack");
+    // The seam owns the route; the connector only declares WHERE its key lives —
+    // plus the one tenant-less hook that answers Slack's endpoint handshake.
+    expect(typeof slack.webhook.extractInstallKey).toBe("function");
+    expect(typeof slack.webhook.handleUnkeyed).toBe("function");
+    expect(SLACK_WEBHOOK_PATH).toBe("/connectors/webhooks/slack");
   });
 
   it("refuses to construct without a signing secret", () => {
@@ -436,7 +480,13 @@ describe("slack — install key = enterprise_id ?? team_id", () => {
 });
 
 describe("slack — the webhook extractor (verify + parse, never hand-rolled)", () => {
-  const extract = createSlackInstallKeyExtractor(SIGNING_SECRET);
+  const extractRaw = createSlackInstallKeyExtractor(SIGNING_SECRET);
+  // The seam hands the extractor the RAW BODY BYTES + headers (D39), not a
+  // Request: the body is read exactly ONCE and the same bytes go to the adapter,
+  // because Slack HMACs the raw bytes. These tests still build a signed Request
+  // (it is the honest wire shape), so this unwraps it the way the seam does.
+  const extract = async (request: Request): Promise<string | null> =>
+    extractRaw(await request.text(), request.headers);
 
   it("extracts the team id from a correctly signed envelope", async () => {
     await expect(
@@ -497,11 +547,55 @@ describe("slack — the webhook extractor (verify + parse, never hand-rolled)", 
     await expect(extract(request)).resolves.toBeNull();
   });
 
-  it("leaves the request body readable for the adapter (it clones, not consumes)", async () => {
+  it("answers Slack's url_verification handshake — the ONE request with no tenant", async () => {
+    // Slack POSTs this the moment you set the Events request_url, BEFORE any
+    // workspace has installed the app: it carries no team_id at all. The extractor
+    // correctly finds no install key, and `handleUnkeyed` is what keeps the app
+    // configurable. Without it the endpoint could never be verified and Slack
+    // could never be installed by anyone.
+    const respond = createSlackHandshakeResponder(SIGNING_SECRET);
+    const envelope = { type: "url_verification", challenge: "3eZbrw1aB" };
+    const request = signedSlackRequest(envelope);
+    const raw = await request.text();
+
+    await expect(extractRaw(raw, request.headers)).resolves.toBeNull();
+
+    const response = await respond(raw, request.headers);
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({ challenge: "3eZbrw1aB" });
+  });
+
+  it("refuses an UNSIGNED handshake — the app-wide secret still gates it", async () => {
+    const respond = createSlackHandshakeResponder(SIGNING_SECRET);
+    const envelope = { type: "url_verification", challenge: "forged" };
+    const request = signedSlackRequest(envelope, { signingSecret: "wrong-secret" });
+    const raw = await request.text();
+
+    // Null => the seam falls through to its opaque 404. A stranger cannot even
+    // confirm that a Slack connector is mounted here.
+    await expect(respond(raw, request.headers)).resolves.toBeNull();
+  });
+
+  it("returns null for a NON-handshake body, so the hook can never shadow real traffic", async () => {
+    const respond = createSlackHandshakeResponder(SIGNING_SECRET);
     const request = signedSlackRequest(mentionEnvelope({ teamId: TEAM_A }));
-    await extract(request);
-    // The router extracts the key, THEN hands the same request to handleWebhook.
-    await expect(request.text()).resolves.toContain(TEAM_A);
+    const raw = await request.text();
+
+    await expect(respond(raw, request.headers)).resolves.toBeNull();
+  });
+
+  it("reads the RAW BYTES, so the adapter still gets the exact wire body", async () => {
+    // The seam reads the body ONCE and hands the same bytes to both the extractor
+    // and the adapter (D39 rule 4) — the extractor never sees a Request, so it can
+    // never consume one out from under `handleWebhook`. Slack HMACs the raw bytes,
+    // so "the exact bytes" is not a nicety: a re-serialised body 401s.
+    const envelope = mentionEnvelope({ teamId: TEAM_A });
+    const request = signedSlackRequest(envelope);
+    const raw = await request.text();
+
+    await expect(extractRaw(raw, request.headers)).resolves.toBe(TEAM_A);
+    // Same bytes still in hand, byte for byte, for the adapter's own verification.
+    expect(raw).toBe(JSON.stringify(envelope));
   });
 });
 
@@ -635,7 +729,7 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
       pool = createBridgePool({ connectionString: dbUrl });
       await ensureBridgeSchema(pool);
       for (const install of installsTable) {
-        await upsertInstall(pool, install);
+        await upsertInstall(pool, cipher, install);
       }
     }, 30_000);
 
@@ -660,7 +754,7 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
       request: Request,
       options: { staticBotToken?: string } = {},
     ): Promise<{ workspaces: string[]; posts: SlackApiCall[] }> {
-      const lookup = createInstallsLookup(pool);
+      const lookup = createInstallsLookup(pool, cipher);
       const slack = createSlackConnector({
         signingSecret: SIGNING_SECRET,
         clientId: CLIENT_ID,
@@ -722,7 +816,7 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
             registry,
             installs: { installs: lookup },
             map,
-            chatClientFor: recordingChatClientFor(workspaces),
+            chatClientForInstall: recordingChatClientFor(workspaces),
             reply: async (out) => {
               await reply(out);
             },
@@ -772,11 +866,15 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
     it("team A's event is answered with A's token; team B's with B's", async () => {
       const a = await driveWebhook(
         installsTable[0] as ConnectorInstall,
-        signedSlackRequest(mentionEnvelope({ teamId: TEAM_A, text: "<@U_BOT> hi" })),
+        signedSlackRequest(
+          mentionEnvelope({ teamId: TEAM_A, text: "<@U_BOT> hi" }),
+        ),
       );
       const b = await driveWebhook(
         installsTable[1] as ConnectorInstall,
-        signedSlackRequest(mentionEnvelope({ teamId: TEAM_B, text: "<@U_BOT> hi" })),
+        signedSlackRequest(
+          mentionEnvelope({ teamId: TEAM_B, text: "<@U_BOT> hi" }),
+        ),
       );
 
       // THE CLAIM, at the wire: the bearer token on chat.postMessage.
@@ -796,12 +894,16 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
     it("PROTECTIVE: swapping installationProvider for a static botToken makes BOTH tenants reply with the operator token", async () => {
       const a = await driveWebhook(
         installsTable[0] as ConnectorInstall,
-        signedSlackRequest(mentionEnvelope({ teamId: TEAM_A, text: "<@U_BOT> hi" })),
+        signedSlackRequest(
+          mentionEnvelope({ teamId: TEAM_A, text: "<@U_BOT> hi" }),
+        ),
         { staticBotToken: OPERATOR_TOKEN },
       );
       const b = await driveWebhook(
         installsTable[1] as ConnectorInstall,
-        signedSlackRequest(mentionEnvelope({ teamId: TEAM_B, text: "<@U_BOT> hi" })),
+        signedSlackRequest(
+          mentionEnvelope({ teamId: TEAM_B, text: "<@U_BOT> hi" }),
+        ),
         { staticBotToken: OPERATOR_TOKEN },
       );
 
@@ -855,7 +957,9 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
       // not of the router's correctness.
       const misrouted = await driveWebhook(
         installsTable[0] as ConnectorInstall,
-        signedSlackRequest(mentionEnvelope({ teamId: TEAM_B, text: "<@U_BOT> hi" })),
+        signedSlackRequest(
+          mentionEnvelope({ teamId: TEAM_B, text: "<@U_BOT> hi" }),
+        ),
       );
 
       expect(misrouted.posts).toEqual([]);
@@ -913,9 +1017,9 @@ describe("slack oauth — the workspace binding is integrity-protected", () => {
     expect(url.origin + url.pathname).toBe("https://slack.com/oauth/v2/authorize");
     expect(url.searchParams.get("client_id")).toBe(CLIENT_ID);
     expect(url.searchParams.get("scope")).toContain("chat:write");
-    expect(
-      verifyOAuthState(url.searchParams.get("state"), STATE_SECRET),
-    ).toBe(WS_A);
+    expect(verifyOAuthState(url.searchParams.get("state"), STATE_SECRET)).toBe(
+      WS_A,
+    );
   });
 });
 
@@ -1123,8 +1227,17 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
       bridge = await startBridge({
         databaseUrl: dbUrl,
         apiUrl: "http://127.0.0.1:1/unused",
-        chatToken: "unused",
+        credentialKey: CREDENTIAL_KEY,
+        previousCredentialKeys: [],
         userName: "barkpark",
+        // This suite drives the connector directly; no inbound listener wanted.
+        webhook: {
+          enabled: false,
+          host: "127.0.0.1",
+          port: 0,
+          pathPrefix: "/connectors",
+          maxBodyBytes: 1_048_576,
+        },
       });
     }, 30_000);
 
@@ -1158,7 +1271,7 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
           clientSecret: CLIENT_SECRET,
           redirectUri: `https://bridge.test${SLACK_OAUTH_CALLBACK_PATH}`,
           stateSecret: STATE_SECRET,
-          upsertInstall: (install) => upsertInstall(pool, install),
+          upsertInstall: (install) => upsertInstall(pool, cipher, install),
           mountInstall: (install) => bridge.mount(install),
           fetch: (async () =>
             new Response(
@@ -1179,13 +1292,38 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
       expect(bridge.mounted[0]?.install.workspaceId).toBe(WS_A);
       expect(bridge.mounted[0]?.connector.id).toBe(SLACK_PROVIDER);
 
-      // …and it is durable: the row is really in connector_installs.
-      const { rows } = await pool.query(
+      // …and it is durable: the row is really in connector_installs — and SEALED.
+      const { rows } = await pool.query<{
+        workspace_id: string;
+        credential_ref: string;
+      }>(
         `SELECT workspace_id, credential_ref FROM chat_bridge.connector_installs
           WHERE provider = $1 AND install_key = $2`,
         [SLACK_PROVIDER, TEAM_A],
       );
-      expect(rows[0]).toMatchObject({ workspace_id: WS_A, credential_ref: TOKEN_A });
+      expect(rows[0]?.workspace_id).toBe(WS_A);
+      // The column must NOT hold the bot token in the clear (D35/D37) — asserting
+      // `credential_ref === TOKEN_A` would have passed on a bridge that stored
+      // every tenant's Slack token in plaintext, which is what we just stopped
+      // doing. The real claim is: it is a sealed blob, and it opens to TOKEN_A for
+      // THIS row's identity and no other.
+      const sealed = rows[0]?.credential_ref as string;
+      expect(sealed).not.toContain(TOKEN_A);
+      expect(
+        cipher.open(sealed, {
+          provider: SLACK_PROVIDER,
+          installKey: TEAM_A,
+          workspaceId: WS_A,
+        }),
+      ).toBe(TOKEN_A);
+      // …and refuses to open for another tenant's identity.
+      expect(
+        cipher.opens(sealed, {
+          provider: SLACK_PROVIDER,
+          installKey: TEAM_A,
+          workspaceId: WS_B,
+        }),
+      ).toBe(false);
     }, 30_000);
 
     it("a re-install REPLACES the mount instead of stacking a second listener", async () => {

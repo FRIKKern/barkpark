@@ -68,10 +68,25 @@ export function createTelegramConnector(
      * One adapter per INSTALL — built from that workspace's own bot token.
      * Per-workspace credential isolation (D1) is structural: a tenant's
      * adapter is constructed from that tenant's credential and nothing else.
+     *
+     * `credentialRef` is nullable at the type level because Teams has no
+     * per-workspace secret (D42). Telegram DOES: a credential-bound connector
+     * whose credential is missing has no tenant binding at all, so it fails
+     * LOUDLY here at mount rather than constructing an adapter that would fall
+     * back to a `TELEGRAM_BOT_TOKEN` env var — i.e. to the operator's bot, in
+     * another workspace's name.
      */
     adapterFactory(install: ConnectorInstall): TelegramAdapter {
+      const botToken = install.credentialRef;
+      if (botToken === null || botToken.trim() === "") {
+        throw new Error(
+          `telegram: install "${install.installKey}" (workspace ${install.workspaceId}) ` +
+            "has no credential_ref — Telegram is bring-your-own-bot and the bot token " +
+            "IS the tenant binding (D29). Refusing to mount.",
+        );
+      }
       return createTelegramAdapter({
-        botToken: install.credentialRef,
+        botToken,
         mode,
       });
     },

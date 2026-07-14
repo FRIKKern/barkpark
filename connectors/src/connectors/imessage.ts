@@ -120,8 +120,12 @@ function requireString(record: Record<string, unknown>, field: string): string {
  * or a JSON object for an explicit gRPC relay. REJECTS anything carrying Spectrum
  * Cloud credentials, loudly.
  */
-export function parseIMessageCredential(credentialRef: string): IMessageCredential {
-  const raw = credentialRef.trim();
+export function parseIMessageCredential(
+  credentialRef: string | null,
+): IMessageCredential {
+  // NULL and "" both mean "the Mac this process runs on" — the local relay needs
+  // no stored secret. (NULL is a first-class column state since D42.)
+  const raw = credentialRef?.trim() ?? "";
 
   if (raw === "" || raw === "local") return { mode: "local" };
 

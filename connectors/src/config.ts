@@ -46,10 +46,17 @@ export interface BridgeConfig {
 }
 
 /**
- * Inbound webhook transport config (charter D39).
+ * Inbound webhook transport config (charter D34/D39).
  *
- * `pathPrefix` is load-bearing: Caddy's `handle` does NOT strip the prefix, so the
- * bridge's router owns the FULL `/connectors/...` path. If the proxy and the
+ * `host`/`port` come from `CONNECTORS_HTTP_ADDR` — the ONE name the deploy writes
+ * into `/etc/barkpark/connectors.env` (`127.0.0.1:4020`, D34). It is `host:port`,
+ * not a bare port, and the host half is load-bearing: on guerrilla the bridge must
+ * bind LOOPBACK only, because Caddy fronts it on a path route and a bridge
+ * listening on 0.0.0.0 would put every provider webhook — and the `x-forwarded-*`
+ * headers the seam trusts — directly on the public internet.
+ *
+ * `pathPrefix` is load-bearing too: Caddy's `handle` does NOT strip the prefix, so
+ * the bridge's router owns the FULL `/connectors/...` path. If the proxy and the
  * bridge disagree about it, EVERY webhook 404s silently.
  *
  * `publicBaseUrl` is equally load-bearing behind a proxy: the socket speaks plain
@@ -59,16 +66,25 @@ export interface BridgeConfig {
 export interface WebhookConfig {
   /** Poll/socket-only deployments (Telegram, Discord) can turn the listener off. */
   enabled: boolean;
+  /** The interface to bind. `127.0.0.1` behind Caddy — never `0.0.0.0` in Cloud. */
+  host: string;
   port: number;
   /** Default `/connectors`. Must match the path the provider is configured with. */
   pathPrefix: string;
-  /** e.g. `https://bridge.barkpark.cloud`. Unset = derive from x-forwarded-proto/host. */
+  /** e.g. `https://guerrilla.barkpark.cloud`. Unset = derive from x-forwarded-proto/host. */
   publicBaseUrl?: string;
   /** Bodies larger than this are rejected with a 413 (never a socket teardown). */
   maxBodyBytes: number;
 }
 
-const DEFAULT_WEBHOOK_PORT = 3000;
+/**
+ * Loopback by default, and deliberately so: the seam trusts `x-forwarded-proto` /
+ * `x-forwarded-host` when `publicBaseUrl` is unset (that is what makes Teams' JWT
+ * audience check work behind Caddy), and those headers are only trustworthy from a
+ * proxy. A bridge that defaulted to 0.0.0.0 would let a stranger spoof them.
+ */
+const DEFAULT_WEBHOOK_HOST = "127.0.0.1";
+const DEFAULT_WEBHOOK_PORT = 4020;
 const DEFAULT_WEBHOOK_PATH_PREFIX = "/connectors";
 const DEFAULT_WEBHOOK_MAX_BODY_BYTES = 1_048_576;
 
@@ -138,23 +154,75 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
 }
 
 /**
+ * Parse `CONNECTORS_HTTP_ADDR` — `host:port`, or a bare `port`.
+ *
+ * This is the name `deploy/instance-deploy.sh` writes into
+ * `/etc/barkpark/connectors.env` (D34), so it is the name that has to work: a
+ * bridge that silently ignored it would bind its default port while Caddy
+ * reverse-proxied :4020, and EVERY provider webhook would land on the maintenance
+ * 503 — with a green deploy and a running unit to look at.
+ *
+ * A malformed value is an ERROR, never a silent fallback, for the same reason.
+ * IPv6 is accepted in bracket form (`[::1]:4020`).
+ */
+function httpAddrFromEnv(env: NodeJS.ProcessEnv): {
+  host: string;
+  port: number;
+} {
+  const raw = env["CONNECTORS_HTTP_ADDR"]?.trim();
+  if (raw === undefined || raw === "") {
+    return {
+      host: env["CONNECTORS_WEBHOOK_HOST"]?.trim() || DEFAULT_WEBHOOK_HOST,
+      port: intFromEnv(
+        env,
+        "CONNECTORS_WEBHOOK_PORT",
+        DEFAULT_WEBHOOK_PORT,
+        1,
+        65535,
+      ),
+    };
+  }
+
+  // `[::1]:4020` | `127.0.0.1:4020` | `4020`
+  const bracketed = /^\[(.+)\]:(\d+)$/.exec(raw);
+  const hostPort = bracketed ?? /^([^:]*):(\d+)$/.exec(raw);
+  const bare = /^(\d+)$/.exec(raw);
+
+  const host = hostPort ? (hostPort[1] as string) : DEFAULT_WEBHOOK_HOST;
+  const portText = hostPort ? hostPort[2] : bare?.[1];
+  if (portText === undefined) {
+    throw new InvalidConfigError(
+      "CONNECTORS_HTTP_ADDR",
+      `expected "host:port" (e.g. 127.0.0.1:4020) or a bare port, got "${raw}"`,
+    );
+  }
+
+  const port = Number(portText);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new InvalidConfigError(
+      "CONNECTORS_HTTP_ADDR",
+      `port must be an integer in [1, 65535], got "${portText}"`,
+    );
+  }
+
+  return { host: host === "" ? DEFAULT_WEBHOOK_HOST : host, port };
+}
+
+/**
  * Webhook transport config. Every value has a working default — a bridge with no
- * webhook channels installed still boots, and one with them needs only a port.
+ * webhook channels installed still boots, and one with them needs only an address.
  * A malformed number is an ERROR, never a silent fallback: a bridge listening on
  * the wrong port is a bridge that 404s every provider event.
  */
 export function loadWebhookConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): WebhookConfig {
+  const { host, port } = httpAddrFromEnv(env);
+
   return {
     enabled: boolFromEnv(env["CONNECTORS_WEBHOOK_ENABLED"], true),
-    port: intFromEnv(
-      env,
-      "CONNECTORS_WEBHOOK_PORT",
-      DEFAULT_WEBHOOK_PORT,
-      1,
-      65535,
-    ),
+    host,
+    port,
     pathPrefix:
       env["CONNECTORS_PATH_PREFIX"]?.trim() || DEFAULT_WEBHOOK_PATH_PREFIX,
     publicBaseUrl: env["CONNECTORS_PUBLIC_BASE_URL"]?.trim() || undefined,
