@@ -52,6 +52,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:sidebar_slug_draft, :string, default: nil)
   attr(:sidebar_slug_feedback, :any, default: nil)
   attr(:workspace_label, :string, default: nil)
+  # sup-w5 — the socket-owned save mirror (Shared.Paper computes both on every
+  # write). Threaded into the canvas <.paper_block_editor> below so the footer
+  # echoes the REAL status and a plugin-halt raises the shared banner, instead
+  # of the old hardcoded "✓ Auto-saved" that lied through "Save failed"/halts.
+  # Both default calm — save_status is assigned ONLY in write handlers, so it is
+  # UNASSIGNED on a fresh paper open (the outer call site Map.get-guards it).
+  attr(:save_status, :string, default: "")
+  attr(:paper_halt, :string, default: nil)
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -173,6 +181,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   api_token_raw={@api_token_raw}
                   canvas_eligible={true}
                   task_previews={@task_previews}
+                  save_status={@save_status}
+                  paper_halt={@paper_halt}
                 />
               <% @paper_block_mode -> %>
                 <%!-- Block-backed: each top-level block is its own keyed stream
@@ -736,6 +746,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_block_mode={@paper_block_mode}
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
+          save_status={Map.get(assigns, :save_status, "")}
+          paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
           dataset={@dataset}
           streams={@streams}
