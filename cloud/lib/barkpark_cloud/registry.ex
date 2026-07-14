@@ -3392,7 +3392,11 @@ defmodule BarkparkCloud.Registry do
     with box_url when is_binary(box_url) and box_url != "" <- barkpark.url,
          dataset when is_binary(dataset) and dataset != "" <- site.bootstrap_dataset,
          url when is_binary(url) <- content_receiver_url(site) do
+      # The box's webhook changeset validate_required([:name, :url]) — omitting
+      # `name` 422s ("name can't be blank") and the registration silently fails,
+      # so the site never auto-rebuilds on publish. Name it after the site.
       body = %{
+        name: "site-autodeploy-#{site.id}",
         events: ["publish", "unpublish", "delete"],
         url: url,
         secret: secret

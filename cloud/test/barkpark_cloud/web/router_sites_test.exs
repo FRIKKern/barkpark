@@ -610,6 +610,20 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       decoded = Jason.decode!(body)
       assert decoded["permissions"] == ["public-read"]
       assert decoded["dataset"] == "production"
+
+      # The content-publish webhook registration MUST carry a non-blank `name`:
+      # the box's webhook changeset validate_required([:name, :url]), so a body
+      # without a name 422s and the registration silently fails (the site never
+      # auto-rebuilds on publish). Regression guard for that gap.
+      wh_req =
+        Enum.find(StudioLinkFakeHttpClient.requests(), fn r ->
+          String.contains?(r.url, "/v1/webhooks/")
+        end)
+
+      assert wh_req, "create must register the content-publish webhook on the box"
+      wh_body = Jason.decode!(wh_req.body)
+      assert is_binary(wh_body["name"]) and wh_body["name"] != ""
+      assert wh_body["events"] == ["publish", "unpublish", "delete"]
     end
 
     test "an instance that refuses the mint → 502 naming the box, and NO ghost site row" do
