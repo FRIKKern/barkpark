@@ -272,6 +272,96 @@ defmodule Barkpark.Auth do
     end
   end
 
+  # ── Connectors: the per-install chat token (D36/D48) ───────────────────────
+
+  # THE ONLY PLACE the connector chat permission set is written. HARDCODED, in
+  # ONE place, on purpose.
+  #
+  # `create_token/5` above does NOT hardcode anything — it mints whatever
+  # permission list it is handed. Before this extraction the `["chat"]` literal
+  # lived in `ChatTokenController`, which made the HTTP endpoint safe and left
+  # every IN-PROCESS caller (a LiveView, a Mix task, a plugin) one keystroke from
+  # `["admin"]` — and `TenancyAuth.role_for_permissions/1` would then escalate the
+  # minted token's own membership row to `admin`: a token that can mint more
+  # tokens. Studio's Connect button is exactly such an in-process caller.
+  #
+  # Consequences of ANY change to this list, both proven in
+  # `chat_token_controller_test.exs`:
+  #   * adding "admin" → `RequireChatAccess.chat_scope/1` checks `admin` FIRST →
+  #     `:global` → `StudioChat` stamps `owner_workspace_id = NULL` → every bridge
+  #     session becomes TENANT-LESS and any other `:global` caller reads them all.
+  #   * that suite reds with `expected owner_workspace_id=…, got nil` and a
+  #     literal `CROSS-TENANT LEAK` assertion. It now protects BOTH callers.
+  @chat_permissions ["chat"]
+
+  @doc """
+  The permission set every connector chat token carries — `#{inspect(["chat"])}`,
+  and nothing else. Exposed so callers (the controller's 201 body, the LiveView)
+  can ECHO it without re-declaring it.
+  """
+  @spec chat_permissions() :: [String.t()]
+  def chat_permissions, do: @chat_permissions
+
+  @doc """
+  Mint a workspace-bound `chat` API token (Connectors D36/D48) — the ONE mint
+  path for a connector install's credential, shared by the HTTP endpoint
+  (`ChatTokenController`) and the in-process Studio connect loop.
+
+  The raw token is returned ONCE (only its SHA-256 hash is persisted) and must
+  never be logged, never assigned to a LiveView socket, and never put in a URL.
+  It rides the connect POST body over loopback to the bridge, which seals it into
+  `connector_installs.chat_token_ref`.
+
+  `label` is load-bearing for CONNECTORS: `Barkpark.Connectors.Catalog.token_label/2`
+  produces `connector:<provider>:<install_key>`, and that label is the ONLY handle
+  DISCONNECT has on the token — the bridge holds no token id and the sealed
+  `chat_token_ref` is never opened by Elixir.
+
+  Fail-closed on a missing workspace: a `chat` token with a NULL `workspace_id`
+  is precisely the tenant-less operator credential this whole wave exists to
+  delete, so it is an error, never a Default-workspace fallback.
+  """
+  @spec create_chat_token(String.t(), String.t(), binary()) ::
+          {:ok, binary(), ApiToken.t()} | {:error, :workspace_required | term()}
+  def create_chat_token(label, dataset, workspace_id)
+      when is_binary(label) and is_binary(dataset) and is_binary(workspace_id) and
+             workspace_id != "" do
+    raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+    case create_token(raw, label, dataset, @chat_permissions, workspace_id) do
+      {:ok, %ApiToken{} = token} -> {:ok, raw, token}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def create_chat_token(_label, _dataset, _workspace_id), do: {:error, :workspace_required}
+
+  @doc """
+  Every LIVE (non-revoked) api_token in `workspace_id` carrying `label` — the
+  disconnect side of `create_chat_token/3`.
+
+  Scoped to the workspace on purpose: two workspaces could each connect a bot and
+  (pathologically) land the same `install_key`, and one tenant must never revoke
+  another's credential.
+  """
+  @spec live_tokens_by_label(binary(), String.t()) :: [ApiToken.t()]
+  def live_tokens_by_label(workspace_id, label)
+      when is_binary(workspace_id) and is_binary(label) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      uuid ->
+        ApiToken
+        |> where([t], t.workspace_id == ^uuid)
+        |> where([t], t.label == ^label)
+        |> where([t], is_nil(t.revoked_at))
+        |> Repo.all()
+    end
+  end
+
+  def live_tokens_by_label(_workspace_id, _label), do: []
+
   defp insert_token_with_membership(token_attrs, ws_id, permissions) do
     role = TenancyAuth.role_for_permissions(permissions)
 

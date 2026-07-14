@@ -63,6 +63,23 @@ CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.thread_session_map (
  * `chat_token_ref` is NULLABLE: an install can exist before its chat token is
  * provisioned (an OAuth callback lands the provider secret first). A NULL token
  * is a fail-closed DROP at dispatch, never a fallback to an operator token.
+ *
+ * ⚠️ TWO SOURCES OF TRUTH — KEEP THEM IN LOCKSTEP (connectors D54).
+ * The bridge OWNS this DDL (charter D28: no Ecto migration may create
+ * `chat_bridge`), but Elixir READS the table — the Studio Connectors catalog
+ * queries it through `Barkpark.Connectors.Install`, an `@schema_prefix` schema.
+ * The Elixir TEST database therefore has to create the table itself, and it does
+ * so by TRANSCRIBING the SQL below:
+ *
+ *   · api/test/test_helper.exs                    — the fixture (mirrors BOTH statements here)
+ *   · api/lib/barkpark/connectors/install.ex      — the Ecto schema (the column set)
+ *   · api/test/barkpark/connectors/install_schema_test.exs — pins the column set
+ *     against information_schema, so a drift REDS the Elixir suite instead of
+ *     500ing Studio in production.
+ *
+ * This file has already drifted once — `ADD_CHAT_TOKEN_REF_SQL` below exists
+ * precisely because `CREATE TABLE IF NOT EXISTS` was a no-op against P2's
+ * four-column table. Change a column here ⇒ change all three files above.
  */
 export const CREATE_CONNECTOR_INSTALLS_SQL = `
 CREATE TABLE IF NOT EXISTS ${CHAT_BRIDGE_SCHEMA}.connector_installs (

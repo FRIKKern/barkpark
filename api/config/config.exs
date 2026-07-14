@@ -103,6 +103,24 @@ config :barkpark, :tmux_console, enabled: true, backend: ExPTY
 # `claude` binary is not installed.
 config :barkpark, :claude_chat, enabled: true
 
+# Connectors — the Elixir edge of the chat-bridge seam (connectors D50/D51).
+#
+# `connect_secret: nil` is the DEFAULT and a fully supported state: an instance
+# with no CONNECTORS_CONNECT_SECRET simply has no connect seam (the bridge does
+# not mount the connect routes; the Studio catalog renders read-only with a
+# banner). It must never raise at boot and never leave an unauthenticated route
+# — which is also what removes the merge-order hazard between the bridge slice
+# and the deploy step that generates the secret.
+#
+# `bridge_url` is LOOPBACK by construction: the bridge binds 127.0.0.1:4020 on
+# the same box as the BEAM (CONNECTORS_HTTP_ADDR), and the connect routes 404 on
+# any request carrying `x-forwarded-*` — so the raw chat token never traverses
+# anything but the loopback interface.
+config :barkpark, Barkpark.Connectors,
+  bridge_url: "http://127.0.0.1:4020/connectors",
+  connect_secret: nil,
+  bridge: Barkpark.Connectors.BridgeClient
+
 config :barkpark, :media_cdn,
   base_url: nil,
   invalidation: [adapter: :noop]

@@ -829,6 +829,11 @@ defmodule BarkparkWeb.Router do
     pipe_through([:browser, :soft_token])
 
     get("/settings", AdminStudioRedirectController, :settings)
+
+    # Same substance argument (connectors D49): a connector install belongs to
+    # ONE workspace, so the canonical home is
+    # `/w/:ws/p/:proj/studio/connectors` and the flat spelling only 302s there.
+    get("/connectors", AdminStudioRedirectController, :connectors)
   end
 
   # ── Back-compat redirects: legacy host-namespaced admin URLs ──────────
@@ -1141,6 +1146,16 @@ defmodule BarkparkWeb.Router do
       ],
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
+
+      # Connectors catalog + the connect loop (connectors D49). It MUST be in
+      # THIS session, not the flat `/studio/*` one: the flat live_session carries
+      # no `LiveScope` hook, so it has no `current_workspace` — and every install
+      # would then pin to the seeded Default workspace (the exact bug that moved
+      # `/studio/settings` to the scoped spelling). LiveScope's membership gate
+      # binds the panel to the URL workspace; the LV re-gates each write on
+      # `workspace_admin?/2` (the mount gate is a GLOBAL-permission gate, which is
+      # strictly weaker than the per-workspace mint gate it delegates to).
+      live("/connectors", ConnectorsLive)
     end
   end
 

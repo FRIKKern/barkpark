@@ -14,13 +14,23 @@ defmodule BarkparkWeb.ChatTokenController do
   widening it to `chat` would blur that guarantee. This controller mints exactly
   one permission set and nothing else.
 
-  SECURITY — the permission set is HARDCODED to `#{inspect(["chat"])}`. The
-  request body cannot influence it: no `permissions` key is read, so a body
-  asking for `admin` is silently irrelevant rather than a policy decision. That
-  matters because `RequireChatAccess` checks `admin` FIRST and resolves such a
-  token to `:global`, and `StudioChat` stamps `owner_workspace_id = NULL` for a
-  `:global` scope — a single `admin` entry in this list would silently re-open
-  the tenant-less-session bug this endpoint exists to close.
+  SECURITY — the permission set is HARDCODED to `#{inspect(["chat"])}`, and it
+  is hardcoded in exactly ONE place: `Barkpark.Auth.create_chat_token/3` (D48).
+  This controller DELEGATES to it and holds no permission literal of its own.
+  That extraction is not tidying — it is the fix for a live escalation seam:
+  `Auth.create_token/5` mints whatever list it is handed, so while the literal
+  lived here, the endpoint was safe and every in-process caller (Studio's Connect
+  button, a Mix task) was one keystroke from `["admin"]`, which
+  `TenancyAuth.role_for_permissions/1` would then turn into an `admin` membership
+  row — a token that can mint more tokens.
+
+  The request body cannot influence the permissions: no `permissions` key is
+  read, so a body asking for `admin` is silently irrelevant rather than a policy
+  decision. That matters because `RequireChatAccess` checks `admin` FIRST and
+  resolves such a token to `:global`, and `StudioChat` stamps
+  `owner_workspace_id = NULL` for a `:global` scope — a single `admin` entry in
+  that list would silently re-open the tenant-less-session bug this endpoint
+  exists to close. This suite is therefore the protective test for BOTH callers.
 
   A `chat` token grants exactly one thing: the ability to drive `/v1/chat`
   sessions owned by THIS workspace (`RequireChatAccess` resolves it to
@@ -38,12 +48,6 @@ defmodule BarkparkWeb.ChatTokenController do
 
   alias Barkpark.Auth
 
-  # The ONLY permissions this endpoint will ever mint. HARDCODED — not read from
-  # params, not overridable, not extendable by a request. Adding "admin" here
-  # would resolve the token to `:global` chat scope and stamp NULL-owner
-  # sessions; the suite reds with a cross-tenant leak if anyone tries.
-  @permissions ["chat"]
-
   @doc """
   Mint a `chat` token bound to the resolved workspace.
 
@@ -51,8 +55,8 @@ defmodule BarkparkWeb.ChatTokenController do
 
     * `label` is required and must be a non-empty string.
     * `dataset` defaults to `"production"`.
-    * `permissions` in the body is IGNORED — the mint is always
-      `#{inspect(["chat"])}`.
+    * `permissions` in the body is IGNORED — the mint is always whatever
+      `Auth.chat_permissions/0` says, which is `#{inspect(["chat"])}`.
 
   201 → `{"token": raw, "label": ..., "permissions": ["chat"], "dataset": ...,
   "workspace": <workspace_slug>}`.
@@ -63,16 +67,16 @@ defmodule BarkparkWeb.ChatTokenController do
     with {:ok, label} <- fetch_label(params),
          dataset when is_binary(dataset) <- fetch_dataset(params),
          %{id: ws_id, slug: ws_slug} <- workspace do
-      raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
-
-      case Auth.create_token(raw, label, dataset, @permissions, ws_id) do
-        {:ok, _token} ->
+      # DELEGATE (D48). The raw token is generated INSIDE the context fn — the
+      # controller never chooses the permissions and never chooses the entropy.
+      case Auth.create_chat_token(label, dataset, ws_id) do
+        {:ok, raw, _token} ->
           conn
           |> put_status(:created)
           |> json(%{
             token: raw,
             label: label,
-            permissions: @permissions,
+            permissions: Auth.chat_permissions(),
             dataset: dataset,
             workspace: ws_slug
           })
