@@ -35,6 +35,7 @@ const testSiteID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 type siteCP struct {
 	t          *testing.T
 	createBody []byte
+	deployBody []byte
 	lastAuth   string
 	deployHits int
 	pollHits   int
@@ -67,6 +68,7 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.write(w, cp.createResp)
 		case r.Method == "POST" && path == "/v1/sites/"+testSiteID+"/deploy":
 			cp.deployHits++
+			cp.deployBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.deployResp)
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
@@ -182,6 +184,48 @@ func TestRunCloudSiteCreateJSON(t *testing.T) {
 	}
 	if env.Site.Kind != "static" || env.Site.Dataset != "production" {
 		t.Fatalf("json site payload wrong: %+v", env.Site)
+	}
+}
+
+// TestRunCloudSiteCreateDocType is the D35 plumbing proof: --doc-type reaches the
+// wire as doc_type so a dataset that serves a non-default type (guerrilla is
+// `paper`, not `post`) actually builds. Passing it via an env prefix is inert —
+// the box's allowlist drops it — so create is the ONLY channel that gets it there.
+func TestRunCloudSiteCreateDocType(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID, "--doc-type", "paper")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	var got struct {
+		DocType string `json:"doc_type"`
+	}
+	if err := json.Unmarshal(cp.createBody, &got); err != nil {
+		t.Fatalf("decode create body: %v (raw %s)", err, cp.createBody)
+	}
+	if got.DocType != "paper" {
+		t.Fatalf("create body doc_type=%q want %q (raw %s)", got.DocType, "paper", cp.createBody)
+	}
+	if !strings.Contains(stdout, "paper") {
+		t.Fatalf("create should echo the doc type it bound:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteCreateDocTypeOmitted proves the field is omitempty: with no
+// --doc-type the wire carries NO doc_type key at all, so the control plane applies
+// its own canonical default ("post") rather than the CLI forcing an empty string.
+func TestRunCloudSiteCreateDocTypeOmitted(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.createResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static"}}`}
+	cp.serve()
+	if _, _, code := runSite(t, "table", "create", "--name", "blog", "--dataset", "acme/blog/production", "--instance", testInstanceID); code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if bytes.Contains(cp.createBody, []byte("doc_type")) {
+		t.Fatalf("omitted --doc-type must not send a doc_type key (omitempty): %s", cp.createBody)
 	}
 }
 
@@ -338,6 +382,80 @@ func TestRunCloudSiteDeployNoFollow(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "in progress") {
 		t.Fatalf("--no-follow should print the in-progress verdict:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteDeployForce is the D36 proof: --force POSTs {"force":true} to
+// the deploy route so the box folds a nonce and mints a genuinely new release even
+// when content+config are unchanged. Without it a re-deploy would return the
+// cached (possibly failed) deployment and could never re-run.
+func TestRunCloudSiteDeployForce(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-2","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	if _, stderr, code := runSite(t, "table", "deploy", testSiteID, "--force"); code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	var got struct {
+		Force bool `json:"force"`
+	}
+	if err := json.Unmarshal(cp.deployBody, &got); err != nil {
+		t.Fatalf("decode deploy body: %v (raw %s)", err, cp.deployBody)
+	}
+	if !got.Force {
+		t.Fatalf("--force must POST {\"force\":true}, got %s", cp.deployBody)
+	}
+}
+
+// TestRunCloudSiteDeployNoForce is the tripwire on the idempotent default: with no
+// --force the deploy body must NOT carry force:true, so an unchanged re-deploy
+// stays the byte-identical no-op the box relies on.
+func TestRunCloudSiteDeployNoForce(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	if _, _, code := runSite(t, "table", "deploy", testSiteID); code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if bytes.Contains(cp.deployBody, []byte("true")) {
+		t.Fatalf("a plain deploy must not send force:true, got %s", cp.deployBody)
+	}
+}
+
+// TestRunCloudSiteDeployNarratesRunningThenDone is the D39 proof: a stage that
+// walks running → done prints TWO distinct lines (the "started" narration then the
+// terminal line), and the terminal done-line is NEVER swallowed. The bug D39 kills
+// is a name-only printed map: once "… BUILD" is printed, "✓ BUILD" would be
+// skipped and the bar would never resolve. Keyed by (name+status), BUILD appears
+// exactly twice — once running, once done — never once, never thrice.
+func TestRunCloudSiteDeployNarratesRunningThenDone(t *testing.T) {
+	cp := newSiteCP(t)
+	// The queued deploy response already carries BUILD as running (the box streams
+	// `started` as status running) — render() prints it on the first pass.
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"building","stage":"BUILD","build_id":"b-1","stages":[{"name":"BUILD","status":"running"}]}}`}
+	// The poll lands live with BUILD done among all six.
+	cp.pollResp = fakeResp{200, sixStagesLive}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// BUILD gets exactly two stream lines: no swallow (done survives), no double
+	// (running is not reprinted on every poll).
+	if n := strings.Count(stdout, "BUILD"); n != 2 {
+		t.Fatalf("BUILD should appear exactly twice (running + done), got %d:\n%s", n, stdout)
+	}
+	// One line carries the running glyph, one the done glyph — the two transitions.
+	if !strings.Contains(stdout, siteStageMark("running")+" "+hzCell("BUILD")) {
+		t.Fatalf("missing the running BUILD line:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, siteStageMark("done")+" "+hzCell("BUILD")) {
+		t.Fatalf("missing the terminal (done) BUILD line — it was swallowed:\n%s", stdout)
 	}
 }
 

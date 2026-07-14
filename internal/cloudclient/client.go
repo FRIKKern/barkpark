@@ -1218,6 +1218,12 @@ type SpawnSiteCreate struct {
 	Project    string `json:"project"`
 	Dataset    string `json:"dataset"`
 	BarkparkID string `json:"barkpark_id,omitempty"`
+	// DocType is the Barkpark content type the build's flagship fetch reads
+	// (BARKPARK_DOC_TYPE on the box). Optional: the control plane defaults it to
+	// the canonical "post" when omitted, so an empty string is a server-side
+	// default rather than a wire error (charter D35). The live proof passes
+	// "paper" explicitly because guerrilla has no post schema.
+	DocType string `json:"doc_type,omitempty"`
 }
 
 // SpawnSite is one spawned site as returned by the /v1/sites endpoints for a
@@ -1343,8 +1349,17 @@ func (c *Client) GetSpawnSite(ctx context.Context, id string) (SpawnSite, error)
 // DeploySpawnSite enqueues a build via POST /v1/sites/:id/deploy (Bearer) and
 // returns the queued SiteDeployment — status:"queued" with a build id. The CLI
 // then streams it through the six stages by polling SpawnSiteDeployment.
-func (c *Client) DeploySpawnSite(ctx context.Context, id string) (SiteDeployment, error) {
-	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/deploy", true, map[string]any{})
+//
+// force folds a fresh nonce into the box's build_id so an unchanged re-deploy
+// mints a genuinely new releases/<build_id>/ instead of returning the cached
+// (possibly failed) deployment. Without it {force:true} the body stays the empty
+// object and the deploy is idempotent on identical content+config (charter D36).
+func (c *Client) DeploySpawnSite(ctx context.Context, id string, force bool) (SiteDeployment, error) {
+	req := map[string]any{}
+	if force {
+		req["force"] = true
+	}
+	status, body, err := c.do(ctx, "POST", "/v1/sites/"+esc(id)+"/deploy", true, req)
 	if err != nil {
 		return SiteDeployment{}, err
 	}

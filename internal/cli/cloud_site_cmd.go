@@ -132,8 +132,8 @@ const siteInstanceRequired = "--instance is required: a site is spawned on a spe
 // Astro/static are the defaults; --instance has no default because there is no
 // honest one.
 func runCloudSiteCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static]"
-	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance"}, nil, usage)
+	const usage = "bp cloud site create --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static] [--doc-type <type>]"
+	a, err := parseHzArgs(args, []string{"name", "dataset", "framework", "kind", "instance", "doc-type"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -182,6 +182,11 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 		Project:    proj,
 		Dataset:    ds,
 		BarkparkID: barkparkID,
+		// --doc-type binds the content type the build's flagship fetch reads. Left
+		// empty the control plane defaults it to "post"; the flag is here because
+		// guerrilla's content is `paper`, and passing it via an env prefix is inert
+		// (the allowlist drops it) — it has to reach the box through create (D35).
+		DocType: strings.TrimSpace(a.val("doc-type")),
 	}
 
 	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
@@ -195,6 +200,9 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	ref := spawnSiteRef(site)
 	out.outf("✓ site %s created — %s build, kind %s", hzCell(site.Name), hzCell(siteOr(site.Framework, framework)), hzCell(siteOr(site.Kind, kind)))
 	out.outf("  dataset: %s", siteDatasetLabel(site, ws, proj, ds))
+	if req.DocType != "" {
+		out.outf("  content: %s docs", hzCell(req.DocType))
+	}
 	if u := spawnSiteURL(site); u != "" {
 		out.outf("  url:     %s (live after the first deploy)", u)
 	}
@@ -208,8 +216,8 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
 // build, then stream the six visible stages until the deploy lands or fails.
 func runCloudSiteDeploy(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site deploy <site> [--no-follow]"
-	a, err := parseHzArgs(args, nil, []string{"no-follow"}, usage)
+	const usage = "bp cloud site deploy <site> [--no-follow] [--force]"
+	a, err := parseHzArgs(args, nil, []string{"no-follow", "force"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -226,7 +234,7 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	if rerr != nil {
 		return openResolveFail(out, rerr)
 	}
-	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id)
+	dep, derr := cfg.CloudClient().DeploySpawnSite(cloudCtx(), id, a.bools["force"])
 	if derr != nil {
 		return cloudFail(out, "deploy site", derr)
 	}
@@ -244,17 +252,23 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 		out.progressf("→ deploy queued for %s", ref)
 	}
 
+	// printed is keyed by (name + status), NOT name alone: a stage that walks
+	// running → done owes the reader TWO lines — the "… BUILD" that says work
+	// started (the box streams `started` as status running; BUILD alone is ~38s of
+	// silence otherwise) and the terminal "✓ BUILD". A name-only key would let the
+	// running line SWALLOW the done line and the bar would never resolve (D39).
 	printed := map[string]bool{}
 	render := func(d cloudclient.SiteDeployment) {
 		for _, st := range d.Stages {
 			s := strings.ToLower(strings.TrimSpace(st.Status))
-			if s != "done" && s != "failed" && s != "skipped" {
+			if !siteStageNarratable(s) {
 				continue
 			}
-			if printed[st.Name] {
+			key := st.Name + "\x00" + s
+			if printed[key] {
 				continue
 			}
-			printed[st.Name] = true
+			printed[key] = true
 			out.progressf("  %s", siteStageLine(st))
 		}
 	}
@@ -557,12 +571,28 @@ func siteStageMark(status string) string {
 		return "✓"
 	case "failed", "error":
 		return "✗"
-	case "running", "in_progress", "building":
+	case "running", "started", "in_progress", "building":
 		return "…"
 	case "skipped":
 		return "–"
 	default:
 		return "·"
+	}
+}
+
+// siteStageNarratable reports whether a stage status is worth a stream line: the
+// running/started transition and every terminal outcome, but NOT the neutral
+// pending/queued fill (those are silence, not progress). It is exactly the set of
+// statuses siteStageMark gives a real glyph — the deploy stream and the status
+// table stay in lockstep on what counts as "something happened".
+func siteStageNarratable(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "running", "started", "in_progress", "building",
+		"done", "ok", "passed", "live",
+		"failed", "error", "skipped":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -690,14 +720,19 @@ func printCloudSiteHelp(out *writer) {
 	const help = `bp cloud site — spawn a website that builds and serves next to your Barkpark.
 
 USAGE
-  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static]
-  bp cloud site deploy    <site> [--no-follow]      (alias: build)
+  bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static] [--doc-type <type>]
+  bp cloud site deploy    <site> [--no-follow] [--force]      (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
 
   --instance is REQUIRED: a site is spawned on a specific Barkpark instance (it
   builds and serves on that box). List yours with 'bp cloud status'.
+
+  --doc-type binds the content type the build reads (default 'post'); pass it
+  when your dataset serves another type (e.g. 'paper').
+  --force re-runs a build even when content and config are unchanged — it folds a
+  fresh nonce so a new release is minted instead of the cached deployment.
 
 WHAT IT DOES
   Spawns a static site (Astro is the flagship; Next.js, TanStack Start, Hugo and
