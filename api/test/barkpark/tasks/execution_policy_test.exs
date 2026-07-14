@@ -154,6 +154,45 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
     assert renewed.content["claim"]["execution_policy"] == snapshot
   end
 
+  test "same-worker renewal validates every supplied policy layer without replacing the snapshot",
+       %{scope: scope} do
+    task =
+      mk_task!(uniq("policy-renew-layers"), scope, %{
+        "execution_policy" => %{"version" => 1, "agent_type" => "executor"}
+      })
+
+    assert {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "policy-worker", scope)
+    original_claim = claimed.content["claim"]
+
+    invalid_layers = [
+      {:execution_policy_override, %{"version" => 1, "command" => "unsafe"}, "explicit.command"},
+      {:execution_policy_override, %{"version" => 1, "reasoning_effort" => "unbounded"},
+       "explicit.reasoning_effort"},
+      {:session_execution_policy, %{"version" => 1, "command" => "unsafe"}, "session.command"},
+      {:provider_execution_policy, %{"version" => 1, "command" => "unsafe"}, "provider.command"}
+    ]
+
+    for {layer, policy, error_key} <- invalid_layers do
+      assert {:error, {:invalid_execution_policy, %{^error_key => [_ | _]}}} =
+               Tasks.claim_by_id(
+                 task.doc_id,
+                 "policy-worker",
+                 scope ++ [{layer, policy}]
+               )
+
+      persisted_claim = Repo.get!(Document, task.id).content["claim"]
+      assert persisted_claim == original_claim
+    end
+
+    :ok =
+      patch_content!(task.id, %{"execution_policy" => %{"version" => 1, "command" => "unsafe"}})
+
+    assert {:error, {:invalid_execution_policy, %{"task.command" => [_ | _]}}} =
+             Tasks.claim_by_id(task.doc_id, "policy-worker", scope)
+
+    assert Repo.get!(Document, task.id).content["claim"] == original_claim
+  end
+
   test "editing Task policy after claim trips the default close fence", %{scope: scope} do
     task =
       mk_task!(uniq("policy-fence"), scope, %{
@@ -219,6 +258,51 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
 
     assert bad_resp.status == 400
     assert Repo.get!(Document, bad.id).content["lifecycle_status"] == "open"
+  end
+
+  test "targeted claim HTTP rejects invalid and unknown overrides on same-worker renewal",
+       %{conn: conn, scope: scope} do
+    task =
+      mk_task!(uniq("policy-api-renew"), scope, %{
+        "execution_policy" => %{"version" => 1, "agent_type" => "executor"}
+      })
+
+    claim_resp =
+      conn
+      |> authed()
+      |> post(
+        "/v1/tasks/#{task.doc_id}/claim",
+        Jason.encode!(%{worker_id: "api-policy-worker"})
+      )
+
+    assert claim_resp.status == 200
+    claimed = Jason.decode!(claim_resp.resp_body)["doc"]["claim"]
+
+    bad_overrides = [
+      %{"version" => 1, "reasoning_effort" => "unbounded"},
+      %{"version" => 1, "command" => "unsafe"}
+    ]
+
+    for override <- bad_overrides do
+      renew_resp =
+        conn
+        |> recycle()
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/claim",
+          Jason.encode!(%{
+            worker_id: "api-policy-worker",
+            execution_policy_override: override
+          })
+        )
+
+      assert renew_resp.status == 400
+      assert Jason.decode!(renew_resp.resp_body)["ok"] == false
+
+      persisted = Repo.get!(Document, task.id).content["claim"]
+      assert persisted["epoch"] == claimed["epoch"]
+      assert persisted["execution_policy"] == claimed["execution_policy"]
+    end
   end
 
   defp register_schemas!(scope) do
