@@ -649,6 +649,19 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireChatAccess)
   end
 
+  pipeline :require_chat_host_admin do
+    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.RequireWorkspaceRole)
+  end
+
+  pipeline :registered_chat_host do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireChatHost)
+  end
+
   # Scoped admin gate (barkpark-23yi / barkpark-fsko P0 fix). For the
   # /w/:ws/p/:project admin routes: require a token AND a membership ROLE of
   # owner/admin in the resolved `current_workspace`. RequireToken sets
@@ -1146,6 +1159,7 @@ defmodule BarkparkWeb.Router do
       ],
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
+      live("/chat-hosts", ChatHostsLive)
 
       # Connectors catalog + the connect loop (connectors D49). It MUST be in
       # THIS session, not the flat `/studio/*` one: the flat live_session carries
@@ -1571,6 +1585,27 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/interrupt", ChatController, :interrupt)
     post("/sessions/:id/approval", ChatController, :approval)
     get("/sessions/:id/events", ChatController, :events)
+  end
+
+  scope "/w/:workspace_slug/v1/chat-hosts", BarkparkWeb do
+    pipe_through([:api, :require_chat_host_admin])
+
+    get("/", ChatHostController, :index)
+    post("/enrollments", ChatHostController, :create_enrollment)
+    delete("/:id", ChatHostController, :revoke)
+  end
+
+  scope "/v1/chat-host", BarkparkWeb do
+    pipe_through(:api)
+    post("/enroll", ChatHostController, :enroll)
+  end
+
+  scope "/v1/chat-host", BarkparkWeb do
+    pipe_through(:registered_chat_host)
+    post("/heartbeat", ChatHostController, :heartbeat)
+    post("/rotate", ChatHostController, :rotate)
+    get("/commands", ChatHostController, :commands)
+    post("/events", ChatHostController, :event)
   end
 
   # ── Revision restore — a WRITE (Revisions.restore_revision →

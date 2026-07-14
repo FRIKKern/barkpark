@@ -1,0 +1,410 @@
+defmodule Barkpark.ChatHosts do
+  @moduledoc "Workspace-scoped registration and fenced dispatch for local Chat hosts."
+
+  @behaviour Barkpark.StudioChat.Runtime.HostDirectory
+
+  import Ecto.Query
+
+  alias Barkpark.ChatHosts.{ExecutionEvent, ExecutionLease, RegisteredHost, Security, Transport}
+  alias Barkpark.Repo
+
+  @enrollment_ttl 10 * 60
+  @credential_ttl 30 * 24 * 60 * 60
+  @lease_ttl 60
+  @online_window 90
+
+  def issue_enrollment(workspace_id, attrs) when is_binary(workspace_id) and is_map(attrs) do
+    secret = Security.mint_secret()
+    now = DateTime.utc_now()
+
+    params = %{
+      workspace_id: workspace_id,
+      name: value(attrs, :name),
+      enrollment_hash: Security.hash_secret(secret),
+      enrollment_expires_at: DateTime.add(now, @enrollment_ttl),
+      approved_roots: value(attrs, :approved_roots, []),
+      protocol_version: value(attrs, :protocol_version, 1),
+      capabilities: value(attrs, :capabilities, %{})
+    }
+
+    case %RegisteredHost{} |> RegisteredHost.enrollment_changeset(params) |> Repo.insert() do
+      {:ok, host} -> {:ok, %{host: public_host(host), enrollment_token: secret}}
+      error -> error
+    end
+  end
+
+  def enroll(enrollment_token, attrs \\ %{})
+      when is_binary(enrollment_token) and is_map(attrs) do
+    now = DateTime.utc_now()
+    hash = Security.hash_secret(enrollment_token)
+
+    Repo.transaction(fn ->
+      host =
+        RegisteredHost
+        |> where([h], h.enrollment_hash == ^hash)
+        |> where([h], is_nil(h.enrolled_at) and is_nil(h.revoked_at))
+        |> lock("FOR UPDATE")
+        |> Repo.one()
+
+      cond do
+        is_nil(host) ->
+          Repo.rollback(:invalid_enrollment)
+
+        DateTime.compare(host.enrollment_expires_at, now) != :gt ->
+          Repo.rollback(:expired_enrollment)
+
+        true ->
+          complete_enrollment(host, attrs, now)
+      end
+    end)
+    |> case do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp complete_enrollment(host, attrs, now) do
+    credential = Security.mint_secret()
+
+    params = %{
+      enrolled_at: now,
+      credential_hash: Security.hash_secret(credential),
+      credential_version: 1,
+      credential_expires_at: DateTime.add(now, @credential_ttl),
+      approved_roots: value(attrs, :approved_roots, host.approved_roots),
+      protocol_version: value(attrs, :protocol_version, host.protocol_version),
+      capabilities: value(attrs, :capabilities, host.capabilities),
+      last_seen_at: now
+    }
+
+    case host |> RegisteredHost.enrollment_complete_changeset(params) |> Repo.update() do
+      {:ok, enrolled} -> %{host: public_host(enrolled), credential: credential}
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  def authenticate(credential) when is_binary(credential) do
+    now = DateTime.utc_now()
+    hash = Security.hash_secret(credential)
+
+    RegisteredHost
+    |> where([h], h.credential_hash == ^hash)
+    |> where([h], is_nil(h.revoked_at) and not is_nil(h.enrolled_at))
+    |> where([h], h.credential_expires_at > ^now)
+    |> Repo.one()
+    |> case do
+      nil -> {:error, :invalid_credential}
+      host -> {:ok, host}
+    end
+  end
+
+  def rotate_credential(%RegisteredHost{} = host) do
+    credential = Security.mint_secret()
+    now = DateTime.utc_now()
+
+    attrs = %{
+      credential_hash: Security.hash_secret(credential),
+      credential_version: host.credential_version + 1,
+      credential_expires_at: DateTime.add(now, @credential_ttl)
+    }
+
+    case host |> RegisteredHost.rotate_changeset(attrs) |> Repo.update() do
+      {:ok, rotated} -> {:ok, %{host: public_host(rotated), credential: credential}}
+      error -> error
+    end
+  end
+
+  def heartbeat(%RegisteredHost{} = host, attrs) when is_map(attrs) do
+    now = DateTime.utc_now()
+
+    params = %{
+      protocol_version: value(attrs, :protocol_version, host.protocol_version),
+      capabilities: value(attrs, :capabilities, host.capabilities),
+      last_seen_at: now
+    }
+
+    host
+    |> RegisteredHost.heartbeat_changeset(params)
+    |> Repo.update()
+    |> case do
+      {:ok, updated} ->
+        from(l in ExecutionLease,
+          where:
+            l.host_id == ^host.id and is_nil(l.revoked_at) and
+              l.status in ["leased", "running", "disconnected"]
+        )
+        |> Repo.update_all(set: [expires_at: DateTime.add(now, @lease_ttl), updated_at: now])
+
+        {:ok, public_host(updated)}
+
+      error ->
+        error
+    end
+  end
+
+  def list_hosts(workspace_id) when is_binary(workspace_id) do
+    RegisteredHost
+    |> where([h], h.workspace_id == ^workspace_id and is_nil(h.revoked_at))
+    |> order_by([h], asc: h.name)
+    |> Repo.all()
+    |> Enum.map(&public_host/1)
+  end
+
+  def get_host(workspace_id, host_id) do
+    RegisteredHost
+    |> where([h], h.workspace_id == ^workspace_id and h.id == ^host_id)
+    |> Repo.one()
+  end
+
+  @impl true
+  def resolve(workspace_id, host_id) do
+    case get_host(workspace_id, host_id) do
+      %RegisteredHost{revoked_at: nil, enrolled_at: enrolled_at} = host
+      when not is_nil(enrolled_at) ->
+        if online?(host), do: {:ok, public_host(host)}, else: {:error, :host_offline}
+
+      _ ->
+        {:error, :host_not_found}
+    end
+  end
+
+  def revoke(workspace_id, host_id) do
+    now = DateTime.utc_now()
+
+    Repo.transaction(fn ->
+      case get_host(workspace_id, host_id) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        host ->
+          with {:ok, revoked} <- host |> RegisteredHost.revoke_changeset(now) |> Repo.update() do
+            from(l in ExecutionLease,
+              where: l.host_id == ^host.id and is_nil(l.revoked_at)
+            )
+            |> Repo.update_all(set: [revoked_at: now, status: "cancelled", updated_at: now])
+
+            Transport.revoke(host.id)
+            broadcast_revoke(host.id)
+            public_host(revoked)
+          else
+            {:error, changeset} -> Repo.rollback(changeset)
+          end
+      end
+    end)
+  end
+
+  def lease_and_enqueue(host, command, opts) do
+    host_id = value(host, :id)
+    workspace_id = value(host, :workspace_id)
+    now = DateTime.utc_now()
+    key = command.idempotency_key || Ecto.UUID.generate()
+
+    attrs = %{
+      host_id: host_id,
+      workspace_id: workspace_id,
+      session_id: command.session_id,
+      provider: command.provider,
+      command_key: key,
+      expires_at: DateTime.add(now, Keyword.get(opts, :lease_ttl, @lease_ttl))
+    }
+
+    result =
+      case %ExecutionLease{} |> ExecutionLease.changeset(attrs) |> Repo.insert() do
+        {:ok, lease} ->
+          {:ok, lease}
+
+        {:error, changeset} ->
+          if constraint_error?(changeset),
+            do: {:ok, Repo.get_by!(ExecutionLease, host_id: host_id, command_key: key)},
+            else: {:error, changeset}
+      end
+
+    with {:ok, lease} <- result,
+         :ok <- Transport.enqueue(host_id, lease.id, command) do
+      {:ok, %{lease_id: lease.id, epoch: lease.epoch, command_key: lease.command_key}}
+    end
+  end
+
+  def next_commands(%RegisteredHost{} = host) do
+    host.id
+    |> Transport.commands()
+    |> Enum.flat_map(fn {lease_id, command} ->
+      case Repo.get(ExecutionLease, lease_id) do
+        %ExecutionLease{revoked_at: nil, status: status} = lease
+        when status not in ["completed", "cancelled"] ->
+          [
+            %{
+              lease_id: lease.id,
+              epoch: lease.epoch,
+              last_cursor: lease.last_cursor,
+              command: command_to_map(command)
+            }
+          ]
+
+        _ ->
+          []
+      end
+    end)
+  end
+
+  def accept_event(%RegisteredHost{} = host, attrs) when is_map(attrs) do
+    lease_id = value(attrs, :lease_id)
+    epoch = value(attrs, :epoch)
+    cursor = value(attrs, :cursor)
+    key = value(attrs, :idempotency_key)
+    event = value(attrs, :event, %{})
+
+    Repo.transaction(fn ->
+      lease = ExecutionLease |> where([l], l.id == ^lease_id) |> lock("FOR UPDATE") |> Repo.one()
+
+      with :ok <- validate_fence(lease, host, epoch) do
+        reconcile_event(lease, cursor, key, event)
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp reconcile_event(%ExecutionLease{last_cursor: current} = lease, cursor, key, event)
+       when cursor == current + 1 do
+    with :ok <- persist_event(lease, cursor, key, event),
+         :ok <- persist_cursor(lease, cursor, event) do
+      broadcast_event(lease, cursor, key, event)
+      if status_for(event) == "completed", do: Transport.complete(lease.id)
+      :accepted
+    else
+      :duplicate -> :duplicate
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp reconcile_event(%ExecutionLease{last_cursor: current} = lease, cursor, key, event)
+       when cursor <= current do
+    case Repo.get_by(ExecutionEvent, lease_id: lease.id, cursor: cursor) do
+      %ExecutionEvent{idempotency_key: ^key, payload: ^event} -> :duplicate
+      %ExecutionEvent{} -> Repo.rollback(:cursor_conflict)
+      nil -> Repo.rollback(:cursor_history_lost)
+    end
+  end
+
+  defp reconcile_event(%ExecutionLease{}, _cursor, _key, _event),
+    do: Repo.rollback(:cursor_gap)
+
+  defp persist_cursor(lease, cursor, event) do
+    lease
+    |> Ecto.Changeset.change(last_cursor: cursor, status: status_for(event))
+    |> Repo.update()
+    |> case do
+      {:ok, _} -> :ok
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  defp persist_event(lease, cursor, key, event) do
+    attrs = %{
+      lease_id: lease.id,
+      host_id: lease.host_id,
+      workspace_id: lease.workspace_id,
+      cursor: cursor,
+      idempotency_key: key,
+      kind: value(event, :kind, "event"),
+      payload: event
+    }
+
+    case %ExecutionEvent{} |> ExecutionEvent.changeset(attrs) |> Repo.insert() do
+      {:ok, _} -> :ok
+      {:error, changeset} ->
+        case Repo.get_by(ExecutionEvent, lease_id: lease.id, cursor: cursor) do
+          %ExecutionEvent{idempotency_key: ^key, payload: ^event} -> :duplicate
+          %ExecutionEvent{} -> {:error, :cursor_conflict}
+          nil -> {:error, changeset}
+        end
+    end
+  end
+
+  defp validate_fence(nil, _host, _epoch), do: {:error, :lease_not_found}
+
+  defp validate_fence(%ExecutionLease{} = lease, host, epoch) do
+    now = DateTime.utc_now()
+
+    cond do
+      lease.host_id != host.id -> {:error, :stale_fence}
+      lease.epoch != epoch -> {:error, :stale_fence}
+      not is_nil(lease.revoked_at) -> {:error, :stale_fence}
+      DateTime.compare(lease.expires_at, now) != :gt -> {:error, :lease_expired}
+      true -> :ok
+    end
+  end
+
+  defp status_for(%{"kind" => kind}) when kind in ["terminal", "completed"], do: "completed"
+  defp status_for(%{kind: kind}) when kind in [:terminal, :completed], do: "completed"
+  defp status_for(_), do: "running"
+
+  defp command_to_map(%_{} = command), do: Map.from_struct(command)
+  defp command_to_map(command), do: command
+
+  defp constraint_error?(changeset),
+    do:
+      Enum.any?(changeset.errors, fn {_field, {_message, opts}} ->
+        opts[:constraint] == :unique
+      end)
+
+  defp online?(%RegisteredHost{last_seen_at: nil}), do: false
+
+  defp online?(%RegisteredHost{last_seen_at: seen}) do
+    DateTime.compare(seen, DateTime.add(DateTime.utc_now(), -@online_window)) == :gt
+  end
+
+  defp public_host(host) do
+    %{
+      id: host.id,
+      workspace_id: host.workspace_id,
+      name: host.name,
+      enrolled: not is_nil(host.enrolled_at),
+      revoked: not is_nil(host.revoked_at),
+      approved_roots: host.approved_roots,
+      protocol_version: host.protocol_version,
+      capabilities: host.capabilities,
+      credential_version: host.credential_version,
+      credential_expires_at: host.credential_expires_at,
+      last_seen_at: host.last_seen_at,
+      online: online?(host)
+    }
+  end
+
+  defp broadcast_revoke(host_id) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      "chat_host:#{host_id}",
+      {:chat_host_revoked, host_id}
+    )
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp broadcast_event(lease, cursor, key, event) do
+    normalized = %Barkpark.StudioChat.Runtime.Event{
+      provider: lease.provider,
+      session_id: lease.session_id,
+      sequence: cursor,
+      idempotency_key: key,
+      durability: :durable,
+      kind: value(event, :kind, "event"),
+      approval_id: value(event, :approval_id),
+      terminal_state: value(event, :terminal_state),
+      error: value(event, :error),
+      native: event
+    }
+
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      Barkpark.StudioChat.Recorder.topic(lease.session_id),
+      {:chat_runtime_event, normalized}
+    )
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp value(map, key, default \\ nil),
+    do: Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+end
