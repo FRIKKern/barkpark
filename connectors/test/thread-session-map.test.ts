@@ -32,9 +32,9 @@ import { ThreadSessionMap } from "../src/state/thread-session-map.js";
 import { CHAT_BRIDGE_SCHEMA } from "../src/db/schema.js";
 import type {
   ChatClient,
+  ChatEvent,
   ChatSession,
-  ChatSseFrame,
-  PostMessageAck,
+  PostMessageResult,
 } from "../src/chat-client/types.js";
 
 /** Admin connection used only to CREATE/DROP the throwaway test database. */
@@ -72,22 +72,41 @@ class SpyChatClient implements ChatClient {
   createSessionCalls = 0;
   private next = 0;
 
+  private session(id: string): ChatSession {
+    return {
+      id,
+      title: null,
+      status: "idle",
+      mode: "plan",
+      model: null,
+      cwd: "/tmp",
+      message_count: 0,
+    };
+  }
+
   async createSession(): Promise<ChatSession> {
     this.createSessionCalls += 1;
     this.next += 1;
-    return { id: `00000000-0000-4000-8000-${String(this.next).padStart(12, "0")}` };
+    return this.session(
+      `00000000-0000-4000-8000-${String(this.next).padStart(12, "0")}`,
+    );
   }
 
-  async getSession(id: string): Promise<ChatSession | null> {
-    return { id };
+  async getSession(id: string): Promise<ChatSession> {
+    return this.session(id);
   }
 
-  async postMessage(): Promise<PostMessageAck> {
+  async postMessage(): Promise<PostMessageResult> {
     return { accepted: true };
   }
 
-  async *streamEvents(): AsyncIterable<ChatSseFrame> {
-    yield { type: "keepalive" };
+  async openEventStream(): Promise<AsyncIterable<ChatEvent>> {
+    return {
+      // eslint-disable-next-line require-yield
+      async *[Symbol.asyncIterator]() {
+        return;
+      },
+    };
   }
 }
 

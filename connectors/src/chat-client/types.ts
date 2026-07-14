@@ -1,122 +1,205 @@
 /**
  * The shared contract for talking to Barkpark's /v1/chat HTTP+SSE API.
  *
- * The bridge is a CLIENT of /v1/chat (charter D33) — the BEAM stays the engine.
- * This slice defines the INTERFACE and the SSE frame union; the concrete HTTP
- * implementation is W3-2 (connectors-p2-chat-client-sse) and the turn loop that
- * consumes the stream is W3-3 (connectors-p2-turn-loop). Defining the contract
- * here lets the thread<->session map (this slice) mint sessions through an
- * injected ChatClient without importing the transport, keeping the map testable
- * against a faithful mock rather than a live BEAM.
+ * The bridge is a CLIENT of /v1/chat (charter D4/D33) — the BEAM stays the
+ * engine. This file is the ONE contract every other module codes against: the
+ * thread<->session map mints through it, the turn loop consumes its frames, and
+ * the connectors never see the transport at all.
  *
- * Proven /v1/chat surface (verified against the merged ChatController, 8 routes
- * behind RequireChatAccess; wave-3 DECIDE):
- *   - POST   /v1/chat/sessions              {mode?,model?,effort?} -> {id, ...}
- *       Workspace is derived from the bearer TOKEN, never the body. Create
- *       ALWAYS mints a fresh Session UUID — there is no find-or-create, so
- *       mint-on-first / resume-thereafter is the bridge's own responsibility
- *       (see thread-session-map.ts).
- *   - GET    /v1/chat/sessions/:id          -> the session (404 if wrong tenant,
- *       indistinguishable from missing — reads are fail-closed).
- *   - POST   /v1/chat/sessions/:id/messages {content} -> 202 {accepted:true}
- *   - GET    /v1/chat/sessions/:id/events   -> the SSE stream.
+ * Transcribed from the real Elixir on main, not guessed:
+ *   api/lib/barkpark_web/controllers/chat_controller.ex   (the sse_*_frame serializers)
+ *   api/lib/barkpark_web/plugs/require_chat_access.ex     (the workspace-less-token 403)
+ *
+ *   POST /v1/chat/sessions              {mode?,model?,effort?} -> 201 full session
+ *   GET  /v1/chat/sessions/:id          [?since=<seq>]         -> 200 full session
+ *   POST /v1/chat/sessions/:id/messages {content}              -> 202 {accepted:true}
+ *   GET  /v1/chat/sessions/:id/events                          -> SSE
+ *
+ * Auth: `Authorization: Bearer <ApiToken>` carrying the `chat` permission. The
+ * workspace is derived from the TOKEN, never from a request body. A `chat` token
+ * WITHOUT a workspace_id is 403 (D33).
+ *
+ * NOTE the shape of the wire: sending a turn and reading its output are TWO
+ * calls — the SSE stream is a separate GET, not the POST's response. That is why
+ * `openEventStream` returns a Promise (see below).
  */
 
-/** Session creation knobs. Workspace is NOT here — it rides the token. */
+/**
+ * A Barkpark chat Session. The server mints `id` and `cwd` — a client NEVER
+ * sends them. The shape stays open (`[key: string]`) so a server-side field
+ * addition never breaks a bridge that only reads `id`.
+ */
+export interface ChatSession {
+  id: string;
+  title: string | null;
+  title_source?: string | null;
+  status: string;
+  mode: string;
+  model: string | null;
+  model_choice?: string | null;
+  effort_choice?: string | null;
+  cwd: string;
+  message_count: number;
+  messages?: ChatSessionMessage[];
+  [key: string]: unknown;
+}
+
+/** A settled message row (seq-ascending) on the full-session read. */
+export interface ChatSessionMessage {
+  seq: number;
+  role: string;
+  source_markdown: string | null;
+  [key: string]: unknown;
+}
+
+/**
+ * Body of `POST /v1/chat/sessions`. All optional — the server defaults `mode`.
+ * `id`, `cwd` and `workspace` are NOT accepted; workspace rides the token.
+ */
 export interface CreateSessionInput {
   mode?: string;
   model?: string;
   effort?: string;
 }
 
-/** A Barkpark chat Session. `id` is the UUID the thread map persists. */
-export interface ChatSession {
-  id: string;
-  mode?: string;
-  model?: string;
+/** `POST /v1/chat/sessions/:id/messages` -> 202 `{accepted:true}`. */
+export interface PostMessageResult {
+  accepted: boolean;
+}
+
+/* ── SSE frame union ────────────────────────────────────────────────────────
+ * The frame shapes /v1/chat emits, discriminated on `type` (which mirrors the
+ * SSE `event:` name). Only `message` carries an `id:` — it is the Last-Event-ID
+ * resume cursor. `chat` is an OPAQUE verbatim passthrough of a claude
+ * stream-json line and is NEVER schema-validated: `raw` keeps the exact bytes,
+ * `data` is a best-effort decode. `: keepalive` comments are tolerated and
+ * skipped by the parser.
+ */
+
+export interface MessageFrame {
+  type: "message";
+  /** The persisted row `seq` — resumable via Last-Event-ID. */
+  id: number;
+  data: unknown;
+}
+
+export interface ChatFrame {
+  type: "chat";
+  /** Verbatim stream-json payload bytes — forwarded unchanged (D12/D26). */
+  raw: string;
+  /** Best-effort decode of `raw`; the raw string when it does not parse. */
+  data: unknown;
+}
+
+export interface PermissionFrame {
+  type: "permission";
+  data: unknown;
+}
+
+/** The fixed public exit contract — status + a closed reason enum. */
+export type ExitReason =
+  | "clean"
+  | "crashed"
+  | "idle_reaped"
+  | "failed_start"
+  | "unknown";
+
+export interface ExitFrame {
+  type: "exit";
+  data: { status: number | null; reason: ExitReason };
+}
+
+export type ChatEvent = MessageFrame | ChatFrame | PermissionFrame | ExitFrame;
+
+/**
+ * The claude stream-json `result` frame, carried verbatim inside `event: chat`.
+ * THIS — not `event: exit` — is the turn-completion signal (D26): exit means the
+ * subprocess died, and the stream deliberately stays open for lazy resume.
+ */
+export interface ClaudeResultFrame {
+  type: "result";
+  subtype?: string;
+  is_error?: boolean;
+  /** The authoritative final assistant text for the turn. */
+  result?: string;
   [key: string]: unknown;
 }
 
-/** Body of POST /v1/chat/sessions/:id/messages. */
-export interface PostMessageInput {
-  content: string;
+/**
+ * A structured error from the /v1/chat transport. `code` is the canonical
+ * envelope code (`forbidden`, `invalid_request`, `chat_unavailable`, …) or a
+ * synthetic `network_error` for a transport-level failure. Retry decisions key
+ * off `code`, NEVER the raw status; 401/403 are terminal.
+ */
+export class ChatClientError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly requestId: string | undefined;
+
+  constructor(opts: {
+    code: string;
+    status: number;
+    message: string;
+    requestId?: string;
+  }) {
+    super(opts.message);
+    this.name = "ChatClientError";
+    this.code = opts.code;
+    this.status = opts.status;
+    this.requestId = opts.requestId;
+  }
+
+  /** Auth failures are a misconfigured token, not a transient blip. */
+  get terminal(): boolean {
+    return this.status === 401 || this.status === 403;
+  }
 }
 
-/** 202 acknowledgement of a posted user turn. */
-export interface PostMessageAck {
-  accepted: true;
+/** Config shared by the HTTP client (client.ts) and the SSE reader (sse.ts). */
+export interface ChatClientConfig {
+  /** Barkpark API origin, e.g. `https://guerrilla.barkpark.cloud`. */
+  baseUrl: string;
+  /** A workspace-bound `chat`-permission ApiToken (BARKPARK_CHAT_TOKEN). */
+  token: string;
+  /** Injectable fetch (tests/mocks); defaults to the global `fetch`. */
+  fetch?: typeof fetch;
+  /** Max RETRY attempts (beyond the first try) for retryable codes. Default 2. */
+  maxRetries?: number;
+  /** Base linear backoff in ms between retries. Default 50. Set 0 in tests. */
+  retryBackoffMs?: number;
 }
 
 /** Options for opening the SSE event stream. */
-export interface StreamEventsInput {
+export interface OpenEventStreamOptions {
   /**
-   * Resume cursor. The server replays `message` frames after this SSE id
-   * (Last-Event-ID), then switches to the live stream. Only `message` frames
-   * carry an id and are replayable; `chat`/`permission`/`exit` are not.
+   * Resume cursor (a row `seq`). Sent as `Last-Event-ID`; the server replays
+   * persisted `message` rows with `seq > lastEventId`, then goes live.
    */
-  lastEventId?: string;
-  /** Abort the long-lived stream (process shutdown, turn interrupt). */
+  lastEventId?: number;
+  /** Abort the long-lived stream (turn timeout, process shutdown). */
   signal?: AbortSignal;
 }
 
-/*
- * ── SSE frame union ─────────────────────────────────────────────────────────
- * The five frame shapes /v1/chat emits. The discriminant `type` mirrors the
- * SSE `event:` name. `message` is the only id-bearing, replayable frame; `chat`
- * is the RAW Claude stream-json passthrough (no Barkpark schema); `keepalive`
- * is the `:`-comment heartbeat (~every 30s) surfaced as a typed frame so the
- * reader can distinguish a live-but-quiet stream from a stalled one.
- */
-
-/** A durable, replayable Barkpark message row. Carries the SSE `id`. */
-export interface ChatMessageFrame {
-  type: "message";
-  /** SSE event id — the Last-Event-ID resume cursor. */
-  id: string;
-  data: Record<string, unknown>;
-}
-
-/** Raw Claude stream-json delta (no Barkpark schema, not replayable). */
-export interface ChatChatFrame {
-  type: "chat";
-  data: Record<string, unknown>;
-}
-
-/** A tool/permission approval request awaiting a decision. */
-export interface ChatPermissionFrame {
-  type: "permission";
-  data: Record<string, unknown>;
-}
-
-/** The turn/session has ended. */
-export interface ChatExitFrame {
-  type: "exit";
-  data: Record<string, unknown>;
-}
-
-/** The `:` keepalive comment, surfaced as a frame. */
-export interface ChatKeepaliveFrame {
-  type: "keepalive";
-}
-
-export type ChatSseFrame =
-  | ChatMessageFrame
-  | ChatChatFrame
-  | ChatPermissionFrame
-  | ChatExitFrame
-  | ChatKeepaliveFrame;
-
-/**
- * The transport the bridge depends on. W3-2 provides the HTTP+SSE
- * implementation; tests and the thread map depend only on this interface.
- */
+/** The transport the bridge depends on. `client.ts` is the implementation. */
 export interface ChatClient {
-  /** Mint a fresh Session (workspace derived from this client's token). */
+  /** Mint a Session. The workspace is derived from this client's token. */
   createSession(input?: CreateSessionInput): Promise<ChatSession>;
-  /** Fetch a Session by id; null when missing or not this tenant's. */
-  getSession(id: string): Promise<ChatSession | null>;
-  /** Post a user turn; resolves on the 202 ack. */
-  postMessage(sessionId: string, input: PostMessageInput): Promise<PostMessageAck>;
-  /** Open the SSE event stream as an async iterable of typed frames. */
-  streamEvents(sessionId: string, input?: StreamEventsInput): AsyncIterable<ChatSseFrame>;
+  /** Read a full Session. `since` returns only rows with `seq > since`. */
+  getSession(id: string, since?: number): Promise<ChatSession>;
+  /** Send a user turn; resolves on the 202 ack (the model has not spoken yet). */
+  postMessage(id: string, content: string): Promise<PostMessageResult>;
+  /**
+   * Open the SSE stream.
+   *
+   * Returns a PROMISE deliberately. Awaiting it completes the HTTP handshake, so
+   * the subscription exists on the server BEFORE the caller sends the turn. An
+   * `async *` generator would NOT do this: generator bodies are lazy, so the
+   * fetch would not fire until the first `.next()` — by which time the turn has
+   * been posted and its opening frames are on the floor. This bit us once; the
+   * shape of the return type is what prevents it recurring.
+   */
+  openEventStream(
+    id: string,
+    options?: OpenEventStreamOptions,
+  ): Promise<AsyncIterable<ChatEvent>>;
 }
