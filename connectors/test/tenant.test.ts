@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import type { Adapter } from "chat";
 import pg from "pg";
 import type { Pool } from "pg";
@@ -12,9 +13,11 @@ import type {
   InstallsLookup,
   TenantContext,
 } from "../src/connector/types.js";
+import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import {
   createInstallsLookup,
   createInMemoryInstallsLookup,
+  upsertInstall,
   type Queryable,
 } from "../src/tenant/installs.js";
 import {
@@ -22,6 +25,14 @@ import {
   createPayloadTeamIdResolver,
   resolveTenantForEvent,
 } from "../src/tenant/resolve.js";
+
+/**
+ * The cipher every install row is sealed with (D35). A throwaway key per run:
+ * the tests prove the BINDING, and a fixed key would prove nothing extra.
+ */
+const cipher = createCredentialCipher({
+  key: randomBytes(32).toString("base64"),
+});
 
 // Two tenants. Every assertion below is really asking one question: can workspace A's
 // traffic ever reach workspace B?
@@ -425,7 +436,7 @@ describe("connector_installs reads (chat_bridge.connector_installs, charter D29)
 
   it("looks up (provider, install_key) and returns the workspace_id", async () => {
     const { db, calls } = fakeDb([{ workspace_id: WS_A }]);
-    const lookup = createInstallsLookup(db);
+    const lookup = createInstallsLookup(db, cipher);
 
     await expect(lookup.resolveWorkspace("telegram", "bot-a")).resolves.toBe(WS_A);
 
@@ -437,7 +448,7 @@ describe("connector_installs reads (chat_bridge.connector_installs, charter D29)
 
   it("returns null when no row matches (unknown install)", async () => {
     const { db } = fakeDb([]);
-    const lookup = createInstallsLookup(db);
+    const lookup = createInstallsLookup(db, cipher);
 
     await expect(
       lookup.resolveWorkspace("telegram", "bot-unknown"),
@@ -446,14 +457,14 @@ describe("connector_installs reads (chat_bridge.connector_installs, charter D29)
 
   it("returns null when the row has a null workspace_id", async () => {
     const { db } = fakeDb([{ workspace_id: null }]);
-    const lookup = createInstallsLookup(db);
+    const lookup = createInstallsLookup(db, cipher);
 
     await expect(lookup.resolveWorkspace("telegram", "bot-a")).resolves.toBeNull();
   });
 
   it("never touches the database for a blank/null install key", async () => {
     const { db, calls } = fakeDb([{ workspace_id: WS_A }]);
-    const lookup = createInstallsLookup(db);
+    const lookup = createInstallsLookup(db, cipher);
 
     await expect(lookup.resolveWorkspace("telegram", null)).resolves.toBeNull();
     await expect(
@@ -512,7 +523,7 @@ describe("connector_installs reads (chat_bridge.connector_installs, charter D29)
 
     // And it type-checks as an actual call, not just a type relation.
     const feed = (pool: ReturnType<typeof createBridgePool>) =>
-      createInstallsLookup(pool);
+      createInstallsLookup(pool, cipher);
 
     expect(proof).toBe(true);
     expect(typeof feed).toBe("function");
@@ -552,6 +563,12 @@ async function postgresReachable(): Promise<boolean> {
 
 const pgReachable = await postgresReachable();
 
+/** The plaintext secrets the real-Postgres block seals. Never written raw. */
+const BOT_SECRET_A = "111111111:AA-ws-a-bot-secret";
+const BOT_SECRET_B = "222222222:AA-ws-b-bot-secret";
+const CHAT_TOKEN_A = "bp_chat_ws_a_token";
+const CHAT_TOKEN_B = "bp_chat_ws_b_token";
+
 describe.skipIf(!pgReachable && !REQUIRE_DB)(
   "tenant routing against a REAL Postgres (chat_bridge.connector_installs)",
   () => {
@@ -577,26 +594,33 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
       await ensureBridgeSchema(pool);
 
       // Two tenants install the same provider. This is the cross-tenant scenario.
-      await pool.query(
-        `INSERT INTO connector_installs (provider, install_key, workspace_id, credential_ref)
-         VALUES ($1,$2,$3,$4), ($5,$6,$7,$8), ($9,$10,$11,$12)`,
-        [
-          "telegram",
-          "bot-a",
-          WS_A,
-          "secret://ws-a/telegram",
-          "telegram",
-          "bot-b",
-          WS_B,
-          "secret://ws-b/telegram",
-          "slack",
-          "T_AAA",
-          WS_A,
-          "secret://ws-a/slack",
-        ],
-      );
+      // Written through the REAL write path (upsertInstall), so what lands in the
+      // table is what production would land there: two SEALED blobs per row.
+      await upsertInstall(pool, cipher, {
+        provider: "telegram",
+        installKey: "bot-a",
+        workspaceId: WS_A,
+        credentialRef: BOT_SECRET_A,
+        chatToken: CHAT_TOKEN_A,
+      });
+      await upsertInstall(pool, cipher, {
+        provider: "telegram",
+        installKey: "bot-b",
+        workspaceId: WS_B,
+        credentialRef: BOT_SECRET_B,
+        chatToken: CHAT_TOKEN_B,
+      });
+      await upsertInstall(pool, cipher, {
+        provider: "slack",
+        installKey: "T_AAA",
+        workspaceId: WS_A,
+        credentialRef: "xoxb-ws-a-slack",
+        // Deliberately NO chat token: an install can exist before its Barkpark
+        // token is minted. It must be routable but not runnable.
+        chatToken: null,
+      });
 
-      lookup = createInstallsLookup(pool);
+      lookup = createInstallsLookup(pool, cipher);
     }, 30_000);
 
     afterAll(async () => {
@@ -687,6 +711,199 @@ describe.skipIf(!pgReachable && !REQUIRE_DB)(
           registry,
         ),
       ).resolves.toBeNull();
+    });
+
+    /**
+     * Sealed at rest (D35) — proven against the REAL column, not a fake.
+     *
+     * The docstring in db/schema.ts used to promise "never the raw secret in this
+     * column" while `upsertInstall` wrote the bot token in plaintext. These tests
+     * are what makes the promise true: they read the raw bytes back out of
+     * Postgres and assert the secret is not in them.
+     */
+    describe("sealed at rest", () => {
+      const rawRow = async (provider: string, installKey: string) => {
+        const { rows } = await pool.query<{
+          credential_ref: string | null;
+          chat_token_ref: string | null;
+        }>(
+          `SELECT credential_ref, chat_token_ref
+             FROM chat_bridge.connector_installs
+            WHERE provider = $1 AND install_key = $2`,
+          [provider, installKey],
+        );
+        return rows[0];
+      };
+
+      it("stores NO plaintext secret in credential_ref or chat_token_ref", async () => {
+        const row = await rawRow("telegram", "bot-a");
+
+        expect(row?.credential_ref).toBeTruthy();
+        expect(row?.chat_token_ref).toBeTruthy();
+
+        // The bytes actually on disk contain neither secret, in any encoding a
+        // casual `SELECT *` would reveal.
+        expect(row?.credential_ref).not.toContain(BOT_SECRET_A);
+        expect(row?.chat_token_ref).not.toContain(CHAT_TOKEN_A);
+        expect(
+          Buffer.from(row?.credential_ref ?? "", "base64").toString("utf8"),
+        ).not.toContain(BOT_SECRET_A);
+        expect(
+          Buffer.from(row?.chat_token_ref ?? "", "base64").toString("utf8"),
+        ).not.toContain(CHAT_TOKEN_A);
+      });
+
+      it("opens BOTH refs on lookupInstall — the token and the routing key from ONE row", async () => {
+        const install = await lookup.lookupInstall("telegram", "bot-b");
+
+        expect(install).not.toBeNull();
+        expect(install?.workspaceId).toBe(WS_B);
+        expect(install?.credentialRef).toBe(BOT_SECRET_B);
+        expect(install?.chatToken).toBe(CHAT_TOKEN_B);
+      });
+
+      it("returns chatToken null (not a fallback) for an install with no chat token", async () => {
+        const install = await lookup.lookupInstall("slack", "T_AAA");
+
+        // Routable — the workspace is right there — but NOT runnable. Dispatch
+        // turns this into a typed drop; it never borrows another install's token.
+        expect(install?.workspaceId).toBe(WS_A);
+        expect(install?.credentialRef).toBe("xoxb-ws-a-slack");
+        expect(install?.chatToken).toBeNull();
+      });
+
+      it("each row's blobs are DISTINCT — no shared ciphertext across tenants", async () => {
+        const a = await rawRow("telegram", "bot-a");
+        const b = await rawRow("telegram", "bot-b");
+
+        expect(a?.credential_ref).not.toBe(b?.credential_ref);
+        expect(a?.chat_token_ref).not.toBe(b?.chat_token_ref);
+      });
+
+      it("REFUSES a sealed token pasted into another tenant's row (the AAD in action)", async () => {
+        // The attack the AAD exists for, executed against the real table: take
+        // ws-a's sealed chat token and write it into ws-b's row. Without AAD (see
+        // @chat-adapter/shared's encryptToken) this succeeds, and ws-b's agent
+        // starts talking to /v1/chat as ws-a.
+        const stolen = (await rawRow("telegram", "bot-a"))?.chat_token_ref;
+        expect(stolen).toBeTruthy();
+
+        await pool.query(
+          `UPDATE chat_bridge.connector_installs
+              SET chat_token_ref = $1
+            WHERE provider = 'telegram' AND install_key = 'bot-b'`,
+          [stolen],
+        );
+
+        // The row does not open. It is DROPPED, not served with someone else's token.
+        await expect(lookup.lookupInstall("telegram", "bot-b")).resolves.toBeNull();
+
+        // …and routing still resolves the workspace (that never needed a secret),
+        // so the drop happens at the credential step, exactly where it should.
+        await expect(lookup.resolveWorkspace("telegram", "bot-b")).resolves.toBe(
+          WS_B,
+        );
+
+        // Restore, so test order cannot matter.
+        await upsertInstall(pool, cipher, {
+          provider: "telegram",
+          installKey: "bot-b",
+          workspaceId: WS_B,
+          credentialRef: BOT_SECRET_B,
+          chatToken: CHAT_TOKEN_B,
+        });
+        await expect(
+          lookup.lookupInstall("telegram", "bot-b"),
+        ).resolves.toMatchObject({ chatToken: CHAT_TOKEN_B });
+      });
+
+      it("REFUSES a row whose workspace_id was repointed after sealing (PK intact)", async () => {
+        // The subtler theft: leave the blobs alone, just move the row to another
+        // workspace. (provider, install_key) — the PRIMARY KEY — is untouched, so a
+        // PK-only AAD would still open it. workspace_id is in the AAD, so it does not.
+        await pool.query(
+          `UPDATE chat_bridge.connector_installs
+              SET workspace_id = $1
+            WHERE provider = 'telegram' AND install_key = 'bot-a'`,
+          [WS_B],
+        );
+
+        await expect(lookup.lookupInstall("telegram", "bot-a")).resolves.toBeNull();
+        await expect(lookup.listInstalls("telegram")).resolves.not.toContainEqual(
+          expect.objectContaining({ installKey: "bot-a" }),
+        );
+
+        // Restore.
+        await upsertInstall(pool, cipher, {
+          provider: "telegram",
+          installKey: "bot-a",
+          workspaceId: WS_A,
+          credentialRef: BOT_SECRET_A,
+          chatToken: CHAT_TOKEN_A,
+        });
+      });
+
+      it("upsert REPLACES both sealed refs (a rotated bot token really rotates)", async () => {
+        const before = await rawRow("telegram", "bot-a");
+
+        await upsertInstall(pool, cipher, {
+          provider: "telegram",
+          installKey: "bot-a",
+          workspaceId: WS_A,
+          credentialRef: "111111111:AA-rotated",
+          chatToken: "bp_chat_ws_a_rotated",
+        });
+
+        const after = await rawRow("telegram", "bot-a");
+        expect(after?.credential_ref).not.toBe(before?.credential_ref);
+
+        await expect(
+          lookup.lookupInstall("telegram", "bot-a"),
+        ).resolves.toMatchObject({
+          credentialRef: "111111111:AA-rotated",
+          chatToken: "bp_chat_ws_a_rotated",
+        });
+
+        // Restore.
+        await upsertInstall(pool, cipher, {
+          provider: "telegram",
+          installKey: "bot-a",
+          workspaceId: WS_A,
+          credentialRef: BOT_SECRET_A,
+          chatToken: CHAT_TOKEN_A,
+        });
+      });
+
+      it("chat_token_ref exists on a table created by P2's four-column DDL (ADD COLUMN IF NOT EXISTS)", async () => {
+        // The migration path that actually matters: a bridge that already booted
+        // has the OLD table, and `CREATE TABLE IF NOT EXISTS` is a no-op against it.
+        // Simulate that exactly, then run the real boot DDL over it.
+        await pool.query("DROP TABLE IF EXISTS chat_bridge.legacy_installs");
+        await pool.query(`
+          CREATE TABLE chat_bridge.legacy_installs (
+            provider       text NOT NULL,
+            install_key    text NOT NULL,
+            workspace_id   text NOT NULL,
+            credential_ref text,
+            created_at     timestamptz NOT NULL DEFAULT now(),
+            PRIMARY KEY (provider, install_key)
+          )`);
+        await pool.query(
+          "ALTER TABLE chat_bridge.legacy_installs ADD COLUMN IF NOT EXISTS chat_token_ref text",
+        );
+
+        const { rows } = await pool.query<{ column_name: string }>(
+          `SELECT column_name FROM information_schema.columns
+            WHERE table_schema = 'chat_bridge' AND table_name = 'legacy_installs'`,
+        );
+        expect(rows.map((r) => r.column_name)).toContain("chat_token_ref");
+
+        // And it is idempotent — the boot path runs it on EVERY start.
+        await pool.query(
+          "ALTER TABLE chat_bridge.legacy_installs ADD COLUMN IF NOT EXISTS chat_token_ref text",
+        );
+        await pool.query("DROP TABLE chat_bridge.legacy_installs");
+      });
     });
   },
 );

@@ -41,11 +41,17 @@ export type TenantResolution = "credential-bound" | "payload-team-id";
 
 /**
  * One workspace's install of one connector — a row of
- * `chat_bridge.connector_installs` (D29).
+ * `chat_bridge.connector_installs` (D29/D35), with both secrets OPENED.
  *
  * This is what `adapterFactory` is handed, and it is the whole of per-workspace
  * credential isolation (D1): a tenant's adapter is constructed from that tenant's
- * credential and nothing else. The core never logs or forwards `credentialRef`.
+ * provider secret, and its /v1/chat traffic travels on that tenant's OWN chat
+ * token — both read from the SAME row that routed the event. The core never logs
+ * or forwards either secret.
+ *
+ * At REST both secrets are sealed (AES-256-GCM, AAD-bound to this row's
+ * identity — see `src/crypto/credential-cipher.ts`). They are plaintext only in
+ * this in-memory shape, opened by `tenant/installs.ts` on the way out of SQL.
  */
 export interface ConnectorInstall {
   /** The connector id this install belongs to (e.g. "telegram"). */
@@ -56,18 +62,37 @@ export interface ConnectorInstall {
    * secret must never be used here.
    */
   installKey: string;
-  /** The workspace that owns this install. */
+  /** The workspace that owns this install. Part of the seal's AAD. */
   workspaceId: WorkspaceId;
   /**
-   * Reference to the provider secret (bot token, signing secret).
-   *
-   * KNOWN GAP: today this column holds the raw secret in plaintext. Encrypting it
-   * (or pointing it at a real per-workspace credential store) is filed as
-   * `connectors-encrypt-install-credentials` and blocked on D9's run-secrets
-   * workspace scoping. Named here so nobody mistakes the name for a promise.
+   * The provider secret (bot token, signing secret), OPENED.
+   * Sealed at rest in `connector_installs.credential_ref`.
    */
   credentialRef: string;
+  /**
+   * THIS workspace's Barkpark `chat`-permission ApiToken, OPENED. Sealed at rest
+   * in `connector_installs.chat_token_ref`.
+   *
+   * Nullable on purpose: an install can exist before its chat token is minted (an
+   * OAuth callback lands the provider secret first). A missing token is a
+   * fail-closed DROP at dispatch (`dropped_no_chat_token`) — there is no operator
+   * -token fallback anywhere in the request path, because a fallback is exactly
+   * how one token silently comes to serve every tenant.
+   *
+   * Optional in the TYPE only so the connectors that never mint a client (an
+   * adapterFactory needs the provider secret, not this) can build an install
+   * literal without it. Absent and null mean the same thing: drop.
+   */
+  chatToken?: string | null;
 }
+
+/**
+ * An install whose chat token is PRESENT — the only shape allowed to mint a
+ * ChatClient. Narrowing to this type at the one place it is checked (dispatch)
+ * is what makes "no token => no HTTP call" a compile-time property rather than a
+ * convention someone can forget.
+ */
+export type AuthorizedInstall = ConnectorInstall & { chatToken: string };
 
 /**
  * A raw inbound provider event as it reaches the bridge (webhook body or poll

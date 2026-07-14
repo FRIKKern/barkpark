@@ -23,6 +23,7 @@ import {
   telegramBotIdFromToken,
   TELEGRAM_PROVIDER,
 } from "../src/connectors/telegram.js";
+import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import { createBridgePool, ensureBridgeSchema } from "../src/db/pool.js";
 import { mountInstall, type BridgeDeps } from "../src/index.js";
 import { createBridgeState } from "../src/state/state-adapter.js";
@@ -48,9 +49,9 @@ const REQUIRED = [
   },
   {
     name: "BARKPARK_CHAT_TOKEN",
-    why: "a workspace-bound ApiToken carrying the `chat` permission (charter D33)",
+    why: "THIS install's workspace-bound `chat` ApiToken — sealed into its connector_installs row (D33/D35), never used as a process-wide token",
     how: [
-      "P2 ships zero Elixir changes — mint the token out-of-band.",
+      "Mint the token out-of-band (no HTTP mint endpoint exists yet).",
       "In an api/ console (cd api && iex -S mix), with YOUR workspace id:",
       "  Barkpark.Auth.create_token(",
       '    "my-telegram-secret",        # the raw token you will export',
@@ -63,6 +64,20 @@ const REQUIRED = [
       "A `chat` token WITHOUT a workspace_id resolves to :global (admin scope) —",
       "fine for a solo dev smoke, WRONG for real multi-tenant isolation.",
       "  export BARKPARK_CHAT_TOKEN='my-telegram-secret'",
+      "This smoke SEALS it into chat_bridge.connector_installs.chat_token_ref for",
+      "this bot's install. The running bridge reads it from there and nowhere else.",
+    ],
+  },
+  {
+    name: "CONNECTORS_CREDENTIAL_KEY",
+    why: "the AES-256-GCM key that seals BOTH secrets in every install row (D35)",
+    how: [
+      "An INDEPENDENT key — not BARKPARK_KEK, not an ApiToken. 32 bytes, base64:",
+      "  export CONNECTORS_CREDENTIAL_KEY=$(openssl rand -base64 32)",
+      "Missing => the bridge REFUSES to boot. There is no plaintext fallback:",
+      "encryption you can switch off by unsetting a variable is not encryption.",
+      "Keep it: rows sealed under a lost key can never be opened again (rotate",
+      "via CONNECTORS_CREDENTIAL_KEY_PREVIOUS, do not lose the current one).",
     ],
   },
   {
@@ -171,6 +186,16 @@ async function main(): Promise<void> {
     return;
   }
 
+  // Boot-fatal if the key is missing or malformed (D35) — the same failure the
+  // real bridge takes, taken here before anything is written.
+  const cipher = createCredentialCipher({
+    key: env.CONNECTORS_CREDENTIAL_KEY as string,
+    previousKeys: (env.CONNECTORS_CREDENTIAL_KEY_PREVIOUS ?? "")
+      .split(",")
+      .map((k) => k.trim())
+      .filter((k) => k !== ""),
+  });
+
   const pool = createBridgePool({ connectionString: databaseUrl });
   // Fails CLOSED if the pool is not pinned to chat_bridge — better to refuse
   // than to scatter the SDK's tables across Barkpark's `public` schema (D28).
@@ -184,20 +209,26 @@ async function main(): Promise<void> {
     installKey: botId,
     workspaceId,
     credentialRef: botToken,
+    // THIS install's own chat token. The bridge has no other one to fall back on.
+    chatToken,
   };
 
-  // The install row is what routes an inbound update to a tenant. Persist it
-  // only on request — a smoke run should not silently mutate a shared DB.
+  // The install row is what routes an inbound update to a tenant AND what its
+  // /v1/chat traffic is authenticated with. Persist it only on request — a smoke
+  // run should not silently mutate a shared DB.
   const persist = env.BRIDGE_PERSIST_INSTALL === "1";
   const installs = persist
-    ? createInstallsLookup(pool)
+    ? createInstallsLookup(pool, cipher)
     : createInMemoryInstallsLookup([install]);
 
   if (persist) {
-    await upsertInstall(pool, install);
+    await upsertInstall(pool, cipher, install);
     console.log("[smoke] install persisted to chat_bridge.connector_installs");
     console.log(
-      "[smoke] NOTE: credential_ref stores the bot token in PLAINTEXT today.",
+      "[smoke] both credential_ref and chat_token_ref are SEALED (AES-256-GCM,",
+    );
+    console.log(
+      `[smoke] AAD-bound to provider=${TELEGRAM_PROVIDER} install=${botId} workspace=${workspaceId}).`,
     );
   } else {
     console.log(
@@ -212,15 +243,19 @@ async function main(): Promise<void> {
   const deps: BridgeDeps = {
     config: {
       apiUrl,
-      chatToken,
       databaseUrl,
+      credentialKey: env.CONNECTORS_CREDENTIAL_KEY as string,
+      previousCredentialKeys: [],
       userName: env.BRIDGE_USER_NAME?.trim() || "barkpark",
     },
     registry,
     installs,
     map: createThreadSessionMap(createPgThreadSessionStore(pool)),
     state: createBridgeState(pool),
-    chatClientFor: () => client,
+    // The token rides the INSTALL, exactly as the real bridge does (D35). The
+    // probe client above is not reused: it would hide a broken install row.
+    chatClientForInstall: (routed) =>
+      createChatClient({ baseUrl: apiUrl, token: routed.chatToken }),
     onOutcome: (outcome, event) => {
       console.log("");
       console.log(
@@ -241,6 +276,22 @@ async function main(): Promise<void> {
       if (outcome.status === "dropped_no_tenant") {
         console.log(
           "[smoke] ✗ no tenant resolved — the install row does not match this bot.",
+        );
+      }
+      if (outcome.status === "dropped_no_install") {
+        console.log(
+          "[smoke] ✗ install row unusable — its sealed refs did not open. Wrong",
+        );
+        console.log(
+          "[smoke]   CONNECTORS_CREDENTIAL_KEY, or the row was written under another one.",
+        );
+      }
+      if (outcome.status === "dropped_no_chat_token") {
+        console.log(
+          "[smoke] ✗ this install has no chat token sealed into chat_token_ref.",
+        );
+        console.log(
+          "[smoke]   The bridge will NOT fall back to an operator token (D35).",
         );
       }
       if (outcome.status === "empty_reply") {

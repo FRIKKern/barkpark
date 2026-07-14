@@ -10,11 +10,13 @@ import {
   type ConnectorRegistry,
 } from "./connector/registry.js";
 import type {
+  AuthorizedInstall,
   Connector,
   ConnectorInstall,
   InboundEvent,
   InstallsLookup,
 } from "./connector/types.js";
+import { createCredentialCipher } from "./crypto/credential-cipher.js";
 import {
   createTelegramConnector,
   TELEGRAM_PROVIDER,
@@ -41,6 +43,11 @@ import { createInstallsLookup } from "./tenant/installs.js";
  * is built from exactly one workspace's bot credential and talks to /v1/chat
  * with exactly that workspace's token — a tenant's adapter can never be
  * constructed from another tenant's secret.
+ *
+ * Both of those secrets are SEALED at rest (AES-256-GCM, AAD-bound to the
+ * install row — D35) and opened only through `tenant/installs.ts`. The bridge
+ * holds no process-wide chat token at all: there is nothing here that could
+ * serve one tenant's traffic on another tenant's credential.
  */
 
 /** P3 adds its channels HERE and nowhere else. */
@@ -59,8 +66,14 @@ export interface BridgeDeps {
   map: ThreadSessionMap;
   /** The Chat SDK's own state backend (subscriptions/locks), on chat_bridge. */
   state: StateAdapter;
-  /** Mint a per-workspace ChatClient. Override to give each tenant its token. */
-  chatClientFor(workspaceId: string): ChatClient | Promise<ChatClient>;
+  /**
+   * Mint a ChatClient bound to THIS install's own chat token — the one sealed in
+   * the same `connector_installs` row that routed the event (D35). Takes an
+   * {@link AuthorizedInstall}, so a tokenless install cannot even be passed in.
+   */
+  chatClientForInstall(
+    install: AuthorizedInstall,
+  ): ChatClient | Promise<ChatClient>;
   onOutcome?: (outcome: DispatchOutcome, event: InboundEvent) => void;
   /** Fired when /v1/chat accepts the turn (D21) — NOT a channel post. */
   onAck?: (event: InboundEvent) => void;
@@ -117,7 +130,7 @@ export function mountInstall(
         registry: deps.registry,
         installs: { installs: deps.installs },
         map: deps.map,
-        chatClientFor: deps.chatClientFor,
+        chatClientForInstall: deps.chatClientForInstall,
         reply: async (out) => {
           posted = true;
           await reply(out);
@@ -179,6 +192,14 @@ export interface Bridge {
 export async function startBridge(
   config: BridgeConfig = loadConfig(),
 ): Promise<Bridge> {
+  // Built FIRST, before anything touches the network or the database: a missing
+  // or malformed CONNECTORS_CREDENTIAL_KEY is a boot failure, and it should be
+  // the fastest, loudest one. There is no plaintext fallback to fall into.
+  const cipher = createCredentialCipher({
+    key: config.credentialKey,
+    previousKeys: config.previousCredentialKeys,
+  });
+
   const pool = createBridgePool({ connectionString: config.databaseUrl });
   // Idempotent, and FAIL-CLOSED: refuses to boot if the pool's search_path is not
   // pinned to chat_bridge, because state-pg's unqualified DDL would then land in
@@ -186,7 +207,7 @@ export async function startBridge(
   await ensureBridgeSchema(pool);
 
   const state = createBridgeState(pool);
-  const installs = createInstallsLookup(pool);
+  const installs = createInstallsLookup(pool, cipher);
   const map = createThreadSessionMap(createPgThreadSessionStore(pool));
 
   const registry = createConnectorRegistry();
@@ -198,13 +219,12 @@ export async function startBridge(
     installs,
     map,
     state,
-    // KNOWN GAP — one operator token serves every tenant today (D33): this
-    // ignores `workspaceId`. Tenant isolation is therefore only as strong as
-    // this single token, and a `:global` one would read every workspace's
-    // sessions. The seam is right; the token store is not built.
-    // Backlog: task `connectors-per-workspace-chat-token`.
-    chatClientFor: (_workspaceId: string) =>
-      createChatClient({ baseUrl: config.apiUrl, token: config.chatToken }),
+    // Each tenant's traffic travels on ITS OWN workspace-bound `chat` ApiToken,
+    // opened from the very install row that routed the event (D35). The token
+    // and the routing key are two columns of one row — the bridge holds no
+    // process-wide token that could stand in for a missing one.
+    chatClientForInstall: (install: AuthorizedInstall) =>
+      createChatClient({ baseUrl: config.apiUrl, token: install.chatToken }),
     onOutcome: (outcome, event) => {
       console.log(
         `[bridge] ${event.provider} thread=${event.threadId} -> ${outcome.status}` +
