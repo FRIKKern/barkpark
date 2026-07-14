@@ -308,10 +308,27 @@ if ! grep -q '^BARKPARK_CLOUD_URL=' .env 2>/dev/null; then
 fi
 
 # The Connectors bridge ciphers each install's per-workspace credentials with
-# this key. It MUST be STABLE across deploys — regenerating it makes every stored
-# connector credential undecryptable — so it is backfilled ONCE into .env (the
-# box's durable secret store, same mechanism as BARKPARK_KEK above) and only
-# COPIED into /etc/barkpark/connectors.env on each deploy.
+# this key (the KEK — every row is sealed under an HKDF-derived per-workspace
+# subkey, never the KEK directly). It is backfilled ONCE into .env and only
+# COPIED into /etc/barkpark/connectors.env on each deploy, so it stays STABLE
+# across deploys rather than being regenerated under live installs.
+#
+# KEY CUSTODY — where it lives, how to rotate, what breaks if lost:
+#   · BACKED UP: /opt/barkpark/.env (mode 0600), the box's durable secret store,
+#     the SAME mechanism as BARKPARK_KEK above. It is NOT escrowed off-box by
+#     this script — an operator who wants disaster recovery must copy this line
+#     out of .env to a secret manager. Losing the box loses the key.
+#   · ROTATE DELIBERATELY (this is safe, NOT a flag day): put the OLD key in
+#     CONNECTORS_CREDENTIAL_KEY_PREVIOUS and a fresh one in
+#     CONNECTORS_CREDENTIAL_KEY, deploy, then run `npm run rewrap` in
+#     /opt/barkpark/connectors (re-seals every row under the new key). Once it
+#     reports raced=0 / no unopenable rows, delete the _PREVIOUS line — the old
+#     key is now retired. The cipher opens rows under EITHER key in the meantime,
+#     so nothing goes dark during the window. See docs/ops/connectors-deploy.md.
+#   · IF THE KEY IS LOST with no _PREVIOUS and no backup: stored blobs can no
+#     longer be opened, so every install must be RE-CONNECTED (re-paste the
+#     provider token). That is the ONLY thing a lost key breaks — routing rows
+#     survive; the secrets they point at do not.
 if ! grep -q '^CONNECTORS_CREDENTIAL_KEY=' .env 2>/dev/null; then
   echo "CONNECTORS_CREDENTIAL_KEY=$(openssl rand -base64 32)" >> .env
   log "added CONNECTORS_CREDENTIAL_KEY to .env (connectors bridge credential cipher)"

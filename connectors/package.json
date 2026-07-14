@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "tsx src/index.ts",
+    "rewrap": "tsx scripts/rewrap.ts",
     "smoke:telegram": "tsx scripts/smoke-telegram.ts",
     "smoke:teams": "tsx scripts/smoke-teams.ts",
     "smoke:whatsapp": "tsx scripts/smoke-whatsapp.ts",

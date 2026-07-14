@@ -96,10 +96,37 @@ install authenticates with its **own** workspace-bound `chat` ApiToken, stored
 ciphered in the bridge's `connector_installs` rows. `mcp.env` is `0644` because
 it deliberately holds no secret; `connectors.env` holds two, hence `0600`.
 
-`CONNECTORS_CREDENTIAL_KEY` is generated **once** and persisted in
-`/opt/barkpark/.env` (same mechanism as `BARKPARK_KEK`), then copied into
-`connectors.env` on every deploy. **Rotating it makes every stored connector
-credential undecryptable** — every install must then be re-connected.
+`CONNECTORS_CREDENTIAL_KEY` is the **KEK**: every install's secrets are sealed
+under an HKDF-derived **per-workspace subkey**, never the KEK directly, so a
+single leaked row-key compromises one workspace rather than the instance. It is
+generated **once** and persisted in `/opt/barkpark/.env` (same mechanism as
+`BARKPARK_KEK`), then copied into `connectors.env` on every deploy.
+
+## Rotating the credential key (a deliberate, safe rotation — not a flag day)
+
+Rotating the key does **not** make stored credentials undecryptable — that old
+claim was wrong. The cipher opens a row under the **current key OR**
+`CONNECTORS_CREDENTIAL_KEY_PREVIOUS`, and a sweep re-seals every row under the
+new one:
+
+1. Move the current value to `CONNECTORS_CREDENTIAL_KEY_PREVIOUS=<old>` and set a
+   fresh `CONNECTORS_CREDENTIAL_KEY=<new>` in `/opt/barkpark/.env`, then deploy
+   (both land in `connectors.env`). Installs keep working through the window —
+   rows still open under the previous key.
+2. Run the sweep: `cd /opt/barkpark/connectors && npm run rewrap`. It re-seals
+   **both** sealed columns of **every** install (all providers) under the new
+   per-workspace key. It is idempotent and safe against a live bridge (it pins
+   each row's old bytes, so a connect landing mid-sweep is kept, never rolled
+   back — re-run to finish any `raced` row).
+3. When it reports `raced=0` and no `unopenable` rows, delete the
+   `CONNECTORS_CREDENTIAL_KEY_PREVIOUS` line. The old key is now retired.
+
+**Custody.** The key is backed up only in `/opt/barkpark/.env` (`0600`) — the
+box owns it. For disaster recovery, copy that line to a secret manager off-box;
+this deploy does not escrow it. **If the key is lost** with no `_PREVIOUS` and no
+backup, stored blobs can no longer be opened and every install must be
+**re-connected** (re-paste the provider token). That is the only thing a lost key
+breaks — the routing rows survive, the secrets they point at do not.
 
 ## Verify
 

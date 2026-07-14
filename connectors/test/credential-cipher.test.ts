@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
 import {
   createCredentialCipher,
   credentialAad,
   CredentialOpenError,
   CredentialSealError,
+  deriveWorkspaceDek,
   InvalidCredentialKeyError,
   secretsEqual,
   type CredentialIdentity,
@@ -75,29 +76,28 @@ describe("credential cipher — round trip", () => {
   });
 });
 
-describe("credential cipher — wire format (byte-identical to LocalKek)", () => {
-  it("is Base64(iv(12) || tag(16) || ciphertext)", () => {
+describe("credential cipher — wire format (the LocalKek envelope layout)", () => {
+  it("is Base64(iv(12) || tag(16) || ciphertext), sealed under the workspace DEK", () => {
     const plaintext = "the-secret";
     const sealed = cipher.seal(plaintext, alpha);
     const raw = Buffer.from(sealed, "base64");
 
     // 12 + 16 + len(plaintext): GCM is a stream cipher, so ct is the same length
-    // as the plaintext. Any other layout would not be LocalKek's.
+    // as the plaintext. The envelope LAYOUT is LocalKek's, byte for byte.
     expect(raw.length).toBe(12 + 16 + Buffer.byteLength(plaintext, "utf8"));
 
     // Decrypt by hand, splitting exactly as api/lib/barkpark/crypto/local_kek.ex
     // does (<<iv::binary-size(12), tag::binary-size(16), ct::binary>>). If the
-    // order of iv and tag ever flips, this is what catches it.
+    // order of iv and tag ever flips, this is what catches it. What DIFFERS from
+    // LocalKek: the key is the PER-WORKSPACE DEK, not the instance key straight,
+    // and the AAD carries the v2 version prefix.
     const iv = raw.subarray(0, 12);
     const tag = raw.subarray(12, 28);
     const ct = raw.subarray(28);
 
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      Buffer.from(KEY_A, "base64"),
-      iv,
-    );
-    decipher.setAAD(credentialAad(alpha));
+    const dek = deriveWorkspaceDek(Buffer.from(KEY_A, "base64"), WS_ALPHA);
+    const decipher = createDecipheriv("aes-256-gcm", dek, iv);
+    decipher.setAAD(credentialAad(alpha)); // defaults to v2, the seal scheme
     decipher.setAuthTag(tag);
     const out = Buffer.concat([decipher.update(ct), decipher.final()]).toString(
       "utf8",
@@ -106,8 +106,13 @@ describe("credential cipher — wire format (byte-identical to LocalKek)", () =>
     expect(out).toBe(plaintext);
   });
 
-  it("binds the AAD to the FULL row identity, prefix included", () => {
+  it("binds the AAD to the FULL row identity, v2 version prefix included", () => {
     expect(credentialAad(alpha).toString("utf8")).toBe(
+      'bpc2|["telegram","bot-alpha","11111111-1111-4111-8111-111111111111"]',
+    );
+    // The version tag is IN the AAD (authenticated by the GCM tag), never a
+    // physical column — v1 and v2 differ only by prefix.
+    expect(credentialAad(alpha, 1).toString("utf8")).toBe(
       'bpc1|["telegram","bot-alpha","11111111-1111-4111-8111-111111111111"]',
     );
 
@@ -120,6 +125,82 @@ describe("credential cipher — wire format (byte-identical to LocalKek)", () =>
     expect(credentialAad(sneaky).toString("utf8")).not.toBe(
       credentialAad(alpha).toString("utf8"),
     );
+  });
+});
+
+/**
+ * PER-WORKSPACE DEK (V2). The AAD already fails a cross-tenant paste closed; the
+ * DEK removes the ONE service-wide key that sat under every tenant, so these
+ * assertions are about the KEY itself, independent of the AAD binding.
+ */
+describe("credential cipher — per-workspace DEK isolation", () => {
+  it("derives a DIFFERENT key per workspace from the same instance KEK", () => {
+    const kek = Buffer.from(KEY_A, "base64");
+    const dekAlpha = deriveWorkspaceDek(kek, WS_ALPHA);
+    const dekBeta = deriveWorkspaceDek(kek, WS_BETA);
+
+    expect(dekAlpha.length).toBe(32);
+    expect(dekBeta.length).toBe(32);
+    // Two workspaces, one instance key, two DISTINCT data-encryption keys.
+    expect(dekAlpha.equals(dekBeta)).toBe(false);
+    // And neither is the instance key itself — the KEK never encrypts a row.
+    expect(dekAlpha.equals(kek)).toBe(false);
+    // Deterministic: the same (KEK, workspace) always derives the same DEK, or
+    // a sealed row could never be re-opened.
+    expect(deriveWorkspaceDek(kek, WS_ALPHA).equals(dekAlpha)).toBe(true);
+  });
+
+  it("workspace A's DEK cannot open a blob sealed for workspace B", () => {
+    // Seal for beta (workspace B). Then try to decrypt the raw bytes with A's
+    // DEK — GCM must reject it, even though we hand it B's AAD, because the KEY
+    // is wrong. This is the property the AAD alone did not give: key isolation.
+    const sealedForBeta = cipher.seal("beta-bot-token", beta);
+    const raw = Buffer.from(sealedForBeta, "base64");
+    const iv = raw.subarray(0, 12);
+    const tag = raw.subarray(12, 28);
+    const ct = raw.subarray(28);
+
+    const dekAlpha = deriveWorkspaceDek(Buffer.from(KEY_A, "base64"), WS_ALPHA);
+    const decipher = createDecipheriv("aes-256-gcm", dekAlpha, iv);
+    decipher.setAAD(credentialAad(beta)); // B's own AAD — only the KEY is A's
+    decipher.setAuthTag(tag);
+    expect(() => Buffer.concat([decipher.update(ct), decipher.final()])).toThrow();
+
+    // And B's own DEK opens it, so the failure above is the key, not the bytes.
+    const dekBeta = deriveWorkspaceDek(Buffer.from(KEY_A, "base64"), WS_BETA);
+    const good = createDecipheriv("aes-256-gcm", dekBeta, iv);
+    good.setAAD(credentialAad(beta));
+    good.setAuthTag(tag);
+    expect(Buffer.concat([good.update(ct), good.final()]).toString("utf8")).toBe(
+      "beta-bot-token",
+    );
+  });
+
+  it("a v2 blob is reported current; a v1 (pre-DEK) blob is not, yet still opens", () => {
+    // Seal a legacy v1 blob by hand: instance KEY straight (no DEK), v1 AAD.
+    const kek = Buffer.from(KEY_A, "base64");
+    const iv = randomBytes(12);
+    const enc = createCipheriv("aes-256-gcm", kek, iv);
+    enc.setAAD(credentialAad(alpha, 1));
+    const body = Buffer.concat([enc.update("v1-secret", "utf8"), enc.final()]);
+    const legacyBlob = Buffer.concat([iv, enc.getAuthTag(), body]).toString(
+      "base64",
+    );
+
+    // It still OPENS (rotation-safe, so no flag day) but is NOT current — the
+    // sweep must rewrap it. This is exactly the old-key-drain condition.
+    expect(cipher.open(legacyBlob, alpha)).toBe("v1-secret");
+    expect(cipher.isSealedWithCurrentKey(legacyBlob, alpha)).toBe(false);
+
+    // A freshly-sealed (v2) blob is current.
+    const v2 = cipher.seal("v2-secret", alpha);
+    expect(cipher.isSealedWithCurrentKey(v2, alpha)).toBe(true);
+
+    // Under a DIFFERENT current key it is no longer current (needs rewrap) but
+    // still opens via the previous key — the whole point of the sweep.
+    const rotated = createCredentialCipher({ key: KEY_B, previousKeys: [KEY_A] });
+    expect(rotated.isSealedWithCurrentKey(v2, alpha)).toBe(false);
+    expect(rotated.open(v2, alpha)).toBe("v2-secret");
   });
 });
 
