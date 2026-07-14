@@ -392,7 +392,9 @@ defmodule Barkpark.Content do
         %CallerContext{is_admin: true}
       )
       when is_binary(dataset),
-      do: Encryption.decrypt_document(doc, schema, dataset)
+      # The DEK is attributed to the document's workspace (charter D51-D54), so
+      # decryption MUST resolve the same (workspace_id, scope) DEK that sealed it.
+      do: Encryption.decrypt_document(doc, schema, dataset, doc.workspace_id)
 
   def reveal_fields(%Document{}, %SchemaDefinition{}, dataset, %CallerContext{})
       when is_binary(dataset),

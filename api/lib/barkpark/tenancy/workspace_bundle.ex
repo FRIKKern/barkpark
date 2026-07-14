@@ -180,18 +180,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   A dataset slug is unique only per `(project_id, slug)` (`datasets` unique
   index), NOT globally — every workspace gets a `"production"` dataset, so
   `"production"` collides across tenants. The E3-dataset tables
-  (`sync_cursors`, `preview_token_jti`, …) and the `scope`-column allowlist
-  (`data_keys` = `"dataset:" <> slug`, `search_surface_config` = slug) carry
-  ONLY that bare slug/scope — no `project_id` / `dataset_id` / `workspace_id`
-  column — so a row under a SHARED slug is genuinely unattributable to a single
-  workspace. The bare `dataset = ANY(slugs)` / `scope = ANY(...)` predicate that
-  BOTH the exporter (`copy_where/4`) and the teardown sweep
-  (`Tenancy.delete_workspace/1`) run over that slug set therefore MUST NOT match
-  a shared slug, else it becomes a cross-tenant COPY (leak into a
-  single-workspace bundle) or a cross-tenant DELETE (stripping a co-tenant's
-  DEKs / cursors on teardown). Dropping shared slugs here narrows BOTH callers
-  in lockstep — fail-CLOSED: an ambiguous slug's bare-keyed rows are left
+  (`sync_cursors`, `preview_token_jti`, …) carry ONLY that bare slug — no
+  `project_id` / `dataset_id` / `workspace_id` column — so a row under a SHARED
+  slug is genuinely unattributable to a single workspace. The bare
+  `dataset = ANY(slugs)` predicate that BOTH the exporter (`copy_where/4`) and
+  the teardown sweep (`Tenancy.delete_workspace/1`) run over that slug set
+  therefore MUST NOT match a shared slug, else it becomes a cross-tenant COPY
+  (leak into a single-workspace bundle) or a cross-tenant DELETE (stripping a
+  co-tenant's cursors on teardown). Dropping shared slugs here narrows BOTH
+  callers in lockstep — fail-CLOSED: an ambiguous slug's bare-keyed rows are left
   untouched (an orphan is recoverable; a cross-tenant delete is not).
+
+  The `scope`-column allowlist is now EMPTY: both former members moved to E1
+  because a bare `scope` is exactly this unattributable-under-a-shared-slug trap.
+  `search_surface_config` (Wave 5 Slice A, charter D45/D49) and `data_keys` (the
+  per-dataset DEK store — a shared-slug DEK was silently dropped from a
+  single-workspace bundle for exactly this reason) each gained a `workspace_id`
+  FK and now ride E1: copied via `WHERE workspace_id = $ws` and swept via the FK
+  cascade, so a shared-slug row travels by attribution, not by slug
+  (`bpb-datakeys-write-path-workspace-attribution`, charter D51-D54).
 
   NEVER `scope_to_workspace_or_global` (which routes nil to a fully-unscoped,
   all-tenant read → a cross-tenant leak). Public so the teardown path derives
@@ -280,7 +287,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     "WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})"
   end
 
-  # data_keys.scope = "dataset:" <> slug ; search_surface_config.scope = slug.
+  # data_keys.scope = "dataset:" <> slug (search_surface_config left the allowlist
+  # in Wave 5 Slice A — it is now a plain E1 workspace_id table, charter D45/D49).
   defp copy_where(table, :allowlist, _ws_lit, slugs) do
     prefix = Map.fetch!(Catalog.allowlist(), table)
     scopes = Enum.map(slugs, &(prefix <> &1))

@@ -5,6 +5,8 @@ defmodule Barkpark.CryptoTest do
   """
   use Barkpark.DataCase, async: false
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Crypto.{DataKey, DataKeys, FieldCipher, KeyProvider, LocalKek}
 
   describe "LocalKek (KEK wrap/unwrap)" do
@@ -237,6 +239,89 @@ defmodule Barkpark.CryptoTest do
       active = Repo.one!(from d in DataKey, where: d.scope == ^scope and d.active == true)
       assert active.version == 3
       assert Repo.aggregate(from(d in DataKey, where: d.scope == ^scope), :count) == 3
+    end
+  end
+
+  # ── D51-D54: per-workspace DEK attribution (write/read wiring) ────────────────
+  describe "data_keys — per-workspace attribution" do
+    test "two workspaces sharing the 'production' scope each mint a v1 DEK (no unique_violation)" do
+      ws_a = create_workspace!().id
+      ws_b = create_workspace!().id
+      scope = "dataset:production"
+
+      # On origin/main the (scope, version) unique index made the SECOND
+      # workspace's v1 a :unique_violation; the D53 re-key to
+      # (workspace_id, scope, version) lets both mint version 1 independently.
+      {1, dek_a} = DataKeys.active_dek(ws_a, scope)
+      {1, dek_b} = DataKeys.active_dek(ws_b, scope)
+
+      refute dek_a == dek_b
+
+      rows =
+        Repo.all(
+          from d in DataKey,
+            where: d.scope == ^scope and d.active == true and not is_nil(d.workspace_id)
+        )
+
+      assert length(rows) == 2
+      assert rows |> Enum.map(& &1.workspace_id) |> Enum.sort() == Enum.sort([ws_a, ws_b])
+    end
+
+    test "active_dek stamps workspace_id and is keyed per-workspace (nil-ws is a separate row)" do
+      ws = create_workspace!().id
+      scope = "dataset:#{Ecto.UUID.generate()}"
+
+      {1, dek} = DataKeys.active_dek(ws, scope)
+      row = Repo.one!(from d in DataKey, where: d.scope == ^scope and d.workspace_id == ^ws)
+      assert row.workspace_id == ws
+
+      # The NULL-workspace DEK for the SAME scope is a distinct row + key.
+      {1, dek_nil} = DataKeys.active_dek(nil, scope)
+      refute dek == dek_nil
+      assert Repo.aggregate(from(d in DataKey, where: d.scope == ^scope), :count) == 2
+
+      # dek_for_version resolves the RIGHT key per workspace.
+      assert {:ok, ^dek} = DataKeys.dek_for_version(ws, scope, 1)
+      assert {:ok, ^dek_nil} = DataKeys.dek_for_version(nil, scope, 1)
+    end
+
+    test "one active DEK per (workspace, scope) — a second active row is rejected (D52 ws index)" do
+      ws = create_workspace!().id
+      scope = "dataset:#{Ecto.UUID.generate()}"
+      {1, _} = DataKeys.active_dek(ws, scope)
+
+      assert_raise Ecto.ConstraintError, fn ->
+        %DataKey{}
+        |> DataKey.changeset(%{
+          scope: scope,
+          version: 2,
+          wrapped_key: "x",
+          kek_version: 1,
+          active: true,
+          workspace_id: ws
+        })
+        |> Repo.insert!()
+      end
+    end
+
+    test "per-workspace isolation: neither workspace can decrypt the other's ciphertext" do
+      ws_a = create_workspace!().id
+      ws_b = create_workspace!().id
+      scope = "dataset:production"
+
+      env_a = FieldCipher.encrypt("secret-A", scope, ws_a)
+      env_b = FieldCipher.encrypt("secret-B", scope, ws_b)
+
+      # Same workspace round-trips.
+      assert {:ok, "secret-A"} = FieldCipher.decrypt(env_a, scope, ws_a)
+      assert {:ok, "secret-B"} = FieldCipher.decrypt(env_b, scope, ws_b)
+
+      # Cross-workspace decrypt fails closed (distinct DEK → GCM auth fails).
+      assert :error = FieldCipher.decrypt(env_a, scope, ws_b)
+      assert :error = FieldCipher.decrypt(env_b, scope, ws_a)
+
+      # The NULL-workspace DEK cannot read an attributed ciphertext either.
+      assert :error = FieldCipher.decrypt(env_a, scope, nil)
     end
   end
 end

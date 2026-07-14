@@ -10,20 +10,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (19 today; the two
+    * **E1** — every table carrying a `workspace_id` column (21 today; the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
-      column with no FK to `workspaces`, and `roles` is the 19th).
+      column with no FK to `workspaces`, `roles` is one, and both
+      `search_surface_config` (Wave 5 Slice A, charter D45/D49) and `data_keys`
+      (the per-dataset DEK store, bpb-datakeys-write-path-workspace-attribution)
+      were re-pinned from the allowlist so a shared-slug row travels via the
+      `workspace_id` path instead of a bare, project-ambiguous `scope`).
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
       that do NOT themselves carry `workspace_id` (6: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
       `webhook_deliveries`). Reached via a real FK, extracted through a
       parent-join to the nearest `workspace_id`-bearing ancestor.
     * **E3** — the `dataset`-column tables minus E1 (9), keyed by a `dataset`
-      slug (and, for four of them, a `doc_id`). PLUS an explicit two-table
-      allowlist (`data_keys`, `search_surface_config`) whose tenant key is a
-      `scope` column, not `dataset` — the mechanical `dataset` scan cannot see
-      them, and dropping `data_keys` would render every exported ciphertext
-      permanently undecryptable (it holds the per-dataset DEKs).
+      slug (and, for four of them, a `doc_id`). The `scope`-column allowlist is
+      now EMPTY: both former members (`search_surface_config`, `data_keys`)
+      gained a `workspace_id` column and moved to E1, so a shared-slug row —
+      including a per-dataset DEK — is exported and torn down via
+      `WHERE workspace_id = $ws` and is never silently dropped.
 
   ## The reviewed extraction specs
 
@@ -51,11 +55,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @root_table "workspaces"
 
   @pinned_e1 ~w(
-    access_grants api_tokens audit_events audit_export_sinks documents
+    access_grants api_tokens audit_events audit_export_sinks data_keys documents
     media_files mutation_events paper_events projects revisions roles
     schema_definitions search_intel_crystals search_intel_events
-    search_intel_merge_patterns search_synonyms share_links webhooks
-    workspace_memberships
+    search_intel_merge_patterns search_surface_config search_synonyms
+    share_links webhooks workspace_memberships
   )
 
   @pinned_e2 ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
@@ -66,13 +70,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # E3 tables with no `doc_id` → filtered by dataset-slug membership.
   @e3_dataset_keyed ~w(preview_token_jti shares sync_cursors sync_dead_letters sync_push_cursors)
 
-  # The `scope`-column allowlist (charter D4/D5). Cannot be dataset-scanned.
-  #   data_keys.scope             = "dataset:" <> slug   (per-dataset DEKs)
-  #   search_surface_config.scope = slug
-  @allowlist %{
-    "data_keys" => "dataset:",
-    "search_surface_config" => ""
-  }
+  # The `scope`-column allowlist (charter D4/D5): tables whose tenant key is a
+  # bare `scope` string, not a `dataset` column, so the mechanical dataset scan
+  # cannot see them.
+  #
+  # EMPTY as of Wave 5 — both former members gained a real `workspace_id` column
+  # and moved to E1 (`@pinned_e1`), exported and torn down via
+  # `WHERE workspace_id = $ws` instead of a bare, project-ambiguous `scope`:
+  #   * `search_surface_config` — Wave 5 Slice A (charter D45/D49), closed a LIVE
+  #     cross-tenant config-overwrite bleed.
+  #   * `data_keys` — bpb-datakeys-write-path-workspace-attribution (D51-D54),
+  #     so a shared-slug DEK is attributed to one workspace, not silently dropped.
+  @allowlist %{}
 
   # Every base table that rolls ABOVE or OUTSIDE the workspace grain (charter
   # D5): global codelists, admin/host state, the org tier, job queue, metrics,

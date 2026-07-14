@@ -659,7 +659,15 @@ defmodule Barkpark.Content.Writer do
         # `{:error, {:encryption_failed, …}}` when a marked-encrypted field cannot
         # be sealed; we surface it so create/upsert REJECT the write (422-class)
         # instead of persisting plaintext-at-rest.
-        case Encryption.encrypt_marked(content, type, dataset) do
+        # Attribute the DEK to the document's workspace (charter D51-D54). The
+        # scope-resolution (`WriteScope.put_scope_attrs`) has already stamped
+        # `attrs["workspace_id"]` with the value the `Document.changeset` will
+        # persist, so the encrypt-time workspace equals the stored one — a later
+        # `reveal_fields` resolves the same (workspace_id, scope) DEK. `nil` (an
+        # unscoped write) → the NULL-workspace DEK.
+        workspace_id = Map.get(attrs, "workspace_id")
+
+        case Encryption.encrypt_marked(content, type, dataset, workspace_id) do
           {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
           {:error, _} = err -> err
         end
