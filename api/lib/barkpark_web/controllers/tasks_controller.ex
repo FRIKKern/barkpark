@@ -208,6 +208,7 @@ defmodule BarkparkWeb.TasksController do
           []
           |> Params.put_opt(:phase_id, params["phase_id"])
           |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+          |> Keyword.merge(Params.execution_policy_opts(params))
           |> Keyword.merge(scope_opts(conn))
 
         case Tasks.claim(worker_id, opts) do
@@ -224,6 +225,9 @@ defmodule BarkparkWeb.TasksController do
               conn,
               with_rail_extras(%{ok: true, doc: Params.render_doc(doc)}, doc, nil, conn, params)
             )
+
+          {:error, {:invalid_execution_policy, errors}} ->
+            bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
 
           {:error, reason} ->
             conn
@@ -306,6 +310,7 @@ defmodule BarkparkWeb.TasksController do
         opts =
           [resources: params["resources"] || []]
           |> Params.put_opt(:caller_token_id, caller_token_id(conn))
+          |> Keyword.merge(Params.execution_policy_opts(params))
           |> Keyword.merge(scope_opts(conn))
 
         # Snapshot the rail BEFORE the claim so rail_changed compares
@@ -340,6 +345,9 @@ defmodule BarkparkWeb.TasksController do
             conn
             |> put_status(:conflict)
             |> json(%{ok: false, reason: "resource_conflict", conflicts: conflicts})
+
+          {:error, {:invalid_execution_policy, errors}} ->
+            bad_request(conn, "invalid execution_policy_override: #{inspect(errors)}")
 
           {:error, reason} ->
             conn
@@ -1072,6 +1080,7 @@ defmodule BarkparkWeb.TasksController do
 
     notices =
       []
+      |> add_execution_policy_notices(task)
       |> add_blocked_notice(task)
       |> add_rail_changed_notice(parent_id, compare_rev, rail_rev, params["observed_rail_rev"])
 
@@ -1123,6 +1132,13 @@ defmodule BarkparkWeb.TasksController do
       blockers ->
         notices ++
           [%{type: "blocked_while_claimed", task_id: task.doc_id, blockers: blockers}]
+    end
+  end
+
+  defp add_execution_policy_notices(notices, %Document{content: content}) do
+    case get_in(content || %{}, ["claim", "execution_policy", "notices"]) do
+      policy_notices when is_list(policy_notices) -> notices ++ policy_notices
+      _ -> notices
     end
   end
 

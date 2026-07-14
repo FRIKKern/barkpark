@@ -154,6 +154,7 @@ defmodule BarkparkWeb.TasksController.Params do
       priority: Map.get(content, "priority"),
       assignee: Map.get(content, "assignee"),
       parent_id: Map.get(content, "parent_id"),
+      execution_policy: Map.get(content, "execution_policy"),
       claim: Map.get(content, "claim"),
       # tt5: surface content.labels at the top level so a client's `.labels[]`
       # (e.g. `bp task show`'s label view + the `label=` list filter) works
@@ -252,6 +253,14 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def put_opt(opts, _key, nil), do: opts
   def put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # Public claim requests may supply only the highest-precedence explicit
+  # override. Session/user/provider defaults are trusted server-side Claim opts,
+  # not client-asserted provenance.
+  def execution_policy_opts(params) do
+    []
+    |> put_opt(:execution_policy_override, Map.get(params, "execution_policy_override"))
+  end
 
   def fetch_string(params, key) do
     case Map.get(params, key) do
