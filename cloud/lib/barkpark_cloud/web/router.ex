@@ -4593,13 +4593,24 @@ defmodule BarkparkCloud.Web.Router do
                Registry.get_barkpark(bp_id),
              true <- is_binary(name) and name != "",
              slug <- conn.body_params["slug"] || slugify(name),
+             # site-spawner W1: `kind` discriminates container (BYO-repo, the
+             # default) from static (content-bound Astro/Hugo/…). Framework
+             # defaults per kind so a static site with no explicit framework lands
+             # on astro rather than the container default nextjs (an illegal pair).
+             kind <- conn.body_params["kind"] || "container",
+             framework <- conn.body_params["framework"] || default_framework(kind),
              attrs <- %{
                name: name,
                slug: slug,
-               framework: conn.body_params["framework"] || "nextjs",
+               kind: kind,
+               framework: framework,
                domains: conn.body_params["domains"] || [],
                scale_mode: conn.body_params["scale_mode"] || "always_on"
              },
+             # The content binding (static sites) + the plaintext read token the
+             # build fetches with. create_site encrypts the token at rest; only
+             # present keys are folded in so a container site stays unchanged.
+             attrs <- put_site_content_binding(attrs, conn.body_params),
              # activity-audit-log: the create + a `site.created` audit event share
              # ONE transaction (the target_id is resolved from the created site).
              # target_fun supplies the id only knowable after the insert.
@@ -4610,7 +4621,12 @@ defmodule BarkparkCloud.Web.Router do
                    actor_user_id: conn.assigns.current_user.id,
                    action: "site.created",
                    target_type: "site",
-                   metadata: %{name: name, framework: attrs.framework, barkpark_id: bp.id}
+                   metadata: %{
+                     name: name,
+                     kind: attrs.kind,
+                     framework: attrs.framework,
+                     barkpark_id: bp.id
+                   }
                  },
                  fn -> Registry.create_site(bp, attrs) end,
                  fn s -> %{target_id: s.id} end
@@ -7855,11 +7871,19 @@ defmodule BarkparkCloud.Web.Router do
       team_id: s.team_id,
       name: s.name,
       slug: s.slug,
+      kind: s.kind,
       framework: s.framework,
       domains: s.domains,
       scale_mode: s.scale_mode,
       port: s.port,
       current_deployment_id: s.current_deployment_id,
+      # site-spawner W1: the content binding (which Barkpark dataset a static
+      # build reads). read_token_encrypted is NEVER serialized — the plaintext
+      # read token stays at rest, like env_encrypted.
+      bootstrap_workspace: s.bootstrap_workspace,
+      bootstrap_project: s.bootstrap_project,
+      bootstrap_dataset: s.bootstrap_dataset,
+      content_bound: not is_nil(s.read_token_encrypted),
       github_repo: s.github_repo,
       github_branch: s.github_branch,
       github_webhook_configured: not is_nil(s.github_webhook_secret_encrypted),
@@ -8208,6 +8232,32 @@ defmodule BarkparkCloud.Web.Router do
   # A report means the agent is online; honour an explicit offline, else online.
   defp normalize_agent("offline"), do: "offline"
   defp normalize_agent(_), do: "online"
+
+  # site-spawner W1: the default framework for a Site `kind` — a static site with
+  # no explicit framework lands on astro (the flagship), a container site on
+  # nextjs (the pre-W1 default). An unknown kind keeps nextjs; the changeset's
+  # kind-inclusion check is what rejects it.
+  defp default_framework("static"), do: "astro"
+  defp default_framework(_), do: "nextjs"
+
+  # site-spawner W1: fold the content binding into the create attrs — the
+  # bootstrap_* dataset triple (which Barkpark dataset the build reads) plus the
+  # plaintext read_token (create_site encrypts it at rest). Only present,
+  # non-blank keys are added, so a container site's attrs stay exactly as before.
+  defp put_site_content_binding(attrs, body) when is_map(body) do
+    [
+      {:bootstrap_workspace, "bootstrap_workspace"},
+      {:bootstrap_project, "bootstrap_project"},
+      {:bootstrap_dataset, "bootstrap_dataset"},
+      {:read_token, "read_token"}
+    ]
+    |> Enum.reduce(attrs, fn {key, param}, acc ->
+      case body[param] do
+        v when is_binary(v) and v != "" -> Map.put(acc, key, v)
+        _ -> acc
+      end
+    end)
+  end
 
   # name → slug: lowercase, non-alnum → hyphen, trim hyphens. Falls back to a
   # short random suffix so a name like "!!!" still yields a valid slug.

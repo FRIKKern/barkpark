@@ -27,7 +27,22 @@ defmodule BarkparkCloud.Registry.Site do
   @slug_format ~r/^[a-z0-9][a-z0-9-]*$/
   @domain_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
 
-  @frameworks ~w(nextjs nuxt sveltekit astro static)
+  # site-spawner W1 (charter D1): `kind` is THE discriminator between the two
+  # ways a Site is built and served.
+  #
+  #   * "container" — BYO-repo runtime: a Next.js/Nuxt/SvelteKit app runs as a
+  #     long-lived container next to Phoenix (the pre-W1 shape, the default).
+  #   * "static"    — content-bound static build: Astro/Hugo/plain HTML built once
+  #     from a Barkpark dataset and served as files. The flagship spawn path.
+  @kinds ~w(container static)
+
+  # Framework legality is kind-GATED (charter D2): a static site can't be a
+  # Next.js container app and vice-versa. `@frameworks` stays the union (the
+  # public `frameworks/0` surface + the migration/history), but the changeset
+  # only accepts the sublist that matches the row's `kind`.
+  @container_frameworks ~w(nextjs nuxt sveltekit)
+  @static_frameworks ~w(astro hugo static)
+  @frameworks @container_frameworks ++ @static_frameworks
   @scale_modes ~w(always_on zero)
 
   # owner/repo — the only shape GitHub uses for repos, e.g. "FRIKKern/barkpark".
@@ -37,12 +52,26 @@ defmodule BarkparkCloud.Registry.Site do
   schema "sites" do
     field :name, :string
     field :slug, :string
+    field :kind, :string, default: "container"
     field :framework, :string, default: "nextjs"
     field :domains, {:array, :string}, default: []
     field :env_encrypted, :binary
     field :scale_mode, :string, default: "always_on"
     field :port, :integer
     field :current_deployment_id, :binary_id
+
+    # site-spawner W1 (charter D3): the content binding — WHICH Barkpark dataset a
+    # static build fetches from over the internal link. Mirrors the Barkpark row's
+    # own bootstrap_* triple. Null on container sites (they bring their own repo).
+    field :bootstrap_workspace, :string
+    field :bootstrap_project, :string
+    field :bootstrap_dataset, :string
+
+    # A public-read-scoped token the static build uses to read that dataset.
+    # `Vault.encrypt/1`'d exactly like `env_encrypted`; the plaintext is never
+    # persisted and never serialized. Set through `Registry.create_site/2`
+    # (accepts a plaintext `:read_token`, stores only ciphertext).
+    field :read_token_encrypted, :binary
 
     # P7 github-webhook: a GitHub push to `github_branch` of `github_repo`
     # triggers /v1/webhooks/github/:site_id, which verifies the HMAC with the
@@ -68,8 +97,18 @@ defmodule BarkparkCloud.Registry.Site do
   @type t :: %__MODULE__{}
 
   def frameworks, do: @frameworks
+  def kinds, do: @kinds
   def scale_modes, do: @scale_modes
   def domain_format, do: @domain_format
+
+  @doc """
+  The frameworks legal for a given `kind` (charter D2). An unknown/nil kind
+  falls back to the full union so a bad kind fails on the `kind` inclusion check
+  rather than silently emptying the framework allow-list.
+  """
+  def frameworks_for_kind("static"), do: @static_frameworks
+  def frameworks_for_kind("container"), do: @container_frameworks
+  def frameworks_for_kind(_), do: @frameworks
 
   @doc """
   Changeset for creating / updating a Site. `name`, `slug`, `barkpark_id`, and
@@ -82,12 +121,17 @@ defmodule BarkparkCloud.Registry.Site do
     |> cast(attrs, [
       :name,
       :slug,
+      :kind,
       :framework,
       :domains,
       :env_encrypted,
       :scale_mode,
       :port,
       :current_deployment_id,
+      :bootstrap_workspace,
+      :bootstrap_project,
+      :bootstrap_dataset,
+      :read_token_encrypted,
       :github_repo,
       :github_branch,
       :github_webhook_secret_encrypted,
@@ -95,13 +139,14 @@ defmodule BarkparkCloud.Registry.Site do
       :barkpark_id,
       :team_id
     ])
-    |> validate_required([:name, :slug, :barkpark_id, :team_id])
+    |> validate_required([:name, :slug, :kind, :barkpark_id, :team_id])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_format(:slug, @slug_format,
       message: "must be lowercase alphanumeric with hyphens"
     )
-    |> validate_inclusion(:framework, @frameworks)
+    |> validate_inclusion(:kind, @kinds)
+    |> validate_framework_for_kind()
     |> validate_inclusion(:scale_mode, @scale_modes)
     |> validate_github_repo()
     |> validate_length(:github_branch, max: 255)
@@ -113,6 +158,34 @@ defmodule BarkparkCloud.Registry.Site do
       name: :sites_team_slug_unique_idx,
       message: "a site with this slug already exists in this team"
     )
+  end
+
+  # Kind-gated framework legality (charter D2). A static site accepts only
+  # {astro,hugo,static}; a container site only {nextjs,nuxt,sveltekit}. Runs off
+  # the RESOLVED values (`get_field`, so the schema defaults count) — a static
+  # site left on the default framework "nextjs" is correctly rejected rather than
+  # silently allowed. Skipped when `kind` itself is invalid (that error already
+  # fires) so the caller sees the real cause.
+  defp validate_framework_for_kind(changeset) do
+    kind = get_field(changeset, :kind)
+    framework = get_field(changeset, :framework)
+
+    cond do
+      kind not in @kinds ->
+        changeset
+
+      framework in frameworks_for_kind(kind) ->
+        changeset
+
+      true ->
+        add_error(
+          changeset,
+          :framework,
+          "is not valid for a #{kind} site",
+          validation: :inclusion,
+          enum: frameworks_for_kind(kind)
+        )
+    end
   end
 
   defp validate_github_repo(changeset) do
