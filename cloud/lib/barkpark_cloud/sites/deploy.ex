@@ -1,0 +1,868 @@
+defmodule BarkparkCloud.Sites.Deploy do
+  @moduledoc """
+  site-spawner D22/D30 — the control plane's STATIC deploy spine: mint a build,
+  drive the box through `deploy/site-deploy.sh`'s six stages, narrate every
+  transition onto the Deployment row, and flip the site live (or fail it honestly)
+  at the end.
+
+      PLAN → BUILD → STAGE → HEALTH → SWITCH → RETIRE
+
+  ## Why the stages ride ALONGSIDE `status` (charter D3)
+
+  The `Deployment.status` enum is deliberately NOT widened to six. Widening it
+  would force migrating `@transitions`, every fenced CAS writer, and the stale
+  reaper — high blast radius for cosmetic granularity. So the coarse lifecycle
+  stays `queued → building → pushing → live | failed`, and the six VISIBLE stages
+  ride the nullable `stage` column (which stage is in flight), `detail` (the
+  latest-wins caption), and `console` (the append-only narration).
+
+  Each stage transition appends ONE console entry that carries its stage identity:
+
+      %{"line" => "HEALTH — probe returned 200 and the build markers matched",
+        "at" => "2026-07-14T…Z", "stage" => "HEALTH", "status" => "done",
+        "detail" => "…"}
+
+  `stages/1` folds those back into the ordered six-stage list the CLI streams. The
+  `console` array is already append-only, capped, and serialized — reusing it
+  costs no migration and keeps ONE source of truth for "what happened", instead of
+  a second stage table that could disagree with the narration.
+
+  ## Crash safety (why this is NOT just a Task)
+
+  The driver claims the row (`claim_worker` + `claimed_at` + `claim_epoch`) and
+  heartbeats `claimed_at` on every stage CAS, exactly like the off-box container
+  builder. That is deliberate: if the control plane restarts mid-build, the row is
+  still visibly claimed and STALE, so the existing `StaleDeploymentReaper` sweeps
+  it — requeue under budget, terminal failure over budget. An in-BEAM Task with no
+  row liveness would be a brand-new crash-safety class (an eternal spinner nothing
+  can see). `resume_orphaned/0` closes the loop: a requeued static row is picked
+  back up and re-driven, because nothing else in the fleet claims static rows.
+
+  ## Idempotency
+
+  `build_id = hash(code_rev + content_rev + config)` names `releases/<build_id>/`
+  on the box AND is the PLAN no-op key: the `(site_id, build_id)` partial unique
+  index turns a re-deploy of unchanged code+content+config into a 200 no-op
+  instead of a duplicate build. `content_rev` is read from the box (the only thing
+  that can see the dataset); when it cannot be read the rev degrades to a fresh
+  marker — an honest "I don't know the content revision, so rebuild" rather than a
+  false cache hit that would serve stale content forever.
+  """
+
+  require Logger
+
+  alias BarkparkCloud.Registry
+  alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
+  alias BarkparkCloud.Sites.BoxRelay
+
+  # The six visible stages, in order — the same list the CLI renders
+  # (cloudclient.SpawnSiteStages). This is the canonical ordering `stages/1`
+  # walks, so a lean box report still shows the full bar.
+  @stages ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
+
+  # The stage at which the deploy stops being reversible-for-free and starts
+  # touching what visitors see. Everything before SWITCH is `building`; SWITCH and
+  # RETIRE are `pushing` (the coarse status the container pipeline already uses
+  # for "on the box, going live"), and only then `live`.
+  @switch_stage "SWITCH"
+
+  @doc "The six visible deploy stages, in order."
+  @spec stages() :: [String.t()]
+  def stages, do: @stages
+
+  ## ---------------------------------------------------------------------------
+  ## Mint
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  Mint a static Deployment for `site` — the 201 the CLI gets back INSTANTLY. The
+  build itself runs on the box; this only computes the build identity and records
+  the row so the deploy is visible (and reap-able) the moment it exists.
+
+  Returns `{:ok, deployment}`, `{:duplicate, deployment}` when this exact
+  code+content+config is already built (the `(site_id, build_id)` unique index —
+  the PLAN no-op's DB backstop), or `{:error, changeset}`.
+  """
+  @spec enqueue(Site.t(), Barkpark.t()) ::
+          {:ok, Deployment.t()} | {:duplicate, Deployment.t()} | {:error, Ecto.Changeset.t()}
+  def enqueue(%Site{} = site, %Barkpark{} = bp) do
+    content_rev = content_rev(site, bp)
+    build_id = build_id(site, bp, content_rev)
+
+    case Registry.create_deployment(site, %{build_id: build_id, content_rev: content_rev}) do
+      {:ok, deployment} ->
+        {:ok, deployment}
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        # A repeat build_id: this exact build already exists. Recover it as a
+        # no-op rather than surfacing a constraint error — a re-deploy of
+        # unchanged content IS a no-op, and the script agrees (PLAN exits 0 when
+        # build_id is already live).
+        case build_id_conflict?(cs) && Registry.find_deployment_by_build_id(site.id, build_id) do
+          %Deployment{} = existing -> {:duplicate, existing}
+          _ -> {:error, cs}
+        end
+    end
+  end
+
+  @doc """
+  `build_id = hash(code_rev + content_rev + config)` (charter D2), truncated to 16
+  lowercase hex chars — a valid `releases/<build_id>/` dir name under the script's
+  `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$` guard.
+
+  `code_rev` is the box's own code revision (the adapter template ships with the
+  instance, so the instance's commit IS the build's code identity); `config` is
+  everything else that changes the output: framework, kind, the base path the site
+  is served at, and the content binding.
+  """
+  @spec build_id(Site.t(), Barkpark.t(), String.t()) :: String.t()
+  def build_id(%Site{} = site, %Barkpark{} = bp, content_rev) when is_binary(content_rev) do
+    config =
+      Jason.encode!(%{
+        framework: site.framework,
+        kind: site.kind,
+        base: base_path(site),
+        workspace: site.bootstrap_workspace,
+        project: site.bootstrap_project,
+        dataset: site.bootstrap_dataset
+      })
+
+    :sha256
+    |> :crypto.hash(Enum.join([code_rev(bp), content_rev, config], "|"))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
+  end
+
+  # The box's code revision. `git_commit` is the truth when the instance reports
+  # it; `version` is the fallback; "unknown" only when the box has reported
+  # neither (a fresh instance) — in which case content_rev still varies the hash,
+  # so a build is never wrongly deduped.
+  defp code_rev(%Barkpark{git_commit: c}) when is_binary(c) and c != "", do: c
+  defp code_rev(%Barkpark{version: v}) when is_binary(v) and v != "", do: v
+  defp code_rev(_bp), do: "unknown"
+
+  # The content revision baked into the build (and into the `bp-content-rev`
+  # marker HEALTH asserts). Only the box can see the dataset, so we ask it — over
+  # the SCOPED analytics read, with the site's own public-read token.
+  #
+  # FAIL-OPEN, DELIBERATELY: an unreadable revision degrades to a fresh random
+  # marker, which makes the build_id unique and forces a real rebuild. The
+  # opposite (a stable placeholder) would collide with the previous build_id and
+  # make PLAN a no-op — silently serving stale content forever, the worst possible
+  # failure for a content-bound site. Distrust vacuous green.
+  defp content_rev(%Site{} = site, %Barkpark{} = bp) do
+    with ws when is_binary(ws) <- site.bootstrap_workspace,
+         proj when is_binary(proj) <- site.bootstrap_project,
+         ds when is_binary(ds) <- site.bootstrap_dataset,
+         path <-
+           "/w/#{URI.encode(ws)}/p/#{URI.encode(proj)}/v1/data/analytics/#{URI.encode(ds)}",
+         {:ok, status, body} when status in 200..299 <- Registry.relay_admin(bp, :get, path, nil) do
+      :sha256
+      |> :crypto.hash(Jason.encode!(body))
+      |> Base.encode16(case: :lower)
+      |> binary_part(0, 12)
+    else
+      _ -> "u" <> (:crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower))
+    end
+  end
+
+  defp build_id_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:build_id, {_msg, opts}} -> opts[:constraint] == :unique
+      _ -> false
+    end)
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## Drive
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  Kick the driver for a minted deployment. Asynchronous by contract — the caller
+  (the deploy route) has already answered 201, and the build takes tens of
+  seconds. The spawn itself is a config seam (`:site_deploy_starter`) so tests can
+  drive `run/1` synchronously and deterministically instead of racing a Task.
+  """
+  @spec start(Deployment.t()) :: :ok
+  def start(%Deployment{id: id}), do: starter().start(id)
+
+  @doc """
+  Drive ONE deployment end to end, synchronously: claim the row, start the run on
+  the box, poll it, CAS every stage transition onto the row, and settle it `live`
+  (with the site's live pointer flipped in the SAME transaction) or `failed` (with
+  the box's real reason — never an invented one).
+
+  Returns `{:ok, :live}`, `{:ok, :failed}`, or `{:error, reason}` when the row
+  could not even be claimed (already claimed / gone). Never raises: a crash here
+  would leave a claimed row, which the reaper sweeps — but an honest `failed` with
+  the reason is strictly better, so every outbound error is mapped to one.
+  """
+  @spec run(binary()) :: {:ok, :live | :failed} | {:error, term()}
+  def run(deployment_id) when is_binary(deployment_id) do
+    with %Deployment{} = deployment <- Registry.get_deployment(deployment_id),
+         %Site{} = site <- Registry.get_site(deployment.site_id),
+         %Barkpark{} = bp <- Registry.get_barkpark(site.barkpark_id),
+         {:ok, claimed} <- Registry.claim_deployment(deployment_id, worker_id()) do
+      drive(claimed, site, bp)
+    else
+      nil -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp drive(%Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp) do
+    ctx = %{
+      id: deployment.id,
+      worker: deployment.claim_worker,
+      epoch: deployment.claim_epoch,
+      site: site,
+      bp: bp
+    }
+
+    case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp)) do
+      {:ok, status, _body} when status in 200..299 ->
+        poll(ctx, deployment.build_id, poll_max())
+
+      {:ok, status, body} ->
+        fail(ctx, box_refusal(status, body))
+
+      {:error, reason} ->
+        fail(ctx, unreachable(bp, reason))
+    end
+  end
+
+  # The box's argv: WHAT to build, and the scrubbed BARKPARK_* env it is allowed
+  # to see (charter D7 — the box passes ONLY these into the build, so an ambient
+  # BARKPARK_TOKEN on the instance can never shadow the site's own read token).
+  # The read token is revealed here and never logged.
+  defp deploy_payload(%Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp) do
+    read_token =
+      case Registry.reveal_site_read_token(site) do
+        {:ok, t} when is_binary(t) -> t
+        _ -> nil
+      end
+
+    %{
+      mode: "deploy",
+      slug: site.slug,
+      build_id: deployment.build_id,
+      content_rev: deployment.content_rev,
+      framework: site.framework,
+      env: %{
+        BARKPARK_API_URL: scoped_api_url(site, bp),
+        BARKPARK_TOKEN: read_token,
+        BARKPARK_DATASET: site.bootstrap_dataset,
+        BARKPARK_WORKSPACE: site.bootstrap_workspace,
+        BARKPARK_PROJECT: site.bootstrap_project,
+        BARKPARK_SITE_BASE: base_path(site)
+      }
+    }
+  end
+
+  # The build fetches over the SCOPED route (charter D6): tenant-membership
+  # isolation is what pins the token to ONE workspace — the flat route would let a
+  # token's default workspace decide, which is not the same guarantee.
+  defp scoped_api_url(%Site{} = site, %Barkpark{url: url}) when is_binary(url) do
+    String.trim_trailing(url, "/") <>
+      "/w/#{URI.encode(site.bootstrap_workspace || "")}/p/#{URI.encode(site.bootstrap_project || "")}"
+  end
+
+  defp scoped_api_url(_site, _bp), do: nil
+
+  ## The poll loop: read the box, CAS what changed, repeat until terminal.
+
+  defp poll(ctx, _build_id, 0),
+    do:
+      fail(
+        ctx,
+        "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
+      )
+
+  defp poll(ctx, build_id, left) do
+    case BoxRelay.poll_deploy(ctx.bp, ctx.site.slug, build_id) do
+      {:ok, status, body} when status in 200..299 ->
+        report = normalize_report(body)
+        ctx = apply_stages(ctx, report.stages)
+
+        case report.state do
+          :succeeded -> settle_live(ctx, report)
+          :failed -> fail(ctx, report.failure_reason || stage_failure_copy(report))
+          :running -> sleep_then_poll(ctx, build_id, left)
+        end
+
+      # The box has not started reporting yet (a 404 on a build id it hasn't
+      # picked up) — keep waiting rather than inventing a failure.
+      {:ok, 404, _body} ->
+        sleep_then_poll(ctx, build_id, left)
+
+      {:ok, status, body} ->
+        fail(ctx, box_refusal(status, body))
+
+      {:error, reason} ->
+        fail(ctx, unreachable(ctx.bp, reason))
+    end
+  end
+
+  defp sleep_then_poll(ctx, build_id, left) do
+    Process.sleep(poll_ms())
+    poll(ctx, build_id, left - 1)
+  end
+
+  # CAS each NEW stage transition onto the row: `stage` (which stage is in
+  # flight), `detail` (latest-wins caption), and ONE console entry per stage
+  # carrying its identity. Already-recorded stages are skipped, so a poll that
+  # re-reports the whole stream is idempotent.
+  defp apply_stages(ctx, stages) do
+    Enum.reduce(stages, ctx, fn stage, acc ->
+      if recorded?(acc, stage.name, stage.status) do
+        acc
+      else
+        record_stage(acc, stage)
+      end
+    end)
+  end
+
+  defp recorded?(ctx, name, status) do
+    seen = Map.get(ctx, :seen, MapSet.new())
+    MapSet.member?(seen, {name, status})
+  end
+
+  defp record_stage(ctx, stage) do
+    deployment = Registry.get_deployment(ctx.id)
+    entry = console_entry(stage)
+
+    attrs = %{
+      stage: stage.name,
+      detail: stage.detail || stage_line(stage),
+      console: (deployment.console || []) ++ [entry],
+      status: status_for_stage(deployment.status, stage),
+      # Heartbeat: every stage CAS refreshes the lease so the reaper doesn't
+      # mistake a long-but-healthy BUILD for an abandoned claim.
+      claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond)
+    }
+
+    case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, attrs) do
+      {:ok, _updated} ->
+        Map.update(
+          ctx,
+          :seen,
+          MapSet.new([{stage.name, stage.status}]),
+          &MapSet.put(&1, {stage.name, stage.status})
+        )
+
+      {:error, reason} ->
+        # A stale epoch means our lease was swept and someone else owns the row —
+        # stop narrating over them. Telemetry is best-effort by design.
+        Logger.warning("site deploy stage CAS failed (#{inspect(reason)}) for #{ctx.id}")
+
+        Map.update(
+          ctx,
+          :seen,
+          MapSet.new([{stage.name, stage.status}]),
+          &MapSet.put(&1, {stage.name, stage.status})
+        )
+    end
+  end
+
+  # The coarse status a stage implies (charter D3). Everything up to HEALTH is
+  # still `building` — nothing a visitor can see has moved. SWITCH/RETIRE are
+  # `pushing`: the box is flipping the symlink. `live` is settled once, at the
+  # end, together with the site pointer.
+  defp status_for_stage(current, %{name: name}) do
+    cond do
+      current in ["pushing", "live", "failed", "cancelled"] -> current
+      name in [@switch_stage, "RETIRE"] -> "pushing"
+      true -> "building"
+    end
+  end
+
+  defp console_entry(stage) do
+    %{
+      "line" => stage_line(stage),
+      "at" => DateTime.to_iso8601(DateTime.utc_now()),
+      "stage" => stage.name,
+      "status" => stage.status,
+      "detail" => stage.detail
+    }
+  end
+
+  defp stage_line(%{name: name, status: status, detail: detail}) do
+    case detail do
+      d when is_binary(d) and d != "" -> "#{name} #{status} — #{d}"
+      _ -> "#{name} #{status}"
+    end
+  end
+
+  ## Terminal states.
+
+  # SWITCH has happened on the box: the release is serving. Flip the live pointer
+  # and the deployment together, in ONE transaction — no window where the
+  # deployment says `live` but the site still points at the previous build.
+  defp settle_live(ctx, report) do
+    attrs = %{
+      status: "live",
+      stage: List.last(@stages),
+      became_live_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
+      detail: "live at #{report.url || site_url(ctx.site, ctx.bp)}"
+    }
+
+    case Registry.transition_deployment_with_site_update(ctx.id, ctx.worker, ctx.epoch, attrs, %{
+           current_deployment_id: ctx.id
+         }) do
+      {:ok, _d} ->
+        BarkparkCloud.Events.broadcast(ctx.site.team_id, "deployments")
+        {:ok, :live}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp fail(ctx, reason) do
+    _ =
+      Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+        status: "failed",
+        failure_reason: reason,
+        detail: reason
+      })
+
+    BarkparkCloud.Events.broadcast(ctx.site.team_id, "deployments")
+    {:ok, :failed}
+  end
+
+  # A box that answered, but said no. Its own words travel — never a generic
+  # "deploy failed".
+  defp box_refusal(status, body) when is_map(body) do
+    detail = body["error"] || body["detail"] || body["reason"] || body["failure_reason"]
+
+    case detail do
+      d when is_binary(d) and d != "" -> "the instance refused the deploy (HTTP #{status}): #{d}"
+      _ -> "the instance refused the deploy (HTTP #{status})"
+    end
+  end
+
+  defp unreachable(%Barkpark{slug: slug}, :not_live),
+    do: "instance #{slug} has no URL yet — it is still provisioning"
+
+  defp unreachable(%Barkpark{slug: slug}, :no_admin_token),
+    do:
+      "instance #{slug} has no stored admin token — the control plane cannot drive a deploy on it"
+
+  defp unreachable(%Barkpark{slug: slug}, :decrypt_failed),
+    do: "instance #{slug}'s admin token could not be decrypted"
+
+  defp unreachable(%Barkpark{slug: slug}, _reason),
+    do:
+      "instance #{slug} is unreachable — the deploy could not be delivered; check instance health"
+
+  # The box reported `failed` but named no reason: name the stage that failed, so
+  # the user still learns WHERE it broke.
+  defp stage_failure_copy(%{stages: stages}) do
+    case Enum.find(stages, &(&1.status == "failed")) do
+      %{name: name, detail: d} when is_binary(d) and d != "" -> "#{name} failed — #{d}"
+      %{name: name} -> "#{name} failed on the box — see the deploy console"
+      _ -> "the deploy failed on the box — see the deploy console"
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## Rollback (charter D5) — a symlink repoint, BLOCKING on the real flip.
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  Roll `site` back to its previous release: `site-deploy.sh --rollback` on the box
+  — an atomic `current` symlink repoint, no rebuild.
+
+  BLOCKS until the box confirms the flip, then repoints `sites.current_deployment_id`
+  at the deployment that build belongs to. Returns
+  `{:ok, %{deployment_id, previous_deployment_id, url}}`, or `{:error, status,
+  reason}` when the box cannot roll back (no previous release, a deploy holding the
+  lock, an unreachable box). The route answers non-2xx on every `:error` — the CLI
+  gates success on the HTTP status ALONE, so a rollback that could not happen MUST
+  NOT answer 200.
+  """
+  @spec rollback(Site.t(), Barkpark.t()) ::
+          {:ok, map()} | {:error, non_neg_integer(), String.t()}
+  def rollback(%Site{} = site, %Barkpark{} = bp) do
+    was = site.current_deployment_id
+
+    case BoxRelay.rollback(bp, %{mode: "rollback", slug: site.slug}) do
+      {:ok, status, body} when status in 200..299 ->
+        target = body["build_id"] || body["target_build"] || body["current_build"]
+        finish_rollback(site, bp, was, target)
+
+      {:ok, 409, body} ->
+        {:error, 409,
+         rollback_refusal(body, "a deploy is running on the box — try again once it finishes")}
+
+      {:ok, status, body} when status in 400..599 ->
+        {:error, 422,
+         rollback_refusal(body, "the instance could not roll this site back (HTTP #{status})")}
+
+      {:ok, _status, body} ->
+        {:error, 422, rollback_refusal(body, "the instance could not roll this site back")}
+
+      {:error, reason} ->
+        {:error, 502, unreachable(bp, reason)}
+    end
+  end
+
+  # The box has flipped. Point the site at the deployment that owns the now-live
+  # build so `bp cloud site status` tells the truth immediately (no polling
+  # window where the site claims the build it just rolled AWAY from).
+  defp finish_rollback(site, bp, was, target) do
+    now_live =
+      case target do
+        b when is_binary(b) and b != "" -> Registry.find_deployment_by_build_id(site.id, b)
+        _ -> nil
+      end
+
+    _ =
+      if now_live && now_live.id != was do
+        Registry.set_site_current_deployment(site, now_live.id)
+      end
+
+    BarkparkCloud.Events.broadcast(site.team_id, "deployments")
+
+    {:ok,
+     %{
+       deployment_id: (now_live && now_live.id) || nil,
+       previous_deployment_id: was,
+       url: site_url(site, bp)
+     }}
+  end
+
+  defp rollback_refusal(body, fallback) when is_map(body) do
+    case body["error"] || body["detail"] || body["reason"] do
+      d when is_binary(d) and d != "" -> rollback_copy(d, fallback)
+      _ -> fallback
+    end
+  end
+
+  defp rollback_refusal(_body, fallback), do: fallback
+
+  # site-deploy.sh's typed rollback exits, in plain words.
+  defp rollback_copy("no_previous", _fallback),
+    do: "there is no previous build to roll back to — this site has only ever had one release"
+
+  defp rollback_copy("not_supported", _fallback),
+    do: "this site has no live release yet — there is nothing to roll back"
+
+  defp rollback_copy("lock_held", _fallback),
+    do: "a deploy is running on the box — try again once it finishes"
+
+  defp rollback_copy(other, _fallback), do: other
+
+  ## ---------------------------------------------------------------------------
+  ## Crash recovery
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  Re-drive static deployments the reaper requeued — the other half of crash
+  safety. The reaper can RECOVER an orphaned row (a control plane that restarted
+  mid-build leaves a stale `building` claim, which it sweeps back to `queued`), but
+  nothing in the fleet CLAIMS a static row: the off-box container builder is
+  kind-scoped away from them, so a requeued static row would sit `queued` forever —
+  the eternal spinner in a new costume.
+
+  A row is an orphan (not a fresh mint) when it has been claimed before
+  (`claim_epoch > 0`). Fresh rows are driven by the deploy route itself. Returns
+  the number of rows re-driven.
+  """
+  @spec resume_orphaned() :: non_neg_integer()
+  def resume_orphaned do
+    orphans = Registry.list_orphaned_static_deployments()
+    Enum.each(orphans, &start/1)
+    length(orphans)
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## Read model — the stage list the CLI streams
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  The ordered six-stage list for a deployment, folded back out of its console
+  narration. Every stage always appears (a lean payload still renders the full
+  bar); a stage nothing has been recorded for is `pending`.
+
+  Per-stage `status` is LITERALLY one of `done` | `failed` | `skipped` (plus
+  `running`/`pending` for the ones still ahead) — the CLI's live stream prints
+  NOTHING for any other word, so `ok`/`passed`/`complete` would silently blank the
+  progress bar.
+  """
+  @spec stages(Deployment.t()) :: [map()]
+  def stages(%Deployment{} = deployment) do
+    recorded =
+      (deployment.console || [])
+      |> Enum.filter(&is_map/1)
+      |> Enum.filter(&(&1["stage"] in @stages))
+      |> Enum.reduce(%{}, fn entry, acc ->
+        name = entry["stage"]
+
+        Map.update(
+          acc,
+          name,
+          %{
+            name: name,
+            status: normalize_status(entry["status"]),
+            started_at: entry["at"],
+            finished_at: finished_at(entry),
+            detail: entry["detail"]
+          },
+          fn prev ->
+            %{
+              prev
+              | status: normalize_status(entry["status"]),
+                finished_at: finished_at(entry) || prev.finished_at,
+                detail: entry["detail"] || prev.detail
+            }
+          end
+        )
+      end)
+
+    Enum.map(@stages, fn name ->
+      Map.get(recorded, name, %{
+        name: name,
+        status: pending_status(deployment, name),
+        started_at: nil,
+        finished_at: nil,
+        detail: nil
+      })
+    end)
+  end
+
+  # A terminal deployment never gains another stage: an un-run stage of a FAILED
+  # deploy is honestly `skipped` (the build died before it got there — and that is
+  # exactly why visitors never saw it), not "pending" forever.
+  defp pending_status(%Deployment{status: "failed"}, _name), do: "skipped"
+  defp pending_status(_deployment, _name), do: "pending"
+
+  defp finished_at(%{"status" => s, "at" => at}) when s in ["done", "failed", "skipped"], do: at
+  defp finished_at(_), do: nil
+
+  ## ---------------------------------------------------------------------------
+  ## The box report — tolerant normalization
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  Normalize whatever the box reported into `%{state, stages, url, failure_reason}`.
+
+  Tolerant BY DESIGN: it reads a structured `stages` array when the instance
+  supplies one, and otherwise parses the run's log lines — both the explicit
+  `BPSTAGE <NAME> <status> [detail]` marker and `site-deploy.sh`'s own
+  `[site-deploy hh:mm:ss] PLAN: …` narration. The instance-side surface is a
+  sibling slice; a shape disagreement must degrade to "fewer stages narrated", never
+  to a lost deploy.
+  """
+  @spec normalize_report(map()) :: %{
+          state: :running | :succeeded | :failed,
+          stages: [map()],
+          url: String.t() | nil,
+          failure_reason: String.t() | nil
+        }
+  def normalize_report(body) when is_map(body) do
+    stages =
+      cond do
+        is_list(body["stages"]) ->
+          Enum.map(body["stages"], &normalize_stage/1) |> Enum.filter(& &1)
+
+        is_list(body["console"]) ->
+          parse_lines(body["console"])
+
+        is_binary(body["log"]) ->
+          parse_lines(String.split(body["log"], "\n"))
+
+        true ->
+          []
+      end
+
+    %{
+      state: normalize_state(body["state"] || body["status"], stages),
+      stages: stages,
+      url: nonblank(body["url"]),
+      failure_reason: nonblank(body["failure_reason"] || body["error"])
+    }
+  end
+
+  def normalize_report(_), do: %{state: :running, stages: [], url: nil, failure_reason: nil}
+
+  defp normalize_stage(%{} = s) do
+    name = s["name"] || s["stage"]
+
+    if name in @stages do
+      %{
+        name: name,
+        status: normalize_status(s["status"]),
+        detail: nonblank(s["detail"])
+      }
+    end
+  end
+
+  defp normalize_stage(_), do: nil
+
+  # `BPSTAGE PLAN done — …` (the explicit marker) or `[site-deploy 09:12:03] BUILD
+  # failed for 'blog' …` (the script's own log). Both name a stage and a verdict.
+  defp parse_lines(lines) do
+    lines
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&parse_line/1)
+    |> Enum.filter(& &1)
+  end
+
+  defp parse_line(line) do
+    stripped = Regex.replace(~r/^\[site-deploy [^\]]*\]\s*/, line, "")
+
+    case Regex.run(
+           ~r/^(?:BPSTAGE\s+)?(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE)\b[:\s]*(.*)$/,
+           stripped
+         ) do
+      [_, name, rest] ->
+        %{name: name, status: line_status(rest), detail: nonblank(String.trim(rest))}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp line_status(rest) do
+    down = String.downcase(rest)
+
+    cond do
+      String.contains?(down, "fail") or String.contains?(down, "abort") -> "failed"
+      String.starts_with?(down, "skip") or String.contains?(down, "nothing to do") -> "skipped"
+      String.starts_with?(down, "running") or String.starts_with?(down, "start") -> "running"
+      true -> "done"
+    end
+  end
+
+  # The CLI prints a stage ONLY for these exact words. `ok` / `passed` / `complete`
+  # would blank the six-stage bar with no error anywhere — so they are mapped, not
+  # trusted.
+  defp normalize_status(s) when is_binary(s) do
+    case String.downcase(String.trim(s)) do
+      w
+      when w in ["done", "ok", "passed", "pass", "success", "succeeded", "complete", "completed"] ->
+        "done"
+
+      w when w in ["failed", "fail", "error", "errored"] ->
+        "failed"
+
+      w when w in ["skipped", "skip", "noop", "no-op"] ->
+        "skipped"
+
+      w when w in ["running", "in_progress", "started", "start"] ->
+        "running"
+
+      _ ->
+        "pending"
+    end
+  end
+
+  defp normalize_status(_), do: "pending"
+
+  defp normalize_state(state, stages) do
+    case state && String.downcase(to_string(state)) do
+      s when s in ["succeeded", "success", "done", "live", "ok", "complete", "completed"] ->
+        :succeeded
+
+      s when s in ["failed", "fail", "error"] ->
+        :failed
+
+      _ ->
+        # No explicit state: infer from the stages — a failed stage is terminal,
+        # a done RETIRE is a finished run, anything else is still going.
+        cond do
+          Enum.any?(stages, &(&1.status == "failed")) -> :failed
+          Enum.any?(stages, &(&1.name == "RETIRE" and &1.status == "done")) -> :succeeded
+          true -> :running
+        end
+    end
+  end
+
+  defp nonblank(v) when is_binary(v), do: if(String.trim(v) == "", do: nil, else: v)
+  defp nonblank(_), do: nil
+
+  ## ---------------------------------------------------------------------------
+  ## URL + config
+  ## ---------------------------------------------------------------------------
+
+  @doc """
+  The live URL of a spawned site: `https://<instance>/sites/<slug>/` (charter D4 —
+  a PATH under the instance's existing FQDN, because no `*.barkpark.cloud`
+  wildcard exists and no live box has ever run `on_demand_tls`). Nil while the
+  instance has no URL yet.
+  """
+  @spec site_url(Site.t(), Barkpark.t() | nil) :: String.t() | nil
+  def site_url(%Site{} = site, %Barkpark{url: url}) when is_binary(url) and url != "",
+    do: String.trim_trailing(url, "/") <> base_path(site)
+
+  def site_url(_site, _bp), do: nil
+
+  @doc "The path a spawned site is served at, with both slashes: `/sites/<slug>/`."
+  @spec base_path(Site.t()) :: String.t()
+  def base_path(%Site{slug: slug}), do: "/sites/#{slug}/"
+
+  ## Config seams.
+
+  defp starter,
+    do:
+      Application.get_env(
+        :barkpark_cloud,
+        :site_deploy_starter,
+        BarkparkCloud.Sites.Deploy.TaskStarter
+      )
+
+  defp poll_ms, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_ms, 2_000)
+  defp poll_max, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_max, 450)
+
+  defp worker_id, do: "site-deploy-#{System.unique_integer([:positive])}@#{node()}"
+end
+
+defmodule BarkparkCloud.Sites.Deploy.Starter do
+  @moduledoc """
+  How a minted deployment's driver gets kicked off. One tiny behaviour with two
+  implementations, because "spawn a Task" is exactly the kind of thing that makes a
+  test race: prod spawns supervised (`TaskStarter`), test drives `Deploy.run/1`
+  synchronously and asserts the settled row (`NoopStarter`).
+  """
+  @callback start(binary()) :: :ok
+end
+
+defmodule BarkparkCloud.Sites.Deploy.TaskStarter do
+  @moduledoc """
+  The production starter: a supervised Task under `BarkparkCloud.SiteDeploySupervisor`.
+
+  Crash-safety does NOT live here — it lives on the row (claim + epoch +
+  heartbeat), so a Task that dies with the BEAM is recovered by the
+  StaleDeploymentReaper + `Deploy.resume_orphaned/0`, not by this supervisor.
+  """
+  @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+  require Logger
+
+  @impl true
+  def start(deployment_id) do
+    Task.Supervisor.start_child(BarkparkCloud.SiteDeploySupervisor, fn ->
+      try do
+        BarkparkCloud.Sites.Deploy.run(deployment_id)
+      rescue
+        e ->
+          Logger.error("site deploy driver crashed for #{deployment_id}: #{Exception.message(e)}")
+      end
+    end)
+
+    :ok
+  end
+end
+
+defmodule BarkparkCloud.Sites.Deploy.NoopStarter do
+  @moduledoc """
+  The test starter: records nothing, spawns nothing. Route tests assert the 201 +
+  the minted row deterministically; the driver itself is proven by calling
+  `Deploy.run/1` directly against the in-memory fake box.
+  """
+  @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+  @impl true
+  def start(_deployment_id), do: :ok
+end

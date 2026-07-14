@@ -1,0 +1,343 @@
+defmodule BarkparkCloud.SitesDeployTest do
+  @moduledoc """
+  site-spawner D22/D30 — the STATIC deploy driver: mint a build, drive the box
+  through PLAN → BUILD → STAGE → HEALTH → SWITCH → RETIRE, narrate every stage
+  onto the row, and settle it live (or fail it honestly).
+
+  The box is `Sites.FakeBoxRelay` — an in-memory instance. Nothing here touches a
+  network, a shell, or npm, and yet every claim the product makes is exercised
+  against real Postgres rows:
+
+    * the six stages are CASed onto `stage` / `console` / `detail` as they happen,
+      and the deployment ends `live` with the site's live pointer flipped;
+    * a build that fails HEALTH NEVER switches — the site's live pointer does not
+      move, so visitors keep the previous build (the whole point of a health gate);
+    * the box is driven with the SCRUBBED env and the site's OWN read token;
+    * a rollback blocks on the real flip and repoints the site, while a box that
+      cannot roll back is reported as a failure, never as a success.
+  """
+  use BarkparkCloud.DataCase, async: true
+
+  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.Registry.{Deployment, Site, Vault}
+  alias BarkparkCloud.Sites.Deploy
+  alias BarkparkCloud.Sites.FakeBoxRelay
+
+  @instance_url "https://acme.barkpark.cloud"
+  @read_token "bpt_public_read_xyz"
+
+  ## Fixtures
+
+  defp team_fixture do
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+    team
+  end
+
+  # A LIVE instance: url + encrypted admin token (what the provision-succeed path
+  # writes). Without both, the control plane cannot drive anything on it.
+  defp live_barkpark(team) do
+    n = System.unique_integer([:positive])
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+
+    bp
+    |> Ecto.Changeset.change(
+      url: @instance_url,
+      git_commit: "abc123",
+      admin_token_encrypted: Vault.encrypt("instance-admin-token")
+    )
+    |> Repo.update!()
+  end
+
+  defp static_site(bp, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    {:ok, site} =
+      Registry.create_site(
+        bp,
+        Enum.into(attrs, %{
+          name: "Blog #{n}",
+          slug: "blog-#{n}",
+          kind: "static",
+          framework: "astro",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "blog",
+          bootstrap_dataset: "production",
+          read_token: @read_token
+        })
+      )
+
+    site
+  end
+
+  defp setup_site do
+    bp = team_fixture() |> live_barkpark()
+    {bp, static_site(bp)}
+  end
+
+  defp all_stages, do: Deploy.stages()
+
+  ## ---------------------------------------------------------------------------
+
+  describe "enqueue/2" do
+    test "mints a build_id + content_rev, and a repeat build of the same code+content+config is a no-op" do
+      {bp, site} = setup_site()
+
+      assert {:ok, %Deployment{} = d} = Deploy.enqueue(site, bp)
+      assert d.status == "queued"
+      assert is_binary(d.build_id) and byte_size(d.build_id) == 16
+      assert is_binary(d.content_rev)
+
+      # The SAME code + content + config hashes to the same build_id, which the
+      # (site_id, build_id) unique index turns into a no-op — the DB backstop
+      # behind the script's PLAN "already live, nothing to do" exit.
+      assert {:duplicate, existing} = Deploy.enqueue(site, bp)
+      assert existing.id == d.id
+      assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    test "a different dataset binding is a different build" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+
+      other = static_site(bp, %{bootstrap_dataset: "staging"})
+      {:ok, d2} = Deploy.enqueue(other, bp)
+
+      refute d1.build_id == d2.build_id
+    end
+  end
+
+  describe "run/1 — the six-stage walk" do
+    test "walks PLAN..RETIRE, persists each stage, and settles live with the site pointer flipped" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # The box reports the stages as it finishes them — three polls, the way a
+      # real build lands: plan+build, then stage+health, then the switch.
+      FakeBoxRelay.program(
+        polls: [
+          FakeBoxRelay.walk(~w(PLAN BUILD)),
+          FakeBoxRelay.walk(~w(PLAN BUILD STAGE HEALTH)),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
+      assert final.stage == "RETIRE"
+      assert final.became_live_at
+      assert final.detail =~ "live at"
+
+      # Every one of the six stages was CASed onto the row as it happened — the
+      # console is the narration, and `stages/1` folds it back into the bar.
+      stages = Deploy.stages(final)
+      assert Enum.map(stages, & &1.name) == all_stages()
+
+      assert Enum.all?(stages, &(&1.status == "done")),
+             "expected every stage done, got #{inspect(Enum.map(stages, &{&1.name, &1.status}))}"
+
+      # The site now serves this build.
+      assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    test "the box is driven with the site's OWN read token over the SCOPED route, and the build env is exactly the allow-list" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      assert [{:start_deploy, payload} | _] = FakeBoxRelay.calls()
+      assert payload.slug == site.slug
+      assert payload.build_id == d.build_id
+      assert payload.mode == "deploy"
+
+      env = payload.env
+      # The token is the SITE's public-read token — not the instance admin token,
+      # and not an ambient BARKPARK_TOKEN (charter D6/D7).
+      assert env[:BARKPARK_TOKEN] == @read_token
+      # Scoped route: tenant-membership isolation (the flat route would let the
+      # token's default workspace decide which content it sees).
+      assert env[:BARKPARK_API_URL] == "#{@instance_url}/w/acme/p/blog"
+      assert env[:BARKPARK_DATASET] == "production"
+      assert env[:BARKPARK_SITE_BASE] == "/sites/#{site.slug}/"
+    end
+
+    test "a build that fails HEALTH never switches — the live pointer does not move" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          FakeBoxRelay.failed_at(
+            "HEALTH",
+            "health probe returned 500 — bp-build-id marker missing"
+          )
+        ]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "health probe returned 500"
+      assert final.stage == "HEALTH"
+
+      # THE promise of a health gate: SWITCH never ran, so visitors never saw this
+      # build. The site's live pointer is untouched.
+      stages = Deploy.stages(final)
+      by_name = Map.new(stages, &{&1.name, &1.status})
+      assert by_name["BUILD"] == "done"
+      assert by_name["HEALTH"] == "failed"
+      assert by_name["SWITCH"] == "skipped"
+      assert by_name["RETIRE"] == "skipped"
+
+      assert is_nil(Repo.get(Site, site.id).current_deployment_id)
+    end
+
+    test "an unreachable box fails the row with an honest reason, never a silent hang" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(start: {:error, :instance_error})
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "unreachable"
+      assert final.failure_reason =~ bp.slug
+    end
+
+    test "the box's own refusal travels intact (never a generic 'deploy failed')" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(start: {:ok, 409, %{"error" => "a deploy is already running"}})
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+      assert Repo.get(Deployment, d.id).failure_reason =~ "a deploy is already running"
+    end
+
+    test "the driver CLAIMS the row and heartbeats it, so the stale reaper can still recover an orphan" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+      assert d.claim_epoch == 0
+
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(all_stages())])
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      # The row carries a claim + a bumped epoch + a fresh lease — the same shape
+      # the off-box builder leaves behind, which is exactly what makes an orphaned
+      # in-flight row visible (and sweepable) to the StaleDeploymentReaper rather
+      # than a lost in-BEAM Task.
+      assert final.claim_epoch == 1
+      assert is_binary(final.claim_worker)
+      assert final.claimed_at
+    end
+
+    test "a poll stream that never finishes fails the row rather than spinning forever" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      # The box keeps saying "running" — test config caps the driver at 10 polls.
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(~w(PLAN BUILD))])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+      assert Repo.get(Deployment, d.id).failure_reason =~ "did not finish in time"
+    end
+  end
+
+  describe "rollback/2 — the sub-second symlink flip (charter D5)" do
+    test "blocks on the real flip, then repoints the site at the build that is now live" do
+      {bp, site} = setup_site()
+
+      # Two builds: the previous good one, and the one currently live.
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      # The box confirms it repointed `current` at the previous release.
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000001"}}
+      )
+
+      assert {:ok, result} = Deploy.rollback(site, bp)
+      assert result.deployment_id == prev.id
+      assert result.previous_deployment_id == live.id
+      assert result.url == "#{@instance_url}/sites/#{site.slug}/"
+
+      # The control plane's view agrees with the box IMMEDIATELY — no window where
+      # `bp cloud site status` names the build it just rolled away from.
+      assert Repo.get(Site, site.id).current_deployment_id == prev.id
+
+      # It invoked --rollback, NOT a promote (a new build).
+      assert [{:rollback, payload}] = FakeBoxRelay.calls()
+      assert payload.mode == "rollback"
+      assert payload.slug == site.slug
+    end
+
+    test "a box with no previous release is a FAILURE, not a cheerful no-op" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "no_previous"}})
+
+      assert {:error, status, detail} = Deploy.rollback(site, bp)
+      # Non-2xx is load-bearing: the CLI gates success on the HTTP status ALONE.
+      refute status in 200..299
+      assert detail =~ "no previous build"
+    end
+
+    test "a deploy holding the box's lock answers 409, in plain words" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(rollback: {:ok, 409, %{"error" => "lock_held"}})
+
+      assert {:error, 409, detail} = Deploy.rollback(site, bp)
+      assert detail =~ "deploy is running"
+    end
+
+    test "an unreachable box is a 502, never a 200" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(rollback: {:error, :instance_error})
+
+      assert {:error, 502, detail} = Deploy.rollback(site, bp)
+      assert detail =~ "unreachable"
+    end
+  end
+
+  describe "normalize_report/1 — tolerating whatever the box says" do
+    test "parses site-deploy.sh's own log lines when no structured stages are reported" do
+      report =
+        Deploy.normalize_report(%{
+          "console" => [
+            "[site-deploy 09:12:01] PLAN: deploy 'blog' build abc (live now: none)",
+            "[site-deploy 09:12:40] BUILD: npm ci && npm run build in /opt/.../src",
+            "[site-deploy 09:12:59] HEALTH failed for 'blog' — marker missing"
+          ]
+        })
+
+      assert report.state == :failed
+      by_name = Map.new(report.stages, &{&1.name, &1.status})
+      assert by_name["PLAN"] == "done"
+      assert by_name["HEALTH"] == "failed"
+    end
+
+    test "maps ok/passed/complete onto the ONLY three words the CLI renders" do
+      report =
+        Deploy.normalize_report(%{
+          "state" => "running",
+          "stages" => [
+            %{"name" => "PLAN", "status" => "ok"},
+            %{"name" => "BUILD", "status" => "passed"},
+            %{"name" => "STAGE", "status" => "complete"}
+          ]
+        })
+
+      # `ok` / `passed` / `complete` all print NOTHING in the CLI's stream — a
+      # blank six-stage bar with no error anywhere. They are mapped, not trusted.
+      assert Enum.map(report.stages, & &1.status) == ["done", "done", "done"]
+    end
+  end
+end

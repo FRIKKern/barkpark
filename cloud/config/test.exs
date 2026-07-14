@@ -120,3 +120,16 @@ config :barkpark_cloud, BarkparkCloud.OAuth,
       client_secret: "g_test_client_secret"
     }
   }
+
+# site-spawner D22: the box seam. A static site deploy runs ON the instance
+# (site-deploy.sh over the admin relay); tests drive an in-memory box instead, so
+# the six-stage walk — including a HEALTH failure that must never reach a visitor
+# — is proven with ZERO network and zero shell. Same seam shape as the
+# studio-link / Hetzner / Azure fakes above.
+config :barkpark_cloud,
+  site_box_relay: BarkparkCloud.Sites.FakeBoxRelay,
+  # The driver is invoked SYNCHRONOUSLY in tests (`Sites.Deploy.run/1`) rather
+  # than spawned, so a route test asserts a settled row instead of racing a Task.
+  site_deploy_starter: BarkparkCloud.Sites.Deploy.NoopStarter,
+  site_deploy_poll_ms: 0,
+  site_deploy_poll_max: 10

@@ -146,6 +146,7 @@ defmodule BarkparkCloud.Web.Router do
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Registry.InstanceApiCatalog
+  alias BarkparkCloud.Sites
   alias BarkparkCloud.Web.Auth
 
   # Recover the REAL client IP from X-Forwarded-For BEFORE anything reads
@@ -4573,6 +4574,13 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/sites {barkpark_id, name, framework?, domains?, scale_mode?} → 201
   # {site}. The site inherits its team_id from the Barkpark — the caller doesn't
   # (and can't) pick a different team.
+  #
+  # site-spawner D29: a STATIC site also carries its CONTENT BINDING — the
+  # workspace/project/dataset triple it builds from — and the control plane MINTS
+  # its public-read content token here, server-side, over the instance's scoped
+  # token route. Both halves matter: without the binding the site is a ghost the
+  # reaper later kills, and without the token the build has nothing to read with.
+  # A 201 from this route therefore MEANS content_bound: true.
   post "/v1/sites" do
     conn = Auth.require_user(conn, [])
 
@@ -4588,10 +4596,10 @@ defmodule BarkparkCloud.Web.Router do
         bp_id = conn.body_params["barkpark_id"]
         name = conn.body_params["name"]
 
-        with true <- is_binary(bp_id),
+        with true <- is_binary(bp_id) or {:error, :barkpark_required},
              %Registry.Barkpark{team_id: tid} = bp when tid == team.id <-
                Registry.get_barkpark(bp_id),
-             true <- is_binary(name) and name != "",
+             true <- (is_binary(name) and name != "") or {:error, :name_required},
              slug <- conn.body_params["slug"] || slugify(name),
              # site-spawner W1: `kind` discriminates container (BYO-repo, the
              # default) from static (content-bound Astro/Hugo/…). Framework
@@ -4611,6 +4619,12 @@ defmodule BarkparkCloud.Web.Router do
              # build fetches with. create_site encrypts the token at rest; only
              # present keys are folded in so a container site stays unchanged.
              attrs <- put_site_content_binding(attrs, conn.body_params),
+             # site-spawner D29: MINT the public-read content token on the box
+             # BEFORE the row exists, so a 201 can never be a ghost (a site with a
+             # binding but no token can't build, and nothing downstream would say
+             # so). An unreachable/refusing instance is a 502 with its own words —
+             # no site row is written.
+             {:ok, attrs} <- mint_site_read_token(bp, attrs, slug),
              # activity-audit-log: the create + a `site.created` audit event share
              # ONE transaction (the target_id is resolved from the created site).
              # target_fun supplies the id only knowable after the insert.
@@ -4635,7 +4649,7 @@ defmodule BarkparkCloud.Web.Router do
           # browser tabs) picks up the new site without a manual refresh.
           push_event(site.team_id, "sites")
           push_event(site.team_id, "audit")
-          json(conn, 201, %{site: site_json(site)})
+          json(conn, 201, %{site: site_json(site, bp)})
         else
           nil ->
             json(conn, 404, %{error: "barkpark_not_found"})
@@ -4645,8 +4659,20 @@ defmodule BarkparkCloud.Web.Router do
             # existence leak across team boundaries.
             json(conn, 404, %{error: "barkpark_not_found"})
 
-          false ->
+          # site-spawner D29: `barkpark_id` is validate_required AND NOT NULL, but
+          # omitting it used to answer `name_required` — an error that names the
+          # wrong field and sends the caller looking for a bug that isn't there.
+          {:error, :barkpark_required} ->
+            json(conn, 422, %{
+              error: "barkpark_required",
+              detail: "name the instance to host this site (barkpark_id)"
+            })
+
+          {:error, :name_required} ->
             json(conn, 422, %{error: "name_required"})
+
+          {:error, {:mint_failed, detail}} ->
+            json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
 
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -4685,8 +4711,12 @@ defmodule BarkparkCloud.Web.Router do
 
       true ->
         case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
-          %Registry.Site{} = site -> json(conn, 200, %{site: site_json(site)})
-          nil -> json(conn, 404, %{error: "not_found"})
+          %Registry.Site{} = site ->
+            bp = Registry.get_barkpark(site.barkpark_id)
+            json(conn, 200, %{site: site_json(site, bp) |> put_current_deployment(site, bp)})
+
+          nil ->
+            json(conn, 404, %{error: "not_found"})
         end
     end
   end
@@ -4694,87 +4724,96 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/sites/:id/deploy {git_ref?, artifact_url?} → 201 {deployment}.
   # Enqueues a Deployment with status:"queued"; the off-box builder (P2) polls
   # for queued rows and walks them through building → pushing → live.
+  #
+  # site-spawner D30: KIND-BRANCHED. A STATIC site builds from CONTENT, not from
+  # an artifact or a repo — `deploy_static_site/2` mints the build and drives the
+  # box through the six stages. The container path below is untouched.
   post "/v1/sites/:id/deploy" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
-      # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
-      # connected repo can never build regardless of fleet — the row would sit
-      # "queued" forever as an eternal dashboard spinner. Refuse it up front so
-      # no un-buildable row is ever minted.
-      if is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) do
-        json(conn, 422, %{
-          error: "no_build_source",
-          detail: "upload an artifact (bp deploy) or connect a GitHub repo"
-        })
-      else
-        attrs = %{
-          git_ref: conn.body_params["git_ref"],
-          artifact_url: conn.body_params["artifact_url"]
-        }
+      cond do
+        site.kind == "static" ->
+          deploy_static_site(conn, site)
 
-        # manual-deploy-no-dedup: a double-click or client retry must not mint a
-        # duplicate queued build. When a git_ref is present, coalesce onto any
-        # already-active (queued|building|pushing) PRODUCTION deploy of this
-        # exact ref and 200 the existing row — the same "active" definition the
-        # GitHub webhook path (handle_production_push) uses via
-        # find_active_deployment/2. An artifact-only deploy (no ref) can't be
-        # coalesced and always mints a fresh row.
-        existing =
-          case attrs.git_ref do
-            ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
-            _ -> nil
-          end
+        # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
+        # connected repo can never build regardless of fleet — the row would sit
+        # "queued" forever as an eternal dashboard spinner. Refuse it up front so
+        # no un-buildable row is ever minted.
+        is_nil(conn.body_params["artifact_url"]) and is_nil(site.github_repo) ->
+          json(conn, 422, %{
+            error: "no_build_source",
+            detail: "upload an artifact (bp deploy) or connect a GitHub repo"
+          })
 
-        case existing do
-          %{} = deployment ->
-            json(conn, 200, %{deployment: deployment_json(deployment)})
+        true ->
+          attrs = %{
+            git_ref: conn.body_params["git_ref"],
+            artifact_url: conn.body_params["artifact_url"]
+          }
 
-          nil ->
-            case Registry.create_deployment(site, attrs) do
-              {:ok, deployment} ->
-                # activity-audit-log: a deploy request ENQUEUES a queued row the
-                # off-box builder later walks — a relay, so the audit is a
-                # post-commit best-effort record_audit/1 (never rolls the queued
-                # row back). Only a FRESHLY minted row is audited; a coalesced /
-                # lost-race 200 re-uses an existing row and stamps nothing (no
-                # double-audit on a double-click). Detail carries git_ref + whether
-                # an artifact was supplied, never the artifact bytes.
-                _ =
-                  Accounts.record_audit(%{
-                    team_id: site.team_id,
-                    actor_user_id: conn.assigns.current_user.id,
-                    action: "site.deploy_requested",
-                    target_type: "deployment",
-                    target_id: deployment.id,
-                    metadata: %{
-                      site_id: site.id,
-                      git_ref: attrs.git_ref,
-                      has_artifact: not is_nil(attrs.artifact_url)
-                    }
-                  })
-
-                push_event(site.team_id, "deployments")
-                push_event(site.team_id, "audit")
-                json(conn, 201, %{deployment: deployment_json(deployment)})
-
-              {:error, %Ecto.Changeset{errors: errs} = cs} ->
-                # A lost race: a concurrent double-click won the active
-                # site+ref partial-unique index between our lookup and this
-                # INSERT. Recover its row as a 200 duplicate rather than
-                # surfacing the constraint error (mirrors the webhook path).
-                winner =
-                  if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
-                    Registry.find_active_deployment(site.id, attrs.git_ref)
-                  end
-
-                case winner do
-                  %{} = deployment ->
-                    json(conn, 200, %{deployment: deployment_json(deployment)})
-
-                  _ ->
-                    json(conn, 422, %{error: "invalid", details: errors(cs)})
-                end
+          # manual-deploy-no-dedup: a double-click or client retry must not mint a
+          # duplicate queued build. When a git_ref is present, coalesce onto any
+          # already-active (queued|building|pushing) PRODUCTION deploy of this
+          # exact ref and 200 the existing row — the same "active" definition the
+          # GitHub webhook path (handle_production_push) uses via
+          # find_active_deployment/2. An artifact-only deploy (no ref) can't be
+          # coalesced and always mints a fresh row.
+          existing =
+            case attrs.git_ref do
+              ref when is_binary(ref) -> Registry.find_active_deployment(site.id, ref)
+              _ -> nil
             end
-        end
+
+          case existing do
+            %{} = deployment ->
+              json(conn, 200, %{deployment: deployment_json(deployment)})
+
+            nil ->
+              case Registry.create_deployment(site, attrs) do
+                {:ok, deployment} ->
+                  # activity-audit-log: a deploy request ENQUEUES a queued row the
+                  # off-box builder later walks — a relay, so the audit is a
+                  # post-commit best-effort record_audit/1 (never rolls the queued
+                  # row back). Only a FRESHLY minted row is audited; a coalesced /
+                  # lost-race 200 re-uses an existing row and stamps nothing (no
+                  # double-audit on a double-click). Detail carries git_ref + whether
+                  # an artifact was supplied, never the artifact bytes.
+                  _ =
+                    Accounts.record_audit(%{
+                      team_id: site.team_id,
+                      actor_user_id: conn.assigns.current_user.id,
+                      action: "site.deploy_requested",
+                      target_type: "deployment",
+                      target_id: deployment.id,
+                      metadata: %{
+                        site_id: site.id,
+                        git_ref: attrs.git_ref,
+                        has_artifact: not is_nil(attrs.artifact_url)
+                      }
+                    })
+
+                  push_event(site.team_id, "deployments")
+                  push_event(site.team_id, "audit")
+                  json(conn, 201, %{deployment: deployment_json(deployment)})
+
+                {:error, %Ecto.Changeset{errors: errs} = cs} ->
+                  # A lost race: a concurrent double-click won the active
+                  # site+ref partial-unique index between our lookup and this
+                  # INSERT. Recover its row as a 200 duplicate rather than
+                  # surfacing the constraint error (mirrors the webhook path).
+                  winner =
+                    if is_binary(attrs.git_ref) and Keyword.has_key?(errs, :git_ref) do
+                      Registry.find_active_deployment(site.id, attrs.git_ref)
+                    end
+
+                  case winner do
+                    %{} = deployment ->
+                      json(conn, 200, %{deployment: deployment_json(deployment)})
+
+                    _ ->
+                      json(conn, 422, %{error: "invalid", details: errors(cs)})
+                  end
+              end
+          end
       end
     end)
   end
@@ -4790,6 +4829,100 @@ defmodule BarkparkCloud.Web.Router do
       # GET /v1/sites/:id/previews so the dashboard keeps the two apart.
       deployments = Registry.list_deployments(site, limit, environment: "production")
       json(conn, 200, %{deployments: Enum.map(deployments, &deployment_json/1)})
+    end)
+  end
+
+  # GET /v1/sites/:id/deployments/:dep_id → 200 {deployment} — the STAGE-AWARE
+  # poll `bp cloud site deploy` streams and `bp cloud site status` reads
+  # (site-spawner D30).
+  #
+  # The response shape is the CLI's contract, not a suggestion: it decodes
+  # `{"deployment": {…, "stages": [{"name","status",…}]}}` and prints a stage line
+  # ONLY for a per-stage status of `done` | `failed` | `skipped`. Every mismatch
+  # here is a SILENT failure — the six-stage bar simply renders empty and the user
+  # watches a spinner that never says anything. A wrong-site / nonexistent /
+  # non-UUID dep_id is the same 404 as a wrong-team site (existence-leak
+  # protection).
+  get "/v1/sites/:id/deployments/:dep_id" do
+    with_team_site(conn, {:ability, "read"}, fn site ->
+      case Registry.get_deployment(conn.path_params["dep_id"]) do
+        %Registry.Deployment{site_id: sid} = d when sid == site.id ->
+          bp = Registry.get_barkpark(site.barkpark_id)
+          json(conn, 200, %{deployment: site_deployment_json(d, site, bp)})
+
+        _ ->
+          json(conn, 404, %{error: "not_found"})
+      end
+    end)
+  end
+
+  # POST /v1/sites/:id/rollback → 200 {ok, status, deployment_id,
+  # previous_deployment_id, url} — the sub-second symlink flip back to the previous
+  # release (charter D5, site-spawner D30).
+  #
+  # THREE things about this route are load-bearing, and each one is a lie if it's
+  # wrong:
+  #
+  #   * The body is FLAT, never enveloped. Wrap it as {"deployment": …} and Go's
+  #     decoder silently leaves every field at its zero value — the CLI still
+  #     prints "✓ site rolled back", naming no build, and nothing anywhere errors.
+  #   * It BLOCKS on the real on-box flip. There is no client-side poll for
+  #     rollback; if this answered before the symlink moved, "sub-second rollback"
+  #     would be a vacuous green baked into the wire.
+  #   * A rollback that CANNOT happen answers non-2xx. The CLI gates success on the
+  #     HTTP status ALONE (it never reads `ok`), so a 200 with ok:false would print
+  #     a checkmark for a rollback that never occurred.
+  #
+  # It invokes site-deploy.sh --rollback on the box — never Deployment.promotion_attrs,
+  # which is promote-by-NEW-deployment (charter D5: seconds-to-minutes, and a
+  # rebuild of content that may since have changed). Container sites keep the
+  # promote route; rollback is the static verb.
+  post "/v1/sites/:id/rollback" do
+    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+      cond do
+        site.kind != "static" ->
+          json(conn, 422, %{
+            error: "not_rollbackable",
+            detail:
+              "instant rollback is a static-site verb — redeploy a container site's previous build with `bp sites promote`"
+          })
+
+        is_nil(Registry.get_barkpark(site.barkpark_id)) ->
+          json(conn, 404, %{error: "not_found"})
+
+        true ->
+          bp = Registry.get_barkpark(site.barkpark_id)
+
+          case Sites.Deploy.rollback(site, bp) do
+            {:ok, result} ->
+              _ =
+                Accounts.record_audit(%{
+                  team_id: site.team_id,
+                  actor_user_id: conn.assigns.current_user.id,
+                  action: "site.rolled_back",
+                  target_type: "site",
+                  target_id: site.id,
+                  metadata: %{
+                    deployment_id: result.deployment_id,
+                    previous_deployment_id: result.previous_deployment_id
+                  }
+                })
+
+              push_event(site.team_id, "deployments")
+              push_event(site.team_id, "audit")
+
+              json(conn, 200, %{
+                ok: true,
+                status: "rolled_back",
+                deployment_id: result.deployment_id,
+                previous_deployment_id: result.previous_deployment_id,
+                url: result.url
+              })
+
+            {:error, status, detail} ->
+              json(conn, status, %{ok: false, error: "rollback_failed", detail: detail})
+          end
+      end
     end)
   end
 
@@ -7861,7 +7994,13 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
-  defp site_json(s) do
+  defp site_json(s), do: site_json(s, nil)
+
+  # `bp` (optional) is the site's instance — when it is loaded, the spawned-site
+  # view can carry the live URL + instance handle the CLI renders
+  # (`bp cloud site open|status`). Absent (the list surface, which would N+1 to
+  # fetch it) those keys are simply nil: honest, never invented.
+  defp site_json(s, bp) do
     # env_encrypted is NEVER serialized — the env blob stays at rest.
     # github_webhook_secret_encrypted is NEVER serialized either; the plaintext
     # is shown ONCE in the POST /v1/sites/:id/github response body and that's it.
@@ -7883,6 +8022,15 @@ defmodule BarkparkCloud.Web.Router do
       bootstrap_workspace: s.bootstrap_workspace,
       bootstrap_project: s.bootstrap_project,
       bootstrap_dataset: s.bootstrap_dataset,
+      # site-spawner D29: the CLI's spelling of the same triple
+      # (cloudclient.SpawnSite reads `workspace`/`project`/`dataset`), plus the
+      # live PATH url and the instance handle it renders. One row, both
+      # vocabularies — the container view is unchanged.
+      workspace: s.bootstrap_workspace,
+      project: s.bootstrap_project,
+      dataset: s.bootstrap_dataset,
+      url: bp && Sites.Deploy.site_url(s, bp),
+      instance: bp && bp.slug,
       content_bound: not is_nil(s.read_token_encrypted),
       github_repo: s.github_repo,
       github_branch: s.github_branch,
@@ -7929,10 +8077,39 @@ defmodule BarkparkCloud.Web.Router do
       # dwb-19: the live sub-caption under the status pill (nil when none). The
       # site-detail deploy row renders it while the deploy is active.
       detail: d.detail,
+      # site-spawner D30: the static-build identity + which of the six stages is in
+      # flight. Null on every container row, so the container view is unchanged.
+      build_id: d.build_id,
+      content_rev: d.content_rev,
+      stage: d.stage,
       inserted_at: d.inserted_at,
       updated_at: d.updated_at
     }
   end
+
+  # site-spawner D30: the STAGE-AWARE deployment view — deployment_json plus the
+  # six-stage bar and the live URL, i.e. exactly what `bp cloud site deploy`
+  # streams and `bp cloud site status` renders.
+  #
+  # The per-stage `status` is LITERALLY `done` | `failed` | `skipped` (or
+  # `running`/`pending` for what's still ahead): the CLI's stream prints a stage
+  # ONLY for those three words and silently ignores anything else, so an `ok` or a
+  # `passed` here would blank the progress bar with no error anywhere — a lie that
+  # looks like a hang. `Sites.Deploy.stages/1` is the one place that vocabulary is
+  # enforced.
+  defp site_deployment_json(d, site, bp) do
+    d
+    |> deployment_json()
+    |> Map.put(:stages, Sites.Deploy.stages(d))
+    |> Map.put(:url, deployment_url(d, site, bp))
+  end
+
+  # A deployment's URL is the site's live URL — but ONLY once this deployment is
+  # the one actually serving. A queued/failed build has no URL: claiming one would
+  # send the user to a page showing somebody else's build (or the previous one),
+  # which is precisely the confusion a health-gated deploy exists to prevent.
+  defp deployment_url(%{status: "live"} = _d, site, bp), do: Sites.Deploy.site_url(site, bp)
+  defp deployment_url(_d, _site, _bp), do: nil
 
   # The click-through URL for a preview deployment (https on the preview host),
   # or nil for a production deployment.
@@ -8098,6 +8275,94 @@ defmodule BarkparkCloud.Web.Router do
   defp apply_site_fun(fun, _conn, site) when is_function(fun, 1), do: fun.(site)
   defp apply_site_fun(fun, conn, site) when is_function(fun, 2), do: fun.(conn, site)
 
+  # site-spawner D30: deploy a content-bound STATIC site — the verb the whole
+  # spawner exists for.
+  #
+  # It answers 201 IMMEDIATELY (the build takes tens of seconds; the CLI streams
+  # the six stages by polling GET /v1/sites/:id/deployments/:dep_id) and hands the
+  # row to the driver, which walks the box through PLAN → BUILD → STAGE → HEALTH →
+  # SWITCH → RETIRE and narrates every transition back onto it.
+  #
+  # The two refusals are the honest ones a static site can actually hit:
+  #
+  #   * no content binding — the site was created without a dataset, so there is
+  #     nothing to build FROM. (The reaper says the same thing about a row that
+  #     slips past this; both name the same cure.)
+  #   * the instance isn't live — its URL/admin token isn't there yet, so no
+  #     deploy can be driven on it.
+  #
+  # `no_build_source` — the container refusal about artifacts and GitHub repos —
+  # is exactly what a static site must NEVER hear: it is not what it builds from.
+  defp deploy_static_site(conn, site) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+
+    cond do
+      is_nil(site.bootstrap_dataset) ->
+        json(conn, 422, %{
+          error: "no_content_binding",
+          detail:
+            "this site isn't bound to any content — create it with `--dataset <workspace>/<project>/<dataset>`"
+        })
+
+      is_nil(bp) or is_nil(bp.url) or bp.url == "" ->
+        json(conn, 422, %{
+          error: "instance_not_live",
+          detail:
+            "the instance hosting this site has no URL yet — wait for it to finish provisioning"
+        })
+
+      true ->
+        case Sites.Deploy.enqueue(site, bp) do
+          {:ok, deployment} ->
+            _ =
+              Accounts.record_audit(%{
+                team_id: site.team_id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "site.deploy_requested",
+                target_type: "deployment",
+                target_id: deployment.id,
+                metadata: %{
+                  site_id: site.id,
+                  kind: "static",
+                  build_id: deployment.build_id
+                }
+              })
+
+            # Hand the row to the driver AFTER it is committed and audited, so the
+            # deploy the box is asked to run is one the control plane can already
+            # see, reap, and report on.
+            :ok = Sites.Deploy.start(deployment)
+
+            push_event(site.team_id, "deployments")
+            push_event(site.team_id, "audit")
+            json(conn, 201, %{deployment: site_deployment_json(deployment, site, bp)})
+
+          # Same code + same content + same config = the same build. The box's PLAN
+          # stage would no-op on it anyway (build_id is already live), so answer
+          # 200 with the row that already exists rather than minting a twin.
+          {:duplicate, deployment} ->
+            json(conn, 200, %{deployment: site_deployment_json(deployment, site, bp)})
+
+          {:error, %Ecto.Changeset{} = cs} ->
+            json(conn, 422, %{error: "invalid", details: errors(cs)})
+        end
+    end
+  end
+
+  # Embed the site's LIVE deployment (stage-aware) so `bp cloud site status` shows
+  # the six-stage bar without a second round trip. Absent (never deployed) it is
+  # simply not there — the CLI's honest empty state ("no deployment yet — kick the
+  # first build with…") depends on this key being missing, not on a fake row.
+  defp put_current_deployment(json, site, bp) do
+    case site.current_deployment_id && Registry.get_deployment(site.current_deployment_id) do
+      %Registry.Deployment{} = d ->
+        Map.put(json, :current_deployment, site_deployment_json(d, site, bp))
+
+      _ ->
+        json
+    end
+  end
+
   # Promote (rollback/redeploy) the `dep_id` deployment onto `site` — charter
   # decision 7. The source must belong to THIS (already team-scoped) site and be
   # a production deployment; a nil / non-UUID / cross-site id is the same 404 as
@@ -8115,6 +8380,19 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{
           error: "not_promotable",
           detail: "branch previews cannot be promoted — promote a production deployment"
+        })
+
+      # site-spawner D30: a STATIC site is never promoted. Promote is
+      # promote-by-NEW-deployment (a rebuild); a static site's previous build is
+      # already on disk under releases/<build_id>/, so going back to it is a
+      # symlink repoint — POST /v1/sites/:id/rollback, sub-second, no rebuild.
+      # Without this branch the guard below would 422 no_build_source on every
+      # static row (no artifact, no repo) — the SAME lie the deploy route told.
+      site.kind == "static" ->
+        json(conn, 422, %{
+          error: "not_promotable",
+          detail:
+            "a static site rolls back instantly (`bp cloud site rollback`) — promote is for container sites"
         })
 
       # Parity with POST /deploy's no_build_source guard: a source with neither a
@@ -8240,24 +8518,94 @@ defmodule BarkparkCloud.Web.Router do
   defp default_framework("static"), do: "astro"
   defp default_framework(_), do: "nextjs"
 
-  # site-spawner W1: fold the content binding into the create attrs — the
+  # site-spawner W1/D29: fold the content binding into the create attrs — the
   # bootstrap_* dataset triple (which Barkpark dataset the build reads) plus the
   # plaintext read_token (create_site encrypts it at rest). Only present,
   # non-blank keys are added, so a container site's attrs stay exactly as before.
+  #
+  # BOTH spellings are accepted, and that is the whole point: the CLI sends
+  # `workspace` / `project` / `dataset` (cloudclient.SpawnSiteCreate), while
+  # `Site.changeset` casts only `:bootstrap_*`. Ecto's `cast/3` DISCARDS unknown
+  # keys SILENTLY — so before this, `bp cloud site create --dataset …` returned a
+  # cheerful 201 for a site with no content binding at all, and the first thing
+  # that ever mentioned it was the reaper, 60 seconds later, killing the deploy.
+  # The explicit `bootstrap_*` spelling wins when both are sent.
   defp put_site_content_binding(attrs, body) when is_map(body) do
     [
-      {:bootstrap_workspace, "bootstrap_workspace"},
-      {:bootstrap_project, "bootstrap_project"},
-      {:bootstrap_dataset, "bootstrap_dataset"},
-      {:read_token, "read_token"}
+      {:bootstrap_workspace, ["bootstrap_workspace", "workspace"]},
+      {:bootstrap_project, ["bootstrap_project", "project"]},
+      {:bootstrap_dataset, ["bootstrap_dataset", "dataset"]},
+      {:read_token, ["read_token"]}
     ]
-    |> Enum.reduce(attrs, fn {key, param}, acc ->
-      case body[param] do
-        v when is_binary(v) and v != "" -> Map.put(acc, key, v)
-        _ -> acc
+    |> Enum.reduce(attrs, fn {key, params}, acc ->
+      case Enum.find_value(params, fn p ->
+             case body[p] do
+               v when is_binary(v) and v != "" -> v
+               _ -> nil
+             end
+           end) do
+        nil -> acc
+        v -> Map.put(acc, key, v)
       end
     end)
   end
+
+  # site-spawner D29: mint the site's PUBLIC-READ content token on the instance
+  # and fold the plaintext into the create attrs (`Registry.create_site/2`
+  # Vault-encrypts it; the plaintext never lands in the DB and is never
+  # serialized back).
+  #
+  # Only for a content-bound STATIC site: a container site brings its own repo and
+  # has nothing to read, and a caller who explicitly supplied a `read_token` keeps
+  # theirs (BYO-token stays possible). Everything else — a container site, a
+  # static site with an incomplete triple — passes straight through, and the
+  # changeset/reaper give the honest verdict for a half-bound row.
+  defp mint_site_read_token(bp, %{kind: "static"} = attrs, slug) do
+    ws = attrs[:bootstrap_workspace]
+    proj = attrs[:bootstrap_project]
+    ds = attrs[:bootstrap_dataset]
+
+    cond do
+      is_binary(attrs[:read_token]) ->
+        {:ok, attrs}
+
+      is_binary(ws) and is_binary(proj) and is_binary(ds) ->
+        case Registry.mint_public_read_token(bp, ws, proj, ds, "site-read-#{slug}") do
+          {:ok, token} -> {:ok, Map.put(attrs, :read_token, token)}
+          {:error, reason} -> {:error, {:mint_failed, mint_failure_copy(bp, reason)}}
+        end
+
+      true ->
+        {:ok, attrs}
+    end
+  end
+
+  defp mint_site_read_token(_bp, attrs, _slug), do: {:ok, attrs}
+
+  # The instance's own words, in plain language. A mint failure is almost always
+  # an instance-side fact (not live yet, no stored admin token, the token route is
+  # older than public-read), and naming WHICH box and WHAT it said is the
+  # difference between a fixable error and a shrug.
+  defp mint_failure_copy(bp, {:instance, status, body}) do
+    detail = body["error"] || body["detail"] || body["reason"]
+
+    base =
+      "#{bp.slug} refused to mint the site's read token (HTTP #{status})"
+
+    if is_binary(detail) and detail != "", do: "#{base}: #{detail}", else: base
+  end
+
+  defp mint_failure_copy(bp, :not_live),
+    do: "#{bp.slug} has no URL yet — wait for it to finish provisioning, then create the site"
+
+  defp mint_failure_copy(bp, :no_admin_token),
+    do: "#{bp.slug} has no stored admin token — the control plane cannot mint a read token on it"
+
+  defp mint_failure_copy(bp, :decrypt_failed),
+    do: "#{bp.slug}'s admin token could not be decrypted"
+
+  defp mint_failure_copy(bp, _reason),
+    do: "#{bp.slug} is unreachable — could not mint the site's read token"
 
   # name → slug: lowercase, non-alnum → hyphen, trim hyphens. Falls back to a
   # short random suffix so a name like "!!!" still yields a valid slug.

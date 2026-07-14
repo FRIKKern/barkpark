@@ -44,7 +44,15 @@ defmodule BarkparkCloud.Application do
         # in EVERY env — including test, where broadcasts are harmless no-ops —
         # and is ready before the web listener accepts the first /v1/events
         # connection.
-        BarkparkCloud.Events
+        BarkparkCloud.Events,
+        # site-spawner D22: the driver Tasks that walk a static site deploy through
+        # the box's six stages. Supervised so a crashed driver is contained (never
+        # takes the plane down) — but crash RECOVERY does not live here: it lives
+        # on the Deployment row (claim + epoch + heartbeat), which the
+        # StaleDeploymentReaper sweeps and `Sites.Deploy.resume_orphaned/0`
+        # re-drives. A supervisor that restarted the Task would resume a build the
+        # DB no longer believes is claimed.
+        {Task.Supervisor, name: BarkparkCloud.SiteDeploySupervisor}
       ] ++ web_children()
 
     # See https://hexdocs.pm/elixir/Supervisor.html
