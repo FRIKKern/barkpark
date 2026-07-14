@@ -9,10 +9,25 @@ A standalone Node/TypeScript service built on [Vercel's Chat SDK](https://chat-s
 API — the BEAM stays the engine; the bridge speaks the channels. Adding a channel
 (Slack, Discord, Teams, WhatsApp, iMessage) is a registry entry, not a core change.
 
-> **Status: W3-1 (scaffold) only.** This package currently contains the state
-> layer and the shared `ChatClient` contract. The HTTP/SSE client (W3-2), the turn
-> loop (W3-3), the connector registry (W3-4) and the Telegram smoke adapter (W3-5)
-> land on top of it. There is no runnable service entrypoint yet.
+> **Status: the P2 core is complete; the live Telegram round-trip is a HUMAN GATE
+> that has NOT been run.** Everything here is proven by unit tests against a real
+> ephemeral Postgres and a byte-exact `/v1/chat` mock. Nothing has yet talked to a
+> real BotFather bot or a running BEAM. See `docs/telegram-smoke.md` — it opens
+> with "Status: NOT PASSED", and that is the honest state.
+
+## The core loop
+
+    inbound event
+      -> connector.resolveTenant   which workspace? (fail closed)
+      -> map.resolveOrMint         which Session? (mint once, resume after)
+      -> runTurn                   send the turn, consume the SSE stream
+      -> thread.post(finalText)    reply EXACTLY once per turn
+
+`src/core/dispatch.ts` is that loop, and it **never names a channel**. Adding
+Slack/Discord/Teams/WhatsApp/iMessage in P3 is one `registry.register(...)` entry
+plus its `@chat-adapter/*` dependency — no core edit. A structural tripwire in
+`test/tenant.test.ts` fails the build if a provider name ever appears in the core's
+executable code.
 
 ## Why it is not in `js/`
 
@@ -81,8 +96,11 @@ The binding is a plain indexed row instead. A test enforces this (`D28 invariant
 ## Development
 
     npm install
-    npm run typecheck     # tsc --noEmit
-    npm test              # vitest run
+    npm run typecheck        # tsc --noEmit (src, test AND scripts)
+    npm test                 # vitest run
+    npm run format:check     # prettier
+    npm start                # the persistent bridge process
+    npm run smoke:telegram   # the human gate (prints what it needs, never fakes it)
 
 ### The tests need a real Postgres
 
@@ -108,8 +126,25 @@ on for concurrent first messages. A green from it would be a fabricated green.
 |---|---|
 | `DATABASE_URL` | Postgres for the bridge's `chat_bridge` schema. |
 | `BARKPARK_API_URL` | Base URL of the Barkpark API serving `/v1/chat`. |
+| `BARKPARK_CHAT_TOKEN` | An ApiToken with the `chat` permission **and** a `workspace_id`. A `chat` token without a workspace is `403` (D33). |
+| `BRIDGE_USER_NAME` | The agent's display name in a channel. Default `barkpark`. |
 
-Per-workspace `/v1/chat` credentials are **not** global env vars: each tenant's
-chat-permission token is resolved through `connector_installs` (D29/D33). Barkpark's
-`secrets` table is currently instance-global and is *not* a per-workspace credential
-store, so the bridge owns its own.
+## Known gaps — read before trusting the isolation story
+
+These are real, filed, and deliberately not papered over:
+
+- **One chat token serves every tenant.** `chatClientFor(workspaceId)` in
+  `src/index.ts` currently **ignores** its argument and hands back a client built
+  from the single `BARKPARK_CHAT_TOKEN`. The multi-tenant *seam* is right, but
+  today isolation of `/v1/chat` reads is only as strong as that one token — and a
+  `:global` one would see every workspace's sessions. Filed:
+  `connectors-per-workspace-chat-token`.
+- **`credential_ref` is plaintext.** The BotFather token is stored as-is in
+  `connector_installs`. Filed: `connectors-encrypt-install-credentials`.
+- **No self-serve install flow.** `upsertInstall()` is an operator/smoke write
+  path; a workspace cannot connect a bot for itself. That is the P3 connect UX.
+  Filed: `connectors-p3-install-write-credentials`.
+
+What *is* structurally enforced today: an inbound event never resolves to a tenant
+it does not belong to (fail-closed reads, no default-workspace fallback anywhere),
+and one workspace's adapter is only ever built from that workspace's own credential.

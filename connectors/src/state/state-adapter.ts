@@ -18,7 +18,10 @@
  * silently create them in `public`, next to chat_sessions. Don't.
  */
 
-import { createPostgresState, type PostgresStateAdapter } from "@chat-adapter/state-pg";
+import {
+  createPostgresState,
+  type PostgresStateAdapter,
+} from "@chat-adapter/state-pg";
 import type pg from "pg";
 
 /** Row-key namespace for the SDK's own state rows (distinct from the schema). */

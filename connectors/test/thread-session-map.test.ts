@@ -28,7 +28,10 @@ import {
   SchemaIsolationError,
 } from "../src/db/pool.js";
 import { createBridgeState } from "../src/state/state-adapter.js";
-import { ThreadSessionMap } from "../src/state/thread-session-map.js";
+import {
+  createPgThreadSessionStore,
+  createThreadSessionMap,
+} from "../src/state/thread-session-map.js";
 import { CHAT_BRIDGE_SCHEMA } from "../src/db/schema.js";
 import type {
   ChatClient,
@@ -39,8 +42,7 @@ import type {
 
 /** Admin connection used only to CREATE/DROP the throwaway test database. */
 const ADMIN_URL =
-  process.env.CONNECTORS_TEST_DATABASE_URL ??
-  "postgres://localhost:5432/postgres";
+  process.env.CONNECTORS_TEST_DATABASE_URL ?? "postgres://localhost:5432/postgres";
 const REQUIRE_DB = process.env.CONNECTORS_REQUIRE_DB === "1";
 
 const TEST_DB = `connectors_bridge_test_${process.pid}_${Date.now()}`;
@@ -120,211 +122,247 @@ if (!reachable && !REQUIRE_DB) {
   );
 }
 
-describe.skipIf(!reachable && !REQUIRE_DB)("bridge state layer (real Postgres)", () => {
-  let admin: pg.Client;
-  let pool: pg.Pool;
-  let testUrl: string;
+describe.skipIf(!reachable && !REQUIRE_DB)(
+  "bridge state layer (real Postgres)",
+  () => {
+    let admin: pg.Client;
+    let pool: pg.Pool;
+    let testUrl: string;
 
-  beforeAll(async () => {
-    if (!reachable && REQUIRE_DB) {
-      throw new Error(
-        `CONNECTORS_REQUIRE_DB=1 but no Postgres is reachable at ${ADMIN_URL}`,
+    beforeAll(async () => {
+      if (!reachable && REQUIRE_DB) {
+        throw new Error(
+          `CONNECTORS_REQUIRE_DB=1 but no Postgres is reachable at ${ADMIN_URL}`,
+        );
+      }
+      admin = new pg.Client({ connectionString: ADMIN_URL });
+      await admin.connect();
+      await admin.query(`CREATE DATABASE ${TEST_DB}`);
+      testUrl = urlForDatabase(ADMIN_URL, TEST_DB);
+
+      // The exact production wiring, against the throwaway database.
+      pool = createBridgePool({ connectionString: testUrl });
+      await ensureBridgeSchema(pool);
+    }, 30_000);
+
+    afterAll(async () => {
+      await pool?.end();
+      if (admin) {
+        await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)`);
+        await admin.end();
+      }
+    }, 30_000);
+
+    it("pins search_path on EVERY connection the pool opens, not just the first", async () => {
+      // Deliberately concurrent: node-postgres reuses an idle connection, so a
+      // single query would happily read back a leftover session `SET` from setup
+      // and prove nothing. Forcing several connections open at once means these
+      // are fresh backends whose search_path can only come from the startup
+      // options — which is what state-pg's unqualified DDL actually depends on.
+      const CONNECTIONS = 5;
+      const clients = await Promise.all(
+        Array.from({ length: CONNECTIONS }, () => pool.connect()),
       );
-    }
-    admin = new pg.Client({ connectionString: ADMIN_URL });
-    await admin.connect();
-    await admin.query(`CREATE DATABASE ${TEST_DB}`);
-    testUrl = urlForDatabase(ADMIN_URL, TEST_DB);
+      try {
+        const paths = await Promise.all(
+          clients.map(async (c) => {
+            const { rows } = await c.query<{ search_path: string }>(
+              "SHOW search_path",
+            );
+            return rows[0]?.search_path;
+          }),
+        );
+        expect(paths).toEqual(Array(CONNECTIONS).fill(CHAT_BRIDGE_SCHEMA));
+      } finally {
+        clients.forEach((c) => c.release());
+      }
+    });
 
-    // The exact production wiring, against the throwaway database.
-    pool = createBridgePool({ connectionString: testUrl });
-    await ensureBridgeSchema(pool);
-  }, 30_000);
-
-  afterAll(async () => {
-    await pool?.end();
-    if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS ${TEST_DB} WITH (FORCE)`);
-      await admin.end();
-    }
-  }, 30_000);
-
-  it("pins search_path on EVERY connection the pool opens, not just the first", async () => {
-    // Deliberately concurrent: node-postgres reuses an idle connection, so a
-    // single query would happily read back a leftover session `SET` from setup
-    // and prove nothing. Forcing several connections open at once means these
-    // are fresh backends whose search_path can only come from the startup
-    // options — which is what state-pg's unqualified DDL actually depends on.
-    const CONNECTIONS = 5;
-    const clients = await Promise.all(
-      Array.from({ length: CONNECTIONS }, () => pool.connect()),
-    );
-    try {
-      const paths = await Promise.all(
-        clients.map(async (c) => {
-          const { rows } = await c.query<{ search_path: string }>(
-            "SHOW search_path",
-          );
-          return rows[0]?.search_path;
-        }),
-      );
-      expect(paths).toEqual(Array(CONNECTIONS).fill(CHAT_BRIDGE_SCHEMA));
-    } finally {
-      clients.forEach((c) => c.release());
-    }
-  });
-
-  it("fails closed when handed a pool that is NOT pinned to chat_bridge", async () => {
-    // The pin is the only thing keeping state-pg's five unqualified tables out
-    // of Barkpark's `public` schema. If it is ever lost, the bridge must refuse
-    // to boot rather than quietly pollute Ecto's schema.
-    const unpinned = new pg.Pool({ connectionString: testUrl });
-    try {
-      await expect(ensureBridgeSchema(unpinned)).rejects.toThrow(
-        SchemaIsolationError,
-      );
-      // And it created nothing in public on the way out.
-      const { rows } = await unpinned.query(
-        `SELECT table_name FROM information_schema.tables
+    it("fails closed when handed a pool that is NOT pinned to chat_bridge", async () => {
+      // The pin is the only thing keeping state-pg's five unqualified tables out
+      // of Barkpark's `public` schema. If it is ever lost, the bridge must refuse
+      // to boot rather than quietly pollute Ecto's schema.
+      const unpinned = new pg.Pool({ connectionString: testUrl });
+      try {
+        await expect(ensureBridgeSchema(unpinned)).rejects.toThrow(
+          SchemaIsolationError,
+        );
+        // And it created nothing in public on the way out.
+        const { rows } = await unpinned.query(
+          `SELECT table_name FROM information_schema.tables
           WHERE table_schema = 'public'
             AND table_name IN ('thread_session_map', 'connector_installs')`,
-      );
-      expect(rows).toEqual([]);
-    } finally {
-      await unpinned.end();
-    }
-  });
+        );
+        expect(rows).toEqual([]);
+      } finally {
+        await unpinned.end();
+      }
+    });
 
-  it("creates thread_session_map and connector_installs in chat_bridge, not public", async () => {
-    const { rows } = await pool.query<{
-      table_schema: string;
-      table_name: string;
-    }>(
-      `SELECT table_schema, table_name
+    it("creates thread_session_map and connector_installs in chat_bridge, not public", async () => {
+      const { rows } = await pool.query<{
+        table_schema: string;
+        table_name: string;
+      }>(
+        `SELECT table_schema, table_name
          FROM information_schema.tables
         WHERE table_name IN ('thread_session_map', 'connector_installs')
         ORDER BY table_name`,
-    );
+      );
 
-    expect(rows).toEqual([
-      { table_schema: "chat_bridge", table_name: "connector_installs" },
-      { table_schema: "chat_bridge", table_name: "thread_session_map" },
-    ]);
-    // And nothing of ours leaked into public.
-    expect(rows.filter((r) => r.table_schema === "public")).toEqual([]);
-  });
+      expect(rows).toEqual([
+        { table_schema: "chat_bridge", table_name: "connector_installs" },
+        { table_schema: "chat_bridge", table_name: "thread_session_map" },
+      ]);
+      // And nothing of ours leaked into public.
+      expect(rows.filter((r) => r.table_schema === "public")).toEqual([]);
+    });
 
-  it("lands @chat-adapter/state-pg's five tables in chat_bridge, never public", async () => {
-    // The whole point of D28: state-pg issues UNQUALIFIED `CREATE TABLE IF NOT
-    // EXISTS` and exposes no schema option, so the pool's search_path is the
-    // only thing keeping its tables off Barkpark's Ecto-owned public schema.
-    const state = createBridgeState(pool);
-    await state.connect();
+    it("lands @chat-adapter/state-pg's five tables in chat_bridge, never public", async () => {
+      // The whole point of D28: state-pg issues UNQUALIFIED `CREATE TABLE IF NOT
+      // EXISTS` and exposes no schema option, so the pool's search_path is the
+      // only thing keeping its tables off Barkpark's Ecto-owned public schema.
+      const state = createBridgeState(pool);
+      await state.connect();
 
-    const { rows } = await pool.query<{
-      table_schema: string;
-      table_name: string;
-    }>(
-      `SELECT table_schema, table_name
+      const { rows } = await pool.query<{
+        table_schema: string;
+        table_name: string;
+      }>(
+        `SELECT table_schema, table_name
          FROM information_schema.tables
         WHERE table_name LIKE 'chat_state_%'
         ORDER BY table_name`,
-    );
-
-    expect(rows.map((r) => r.table_name)).toEqual([
-      "chat_state_cache",
-      "chat_state_lists",
-      "chat_state_locks",
-      "chat_state_queues",
-      "chat_state_subscriptions",
-    ]);
-    for (const row of rows) {
-      expect(row.table_schema).toBe(CHAT_BRIDGE_SCHEMA);
-    }
-
-    const leaked = await pool.query(
-      `SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'public' AND table_name LIKE 'chat_state_%'`,
-    );
-    expect(leaked.rows).toEqual([]);
-
-    await state.disconnect();
-  }, 30_000);
-
-  it("is idempotent: ensureBridgeSchema can run again on every boot", async () => {
-    await expect(ensureBridgeSchema(pool)).resolves.toBeUndefined();
-  });
-
-  describe("resolveOrMint", () => {
-    it("mints exactly ONE session on first message and resumes it thereafter", async () => {
-      const chat = new SpyChatClient();
-      const map = new ThreadSessionMap(pool, chat);
-
-      const first = await map.resolveOrMint("ws-alpha", "tg-chat-1");
-      expect(chat.createSessionCalls).toBe(1);
-
-      const second = await map.resolveOrMint("ws-alpha", "tg-chat-1");
-      const third = await map.resolveOrMint("ws-alpha", "tg-chat-1");
-
-      // Resume, not re-mint: /v1/chat would hand out a NEW uuid every call, so
-      // the map is what makes the conversation continuous.
-      expect(second).toBe(first);
-      expect(third).toBe(first);
-      expect(chat.createSessionCalls).toBe(1);
-
-      const { rows } = await pool.query(
-        "SELECT session_uuid FROM thread_session_map WHERE workspace_id = $1 AND thread_id = $2",
-        ["ws-alpha", "tg-chat-1"],
       );
-      expect(rows).toEqual([{ session_uuid: first }]);
-    });
 
-    it("gives distinct threads distinct sessions", async () => {
-      const chat = new SpyChatClient();
-      const map = new ThreadSessionMap(pool, chat);
-
-      const a = await map.resolveOrMint("ws-beta", "thread-a");
-      const b = await map.resolveOrMint("ws-beta", "thread-b");
-
-      expect(a).not.toBe(b);
-      expect(chat.createSessionCalls).toBe(2);
-    });
-
-    it("isolates tenants: the same raw thread id in two workspaces never shares a Session", async () => {
-      const chat = new SpyChatClient();
-      const map = new ThreadSessionMap(pool, chat);
-
-      // Telegram chat ids are only unique per bot — without the workspace in
-      // the key, two tenants could land in each other's conversation.
-      const one = await map.resolveOrMint("ws-one", "collide-42");
-      const two = await map.resolveOrMint("ws-two", "collide-42");
-
-      expect(one).not.toBe(two);
-      expect(await map.resolveOrMint("ws-one", "collide-42")).toBe(one);
-      expect(await map.resolveOrMint("ws-two", "collide-42")).toBe(two);
-      expect(chat.createSessionCalls).toBe(2);
-    });
-
-    it("survives a concurrent first message without splitting the thread", async () => {
-      const chat = new SpyChatClient();
-      const map = new ThreadSessionMap(pool, chat);
-
-      // Two inbound events for the same brand-new thread at once: exactly one
-      // binding must win, and both callers must see the winner.
-      const [x, y] = await Promise.all([
-        map.resolveOrMint("ws-race", "thread-race"),
-        map.resolveOrMint("ws-race", "thread-race"),
+      expect(rows.map((r) => r.table_name)).toEqual([
+        "chat_state_cache",
+        "chat_state_lists",
+        "chat_state_locks",
+        "chat_state_queues",
+        "chat_state_subscriptions",
       ]);
+      for (const row of rows) {
+        expect(row.table_schema).toBe(CHAT_BRIDGE_SCHEMA);
+      }
 
-      expect(x).toBe(y);
-      const { rows } = await pool.query(
-        "SELECT session_uuid FROM thread_session_map WHERE workspace_id = $1 AND thread_id = $2",
-        ["ws-race", "thread-race"],
+      const leaked = await pool.query(
+        `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name LIKE 'chat_state_%'`,
       );
-      expect(rows).toEqual([{ session_uuid: x }]);
+      expect(leaked.rows).toEqual([]);
+
+      await state.disconnect();
+    }, 30_000);
+
+    it("is idempotent: ensureBridgeSchema can run again on every boot", async () => {
+      await expect(ensureBridgeSchema(pool)).resolves.toBeUndefined();
     });
-  });
-});
+
+    describe("resolveOrMint", () => {
+      it("mints exactly ONE session on first message and resumes it thereafter", async () => {
+        const chat = new SpyChatClient();
+        const map = createThreadSessionMap(createPgThreadSessionStore(pool));
+        const mint = async () => (await chat.createSession()).id;
+
+        const first = await map.resolveOrMint("ws-alpha", "tg-chat-1", mint);
+        expect(chat.createSessionCalls).toBe(1);
+        expect(first.minted).toBe(true);
+
+        const second = await map.resolveOrMint("ws-alpha", "tg-chat-1", mint);
+        const third = await map.resolveOrMint("ws-alpha", "tg-chat-1", mint);
+
+        // Resume, not re-mint: /v1/chat would hand out a NEW uuid every call, so
+        // the map is what makes the conversation continuous.
+        expect(second.sessionUuid).toBe(first.sessionUuid);
+        expect(third.sessionUuid).toBe(first.sessionUuid);
+        expect(second.minted).toBe(false);
+        expect(third.minted).toBe(false);
+        expect(chat.createSessionCalls).toBe(1);
+
+        const { rows } = await pool.query(
+          "SELECT session_uuid FROM chat_bridge.thread_session_map WHERE workspace_id = $1 AND thread_id = $2",
+          ["ws-alpha", "tg-chat-1"],
+        );
+        expect(rows).toEqual([{ session_uuid: first.sessionUuid }]);
+      });
+
+      it("never calls mint on a resume — the SDK/API is not asked for a second Session", async () => {
+        const chat = new SpyChatClient();
+        const map = createThreadSessionMap(createPgThreadSessionStore(pool));
+        let mintCalls = 0;
+        const mint = async () => {
+          mintCalls += 1;
+          return (await chat.createSession()).id;
+        };
+
+        await map.resolveOrMint("ws-mintonce", "thread-1", mint);
+        await map.resolveOrMint("ws-mintonce", "thread-1", mint);
+        await map.resolveOrMint("ws-mintonce", "thread-1", mint);
+
+        // The callback is the ONLY way a Barkpark Session gets created. If the map
+        // ever invoked it on a hit, every message would start a fresh, amnesiac
+        // Session — the exact failure this table exists to prevent.
+        expect(mintCalls).toBe(1);
+      });
+
+      it("gives distinct threads distinct sessions", async () => {
+        const chat = new SpyChatClient();
+        const map = createThreadSessionMap(createPgThreadSessionStore(pool));
+        const mint = async () => (await chat.createSession()).id;
+
+        const a = await map.resolveOrMint("ws-beta", "thread-a", mint);
+        const b = await map.resolveOrMint("ws-beta", "thread-b", mint);
+
+        expect(a.sessionUuid).not.toBe(b.sessionUuid);
+        expect(chat.createSessionCalls).toBe(2);
+      });
+
+      it("isolates tenants: the same raw thread id in two workspaces never shares a Session", async () => {
+        const chat = new SpyChatClient();
+        const map = createThreadSessionMap(createPgThreadSessionStore(pool));
+        const mint = async () => (await chat.createSession()).id;
+
+        // Telegram chat ids are only unique per bot — without the workspace in
+        // the key, two tenants could land in each other's conversation.
+        const one = await map.resolveOrMint("ws-one", "collide-42", mint);
+        const two = await map.resolveOrMint("ws-two", "collide-42", mint);
+
+        expect(one.sessionUuid).not.toBe(two.sessionUuid);
+        expect(
+          (await map.resolveOrMint("ws-one", "collide-42", mint)).sessionUuid,
+        ).toBe(one.sessionUuid);
+        expect(
+          (await map.resolveOrMint("ws-two", "collide-42", mint)).sessionUuid,
+        ).toBe(two.sessionUuid);
+        expect(chat.createSessionCalls).toBe(2);
+      });
+
+      it("survives a concurrent first message without splitting the thread", async () => {
+        const chat = new SpyChatClient();
+        const map = createThreadSessionMap(createPgThreadSessionStore(pool));
+        const mint = async () => (await chat.createSession()).id;
+
+        // Two inbound events for the same brand-new thread at once: exactly one
+        // binding must win, and both callers must see the winner.
+        const [x, y] = await Promise.all([
+          map.resolveOrMint("ws-race", "thread-race", mint),
+          map.resolveOrMint("ws-race", "thread-race", mint),
+        ]);
+
+        expect(x.sessionUuid).toBe(y.sessionUuid);
+        // Exactly one of the two racers reports having minted the thread's Session.
+        expect([x.minted, y.minted].filter(Boolean)).toHaveLength(1);
+
+        const { rows } = await pool.query(
+          "SELECT session_uuid FROM chat_bridge.thread_session_map WHERE workspace_id = $1 AND thread_id = $2",
+          ["ws-race", "thread-race"],
+        );
+        expect(rows).toEqual([{ session_uuid: x.sessionUuid }]);
+      });
+    });
+  },
+);
 
 /**
  * Source-level invariant, provable with no database: the Session binding must

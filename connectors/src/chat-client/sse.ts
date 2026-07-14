@@ -181,9 +181,7 @@ export async function openEventStream(
         typeof err?.message === "string"
           ? err.message
           : `chat event stream failed (${res.status})`,
-      ...(typeof err?.request_id === "string"
-        ? { requestId: err.request_id }
-        : {}),
+      ...(typeof err?.request_id === "string" ? { requestId: err.request_id } : {}),
     });
   }
 
@@ -203,9 +201,7 @@ export async function openEventStream(
  * the handshake can be awaited independently of consumption — which is the whole
  * point of the eager `openEventStream`.
  */
-function frameIterable(
-  body: ReadableStream<Uint8Array>,
-): AsyncIterable<ChatEvent> {
+function frameIterable(body: ReadableStream<Uint8Array>): AsyncIterable<ChatEvent> {
   return {
     async *[Symbol.asyncIterator](): AsyncGenerator<ChatEvent, void, unknown> {
       const reader = body.getReader();

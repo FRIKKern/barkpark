@@ -1,82 +1,126 @@
 /**
- * The Connector contract (charter D30).
+ * The Connector contract (charter D29/D30).
  *
  * A Connector is a plain TypeScript declaration in a registry — NOT an Elixir
- * `Barkpark.Plugin` (that is a compile-time BEAM construct; this is a runtime TS map).
+ * `Barkpark.Plugin` (that is a compile-time BEAM construct; this is a runtime TS
+ * map). The Chat SDK already gives us "register an adapter, no core change" via
+ * `new Chat({ adapters })`; a Connector adds the three things the SDK does not
+ * model: which DIRECTION it runs in, how an inbound event resolves to a Barkpark
+ * WORKSPACE, and how its inbound TRANSPORT is started.
+ *
  * Adding a P3 channel (Slack / Discord / Teams / WhatsApp / iMessage) must be ONE
- * registry entry plus its `@chat-adapter/*` dependency, with ZERO edits to the core
- * router (`tenant/resolve.ts`) or the registry (`connector/registry.ts`). That
- * zero-core-change invariant is this slice's acceptance bar.
+ * registry entry plus its `@chat-adapter/*` dependency, with ZERO edits to the
+ * core router (`tenant/resolve.ts`), the registry, or the dispatch loop
+ * (`core/dispatch.ts`). That zero-core-change invariant IS this wave's acceptance
+ * bar, and `test/tenant.test.ts` enforces it with a structural tripwire.
  */
-import type { Adapter } from 'chat';
+import type { Adapter } from "chat";
 
-/** A Barkpark workspace UUID (`workspaces.id`). The tenant key for everything downstream. */
+/** A Barkpark workspace UUID. The tenant key for everything downstream. */
 export type WorkspaceId = string;
 
 /** Inbound (you talk to the agent) vs outbound (the agent acts) vs both. */
-export type ConnectorDirection = 'channel' | 'tool' | 'both';
+export type ConnectorDirection = "channel" | "tool" | "both";
 
 /** How a workspace proves it owns this install. */
-export type ConnectorAuth = 'oauth' | 'token' | 'signing-secret';
+export type ConnectorAuth = "oauth" | "token" | "signing-secret";
 
 /**
  * How an inbound event is mapped to a tenant (charter D29).
  *
  * - `credential-bound` — the inbound path IS the tenant binding. Telegram: each
- *   workspace brings its own bot, so the bot token / webhook path identifies the
- *   tenant BEFORE the payload is inspected. There is no team/org field in a
- *   Telegram Update, so the abstraction must never assume one is extractable.
+ *   workspace brings its own bot (BYO-bot), so the bot that received the message
+ *   identifies the tenant BEFORE the payload is inspected. A Telegram `Update`
+ *   carries no team/org field AT ALL, which is exactly why the abstraction must
+ *   never assume a payload-extractable tenant id.
  * - `payload-team-id` — the provider stamps a workspace/team id into the event
- *   envelope (Slack `team_id`). Extract it, then look it up in `connector_installs`.
+ *   envelope (Slack's `team_id`). Extract it, then look it up like any other
+ *   install key. Declared now; P3 Slack lands with zero core change.
  */
-export type TenantResolution = 'credential-bound' | 'payload-team-id';
+export type TenantResolution = "credential-bound" | "payload-team-id";
 
 /**
- * Credentials for one install, as loaded from the workspace's credential store.
- * Opaque to the core: only the owning connector's `adapterFactory` interprets them.
- * The core NEVER logs or forwards these.
- */
-export type ConnectorCredentials = Record<string, string>;
-
-/**
- * A raw inbound provider event as it reaches the bridge (webhook body or poll update).
+ * One workspace's install of one connector — a row of
+ * `chat_bridge.connector_installs` (D29).
  *
- * `installKey` is the credential/inbound-path binding the event arrived through — for
- * `credential-bound` connectors it is populated by the transport (which bot's webhook
- * path or polling loop produced this), and is the ONLY thing needed to find the tenant.
- * For `payload-team-id` connectors it is absent and the id is dug out of `payload`.
+ * This is what `adapterFactory` is handed, and it is the whole of per-workspace
+ * credential isolation (D1): a tenant's adapter is constructed from that tenant's
+ * credential and nothing else. The core never logs or forwards `credentialRef`.
  */
-export interface InboundEvent<TPayload = unknown> {
-  /** The connector id this event arrived on — matches `Connector.id` (e.g. 'telegram'). */
+export interface ConnectorInstall {
+  /** The connector id this install belongs to (e.g. "telegram"). */
   provider: string;
   /**
-   * The install binding this event arrived through (bot id, webhook path secret, …).
-   * Absent/null for `payload-team-id` connectors. Never guessed — a missing key is a
-   * fail-closed null tenant, never a fallback to "the only workspace".
+   * The provider-side identity of the install — a Telegram bot id, a Slack
+   * team_id. Non-secret by construction: it is a PRIMARY KEY column, so a raw
+   * secret must never be used here.
+   */
+  installKey: string;
+  /** The workspace that owns this install. */
+  workspaceId: WorkspaceId;
+  /**
+   * Reference to the provider secret (bot token, signing secret).
+   *
+   * KNOWN GAP: today this column holds the raw secret in plaintext. Encrypting it
+   * (or pointing it at a real per-workspace credential store) is filed as
+   * `connectors-encrypt-install-credentials` and blocked on D9's run-secrets
+   * workspace scoping. Named here so nobody mistakes the name for a promise.
+   */
+  credentialRef: string;
+}
+
+/**
+ * A raw inbound provider event as it reaches the bridge (webhook body or poll
+ * update), normalised to the two things the core loop needs (`threadId`, `text`)
+ * plus the two things tenant routing needs (`installKey`, `payload`).
+ */
+export interface InboundEvent<TPayload = unknown> {
+  /** The connector id this event arrived on — matches `Connector.id`. */
+  provider: string;
+  /** The SDK thread id, already namespaced by the adapter. The map's key. */
+  threadId: string;
+  /** The user's text for this turn. */
+  text: string;
+  /**
+   * The install binding this event arrived through, set by the TRANSPORT (which
+   * knows which credential/adapter received it). This is what makes
+   * `credential-bound` resolution possible for providers whose payload carries no
+   * tenant id. Absent for `payload-team-id` connectors — and a missing key is a
+   * fail-closed null tenant, NEVER a fallback to "the only workspace".
    */
   installKey?: string | null;
-  /** The provider's raw payload (a Telegram `Update`, a Slack event envelope, …). */
-  payload: TPayload;
+  /** The provider's raw payload (a Telegram `Update`, a Slack envelope, …). */
+  payload?: TPayload;
 }
 
 /**
  * The fail-closed installs lookup a resolver consults.
  *
- * Backed in production by `chat_bridge.connector_installs` over W3-1's `pg.Pool`
- * (see `tenant/installs.ts`); trivially faked in tests. Declared as an interface so
- * this slice never hard-imports a concrete DB module — the core stays disjoint from,
- * and testable without, the database.
+ * Backed in production by `chat_bridge.connector_installs` (see `tenant/installs.ts`);
+ * trivially faked in tests. Declared as an interface so the core never hard-imports
+ * a database module — it stays disjoint from, and testable without, Postgres.
  */
 export interface InstallsLookup {
   /**
-   * `(provider, installKey)` → `workspace_id`, or `null` when the install is unknown,
-   * absent, or unmapped. Fail-closed: a miss is ALWAYS null, never a cross-tenant
-   * fallback (mirrors `Content.Scope.scope_to_workspace/3` semantics).
+   * `(provider, installKey)` -> the full install, or `null` when unknown/absent.
+   * The core needs this (not just the workspace id) because `adapterFactory` must
+   * be handed THAT tenant's credential.
+   */
+  lookupInstall(
+    provider: string,
+    installKey: string | null | undefined,
+  ): Promise<ConnectorInstall | null>;
+  /**
+   * `(provider, installKey)` -> `workspace_id`, or `null` when the install is
+   * unknown, absent, or unmapped. Fail-closed: a miss is ALWAYS null, never a
+   * cross-tenant fallback (mirrors `Content.Scope.scope_to_workspace/3`).
    */
   resolveWorkspace(
     provider: string,
     installKey: string | null | undefined,
   ): Promise<WorkspaceId | null>;
+  /** Every install of a connector — the boot path mounts one Chat per install. */
+  listInstalls(provider: string): Promise<ConnectorInstall[]>;
 }
 
 /** Per-dispatch context handed to a connector's `resolveTenant`. */
@@ -87,28 +131,39 @@ export interface TenantContext {
 /**
  * A channel or tool connector (charter D30).
  *
- * Telegram registers as a first-class Connector, identical in shape to every future
- * channel — the P2 smoke adapter is an adapter swap, not a special case.
+ * Telegram registers as a first-class Connector, identical in shape to every
+ * future channel — the P2 smoke adapter is an adapter SWAP, not a special case.
  */
 export interface Connector<TPayload = unknown> {
-  /** Stable provider id. Matches `InboundEvent.provider` and the `provider` column. */
+  /** Stable provider id. Also the key in `new Chat({ adapters })`. */
   id: string;
   direction: ConnectorDirection;
   auth: ConnectorAuth;
-  /** Declares which routing strategy `resolveTenant` implements. Metadata for the catalog. */
+  /** Declares which routing strategy `resolveTenant` implements. */
   tenantResolution: TenantResolution;
   /**
-   * Build the Chat SDK adapter for one install's credentials. Called once per install;
-   * the resulting adapter is handed to `new Chat({ adapters })`.
+   * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
+   * Called once per install; the adapter is handed to `new Chat({ adapters })`.
    */
-  adapterFactory(creds: ConnectorCredentials): Adapter;
+  adapterFactory(install: ConnectorInstall): Adapter;
   /**
    * Map an inbound event to the workspace that owns it, or `null` to drop it.
-   * Implementations should compose the strategy helpers in `tenant/resolve.ts` rather
-   * than hand-rolling a lookup, so fail-closed semantics stay uniform.
+   * MUST fail closed: return null rather than guess a tenant. Implementations
+   * should compose the strategy helpers in `tenant/resolve.ts` rather than
+   * hand-rolling a lookup, so fail-closed semantics stay uniform.
    */
   resolveTenant(
     event: InboundEvent<TPayload>,
     ctx: TenantContext,
   ): Promise<WorkspaceId | null>;
+  /**
+   * Start the inbound transport for a mounted adapter — Telegram's getUpdates
+   * poll loop, and in P3 Discord's gateway socket. Webhook-driven connectors
+   * (Slack, Teams) leave it undefined: the transport IS the HTTP request.
+   *
+   * This is what keeps the core free of `if (provider === "telegram")`. The boot
+   * path calls `connector.listen?.(adapter)` and never learns the channel.
+   */
+  listen?(adapter: Adapter): Promise<void>;
+  stopListening?(adapter: Adapter): Promise<void>;
 }

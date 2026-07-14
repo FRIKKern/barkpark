@@ -98,11 +98,7 @@ export interface PermissionFrame {
 
 /** The fixed public exit contract — status + a closed reason enum. */
 export type ExitReason =
-  | "clean"
-  | "crashed"
-  | "idle_reaped"
-  | "failed_start"
-  | "unknown";
+  "clean" | "crashed" | "idle_reaped" | "failed_start" | "unknown";
 
 export interface ExitFrame {
   type: "exit";

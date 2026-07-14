@@ -10,7 +10,7 @@
  * "register an adapter, no core change"; this mirrors it one level up, at the
  * connector (adapter + auth + tenant-routing) granularity.
  */
-import type { Connector } from './types.js';
+import type { Connector } from "./types.js";
 
 export interface ConnectorRegistry {
   /**
@@ -25,6 +25,12 @@ export interface ConnectorRegistry {
   has(id: string): boolean;
   /** All registered connectors, in registration order. */
   list(): Connector[];
+  /**
+   * Only the inbound-capable connectors. The boot path mounts one Chat per
+   * install of each of these; a `tool`-only connector (P4: GitHub, Linear) has no
+   * inbound channel to listen on.
+   */
+  channels(): Connector[];
   /** Drop a single connector. Returns true when one was removed. */
   unregister(id: string): boolean;
   /** Drop every connector. Test-isolation helper — not used in production paths. */
@@ -43,12 +49,14 @@ export function createConnectorRegistry(): ConnectorRegistry {
     register(connector) {
       const id = connector.id;
       if (!id) {
-        throw new Error('connectorRegistry.register: connector.id must be a non-empty string');
+        throw new Error(
+          "connectorRegistry.register: connector.id must be a non-empty string",
+        );
       }
       if (connectors.has(id)) {
         throw new Error(
           `connectorRegistry.register: duplicate connector id "${id}" — ` +
-            'a shadowed connector would route inbound events through the wrong ' +
+            "a shadowed connector would route inbound events through the wrong " +
             "workspace's credentials. Unregister the existing one first.",
         );
       }
@@ -65,6 +73,13 @@ export function createConnectorRegistry(): ConnectorRegistry {
 
     list() {
       return [...connectors.values()];
+    },
+
+    channels() {
+      return [...connectors.values()].filter(
+        (connector) =>
+          connector.direction === "channel" || connector.direction === "both",
+      );
     },
 
     unregister(id) {

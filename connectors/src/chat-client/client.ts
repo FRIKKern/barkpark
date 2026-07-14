@@ -19,8 +19,8 @@ import {
   type CreateSessionInput,
   type OpenEventStreamOptions,
   type PostMessageResult,
-} from './types.js'
-import { openEventStream } from './sse.js'
+} from "./types.js";
+import { openEventStream } from "./sse.js";
 
 /**
  * Codes that are safe to retry on ANY method. Keyed off the canonical
@@ -28,7 +28,7 @@ import { openEventStream } from './sse.js'
  * as a REAL HTTP response, which proves the server refused the request before
  * doing any work — so replaying it cannot duplicate a side effect.
  */
-const RETRYABLE_CODES: ReadonlySet<string> = new Set(['chat_unavailable'])
+const RETRYABLE_CODES: ReadonlySet<string> = new Set(["chat_unavailable"]);
 
 /**
  * `network_error` is different: no response came back, so we CANNOT know whether
@@ -37,45 +37,48 @@ const RETRYABLE_CODES: ReadonlySet<string> = new Set(['chat_unavailable'])
  * /v1/chat/sessions/:id/messages). So a transport failure is only retried on
  * IDEMPOTENT methods; a POST surfaces it and lets the caller decide.
  */
-const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD'])
+const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 
 /** Status codes that must NEVER be retried regardless of code (auth is terminal). */
-const NEVER_RETRY_STATUS: ReadonlySet<number> = new Set([401, 403])
+const NEVER_RETRY_STATUS: ReadonlySet<number> = new Set([401, 403]);
 
 /** The single retry predicate — method-aware, code-keyed, auth-terminal. */
 function isRetryable(err: ChatClientError, method: string): boolean {
-  if (NEVER_RETRY_STATUS.has(err.status)) return false
-  if (err.code === 'network_error') return IDEMPOTENT_METHODS.has(method.toUpperCase())
-  return RETRYABLE_CODES.has(err.code)
+  if (NEVER_RETRY_STATUS.has(err.status)) return false;
+  if (err.code === "network_error")
+    return IDEMPOTENT_METHODS.has(method.toUpperCase());
+  return RETRYABLE_CODES.has(err.code);
 }
 
 interface ErrorEnvelope {
-  error?: { code?: unknown; message?: unknown; request_id?: unknown }
+  error?: { code?: unknown; message?: unknown; request_id?: unknown };
 }
 
 const sleep = (ms: number): Promise<void> =>
-  ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve()
+  ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 
 /** Create a stateless client bound to one workspace token. */
 export function createChatClient(config: ChatClientConfig): ChatClient {
-  const base = config.baseUrl.replace(/\/+$/, '')
-  const maxRetries = config.maxRetries ?? 2
-  const backoffMs = config.retryBackoffMs ?? 50
+  const base = config.baseUrl.replace(/\/+$/, "");
+  const maxRetries = config.maxRetries ?? 2;
+  const backoffMs = config.retryBackoffMs ?? 50;
 
   // Resolve fetch LAZILY, per request — never captured at construction. A client
   // built before an interceptor (msw, OpenTelemetry, a proxy shim) patches
   // `globalThis.fetch` must still go through it; capturing the reference up front
   // silently pins the un-intercepted original.
   function resolveFetch(): typeof fetch {
-    const impl = config.fetch ?? globalThis.fetch
-    if (typeof impl !== 'function') {
-      throw new TypeError('createChatClient: no fetch available (pass config.fetch)')
+    const impl = config.fetch ?? globalThis.fetch;
+    if (typeof impl !== "function") {
+      throw new TypeError(
+        "createChatClient: no fetch available (pass config.fetch)",
+      );
     }
-    return impl
+    return impl;
   }
 
   function authHeaders(extra?: Record<string, string>): Record<string, string> {
-    return { authorization: `Bearer ${config.token}`, ...extra }
+    return { authorization: `Bearer ${config.token}`, ...extra };
   }
 
   /** One HTTP round-trip; throws a typed ChatClientError on !ok or transport failure. */
@@ -84,55 +87,62 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
     path: string,
     body?: unknown,
   ): Promise<Response> {
-    let res: Response
+    let res: Response;
     try {
       res = await resolveFetch()(`${base}${path}`, {
         method,
         headers: authHeaders(
-          body === undefined ? undefined : { 'content-type': 'application/json' },
+          body === undefined ? undefined : { "content-type": "application/json" },
         ),
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      })
+      });
     } catch (cause) {
       // Transport-level failure (DNS, connection refused, aborted): a synthetic
       // retryable code so the retry loop can see it.
-      const detail = cause instanceof Error ? `: ${cause.message}` : ''
+      const detail = cause instanceof Error ? `: ${cause.message}` : "";
       throw new ChatClientError({
-        code: 'network_error',
+        code: "network_error",
         status: 0,
         message: `chat request failed: ${method} ${path}${detail}`,
-      })
+      });
     }
 
-    if (res.ok) return res
+    if (res.ok) return res;
 
     // Parse the canonical error envelope: {error:{code,message,request_id}}.
-    const envelope = (await res.json().catch(() => null)) as ErrorEnvelope | null
-    const err = envelope?.error
-    const code = typeof err?.code === 'string' ? err.code : `http_${res.status}`
+    const envelope = (await res.json().catch(() => null)) as ErrorEnvelope | null;
+    const err = envelope?.error;
+    const code = typeof err?.code === "string" ? err.code : `http_${res.status}`;
     const message =
-      typeof err?.message === 'string' ? err.message : `chat request failed (${res.status})`
-    const requestId = typeof err?.request_id === 'string' ? err.request_id : undefined
+      typeof err?.message === "string"
+        ? err.message
+        : `chat request failed (${res.status})`;
+    const requestId =
+      typeof err?.request_id === "string" ? err.request_id : undefined;
 
     throw new ChatClientError({
       code,
       status: res.status,
       message: augmentMessage(code, res.status, message),
       ...(requestId === undefined ? {} : { requestId }),
-    })
+    });
   }
 
   /** Retry wrapper: retries only retryable codes, and NEVER on 401/403. */
-  async function request(method: string, path: string, body?: unknown): Promise<Response> {
-    let attempt = 0
+  async function request(
+    method: string,
+    path: string,
+    body?: unknown,
+  ): Promise<Response> {
+    let attempt = 0;
     for (;;) {
       try {
-        return await once(method, path, body)
+        return await once(method, path, body);
       } catch (err) {
-        if (!(err instanceof ChatClientError)) throw err
-        if (!isRetryable(err, method) || attempt >= maxRetries) throw err
-        attempt += 1
-        await sleep(backoffMs * attempt)
+        if (!(err instanceof ChatClientError)) throw err;
+        if (!isRetryable(err, method) || attempt >= maxRetries) throw err;
+        attempt += 1;
+        await sleep(backoffMs * attempt);
       }
     }
   }
@@ -144,12 +154,12 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
      * from the token). 201 → the full session JSON.
      */
     async createSession(input: CreateSessionInput = {}): Promise<ChatSession> {
-      const payload: CreateSessionInput = {}
-      if (input.mode !== undefined) payload.mode = input.mode
-      if (input.model !== undefined) payload.model = input.model
-      if (input.effort !== undefined) payload.effort = input.effort
-      const res = await request('POST', '/v1/chat/sessions', payload)
-      return (await res.json()) as ChatSession
+      const payload: CreateSessionInput = {};
+      if (input.mode !== undefined) payload.mode = input.mode;
+      if (input.model !== undefined) payload.model = input.model;
+      if (input.effort !== undefined) payload.effort = input.effort;
+      const res = await request("POST", "/v1/chat/sessions", payload);
+      return (await res.json()) as ChatSession;
     },
 
     /**
@@ -157,9 +167,13 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
      * turn-boundary tail refetch the bridge does after a stream settles).
      */
     async getSession(id: string, since?: number): Promise<ChatSession> {
-      const query = since === undefined ? '' : `?since=${encodeURIComponent(String(since))}`
-      const res = await request('GET', `/v1/chat/sessions/${encodeURIComponent(id)}${query}`)
-      return (await res.json()) as ChatSession
+      const query =
+        since === undefined ? "" : `?since=${encodeURIComponent(String(since))}`;
+      const res = await request(
+        "GET",
+        `/v1/chat/sessions/${encodeURIComponent(id)}${query}`,
+      );
+      return (await res.json()) as ChatSession;
     },
 
     /**
@@ -168,11 +182,11 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
      */
     async postMessage(id: string, content: string): Promise<PostMessageResult> {
       const res = await request(
-        'POST',
+        "POST",
         `/v1/chat/sessions/${encodeURIComponent(id)}/messages`,
         { content },
-      )
-      return (await res.json()) as PostMessageResult
+      );
+      return (await res.json()) as PostMessageResult;
     },
 
     /**
@@ -185,9 +199,9 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
       id: string,
       options?: OpenEventStreamOptions,
     ): Promise<AsyncIterable<ChatEvent>> {
-      return openEventStream(config, id, options)
+      return openEventStream(config, id, options);
     },
-  }
+  };
 }
 
 /**
@@ -196,8 +210,8 @@ export function createChatClient(config: ChatClientConfig): ChatClient {
  * token minted without a workspace binding (require_chat_access.ex).
  */
 function augmentMessage(code: string, status: number, message: string): string {
-  if (status === 403 && code === 'forbidden') {
-    return `${message} — a chat token must be workspace-bound (mint BARKPARK_CHAT_TOKEN with a workspace_id and the \`chat\` permission).`
+  if (status === 403 && code === "forbidden") {
+    return `${message} — a chat token must be workspace-bound (mint BARKPARK_CHAT_TOKEN with a workspace_id and the \`chat\` permission).`;
   }
-  return message
+  return message;
 }

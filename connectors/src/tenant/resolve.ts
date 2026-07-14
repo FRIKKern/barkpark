@@ -26,8 +26,11 @@ import type {
   InboundEvent,
   TenantContext,
   WorkspaceId,
-} from '../connector/types.js';
-import { connectorRegistry, type ConnectorRegistry } from '../connector/registry.js';
+} from "../connector/types.js";
+import {
+  connectorRegistry,
+  type ConnectorRegistry,
+} from "../connector/registry.js";
 
 /**
  * Strategy: `credential-bound`.
@@ -50,6 +53,18 @@ export async function resolveCredentialBound(
 }
 
 /**
+ * The `credential-bound` strategy as a factory, mirroring
+ * {@link createPayloadTeamIdResolver} so a Connector declares its tenant routing
+ * the same way whichever strategy it uses.
+ */
+export function credentialBoundResolver(): (
+  event: InboundEvent,
+  ctx: TenantContext,
+) => Promise<WorkspaceId | null> {
+  return resolveCredentialBound;
+}
+
+/**
  * Strategy: `payload-team-id`.
  *
  * Builds a `resolveTenant` from a connector-supplied extractor. The extractor owns the
@@ -68,11 +83,17 @@ export async function resolveCredentialBound(
  *     };
  */
 export function createPayloadTeamIdResolver<TPayload = unknown>(
-  extractTeamId: (payload: TPayload) => string | null | undefined,
-): (event: InboundEvent<TPayload>, ctx: TenantContext) => Promise<WorkspaceId | null> {
+  extractTeamId: (payload: TPayload | undefined) => string | null | undefined,
+): (
+  event: InboundEvent<TPayload>,
+  ctx: TenantContext,
+) => Promise<WorkspaceId | null> {
   return async (event, ctx) => {
     let teamId: string | null | undefined;
     try {
+      // `payload` is optional on the event: a transport that hands us no payload
+      // at all must resolve to NO tenant, never to a default one. The extractor
+      // sees `undefined` and is expected to return null.
       teamId = extractTeamId(event.payload);
     } catch {
       // Malformed payload → no tenant. Drop it.
@@ -106,7 +127,7 @@ export async function resolveTenantForEvent(
 
   // Normalise a blank/whitespace workspace id to a hard miss, so a sloppy connector
   // cannot smuggle an empty-string "tenant" past the callers' `if (!workspaceId)` guards.
-  if (typeof workspaceId !== 'string' || workspaceId.trim() === '') return null;
+  if (typeof workspaceId !== "string" || workspaceId.trim() === "") return null;
 
   return workspaceId;
 }
