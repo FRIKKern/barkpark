@@ -252,3 +252,93 @@ re-issues the mail relay's Let's Encrypt cert via DNS-01, ships it to
   `/etc/caddy/Caddyfile` back (4100↔4101 / 4000↔4001), `systemctl reload
   caddy`, start the old slot (`docker start …` / `systemctl start
   barkpark-slot@<slot>`).
+
+## Spawning a site (`bp cloud site`) — and proving it
+
+A **site** is not an instance. `bp cloud deploy` flips a whole Barkpark box
+blue/green; `bp cloud site deploy` builds ONE content-bound static site that
+lives *next to* Phoenix on that box and serves at
+`https://<instance>.barkpark.cloud/sites/<slug>/`. Its engine is
+`deploy/site-deploy.sh` — six stages, PLAN → BUILD → STAGE → HEALTH → SWITCH →
+RETIRE, an atomic `current` symlink swap, and rollback as a symlink repoint
+(~25ms measured, no rebuild).
+
+The command sequence:
+
+```bash
+bp cloud site create my-blog --dataset default/default/production \
+    --framework astro --kind static --instance guerrilla
+bp cloud site deploy   my-blog     # streams the six stages
+bp cloud site open     my-blog     # https://guerrilla.barkpark.cloud/sites/my-blog/
+bp cloud site rollback my-blog     # sub-second flip to the previous build
+```
+
+### The proof script
+
+`deploy/site-spawner-live-proof.sh` drives that whole journey against the live
+fleet and **exits non-zero with a NAMED failure at any step it cannot prove**.
+It is the gate for "the spawner works", and it is deliberately hostile to a
+vacuous green — a 200 is never accepted as evidence on its own.
+
+```bash
+bash deploy/site-spawner-live-proof.sh --self-check  # offline; no creds, no network
+bash deploy/site-spawner-live-proof.sh --preflight   # read-only; creates NOTHING
+bash deploy/site-spawner-live-proof.sh               # the full live proof
+```
+
+- **`--self-check`** feeds every assertion synthetic good *and* bad input and
+  asserts the exact typed red comes back (22 cases). It exists because a proof
+  script whose failure paths never ran is itself a vacuous green.
+- **`--preflight`** checks *every* wall and reports all of them before exiting on
+  the first — so the walls can't rot as untested paths, and an operator fixes
+  them in one pass.
+- The full run asserts **by value**: the served `bp-build-id` must EQUAL the
+  deployment's `build_id` (a build with `bp-build-id=TOTALLY-WRONG` once went
+  live on this box and a reachability check called it green), `bp-content-rev`
+  and `bp-doc-id` must be non-empty (a page that fetched no content still
+  returns a cheerful 200), rollback must land under 1000ms **and** actually flip
+  the live page, and a deliberately broken build must die at its named stage
+  **without changing what a visitor sees**.
+
+### The two walls that will stop you first
+
+Both are real, both are live today, and the script names them rather than
+letting you discover them as a confusing 404 an hour in.
+
+1. **`PREFLIGHT_NO_BARKPARK` (exit 32) — the credential.** A site is created
+   under a *Barkpark*, and the Barkpark belongs to a *team*. A cross-team create
+   returns **404 `barkpark_not_found`** — not a permission error — because the
+   control plane refuses to leak existence across a team boundary. The default
+   dev session's team (`azh-w6-smoke-*`) owns **zero** barkparks; guerrilla's row
+   belongs to team `guerrilla`. Use a session in the owning team, or adopt the
+   box via the worker-token-gated `POST /v1/internal/barkparks`. **Adoption is a
+   human gate** — it re-parents a live production box, so it is not something a
+   build script should do on its own.
+
+2. **`PREFLIGHT_NO_CONTENT` (exit 33) — the empty page.** An **undefined document
+   type answers 200 with `count:0`, not 404.** The Astro starter's default is
+   `BARKPARK_DOC_TYPE=post`, and there is no `post` type on guerrilla — so the
+   default build succeeds and ships a **silently empty page**. Use
+   `BARKPARK_DOC_TYPE=paper` (public + published), and **pin `BARKPARK_DOC_ID`**:
+   "newest published" is a moving target when other sessions are writing the
+   corpus, so an unpinned build races and bakes a different `bp-doc-id` than the
+   one you verified.
+
+### Status (2026-07-14)
+
+The proof script is **live and reports an honest red**: `--self-check` is 22/22
+green, and the live run exits **32 `PREFLIGHT_NO_BARKPARK`**. The end-to-end
+spawn has **not** been proven yet, because the server-side spine is still
+unwired on `main`:
+
+- `POST /v1/sites/:id/deploy` refuses a content-bound static site with **422
+  `no_build_source`** (it still demands an `artifact_url` or a `github_repo`).
+- `GET /v1/sites/:id/deployments/:dep_id` (the CLI's stage poll) and
+  `POST /v1/sites/:id/rollback` **do not exist** in the control-plane router.
+
+Those are the three in-flight W3 slices (`site-spawner-w3-engine-protocol`,
+`site-spawner-w3-admin-site-deploy-seam`,
+`site-spawner-backlog-server-orchestration`). When they merge, the control plane
+and guerrilla auto-deploy (`cloud/**`, `api/**`, `deploy/**` are all on the CD
+trigger paths above) and this script is the thing that says whether the spawner
+actually works. Run it; don't trust a dashboard.
