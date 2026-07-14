@@ -269,7 +269,6 @@ defmodule Barkpark.StudioChat.Runtime do
       _ -> {:error, {:missing_runtime_contract, key}}
     end
   end
-
   defp optional_call(module, function, args, default \\ :ok) do
     if Code.ensure_loaded?(module) and function_exported?(module, function, length(args)),
       do: apply(module, function, args),
