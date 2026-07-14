@@ -15,6 +15,7 @@ import type {
   InboundEvent,
   InstallsLookup,
 } from "./connector/types.js";
+import { createSlackConnector, SLACK_PROVIDER } from "./connectors/slack.js";
 import {
   createTelegramConnector,
   TELEGRAM_PROVIDER,
@@ -43,12 +44,66 @@ import { createInstallsLookup } from "./tenant/installs.js";
  * constructed from another tenant's secret.
  */
 
+/**
+ * What a builtin connector may ask the bridge for at REGISTRATION time.
+ *
+ * Telegram needs nothing (its credential arrives per-install, in
+ * `adapterFactory`). A `payload-team-id` connector needs more: Slack resolves a
+ * team's bot token from `connector_installs` on EVERY inbound event, so its
+ * `installationProvider` has to close over the installs lookup before any adapter
+ * exists. That is a GENERIC need of the strategy, not a Slack quirk — Teams will
+ * want the same — so it is a deps bag, never an `if (provider === "slack")`.
+ *
+ * Deliberately optional: `registerBuiltinConnectors(registry)` with no deps still
+ * works and registers every connector that needs nothing. A connector whose deps
+ * are absent is SKIPPED LOUDLY (warn), because half-registering it would mean an
+ * adapter that cannot resolve a token — silence there would look like "Slack is
+ * broken" instead of "Slack is not configured".
+ */
+export interface BuiltinConnectorDeps {
+  /** `chat_bridge.connector_installs` — the tenant map. */
+  installs?: InstallsLookup;
+  /** Slack app credentials. Absent ⇒ Slack is not registered. */
+  slack?: {
+    signingSecret: string;
+    clientId: string;
+    clientSecret: string;
+  };
+  /**
+   * Open a sealed `credential_ref`. Identity today — the column still holds the
+   * raw secret (KNOWN GAP, see `tenant/installs.ts`). The credential cipher plugs
+   * in HERE, at one call site, and no connector changes.
+   */
+  decryptCredential?: (credentialRef: string) => string | Promise<string>;
+}
+
 /** P3 adds its channels HERE and nowhere else. */
-export function registerBuiltinConnectors(registry: ConnectorRegistry): void {
+export function registerBuiltinConnectors(
+  registry: ConnectorRegistry,
+  deps: BuiltinConnectorDeps = {},
+): void {
   if (!registry.has(TELEGRAM_PROVIDER)) {
     registry.register(createTelegramConnector({ mode: "polling" }));
   }
-  // P3: registry.register(createSlackConnector());   // payload-team-id
+
+  if (!registry.has(SLACK_PROVIDER)) {
+    if (deps.slack && deps.installs) {
+      registry.register(
+        createSlackConnector({
+          ...deps.slack,
+          installs: deps.installs,
+          ...(deps.decryptCredential
+            ? { decryptCredential: deps.decryptCredential }
+            : {}),
+        }),
+      );
+    } else if (deps.slack) {
+      console.warn(
+        "[bridge] slack: app credentials present but no installs lookup — not registered. " +
+          "A Slack adapter with no install table could not resolve any tenant's bot token.",
+      );
+    }
+  }
   // P3: registry.register(createDiscordConnector()); // credential-bound
 }
 
@@ -167,9 +222,31 @@ export function mountInstall(
 
 export interface Bridge {
   pool: pg.Pool;
+  registry: ConnectorRegistry;
   installs: InstallsLookup;
   mounted: MountedInstall[];
+  /**
+   * Mount an install that appeared AFTER boot — the OAuth path. Initializes its
+   * Chat and starts its transport, so the tenant can message the bot the second
+   * the connect flow returns. No restart, no deploy.
+   *
+   * Provider-agnostic on purpose: it takes a `ConnectorInstall` and looks the
+   * connector up in the registry. Slack's OAuth callback uses it; Discord's and
+   * Teams' will use the SAME function, unchanged.
+   */
+  mount(install: ConnectorInstall): Promise<MountedInstall>;
   shutdown(): Promise<void>;
+}
+
+/** Slack app credentials from the environment. Absent ⇒ Slack simply isn't registered. */
+function slackDepsFromEnv(
+  env: NodeJS.ProcessEnv,
+): BuiltinConnectorDeps["slack"] | undefined {
+  const signingSecret = env["SLACK_SIGNING_SECRET"]?.trim();
+  const clientId = env["SLACK_CLIENT_ID"]?.trim();
+  const clientSecret = env["SLACK_CLIENT_SECRET"]?.trim();
+  if (!signingSecret || !clientId || !clientSecret) return undefined;
+  return { signingSecret, clientId, clientSecret };
 }
 
 /**
@@ -190,7 +267,12 @@ export async function startBridge(
   const map = createThreadSessionMap(createPgThreadSessionStore(pool));
 
   const registry = createConnectorRegistry();
-  registerBuiltinConnectors(registry);
+  registerBuiltinConnectors(registry, {
+    installs,
+    ...(slackDepsFromEnv(process.env)
+      ? { slack: slackDepsFromEnv(process.env) }
+      : {}),
+  });
 
   const deps: BridgeDeps = {
     config,
@@ -216,34 +298,74 @@ export async function startBridge(
   };
 
   const mounted: MountedInstall[] = [];
+
+  /**
+   * Mount ONE install and bring it live. The boot loop and the OAuth callback run
+   * the SAME code path, so an install that arrives at 3pm behaves exactly like one
+   * that was in the table at boot — there is no "restart to pick it up" state.
+   *
+   * Re-mounting an install we already serve (a team that re-installs the app, or a
+   * rotated token) REPLACES it: the old Chat is stopped first, so two adapters can
+   * never listen for the same install with two different credentials.
+   */
+  const mount = async (install: ConnectorInstall): Promise<MountedInstall> => {
+    const connector = registry.get(install.provider);
+    if (!connector) {
+      // Fail closed and loudly: an install with no connector has credentials and
+      // no code to use them safely.
+      throw new Error(
+        `[bridge] cannot mount install ${install.provider}/${install.installKey}: ` +
+          `no connector registered for "${install.provider}"`,
+      );
+    }
+
+    const existing = mounted.findIndex(
+      (m) =>
+        m.install.provider === install.provider &&
+        m.install.installKey === install.installKey,
+    );
+    if (existing !== -1) {
+      const stale = mounted[existing] as MountedInstall;
+      await stale.connector.stopListening?.(stale.adapter);
+      await stale.chat.shutdown();
+      mounted.splice(existing, 1);
+    }
+
+    const next = mountInstall(connector, install, deps);
+    await next.chat.initialize();
+    // The core never learns the channel: Telegram starts a poll loop here,
+    // Discord will start a gateway socket, Slack does nothing at all (its
+    // transport IS the inbound HTTP request).
+    await next.connector.listen?.(next.adapter);
+    mounted.push(next);
+
+    console.log(
+      `[bridge] listening: ${next.connector.id} install=${next.install.installKey} ` +
+        `workspace=${next.install.workspaceId}`,
+    );
+    return next;
+  };
+
   for (const connector of registry.channels()) {
     for (const install of await installs.listInstalls(connector.id)) {
-      mounted.push(mountInstall(connector, install, deps));
+      await mount(install);
     }
   }
 
   if (mounted.length === 0) {
     console.warn(
       "[bridge] no connector installs found in chat_bridge.connector_installs — " +
-        "nothing to listen on. See connectors/docs/telegram-smoke.md to register a bot.",
-    );
-  }
-
-  for (const install of mounted) {
-    await install.chat.initialize();
-    // The core never learns the channel: Telegram starts a poll loop here,
-    // P3's Discord will start a gateway socket, Slack does nothing at all.
-    await install.connector.listen?.(install.adapter);
-    console.log(
-      `[bridge] listening: ${install.connector.id} install=${install.install.installKey} ` +
-        `workspace=${install.install.workspaceId}`,
+        "nothing to listen on. See connectors/docs/telegram-smoke.md to register a bot, " +
+        "or connectors/docs/slack-install.md to install a Slack app.",
     );
   }
 
   return {
     pool,
+    registry,
     installs,
     mounted,
+    mount,
     async shutdown() {
       for (const install of mounted) {
         await install.connector.stopListening?.(install.adapter);
