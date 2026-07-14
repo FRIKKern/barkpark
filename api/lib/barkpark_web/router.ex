@@ -53,6 +53,12 @@ defmodule BarkparkWeb.Router do
   pipeline :api_grant_read do
     plug(BarkparkWeb.Plugs.ResolveTokenOwner)
     plug(BarkparkWeb.Plugs.AssignGrantScope)
+    # Deny-by-default clamp for a `public-read`-only token (site-spawner D6):
+    # published perspective + public-visibility schemas + GET query/doc only.
+    # Runs AFTER OptionalToken (:api) assigned :api_token AND after
+    # AssignDefaultScope (:api) set :current_workspace/:current_project, so the
+    # schema-visibility check is scope-accurate. No-op for read/write/admin/anon.
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
@@ -142,6 +148,13 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    # Deny-by-default clamp for a `public-read`-only token (site-spawner D6) on
+    # the SCOPED read the site-spawner BUILD token fetches over. Mounted at the
+    # TAIL: OptionalToken assigned :api_token and ResolveWorkspace/ResolveProject
+    # set the scope, so the schema-visibility check is workspace-accurate.
+    # Membership (ResolveWorkspace) is necessary but not sufficient — it does not
+    # pin published-vs-draft; this plug is the missing clamp. No-op otherwise.
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # Tenancy-aware READ pipeline for the scoped media surface (P3) — the
