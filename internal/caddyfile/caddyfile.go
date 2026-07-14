@@ -7,7 +7,9 @@
 //     the cloud control plane's GET /v1/tls/ask?domain=... — a 200 means "this
 //     domain is registered to one of our Sites; you may issue a cert"; a 404
 //     stops Caddy from issuing certs for arbitrary hostnames pointed at the
-//     box. Without this gate, the box is a cert-issuance DoS target.
+//     box. Without this gate, the box is a cert-issuance DoS target. On a box
+//     that fronts any site through Cloudflare, this block also carries the
+//     once-only trusted_proxies allowlist (see TLSModeOriginCA).
 //
 //  2. One reverse-proxy block per live Site, keyed on the Site's domains. The
 //     block points at the loopback port of the currently-running container.
@@ -113,6 +115,66 @@ const (
 	KindStatic = "static"
 )
 
+// TLS modes. TLSMode selects how a site terminates TLS. The empty string is the
+// zero value and means TLSModeOnDemand — so every existing caller, which sets
+// no TLSMode at all, keeps emitting today's `tls { on_demand }` block verbatim.
+// Any unrecognized value is likewise treated as on-demand (same defaulting
+// contract as Kind).
+const (
+	// TLSModeOnDemand issues a cert per hostname through ACME at first
+	// handshake, gated by the box's on_demand_tls ask URL. This is the default
+	// and the right mode for a domain that resolves STRAIGHT to the box.
+	TLSModeOnDemand = "on_demand"
+
+	// TLSModeOriginCA terminates TLS with a long-lived Cloudflare Origin CA
+	// certificate loaded from disk — no ACME, no issuance at handshake time.
+	//
+	// This is a CORRECTNESS requirement, not a preference: when a domain is
+	// proxied through Cloudflare (orange cloud) in Full (Strict) mode, the box
+	// never sees the visitor's TLS handshake — Cloudflare does. Caddy's
+	// on-demand ACME challenge (TLS-ALPN-01) therefore cannot complete through
+	// the proxy, the origin ends up with no usable cert, and every visitor gets
+	// Cloudflare error 526 (invalid SSL certificate). A CF-fronted site MUST
+	// present a pre-issued Origin CA cert instead. Requires CertPath + KeyPath.
+	TLSModeOriginCA = "origin_ca"
+)
+
+// cloudflareIPRanges is Cloudflare's published edge network — the only peers
+// allowed to set the client-IP headers we honour. Sourced from
+// https://www.cloudflare.com/ips/ (list current as of 2026-07-14; Cloudflare
+// changes it rarely, and a stale entry degrades to "that edge IP is not
+// trusted", never to "an untrusted peer is").
+//
+// Trusting these — and ONLY these — is what makes CF-Connecting-IP safe to
+// believe: without a trusted_proxies allowlist, any client could forge the
+// header and spoof its own address in logs, rate limits, and access rules.
+var cloudflareIPRanges = []string{
+	// IPv4
+	"173.245.48.0/20",
+	"103.21.244.0/22",
+	"103.22.200.0/22",
+	"103.31.4.0/22",
+	"141.101.64.0/18",
+	"108.162.192.0/18",
+	"190.93.240.0/20",
+	"188.114.96.0/20",
+	"197.234.240.0/22",
+	"198.41.128.0/17",
+	"162.158.0.0/15",
+	"104.16.0.0/13",
+	"104.24.0.0/14",
+	"172.64.0.0/13",
+	"131.0.72.0/22",
+	// IPv6
+	"2400:cb00::/32",
+	"2606:4700::/32",
+	"2803:f800::/32",
+	"2405:b500::/32",
+	"2405:8100::/32",
+	"2a06:98c0::/29",
+	"2c0f:f248::/32",
+}
+
 // Site describes one hosted site's runtime state for Caddy: which domains it
 // answers on, and how it serves them.
 //
@@ -133,11 +195,64 @@ type Site struct {
 	// Root is the served directory for a KindStatic site (e.g. the site's
 	// `current` release symlink). Ignored for reverse_proxy sites.
 	Root string
+
+	// TLSMode is the TLS termination strategy: "" / TLSModeOnDemand (default)
+	// or TLSModeOriginCA. Any other value is treated as on-demand. Orthogonal
+	// to Kind — a static site and a proxied site can each be CF-fronted or not.
+	TLSMode string
+	// CertPath and KeyPath are the on-box PEM files for a TLSModeOriginCA site
+	// (the Cloudflare Origin CA cert and its private key). Both are REQUIRED in
+	// that mode and ignored otherwise. A site that asks for Origin CA without a
+	// safe pair is not served at all (see tlsReady) — it is never quietly
+	// downgraded to on-demand, which is precisely the 526 outage this mode
+	// exists to prevent.
+	CertPath string
+	KeyPath  string
 }
 
 // isStatic reports whether s serves files with file_server rather than
 // proxying to a container port.
 func (s Site) isStatic() bool { return s.Kind == KindStatic }
+
+// isCloudflareFronted reports whether s sits behind the Cloudflare proxy and so
+// terminates TLS with a pre-issued Origin CA cert instead of on-demand ACME.
+func (s Site) isCloudflareFronted() bool { return s.TLSMode == TLSModeOriginCA }
+
+// tlsReady reports whether s's TLS configuration can actually be rendered. An
+// on-demand site (the default) needs nothing. A Cloudflare-fronted site needs a
+// cert/key pair that is safe to splice into a `tls <cert> <key>` directive.
+//
+// This gate FAILS CLOSED: an Origin-CA site with a missing or unsafe pair is
+// skipped entirely rather than falling back to `tls { on_demand }`. That
+// fallback would look like a harmless default and behave like an outage —
+// ACME cannot complete through the Cloudflare proxy, so every visitor to that
+// host would get error 526.
+func (s Site) tlsReady() bool {
+	if !s.isCloudflareFronted() {
+		return true
+	}
+	return safeCaddyPath(s.CertPath) && safeCaddyPath(s.KeyPath)
+}
+
+// anyCloudflareFronted reports whether any site in sites is served with an
+// Origin CA cert, i.e. whether the box sits behind Cloudflare at all.
+//
+// This is a pre-pass because the global block is written BEFORE the site loop
+// runs (and before sites are even sorted), while `trusted_proxies` is a global
+// option that must be emitted exactly once no matter how many CF-fronted sites
+// there are. A plain OR is order-independent, so it costs nothing and cannot
+// perturb the deterministic site ordering.
+//
+// Sites that could never render as CF-fronted (unsafe cert/key — see tlsReady)
+// do not count: they will be skipped, so no traffic for them ever arrives.
+func anyCloudflareFronted(sites []Site) bool {
+	for _, s := range sites {
+		if s.isCloudflareFronted() && s.tlsReady() {
+			return true
+		}
+	}
+	return false
+}
 
 // Render produces the Caddyfile text for box. Deterministic: sites are emitted
 // in slug order, domains within a site are sorted — same input → byte-identical
@@ -148,12 +263,34 @@ func (s Site) isStatic() bool { return s.Kind == KindStatic }
 func Render(box Box) string {
 	var sb strings.Builder
 
-	// Global block: on_demand_tls + ask gate.
-	if box.AskGateURL != "" {
+	// Pre-pass: does ANY site sit behind Cloudflare? The global block below is
+	// written before the site loop, so the once-only `trusted_proxies` option
+	// has to be decided up front rather than appended from inside the loop.
+	cfFronted := anyCloudflareFronted(box.Sites)
+
+	// Global block: on_demand_tls + ask gate, and — only on a CF-fronted box —
+	// the trusted-proxy allowlist. Each half is independent, so a box with an
+	// ask gate and no CF site renders byte-identically to before this option
+	// existed.
+	if box.AskGateURL != "" || cfFronted {
 		sb.WriteString("{\n")
-		sb.WriteString("  on_demand_tls {\n")
-		fmt.Fprintf(&sb, "    ask %s\n", box.AskGateURL)
-		sb.WriteString("  }\n")
+		if box.AskGateURL != "" {
+			sb.WriteString("  on_demand_tls {\n")
+			fmt.Fprintf(&sb, "    ask %s\n", box.AskGateURL)
+			sb.WriteString("  }\n")
+		}
+		if cfFronted {
+			// Behind Cloudflare every request arrives from a CF edge IP, so the
+			// remote address is useless: without this, logs, rate limits and
+			// access rules all see Cloudflare instead of the visitor. Trusting
+			// the CF ranges — and only them — makes CF-Connecting-IP believable;
+			// a direct-to-origin client cannot forge it, because it is not a
+			// trusted peer.
+			sb.WriteString("  servers {\n")
+			fmt.Fprintf(&sb, "    trusted_proxies static %s\n", strings.Join(cloudflareIPRanges, " "))
+			sb.WriteString("    client_ip_headers CF-Connecting-IP\n")
+			sb.WriteString("  }\n")
+		}
 		sb.WriteString("}\n\n")
 	}
 
@@ -185,8 +322,15 @@ func Render(box Box) string {
 		// also spliced verbatim into `root * <Root>`, so a Root that would break
 		// Caddyfile syntax (whitespace, braces, control bytes) fails closed —
 		// the whole file must never be wedged by one bad value.
+		//
+		// TLS readiness is orthogonal to kind and gates both: an Origin-CA site
+		// without a safe cert/key pair is skipped rather than downgraded to
+		// on-demand (which would be a 526 outage, not a fallback).
+		if !s.tlsReady() {
+			continue
+		}
 		if s.isStatic() {
-			if !safeRoot(s.Root) {
+			if !safeCaddyPath(s.Root) {
 				continue
 			}
 		} else if s.Port <= 0 {
@@ -214,9 +358,15 @@ func Render(box Box) string {
 			fmt.Fprintf(&sb, "# site %s (port %d)\n", s.Slug, s.Port)
 		}
 		fmt.Fprintf(&sb, "%s {\n", strings.Join(clean, ", "))
-		sb.WriteString("  tls {\n")
-		sb.WriteString("    on_demand\n")
-		sb.WriteString("  }\n")
+		if s.isCloudflareFronted() {
+			// Pre-issued Cloudflare Origin CA cert: load it from disk, never ask
+			// ACME. tlsReady() has already vetted both paths for splice safety.
+			fmt.Fprintf(&sb, "  tls %s %s\n", s.CertPath, s.KeyPath)
+		} else {
+			sb.WriteString("  tls {\n")
+			sb.WriteString("    on_demand\n")
+			sb.WriteString("  }\n")
+		}
 		if s.isStatic() {
 			// Serve the immutable release directory. A static site has no
 			// process to restart — the deploy swaps the `current` symlink
@@ -236,17 +386,23 @@ func Render(box Box) string {
 	return sb.String()
 }
 
-// safeRoot reports whether root is safe to splice verbatim into a Caddyfile
-// `root * <root>` directive. It rejects the empty string and anything carrying
-// whitespace, control bytes, or the Caddyfile-structural characters "{", "}",
-// so a malformed served path can neither break the file's syntax (one bad
-// value fails the whole file) nor inject directives. The served path is an
-// on-box release directory, so a legitimate value never contains these.
-func safeRoot(root string) bool {
-	if root == "" {
+// safeCaddyPath reports whether p is safe to splice verbatim into a Caddyfile
+// directive that takes an on-box path — `root * <p>` for a static site's served
+// directory, and `tls <cert> <key>` for an Origin-CA site's PEM pair. It rejects
+// the empty string and anything carrying whitespace, control bytes, or the
+// Caddyfile-structural characters "{", "}", so a malformed path can neither
+// break the file's syntax (one bad value fails the whole file) nor inject
+// directives. These are box-local paths (a release directory, a cert file), so
+// a legitimate value never contains any of them.
+//
+// One guard for all three paths on purpose: the rejection set is a property of
+// Caddyfile splice safety, not of what the path points at, so a second copy
+// could only drift out of sync with this one.
+func safeCaddyPath(p string) bool {
+	if p == "" {
 		return false
 	}
-	for _, r := range root {
+	for _, r := range p {
 		if r <= ' ' || r == 0x7f || r == '{' || r == '}' {
 			return false
 		}
