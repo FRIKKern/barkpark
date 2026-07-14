@@ -9,7 +9,7 @@ The `bp` CLI talks to the configured server (`~/.config/barkpark/`).
 - `bp task close <id> <worker> <epoch>` — complete; epoch comes from your claim. If the claim lapsed, re-claim the same task for a fresh epoch, then close.
 - `bp task create ...` — file new work (older binaries lack this verb; fall back to `bp doc create task`)
 - `bp task prime <worker>` — one-call rehydration: your in-progress claims, ready head, recent events
-- `bp task stamp <id> <worker> <epoch> --criterion N --met --evidence "…"` — record evidence on ONE criterion mid-claim. N is ZERO-BASED: the FIRST criterion is `--criterion 0`, the second is `--criterion 1` (do NOT pass a 1-based number — that silently stamps the wrong row). `--miss --note "…"` logs an honest attempt without flipping the lock; add `--criterion-text "<exact wording>"` to reject an off-by-one index instead of flipping a neighbour
+- `bp task stamp <id> <worker> <epoch> --criterion N --met --evidence "…"` — record evidence on ONE criterion mid-claim (N is ZERO-BASED — first criterion = `--criterion 0`; `--miss --note "…"` logs an honest attempt without flipping the lock)
 - `bp task pulse <id> <worker> --now "…"` — write the now-line and renew the lease in one write (no epoch arg — it bumps the claim epoch)
 - `bp capabilities -o json` — the whole API manifest when unsure
 
