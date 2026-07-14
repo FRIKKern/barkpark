@@ -312,7 +312,9 @@ defmodule Barkpark.ChatHosts do
     }
 
     case %ExecutionEvent{} |> ExecutionEvent.changeset(attrs) |> Repo.insert() do
-      {:ok, _} -> :ok
+      {:ok, _} ->
+        :ok
+
       {:error, changeset} ->
         case Repo.get_by(ExecutionEvent, lease_id: lease.id, cursor: cursor) do
           %ExecutionEvent{idempotency_key: ^key, payload: ^event} -> :duplicate
@@ -336,8 +338,14 @@ defmodule Barkpark.ChatHosts do
     end
   end
 
-  defp status_for(%{"kind" => kind}) when kind in ["terminal", "completed"], do: "completed"
-  defp status_for(%{kind: kind}) when kind in [:terminal, :completed], do: "completed"
+  defp status_for(%{"kind" => kind})
+       when kind in ["terminal", "completed", "turn_completed", "control_completed"],
+       do: "completed"
+
+  defp status_for(%{kind: kind})
+       when kind in [:terminal, :completed, :turn_completed, :control_completed],
+       do: "completed"
+
   defp status_for(_), do: "running"
 
   defp command_to_map(%_{} = command), do: Map.from_struct(command)
@@ -383,27 +391,45 @@ defmodule Barkpark.ChatHosts do
   end
 
   defp broadcast_event(lease, cursor, key, event) do
+    kind = value(event, :kind, "event")
+
+    native =
+      case value(event, :delta) do
+        delta when is_binary(delta) -> Map.put(event, "params", %{"delta" => delta})
+        _ -> event
+      end
+
     normalized = %Barkpark.StudioChat.Runtime.Event{
       provider: lease.provider,
       session_id: lease.session_id,
       sequence: cursor,
       idempotency_key: key,
       durability: :durable,
-      kind: value(event, :kind, "event"),
+      kind: normalize_host_kind(kind),
       approval_id: value(event, :approval_id),
       terminal_state: value(event, :terminal_state),
       error: value(event, :error),
-      native: event
+      native: native
     }
 
-    Phoenix.PubSub.broadcast(
-      Barkpark.PubSub,
-      Barkpark.StudioChat.Recorder.topic(lease.session_id),
-      {:chat_runtime_event, normalized}
-    )
+    case Barkpark.StudioChat.Recorder.whereis(lease.session_id) do
+      recorder when is_pid(recorder) ->
+        send(recorder, {:studio_chat_runtime_event, normalized})
+
+      _ ->
+        :ok
+    end
   catch
     :exit, _ -> :ok
   end
+
+  defp normalize_host_kind("session_started"), do: :session_started
+  defp normalize_host_kind("turn_started"), do: :turn_started
+  defp normalize_host_kind("text_delta"), do: :text_delta
+  defp normalize_host_kind("approval_requested"), do: :approval_requested
+  defp normalize_host_kind("turn_completed"), do: :turn_completed
+  defp normalize_host_kind("error"), do: :error
+  defp normalize_host_kind(kind), do: kind
 
   defp value(map, key, default \\ nil),
     do: Map.get(map, key, Map.get(map, Atom.to_string(key), default))

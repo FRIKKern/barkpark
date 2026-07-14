@@ -129,6 +129,9 @@ defmodule Barkpark.StudioChat.Recorder do
            sink: self(),
            mode: Map.get(opts, :mode, "plan"),
            resume: Map.get(opts, :resume, false),
+           execution_target: Map.get(opts, :execution_target, "managed"),
+           execution_host_id: Map.get(opts, :execution_host_id),
+           workspace_id: Map.get(opts, :workspace_id),
            cwd: Map.get(opts, :cwd),
            provider_session_id: Map.get(opts, :provider_session_id),
            session_opts: session_opts
@@ -688,6 +691,11 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp capture_runtime_event(state, %Event{} = event) do
     maybe_capture_event_provider_session_id(state.session_id, event.provider_session_id)
+
+    state = %{
+      state
+      | session: Runtime.with_provider_session_id(state.session, event.provider_session_id)
+    }
 
     case event.kind do
       :session_started ->

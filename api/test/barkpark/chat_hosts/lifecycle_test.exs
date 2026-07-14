@@ -74,14 +74,15 @@ defmodule Barkpark.ChatHosts.LifecycleTest do
       event: %{"kind" => "started"}
     }
 
-    Phoenix.PubSub.subscribe(Barkpark.PubSub, Barkpark.StudioChat.Recorder.topic(session_id))
+    assert {:ok, _} =
+             Registry.register(Barkpark.StudioChat.RecorderRegistry, session_id, :test_recorder)
 
     assert {:error, :stale_fence} =
              ChatHosts.accept_event(authenticated, %{event | epoch: epoch + 1})
 
     assert {:ok, :accepted} = ChatHosts.accept_event(authenticated, event)
 
-    assert_receive {:chat_runtime_event,
+    assert_receive {:studio_chat_runtime_event,
                     %Barkpark.StudioChat.Runtime.Event{
                       provider: "claude",
                       session_id: ^session_id,

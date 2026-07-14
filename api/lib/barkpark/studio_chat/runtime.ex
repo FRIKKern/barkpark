@@ -106,6 +106,23 @@ defmodule Barkpark.StudioChat.Runtime do
           }
   end
 
+  defmodule RemoteRef do
+    @moduledoc "Opaque handle for a provider runtime executing on a registered host."
+
+    @enforce_keys [:provider, :session_id, :workspace_id, :execution_host_id]
+    defstruct [
+      :provider,
+      :session_id,
+      :provider_session_id,
+      :workspace_id,
+      :execution_host_id,
+      :cwd,
+      :host_directory,
+      :remote_dispatch,
+      :lease_id
+    ]
+  end
+
   @doc "Resolve the configured managed adapter without coupling callers to a provider module."
   @spec adapter(provider() | atom()) :: module()
   def adapter(provider) when provider in ["claude", :claude],
@@ -150,6 +167,8 @@ defmodule Barkpark.StudioChat.Runtime do
   def runtime_pid(%{runtime: pid}) when is_pid(pid), do: pid
   def runtime_pid(_runtime_ref), do: nil
 
+  def alive?(%RemoteRef{}), do: true
+
   def alive?(runtime_ref) do
     case runtime_pid(runtime_ref) do
       pid when is_pid(pid) -> Process.alive?(pid)
@@ -161,14 +180,43 @@ defmodule Barkpark.StudioChat.Runtime do
   def provider_session_id(%{provider_session_id: id}) when is_binary(id) and id != "", do: id
   def provider_session_id(_runtime_ref), do: nil
 
+  def with_provider_session_id(%RemoteRef{} = runtime_ref, id)
+      when is_binary(id) and id != "",
+      do: %{runtime_ref | provider_session_id: id}
+
+  def with_provider_session_id(runtime_ref, _id), do: runtime_ref
+
+  def send_turn(_provider, %RemoteRef{} = runtime_ref, content),
+    do: dispatch_remote(runtime_ref, :send_turn, %{content: content})
+
   def send_turn(provider, runtime_ref, content),
     do: adapter(provider).send_turn(runtime_ref, content)
 
+  def steer(_provider, %RemoteRef{} = runtime_ref, command),
+    do: dispatch_remote(runtime_ref, :steer, command)
+
   def steer(provider, runtime_ref, command), do: adapter(provider).steer(runtime_ref, command)
+
+  def interrupt(_provider, %RemoteRef{} = runtime_ref) do
+    case dispatch_remote(runtime_ref, :interrupt, %{}) do
+      :ok -> {:ok, Ecto.UUID.generate()}
+      error -> error
+    end
+  end
+
   def interrupt(provider, runtime_ref), do: adapter(provider).interrupt(runtime_ref)
+
+  def answer_approval(_provider, %RemoteRef{} = runtime_ref, approval_id, decision),
+    do:
+      dispatch_remote(runtime_ref, :answer_approval, %{decision: decision},
+        approval_id: approval_id
+      )
 
   def answer_approval(provider, runtime_ref, approval_id, decision),
     do: adapter(provider).answer_approval(runtime_ref, approval_id, decision)
+
+  def close(_provider, %RemoteRef{} = runtime_ref),
+    do: dispatch_remote(runtime_ref, :close, %{})
 
   def close(provider, runtime_ref), do: adapter(provider).close(runtime_ref)
 
@@ -193,6 +241,24 @@ defmodule Barkpark.StudioChat.Runtime do
   end
 
   @doc "Start or resume a managed runtime using one provider-neutral entry point."
+  def open(provider, %{execution_target: "registered_host"} = opts) do
+    ref = %RemoteRef{
+      provider: to_string(provider),
+      session_id: Map.fetch!(opts, :session_id),
+      provider_session_id: Map.get(opts, :provider_session_id),
+      workspace_id: Map.fetch!(opts, :workspace_id),
+      execution_host_id: Map.fetch!(opts, :execution_host_id),
+      cwd: Map.get(opts, :cwd),
+      host_directory: Map.get(opts, :host_directory, Barkpark.ChatHosts),
+      remote_dispatch: Map.get(opts, :remote_dispatch, Barkpark.ChatHosts.RemoteDispatch)
+    }
+
+    case ref.host_directory.resolve(ref.workspace_id, ref.execution_host_id) do
+      {:ok, host} -> {:ok, %{ref | cwd: registered_host_cwd(host, ref.cwd)}}
+      error -> error
+    end
+  end
+
   def open(provider, opts) when is_map(opts) do
     runtime = adapter(provider)
     if Map.get(opts, :resume, false), do: runtime.resume(opts), else: runtime.start(opts)
@@ -256,6 +322,40 @@ defmodule Barkpark.StudioChat.Runtime do
 
   defp dispatch_managed(_adapter, %Command{operation: operation}, _opts),
     do: {:error, {:unsupported_runtime_operation, operation}}
+
+  defp dispatch_remote(%RemoteRef{} = ref, operation, payload, command_opts \\ []) do
+    payload = if operation == :send_turn, do: Map.put(payload, :cwd, ref.cwd), else: payload
+
+    command = %Command{
+      operation: operation,
+      provider: ref.provider,
+      session_id: ref.session_id,
+      provider_session_id: ref.provider_session_id,
+      approval_id: command_opts[:approval_id],
+      idempotency_key: Ecto.UUID.generate(),
+      payload: payload
+    }
+
+    opts = [
+      workspace_id: ref.workspace_id,
+      execution_host_id: ref.execution_host_id,
+      host_directory: ref.host_directory,
+      remote_dispatch: ref.remote_dispatch
+    ]
+
+    case dispatch("registered_host", ref.provider, command, opts) do
+      {:ok, result} when operation in [:start, :resume] -> {:ok, result}
+      {:ok, _result} -> :ok
+      other -> other
+    end
+  end
+
+  defp registered_host_cwd(host, fallback) do
+    case Map.get(host, :approved_roots) || Map.get(host, "approved_roots") do
+      [root | _] when is_binary(root) -> root
+      _ -> fallback
+    end
+  end
 
   defp configured_adapter(provider, default) do
     :barkpark

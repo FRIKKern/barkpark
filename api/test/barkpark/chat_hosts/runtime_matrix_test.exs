@@ -27,6 +27,14 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
     def dispatch(host, command, _opts), do: {:ok, {:registered_host, host.id, command.provider}}
   end
 
+  defmodule LifecycleDispatch do
+    @behaviour Runtime.RemoteDispatch
+
+    def dispatch(host, command, _opts) do
+      {:ok, %{lease_id: "#{host.id}:#{command.operation}", provider: command.provider}}
+    end
+  end
+
   setup do
     old = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
 
@@ -65,6 +73,31 @@ defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
           else: {:ok, {:registered_host, "host-1", provider}}
 
       assert result == expected
+    end
+  end
+
+  test "registered-host lifecycle never opens a managed provider process" do
+    for provider <- ~w(claude codex) do
+      assert {:ok, %Runtime.RemoteRef{} = ref} =
+               Runtime.open(provider, %{
+                 session_id: "session-#{provider}",
+                 execution_target: "registered_host",
+                 execution_host_id: "host-1",
+                 workspace_id: "ws-1",
+                 host_directory: Directory,
+                 remote_dispatch: LifecycleDispatch,
+                 resume: false
+               })
+
+      assert ref.provider == provider
+      assert is_nil(ref.lease_id)
+      assert Runtime.alive?(ref)
+      assert :ok = Runtime.send_turn(provider, ref, "hello")
+      assert :ok = Runtime.steer(provider, ref, %{mode: "plan"})
+      assert {:ok, request_id} = Runtime.interrupt(provider, ref)
+      assert is_binary(request_id)
+      assert :ok = Runtime.answer_approval(provider, ref, "approval-1", :allow)
+      assert :ok = Runtime.close(provider, ref)
     end
   end
 end

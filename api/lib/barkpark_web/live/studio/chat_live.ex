@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   require Logger
 
+  alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
@@ -188,6 +189,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          provider: "claude",
          execution_target: "managed",
          execution_host_id: nil,
+         execution_hosts: execution_hosts(socket),
          model_choice: "default",
          # Reasoning-effort intent (charter D48), the exact mirror of model_choice.
          effort_choice: "default",
@@ -355,6 +357,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case ReturnTo.sanitize(params["return_to"]) do
       nil -> socket
       rt -> assign(socket, return_to: rt)
+    end
+  end
+
+  defp execution_hosts(socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: workspace_id} -> ChatHosts.list_hosts(workspace_id)
+      _ -> []
     end
   end
 
@@ -2965,14 +2974,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 phx-change="set-execution-host"
                 style="display: inline-flex; align-items: center;"
               >
-                <input
-                  type="text"
-                  name="execution_host_id"
-                  value={@execution_host_id || ""}
-                  placeholder="Registered host UUID"
-                  aria-label="Registered host ID"
-                  style="width: 18rem;"
-                />
+                <span class="bp-select">
+                  <select name="execution_host_id" aria-label="Registered host">
+                    <option value="">Choose local hardware…</option>
+                    <option
+                      :for={host <- @execution_hosts}
+                      value={host.id}
+                      selected={host.id == @execution_host_id}
+                    >
+                      <%= host.name %><%= if host.online, do: " · online", else: " · offline" %>
+                    </option>
+                  </select>
+                </span>
               </form>
               <form
                 :if={is_nil(@store_session_id)}
@@ -3604,6 +3617,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       nil ->
         id = Ecto.UUID.generate()
 
+        scope =
+          if socket.assigns.execution_target == "registered_host" do
+            socket.assigns.current_workspace.id
+          else
+            :global
+          end
+
         # De-fanged strict match (charter D24): a create failure must NOT crash
         # the LiveView (a crashed tab restores nothing). Post an honest line and
         # go offline; the caller withdraws the echo and hands the words back.
@@ -3616,7 +3636,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                  cwd: Runtime.cwd(socket.assigns.provider),
                  mode: socket.assigns.mode
                },
-               :global
+               scope
              ) do
           {:ok, _} ->
             socket
@@ -3655,6 +3675,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
              provider_session_id: socket.assigns[:provider_session_id],
              execution_target: socket.assigns.execution_target,
              execution_host_id: socket.assigns.execution_host_id,
+             workspace_id:
+               socket.assigns[:current_workspace] && socket.assigns.current_workspace.id,
              cwd: Runtime.cwd(socket.assigns.provider),
              mode: socket.assigns.mode,
              resume: resume?,

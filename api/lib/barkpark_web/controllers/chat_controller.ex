@@ -537,6 +537,7 @@ defmodule BarkparkWeb.ChatController do
              provider_session_id: session.provider_session_id,
              execution_target: session.execution_target,
              execution_host_id: session.execution_host_id,
+             workspace_id: session.owner_workspace_id,
              cwd: session.cwd,
              mode: session.mode || "plan",
              resume: resume?,

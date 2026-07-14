@@ -19,8 +19,13 @@ type Runner struct {
 	PollInterval      time.Duration
 	HeartbeatInterval time.Duration
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	mu     sync.Mutex
+	active map[string]activeCommand
+}
+
+type activeCommand struct {
+	sessionID string
+	cancel    context.CancelFunc
 }
 
 func (r *Runner) Run(ctx context.Context) error {
@@ -33,7 +38,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	if r.HeartbeatInterval <= 0 {
 		r.HeartbeatInterval = 15 * time.Second
 	}
-	r.cancels = make(map[string]context.CancelFunc)
+	r.active = make(map[string]activeCommand)
 
 	poll := time.NewTicker(r.PollInterval)
 	heartbeat := time.NewTicker(r.HeartbeatInterval)
@@ -72,19 +77,26 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) start(parent context.Context, command RemoteCommand) {
+	operation, _ := command.Command["operation"].(string)
+	if operation == "interrupt" || operation == "close" {
+		sessionID, _ := command.Command["session_id"].(string)
+		r.cancelSession(sessionID)
+	}
+
 	r.mu.Lock()
-	if _, exists := r.cancels[command.LeaseID]; exists {
+	if _, exists := r.active[command.LeaseID]; exists {
 		r.mu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithCancel(parent)
-	r.cancels[command.LeaseID] = cancel
+	sessionID, _ := command.Command["session_id"].(string)
+	r.active[command.LeaseID] = activeCommand{sessionID: sessionID, cancel: cancel}
 	r.mu.Unlock()
 
 	go func() {
 		defer func() {
 			r.mu.Lock()
-			delete(r.cancels, command.LeaseID)
+			delete(r.active, command.LeaseID)
 			r.mu.Unlock()
 			cancel()
 		}()
@@ -108,8 +120,22 @@ func (r *Runner) start(parent context.Context, command RemoteCommand) {
 func (r *Runner) cancelAll() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for leaseID, cancel := range r.cancels {
-		cancel()
-		delete(r.cancels, leaseID)
+	for leaseID, active := range r.active {
+		active.cancel()
+		delete(r.active, leaseID)
+	}
+}
+
+func (r *Runner) cancelSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for leaseID, active := range r.active {
+		if active.sessionID == sessionID {
+			active.cancel()
+			delete(r.active, leaseID)
+		}
 	}
 }

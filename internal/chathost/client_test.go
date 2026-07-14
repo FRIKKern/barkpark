@@ -101,8 +101,20 @@ type blockingHandler struct {
 
 type emittingHandler struct{}
 
+type cancelOnlyHandler struct {
+	started  chan struct{}
+	canceled chan struct{}
+}
+
 func (emittingHandler) Handle(_ context.Context, _ RemoteCommand, emit func(map[string]any) error) error {
 	return emit(map[string]any{"kind": "terminal", "terminal_state": "completed"})
+}
+
+func (h *cancelOnlyHandler) Handle(ctx context.Context, _ RemoteCommand, _ func(map[string]any) error) error {
+	close(h.started)
+	<-ctx.Done()
+	close(h.canceled)
+	return nil
 }
 
 func (h *blockingHandler) Handle(ctx context.Context, _ RemoteCommand, _ func(map[string]any) error) error {
@@ -161,6 +173,34 @@ func TestRunnerCancelsProviderWorkWhenCredentialIsRevoked(t *testing.T) {
 	case <-handler.canceled:
 	case <-time.After(time.Second):
 		t.Fatal("provider process context was not cancelled")
+	}
+}
+
+func TestRunnerInterruptCancelsActiveSession(t *testing.T) {
+	handler := &cancelOnlyHandler{started: make(chan struct{}), canceled: make(chan struct{})}
+	runner := Runner{
+		Handler: handler,
+		active:  make(map[string]activeCommand),
+	}
+
+	runner.start(context.Background(), RemoteCommand{
+		LeaseID: "turn-lease",
+		Command: map[string]any{
+			"operation":  "send_turn",
+			"session_id": "session-1",
+		},
+	})
+	select {
+	case <-handler.started:
+	case <-time.After(time.Second):
+		t.Fatal("provider work did not start")
+	}
+
+	runner.cancelSession("session-1")
+	select {
+	case <-handler.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("interrupt did not cancel active session")
 	}
 }
 
