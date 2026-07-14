@@ -31,28 +31,42 @@
  * is dropped, and no plaintext is ever produced. JSON-encoding the triple means
  * there is no delimiter to smuggle (`["a","b|c"]` ≠ `["a|b","c"]`).
  *
- * ## Wire format — byte-identical to `api/lib/barkpark/crypto/local_kek.ex`
+ * ## Wire format — the LocalKek envelope layout, byte for byte
  *
  *     Base64( iv(12) ‖ tag(16) ‖ ciphertext )
  *
- * Same layout as the BEAM side on purpose: one wire format across the codebase,
- * so a blob is legible from either language and a future move of this table into
- * Ecto needs no re-encryption.
+ * Same envelope layout as `api/lib/barkpark/crypto/local_kek.ex` on purpose: one
+ * wire LAYOUT across the codebase, so a blob is legible byte-for-byte from either
+ * language. What differs from LocalKek is the KEY and the AAD: a V2 blob is
+ * sealed under a PER-WORKSPACE derived key (see "## Keys") with the `bpc2|` AAD
+ * prefix as its version tag, and nothing on the Elixir side decodes it (V2 proved
+ * the read path is Node-only). The version is not a stored byte — it is the AAD
+ * prefix, recovered at open time by trying each scheme.
  *
  * ## Keys
  *
- * `CONNECTORS_CREDENTIAL_KEY` is an INDEPENDENT key (base64, 32 bytes) — not
- * `BARKPARK_KEK`, not the API token. Missing key = BOOT FAILURE (see config.ts's
- * `required()`); there is deliberately NO plaintext fallback path in this module,
- * because a fallback is how "encrypted at rest" quietly becomes "sometimes".
+ * `CONNECTORS_CREDENTIAL_KEY` is an INDEPENDENT instance key (base64, 32 bytes) —
+ * not `BARKPARK_KEK`, not the API token. It is the KEK: it never encrypts a row
+ * directly. Every V2 seal runs it through
+ * `HKDF-SHA256(KEK, salt, "workspace|"+workspaceId)` first, so each workspace has
+ * its OWN data-encryption key and a single leaked row-key compromises one tenant,
+ * not the instance. Missing key = BOOT FAILURE (see config.ts's `required()`);
+ * there is deliberately NO plaintext fallback path in this module, because a
+ * fallback is how "encrypted at rest" quietly becomes "sometimes".
+ *
  * `CONNECTORS_CREDENTIAL_KEY_PREVIOUS` is tried only AFTER the current key fails,
- * so a key rotation can re-seal rows without a flag day.
+ * so a key rotation opens old rows without a flag day. New rows always take the
+ * current key; a full rotation completes when `tenant/rewrap.ts` re-seals every
+ * row under the current per-workspace DEK, after which the previous key can
+ * retire. Legacy V1 rows (sealed under the instance key directly, pre-DEK) still
+ * open, and the same sweep upgrades them to V2.
  *
  * Zero new dependencies: `node:crypto` only.
  */
 import {
   createCipheriv,
   createDecipheriv,
+  hkdfSync,
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
@@ -62,8 +76,43 @@ const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 
-/** Version tag on the AAD. Bump only for a genuine format break. */
-const AAD_PREFIX = "bpc1|";
+/**
+ * The AAD version prefix IS the key-version tag, and it lives INSIDE the sealed
+ * envelope: the AAD is authenticated by the GCM tag, so flipping the version a
+ * blob was sealed with makes it fail closed. It is NOT a physical column
+ * (`connector_installs` is unchanged, and no Elixir decodes the blob — V2). A
+ * blob's version is recovered at open time by trying each scheme and letting GCM
+ * reject the wrong one, so nothing has to be stored to tell them apart and old
+ * V1 rows still open unchanged. See the "## Keys" section above.
+ *
+ *   V1  the instance key sealed the row directly (pre-DEK, before this wave).
+ *   V2  a PER-WORKSPACE key seals the row (this wave). New seals are always V2.
+ */
+const AAD_PREFIX_V1 = "bpc1|";
+const AAD_PREFIX_V2 = "bpc2|";
+
+/** The scheme every NEW seal uses. Opening still accepts V1. */
+const CURRENT_VERSION = 2 as const;
+type SealVersion = 1 | 2;
+
+/**
+ * Per-workspace DEK derivation (V2, charter D37 follow-through).
+ *
+ * Each workspace's data-encryption key is
+ * `HKDF-SHA256(instanceKEK, salt, "workspace|"+workspaceId)` — so the instance
+ * key in `.env` never directly encrypts a row, and a ciphertext leaked for one
+ * tenant is bound to a key that no other tenant's identity can derive. The AAD
+ * already fails a cross-tenant paste closed; the DEK removes the shared key that
+ * sat under every tenant, so a single leaked row-key compromises ONE workspace,
+ * not the instance.
+ *
+ * The salt is a fixed domain-separation constant, not a stored random: the KEK
+ * is already 32 bytes of entropy, so a per-row random salt would add nothing and
+ * would have to be persisted alongside the blob. HKDF's `info` carries the
+ * workspace, which is what actually separates the keys.
+ */
+const DEK_HKDF_SALT = Buffer.from("barkpark/connectors/credential-dek/v2", "utf8");
+const DEK_HKDF_INFO_PREFIX = "workspace|";
 
 /** The row identity a sealed blob is bound to. All three fields are load-bearing. */
 export interface CredentialIdentity {
@@ -127,15 +176,42 @@ export class CredentialOpenError extends CredentialCipherError {
  * Exported because the negative tests assert on it directly: the AAD is the
  * security boundary, so it is worth being able to see it.
  */
-export function credentialAad(identity: CredentialIdentity): Buffer {
+export function credentialAad(
+  identity: CredentialIdentity,
+  version: SealVersion = CURRENT_VERSION,
+): Buffer {
+  const prefix = version === 1 ? AAD_PREFIX_V1 : AAD_PREFIX_V2;
   return Buffer.from(
-    AAD_PREFIX +
+    prefix +
       JSON.stringify([
         identity.provider,
         identity.installKey,
         identity.workspaceId,
       ]),
     "utf8",
+  );
+}
+
+/**
+ * Derive a workspace's V2 data-encryption key from the instance KEK.
+ *
+ * Exported so the negative test can prove DEK isolation directly: workspace A's
+ * DEK and workspace B's DEK are different bytes, and A's DEK cannot open a blob
+ * sealed for B — independently of the AAD binding. Callers that seal or open do
+ * NOT call this; it lives inside the cipher closure.
+ */
+export function deriveWorkspaceDek(
+  instanceKey: Buffer,
+  workspaceId: string,
+): Buffer {
+  return Buffer.from(
+    hkdfSync(
+      "sha256",
+      instanceKey,
+      DEK_HKDF_SALT,
+      DEK_HKDF_INFO_PREFIX + workspaceId,
+      KEY_BYTES,
+    ),
   );
 }
 
@@ -188,6 +264,15 @@ export interface CredentialCipher {
   open(sealed: string, identity: CredentialIdentity): string;
   /** True when `sealed` opens for `identity`. The non-throwing probe. */
   opens(sealed: string, identity: CredentialIdentity): boolean;
+  /**
+   * True when `sealed` opens under the CURRENT key using the CURRENT scheme
+   * (V2 per-workspace DEK) — i.e. it does NOT need rewrapping. A blob sealed
+   * under a PREVIOUS key, or in the legacy V1 scheme, returns false even though
+   * `open` would still recover it. `tenant/rewrap.ts` uses this to skip
+   * already-current rows (idempotency / resumability) and to know that a row
+   * still binds the old key.
+   */
+  isSealedWithCurrentKey(sealed: string, identity: CredentialIdentity): boolean;
 }
 
 export interface CredentialCipherOptions {
@@ -249,17 +334,49 @@ export function createCredentialCipher(
     const iv = raw.subarray(0, IV_BYTES);
     const tag = raw.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
     const ciphertext = raw.subarray(IV_BYTES + TAG_BYTES);
-    const aad = credentialAad(identity);
+    const aadV2 = credentialAad(identity, 2);
+    const aadV1 = credentialAad(identity, 1);
 
+    // For each candidate KEK (current, then each previous — the rotation order),
+    // try the CURRENT scheme first (V2 per-workspace DEK) and fall back to the
+    // legacy V1 scheme (instance key straight). GCM fails closed on the wrong
+    // key OR the wrong AAD prefix, so at most one (key, scheme) pair opens a blob
+    // — that IS how the version is recovered without storing a version byte.
     for (const key of keys) {
-      const plaintext = openWith(key, iv, tag, ciphertext, aad);
-      if (plaintext !== null) return plaintext;
+      const dek = deriveWorkspaceDek(key, identity.workspaceId);
+      const v2 = openWith(dek, iv, tag, ciphertext, aadV2);
+      if (v2 !== null) return v2;
+
+      const v1 = openWith(key, iv, tag, ciphertext, aadV1);
+      if (v1 !== null) return v1;
     }
 
     throw new CredentialOpenError(
       identity,
       "wrong key, tampered bytes, or sealed for a DIFFERENT row identity",
     );
+  };
+
+  // Does this blob already carry the CURRENT key + CURRENT scheme? The rewrap
+  // sweep's idempotency hinges on it: a row every present blob of which answers
+  // true is already rewrapped and must be left byte-for-byte alone. Only the
+  // current KEK's V2 DEK is tried — a previous-key or V1 blob answers false and
+  // gets rewrapped, which is exactly the condition that lets the old key retire.
+  const isSealedWithCurrentKey = (
+    sealed: string,
+    identity: CredentialIdentity,
+  ): boolean => {
+    let raw: Buffer;
+    try {
+      raw = decodeSealed(sealed, identity);
+    } catch {
+      return false;
+    }
+    const iv = raw.subarray(0, IV_BYTES);
+    const tag = raw.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
+    const ciphertext = raw.subarray(IV_BYTES + TAG_BYTES);
+    const dek = deriveWorkspaceDek(current, identity.workspaceId);
+    return openWith(dek, iv, tag, ciphertext, credentialAad(identity, 2)) !== null;
   };
 
   return {
@@ -283,16 +400,19 @@ export function createCredentialCipher(
         );
       }
 
+      // V2: seal under this workspace's DERIVED key, never the instance KEK
+      // directly. The version tag rides the AAD prefix (bpc2|).
+      const dek = deriveWorkspaceDek(current, identity.workspaceId);
       const iv = randomBytes(IV_BYTES);
-      const cipher = createCipheriv(ALGORITHM, current, iv);
-      cipher.setAAD(credentialAad(identity));
+      const cipher = createCipheriv(ALGORITHM, dek, iv);
+      cipher.setAAD(credentialAad(identity, CURRENT_VERSION));
       const ciphertext = Buffer.concat([
         cipher.update(plaintext, "utf8"),
         cipher.final(),
       ]);
       const tag = cipher.getAuthTag();
 
-      // iv ‖ tag ‖ ct — the LocalKek layout, byte for byte.
+      // iv ‖ tag ‖ ct — the LocalKek envelope layout, byte for byte.
       return Buffer.concat([iv, tag, ciphertext]).toString("base64");
     },
 
@@ -306,6 +426,8 @@ export function createCredentialCipher(
         return false;
       }
     },
+
+    isSealedWithCurrentKey,
   };
 }
 
