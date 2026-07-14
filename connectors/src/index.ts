@@ -349,7 +349,15 @@ export async function startBridge(
     previousKeys: config.previousCredentialKeys,
   });
 
-  const pool = createBridgePool({ connectionString: config.databaseUrl });
+  const pool = createBridgePool({
+    connectionString: config.databaseUrl,
+    // A terminated idle backend (Postgres restart/failover) is survivable — the
+    // pool drops the dead client and opens a fresh one — but it must be VISIBLE.
+    onIdleClientError: (err) =>
+      console.warn(
+        `[bridge] idle Postgres client dropped by the server (pool recovers): ${err.message}`,
+      ),
+  });
   // Idempotent, and FAIL-CLOSED: refuses to boot if the pool's search_path is not
   // pinned to chat_bridge, because state-pg's unqualified DDL would then land in
   // Barkpark's Ecto-owned `public` schema (D28). No Ecto migration (D33).

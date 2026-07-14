@@ -41,6 +41,13 @@ export interface BridgePoolClient {
 
 export interface CreateBridgePoolOptions {
   connectionString: string;
+  /**
+   * Called when the pool reports an error on an IDLE client (a terminated
+   * backend — see the listener in {@link createBridgePool}). Optional because
+   * the listener MUST exist either way; this only decides whether the event is
+   * also recorded. Never used to reject an in-flight query.
+   */
+  onIdleClientError?: (err: Error) => void;
 }
 
 /**
@@ -49,12 +56,30 @@ export interface CreateBridgePoolOptions {
  * boot to create the schema + tables idempotently.
  */
 export function createBridgePool(options: CreateBridgePoolOptions): pg.Pool {
-  return new pg.Pool({
+  const pool = new pg.Pool({
     connectionString: options.connectionString,
     // Startup parameter: server-side, applied at connection open, ahead of any
     // query. This is the guarantee that state-pg's unqualified DDL is isolated.
     options: `-c search_path=${CHAT_BRIDGE_SCHEMA}`,
   });
+
+  // MANDATORY, not defensive. A pg Pool emits 'error' on an IDLE client whose
+  // backend the server terminated — a Postgres restart, a failover, an admin
+  // `pg_terminate_backend`, an idle-session timeout. That event has no
+  // associated query to reject into, so with no listener attached Node treats
+  // it as an unhandled 'error' event and KILLS THE PROCESS. For a long-lived
+  // bridge that is the difference between riding out a database restart and
+  // dying on one. pg's own docs are explicit about this.
+  //
+  // Swallowing is correct here: the pool has already discarded the dead client
+  // and will open a fresh one on the next checkout, so there is nothing to
+  // repair — only to record. In-flight queries still reject at their own call
+  // site; this handler never hides those.
+  pool.on("error", (err) => {
+    options.onIdleClientError?.(err);
+  });
+
+  return pool;
 }
 
 /**
