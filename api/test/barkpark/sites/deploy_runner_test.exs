@@ -20,6 +20,33 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.DeployRunner
+  alias Barkpark.Sites.Provisioner
+
+  # Every `deploy` now provisions FIRST (charter D33/D34) — so point the
+  # Provisioner at a TMP sites dir + a TMP stand-in template for the whole
+  # module, or every deploy trigger would try (and fail) to write
+  # /opt/barkpark/sites. A `rollback` never provisions, so those tests are
+  # unaffected by this.
+  setup do
+    base = Path.join(System.tmp_dir!(), "bp-dr-prov-#{System.unique_integer([:positive])}")
+    sites = Path.join(base, "sites")
+    template = Path.join(base, "template")
+    File.mkdir_p!(template)
+    File.write!(Path.join(template, "package.json"), ~s({"name":"stub"}))
+
+    prior = Application.get_env(:barkpark, Provisioner)
+    Application.put_env(:barkpark, Provisioner, sites_dir: sites, template_dir: template)
+
+    on_exit(fn ->
+      if prior,
+        do: Application.put_env(:barkpark, Provisioner, prior),
+        else: Application.delete_env(:barkpark, Provisioner)
+
+      File.rm_rf(base)
+    end)
+
+    {:ok, sites: sites, template: template}
+  end
 
   # ── helpers ─────────────────────────────────────────────────────────────
 
@@ -504,6 +531,52 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     test "a slug that has never deployed is :idle, not an error" do
       assert %{state: :idle, slug: "never-seen", stages: [], log: []} =
                DeployRunner.status("never-seen")
+    end
+  end
+
+  # ── PROVISION runs before the port (charter D33/D34) ─────────────────────
+
+  describe "provisioning" do
+    test "a deploy materializes the site source BEFORE the deploy port opens", %{sites: sites} do
+      put_cfg(enabled: true, command: stub("exit 0"))
+
+      assert DeployRunner.trigger(req("prov-blog")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("prov-blog")
+
+      # The template landed at exactly the <sites_dir>/<slug>/src the engine
+      # reads — proof the source now exists for BUILD (no more exit-10).
+      src = Path.join([sites, "prov-blog", "src"])
+      assert File.exists?(Path.join(src, "package.json"))
+      assert File.regular?(Path.join(src, ".bp-provisioned"))
+    end
+
+    test "a provision failure short-circuits like an open_port failure (no run, no port)" do
+      pid = Process.whereis(DeployRunner)
+
+      # Point the template at nothing — provision fails fail-closed, so the
+      # deploy must never start (exactly like a missing executable does).
+      Application.put_env(:barkpark, Provisioner,
+        sites_dir: Path.join(System.tmp_dir!(), "bp-dr-fail-#{System.unique_integer([:positive])}"),
+        template_dir: Path.join(System.tmp_dir!(), "bp-no-template-#{System.unique_integer([:positive])}")
+      )
+
+      put_cfg(enabled: true, command: stub("exit 0"))
+
+      assert DeployRunner.trigger(req("prov-fail")) == {:error, :start_failed}
+      # The Runner survived the fail-closed provision…
+      assert Process.whereis(DeployRunner) == pid
+      # …and no run was recorded — the slug is still idle.
+      assert %{state: :idle} = DeployRunner.status("prov-fail")
+    end
+
+    test "a rollback does NOT provision — its source is already there", %{sites: sites} do
+      put_cfg(enabled: true, rollback_command: stub("exit 0"))
+
+      assert DeployRunner.trigger(req("rb-noprov", mode: "rollback")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = await_done("rb-noprov")
+
+      # No src materialized for a rollback.
+      refute File.exists?(Path.join([sites, "rb-noprov", "src"]))
     end
   end
 

@@ -63,7 +63,10 @@ defmodule Barkpark.Sites.DeployRunner do
 
   use GenServer
 
+  require Logger
+
   alias Barkpark.Sites.DeployRequest
+  alias Barkpark.Sites.Provisioner
 
   @default_command {"bash", ["deploy/site-deploy.sh"]}
   @default_rollback_command {"bash", ["deploy/site-deploy.sh", "--rollback"]}
@@ -255,6 +258,27 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   defp start_run(state, %DeployRequest{} = req) do
+    # PROVISION FIRST (charter D33/D34): a content-bound static site has no repo
+    # to check out, so its source must be materialized from the shipped template
+    # BEFORE the deploy port opens — otherwise site-deploy.sh walks PLAN and dies
+    # at BUILD with `no site source dir …/src` (exit 10). Deploy only; a rollback
+    # is a symlink repoint whose source is already there (Provisioner no-ops it).
+    # Fail-closed: a provision failure short-circuits EXACTLY like an open_port
+    # failure — no Port, no run recorded, `{:error, :start_failed}`.
+    case Provisioner.provision(req) do
+      :ok ->
+        open_port_and_record(state, req)
+
+      {:error, {:provision_failed, reason}} ->
+        Logger.warning(
+          "[site-deploy] provision failed for #{inspect(req.slug)} — deploy not started: #{inspect(reason)}"
+        )
+
+        {:reply, {:error, :start_failed}, state}
+    end
+  end
+
+  defp open_port_and_record(state, %DeployRequest{} = req) do
     case open_port(req) do
       {:ok, port} ->
         schedule_run_deadline(port)
