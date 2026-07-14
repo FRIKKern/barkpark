@@ -84,11 +84,23 @@ export interface ConnectDeps {
   mountInstall(install: ConnectorInstall): Promise<unknown>;
   /** `Bridge.removeInstall` — unroute now, before the row is deleted. */
   unmountInstall(provider: string, installKey: string): Promise<boolean>;
+  /**
+   * STAGE a pending-connect row for the OAuth flow (D63), sealing the raw chat
+   * token under the ticket's nonce. Only providers that connect over OAuth
+   * (Slack) use this — the paste flow ships both secrets in ONE `/connect` write
+   * and never stages. Absent ⇒ `/connect/pending` answers the opaque 404.
+   */
+  stagePending?(input: {
+    nonce: string;
+    workspaceId: string;
+    provider: string;
+    chatToken: string;
+  }): Promise<void>;
   now?: () => number;
 }
 
-/** The three routes, named by the thing they do. */
-export type ConnectAction = "validate" | "connect" | "disconnect";
+/** The routes, named by the thing they do. */
+export type ConnectAction = "validate" | "connect" | "disconnect" | "pending";
 
 /**
  * A rendered answer — or `null`, meaning "answer the caller's OWN opaque 404".
@@ -187,6 +199,11 @@ export async function handleConnectRequest(
   const ticket = readTicket(rawTicket, deps);
   if (ticket === null) return UNAUTHORIZED;
 
+  // PENDING is handled BEFORE the `connector.connect` gate: it is the OAuth flow's
+  // staging step (Slack has NO paste-mode `connect` member), and it needs nothing
+  // from the connector — only a verified ticket and the raw chat token.
+  if (action === "pending") return stagePending(body, ticket, deps);
+
   const connector = deps.registry.get(ticket.provider);
   // An unknown provider, or one that is catalog-visible but NOT connectable
   // (Slack = OAuth, Teams = admin consent, iMessage = self-hosted): the same
@@ -202,6 +219,36 @@ export async function handleConnectRequest(
     case "disconnect":
       return disconnect(body, ticket, deps);
   }
+}
+
+/**
+ * STAGE — seal the raw chat token into a pending-connect row under the ticket's
+ * nonce (D63), so the public OAuth callback can join it after Slack redirects.
+ *
+ * The provider comes from the TICKET, never the body, and the chat token rides
+ * THIS loopback body once — never logged, never echoed, never a URL. If the bridge
+ * was not built with a `stagePending` (no OAuth channel configured) the route is
+ * the same opaque 404 as any unknown one.
+ */
+async function stagePending(
+  body: Record<string, unknown>,
+  ticket: ConnectTicket,
+  deps: ConnectDeps,
+): Promise<ConnectReply> {
+  if (!deps.stagePending) return null;
+
+  const chatToken = stringField(body, "chat_token");
+  if (chatToken === null) return BAD_REQUEST;
+  if (!ticket.nonce || ticket.nonce.trim() === "") return BAD_REQUEST;
+
+  await deps.stagePending({
+    nonce: ticket.nonce,
+    workspaceId: ticket.workspaceId,
+    provider: ticket.provider,
+    chatToken,
+  });
+
+  return { status: 200, body: { ok: true, provider: ticket.provider } };
 }
 
 /** VALIDATE — the provider says yes or no, and NOTHING is written either way. */

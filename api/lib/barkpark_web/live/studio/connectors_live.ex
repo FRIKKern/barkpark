@@ -41,9 +41,15 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     * The bridge unreachable ⇒ the operator is told the bridge is not answering.
       There is no code path anywhere in this module that renders "Connected"
       without an install row read back out of the database.
-    * A provider we cannot honestly connect (Slack's OAuth is not wired; Teams
-      needs your org's Azure admin; WhatsApp needs Meta App Review; iMessage needs
-      a Mac you own) shows its gate as prose and NO button.
+    * Slack connects over OAUTH (Add to Slack), not the paste modal (D62). The
+      card renders an external `<a>` carrying a signed connect ticket as `state`;
+      Studio first stages the workspace-bound chat token over LOOPBACK (D63) so
+      the public callback can join it. If the instance has no Slack app configured
+      (no client id / public URL) the card shows an honest note, never a broken
+      button.
+    * A provider we cannot honestly connect (Teams needs your org's Azure admin;
+      WhatsApp needs Meta App Review; iMessage needs a Mac you own) shows its gate
+      as prose and NO button.
 
   Zero installs exist anywhere today. Nothing here seeds one.
   """
@@ -73,7 +79,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
        # A scope switch from here re-opens Connectors under the new scope.
        scope_subpath: "/connectors",
        dialog: nil,
-       disconnecting: nil
+       disconnecting: nil,
+       # The Add-to-Slack OAuth surface (D62), populated on connect: either a
+       # ready authorize URL or an honest note about why there is none.
+       slack_add_url: nil,
+       slack_gate: nil
      )}
   end
 
@@ -84,7 +94,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     # so load once, on connect. Until then the cards render "Loading…", never a
     # confident "Not connected" the read might contradict.
     if connected?(socket) do
-      {:noreply, load_installs(socket)}
+      {:noreply, reload(socket)}
     else
       {:noreply, socket}
     end
@@ -207,7 +217,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           {:noreply,
            socket
            |> assign(:disconnecting, nil)
-           |> load_installs()
+           |> reload()
            |> put_flash(
              :info,
              "Disconnected #{provider_name(provider)}. #{revoked} token#{plural(revoked)} revoked."
@@ -251,7 +261,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           {:ok, %{install_key: ^install_key}} ->
             socket
             |> assign(:dialog, nil)
-            |> load_installs()
+            |> reload()
             |> put_flash(:info, "#{provider_name(provider)} connected.")
 
           {:ok, %{install_key: other}} ->
@@ -279,14 +289,28 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   end
 
   defp revoke_install_tokens(ws_id, provider, install_key) do
-    ws_id
-    |> Auth.live_tokens_by_label(Catalog.token_label(provider, install_key))
+    # The install's own labelled token — and, for Slack, ALSO the OAuth-minted
+    # token. The Add-to-Slack flow mints its chat token BEFORE the install key is
+    # known (the OAuth callback learns team_id only after the redirect), so it is
+    # labelled `connector:slack:oauth`, not `connector:slack:<install_key>` — a
+    # named limitation (filed backlog). Revoking both here keeps a disconnect from
+    # leaving a live workspace credential behind.
+    install_token_labels(provider, install_key)
+    |> Enum.flat_map(&Auth.live_tokens_by_label(ws_id, &1))
     |> Enum.reduce(0, fn token, acc ->
       case Auth.revoke_token(token) do
         {:ok, _} -> acc + 1
         _ -> acc
       end
     end)
+  end
+
+  defp install_token_labels("slack", install_key) do
+    [Catalog.token_label("slack", install_key), slack_oauth_label()]
+  end
+
+  defp install_token_labels(provider, install_key) do
+    [Catalog.token_label(provider, install_key)]
   end
 
   # ── Gate + helpers ─────────────────────────────────────────────────────────
@@ -324,6 +348,97 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     socket
     |> assign(:installs, Catalog.installs_by_provider(socket.assigns[:current_workspace]))
     |> assign(:loaded?, true)
+  end
+
+  # Read the installs, THEN prepare the Add-to-Slack surface (which depends on
+  # whether a Slack install already exists). Called on connect and after any
+  # connect/disconnect that changes what is installed.
+  defp reload(socket) do
+    socket
+    |> load_installs()
+    |> prepare_slack_oauth()
+  end
+
+  # THE ADD-TO-SLACK SURFACE (D62/D63). Decide, honestly, which of three states the
+  # Slack card is in: a ready OAuth button, no button (already connected / not an
+  # admin / no connect seam), or an honest note (no Slack app configured).
+  #
+  # A ready button means a fresh chat token has been minted and STAGED over
+  # loopback — so this runs only when it should: gated on workspace-admin, a connect
+  # seam, a configured Slack app, and NO existing Slack install.
+  defp prepare_slack_oauth(socket) do
+    slack_connected? = Map.has_key?(socket.assigns.installs, "slack")
+
+    cond do
+      # An install exists: the card shows Disconnect, not Add to Slack.
+      slack_connected? ->
+        assign(socket, slack_add_url: nil, slack_gate: nil)
+
+      # A non-admin (mounts the page, cannot change connectors — D49) or an
+      # instance with no connect seam: no button, and the read-only banner already
+      # explains the latter.
+      match?({:error, :forbidden}, authorize(socket)) or not socket.assigns.connect_configured? ->
+        assign(socket, slack_add_url: nil, slack_gate: nil)
+
+      # No Slack app on this instance: an honest note, never a broken button.
+      Catalog.slack_oauth_config() == nil ->
+        assign(socket,
+          slack_add_url: nil,
+          slack_gate:
+            "Add to Slack is not configured on this instance — it needs a Slack app " <>
+              "(a client id from api.slack.com and a public callback URL). See " <>
+              "docs/ops/slack-app.md."
+        )
+
+      true ->
+        stage_slack_oauth(socket)
+    end
+  end
+
+  # Mint a workspace-bound chat token, STAGE it over loopback under a fresh connect
+  # ticket's nonce (D63), and hand back the Add-to-Slack URL carrying that ticket
+  # as `state`. The raw token rides the loopback stage, NEVER the URL.
+  defp stage_slack_oauth(socket) do
+    {:ok, ws, _principal} = authorize(socket)
+    cfg = Catalog.slack_oauth_config()
+
+    # Any prior unclicked OAuth token for this workspace is stale on this path (no
+    # Slack install exists), so revoke it before minting a fresh one — at most one
+    # unattached credential at a time, never a growing pile.
+    revoke_slack_oauth_tokens(ws.id)
+
+    with {:ok, ticket} <- ConnectTicket.sign(ws.id, "slack"),
+         {:ok, raw, token} <- Auth.create_chat_token(slack_oauth_label(), @dataset, ws.id) do
+      case Connectors.bridge().stage_pending(ticket, raw) do
+        {:ok, _} ->
+          assign(socket,
+            slack_add_url: Catalog.slack_authorize_url(ticket, cfg),
+            slack_gate: nil
+          )
+
+        {:error, reason} ->
+          # Never leave a minted-but-unstaged token live — a chat token with no
+          # pending row is a workspace credential nobody owns.
+          Auth.revoke_token(token)
+
+          assign(socket,
+            slack_add_url: nil,
+            slack_gate: "Add to Slack is unavailable right now: #{bridge_message(reason)}"
+          )
+      end
+    else
+      {:error, reason} ->
+        Logger.warning("connectors: could not prepare Add to Slack: #{inspect(reason)}")
+        assign(socket, slack_add_url: nil, slack_gate: "Could not prepare Add to Slack.")
+    end
+  end
+
+  defp slack_oauth_label, do: Catalog.token_label("slack", "oauth")
+
+  defp revoke_slack_oauth_tokens(ws_id) do
+    ws_id
+    |> Auth.live_tokens_by_label(slack_oauth_label())
+    |> Enum.each(&Auth.revoke_token/1)
   end
 
   defp dialog_error(socket, message) do
@@ -403,6 +518,8 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           install={Map.get(@installs, provider.id)}
           loaded?={@loaded?}
           connect_configured?={@connect_configured?}
+          slack_add_url={@slack_add_url}
+          slack_gate={@slack_gate}
         />
       </div>
 
@@ -451,6 +568,8 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   attr :install, :map, default: nil
   attr :loaded?, :boolean, default: false
   attr :connect_configured?, :boolean, default: false
+  attr :slack_add_url, :string, default: nil
+  attr :slack_gate, :string, default: nil
 
   defp provider_card(assigns) do
     ~H"""
@@ -497,6 +616,17 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         {@provider.gate}
       </p>
 
+      <p
+        :if={
+          @provider.connect_mode == :oauth and @loaded? and is_nil(@install) and @slack_gate
+        }
+        data-test-id={"connector-oauth-gate-#{@provider.id}"}
+        class="text-sm"
+        style="margin: 0; color: var(--fg-muted); border-left: 2px solid var(--border); padding-left: 10px;"
+      >
+        {@slack_gate}
+      </p>
+
       <div style="display: flex; gap: 8px; margin-top: auto; padding-top: 4px;">
         <%!-- `@loaded?` is not decoration: until the install read lands we do not
         KNOW that this provider is unconnected, and a Connect button offered beside
@@ -511,6 +641,21 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         >
           Connect
         </button>
+
+        <%!-- Slack connects over OAuth: a plain external link, NOT phx-click into
+        the paste flow. The href carries a signed connect ticket as `state`; the
+        pending chat token was already staged over loopback (D62/D63). --%>
+        <a
+          :if={
+            @provider.connect_mode == :oauth and @loaded? and is_nil(@install) and
+              @connect_configured? and @slack_add_url
+          }
+          href={@slack_add_url}
+          class="btn btn-primary"
+          data-test-id={"connector-add-to-slack-#{@provider.id}"}
+        >
+          Add to Slack
+        </a>
 
         <button
           :if={@install}

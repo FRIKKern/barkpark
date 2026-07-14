@@ -75,6 +75,23 @@ defmodule Barkpark.Connectors.BridgeClient do
   end
 
   @impl true
+  def stage_pending(ticket, chat_token) do
+    # The raw chat token rides THIS body, over loopback, once — sealed by the
+    # bridge into the pending_connect row and never returned. `retry: false` (in
+    # `do_post`) keeps a half-applied stage from being replayed.
+    case post("/connect/pending", %{ticket: ticket, chat_token: chat_token}) do
+      {:ok, %{"ok" => true} = body} ->
+        {:ok, body}
+
+      {:ok, body} ->
+        {:error, {:refused, reason_from(body, "the bridge refused to stage the connect")}}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @impl true
   def disconnect(ticket, install_key) do
     case post("/disconnect", %{ticket: ticket, install_key: install_key}) do
       {:ok, %{"ok" => true} = body} ->
