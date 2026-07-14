@@ -787,6 +787,15 @@ Backlog seeded this wave (published children): `task-felix-auth-genserver-async-
   redesign), sweep-worker unique watch-item, pusher explicit-timeout. Six RUN verifiers overturned
   three wish premises (SSO crash-headline, pool-contention magnitude, CLI-validation sufficiency).
   Fable exhausted — all builders opus. Grade: pending build+review.
+- **Wave 10 — 2026-07-14 — LANDED (steward close-out).** BOTH slices merged to origin/main:
+  (1) auth Finch-pool isolation `#3063` (admin-merged past a pr-task-gate lease-lapse; closed
+  `task-felix-outbound-pool-isolation` + `task-felix-sso-explicit-timeout`); (2) stamp in-range
+  wrong-index guard `#3064` merged as `cf48aeeb7` — closed `task-felix-stamp-index-guard`
+  (all 4 criteria met). #3064 needed steward finish-work after the builder: rebased onto current
+  origin/main, regenerated the AGENTS.md onramp golden + 3 teach wrappers, trimmed the teach line to
+  hold `docs/setup/CODEX.md` under its 10100B budget, and hand-applied the task-stamp OpenAPI summary
+  drift (CI-printed; can't regen locally — OOM). Both slices' three overturned premises stand. Wave 10
+  epic `task-96a908af98698118` slices fully landed.
 
 - **Wave 9 — 2026-07-13 — MERGED.** All four opus slices merged to origin/main (#3038 sobelow
   reconcile, #3039 close.ex Mode-B autostamp, #3040 CDN publish-path async, #3041 D35 audit-dispatch
