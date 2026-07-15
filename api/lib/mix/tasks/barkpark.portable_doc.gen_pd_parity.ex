@@ -84,7 +84,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "type" => "paragraph",
       "content" => [
         %{"type" => "text", "value" => "A body paragraph with "},
-        %{"type" => "text", "value" => "bold emphasis", "marks" => ["bold"]},
+        # Marks are MAPS keyed by "type" (Inline.apply_mark/3) — NOT bare strings.
+        # A string mark hits the unknown-mark passthrough and emits no <span>, so
+        # this fixture would silently NOT exercise D4 inline marks.
+        %{"type" => "text", "value" => "bold emphasis", "marks" => [%{"type" => "bold"}]},
         %{"type" => "text", "value" => " inside it."}
       ]
     },
