@@ -277,6 +277,7 @@ defmodule Barkpark.CycleFleet do
        %{
          cycle_ledger: reconciliation,
          fleet: fleet.fleet,
+         assignment_attributions: assignment_attributions(scope),
          authority: %{
            kind: "barkpark_cycle_fleet",
            workspace_id: reconciliation.scope.workspace_id,
@@ -287,6 +288,28 @@ defmodule Barkpark.CycleFleet do
          }
        }}
     end
+  end
+
+  @doc "Project the immutable retrieval attribution seed for every assignment in one cycle wave."
+  @spec assignment_attributions(map()) :: [map()]
+  def assignment_attributions(scope) when is_map(scope) do
+    scope
+    |> list_assignments()
+    |> Enum.sort_by(&{&1.inserted_at, &1.id})
+    |> Enum.map(&assignment_attribution/1)
+  end
+
+  @doc "Project one cycle assignment's immutable retrieval attribution seed."
+  @spec assignment_attribution(Assignment.t()) :: map()
+  def assignment_attribution(%Assignment{} = assignment) do
+    %{
+      cycle_assignment_id: assignment.id,
+      cycle_wave_id: assignment.cycle_wave_id,
+      assignment_id: assignment.assignment_id,
+      unit_ids: assignment.unit_ids,
+      inventory_digest: assignment.inventory_digest,
+      snapshot_digest: assignment.snapshot_digest
+    }
   end
 
   @spec profile_plan(String.t() | atom(), map()) :: {:ok, map()} | {:error, atom()}

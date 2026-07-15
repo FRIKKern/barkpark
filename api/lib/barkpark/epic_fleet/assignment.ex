@@ -25,6 +25,8 @@ defmodule Barkpark.EpicFleet.Assignment do
     field :effort, :string
     field :snapshot, :map, default: %{}
     field :snapshot_digest, :string
+    field :unit_ids, {:array, :string}, read_after_writes: true
+    field :inventory_digest, :string, read_after_writes: true
     belongs_to :cycle_wave, Barkpark.CycleFleet.Wave
     belongs_to :replaces_assignment, __MODULE__
     has_one :result, Barkpark.EpicFleet.Result

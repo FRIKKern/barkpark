@@ -222,7 +222,8 @@ defmodule BarkparkWeb.CycleFleetController do
   end
 
   defp assignment_json(assignment) do
-    Map.take(assignment, [
+    assignment
+    |> Map.take([
       :id,
       :assignment_id,
       :epic_id,
@@ -232,9 +233,13 @@ defmodule BarkparkWeb.CycleFleetController do
       :effort,
       :snapshot,
       :snapshot_digest,
+      :unit_ids,
+      :inventory_digest,
+      :cycle_wave_id,
       :replaces_assignment_id,
       :inserted_at
     ])
+    |> Map.put(:cycle_assignment_id, assignment.id)
   end
 
   defp result_json(result) do

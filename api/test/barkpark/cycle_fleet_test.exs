@@ -356,7 +356,7 @@ defmodule Barkpark.CycleFleetTest do
     end
 
     test "logical replacement ids resolve to the cycle assignment row UUID", %{scope: scope} do
-      assert {:ok, _wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1"]))
+      assert {:ok, wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1"]))
 
       assert {:ok, original} =
                CycleFleet.create_assignment(
@@ -374,6 +374,15 @@ defmodule Barkpark.CycleFleetTest do
       assert {:ok, replacement} = CycleFleet.create_assignment(replacement_attrs)
       assert replacement.replaces_assignment_id == original.id
       assert CycleFleet.get_assignment(scope, "build-1-retry").id == replacement.id
+      refute replacement.id == original.id
+      assert replacement.cycle_wave_id == wave.id
+      assert replacement.unit_ids == original.unit_ids
+      assert replacement.inventory_digest == original.inventory_digest
+
+      assert {:ok, replacement_replay} = CycleFleet.create_assignment(replacement_attrs)
+
+      assert CycleFleet.assignment_attribution(replacement_replay) ==
+               CycleFleet.assignment_attribution(replacement)
 
       assert {:error, :replacement_not_found} =
                replacement_attrs
@@ -606,6 +615,69 @@ defmodule Barkpark.CycleFleetTest do
       end
     end
 
+    test "retrieval attribution is durable, project-scoped, replay-stable, and append-only" do
+      {workspace, first_project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      second_project = Barkpark.TenancyFixtures.create_project!(workspace, "attribution-other")
+
+      common = %{
+        workspace_id: workspace.id,
+        epic_id: "retrieval-attribution",
+        wave_id: "wave-1"
+      }
+
+      first = Map.put(common, :project_id, first_project.id)
+      second = Map.put(common, :project_id, second_project.id)
+      assert {:ok, first_wave} = CycleFleet.open_wave(epic_wave_attrs(first, ["unit-1"]))
+      assert {:ok, second_wave} = CycleFleet.open_wave(epic_wave_attrs(second, ["unit-2"]))
+
+      attrs = assignment_attrs(first, "build-1", "build", "epic-builder", ["unit-1"])
+      assert {:ok, assignment} = CycleFleet.create_assignment(attrs)
+      assert assignment.cycle_wave_id == first_wave.id
+      assert assignment.unit_ids == ["unit-1"]
+      assert assignment.inventory_digest == first_wave.inventory_digest
+      assert assignment.snapshot_digest == CycleFleet.digest(attrs.snapshot)
+
+      expected = %{
+        cycle_assignment_id: assignment.id,
+        cycle_wave_id: first_wave.id,
+        assignment_id: "build-1",
+        unit_ids: ["unit-1"],
+        inventory_digest: first_wave.inventory_digest,
+        snapshot_digest: assignment.snapshot_digest
+      }
+
+      assert CycleFleet.assignment_attributions(first) == [expected]
+      assert CycleFleet.assignment_attributions(second) == []
+      assert {:ok, %{assignment_attributions: [^expected]}} = CycleFleet.projection(first)
+
+      assert {:ok, replay} = CycleFleet.create_assignment(attrs)
+      assert CycleFleet.assignment_attribution(replay) == expected
+
+      assert {:error, :assignment_conflict} =
+               attrs
+               |> put_in([:snapshot, :changed], true)
+               |> CycleFleet.create_assignment()
+
+      assert {:ok, other_assignment} =
+               CycleFleet.create_assignment(
+                 assignment_attrs(second, "build-1", "build", "epic-builder", ["unit-2"])
+               )
+
+      refute other_assignment.id == assignment.id
+      assert other_assignment.cycle_wave_id == second_wave.id
+      assert other_assignment.inventory_digest == second_wave.inventory_digest
+      assert CycleFleet.assignment_attributions(first) == [expected]
+
+      assert_raise Postgrex.Error, ~r/append-only/, fn ->
+        Repo.query!(
+          "UPDATE epic_assignments SET unit_ids = ARRAY['unit-2'] WHERE id = $1",
+          [Ecto.UUID.dump!(assignment.id)]
+        )
+      end
+
+      assert CycleFleet.assignment_attributions(first) == [expected]
+    end
+
     test "Review capacity is immutable for both cycle profiles", %{scope: scope} do
       assert {:ok, _wave} = CycleFleet.open_wave(epic_wave_attrs(scope, ["unit-1"]))
 
@@ -718,6 +790,9 @@ defmodule Barkpark.CycleFleetTest do
 
       assert assignment.snapshot["unit_ids"] == ["unit-1"] or
                assignment.snapshot[:unit_ids] == ["unit-1"]
+
+      assert assignment.unit_ids == ["unit-1"]
+      assert assignment.inventory_digest == CycleFleet.get_wave(scope).inventory_digest
     end
 
     test "completed Build results exactly partition owned units with typed outcome lists", %{

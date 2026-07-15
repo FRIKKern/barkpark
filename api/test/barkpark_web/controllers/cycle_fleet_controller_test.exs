@@ -317,15 +317,38 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       "snapshot_json" => Jason.encode!(%{"unit_ids" => ["unit-1"]})
     }
 
-    assert build_conn()
-           |> bearer(token)
-           |> post(base <> "/assignments", assignment_params)
-           |> json_response(201)
+    created =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", assignment_params)
+      |> json_response(201)
 
-    assert build_conn()
-           |> bearer(token)
-           |> post(base <> "/assignments", assignment_params)
-           |> json_response(201)
+    replayed =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", assignment_params)
+      |> json_response(201)
+
+    assignment = created["assignment"]
+    assert replayed["assignment"] == assignment
+    assert assignment["cycle_assignment_id"] == assignment["id"]
+    assert assignment["unit_ids"] == ["unit-1"]
+    assert assignment["cycle_wave_id"] =~ ~r/^[0-9a-f-]{36}$/
+    assert assignment["inventory_digest"] =~ ~r/^[0-9a-f]{64}$/
+    assert assignment["snapshot_digest"] =~ ~r/^[0-9a-f]{64}$/
+
+    projection = get_cycle(base, token)
+
+    assert projection["assignment_attributions"] == [
+             %{
+               "cycle_assignment_id" => assignment["id"],
+               "cycle_wave_id" => assignment["cycle_wave_id"],
+               "assignment_id" => "build-1",
+               "unit_ids" => ["unit-1"],
+               "inventory_digest" => assignment["inventory_digest"],
+               "snapshot_digest" => assignment["snapshot_digest"]
+             }
+           ]
 
     assignment_conflict =
       build_conn()
