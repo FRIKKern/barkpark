@@ -771,7 +771,87 @@ origin/main` at claim time). Fable exhausted — all builders opus.
 Backlog seeded this wave (published children): `task-felix-auth-genserver-async-fetch`,
 `task-felix-sweep-worker-unique-guard`, `task-felix-pusher-explicit-timeout` (see D57).
 
+## Wave 11 Decisions (2026-07-16) — RELIABLY-GREEN ANCHOR
+
+Wave Paper: **`felix-pristine-wave-2026-07-16`** (guerrilla, style=article). North star: main goes
+RELIABLY green so every `.ex` PR merges on its own gate — no admin override. The wish framed three
+lanes (fix the `deploy_runner_test.exs:581` flake; sweep sibling test-isolation weaknesses; ship any
+Felix doctrine violation). A 6-assignment RUN-verify fleet collapsed all three to ONE ship slice.
+
+- **D59 — This wave is the ANCHOR-ONLY wave: fix `deploy_runner_test.exs:581`; ONE ship slice.**
+  Why: this is the flake that forces admin-merges on every `.ex` PR; verification settled its
+  mechanism decisively, and the sibling-sweep + doctrine lanes both came back empty of any slice
+  that clears the improvement-only bar. A one-slice wave that makes main reliably green IS the north
+  star — no breadth theater.
+- **D60 — Theory A (env-leak → `delete_env` + reset-singleton) is REFUTED and DROPPED.** Why:
+  `config()` reads `Application.get_env(:barkpark, DeployRunner)` LIVE every call
+  (`deploy_runner.ex:134`) and never enters GenServer state, so "reset the singleton" is dead weight;
+  TWO independent CI runs at DIFFERENT seeds (584655 job 87451079266; 706849 job 87461107180) gave
+  the IDENTICAL failure — proving seed/order independence, so there is no cross-file order dependence
+  to inherit; and grep proves NO test leaks `node_rollback_command`/`:cd` for this key. The red is a
+  CONSISTENT-Linux NON-HERMETIC failure: line-581's `put_cfg(enabled: true)` dispatches the SHIPPED
+  default `{"bash", ["deploy/site-deploy-node.sh", "--rollback"]}` from `run_cd = Path.dirname(File.cwd!())`
+  = repo root, where the real script EXISTS; on Linux (flock present) it logs
+  `no live route for 'rt-default' (not_supported)` and NEVER echoes its own path, so
+  `assert log contains "deploy/site-deploy-node.sh"` is structurally unsatisfiable. macOS passed by
+  ACCIDENT (flock absent → bash's `flock: command not found` error is prefixed with the script path).
+- **D61 — The fix is purely HERMETIC: run bash from a scriptless tmp cwd via `put_cfg(enabled: true,
+  cd: scriptless_tmp)`, DEFAULT command untouched.** Why: it preserves the test's stated intent
+  ("prove the SHIPPED default names the node script — argv, not env") while making bash
+  deterministically print `bash: deploy/site-deploy-node.sh: No such file or directory` (path-prefixed)
+  on EVERY host, and the real script never runs. Prototype PROVEN: single test 1→0 red-before under
+  Linux-equiv fake-flock → green-after; full file 36/0 under Linux-equiv flock AND plain macOS;
+  14-line diff, test file only. Also restores the file's own moduledoc contract (`:5-6` "Stub commands
+  only, never the real deploy/site-deploy.sh"), which line-581 alone violates.
+- **D62 — The sibling sweep (wish lane 2) collapses to ZERO ship slices.** Why: verification
+  classified the read-then-merge trio — both siblings are BENIGN. `self_update/runner_test.exs`
+  overrides the exact command key it asserts on in EVERY behavior test (no shipped-default is under
+  test); `provisioner_test.exs` setup overrides all 3 Provisioner keys every test and Provisioner
+  reads ONLY those 3 — zero default-reliance/injection surface. The genuine green-wash shape (partial
+  cfg + assert-on-shipped-default) exists ONLY at `deploy_runner_test.exs:587` (the anchor). Improvement-only
+  forbids hardening clean files.
+- **D63 — The W3 doctrine candidate `task-felix-auth-genserver-async-fetch` is DROPPED for this
+  wave (stays honest backlog).** Why: real OTP smell (sync HTTP in `handle_call(:token)` on
+  github/indx/bokbasen Auth) but the named failure mode is overstated — every `token/0` caller needs
+  the token, so async yields ~zero ops-latency win; the only real delta is control-message
+  responsiveness during a slow fetch, which no caller depends on. W10 (#3063) JUST intentionally
+  shaped these three files (dedicated `Barkpark.Auth.Finch` pool). No red-before proves the headline;
+  under improvement-only this reads as churn. If ever taken, scope HONESTLY to ":invalidate stays
+  responsive during a slow fetch" with a timing red-before — not "serializes all ops for 30s."
+- **D64 — Ecto FK-abort, unsupervised-spawn, and sandbox-ownership candidates are PREMISE-NEGATIVE
+  — DROPPED.** Why: no `Ecto.Multi` anywhere in `api/lib` (every `Repo.transaction` rolls back
+  cleanly, `{:error, changeset}` propagates); every `Task`/`spawn`/`start_link` is supervised or a
+  deliberately-linked/awaited task with a handled failure mode; the `$callers`-scoped sandbox drain
+  (`DataCase.setup_sandbox/1`) is correct and centralized. No named failure mode survives — the
+  DeployRunner flake is orthogonal (plain `ExUnit.Case`, no Repo).
+- **D65 — Backlog seeded (real, off this wave).** Why: none has a provable CURRENT failure mode /
+  red-before. `studio_chat_test.exs:588-596` + `chat_live_test.exs:2049-2054` nil-prior `on_exit`
+  leak (DORMANT — `config/test.exs:169` baseline guarantees `prev` non-nil; defense-in-depth);
+  `tenancy_delete_workspace_test.exs` `:media_cdn` unconditional `delete_env` (W7-fenced, functionally
+  safe today — sole reader supplies matching defaults; post-fence-lift pattern alignment); suite
+  determinism gap (no pinned seed, `MIX_TEST_PARTITION` dormant).
+- **D66 — All-opus; anchor slice is opus.** Why: Fable exhausted; the fix is a 14-line diff with a
+  proven red-before/green-after — no subtle design judgment remains to warrant Fable.
+- **D67 — Disjoint from concurrent cloud-build W6/W7.** Why: verification confirmed ZERO file overlap
+  — the anchor touches only `api/test/barkpark/sites/deploy_runner_test.exs`; nothing under
+  `api/lib/barkpark/tenancy/**` or the W6 search read-path. The W7-fenced `tenancy_delete_workspace_test.exs`
+  is proven NOT the leaker (zero `DeployRunner`/`node_command` refs) and stays off-limits regardless.
+
 ## Wave log
+
+- **Wave 11 — 2026-07-16 — DECIDED (building).** Ratified D59–D67. ONE opus ship slice under
+  `task-96a908af98698118`, linked to `felix-pristine-wave-2026-07-16`: the anchor — hermetic fix of
+  `deploy_runner_test.exs:581` (`task-32ee49492917906d`, re-parented from unparented + brief rewritten
+  off the refuted env-leak theory to the proven `cd: scriptless_tmp` fix). A 6-assignment RUN-verify
+  fleet REFUTED the wish's env-leak framing: two CI seeds (584655/706849) gave identical output →
+  order-independent; `config()` is read live (never in GenServer state) → reset-singleton is dead
+  weight; the real script never echoes its path → the assertion is unsatisfiable on Linux (macOS
+  passed by flock-absent accident). The sibling sweep and the auth-async doctrine candidate BOTH
+  collapsed to zero ship slices (siblings benign; auth-async churn — W10 just shaped those files).
+  Ecto-FK / unsupervised-spawn / sandbox-ownership all premise-negative. Backlog seeded:
+  studio_chat/chat_live nil-prior `on_exit` leak, tenancy `:media_cdn` pattern alignment (W7-fenced),
+  suite-determinism seed pin. Fable exhausted — builder opus. Gate proves red-before/green-after under
+  Linux-equiv fake-flock. Grade: pending build+review.
 
 - **Wave 10 — 2026-07-13 — DECIDED (building).** Ratified D51–D58. TWO opus build slices under
   `task-96a908af98698118`, both linked to `felix-pristine-wave-10-2026-07-13`, file-disjoint
