@@ -110,15 +110,26 @@ defmodule Barkpark.Test.ConnectorsBridgeStub do
   end
 
   defp upsert(ws_id, provider, install_key) do
+    # DIRECTION-AWARE, exactly like the real bridge's `upsertInstall` (D101): a
+    # TOOL install (github/linear) seals ONLY the pasted credential and leaves
+    # `chat_token_ref` NULL — no workspace chat token was minted. A CHANNEL install
+    # carries the sealed chat token. Hardcoding 'SEALED-CHAT-TOKEN' for tools would
+    # make the protective test assert a lie.
+    chat_token_ref =
+      case Barkpark.Connectors.Catalog.direction(provider) do
+        :tool -> nil
+        :channel -> "SEALED-CHAT-TOKEN"
+      end
+
     Repo.query!(
       """
       INSERT INTO chat_bridge.connector_installs
         (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
-      VALUES ($1, $2, $3, 'SEALED-CREDENTIAL', 'SEALED-CHAT-TOKEN', now())
+      VALUES ($1, $2, $3, 'SEALED-CREDENTIAL', $4, now())
       ON CONFLICT (provider, install_key) DO UPDATE
         SET workspace_id = EXCLUDED.workspace_id
       """,
-      [provider, install_key, ws_id]
+      [provider, install_key, ws_id, chat_token_ref]
     )
   end
 

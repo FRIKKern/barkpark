@@ -32,7 +32,10 @@ defmodule Barkpark.Connectors.Bridge do
   @callback validate(ticket :: String.t(), credential :: String.t()) ::
               {:ok, %{install_key: String.t(), display_name: String.t()}} | {:error, reason()}
 
-  @callback connect(ticket :: String.t(), credential :: String.t(), chat_token :: String.t()) ::
+  # `chat_token` is `nil` for a TOOL connect (github/linear — D101): a tool install
+  # seals ONLY the pasted credential, its `chat_token_ref` stays NULL, and no
+  # workspace chat token is minted. Channel connects pass a real minted token.
+  @callback connect(ticket :: String.t(), credential :: String.t(), chat_token :: String.t() | nil) ::
               {:ok, %{install_key: String.t(), mounted: boolean()}} | {:error, reason()}
 
   @callback disconnect(ticket :: String.t(), install_key :: String.t()) ::

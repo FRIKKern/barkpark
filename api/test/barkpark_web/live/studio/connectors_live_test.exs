@@ -597,7 +597,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       assert html =~ "slack.com/oauth/v2/authorize"
 
       # The href IS a Slack authorize URL carrying a valid signed connect ticket.
-      url = :sys.get_state(view.pid).socket.assigns.slack_add_url
+      url = :sys.get_state(view.pid).socket.assigns.oauth["slack"].add_url
       assert is_binary(url)
       uri = URI.parse(url)
       assert uri.host == "slack.com"
@@ -663,19 +663,229 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       script_slack(ws)
 
       {:ok, view1, _html} = live(as(conn, raw), path)
-      first = :sys.get_state(view1.pid).socket.assigns.slack_add_url
+      first = :sys.get_state(view1.pid).socket.assigns.oauth["slack"].add_url
       assert [%ApiToken{revoked_at: nil} = t1] = live_tokens(ws, "slack", "oauth")
 
       # A second visit mints a fresh token and revokes the stale one — at most one
       # unattached credential at a time.
       {:ok, view2, _html} = live(as(conn, raw), path)
-      second = :sys.get_state(view2.pid).socket.assigns.slack_add_url
+      second = :sys.get_state(view2.pid).socket.assigns.oauth["slack"].add_url
       refute second == first
 
       tokens = live_tokens(ws, "slack", "oauth")
       # The first is now revoked; exactly one live token remains.
       assert Enum.any?(tokens, fn t -> t.id == t1.id and not is_nil(t.revoked_at) end)
       assert Enum.count(tokens, &is_nil(&1.revoked_at)) == 1
+    end
+  end
+
+  # ── TOOL CONNECTORS (the OUTBOUND direction — D97–D105) ────────────────────
+
+  defp script_github(ws, overrides \\ %{}) do
+    Stub.start(
+      Map.merge(
+        %{
+          workspace_id: ws.id,
+          provider: "github",
+          validate: {:ok, %{install_key: "octo-org", display_name: "octo-org"}},
+          # A tool install mounts nothing (mounted: false) — the agent ACTS on it,
+          # there is no live adapter to mount.
+          connect: {:ok, %{install_key: "octo-org", mounted: false}},
+          disconnect: {:ok, %{removed: true}}
+        },
+        overrides
+      )
+    )
+
+    configure(bridge: Stub, connect_secret: @secret)
+  end
+
+  defp connect_github!(view) do
+    view |> element(~s([data-test-id="connector-connect-github"])) |> render_click()
+
+    view
+    |> form(~s(#connectors-connect-modal form), %{"credential" => "github_pat_abc"})
+    |> render_submit()
+
+    view |> element(~s([data-test-id="connectors-confirm-connect"])) |> render_click()
+  end
+
+  describe "tool connectors" do
+    test "the Tools section renders github + linear cards, distinct from the Channels section", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw
+    } do
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      # Both sections exist, and the tool cards are their own thing.
+      assert html =~ ~s(data-test-id="connectors-section-channels")
+      assert html =~ ~s(data-test-id="connectors-section-tools")
+
+      for %{id: id, name: name} <- Catalog.tool_providers() do
+        assert html =~ ~s(data-test-id="connector-card-#{id}")
+        assert html =~ name
+      end
+
+      # github is a PASTE tool — it gets a Connect button (reuses the connect loop).
+      assert html =~ ~s(data-test-id="connector-connect-github")
+      # linear is an OAUTH tool — no paste Connect button, exactly like Slack.
+      refute html =~ ~s(data-test-id="connector-connect-linear")
+    end
+
+    test "with zero installs every tool card is Not connected — nothing is seeded", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw
+    } do
+      {:ok, view, _html} = live(as(conn, raw), path)
+      html = render(view)
+
+      for %{id: id} <- Catalog.tool_providers() do
+        refute html =~ ~s(data-test-id="connector-install-#{id}")
+        refute html =~ ~s(data-test-id="connector-disconnect-#{id}")
+      end
+    end
+
+    test "github paste connect passes a NIL chat token, mints NOTHING, install lands chat_token_ref NULL",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_github(ws)
+
+      {:ok, view, _html} = live(as(conn, raw), path)
+      html = connect_github!(view)
+
+      assert html =~ "GitHub connected"
+      assert html =~ ~s(data-test-id="connector-install-github")
+
+      # The bridge got a NIL chat token — a tool connect mints nothing (D101).
+      assert [{:validate, _, "github_pat_abc"}, {:connect, _, "github_pat_abc", nil}] =
+               Stub.calls()
+
+      # No workspace chat token was minted for this install.
+      assert live_tokens(ws, "github", "octo-org") == []
+
+      # The install is real — read back out of chat_bridge, joined to this workspace.
+      assert [%{provider: "github", install_key: "octo-org"}] =
+               Catalog.installs_for_workspace(ws)
+
+      # …and its chat_token_ref is NULL (a tool seals only the PAT).
+      %{rows: [[ref]]} =
+        Repo.query!(
+          "SELECT chat_token_ref FROM chat_bridge.connector_installs " <>
+            "WHERE provider = 'github' AND install_key = 'octo-org'"
+        )
+
+      assert is_nil(ref)
+    end
+
+    test "the Linear card shows the honest not-configured gate by default (no env plumbing)", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw
+    } do
+      # setup's `configure` has a connect secret but no linear client id.
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      assert html =~ ~s(data-test-id="connector-oauth-gate-linear")
+      assert html =~ "Connect Linear is not configured on this instance"
+      refute html =~ ~s(data-test-id="connector-add-to-slack-linear")
+    end
+
+    test "with a Linear OAuth app configured, the card renders an authorize link carrying response_type=code + a linear-bound signed state, NEVER Slack's URL, and stages/mints NOTHING",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      # A stub bridge so we can assert NOTHING crossed the wire, plus injected
+      # Linear OAuth config (no Slack client id — Slack stays the honest gate).
+      Stub.start(%{workspace_id: ws.id, provider: "linear"})
+
+      configure(
+        bridge: Stub,
+        connect_secret: @secret,
+        linear_client_id: "lin_123",
+        linear_redirect_uri: "https://guerrilla.barkpark.cloud/connectors/oauth/linear/callback"
+      )
+
+      {:ok, view, html} = live(as(conn, raw), path)
+
+      assert html =~ ~s(data-test-id="connector-add-to-slack-linear")
+      refute html =~ ~s(data-test-id="connector-oauth-gate-linear")
+
+      url = :sys.get_state(view.pid).socket.assigns.oauth["linear"].add_url
+      uri = URI.parse(url)
+
+      # The Linear authorize host — NEVER Slack's.
+      assert uri.host == "linear.app"
+      assert uri.path == "/oauth/authorize"
+      refute url =~ "slack.com"
+
+      q = URI.decode_query(uri.query)
+      assert q["client_id"] == "lin_123"
+      # THE load-bearing delta: Linear requires response_type=code (Slack omits it).
+      assert q["response_type"] == "code"
+      assert q["scope"] == "read"
+
+      assert q["redirect_uri"] ==
+               "https://guerrilla.barkpark.cloud/connectors/oauth/linear/callback"
+
+      # The state is a connect ticket bound to THIS workspace + "linear".
+      state = q["state"]
+      [body, sig] = String.split(state, ".")
+
+      assert sig ==
+               :crypto.mac(:hmac, :sha256, @secret, body) |> Base.url_encode64(padding: false)
+
+      {:ok, json} = Base.url_decode64(body, padding: false)
+      %{"w" => w, "p" => p, "n" => n} = Jason.decode!(json)
+      assert w == ws.id
+      assert p == "linear"
+      assert n != ""
+
+      # D78 — the write IS the connect: NOTHING was staged or minted ahead of the
+      # redirect. No stage_pending call, no chat token.
+      assert Stub.calls() == []
+      assert live_tokens(ws, "linear", "oauth") == []
+    end
+
+    test "a tool install owned by ANOTHER workspace never appears on this workspace's list (fail-closed)",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      {:ok, other} = Tenancy.create_workspace(%{slug: "conn-other", name: "Other"})
+
+      Repo.query!(
+        """
+        INSERT INTO chat_bridge.connector_installs
+          (provider, install_key, workspace_id, credential_ref, chat_token_ref, created_at)
+        VALUES ('github', 'foreign-key', $1, 'SEALED-CREDENTIAL-BLOB', NULL, now())
+        """,
+        [other.id]
+      )
+
+      {:ok, _view, html} = live(as(conn, raw), path)
+
+      refute html =~ "foreign-key"
+      refute html =~ ~s(data-test-id="connector-install-github")
+      assert Catalog.installs_for_workspace(ws) == []
+    end
+
+    test "disconnecting a tool deletes the install, flashes '0 tokens revoked', and does not crash",
+         %{conn: conn, path: path, admin_raw: raw, ws: ws} do
+      script_github(ws)
+
+      {:ok, view, _html} = live(as(conn, raw), path)
+      connect_github!(view)
+
+      assert [%{provider: "github", install_key: "octo-org"}] =
+               Catalog.installs_for_workspace(ws)
+
+      # There was never a token to revoke — a tool connect mints nothing.
+      view |> element(~s([data-test-id="connector-disconnect-github"])) |> render_click()
+      html = view |> element(~s([data-test-id="connectors-confirm-disconnect"])) |> render_click()
+
+      assert html =~ "Disconnected GitHub"
+      assert html =~ "0 tokens revoked"
+      assert html =~ "Not connected"
+      assert Catalog.installs_for_workspace(ws) == []
+      assert Process.alive?(view.pid)
+
+      assert {:disconnect, _ticket, "octo-org"} = List.last(Stub.calls())
     end
   end
 
