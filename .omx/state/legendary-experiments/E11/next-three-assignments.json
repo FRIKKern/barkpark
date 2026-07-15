@@ -1,0 +1,25 @@
+{
+  "assignment_id": "E11",
+  "complete_round_required": true,
+  "next_assignment_ids": ["E16", "E17", "E18"],
+  "reason": "Round 3 rejected all three candidates under frozen hard gates; Round-4 convergence cannot create a winner from blocked/rejected evidence, and E13-E15 pilot work must not start without one.",
+  "schema_version": "legendary-e11-next-three/v1",
+  "assignments": [
+    {
+      "id": "E16",
+      "gate": "All 36 frozen fixtures preserve semantic order and authored heading/list/link/table/status structure with zero critical/high defects; nested-list/table and long-content failures from E08 are eliminated.",
+      "objective": "Build a new runnable preservation candidate from raw E03 captures, removing the E04/E05 structural failures without weakening any E03 threshold."
+    },
+    {
+      "id": "E17",
+      "gate": "Produce 180 hashed candidate-specific captures (36 fixtures x 5 real surfaces), including authenticated Studio, public reader, TUI, real-client email, and CLI/API; zero silent blanks and explicit narrow-width degradation.",
+      "objective": "Materialize and independently capture the new candidate on every required reader; proxies and source-only captures are forbidden."
+    },
+    {
+      "id": "E18",
+      "gate": "Replay every output twice with byte-stable golden hashes, sealed-before-scoring blind records, complete E03 adversarial coverage, and 100% rollback/quarantine proof; reject on any missing cell or hard-gate failure.",
+      "objective": "Attack the new candidate's accessibility, evidence truth, idempotence, rollback, quarantine, and classification boundaries before any convergence or pilot claim."
+    }
+  ],
+  "stop_condition": "Do not resume E10-E12 convergence or E13-E15 pilot selection unless all three assignments complete and one candidate clears every frozen E03 hard gate."
+}
