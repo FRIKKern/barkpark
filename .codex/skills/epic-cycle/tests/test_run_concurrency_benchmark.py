@@ -244,6 +244,21 @@ class MetricsAndSamplerTest(unittest.TestCase):
         self.assertAlmostEqual(0.6, sample.system_seconds)
         self.assertEqual(6 * 4096, sample.rss_bytes)
 
+    def test_empty_owned_group_has_unknown_rss_instead_of_measured_zero(self):
+        linux = MODULE.parse_linux_group_sample([], 77, 100, 4096)
+        self.assertEqual((), linux.pids)
+        self.assertIsNone(linux.rss_bytes)
+        sampler = MODULE.OwnedGroupSampler()
+
+        def sample_once(pgid):
+            sampler._stop.set()
+            return linux
+
+        sampler._sample = sample_once
+        sampler.register(77)
+        sampler._loop()
+        self.assertIsNone(sampler.peak_rss_bytes)
+
 
 class ExecutionAndAnalysisTest(unittest.TestCase):
     def test_fast_control_command_is_fenced_before_exec(self):
@@ -268,10 +283,26 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
         self.assertEqual("failure", crashed["status"])
         self.assertFalse(crashed["complete"])
         self.assertEqual(
-            {"wall", "user", "system", "rss", "cpu", "sampled_cpu"},
+            {
+                "wall",
+                "user",
+                "system",
+                "rss",
+                "cpu",
+                "sampled_cpu",
+                "token_cost",
+                "context_cost",
+                "verified_unique_information",
+            },
             set(result["metrics"]),
         )
         self.assertTrue(all("source" in metric for metric in result["metrics"].values()))
+        for name in ("token_cost", "context_cost", "verified_unique_information"):
+            self.assertEqual("unsupported", result["metrics"][name]["kind"])
+            self.assertIsNone(result["metrics"][name]["value"])
+        self.assertTrue(
+            all("launch/fence" in item["wall_scope"] for item in result["assignment_results"])
+        )
 
     def test_timeout_is_retained_in_itt_denominator(self):
         assignments = [assignment(f"a{index}", delay=0.08) for index in range(1, 7)]
@@ -295,6 +326,11 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
         self.assertEqual(3, selection["selected_width"])
         self.assertNotIn(6, selection["eligible_widths"])
         self.assertEqual(-5.0, selection["margins_pp"]["completeness"])
+        self.assertEqual("unsupported", selection["statistically_fastest_width"]["kind"])
+        self.assertIsNone(selection["statistically_fastest_width"]["value"])
+        self.assertEqual("unsupported", selection["knee_width"]["kind"])
+        self.assertIsNone(selection["knee_width"]["value"])
+        self.assertIn("not a statistically-fastest or knee estimate", selection["interpretation"])
 
     def test_contaminated_original_is_retained_and_clean_sensitivity_rerun_used(self):
         source = MODULE.validate_manifest(manifest())
@@ -336,6 +372,19 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
         self.assertTrue(result["fixed_look_results"][-1]["decision_binding"])
         for look in result["fixed_look_results"]:
             self.assertTrue(all(values["trial_count"] == look["look"] for values in look["aggregates"].values()))
+        scope = result["contamination_scope"]
+        self.assertIn("host_load1_drift", scope["not_monitored"])
+        self.assertEqual("unsupported", scope["not_monitored"]["host_load1_drift"]["kind"])
+        self.assertEqual("unsupported", scope["not_monitored"]["memory_available_drift"]["kind"])
+
+    def test_default_controls_report_command_success_without_claiming_semantics(self):
+        source = MODULE.validate_manifest(manifest())
+        trial = MODULE.plan_artifact(source)["schedule"][0]
+        result = MODULE.default_treatment_runner(source, trial, None)
+        self.assertEqual("passed", result["cold_reset"]["status"])
+        self.assertEqual("unsupported", result["cold_reset"]["semantic_verification"]["kind"])
+        self.assertEqual("passed", result["warm_prime"]["status"])
+        self.assertEqual("unsupported", result["warm_prime"]["semantic_verification"]["kind"])
 
 
 if __name__ == "__main__":

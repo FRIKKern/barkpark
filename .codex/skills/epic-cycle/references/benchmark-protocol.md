@@ -19,7 +19,7 @@
   ```
 
   Every width appears once at each of four fixed looks and every directed first-order carryover pair appears once. The seed freezes each trial's six-item FIFO dispatch order.
-- Preparation: every treatment trial performs its declared cold reset, then its declared warm prime, before measurement. A failed or timed-out preparation aborts rather than silently changing the protocol.
+- Preparation: every treatment trial runs its declared `cold_reset_argv`, then its declared `warm_prime_argv`, before measurement. The artifact proves only that each command exited successfully; it reports semantic verification as typed `unsupported` because the runner cannot establish that arbitrary commands actually produced cold and warm states. A failed or timed-out preparation aborts rather than silently changing the protocol.
 - Looks: analysis is emitted after Williams rows 1, 2, 3, and 4. All are recorded; only look 4 is decision-binding. There is no optional early stopping.
 - ITT: all six scheduled assignments stay in the denominator. Launch failures, crashes, malformed/missing evaluation JSON, and timeouts are retained rather than dropped.
 
@@ -39,7 +39,7 @@ At every fixed look, each width is compared with **every** other width. A width 
 - contradiction/unsupported is no more than **2 percentage points higher**;
 - failure/timeout is no more than **5 percentage points higher**.
 
-The highest all-pairs-eligible width is selected. No width is selected when balanced evidence is missing. This rule is fixed in code and artifact provenance; do not substitute a baseline-only or best-pair comparison.
+The highest all-pairs-eligible width is selected. No width is selected when balanced evidence is missing. This rule is fixed in code and artifact provenance; do not substitute a baseline-only or best-pair comparison. `selected_width` is only the outcome of this preregistered quality-margin rule: the artifact emits typed `unsupported` values for both `statistically_fastest_width` and `knee_width`, because the design contains neither a preregistered runtime hypothesis test nor a knee estimator with sufficient repeated runtime evidence.
 
 ## Admission and process ownership
 
@@ -64,17 +64,19 @@ The pane pid is resolved live with `tmux display-message`. The pid is fenced aga
 
 Each measured trial records:
 
-- wall seconds from `time.monotonic`;
+- treatment wall seconds from `time.monotonic`, plus per-assignment wall seconds from FIFO dispatch through launch/start-identity fencing and terminal observation (launch failures retain the elapsed failed launch/fence interval rather than zero);
 - child user and system seconds from `resource.getrusage(RUSAGE_CHILDREN)`;
 - peak live RSS from the owned-process-group sampler;
 - CPU derived from `(user + system) / wall`;
 - instantaneous sampled CPU where the platform exposes it.
 
-Every metric is a typed object with `kind`, `value`, `unit`, `source`, and `scope`. Kinds are `measured`, `null`, and `unsupported`. The latter two always carry JSON `null`, plus a reason; they are never coerced to numeric zero. Darwin group sampling reports unsupported user/system components when portable `ps` cannot separate them, while final child rusage remains measured.
+Every metric is a typed object with `kind`, `value`, `unit`, `source`, and `scope`. Kinds are `measured`, `null`, and `unsupported`. The latter two always carry JSON `null`, plus a reason; they are never coerced to numeric zero. An empty owned process group is not an observed zero-RSS group, so it contributes no RSS observation and produces typed `null` when no live owned-group sample exists. Darwin group sampling reports unsupported user/system components when portable `ps` cannot separate them, while final child rusage remains measured. The artifact also exposes typed `unsupported` `token_cost`, `context_cost`, and `verified_unique_information` fields: the narrow assignment evaluation contract does not provide token/context accounting or a preregistered unique-information verifier.
 
 ## Contamination and sensitivity
 
-The runner snapshots the declared tmux pane identities before and after every treatment. A missing or changed primary pid/start identity is a safety violation; any changed ambient pane identity marks the original trial contaminated. Contaminated originals remain verbatim in `original_trials`. Each gets one separately labeled sensitivity rerun after the complete original schedule. A clean rerun replaces its contaminated original only for sensitivity analysis; the artifact retains both. A contaminated rerun does not erase or launder the original.
+The runner snapshots the declared tmux pane identities before and after every treatment. A missing or changed primary pid/start identity is a safety violation; any changed ambient pane identity marks the original trial contaminated. Owned process-group sampler errors also contaminate the trial. Contaminated originals remain verbatim in `original_trials`. Each gets one separately labeled sensitivity rerun after the complete original schedule. A clean rerun replaces its contaminated original only for sensitivity analysis; the artifact retains both. A contaminated rerun does not erase or launder the original.
+
+The result's `contamination_scope` is deliberately explicit: load1 and available memory are admission-time safety signals, not within-treatment drift monitors. A trial without pane or sampler contamination therefore does **not** establish stable host load or memory availability during the treatment; those two drift claims are emitted as typed `unsupported` limitations.
 
 ## Manifest and commands
 

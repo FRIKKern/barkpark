@@ -566,12 +566,13 @@ def parse_linux_group_sample(lines: Iterable[str], pgid: int, clock_ticks: int, 
             rss_pages += max(0, int(fields[23]))
         except (ValueError, SafetyError):
             continue
+    observed = bool(pids)
     return GroupSample(
         pgid,
         tuple(sorted(pids)),
-        user_ticks / clock_ticks,
-        system_ticks / clock_ticks,
-        rss_pages * page_size,
+        user_ticks / clock_ticks if observed else None,
+        system_ticks / clock_ticks if observed else None,
+        rss_pages * page_size if observed else None,
         None,
         {
             "user_seconds": "/proc/<pid>/stat utime",
@@ -617,13 +618,14 @@ def sample_process_group(pgid: int, *, system: Optional[str] = None) -> GroupSam
                 pids.append(pid_value)
                 rss_kib += max(0, rss_value)
                 cpu_percent += max(0.0, cpu_value)
+        observed = bool(pids)
         return GroupSample(
             pgid,
             tuple(sorted(pids)),
             None,
             None,
-            rss_kib * 1024,
-            cpu_percent,
+            rss_kib * 1024 if observed else None,
+            cpu_percent if observed else None,
             {
                 "user_seconds": "unsupported by portable Darwin ps group sample",
                 "system_seconds": "unsupported by portable Darwin ps group sample",
@@ -927,7 +929,8 @@ def run_assignment_set(
                             "complete": False,
                             "contradiction_unsupported": True,
                             "exit_code": None,
-                            "wall_seconds": 0.0,
+                            "wall_seconds": time.monotonic() - dispatched_at,
+                            "wall_scope": "dispatch through launch/fence failure",
                             "reason": str(error),
                             "process_identity": None,
                             "pgid": None,
@@ -939,7 +942,7 @@ def run_assignment_set(
                             "process": process,
                             "identity": identity,
                             "pgid": pgid,
-                            "started": launched_at,
+                            "wall_started": dispatched_at,
                             "deadline": launched_at + timeout_seconds,
                             "stdout": stdout_path,
                             "stderr": stderr_path,
@@ -974,7 +977,8 @@ def run_assignment_set(
                         "complete": bool(complete),
                         "contradiction_unsupported": bool(contradiction),
                         "exit_code": returncode,
-                        "wall_seconds": time.monotonic() - state["started"],
+                        "wall_seconds": time.monotonic() - state["wall_started"],
+                        "wall_scope": "dispatch through launch/fence and terminal observation",
                         "reason": evaluation_reason,
                         "process_identity": asdict(state["identity"]),
                         "pgid": state["pgid"],
@@ -1020,6 +1024,24 @@ def run_assignment_set(
                 "platform sampler did not expose instantaneous CPU",
             )
         ),
+        "token_cost": unsupported_metric(
+            "tokens",
+            "assignment evaluation contract",
+            "six-assignment treatment trial",
+            "the narrow assignment evaluation payload does not expose token accounting",
+        ),
+        "context_cost": unsupported_metric(
+            "tokens",
+            "assignment evaluation contract",
+            "six-assignment treatment trial",
+            "the narrow assignment evaluation payload does not expose context accounting",
+        ),
+        "verified_unique_information": unsupported_metric(
+            "items",
+            "assignment evaluation contract",
+            "six-assignment treatment trial",
+            "no preregistered unique-information verifier is part of this benchmark",
+        ),
     }
     return {
         "assignment_results": ordered_results,
@@ -1051,7 +1073,27 @@ def default_treatment_runner(
         timeout_seconds=manifest["timeout_seconds"],
         environment=env,
     )
-    return {"cold_reset": reset, "warm_prime": prime, **measured_work}
+    return {
+        "cold_reset": {
+            **reset,
+            "semantic_verification": unsupported_metric(
+                "boolean",
+                "declared cold_reset_argv",
+                "pre-treatment control",
+                "the runner verifies command success, not that the command produced a cold state",
+            ),
+        },
+        "warm_prime": {
+            **prime,
+            "semantic_verification": unsupported_metric(
+                "boolean",
+                "declared warm_prime_argv",
+                "pre-treatment control",
+                "the runner verifies command success, not that the command produced a warm state",
+            ),
+        },
+        **measured_work,
+    }
 
 
 def _trial_rates(trial: Mapping[str, Any]) -> dict[str, float]:
@@ -1132,6 +1174,47 @@ def select_width_all_pairs(aggregates: Mapping[int, Mapping[str, float]]) -> dic
             "contradiction_unsupported": CONTRADICTION_MARGIN_PP,
             "failure_timeout": FAILURE_MARGIN_PP,
         },
+        "interpretation": (
+            "highest all-pairs-eligible width under preregistered quality margins; "
+            "not a statistically-fastest or knee estimate"
+        ),
+        "statistically_fastest_width": unsupported_metric(
+            "concurrency_width",
+            "fixed all-pairs quality-margin rule",
+            "selection report",
+            "no preregistered runtime hypothesis test or sufficient repeated runtime evidence",
+        ),
+        "knee_width": unsupported_metric(
+            "concurrency_width",
+            "fixed all-pairs quality-margin rule",
+            "selection report",
+            "no preregistered knee estimator or sufficient repeated runtime evidence",
+        ),
+    }
+
+
+def contamination_scope() -> dict[str, Any]:
+    """State exactly what the contamination flag can and cannot establish."""
+    return {
+        "monitored": [
+            "declared tmux pane pid/start identity changes",
+            "owned process-group sampler errors",
+        ],
+        "not_monitored": {
+            "host_load1_drift": unsupported_metric(
+                "load_average",
+                "host admission snapshot only",
+                "within-treatment contamination",
+                "load1 is checked at admission but not sampled before and after each treatment",
+            ),
+            "memory_available_drift": unsupported_metric(
+                "bytes",
+                "host admission snapshot only",
+                "within-treatment contamination",
+                "available memory is checked at admission but not sampled before and after each treatment",
+            ),
+        },
+        "interpretation": "a clean contamination flag does not rule out host-load or available-memory drift",
     }
 
 
@@ -1224,6 +1307,7 @@ def execute_protocol(
         "original_trials": originals,
         "sensitivity_reruns": reruns,
         "analysis_policy": "clean sensitivity rerun replaces contaminated original; original is retained",
+        "contamination_scope": contamination_scope(),
         "fixed_look_results": fixed_look_results,
         "final_selection": fixed_look_results[-1]["selection"],
     }
