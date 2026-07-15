@@ -302,9 +302,26 @@ defmodule Barkpark.Search.SurfaceConfigs do
   defp normalize_fields(fields) when is_list(fields), do: fields
   defp normalize_fields(_), do: []
 
-  defp invalidate(surface, scope, workspace_id) do
+  # A per-workspace upsert only touches its OWN key.
+  defp invalidate(surface, scope, workspace_id) when not is_nil(workspace_id) do
     ensure_cache()
     :ets.delete(@cache, {workspace_id, surface, scope})
+    :ok
+  end
+
+  # A nil-workspace (global-default) upsert retunes the row that EVERY untuned
+  # workspace inherits via the D64 fallthrough (`load_or_default/3` caches the
+  # inherited payload under the per-workspace key `{workspace_id, surface,
+  # scope}`). Deleting only `{nil, surface, scope}` would leave those inherited
+  # copies stale for up to the 60s ETS TTL — an untuned workspace would serve the
+  # OLD global config. So evict every `{*, surface, scope}` entry (any workspace
+  # key for this surface/scope may hold the fallthrough copy). `match_delete`
+  # keeps unrelated surfaces/scopes cached; the evicted keys re-derive on the next
+  # miss via the same cold path (behaviour-preserving, mirrors the clear-on-full
+  # bound in `store_config/2`).
+  defp invalidate(surface, scope, nil) do
+    ensure_cache()
+    :ets.match_delete(@cache, {{:_, surface, scope}, :_})
     :ok
   end
 
