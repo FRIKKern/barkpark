@@ -555,6 +555,51 @@ html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-t
 }
 /* END GENERATED: tokens */
 
+/* ── Chat-block BASE tokens (hand-authored — charter D6, rpu-w1-chat-tokens). ──
+   The three chat blocks (chat-thinking / chat-todo / chat-tool-diff, emitted by
+   render/components.ex) style themselves with inline
+   `var(--primary | --muted-surface | --border-muted | --fg-dim | --font-mono)`
+   and NO fallback. Those five live only in root.html.heex's Studio <style>, so
+   OUTSIDE Studio — the `/papers` reader, the sheet `.html` export, any embedder
+   that loads only this stylesheet — they resolved to nothing and the chat chrome
+   collapsed to browser defaults. Define them ON the paper surface so chat
+   self-resolves on every surface that inlines Stylesheet.css/0.
+
+   Deliberately NOT in the design/tokens.json GENERATED block above: the four
+   colour values are lifted VERBATIM from root.html.heex's DEFAULT theme (they
+   must match the Studio bytes exactly, not an emit-derived value), and
+   `--font-mono` ALIASES this surface's own `--paper-font-mono` rather than
+   carrying a stack. They follow the SAME 4-block dual-swap shape as the
+   generated status tones (bare-light → prefers-dark → explicit-light →
+   explicit-dark) so an explicit light theme on a dark OS still wins over the
+   `prefers-color-scheme` block, and every dark value is re-skinned in the
+   `@media (prefers-color-scheme: dark)` block the reader reads.
+
+   NOTE (rpu-w1 review): D6 spec light `--border-muted: var(--border)`, but
+   `--border` lives ONLY in root.html.heex (Studio), so on a non-Studio surface
+   it was undefined and `border-top: 1px solid var(--border-muted)` (the
+   chat-tool-diff divider) collapsed to `border-style: none` in light mode.
+   Resolved here to the concrete light value `--border` carries in
+   root.html.heex's default theme — hsl(240 5.9% 90%) — so it self-resolves on
+   every surface with IDENTICAL rendering to Studio, without introducing a bare
+   `--border` token (which the paper-editor mirror would push into the editor's
+   light `:root`, wrongly overriding the inherited Studio dark `--border`). The
+   dark blocks already carry a concrete `--border-muted`. */
+.bp-paper-surface, .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body {
+    --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+  }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
+  --primary: hsl(163 46% 22%); --muted-surface: hsl(240 4.8% 95.9%); --border-muted: hsl(240 5.9% 90%); --fg-dim: hsl(240 4% 47%); --font-mono: var(--paper-font-mono);
+}
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
+  --primary: hsl(160 42% 62%); --muted-surface: hsl(240 3.7% 12%); --border-muted: hsl(240 3.7% 11%); --fg-dim: hsl(240 5% 51%); --font-mono: var(--paper-font-mono);
+}
+
 .bp-paper-surface .bp-tasks {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   margin: 1.6rem 0;
