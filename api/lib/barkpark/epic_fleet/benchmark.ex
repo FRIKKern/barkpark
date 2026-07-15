@@ -222,12 +222,12 @@ defmodule Barkpark.EpicFleet.Benchmark do
             Enum.sort_by(document["attempts"], &{&1["ordinal"], &1["attempt_id"]}),
             %{experiment: experiment, attempts: 0},
             fn row, stats ->
-            attrs = Map.drop(row, ["attempt_digest"])
+              attrs = Map.drop(row, ["attempt_digest"])
 
-            case record_attempt(experiment, attrs) do
-              {:ok, _attempt} -> {:cont, %{stats | attempts: stats.attempts + 1}}
-              {:error, reason} -> Repo.rollback(reason)
-            end
+              case record_attempt(experiment, attrs) do
+                {:ok, _attempt} -> {:cont, %{stats | attempts: stats.attempts + 1}}
+                {:error, reason} -> Repo.rollback(reason)
+              end
             end
           )
 
