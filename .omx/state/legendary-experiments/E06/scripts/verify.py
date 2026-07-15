@@ -76,6 +76,8 @@ def main() -> None:
     assert all(frozen_threshold_keys <= set(row["threshold_results"]) for row in scorecard["rails"])
     surface_matrix = load("surface-matrix.json")
     assert not any(row["surface"] in {"Studio", "email"} and row["status"] == "PASS" for row in surface_matrix["cells"])
+    volatile_timing = load(".replay/timing.json")
+    assert volatile_timing["tracked"] is False and volatile_timing["wall_seconds"] > 0
     result = {
         "schema_version": "legendary-e06-result/v1",
         "assignment_id": "E06",
@@ -112,6 +114,7 @@ def main() -> None:
     print(f"dispatch_sha256={sha(ROOT / 'dispatch-manifest.json')}")
     print(f"scorecard_sha256={sha(ROOT / 'scorecard.json')}")
     print(f"result_sha256={sha(ROOT / 'result.json')}")
+    print(f"volatile_wall_seconds={volatile_timing['wall_seconds']}")
 
 
 if __name__ == "__main__":

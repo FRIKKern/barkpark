@@ -157,7 +157,7 @@ def main() -> None:
     write_json("outputs/candidates.json", output_doc)
     write_json("scorecard.json", scorecard)
     write_json("surface-matrix.json", surface_matrix)
-    write_json("timing.json", {"schema_version": "legendary-e06-timing/v1", "assignment_id": "E06", "wall_seconds": round(time.perf_counter() - started, 6), "unit_count": len(decisions)})
+    write_json(".replay/timing.json", {"schema_version": "legendary-e06-volatile-timing/v1", "assignment_id": "E06", "wall_seconds": round(time.perf_counter() - started, 6), "unit_count": len(decisions), "tracked": False})
     print(f"E06 DISPATCH PASS units={len(decisions)} accepted={counts.get('accepted', 0)} quarantined={counts.get('quarantined', 0)} excluded={counts.get('excluded', 0)} rails={len(rails)}")
 
 
