@@ -210,9 +210,13 @@ defmodule BarkparkWeb.SearchController do
   def search_insights(conn, %{"dataset" => dataset} = params) do
     period = params["period"] || "week"
 
-    # The `:search_settings_admin` pipeline derives `current_workspace` from the
-    # caller's OWN admin token BEFORE AssignDefaultScope, so this reads the
-    # caller's tenant — not a Default-collapsed shared row.
+    # Read the caller's resolved `current_workspace`, matching the workspace the
+    # record path stamps at ingest — so insights and events roll up on the SAME
+    # tenant row. On the flat `[:api, :require_admin]` route AssignDefaultScope
+    # resolves the seeded Default workspace (no DeriveWorkspaceFromToken here);
+    # true per-tenant isolation comes via the scoped `/w/:ws/p/:project` mirror
+    # or a workspace-bound token that sets `current_workspace` upstream. The
+    # crystallizer + reads are tenant-safe at the module layer regardless.
     opts = [period: period, workspace_id: workspace_id(conn)]
 
     opts =

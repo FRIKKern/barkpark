@@ -63,7 +63,14 @@ defmodule Barkpark.Repo.Migrations.SearchIntelWorkspaceUniqueIndex do
 
     create unique_index(
              :search_intel_crystals,
-             [:surface, :dataset_id, :period, :period_start, :query_normalized, :filter_fingerprint],
+             [
+               :surface,
+               :dataset_id,
+               :period,
+               :period_start,
+               :query_normalized,
+               :filter_fingerprint
+             ],
              where: "workspace_id IS NULL",
              name: :search_intel_crystals_null_ws_unique_idx
            )
@@ -133,7 +140,14 @@ defmodule Barkpark.Repo.Migrations.SearchIntelWorkspaceUniqueIndex do
     # drop the two-partial split. Safe: no rows or columns were mutated.
     create unique_index(
              :search_intel_crystals,
-             [:surface, :dataset_id, :period, :period_start, :query_normalized, :filter_fingerprint],
+             [
+               :surface,
+               :dataset_id,
+               :period,
+               :period_start,
+               :query_normalized,
+               :filter_fingerprint
+             ],
              name: :search_intel_crystals_dataset_id_unique_idx
            )
 

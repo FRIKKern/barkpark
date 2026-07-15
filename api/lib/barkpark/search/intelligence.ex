@@ -127,7 +127,10 @@ defmodule Barkpark.Search.Intelligence do
       end
 
     quality = quality_stats(surface, scope, period, period_start, workspace_id)
-    prev_counts = previous_period_search_counts(surface, scope, period, period_start, workspace_id)
+
+    prev_counts =
+      previous_period_search_counts(surface, scope, period, period_start, workspace_id)
+
     rates = search_rates(surface, scope, period, period_start, workspace_id)
 
     top_queries =
@@ -621,7 +624,14 @@ defmodule Barkpark.Search.Intelligence do
     window_start = Date.add(today, -@popular_window_days)
 
     crystal_rows =
-      popular_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1), workspace_id)
+      popular_from_crystals(
+        surface,
+        scope,
+        prefix,
+        window_start,
+        Date.add(today, -1),
+        workspace_id
+      )
 
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
     raw_rows = popular_from_events(surface, scope, prefix, today_start, workspace_id)
@@ -700,7 +710,14 @@ defmodule Barkpark.Search.Intelligence do
     window_start = Date.add(today, -@popular_window_days)
 
     crystal_rows =
-      nohits_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1), workspace_id)
+      nohits_from_crystals(
+        surface,
+        scope,
+        prefix,
+        window_start,
+        Date.add(today, -1),
+        workspace_id
+      )
 
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
     raw_rows = nohits_from_events(surface, scope, prefix, today_start, workspace_id)

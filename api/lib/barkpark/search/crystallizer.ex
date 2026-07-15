@@ -93,7 +93,13 @@ defmodule Barkpark.Search.Crystallizer do
   the legacy/unscoped bucket (events whose `workspace_id IS NULL`) — the default
   keeps the pre-tenancy `crystallize_period/4` call sites behaviour-identical.
   """
-  @spec crystallize_period(String.t(), String.t(), :day | :week | :month, Date.t(), binary() | nil) ::
+  @spec crystallize_period(
+          String.t(),
+          String.t(),
+          :day | :week | :month,
+          Date.t(),
+          binary() | nil
+        ) ::
           map()
   def crystallize_period(surface, scope, period, period_start, workspace_id \\ nil)
       when is_binary(surface) and is_binary(scope) and period in [:day, :week, :month] do

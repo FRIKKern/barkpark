@@ -99,8 +99,11 @@ defmodule BarkparkWeb.V1.MediaController do
   def search_insights(conn, %{"dataset" => dataset} = params) do
     period = params["period"] || "week"
 
-    # `:search_settings_admin` pipeline derives the caller's OWN workspace before
-    # AssignDefaultScope, so insights read the caller's tenant roll-up.
+    # Read the caller's resolved `current_workspace`, matching the workspace the
+    # record path stamps at ingest — so insights and events roll up on the SAME
+    # tenant row. On the flat `[:api, :require_admin]` route AssignDefaultScope
+    # resolves the seeded Default workspace; true per-tenant isolation comes via
+    # the scoped `/w/:ws/p/:project` mirror or a workspace-bound token upstream.
     opts = [period: period, workspace_id: workspace_id(conn)]
 
     opts =
