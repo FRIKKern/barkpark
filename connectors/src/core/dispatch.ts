@@ -153,6 +153,11 @@ function witnessInstalls(inner: InstallsLookup): Witness {
       listInstalls(provider) {
         return inner.listInstalls(provider);
       },
+      // Tool-connector reads (D69) never flow through inbound dispatch, but the
+      // witnessing wrapper must satisfy the full lookup shape — delegate as-is.
+      lookupByWorkspace(provider, workspaceId) {
+        return inner.lookupByWorkspace(provider, workspaceId);
+      },
     },
 
     keysFor(provider, workspaceId) {

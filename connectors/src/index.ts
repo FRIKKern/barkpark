@@ -22,6 +22,7 @@ import type {
 } from "./connector/types.js";
 import { createCredentialCipher } from "./crypto/credential-cipher.js";
 import { createDiscordConnector, DISCORD_PROVIDER } from "./connectors/discord.js";
+import { createGithubConnector, GITHUB_PROVIDER } from "./connectors/github.js";
 import {
   createIMessageConnector,
   IMESSAGE_PROVIDER,
@@ -163,6 +164,16 @@ export function registerBuiltinConnectors(
   // the body) (D43).
   if (!registry.has(WHATSAPP_PROVIDER)) {
     registry.register(createWhatsappConnector());
+  }
+
+  // GitHub — the FIRST tool connector (D69/D71), the epic's OTHER direction. The
+  // agent ACTS on GitHub via its hosted MCP server; there is no inbound channel,
+  // so this is `direction:"tool"` and `registry.channels()` never mounts it. It
+  // needs nothing at registration (the PAT arrives per-install on /connect) — one
+  // registry entry, ZERO core-loop change, exactly like every channel before it. A
+  // second tool connector (Linear) is a second line here.
+  if (!registry.has(GITHUB_PROVIDER)) {
+    registry.register(createGithubConnector());
   }
 
   // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
@@ -635,6 +646,21 @@ export async function startBridge(
         `health: ${config.webhook.pathPrefix}/health` +
         (connectDeps ? `; connect: ${config.webhook.pathPrefix}/connect` : ""),
     );
+
+    // The tool-connector seam's own loopback base (D69/D71), resolved AFTER bind so
+    // it carries the REAL port (an ephemeral `port: 0` in tests still works). This
+    // is the URL the `headersHelper` curl POSTs to at MCP-connect — it MUST be the
+    // loopback address, never `publicBaseUrl`: a helper hitting the public URL would
+    // travel through Caddy, arrive with `x-forwarded-*`, and be refused as the
+    // opaque 404 that keeps `tool-headers` loopback-only.
+    if (connectDeps) {
+      const host =
+        config.webhook.host === "0.0.0.0" || config.webhook.host === "::"
+          ? "127.0.0.1"
+          : config.webhook.host;
+      const hostForUrl = host.includes(":") ? `[${host}]` : host;
+      connectDeps.toolHeadersBaseUrl = `http://${hostForUrl}:${webhookServer.port}${config.webhook.pathPrefix}`;
+    }
   }
 
   return {

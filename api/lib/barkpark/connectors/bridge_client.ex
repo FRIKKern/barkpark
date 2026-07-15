@@ -105,6 +105,27 @@ defmodule Barkpark.Connectors.BridgeClient do
     end
   end
 
+  @impl true
+  def fetch_tool_descriptors(ticket) do
+    # A READ, not a write — the tool-descriptors route lists a workspace's tool
+    # connectors and mints no state. `retry: false` still holds (via `do_post`);
+    # a transient failure is fail-soft at the caller (no tool servers this
+    # session), never a fabricated list.
+    case post("/connect/tool-descriptors", %{ticket: ticket}) do
+      {:ok, %{"descriptors" => descriptors}} when is_list(descriptors) ->
+        {:ok, descriptors}
+
+      {:ok, _body} ->
+        # A 200 with no descriptors array is an empty toolset, not an error —
+        # the bridge answers `{descriptors: []}` for a workspace that has
+        # connected nothing, and a defensive shape mismatch degrades the same.
+        {:ok, []}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   defp post(path, body) do
     case Connectors.bridge_url() do
       url when is_binary(url) and url != "" ->
