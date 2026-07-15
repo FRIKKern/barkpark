@@ -37,8 +37,10 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
        a docstring mention is not a coupling) over `lib/barkpark_cloud`, excluding
        the provider trees themselves. The detected `{provider, host_file}` set
        must EQUAL `@sanctioned_provider_coupling`; a NEW reference reds. Cloudflare
-       has ZERO host coupling today (the scaffold is fully decoupled), asserted
-       separately so a first CF-on-a-serving-path reach reds immediately.
+       coupling (wired in W6: connect + DNS deploy) must stay CONFINED to the
+       allowlist — each entry reviewed as a credential-gated provider path, never
+       the box's standalone serving path — asserted separately (non-vacuously) so
+       a NEW CF-on-a-serving-path reach reds immediately.
 
   ## Sibling-slice contract (`resolve_cloudflare_credential`, `serving_mode`)
 
@@ -74,7 +76,8 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
     @behaviour BarkparkCloud.Cloudflare.Client
 
     @impl true
-    def verify_token(_token), do: raise("Cloudflare.Client.verify_token/1 ran on the standalone path")
+    def verify_token(_token),
+      do: raise("Cloudflare.Client.verify_token/1 ran on the standalone path")
 
     @impl true
     def upsert_dns_record(_zone, _rec),
@@ -108,11 +111,24 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
   #     on the standalone box's own site-serving path, and degrades to the classic
   #     copy-block handoff. Legitimate.
   #
-  # Cloudflare is DELIBERATELY absent: the cf-w2 scaffold is referenced ONLY from
-  # its own tree — no serving/control path binds it yet. A first such reference
-  # reds this gate (the point of the capstone).
+  #   * router.ex → BarkparkCloud.Cloudflare — wired in W6: verify_token (connect
+  #     preflight, `POST /v1/providers`) + upsert_dns_record/ensure_zone_proxied
+  #     (the `--via cloudflare` deploy path, which requires a stored CF credential
+  #     and 422s `cloudflare_credential_unreadable` when absent). Both run ONLY on
+  #     the control-plane provider path, never the box's standalone serving path;
+  #     with no CF connected neither executes. Legitimate + credential-gated.
+  #
+  # A NEW, unreviewed CF reference on any serving path reds this gate.
   @sanctioned_provider_coupling [
-    {"BarkparkCloud.Vercel", "lib/barkpark_cloud/web/router.ex"}
+    {"BarkparkCloud.Vercel", "lib/barkpark_cloud/web/router.ex"},
+    # W6 wired Cloudflare end-to-end (connect + DNS deploy). Both couplings live
+    # ONLY on control-plane provider-operation paths that require a user-supplied
+    # token: verify_token runs during `POST /v1/providers` (connect), and
+    # upsert_dns_record/ensure_zone_proxied run only when a stored CF credential
+    # is present (`cloudflare_credential_unreadable` otherwise). With no CF
+    # connected, neither path executes and the box serves directly — the degrade
+    # law holds. Reviewed + sanctioned.
+    {"BarkparkCloud.Cloudflare", "lib/barkpark_cloud/web/router.ex"}
   ]
 
   # Merge Cloudflare config for one test, restoring the original on exit. Config
@@ -244,19 +260,37 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
              """
     end
 
-    test "Cloudflare has ZERO host coupling — the scaffold is fully decoupled" do
+    test "every Cloudflare host coupling is confined to the reviewed allowlist" do
+      # W6 wired Cloudflare end-to-end, so the scaffold is no longer decoupled —
+      # but every coupling must stay CONFINED to @sanctioned_provider_coupling
+      # (each entry reviewed as running only on a credential-gated provider path,
+      # never the box's standalone serving path). A NEW, unreviewed CF coupling
+      # reds here.
       cf_couplings =
         detect_provider_couplings()
         |> Enum.filter(fn {module, _file} -> module == "BarkparkCloud.Cloudflare" end)
         |> Enum.sort()
 
-      assert cf_couplings == [],
+      sanctioned_cf =
+        @sanctioned_provider_coupling
+        |> Enum.filter(fn {module, _file} -> module == "BarkparkCloud.Cloudflare" end)
+        |> Enum.sort()
+
+      # There MUST be at least one (the wave wired CF) — a vacuous pass would mean
+      # the sweep stopped detecting couplings and this guard went blind.
+      assert cf_couplings != [],
+             "the CF sweep detected zero couplings — the AST guard has gone blind"
+
+      assert cf_couplings == sanctioned_cf,
              """
-             A live path now binds BarkparkCloud.Cloudflare. The FIRST such \
-             reference must land behind `Cloudflare.configured?()` and degrade to \
-             pure-standalone when absent — add it to @sanctioned_provider_coupling \
-             WITH a justification once reviewed:
-               #{format_couplings(cf_couplings)}
+             Cloudflare host coupling drifted from the reviewed allowlist. A live \
+             path now binds BarkparkCloud.Cloudflare outside \
+             @sanctioned_provider_coupling — gate it behind a stored-credential / \
+             `Cloudflare.configured?()` check (so the box degrades to standalone \
+             when no CF is connected), then add it to the allowlist WITH a \
+             justification.
+               detected:   #{format_couplings(cf_couplings)}
+               sanctioned: #{format_couplings(sanctioned_cf)}
              """
     end
   end
