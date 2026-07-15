@@ -35,7 +35,6 @@
 import 'server-only'
 
 import { createClient, BarkparkNotFoundError, type BarkparkClient } from '@barkpark/core'
-import { createBarkparkServer } from '@barkpark/nextjs/server'
 
 /** Barkpark API version this template pins its reads to. */
 const API_VERSION = '2026-04-01'
@@ -141,23 +140,6 @@ export interface FlagshipResult {
   doc: FlagshipDoc | null
 }
 
-/** Query-endpoint envelope: `{ result: { count, documents: [...] } }`. */
-interface QueryEnvelope {
-  result?: {
-    documents?: Array<Record<string, unknown>>
-    count?: number
-  }
-}
-
-/** Single-doc envelope: `{ result: <doc> }` (or the bare doc). */
-function unwrapDoc(res: unknown): Record<string, unknown> | null {
-  if (res !== null && typeof res === 'object' && 'result' in res) {
-    const r = (res as { result: unknown }).result
-    return r !== null && typeof r === 'object' ? (r as Record<string, unknown>) : null
-  }
-  return res !== null && typeof res === 'object' ? (res as Record<string, unknown>) : null
-}
-
 function toFlagship(doc: Record<string, unknown> | null | undefined): FlagshipDoc | null {
   if (!doc || typeof doc._id !== 'string') return null
   const rawTitle = doc.title
@@ -166,46 +148,41 @@ function toFlagship(doc: Record<string, unknown> | null | undefined): FlagshipDo
 }
 
 /**
- * Fetch the one document this site features, at REQUEST time, via
- * `@barkpark/nextjs`'s `createBarkparkServer` (the Next-native content link).
- *
- * `serverToken` is required by the factory (it is used on the draft-preview
- * branch, which this starter never enables) — a public dataset reads published
- * content anonymously, so we pass a placeholder when no BARKPARK_TOKEN is set.
+ * Fetch the one document this site features, at REQUEST time, via the
+ * token-authed `@barkpark/core` client's fluent reads — the SAME path the
+ * astro-starter uses. (An earlier version routed this through
+ * `@barkpark/nextjs`'s `createBarkparkServer`/`barkparkFetch`, which put the
+ * read token in `serverToken` — the draft-preview slot — so the published
+ * content query went out ANONYMOUS and a token-required dataset answered 403,
+ * 500ing every SSR request. `createBpClient` already carries the token in the
+ * Authorization header, so read straight from it.)
  *
  * Fail-closed semantics, mirroring the astro-starter:
  *   - a network / auth error THROWS → the page 500s → HEALTH fails → the slot
  *     never takes traffic (last-good keeps serving);
  *   - a Branch-2 404 (the schema/type is missing or private on this dataset) is
- *     CAUGHT here — copying `@barkpark/core` doc.ts:86, which swallows
- *     `BarkparkNotFoundError` and returns null rather than 500 — so the site
- *     renders an honest-empty 200 instead of crashing. We catch in-page; we do
- *     NOT patch core.
+ *     CAUGHT here — `@barkpark/core` raises `BarkparkNotFoundError`, which we
+ *     swallow and return null rather than 500 — so the site renders an
+ *     honest-empty 200 instead of crashing;
  *   - a reachable-but-empty type (zero documents) returns `{ doc: null }` too.
  */
 export async function fetchFlagshipDoc(env: BpEnv): Promise<FlagshipResult> {
-  const client = createBpClient(env)
-  const { barkparkFetch } = createBarkparkServer({
-    client,
-    // Only consumed on the draft branch; published reads are anonymous. A real
-    // preview token is only needed if you enable Next draft mode.
-    serverToken: env.token ?? 'anonymous',
-  })
+  const bp = createBpClient(env)
 
   try {
     if (env.docId) {
-      const res = await barkparkFetch<unknown>({ type: env.docType, id: env.docId })
-      return { doc: toFlagship(unwrapDoc(res)) }
+      const doc = await bp.doc(env.docType, env.docId)
+      return { doc: toFlagship(doc as Record<string, unknown> | null) }
     }
-    const res = await barkparkFetch<QueryEnvelope>({
-      type: env.docType,
-      query: { filters: [], order: '_updatedAt:desc', limit: 1 },
-    })
-    const first = res?.result?.documents?.[0]
-    return { doc: toFlagship(first) }
+    const doc = await bp
+      .docs(env.docType)
+      .order('_updatedAt:desc')
+      .limit(1)
+      .findOne()
+    return { doc: toFlagship(doc as Record<string, unknown> | null) }
   } catch (err) {
-    // Branch-2 404 → honest-empty (copy doc.ts:86). Every other error re-throws
-    // so the fail-closed HEALTH gate can catch a genuinely broken content link.
+    // Branch-2 404 → honest-empty. Every other error re-throws so the
+    // fail-closed HEALTH gate can catch a genuinely broken content link.
     if (err instanceof BarkparkNotFoundError) return { doc: null }
     throw err
   }
