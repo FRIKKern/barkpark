@@ -58,7 +58,9 @@ defmodule Barkpark.Search.QueryPipeline do
     config = SurfaceConfigs.get(surface, scope, Keyword.get(opts, :workspace_id))
     raw_query = Map.get(context, :query, "") || ""
     parsed = QueryParser.parse(raw_query)
-    {parsed, corrected_to} = expand_synonyms(surface, scope, parsed)
+
+    {parsed, corrected_to} =
+      expand_synonyms(surface, scope, parsed, Keyword.get(opts, :workspace_id))
 
     {hits, total, recovery, engine_meta} =
       case surface do
@@ -94,7 +96,7 @@ defmodule Barkpark.Search.QueryPipeline do
      }}
   end
 
-  defp expand_synonyms(surface, scope, parsed) do
+  defp expand_synonyms(surface, scope, parsed, workspace_id) do
     positive = Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, [])
 
     if positive == [] do
@@ -102,7 +104,7 @@ defmodule Barkpark.Search.QueryPipeline do
     else
       extra =
         positive
-        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term) end)
+        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term, workspace_id) end)
         |> Enum.reject(&(&1 in positive or &1 == ""))
         |> Enum.uniq()
 
@@ -110,7 +112,7 @@ defmodule Barkpark.Search.QueryPipeline do
       # for which an enabled synonym fired — null when nothing matched.
       corrected_to =
         Enum.find_value(positive, fn term ->
-          Synonyms.correction_for(surface, scope, term)
+          Synonyms.correction_for(surface, scope, term, workspace_id)
         end)
 
       {%{parsed | terms: parsed.terms ++ extra}, corrected_to}

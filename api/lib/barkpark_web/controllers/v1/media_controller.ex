@@ -111,13 +111,13 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def search_synonyms(conn, %{"dataset" => dataset}) do
     json(conn, %{
-      result: Synonyms.list("media", dataset),
+      result: Synonyms.list("media", dataset, workspace_id(conn)),
       syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]
     })
   end
 
   def create_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.create("media", dataset, params) do
+    case Synonyms.create("media", dataset, params, workspace_id(conn)) do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
@@ -127,7 +127,7 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def promote_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.promote("media", dataset, params) do
+    case Synonyms.promote("media", dataset, params, workspace_id(conn)) do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
@@ -141,7 +141,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def preview_search_synonym(conn, %{"dataset" => dataset} = params) do
     q = bin(params["q"]) || bin(params["from"])
-    result = Synonyms.preview("media", dataset, q, params)
+    result = Synonyms.preview("media", dataset, q, params, workspace_id(conn))
     json(conn, %{result: result})
   end
 
@@ -163,7 +163,7 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
-    case Synonyms.delete(id, "media", dataset) do
+    case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
       :ok ->
         json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 

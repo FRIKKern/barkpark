@@ -11,16 +11,15 @@ defmodule Barkpark.Media.Delivery.Retriever do
   @spec build_text_filter(String.t(), map(), map(), keyword()) :: Ecto.Query.t() | nil
   def build_text_filter(dataset, parsed, config, opts \\ []) do
     relaxed = Keyword.get(opts, :relaxed, false)
-    terms = expanded_terms(dataset, parsed)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+    terms = expanded_terms(dataset, parsed, workspace_id)
 
     if terms == [] and Map.get(parsed, :excludes, []) == [] do
       nil
     else
       include_dyn = include_dynamic(terms, config, relaxed)
       exclude_dyn = exclude_dynamic(Map.get(parsed, :excludes, []), relaxed)
-
-      workspace_id = Keyword.get(opts, :workspace_id)
-      project_id = Keyword.get(opts, :project_id)
 
       base =
         MediaFile
@@ -107,12 +106,12 @@ defmodule Barkpark.Media.Delivery.Retriever do
     )
   end
 
-  defp expanded_terms(dataset, parsed) do
+  defp expanded_terms(dataset, parsed, workspace_id) do
     raw = Map.get(parsed, :raw, "")
 
     synonym_terms =
       if raw != "" do
-        Synonyms.search_terms("media", dataset, raw)
+        Synonyms.search_terms("media", dataset, raw, workspace_id)
       else
         []
       end

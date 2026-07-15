@@ -160,7 +160,11 @@ defmodule Barkpark.Search.Intelligence do
       topQueries: top_queries,
       mergePatterns: merge_patterns,
       synonymCandidates:
-        Synonyms.candidates(surface, scope, period: period, period_start: period_start),
+        Synonyms.candidates(surface, scope,
+          period: period,
+          period_start: period_start,
+          workspace_id: Keyword.get(opts, :workspace_id)
+        ),
       zeroHitRate: rates.zero_hit_rate,
       recoveryRate: rates.recovery_rate,
       hints: improvement_hints(top_queries, merge_patterns, quality)
@@ -347,7 +351,7 @@ defmodule Barkpark.Search.Intelligence do
        an anonymous client can never alone trip the gate.
     4. When the distinct-session count is `>= 2` and no enabled synonym already
        maps `from → to`, write an `alt_correction` synonym via
-       `Synonyms.promote/3` (`source: "auto"`); a unique-constraint conflict is
+       `Synonyms.promote/4` (`source: "auto"`); a unique-constraint conflict is
        treated as "already exists".
 
   Returns `{:ok, %{promoted: boolean, distinct_sessions: non_neg_integer}}`.
@@ -383,6 +387,7 @@ defmodule Barkpark.Search.Intelligence do
     from_norm = if from_raw, do: Sanitizer.normalize(from_raw), else: ""
     to_norm = if to_raw, do: Sanitizer.normalize(to_raw), else: ""
     session_key = Keyword.get(opts, :session_key)
+    workspace_id = Keyword.get(opts, :workspace_id)
 
     cond do
       from_norm == "" or to_norm == "" ->
@@ -413,8 +418,9 @@ defmodule Barkpark.Search.Intelligence do
         distinct = count_distinct_correction_sessions(surface, scope, from_norm, to_norm)
 
         promoted =
-          distinct >= 2 and not synonym_exists?(surface, scope, from_norm, to_norm) and
-            promote_correction(surface, scope, from_norm, to_norm)
+          distinct >= 2 and
+            not synonym_exists?(surface, scope, from_norm, to_norm, workspace_id) and
+            promote_correction(surface, scope, from_norm, to_norm, workspace_id)
 
         {:ok, %{promoted: promoted, distinct_sessions: distinct}}
     end
@@ -432,20 +438,25 @@ defmodule Barkpark.Search.Intelligence do
     |> length()
   end
 
-  defp synonym_exists?(surface, scope, from_norm, to_norm) do
+  defp synonym_exists?(surface, scope, from_norm, to_norm, workspace_id) do
     surface
-    |> Synonyms.list(scope)
+    |> Synonyms.list(scope, workspace_id)
     |> Enum.any?(fn s ->
       s.enabled and s.from == from_norm and s.to == to_norm
     end)
   end
 
-  defp promote_correction(surface, scope, from_norm, to_norm) do
-    case Synonyms.promote(surface, scope, %{
-           "from" => from_norm,
-           "to" => to_norm,
-           "kind" => "alt_correction"
-         }) do
+  defp promote_correction(surface, scope, from_norm, to_norm, workspace_id) do
+    case Synonyms.promote(
+           surface,
+           scope,
+           %{
+             "from" => from_norm,
+             "to" => to_norm,
+             "kind" => "alt_correction"
+           },
+           workspace_id
+         ) do
       {:ok, _row} -> true
       # Unique-constraint conflict (a concurrent promote landed first): treat as
       # already-exists, not a failure.
