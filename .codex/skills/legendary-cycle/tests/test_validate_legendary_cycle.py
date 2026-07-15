@@ -442,7 +442,10 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         self.assertIn("at least 15", skill)
         self.assertIn("minimum total is 135", fleet)
         self.assertIn("--fleet-ledger-json", fleet)
-        self.assertIn("All Legendary Build attempts use `model_reasoning_effort: high`", fleet)
+        self.assertIn(
+            "All Legendary Build and Review attempts use `model_reasoning_effort: high`",
+            fleet,
+        )
         self.assertIn("Every attempt stays in cost and outcome denominators", fleet)
         self.assertIn('model_reasoning_effort = "medium"', builder)
         self.assertIn('name = "legendary-experimenter"', experimenter)
