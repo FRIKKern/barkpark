@@ -345,6 +345,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
     end
   end
 
+  defp validate_attempt_replacement(_experiment_id, _attrs),
+    do: {:error, :invalid_replacement_attempt_id}
+
   defp unwrap_attempt({:ok, %Attempt{} = attempt}), do: {:ok, attempt}
   defp unwrap_attempt({:error, reason}), do: {:error, reason}
 

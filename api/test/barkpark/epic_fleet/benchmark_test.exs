@@ -5,6 +5,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
 
   alias Barkpark.EpicFleet
   alias Barkpark.EpicFleet.{Attempt, Benchmark, Experiment}
+  alias Barkpark.Tenancy
 
   setup do
     {workspace, _project} = ensure_default_scope!()
@@ -104,6 +105,20 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert "must contain typed metric states" in errors_on(changeset).costs
     end
 
+    test "rejects dangling replacement ancestry", %{attrs: attrs} do
+      {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
+
+      assert {:error, :replacement_attempt_not_found} =
+               EpicFleet.record_benchmark_attempt(experiment, %{
+                 attempt_attrs()
+                 | attempt_id: "attempt-retry",
+                   replaces_attempt_id: "attempt-missing",
+                   ordinal: 2
+               })
+
+      assert EpicFleet.list_benchmark_attempts(experiment) == []
+    end
+
     test "database rejects direct attempt UPDATE and DELETE", %{attrs: attrs} do
       {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
       {:ok, attempt} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
@@ -119,6 +134,27 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
           Ecto.UUID.dump!(attempt.id)
         ])
       end
+    end
+
+    test "workspace teardown cascades experiments and replacement attempts", %{attrs: attrs} do
+      workspace = create_workspace!()
+
+      {:ok, experiment} =
+        EpicFleet.create_benchmark_experiment(%{attrs | workspace_id: workspace.id})
+
+      {:ok, _original} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
+
+      {:ok, _replacement} =
+        EpicFleet.record_benchmark_attempt(experiment, %{
+          attempt_attrs()
+          | attempt_id: "attempt-retry",
+            replaces_attempt_id: "attempt-a",
+            ordinal: 2
+        })
+
+      assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
+      assert is_nil(Repo.get(Experiment, experiment.id))
+      assert Repo.aggregate(Attempt, :count) == 0
     end
   end
 
