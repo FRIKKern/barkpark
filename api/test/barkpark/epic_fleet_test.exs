@@ -129,14 +129,7 @@ defmodule Barkpark.EpicFleetTest do
 
       assert 1 == Enum.count(outcomes, &match?({:ok, %Assignment{}}, &1))
 
-      assert 11 ==
-               Enum.count(outcomes, fn
-                 {:error, %Ecto.Changeset{} = changeset} ->
-                   "has already been taken" in errors_on(changeset).replaces_assignment_id
-
-                 _ ->
-                   false
-               end)
+      assert 11 == Enum.count(outcomes, &match?({:error, :assignment_already_replaced}, &1))
 
       assert Repo.aggregate(
                from(a in Assignment, where: a.replaces_assignment_id == ^original.id),

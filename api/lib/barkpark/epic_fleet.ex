@@ -263,11 +263,26 @@ defmodule Barkpark.EpicFleet do
     existing = existing_assignment(attrs)
 
     cond do
-      is_nil(existing) -> {:error, :assignment_conflict}
-      assignment_replay?(existing, attrs) -> {:ok, existing}
-      true -> {:error, :assignment_conflict}
+      is_nil(existing) and replacement_already_exists?(attrs) ->
+        {:error, :assignment_already_replaced}
+
+      is_nil(existing) ->
+        {:error, :assignment_conflict}
+
+      assignment_replay?(existing, attrs) ->
+        {:ok, existing}
+
+      true ->
+        {:error, :assignment_conflict}
     end
   end
+
+  defp replacement_already_exists?(%{replaces_assignment_id: replacement_id})
+       when is_binary(replacement_id) do
+    Repo.exists?(from a in Assignment, where: a.replaces_assignment_id == ^replacement_id)
+  end
+
+  defp replacement_already_exists?(_attrs), do: false
 
   defp reconcile_assignment_with_status(candidate, attrs) do
     case reconcile_assignment(attrs) do
