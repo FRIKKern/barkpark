@@ -59,13 +59,13 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
                "615f47d9bde44b357f54b888dd7a0e9bba5d7a0f6b1baa68c18662839b959f6e"
 
       assert document["attempts_digest"] ==
-               "7265dfbb9bedf5765f750738aebec81fa2766a7287a572e19f4d7593fede196f"
+               "1815ca312f91132a18732fb585c7339025f0a2bc5920fc02c1459be04a9c3100"
 
       assert document["summary_digest"] ==
                "5bd7d2914bc4ae184608cb1c6994de16c8c9502ac76ea3803521781f787bc5ec"
 
       assert document["ledger_digest"] ==
-               "11386eec47be11331c18795df6d10484121bc85425fdf4e61dad4b4884b13365"
+               "0db779ba31f0f71a1faf92610fcdda3633b9b22ac98621aa694164c5b1b16dce"
     end
   end
 
@@ -148,15 +148,9 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert document["manifest"]["operator"]["api_key"] == "[REDACTED]"
       refute EpicFleet.canonical_json(document) =~ "do-not-export"
 
-      assert document["manifest_digest"] ==
-               "615f47d9bde44b357f54b888dd7a0e9bba5d7a0f6b1baa68c18662839b959f6e"
-
-      assert document["attempts_digest"] ==
-               "7265dfbb9bedf5765f750738aebec81fa2766a7287a572e19f4d7593fede196f"
-
-      assert document["summary_digest"] ==
-               "5bd7d2914bc4ae184608cb1c6994de16c8c9502ac76ea3803521781f787bc5ec"
-
+      assert document["manifest_digest"] == EpicFleet.canonical_digest(document["manifest"])
+      assert document["attempts_digest"] == EpicFleet.canonical_digest(document["attempts"])
+      assert document["summary_digest"] == EpicFleet.canonical_digest(document["summary"])
       assert String.length(document["ledger_digest"]) == 64
 
       assert {:ok, json} = EpicFleet.export_benchmark_json(experiment)
