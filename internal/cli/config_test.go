@@ -1,12 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -547,6 +550,233 @@ func TestResolveThemeID(t *testing.T) {
 				t.Errorf("ResolveThemeID(env=%q, cfg=%+v) = %q, want %q", c.env, c.cfg, got, c.want)
 			}
 		})
+	}
+}
+
+// utf8BOM is the byte sequence a Windows editor (Notepad, PowerShell `>`) prepends
+// to a UTF-8 file. encoding/json rejects it, so LoadConfig must strip it.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// TestBOMBricksLoadConfig is the failing-first proof for BP-ONB-12: a config.json
+// saved by a Windows editor carries a leading UTF-8 BOM, which encoding/json will
+// not accept — pre-fix this errored and bricked EVERY bp command. Post-fix
+// LoadConfig strips the BOM and the config loads cleanly.
+func TestBOMBricksLoadConfig(t *testing.T) {
+	root := withTempConfigHome(t)
+	dir := filepath.Join(root, "barkpark")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := []byte(`{"server":"https://api.barkpark.cloud","token":"tok","dataset":"production"}`)
+	withBOM := append(append([]byte(nil), utf8BOM...), body...)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), withBOM, 0o600); err != nil {
+		t.Fatalf("write BOM config: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("BOM-prefixed config must load (Windows Notepad/PowerShell save), got error: %v", err)
+	}
+	if got.Server != "https://api.barkpark.cloud" || got.Token != "tok" || got.Dataset != "production" {
+		t.Fatalf("BOM-stripped config fields wrong: %+v", *got)
+	}
+}
+
+// TestSaveConfigSelfHeals proves the BOM is a one-time hazard: after loading a
+// BOM-poisoned file, a normal SaveConfig rewrites BOM-free bytes, so the next
+// LoadConfig succeeds even without the strip. The on-disk file must not begin
+// with a BOM.
+func TestSaveConfigSelfHeals(t *testing.T) {
+	root := withTempConfigHome(t)
+	dir := filepath.Join(root, "barkpark")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, "config.json")
+	withBOM := append(append([]byte(nil), utf8BOM...), []byte(`{"server":"http://localhost:4000"}`)...)
+	if err := os.WriteFile(path, withBOM, 0o600); err != nil {
+		t.Fatalf("write BOM config: %v", err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load BOM config: %v", err)
+	}
+	cfg.Server = "https://api.barkpark.cloud"
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if bytes.HasPrefix(raw, utf8BOM) {
+		t.Fatalf("SaveConfig must emit BOM-free JSON, got a leading BOM: %q", raw[:min(6, len(raw))])
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("reload after self-heal: %v", err)
+	}
+	if got.Server != "https://api.barkpark.cloud" {
+		t.Fatalf("self-healed server = %q, want https://api.barkpark.cloud", got.Server)
+	}
+}
+
+// TestRememberServerAliasCollapsesOneInstance is the headline proof for D4 / the
+// gyldendal-2 kill: reaching ONE instance via two hostnames — canonical then a
+// custom domain — that share an InstanceID must collapse to a SINGLE known-server
+// entry, fold the prior hostname into aliases, and mint NO "-2" phantom. Both
+// hostnames (and the InstanceID) must resolve back to the one entry, and the
+// alias hostname must read as active.
+func TestRememberServerAliasCollapsesOneInstance(t *testing.T) {
+	const canonical = "https://gyldendal.barkpark.cloud"
+	const custom = "https://cms.gyldendal.no"
+
+	c := &Config{}
+	c.RememberServer(ServerEntry{Server: canonical, InstanceID: "inst-gyld", Token: "t1", Dataset: "production", LastConnected: "2026-07-01T00:00:00Z"})
+	// Reconnect via a DIFFERENT hostname that resolves to the SAME instance.
+	c.RememberServer(ServerEntry{Server: custom, InstanceID: "inst-gyld", Token: "t2", Dataset: "production", LastConnected: "2026-07-02T00:00:00Z"})
+
+	list := c.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("two hostnames of ONE instance must collapse to a single entry (no gyldendal-2), got %d: %+v", len(list), list)
+	}
+	front := list[0]
+	if front.Server != custom {
+		t.Fatalf("primary should be the latest hostname %q, got %q", custom, front.Server)
+	}
+	if front.Token != "t2" {
+		t.Fatalf("front entry should reflect latest connect token, got %q", front.Token)
+	}
+	if len(front.Aliases) != 1 || normalizeServerURL(front.Aliases[0]) != normalizeServerURL(canonical) {
+		t.Fatalf("prior hostname should fold into aliases, got %+v", front.Aliases)
+	}
+	// No phantom -2 handle.
+	if got := c.DisplayName(front); strings.HasSuffix(got, "-2") {
+		t.Fatalf("collapsed instance must not carry a phantom -2 name, got %q", got)
+	}
+	// Both hostnames + the InstanceID resolve to the ONE entry.
+	if e, ok := c.FindServer(canonical); !ok || e.Server != custom {
+		t.Fatalf("alias hostname should resolve to the one entry: %+v ok=%v", e, ok)
+	}
+	if e, ok := c.FindServer(custom); !ok || e.Server != custom {
+		t.Fatalf("primary hostname should resolve: %+v ok=%v", e, ok)
+	}
+	if e, ok := c.FindServer("inst-gyld"); !ok || e.Server != custom {
+		t.Fatalf("InstanceID should resolve to the one entry: %+v ok=%v", e, ok)
+	}
+	// The active flat server is the custom URL; the alias hostname must still read
+	// as active (same instance).
+	if !c.IsActiveServer(canonical) {
+		t.Fatalf("alias hostname should read as active (same instance)")
+	}
+	if !c.IsActiveServer(custom) {
+		t.Fatalf("primary hostname should read as active")
+	}
+}
+
+// TestRememberServerAdoptsInstanceIDForKnownURL proves the ID-less→ID upgrade: a
+// server first saved with no InstanceID (bare local/dev, or a legacy entry) is
+// ADOPTED — not duplicated — when re-connected to the same URL once its ID is
+// known. Falls back to URL equality because one side lacks an ID.
+func TestRememberServerAdoptsInstanceIDForKnownURL(t *testing.T) {
+	const url = "https://api.example.com"
+	c := &Config{}
+	c.RememberServer(ServerEntry{Server: url, Token: "t1", LastConnected: "2026-07-01T00:00:00Z"})
+	c.RememberServer(ServerEntry{Server: url, InstanceID: "inst-x", Token: "t2", LastConnected: "2026-07-02T00:00:00Z"})
+
+	list := c.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("same URL must stay one entry, got %d: %+v", len(list), list)
+	}
+	if list[0].InstanceID != "inst-x" {
+		t.Fatalf("re-connect should adopt the learned InstanceID, got %q", list[0].InstanceID)
+	}
+	if len(list[0].Aliases) != 0 {
+		t.Fatalf("same-URL re-connect must not manufacture aliases, got %+v", list[0].Aliases)
+	}
+}
+
+// TestServerEntryInstanceFieldsRoundTrip proves the new InstanceID + Aliases
+// fields persist through save/load and an old config without them loads cleanly.
+func TestServerEntryInstanceFieldsRoundTrip(t *testing.T) {
+	withTempConfigHome(t)
+	want := &Config{
+		Server: "https://cms.gyldendal.no",
+		KnownServers: []ServerEntry{
+			{Server: "https://cms.gyldendal.no", InstanceID: "inst-gyld", Aliases: []string{"https://gyldendal.barkpark.cloud"}, Tier: "admin"},
+		},
+	}
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("instance-field round-trip mismatch:\n got=%+v\nwant=%+v", *got, *want)
+	}
+}
+
+// TestConnectSeamStampsInstanceIDAndCollapsesAliases is the D9 ACTIVATION proof:
+// it drives the REAL connect persistence seam (configStoreAdapter.Save — the exact
+// path connectToBarkpark writes through), NOT RememberServer directly, with one
+// InstanceID reached via two hostnames. It proves the wave-1 plumbing is no longer
+// INERT: a SavedConfig carrying a fleet-row InstanceID+Team now stamps them onto a
+// single ServerEntry, folds the prior hostname into aliases, and mints NO phantom
+// "-2" — the whole point of D9 (the gyldendal-2 kill only lands once a real ID is
+// stamped by a caller).
+func TestConnectSeamStampsInstanceIDAndCollapsesAliases(t *testing.T) {
+	withTempConfigHome(t)
+	const canonical = "https://gyldendal.barkpark.cloud"
+	const custom = "https://cms.gyldendal.no"
+	store := configStoreAdapter{}
+
+	// First connect: canonical hostname, ID + team learned from the fleet row.
+	if err := store.Save(setup.SavedConfig{Server: canonical, InstanceID: "inst-gyld", Team: "Gyldendal", Token: "t1", Dataset: "production", LastConnected: "2026-07-01T00:00:00Z"}); err != nil {
+		t.Fatalf("first connect save: %v", err)
+	}
+	// Second connect: a DIFFERENT hostname that resolves to the SAME instance ID.
+	if err := store.Save(setup.SavedConfig{Server: custom, InstanceID: "inst-gyld", Team: "Gyldendal", Token: "t2", Dataset: "production", LastConnected: "2026-07-02T00:00:00Z"}); err != nil {
+		t.Fatalf("second connect save: %v", err)
+	}
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("load after connects: %v", err)
+	}
+	list := cfg.KnownServerList()
+	if len(list) != 1 {
+		t.Fatalf("two hostnames of one instance via the connect seam must collapse to ONE entry (no gyldendal-2), got %d: %+v", len(list), list)
+	}
+	e := list[0]
+	if e.InstanceID != "inst-gyld" {
+		t.Fatalf("connect seam must stamp the fleet-row InstanceID onto the entry (activation), got %q", e.InstanceID)
+	}
+	if e.Team != "Gyldendal" {
+		t.Fatalf("connect seam must stamp the owning team, got %q", e.Team)
+	}
+	if e.Server != custom {
+		t.Fatalf("primary should be the latest hostname %q, got %q", custom, e.Server)
+	}
+	if e.Token != "t2" {
+		t.Fatalf("entry should reflect the latest connect token, got %q", e.Token)
+	}
+	if len(e.Aliases) != 1 || normalizeServerURL(e.Aliases[0]) != normalizeServerURL(canonical) {
+		t.Fatalf("prior hostname should fold into aliases, got %+v", e.Aliases)
+	}
+	if got := cfg.DisplayName(e); strings.HasSuffix(got, "-2") {
+		t.Fatalf("collapsed instance must not carry a phantom -2 name, got %q", got)
+	}
+	// The persisted active server is the latest URL; the alias hostname must still
+	// resolve to the one entry and read as active (same instance).
+	if _, ok := cfg.FindServer(canonical); !ok {
+		t.Fatalf("alias hostname must resolve to the one entry through the persisted config")
+	}
+	if !cfg.IsActiveServer(canonical) {
+		t.Fatalf("alias hostname should read as active (same instance)")
 	}
 }
 

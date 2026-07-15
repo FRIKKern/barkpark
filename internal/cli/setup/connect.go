@@ -41,12 +41,14 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	server := strings.TrimRight(plan.Server, "/")
 
 	saved := SavedConfig{
-		Server:    server,
-		Name:      strings.TrimSpace(plan.Name),
-		Token:     plan.Token,
-		Workspace: firstNonEmpty(plan.Workspace, "default"),
-		Project:   firstNonEmpty(plan.Project, "default"),
-		Dataset:   firstNonEmpty(plan.Dataset, "production"),
+		Server:     server,
+		Name:       strings.TrimSpace(plan.Name),
+		Token:      plan.Token,
+		Workspace:  firstNonEmpty(plan.Workspace, "default"),
+		Project:    firstNonEmpty(plan.Project, "default"),
+		Dataset:    firstNonEmpty(plan.Dataset, "production"),
+		InstanceID: strings.TrimSpace(plan.InstanceID),
+		Team:       strings.TrimSpace(plan.Team),
 	}
 
 	if opts.DryRun {

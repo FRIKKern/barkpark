@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -114,8 +115,27 @@ func ResolveThemeID(c *Config) string {
 // DisplayName. An empty Name on a pre-existing entry is fine — DisplayName
 // derives one on the fly, and bp never re-connects just to backfill it.
 type ServerEntry struct {
-	Name          string `json:"name,omitempty"`
-	Server        string `json:"server,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Server string `json:"server,omitempty"`
+	// InstanceID is the STABLE server-side identity of the Barkpark instance this
+	// entry points at (the control plane's DomainStatusResult.Instance.ID). It is
+	// the primary upsert key: two hostnames that resolve to the same InstanceID
+	// collapse to ONE known-server entry instead of minting a phantom "-2" second
+	// server (the gyldendal-2 class). Empty for a bare local dev server whose ID
+	// was never learned — those fall back to normalized-URL equality (D4). A caller
+	// that knows the ID (attach/connect against the control plane) stamps it here.
+	InstanceID string `json:"instance_id,omitempty"`
+	// Aliases are the OTHER hostnames known to reach this same instance, most-recent
+	// primary-first exclusive of the current Server. When a saved instance is
+	// re-reached via a new hostname, the prior primary URL folds into Aliases so no
+	// URL is lost and `bp use <either-host>` still resolves to the one entry.
+	Aliases []string `json:"aliases,omitempty"`
+	// Team is the human name of the Cloud team that owns this instance, learned
+	// from the control-plane fleet row at connect time (cloudclient.Barkpark.Team).
+	// It is IDENTITY only — the credential is still the per-server Token — and lets
+	// a receipt (whoami / doctor) name the owning team from the local entry without
+	// a live fleet round-trip. Empty for a self-hosted attach with no control plane.
+	Team          string `json:"team,omitempty"`
 	Token         string `json:"token,omitempty"`
 	Workspace     string `json:"workspace,omitempty"`
 	Project       string `json:"project,omitempty"`
@@ -216,6 +236,12 @@ func LoadConfig() (*Config, error) {
 		}
 		return nil, fmt.Errorf("read config %s: %w", path, err)
 	}
+	// Strip a leading UTF-8 BOM (EF BB BF) before unmarshalling. Windows editors
+	// (Notepad, PowerShell's `>` redirection) prepend one, and encoding/json rejects
+	// it — a single stray BOM would otherwise brick the whole CLI with a parse error
+	// on every command. SaveConfig always emits BOM-free bytes, so a re-save
+	// self-heals the file (BP-ONB-12).
+	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
 	var c Config
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
@@ -273,35 +299,111 @@ func SaveConfig(c *Config) error {
 	return nil
 }
 
+// sameEntryIdentity reports whether two entries refer to the same Barkpark
+// instance. Identity is by InstanceID FIRST — when BOTH carry one, only the ID
+// decides (case-insensitive), so a second hostname of one instance is the same
+// entry regardless of URL. When either lacks an ID (bare local dev, or a legacy
+// entry saved before IDs were tracked), it falls back to normalized-URL equality
+// against the primary Server or any recorded alias (D4).
+func sameEntryIdentity(a, b ServerEntry) bool {
+	aid := strings.TrimSpace(a.InstanceID)
+	bid := strings.TrimSpace(b.InstanceID)
+	if aid != "" && bid != "" {
+		return strings.EqualFold(aid, bid)
+	}
+	return entryHasURL(a, b.Server) || entryHasURL(b, a.Server)
+}
+
+// entryHasURL reports whether rawURL (normalized) matches the entry's primary
+// Server URL or any of its recorded aliases. It is the URL-fallback half of
+// identity and the alias-aware resolver `bp use <host>` / whoami rely on.
+func entryHasURL(entry ServerEntry, rawURL string) bool {
+	key := normalizeServerURL(rawURL)
+	if key == "" {
+		return false
+	}
+	if normalizeServerURL(entry.Server) == key {
+		return true
+	}
+	for _, a := range entry.Aliases {
+		if normalizeServerURL(a) == key {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeAliases builds the alias set for a re-connected instance: every hostname
+// previously known for it EXCEPT the new primary URL, deduped by normalized form
+// and order-stable (the matched entry's old primary first, then its prior
+// aliases, then any the incoming entry itself carried). The raw string of the
+// first occurrence is kept. A plain re-connect to the SAME URL yields exactly the
+// matched entry's existing aliases (the old primary == new primary is skipped).
+func mergeAliases(primary string, matched ServerEntry, incoming []string) []string {
+	seen := map[string]bool{}
+	if k := normalizeServerURL(primary); k != "" {
+		seen[k] = true
+	}
+	var out []string
+	add := func(raw string) {
+		k := normalizeServerURL(raw)
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, raw)
+	}
+	add(matched.Server)
+	for _, a := range matched.Aliases {
+		add(a)
+	}
+	for _, a := range incoming {
+		add(a)
+	}
+	return out
+}
+
 // RememberServer upserts entry into the connect history AND promotes it to the
 // active flat context, so after RememberServer + SaveConfig the server is both
 // the default `bp` lands on and the head of the pick-list.
 //
-// Upsert is by normalized Server URL (trailing slash trimmed, scheme+host
-// lowercased): connecting to the same server twice collapses to one entry whose
-// fields reflect the latest connect. The matched (or new) entry moves to the
-// front so the list stays most-recent-first; the tail is trimmed to
-// maxKnownServers. LastConnected is taken from entry.LastConnected verbatim —
-// the caller stamps it (time.Now() in the executor, a fixed value in a test) so
-// this stays a pure, deterministic helper.
+// Upsert is by INSTANCE IDENTITY (sameEntryIdentity): InstanceID when both sides
+// carry one, else normalized Server URL (trailing slash trimmed, scheme+host
+// lowercased). Re-connecting to the same instance — even via a DIFFERENT hostname
+// once its InstanceID is known — collapses to one entry whose fields reflect the
+// latest connect and whose prior hostname folds into Aliases (no phantom "-2"
+// second server). The matched (or new) entry moves to the front so the list stays
+// most-recent-first; the tail is trimmed to maxKnownServers. LastConnected is
+// taken verbatim so this stays a pure, deterministic helper.
 func (c *Config) RememberServer(entry ServerEntry) {
 	if c == nil {
 		return
 	}
-	key := normalizeServerURL(entry.Server)
 
-	// Drop any existing entry for the same normalized URL; we re-insert at front.
-	// If the incoming entry has no explicit Name, inherit the name the matched
-	// entry already carried so a plain re-connect keeps a previously-chosen handle.
+	// Split off the first entry that is the SAME instance; keep the rest in order.
 	kept := c.KnownServers[:0:0]
+	matched := ServerEntry{}
+	haveMatch := false
 	for _, e := range c.KnownServers {
-		if normalizeServerURL(e.Server) == key {
-			if entry.Name == "" {
-				entry.Name = e.Name
-			}
+		if !haveMatch && sameEntryIdentity(e, entry) {
+			matched = e
+			haveMatch = true
 			continue
 		}
 		kept = append(kept, e)
+	}
+
+	if haveMatch {
+		// A plain re-connect that didn't set a name/ID inherits what the matched
+		// entry already carried, so nothing a prior connect learned is lost.
+		if entry.Name == "" {
+			entry.Name = matched.Name
+		}
+		if strings.TrimSpace(entry.InstanceID) == "" {
+			entry.InstanceID = matched.InstanceID
+		}
+		// Fold every previously-known hostname (except the new primary) into aliases.
+		entry.Aliases = mergeAliases(entry.Server, matched, entry.Aliases)
 	}
 
 	// Derive a Name when none was supplied (and none inherited). Uniqueness is
@@ -369,7 +471,6 @@ func (c *Config) DisplayName(e ServerEntry) string {
 		return deriveName(e.Server)
 	}
 	base := deriveName(e.Server)
-	key := normalizeServerURL(e.Server)
 
 	// Localhost family special-case: the bare "local" handle goes to whichever
 	// local sorts FIRST (most-recent-first); any additional local disambiguates by
@@ -379,7 +480,7 @@ func (c *Config) DisplayName(e ServerEntry) string {
 	if base == "local" {
 		claimed := false
 		for _, other := range c.KnownServers {
-			if normalizeServerURL(other.Server) == key {
+			if sameEntryIdentity(other, e) {
 				break
 			}
 			if strings.EqualFold(c.DisplayName(other), "local") {
@@ -399,7 +500,7 @@ func (c *Config) DisplayName(e ServerEntry) string {
 	// (skipping ones that carry an explicit Name — those don't claim the base).
 	rank := 0
 	for _, other := range c.KnownServers {
-		if normalizeServerURL(other.Server) == key {
+		if sameEntryIdentity(other, e) {
 			break
 		}
 		if strings.TrimSpace(other.Name) != "" {
@@ -640,11 +741,12 @@ func isIPv4(s string) bool {
 	return true
 }
 
-// FindServer resolves a name-or-URL to a known ServerEntry. It matches, in
-// order: a case-insensitive equality against each entry's explicit Name; against
-// each entry's unique DisplayName; and a normalized-URL equality against each
-// entry's Server. The first hit wins (most-recent-first order). Returns ok=false
-// when nothing matches.
+// FindServer resolves a name-or-URL-or-instance-ID to a known ServerEntry. It
+// matches, in order per entry: a case-insensitive equality against the explicit
+// Name; against the InstanceID; against the unique DisplayName; and a normalized-
+// URL equality against the entry's Server OR any of its aliases. The first hit
+// wins (most-recent-first order) — so either hostname of a multi-alias instance
+// resolves to the one entry. Returns ok=false when nothing matches.
 func (c *Config) FindServer(nameOrURL string) (ServerEntry, bool) {
 	if c == nil {
 		return ServerEntry{}, false
@@ -654,15 +756,17 @@ func (c *Config) FindServer(nameOrURL string) (ServerEntry, bool) {
 		return ServerEntry{}, false
 	}
 	qLower := strings.ToLower(q)
-	qURL := normalizeServerURL(q)
 	for _, e := range c.KnownServers {
 		if strings.TrimSpace(e.Name) != "" && strings.EqualFold(e.Name, q) {
+			return e, true
+		}
+		if id := strings.TrimSpace(e.InstanceID); id != "" && strings.EqualFold(id, q) {
 			return e, true
 		}
 		if strings.ToLower(c.DisplayName(e)) == qLower {
 			return e, true
 		}
-		if normalizeServerURL(e.Server) == qURL {
+		if entryHasURL(e, q) {
 			return e, true
 		}
 	}
@@ -701,13 +805,52 @@ func (c *Config) ActiveServer() string {
 	return c.Server
 }
 
-// IsActiveServer reports whether server is the active one, compared by
-// normalized URL.
+// IsActiveServer reports whether server is the active one. The fast path is
+// normalized-URL equality against the active flat Server (the only signal for a
+// bare local dev server with no known entry). Beyond that it is instance-aware:
+// if `server` is an alias of the active entry, or resolves to a known entry that
+// shares the active entry's InstanceID, it is still "active" — so `bp servers`
+// marks the one row for a multi-hostname instance no matter which host is active.
 func (c *Config) IsActiveServer(server string) bool {
 	if c == nil || c.Server == "" {
 		return false
 	}
-	return normalizeServerURL(c.Server) == normalizeServerURL(server)
+	if normalizeServerURL(c.Server) == normalizeServerURL(server) {
+		return true
+	}
+	active, ok := c.activeKnownEntry()
+	if !ok {
+		return false
+	}
+	if entryHasURL(active, server) {
+		return true
+	}
+	id := strings.TrimSpace(active.InstanceID)
+	if id == "" {
+		return false
+	}
+	for _, e := range c.KnownServers {
+		if entryHasURL(e, server) {
+			return strings.EqualFold(strings.TrimSpace(e.InstanceID), id)
+		}
+	}
+	return false
+}
+
+// activeKnownEntry returns the known entry the active flat Server points at,
+// matching by primary URL or alias. It is the seam IsActiveServer / callers use
+// to recover the active instance's identity (InstanceID, aliases) from the flat
+// context, which stores only the active URL.
+func (c *Config) activeKnownEntry() (ServerEntry, bool) {
+	if c == nil || c.Server == "" {
+		return ServerEntry{}, false
+	}
+	for _, e := range c.KnownServers {
+		if entryHasURL(e, c.Server) {
+			return e, true
+		}
+	}
+	return ServerEntry{}, false
 }
 
 // ToActiveContext projects the persisted config onto the manifest's

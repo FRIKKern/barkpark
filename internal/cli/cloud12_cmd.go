@@ -320,7 +320,7 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 
 	out.outf("")
 	out.outf("Connected to %s — %s", only.Name, connectTarget)
-	if !connectToBarkpark(out, connectTarget, creds.AdminToken, only.Name) {
+	if !connectToBarkpark(out, connectTarget, creds.AdminToken, only.Name, only.ID, fleetTeamLabel(only)) {
 		return exitOK
 	}
 	// TAKE ME FURTHER (decision 23): a successful AUTO-connect ends with the
@@ -355,7 +355,7 @@ func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclien
 		}
 		out.outf("")
 		out.outf("Connected to %s — %s", res.Name, res.Server)
-		if connectToBarkpark(out, res.Server, res.Token, res.Name) {
+		if connectToBarkpark(out, res.Server, res.Token, res.Name, res.InstanceID, res.Team) {
 			out.outf("")
 			out.outf("  run 'bp' to open your desk")
 		}
@@ -372,18 +372,25 @@ func finishMultiBarkpark(out *writer, client cloudFleetClient, list []cloudclien
 	return exitOK
 }
 
-// connectToBarkpark delegates to the UNCHANGED setup connect path (TargetConnect
-// over configStoreAdapter) so the server is probed, the admin token is persisted,
-// bp is defaulted here, and the same premium connect summary prints — exactly like
-// the wizard's cloud target. We never hand-roll RememberServer. A connect failure
-// after a good login is a warning, not a failure (the user stays logged in) —
-// reported as ok=false so the caller skips the next-step tail (hint or desk offer).
-func connectToBarkpark(out *writer, server, token, name string) bool {
+// connectToBarkpark delegates to the setup connect path (TargetConnect over
+// configStoreAdapter) so the server is probed, the admin token is persisted, bp is
+// defaulted here, and the same premium connect summary prints — exactly like the
+// wizard's cloud target. We never hand-roll RememberServer. instanceID + team are
+// the control-plane identity from the fleet row already in scope (Barkpark.ID /
+// Team.Name); they thread through SetupPlan → SavedConfig → ServerEntry so a
+// second hostname of one instance collapses onto the existing entry (aliases)
+// instead of minting a phantom "-2" (D4/D9) — the activation that made the
+// wave-1 InstanceID plumbing live. A connect failure after a good login is a
+// warning, not a failure (the user stays logged in) — reported as ok=false so the
+// caller skips the next-step tail (hint or desk offer).
+func connectToBarkpark(out *writer, server, token, name, instanceID, team string) bool {
 	plan := setup.SetupPlan{
-		Target: setup.TargetConnect,
-		Server: server,
-		Token:  token,
-		Name:   strings.TrimSpace(name),
+		Target:     setup.TargetConnect,
+		Server:     server,
+		Token:      token,
+		Name:       strings.TrimSpace(name),
+		InstanceID: strings.TrimSpace(instanceID),
+		Team:       strings.TrimSpace(team),
 	}
 	opts := setup.Options{
 		Out:          out.stdout,

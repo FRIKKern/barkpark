@@ -45,6 +45,17 @@ type SetupPlan struct {
 	Project   string
 	Dataset   string
 
+	// InstanceID is the STABLE control-plane identity of the target instance, when
+	// the caller learned it (the cloud fleet row's Barkpark.ID). It threads through
+	// to ServerEntry.InstanceID so two hostnames of one instance collapse to a
+	// single known-server entry instead of minting a phantom "-2" (D4/D9). Empty on
+	// a self-hosted connect with no control plane — identity falls back to URL.
+	InstanceID string
+	// Team is the human name of the Cloud team that owns the target instance, when
+	// known (the fleet row's Team.Name). Threads through to ServerEntry.Team as
+	// identity only. Empty when there is no control-plane team.
+	Team string
+
 	// local / deploy
 	Docker  bool   // run via docker-compose rather than native toolchain
 	SSHHost string // user@host for the deploy target
@@ -144,6 +155,13 @@ type SavedConfig struct {
 	Project   string
 	Dataset   string
 
+	// InstanceID + Team carry the control-plane identity the connect executor
+	// resolved from the caller's plan onto the remembered ServerEntry: the adapter
+	// stamps entry.InstanceID (the collapse key that kills the phantom "-2") and
+	// entry.Team. Both empty on a self-hosted connect with no control plane.
+	InstanceID string
+	Team       string
+
 	// Tier is the resolved auth tier the connect probe reported. The adapter
 	// records it on the remembered ServerEntry so the pick-list can show it.
 	Tier string
@@ -225,6 +243,8 @@ type CloudLoginResult struct {
 	Server       string // the picked Barkpark's URL (empty ⇒ logged-in-only)
 	Token        string // the picked Barkpark's admin token (persisted as the server token; never printed)
 	Name         string // the Barkpark's name, saved as the short handle
+	InstanceID   string // the picked Barkpark's stable control-plane ID (fleet row Barkpark.ID); collapses aliases to one entry
+	Team         string // the human name of the owning Cloud team (fleet row Team.Name); identity only
 	LoggedInOnly bool   // true ⇒ authenticated but not connecting to any server
 }
 
