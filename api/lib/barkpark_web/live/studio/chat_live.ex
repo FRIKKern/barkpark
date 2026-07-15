@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat.Runtime
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ReturnTo
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
   # helpers shared by the live render and the store-replay path.
@@ -372,13 +373,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp chat_base_path(params) do
-    case {params["workspace_slug"], params["project_slug"]} do
-      {workspace, project} when is_binary(workspace) and is_binary(project) ->
-        "/w/#{workspace}/p/#{project}/studio/chat"
-
-      _ ->
-        "/studio/chat"
-    end
+    params["workspace_slug"]
+    |> Paths.scope_prefix(params["project_slug"])
+    |> Paths.chat_root()
   end
 
   # Persist the leaving session's composer draft (charter D36c). No-op on the

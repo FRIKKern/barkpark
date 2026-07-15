@@ -44,7 +44,7 @@ import { createGithubConnector } from "../src/connectors/github.js";
 import { createCredentialCipher } from "../src/crypto/credential-cipher.js";
 import { createBridgePool, ensureBridgeSchema } from "../src/db/pool.js";
 import { startBridge, type Bridge } from "../src/index.js";
-import { createInstallsLookup } from "../src/tenant/installs.js";
+import { createInstallsLookup, upsertInstall } from "../src/tenant/installs.js";
 
 const CREDENTIAL_KEY = Buffer.alloc(32, 9).toString("base64");
 const cipher = createCredentialCipher({ key: CREDENTIAL_KEY });
@@ -300,6 +300,10 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
 
     // ── TOOL-HEADERS: open the sealed PAT at MCP-connect ──────────────────────
 
+    // ── D89 COMPAT PIN #1 ─────────────────────────────────────────────────────
+    // A GitHub PAT is a BARE string (`ghp_…`). The dual-shape read-path (D89) must
+    // pass it BYTE-FOR-BYTE — a probe-break of the Bearer builder (connect.ts) reds
+    // exactly this test and the one below, so this green is not vacuous.
     it("TOOL-HEADERS opens the workspace's sealed PAT and returns the flat Bearer header", async () => {
       const h = await boot(githubRegistry());
       await connectGithub(h, WS_A);
@@ -314,6 +318,54 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       });
     });
 
+    // ── D89 dual-shape read-path — the never-throw floor ──────────────────────
+    it("TOOL-HEADERS serves a MALFORMED-JSON credential BYTE-FOR-BYTE and never throws (D89)", async () => {
+      const h = await boot(githubRegistry());
+      // Seed a row whose sealed credential starts with `{` but does NOT parse. A
+      // Linear-bundle parser that threw here would 500 the tool route for a paste
+      // credential that merely happened to start with a brace — the read-path must
+      // fall through to serving the raw bytes.
+      const malformed = '{ "access_token": ';
+      await upsertInstall(pool, cipher, {
+        provider: "github",
+        installKey: GOOD_LOGIN,
+        workspaceId: WS_A,
+        credentialRef: malformed,
+      });
+
+      const response = await h.post("/connectors/connect/tool-headers/github", {
+        ticket: toolTicket(WS_A),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        Authorization: `Bearer ${malformed}`,
+      });
+    });
+
+    it("TOOL-HEADERS serves a valid-JSON-object-without-access_token BYTE-FOR-BYTE (D89)", async () => {
+      const h = await boot(githubRegistry());
+      // Valid JSON, an object, but no non-empty `access_token` — NOT a bundle, so it
+      // is served verbatim, not reduced to some field.
+      const notABundle = '{"note":"not a bundle"}';
+      await upsertInstall(pool, cipher, {
+        provider: "github",
+        installKey: GOOD_LOGIN,
+        workspaceId: WS_A,
+        credentialRef: notABundle,
+      });
+
+      const response = await h.post("/connectors/connect/tool-headers/github", {
+        ticket: toolTicket(WS_A),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        Authorization: `Bearer ${notABundle}`,
+      });
+    });
+
+    // ── D89 COMPAT PIN #2 ─────────────────────────────────────────────────────
+    // The whole helper→route→PAT chain runs for real; the bare PAT must survive the
+    // dual-shape read-path byte-for-byte all the way to the runner's stdout.
     it("the headersHelper command runs for real: helper → loopback route → the Bearer header (D38)", async () => {
       const h = await boot(githubRegistry());
       await connectGithub(h, WS_A);
