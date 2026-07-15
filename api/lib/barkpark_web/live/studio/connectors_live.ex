@@ -472,7 +472,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
               # Never leave a minted-but-unstaged token live — a chat token with no
               # pending row is a workspace credential nobody owns.
               Auth.revoke_token(token)
-              oauth_gate(provider, "Add to Slack is unavailable right now: #{bridge_message(reason)}")
+
+              oauth_gate(
+                provider,
+                "Add to Slack is unavailable right now: #{bridge_message(reason)}"
+              )
           end
         else
           {:error, reason} ->
