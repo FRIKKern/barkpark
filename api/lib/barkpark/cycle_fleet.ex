@@ -10,10 +10,13 @@ defmodule Barkpark.CycleFleet do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content.Document
-  alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, Wave}
+  alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, RuntimeAttempt, Wave}
   alias Barkpark.EpicFleet
   alias Barkpark.EpicFleet.{Assignment, Result}
   alias Barkpark.Repo
+  alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.{Recorder, Runtime}
+  alias Barkpark.Tasks
   alias Barkpark.Tenancy.{Dataset, Project}
 
   @scope_fields [:workspace_id, :project_id, :epic_id, :wave_id]
@@ -193,6 +196,110 @@ defmodule Barkpark.CycleFleet do
 
   def bind_assignment_task(_assignment_id, _task_id),
     do: {:error, :assignment_task_authority_not_found}
+
+  @doc """
+  Authorize and start the one managed-Codex runtime attempt for a Task-bound
+  assignment. Database authority is committed before Recorder opens a provider
+  process, so a failed open is safely retryable against the same session.
+  """
+  @spec start_runtime_attempt(Assignment.t() | Ecto.UUID.t(), map(), map()) ::
+          {:ok, %{attempt: RuntimeAttempt.t(), session: StudioChat.Session.t(), recorder: pid()}}
+          | {:error, term()}
+  def start_runtime_attempt(assignment, claim, opts \\ %{})
+
+  def start_runtime_attempt(%Assignment{id: assignment_id}, claim, opts),
+    do: start_runtime_attempt(assignment_id, claim, opts)
+
+  def start_runtime_attempt(assignment_id, claim, opts)
+      when is_binary(assignment_id) and is_map(claim) and is_map(opts) do
+    recorder = value(opts, :recorder, Recorder)
+
+    with {:ok, attempt} <- prepare_runtime_attempt(assignment_id, claim, opts),
+         %StudioChat.Session{} = session <- StudioChat.get_session(attempt.session_id),
+         {:ok, recorder_pid} <- recorder.ensure(recorder_opts(session, opts)) do
+      {:ok, %{attempt: attempt, session: session, recorder: recorder_pid}}
+    else
+      nil -> {:error, :runtime_attempt_session_not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def start_runtime_attempt(_assignment_id, _claim, _opts),
+    do: {:error, :invalid_runtime_attempt}
+
+  @doc """
+  Freeze one assignment/session attempt after exact current-claim verification.
+  Exact replays return the existing attempt without minting another session.
+  """
+  @spec prepare_runtime_attempt(Assignment.t() | Ecto.UUID.t(), map(), map()) ::
+          {:ok, RuntimeAttempt.t()} | {:error, term()}
+  def prepare_runtime_attempt(assignment, claim, opts \\ %{})
+
+  def prepare_runtime_attempt(%Assignment{id: assignment_id}, claim, opts),
+    do: prepare_runtime_attempt(assignment_id, claim, opts)
+
+  def prepare_runtime_attempt(assignment_id, claim, opts)
+      when is_binary(assignment_id) and is_map(claim) and is_map(opts) do
+    with :ok <- managed_codex_attempt?(opts),
+         {:ok, claim} <- normalize_attempt_claim(claim) do
+      Repo.transaction(fn -> authorize_runtime_attempt(assignment_id, claim, opts) end)
+      |> case do
+        {:ok, %RuntimeAttempt{} = attempt} -> {:ok, attempt}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def prepare_runtime_attempt(_assignment_id, _claim, _opts),
+    do: {:error, :invalid_runtime_attempt}
+
+  @doc "Load the immutable runtime attempt bound to a Barkpark Studio session."
+  @spec get_runtime_attempt_by_session(Ecto.UUID.t()) :: RuntimeAttempt.t() | nil
+  def get_runtime_attempt_by_session(session_id) when is_binary(session_id),
+    do: Repo.get_by(RuntimeAttempt, session_id: session_id)
+
+  def get_runtime_attempt_by_session(_session_id), do: nil
+
+  @doc "Derive the live Task claim authorized by an immutable runtime attempt."
+  @spec current_runtime_attempt_attribution(RuntimeAttempt.t()) ::
+          {:ok, map()} | {:error, term()}
+  def current_runtime_attempt_attribution(%RuntimeAttempt{} = attempt) do
+    with authority when not is_nil(authority) <-
+           runtime_attempt_authority(attempt.assignment_id),
+         true <- authority.task_id == attempt.task_id,
+         claim when is_map(claim) <- get_in(authority.task_content || %{}, ["claim"]),
+         epoch when is_integer(epoch) <- claim["epoch"],
+         {:ok, fence} <-
+           verify_runtime_attempt_claim(
+             attempt,
+             %{
+               task_id: attempt.task_id,
+               worker_id: attempt.task_worker_id,
+               epoch: epoch,
+               work_digest: attempt.task_work_digest
+             },
+             authority
+           ) do
+      {:ok,
+       %{
+         assignment_id: attempt.assignment_id,
+         task: %{
+           id: attempt.task_id,
+           worker_id: fence.task_worker_id,
+           epoch: fence.task_epoch,
+           work_digest: fence.task_work_digest
+         }
+       }}
+    else
+      nil -> {:error, :runtime_attempt_authority_not_found}
+      false -> {:error, :runtime_attempt_authority_not_found}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :task_not_claimed}
+    end
+  end
+
+  def current_runtime_attempt_attribution(_attempt),
+    do: {:error, :runtime_attempt_authority_not_found}
 
   @spec record_result(Assignment.t(), String.t(), map()) ::
           {:ok, Result.t()} | {:error, Ecto.Changeset.t() | atom()}
@@ -932,6 +1039,171 @@ defmodule Barkpark.CycleFleet do
 
   defp effective_plan(wave), do: (get_build_plan(wave) || wave).plan
   defp effective_plan_digest(wave), do: (get_build_plan(wave) || wave).plan_digest
+
+  defp managed_codex_attempt?(opts) do
+    case {value(opts, :provider, "codex"), value(opts, :execution_target, "managed"),
+          value(opts, :runtime_surface, "studio_chat")} do
+      {"codex", "managed", "studio_chat"} -> :ok
+      _ -> {:error, :provider_capability_absent}
+    end
+  end
+
+  defp normalize_attempt_claim(claim) do
+    task_id = value(claim, :task_id, value(claim, :id))
+    worker_id = value(claim, :worker_id)
+    epoch = value(claim, :epoch)
+    work_digest = value(claim, :work_digest)
+
+    with {:ok, task_id} <- cast_assignment_task_id(task_id),
+         true <- nonempty?(worker_id),
+         true <- is_integer(epoch) and epoch > 0,
+         true <- is_binary(work_digest) and Regex.match?(~r/^[0-9a-f]{16}$/, work_digest) do
+      {:ok, %{task_id: task_id, worker_id: worker_id, epoch: epoch, work_digest: work_digest}}
+    else
+      _ -> {:error, :invalid_runtime_attempt_claim}
+    end
+  end
+
+  defp authorize_runtime_attempt(assignment_id, claim, opts) do
+    case runtime_attempt_authority(assignment_id) do
+      nil ->
+        Repo.rollback(:runtime_attempt_authority_not_found)
+
+      authority ->
+        case Repo.get(RuntimeAttempt, assignment_id) do
+          %RuntimeAttempt{} = attempt ->
+            reconcile_runtime_attempt(attempt, claim, authority)
+
+          nil ->
+            create_runtime_attempt(authority, claim, opts)
+        end
+    end
+  end
+
+  defp runtime_attempt_authority(assignment_id) do
+    Repo.one(
+      from(a in Assignment,
+        join: w in Wave,
+        on: w.id == a.cycle_wave_id and w.workspace_id == a.workspace_id,
+        join: b in AssignmentTask,
+        on: b.assignment_id == a.id,
+        join: t in Document,
+        on:
+          t.id == b.task_id and t.type == "task" and t.workspace_id == a.workspace_id and
+            t.project_id == w.project_id,
+        join: d in Dataset,
+        on: d.id == t.dataset_id and d.project_id == w.project_id,
+        where: a.id == ^assignment_id,
+        lock: "FOR UPDATE",
+        select: %{
+          assignment_id: a.id,
+          task_id: t.id,
+          task_doc_id: t.doc_id,
+          workspace_id: a.workspace_id,
+          project_id: w.project_id,
+          dataset_id: d.id,
+          task_content: t.content
+        }
+      )
+    )
+  end
+
+  defp create_runtime_attempt(authority, claim, opts) do
+    if claim.task_id != authority.task_id do
+      Repo.rollback(:runtime_attempt_task_mismatch)
+    end
+
+    expected =
+      claim
+      |> Map.merge(Map.take(authority, [:workspace_id, :project_id, :dataset_id]))
+      |> Map.put(:doc_id, authority.task_doc_id)
+
+    with {:ok, fence} <- Tasks.verify_claim_fence(authority.task_id, expected),
+         {:ok, session} <- create_attempt_session(authority, opts) do
+      now = DateTime.utc_now()
+
+      attrs = %{
+        assignment_id: authority.assignment_id,
+        task_id: authority.task_id,
+        session_id: session.id,
+        task_worker_id: fence.task_worker_id,
+        task_epoch: fence.task_epoch,
+        task_work_digest: fence.task_work_digest,
+        provider: "codex",
+        execution_target: "managed",
+        inserted_at: now
+      }
+
+      {inserted, _} = Repo.insert_all(RuntimeAttempt, [attrs], on_conflict: :nothing)
+      attempt = Repo.get(RuntimeAttempt, authority.assignment_id)
+
+      cond do
+        inserted == 1 -> attempt
+        is_nil(attempt) -> Repo.rollback(:runtime_attempt_conflict)
+        true -> reconcile_runtime_attempt(attempt, claim, authority)
+      end
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp reconcile_runtime_attempt(%RuntimeAttempt{} = attempt, claim, authority) do
+    case verify_runtime_attempt_claim(attempt, claim, authority) do
+      {:ok, _fence} -> attempt
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp verify_runtime_attempt_claim(attempt, claim, authority) do
+    cond do
+      attempt.task_id != claim.task_id ->
+        {:error, :runtime_attempt_conflict}
+
+      attempt.task_worker_id != claim.worker_id ->
+        {:error, :foreign_claim}
+
+      attempt.task_work_digest != claim.work_digest ->
+        {:error, :work_digest_mismatch}
+
+      true ->
+        Tasks.verify_claim_fence(
+          attempt.task_id,
+          claim
+          |> Map.merge(Map.take(authority, [:workspace_id, :project_id, :dataset_id]))
+          |> Map.put(:doc_id, authority.task_doc_id)
+        )
+    end
+  end
+
+  defp create_attempt_session(authority, opts) do
+    attrs = %{
+      id: Ecto.UUID.generate(),
+      provider: "codex",
+      execution_target: "managed",
+      cwd: value(opts, :cwd, Runtime.cwd("codex")),
+      mode: value(opts, :mode, "plan"),
+      model: value(opts, :model)
+    }
+
+    StudioChat.create_session(attrs, {:workspace, authority.workspace_id})
+  end
+
+  defp recorder_opts(session, opts) do
+    %{
+      session_id: session.id,
+      provider: session.provider,
+      provider_session_id: session.provider_session_id,
+      execution_target: session.execution_target,
+      execution_host_id: session.execution_host_id,
+      workspace_id: session.owner_workspace_id,
+      cwd: session.cwd,
+      mode: session.mode || "plan",
+      resume: (session.message_count || 0) > 0,
+      model: value(opts, :model),
+      effort: value(opts, :effort),
+      bypass_armed: false
+    }
+  end
 
   defp normalize_assignment_task_id(attrs) do
     case value(attrs, :task_id) do

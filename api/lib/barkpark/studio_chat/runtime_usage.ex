@@ -13,7 +13,7 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content.Document
-  alias Barkpark.CycleFleet.AssignmentTask
+  alias Barkpark.CycleFleet.{AssignmentTask, RuntimeAttempt}
   alias Barkpark.CycleFleet.Wave
   alias Barkpark.EpicFleet.Assignment
   alias Barkpark.Repo
@@ -117,6 +117,7 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
 
       nil ->
         with {:ok, authority} <- authoritative_join(receipt),
+             :ok <- verify_attempt_fence(authority, receipt),
              :ok <- verify_session(authority.session, receipt),
              {:ok, fence} <-
                Tasks.verify_claim_fence(
@@ -167,6 +168,11 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
         on: w.id == a.cycle_wave_id and w.workspace_id == a.workspace_id,
         join: b in AssignmentTask,
         on: b.assignment_id == a.id,
+        join: ra in RuntimeAttempt,
+        on:
+          ra.assignment_id == a.id and ra.task_id == b.task_id and
+            ra.session_id == ^receipt.session_id and ra.provider == "codex" and
+            ra.execution_target == "managed",
         join: t in Document,
         on:
           t.id == b.task_id and t.id == ^receipt.task_id and t.type == "task" and
@@ -174,7 +180,9 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
         join: d in Dataset,
         on: d.id == t.dataset_id and d.project_id == w.project_id,
         join: s in Session,
-        on: s.id == ^receipt.session_id and s.owner_workspace_id == a.workspace_id,
+        on:
+          s.id == ra.session_id and s.owner_workspace_id == a.workspace_id and
+            s.provider == ra.provider and s.execution_target == ra.execution_target,
         where: a.id == ^receipt.assignment_id,
         lock: "FOR SHARE",
         select: %{
@@ -183,6 +191,9 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
           project_id: w.project_id,
           dataset_id: d.id,
           task_doc_id: t.doc_id,
+          task_worker_id: ra.task_worker_id,
+          task_epoch: ra.task_epoch,
+          task_work_digest: ra.task_work_digest,
           session: s
         }
       )
@@ -190,6 +201,14 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
     case Repo.one(query) do
       nil -> {:error, :authority_not_found}
       authority -> {:ok, authority}
+    end
+  end
+
+  defp verify_attempt_fence(authority, receipt) do
+    cond do
+      authority.task_worker_id != receipt.task_worker_id -> {:error, :foreign_claim}
+      authority.task_work_digest != receipt.task_work_digest -> {:error, :work_digest_mismatch}
+      true -> :ok
     end
   end
 

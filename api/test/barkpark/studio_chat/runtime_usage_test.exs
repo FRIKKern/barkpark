@@ -4,15 +4,82 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
   import Ecto.Query
 
   alias Barkpark.{Content, CycleFleet, Repo, StudioChat, Tasks, Tenancy, TenancyFixtures}
-  alias Barkpark.CycleFleet.AssignmentTask
+  alias Barkpark.CycleFleet.{AssignmentTask, RuntimeAttempt}
+  alias Barkpark.StudioChat.Session
+  alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
+  alias Barkpark.StudioChat.Recorder
   alias Barkpark.StudioChat.RuntimeUsage
   alias Barkpark.StudioChat.RuntimeUsage.Receipt
 
   @dataset "production"
   @worker "cycle-builder"
 
+  defmodule FakeCodex do
+    @behaviour Barkpark.StudioChat.Runtime.Adapter
+
+    def start(opts) do
+      {:ok,
+       %{
+         runtime: spawn(fn -> receive_loop() end),
+         provider_session_id: Map.get(opts, :provider_session_id),
+         runtime_ingress_token: Map.fetch!(opts, :runtime_ingress_token),
+         open_opts: opts
+       }}
+    end
+
+    def resume(opts), do: start(opts)
+    def send_turn(_runtime, _content), do: :ok
+    def steer(_runtime, _command), do: :ok
+    def interrupt(_runtime), do: {:ok, "interrupt"}
+    def answer_approval(_runtime, _approval_id, _decision), do: :ok
+    def readiness(_opts), do: %{ready?: true}
+    def capabilities, do: %{modes: [], models: [], efforts: []}
+
+    def close(%{runtime: pid}) do
+      send(pid, :stop)
+      :ok
+    end
+
+    defp receive_loop do
+      receive do
+        :stop -> :ok
+        _ -> receive_loop()
+      end
+    end
+  end
+
+  defmodule TransactionRejectingRecorder do
+    def ensure(opts) do
+      if Barkpark.Repo.in_transaction?() do
+        {:error, :runtime_opened_inside_transaction}
+      else
+        send(self(), {:runtime_recorder_opts, opts})
+        {:ok, self()}
+      end
+    end
+  end
+
   setup do
+    previous_adapters = Application.get_env(:barkpark, :studio_chat_runtime_adapters)
+    Application.put_env(:barkpark, :studio_chat_runtime_adapters, %{codex: FakeCodex})
+
+    on_exit(fn ->
+      Barkpark.StudioChat.RuntimeSupervisor
+      |> DynamicSupervisor.which_children()
+      |> Enum.each(fn
+        {_, pid, _, _} when is_pid(pid) ->
+          DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
+
+        _ ->
+          :ok
+      end)
+
+      if previous_adapters,
+        do: Application.put_env(:barkpark, :studio_chat_runtime_adapters, previous_adapters),
+        else: Application.delete_env(:barkpark, :studio_chat_runtime_adapters)
+    end)
+
     {workspace, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: workspace.id, project_id: project.id]
     {:ok, dataset} = Tenancy.get_or_create_dataset(project, @dataset)
@@ -31,19 +98,6 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
       )
 
     {:ok, claimed} = Tasks.claim_by_id(task.doc_id, @worker, scope)
-    session_id = Ecto.UUID.generate()
-
-    {:ok, _session} =
-      StudioChat.create_session(
-        %{
-          id: session_id,
-          provider: "codex",
-          execution_target: "managed",
-          provider_session_id: "provider-thread-1",
-          mode: "plan"
-        },
-        {:workspace, workspace.id}
-      )
 
     cycle_scope = %{
       workspace_id: workspace.id,
@@ -73,15 +127,17 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
 
     {:ok, assignment} = CycleFleet.create_assignment(assignment_attrs)
 
-    attribution = %{
-      assignment_id: assignment.id,
-      task: %{
-        id: claimed.id,
-        worker_id: @worker,
-        epoch: get_in(claimed.content, ["claim", "epoch"]),
-        work_digest: get_in(claimed.content, ["claim", "work_digest"])
-      }
+    claim = %{
+      task_id: claimed.id,
+      worker_id: @worker,
+      epoch: get_in(claimed.content, ["claim", "epoch"]),
+      work_digest: get_in(claimed.content, ["claim", "work_digest"])
     }
+
+    {:ok, attempt} = CycleFleet.prepare_runtime_attempt(assignment, claim)
+    {:ok, _session} = StudioChat.set_provider_session_id(attempt.session_id, "provider-thread-1")
+    session_id = attempt.session_id
+    attribution = RuntimeAttempt.attribution(attempt)
 
     %{
       workspace: workspace,
@@ -93,6 +149,7 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
       task: claimed,
       wave: wave,
       assignment: assignment,
+      attempt: attempt,
       session_id: session_id,
       attribution: attribution
     }
@@ -120,6 +177,310 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
                "reason" => "exact_context_occupancy_unavailable"
              }
            } = RuntimeUsage.reduce(identity(ctx, "turn-1"))
+  end
+
+  test "one immutable attempt is replayed and runtime opening happens after commit", ctx do
+    assert {:ok, replay} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, ctx.attribution.task)
+
+    assert replay.assignment_id == ctx.attempt.assignment_id
+    assert replay.session_id == ctx.attempt.session_id
+    assert Repo.aggregate(RuntimeAttempt, :count) == 1
+
+    assert {:ok, %{attempt: started, session: session, recorder: recorder}} =
+             CycleFleet.start_runtime_attempt(ctx.assignment, ctx.attribution.task, %{
+               recorder: TransactionRejectingRecorder,
+               minter: :must_not_reach_managed_attempt
+             })
+
+    assert started.session_id == ctx.attempt.session_id
+    assert session.id == ctx.attempt.session_id
+    assert recorder == self()
+    assert_receive {:runtime_recorder_opts, recorder_opts}
+    refute Map.has_key?(recorder_opts, :minter)
+
+    assert_raise Postgrex.Error, ~r/append-only/, fn ->
+      Repo.update_all(RuntimeAttempt, set: [task_epoch: ctx.attempt.task_epoch + 1])
+    end
+
+    assert_raise Postgrex.Error, ~r/append-only/, fn ->
+      Repo.delete_all(from(a in RuntimeAttempt, where: a.assignment_id == ^ctx.assignment.id))
+    end
+  end
+
+  test "attempt authority rejects cross-Task claims and unsupported runtimes", ctx do
+    assert {:error, :runtime_attempt_conflict} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, %{
+               ctx.attribution.task
+               | id: Ecto.UUID.generate()
+             })
+
+    attempts_before = Repo.aggregate(RuntimeAttempt, :count)
+    sessions_before = Repo.aggregate(Session, :count)
+
+    assert {:error, :provider_capability_absent} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, ctx.attribution.task, %{
+               provider: "claude"
+             })
+
+    assert {:error, :provider_capability_absent} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, ctx.attribution.task, %{
+               execution_target: "registered_host"
+             })
+
+    assert {:error, :provider_capability_absent} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, ctx.attribution.task, %{
+               runtime_surface: "native_omx"
+             })
+
+    assert Repo.aggregate(RuntimeAttempt, :count) == attempts_before
+    assert Repo.aggregate(Session, :count) == sessions_before
+  end
+
+  test "a new attempt requires the exact current bound-Task claim", ctx do
+    {:ok, task} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => unique("attempt-fence-task"),
+          "title" => "Attempt fence task",
+          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+        },
+        @dataset,
+        ctx.scope
+      )
+
+    {:ok, claimed} = Tasks.claim_by_id(task.doc_id, @worker, ctx.scope)
+
+    cycle_scope = %{
+      workspace_id: ctx.workspace.id,
+      project_id: ctx.project.id,
+      epic_id: unique("attempt-fence-epic"),
+      wave_id: unique("attempt-fence-wave")
+    }
+
+    {:ok, _wave} =
+      CycleFleet.open_wave(
+        Map.merge(cycle_scope, %{
+          profile: "epic",
+          inventory: ["attempt-fence-unit"],
+          scale_contract: %{}
+        })
+      )
+
+    {:ok, assignment} =
+      CycleFleet.create_assignment(
+        Map.merge(cycle_scope, %{
+          assignment_id: "attempt-fence-unit",
+          phase: "survey",
+          agent_type: "epic-surveyor",
+          effort: "medium",
+          task_id: claimed.id,
+          snapshot: %{"purpose" => "claim fence"}
+        })
+      )
+
+    claim = %{
+      id: claimed.id,
+      worker_id: @worker,
+      epoch: get_in(claimed.content, ["claim", "epoch"]),
+      work_digest: get_in(claimed.content, ["claim", "work_digest"])
+    }
+
+    sessions_before = Repo.aggregate(Session, :count)
+
+    assert {:error, :stale_claim} =
+             CycleFleet.prepare_runtime_attempt(assignment, %{claim | epoch: claim.epoch + 1})
+
+    assert {:error, :foreign_claim} =
+             CycleFleet.prepare_runtime_attempt(assignment, %{claim | worker_id: "foreign-worker"})
+
+    assert {:error, :work_digest_mismatch} =
+             CycleFleet.prepare_runtime_attempt(assignment, %{
+               claim
+               | work_digest: "0000000000000000"
+             })
+
+    refute Repo.get(RuntimeAttempt, assignment.id)
+    assert Repo.aggregate(Session, :count) == sessions_before
+
+    assert {:ok, %RuntimeAttempt{assignment_id: assignment_id}} =
+             CycleFleet.prepare_runtime_attempt(assignment, claim)
+
+    assert assignment_id == assignment.id
+  end
+
+  test "fresh cross-project and cross-workspace claims mint no session or attempt", ctx do
+    local = create_runtime_authority!(ctx.workspace, ctx.project, "fresh-local")
+
+    other_project =
+      TenancyFixtures.create_project!(ctx.workspace, unique("fresh-other-project"))
+
+    other_project_authority =
+      create_runtime_authority!(ctx.workspace, other_project, "fresh-other-project")
+
+    foreign_workspace = TenancyFixtures.create_workspace!(unique("fresh-foreign-workspace"))
+
+    foreign_project =
+      TenancyFixtures.create_project!(foreign_workspace, unique("fresh-foreign-project"))
+
+    foreign_authority =
+      create_runtime_authority!(foreign_workspace, foreign_project, "fresh-foreign")
+
+    attempts_before = Repo.aggregate(RuntimeAttempt, :count)
+    sessions_before = Repo.aggregate(Session, :count)
+
+    assert {:error, :runtime_attempt_task_mismatch} =
+             CycleFleet.prepare_runtime_attempt(local.assignment, other_project_authority.claim)
+
+    assert {:error, :runtime_attempt_task_mismatch} =
+             CycleFleet.prepare_runtime_attempt(local.assignment, foreign_authority.claim)
+
+    assert Repo.aggregate(RuntimeAttempt, :count) == attempts_before
+    assert Repo.aggregate(Session, :count) == sessions_before
+  end
+
+  test "Recorder freezes available cumulative snapshots and duplicate events stay safe", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    project(recorder, event(ctx.session_id, "previous-turn", 100))
+    project(recorder, lifecycle(ctx.session_id, "recorder-turn", :turn_started))
+    project(recorder, event(ctx.session_id, "recorder-turn", 145))
+    project(recorder, lifecycle(ctx.session_id, "recorder-turn", :turn_completed))
+
+    assert %{"token_count" => %{"state" => "observed", "value" => 45}} =
+             RuntimeUsage.reduce(identity(ctx, "recorder-turn"))
+
+    project(recorder, event(ctx.session_id, "previous-turn", 100))
+    project(recorder, lifecycle(ctx.session_id, "recorder-turn", :turn_started))
+    project(recorder, event(ctx.session_id, "recorder-turn", 145))
+    project(recorder, lifecycle(ctx.session_id, "recorder-turn", :turn_completed))
+
+    assert Repo.aggregate(Receipt, :count) == 2
+  end
+
+  test "Recorder keeps an unavailable first-turn baseline typed missing", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    project(recorder, lifecycle(ctx.session_id, "first-turn", :turn_started))
+    project(recorder, event(ctx.session_id, "first-turn", 17))
+    project(recorder, lifecycle(ctx.session_id, "first-turn", :turn_completed))
+
+    assert %{"token_count" => %{"state" => "missing", "reason" => "baseline_missing"}} =
+             RuntimeUsage.reduce(identity(ctx, "first-turn"))
+
+    [terminal] = Repo.all(Receipt)
+    assert terminal.boundary == "terminal"
+    assert terminal.counters["total_tokens"] == 17
+  end
+
+  test "Recorder preserves a baseline-only turn as terminal_missing", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    project(recorder, event(ctx.session_id, "prior-turn", 21))
+    project(recorder, lifecycle(ctx.session_id, "baseline-only-turn", :turn_started))
+    project(recorder, lifecycle(ctx.session_id, "baseline-only-turn", :turn_completed))
+
+    assert %{"token_count" => %{"state" => "missing", "reason" => "terminal_missing"}} =
+             RuntimeUsage.reduce(identity(ctx, "baseline-only-turn"))
+
+    [baseline] = Repo.all(Receipt)
+    assert baseline.boundary == "baseline"
+    assert baseline.counters["total_tokens"] == 21
+  end
+
+  test "Recorder uses the renewed current epoch and rejects generic usage injection", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan"
+      })
+
+    generic_project(recorder, event(ctx.session_id, "injected-prior", 900))
+    generic_project(recorder, lifecycle(ctx.session_id, "injected-turn", :turn_started))
+    generic_project(recorder, event(ctx.session_id, "injected-turn", 999))
+    generic_project(recorder, lifecycle(ctx.session_id, "injected-turn", :turn_completed))
+    assert Repo.aggregate(Receipt, :count) == 0
+
+    project(recorder, event(ctx.session_id, "trusted-prior", 30))
+    project(recorder, lifecycle(ctx.session_id, "renewed-turn", :turn_started))
+
+    assert {:ok, pulsed} =
+             Tasks.pulse_by_id(ctx.task.id, @worker, text: "renew runtime usage lease")
+
+    renewed_epoch = get_in(pulsed.content, ["claim", "epoch"])
+    assert renewed_epoch > ctx.attribution.task.epoch
+
+    project(recorder, event(ctx.session_id, "renewed-turn", 47))
+    project(recorder, lifecycle(ctx.session_id, "renewed-turn", :turn_completed))
+
+    assert %{"token_count" => %{"state" => "observed", "value" => 17}} =
+             RuntimeUsage.reduce(identity(ctx, "renewed-turn"))
+
+    assert Enum.map(Repo.all(from(r in Receipt, order_by: r.boundary)), & &1.task_epoch) == [
+             ctx.attribution.task.epoch,
+             renewed_epoch
+           ]
+  end
+
+  test "attempt replay requires the caller's current live claim after pulse and release", ctx do
+    assert {:ok, pulsed} =
+             Tasks.pulse_by_id(ctx.task.id, @worker, text: "renew replay fence")
+
+    assert {:error, :stale_claim} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, ctx.attribution.task)
+
+    current_claim = %{
+      task_id: pulsed.id,
+      worker_id: @worker,
+      epoch: get_in(pulsed.content, ["claim", "epoch"]),
+      work_digest: get_in(pulsed.content, ["claim", "work_digest"])
+    }
+
+    assert {:ok, replay} = CycleFleet.prepare_runtime_attempt(ctx.assignment, current_claim)
+    assert replay.assignment_id == ctx.attempt.assignment_id
+
+    assert {:ok, _released} =
+             Tasks.release(pulsed.id, @worker, observed_epoch: current_claim.epoch)
+
+    assert {:error, :task_not_claimed} =
+             CycleFleet.prepare_runtime_attempt(ctx.assignment, current_claim)
+  end
+
+  test "Task-backed Recorder opens without minter or task hands", ctx do
+    {:ok, recorder} =
+      Recorder.ensure(%{
+        session_id: ctx.session_id,
+        provider: "codex",
+        provider_session_id: "provider-thread-1",
+        mode: "plan",
+        minter: :must_not_reach_runtime
+      })
+
+    assert {:ok, runtime} = Recorder.session_pid(recorder)
+    refute Map.has_key?(runtime.open_opts, :minter)
+    refute Map.has_key?(runtime.open_opts.session_opts, :minter)
+    assert Runtime.task_hands("codex", runtime) == :not_attempted
   end
 
   test "exact duplicate is a no-op while divergent replay is invalid", ctx do
@@ -365,6 +726,27 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
                event(foreign_session_id, "turn-wrong-session", 1)
              )
 
+    unbound_session_id = Ecto.UUID.generate()
+
+    {:ok, _unbound_session} =
+      StudioChat.create_session(
+        %{
+          id: unbound_session_id,
+          provider: "codex",
+          execution_target: "managed",
+          provider_session_id: "provider-thread-1",
+          mode: "plan"
+        },
+        {:workspace, ctx.workspace.id}
+      )
+
+    assert {:error, {:invalid, :authority_not_found}} =
+             RuntimeUsage.observe(
+               ctx.attribution,
+               :baseline,
+               event(unbound_session_id, "turn-unbound-session", 1)
+             )
+
     missing = put_in(ctx.attribution, [:task, :id], Ecto.UUID.generate())
 
     assert {:error, {:invalid, :authority_not_found}} =
@@ -452,19 +834,68 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
   end
 
   test "assignment and Task foreign keys preserve guarded teardown semantics" do
-    assert %{rows: [["c", false, false], ["a", true, true]]} =
+    assert %{rows: [["c", false, false], ["r", false, false], ["a", true, true]]} =
              Repo.query!(
                """
                SELECT confdeltype::text, condeferrable, condeferred
                FROM pg_constraint
                WHERE conname IN (
-                 'epic_assignment_tasks_assignment_id_fkey',
-                 'epic_assignment_tasks_task_id_fkey'
+                 'epic_assignment_runtime_attempts_assignment_id_fkey',
+                 'epic_assignment_runtime_attempts_session_id_fkey',
+                 'epic_assignment_runtime_attempts_task_id_fkey'
                )
                ORDER BY conname
                """,
                []
              )
+  end
+
+  test "project teardown removes only its runtime attempt" do
+    workspace = TenancyFixtures.create_workspace!(unique("attempt-project-teardown-ws"))
+    doomed_project = TenancyFixtures.create_project!(workspace, unique("attempt-doomed-project"))
+
+    survivor_project =
+      TenancyFixtures.create_project!(workspace, unique("attempt-survivor-project"))
+
+    doomed = create_runtime_authority!(workspace, doomed_project, "attempt-doomed")
+    survivor = create_runtime_authority!(workspace, survivor_project, "attempt-survivor")
+    {:ok, doomed_attempt} = CycleFleet.prepare_runtime_attempt(doomed.assignment, doomed.claim)
+
+    {:ok, survivor_attempt} =
+      CycleFleet.prepare_runtime_attempt(survivor.assignment, survivor.claim)
+
+    assert {:ok, _project} = Repo.delete(doomed_project)
+    refute Repo.get(RuntimeAttempt, doomed_attempt.assignment_id)
+    assert Repo.get(RuntimeAttempt, survivor_attempt.assignment_id)
+    assert Repo.get(Session, survivor_attempt.session_id)
+  end
+
+  test "workspace teardown removes only its runtime attempt" do
+    doomed_workspace = TenancyFixtures.create_workspace!(unique("attempt-doomed-workspace"))
+
+    doomed_project =
+      TenancyFixtures.create_project!(doomed_workspace, unique("attempt-doomed-project"))
+
+    survivor_workspace =
+      TenancyFixtures.create_workspace!(unique("attempt-survivor-workspace"))
+
+    survivor_project =
+      TenancyFixtures.create_project!(survivor_workspace, unique("attempt-survivor-project"))
+
+    doomed = create_runtime_authority!(doomed_workspace, doomed_project, "workspace-doomed")
+
+    survivor =
+      create_runtime_authority!(survivor_workspace, survivor_project, "workspace-survivor")
+
+    {:ok, doomed_attempt} = CycleFleet.prepare_runtime_attempt(doomed.assignment, doomed.claim)
+
+    {:ok, survivor_attempt} =
+      CycleFleet.prepare_runtime_attempt(survivor.assignment, survivor.claim)
+
+    assert {:ok, _workspace} = Tenancy.delete_workspace(doomed_workspace)
+    refute Repo.get(RuntimeAttempt, doomed_attempt.assignment_id)
+    assert Repo.get(RuntimeAttempt, survivor_attempt.assignment_id)
+    assert Repo.get(Session, survivor_attempt.session_id)
   end
 
   test "native envelopes and unallowlisted counters never enter the receipt", ctx do
@@ -529,6 +960,30 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     }
   end
 
+  defp lifecycle(session_id, turn_id, kind) do
+    %Event{
+      provider: "codex",
+      session_id: session_id,
+      provider_session_id: "provider-thread-1",
+      turn_id: turn_id,
+      idempotency_key: "#{kind}:#{turn_id}",
+      durability: :durable,
+      kind: kind,
+      terminal_state: if(kind == :turn_completed, do: :completed),
+      native: %{}
+    }
+  end
+
+  defp project(recorder, event) do
+    assert {:ok, %{runtime_ingress_token: token}} = Recorder.session_pid(recorder)
+    send(recorder, {:studio_chat_managed_runtime_event, token, event})
+    assert {:ok, _runtime} = Recorder.session_pid(recorder)
+  end
+
+  defp generic_project(recorder, event) do
+    assert :ok = GenServer.call(recorder, {:project_runtime_event, event})
+  end
+
   defp identity(ctx, turn_id) do
     %{
       cycle_id: ctx.wave.id,
@@ -550,6 +1005,63 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
 
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
+  end
+
+  defp create_runtime_authority!(workspace, project, suffix) do
+    scope = [workspace_id: workspace.id, project_id: project.id]
+    {:ok, _dataset} = Tenancy.get_or_create_dataset(project, @dataset)
+    register_task_schema!(scope)
+
+    {:ok, task} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => unique("#{suffix}-task"),
+          "title" => "Runtime authority #{suffix}",
+          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, claimed} = Tasks.claim_by_id(task.doc_id, @worker, scope)
+
+    cycle_scope = %{
+      workspace_id: workspace.id,
+      project_id: project.id,
+      epic_id: unique("#{suffix}-epic"),
+      wave_id: unique("#{suffix}-wave")
+    }
+
+    {:ok, _wave} =
+      CycleFleet.open_wave(
+        Map.merge(cycle_scope, %{
+          profile: "epic",
+          inventory: ["#{suffix}-unit"],
+          scale_contract: %{}
+        })
+      )
+
+    {:ok, assignment} =
+      CycleFleet.create_assignment(
+        Map.merge(cycle_scope, %{
+          assignment_id: unique("#{suffix}-assignment"),
+          phase: "survey",
+          agent_type: "epic-surveyor",
+          effort: "medium",
+          task_id: claimed.id,
+          snapshot: %{"purpose" => "runtime authority #{suffix}"}
+        })
+      )
+
+    claim = %{
+      task_id: claimed.id,
+      worker_id: @worker,
+      epoch: get_in(claimed.content, ["claim", "epoch"]),
+      work_digest: get_in(claimed.content, ["claim", "work_digest"])
+    }
+
+    %{assignment: assignment, task: claimed, claim: claim}
   end
 
   defp unique(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"

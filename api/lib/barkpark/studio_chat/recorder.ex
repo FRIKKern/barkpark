@@ -22,10 +22,10 @@ defmodule Barkpark.StudioChat.Recorder do
 
   require Logger
 
-  alias Barkpark.StudioChat
+  alias Barkpark.{CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
-  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry}
+  alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
 
   @registry Barkpark.StudioChat.RecorderRegistry
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
@@ -110,35 +110,40 @@ defmodule Barkpark.StudioChat.Recorder do
   @impl true
   def init(%{session_id: id} = opts) do
     provider = Map.get(opts, :provider, "claude")
+    runtime_attempt = CycleFleet.get_runtime_attempt_by_session(id)
+    runtime_ingress_token = make_ref()
 
-    session_opts = %{
-      session_id: id,
-      resume: Map.get(opts, :resume, false),
-      model: Map.get(opts, :model),
-      effort: Map.get(opts, :effort),
-      bypass_armed: Map.get(opts, :bypass_armed, false),
-      provider_session_id: Map.get(opts, :provider_session_id),
-      # The chat admin's principal (charter D63): the Session mints its
-      # loopback `bp mcp serve` credential from this — never exceeding the
-      # human's rights. Absent ⇒ the spawn simply has no hands (fail-closed;
-      # the chat itself is unchanged).
-      minter: Map.get(opts, :minter)
-    }
+    # A Task holder authorized this managed attempt but is not the Studio
+    # process's principal. Never mint or forward Task hands for that process.
+    minter = if runtime_attempt, do: nil, else: Map.get(opts, :minter)
 
-    runtime_opts = %{
-      session_id: id,
-      sink: self(),
-      mode: Map.get(opts, :mode, "plan"),
-      resume: Map.get(opts, :resume, false),
-      execution_target: Map.get(opts, :execution_target, "managed"),
-      execution_host_id: Map.get(opts, :execution_host_id),
-      workspace_id: Map.get(opts, :workspace_id),
-      cwd: Map.get(opts, :cwd),
-      provider_session_id: Map.get(opts, :provider_session_id),
-      minter: Map.get(opts, :minter),
-      developer_instructions: codex_developer_instructions(provider, id),
-      session_opts: session_opts
-    }
+    session_opts =
+      %{
+        session_id: id,
+        resume: Map.get(opts, :resume, false),
+        model: Map.get(opts, :model),
+        effort: Map.get(opts, :effort),
+        bypass_armed: Map.get(opts, :bypass_armed, false),
+        provider_session_id: Map.get(opts, :provider_session_id)
+      }
+      |> maybe_put_minter(minter)
+
+    runtime_opts =
+      %{
+        session_id: id,
+        sink: self(),
+        mode: Map.get(opts, :mode, "plan"),
+        resume: Map.get(opts, :resume, false),
+        execution_target: Map.get(opts, :execution_target, "managed"),
+        execution_host_id: Map.get(opts, :execution_host_id),
+        workspace_id: Map.get(opts, :workspace_id),
+        cwd: Map.get(opts, :cwd),
+        provider_session_id: Map.get(opts, :provider_session_id),
+        runtime_ingress_token: runtime_ingress_token,
+        developer_instructions: codex_developer_instructions(provider, id),
+        session_opts: session_opts
+      }
+      |> maybe_put_minter(minter)
 
     case RuntimeAdmission.acquire(id, Map.merge(opts, runtime_opts)) do
       {:ok, admission} ->
@@ -146,7 +151,16 @@ defmodule Barkpark.StudioChat.Recorder do
           {:ok, session} ->
             initialize_runtime(id, session, provider)
             RuntimeTelemetry.observe_identity(id, Runtime.runtime_identity(session, admission))
-            {:ok, new_state(id, session, provider, admission)}
+
+            {:ok,
+             new_state(
+               id,
+               session,
+               provider,
+               admission,
+               runtime_attempt,
+               runtime_ingress_token
+             )}
 
           {:error, {:already_started, session}} ->
             # A Session survived its Recorder (recorder crash). Re-adopt it as
@@ -155,7 +169,16 @@ defmodule Barkpark.StudioChat.Recorder do
             Runtime.adopt_sink(provider, session, self())
             initialize_runtime(id, session, provider)
             RuntimeTelemetry.observe_identity(id, Runtime.runtime_identity(session, admission))
-            {:ok, new_state(id, session, provider, admission)}
+
+            {:ok,
+             new_state(
+               id,
+               session,
+               provider,
+               admission,
+               runtime_attempt,
+               runtime_ingress_token
+             )}
 
           {:error, reason} ->
             RuntimeAdmission.release(admission)
@@ -185,7 +208,10 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp codex_developer_instructions(_, _), do: nil
 
-  defp new_state(id, session, provider, admission) do
+  defp maybe_put_minter(opts, nil), do: opts
+  defp maybe_put_minter(opts, minter), do: Map.put(opts, :minter, minter)
+
+  defp new_state(id, session, provider, admission, runtime_attempt, runtime_ingress_token) do
     %{
       session_id: id,
       provider: provider,
@@ -207,6 +233,16 @@ defmodule Barkpark.StudioChat.Recorder do
       # best available via `advertised_commands/1`.
       commands: nil,
       slash_commands: nil,
+      # Assignment usage authority is loaded from the immutable server row, never
+      # accepted from Recorder opts. Generic Studio chats remain unbound and do
+      # not mint CycleFleet receipts.
+      runtime_attempt: runtime_attempt,
+      runtime_ingress_token: runtime_ingress_token,
+      # Codex reports cumulative thread snapshots separately from terminal events.
+      # Hold the preceding snapshot as the next turn's baseline and only a usage
+      # event observed during the active turn as its terminal candidate.
+      runtime_usage_snapshot: nil,
+      runtime_usage_turn: nil,
       # The current thinking bout's token count (charter D41). Accumulated off
       # `system/thinking_tokens` (`estimated_tokens` is monotonic cumulative — we
       # take the max seen since the last flush, NEVER sum thinking_delta counts),
@@ -249,7 +285,7 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
 
   def handle_call({:project_runtime_event, %Event{} = event}, _from, state) do
-    state = capture_runtime_event(state, event)
+    state = capture_runtime_event(state, event, false)
     broadcast(state, {:studio_chat_runtime_event, event})
     {:reply, :ok, touch(state)}
   end
@@ -261,12 +297,21 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_call(:advertised_commands, _from, state),
     do: {:reply, advertised(state), state}
 
-  # Provider-neutral event ingress. Managed Codex and registered-host runtimes
-  # emit the canonical Runtime.Event envelope; Claude's legacy raw tuples remain
-  # supported below for byte-compatible clients. Recorder is the one durable
-  # projection owner for both paths.
+  # Only the private capability echoed by the managed Session may feed
+  # assignment usage. The public/generic event shape remains projection-only.
+  def handle_info(
+        {:studio_chat_managed_runtime_event, token, %Event{} = event},
+        %{runtime_ingress_token: token} = state
+      ) do
+    state = capture_runtime_event(state, event, true)
+    broadcast(state, {:studio_chat_runtime_event, event})
+    {:noreply, touch(state)}
+  end
+
+  # Provider-neutral untrusted ingress for registered-host replay and generic
+  # projection callers. It can update chat UI state but cannot mint usage.
   def handle_info({:studio_chat_runtime_event, %Event{} = event} = msg, state) do
-    state = capture_runtime_event(state, event)
+    state = capture_runtime_event(state, event, false)
     broadcast(state, msg)
     {:noreply, touch(state)}
   end
@@ -277,7 +322,7 @@ defmodule Barkpark.StudioChat.Recorder do
       |> Barkpark.ChatHosts.replay_unprojected()
       |> Enum.reduce(state, fn
         {event_id, %Event{} = event}, acc ->
-          acc = capture_runtime_event(acc, event)
+          acc = capture_runtime_event(acc, event, false)
           broadcast(acc, {:studio_chat_runtime_event, event})
           Barkpark.ChatHosts.mark_projected(event_id)
           acc
@@ -748,14 +793,28 @@ defmodule Barkpark.StudioChat.Recorder do
     StudioChat.update_status(session_id, "active")
   end
 
-  defp capture_runtime_event(state, %Event{} = event) do
-    maybe_capture_event_provider_session_id(state.session_id, event.provider_session_id)
+  defp capture_runtime_event(state, %Event{} = event, trusted_managed_ingress?) do
     RuntimeTelemetry.observe(state.session_id, event)
+    trusted_source? = trusted_managed_ingress? and trusted_runtime_source?(state, event)
 
-    state = %{
-      state
-      | session: Runtime.with_provider_session_id(state.session, event.provider_session_id)
-    }
+    state =
+      if trusted_source? or (not trusted_managed_ingress? and is_nil(state.runtime_attempt)) do
+        maybe_capture_event_provider_session_id(state.session_id, event.provider_session_id)
+
+        %{
+          state
+          | session: Runtime.with_provider_session_id(state.session, event.provider_session_id)
+        }
+      else
+        state
+      end
+
+    state =
+      if trusted_source? and trusted_runtime_usage_identity?(state, event) do
+        capture_runtime_usage(state, event)
+      else
+        state
+      end
 
     case event.kind do
       :session_started ->
@@ -795,6 +854,86 @@ defmodule Barkpark.StudioChat.Recorder do
 
       _ ->
         state
+    end
+  end
+
+  defp capture_runtime_usage(%{runtime_attempt: nil} = state, _event), do: state
+
+  defp capture_runtime_usage(state, %Event{kind: :usage} = event) do
+    usage_turn =
+      case state.runtime_usage_turn do
+        %{turn_id: turn_id} = turn when turn_id == event.turn_id ->
+          %{turn | terminal_snapshot: event}
+
+        turn ->
+          turn
+      end
+
+    %{state | runtime_usage_snapshot: event, runtime_usage_turn: usage_turn}
+  end
+
+  defp capture_runtime_usage(state, %Event{kind: :turn_started, turn_id: turn_id} = event)
+       when is_binary(turn_id) and turn_id != "" do
+    observe_runtime_boundary(state, :baseline, state.runtime_usage_snapshot, event)
+    %{state | runtime_usage_turn: %{turn_id: turn_id, terminal_snapshot: nil}}
+  end
+
+  defp capture_runtime_usage(
+         state,
+         %Event{kind: kind, turn_id: turn_id} = event
+       )
+       when kind in [:turn_completed, :error, :process_failed, :protocol_error] and
+              is_binary(turn_id) and turn_id != "" do
+    case state.runtime_usage_turn do
+      %{turn_id: ^turn_id, terminal_snapshot: snapshot} ->
+        observe_runtime_boundary(state, :terminal, snapshot, event)
+
+      _ ->
+        :ok
+    end
+
+    %{state | runtime_usage_turn: nil}
+  end
+
+  defp capture_runtime_usage(state, _event), do: state
+
+  defp trusted_runtime_source?(state, event),
+    do: event.provider == state.provider and event.session_id == state.session_id
+
+  defp trusted_runtime_usage_identity?(state, event) do
+    expected_provider_session_id = Runtime.provider_session_id(state.session)
+
+    is_binary(expected_provider_session_id) and
+      event.provider_session_id == expected_provider_session_id
+  end
+
+  defp observe_runtime_boundary(_state, _boundary, nil, _identity), do: :ok
+
+  defp observe_runtime_boundary(state, boundary, %Event{} = snapshot, %Event{} = identity) do
+    event = %{
+      snapshot
+      | provider: identity.provider,
+        session_id: identity.session_id,
+        provider_session_id: identity.provider_session_id,
+        turn_id: identity.turn_id,
+        idempotency_key: nil,
+        native: %{}
+    }
+
+    attribution =
+      case CycleFleet.current_runtime_attempt_attribution(state.runtime_attempt) do
+        {:ok, attribution} -> attribution
+        {:error, _reason} -> Barkpark.CycleFleet.RuntimeAttempt.attribution(state.runtime_attempt)
+      end
+
+    case RuntimeUsage.observe(attribution, boundary, event) do
+      {:ok, result} when result in [:recorded, :duplicate] ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "studio chat recorder: runtime usage #{boundary} was rejected: #{inspect(reason)}"
+        )
     end
   end
 

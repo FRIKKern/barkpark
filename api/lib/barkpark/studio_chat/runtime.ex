@@ -279,6 +279,10 @@ defmodule Barkpark.StudioChat.Runtime do
       when is_binary(id) and id != "",
       do: %{runtime_ref | provider_session_id: id}
 
+  def with_provider_session_id(runtime_ref, id)
+      when is_map(runtime_ref) and is_binary(id) and id != "",
+      do: Map.put(runtime_ref, :provider_session_id, id)
+
   def with_provider_session_id(runtime_ref, _id), do: runtime_ref
 
   def send_turn(_provider, %RemoteRef{} = runtime_ref, content),

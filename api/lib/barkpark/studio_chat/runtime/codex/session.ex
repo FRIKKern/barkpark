@@ -93,6 +93,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
          thread_id: Map.get(opts, :provider_session_id),
          turn_id: nil,
          sequence: 0,
+         runtime_ingress_token: Map.get(opts, :runtime_ingress_token),
          task_hands: task_hands.status,
          task_token: task_hands.token,
          thread_config: task_hands.config
@@ -334,9 +335,17 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     event = %{event | sequence: state.sequence + 1}
 
     case state.sink do
-      pid when is_pid(pid) -> send(pid, {:studio_chat_runtime_event, event})
-      fun when is_function(fun, 1) -> fun.(event)
-      _ -> :ok
+      pid when is_pid(pid) and is_reference(state.runtime_ingress_token) ->
+        send(pid, {:studio_chat_managed_runtime_event, state.runtime_ingress_token, event})
+
+      pid when is_pid(pid) ->
+        send(pid, {:studio_chat_runtime_event, event})
+
+      fun when is_function(fun, 1) ->
+        fun.(event)
+
+      _ ->
+        :ok
     end
 
     %{state | sequence: state.sequence + 1}
