@@ -153,7 +153,7 @@ def task_value(doc, field, klass):
     return values[field]
 
 
-def build():
+def build(output_path=OUTPUT, transformations_path=TRANSFORMATIONS):
     source=json.load(SOURCE.open()); fm=json.load(MANIFEST.open()); classes={x["id"]:x["class"] for x in fm["tasks"]}
     papers=[]; tasks=[]; quarantined=[]
     for doc in source["papers"]:
@@ -173,7 +173,8 @@ def build():
         klass=classes[doc["_id"]]; required=TASK_REQUIREMENTS[klass]; fields={k:task_value(doc,k,klass) for k in required}
         tasks.append({"id":doc["_id"],"kind":"task","class":klass,"required_fields":required,"canonical_fields":fields,"preimage":doc,"preimage_sha256":digest(doc)})
     packet={"schema_version":"legendary-e04-repair-packet/v1","assignment_id":"E04","candidate_id":"candidate-canonical-native","source_manifest_sha256":digest(fm),"papers":papers,"tasks":tasks,"quarantine":quarantined}
-    OUTPUT.parent.mkdir(parents=True,exist_ok=True); OUTPUT.write_text(json.dumps(packet,ensure_ascii=False,sort_keys=True,indent=2)+"\n")
+    output_path=Path(output_path); transformations_path=Path(transformations_path)
+    output_path.parent.mkdir(parents=True,exist_ok=True); output_path.write_text(json.dumps(packet,ensure_ascii=False,sort_keys=True,indent=2)+"\n")
     transformations={"schema_version":"legendary-e04-transformations/v1","assignment_id":"E04","units":[]}
     for u in papers:
         transformations["units"].append({"id":u["id"],"kind":u["kind"],"status":"accepted","preimage_sha256":u["preimage_sha256"],"canonical_sha256":digest(u["canonical"]),"semantic_hash_before":u["semantic_hash_before"],"semantic_hash_after":u["semantic_hash_after"]})
@@ -181,12 +182,15 @@ def build():
         transformations["units"].append({"id":u["id"],"kind":"task","class":u["class"],"status":"accepted","preimage_sha256":u["preimage_sha256"],"canonical_fields_sha256":digest(u["canonical_fields"]),"required_fields":u["required_fields"]})
     for u in quarantined:
         transformations["units"].append({"id":u["id"],"kind":u["kind"],"status":"quarantined","preimage_sha256":u["preimage_sha256"],"reasons":u["reasons"]})
-    TRANSFORMATIONS.write_text(json.dumps(transformations,ensure_ascii=False,sort_keys=True,indent=2)+"\n")
+    transformations_path.parent.mkdir(parents=True,exist_ok=True)
+    transformations_path.write_text(json.dumps(transformations,ensure_ascii=False,sort_keys=True,indent=2)+"\n")
     return packet
 
 
 if __name__ == "__main__":
-    ap=argparse.ArgumentParser(); ap.add_argument("--output",default=str(OUTPUT)); args=ap.parse_args()
-    start=time.perf_counter(); packet=build(); elapsed=time.perf_counter()-start
-    if Path(args.output)!=OUTPUT: Path(args.output).write_bytes(OUTPUT.read_bytes())
-    print(json.dumps({"assignment_id":"E04","papers":len(packet["papers"]),"tasks":len(packet["tasks"]),"quarantined":len(packet["quarantine"]),"output_sha256":digest(OUTPUT.read_bytes()),"elapsed_seconds":round(elapsed,6)},sort_keys=True))
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--output",default=str(OUTPUT))
+    ap.add_argument("--transformations-output",default=str(TRANSFORMATIONS))
+    args=ap.parse_args(); output=Path(args.output); transformations=Path(args.transformations_output)
+    start=time.perf_counter(); packet=build(output,transformations); elapsed=time.perf_counter()-start
+    print(json.dumps({"assignment_id":"E04","papers":len(packet["papers"]),"tasks":len(packet["tasks"]),"quarantined":len(packet["quarantine"]),"output_sha256":digest(output.read_bytes()),"transformations_sha256":digest(transformations.read_bytes()),"elapsed_seconds":round(elapsed,6)},sort_keys=True))
