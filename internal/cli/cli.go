@@ -241,6 +241,21 @@ func Execute(args []string) int {
 		// file. --server/--token are global flags already folded into g; the
 		// target and any trailing tokens ride in rest[1:].
 		return runOnramp(out, g, rest[1:])
+	case "context":
+		// `bp context pack <file…>` — pack files into an optical context bundle
+		// (paginated PNG pages + a verbatim text sidecar) an agent reads at a
+		// fraction of the text-token price. A client-side builtin like cmux/mcp/
+		// onramp: `context` is not a manifest noun, so this intercept shadows
+		// nothing and needs no server change. Local file I/O only — no network.
+		// Research trail: /papers/optical-compression-research-report.
+		if verb == "pack" {
+			return runContextPack(out, g, tail)
+		}
+		if g.help || verb == "" {
+			printContextPackHelp(out)
+			return exitOK
+		}
+		return usageErrf(out, func() { printContextPackHelp(out) }, "unknown command %q %q", noun, verb)
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
