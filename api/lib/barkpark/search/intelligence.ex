@@ -102,14 +102,15 @@ defmodule Barkpark.Search.Intelligence do
       when is_binary(surface) and is_binary(scope) do
     limit = Keyword.get(opts, :limit, @default_limit)
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
+    workspace_id = Keyword.get(opts, :workspace_id)
     prefix = normalize_suggest_prefix(prefix)
 
     suggest_opts = [min_search_count: min_count]
 
     %{
       recent: recent_queries(surface, scope, actor_key, prefix, limit),
-      popular: popular_queries(surface, scope, prefix, limit, suggest_opts),
-      nohits: nohits_queries(surface, scope, prefix, min(limit, 5))
+      popular: popular_queries(surface, scope, prefix, limit, suggest_opts, workspace_id),
+      nohits: nohits_queries(surface, scope, prefix, min(limit, 5), workspace_id)
     }
   end
 
@@ -117,6 +118,7 @@ defmodule Barkpark.Search.Intelligence do
   def insights(surface, scope, opts \\ [])
       when is_binary(surface) and is_binary(scope) do
     period = opts |> Keyword.get(:period, "week") |> normalize_period()
+    workspace_id = Keyword.get(opts, :workspace_id)
 
     period_start =
       case Keyword.get(opts, :period_start) do
@@ -124,9 +126,12 @@ defmodule Barkpark.Search.Intelligence do
         _ -> default_period_start(period)
       end
 
-    quality = quality_stats(surface, scope, period, period_start)
-    prev_counts = previous_period_search_counts(surface, scope, period, period_start)
-    rates = search_rates(surface, scope, period, period_start)
+    quality = quality_stats(surface, scope, period, period_start, workspace_id)
+
+    prev_counts =
+      previous_period_search_counts(surface, scope, period, period_start, workspace_id)
+
+    rates = search_rates(surface, scope, period, period_start, workspace_id)
 
     top_queries =
       from(c in Crystal,
@@ -137,6 +142,7 @@ defmodule Barkpark.Search.Intelligence do
         order_by: [desc: c.search_count],
         limit: 20
       )
+      |> scope_ws(workspace_id)
       |> Repo.all()
       |> Enum.map(&crystal_payload(&1, prev_counts))
 
@@ -148,6 +154,7 @@ defmodule Barkpark.Search.Intelligence do
         order_by: [desc: m.transition_count],
         limit: 30
       )
+      |> scope_ws(workspace_id)
       |> Repo.all()
       |> Enum.map(&merge_pattern_payload/1)
 
@@ -171,7 +178,7 @@ defmodule Barkpark.Search.Intelligence do
     }
   end
 
-  defp search_rates(surface, scope, period, period_start) do
+  defp search_rates(surface, scope, period, period_start, workspace_id) do
     rows =
       from(e in Event,
         where:
@@ -181,6 +188,7 @@ defmodule Barkpark.Search.Intelligence do
             e.inserted_at < ^period_end_dt(period, period_start),
         select: {e.zero_hits, e.metadata}
       )
+      |> scope_ws(workspace_id)
       |> Repo.all()
 
     total = length(rows)
@@ -243,6 +251,12 @@ defmodule Barkpark.Search.Intelligence do
     base = %{
       surface: surface,
       scope: scope,
+      # Tenant attribution stamped at INGEST — without it every event is
+      # workspace_id=nil and the crystallizer folds two tenants sharing a scope
+      # STRING into one summed roll-up. Threaded from the controller's resolved
+      # `current_workspace`; nil on unscoped/legacy callers (behaviour-identical
+      # to pre-tenancy).
+      workspace_id: Keyword.get(opts, :workspace_id),
       result_count: total,
       zero_hits: total == 0,
       actor_key: actor_key,
@@ -311,6 +325,9 @@ defmodule Barkpark.Search.Intelligence do
             insert_event(%{
               surface: surface,
               scope: scope,
+              # Inherit the parent search event's tenant so an interaction can
+              # never re-attribute a click to nil/another workspace.
+              workspace_id: Keyword.get(opts, :workspace_id) || search.workspace_id,
               event_type: event_type,
               query: search.query,
               query_normalized: search.query_normalized,
@@ -401,6 +418,7 @@ defmodule Barkpark.Search.Intelligence do
           insert_event(%{
             surface: surface,
             scope: scope,
+            workspace_id: Keyword.get(opts, :workspace_id),
             event_type: "correction",
             query: from_raw,
             query_normalized: from_norm,
@@ -556,6 +574,16 @@ defmodule Barkpark.Search.Intelligence do
     )
   end
 
+  # Tenant leaf for every crystal/event read. `nil` = the legacy/unscoped bucket
+  # (`workspace_id IS NULL`), matching the pre-tenancy default so existing
+  # callers stay behaviour-identical; a real workspace_id narrows to that tenant
+  # so a scope STRING shared across workspaces no longer unions their roll-ups.
+  # Binds on `workspace_id`, present on Crystal, MergePattern and Event alike.
+  defp scope_ws(queryable, nil), do: from(x in queryable, where: is_nil(x.workspace_id))
+
+  defp scope_ws(queryable, workspace_id),
+    do: from(x in queryable, where: x.workspace_id == ^workspace_id)
+
   defp recent_queries(surface, scope, actor_key, prefix, limit) do
     base =
       from(e in Event,
@@ -601,16 +629,23 @@ defmodule Barkpark.Search.Intelligence do
     }
   end
 
-  defp popular_queries(surface, scope, prefix, limit, opts) do
+  defp popular_queries(surface, scope, prefix, limit, opts, workspace_id) do
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
     today = Date.utc_today()
     window_start = Date.add(today, -@popular_window_days)
 
     crystal_rows =
-      popular_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1))
+      popular_from_crystals(
+        surface,
+        scope,
+        prefix,
+        window_start,
+        Date.add(today, -1),
+        workspace_id
+      )
 
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-    raw_rows = popular_from_events(surface, scope, prefix, today_start)
+    raw_rows = popular_from_events(surface, scope, prefix, today_start, workspace_id)
 
     crystal_rows
     |> merge_count_rows(raw_rows)
@@ -626,7 +661,7 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp popular_from_crystals(surface, scope, prefix, period_start, period_end) do
+  defp popular_from_crystals(surface, scope, prefix, period_start, period_end, workspace_id) do
     base =
       from(c in Crystal,
         where:
@@ -643,6 +678,7 @@ defmodule Barkpark.Search.Intelligence do
       )
 
     base
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_crystal(prefix)
     |> Repo.all()
     |> Enum.map(fn row ->
@@ -654,7 +690,7 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp popular_from_events(surface, scope, prefix, since) do
+  defp popular_from_events(surface, scope, prefix, since, workspace_id) do
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
@@ -668,6 +704,7 @@ defmodule Barkpark.Search.Intelligence do
       }
     )
     |> accepted_events()
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()
     |> Enum.map(fn row ->
@@ -679,15 +716,22 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp nohits_queries(surface, scope, prefix, limit) do
+  defp nohits_queries(surface, scope, prefix, limit, workspace_id) do
     today = Date.utc_today()
     window_start = Date.add(today, -@popular_window_days)
 
     crystal_rows =
-      nohits_from_crystals(surface, scope, prefix, window_start, Date.add(today, -1))
+      nohits_from_crystals(
+        surface,
+        scope,
+        prefix,
+        window_start,
+        Date.add(today, -1),
+        workspace_id
+      )
 
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-    raw_rows = nohits_from_events(surface, scope, prefix, today_start)
+    raw_rows = nohits_from_events(surface, scope, prefix, today_start, workspace_id)
 
     crystal_rows
     |> merge_count_rows(raw_rows)
@@ -696,7 +740,7 @@ defmodule Barkpark.Search.Intelligence do
     |> Enum.map(fn row -> %{query: row.query, count: row.count} end)
   end
 
-  defp nohits_from_crystals(surface, scope, prefix, period_start, period_end) do
+  defp nohits_from_crystals(surface, scope, prefix, period_start, period_end, workspace_id) do
     base =
       from(c in Crystal,
         where:
@@ -712,12 +756,13 @@ defmodule Barkpark.Search.Intelligence do
       )
 
     base
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_crystal(prefix)
     |> Repo.all()
     |> Enum.map(fn row -> %{query: row.query_normalized, count: row.count} end)
   end
 
-  defp nohits_from_events(surface, scope, prefix, since) do
+  defp nohits_from_events(surface, scope, prefix, since, workspace_id) do
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.inserted_at >= ^since and
@@ -726,6 +771,7 @@ defmodule Barkpark.Search.Intelligence do
       select: %{query: max(e.query), count: count(e.id)}
     )
     |> accepted_events()
+    |> scope_ws(workspace_id)
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()
   end
@@ -750,15 +796,20 @@ defmodule Barkpark.Search.Intelligence do
   defp round_result_count(value) when is_float(value), do: round(value)
   defp round_result_count(value) when is_integer(value), do: value
 
-  defp quality_stats(surface, scope, period, period_start) do
-    case Repo.get_by(Crystal,
-           surface: surface,
-           scope: scope,
-           period: period,
-           period_start: period_start,
-           query_normalized: "__quality__",
-           filter_fingerprint: ""
-         ) do
+  defp quality_stats(surface, scope, period, period_start, workspace_id) do
+    # Query (not get_by): a `nil` workspace_id must match `IS NULL` via scope_ws,
+    # and Ecto forbids `= nil` in a keyword get_by.
+    row =
+      from(c in Crystal,
+        where:
+          c.surface == ^surface and c.scope == ^scope and c.period == ^period and
+            c.period_start == ^period_start and c.query_normalized == "__quality__" and
+            c.filter_fingerprint == ""
+      )
+      |> scope_ws(workspace_id)
+      |> Repo.one()
+
+    case row do
       nil ->
         %{rejected: 0, accepted: 0}
 
@@ -767,7 +818,7 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
-  defp previous_period_search_counts(surface, scope, period, period_start) do
+  defp previous_period_search_counts(surface, scope, period, period_start, workspace_id) do
     prev_start = previous_period_start(period, period_start)
 
     from(c in Crystal,
@@ -776,6 +827,7 @@ defmodule Barkpark.Search.Intelligence do
           c.period_start == ^prev_start and c.query_normalized != "__quality__",
       select: {c.query_normalized, c.search_count}
     )
+    |> scope_ws(workspace_id)
     |> Repo.all()
     |> Map.new()
   end

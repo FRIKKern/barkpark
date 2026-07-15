@@ -115,7 +115,10 @@ defmodule BarkparkWeb.SearchController do
           source: SearchIntel.source(conn, "documents-api"),
           record: SearchIntel.should_record?(conn),
           tags: SearchIntel.tags(conn),
-          metadata: search_metadata(meta)
+          metadata: search_metadata(meta),
+          # Stamp the resolved tenant at ingest so the crystallizer can roll this
+          # event up on its OWN row instead of merging tenants that share a scope.
+          workspace_id: workspace_id(conn)
         ]
 
         record_result =
@@ -194,7 +197,8 @@ defmodule BarkparkWeb.SearchController do
         dataset,
         SearchIntel.actor_key(conn),
         prefix,
-        limit: limit
+        limit: limit,
+        workspace_id: workspace_id(conn)
       )
 
     json(conn, %{
@@ -206,7 +210,14 @@ defmodule BarkparkWeb.SearchController do
   def search_insights(conn, %{"dataset" => dataset} = params) do
     period = params["period"] || "week"
 
-    opts = [period: period]
+    # Read the caller's resolved `current_workspace`, matching the workspace the
+    # record path stamps at ingest — so insights and events roll up on the SAME
+    # tenant row. On the flat `[:api, :require_admin]` route AssignDefaultScope
+    # resolves the seeded Default workspace (no DeriveWorkspaceFromToken here);
+    # true per-tenant isolation comes via the scoped `/w/:ws/p/:project` mirror
+    # or a workspace-bound token that sets `current_workspace` upstream. The
+    # crystallizer + reads are tenant-safe at the module layer regardless.
+    opts = [period: period, workspace_id: workspace_id(conn)]
 
     opts =
       case SearchIntel.parse_period_start(params["periodStart"]) do
@@ -291,7 +302,8 @@ defmodule BarkparkWeb.SearchController do
       actor_key: SearchIntel.actor_key(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "documents-api"),
-      disabled: SearchIntel.recording_disabled?(conn)
+      disabled: SearchIntel.recording_disabled?(conn),
+      workspace_id: workspace_id(conn)
     ]
 
     case SearchIntelligence.record_interaction(dataset, params, record_opts) do
@@ -305,7 +317,8 @@ defmodule BarkparkWeb.SearchController do
       actor_key: SearchIntel.actor_key(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "web"),
-      disabled: SearchIntel.recording_disabled?(conn)
+      disabled: SearchIntel.recording_disabled?(conn),
+      workspace_id: workspace_id(conn)
     ]
 
     {:ok, %{promoted: promoted, distinct_sessions: distinct}} =
