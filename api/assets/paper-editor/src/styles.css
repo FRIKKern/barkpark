@@ -112,7 +112,7 @@
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
   --primary: hsl(163 46% 22%);
   --muted-surface: hsl(240 4.8% 95.9%);
-  --border-muted: var(--border);
+  --border-muted: hsl(240 5.9% 90%);
   --fg-dim: hsl(240 4% 47%);
   --font-mono: var(--paper-font-mono);
 }
