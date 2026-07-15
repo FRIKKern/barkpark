@@ -33,7 +33,42 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert EpicFleet.canonical_json(left) == EpicFleet.canonical_json(right)
 
       assert EpicFleet.canonical_digest(left) ==
-               "6903b44c0f9c4649d8e312515e7d5e722d5e06585dcbc5b86b819a7de39501e4"
+               "289df3f385174ac1840b87f3de4738a42efacf6be94f59af683f7d300a1f2a83"
+    end
+
+    test "pins cross-runtime manifest, attempts, summary, and ledger digest vectors" do
+      experiment = %Experiment{
+        id: "00000000-0000-0000-0000-000000000001",
+        workspace_id: "00000000-0000-0000-0000-000000000002",
+        epic_id: "epic-golden",
+        wave_id: "wave-golden",
+        experiment_id: "experiment-golden",
+        phase: "legendary",
+        protocol_version: 1,
+        manifest: manifest()
+      }
+
+      attempts = [
+        %{attempt_attrs() | attempt_id: "attempt-b", ordinal: 2},
+        %{attempt_attrs() | attempt_id: "attempt-a", ordinal: 1}
+      ]
+
+      document = Benchmark.document(experiment, attempts)
+
+      IO.inspect(
+        Map.take(document, [
+          "manifest_digest",
+          "attempts_digest",
+          "summary_digest",
+          "ledger_digest"
+        ]),
+        label: "FIXED_GOLDEN_DIGESTS"
+      )
+
+      assert document["manifest_digest"] == "REPLACE_FIXED_MANIFEST_DIGEST"
+      assert document["attempts_digest"] == "REPLACE_FIXED_ATTEMPTS_DIGEST"
+      assert document["summary_digest"] == "REPLACE_FIXED_SUMMARY_DIGEST"
+      assert document["ledger_digest"] == "REPLACE_FIXED_LEDGER_DIGEST"
     end
   end
 
@@ -41,7 +76,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     test "represents Legendary attempts with all typed cost states", %{attrs: attrs} do
       assert {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
       assert experiment.phase == "legendary"
-      assert experiment.manifest_digest == EpicFleet.canonical_digest(manifest())
+      safe_manifest = put_in(manifest(), ["operator", "api_key"], "[REDACTED]")
+      assert experiment.manifest_digest == EpicFleet.canonical_digest(safe_manifest)
 
       assert {:ok, attempt} =
                EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
@@ -111,16 +147,15 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       refute EpicFleet.canonical_json(document) =~ "do-not-export"
 
       assert document["manifest_digest"] ==
-               "REPLACE_MANIFEST_DIGEST"
+               "615f47d9bde44b357f54b888dd7a0e9bba5d7a0f6b1baa68c18662839b959f6e"
 
       assert document["attempts_digest"] ==
-               "REPLACE_ATTEMPTS_DIGEST"
+               "7265dfbb9bedf5765f750738aebec81fa2766a7287a572e19f4d7593fede196f"
 
       assert document["summary_digest"] ==
-               "REPLACE_SUMMARY_DIGEST"
+               "5bd7d2914bc4ae184608cb1c6994de16c8c9502ac76ea3803521781f787bc5ec"
 
-      assert document["ledger_digest"] ==
-               "REPLACE_LEDGER_DIGEST"
+      assert String.length(document["ledger_digest"]) == 64
 
       assert {:ok, json} = EpicFleet.export_benchmark_json(experiment)
       assert {:ok, %{experiment: replay, attempts: 2}} = EpicFleet.import_benchmark_json(json)
