@@ -5556,16 +5556,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = seed_session("Doomed store")
       {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
 
-      # Delete the row so the post-dispatch append hits the terminal {:error} of
-      # do_append (a vanished-session FK). A true concurrent seq-conflict cannot
-      # be forced on one sandbox connection; this exercises the SAME exhaustion
-      # branch of persist_user_message with a deterministic {:error}.
+      # Warm the session to a LIVE runtime FIRST (the row still exists, so the
+      # lazy resume-spawn succeeds), then settle the turn back to :ready. This is
+      # load-bearing: since the chat_sessions fail-closed store seal (c8d952a6c),
+      # a resume-spawn of a VANISHED session fail-closes at spawn ("Failed to
+      # start…") — so deleting the row BEFORE the first send would trip the spawn
+      # guard, not the persist guard this test is about. We must dispatch through
+      # a genuinely live runtime, then delete the row underneath it.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "warm up"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      _ = render(view)
+
+      # NOW delete the row so the next post-dispatch append hits the terminal
+      # {:error} of do_append (a vanished-session FK) AFTER the live runtime has
+      # already taken the turn. A true concurrent seq-conflict cannot be forced
+      # on one sandbox connection; this exercises the SAME exhaustion branch of
+      # persist_user_message with a deterministic {:error}.
       Barkpark.Repo.delete!(StudioChat.get_session(sid))
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "resend me"})
       _ = render(view)
 
-      # The model DID get the turn (cat dispatched it), so the echo STAYS…
+      # The model DID get the turn (the live runtime dispatched it), so the echo
+      # STAYS…
       assert has_element?(view, ~s([data-role="user"]))
       html = render(view)
       assert html =~ "resend me"

@@ -373,13 +373,102 @@ async function toolHeaders(
   );
   if (install === null) return null;
 
-  const pat = install.credentialRef;
-  if (pat === null || pat === undefined || pat.trim() === "") return null;
+  const stored = install.credentialRef;
+  if (stored === null || stored === undefined || stored.trim() === "") return null;
+
+  // REFRESH BEFORE HANDING THE HEADER OUT (charter D90/D92). The connector — not
+  // this shared route — owns the whole decision: `refreshCredential` parses its own
+  // credential shape, checks its own skew window, and exchanges a fresh token if the
+  // stored one is expiring. The route stays provider-agnostic; GitHub (no hook) and
+  // a Linear bundle still comfortably inside its life both fall straight through.
+  //
+  // On success the re-sealed bundle is written back via `upsertInstall` (blind LWW,
+  // NEVER a pinned CAS — a rotating refresh exchange is non-replayable, so a lost
+  // pin would discard the fresh bundle and brick the install, D91) and the fresh
+  // credential builds the Bearer. On FAILURE we serve the STORED credential and log
+  // LOUDLY (serve-stale-loud, D90): a failed refresh must degrade to a maybe-stale
+  // header, never to a hard connect failure. There is NO on-401 leg — the bridge
+  // only prints headers, so it never observes the provider's 401.
+  let credentialRef = stored;
+  if (deps.upsertInstall && connector.refreshCredential) {
+    const now = deps.now ? deps.now() : Date.now();
+    try {
+      const fresh = await connector.refreshCredential(install, { now });
+      if (fresh !== null) {
+        // Use the fresh credential for THIS connect regardless of the write-back
+        // outcome — the token is already minted and valid.
+        credentialRef = fresh;
+        try {
+          await deps.upsertInstall({
+            provider: install.provider,
+            installKey: install.installKey,
+            workspaceId: install.workspaceId,
+            // PLAINTEXT bundle in — upsertInstall does the ONE seal (AAD bpc2). NO
+            // `chatToken` key: absent means PRESERVE, and D52's CASE keeps a tool
+            // install's `chat_token_ref` NULL (same workspaceId, so nothing moves).
+            credentialRef: fresh,
+          });
+        } catch (writeError) {
+          console.error(
+            `[tool-headers] refreshed ${install.provider} install=${install.installKey} ` +
+              `workspace=${install.workspaceId} but FAILED to persist the re-sealed ` +
+              `bundle — the fresh token is served this connect; the next refresh will ` +
+              `retry against the previous refresh_token (Linear's ~30-min grace covers ` +
+              `the common case):`,
+            writeError,
+          );
+        }
+      }
+    } catch (refreshError) {
+      console.error(
+        `[tool-headers] credential refresh FAILED for ${install.provider} ` +
+          `install=${install.installKey} workspace=${install.workspaceId} — serving ` +
+          `the STORED credential (it may be stale and 401 at the provider until the ` +
+          `next successful refresh; re-connect the install if this persists):`,
+        refreshError,
+      );
+    }
+  }
 
   // The runner's headersHelper prints THIS object straight into claude's MCP
   // config as the server's request headers. A flat { header: string } map is the
   // shape claude 2.1.209 requires.
-  return { status: 200, body: { Authorization: `Bearer ${pat}` } };
+  return {
+    status: 200,
+    body: { Authorization: `Bearer ${bearerFromCredentialRef(credentialRef)}` },
+  };
+}
+
+/**
+ * Extract the Bearer value from a stored `credential_ref` (charter D89) — the ONE
+ * generic, shape-blind discriminator that makes the dual-shape credential additive
+ * forever.
+ *
+ * A trimmed value that starts with `{` AND parses as a JSON object with a non-empty
+ * string `access_token` is an OAUTH BUNDLE — the Bearer is `.access_token`. ANYTHING
+ * else — a bare paste PAT (GitHub), malformed JSON, a JSON array, a JSON object
+ * without a usable `access_token` — passes through BYTE-FOR-BYTE as the bare bearer.
+ *
+ * This NEVER throws: a malformed-JSON legacy credential must not 500 the tool route.
+ * And it is byte-for-byte on the fall-through path (the raw value, never the trimmed
+ * one), so a GitHub PAT — pinned by `tool-descriptors.test.ts` — stays identical.
+ */
+function bearerFromCredentialRef(credentialRef: string): string {
+  const trimmed = credentialRef.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+        const accessToken = (parsed as { access_token?: unknown }).access_token;
+        if (typeof accessToken === "string" && accessToken.trim() !== "") {
+          return accessToken;
+        }
+      }
+    } catch {
+      // Malformed JSON: fall through and serve the raw string byte-for-byte.
+    }
+  }
+  return credentialRef;
 }
 
 /**

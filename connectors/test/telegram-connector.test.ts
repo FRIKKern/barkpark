@@ -358,6 +358,35 @@ describe("telegram connector — listen()/stopListening() drive the watchdog", (
     await connector.stopListening?.(poller.adapter as unknown as Adapter);
   });
 
+  // STANDBY TAKEOVER (charter D93/D94): the install-lease coordinator stops the
+  // poll on a replica that loses the lease and starts it on the one that steals it.
+  // A replica that loses then RE-acquires (holder came back, or a flap) must re-arm
+  // a FRESH watchdog — stopListening() must leave the connector re-listenable, not
+  // wedged with a stale session. This is the connector-level property the lease
+  // relies on for takeover.
+  it("re-arms after stopListening — a lease regained opens a FRESH poll (takeover)", async () => {
+    const poller = fakePoller();
+    const connector = createTelegramConnector({
+      mode: "polling",
+      polling: { healthCheckIntervalMs: 10_000, log: () => {} },
+    });
+
+    await connector.listen?.(poller.adapter as unknown as Adapter);
+    expect(poller.startCalls.length).toBe(1);
+
+    // Lost the lease → the coordinator stops the transport.
+    await connector.stopListening?.(poller.adapter as unknown as Adapter);
+    expect(poller.adapter.isPolling).toBe(false);
+
+    // Re-acquired the lease → listen() again must arm a NEW watchdog (not a no-op
+    // left over from the stale sessions map).
+    await connector.listen?.(poller.adapter as unknown as Adapter);
+    expect(poller.startCalls.length).toBe(2);
+    expect(poller.adapter.isPolling).toBe(true);
+
+    await connector.stopListening?.(poller.adapter as unknown as Adapter);
+  });
+
   it("does not supervise in webhook mode — there is no poll loop to watch", async () => {
     const poller = fakePoller();
     const connector = createTelegramConnector({ mode: "webhook" });

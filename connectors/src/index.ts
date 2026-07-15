@@ -1,6 +1,7 @@
 import { Chat, type Adapter, type StateAdapter } from "chat";
 import type pg from "pg";
 import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
 
 import { createChatClient } from "./chat-client/client.js";
 import type { ChatClient } from "./chat-client/types.js";
@@ -11,6 +12,8 @@ import {
 import {
   loadConfig,
   DEFAULT_MOUNT_RECONCILE_INTERVAL_MS,
+  DEFAULT_INSTALL_LEASE_INTERVAL_MS,
+  DEFAULT_INSTALL_LEASE_TTL_MS,
   type BridgeConfig,
 } from "./config.js";
 import {
@@ -53,6 +56,12 @@ import {
   createMountReconcile,
   type MountReconcile,
 } from "./http/mount-reconcile.js";
+import {
+  createBridgeLeaseStore,
+  createInstallLease,
+  type InstallLease,
+  type LeaseStore,
+} from "./tenant/install-lease.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
 import { createBridgeState } from "./state/state-adapter.js";
 import {
@@ -111,6 +120,18 @@ export interface BuiltinConnectorDeps {
   /** Slack app credentials. Absent ⇒ Slack is not registered. */
   slack?: {
     signingSecret: string;
+    clientId: string;
+    clientSecret: string;
+  };
+  /**
+   * Linear OAuth client credentials (charter D92). Present ⇒ the Linear connector
+   * carries a `refreshCredential` hook that re-tokens an expiring install at
+   * header-build time. Absent ⇒ Linear still registers (the tool seam serves any
+   * install written another way) but WITHOUT the refresh hook — a bare-string or
+   * bundle credential is served as-is. Threaded exactly as `slack` is: a generic
+   * need of the connector, never an `if (provider === "linear")`.
+   */
+  linear?: {
     clientId: string;
     clientSecret: string;
   };
@@ -194,7 +215,14 @@ export function registerBuiltinConnectors(
   // its installs; the OAuth CALLBACK route is separately gated on app credentials
   // (see `linearOAuth` below). One registry entry, one more line than GitHub's.
   if (!registry.has(LINEAR_PROVIDER)) {
-    registry.register(createLinearConnector());
+    // The refresh hook (D92) is attached ONLY when Linear OAuth client creds were
+    // threaded in — otherwise the connector still registers and serves any install,
+    // just without header-build refresh. `refresh` needs the client id/secret to
+    // drive `grant_type=refresh_token`; `installs` is not required (the route hands
+    // the hook the already-opened install).
+    registry.register(
+      createLinearConnector(deps.linear ? { refresh: deps.linear } : {}),
+    );
   }
 
   // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
@@ -204,6 +232,22 @@ export function registerBuiltinConnectors(
   if (isSelfHostedProfile(env) && !registry.has(IMESSAGE_PROVIDER)) {
     registry.register(createIMessageConnector());
   }
+}
+
+/**
+ * A SOCKET/POLL channel (charter D93): its transport is a long-lived `listen()`
+ * (a Discord Gateway socket, a Telegram getUpdates poll), NOT an inbound HTTP
+ * request. Such a transport must be single-owner across replicas — two of them
+ * against one bot double-POST (Discord) or 409-Conflict (Telegram) — so the
+ * install-lease coordinator, not boot, starts it. The exact COMPLEMENT of a
+ * webhook channel (whose HTTP transport any replica may serve, W8 mount-reconcile).
+ */
+export function isLeaseManaged(connector: Connector): boolean {
+  return (
+    (connector.direction === "channel" || connector.direction === "both") &&
+    connector.webhook === undefined &&
+    typeof connector.listen === "function"
+  );
 }
 
 export interface BridgeDeps {
@@ -342,6 +386,13 @@ export interface Bridge {
    */
   mountReconcile: MountReconcile;
   /**
+   * The socket/poll ownership coordinator (D93/D94) that keeps exactly ONE replica
+   * driving each Discord Gateway socket / Telegram poll. Always present — at
+   * `intervalMs: 0` its timer never arms — so a boot test drives `reconcileOnce()`
+   * deterministically with two replicas over one Postgres.
+   */
+  installLease: InstallLease;
+  /**
    * Mount an install that appeared AFTER boot — no restart. This is what makes
    * an OAuth "Add to Slack" callback work: upsertInstall (row) -> addInstall
    * (Chat + webhook mount) and the very next provider event routes. Without it
@@ -401,6 +452,12 @@ export interface StartBridgeOverrides {
    * by hand — the timing-free way to prove convergence.
    */
   mountReconcileIntervalMs?: number;
+  /**
+   * Force the install-lease renew/takeover interval (ms), overriding `config`. A
+   * boot test passes `0` to arm nothing and drive `bridge.installLease.reconcileOnce()`
+   * by hand — the timing-free way to prove single-owner + takeover.
+   */
+  installLeaseIntervalMs?: number;
 }
 
 /**
@@ -438,18 +495,36 @@ export async function startBridge(
   const installs = createInstallsLookup(pool, cipher);
   const map = createThreadSessionMap(createPgThreadSessionStore(pool));
 
+  // THIS replica's identity for the socket/poll ownership lease (D93). A fresh
+  // per-PROCESS UUID, not the hostname: templated pods share a hostname and would
+  // collide; a randomUUID never does. Every claim/renew/release this process makes
+  // carries this owner id, so the lease table can tell "still mine" from "another
+  // replica's" with no ambiguity.
+  const replicaId = randomUUID();
+  const leaseTtlMs = config.installLeaseTtlMs ?? DEFAULT_INSTALL_LEASE_TTL_MS;
+  const leaseStore: LeaseStore = createBridgeLeaseStore(pool, {
+    ownerId: replicaId,
+    ttlMs: leaseTtlMs,
+  });
+
   // The Slack app credentials, read ONCE — the registry needs them to build the
   // adapter, and the OAuth callback deps below need them to exchange the code.
   const slackApp = slackDepsFromEnv(process.env);
+  // The Linear OAuth client credentials, read ONCE and HOISTED here (D92) — the
+  // registry needs them to attach the refresh hook, and the OAuth callback deps
+  // further down reference this same variable to exchange the authorization code.
+  const linearApp = linearDepsFromEnv(process.env);
 
   const registry = overrides.registry ?? createConnectorRegistry();
   if (!overrides.registry) {
     registerBuiltinConnectors(registry, {
       installs,
       env: process.env,
-      // Absent SLACK_* env ⇒ Slack is simply not registered. Spreading rather than
-      // passing `undefined` keeps `exactOptionalPropertyTypes` happy.
+      // Absent SLACK_*/LINEAR_* env ⇒ the connector registers without that
+      // capability. Spreading rather than passing `undefined` keeps
+      // `exactOptionalPropertyTypes` happy.
       ...(slackApp ? { slack: slackApp } : {}),
+      ...(linearApp ? { linear: linearApp } : {}),
     });
   }
 
@@ -493,18 +568,31 @@ export async function startBridge(
   ): Promise<MountedInstall> => {
     const entry = mountInstall(connector, install, deps);
     await entry.chat.initialize();
-    // The core never learns the channel: Telegram starts a poll loop here,
-    // Discord starts a gateway socket, and a webhook channel does nothing at all
-    // — its transport IS the HTTP request, so it mounts into the index instead.
-    await connector.listen?.(entry.adapter);
+    // The core never learns the channel. Three transports, three fates:
     if (connector.webhook) {
+      // Webhook channel: its transport IS the inbound HTTP request. Mount into the
+      // index; any replica may serve it (W8 mount-reconcile keeps that safe).
       mounts.mount({ connector, install, chat: entry.chat });
+    } else if (isLeaseManaged(connector)) {
+      // Socket/poll channel: its listen() opens a long-lived Gateway socket /
+      // getUpdates poll that MUST be single-owner across replicas (D93). The
+      // Chat is mounted here, but the TRANSPORT is started by the install-lease
+      // coordinator's onAcquire — only on the replica that holds this install's
+      // lease. Starting it here would double-serve on every scaled-out replica.
+    } else {
+      // A channel with neither a webhook nor a listen() (none exists today): the
+      // optional-chained call is a no-op, kept so the shape stays total.
+      await connector.listen?.(entry.adapter);
     }
     mounted.push(entry);
     console.log(
-      `[bridge] listening: ${connector.id} install=${install.installKey} ` +
+      `[bridge] mounted: ${connector.id} install=${install.installKey} ` +
         `workspace=${install.workspaceId}` +
-        (connector.webhook ? " (webhook)" : ""),
+        (connector.webhook
+          ? " (webhook)"
+          : isLeaseManaged(connector)
+            ? " (socket/poll — transport lease-gated)"
+            : ""),
     );
     return entry;
   };
@@ -557,17 +645,33 @@ export async function startBridge(
     provider: string,
     installKey: string,
   ): Promise<boolean> => {
+    const connector = registry.get(provider);
     const index = mounted.findIndex(
       (entry) =>
         entry.connector.id === provider && entry.install.installKey === installKey,
     );
-    if (index === -1) return false;
+    if (index === -1) {
+      // Not mounted here, but a socket/poll lease we own must still be released so
+      // a rolling restart / disconnect frees it immediately. Owner-scoped, so it
+      // is a no-op when we don't own it — and webhook installs hold no lease at all.
+      if (connector && isLeaseManaged(connector)) {
+        await leaseStore.release(provider, installKey);
+      }
+      return false;
+    }
     const [entry] = mounted.splice(index, 1);
     if (!entry) return false;
     // Unroute FIRST: an in-flight webhook must not reach a Chat we are tearing down.
     mounts.unmount(provider, installKey);
     await entry.connector.stopListening?.(entry.adapter);
     await entry.chat.shutdown();
+    // Release the socket/poll ownership lease (D94): a graceful shutdown or a
+    // disconnect hands the install to a standby replica on its NEXT tick rather
+    // than making it wait out the TTL. Owner-scoped and a no-op for webhook
+    // installs, which have no lease row.
+    if (isLeaseManaged(entry.connector)) {
+      await leaseStore.release(provider, installKey);
+    }
     console.log(`[bridge] unmounted: ${provider} install=${installKey}`);
     return true;
   };
@@ -632,6 +736,83 @@ export async function startBridge(
     console.log(
       `[bridge] mount reconcile armed — re-reading connector_installs every ` +
         `${mountReconcileIntervalMs}ms so a second replica rediscovers new installs`,
+    );
+  }
+
+  /**
+   * THE SOCKET/POLL OWNERSHIP LEASE (D93/D94) — the honest remainder mount-reconcile
+   * could NOT solve. A webhook is stateless, so every replica may hold the mount; a
+   * Gateway socket / getUpdates poll is a long-lived connection, and opening it on
+   * two replicas double-POSTs (Discord) or 409s (Telegram). So exactly ONE replica
+   * leases each socket/poll install and drives its transport; the others stand by
+   * and take over on lapse.
+   *
+   * Boot mounts the Chat for these installs but deliberately does NOT `listen()`
+   * (see `bringUp`): the coordinator's `onAcquire` starts the transport, only on
+   * the replica that wins the lease. A single-replica deploy just wins every lease
+   * on the first pass. The scope is the exact COMPLEMENT of mount-reconcile's
+   * webhook filter (`isLeaseManaged`): Discord + Telegram today; iMessage would ride
+   * it unchanged but is a self-hosted one-Mac profile, never Cloud (D95).
+   */
+  const onAcquireTransport = async (install: ConnectorInstall): Promise<void> => {
+    const connector = registry.get(install.provider);
+    if (!connector) {
+      throw new Error(
+        `install-lease onAcquire: no connector registered for provider "${install.provider}"`,
+      );
+    }
+    // The Chat is normally already mounted (boot mounted it as a standby). A row
+    // that appeared AFTER this replica booted — a connect handled on another
+    // replica — has no local Chat yet, so bring it up now (bringUp does NOT start
+    // the transport for a lease-managed connector; we do that next).
+    let entry = mounted.find(
+      (candidate) =>
+        candidate.connector.id === install.provider &&
+        candidate.install.installKey === install.installKey,
+    );
+    if (!entry) entry = await bringUp(connector, install);
+    await connector.listen?.(entry.adapter);
+  };
+
+  const onReleaseTransport = async (install: ConnectorInstall): Promise<void> => {
+    const entry = mounted.find(
+      (candidate) =>
+        candidate.connector.id === install.provider &&
+        candidate.install.installKey === install.installKey,
+    );
+    if (!entry) return;
+    // Stop the transport but LEAVE the Chat mounted (cheap, idle) so a re-acquire
+    // is a fast `listen()`, not a full re-mount. A full teardown happens on
+    // takeDown/shutdown, which also releases the lease.
+    await entry.connector.stopListening?.(entry.adapter);
+  };
+
+  const installLeaseIntervalMs =
+    overrides.installLeaseIntervalMs ??
+    config.installLeaseIntervalMs ??
+    DEFAULT_INSTALL_LEASE_INTERVAL_MS;
+  const installLease = createInstallLease(
+    {
+      registry,
+      installs,
+      lease: leaseStore,
+      onAcquire: onAcquireTransport,
+      onRelease: onReleaseTransport,
+    },
+    { intervalMs: installLeaseIntervalMs },
+  );
+  // Drive ONE pass at boot so the sole/first replica starts its socket/poll
+  // transports immediately (no interval-length silence), then arm the periodic
+  // renew/takeover timer. A boot test that wires a stub socket/poll connector with
+  // `installLeaseIntervalMs: 0` still gets this one pass; a two-replica DB test
+  // constructs coordinators directly and is unaffected by boot.
+  await installLease.reconcileOnce();
+  installLease.start();
+  if (installLeaseIntervalMs > 0) {
+    console.log(
+      `[bridge] install lease armed — renewing socket/poll ownership every ` +
+        `${installLeaseIntervalMs}ms (owner=${replicaId}); a standby replica takes ` +
+        "over on lapse so exactly one drives each Discord socket / Telegram poll",
     );
   }
 
@@ -715,7 +896,8 @@ export async function startBridge(
    * browser to an exact registered URL — a loopback address could never be that).
    * Any one missing ⇒ the callback route answers the opaque 404.
    */
-  const linearApp = linearDepsFromEnv(process.env);
+  // `linearApp` is read once and HOISTED beside `slackApp` (D92) so the registry can
+  // attach the refresh hook from the same credentials this callback uses.
   const linearOAuth: LinearOAuthCallbackDeps | undefined =
     linearApp && config.connectSecret && publicBaseUrl
       ? {
@@ -790,6 +972,7 @@ export async function startBridge(
     // Always exposed even at interval 0: `start()` self-guards the timer, so a
     // boot test can drive `reconcileOnce()` by hand without any tick firing.
     mountReconcile,
+    installLease,
 
     addInstall,
 
@@ -803,11 +986,24 @@ export async function startBridge(
     mount: addInstall,
 
     async shutdown() {
+      // Disarm both housekeeping loops BEFORE tearing anything down, or a tick
+      // could re-acquire a lease / re-mount a row mid-shutdown.
+      installLease.stop();
       mountReconcile.stop();
       await webhookServer?.close();
-      for (const install of mounted) {
-        await install.connector.stopListening?.(install.adapter);
-        await install.chat.shutdown();
+      // Tear every install down THROUGH `takeDown` (D94). The old inline loop
+      // bypassed it — it stopped the transport and shut the Chat but NEVER
+      // released the socket/poll lease, so a graceful/rolling restart stranded the
+      // lease until its TTL lapsed and a standby replica sat idle for that whole
+      // window. Routing through `takeDown` releases each lease immediately, so a
+      // standby takes over on its very next tick. Snapshot the keys first:
+      // `takeDown` splices `mounted` as it goes.
+      const installed = mounted.map((entry) => ({
+        provider: entry.connector.id,
+        installKey: entry.install.installKey,
+      }));
+      for (const { provider, installKey } of installed) {
+        await takeDown(provider, installKey);
       }
       mounts.clear();
       mounted.length = 0;
