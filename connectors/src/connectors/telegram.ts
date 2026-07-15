@@ -471,6 +471,13 @@ export function createTelegramConnector(
      * own → `isPolling` false with no error) and a synchronous mount throw (a
      * `resetWebhook` failure that, before this, permanently failed the install).
      * Idempotent: a second listen() never opens a second watchdog for one bot.
+     *
+     * SINGLE-OWNER ACROSS REPLICAS (charter D93/D94). A second getUpdates poll on
+     * one bot token is a hard Telegram 409 Conflict, so `startBridge` does NOT call
+     * this at boot — the install-lease coordinator does, only on the replica that
+     * holds the install's lease. A standby stands by; on the owner's lapse it steals
+     * the lease and calls this. `stopListening()` clears the session, so a lease
+     * regained re-arms a FRESH poll (takeover), which the connector tests pin.
      */
     async listen(adapter: Adapter): Promise<void> {
       if (mode === "webhook") return;
