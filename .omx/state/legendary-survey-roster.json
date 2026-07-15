@@ -1,0 +1,2347 @@
+{
+  "schema_version": "legendary-survey-roster/v1",
+  "roster_id": "legendary-quality-remaining-54",
+  "generated_from": {
+    "baseline": {
+      "path": ".omx/state/legendary-quality-baseline.json",
+      "sha256": "f80108fbf8648af8612aa22fcbf1f217afa6f353076ea6ad8913d2108cc78ed8",
+      "captured_at": "2026-07-15T01:20:00+02:00",
+      "accepted_waves": [
+        "01",
+        "02"
+      ]
+    },
+    "team_tasks": [
+      {
+        "task_id": "4",
+        "version": 3,
+        "completed_at": "2026-07-15T00:29:10.085Z",
+        "result_sha256": "6f14e021e3c5456d8b53adb06ccd6b0fe8c547c9e3c5868d78af4ec0be80f389"
+      },
+      {
+        "task_id": "5",
+        "version": 3,
+        "completed_at": "2026-07-15T00:28:55.988Z",
+        "result_sha256": "8d09aa7ffa7587f153c658a5f5de5ef66864b6df65ed1d63318a2cf592966812"
+      },
+      {
+        "task_id": "6",
+        "version": 3,
+        "completed_at": "2026-07-15T00:32:44.214Z",
+        "result_sha256": "a9535e91ec4ce5b23572ea5e9fcea04ebb83da5a63f8f44fbbf6fc2ab13266a7"
+      }
+    ],
+    "normalizations": {
+      "LP-01..LP-18": "LQ-P01..LQ-P18",
+      "LS-TASK-01..LS-TASK-24": "LQ-T01..LQ-T24",
+      "LQ-X01..LQ-X12": "unchanged"
+    }
+  },
+  "baseline_manifest_hashes": {
+    "paper_snapshot_sha256": "2abe8abc2552213461d004c9a175f81bb94f429aaec9379bb16932a65506fbe4",
+    "task_snapshot_sha256": "e0dd73fcb142fefe4ea8e86b433b901b8c8fb0611dbc9a25e060b447ec82381c",
+    "task_frozen_membership_sha256": "8418146b0770598d3066a0fbe04870a54a4b177bfc356dcc733d94c6300d5ce8",
+    "task_classification_sha256": "3c98e1418e6ed48bb01ffa12d4ef50510dfa6db986a76be489ca4bcda7e59198"
+  },
+  "global_contract": {
+    "lane_counts": {
+      "paper": 18,
+      "task": 24,
+      "cross_surface": 12,
+      "total": 54
+    },
+    "all_assignment_ids": [
+      "LQ-P01",
+      "LQ-P02",
+      "LQ-P03",
+      "LQ-P04",
+      "LQ-P05",
+      "LQ-P06",
+      "LQ-P07",
+      "LQ-P08",
+      "LQ-P09",
+      "LQ-P10",
+      "LQ-P11",
+      "LQ-P12",
+      "LQ-P13",
+      "LQ-P14",
+      "LQ-P15",
+      "LQ-P16",
+      "LQ-P17",
+      "LQ-P18",
+      "LQ-T01",
+      "LQ-T02",
+      "LQ-T03",
+      "LQ-T04",
+      "LQ-T05",
+      "LQ-T06",
+      "LQ-T07",
+      "LQ-T08",
+      "LQ-T09",
+      "LQ-T10",
+      "LQ-T11",
+      "LQ-T12",
+      "LQ-T13",
+      "LQ-T14",
+      "LQ-T15",
+      "LQ-T16",
+      "LQ-T17",
+      "LQ-T18",
+      "LQ-T19",
+      "LQ-T20",
+      "LQ-T21",
+      "LQ-T22",
+      "LQ-T23",
+      "LQ-T24",
+      "LQ-X01",
+      "LQ-X02",
+      "LQ-X03",
+      "LQ-X04",
+      "LQ-X05",
+      "LQ-X06",
+      "LQ-X07",
+      "LQ-X08",
+      "LQ-X09",
+      "LQ-X10",
+      "LQ-X11",
+      "LQ-X12"
+    ],
+    "fleet_slots": "07..60 inclusive; 01..06 are accepted completed assignments",
+    "batches": [
+      {
+        "wave": "03",
+        "fleet_slots": "07..24",
+        "paper_ids": [
+          "LQ-P01",
+          "LQ-P02",
+          "LQ-P03",
+          "LQ-P04",
+          "LQ-P05",
+          "LQ-P06"
+        ],
+        "task_ids": [
+          "LQ-T01",
+          "LQ-T02",
+          "LQ-T03",
+          "LQ-T04",
+          "LQ-T05",
+          "LQ-T06",
+          "LQ-T07",
+          "LQ-T08"
+        ],
+        "cross_surface_ids": [
+          "LQ-X01",
+          "LQ-X02",
+          "LQ-X03",
+          "LQ-X04"
+        ],
+        "count": 18
+      },
+      {
+        "wave": "04",
+        "fleet_slots": "25..42",
+        "paper_ids": [
+          "LQ-P07",
+          "LQ-P08",
+          "LQ-P09",
+          "LQ-P10",
+          "LQ-P11",
+          "LQ-P12"
+        ],
+        "task_ids": [
+          "LQ-T09",
+          "LQ-T10",
+          "LQ-T11",
+          "LQ-T12",
+          "LQ-T13",
+          "LQ-T14",
+          "LQ-T15",
+          "LQ-T16"
+        ],
+        "cross_surface_ids": [
+          "LQ-X05",
+          "LQ-X06",
+          "LQ-X07",
+          "LQ-X08"
+        ],
+        "count": 18
+      },
+      {
+        "wave": "05",
+        "fleet_slots": "43..60",
+        "paper_ids": [
+          "LQ-P13",
+          "LQ-P14",
+          "LQ-P15",
+          "LQ-P16",
+          "LQ-P17",
+          "LQ-P18"
+        ],
+        "task_ids": [
+          "LQ-T17",
+          "LQ-T18",
+          "LQ-T19",
+          "LQ-T20",
+          "LQ-T21",
+          "LQ-T22",
+          "LQ-T23",
+          "LQ-T24"
+        ],
+        "cross_surface_ids": [
+          "LQ-X09",
+          "LQ-X10",
+          "LQ-X11",
+          "LQ-X12"
+        ],
+        "count": 18
+      }
+    ],
+    "invariants": [
+      "All 54 ids are present exactly once in namespaces LQ-P01..P18, LQ-T01..T24, and LQ-X01..X12.",
+      "Every assignment owns exactly one fleet slot in 07..60; no slot or id is duplicated.",
+      "Each wave contains exactly 18 assignments: 6 Paper, 8 Task, and 4 cross-surface.",
+      "Each assignment owns one primary measurement axis. Fixture/manifest reuse is an input dependency, not permission to repeat another metric.",
+      "Intentional same-object and same-metric overlap requires reciprocal paired_assignment_ids plus a stated replication/disagreement purpose before launch.",
+      "Paper work accounts for exactly 203 frozen ids or a named frozen cohort; Task work accounts for exactly 1,527 frozen ids or a deterministic class/cohort; cross-surface work accounts for every declared fixture-by-surface cell.",
+      "Every result separates observed_facts, inferences, recommendations, and unresolved_unknowns; inferred ratings never overwrite source truth.",
+      "Every assignment is read-only and emits commands/probes, baseline/input hashes, expected and actual accounting, evidence paths, validation, risks, and a stop condition.",
+      "No assignment mutates Barkpark content, product files, dependencies, production state, or frozen evidence.",
+      "A wave stops before integration on unreconciled counts, unexplained manifest drift, attempted mutation, missing evidence, or unapproved overlap."
+    ],
+    "required_result_fields": [
+      "assignment_id",
+      "fleet_slot",
+      "baseline_hashes",
+      "input_manifest",
+      "commands_or_probes",
+      "observed_facts",
+      "inferences",
+      "recommendations",
+      "unresolved_unknowns",
+      "expected_accounting",
+      "actual_accounting",
+      "evidence_paths",
+      "validation",
+      "risks",
+      "stop_condition"
+    ]
+  },
+  "lane_metadata": {
+    "paper": {
+      "schema_version": 1,
+      "baseline": "/Volumes/SATECHI/github/barkpark/.omx/state/legendary-quality-baseline.json",
+      "frozen_scope": {
+        "papers": 203,
+        "semantic_block_nodes": 8081,
+        "surface_cells": 1015,
+        "surfaces": [
+          "Studio",
+          "public paper reader",
+          "TUI",
+          "CLI",
+          "email"
+        ]
+      }
+    },
+    "task": {
+      "schema_version": 1,
+      "roster_id": "legendary-survey-task-quality-v1",
+      "agent_type": "epic-surveyor",
+      "assignment_count": 24,
+      "read_only": true,
+      "baseline": {
+        "task_count": 1527,
+        "membership_sha256": "8418146b0770598d3066a0fbe04870a54a4b177bfc356dcc733d94c6300d5ce8",
+        "classification_sha256": "3c98e1418e6ed48bb01ffa12d4ef50510dfa6db986a76be489ca4bcda7e59198"
+      },
+      "common_inputs": [
+        "CLAUDE.md and the Legendary Cycle phase/fleet/scale contracts",
+        ".omx/state/legendary-quality-baseline.json",
+        "accepted Wave 02 frozen membership, classification, cohort, and Cn manifests",
+        "raw Task pages from bp doc query task --perspective raw --count --limit 1000 --offset 0 -o json and --offset 1000"
+      ],
+      "common_deliverable": "Exact ids; commands/probes and decisive output; found/not_found/partial per check; facts separated from inference; cohort counts; defects ranked by severity; recommended Verify/Experiment shard; zero mutations."
+    },
+    "cross_surface": {
+      "baseline": {
+        "path": ".omx/state/legendary-quality-baseline.json",
+        "accepted_waves": [
+          "01",
+          "02"
+        ],
+        "completed_assignments": 6,
+        "remaining_assignments": 54,
+        "frozen_papers": 203,
+        "frozen_tasks": 1527
+      },
+      "validation_checklist": [
+        {
+          "check": "cross_surface_count",
+          "expected": 12,
+          "status": "PASS"
+        },
+        {
+          "check": "global_lane_sum",
+          "expected": "18+24+12=54",
+          "status": "PASS"
+        },
+        {
+          "check": "all_ids_unique",
+          "expected": "54/54",
+          "status": "PASS"
+        },
+        {
+          "check": "exact_cross_ids",
+          "expected": "LQ-X01..LQ-X12",
+          "status": "PASS"
+        },
+        {
+          "check": "exact_cross_slots",
+          "expected": [
+            21,
+            22,
+            23,
+            24,
+            39,
+            40,
+            41,
+            42,
+            57,
+            58,
+            59,
+            60
+          ],
+          "status": "PASS"
+        },
+        {
+          "check": "global_batch_counts",
+          "expected": "W03=18,W04=18,W05=18; each 6P+8T+4X",
+          "status": "PASS"
+        },
+        {
+          "check": "required_assignment_fields",
+          "expected": "all present/non-empty",
+          "status": "PASS"
+        },
+        {
+          "check": "read_only_contract",
+          "expected": true,
+          "status": "PASS"
+        },
+        {
+          "check": "facts_vs_inference_contract",
+          "expected": true,
+          "status": "PASS"
+        },
+        {
+          "check": "overlap_contract",
+          "expected": "X08 paired X07; X09 paired X01; all other axes distinct",
+          "status": "PASS"
+        },
+        {
+          "check": "baseline_preservation",
+          "expected": "203 Papers; 1,527 Tasks; frozen 45/5 and live 46/6 separate",
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "assignments": [
+    {
+      "assignment_id": "LQ-P01",
+      "title": "Reconstruct and seal the 203-Paper frozen membership",
+      "scope": "Read-only reconstruction of the accepted Wave-01 membership from the Wave-02 204-Paper snapshot by removing only codex-epic-cycle-wave-2-2026-07-15; report all later live drift separately.",
+      "inputs": [
+        "legendary-quality-baseline.json survey_wave_02.snapshot",
+        "raw production Paper query"
+      ],
+      "commands_or_probes": [
+        "bp doc query paper --perspective raw --count --limit 1000 --fields title,description,body,blocks,body_html,style,tags,main_tag,_createdAt -o json > $OUT/papers-live.json",
+        "jq -r '.documents[] | ._id // .doc_id' $OUT/papers-live.json | sort -u > $OUT/live.ids",
+        "reconstruct the accepted snapshot membership, verify its 204-ID SHA-256 is 2abe8abc2552213461d004c9a175f81bb94f429aaec9379bb16932a65506fbe4, remove the named post-Wave-01 Paper, then sha256sum the 203-ID frozen manifest"
+      ],
+      "expected_accounting": {
+        "wave_02_snapshot": 204,
+        "named_exclusion": 1,
+        "frozen_papers": 203,
+        "duplicates": 0,
+        "unexplained_errors": 0
+      },
+      "deliverable": "JSON membership seal with the sorted 203 IDs, SHA-256, excluded ID, current-only IDs, facts/inferences, and retrieval transcript.",
+      "validation": [
+        "204 - 1 = 203",
+        "sort -u count is exactly 203",
+        "no current drift ID is silently inserted into the frozen manifest"
+      ],
+      "risks": [
+        "current production drift",
+        "snapshot evidence unavailable",
+        "ID-field ambiguity"
+      ],
+      "stop_condition": "Stop after the 203-ID manifest is reproducible and every live-only/missing ID is explicitly accounted; return partial rather than guessing if the accepted snapshot cannot be reconstructed.",
+      "source_id": "LP-01",
+      "id": "LQ-P01",
+      "lane": "paper",
+      "fleet_slot": 7,
+      "wave": "03"
+    },
+    {
+      "assignment_id": "LQ-P02",
+      "title": "Canonical PortableDoc storage shard A",
+      "scope": "Audit canonical portable_body Papers 1-81 of the 161-ID cohort, ordered by Paper ID; inspect storage/editability invariants without duplicating the completed type census.",
+      "inputs": [
+        "203-ID frozen manifest",
+        "raw Paper payloads",
+        "PortableDoc render and projection contracts"
+      ],
+      "commands_or_probes": [
+        "derive the 161-ID portable_body cohort with jq, sort IDs, and select sed -n '1,81p'",
+        "for each selected ID, assert body version/envelope shape, stable block IDs, derived HTML relationship, and lossless read-only decode",
+        "run scripts/pdrender-dump.sh on a deterministic boundary/sample fixture set only"
+      ],
+      "expected_accounting": {
+        "cohort_total": 161,
+        "shard_start": 1,
+        "shard_end": 81,
+        "shard_count": 81,
+        "overlap_with_LP_03": 0
+      },
+      "deliverable": "81-row JSONL ledger with ID, storage verdict, editability verdict, projection drift, evidence path, and ranked defect class.",
+      "validation": [
+        "exactly 81 unique IDs",
+        "all rows belong to the 161-ID canonical cohort",
+        "found + not_found + partial = 81"
+      ],
+      "risks": [
+        "derived HTML mistaken for canonical source",
+        "render success masking editability loss"
+      ],
+      "stop_condition": "Stop when all 81 rows have decisive storage and editability evidence and no content mutation occurred.",
+      "source_id": "LP-02",
+      "id": "LQ-P02",
+      "lane": "paper",
+      "fleet_slot": 8,
+      "wave": "03"
+    },
+    {
+      "assignment_id": "LQ-P03",
+      "title": "Canonical PortableDoc storage shard B",
+      "scope": "Audit canonical portable_body Papers 82-161 of the 161-ID cohort, ordered by Paper ID, using the same invariant ledger as LP-02.",
+      "inputs": [
+        "203-ID frozen manifest",
+        "raw Paper payloads",
+        "PortableDoc render and projection contracts"
+      ],
+      "commands_or_probes": [
+        "derive the 161-ID portable_body cohort with jq, sort IDs, and select sed -n '82,161p'",
+        "assert envelope, block-ID, derived-HTML, and lossless read-only decode invariants for every selected ID",
+        "compare aggregate defect keys with the contract vocabulary, not LP-02 results"
+      ],
+      "expected_accounting": {
+        "cohort_total": 161,
+        "shard_start": 82,
+        "shard_end": 161,
+        "shard_count": 80,
+        "LP_02_plus_LP_03": 161
+      },
+      "deliverable": "80-row JSONL ledger with the same stable schema as LP-02 plus an 80-row accounting summary.",
+      "validation": [
+        "exactly 80 unique IDs",
+        "IDs 1-81 are absent",
+        "81 + 80 = 161",
+        "found + not_found + partial = 80"
+      ],
+      "risks": [
+        "ordinal drift from unsorted input",
+        "alias acceptance misreported as native type"
+      ],
+      "stop_condition": "Stop when all 80 rows are evidenced and the combined shard arithmetic can cover 161 without overlap.",
+      "source_id": "LP-03",
+      "id": "LQ-P03",
+      "lane": "paper",
+      "fleet_slot": 9,
+      "wave": "03"
+    },
+    {
+      "assignment_id": "LQ-P04",
+      "title": "Legacy-root storage migration dry-run",
+      "scope": "Inspect exactly 13 frozen legacy_top_blocks Papers and model a non-writing migration to canonical PortableDoc, preserving semantic order and IDs.",
+      "inputs": [
+        "13-ID legacy_top_blocks cohort",
+        "Barkpark.PortableDoc.Synthesis and Projection behavior",
+        "raw and rendered representations"
+      ],
+      "commands_or_probes": [
+        "jq-select blocks-present/body-noncanonical rows and assert cohort count 13",
+        "run read-only conversion/projection code in an isolated test process or fixture copy; never call mutate/upsert endpoints",
+        "diff normalized semantic trees and rendered text before/after the dry-run"
+      ],
+      "expected_accounting": {
+        "input_papers": 13,
+        "dry_runs": 13,
+        "writes": 0,
+        "lossless_or_explained": 13
+      },
+      "deliverable": "Per-ID migration feasibility ledger with before/after hashes, semantic diff, blockers, rollback preconditions, and recommended repair ordering.",
+      "validation": [
+        "13 unique IDs",
+        "every semantic difference explained",
+        "zero POST/PATCH/PUT/DELETE requests"
+      ],
+      "risks": [
+        "synthetic IDs destabilize backlinks",
+        "legacy field precedence differs by reader"
+      ],
+      "stop_condition": "Stop after 13 dry-runs and classify each as safe, conditional, or human-review; do not propose bulk mutation.",
+      "source_id": "LP-04",
+      "id": "LQ-P04",
+      "lane": "paper",
+      "fleet_slot": 10,
+      "wave": "03"
+    },
+    {
+      "assignment_id": "LQ-P05",
+      "title": "HTML-only preservation and migration cohort",
+      "scope": "Audit all 20 substantive body_html-only frozen Papers as controls and assess migration feasibility without calling them empty.",
+      "inputs": [
+        "20-ID body_html_only cohort",
+        "public reader HTML",
+        "CLI/TUI handoff behavior",
+        "XSS/sanitization contracts"
+      ],
+      "commands_or_probes": [
+        "jq-select substantive body_html with no canonical blocks and assert count 20",
+        "curl -sS the public /papers/:slug page and compare normalized visible text/links/headings with source HTML",
+        "exercise read-only CLI/TUI decode paths and existing paper_bodyhtml tests; simulate HTML-to-block conversion only on fixture copies"
+      ],
+      "expected_accounting": {
+        "papers": 20,
+        "public_reader_controls": 20,
+        "migration_dry_runs": 20,
+        "writes": 0
+      },
+      "deliverable": "20-row fidelity/migration ledger separating readable, editable, sanitization-safe, and conversion-loss verdicts.",
+      "validation": [
+        "20 of 20 public controls accounted",
+        "found + not_found + partial = 20",
+        "no row is labeled empty solely because blocks are absent"
+      ],
+      "risks": [
+        "HTML sanitization changes semantics",
+        "browser-only success masks terminal failure"
+      ],
+      "stop_condition": "Stop when all 20 have source-vs-reader evidence and a non-destructive migration classification.",
+      "source_id": "LP-05",
+      "id": "LQ-P05",
+      "lane": "paper",
+      "fleet_slot": 11,
+      "wave": "03"
+    },
+    {
+      "assignment_id": "LQ-P06",
+      "title": "Markdown-only six-Paper repair specification",
+      "scope": "Reproduce the known unreadability of all 6 raw-Markdown-body frozen Papers and design loss-aware canonicalization fixtures.",
+      "inputs": [
+        "6-ID markdown_body cohort",
+        "bp paper view",
+        "public Paper reader",
+        "Markdown source"
+      ],
+      "commands_or_probes": [
+        "jq-select the 6 Markdown-only IDs and save their exact source hashes",
+        "bp paper view <slug> for each ID with ANSI-stripped capture",
+        "curl -sS /papers/<slug> for each ID; dry-run Markdown-to-PortableDoc parsing on copies and compare headings, lists, links, code, emphasis, and text"
+      ],
+      "expected_accounting": {
+        "papers": 6,
+        "CLI_reproductions": 6,
+        "public_reproductions": 6,
+        "conversion_dry_runs": 6,
+        "writes": 0
+      },
+      "deliverable": "Six-ID adversarial fixture pack and repair ledger with exact lost/preserved constructs and pre-migration assertions.",
+      "validation": [
+        "6 unique IDs",
+        "each current failure is independently reproduced or explicitly contradicted",
+        "all source hashes preserved"
+      ],
+      "risks": [
+        "Markdown dialect ambiguity",
+        "converter normalizes meaningful whitespace/code"
+      ],
+      "stop_condition": "Stop after all six have reproducible reader evidence and a fixture-backed migration recommendation.",
+      "source_id": "LP-06",
+      "id": "LQ-P06",
+      "lane": "paper",
+      "fleet_slot": 12,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T01",
+      "title": "Executable Tasks 001-064 — criteria and runnable-gate quality",
+      "scope": "First 64 of 127 executable Tasks; audit whether criteria are observable, bounded, non-circular, and backed by a runnable gate or explicit human proof.",
+      "deterministic_membership": {
+        "class": "executable",
+        "ordinals": "1-64",
+        "expected": 64
+      },
+      "probes": [
+        "read raw description, criteria, brief, code_refs and claim/lifecycle",
+        "classify each criterion as command-backed, observable-human, vague, or absent",
+        "record command existence without executing mutating commands"
+      ],
+      "validation": "64 unique ids; no id outside executable manifest; per-id criterion and gate verdict; subtotal=64.",
+      "risks": [
+        "command text may be stale or destructive; inspect only",
+        "mechanical completeness can overstate semantic readiness"
+      ],
+      "stop_condition": "Stop on manifest hash/count drift, duplicate ids, or any required mutation.",
+      "source_id": "LS-TASK-01",
+      "lane": "task",
+      "fleet_slot": 13,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T02",
+      "title": "Executable Tasks 065-127 — dependency, blocker, and readiness truth",
+      "scope": "Remaining 63 executable Tasks; audit dependency edges, blocker truth, claim readiness, placement, and whether the next action is cold-startable.",
+      "deterministic_membership": {
+        "class": "executable",
+        "ordinals": "65-127",
+        "expected": 63
+      },
+      "probes": [
+        "compare depends_on/blocked_by ids with raw Task inventory",
+        "check lifecycle and claim consistency",
+        "rate cold-startability from description, brief, files, and gates"
+      ],
+      "validation": "63 unique ids; LS-TASK-01 union LS-TASK-02 equals all 127 executable ids with overlap=0.",
+      "risks": [
+        "dependency absence is not automatically a defect",
+        "live claims may drift after the frozen snapshot"
+      ],
+      "stop_condition": "Stop if frozen ownership cannot be reconstructed exactly or live state is substituted for frozen truth.",
+      "source_id": "LS-TASK-02",
+      "lane": "task",
+      "fleet_slot": 14,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T03",
+      "title": "Goal Tasks 001-031 — outcome, metric, and child decomposition",
+      "scope": "First 31 of 62 goal Tasks; audit outcome clarity, measurable success, child coverage, and whether the goal is improperly executable as one unit.",
+      "deterministic_membership": {
+        "class": "goal",
+        "ordinals": "1-31",
+        "expected": 31
+      },
+      "probes": [
+        "trace parent/children and child_count",
+        "compare goal criteria with aggregate child outcomes",
+        "flag implementation detail that belongs in child Tasks"
+      ],
+      "validation": "31 unique goal ids with outcome/metric/decomposition verdicts and exact child counts.",
+      "risks": [
+        "missing children can be intentional for newly opened goals"
+      ],
+      "stop_condition": "Stop if parent-child reads cannot be reconciled to the frozen membership.",
+      "source_id": "LS-TASK-03",
+      "lane": "task",
+      "fleet_slot": 15,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T04",
+      "title": "Goal Tasks 032-062 — stop conditions and phase truth",
+      "scope": "Remaining 31 goal Tasks; audit terminal conditions, phase labels, evidence aggregation, and lifecycle truth.",
+      "deterministic_membership": {
+        "class": "goal",
+        "ordinals": "32-62",
+        "expected": 31
+      },
+      "probes": [
+        "compare acceptance criteria with child completion state",
+        "inspect phase/proj labels and Paper links",
+        "identify goals closed without aggregate evidence or left open after terminal evidence"
+      ],
+      "validation": "31 unique ids; LS-TASK-03 union LS-TASK-04 equals all 62 goal ids with overlap=0.",
+      "risks": [
+        "child completion alone may not satisfy a goal-level outcome"
+      ],
+      "stop_condition": "Stop on unresolved membership mismatch; carry live-state differences as drift.",
+      "source_id": "LS-TASK-04",
+      "lane": "task",
+      "fleet_slot": 16,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T05",
+      "title": "Decision/human gates 001-022 — authority and decision inputs",
+      "scope": "First 22 of 43 decision or human-gate Tasks; audit named decider, authority boundary, options, required inputs, and explicit irreversible action.",
+      "deterministic_membership": {
+        "class": "decision_or_human_gate",
+        "ordinals": "1-22",
+        "expected": 22
+      },
+      "probes": [
+        "extract owner/decider and decision requested",
+        "verify options and consequences are present",
+        "separate credential/production authority from ordinary work"
+      ],
+      "validation": "22 unique ids, each with authority/options/input verdicts.",
+      "risks": [
+        "implicit organizational authority cannot be inferred as fact"
+      ],
+      "stop_condition": "Stop rather than invent an owner, option, or decision deadline.",
+      "source_id": "LS-TASK-05",
+      "lane": "task",
+      "fleet_slot": 17,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T06",
+      "title": "Decision/human gates 023-043 — auditability and resumption",
+      "scope": "Remaining 21 decision or human-gate Tasks; audit response capture, expiry, resumption trigger, and downstream handoff.",
+      "deterministic_membership": {
+        "class": "decision_or_human_gate",
+        "ordinals": "23-43",
+        "expected": 21
+      },
+      "probes": [
+        "check whether a decision result has a durable field/evidence link",
+        "identify stale gates whose decision is already observable",
+        "verify named next owner and resumption rule"
+      ],
+      "validation": "21 unique ids; LS-TASK-05 union LS-TASK-06 equals all 43 decision/human-gate ids with overlap=0.",
+      "risks": [
+        "absence of a response in Task content does not prove no external decision occurred"
+      ],
+      "stop_condition": "Stop if evidence would require private/external systems not available to the survey.",
+      "source_id": "LS-TASK-06",
+      "lane": "task",
+      "fleet_slot": 18,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T07",
+      "title": "Done/cancelled history 0001-0290 — closure reason truth",
+      "scope": "First 290 of 1,157 historical Tasks; audit lifecycle, criteria state, close/cancel reason, and contradictory active claims.",
+      "deterministic_membership": {
+        "class": "done_or_cancelled_history",
+        "ordinals": "1-290",
+        "expected": 290
+      },
+      "probes": [
+        "cross-tab lifecycle against criteria met state",
+        "inspect close_reason/cancel rationale",
+        "flag active claims or blockers on terminal Tasks"
+      ],
+      "validation": "290 unique historical ids; exact contradiction counts by lifecycle.",
+      "risks": [
+        "older Tasks may predate current fields"
+      ],
+      "stop_condition": "Stop if terminal lifecycle cannot be read from frozen raw documents.",
+      "source_id": "LS-TASK-07",
+      "lane": "task",
+      "fleet_slot": 19,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-T08",
+      "title": "Done/cancelled history 0291-0579 — evidence and code provenance",
+      "scope": "Next 289 historical Tasks; audit result evidence, code_refs, branch/commit truth, and Paper linkage.",
+      "deterministic_membership": {
+        "class": "done_or_cancelled_history",
+        "ordinals": "291-579",
+        "expected": 289
+      },
+      "probes": [
+        "validate commit-shaped refs locally when present",
+        "check evidence links are non-empty and plausibly resolvable",
+        "distinguish no-code outcomes from missing provenance"
+      ],
+      "validation": "289 unique ids; evidence states found/not_found/partial with false-positive controls.",
+      "risks": [
+        "garbage-collected branches do not invalidate reachable commits",
+        "historical no-code Tasks may need no commit"
+      ],
+      "stop_condition": "Stop before network or repository mutation; report unverifiable external refs as partial.",
+      "source_id": "LS-TASK-08",
+      "lane": "task",
+      "fleet_slot": 20,
+      "wave": "03"
+    },
+    {
+      "id": "LQ-X01",
+      "fleet_slot": 21,
+      "wave": "03",
+      "title": "Five-surface golden reader matrix",
+      "scope": "Render a frozen 12-Paper fixture manifest (five high-signal, five critical/adversarial, one HTML-only control, one canonical PortableDoc control) through Studio, TUI, CLI, public reader, and email preview; measure parity only.",
+      "inputs": [
+        "Wave-02 Paper manifest hash",
+        "hashed 12-id fixture manifest",
+        "surface/version capture"
+      ],
+      "commands_or_probes": [
+        "Read every fixture through all five surfaces",
+        "capture normalized text, structure, links, warnings, screenshots/transcripts"
+      ],
+      "expected_accounting": {
+        "fixtures": 12,
+        "surfaces": 5,
+        "matrix_cells": 60,
+        "unexplained_missing_cells": 0
+      },
+      "deliverable": "A 60-cell parity matrix with per-cell evidence.",
+      "validation": [
+        "12 unique ids",
+        "60 unique cells",
+        "all evidence paths readable",
+        "zero writes"
+      ],
+      "risks": [
+        "normalization can hide structure loss",
+        "email preview is not real-client evidence"
+      ],
+      "stop_condition": "Stop on fixture drift, authentication/write prompt, or missing surface provenance; record the gap without substitution.",
+      "source_id": "LQ-X01",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X02",
+      "fleet_slot": 22,
+      "wave": "03",
+      "title": "HTML-only control fidelity matrix",
+      "scope": "Observe the frozen 20 body_html-only Papers across all five target surfaces without reclassifying storage.",
+      "inputs": [
+        "Wave-01 20-id HTML-only manifest",
+        "surface/version capture"
+      ],
+      "commands_or_probes": [
+        "Read all 20 ids on each surface",
+        "record substantive text, heading/list/link retention, editability status, and explicit unsupported states"
+      ],
+      "expected_accounting": {
+        "fixtures": 20,
+        "surfaces": 5,
+        "matrix_cells": 100,
+        "unexplained_missing_cells": 0
+      },
+      "deliverable": "A 100-cell control matrix of readable, degraded, unsupported, and non-editable states.",
+      "validation": [
+        "20 ids equal frozen manifest",
+        "100 cells reconcile",
+        "storage claims cite baseline"
+      ],
+      "risks": [
+        "readable may still be non-editable",
+        "fallback text can create false parity"
+      ],
+      "stop_condition": "Stop if the cohort differs from frozen 20 without explained delta or a probe would save content.",
+      "source_id": "LQ-X02",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X03",
+      "fleet_slot": 23,
+      "wave": "03",
+      "title": "Markdown-only failure reproduction matrix",
+      "scope": "Reproduce reader behavior for exactly six frozen raw-Markdown-body Papers across five surfaces; measure surface fidelity only.",
+      "inputs": [
+        "Wave-01 six-id Markdown manifest",
+        "surface/version capture"
+      ],
+      "commands_or_probes": [
+        "Read each id through every surface",
+        "capture raw markup leakage, empty rendering, semantic structure, and diagnostics"
+      ],
+      "expected_accounting": {
+        "fixtures": 6,
+        "surfaces": 5,
+        "matrix_cells": 30,
+        "unexplained_missing_cells": 0
+      },
+      "deliverable": "A 30-cell failure-signature matrix.",
+      "validation": [
+        "six unique frozen ids",
+        "30 cells",
+        "success/degradation rule predeclared"
+      ],
+      "risks": [
+        "known failures may drift",
+        "surface Markdown support is not canonical parity"
+      ],
+      "stop_condition": "Stop on cohort drift or ambiguous success criteria; preserve observations and flag inference.",
+      "source_id": "LQ-X03",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X04",
+      "fleet_slot": 24,
+      "wave": "03",
+      "title": "Unsupported-block cross-reader behavior",
+      "scope": "Observe the frozen five-Paper/45-node unsupported cohort, separately label the known live delta of six Papers/46 nodes, and avoid repeating recursive census work.",
+      "inputs": [
+        "Wave-02 unsupported-node manifest",
+        "frozen 45/5",
+        "known live 46/6",
+        "surface/version capture"
+      ],
+      "commands_or_probes": [
+        "Render each frozen affected Paper on all five surfaces",
+        "record node drop, alias handling, fallback, warning, and surrounding-content preservation"
+      ],
+      "expected_accounting": {
+        "frozen_fixtures": 5,
+        "frozen_nodes": 45,
+        "surfaces": 5,
+        "frozen_matrix_cells": 25,
+        "known_live_delta_fixtures": 1,
+        "known_live_delta_nodes": 1
+      },
+      "deliverable": "A node-aware behavior table keeping frozen and live-delta evidence separate.",
+      "validation": [
+        "45 frozen nodes reconcile by type",
+        "25 cells",
+        "46/6 never overwrites 45/5"
+      ],
+      "risks": [
+        "nested nodes can double-count",
+        "alias acceptance is not canonical storage"
+      ],
+      "stop_condition": "Stop if recursive paths cannot map to the frozen manifest or a renderer crashes; retain minimal crash evidence.",
+      "source_id": "LQ-X04",
+      "lane": "cross_surface"
+    },
+    {
+      "assignment_id": "LQ-P07",
+      "title": "Three empty draft probes: exclusion or retirement evidence",
+      "scope": "Review exactly 3 true-empty draft/probe Papers for provenance and policy; never pad them to improve scores.",
+      "inputs": [
+        "3-ID true_empty cohort",
+        "draft/published metadata",
+        "references/backlinks/task links",
+        "audit events where readable"
+      ],
+      "commands_or_probes": [
+        "jq-select rows with no substantive body, blocks, or body_html and assert count 3",
+        "read-only query backlinks, linked Tasks, status, timestamps, and ownership/provenance",
+        "check public visibility with GET only"
+      ],
+      "expected_accounting": {
+        "papers": 3,
+        "policy_decisions": 3,
+        "content_padding": 0
+      },
+      "deliverable": "Three-row human-decision brief recommending explicit exclusion, retention as documented probe, or retirement, with evidence and reversibility notes.",
+      "validation": [
+        "exactly 3 IDs",
+        "no substantive content was overlooked",
+        "each recommendation cites provenance and reference evidence"
+      ],
+      "risks": [
+        "hidden operational purpose",
+        "retiring a referenced probe"
+      ],
+      "stop_condition": "Stop when each Paper has one evidence-backed policy route; do not mutate or invent content.",
+      "source_id": "LP-07",
+      "id": "LQ-P07",
+      "lane": "paper",
+      "fleet_slot": 25,
+      "wave": "04"
+    },
+    {
+      "assignment_id": "LQ-P08",
+      "title": "Unsupported-node remediation matrix",
+      "scope": "Re-enumerate and deeply inspect the accepted frozen total of 45 unsupported nodes across 5 Papers: bulletList=2, bullet_list=22, bulleted_list=15, numbered_list=3, quote=3.",
+      "inputs": [
+        "203 frozen raw payloads",
+        "50 canonical native types",
+        "accepted task-list alias contract",
+        "reader registries"
+      ],
+      "commands_or_probes": [
+        "recursive jq or a checked-in read-only walker over every block-bearing field",
+        "emit one row per unsupported node with Paper ID, JSON path, raw type, content hash, nearest canonical mapping, and per-reader behavior",
+        "render copied nodes through Elixir and Go registries without mutation"
+      ],
+      "expected_accounting": {
+        "papers": 5,
+        "occurrences": 45,
+        "by_type": {
+          "bulletList": 2,
+          "bullet_list": 22,
+          "bulleted_list": 15,
+          "numbered_list": 3,
+          "quote": 3
+        },
+        "sum_by_type": 45
+      },
+      "deliverable": "45-row JSONL node ledger plus five-Paper remediation matrix distinguishing safe alias rewrite, semantic conversion, and fixture-required cases.",
+      "validation": [
+        "2 + 22 + 15 + 3 + 3 = 45",
+        "exactly 5 frozen Paper IDs",
+        "task-list is counted as accepted alias, not unsupported",
+        "malformed nodes = 0"
+      ],
+      "risks": [
+        "live Wave-02 quote inflates frozen total to 46/6",
+        "shallow walkers miss nested nodes"
+      ],
+      "stop_condition": "Stop at exactly the frozen 45/5 accounting and report the live 46/6 delta separately.",
+      "source_id": "LP-08",
+      "id": "LQ-P08",
+      "lane": "paper",
+      "fleet_slot": 26,
+      "wave": "04"
+    },
+    {
+      "assignment_id": "LQ-P09",
+      "title": "Recursive semantic-node and registry integrity proof",
+      "scope": "Validate the accepted 8,081-node recursive census across all 203 frozen Papers without repeating qualitative reader surveys.",
+      "inputs": [
+        "203 frozen payloads",
+        "Elixir and Go PortableDoc registries",
+        "recursive census rules"
+      ],
+      "commands_or_probes": [
+        "walk all nested semantic nodes and record JSON paths",
+        "enumerate distinct type strings and join them against both renderer registries",
+        "classify native, accepted alias, unsupported, malformed, and unexplained exactly once per node"
+      ],
+      "expected_accounting": {
+        "papers": 203,
+        "semantic_nodes": 8081,
+        "distinct_used_types": 55,
+        "canonical_native_types": 50,
+        "accepted_task_list_occurrences": 15,
+        "accepted_task_list_papers": 12,
+        "unsupported_occurrences": 45,
+        "malformed_nodes": 0,
+        "unexplained_errors": 0
+      },
+      "deliverable": "Machine-readable node census, registry join table, and accounting equation with source hashes.",
+      "validation": [
+        "all classification buckets reconcile to the walker total",
+        "55 distinct observed strings",
+        "no unexplained node is discarded"
+      ],
+      "risks": [
+        "non-semantic wrapper objects counted as blocks",
+        "registry drift between languages"
+      ],
+      "stop_condition": "Stop when the 8,081-node accounting is reproducible or every variance has exact IDs/paths and a stated cause.",
+      "source_id": "LP-09",
+      "id": "LQ-P09",
+      "lane": "paper",
+      "fleet_slot": 27,
+      "wave": "04"
+    },
+    {
+      "assignment_id": "LQ-P10",
+      "title": "Structure and accessibility shard 1-68",
+      "scope": "Deep structural/accessibility audit of frozen Papers 1-68 in lexicographic ID order.",
+      "inputs": [
+        "frozen manifest ordinals 1-68",
+        "raw PortableDoc/legacy/HTML source",
+        "rendered article DOM"
+      ],
+      "commands_or_probes": [
+        "select sed -n '1,68p' from the sorted 203-ID manifest",
+        "probe heading order, single useful title/H1, landmark/article structure, link names, image alt/caption, table headers, list semantics, code labels, focusable controls, language/title metadata",
+        "capture source JSON paths and rendered DOM selectors for every finding"
+      ],
+      "expected_accounting": {
+        "ordinal_start": 1,
+        "ordinal_end": 68,
+        "papers": 68,
+        "unaccounted": 0
+      },
+      "deliverable": "68-row Paper ledger plus issue JSONL keyed by WCAG-oriented rule, severity, surface, source path, and evidence.",
+      "validation": [
+        "68 unique IDs",
+        "found + not_found + partial = 68",
+        "no length-based quality scoring"
+      ],
+      "risks": [
+        "automated checks overstate semantic correctness",
+        "HTML-only source needs different selectors"
+      ],
+      "stop_condition": "Stop when all 68 have a structure and accessibility verdict with human-review flags where automation is insufficient.",
+      "source_id": "LP-10",
+      "id": "LQ-P10",
+      "lane": "paper",
+      "fleet_slot": 28,
+      "wave": "04"
+    },
+    {
+      "assignment_id": "LQ-P11",
+      "title": "Structure and accessibility shard 69-136",
+      "scope": "Deep structural/accessibility audit of frozen Papers 69-136 in lexicographic ID order using LP-10's stable schema.",
+      "inputs": [
+        "frozen manifest ordinals 69-136",
+        "raw source",
+        "rendered article DOM"
+      ],
+      "commands_or_probes": [
+        "select sed -n '69,136p' from the sorted manifest",
+        "run the same heading, landmark, alternative-text, table, list, code, focus, language, and metadata probes",
+        "preserve decisive selectors/JSON paths"
+      ],
+      "expected_accounting": {
+        "ordinal_start": 69,
+        "ordinal_end": 136,
+        "papers": 68,
+        "overlap_with_adjacent_shards": 0
+      },
+      "deliverable": "68-row ledger and issue JSONL schema-compatible with LP-10.",
+      "validation": [
+        "68 unique IDs",
+        "no ordinal from 1-68 or 137-203",
+        "found + not_found + partial = 68"
+      ],
+      "risks": [
+        "ordinal generation not lexicographically stable",
+        "visual hierarchy differs from semantic hierarchy"
+      ],
+      "stop_condition": "Stop when every one of the 68 IDs is evidenced and all ambiguous cases are explicitly marked partial.",
+      "source_id": "LP-11",
+      "id": "LQ-P11",
+      "lane": "paper",
+      "fleet_slot": 29,
+      "wave": "04"
+    },
+    {
+      "assignment_id": "LQ-P12",
+      "title": "Structure and accessibility shard 137-203",
+      "scope": "Deep structural/accessibility audit of frozen Papers 137-203 in lexicographic ID order, closing full membership coverage.",
+      "inputs": [
+        "frozen manifest ordinals 137-203",
+        "raw source",
+        "rendered article DOM"
+      ],
+      "commands_or_probes": [
+        "select sed -n '137,203p' from the sorted manifest",
+        "run the identical structural/accessibility probe contract",
+        "reconcile only this shard's issue and Paper counts"
+      ],
+      "expected_accounting": {
+        "ordinal_start": 137,
+        "ordinal_end": 203,
+        "papers": 67,
+        "three_shard_total": 203
+      },
+      "deliverable": "67-row ledger and compatible issue JSONL plus proof that 68 + 68 + 67 = 203.",
+      "validation": [
+        "67 unique IDs",
+        "68 + 68 + 67 = 203",
+        "union has 203 and intersection is empty"
+      ],
+      "risks": [
+        "off-by-one boundary",
+        "draft visibility produces false not-found"
+      ],
+      "stop_condition": "Stop when all 67 are evidenced and the three-shard membership equation closes exactly.",
+      "source_id": "LP-12",
+      "id": "LQ-P12",
+      "lane": "paper",
+      "fleet_slot": 30,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T09",
+      "title": "Done/cancelled history 0580-0868 — semantic usefulness after closure",
+      "scope": "Next 289 historical Tasks; audit whether title, description, criteria, and result preserve enough context for future readers.",
+      "deterministic_membership": {
+        "class": "done_or_cancelled_history",
+        "ordinals": "580-868",
+        "expected": 289
+      },
+      "probes": [
+        "rate standalone comprehensibility without live chat context",
+        "check result explains what changed and limitations",
+        "identify duplicate/superseded artifacts without treating brevity alone as low quality"
+      ],
+      "validation": "289 unique ids; class-aware usefulness rating and exact rationale category per id.",
+      "risks": [
+        "semantic ratings require explicit evidence quotes/paraphrases, not length heuristics"
+      ],
+      "stop_condition": "Stop if a rating cannot be justified from durable Task content.",
+      "source_id": "LS-TASK-09",
+      "lane": "task",
+      "fleet_slot": 31,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T10",
+      "title": "Done/cancelled history 0869-1157 — stale structure and retention value",
+      "scope": "Final 289 historical Tasks; audit parent/placement validity, stale blocker/dependency edges, duplicate history, and retain/archive value.",
+      "deterministic_membership": {
+        "class": "done_or_cancelled_history",
+        "ordinals": "869-1157",
+        "expected": 289
+      },
+      "probes": [
+        "resolve parent/dependency ids against frozen inventory",
+        "group obvious duplicate/superseded artifacts by evidence",
+        "recommend retain, annotate, or human-review; never mutate"
+      ],
+      "validation": "289 unique ids; LS-TASK-07..10 union equals all 1,157 history ids with pairwise overlap=0.",
+      "risks": [
+        "similar titles are insufficient proof of duplication"
+      ],
+      "stop_condition": "Stop if deduplication would rely on inference without shared evidence.",
+      "source_id": "LS-TASK-10",
+      "lane": "task",
+      "fleet_slot": 32,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T11",
+      "title": "Deferred Tasks 001-067 — rationale and reactivation triggers",
+      "scope": "First 67 of 133 deferred Tasks; audit explicit deferral reason, owner, condition, expiry, and reactivation signal.",
+      "deterministic_membership": {
+        "class": "deferred",
+        "ordinals": "1-67",
+        "expected": 67
+      },
+      "probes": [
+        "extract reason and trigger",
+        "distinguish intentional backlog from abandoned executable work",
+        "check lifecycle/priority consistency"
+      ],
+      "validation": "67 unique ids with reason/trigger/owner verdicts.",
+      "risks": [
+        "no date is acceptable when a concrete event trigger exists"
+      ],
+      "stop_condition": "Stop rather than infer product priority from age alone.",
+      "source_id": "LS-TASK-11",
+      "lane": "task",
+      "fleet_slot": 33,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T12",
+      "title": "Deferred Tasks 068-133 — dependency and placement quality",
+      "scope": "Remaining 66 deferred Tasks; audit dependency truth, parent/project placement, labels, priority, and recoverability.",
+      "deterministic_membership": {
+        "class": "deferred",
+        "ordinals": "68-133",
+        "expected": 66
+      },
+      "probes": [
+        "resolve blockers/dependencies",
+        "check project/phase placement",
+        "rate cold-start recoverability when trigger fires"
+      ],
+      "validation": "66 unique ids; LS-TASK-11 union LS-TASK-12 equals all 133 deferred ids with overlap=0.",
+      "risks": [
+        "a missing dependency field can be valid for policy deferrals"
+      ],
+      "stop_condition": "Stop on membership drift or unavailable parent/dependency evidence.",
+      "source_id": "LS-TASK-12",
+      "lane": "task",
+      "fleet_slot": 34,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T13",
+      "title": "Probe class — exhaustive retirement safety review",
+      "scope": "All five accepted probe-class Tasks; determine retain-as-fixture, quarantine, or retire recommendation with preservation evidence.",
+      "deterministic_membership": {
+        "class": "probe",
+        "ordinals": "1-5",
+        "expected": 5
+      },
+      "probes": [
+        "identify whether each probe has continuing fixture/audit value",
+        "trace references from parent/Paper/code",
+        "specify reversible retirement evidence without executing it"
+      ],
+      "validation": "Exactly five unique probe ids and one evidence-backed disposition recommendation per id.",
+      "risks": [
+        "probe-looking Tasks may be durable regression fixtures"
+      ],
+      "stop_condition": "Stop if reference reachability is partial; recommend human review instead of retirement.",
+      "source_id": "LS-TASK-13",
+      "lane": "task",
+      "fleet_slot": 35,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T14",
+      "title": "P0 repair cohort — single critical Task proof packet",
+      "scope": "The one accepted P0 Task; reproduce every severity signal and assemble a non-mutating proof packet for Verify.",
+      "deterministic_membership": {
+        "cohort": "p0",
+        "expected": 1,
+        "sha256": "edc81318db5b00e96e56da931cc98a5902c0c821a31bb1caf9ad784d74c30964"
+      },
+      "probes": [
+        "recompute class-aware hard gates",
+        "check lifecycle/claim/criteria/placement/evidence contradictions",
+        "name minimal safe repair decision and proof commands"
+      ],
+      "validation": "Exactly one frozen id; all P0 signals reproduced or explicitly refuted.",
+      "risks": [
+        "P0 inference is not final product truth"
+      ],
+      "stop_condition": "Stop if cohort hash differs or repair requires production mutation.",
+      "source_id": "LS-TASK-14",
+      "lane": "task",
+      "fleet_slot": 36,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T15",
+      "title": "P1 repair cohort — semantic authoring requirements",
+      "scope": "All five accepted P1 Tasks; determine which gaps are mechanical and which require subject-matter authoring.",
+      "deterministic_membership": {
+        "cohort": "p1",
+        "expected": 5,
+        "sha256": "ad2a8b7afd217a1978b482b4a09c24f732e5893dac96a53ec090d347216190bc"
+      },
+      "probes": [
+        "audit title/description/criteria/brief/placement/labels",
+        "draft field-level repair requirements without writing content",
+        "identify required human decisions"
+      ],
+      "validation": "Five unique ids; every missing/weak field labeled mechanical, semantic, authority-gated, or no-change.",
+      "risks": [
+        "auto-generated prose can fabricate product intent"
+      ],
+      "stop_condition": "Stop when semantic truth is unavailable; emit an authoring question, not guessed content.",
+      "source_id": "LS-TASK-15",
+      "lane": "task",
+      "fleet_slot": 37,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-T16",
+      "title": "P2 repair cohort 01-16 — metadata and placement repairability",
+      "scope": "First 16 of 32 P2 Tasks; audit deterministic repairs for labels, placement, priority, and structurally missing brief fields.",
+      "deterministic_membership": {
+        "cohort": "p2",
+        "ordinals": "1-16",
+        "expected": 16,
+        "cohort_sha256": "854d301d2b23a89c277d599f5f9cdc50b20c52a5228017196363cc9bb00dc0d6"
+      },
+      "probes": [
+        "derive candidate metadata only from parent/project evidence",
+        "check whether brief scaffolding can preserve existing authored text",
+        "identify idempotence keys for later experiment"
+      ],
+      "validation": "16 unique P2 ids and field-level safe/unsafe repair matrix.",
+      "risks": [
+        "parent metadata propagation may be semantically wrong"
+      ],
+      "stop_condition": "Stop if a proposed mechanical repair changes intent or lifecycle.",
+      "source_id": "LS-TASK-16",
+      "lane": "task",
+      "fleet_slot": 38,
+      "wave": "04"
+    },
+    {
+      "id": "LQ-X05",
+      "fleet_slot": 39,
+      "wave": "04",
+      "title": "Real email-client canonical fixture experiment",
+      "scope": "Render six synthetic non-production canonical PortableDoc fixtures covering headings, lists, tables, media, links, and callouts in Apple Mail/WebKit, Gmail web, Outlook desktop/Word, and Outlook web.",
+      "inputs": [
+        "six immutable hashed fixtures",
+        "exact four-client/version manifest"
+      ],
+      "commands_or_probes": [
+        "Generate isolated read-only email artifacts",
+        "capture screenshots, normalized text, link targets, and accessibility tree where available"
+      ],
+      "expected_accounting": {
+        "fixtures": 6,
+        "clients": 4,
+        "matrix_cells": 24,
+        "unexplained_missing_cells": 0
+      },
+      "deliverable": "Twenty-four real-client or explicitly qualified harness evidence bundles closing the Wave-02 gap.",
+      "validation": [
+        "fixture hashes stable",
+        "24 cells",
+        "client/version recorded",
+        "preview-only labeled"
+      ],
+      "risks": [
+        "privacy settings alter output",
+        "Outlook variants differ"
+      ],
+      "stop_condition": "Stop if sending targets a real recipient, requires production mutation, or lacks client provenance.",
+      "source_id": "LQ-X05",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X06",
+      "fleet_slot": 40,
+      "wave": "04",
+      "title": "Email degradation, accessibility, and link adversarial matrix",
+      "scope": "Exercise eight immutable fixtures (long words, nested lists, wide tables, missing-alt control, Unicode/RTL, dark mode, unsafe URL, absent media) across the same four clients.",
+      "inputs": [
+        "eight hashed adversarial fixtures",
+        "LQ-X05 four-client/version manifest"
+      ],
+      "commands_or_probes": [
+        "Render in isolated test mailboxes/harnesses",
+        "record overflow, semantic order, alt behavior, contrast, URL sanitation, and remote-load behavior"
+      ],
+      "expected_accounting": {
+        "fixtures": 8,
+        "clients": 4,
+        "matrix_cells": 32,
+        "unexplained_missing_cells": 0
+      },
+      "deliverable": "A 32-cell adversarial matrix separating accessibility/safety facts from recommendations.",
+      "validation": [
+        "32 cells",
+        "same client versions as X05",
+        "unsafe links never followed",
+        "no real-recipient delivery"
+      ],
+      "risks": [
+        "security filters are environment-dependent",
+        "screenshots miss semantic order"
+      ],
+      "stop_condition": "Stop on external navigation, untrusted remote load, or client-version mismatch; log blocked evidence.",
+      "source_id": "LQ-X06",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X07",
+      "fleet_slot": 41,
+      "wave": "04",
+      "title": "Blind inter-rater calibration pack",
+      "scope": "Create a deterministic ten-item pack: five Paper and five Task evidence bundles stratified across gold, serviceable, repair, ambiguity, and quarantine/probe candidates; conceal prior ratings.",
+      "inputs": [
+        "accepted rubrics",
+        "five hashed Paper bundles",
+        "five hashed Task bundles",
+        "two independent raters"
+      ],
+      "commands_or_probes": [
+        "Both raters independently score all ten bundles",
+        "compare criterion ratings only after both submissions are sealed"
+      ],
+      "expected_accounting": {
+        "items": 10,
+        "raters": 2,
+        "independent_rating_records": 20,
+        "criterion_coverage": "100%"
+      },
+      "deliverable": "A blinded pack, 20 sealed records, and criterion-level agreement statistics.",
+      "validation": [
+        "ten unique items split 5/5",
+        "20 records",
+        "no prior-score leakage",
+        "facts separate from ratings"
+      ],
+      "risks": [
+        "strata can leak outcomes",
+        "small sample is not population quality"
+      ],
+      "stop_condition": "Stop if either rater sees prior ratings, shares reasoning before seal, or evidence lacks provenance.",
+      "source_id": "LQ-X07",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X08",
+      "fleet_slot": 42,
+      "wave": "04",
+      "title": "Inter-rater disagreement adjudication inputs",
+      "scope": "From sealed LQ-X07 outputs, select every item with band disagreement or >10-point delta and prepare evidence-first adjudication packets; explicit paired replication.",
+      "inputs": [
+        "sealed LQ-X07 records",
+        "rubric version",
+        "source evidence paths"
+      ],
+      "commands_or_probes": [
+        "Deterministically select disagreements",
+        "classify cause as missing evidence, rubric ambiguity, factual conflict, or judgment variance",
+        "obtain one independent adjudication without overwriting originals"
+      ],
+      "expected_accounting": {
+        "source_records": 20,
+        "selected_items": "D where 0<=D<=10",
+        "adjudications": "D",
+        "unclassified_disagreements": 0
+      },
+      "deliverable": "A D-item adjudication corpus preserving original ratings and proposed rubric clarifications.",
+      "validation": [
+        "selection recomputes D",
+        "one adjudication per item",
+        "originals immutable",
+        "zero unexplained exclusions"
+      ],
+      "risks": [
+        "consensus pressure can erase uncertainty",
+        "zero disagreements does not prove validity"
+      ],
+      "stop_condition": "Stop if source records are unsealed, mutated, or lack criterion evidence; report D unknown rather than reconstructing.",
+      "paired_assignment_ids": [
+        "LQ-X07"
+      ],
+      "source_id": "LQ-X08",
+      "lane": "cross_surface"
+    },
+    {
+      "assignment_id": "LQ-P13",
+      "title": "Five-surface fidelity matrix shard 1-68",
+      "scope": "For frozen Papers 1-68, compare Studio, public reader, TUI, CLI, and email semantics without changing content or sending email.",
+      "inputs": [
+        "frozen ordinals 1-68",
+        "raw semantic oracle",
+        "Studio and public GET captures",
+        "bp paper view/TUI captures",
+        "email renderer output"
+      ],
+      "commands_or_probes": [
+        "capture each Paper on all five surfaces with GET/read-only renderers",
+        "normalize headings, paragraphs, lists, tables, code, figures, links, inline marks, valuerefs/task chips, warnings, and fallbacks into a surface-neutral signature",
+        "diff each surface signature against raw semantics and record visibility/editability separately"
+      ],
+      "expected_accounting": {
+        "papers": 68,
+        "surfaces_per_paper": 5,
+        "matrix_cells": 340,
+        "writes": 0,
+        "emails_sent": 0
+      },
+      "deliverable": "340-cell JSON matrix with pass/partial/fail/not_applicable, evidence URI, semantic losses, and reader-specific defect taxonomy.",
+      "validation": [
+        "68 * 5 = 340",
+        "every Paper has five explicit cells",
+        "not_applicable is reasoned, never silently omitted"
+      ],
+      "risks": [
+        "Studio authentication unavailable",
+        "email CSS/client behavior cannot be inferred from HTML alone"
+      ],
+      "stop_condition": "Stop after 340 cells are decisive or explicitly partial with the missing capability named.",
+      "source_id": "LP-13",
+      "id": "LQ-P13",
+      "lane": "paper",
+      "fleet_slot": 43,
+      "wave": "05"
+    },
+    {
+      "assignment_id": "LQ-P14",
+      "title": "Five-surface fidelity matrix shard 69-136",
+      "scope": "Run the identical five-surface comparison for frozen Papers 69-136.",
+      "inputs": [
+        "frozen ordinals 69-136",
+        "same raw and reader capture contract as LP-13"
+      ],
+      "commands_or_probes": [
+        "capture Studio/public/TUI/CLI/email read-only outputs for each ID",
+        "normalize and diff the same semantic vocabulary",
+        "record visibility, readability, and editability as separate axes"
+      ],
+      "expected_accounting": {
+        "papers": 68,
+        "surfaces_per_paper": 5,
+        "matrix_cells": 340,
+        "writes": 0,
+        "emails_sent": 0
+      },
+      "deliverable": "340-cell matrix schema-compatible with LP-13.",
+      "validation": [
+        "68 * 5 = 340",
+        "ordinals do not overlap adjacent shards",
+        "cell statuses sum to 340"
+      ],
+      "risks": [
+        "terminal ANSI normalization removes meaning",
+        "draft/public visibility confused with renderer failure"
+      ],
+      "stop_condition": "Stop after exactly 340 accounted cells and preserve all raw captures or hashes.",
+      "source_id": "LP-14",
+      "id": "LQ-P14",
+      "lane": "paper",
+      "fleet_slot": 44,
+      "wave": "05"
+    },
+    {
+      "assignment_id": "LQ-P15",
+      "title": "Five-surface fidelity matrix shard 137-203",
+      "scope": "Run the identical five-surface comparison for frozen Papers 137-203 and close the 1,015-cell matrix.",
+      "inputs": [
+        "frozen ordinals 137-203",
+        "same raw and reader capture contract as LP-13"
+      ],
+      "commands_or_probes": [
+        "capture all five read-only surfaces",
+        "normalize/diff the shared semantic vocabulary",
+        "exercise email output through renderer fixtures only; do not deliver messages to real recipients"
+      ],
+      "expected_accounting": {
+        "papers": 67,
+        "surfaces_per_paper": 5,
+        "matrix_cells": 335,
+        "fleet_matrix_cells": 1015,
+        "emails_sent": 0
+      },
+      "deliverable": "335-cell matrix plus proof that 340 + 340 + 335 = 1,015.",
+      "validation": [
+        "67 * 5 = 335",
+        "203 * 5 = 1015",
+        "union covers 203 Papers with five cells each"
+      ],
+      "risks": [
+        "real-client email fidelity remains experimental",
+        "surface timeouts misclassified as content defects"
+      ],
+      "stop_condition": "Stop after 335 cells and exact reconciliation of the full 1,015-cell matrix.",
+      "source_id": "LP-15",
+      "id": "LQ-P15",
+      "lane": "paper",
+      "fleet_slot": 45,
+      "wave": "05"
+    },
+    {
+      "assignment_id": "LQ-P16",
+      "title": "Five-Paper gold fixture qualification",
+      "scope": "Qualify the baseline high-signal examples as stable gold candidates: codex-epic-cycle-wave-1-2026-07-14, component-reference, bp-chat-tui-wave-2026-07-13, choosing-your-site-framework, wave-deck.",
+      "inputs": [
+        "five named high-signal Papers",
+        "candidate Paper rubric",
+        "five-surface captures",
+        "existing renderer tests"
+      ],
+      "commands_or_probes": [
+        "fetch exact raw payload and hash each named ID",
+        "run the five-surface semantic signature and structure/accessibility checks",
+        "identify which construct each candidate uniquely exercises and whether it passes hard gates"
+      ],
+      "expected_accounting": {
+        "named_candidates": 5,
+        "surface_cells": 25,
+        "qualification_decisions": 5
+      },
+      "deliverable": "Gold-fixture manifest with immutable source hash, covered constructs, expected signatures, hard-gate results, and accept/reject/conditional decision.",
+      "validation": [
+        "all five exact IDs present",
+        "5 * 5 = 25 surface cells",
+        "gold requires 90-100 plus all hard gates; length alone contributes nothing"
+      ],
+      "risks": [
+        "high-signal example contains unsupported quote",
+        "volatile live refs make snapshots nondeterministic"
+      ],
+      "stop_condition": "Stop after five evidence-backed qualification decisions and isolate volatile fields from stable fixture expectations.",
+      "source_id": "LP-16",
+      "id": "LQ-P16",
+      "lane": "paper",
+      "fleet_slot": 46,
+      "wave": "05"
+    },
+    {
+      "assignment_id": "LQ-P17",
+      "title": "Seven-Paper adversarial fixture qualification",
+      "scope": "Turn the seven named critical examples into a minimal adversarial corpus: authoring-excellence-wave-2026-07-13b, authoring-excellence-wave-2026-07-13, cloud-console-wave-2026-07-11, bp-mcp-serve-epic-wave-2026-07-11, pd-everything-editable-wave-2026-07-11, aesthetic-unification-epic-wave-2026-07-11, codex-epic-cycle-wave-1-2026-07-14.",
+      "inputs": [
+        "seven named critical Papers",
+        "unsupported/storage/fidelity taxonomies",
+        "raw and five-surface outputs"
+      ],
+      "commands_or_probes": [
+        "hash raw payloads and enumerate stress constructs",
+        "probe all five surfaces and both language registries",
+        "map each observed failure to a reproducible fixture slice while preserving the full-document hash"
+      ],
+      "expected_accounting": {
+        "named_papers": 7,
+        "surface_cells": 35,
+        "fixture_decisions": 7,
+        "allowed_overlap_with_gold_list": 1
+      },
+      "deliverable": "Seven-row adversarial manifest with failure oracle, minimized fixture proposal, provenance, and false-positive controls.",
+      "validation": [
+        "seven unique IDs",
+        "7 * 5 = 35",
+        "the single intentional overlap codex-epic-cycle-wave-1-2026-07-14 is declared",
+        "no failure is inferred solely from size"
+      ],
+      "risks": [
+        "minimization removes interaction that causes defect",
+        "critical label is historical rather than current truth"
+      ],
+      "stop_condition": "Stop after every named Paper has a reproducible oracle or a documented contradiction and recommended next experiment.",
+      "source_id": "LP-17",
+      "id": "LQ-P17",
+      "lane": "paper",
+      "fleet_slot": 47,
+      "wave": "05"
+    },
+    {
+      "assignment_id": "LQ-P18",
+      "title": "Evidence preservation and final Paper accounting audit",
+      "scope": "Independently validate roster outputs, hashes, schema, no-mutation evidence, and exact reconciliation against the frozen baseline; do not redo content judgments.",
+      "inputs": [
+        "LP-01 through LP-17 deliverables",
+        "baseline JSON",
+        "command transcripts",
+        "git status and production mutation-event reads"
+      ],
+      "commands_or_probes": [
+        "jq -e schema checks over every JSON/JSONL deliverable",
+        "sha256sum all manifests, raw-capture bundles, normalized signatures, and reports into a checksum manifest",
+        "recompute shard unions/intersections and cohort equations",
+        "verify git diff --exit-code for product/source paths and review read-only request logs for absence of POST/PATCH/PUT/DELETE"
+      ],
+      "expected_accounting": {
+        "assignments_reviewed": 17,
+        "frozen_papers": 203,
+        "structure_shards": [
+          68,
+          68,
+          67
+        ],
+        "fidelity_cells": [
+          340,
+          340,
+          335
+        ],
+        "fidelity_cell_total": 1015,
+        "portable_storage_shards": [
+          81,
+          80
+        ],
+        "portable_total": 161,
+        "unsupported_nodes": 45,
+        "unsupported_papers": 5,
+        "writes": 0
+      },
+      "deliverable": "Signed-off evidence index with checksums, exact equations, missing/duplicate ID report, mutation audit, PASS/FAIL per assignment, and bounded follow-up list.",
+      "validation": [
+        "68 + 68 + 67 = 203",
+        "340 + 340 + 335 = 1015",
+        "81 + 80 = 161",
+        "unsupported type counts sum to 45",
+        "all artifacts parse",
+        "zero product/source changes and zero content mutations"
+      ],
+      "risks": [
+        "missing raw captures",
+        "hashes generated after normalization instead of before",
+        "partial surface evidence mislabeled pass"
+      ],
+      "stop_condition": "Stop only when every equation closes and every assignment is PASS or explicitly FAIL/PARTIAL with exact missing evidence; never repair content in this lane.",
+      "source_id": "LP-18",
+      "id": "LQ-P18",
+      "lane": "paper",
+      "fleet_slot": 48,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T17",
+      "title": "P2 repair cohort 17-32 — criteria and evidence repairability",
+      "scope": "Remaining 16 P2 Tasks; audit whether criteria/evidence gaps can be recovered from durable results, code refs, or linked Papers.",
+      "deterministic_membership": {
+        "cohort": "p2",
+        "ordinals": "17-32",
+        "expected": 16,
+        "cohort_sha256": "854d301d2b23a89c277d599f5f9cdc50b20c52a5228017196363cc9bb00dc0d6"
+      },
+      "probes": [
+        "trace durable evidence links",
+        "separate reconstructable facts from new authoring",
+        "define no-fabrication guardrails"
+      ],
+      "validation": "16 unique ids; LS-TASK-16 union LS-TASK-17 equals all 32 P2 ids with overlap=0.",
+      "risks": [
+        "post-hoc criteria can falsely rewrite history"
+      ],
+      "stop_condition": "Stop if repair would assert evidence not already durable.",
+      "source_id": "LS-TASK-17",
+      "lane": "task",
+      "fleet_slot": 49,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T18",
+      "title": "Retire cohort — six-item reference and preservation audit",
+      "scope": "All six accepted retire candidates; independently test reference reachability, audit value, and reversibility. Intentional paired overlap with LS-TASK-13 is allowed only for probe ids also in retire.",
+      "deterministic_membership": {
+        "cohort": "retire",
+        "expected": 6,
+        "sha256": "dbd79be113fac59b403468776e28b01607aa5a8b092139bfaf73a863c21d3927"
+      },
+      "probes": [
+        "trace parents, dependencies, Papers, and code refs",
+        "record preservation/export needs",
+        "recommend retain, quarantine, or retire with confidence"
+      ],
+      "validation": "Six unique ids; overlap with primary class assignments explicitly reported; no deletion or mutation.",
+      "risks": [
+        "reference search can miss external consumers"
+      ],
+      "stop_condition": "Stop and require human review on any unresolved consumer or audit obligation.",
+      "source_id": "LS-TASK-18",
+      "lane": "task",
+      "fleet_slot": 50,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T19",
+      "title": "Human-review cohort 001-138 — class disagreement calibration",
+      "scope": "First 138 of 414 human-review Tasks; independently rate class and quality using frozen rubric, emphasizing multi-signal disagreement.",
+      "deterministic_membership": {
+        "cohort": "human_review",
+        "ordinals": "1-138",
+        "expected": 138,
+        "cohort_sha256": "d8d847d2c1a1cebb5f7357a5d2282f80b58522f115105489bcd9404df1bf646b"
+      },
+      "probes": [
+        "record primary and alternate class with evidence",
+        "rate hard gates separately from weighted score",
+        "flag rubric ambiguity"
+      ],
+      "validation": "138 unique ids, dual-class verdict where applicable, exact disagreement matrix.",
+      "risks": [
+        "single-rater judgment is calibration input, not final truth"
+      ],
+      "stop_condition": "Stop rather than force a class when evidence supports a tie.",
+      "source_id": "LS-TASK-19",
+      "lane": "task",
+      "fleet_slot": 51,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T20",
+      "title": "Human-review cohort 139-276 — lifecycle-sensitive semantics",
+      "scope": "Middle 138 human-review Tasks; calibrate class-aware quality against lifecycle, distinguishing active intent from historical record.",
+      "deterministic_membership": {
+        "cohort": "human_review",
+        "ordinals": "139-276",
+        "expected": 138,
+        "cohort_sha256": "d8d847d2c1a1cebb5f7357a5d2282f80b58522f115105489bcd9404df1bf646b"
+      },
+      "probes": [
+        "apply lifecycle-specific hard gates",
+        "identify cases where Cn/7 penalizes valid history or rewards hollow active work",
+        "record adjudication evidence"
+      ],
+      "validation": "138 unique ids and lifecycle-by-rating disagreement table.",
+      "risks": [
+        "uniform rubrics can misgrade historical or decision Tasks"
+      ],
+      "stop_condition": "Stop if rubric application requires changing the accepted class rules mid-shard.",
+      "source_id": "LS-TASK-20",
+      "lane": "task",
+      "fleet_slot": 52,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T21",
+      "title": "Human-review cohort 277-414 — evidence provenance and final calibration set",
+      "scope": "Final 138 human-review Tasks; audit evidence provenance and nominate a balanced calibration fixture set for Verify/Experiment.",
+      "deterministic_membership": {
+        "cohort": "human_review",
+        "ordinals": "277-414",
+        "expected": 138,
+        "cohort_sha256": "d8d847d2c1a1cebb5f7357a5d2282f80b58522f115105489bcd9404df1bf646b"
+      },
+      "probes": [
+        "trace result/code/Paper evidence",
+        "select fixtures across classes, lifecycles, and disagreement modes",
+        "record why each fixture is representative"
+      ],
+      "validation": "138 unique ids; LS-TASK-19..21 union equals all 414 human-review ids with pairwise overlap=0.",
+      "risks": [
+        "fixture cherry-picking can bias later experiments"
+      ],
+      "stop_condition": "Stop if the proposed fixture set lacks every accepted class and material lifecycle.",
+      "source_id": "LS-TASK-21",
+      "lane": "task",
+      "fleet_slot": 53,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T22",
+      "title": "Active placement and label gaps — exact paired-cohort audit",
+      "scope": "Audit the accepted active-placement gap cohort (84) and active-label gap cohort (224). Their intersection is permitted and must be measured, not deduplicated silently.",
+      "deterministic_membership": {
+        "selectors": [
+          {
+            "active_gap": "placement",
+            "expected": 84
+          },
+          {
+            "active_gap": "labels",
+            "expected": 224
+          }
+        ],
+        "overlap": "explicitly paired; report intersection"
+      },
+      "probes": [
+        "derive intended project/phase only from durable parents/Papers",
+        "test label vocabulary consistency",
+        "separate missing metadata from incorrect metadata"
+      ],
+      "validation": "Placement subtotal=84; labels subtotal=224; intersection and union computed exactly; every id tied to its selector(s).",
+      "risks": [
+        "live active membership can drift",
+        "metadata inference can encode wrong priority"
+      ],
+      "stop_condition": "Stop if either accepted subtotal cannot be reproduced from the frozen manifest.",
+      "source_id": "LS-TASK-22",
+      "lane": "task",
+      "fleet_slot": 54,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T23",
+      "title": "Semantic criteria and evidence-truth control sample",
+      "scope": "Audit all 59 accepted active Tasks missing criteria plus an exact 60-Task control: the first 60 stable ids among active Tasks with criteria present. Compare absence against semantic weakness and evidence provenance.",
+      "deterministic_membership": {
+        "groups": [
+          {
+            "selector": "active AND criteria_missing",
+            "expected": 59
+          },
+          {
+            "selector": "active AND criteria_present",
+            "ordinals": "1-60",
+            "expected": 60
+          }
+        ],
+        "overlap": 0
+      },
+      "probes": [
+        "rate whether present criteria are testable and outcome-linked",
+        "trace proof/evidence sources",
+        "compare Cn mechanical presence with semantic quality"
+      ],
+      "validation": "59 missing + 60 controls =119 unique ids; no cross-group overlap; matched class/lifecycle distribution reported as limitation if imbalanced.",
+      "risks": [
+        "ordinal control may not be statistically representative",
+        "criteria presence does not prove truth"
+      ],
+      "stop_condition": "Stop if fewer than 60 frozen active criteria-present Tasks exist or if evidence would require mutation.",
+      "source_id": "LS-TASK-23",
+      "lane": "task",
+      "fleet_slot": 55,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-T24",
+      "title": "All 82 ambiguous multi-signal Tasks — Cn disagreement adjudication",
+      "scope": "Exhaustively double-rate the accepted 82 ambiguous multi-signal Tasks against class-aware quality and fixed Cn/7; produce calibration inputs, not final product truth.",
+      "deterministic_membership": {
+        "cohort": "ambiguous_multi_signal",
+        "expected": 82,
+        "sha256": "6d881ded0e83311be75afc0a0432f31652070c37a2697a0fec64ddea23bdc4b3"
+      },
+      "probes": [
+        "compute Cn/7 mechanically",
+        "independently score class-aware rubric and hard gates",
+        "record direction/magnitude/cause of disagreement and evidence confidence"
+      ],
+      "validation": "82 unique ids; two scores plus hard-gate verdict per id; exact disagreement distribution and unresolved ties.",
+      "risks": [
+        "class-aware ratings remain inference until independent Verify adjudication"
+      ],
+      "stop_condition": "Stop on cohort hash mismatch or when a score lacks a cited durable fact.",
+      "source_id": "LS-TASK-24",
+      "lane": "task",
+      "fleet_slot": 56,
+      "wave": "05"
+    },
+    {
+      "id": "LQ-X09",
+      "fleet_slot": 57,
+      "wave": "05",
+      "title": "Three-cycle read/render idempotence proof",
+      "scope": "Run the twelve LQ-X01 fixtures through three read-render-normalize cycles in non-mutating CLI/TUI and public/email harnesses; reuse is explicitly paired, metric is idempotence only.",
+      "inputs": [
+        "LQ-X01 hashed fixtures",
+        "normalization rules",
+        "renderer/version manifest"
+      ],
+      "commands_or_probes": [
+        "Run three isolated cycles without Barkpark saves",
+        "hash normalized semantic output across cycles"
+      ],
+      "expected_accounting": {
+        "fixtures": 12,
+        "cycles": 3,
+        "harnesses": 2,
+        "cycle_outputs": 72,
+        "unexpected_hash_changes": 0
+      },
+      "deliverable": "A 72-output hash ledger and minimal diffs for non-idempotence.",
+      "validation": [
+        "72 outputs",
+        "input hashes unchanged",
+        "normalizer version recorded",
+        "every hash change explained or failed"
+      ],
+      "risks": [
+        "over-normalization masks drift",
+        "timestamps create nondeterminism"
+      ],
+      "stop_condition": "Stop if a harness attempts persistence or normalization removes semantics; preserve raw output.",
+      "paired_assignment_ids": [
+        "LQ-X01"
+      ],
+      "source_id": "LQ-X09",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X10",
+      "fleet_slot": 58,
+      "wave": "05",
+      "title": "Cross-surface hostile-content safety survey",
+      "scope": "Observe ten inert hostile fixtures (script markup, event attributes, javascript/data URLs, malformed nesting, oversized text, bidi controls, tracking pixel, external media, formula-like text, terminal escapes) across all five surfaces.",
+      "inputs": [
+        "ten inert hashed fixtures",
+        "isolated no-network/no-write harness",
+        "surface/version capture"
+      ],
+      "commands_or_probes": [
+        "Render without following links or loading external resources",
+        "record escaping, sanitization, terminal control handling, remote requests, and crashes"
+      ],
+      "expected_accounting": {
+        "fixtures": 10,
+        "surfaces": 5,
+        "matrix_cells": 50,
+        "executed_payloads": 0,
+        "external_requests": 0,
+        "content_writes": 0
+      },
+      "deliverable": "A 50-cell safety matrix with execution/network assertions.",
+      "validation": [
+        "50 cells",
+        "zero executions",
+        "zero requests",
+        "zero writes",
+        "crashes retained"
+      ],
+      "risks": [
+        "fixtures can escape weak isolation",
+        "static output differs from client behavior"
+      ],
+      "stop_condition": "Immediately stop an affected probe on execution, request, credential prompt, or write; quarantine evidence.",
+      "source_id": "LQ-X10",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X11",
+      "fleet_slot": 59,
+      "wave": "05",
+      "title": "Frozen-baseline drift and membership reconciliation",
+      "scope": "Compare frozen Wave-02 Paper and Task hashes/counts against one current read-only snapshot, attributing additions/removals/mutations without redoing classification.",
+      "inputs": [
+        "Paper hash 2abe8abc...",
+        "Task hash e0dd73fb...",
+        "frozen 203/1527",
+        "known live-delta ids"
+      ],
+      "commands_or_probes": [
+        "Fetch one bounded raw snapshot via accepted retrieval path",
+        "hash sorted id manifests",
+        "emit added, removed, changed, unchanged sets"
+      ],
+      "expected_accounting": {
+        "frozen_papers": 203,
+        "frozen_tasks": 1527,
+        "current_papers": "Pnow",
+        "current_tasks": "Tnow",
+        "paper_equation": "203 + additions - removals = Pnow",
+        "task_equation": "1527 + additions - removals = Tnow",
+        "unexplained_ids": 0
+      },
+      "deliverable": "A signed drift ledger preserving frozen results and exact later-survey delta.",
+      "validation": [
+        "hashes reproducible",
+        "partition equations hold",
+        "known delta matched/superseded",
+        "no baseline rewrite"
+      ],
+      "risks": [
+        "pagination_stalled can create false removals",
+        "concurrent writes can break atomicity"
+      ],
+      "stop_condition": "Stop on pagination stall, inconsistent bounds, or failed equations; never infer deletion from one bad read.",
+      "source_id": "LQ-X11",
+      "lane": "cross_surface"
+    },
+    {
+      "id": "LQ-X12",
+      "fleet_slot": 60,
+      "wave": "05",
+      "title": "Fifty-four-assignment integration evidence audit",
+      "scope": "Validate all Paper, Task, and cross-surface survey results against the global roster contract without repairing source artifacts.",
+      "inputs": [
+        "all 54 results",
+        "canonical id/slot/batch manifest",
+        "baseline hashes",
+        "declared pair map"
+      ],
+      "commands_or_probes": [
+        "Schema-validate every result",
+        "reconcile ids, slots, counts, expected/actual accounting, evidence readability, stop outcomes, and factual conflicts"
+      ],
+      "expected_accounting": {
+        "results": 54,
+        "unique_ids": 54,
+        "unique_slots": 54,
+        "waves": 3,
+        "results_per_wave": 18,
+        "paper_results": 18,
+        "task_results": 24,
+        "cross_surface_results": 12,
+        "unexplained_duplicates": 0
+      },
+      "deliverable": "A machine-readable integration ledger, missing-evidence list, contradiction register, and go/no-go verdict.",
+      "validation": [
+        "54/54 schema results",
+        "unique ids/slots",
+        "18/18/18 batches",
+        "18P+24T+12X",
+        "reciprocal overlaps",
+        "contradictions retained"
+      ],
+      "risks": [
+        "schema completeness is not evidence quality",
+        "late drift can invalidate results"
+      ],
+      "stop_condition": "Return no-go for any missing, duplicate, unvalidated, mutating, fact/inference-mixed, or count-inconsistent result.",
+      "source_id": "LQ-X12",
+      "lane": "cross_surface"
+    }
+  ],
+  "hashes": {
+    "canonical_assignment_ids_sha256": "7165d315c8b57818baecefb21b9dc2599c7cd4637cfbb901087bd8643e610f27",
+    "canonical_assignments_sha256": "c06141ba707470581816da303cb0cf117b6ed9800d026d6064e82cfdc9a59513"
+  },
+  "validation_checklist": [
+    {
+      "name": "json_source_tasks_completed",
+      "expected": [
+        4,
+        5,
+        6
+      ],
+      "actual": [
+        4,
+        5,
+        6
+      ],
+      "status": "PASS"
+    },
+    {
+      "name": "assignment_count",
+      "expected": 54,
+      "actual": 54,
+      "status": "PASS"
+    },
+    {
+      "name": "unique_ids",
+      "expected": 54,
+      "actual": 54,
+      "status": "PASS"
+    },
+    {
+      "name": "exact_ids",
+      "expected": [
+        "LQ-P01",
+        "LQ-P02",
+        "LQ-P03",
+        "LQ-P04",
+        "LQ-P05",
+        "LQ-P06",
+        "LQ-P07",
+        "LQ-P08",
+        "LQ-P09",
+        "LQ-P10",
+        "LQ-P11",
+        "LQ-P12",
+        "LQ-P13",
+        "LQ-P14",
+        "LQ-P15",
+        "LQ-P16",
+        "LQ-P17",
+        "LQ-P18",
+        "LQ-T01",
+        "LQ-T02",
+        "LQ-T03",
+        "LQ-T04",
+        "LQ-T05",
+        "LQ-T06",
+        "LQ-T07",
+        "LQ-T08",
+        "LQ-T09",
+        "LQ-T10",
+        "LQ-T11",
+        "LQ-T12",
+        "LQ-T13",
+        "LQ-T14",
+        "LQ-T15",
+        "LQ-T16",
+        "LQ-T17",
+        "LQ-T18",
+        "LQ-T19",
+        "LQ-T20",
+        "LQ-T21",
+        "LQ-T22",
+        "LQ-T23",
+        "LQ-T24",
+        "LQ-X01",
+        "LQ-X02",
+        "LQ-X03",
+        "LQ-X04",
+        "LQ-X05",
+        "LQ-X06",
+        "LQ-X07",
+        "LQ-X08",
+        "LQ-X09",
+        "LQ-X10",
+        "LQ-X11",
+        "LQ-X12"
+      ],
+      "actual": [
+        "LQ-P01",
+        "LQ-P02",
+        "LQ-P03",
+        "LQ-P04",
+        "LQ-P05",
+        "LQ-P06",
+        "LQ-P07",
+        "LQ-P08",
+        "LQ-P09",
+        "LQ-P10",
+        "LQ-P11",
+        "LQ-P12",
+        "LQ-P13",
+        "LQ-P14",
+        "LQ-P15",
+        "LQ-P16",
+        "LQ-P17",
+        "LQ-P18",
+        "LQ-T01",
+        "LQ-T02",
+        "LQ-T03",
+        "LQ-T04",
+        "LQ-T05",
+        "LQ-T06",
+        "LQ-T07",
+        "LQ-T08",
+        "LQ-T09",
+        "LQ-T10",
+        "LQ-T11",
+        "LQ-T12",
+        "LQ-T13",
+        "LQ-T14",
+        "LQ-T15",
+        "LQ-T16",
+        "LQ-T17",
+        "LQ-T18",
+        "LQ-T19",
+        "LQ-T20",
+        "LQ-T21",
+        "LQ-T22",
+        "LQ-T23",
+        "LQ-T24",
+        "LQ-X01",
+        "LQ-X02",
+        "LQ-X03",
+        "LQ-X04",
+        "LQ-X05",
+        "LQ-X06",
+        "LQ-X07",
+        "LQ-X08",
+        "LQ-X09",
+        "LQ-X10",
+        "LQ-X11",
+        "LQ-X12"
+      ],
+      "status": "PASS"
+    },
+    {
+      "name": "unique_fleet_slots",
+      "expected": 54,
+      "actual": 54,
+      "status": "PASS"
+    },
+    {
+      "name": "lane_counts",
+      "expected": {
+        "paper": 18,
+        "task": 24,
+        "cross_surface": 12
+      },
+      "actual": {
+        "paper": 18,
+        "task": 24,
+        "cross_surface": 12
+      },
+      "status": "PASS"
+    },
+    {
+      "name": "wave_counts",
+      "expected": {
+        "03": 18,
+        "04": 18,
+        "05": 18
+      },
+      "actual": {
+        "03": 18,
+        "04": 18,
+        "05": 18
+      },
+      "status": "PASS"
+    },
+    {
+      "name": "wave_lane_counts",
+      "expected": {
+        "03": {
+          "paper": 6,
+          "task": 8,
+          "cross_surface": 4
+        },
+        "04": {
+          "paper": 6,
+          "task": 8,
+          "cross_surface": 4
+        },
+        "05": {
+          "paper": 6,
+          "task": 8,
+          "cross_surface": 4
+        }
+      },
+      "actual": {
+        "03": {
+          "paper": 6,
+          "task": 8,
+          "cross_surface": 4
+        },
+        "04": {
+          "paper": 6,
+          "task": 8,
+          "cross_surface": 4
+        },
+        "05": {
+          "paper": 6,
+          "task": 8,
+          "cross_surface": 4
+        }
+      },
+      "status": "PASS"
+    },
+    {
+      "name": "required_common_fields",
+      "expected": "no missing fields",
+      "actual": {},
+      "status": "PASS"
+    }
+  ],
+  "stop_condition": "Do not launch the fleet unless every validation check is PASS, the baseline/source hashes match, and all 54 assignments remain read-only."
+}
