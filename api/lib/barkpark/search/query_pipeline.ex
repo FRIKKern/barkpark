@@ -26,6 +26,28 @@ defmodule Barkpark.Search.QueryPipeline do
 
   @spec search(String.t(), String.t(), map(), keyword()) :: {:ok, result()}
   def search(surface, scope, context, opts \\ []) when is_binary(surface) and is_binary(scope) do
+    # TIMED: the search READ path had ZERO telemetry — it computed `ms` locally
+    # (t0/System.monotonic_time below) for the response body but never fired a
+    # `:telemetry` event, so "what is p95 of a search?" was unanswerable and the
+    # only search event ([:barkpark, :search, :intel, :record]) is a WRITE with no
+    # `workspace_id`. This is the single choke point every documents+media search
+    # caller funnels through, so one `:telemetry.span` here covers them all.
+    # Mirrors the D12 content-write precedent (content/mutations.ex): the span
+    # emits `[:barkpark, :search, :query, :start | :stop | :exception]` with a
+    # `:duration`; BarkparkWeb.Telemetry subscribes a Prometheus histogram to
+    # `:stop` (p95 via histogram_quantile). `workspace_id` — already live in
+    # `opts` via `scope_opts/1` — tags per-workspace search volume/latency; nil
+    # (anonymous / unscoped caller) coerces to "global" so the Prometheus tag is
+    # always present and never crashes the reporter handler.
+    workspace_id = Keyword.get(opts, :workspace_id) || "global"
+    meta = %{surface: surface, scope: scope, workspace_id: workspace_id}
+
+    :telemetry.span([:barkpark, :search, :query], meta, fn ->
+      {do_search(surface, scope, context, opts), meta}
+    end)
+  end
+
+  defp do_search(surface, scope, context, opts) do
     t0 = System.monotonic_time(:microsecond)
     # Resolve the surface config for the CALLER'S workspace (charter D63). The
     # resolved `workspace_id` already rides in `opts` (set by scope_opts/1 from
