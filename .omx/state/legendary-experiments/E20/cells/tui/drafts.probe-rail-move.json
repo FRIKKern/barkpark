@@ -1,0 +1,16 @@
+{
+  "accepted_capture": false,
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "capture_sha256": null,
+  "client_open_timestamp": null,
+  "delivery_receipt": null,
+  "deployment_id": null,
+  "explicit_block": "E19_NOT_PASS_AND_NO_LIVE_IMMUTABLE_DEPLOYMENT",
+  "fixture_id": "drafts.probe-rail-move",
+  "production_contacted": false,
+  "proxy_evidence": false,
+  "schema_version": "legendary-e20-cell/v1",
+  "silent_blank": false,
+  "status": "NOT_STARTED",
+  "surface": "tui"
+}

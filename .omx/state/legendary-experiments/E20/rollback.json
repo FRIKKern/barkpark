@@ -1,0 +1,22 @@
+{
+  "cleanup_mode": "NO_ACTIONS_STARTED_DEPENDENCY_STOP",
+  "e19_pins_before_and_after": {
+    "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+    "deployment_id": null,
+    "e19_deployment_sha256": "a457e24497b3654c7fbde476f755a7e0e5cba4fe0a9b6ab7da152fe6f81150d4",
+    "e19_provenance_sha256": "05bdac077caa3e3d61b82805effdc59feeb533124dfebfd117dee76d87c7110f",
+    "e19_result_sha256": "3c2228fe964aedbbc7ebd881d16f03144a6d9e6fee390b75b371189f62d60ad6",
+    "fixture_manifest_sha256": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+    "plan_sha256": "f33916ea678dc8c9117588ea4b168b5735cc8a6b7b150c3a03bae9446667aa58"
+  },
+  "fixture_records_expected": 36,
+  "fixture_records_untouched": 36,
+  "messages_sent": 0,
+  "production_mutations": 0,
+  "rollback_coverage_percent": 100,
+  "schema_version": "legendary-e20-rollback/v1",
+  "secrets_persisted": false,
+  "sessions_or_messages_cleaned": 0,
+  "sessions_started": 0,
+  "test_accounts_created": 0
+}

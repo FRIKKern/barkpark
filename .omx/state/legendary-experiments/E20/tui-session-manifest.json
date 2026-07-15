@@ -1,0 +1,18 @@
+{
+  "block_reason": "E19_NOT_PASS_AND_NO_LIVE_IMMUTABLE_DEPLOYMENT",
+  "bp_binary_path": null,
+  "bp_binary_sha256": null,
+  "candidate_digest": "3c8aa851df6d7cb65bba42f6322af82e08f6af2621499c5ecea66f11644f1830",
+  "deployment_id": null,
+  "interactive_selection_attempts": 0,
+  "pdrender_or_stdout_substitutions": 0,
+  "required_terminal": {
+    "columns": 40,
+    "rows": 24
+  },
+  "schema_version": "legendary-e20-tui-session-manifest/v1",
+  "sessions_accepted": 0,
+  "sessions_required": 36,
+  "sessions_started": 0,
+  "status": "NOT_STARTED_DEPENDENCY_BLOCK"
+}
