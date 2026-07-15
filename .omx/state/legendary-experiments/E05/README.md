@@ -10,6 +10,8 @@ This isolated Round-2 candidate keeps the original payload as the sole authority
 
 Expected terminal line: `E05 REPLAY PASS`.
 
+Ordinary replay is byte-stable. `outputs/timing.json` preserves the accepted measured timing evidence, while the current replay observation is written outside the repository to `$E05_VOLATILE_TIMING_PATH` (default: the system temporary directory). Set `E05_REFRESH_TIMING=1` only when intentionally replacing the committed timing evidence; that explicit maintenance mode is expected to create a reviewable diff.
+
 The fixture bundle contains exact frozen E03 bytes: 12 Papers, 18 Tasks, and 6 adversarial fixtures. The candidate emits 36 envelopes and a 180-cell five-surface matrix. Authenticated Studio and real-client email remain `BLOCKED`; scratch output is not promoted to real-surface proof. Consequently the honest experiment verdict is `PARTIAL / REWORK`, and this candidate does not select itself as winner.
 
 ## Evidence
