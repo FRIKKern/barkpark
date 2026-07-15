@@ -110,15 +110,106 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         path.write_text(value if isinstance(value, str) else json.dumps(value), encoding="utf-8")
         return path
 
-    def args(self, task=None, paper=None, phase="build", require_debrief=False):
+    def resign_ledger(self, ledger):
+        ledger["attempts"].sort(key=lambda attempt: (attempt["ordinal"], attempt["attempt_id"]))
+        for attempt in ledger["attempts"]:
+            semantic = {key: value for key, value in attempt.items() if key != "attempt_digest"}
+            attempt["attempt_digest"] = MODULE.EPIC.canonical_digest(semantic)
+        ledger["manifest_digest"] = MODULE.EPIC.canonical_digest(ledger["manifest"])
+        ledger["attempts_digest"] = MODULE.EPIC.canonical_digest(ledger["attempts"])
+        ledger["summary"] = MODULE.EPIC.benchmark_summary(ledger["attempts"])
+        ledger["summary_digest"] = MODULE.EPIC.canonical_digest(ledger["summary"])
+        base = {key: value for key, value in ledger.items() if key != "ledger_digest"}
+        ledger["ledger_digest"] = MODULE.EPIC.canonical_digest(base)
+        return ledger
+
+    def ledger(self, task=None, paper=None):
+        task = task or self.task
+        paper = MODULE.EPIC.paper_doc(paper or self.paper)
+        fields = MODULE.EPIC.task_fields(MODULE.EPIC.task_doc(task))
+        fleet = MODULE.EPIC.paper_fleet(paper)
+        attempts = []
+        ordinal = 0
+        for phase, record in fleet.items():
+            for assignment in record["assignments"]:
+                ordinal += 1
+                attempts.append(
+                    {
+                        "attempt_id": f"attempt-{phase}-{assignment['id']}",
+                        "replaces_attempt_id": None,
+                        "ordinal": ordinal,
+                        "treatment": "legendary-fleet-reconciliation",
+                        "status": "completed",
+                        "costs": {
+                            "wall_seconds": {"state": "observed", "value": ordinal},
+                            "token_count": {"state": "unsupported", "reason": "fixture provider"},
+                            "context_bytes": {"state": "missing", "reason": "fixture absent"},
+                            "cpu_percent": {"state": "invalid", "reason": "fixture reset"},
+                        },
+                        "provenance": {"source": "legendary validator fixture"},
+                        "payload": {
+                            "fleet_assignment": {
+                                "phase": phase,
+                                "assignment_id": assignment["id"],
+                                "agent_type": assignment["agent_type"],
+                                "evidence": assignment["evidence"],
+                                "model_reasoning_effort": (
+                                    "high" if phase in {"build", "review"} else "medium"
+                                ),
+                            }
+                        },
+                    }
+                )
+        ledger = {
+            "format": MODULE.EPIC.LEDGER_FORMAT,
+            "experiment": {
+                "workspace_id": "workspace-fixture",
+                "epic_id": fields.get("parent_id"),
+                "wave_id": paper["_id"],
+                "experiment_id": "legendary-fleet-fixture",
+                "phase": "legendary",
+                "protocol_version": 1,
+            },
+            "manifest": {
+                "fleet_contract": {
+                    "version": 1,
+                    "paper_fleet_digest": MODULE.EPIC.canonical_digest(fleet),
+                }
+            },
+            "manifest_digest": "",
+            "attempts": attempts,
+            "attempts_digest": "",
+            "summary": {},
+            "summary_digest": "",
+            "ledger_digest": "",
+        }
+        return self.resign_ledger(ledger)
+
+    def args(
+        self,
+        task=None,
+        paper=None,
+        phase="build",
+        require_debrief=False,
+        ledger=None,
+        include_ledger=True,
+    ):
+        task = task or self.task
+        paper = paper or self.paper
+        ledger = ledger or self.ledger(task, paper)
         return argparse.Namespace(
             task=None,
-            task_json=self.write("task.json", task or self.task),
+            task_json=self.write("task.json", task),
             paper=None,
-            paper_json=self.write("paper.json", paper or self.paper),
+            paper_json=self.write("paper.json", paper),
             worker="legendary-lead",
             phase=phase,
             require_debrief=require_debrief,
+            fleet_ledger_json=(
+                self.write("fleet-ledger.json", MODULE.EPIC.canonical_json(ledger))
+                if include_ledger
+                else None
+            ),
             wish_file=self.write("wish.txt", "repair every unreadable Paper\n"),
             pr_body=self.write("pr.md", "Summary\n\nTask: legendary-slice-1\n"),
         )
@@ -128,6 +219,87 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
 
     def test_valid_five_scale_fixture_passes(self):
         self.assertEqual([], MODULE.validate(self.args()))
+
+    def test_legendary_build_preflight_accepts_prior_fleet_without_future_completions(self):
+        paper = copy.deepcopy(self.paper)
+        fleet = self.fleet(paper)
+        for phase in ("build", "review"):
+            fleet[phase].update(
+                {
+                    "started": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "missing": fleet[phase]["planned"],
+                    "assignments": [],
+                }
+            )
+        self.assertEqual([], MODULE.validate(self.args(paper=paper)))
+
+    def test_legendary_build_and_review_require_canonical_ledger(self):
+        self.assertIn(
+            "build/review preflight requires --fleet-ledger-json",
+            MODULE.validate(self.args(include_ledger=False)),
+        )
+
+    def test_legendary_exporter_to_validator_rejects_paper_only_inflation(self):
+        ledger = self.ledger()
+        ledger["attempts"] = [
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["assignment_id"] != "build-15"
+        ]
+        self.resign_ledger(ledger)
+        self.assertIn(
+            "fleet ledger build terminal completions do not match the Paper projection",
+            MODULE.validate(self.args(ledger=ledger)),
+        )
+
+    def test_legendary_exporter_to_validator_requires_high_build_effort(self):
+        ledger = self.ledger()
+        build = next(
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["phase"] == "build"
+        )
+        build["payload"]["fleet_assignment"]["model_reasoning_effort"] = "medium"
+        self.resign_ledger(ledger)
+        self.assertTrue(
+            any("Build effort is not exactly high" in error for error in MODULE.validate(self.args(ledger=ledger)))
+        )
+
+    def test_legendary_exporter_to_validator_reconciles_replacement_failure_costs(self):
+        paper = copy.deepcopy(self.paper)
+        self.fleet(paper)["experiment"]["failed"] = 1
+        ledger = self.ledger(paper=paper)
+        original = next(
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["assignment_id"] == "experiment-1"
+        )
+        original["status"] = "timeout"
+        replacement = copy.deepcopy(original)
+        replacement["attempt_id"] = "attempt-experiment-1-retry"
+        replacement["replaces_attempt_id"] = original["attempt_id"]
+        replacement["ordinal"] = len(ledger["attempts"]) + 1
+        replacement["status"] = "completed"
+        ledger["attempts"].append(replacement)
+        self.resign_ledger(ledger)
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
+        self.assertEqual(1, ledger["summary"]["outcomes"]["timeout"])
+
+    def test_legendary_ledger_rejects_epic_cycle_scope(self):
+        ledger = self.ledger()
+        ledger["experiment"]["phase"] = "epic"
+        self.resign_ledger(ledger)
+        self.assertTrue(
+            any("expected 'legendary'" in error for error in MODULE.validate(self.args(ledger=ledger)))
+        )
+
+    def test_legendary_unrelated_paper_content_preserves_valid_projection(self):
+        ledger = self.ledger()
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"].append({"type": "paragraph", "text": "Unrelated context"})
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
 
     def test_missing_scale_profile_fails(self):
         paper = copy.deepcopy(self.paper)
@@ -222,6 +394,9 @@ class LegendaryCyclePreflightTest(unittest.TestCase):
         self.assertIn("30 Verify", skill)
         self.assertIn("at least 15", skill)
         self.assertIn("minimum total is 135", fleet)
+        self.assertIn("--fleet-ledger-json", fleet)
+        self.assertIn("All Legendary Build attempts use `model_reasoning_effort: high`", fleet)
+        self.assertIn("Every attempt stays in cost and outcome denominators", fleet)
         self.assertIn('model_reasoning_effort = "medium"', builder)
         self.assertIn('name = "legendary-experimenter"', experimenter)
 

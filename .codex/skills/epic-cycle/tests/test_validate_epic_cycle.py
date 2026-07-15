@@ -91,6 +91,84 @@ class EpicCyclePreflightTest(unittest.TestCase):
             path.write_text(json.dumps(value), encoding="utf-8")
         return path
 
+    def fleet(self, paper):
+        paper = MODULE.paper_doc(paper)
+        return MODULE.paper_fleet(paper)
+
+    def resign_ledger(self, ledger):
+        ledger["attempts"].sort(key=lambda attempt: (attempt["ordinal"], attempt["attempt_id"]))
+        for attempt in ledger["attempts"]:
+            semantic = {key: value for key, value in attempt.items() if key != "attempt_digest"}
+            attempt["attempt_digest"] = MODULE.canonical_digest(semantic)
+        ledger["manifest_digest"] = MODULE.canonical_digest(ledger["manifest"])
+        ledger["attempts_digest"] = MODULE.canonical_digest(ledger["attempts"])
+        ledger["summary"] = MODULE.benchmark_summary(ledger["attempts"])
+        ledger["summary_digest"] = MODULE.canonical_digest(ledger["summary"])
+        base = {key: value for key, value in ledger.items() if key != "ledger_digest"}
+        ledger["ledger_digest"] = MODULE.canonical_digest(base)
+        return ledger
+
+    def ledger(self, task=None, paper=None, cycle_phase="epic"):
+        task = task or self.task
+        paper = MODULE.paper_doc(paper or self.paper)
+        fields = MODULE.task_fields(MODULE.task_doc(task))
+        fleet = self.fleet(paper)
+        attempts = []
+        ordinal = 0
+        for phase, record in fleet.items():
+            for assignment in record["assignments"]:
+                ordinal += 1
+                effort = "high" if phase in {"build", "review"} else "medium"
+                attempts.append(
+                    {
+                        "attempt_id": f"attempt-{phase}-{assignment['id']}",
+                        "replaces_attempt_id": None,
+                        "ordinal": ordinal,
+                        "treatment": "fleet-reconciliation",
+                        "status": "completed",
+                        "costs": {
+                            "wall_seconds": {"state": "observed", "value": ordinal},
+                            "token_count": {"state": "unsupported", "reason": "fixture provider"},
+                            "context_bytes": {"state": "missing", "reason": "fixture absent"},
+                            "cpu_percent": {"state": "invalid", "reason": "fixture reset"},
+                        },
+                        "provenance": {"source": "validator fixture"},
+                        "payload": {
+                            "fleet_assignment": {
+                                "phase": phase,
+                                "assignment_id": assignment["id"],
+                                "agent_type": assignment["agent_type"],
+                                "evidence": assignment["evidence"],
+                                "model_reasoning_effort": effort,
+                            }
+                        },
+                    }
+                )
+        ledger = {
+            "format": MODULE.LEDGER_FORMAT,
+            "experiment": {
+                "workspace_id": "workspace-fixture",
+                "epic_id": fields.get("parent_id"),
+                "wave_id": paper["_id"],
+                "experiment_id": f"{cycle_phase}-fleet-fixture",
+                "phase": cycle_phase,
+                "protocol_version": 1,
+            },
+            "manifest": {
+                "fleet_contract": {
+                    "version": 1,
+                    "paper_fleet_digest": MODULE.canonical_digest(fleet),
+                }
+            },
+            "manifest_digest": "",
+            "attempts": attempts,
+            "attempts_digest": "",
+            "summary": {},
+            "summary_digest": "",
+            "ledger_digest": "",
+        }
+        return self.resign_ledger(ledger)
+
     def args(
         self,
         task=None,
@@ -99,21 +177,223 @@ class EpicCyclePreflightTest(unittest.TestCase):
         phase="build",
         require_debrief=False,
         include_wish=True,
+        ledger=None,
+        include_ledger=True,
     ):
+        task = task or self.task
+        paper = paper or self.paper
+        ledger = ledger or self.ledger(task, paper)
         return argparse.Namespace(
             task=None,
-            task_json=self.write("task.json", task or self.task),
+            task_json=self.write("task.json", task),
             paper=None,
-            paper_json=self.write("paper.json", paper or self.paper),
+            paper_json=self.write("paper.json", paper),
             worker="codex-lead",
             phase=phase,
             require_debrief=require_debrief,
+            fleet_ledger_json=(
+                self.write("fleet-ledger.json", MODULE.canonical_json(ledger))
+                if include_ledger
+                else None
+            ),
             wish_file=self.write("wish.txt", "make Codex task obsessed") if include_wish else None,
             pr_body=self.write("pr.md", pr_body),
         )
 
     def test_valid_fixture_passes(self):
         self.assertEqual([], MODULE.validate(self.args()))
+
+    def test_build_preflight_accepts_current_prior_fleet_without_future_completions(self):
+        paper = copy.deepcopy(self.paper)
+        fleet = self.fleet(paper)
+        for phase in ("build", "review"):
+            fleet[phase].update(
+                {
+                    "started": 0,
+                    "completed": 0,
+                    "failed": 0,
+                    "missing": fleet[phase]["planned"],
+                    "assignments": [],
+                }
+            )
+        self.assertEqual([], MODULE.validate(self.args(paper=paper)))
+
+    def test_build_and_review_require_canonical_ledger_export(self):
+        errors = MODULE.validate(self.args(include_ledger=False))
+        self.assertIn("build/review preflight requires --fleet-ledger-json", errors)
+
+        args = self.args()
+        args.fleet_ledger_json.write_text(
+            args.fleet_ledger_json.read_text(encoding="utf-8") + "\n",
+            encoding="utf-8",
+        )
+        self.assertTrue(
+            any("bytes are not the canonical B1 exporter encoding" in error for error in MODULE.validate(args))
+        )
+
+    def test_python_digest_matches_b1_cross_runtime_golden_vector(self):
+        self.assertEqual(
+            '{"a":"nord","b":[{"a":true,"z":1}]}',
+            MODULE.canonical_json({"b": [{"z": 1, "a": True}], "a": "nord"}),
+        )
+        self.assertEqual(
+            "289df3f385174ac1840b87f3de4738a42efacf6be94f59af683f7d300a1f2a83",
+            MODULE.canonical_digest({"b": [{"z": 1, "a": True}], "a": "nord"}),
+        )
+
+    def test_python_reproduces_b1_exporter_component_and_ledger_golden_digests(self):
+        manifest = {
+            "seed": 20260715,
+            "widths": [1, 2, 3, 6],
+            "operator": {"name": "benchmark", "api_key": "[REDACTED]"},
+        }
+
+        def attempt(attempt_id, ordinal):
+            semantic = {
+                "attempt_id": attempt_id,
+                "replaces_attempt_id": None,
+                "ordinal": ordinal,
+                "treatment": "width-1",
+                "status": "completed",
+                "costs": {
+                    "wall_seconds": {"state": "observed", "value": 3.25, "unit": "seconds"},
+                    "token_count": {"state": "unsupported", "reason": "provider omitted usage"},
+                    "context_bytes": {"state": "missing", "reason": "sample absent"},
+                    "cpu_percent": {"state": "invalid", "reason": "counter reset"},
+                },
+                "provenance": {"sampler": "stdlib", "host": "fixture"},
+                "payload": {"complete": True, "verified_yield": 6},
+            }
+            return {**semantic, "attempt_digest": MODULE.canonical_digest(semantic)}
+
+        attempts = [attempt("attempt-a", 1), attempt("attempt-b", 2)]
+        summary = MODULE.benchmark_summary(attempts)
+        base = {
+            "format": MODULE.LEDGER_FORMAT,
+            "experiment": {
+                "workspace_id": "00000000-0000-0000-0000-000000000002",
+                "epic_id": "epic-golden",
+                "wave_id": "wave-golden",
+                "experiment_id": "experiment-golden",
+                "phase": "legendary",
+                "protocol_version": 1,
+            },
+            "manifest": manifest,
+            "manifest_digest": MODULE.canonical_digest(manifest),
+            "attempts": attempts,
+            "attempts_digest": MODULE.canonical_digest(attempts),
+            "summary": summary,
+            "summary_digest": MODULE.canonical_digest(summary),
+        }
+        self.assertEqual(
+            "615f47d9bde44b357f54b888dd7a0e9bba5d7a0f6b1baa68c18662839b959f6e",
+            base["manifest_digest"],
+        )
+        self.assertEqual(
+            "1815ca312f91132a18732fb585c7339025f0a2bc5920fc02c1459be04a9c3100",
+            base["attempts_digest"],
+        )
+        self.assertEqual(
+            "5bd7d2914bc4ae184608cb1c6994de16c8c9502ac76ea3803521781f787bc5ec",
+            base["summary_digest"],
+        )
+        self.assertEqual(
+            "0db779ba31f0f71a1faf92610fcdda3633b9b22ac98621aa694164c5b1b16dce",
+            MODULE.canonical_digest(base),
+        )
+
+    def test_exporter_to_validator_rejects_paper_only_inflation(self):
+        ledger = self.ledger()
+        ledger["attempts"] = [
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["assignment_id"] != "build-3"
+        ]
+        self.resign_ledger(ledger)
+        self.assertIn(
+            "fleet ledger build terminal completions do not match the Paper projection",
+            MODULE.validate(self.args(ledger=ledger)),
+        )
+
+    def test_exporter_to_validator_rejects_stale_paper_projection(self):
+        ledger = self.ledger()
+        paper = copy.deepcopy(self.paper)
+        self.fleet(paper)["build"]["assignments"][0]["evidence"] = "paper://build/new-evidence"
+        errors = MODULE.validate(self.args(paper=paper, ledger=ledger))
+        self.assertIn("fleet ledger Paper fleet digest is stale", errors)
+        self.assertIn(
+            "fleet ledger build terminal completions do not match the Paper projection",
+            errors,
+        )
+
+    def test_exporter_to_validator_retry_counts_terminal_leaf_and_all_attempt_costs(self):
+        paper = copy.deepcopy(self.paper)
+        self.fleet(paper)["verify"]["failed"] = 1
+        ledger = self.ledger(paper=paper)
+        original = next(
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["assignment_id"] == "verify-1"
+        )
+        original["status"] = "failed"
+        replacement = copy.deepcopy(original)
+        replacement["attempt_id"] = "attempt-verify-1-retry"
+        replacement["replaces_attempt_id"] = original["attempt_id"]
+        replacement["ordinal"] = max(attempt["ordinal"] for attempt in ledger["attempts"]) + 1
+        replacement["status"] = "completed"
+        ledger["attempts"].append(replacement)
+        self.resign_ledger(ledger)
+
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
+        self.assertEqual(len(ledger["attempts"]), ledger["summary"]["attempt_count"])
+        self.assertEqual(set(MODULE.COST_STATES), set(ledger["summary"]["cost_states"]))
+
+    def test_exporter_to_validator_rejects_dangling_replacement(self):
+        ledger = self.ledger()
+        ledger["attempts"][-1]["replaces_attempt_id"] = "attempt-missing"
+        self.resign_ledger(ledger)
+        self.assertTrue(
+            any("replacement ancestry is invalid" in error for error in MODULE.validate(self.args(ledger=ledger)))
+        )
+
+    def test_exporter_to_validator_rejects_coerced_unknown_cost(self):
+        ledger = self.ledger()
+        attempt = ledger["attempts"][0]
+        attempt["costs"]["token_count"] = {"state": "unknown", "value": 0}
+        semantic = {key: value for key, value in attempt.items() if key != "attempt_digest"}
+        attempt["attempt_digest"] = MODULE.canonical_digest(semantic)
+        ledger["attempts_digest"] = MODULE.canonical_digest(ledger["attempts"])
+        base = {key: value for key, value in ledger.items() if key != "ledger_digest"}
+        ledger["ledger_digest"] = MODULE.canonical_digest(base)
+        self.assertTrue(
+            any("costs do not use exhaustive typed states" in error for error in MODULE.validate(self.args(ledger=ledger)))
+        )
+
+    def test_exporter_to_validator_rejects_wrong_agent_type_and_non_high_build(self):
+        ledger = self.ledger()
+        build = next(
+            attempt
+            for attempt in ledger["attempts"]
+            if attempt["payload"]["fleet_assignment"]["phase"] == "build"
+        )
+        build["payload"]["fleet_assignment"]["agent_type"] = "executor"
+        build["payload"]["fleet_assignment"]["model_reasoning_effort"] = "medium"
+        self.resign_ledger(ledger)
+        errors = MODULE.validate(self.args(ledger=ledger))
+        self.assertTrue(any("fleet_assignment agent_type is invalid" in error for error in errors))
+        self.assertTrue(any("Build effort is not exactly high" in error for error in errors))
+
+    def test_exporter_to_validator_rejects_wrong_epic_scope(self):
+        ledger = self.ledger()
+        ledger["experiment"]["epic_id"] = "another-epic"
+        self.resign_ledger(ledger)
+        self.assertTrue(any("fleet ledger epic scope" in error for error in MODULE.validate(self.args(ledger=ledger))))
+
+    def test_unrelated_paper_content_does_not_stale_fleet_projection(self):
+        ledger = self.ledger()
+        paper = copy.deepcopy(self.paper)
+        paper["body"]["blocks"].append({"type": "paragraph", "text": "Unrelated reader context"})
+        self.assertEqual([], MODULE.validate(self.args(paper=paper, ledger=ledger)))
 
     def test_missing_claim_fails(self):
         task = copy.deepcopy(self.task)
@@ -359,6 +639,9 @@ class EpicCyclePreflightTest(unittest.TestCase):
         self.assertIn("Fleet gate", fleet)
         self.assertIn('"fleet": {', fleet)
         self.assertIn("Never overwrite earlier review evidence", fleet)
+        self.assertIn("--fleet-ledger-json", fleet)
+        self.assertIn("Every attempt, including failed", fleet)
+        self.assertIn("model_reasoning_effort: high", fleet)
 
 
 if __name__ == "__main__":

@@ -78,4 +78,28 @@ Every completed assignment is appended in this exact form:
 
 `completed` equals the number of unique, valid assignment records; `started` is at least `completed`; and `missing` is `max(0, planned - completed)`. If fixes materially change behavior, append a complete new Review wave of three unique assignments. The baseline `planned` value remains 3, `completed` may therefore be 6, 9, and so on, and `missing` remains 0. Never overwrite earlier review evidence.
 
+## Ledger-backed Build and Review gate
+
+The Paper is a reader projection, not completion authority. Every Build and Review preflight must also receive `--fleet-ledger-json PATH`, where `PATH` is the exact newline-free canonical JSON emitted by `mix barkpark.epic_fleet.export`. The validator verifies the B1 `barkpark-epic-benchmark-v1` document shape, canonical byte encoding, every component digest, replacement ancestry, secret redaction, typed costs, and the all-attempt summary before consulting completion counts.
+
+The export is scoped as follows:
+
+- `experiment.phase` is `epic`, `protocol_version` is `1`, `experiment.epic_id` equals the Task's parent epic, and `experiment.wave_id` equals the published Paper id.
+- `manifest.fleet_contract` is exactly `{"version":1,"paper_fleet_digest":"<sha256>"}`. The digest covers only the canonical top-level `fleet` object, so unrelated reader content remains untouched and does not stale the export.
+- Every attempt payload contains an exact `fleet_assignment` object:
+
+```json
+{
+  "phase": "build",
+  "assignment_id": "build-1",
+  "agent_type": "epic-builder",
+  "evidence": "paper://build/1",
+  "model_reasoning_effort": "high"
+}
+```
+
+Every attempt, including failed, timed-out, contaminated, cancelled, and replaced attempts, remains in the signed ledger and cost summary. Each cost metric is typed as `observed` with a numeric `value`, or `unsupported`, `missing`, or `invalid` with a non-empty `reason`; an unknown or coerced zero never counts.
+
+Only an unreplaced terminal leaf with attempt `status: completed` contributes a Paper completion. A replacement must point backward to an existing lower ordinal and preserve phase, assignment id, agent type, and effort. `started` reconciles to unique logical assignment ids, `completed` to completed terminal leaves, and `failed` to every non-completed attempt, including attempts later replaced. Terminal ids, types, and evidence must match the Paper exactly. Every Build attempt, including replaced attempts, records `model_reasoning_effort: high`; Paper-only inflation, stale projections, missing leaves, forks, malformed costs, untyped agents, or non-high Build work fail closed.
+
 If the active surface cannot name `agent_type`, the wave is capability-blocked. Sequential work or standalone CLI sessions may preserve progress but cannot satisfy this gate. Resume from the published Task and Paper on a typed native-subagent surface or an attached-tmux OMX team runtime.
