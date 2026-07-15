@@ -60,7 +60,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
         |> Repo.one()
 
       if experiment do
-        reconcile_attempt(experiment_id, attrs)
+        with :ok <- validate_attempt_replacement(experiment_id, attrs) do
+          reconcile_attempt(experiment_id, attrs)
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
       else
         Repo.rollback(:experiment_not_found)
       end
@@ -317,6 +321,27 @@ defmodule Barkpark.EpicFleet.Benchmark do
         else
           Repo.rollback(:attempt_conflict)
         end
+    end
+  end
+
+  defp validate_attempt_replacement(_experiment_id, %{"replaces_attempt_id" => nil}), do: :ok
+
+  defp validate_attempt_replacement(_experiment_id, %{
+         "attempt_id" => attempt_id,
+         "replaces_attempt_id" => attempt_id
+       }),
+       do: {:error, :attempt_cannot_replace_itself}
+
+  defp validate_attempt_replacement(experiment_id, %{"replaces_attempt_id" => replacement_id})
+       when is_binary(replacement_id) do
+    if Repo.exists?(
+         from attempt in Attempt,
+           where:
+             attempt.experiment_id == ^experiment_id and attempt.attempt_id == ^replacement_id
+       ) do
+      :ok
+    else
+      {:error, :replacement_attempt_not_found}
     end
   end
 

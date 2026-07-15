@@ -129,6 +129,12 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       {:ok, _} =
         EpicFleet.record_benchmark_attempt(
           experiment,
+          %{attempt_attrs() | attempt_id: "attempt-a", ordinal: 1}
+        )
+
+      {:ok, _} =
+        EpicFleet.record_benchmark_attempt(
+          experiment,
           %{
             attempt_attrs()
             | attempt_id: "attempt-b",
@@ -137,14 +143,9 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
           }
         )
 
-      {:ok, _} =
-        EpicFleet.record_benchmark_attempt(
-          experiment,
-          %{attempt_attrs() | attempt_id: "attempt-a", ordinal: 1}
-        )
-
       assert {:ok, document} = EpicFleet.export_benchmark(experiment)
       assert Enum.map(document["attempts"], & &1["attempt_id"]) == ["attempt-a", "attempt-b"]
+      assert Enum.at(document["attempts"], 1)["replaces_attempt_id"] == "attempt-a"
       assert document["manifest"]["operator"]["api_key"] == "[REDACTED]"
       refute EpicFleet.canonical_json(document) =~ "do-not-export"
 
