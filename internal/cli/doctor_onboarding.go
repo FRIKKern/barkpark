@@ -249,12 +249,12 @@ func onboardingWhoamiSpine(g globals, ctx manifest.Context, cfg *Config, m *mani
 // localInstance is whoami's NETWORK-FREE instance identity: the active saved
 // target, read from local config only (no cross-team fleet fetch — that stays in
 // the doctor receipt, which is a rarely-run diagnostic). It reports the resolved
-// URL, the saved entry's display name, and the Cloud-session team. The instance
-// ID + host aliases are the identity slice's ServerEntry.InstanceID/Aliases
-// (BP-ONB-05); until that slice lands (and onb-backlog-doctor-prefer-local-
-// serverentry wires this accessor to it) they read empty here — the spine keys
-// are present and additive from day one, and fill in without a shape change.
-// Returns nil only when there is no active target at all.
+// URL, the saved entry's display name, and the instance identity the connect path
+// stamped on the ServerEntry (BP-ONB-05): the stable InstanceID and any host
+// aliases the same instance answers on. Team prefers the entry's owning-team name
+// (identity, stamped at connect) and falls back to the active Cloud-session team
+// (cfg.CloudTeam) when the entry carries none. Returns nil only when there is no
+// active target at all.
 func localInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 	active := strings.TrimRight(strings.TrimSpace(ctx.Server), "/")
 	if active == "" {
@@ -264,8 +264,15 @@ func localInstance(cfg *Config, ctx manifest.Context) *onbInstance {
 	if cfg != nil {
 		if e, ok := cfg.FindServer(ctx.Server); ok {
 			inst.Name = cfg.DisplayName(e)
+			inst.ID = strings.TrimSpace(e.InstanceID)
+			if len(e.Aliases) > 0 {
+				inst.Aliases = append([]string(nil), e.Aliases...)
+			}
+			inst.Team = strings.TrimSpace(e.Team)
 		}
-		inst.Team = strings.TrimSpace(cfg.CloudTeam)
+		if inst.Team == "" {
+			inst.Team = strings.TrimSpace(cfg.CloudTeam)
+		}
 	}
 	return inst
 }

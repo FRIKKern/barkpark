@@ -404,3 +404,60 @@ func TestWhoamiCarriesOnboardingReceiptSpine(t *testing.T) {
 		t.Fatalf("reload_instruction missing from the whoami spine")
 	}
 }
+
+// TestWhoamiInstanceReadsServerEntryIdentity is the D9 ACTIVATION proof for the
+// whoami receipt: once the connect path has stamped ServerEntry.InstanceID +
+// Aliases + Team (slice 1), whoami's local instance block must READ them — not
+// leave them empty. A prior wave shipped the plumbing inert; this pins the wire
+// live so the receipt actually carries the instance ID and host aliases the wish
+// names, sourced network-free from the saved config.
+func TestWhoamiInstanceReadsServerEntryIdentity(t *testing.T) {
+	const canonical = "https://gyldendal.barkpark.cloud"
+	const custom = "https://cms.gyldendal.no"
+	cfg := &Config{
+		Server:    custom,
+		CloudTeam: "some-active-team-uuid",
+		KnownServers: []ServerEntry{
+			{Server: custom, InstanceID: "inst-gyld", Aliases: []string{canonical}, Team: "Gyldendal"},
+		},
+	}
+	inst := localInstance(cfg, manifest.Context{Server: custom})
+	if inst == nil {
+		t.Fatal("localInstance returned nil for an active target")
+	}
+	if inst.ID != "inst-gyld" {
+		t.Fatalf("instance ID = %q, want the ServerEntry.InstanceID (inert plumbing not activated)", inst.ID)
+	}
+	if len(inst.Aliases) != 1 || inst.Aliases[0] != canonical {
+		t.Fatalf("instance aliases = %v, want the ServerEntry.Aliases", inst.Aliases)
+	}
+	// Team prefers the entry's owning-team identity over the active-session team.
+	if inst.Team != "Gyldendal" {
+		t.Fatalf("instance team = %q, want the entry's owning team Gyldendal", inst.Team)
+	}
+	if inst.URL != custom {
+		t.Fatalf("instance URL = %q, want %q", inst.URL, custom)
+	}
+}
+
+// TestWhoamiInstanceTeamFallsBackToCloudTeam proves the fallback half: an entry
+// with no stamped owning team (a self-hosted or pre-activation connect) still
+// names a team via the active Cloud session (cfg.CloudTeam), so the receipt is
+// never blank when a team context exists.
+func TestWhoamiInstanceTeamFallsBackToCloudTeam(t *testing.T) {
+	const url = "https://api.example.com"
+	cfg := &Config{
+		Server:    url,
+		CloudTeam: "active-team",
+		KnownServers: []ServerEntry{
+			{Server: url, InstanceID: "inst-x"}, // no Team stamped
+		},
+	}
+	inst := localInstance(cfg, manifest.Context{Server: url})
+	if inst == nil {
+		t.Fatal("localInstance returned nil for an active target")
+	}
+	if inst.Team != "active-team" {
+		t.Fatalf("instance team = %q, want the cfg.CloudTeam fallback", inst.Team)
+	}
+}
