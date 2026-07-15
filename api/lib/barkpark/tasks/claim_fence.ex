@@ -10,6 +10,9 @@ defmodule Barkpark.Tasks.ClaimFence do
           :task_not_found
           | :task_not_claimed
           | :task_doc_mismatch
+          | :task_workspace_mismatch
+          | :task_project_mismatch
+          | :task_dataset_mismatch
           | :foreign_claim
           | :stale_claim
           | :work_digest_mismatch
@@ -37,6 +40,9 @@ defmodule Barkpark.Tasks.ClaimFence do
     expected_worker = value(expected, :worker_id)
     expected_epoch = value(expected, :epoch)
     expected_digest = value(expected, :work_digest)
+    expected_workspace_id = value(expected, :workspace_id)
+    expected_project_id = value(expected, :project_id)
+    expected_dataset_id = value(expected, :dataset_id)
 
     cond do
       Map.get(content, "lifecycle_status") != "in_progress" or
@@ -45,6 +51,15 @@ defmodule Barkpark.Tasks.ClaimFence do
 
       task.doc_id != expected_doc_id ->
         {:error, :task_doc_mismatch}
+
+      task.workspace_id != expected_workspace_id ->
+        {:error, :task_workspace_mismatch}
+
+      task.project_id != expected_project_id ->
+        {:error, :task_project_mismatch}
+
+      task.dataset_id != expected_dataset_id ->
+        {:error, :task_dataset_mismatch}
 
       Map.get(claim, "worker") != expected_worker ->
         {:error, :foreign_claim}

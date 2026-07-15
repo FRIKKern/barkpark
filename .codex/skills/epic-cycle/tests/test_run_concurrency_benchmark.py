@@ -257,6 +257,44 @@ class ManifestTest(unittest.TestCase):
                 source = retrieval_manifest(path, digest)
                 normalized = MODULE.validate_manifest(source)
                 self.assertEqual(MODULE.RETRIEVAL_SCHEMA_VERSION, normalized["schema_version"])
+                self.assertEqual("exact_file_bytes", normalized["corpus"]["sha256_scope"])
+                expected_domain = {
+                    assignment_id: ["C1", "C2", "C3"]
+                    for assignment_id in MODULE.RETRIEVAL_UNIT_IDS
+                }
+                self.assertEqual(expected_domain, normalized["corpus"]["claim_domain"])
+                self.assertEqual(
+                    "ad364452e4288061ecb1b972bb301b9d8cfdbe91e8f142a62ef3ded02f13176a",
+                    normalized["corpus"]["claim_domain_digest"],
+                )
+
+                # The normalized value is reused by plan/execute/replay. It
+                # must remain a valid manifest rather than becoming a
+                # producer-only intermediate shape after initial admission.
+                self.assertEqual(normalized, MODULE.validate_manifest(normalized))
+
+                attribution = MODULE.build_epicfleet_attribution(
+                    normalized,
+                    [{"trial_id": "golden", "assignment_results": []}],
+                    [],
+                )
+                self.assertEqual(
+                    {
+                        "sha256",
+                        "repo_commit",
+                        "schema_version",
+                        "unit_ids",
+                        "claim_domain",
+                        "claim_domain_digest",
+                    },
+                    set(attribution["corpus"]),
+                )
+                self.assertNotIn("sha256_scope", attribution["corpus"])
+
+                tampered = copy.deepcopy(normalized)
+                tampered["corpus"]["claim_domain"][MODULE.RETRIEVAL_UNIT_IDS[0]] = ["C1"]
+                with self.assertRaisesRegex(MODULE.ProtocolError, "claim domain"):
+                    MODULE.validate_manifest(tampered)
                 path.write_bytes(path.read_bytes() + b" ")
                 with self.assertRaisesRegex(MODULE.ProtocolError, "bytes"):
                     MODULE.validate_manifest(source)
@@ -317,7 +355,7 @@ class RetrievalEvidenceTest(unittest.TestCase):
         decreasing["terminal_tokens"] = 99
         self.assertEqual("invalid", MODULE.validate_usage_receipt(decreasing)["state"])
 
-    def test_semantic_cold_and_warm_postconditions_are_exact(self):
+    def test_self_reported_cold_and_warm_claims_are_not_measured(self):
         corpus = {
             "sha256": "a" * 64,
             "unit_ids": list(MODULE.RETRIEVAL_UNIT_IDS),
@@ -336,11 +374,20 @@ class RetrievalEvidenceTest(unittest.TestCase):
             "unit_ids": corpus["unit_ids"],
             "primed_unit_ids": corpus["unit_ids"],
         }
-        self.assertEqual("measured", MODULE.validate_control_proof(json.dumps(cold), "cold", corpus)["kind"])
-        self.assertEqual("measured", MODULE.validate_control_proof(json.dumps(warm), "warm", corpus)["kind"])
-        cold["cache_entries"] = 1
-        with self.assertRaises(MODULE.SafetyError):
-            MODULE.validate_control_proof(json.dumps(cold), "cold", corpus)
+        for state, proof in (("cold", cold), ("warm", warm)):
+            result = MODULE.run_control_command(
+                [sys.executable, "-c", f"print({json.dumps(proof)!r})"],
+                dict(os.environ),
+                2.0,
+                f"hostile no-op {state}",
+                semantic_state=state,
+                corpus=corpus,
+            )
+            self.assertEqual("passed", result["status"])
+            semantic = result["semantic_verification"]
+            self.assertEqual("unsupported", semantic["kind"])
+            self.assertIsNone(semantic["value"])
+            self.assertIn("self-reported", semantic["reason"])
 
     def test_end_to_end_v2_assignment_fixture_scores_costs_and_redacts_native_output(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -518,6 +565,53 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
         self.assertEqual("passed", result["status"])
         self.assertEqual(result["process_identity"]["pid"], result["pgid"])
 
+    def test_zero_exit_control_with_live_background_child_is_killed_and_rejected(self):
+        code = (
+            "import subprocess, sys; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+            "raise SystemExit(0)"
+        )
+        with self.assertRaisesRegex(MODULE.SafetyError, "left live members"):
+            MODULE.run_control_command(
+                [sys.executable, "-c", code],
+                dict(os.environ),
+                2.0,
+                "hostile control",
+            )
+
+    def test_zero_exit_assignment_with_live_background_child_is_contaminated_and_drained(self):
+        payload = json.dumps(
+            {"complete": True, "contradiction_unsupported": False},
+            separators=(",", ":"),
+        )
+        code = (
+            "import subprocess, sys; "
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+            f"print({payload!r})"
+        )
+        assignments = [assignment(f"a{index}", delay=0.01) for index in range(1, 7)]
+        assignments[0] = {"id": "a1", "argv": [sys.executable, "-c", code]}
+        result = MODULE.run_assignment_set(
+            assignments,
+            [f"a{index}" for index in range(1, 7)],
+            1,
+            timeout_seconds=2,
+            environment={},
+        )
+        hostile = result["assignment_results"][0]
+        self.assertEqual("process_group_contaminated", hostile["status"])
+        self.assertFalse(hostile["complete"])
+        self.assertTrue(hostile["contradiction_unsupported"])
+        self.assertTrue(hostile["process_group_cleanup"]["verified_disappearance"])
+        self.assertEqual([hostile["pgid"]], result["process_group_contamination"])
+        self.assertFalse(MODULE.process_group_exists(hostile["pgid"]))
+        self.assertTrue(
+            any(
+                "live members" in reason
+                for reason in MODULE.execution_contamination_reasons(result)
+            )
+        )
+
     def test_fifo_dispatch_retains_crashes_and_metric_provenance(self):
         assignments = [assignment(f"a{index}") for index in range(1, 7)]
         assignments[1] = assignment("a2", exit_code=9, complete=False)
@@ -552,11 +646,12 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
         )
 
     def test_timeout_is_retained_in_itt_denominator(self):
-        assignments = [assignment(f"a{index}", delay=0.08) for index in range(1, 7)]
-        assignments[0] = assignment("a1", delay=0.5)
+        assignments = [assignment(f"a{index}", delay=0.01) for index in range(1, 7)]
+        assignments[0] = assignment("a1", delay=5.0)
         # Width one isolates the timeout assertion from concurrent process-start
-        # fencing cost on slower Darwin CI hosts.
-        result = MODULE.run_assignment_set(assignments, [f"a{index}" for index in range(1, 7)], 1, timeout_seconds=0.2, environment={})
+        # fencing cost on slower Darwin CI hosts. The one-second deadline is
+        # still far below the hostile command's five-second sleep.
+        result = MODULE.run_assignment_set(assignments, [f"a{index}" for index in range(1, 7)], 1, timeout_seconds=1.0, environment={})
         self.assertEqual(6, len(result["assignment_results"]))
         self.assertEqual("timeout", result["assignment_results"][0]["status"])
         rates = MODULE._trial_rates(result)

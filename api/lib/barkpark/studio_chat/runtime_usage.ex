@@ -2,18 +2,24 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
   @moduledoc """
   Append-only, assignment-bound provider usage receipts.
 
-  The attribution argument is the frozen handoff to the CycleFleet assignment
-  spine. Until that integration lands, callers supply only the server-minted
-  cycle and assignment UUIDs plus the exact Barkpark Task claim they observed.
+  The attribution argument carries only durable assignment/task row IDs and the
+  exact Barkpark Task claim fence observed by the worker. Cycle, task document,
+  tenant, dataset, and session provenance are derived from server rows in the
+  receipt transaction; callers cannot author those persisted facts.
   Provider-native envelopes are never accepted by this module: normalized
   `Runtime.Event` identity and allowlisted counters are the complete input.
   """
 
   import Ecto.Query, only: [from: 2]
 
+  alias Barkpark.Content.Document
+  alias Barkpark.CycleFleet.AssignmentTask
+  alias Barkpark.CycleFleet.Wave
+  alias Barkpark.EpicFleet.Assignment
   alias Barkpark.Repo
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.Session
+  alias Barkpark.Tenancy.Dataset
   alias Barkpark.Tasks
 
   @counter_domain "provider_thread_total_tokens_v1"
@@ -56,9 +62,10 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
               :invalid_attribution
               | :invalid_boundary
               | :invalid_event
+              | :missing_usage
               | :invalid_provider_identity
               | :invalid_counter
-              | :session_not_found
+              | :authority_not_found
               | :provider_mismatch
               | :provider_session_mismatch
               | :divergent_replay
@@ -104,12 +111,26 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
   defp record_once(receipt, attribution) do
     case existing(receipt) do
       %Receipt{} = stored ->
-        replay_result(stored, receipt)
+        stored
+        |> replay_candidate(receipt)
+        |> then(&replay_result(stored, &1))
 
       nil ->
-        with :ok <- verify_session(receipt),
-             {:ok, fence} <- Tasks.verify_claim_fence(receipt.task_id, task_fence(attribution)) do
-          receipt = receipt |> Map.merge(fence) |> put_payload_hash()
+        with {:ok, authority} <- authoritative_join(receipt),
+             :ok <- verify_session(authority.session, receipt),
+             {:ok, fence} <-
+               Tasks.verify_claim_fence(
+                 receipt.task_id,
+                 attribution
+                 |> task_fence()
+                 |> Map.merge(Map.take(authority, [:workspace_id, :project_id, :dataset_id]))
+                 |> Map.put(:doc_id, authority.task_doc_id)
+               ) do
+          receipt =
+            receipt
+            |> Map.merge(Map.take(authority, [:cycle_id]))
+            |> Map.merge(fence)
+            |> put_payload_hash()
 
           {inserted, _} = Repo.insert_all(Receipt, [receipt], on_conflict: :nothing)
 
@@ -139,11 +160,41 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
   defp replay_result(%Receipt{}, _receipt), do: Repo.rollback({:invalid, :divergent_replay})
   defp replay_result(nil, _receipt), do: Repo.rollback({:invalid, :divergent_replay})
 
-  defp verify_session(receipt) do
-    case Repo.one(from(s in Session, where: s.id == ^receipt.session_id, lock: "FOR SHARE")) do
-      nil ->
-        {:error, :session_not_found}
+  defp authoritative_join(receipt) do
+    query =
+      from(a in Assignment,
+        join: w in Wave,
+        on: w.id == a.cycle_wave_id and w.workspace_id == a.workspace_id,
+        join: b in AssignmentTask,
+        on: b.assignment_id == a.id,
+        join: t in Document,
+        on:
+          t.id == b.task_id and t.id == ^receipt.task_id and t.type == "task" and
+            t.workspace_id == a.workspace_id and t.project_id == w.project_id,
+        join: d in Dataset,
+        on: d.id == t.dataset_id and d.project_id == w.project_id,
+        join: s in Session,
+        on: s.id == ^receipt.session_id and s.owner_workspace_id == a.workspace_id,
+        where: a.id == ^receipt.assignment_id,
+        lock: "FOR SHARE",
+        select: %{
+          cycle_id: w.id,
+          workspace_id: a.workspace_id,
+          project_id: w.project_id,
+          dataset_id: d.id,
+          task_doc_id: t.doc_id,
+          session: s
+        }
+      )
 
+    case Repo.one(query) do
+      nil -> {:error, :authority_not_found}
+      authority -> {:ok, authority}
+    end
+  end
+
+  defp verify_session(%Session{} = session, receipt) do
+    case session do
       %Session{provider: provider} when provider != receipt.provider ->
         {:error, :provider_mismatch}
 
@@ -156,8 +207,7 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
   end
 
   defp normalize(attribution, boundary, %Event{} = event) do
-    with {:ok, cycle_id} <- uuid(value(attribution, :cycle_id)),
-         {:ok, assignment_id} <- uuid(value(attribution, :assignment_id)),
+    with {:ok, assignment_id} <- uuid(value(attribution, :assignment_id)),
          {:ok, task_id} <- uuid(get_in_value(attribution, :task, :id)),
          boundary when boundary in @boundaries <- to_string(boundary),
          true <- event.kind == :usage,
@@ -170,11 +220,9 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
         observation
         |> Map.merge(%{
           id: Ecto.UUID.generate(),
-          cycle_id: cycle_id,
           assignment_id: assignment_id,
           session_id: session_id,
           task_id: task_id,
-          task_doc_id: get_in_value(attribution, :task, :doc_id),
           task_worker_id: get_in_value(attribution, :task, :worker_id),
           task_epoch: get_in_value(attribution, :task, :epoch),
           task_work_digest: get_in_value(attribution, :task, :work_digest),
@@ -194,22 +242,31 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
       false -> {:error, {:invalid, :invalid_event}}
       {:error, :uuid} -> {:error, {:invalid, :invalid_attribution}}
       {:error, :opaque} -> {:error, {:invalid, :invalid_provider_identity}}
+      {:error, :missing_usage} -> {:error, {:invalid, :missing_usage}}
       {:error, :counter} -> {:error, {:invalid, :invalid_counter}}
       _ -> {:error, {:invalid, :invalid_attribution}}
     end
   end
 
-  defp observation(nil) do
-    {:ok,
-     %{
-       observation_state: "unsupported",
-       counter_domain: nil,
-       counters: %{},
-       reason_code: "provider_capability_absent"
-     }}
+  defp observation(usage) when is_map(usage) do
+    if value(usage, :state) in [:unsupported, "unsupported"] and
+         value(usage, :reason) in [:provider_capability_absent, "provider_capability_absent"] do
+      {:ok,
+       %{
+         observation_state: "unsupported",
+         counter_domain: nil,
+         counters: %{},
+         reason_code: "provider_capability_absent"
+       }}
+    else
+      observed_usage(usage)
+    end
   end
 
-  defp observation(%{} = usage) do
+  defp observation(nil), do: {:error, :missing_usage}
+  defp observation(_usage), do: {:error, :counter}
+
+  defp observed_usage(usage) do
     total = value(usage, :total)
 
     if is_map(total) do
@@ -234,7 +291,11 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
     end
   end
 
-  defp observation(_usage), do: {:error, :counter}
+  defp replay_candidate(stored, receipt) do
+    receipt
+    |> Map.merge(Map.take(stored, [:cycle_id, :task_doc_id]))
+    |> put_payload_hash()
+  end
 
   defp normalize_identity(identity) do
     with {:ok, cycle_id} <- uuid(value(identity, :cycle_id)),
@@ -331,8 +392,7 @@ defmodule Barkpark.StudioChat.RuntimeUsage do
   defp task_fence(attribution), do: value(attribution, :task) || %{}
 
   defp valid_fence_shape?(receipt) do
-    is_binary(receipt.task_doc_id) and receipt.task_doc_id != "" and
-      is_binary(receipt.task_worker_id) and receipt.task_worker_id != "" and
+    is_binary(receipt.task_worker_id) and receipt.task_worker_id != "" and
       is_integer(receipt.task_epoch) and receipt.task_epoch > 0 and
       is_binary(receipt.task_work_digest) and
       Regex.match?(~r/^[0-9a-f]{16}$/, receipt.task_work_digest)

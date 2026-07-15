@@ -37,6 +37,7 @@ RETRIEVAL_CORPUS_SCHEMA_VERSION = "barkpark.retrieval-corpus.v1"
 RETRIEVAL_CONTROL_SCHEMA_VERSION = "epic-cycle-control-proof-v2"
 RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION = "barkpark.epic-retrieval-attribution.v2"
 RETRIEVAL_CORPUS_SHA256 = "a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26"
+RETRIEVAL_CORPUS_SHA256_SCOPE = "exact_file_bytes"
 RETRIEVAL_REPO_COMMIT = "55519257db1377e4e747683204fe902fe8d562a9"
 RETRIEVAL_UNIT_IDS = tuple(f"survey-2-1-{index:02d}" for index in range(1, 7))
 SEED = 20260715
@@ -322,7 +323,11 @@ def validate_retrieval_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     if manifest.get("seed", SEED) != SEED:
         raise ProtocolError(f"seed must be {SEED}")
 
-    corpus = admit_retrieval_corpus(manifest.get("corpus"))
+    corpus_input = manifest.get("corpus")
+    corpus = admit_retrieval_corpus(
+        corpus_input,
+        already_admitted=isinstance(corpus_input, dict) and "sha256_scope" in corpus_input,
+    )
     assignments = manifest.get("assignments")
     if not isinstance(assignments, list) or len(assignments) != ASSIGNMENT_COUNT:
         raise ProtocolError("retrieval manifest must contain exactly six assignments")
@@ -384,15 +389,20 @@ def validate_retrieval_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def admit_retrieval_corpus(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or set(value) != {
+def admit_retrieval_corpus(value: Any, *, already_admitted: bool = False) -> dict[str, Any]:
+    admission_fields = {
         "path",
         "sha256",
         "repo_commit",
         "schema_version",
         "unit_ids",
-    }:
+    }
+    if already_admitted:
+        admission_fields.update({"sha256_scope", "claim_domain", "claim_domain_digest"})
+    if not isinstance(value, dict) or set(value) != admission_fields:
         raise ProtocolError("retrieval corpus must contain the exact admission fields")
+    if already_admitted and value.get("sha256_scope") != RETRIEVAL_CORPUS_SHA256_SCOPE:
+        raise ProtocolError("retrieval corpus digest scope is not exact file bytes")
     path = value.get("path")
     if not isinstance(path, str) or not path:
         raise ProtocolError("retrieval corpus path must be non-empty")
@@ -432,12 +442,32 @@ def admit_retrieval_corpus(value: Any) -> dict[str, Any]:
         sources = record.get("sources")
         if not isinstance(claims, list) or not claims or not isinstance(sources, list) or not sources:
             raise ProtocolError("retrieval corpus records require gold claims and sources")
+        claim_ids = [claim.get("claim_id") for claim in claims if isinstance(claim, dict)]
+        if (
+            len(claim_ids) != len(claims)
+            or any(not isinstance(claim_id, str) or not claim_id for claim_id in claim_ids)
+            or len(claim_ids) != len(set(claim_ids))
+        ):
+            raise ProtocolError("retrieval corpus claim ids must be unique non-empty strings")
+    claim_domain = {
+        record["id"]: [claim["claim_id"] for claim in record["gold_claims"]]
+        for record in records
+    }
+    claim_domain_digest = digest_json(claim_domain)
+    if already_admitted and (
+        value.get("claim_domain") != claim_domain
+        or value.get("claim_domain_digest") != claim_domain_digest
+    ):
+        raise ProtocolError("retrieval corpus claim domain does not match exact file bytes")
     return {
         "path": str(Path(path).resolve()),
         "sha256": actual_digest,
+        "sha256_scope": RETRIEVAL_CORPUS_SHA256_SCOPE,
         "repo_commit": RETRIEVAL_REPO_COMMIT,
         "schema_version": RETRIEVAL_CORPUS_SCHEMA_VERSION,
         "unit_ids": list(RETRIEVAL_UNIT_IDS),
+        "claim_domain": claim_domain,
+        "claim_domain_digest": claim_domain_digest,
     }
 
 
@@ -513,7 +543,15 @@ def plan_artifact(manifest: Mapping[str, Any]) -> dict[str, Any]:
         corpus = normalized["corpus"]
         frozen["retrieval_admission"] = {
             key: corpus[key]
-            for key in ("sha256", "repo_commit", "schema_version", "unit_ids")
+            for key in (
+                "sha256",
+                "sha256_scope",
+                "repo_commit",
+                "schema_version",
+                "unit_ids",
+                "claim_domain",
+                "claim_domain_digest",
+            )
         }
         frozen["attribution_contract_digest"] = digest_json(
             [assignment["attribution"] for assignment in normalized["assignments"]]
@@ -744,13 +782,24 @@ def assert_primary_fence(snapshot: PaneSnapshot, pane: str, expected: ProcessIde
 
 
 def execution_contamination_reasons(payload: Mapping[str, Any]) -> list[str]:
+    reasons: list[str] = []
     sampler = payload.get("sampler")
-    if not isinstance(sampler, dict):
-        return []
-    errors = sampler.get("errors")
-    if not isinstance(errors, list):
-        return ["sampler error record is malformed"]
-    return [f"owned process-group sampler error: {error}" for error in errors]
+    if isinstance(sampler, dict):
+        errors = sampler.get("errors")
+        if not isinstance(errors, list):
+            reasons.append("sampler error record is malformed")
+        else:
+            reasons.extend(f"owned process-group sampler error: {error}" for error in errors)
+    contaminated_groups = payload.get("process_group_contamination")
+    if contaminated_groups is not None:
+        if not isinstance(contaminated_groups, list):
+            reasons.append("owned process-group contamination record is malformed")
+        else:
+            reasons.extend(
+                f"owned process group had live members after its leader exited: {pgid}"
+                for pgid in contaminated_groups
+            )
+    return reasons
 
 
 def parse_linux_group_sample(lines: Iterable[str], pgid: int, clock_ticks: int, page_size: int) -> GroupSample:
@@ -936,7 +985,7 @@ def typed_observation(state: str, *, value: Optional[int] = None, unit: str, rea
 
 
 def retrieval_record(corpus: Mapping[str, Any], assignment_id: str) -> dict[str, Any]:
-    admitted = admit_retrieval_corpus(corpus)
+    admitted = admit_retrieval_corpus(corpus, already_admitted=True)
     raw = Path(admitted["path"]).read_text(encoding="utf-8")
     for line in raw.splitlines():
         record = json.loads(line)
@@ -1147,14 +1196,42 @@ def launch_owned_process(
             raise SafetyError("child process identity could not be fenced after launch")
         gate_path.touch(exist_ok=False)
     except BaseException:
-        if process.poll() is None:
-            terminate_owned_group(process.pid)
-        process.wait(timeout=2.0)
+        # start_new_session makes the child pid its pgid before the exec gate;
+        # drain the group even when the leader already exited during fencing.
+        terminate_owned_group(process.pid, leader=process)
         raise
     return process, identity, pgid
 
 
-def terminate_owned_group(pgid: int, grace_seconds: float = 1.0) -> None:
+def process_group_exists(pgid: int) -> bool:
+    """Return whether the owned process group still has signal-visible members."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # An owned group should remain signalable. Treat an unexpected EPERM as
+        # existing so callers cannot mistake an unverifiable group for drained.
+        return True
+    return True
+
+
+def wait_for_process_group_disappearance(pgid: int, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while process_group_exists(pgid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.02)
+    return True
+
+
+def terminate_owned_group(
+    pgid: int,
+    grace_seconds: float = 1.0,
+    *,
+    leader: Optional[subprocess.Popen[str]] = None,
+) -> None:
+    """Terminate an owned group and prove no signal-visible member remains."""
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
@@ -1167,25 +1244,49 @@ def terminate_owned_group(pgid: int, grace_seconds: float = 1.0) -> None:
             os.kill(pgid, signal.SIGTERM)
         except ProcessLookupError:
             return
-    deadline = time.monotonic() + grace_seconds
-    while time.monotonic() < deadline:
+    if leader is not None:
         try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
-            return
-        except PermissionError:
-            # No signalable live member remains for this uid.
-            return
-        time.sleep(0.02)
+            leader.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+    if wait_for_process_group_disappearance(pgid, grace_seconds):
+        return
     try:
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
-        pass
+        return
     except PermissionError:
         try:
             os.kill(pgid, signal.SIGKILL)
         except ProcessLookupError:
-            pass
+            return
+    if leader is not None:
+        try:
+            leader.wait(timeout=grace_seconds)
+        except subprocess.TimeoutExpired as error:
+            raise SafetyError(
+                f"owned process-group leader {pgid} did not exit after SIGKILL"
+            ) from error
+    if not wait_for_process_group_disappearance(pgid, grace_seconds):
+        raise SafetyError(
+            f"owned process group {pgid} did not disappear after SIGTERM/SIGKILL"
+        )
+
+
+def drain_group_after_leader_exit(pgid: int) -> dict[str, Any]:
+    """Classify a terminal leader's group, cleaning any surviving members."""
+    if not process_group_exists(pgid):
+        return {
+            "status": "clean",
+            "action": "none",
+            "verified_disappearance": True,
+        }
+    terminate_owned_group(pgid)
+    return {
+        "status": "contaminated",
+        "action": "SIGTERM/SIGKILL as needed",
+        "verified_disappearance": True,
+    }
 
 
 def run_control_command(
@@ -1214,9 +1315,14 @@ def run_control_command(
             try:
                 returncode = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired as error:
-                terminate_owned_group(pgid)
-                process.wait(timeout=2.0)
+                terminate_owned_group(pgid, leader=process)
                 raise SafetyError(f"{label} timed out after {timeout_seconds}s") from error
+            group_cleanup = drain_group_after_leader_exit(pgid)
+            if group_cleanup["status"] != "clean":
+                raise SafetyError(
+                    f"{label} leader exited with {returncode} but left live members "
+                    f"in owned process group {pgid}; the group was terminated and disappearance verified"
+                )
             if returncode != 0:
                 stderr = stderr_path.read_text(encoding="utf-8", errors="replace")
                 raise SafetyError(f"{label} failed with exit {returncode}: {stderr[-500:]}")
@@ -1236,43 +1342,17 @@ def run_control_command(
             return result
         finally:
             if process is not None and process.poll() is None and pgid is not None:
-                terminate_owned_group(pgid)
-                process.wait(timeout=2.0)
+                terminate_owned_group(pgid, leader=process)
 
 
 def validate_control_proof(stdout: str, expected_state: str, corpus: Mapping[str, Any]) -> dict[str, Any]:
-    lines = [line for line in stdout.splitlines() if line.strip()]
-    if not lines:
-        raise SafetyError(f"{expected_state} control emitted no semantic proof")
-    try:
-        proof = json.loads(lines[-1])
-    except json.JSONDecodeError as error:
-        raise SafetyError(f"{expected_state} control semantic proof is not JSON") from error
-    if expected_state == "cold":
-        expected = {
-            "schema_version": RETRIEVAL_CONTROL_SCHEMA_VERSION,
-            "state": "cold",
-            "corpus_sha256": corpus["sha256"],
-            "unit_ids": corpus["unit_ids"],
-            "cache_entries": 0,
-        }
-    elif expected_state == "warm":
-        expected = {
-            "schema_version": RETRIEVAL_CONTROL_SCHEMA_VERSION,
-            "state": "warm",
-            "corpus_sha256": corpus["sha256"],
-            "unit_ids": corpus["unit_ids"],
-            "primed_unit_ids": corpus["unit_ids"],
-        }
-    else:
+    if expected_state not in {"cold", "warm"}:
         raise ProtocolError(f"unsupported semantic control state: {expected_state}")
-    if proof != expected:
-        raise SafetyError(f"{expected_state} control semantic proof mismatch")
-    return measured(
-        1,
+    return unsupported_metric(
         "boolean",
-        f"{RETRIEVAL_CONTROL_SCHEMA_VERSION} final stdout JSON",
-        f"pre-treatment {expected_state} postcondition",
+        f"declared {expected_state} preparation command",
+        f"pre-treatment {expected_state} state for exact-byte corpus {corpus['sha256']}",
+        "command stdout is self-reported and cannot independently establish generic cache state",
     )
 
 
@@ -1405,6 +1485,7 @@ def run_assignment_set(
     base_env.update(environment)
     results: dict[str, dict[str, Any]] = {}
     active: dict[str, dict[str, Any]] = {}
+    contaminated_groups: list[int] = []
     queue = list(assignment_order)
     dispatch_sequence: list[str] = []
     sampler = OwnedGroupSampler()
@@ -1481,12 +1562,21 @@ def run_assignment_set(
                     if returncode is None and not timed_out:
                         continue
                     if timed_out:
-                        terminate_owned_group(state["pgid"])
-                        returncode = process.wait(timeout=2.0)
+                        terminate_owned_group(state["pgid"], leader=process)
+                        returncode = process.returncode
                         status = "timeout"
+                        group_cleanup = {
+                            "status": "terminated_after_timeout",
+                            "action": "SIGTERM/SIGKILL as needed",
+                            "verified_disappearance": True,
+                        }
                     else:
                         process.wait()
                         status = "success" if returncode == 0 else "failure"
+                        group_cleanup = drain_group_after_leader_exit(state["pgid"])
+                        if group_cleanup["status"] == "contaminated":
+                            contaminated_groups.append(state["pgid"])
+                            status = "process_group_contaminated"
                     stdout = state["stdout"].read_text(encoding="utf-8", errors="replace")
                     stderr = state["stderr"].read_text(encoding="utf-8", errors="replace")
                     retrieval_evaluation = None
@@ -1503,6 +1593,12 @@ def run_assignment_set(
                         evaluation_reason = retrieval_evaluation["reason"]
                     if status != "success":
                         complete = False
+                    if status == "process_group_contaminated":
+                        contradiction = True
+                        evaluation_reason = (
+                            "owned process group retained live members after its leader exited; "
+                            "the group was terminated and disappearance verified"
+                        )
                     if contradiction is None:
                         contradiction = True
                     assignment_result = {
@@ -1516,6 +1612,7 @@ def run_assignment_set(
                         "reason": evaluation_reason,
                         "process_identity": asdict(state["identity"]),
                         "pgid": state["pgid"],
+                        "process_group_cleanup": group_cleanup,
                         "stdout_tail": (
                             stdout[-2000:]
                             if corpus is None
@@ -1543,7 +1640,7 @@ def run_assignment_set(
                     time.sleep(0.01)
         finally:
             for state in active.values():
-                terminate_owned_group(state["pgid"])
+                terminate_owned_group(state["pgid"], leader=state["process"])
             sampler.stop()
     wall_seconds = time.monotonic() - wall_started
     user_after, system_after = _rusage_snapshot()
@@ -1614,6 +1711,7 @@ def run_assignment_set(
     return {
         "assignment_results": ordered_results,
         "dispatch_sequence": dispatch_sequence,
+        "process_group_contamination": contaminated_groups,
         "metrics": metrics,
         "sampler": {"sample_count": sampler.sample_count, "errors": sampler.errors},
     }
@@ -1845,7 +1943,14 @@ def build_epicfleet_attribution(
         "wave_id": assignments[0]["wave_id"],
         "corpus": {
             key: corpus[key]
-            for key in ("sha256", "repo_commit", "schema_version", "unit_ids")
+            for key in (
+                "sha256",
+                "repo_commit",
+                "schema_version",
+                "unit_ids",
+                "claim_domain",
+                "claim_domain_digest",
+            )
         },
         "assignments": assignments,
         "trials": trials,

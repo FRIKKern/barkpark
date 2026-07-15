@@ -67,10 +67,10 @@ defmodule Barkpark.EpicFleet do
     attrs = Map.merge(attrs, %{snapshot: snapshot, snapshot_digest: digest(snapshot)})
 
     with :ok <- validate_replacement(attrs) do
-      attrs
-      |> Assignment.insert_changeset()
-      |> Repo.insert()
-      |> reconcile_assignment(attrs)
+      case Repo.insert(Assignment.insert_changeset(attrs), on_conflict: :nothing) do
+        {:ok, _candidate} -> reconcile_assignment(attrs)
+        {:error, changeset} -> {:error, changeset}
+      end
     end
   end
 
@@ -248,13 +248,11 @@ defmodule Barkpark.EpicFleet do
     |> Base.encode16(case: :lower)
   end
 
-  defp reconcile_assignment({:ok, assignment}, _attrs), do: {:ok, assignment}
-
-  defp reconcile_assignment({:error, changeset}, attrs) do
+  defp reconcile_assignment(attrs) do
     existing = existing_assignment(attrs)
 
     cond do
-      is_nil(existing) -> {:error, changeset}
+      is_nil(existing) -> {:error, :assignment_conflict}
       assignment_replay?(existing, attrs) -> {:ok, existing}
       true -> {:error, :assignment_conflict}
     end

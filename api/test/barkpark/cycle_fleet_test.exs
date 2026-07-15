@@ -17,7 +17,8 @@ defmodule Barkpark.CycleFleetTest do
   end
 
   alias Barkpark.CycleFleet
-  alias Barkpark.CycleFleet.{BuildPlan, Profile, Wave}
+  alias Barkpark.Content.Document
+  alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, Wave}
   alias Barkpark.EpicFleet.{Assignment, Result}
   alias Barkpark.Tenancy
 
@@ -448,6 +449,27 @@ defmodule Barkpark.CycleFleetTest do
       assert {:ok, _plan} = CycleFleet.seal_build_plan(scope, build_plan_attrs(1))
       chain = create_retry_chain(scope, "legendary-builder")
 
+      assert {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
+
+      task =
+        %Document{}
+        |> Document.changeset(%{
+          doc_id: "drafts.cycle-teardown-task",
+          type: "task",
+          dataset: "production",
+          title: "Cycle teardown task",
+          status: "draft",
+          content: %{"kind" => "task", "lifecycle_status" => "open"},
+          rev: Ecto.UUID.generate(),
+          workspace_id: workspace.id,
+          project_id: project.id,
+          dataset_id: dataset.id
+        })
+        |> Repo.insert!()
+
+      assert {:ok, binding} = CycleFleet.bind_assignment_task(hd(chain), task.id)
+      assert Repo.get!(AssignmentTask, binding.assignment_id)
+
       assert Enum.map(chain, &CycleFleet.get_result/1) |> Enum.all?(&match?(%Result{}, &1))
 
       assert_raise Postgrex.Error, ~r/append-only/, fn ->
@@ -456,6 +478,8 @@ defmodule Barkpark.CycleFleetTest do
 
       assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
       refute Repo.get(Wave, wave.id)
+      refute Repo.get(AssignmentTask, binding.assignment_id)
+      refute Repo.get(Document, task.id)
       assert Repo.aggregate(BuildPlan, :count, :id) == 0
 
       refute Repo.exists?(
@@ -506,6 +530,27 @@ defmodule Barkpark.CycleFleetTest do
 
       chain = create_retry_chain(doomed_scope, "epic-builder")
 
+      assert {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
+
+      task =
+        %Document{}
+        |> Document.changeset(%{
+          doc_id: "drafts.project-teardown-task",
+          type: "task",
+          dataset: "production",
+          title: "Project teardown task",
+          status: "draft",
+          content: %{"kind" => "task", "lifecycle_status" => "open"},
+          rev: Ecto.UUID.generate(),
+          workspace_id: workspace.id,
+          project_id: project.id,
+          dataset_id: dataset.id
+        })
+        |> Repo.insert!()
+
+      assert {:ok, binding} = CycleFleet.bind_assignment_task(hd(chain), task.id)
+      assert Repo.get!(AssignmentTask, binding.assignment_id)
+
       assert Enum.map(chain, &CycleFleet.get_result/1) |> Enum.all?(&match?(%Result{}, &1))
 
       assert {:ok, survivor_wave} =
@@ -513,6 +558,8 @@ defmodule Barkpark.CycleFleetTest do
 
       assert {:ok, _project} = Repo.delete(project)
       refute Repo.get(Wave, doomed_wave.id)
+      refute Repo.get(AssignmentTask, binding.assignment_id)
+      refute Repo.get(Document, task.id)
       assert Repo.get(Wave, survivor_wave.id)
       assert Tenancy.get_workspace_by_id(workspace.id)
 

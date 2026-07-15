@@ -9,11 +9,12 @@ defmodule Barkpark.CycleFleet do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Barkpark.CycleFleet.{BuildPlan, Profile, Wave}
+  alias Barkpark.Content.Document
+  alias Barkpark.CycleFleet.{AssignmentTask, BuildPlan, Profile, Wave}
   alias Barkpark.EpicFleet
   alias Barkpark.EpicFleet.{Assignment, Result}
   alias Barkpark.Repo
-  alias Barkpark.Tenancy.Project
+  alias Barkpark.Tenancy.{Dataset, Project}
 
   @scope_fields [:workspace_id, :project_id, :epic_id, :wave_id]
   @experiment_rounds ~w(baseline diverge attack converge pilot)
@@ -123,12 +124,71 @@ defmodule Barkpark.CycleFleet do
         with {:ok, attrs} <- resolve_replacement(attrs, wave),
              {:ok, plan} <- assignment_plan(attrs, wave),
              :ok <- validate_assignment_against_plan(attrs, plan, wave) do
-          attrs
-          |> put_attr(:cycle_wave_id, wave.id)
-          |> EpicFleet.create_assignment()
+          Repo.transaction(fn ->
+            with {:ok, assignment} <-
+                   attrs
+                   |> put_attr(:cycle_wave_id, wave.id)
+                   |> EpicFleet.create_assignment(),
+                 {:ok, _binding} <- maybe_bind_assignment_task(assignment, attrs, wave) do
+              assignment
+            else
+              {:error, reason} -> Repo.rollback(reason)
+            end
+          end)
+          |> unwrap_assignment()
         end
     end
   end
+
+  @doc "Freeze the server-owned Task bound to an existing CycleFleet assignment."
+  @spec bind_assignment_task(Assignment.t() | Ecto.UUID.t(), Ecto.UUID.t()) ::
+          {:ok, AssignmentTask.t()} | {:error, atom()}
+  def bind_assignment_task(%Assignment{id: assignment_id}, task_id),
+    do: bind_assignment_task(assignment_id, task_id)
+
+  def bind_assignment_task(assignment_id, task_id)
+      when is_binary(assignment_id) and is_binary(task_id) do
+    Repo.transaction(fn ->
+      authority =
+        Repo.one(
+          from(a in Assignment,
+            join: w in Wave,
+            on: w.id == a.cycle_wave_id and w.workspace_id == a.workspace_id,
+            join: t in Document,
+            on:
+              t.id == ^task_id and t.type == "task" and
+                t.workspace_id == a.workspace_id and t.project_id == w.project_id,
+            join: d in Dataset,
+            on: d.id == t.dataset_id and d.project_id == w.project_id,
+            where: a.id == ^assignment_id,
+            lock: "FOR SHARE",
+            select: %{assignment_id: a.id, task_id: t.id}
+          )
+        )
+
+      case authority do
+        nil ->
+          Repo.rollback(:assignment_task_authority_not_found)
+
+        attrs ->
+          {inserted, _} =
+            Repo.insert_all(AssignmentTask, [Map.put(attrs, :inserted_at, DateTime.utc_now())],
+              on_conflict: :nothing
+            )
+
+          binding = Repo.get(AssignmentTask, assignment_id)
+
+          cond do
+            inserted == 1 -> binding
+            binding && binding.task_id == task_id -> binding
+            true -> Repo.rollback(:assignment_task_conflict)
+          end
+      end
+    end)
+  end
+
+  def bind_assignment_task(_assignment_id, _task_id),
+    do: {:error, :assignment_task_authority_not_found}
 
   @spec record_result(Assignment.t(), String.t(), map()) ::
           {:ok, Result.t()} | {:error, Ecto.Changeset.t() | atom()}
@@ -868,6 +928,17 @@ defmodule Barkpark.CycleFleet do
 
   defp effective_plan(wave), do: (get_build_plan(wave) || wave).plan
   defp effective_plan_digest(wave), do: (get_build_plan(wave) || wave).plan_digest
+
+  defp maybe_bind_assignment_task(assignment, attrs, _wave) do
+    case value(attrs, :task_id) do
+      nil -> {:ok, nil}
+      task_id -> bind_assignment_task(assignment, task_id)
+    end
+  end
+
+  defp unwrap_assignment({:ok, %Assignment{} = assignment}), do: {:ok, assignment}
+  defp unwrap_assignment({:error, reason}), do: {:error, reason}
+
   defp unit_id(unit), do: value(unit, :unit_id)
 
   defp strict_string_list(value) when is_list(value) do

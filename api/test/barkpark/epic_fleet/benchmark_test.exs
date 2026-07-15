@@ -1,6 +1,7 @@
 defmodule Barkpark.EpicFleet.BenchmarkTest do
   use Barkpark.DataCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import Barkpark.TenancyFixtures
 
   alias Barkpark.EpicFleet
@@ -228,7 +229,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
 
       assert {:ok, _workspace} = Tenancy.delete_workspace(workspace)
       assert is_nil(Repo.get(Experiment, experiment.id))
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert attempt_count(%{attrs | workspace_id: workspace.id}) == 0
     end
   end
 
@@ -268,8 +269,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:ok, %{experiment: replay, attempts: 2}} = EpicFleet.import_benchmark_json(json)
       assert replay.id == experiment.id
       assert {:ok, ^json} = EpicFleet.export_benchmark_json(replay)
-      assert Repo.aggregate(Experiment, :count) == 1
-      assert Repo.aggregate(Attempt, :count) == 2
+      assert experiment_count(attrs) == 1
+      assert attempt_count(attrs) == 2
     end
 
     test "redacts normalized and suffixed secret-key variants", %{attrs: attrs} do
@@ -314,8 +315,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
 
       assert json == document |> Jason.encode!() |> Jason.decode!() |> EpicFleet.canonical_json()
       assert {:error, :duplicate_attempt_id} = EpicFleet.import_benchmark_json(json)
-      assert Repo.aggregate(Experiment, :count) == 0
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
     end
 
     test "rejects signed replacement forks before persistence", %{attrs: attrs} do
@@ -341,8 +342,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:error, :invalid_replacement_ancestry} =
                document |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
 
-      assert Repo.aggregate(Experiment, :count) == 0
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
     end
 
     test "rejects non-canonical bytes and shape-changing fields before any write", %{attrs: attrs} do
@@ -357,8 +358,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:error, :invalid_document_shape} =
                with_extra_field |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
 
-      assert Repo.aggregate(Experiment, :count) == 0
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
     end
 
     test "rejects signed but non-canonical attempt ordering and unredacted secrets", %{
@@ -388,8 +389,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:error, :secrets_not_redacted} =
                unredacted |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
 
-      assert Repo.aggregate(Experiment, :count) == 0
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
     end
 
     test "rolls back earlier attempt inserts when a later replay conflicts", %{attrs: attrs} do
@@ -410,7 +411,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
                document |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
 
       refute Repo.get_by(Attempt, experiment_id: experiment.id, attempt_id: "attempt-a")
-      assert Repo.aggregate(Attempt, :count) == 1
+      assert attempt_count(attrs) == 1
     end
 
     test "atomically replaces artifact files with exact canonical bytes" do
@@ -437,8 +438,8 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:error, :summary_mismatch} =
                tampered |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
 
-      assert Repo.aggregate(Experiment, :count) == 0
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
     end
   end
 
@@ -471,6 +472,76 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert {:ok, ^v2_json} = EpicFleet.export_benchmark_v2_json(replay)
     end
 
+    test "imports the exact attribution bytes emitted by the Python producer", %{attrs: attrs} do
+      attrs = %{
+        attrs
+        | epic_id: "codex-epic-cycle-w3-real-corpus-usage-join",
+          wave_id: "codex-epic-cycle-wave-3-real-corpus-usage-join-2026-07-15"
+      }
+
+      contract = retrieval_contract(attrs)
+      handoff = retrieval_attribution(contract, attrs)
+
+      producer_input = %{
+        "manifest" => %{
+          "corpus" => contract["corpus"],
+          "assignments" => Enum.map(contract["assignments"], &%{"attribution" => &1})
+        },
+        "originals" => [
+          %{
+            "trial_id" => "python-elixir-golden",
+            "assignment_results" => get_in(handoff, ["trials", Access.at(0), "assignments"])
+          }
+        ]
+      }
+
+      input_path =
+        Path.join(
+          System.tmp_dir!(),
+          "barkpark-python-attribution-#{System.unique_integer([:positive, :monotonic])}.json"
+        )
+
+      on_exit(fn -> File.rm(input_path) end)
+      File.write!(input_path, Jason.encode!(producer_input))
+
+      script = Path.expand("../.codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py")
+
+      python = """
+      import importlib.util, json, sys
+      spec = importlib.util.spec_from_file_location("epic_cycle_runner", sys.argv[1])
+      module = importlib.util.module_from_spec(spec)
+      sys.modules[spec.name] = module
+      spec.loader.exec_module(module)
+      with open(sys.argv[2], encoding="utf-8") as handle:
+          payload = json.load(handle)
+      value = module.build_epicfleet_attribution(payload["manifest"], payload["originals"], [])
+      print(module.canonical_json(value), end="")
+      """
+
+      assert {python_json, 0} = System.cmd("python3", ["-c", python, script, input_path])
+      attribution = Jason.decode!(python_json)
+
+      assert Map.keys(attribution["corpus"]) |> Enum.sort() ==
+               ~w(claim_domain claim_domain_digest repo_commit schema_version sha256 unit_ids)
+
+      experiment = %Experiment{
+        id: Ecto.UUID.generate(),
+        workspace_id: attrs.workspace_id,
+        epic_id: attrs.epic_id,
+        wave_id: attrs.wave_id,
+        experiment_id: attrs.experiment_id,
+        phase: attrs.phase,
+        protocol_version: 2,
+        manifest: Map.put(manifest(), "retrieval_attribution_contract", contract),
+        artifact_format: "barkpark-epic-benchmark-v2",
+        retrieval_attribution: attribution,
+        retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
+      }
+
+      document = Benchmark.document_v2(experiment, [attempt_attrs()])
+      assert {:ok, %{attempts: 1}} = import_document(document)
+    end
+
     test "pins the v2 cross-runtime attribution and outer ledger digests", %{attrs: attrs} do
       attrs = %{attrs | epic_id: "epic-v2-golden", wave_id: "wave-v2-golden"}
       contract = retrieval_contract(attrs)
@@ -493,10 +564,10 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       document = Benchmark.document_v2(experiment, [attempt_attrs()])
 
       assert document["attribution_digest"] ==
-               "83e3f02cf45c9119b43edebbb0614abf3e4e5d5227006e77d753c5550c2a6b3b"
+               "6fbfe73118abe1443f3bdf55263f1aad3de2a3d1ad7aee793a61349426b6c2f2"
 
       assert document["ledger_digest"] ==
-               "f493b893274a58bd6d1fb429d4f60f80fd0331573c0065e09eff6a25bed1fb78"
+               "541921a954f8fc057d5b05dfe3d0119131df6948469fc17619606aa93a365d0a"
     end
 
     test "rejects tamper, scope, task, duplicate, receipt, and secret-bearing attribution", %{
@@ -596,8 +667,96 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
         |> resign_v2_document()
 
       assert {:error, :attribution_secrets_not_redacted} = import_document(secret)
-      assert Repo.aggregate(Experiment, :count) == 0
-      assert Repo.aggregate(Attempt, :count) == 0
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
+    end
+
+    test "rejects re-signed assignment attribution outside the experiment scope", %{attrs: attrs} do
+      document = v2_document_fixture(attrs)
+
+      for field <- ~w(epic_id wave_id) do
+        forged =
+          document
+          |> update_assignment(0, &Map.put(&1, field, "foreign-scope"))
+          |> resign_v2_document()
+
+        assert {:error, :attribution_assignment_scope_mismatch} = import_document(forged)
+      end
+
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
+    end
+
+    test "rejects non-integer, negative, and verified-count-mismatched VUI", %{attrs: attrs} do
+      document = v2_document_fixture(attrs)
+
+      for invalid_value <- [3.0, -1, 2] do
+        forged =
+          document
+          |> put_in(
+            ["attribution", "trials", Access.at(0), "assignments", Access.at(0), "vui", "value"],
+            invalid_value
+          )
+          |> resign_v2_document()
+
+        assert {:error, :attribution_vui_invalid} = import_document(forged)
+      end
+
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
+    end
+
+    test "rejects overlapping, unknown, and observed-incoherent claim states", %{attrs: attrs} do
+      document = v2_document_fixture(attrs)
+      vui_path = ["attribution", "trials", Access.at(0), "assignments", Access.at(0), "vui"]
+
+      overlapping =
+        document
+        |> put_in(vui_path ++ ["missing_claim_ids"], ["C1"])
+        |> resign_v2_document()
+
+      assert {:error, :attribution_vui_invalid} = import_document(overlapping)
+
+      unknown =
+        document
+        |> put_in(vui_path ++ ["verified_claim_ids"], ~w(C1 C2 CX))
+        |> resign_v2_document()
+
+      assert {:error, :attribution_vui_invalid} = import_document(unknown)
+
+      observed_with_missing_claim =
+        document
+        |> put_in(vui_path ++ ["value"], 2)
+        |> put_in(vui_path ++ ["verified_claim_ids"], ~w(C1 C2))
+        |> put_in(vui_path ++ ["missing_claim_ids"], ["C3"])
+        |> resign_v2_document()
+
+      assert {:error, :attribution_vui_invalid} = import_document(observed_with_missing_claim)
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
+    end
+
+    test "rejects a re-signed corpus claim-domain forgery without its frozen digest", %{
+      attrs: attrs
+    } do
+      document = v2_document_fixture(attrs)
+      assignment_id = hd(document["attribution"]["corpus"]["unit_ids"])
+
+      forged_corpus =
+        put_in(document["attribution"]["corpus"], ["claim_domain", assignment_id], ~w(C1 C2 CX))
+
+      forged =
+        document
+        |> put_in(
+          ["ledger", "manifest", "retrieval_attribution_contract", "corpus"],
+          forged_corpus
+        )
+        |> put_in(["attribution", "corpus"], forged_corpus)
+        |> resign_v2_document()
+
+      assert {:error, :attribution_corpus_mismatch} = import_document(forged)
+      assert experiment_count(attrs) == 0
+      assert attempt_count(attrs) == 0
     end
 
     test "preserves unsupported missing and invalid typed attribution states", %{attrs: attrs} do
@@ -709,11 +868,16 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
   end
 
   defp retrieval_contract(attrs) do
+    unit_ids = Enum.map(1..6, &"survey-2-1-0#{&1}")
+    claim_domain = Map.new(unit_ids, &{&1, ~w(C1 C2 C3)})
+
     corpus = %{
       "sha256" => "a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26",
       "repo_commit" => "55519257db1377e4e747683204fe902fe8d562a9",
       "schema_version" => "barkpark.retrieval-corpus.v1",
-      "unit_ids" => Enum.map(1..6, &"survey-2-1-0#{&1}")
+      "unit_ids" => unit_ids,
+      "claim_domain" => claim_domain,
+      "claim_domain_digest" => EpicFleet.canonical_digest(claim_domain)
     }
 
     %{
@@ -821,12 +985,62 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
   end
 
   defp resign_v2_document(document) do
+    ledger = resign_document(document["ledger"])
+
     base =
       document
       |> Map.delete("ledger_digest")
+      |> Map.put("ledger", ledger)
       |> Map.put("attribution_digest", EpicFleet.canonical_digest(document["attribution"]))
 
     Map.put(base, "ledger_digest", EpicFleet.canonical_digest(base))
+  end
+
+  defp update_assignment(document, index, update) do
+    assignment =
+      document
+      |> get_in(["attribution", "assignments", Access.at(index)])
+      |> update.()
+
+    document
+    |> put_in(
+      ["ledger", "manifest", "retrieval_attribution_contract", "assignments", Access.at(index)],
+      assignment
+    )
+    |> put_in(["attribution", "assignments", Access.at(index)], assignment)
+    |> put_in(
+      ["attribution", "trials", Access.at(0), "assignments", Access.at(index), "attribution"],
+      assignment
+    )
+  end
+
+  defp experiment_count(attrs) do
+    Experiment
+    |> where_experiment_scope(attrs)
+    |> Repo.aggregate(:count)
+  end
+
+  defp attempt_count(attrs) do
+    query =
+      from attempt in Attempt,
+        join: experiment in Experiment,
+        on: experiment.id == attempt.experiment_id,
+        where:
+          experiment.workspace_id == ^attrs.workspace_id and
+            experiment.epic_id == ^attrs.epic_id and
+            experiment.wave_id == ^attrs.wave_id and
+            experiment.experiment_id == ^attrs.experiment_id
+
+    Repo.aggregate(query, :count)
+  end
+
+  defp where_experiment_scope(query, attrs) do
+    from experiment in query,
+      where:
+        experiment.workspace_id == ^attrs.workspace_id and
+          experiment.epic_id == ^attrs.epic_id and
+          experiment.wave_id == ^attrs.wave_id and
+          experiment.experiment_id == ^attrs.experiment_id
   end
 
   defp resign_document(document) do

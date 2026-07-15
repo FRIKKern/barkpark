@@ -23,7 +23,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @v2_document_keys ~w(format ledger attribution attribution_digest ledger_digest)
   @contract_keys ~w(schema_version corpus assignments)
   @attribution_keys ~w(schema_version epic_id wave_id corpus assignments trials)
-  @corpus_keys ~w(sha256 repo_commit schema_version unit_ids)
+  @corpus_keys ~w(
+    sha256 repo_commit schema_version unit_ids claim_domain claim_domain_digest
+  )
   @cycle_attribution_keys ~w(
     epic_id wave_id cycle_assignment_uuid assignment_id unit_ids inventory_digest snapshot_digest task
   )
@@ -425,8 +427,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
     contract = manifest["retrieval_attribution_contract"]
 
     with :ok <- validate_attribution_scope(attribution, experiment),
-         :ok <- validate_attribution_contract(attribution, contract),
-         :ok <- validate_attribution_trials(attribution) do
+         {:ok, claim_domain} <- validate_attribution_contract(attribution, contract, experiment),
+         :ok <- validate_attribution_trials(attribution, claim_domain) do
       :ok
     end
   end
@@ -441,7 +443,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
     end
   end
 
-  defp validate_attribution_contract(attribution, contract) do
+  defp validate_attribution_contract(attribution, contract, experiment) do
     cond do
       not is_map(contract) or not exact_keys?(contract, @contract_keys) or
           contract["schema_version"] != @contract_schema ->
@@ -454,6 +456,10 @@ defmodule Barkpark.EpicFleet.Benchmark do
           not Enum.all?(contract["assignments"], &valid_cycle_attribution?/1) ->
         {:error, :attribution_contract_invalid}
 
+      not assignments_match_scope?(contract["assignments"], experiment) or
+          not assignments_match_scope?(attribution["assignments"], experiment) ->
+        {:error, :attribution_assignment_scope_mismatch}
+
       attribution["assignments"] != contract["assignments"] ->
         {:error, :attribution_assignment_mismatch}
 
@@ -461,11 +467,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
         {:error, :duplicate_attribution}
 
       true ->
-        :ok
+        {:ok, contract["corpus"]["claim_domain"]}
     end
   end
 
-  defp validate_attribution_trials(attribution) do
+  defp validate_attribution_trials(attribution, claim_domain) do
     trials = attribution["trials"]
     expected = Map.new(attribution["assignments"], &{&1["assignment_id"], &1})
 
@@ -477,13 +483,13 @@ defmodule Barkpark.EpicFleet.Benchmark do
         {:error, :duplicate_attribution}
 
       true ->
-        validate_trial_rows(trials, expected, MapSet.new())
+        validate_trial_rows(trials, expected, claim_domain, MapSet.new())
     end
   end
 
-  defp validate_trial_rows([], _expected, _usage_ids), do: :ok
+  defp validate_trial_rows([], _expected, _claim_domain, _usage_ids), do: :ok
 
-  defp validate_trial_rows([trial | rest], expected, usage_ids) do
+  defp validate_trial_rows([trial | rest], expected, claim_domain, usage_ids) do
     rows = is_map(trial) && trial["assignments"]
 
     cond do
@@ -497,14 +503,17 @@ defmodule Barkpark.EpicFleet.Benchmark do
         {:error, :incomplete_attribution_trial}
 
       true ->
-        case validate_one_trial(rows, expected, usage_ids) do
-          {:ok, updated_usage_ids} -> validate_trial_rows(rest, expected, updated_usage_ids)
-          {:error, reason} -> {:error, reason}
+        case validate_one_trial(rows, expected, claim_domain, usage_ids) do
+          {:ok, updated_usage_ids} ->
+            validate_trial_rows(rest, expected, claim_domain, updated_usage_ids)
+
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
 
-  defp validate_one_trial(rows, expected, usage_ids) do
+  defp validate_one_trial(rows, expected, claim_domain, usage_ids) do
     ids = Enum.map(rows, &(is_map(&1) && &1["assignment_id"]))
 
     if not unique_strings?(ids) or MapSet.new(ids) != MapSet.new(Map.keys(expected)) do
@@ -527,7 +536,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
           not valid_usage?(usage) ->
             {:halt, {:error, :attribution_usage_invalid}}
 
-          not valid_vui?(row["vui"]) ->
+          not valid_vui?(row["vui"], claim_domain[assignment_id]) ->
             {:halt, {:error, :attribution_vui_invalid}}
 
           true ->
@@ -548,12 +557,25 @@ defmodule Barkpark.EpicFleet.Benchmark do
   end
 
   defp valid_corpus?(corpus) do
+    claim_domain = is_map(corpus) && corpus["claim_domain"]
+
     is_map(corpus) and exact_keys?(corpus, @corpus_keys) and
       sha256?(corpus["sha256"]) and hex?(corpus["repo_commit"], 40) and
       is_binary(corpus["schema_version"]) and corpus["schema_version"] != "" and
       is_list(corpus["unit_ids"]) and length(corpus["unit_ids"]) == 6 and
-      unique_strings?(corpus["unit_ids"])
+      unique_strings?(corpus["unit_ids"]) and
+      valid_claim_domain?(claim_domain, corpus["unit_ids"]) and
+      corpus["claim_domain_digest"] == CanonicalJSON.digest(claim_domain)
   end
+
+  defp valid_claim_domain?(claim_domain, unit_ids) when is_map(claim_domain) do
+    MapSet.new(Map.keys(claim_domain)) == MapSet.new(unit_ids) and
+      Enum.all?(claim_domain, fn {_assignment_id, claim_ids} ->
+        is_list(claim_ids) and claim_ids != [] and unique_strings?(claim_ids)
+      end)
+  end
+
+  defp valid_claim_domain?(_claim_domain, _unit_ids), do: false
 
   defp valid_cycle_attribution?(value) do
     task = is_map(value) && value["task"]
@@ -584,6 +606,15 @@ defmodule Barkpark.EpicFleet.Benchmark do
           assignment["epic_id"] != "" and assignment["wave_id"] != ""
       end)
   end
+
+  defp assignments_match_scope?(assignments, experiment) when is_list(assignments) do
+    Enum.all?(assignments, fn assignment ->
+      is_map(assignment) and assignment["epic_id"] == experiment["epic_id"] and
+        assignment["wave_id"] == experiment["wave_id"]
+    end)
+  end
+
+  defp assignments_match_scope?(_assignments, _experiment), do: false
 
   defp valid_usage?(%{"state" => "observed"} = usage) do
     expected = ~w(
@@ -616,14 +647,21 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   defp valid_context_occupancy?(_value), do: false
 
-  defp valid_vui?(%{"state" => "observed", "value" => value, "unit" => "claims"} = vui) do
-    value >= 0 and
+  defp valid_vui?(
+         %{"state" => "observed", "value" => value, "unit" => "claims"} = vui,
+         claim_ids
+       ) do
+    is_integer(value) and value >= 0 and
       exact_keys?(vui, ~w(
         state value unit verified_claim_ids missing_claim_ids contradicted_claim_ids unsupported_claim_ids
-      )) and valid_claim_lists?(vui)
+      )) and valid_claim_lists?(vui, claim_ids) and
+      value == length(vui["verified_claim_ids"]) and
+      Enum.all?(~w(missing_claim_ids contradicted_claim_ids unsupported_claim_ids), fn key ->
+        vui[key] == []
+      end)
   end
 
-  defp valid_vui?(%{"state" => state, "reason" => reason, "unit" => "claims"} = vui)
+  defp valid_vui?(%{"state" => state, "reason" => reason, "unit" => "claims"} = vui, claim_ids)
        when state in ~w(unsupported missing invalid) and is_binary(reason) and reason != "" do
     allowed = [
       ~w(state reason unit),
@@ -633,17 +671,23 @@ defmodule Barkpark.EpicFleet.Benchmark do
     ]
 
     Enum.any?(allowed, &exact_keys?(vui, &1)) and
-      (not Map.has_key?(vui, "verified_claim_ids") or valid_claim_lists?(vui))
+      (not Map.has_key?(vui, "verified_claim_ids") or valid_claim_lists?(vui, claim_ids))
   end
 
-  defp valid_vui?(_vui), do: false
+  defp valid_vui?(_vui, _claim_ids), do: false
 
-  defp valid_claim_lists?(vui) do
-    Enum.all?(
-      ~w(verified_claim_ids missing_claim_ids contradicted_claim_ids unsupported_claim_ids),
-      fn key -> is_list(vui[key]) and unique_strings?(vui[key]) end
-    )
+  defp valid_claim_lists?(vui, claim_ids) when is_list(claim_ids) do
+    classified_claim_ids =
+      Enum.flat_map(
+        ~w(verified_claim_ids missing_claim_ids contradicted_claim_ids unsupported_claim_ids),
+        fn key -> if is_list(vui[key]), do: vui[key], else: [nil] end
+      )
+
+    unique_strings?(classified_claim_ids) and
+      MapSet.new(classified_claim_ids) == MapSet.new(claim_ids)
   end
+
+  defp valid_claim_lists?(_vui, _claim_ids), do: false
 
   defp usage_identity(%{"state" => "observed"} = usage),
     do: {usage["provider_session_id"], usage["provider_turn_id"]}
