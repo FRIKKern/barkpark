@@ -112,6 +112,33 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     site
   end
 
+  # site-spawner W7: a content-bound NODE site (the node-slot SSR runtime target)
+  # with its read token at rest AND a port_base allocated. The create ROUTE folds
+  # port_base in through NodePortAllocator; this fixture bypasses the route, so it
+  # sets the base explicitly (blue=7002, green=7003).
+  defp node_site(bp, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    {:ok, site} =
+      Registry.create_site(
+        bp,
+        Enum.into(attrs, %{
+          name: "SSR #{n}",
+          slug: "ssr-#{n}",
+          kind: "node",
+          framework: "nextjs",
+          bootstrap_workspace: "acme",
+          bootstrap_project: "app",
+          bootstrap_dataset: "production",
+          read_token: "bpt_public_read_xyz"
+        })
+      )
+
+    site
+    |> Ecto.Changeset.change(port_base: Map.get(attrs, :port_base, 7002))
+    |> BarkparkCloud.Repo.update!()
+  end
+
   ## Request helpers
 
   defp call(method, path, body \\ nil, token \\ nil) do
@@ -920,6 +947,105 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
       assert conn.status == 422
       assert json_body(conn)["error"] == "not_rollbackable"
+    end
+  end
+
+  describe "site-spawner W7: kind=node is the THIRD router arm (deploy / binding / rollback)" do
+    test "a content-bound NODE site deploy → 201 with a build_id and the SAME six-stage bar (not no_build_source)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = node_site(bp)
+      token = login_token(user)
+
+      conn = call(:post, "/v1/sites/#{site.id}/deploy", %{}, token)
+
+      assert conn.status == 201
+      d = json_body(conn)["deployment"]
+      assert d["status"] == "queued"
+      assert is_binary(d["build_id"])
+      # A node site is content-bound — it must NEVER hear the container refusal.
+      refute d["error"] == "no_build_source"
+      # The SAME six-stage machine drives it — not a container/repo path.
+      assert Enum.map(d["stages"], & &1["name"]) ==
+               ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
+    end
+
+    test "creating a node site with NO content binding → 422 content_binding_required (not the _kind catch-all :ok)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "ssr", kind: "node", framework: "nextjs"},
+          token
+        )
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "content_binding_required"
+      # No ghost row — the unbound node site was refused at the door.
+      assert Registry.list_sites_for_team(team) == []
+    end
+
+    test "a node site IS rollbackable → NOT 422 not_rollbackable (it flips the Caddy upstream to the previous slot)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = node_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000001"}}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+
+      # THE contract: node is NOT refused as not_rollbackable.
+      refute conn.status == 422
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["ok"] == true
+      assert body["deployment_id"] == prev.id
+      assert Registry.get_site(site.id).current_deployment_id == prev.id
+    end
+
+    test "the box receives runtime_target=node and the idle slot's target_port (deploy_payload, charter D63)" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # No live port yet → the first deploy targets blue (port_base = 7002).
+      site = node_site(bp, %{port_base: 7002})
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE))])
+      assert {:ok, :live} = Sites.Deploy.run(d.id)
+
+      [{:start_deploy, payload}] =
+        Enum.filter(FakeBoxRelay.calls(), fn {kind, _} -> kind == :start_deploy end)
+
+      assert payload.runtime_target == "node"
+      assert payload.target_port == 7002
+      assert payload.framework == "nextjs"
+    end
+
+    test "a STATIC deploy carries runtime_target=static and NO target_port (unchanged)" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(polls: [FakeBoxRelay.walk(~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE))])
+      assert {:ok, :live} = Sites.Deploy.run(d.id)
+
+      [{:start_deploy, payload}] =
+        Enum.filter(FakeBoxRelay.calls(), fn {kind, _} -> kind == :start_deploy end)
+
+      assert payload.runtime_target == "static"
+      refute Map.has_key?(payload, :target_port)
     end
   end
 

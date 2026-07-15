@@ -45,8 +45,13 @@ defmodule BarkparkCloud.Registry.SiteTest do
       assert Ecto.Changeset.get_field(cs, :kind) == "container"
     end
 
-    test "the two legal kinds are container and static" do
-      assert Site.kinds() == ~w(container static)
+    test "the legal kinds are container, static, and node" do
+      assert Site.kinds() == ~w(container static node)
+    end
+
+    test "node is a valid kind (site-spawner W7 — the node-slot SSR runtime target)" do
+      cs = changeset(kind: "node", framework: "nextjs")
+      assert cs.valid?, inspect(errors_on(cs))
     end
 
     test "container is a valid kind" do
@@ -81,6 +86,19 @@ defmodule BarkparkCloud.Registry.SiteTest do
       end
     end
 
+    test "node allows nextjs, nuxt, and sveltekit (site-spawner W7 — the container frameworks)" do
+      for fw <- ~w(nextjs nuxt sveltekit) do
+        cs = changeset(kind: "node", framework: fw)
+        assert cs.valid?, "node+#{fw} should be legal: #{inspect(errors_on(cs))}"
+      end
+    end
+
+    test "astro (a static framework) on a node site is rejected" do
+      cs = changeset(kind: "node", framework: "astro")
+      refute cs.valid?
+      assert %{framework: [_ | _]} = errors_on(cs)
+    end
+
     test "astro on a container site is rejected" do
       cs = changeset(kind: "container", framework: "astro")
       refute cs.valid?
@@ -105,6 +123,8 @@ defmodule BarkparkCloud.Registry.SiteTest do
     test "frameworks_for_kind maps each kind to its sublist" do
       assert Site.frameworks_for_kind("static") == ~w(astro hugo static)
       assert Site.frameworks_for_kind("container") == ~w(nextjs nuxt sveltekit)
+      # site-spawner W7: node reuses the container frameworks (SSR from content).
+      assert Site.frameworks_for_kind("node") == ~w(nextjs nuxt sveltekit)
       # Unknown kind → the full union (so the kind-inclusion check, not an empty
       # allow-list, is what fails).
       assert Site.frameworks_for_kind("bogus") == Site.frameworks()

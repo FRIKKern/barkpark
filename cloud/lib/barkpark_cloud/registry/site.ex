@@ -34,12 +34,20 @@ defmodule BarkparkCloud.Registry.Site do
   #     long-lived container next to Phoenix (the pre-W1 shape, the default).
   #   * "static"    — content-bound static build: Astro/Hugo/plain HTML built once
   #     from a Barkpark dataset and served as files. The flagship spawn path.
-  @kinds ~w(container static)
+  #   * "node"      — site-spawner W7 (charter D62): content-bound SSR build served
+  #     by a per-site long-running Node process (the node-slot runtime target).
+  #     Next.js/Nuxt/SvelteKit built FROM a Barkpark dataset (like static) but
+  #     served as a running process behind a blue/green Caddy upstream flip — NOT
+  #     the pre-W1 "container" BYO-repo path (which routes to the dead off-box
+  #     builder, has no content binding, and has no instant rollback).
+  @kinds ~w(container static node)
 
-  # Framework legality is kind-GATED (charter D2): a static site can't be a
+  # Framework legality is kind-GATED (charter D2/D62): a static site can't be a
   # Next.js container app and vice-versa. `@frameworks` stays the union (the
   # public `frameworks/0` surface + the migration/history), but the changeset
-  # only accepts the sublist that matches the row's `kind`.
+  # only accepts the sublist that matches the row's `kind`. The container
+  # frameworks are ALSO legal under `node` — a node site fetches content like a
+  # static one but serves it via SSR.
   @container_frameworks ~w(nextjs nuxt sveltekit)
   @static_frameworks ~w(astro hugo static)
   @frameworks @container_frameworks ++ @static_frameworks
@@ -70,6 +78,13 @@ defmodule BarkparkCloud.Registry.Site do
     field :env_encrypted, :binary
     field :scale_mode, :string, default: "always_on"
     field :port, :integer
+
+    # site-spawner W7 (charter D68): the per-site node-slot port BASE, allocated
+    # ONCE at create for a kind=node site (the lowest-free EVEN base in
+    # [7002,7998]). Blue slot = port_base, green slot = port_base + 1; `port`
+    # above stays the currently-LIVE serving port (whichever slot the Caddy
+    # upstream points at). Null on static/container sites (no per-site process).
+    field :port_base, :integer
     field :current_deployment_id, :binary_id
 
     # site-spawner W1 (charter D3): the content binding — WHICH Barkpark dataset a
@@ -166,6 +181,7 @@ defmodule BarkparkCloud.Registry.Site do
   """
   def frameworks_for_kind("static"), do: @static_frameworks
   def frameworks_for_kind("container"), do: @container_frameworks
+  def frameworks_for_kind("node"), do: @container_frameworks
   def frameworks_for_kind(_), do: @frameworks
 
   @doc """
@@ -185,6 +201,7 @@ defmodule BarkparkCloud.Registry.Site do
       :env_encrypted,
       :scale_mode,
       :port,
+      :port_base,
       :current_deployment_id,
       :bootstrap_workspace,
       :bootstrap_project,

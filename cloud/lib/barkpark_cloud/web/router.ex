@@ -4654,6 +4654,12 @@ defmodule BarkparkCloud.Web.Router do
              # A static site IS its content binding — refuse an unbound one AT THE
              # DOOR rather than writing a row the deploy path can never build.
              :ok <- require_content_binding(kind, attrs),
+             # site-spawner W7 (charter D68): a node site owns a per-site blue/green
+             # port pair — allocate the lowest-free EVEN base ONCE, here at create.
+             # A container/static site allocates nothing (attrs pass through). A box
+             # whose node-slot window is full fails closed with an honest 503 rather
+             # than minting a portless (un-servable) node row.
+             {:ok, attrs} <- allocate_node_port(kind, attrs),
              # site-spawner D29: MINT the public-read content token on the box
              # BEFORE the row exists, so a 201 can never be a ghost (a site with a
              # binding but no token can't build, and nothing downstream would say
@@ -4712,6 +4718,13 @@ defmodule BarkparkCloud.Web.Router do
               detail:
                 "a static site builds FROM your content — bind it with " <>
                   "`--dataset <workspace>/<project>/<dataset>` (missing: #{Enum.join(missing, ", ")})"
+            })
+
+          {:error, :ports_exhausted} ->
+            json(conn, 503, %{
+              error: "node_ports_exhausted",
+              detail:
+                "this instance has no free node-slot port left — retire a node site or move to a larger box"
             })
 
           {:error, {:mint_failed, detail}} ->
@@ -4781,7 +4794,14 @@ defmodule BarkparkCloud.Web.Router do
       # missing/unreadable CF provider fails closed here and NEVER half-binds.
       with {:cont, site} <- maybe_bind_cloudflare(conn, site) do
         cond do
-          site.kind == "static" ->
+          # site-spawner W7 (charter D62): a NODE site is content-bound just like a
+          # static one — it builds FROM a Barkpark dataset and is driven through the
+          # SAME six-stage deploy machine (`deploy_static_site/2` mints the build and
+          # drives PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE). The only difference is the
+          # runtime target the box switches to (a running node process vs a symlink),
+          # which the deploy_payload carries down — not this route's concern. The
+          # container artifact/repo path below is NOT taken.
+          site.kind in ["static", "node"] ->
             deploy_static_site(conn, site)
 
           # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
@@ -4934,7 +4954,11 @@ defmodule BarkparkCloud.Web.Router do
   post "/v1/sites/:id/rollback" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       cond do
-        site.kind != "static" ->
+        # site-spawner W7 (charter D67): a NODE site rolls back the SAME way a
+        # static one does — instantly, by flipping the Caddy upstream back to the
+        # previous slot's still-running node process (no rebuild). Container sites
+        # keep the promote verb; static AND node both get the sub-second flip.
+        site.kind not in ["static", "node"] ->
           json(conn, 422, %{
             error: "not_rollbackable",
             detail:
@@ -8274,6 +8298,9 @@ defmodule BarkparkCloud.Web.Router do
       domains: s.domains,
       scale_mode: s.scale_mode,
       port: s.port,
+      # site-spawner W7: the node-slot port base (blue=base, green=base+1). Null on
+      # static/container sites. `port` above is the currently-live serving port.
+      port_base: s.port_base,
       current_deployment_id: s.current_deployment_id,
       # site-spawner W1: the content binding (which Barkpark dataset a static
       # build reads). read_token_encrypted is NEVER serialized — the plaintext
@@ -8709,7 +8736,7 @@ defmodule BarkparkCloud.Web.Router do
                 target_id: deployment.id,
                 metadata: %{
                   site_id: site.id,
-                  kind: "static",
+                  kind: site.kind,
                   build_id: deployment.build_id
                 }
               })
@@ -8774,7 +8801,9 @@ defmodule BarkparkCloud.Web.Router do
       # symlink repoint — POST /v1/sites/:id/rollback, sub-second, no rebuild.
       # Without this branch the guard below would 422 no_build_source on every
       # static row (no artifact, no repo) — the SAME lie the deploy route told.
-      site.kind == "static" ->
+      # site-spawner W7: a NODE site is likewise never promoted (it rolls back by
+      # flipping the Caddy upstream to the previous slot), so it takes this arm too.
+      site.kind in ["static", "node"] ->
         json(conn, 422, %{
           error: "not_promotable",
           detail:
@@ -8958,7 +8987,30 @@ defmodule BarkparkCloud.Web.Router do
   # fetches from workspace/project/dataset and has literally nothing to render
   # without all three, so the honest answer is a 422 at the door naming the flag.
   # The reaper's static pass stays as the safety net for rows that predate this.
-  defp require_content_binding("static", attrs) do
+  defp require_content_binding("static", attrs), do: require_content_triple(attrs)
+
+  # site-spawner W7 (charter D62): a NODE site is content-bound EXACTLY like a
+  # static one — its SSR build fetches from workspace/project/dataset and has
+  # literally nothing to render without all three. It must NOT fall through to the
+  # `_kind -> :ok` catch-all (which is for container BYO-repo sites): an unbound
+  # node site is the same ghost the static clause exists to kill.
+  defp require_content_binding("node", attrs), do: require_content_triple(attrs)
+
+  defp require_content_binding(_kind, _attrs), do: :ok
+
+  # site-spawner W7 (charter D68): fold the allocated node-slot port base into the
+  # create attrs for a node site. Non-node sites pass through untouched (no
+  # port_base). An exhausted window fails closed — no portless node row is minted.
+  defp allocate_node_port("node", attrs) do
+    case Sites.NodePortAllocator.allocate() do
+      {:ok, base} -> {:ok, Map.put(attrs, :port_base, base)}
+      {:error, :exhausted} -> {:error, :ports_exhausted}
+    end
+  end
+
+  defp allocate_node_port(_kind, attrs), do: {:ok, attrs}
+
+  defp require_content_triple(attrs) do
     missing =
       [
         {:bootstrap_workspace, "workspace"},
@@ -8971,9 +9023,9 @@ defmodule BarkparkCloud.Web.Router do
     if missing == [], do: :ok, else: {:error, {:binding_required, missing}}
   end
 
-  defp require_content_binding(_kind, _attrs), do: :ok
-
-  defp mint_site_read_token(bp, %{kind: "static"} = attrs, slug) do
+  # site-spawner W7 (charter D62): a node site is content-bound like a static one,
+  # so it mints the SAME public-read token over the SAME scoped route.
+  defp mint_site_read_token(bp, %{kind: kind} = attrs, slug) when kind in ["static", "node"] do
     ws = attrs[:bootstrap_workspace]
     proj = attrs[:bootstrap_project]
     ds = attrs[:bootstrap_dataset]
