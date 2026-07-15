@@ -1,0 +1,89 @@
+Onboarding-composition — Wave 2 strategy
+
+Epic: onboarding-composition-epic · Wave: 2 · Phase: SURVEYING · Model: Opus-only (Fable exhausted) · Opened: 2026-07-14
+
+This Paper is the wave's living story. Strategize opened it; Digest appends the survey digest + verify plan; Decide appends decisions + the wave plan + the fresh charter; Review closes it as the debrief. Fan-out workers never write here — they write their own bp task; the next Fable folds their reports in.
+
+The wish (verbatim intent)
+
+Wave 1 landed grade A- (paper bp-onboarding-composition-wave-2026-07-13): the ONE-transaction ONE-receipt onboarding — nothing → authenticated → MCP-connected → correct-team instance → a proven read-only tool call, under 5 min, never printing the bearer. Wave 2 ships the identity-composition slices already filed and ready:
+
+BP-ONB-02/03 — Team-aware CLI identity: bp teams / bp team use + --team instance credentials, so a user selects and pins the right team's instance.
+
+BP-ONB-04 — Provision with BARKPARK_CLOUD_URL: so the Cloud-to-Studio login button actually renders.
+
+BP-ONB-05/12 — Instance-ID identity: URL aliases + BOM-tolerant config parsing + a whoami receipt (instance ID, team, URL+aliases, auth tier, MCP tool-catalog version+names, read-only call result, exact client-reload instruction).
+
+Ground every slice in the wave-1 paper and the epic's filed child tasks. Each slice needs a behavioral proof — a real first-time flow, Windows/BOM path included.
+
+Strategic direction
+
+The finished experience: a first-time Windows user, coming from Barkpark Cloud, runs bp once and the CLI knows who they are, which team they belong to, and which instance is that team's — with no phantom "-2" duplicate servers, no config bricked by a Notepad BOM, and a single bp whoami / doctor receipt that reads back the whole identity in one honest envelope. From the Cloud side, provisioning stamps BARKPARK_CLOUD_URL so Studio renders the "sign in via Cloud" button instead of a dead corner. Identity becomes composed and legible end-to-end, not scattered across URL-string keys.
+
+The load-bearing reconciliation (surveyors must nail this first): the epic task's wave_status claims wave 1 built "8/8 slices" — but the local checkout / origin main shows internal/cli/config.go with no InstanceID, no Aliases, and no BOM strip; the ServerEntry is still keyed purely by normalized URL. This matches the KNOWN failure mode of wave 1 (Decide committed to a diverged LOCAL main and never PR'd — same reason the wave-1 charter is stranded on neither origin nor local). So wave 2 likely builds the identity PLUMBING fresh, not merely activates it. Every builder must diff its target files against origin/main before writing, and treat wave-1 "done" claims as unverified until proven.
+
+Choices I lean toward (tentative — Decide finalizes after two explore rounds):
+
+Key identity by InstanceID first, URL second. Add InstanceID string + Aliases []string to ServerEntry; key Remember/Find/IsActive/DisplayName by InstanceID when known, fall back to normalized-URL only for ID-less bare local dev. A second hostname of a known instance folds into Aliases, never mints a "-2". Source of truth for the ID: the control plane's DomainStatusResult.Instance.ID + Domains[] (already modeled in internal/cloudclient/client.go).
+
+Wire the ID at connect/attach (task-e6b0bc97130bae89) — plumbing is inert until a caller stamps the real ID. This is the E2E activation: one instance via two hostnames → one ServerEntry.
+
+BOM tolerance is a one-line strip (bytes.TrimPrefix(raw, []byte{0xEF,0xBB,0xBF})) before Unmarshal in LoadConfig; SaveConfig already emits BOM-free JSON and self-heals. Prove it with a failing-first test (TestBOMBricksLoadConfig flips to green).
+
+whoami is the receipt spine. Extend bp whoami -o json (builtins.go) to carry instance_id + aliases[] + team + auth_tier + MCP catalog version/names + read-only call result + the exact client-reload instruction. The onboarding doctor composes over this — don't fork a second receipt.
+
+Team model needs a real backend concept. bp teams / bp team use presuppose the server/control-plane models teams + memberships and can mint --team-scoped instance credentials. Whether that maps to existing tenancy/workspace scoping (bp cloud members, workspace-scoped tokens) is the biggest open design question — surveyors map it before Decide commits a shape.
+
+BP-ONB-04 is a provisioning + Studio-render pair: stamp BARKPARK_CLOUD_URL at provision time (cloud/**) and make the Studio session view render the Cloud login button when it's present (session_controller.ex / session_html/new.html.heex). Backfill for existing instances is a separate backlog slice.
+
+Prioritize: (1) origin-main truth reconciliation — everything downstream depends on whether we build or activate; (2) the ServerEntry identity core (BP-ONB-05/12) since 02/03/04 all read from it; (3) the team-model design question, because it's the one slice whose backend shape is genuinely uncertain.
+
+Constraints held: Opus-only every phase (Fable exhausted, never Haiku). No charter file exists — reconstruct epic context from the epic task + wave-1 paper; Decide writes the charter FRESH and lands it via clean-extract (detached worktree off origin/main → copy charter → commit → PR → admin-merge), NEVER pushing diverged local main. Builders commit to LOCAL worktree branches and do NOT push; the steward pushes green branches. Keep every onboarding slice FILE-DISJOINT from the concurrent cloud-build W6 cycle (wf_fe674ef4-19d) running tenancy/search.
+
+Survey plan (in flight now)
+
+15 broad Sonnet surveyors cast a wide net. Each question + why it changes the plan:
+
+origin-main-truth — What identity code is ACTUALLY on origin/main? Diff config.go/servers_cmd.go/builtins.go for InstanceID/Aliases/BOM/team verbs; reconcile against the "8/8 done" wave_status. Why: decides build-fresh vs activate for every slice.
+
+serverentry-config-map — Full ServerEntry struct + RememberServer/FindServer/IsActiveServer/deriveUniqueName/DisplayName-collision + LoadConfig/SaveConfig + config.json schema. Why: 02/03/05/12 all mutate this one struct.
+
+control-plane-instance-shape — cloudclient DomainStatusResult.Instance{ID} + Domains[]; which fields are live at attach/connect; how bp attach/connect call the control plane. Why: the ID source for the whole identity fix.
+
+team-model-api — Does the server/control-plane model teams + memberships? Is there a /v1/teams route? What does a --team-scoped instance credential mean concretely? Why: BP-ONB-02/03 need a real backend team concept; this is the biggest unknown.
+
+tenancy-overlap — Existing tenancy/workspace scoping + bp cloud members + workspace-scoped tokens: does bp teams/team use overlap or extend it? Why: avoid building a parallel identity store; reuse the tenancy seam if it fits.
+
+whoami-receipt-current — Current bp whoami -o json fields (builtins.go), bp servers output, bp doctor. Why: the receipt must extend these, not fork.
+
+doctor-receipt-integration — onb-w1-onboarding-doctor-receipt: is the doctor built? How does it compose the receipt? Why: whoami feeds the doctor; the reload instruction + read-only call live here.
+
+mcp-catalog-in-receipt — Where's the MCP serve / tool catalog (bp-mcp-serve epic)? How does the receipt obtain catalog version + names + a read-only call result? Why: the receipt spec demands MCP fields.
+
+bom-config-parsing — LoadConfig Unmarshal path + existing config_test.go + Windows/Notepad save behavior. Why: BP-ONB-12 BOM tolerance + the failing-first test shape.
+
+barkpark-cloud-url-provision — Where instances are provisioned with env; where BARKPARK_CLOUD_URL is set/leaked today (base_url leak); provision path in cloud/**. Why: BP-ONB-04 stamps it at provision.
+
+studio-login-button — The Studio/session view that renders the Cloud login button (session_controller.ex, session_html/new.html.heex); what condition gates it (base_url vs cloud_url). Why: BP-ONB-04 makes it render.
+
+capabilities-base-url — How the capabilities endpoint emits base_url; onb-backlog-capabilities-base-url-alias; instance-ID + aliases in capabilities. Why: whoami/receipt + Studio button read this; possible backend slice.
+
+wave1-paper-decisions — Read the wave-1 paper fully: decisions D1-D34 (esp. D4 greenfield client-side identity, D27 identity, D34 workspace-slug resolve), what the charter must encode. Why: the fresh charter + all slices must honor prior decisions.
+
+concurrent-cycle-disjointness — What files does the cloud-build W6 cycle (wf_fe674ef4-19d, tenancy/search) touch right now? Open PRs + foreign claims. Why: onboarding slices must stay file-disjoint to avoid clobber.
+
+gate-and-build-mechanics — The Go gate (CC=clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/... -count=1); how internal/cli tests run; any Studio/api gate for BP-ONB-04; worktree isolation recipe. Why: builders need an exact, reproducible gate + isolation recipe.
+
+Driven tasks
+
+onboarding-composition-epic — epic anchor (carries wave_status + wave_paper)
+
+onb-w1-team-aware-cli-identity — BP-ONB-02/03 (+BP-ONB-12 config half, whoami receipt)
+
+onb-w1-instance-id-aliases-receipt — BP-ONB-05/12 plumbing
+
+task-e6b0bc97130bae89 — BP-ONB-05 connect/attach ID-stamp activation (D4 wiring)
+
+onb-backlog-cloud-url-fleet-backfill — BP-ONB-04 backfill BARKPARK_CLOUD_URL + fix base_url leak
+
+onb-backlog-capabilities-base-url-alias — backend base_url from instance-ID + aliases

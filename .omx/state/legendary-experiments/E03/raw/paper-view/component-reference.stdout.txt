@@ -1,0 +1,734 @@
+B A R K P A R K   ·   P O R T A B L E D O C   ·   C O M P O N E N T   R E F E R
+E N C E
+
+THE COMPONENT REFERENCE
+───────────────────────
+
+Every block, documented · reader ⇄ edit-canvas parity · 26-agent audit
+──────────────────────────────────────────────────────────────────────
+
+▌ What each block is, how the reader and the edit canvas compare, and exactly
+▌ what a user can and cannot edit — graded, screenshotted, and code-reviewed.
+▌ This paper is itself built from the components it documents.
+
+────────────────────────────────────────────────────────────────────────────────
+╭───────────────────────╮  ╭───────────────────────╮  ╭───────────────────────╮
+│ ● FULL · 10           │  │ ◐ PARTIAL · 25        │  │ ○ VIEW-ONLY · 10      │
+│ Every authored part   │  │ Renders and partly    │  │ Server-painted — no   │
+│ is editable in-       │  │ edits, but a real     │  │ in-canvas editing at  │
+│ canvas, and the block │  │ part is read-only or  │  │ all.                  │
+│ is insertable.        │  │ not insertable.       │  ╰───────────────────────╯
+╰───────────────────────╯  ╰───────────────────────╯
+────────────────────────────────────────────────────────────────────────────────
+
+Index
+
+┌──────────────────────────────────────────────────┬─────────┬───────────┬──────
+│ COMPONENT                                        │ TIER    │ GRADE     │ INSER
+├──────────────────────────────────────────────────┼─────────┼───────────┼──────
+│ ● paragraph                                      │ element │ FULL      │ yes
+│ ● heading                                        │ element │ FULL      │ yes
+│ ● list                                           │ element │ FULL      │ yes
+│ ◐ eyebrow                                        │ element │ PARTIAL   │ —
+│ ◐ byline                                         │ element │ PARTIAL   │ —
+│ ◐ ingress                                        │ element │ PARTIAL   │ —
+│ ◐ pullquote                                      │ element │ PARTIAL   │ —
+│ ● divider                                        │ element │ FULL      │ yes
+│ ● code                                           │ element │ FULL      │ yes
+│ ● diagram                                        │ element │ FULL      │ yes
+│ ● action                                         │ element │ FULL      │ yes
+│ ◐ image                                          │ element │ PARTIAL   │ —
+│ ◐ field-* (native ×7)                            │ element │ PARTIAL   │ yes
+│ ◐ field-image / field-reference                  │ element │ PARTIAL   │ —
+│ ◐ composite / arrayOf / codelist / localizedText │ element │ PARTIAL   │ —
+│ ◐ callout                                        │ widget  │ PARTIAL   │ yes
+│ ● table                                          │ widget  │ FULL      │ yes
+│ ◐ card                                           │ widget  │ PARTIAL   │ —
+│ ● note                                           │ widget  │ FULL      │ yes
+│ ● stage                                          │ widget  │ FULL      │ yes
+│ ◐ terminal                                       │ widget  │ PARTIAL   │ yes
+│ ◐ figure                                         │ widget  │ PARTIAL   │ yes
+│ ◐ task-list                                      │ widget  │ PARTIAL   │ —
+│ ○ fleet · the read-only ten                      │ widget  │ VIEW-ONLY │ —
+│ ◐ section                                        │ section │ PARTIAL   │ yes
+│ ◐ columns                                        │ section │ PARTIAL   │ yes
+└──────────────────────────────────────────────────┴─────────┴───────────┴──────
+
+────────────────────────────────────── § ───────────────────────────────────────
+
+E L E M E N T S
+
+●  paragraph
+
+FULL · element · insertable. Fully editable — a paragraph is native
+contenteditable prose, every inline mark included, insertable via slash and
+Enter.
+
+The most elemental block — meaning with nothing but its own text.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 paragraph — view vs edit (view in Studio)                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Prose text — type directly in the      • — none —
+  canvas contenteditable
+• Bold / italic / link — inline
+  FormatBubble
+• Inline code — code mark (block
+  disabled, mark kept)
+• Wikilink / blockref / tag / valueref
+  — inline marks + autocomplete
+• Split & merge — Enter splits,
+  Backspace merges (free from schema)
+• Insert — "/" slash menu, and the
+  default Enter block
+
+Code: canvas/index.js:540-558, :557, :580-583, :807-810, :832-834; slash-
+insert.js:40; bp-attrs.js:30,38
+
+●  heading
+
+FULL · element · insertable. Fully editable in-canvas: type the text inline,
+change the level via Cmd-P or Markdown — and it's slash-insertable.
+
+A titled break, levels 1–6.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 heading — view vs edit (view in Studio)                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Text — type inline directly in the     • Level has no on-block control — no
+  h1/h2/h3                                 dropdown or bubble button, so it's
+• Level — Cmd-P "Turn into -> Heading      editable but undiscoverable
+  1/2/3"
+• Level — also via "## " Markdown
+  shorthand
+• Insert — from the slash menu
+
+Fix: Add a visible level control (dropdown or bubble button) on the heading
+block so changing level is discoverable.  Code: run-convert.js:541-542,
+index.js:568-569 & :971-998, command-palette.js:267-269, slash-insert.js:94
+
+●  list
+
+FULL · element · insertable. Fully editable in-canvas: item text and
+bullet/ordered are both real, and it's slash-insertable.
+
+Ordered or bulleted list; nestable.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 list — view vs edit (view in Studio)                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Item text — type/edit inline via       • No on-block toggle and no format-
+  ProseMirror contenteditable              bubble button for ordered/bullet
+• Add/remove items — Enter and           • Ordered flip lives only in the Mod-P
+  Backspace                                command palette
+• Nest sublists — Tab                    • Slash always inserts a bullet list —
+• Inline marks —                           no direct ordered insert
+  bold/italic/link/wikilink
+• Ordered ↔ bullet — Mod-P palette
+  "Turn into…"
+• Insert — slash menu "list"
+
+Fix: Add a bullet/ordered toggle to the format bubble and an ordered-list slash
+entry.  Code: command-palette.js:270-271, convert.js:406-413, slash-
+insert.js:42,97-103, slash-menu.js:22, format-bubble.js
+
+◐  eyebrow
+
+PARTIAL · element · not insertable. Fully editable text if it already exists,
+but you can't create an eyebrow from the canvas.
+
+A kicker label above a title.
+
+✓ Editable                               ✗ Gaps
+
+• Eyebrow text — click in and type as    • Not insertable — excluded from the
+  plain-text prose                         canvas slash + command palette
+• Whole authored surface — the one       • No inline marks — bold/italic/link
+  string is fully exposed                  forbidden in the text
+                                         • bpId/bpType — internal attrs, not
+                                           user-authored
+                                         • Birth only via per-block form, raw
+                                           JSON, or ingest
+
+Fix: Add eyebrow to CANVAS_SLASH_TYPES; its "no node-view" exclusion reason is
+now stale.  Code: role-nodes.js:67-90 (:70 marks, :87 hole), run-convert.js:96,
+slash-insert.js:35, canvas/index.js:378-379,:1534, command-palette.js:59
+
+◐  byline
+
+PARTIAL · element · not insertable. Barely editable: you can retype the one
+authors line, but the "list" is fake middot-text — no add/remove, no marks, no
+insert.
+
+An author / credit line.
+
+✓ Editable                               ✗ Gaps
+
+• Authors line — type/edit the whole     • No real list — items are one “·”-
+  line inline in the canvas                joined text line, no per-author
+• Add an author — type a name plus a       fields
+  “·” separator                          • No add/remove controls — structural
+• Remove an author — delete their text     list ops don't exist
+  and the “·”                            • Marks stripped — bold/italic/link on
+                                           names silently dropped
+                                         • Not insertable — byline is excluded
+                                           from the “/” slash menu
+                                         • bpId/bpType are internal attrs, not
+                                           user-facing
+
+Fix: Add per-author fields with add/remove controls, allow link marks, and list
+byline in CANVAS_SLASH_TYPES.  Code: role-nodes.js:95-99, run-convert.js:1738-
+1749, slash-insert.js:34-62
+
+◐  ingress
+
+PARTIAL · element · not insertable. Fully editable in-canvas — click into the
+lede and type like a paragraph, marks and all; you just can't slash-insert one.
+
+The lede / standfirst paragraph.
+
+✓ Editable                               ✗ Gaps
+
+• Lede text — click in and type, real    • Not in the canvas slash menu —
+  inline textblock                         excluded from CANVAS_SLASH_TYPES
+• Bold / italic / link — inline marks    • Only add-path is a LiveView ghost-
+  work in-canvas                           slot button in Studio chrome
+• Body edit — round-trips to one clean   • No in-canvas insert control for a
+  {content} patch                          lede
+• Not doctrine-locked — only the title
+  is vetoed
+
+Fix: Add ingress to CANVAS_SLASH_TYPES so the slash menu can insert a lede in-
+canvas.  Code: role-nodes.js:131,120-122; canvas/index.js:722,378-379,1534;
+slash-insert.js:34-62; paper_editor.ex:656,631-649; handlers/paper.ex:291-319
+
+◐  pullquote
+
+PARTIAL · element · not insertable. Quote text is fully editable inline with
+marks, but you can't insert a new pullquote from the canvas.
+
+A large pulled quote.
+
+✓ Editable                               ✗ Gaps
+
+• Quote text — inline contenteditable    • Not insertable — filtered out of the
+  prose in the canvas                      canvas slash menu
+• Bold / italic / link — inline marks    • No attribution / author / citation
+  work on the quote text                   field exists in the model
+• Edits — round-trip to one clean {      • Italic look is server-stamped
+  content } patch                          styling, not a toggle
+
+Fix: Add pullquote to CANVAS_SLASH_TYPES so it appears in the slash menu and can
+be inserted.  Code: role-nodes.js:152-175,:30-35; slash-insert.js:34-62;
+index.js:378,:1534; slash-menu.js:33; run-convert.js:99; __role.test.mjs:107
+
+●  divider
+
+FULL · element · insertable. Fully handled: an empty-payload atom with nothing
+to author — you insert it and delete it, that's the whole surface.
+
+A section rule (§) — no payload.
+
+✓ Editable                               ✗ Gaps
+
+• Insert — slash menu → "divider"        • — none —
+• Delete — Backspace/Delete on the
+  selected node
+• Select — whole-node caret selection
+  works
+
+Code: slash-insert.js:46,:117-118; divider-node.js:49,:61,:68,:100;
+figures.ex:33-37
+
+●  code
+
+FULL · element · insertable. Fully editable: code body is a real textarea,
+language a real input, and it inserts from the slash menu.
+
+A fenced code block with a language.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 code — view vs edit (view in Studio)                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Code body — live textarea, debounced   • Language hides at rest — only shows
+  write-back                               on hover/focus, easy to miss
+• Language — inline input, empties       • Language has zero render effect —
+  round-trip to null                       editable but cosmetically inert
+• Insert — slash menu "code" + default-  • No syntax highlighting
+  block
+
+Code: code-node.js:224-231, :236-249, :261-271, :280, :337, :344; slash-
+insert.js:45, :115-116; Figures.code_block_html:221-223
+
+●  diagram
+
+FULL · element · insertable. Fully editable — both Mermaid source and caption
+are real in-canvas controls and it's slash-insertable, but you edit raw code
+blind.
+
+A Mermaid diagram + caption.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 diagram — view vs edit (view in Studio)                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Mermaid source — live monospace        • No live Mermaid preview — you edit
+  textarea, debounced write-back           raw source blind; rendered SVG is
+• Caption — text input, aria-labelled,     view-only
+  empty round-trips as absent            • Caption box hidden until you hover or
+• Insert — /diagram slash command drops    focus the frame
+  a blank block                          • Rendered diagram picture is server-
+                                           painted, not author-editable
+
+Fix: Add an inline rendered Mermaid preview beside the source textarea and
+always-show the caption field.  Code: diagram-node.js:235-246, :258-265, :277-
+289, :342-376; slash-insert.js:47,119-120; blocks.ex:238
+
+●  action
+
+FULL · element · insertable. Fully editable in-canvas: label, href, and priority
+each have a live native control, and the block is slash-insertable.
+
+A CTA button / link.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 action — view vs edit (view in Studio)                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Label — text input in the card,        • — none —
+  debounced commit
+• Href — URL input in the card,
+  debounced commit
+• Priority — Primary/Secondary select,
+  commits on change
+• Live preview — anchor repaints from
+  attrs on every edit
+• Insert — slash-insertable block
+
+Code: action-node.js:223-249, :261-282, :303-319, :333-335, :272-274; template-
+lock :153-164
+
+◐  image
+
+PARTIAL · element · not insertable. Barely — a pre-seeded featured slot where
+you can only swap the picture; nothing else is typed.
+
+A content image (src + alt).
+
+✓ Editable                               ✗ Gaps
+
+• Image — swap via the media picker      • Alt text — not authorable; derived
+• Upload — pick from library or upload     from the picked asset
+  a new asset                            • Role — read-only, server-painted
+• Remove — clears src so the reader        (Featured image vs Image)
+  skips the block                        • No caption, width, alignment, or link
+                                           controls
+                                         • Not insertable — absent from the
+                                           slash menu, seeded-only
+
+Fix: Add an alt-text input, expose role, and register image in
+CANVAS_SLASH_TYPES so it can be inserted.  Code: paper_editor.ex:1280-1289,1331-
+1336; root.html.heex:2949-2976,5080-5102; bp-media-picker.js:560,584,601,639;
+slash-insert.js:37-62
+
+◐  field-* (native ×7)
+
+PARTIAL · element · insertable. All 7 native field types insert and their value
+edits live in-canvas — but label, schema binding, and select options stay read-
+only config.
+
+Schema-bound field controls.
+
+✓ Editable                               ✗ Gaps
+
+• Field value — real typed control       • Label — static text, only editable
+  (input/textarea/checkbox/select/date/    via per-block form or raw JSON
+  color)                                 • fieldName (schema binding) — attr-
+• field-select value — live <select>       only, no canvas UI
+  from the block's inline options        • Select options set — pickable but not
+• Insert — all 7 types from the slash      add/remove/rename in-canvas
+  menu                                   • field-text rows, locked/role attrs —
+• Persistence — debounced input/change     config round-trip only
+  coerces and patches the block
+
+Fix: Add in-canvas controls for label, fieldName binding, and select-option
+editing to make the whole field authorable.  Code: field-node.js:907-972
+(buildControl), :527/:560 (label), :338-345 (fieldName), :571-604 (patch);
+slash-insert.js:55-61,161-176; paper_editor.ex:939
+
+◐  field-image / field-reference
+
+PARTIAL · element · not insertable. Narrowly editable — you can set the asset or
+linked doc in-canvas, but nothing else and you can't even insert one.
+
+Media + reference picker fields.
+
+✓ Editable                               ✗ Gaps
+
+• Image asset — ghost frame → media      • label caption — plain read-only text,
+  picker writes value                      no input
+• Reference target — typeahead pill      • refType (reference scope) — attr
+  picks a doc into value                   only, no UI
+• Both persist via patch-block {value};  • dataset fetch-scope override — attr
+  undo/echo repaints the picker            only, no UI
+                                         • locked/role doctrine attrs — round-
+                                           tripped, no UI
+                                         • field-image has no alt/caption/title
+                                           — bare asset ref
+                                         • Not insertable — excluded from slash
+                                           menu, pick is a no-op
+
+Fix: Add field-image/field-reference to CANVAS_SLASH_TYPES and expose
+label/refType/dataset as canvas controls.  Code: field-node.js:245-281, :674-
+676, :711, :743-776, :797-847; run-convert.js:245-249, :2113-2116; slash-
+insert.js:37-62; canvas/index.js:378-379, :1534-1535
+
+◐  composite / arrayOf / codelist / localizedText
+
+PARTIAL · element · not insertable. Values of all four composite types are fully
+editable in the side rail — but you can't insert one, there's no in-canvas
+editing, and the shape is JSON-only.
+
+Nested schema field structures.
+
+✓ Editable                               ✗ Gaps
+
+• Composite — every subfield gets its    • Not insertable — can't add any of the
+  native control                           four from the paper
+• arrayOf — text-input rows,             • No canvas node-view — renders opaque
+  add/remove/reorder buttons               in the TipTap prose flow
+• codelist — flat picker or stateful     • Field shape (subfields, element type,
+  tree component                           codelist, languages) is JSON-only
+• localizedText — one input per          • Unknown inner field types degrade to
+  configured language                      read-only atoms
+• All edits — server-bound, focus-       • Can't delete the whole block from the
+  preserving, idempotent                   paper
+
+Fix: Add canvas node-views + slash-insert entries for all four, plus UI to edit
+field shape instead of raw JSON.  Code: paper_field_block.ex:271-320, :399-504,
+:253-261; composite_field.ex:204-328; array_field.ex:278-331;
+localized_text_field.ex:110-126; slash-insert.js:32-62; paper_editor.ex:1301
+
+────────────────────────────────────── § ───────────────────────────────────────
+
+W I D G E T S
+
+◐  callout
+
+PARTIAL · widget · insertable. Only the body prose is truly canvas-editable —
+title is inert chrome and tone is set once at birth.
+
+A toned box + title + body.
+
+✓ Editable                               ✗ Gaps
+
+• Body — inline ProseMirror prose,       • Title — read-only chrome; set only
+  takes format marks                       via raw data-title/JSON
+• Fold state — toggle via native         • Tone on existing callout — no picker;
+  details/summary, collapsible only        re-tone needs raw JSON
+• Tone — chosen once at creation via >   • Collapsible flag — no in-canvas
+  [!tone] shorthand                        toggle; JSON or compose gating only
+• Insert — from slash menu or > [!tone]
+  shorthand
+
+Fix: Add an in-canvas tone picker and an editable title input to the callout
+node-view.  Code: callout-node.js:264,272-291,301-336,345; index.js:1459,1462;
+slash-insert.js:31
+
+●  table
+
+FULL · widget · insertable. Genuinely full: cells are real contenteditable
+inline holes and rows, cols, and header are live buttons.
+
+A grid of cells with an optional header row.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 table — view vs edit (view in Studio)                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Cell text — type directly in each      • Add/remove is trailing-edge only — no
+  cell, marks round-trip                   insert or delete of an interior
+• Rows — + row / − row buttons (−          row/col
+  disables at 1 body row)                • No drag-reorder of rows or columns
+• Columns — + col / − col buttons (−     • No alignment, caption,
+  disables at 1 col)                       colspan/rowspan, or column width (not
+• Header — button flips the first row      in the model)
+  th↔td                                  • Header is single-row only — cannot
+• Insert — slash-insert seeds a headed     mark an interior row or a header
+  1-body 2-col grid                        column
+
+Fix: Add interior insert/delete and drag-reorder for rows and columns to make
+blunt editing precise.  Code: table-node.js:290-415 (renderHTML/buttons),
+TRANSFORMS:136-158, run-convert.js:1626-1633/1693-1699, slash-insert.js:53/147-
+155
+
+◐  card
+
+PARTIAL · widget · not insertable. Only title and body edit in-canvas (body
+silently drops formatting); media/action are raw-string inputs, tone unexposed,
+card not insertable.
+
+A composed widget: title + body + media/action slots.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 card — view vs edit (view in Studio)                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Title — inline contentEditable         • Tone (info/ok/warn/danger) — no
+  island, debounced, Enter-to-blur         control at all, raw-JSON-only
+• Body — the real PM contentDOM, type    • Media image — read-only server-paint;
+  inline                                   no upload, picker, or alt field
+• Media src — paste a URL into a bare    • Action link — read-only server-paint;
+  text input                               no priority or style
+• Action — set label + href via two      • Body rich text — marks flattened to
+  bare text inputs                         plain text on render
+                                         • Card — not insertable from the slash
+                                           menu
+
+Fix: Add a tone control, media picker with alt, action-priority field, preserve
+body marks, and register a slash-menu insert.  Code: card-node.js:159,178-
+196,199-219,247-260,304-371; slots.ex:280-286
+
+●  note
+
+FULL · widget · insertable. Fully editable in-canvas: body text plus label and
+lead inputs all live-edit, and it's slash-insertable.
+
+An annotated item: label + lead + body.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 note — view vs edit (view in Studio)                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Body — editable inline region (the     • Body bold/italic marks persist in
+  node's contentDOM)                       JSON but don't render in the reader
+• Label — single-line input island in      (deliberate)
+  the note bar
+• Lead — single-line input island;
+  clearing round-trips to absent
+
+Code: note-node.js:58,138-158,215-246,254; islands :164-179; PM-hidden :261-272;
+lossy note :34-36
+
+●  stage
+
+FULL · widget · insertable. Fully editable: all five authored fields are live
+native controls that write back, and it inserts from the slash menu.
+
+A pipeline-node twin: kind/title/detail.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 stage — view vs edit (view in Studio)                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Kind — inline text input in the node   • — none —
+• Title — inline text input in the node
+• Detail — inline text input in the
+  node
+• Files — inline text input in the node
+• Source — checkbox, commits
+  immediately on change
+• Insert — from the slash menu as
+  "stage"
+
+Code: stage-node.js:172-186, :228-244, :257-261, :92-105; slash-insert.js:54,
+:156-160
+
+◐  terminal
+
+PARTIAL · widget · insertable. Chrome and prose command-lines edit inline, but
+any non-prose child becomes a read-only JSON chip.
+
+Terminal chrome wrapping child blocks.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 terminal — view vs edit (view in Studio)                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Title — inline input in the bar        • Non-prose children
+• Footer — inline input, with a "+         (code/callout/image/table/nested) are
+  footer" affordance                       read-only
+• Live badge — hover-revealed toggle     • Such children render as a dead "·
+  button                                   type ·" chip
+• Prose lines — real ProseMirror body    • Chip content lives only as raw JSON —
+  (para/heading/list/divider)              un-openable in canvas
+• Insert — from the slash menu, seeds    • You can select/delete/move a chip,
+  an empty paragraph                       but not edit it
+
+Fix: Give non-prose children real in-canvas node-views instead of the verbatim
+JSON carrier chip.  Code: terminal-node.js:192-263 (chrome), :298 & :60-63
+(prose body), :402/:417/:418 (chip); slash-insert.js:52, :143-146
+
+◐  figure
+
+PARTIAL · widget · insertable. Barely — you can edit the caption and nothing
+else; the figure's actual content is a read-only server-painted atom.
+
+A single child block + a caption.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 figure — view vs edit (view in Studio)                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Caption — plain <input> below the      • Figure content (image/diagram/code) —
+  figure, debounced write-back             read-only, verbatim in v1
+• Whole figure — caret-selectable and    • No picker, upload, or swap control
+  Backspace-deletable as one atom          for the child anywhere
+                                         • Child only settable via raw JSON /
+                                           ingest pipeline
+                                         • Fresh slash-inserted figure — empty,
+                                           unfillable body + loading chip
+                                         • bpId/bpType — internal round-trip
+                                           attrs, hidden
+
+Fix: Add an in-canvas child editor — image picker/upload plus a swap control —
+so the figure body is authorable.  Code: figure-node.js:200-224, :291-317, :114-
+136, :76,281-286, :177,339-342; slash-insert.js:77-78,123-128
+
+◐  task-list
+
+PARTIAL · widget · not insertable. Title and query-label edit live with server-
+bound rows, but you can't insert it and every other facet is raw-JSON only.
+
+A live task query, rows resolved at read.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 task-list — view vs edit (view in Studio)                                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Title — hover-revealed inline input    • Query facets (parent_id, labels,
+  in the bar                               status) — no control, raw JSON only
+• Query label — free-text input, the     • Config (limit, fields) — round-trips
+  primary edit surface                     verbatim, no control yet
+• Rows — live server projection, re-     • Rows — read-only projection, never
+  resolve as you edit the label            editable or persisted
+                                         • Not insertable — absent from the
+                                           slash menu, edit-only
+                                         • No task-detail / board / roadmap
+                                           node-views exist
+
+Fix: Add facet + config controls (project/status/parent selects, limit/fields
+select) and register it in CANVAS_SLASH_TYPES.  Code: task-list-node.js:222-236,
+:329-384, :42-82, :153-155, :245-289; slash-insert.js:39-62
+
+○  fleet · the read-only ten
+
+VIEW-ONLY · widget · not insertable. View-only: all ten atoms are server-painted
+and read-only — the canvas can select and delete them, but edit nothing.
+
+tasks · task-detail · task-board · roadmap · status-legend · asciicast · form ·
+questionnaire · sheet · embed.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 fleet · the read-only ten — view vs edit (view in Studio)                  │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Whole block — caret-select, then       • sheet/embed — chip is client-
+  Backspace/Delete to remove               computed, block carried verbatim, no
+• Block — Tab-stop with aria label,        value ops
+  Enter/Space to select                  • ref, snapshot, target — only via
+                                           source doc or raw JSON, never in-
+                                           canvas
+                                         • 8 fleet kinds share one bpFleet atom,
+                                           100% server-painted, no controls
+                                         • Task titles, board columns, roadmap
+                                           bars, form fields — all read-only
+                                         • None insertable — absent from slash
+                                           menu; sheet/embed explicitly excluded
+
+Fix: Add real node-view controls (fields/inputs) per kind and register the types
+in CANVAS_SLASH_TYPES.  Code: embed-node.js:162-167, :400-415, :22-27,101-
+116,240-267, :457-523; paper_canvas.ex:167; slash-insert.js:32,39-62
+
+────────────────────────────────────── § ───────────────────────────────────────
+
+S E C T I O N S   &   L A Y O U T
+
+◐  section
+
+PARTIAL · section · insertable. Name it, edit its blocks, flip stack⇄grid, set
+column count — but per-child span/order, gap, and breakpoints stay raw-JSON.
+
+A layout container: title + children + layout spec.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 section — view vs edit (view in Studio)                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Title — inline contentEditable bar     • Per-child span/order (cells) — paint-
+  above the body                           only, raw-JSON to change
+• Children — real PM blocks, fully       • Grid gap — no control, raw-JSON only
+  typed & reorderable                    • Breakpoints — named in shape, no
+• Layout mode — stack⇄grid toggle          control at all
+  button
+• Columns — +/− stepper, clamped 1..6
+• Insert — slash menu seeds title + one
+  paragraph
+
+Fix: Add a per-child span/order picker (or drag-resize) plus gap and breakpoint
+controls that write layout attrs.  Code: section-node.js:280-320
+(title/mode/tracks), :335-372 cells paint, :73-79 gap; slash-insert.js:51,:133-
+142
+
+◐  columns
+
+PARTIAL · section · insertable. Prose inside columns is fully editable, but you
+can't add/remove columns or edit rich children — a column filler, not a builder.
+
+A multi-column layout.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ 🖼 columns — view vs edit (view in Studio)                                    │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+✓ Editable                               ✗ Gaps
+
+• Column prose — type/edit paragraphs &  • No add-column or remove-column
+  headings in-canvas                       control — count is static
+• Lists — bullet & ordered lists edit    • Column count only changeable by re-
+  as normal content                        authoring source JSON
+• Dividers — drop them inside any        • Rich children
+  column                                   (callout/code/image/sheet) collapse
+• Insert — slash menu "columns" seeds      to read-only chips
+  two empty columns                      • Chips are delete-only — content never
+• Atom chips — select and Backspace to     editable in-canvas
+  delete                                 • bpId, bpType, cols/data-cols are
+                                           server-painted
+
+Fix: Add canvas add/remove-column controls and let non-prose children render
+editable instead of read-only chips.  Code: columns-node.js:138-141, :50/:129
+(slash), :74-92 (static cols), :157-198/:249-273 (atom chip), :242 (delete)

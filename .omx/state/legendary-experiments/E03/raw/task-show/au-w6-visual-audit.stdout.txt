@@ -1,0 +1,165 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "Every surface's styleguide + one real screen is captured for side-by-side review",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "The audit confirms color, type, status vocab, lifecycle glyphs, and motion read as one system across surfaces",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Residual drift is filed as follow-up tasks (none left silent)",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "Audit result + human sign-off recorded",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "blocked_by": [
+        "au-w2-studio-styleguide",
+        "au-w3-web-sweep",
+        "au-w4-bp-style-screen"
+      ],
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Why. The closing gate of the whole epic: a human-driven cross-surface visual audit that puts Studio, web, paper, and TUI side by side and confirms they read as one system — the qualitative complement to the automated drift gates."
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Lifecycle: open. 0 of 4 acceptance criteria are currently proven."
+              }
+            ],
+            "id": "state-copy",
+            "title": "Task status",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              [
+                {
+                  "type": "text",
+                  "value": "Every surface's styleguide + one real screen is captured for side-by-side review — remaining"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "The audit confirms color, type, status vocab, lifecycle glyphs, and motion read as one system across surfaces — remaining"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Residual drift is filed as follow-up tasks (none left silent) — remaining"
+                }
+              ],
+              [
+                {
+                  "type": "text",
+                  "value": "Audit result + human sign-off recorded — remaining"
+                }
+              ]
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "description": "**Why.** The closing gate of the whole epic: a human-driven cross-surface visual audit that puts Studio, web, paper, and TUI side by side and confirms they read as one system — the qualitative complement to the automated drift gates.\n\n**Approach.** Once the per-surface styleguides/sweeps land, capture each surface's styleguide + a representative real screen, review them together against the profile (colors, type, status vocab, lifecycle glyphs, motion), and file any residual drift as follow-ups. Record the audit + sign-off.\n\n**Out of scope.** Fixing individual drifts (filed as follow-ups). This is the audit + sign-off gate.\n\nDriven by spec §6 (drift) + §7 (sign-off) + the charter.",
+      "github": {
+        "issue": 1337,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 96036333,
+        "synced_rev": "a0b724940518209e193a3db252274a9b"
+      },
+      "kind": "task",
+      "labels": [
+        "proj:design-system",
+        "phase:6-enforce",
+        "area:studio",
+        "area:web",
+        "area:tui",
+        "area:pdrender"
+      ],
+      "lifecycle_status": "open",
+      "parent_id": "aesthetic-unification-epic",
+      "priority": 4,
+      "reopen_note": "2026-07-11 Decide: blocked_by pruned — au-w5-paper-components-gate was CUT (W5.B family cancelled, charter D9); the three remaining blockers are all done, so this human 'look at it' gate is now READY. It is the single named remainder for anchor criterion C4 (ratified). Audit runs against the LOCAL coherence harness (cloud/priv/static/__preview__/coherence.html via serve.mjs) per the verify-via-standalone-harness doctrine — do NOT route it."
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 4
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "au-w6-visual-audit",
+    "execution_policy": null,
+    "id": "87fb43e4-76ef-459b-ac54-fe530a1b9cb0",
+    "inserted_at": "2026-07-04T17:33:39.690798Z",
+    "kind": "task",
+    "labels": [
+      "proj:design-system",
+      "phase:6-enforce",
+      "area:studio",
+      "area:web",
+      "area:tui",
+      "area:pdrender"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": "aesthetic-unification-epic",
+    "priority": 4,
+    "rev": "76962afba34c830c8dc2cec7904bf3b1",
+    "status": "published",
+    "title": "W6.17 · Run the cross-surface visual audit — the 'look at it' gate",
+    "type": "task",
+    "updated_at": "2026-07-12T11:11:35.135480Z"
+  },
+  "ok": true
+}

@@ -1,0 +1,6 @@
+AUTO-REBUILD LIVE PROOF 164347
+──────────────────────────────
+
+If you can read this on the live site and nobody ran a deploy command, then
+publish-to-live auto-rebuild works. Published at 164347 to trigger the content
+webhook.

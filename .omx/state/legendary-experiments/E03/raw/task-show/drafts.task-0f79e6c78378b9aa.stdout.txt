@@ -1,0 +1,78 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "probe full label spine hint text please show the complete field requirement"
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "This task is open and has not yet recorded completion evidence."
+              }
+            ],
+            "id": "state-callout",
+            "title": "Ready to begin",
+            "tone": "info",
+            "type": "callout"
+          }
+        ],
+        "version": 1
+      },
+      "description": "probe full label spine hint text please show the complete field requirement",
+      "github": {
+        "issue": 2951,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_rev": "1f58bc81f47ea292eb391c418dd69a0f"
+      },
+      "kind": "task",
+      "lifecycle_status": "open"
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "drafts.task-0f79e6c78378b9aa",
+    "execution_policy": null,
+    "id": "83984fae-3f6f-461f-937b-720ab7965d3d",
+    "inserted_at": "2026-07-13T13:35:34.171978Z",
+    "kind": "task",
+    "labels": [],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": null,
+    "rev": "63f630434a1a34f1e4982619eaeb7b89",
+    "status": "draft",
+    "title": "zzz2 probe full hint",
+    "type": "task",
+    "updated_at": "2026-07-13T13:36:15.987591Z"
+  },
+  "ok": true
+}

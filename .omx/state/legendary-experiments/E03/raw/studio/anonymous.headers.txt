@@ -1,0 +1,41 @@
+HTTP/2 302
+alt-svc: h3=":443"; ma=2592000
+cache-control: max-age=0, private, must-revalidate
+content-security-policy: base-uri 'self'; frame-ancestors 'self';
+content-type: text/html; charset=utf-8
+date: Wed, 15 Jul 2026 02:29:06 GMT
+location: /w/default/p/default/d/production/studio
+referrer-policy: strict-origin-when-cross-origin
+vary: accept-encoding
+via: 1.1 Caddy
+x-content-type-options: nosniff
+x-permitted-cross-domain-policies: none
+x-request-id: GMJVn7uZE3RcWVEAAxFy
+
+HTTP/2 302
+alt-svc: h3=":443"; ma=2592000
+cache-control: max-age=0, private, must-revalidate
+content-security-policy: base-uri 'self'; frame-ancestors 'self';
+content-type: text/html; charset=utf-8
+date: Wed, 15 Jul 2026 02:29:06 GMT
+location: /login?return_to=%2Fw%2Fdefault%2Fp%2Fdefault%2Fd%2Fproduction%2Fstudio
+referrer-policy: strict-origin-when-cross-origin
+vary: accept-encoding
+via: 1.1 Caddy
+x-content-type-options: nosniff
+x-permitted-cross-domain-policies: none
+x-request-id: GMJVn70GBSJcWVEAAxGC
+
+HTTP/2 200
+alt-svc: h3=":443"; ma=2592000
+cache-control: max-age=0, private, must-revalidate
+content-security-policy: base-uri 'self'; frame-ancestors 'self';
+content-type: text/html; charset=utf-8
+date: Wed, 15 Jul 2026 02:29:06 GMT
+referrer-policy: strict-origin-when-cross-origin
+set-cookie: <REDACTED_EPHEMERAL_SESSION>
+vary: accept-encoding
+via: 1.1 Caddy
+x-content-type-options: nosniff
+x-permitted-cross-domain-policies: none
+x-request-id: GMJVn75EEExcWVEAAxGS

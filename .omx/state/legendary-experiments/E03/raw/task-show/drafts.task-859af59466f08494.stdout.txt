@@ -1,0 +1,49 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": null,
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "probe criterion",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "github": {
+        "issue": 2263,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_rev": "e91a35112101abe0d64993711dbbb5ef"
+      },
+      "kind": "task",
+      "lifecycle_status": "open"
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 1
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "drafts.task-859af59466f08494",
+    "execution_policy": null,
+    "id": "71e440a9-ca53-4e27-a942-a4db1328aa36",
+    "inserted_at": "2026-07-10T17:03:26.589259Z",
+    "kind": "task",
+    "labels": [],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": null,
+    "rev": "51dd2fb5deabd5bc717cfd2ca2b5404a",
+    "status": "draft",
+    "title": "scratch digest probe (delete me)",
+    "type": "task",
+    "updated_at": "2026-07-10T17:04:00.643433Z"
+  },
+  "ok": true
+}

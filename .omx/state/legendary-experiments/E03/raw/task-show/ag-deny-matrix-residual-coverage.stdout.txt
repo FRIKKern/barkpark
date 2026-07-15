@@ -1,0 +1,152 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": "worker-2",
+    "claim": {
+      "epoch": 2,
+      "expired_at": "2026-07-13T10:24:00.693785Z",
+      "previous_worker": "worker-2",
+      "ts_iso": "2026-07-13T10:24:00.693785Z",
+      "work_digest": "136f8b7c03bea7e8",
+      "work_field_digests": {
+        "acceptance_criteria": "ed7d31ed3cf9fb17",
+        "brief": "a6a5be3e34db4945",
+        "description": "1c93b6675177b044",
+        "title": "a0fabe1948984d9c"
+      },
+      "worker": null
+    },
+    "comment_count": 0,
+    "content": {
+      "acceptance_criteria": [
+        {
+          "criterion": "Scoped-federated contract test exists and passes: grant-admitted non-member narrowed on the /w/:ws federated route, unowned-token positive control sees all, member byte-identical",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "RequireLoopback contract test exists and passes: non-loopback remote_ip gets bodiless 403 halt, loopback (IPv4+IPv6) passes; proven non-vacuous by a deliberate local break going red",
+          "evidence": "",
+          "met": false
+        },
+        {
+          "criterion": "PR merged with the Elixir Test gate green (LEAD closes this criterion)",
+          "evidence": "",
+          "met": false
+        }
+      ],
+      "assignee": "worker-2",
+      "brief": {
+        "blocks": [
+          {
+            "id": "purpose",
+            "level": 2,
+            "text": "Purpose",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Residual test coverage from the airdrop-grants close-out verification (2026-07-10). Both lanes were traced firsthand and HOLD today — this task adds the missing automated assertions so a regression is caught by a test, not a future audit. Not urgent; not a leak"
+              }
+            ],
+            "id": "purpose-copy",
+            "type": "paragraph"
+          },
+          {
+            "id": "state",
+            "level": 2,
+            "text": "Current state",
+            "type": "heading"
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "0 of 3 acceptance criteria are recorded as met."
+              }
+            ],
+            "id": "state-callout",
+            "title": "open",
+            "tone": "info",
+            "type": "callout"
+          },
+          {
+            "id": "done",
+            "level": 2,
+            "text": "Definition of done",
+            "type": "heading"
+          },
+          {
+            "id": "done-list",
+            "items": [
+              "Scoped-federated contract test exists and passes: grant-admitted non-member narrowed on the /w/:ws federated route, unowned-token positive control sees all, member byte-identical",
+              "RequireLoopback contract test exists and passes: non-loopback remote_ip gets bodiless 403 halt, loopback (IPv4+IPv6) passes; proven non-vacuous by a deliberate local break going red",
+              "PR merged with the Elixir Test gate green (LEAD closes this criterion)"
+            ],
+            "ordered": false,
+            "type": "list"
+          }
+        ],
+        "version": 1
+      },
+      "claim": {
+        "epoch": 2,
+        "expired_at": "2026-07-13T10:24:00.693785Z",
+        "previous_worker": "worker-2",
+        "ts_iso": "2026-07-13T10:24:00.693785Z",
+        "work_digest": "136f8b7c03bea7e8",
+        "work_field_digests": {
+          "acceptance_criteria": "ed7d31ed3cf9fb17",
+          "brief": "a6a5be3e34db4945",
+          "description": "1c93b6675177b044",
+          "title": "a0fabe1948984d9c"
+        },
+        "worker": null
+      },
+      "description": "Residual test coverage from the airdrop-grants close-out verification (2026-07-10). Both lanes were traced firsthand and HOLD today — this task adds the missing automated assertions so a regression is caught by a test, not a future audit. Not urgent; not a leak.\n\n(a) SCOPED FEDERATED NARROWING: the /w/:ws scoped federated-search route (router.ex ~1665, pipe_through :scoped_api -> ResolveWorkspace) grant-narrows via resolve_workspace.ex:117-121 assigning grant_scoped_read -> scope_opts -> DocumentsRetriever base. This is proven ONLY by code-trace: federated_grant_deny_test.exs covers only the FLAT bare-:api route. Add a contract test mirroring federated_grant_deny_test for the scoped route: a grant-admitted non-member sees only grant-covered docs; an unowned token (positive control) sees everything; members byte-identical.\n\n(b) REQUIRE-LOOPBACK 403 CONTRACT: /v1/data/local/search/:dataset (SearchController.search_local, pipeline :api_local) is safe solely because RequireLoopback (require_loopback.ex:20-34) halts non-127.0.0.0/8 / ::1 callers with a bodiless 403 — no test asserts this. A regression widening loopback?/1 would be caught by nothing. Add a plug/contract test: external remote_ip -> 403 halt; 127.0.0.1 and ::1 -> passes through.\n\nGate: CC=/usr/bin/clang mix test <the two new test files> — plus a deliberate-break check (invert the loopback guard locally, watch the new test go red) to prove non-vacuity.",
+      "github": {
+        "issue": 2271,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 53479994,
+        "synced_rev": "72d9f34ce88d0f8e880d423c9e198992"
+      },
+      "kind": "task",
+      "labels": [
+        "proj:airdrop-grants",
+        "test-coverage"
+      ],
+      "lifecycle_status": "open",
+      "priority": 3
+    },
+    "criteria_progress": {
+      "met": 0,
+      "total": 3
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "ag-deny-matrix-residual-coverage",
+    "execution_policy": null,
+    "id": "b4e1967e-22c3-4164-9af4-e92c26a3139e",
+    "inserted_at": "2026-07-10T17:26:33.869671Z",
+    "kind": "task",
+    "labels": [
+      "proj:airdrop-grants",
+      "test-coverage"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": 3,
+    "rev": "8cb347643e0142e2ace152ec8a87390b",
+    "status": "published",
+    "title": "Grant deny-matrix residual coverage — scoped-federated narrowing contract test + RequireLoopback 403 contract test",
+    "type": "task",
+    "updated_at": "2026-07-13T10:24:33.343371Z"
+  },
+  "ok": true
+}
