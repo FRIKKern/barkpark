@@ -5,6 +5,7 @@ import { bpAll } from "@/lib/bp-tags";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
+import { paperTags, type PaperTag } from "@/lib/paper-tags";
 
 /**
  * The data layer for the listing-directory landing — the map's source of pins.
@@ -105,10 +106,12 @@ function normalizeListing(raw: unknown): Listing | null {
   const id = str(r._id) ?? str(r.id) ?? str(r.slug);
   if (!id) return null;
 
-  const tagsRaw = content.tags ?? r.tags;
-  const tags = Array.isArray(tagsRaw)
-    ? tagsRaw.filter((t): t is string => typeof t === "string")
-    : undefined;
+  // Tags may arrive flat (`["dog_friendly"]`) OR as authoring-excellence
+  // weighted objects (`[{tag,strength,rationale}]`) — the same dual shape the
+  // Paper surfaces carry (charter D8–D10). Lean on the shared `paperTags`
+  // normalizer so weighted-tag listings are no longer silently dropped; it
+  // tolerates a non-array (→ []), reads both shapes, trims + dedups first-seen.
+  const tags = paperTags((content.tags ?? r.tags) as PaperTag[] | undefined);
 
   return {
     id,
