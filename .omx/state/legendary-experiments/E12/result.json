@@ -1,0 +1,88 @@
+{
+  "artifact_hashes": {
+    "failure-injection.json": "298e9937bfa6d7244dae5e3b605e660a5cb8af52ca53fac8879c92835ad752ef",
+    "input-hashes.json": "37971795ec66b771638d205cdd553662b079e841f31463fe76a24e14ed03a13d",
+    "migration-manifest-schema.json": "793ea7b4809200f0689f5589291ec3502dd8ebcba95c3f4d0b8b966f83c07567",
+    "migration-manifest.json": "0b64f3d4551c268167585a7813fc7a951ac93726836844726be1f15df94ac076",
+    "quarantine-authority-rules.json": "74b0a45d57d411541919803ec45090d1b969f277a23d20088109b9449d370f24",
+    "rollback-idempotence-proof.json": "0947ff91824949875ffc026bca0932cd7e2fe02b6f26cf9dc4b17a3d6f4779c9",
+    "threshold-outcomes.json": "d199af2f96be95802fecf2eaa4c1bc564be97984c8582899fdfc3ca3332c2b39"
+  },
+  "assignment_id": "E12",
+  "candidate_provenance": {
+    "candidate_id": "E05",
+    "round_3_status": "BLOCKED_REWORK",
+    "strongest_non_rejected_candidate": "E05",
+    "winner_selected": false
+  },
+  "capability_blocks": [
+    "paired blind records are not sealed before scoring",
+    "authenticated Studio content proof unavailable",
+    "real-client email proof unavailable",
+    "typed native-subagent spawn unavailable on this worker tool surface; untyped substitutes forbidden"
+  ],
+  "counts": {
+    "dry_run_routes": 33,
+    "fixtures": 36,
+    "quarantines": 3,
+    "sealed_blind_records": 0
+  },
+  "exact_next_complete_three": [
+    {
+      "id": "E13",
+      "requirement": "Seal >=20 paired blind records before scoring; rerun classification/authority attack without proxy records."
+    },
+    {
+      "id": "E14",
+      "requirement": "Capture authenticated Studio, real-client email, and real TUI evidence for all 36 frozen fixtures under unchanged E03 thresholds."
+    },
+    {
+      "id": "E15",
+      "requirement": "Repeat migration/idempotence/rollback convergence against the resulting eligible candidate; reject on any missing route, pre-image, truth boundary, or hard surface failure."
+    }
+  ],
+  "hard_gate_outcomes": {
+    "authored_content_preservation": {
+      "evidence": "36/36 pre-images retained",
+      "status": "PASS_DRY_RUN"
+    },
+    "convergence": {
+      "evidence": "Round 3 selected no winner; E05 remains BLOCKED_REWORK",
+      "status": "REJECTED"
+    },
+    "evidence_truth_boundary": {
+      "evidence": "0/20 required sealed paired blind records",
+      "status": "BLOCKED"
+    },
+    "idempotence": {
+      "evidence": "36/36 fixture hashes stable and E05 tracked artifacts identical across two E09 runs",
+      "status": "PASS_DRY_RUN"
+    },
+    "rollback": {
+      "evidence": "36/36 restored hashes equal pre-images; zero residue keys",
+      "status": "PASS_DRY_RUN"
+    },
+    "surface_exercise": {
+      "evidence": "authenticated Studio and real-client email unavailable",
+      "status": "BLOCKED"
+    }
+  },
+  "probes": [
+    "deterministic 36-route construction",
+    "E09 two-run artifact comparison",
+    "36 pre-image restoration checks",
+    "three negative failure injections"
+  ],
+  "schema_version": "legendary-e12-result/v1",
+  "stop_condition": "Triggered: Round 3 has no winner and evidence-truth/surface gates remain blocked.",
+  "timing": {
+    "policy": "representative replay observation is committed once; deterministic artifacts exclude wall-clock bytes",
+    "source": "timing.json"
+  },
+  "verdict": {
+    "action": "REWORK",
+    "quality": "PARTIAL",
+    "reason": "Migration mechanics pass in dry-run evidence, but convergence cannot pass without a Round-3 winner, sealed blind records, and real Studio/email evidence.",
+    "winner_selected": false
+  }
+}
