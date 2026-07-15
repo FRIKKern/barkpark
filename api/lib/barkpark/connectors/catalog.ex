@@ -58,17 +58,23 @@ defmodule Barkpark.Connectors.Catalog do
   """
   @type connect_mode :: :paste | :oauth | nil
 
+  @type direction :: :tool | :channel
+
   @type provider :: %{
-          id: String.t(),
-          name: String.t(),
-          blurb: String.t(),
-          effort: String.t(),
-          connectable?: boolean(),
-          connect_mode: connect_mode(),
-          credential_label: String.t() | nil,
-          credential_hint: String.t() | nil,
-          help_url: String.t() | nil,
-          gate: String.t() | nil
+          :id => String.t(),
+          :name => String.t(),
+          :blurb => String.t(),
+          :effort => String.t(),
+          :connectable? => boolean(),
+          :connect_mode => connect_mode(),
+          :credential_label => String.t() | nil,
+          :credential_hint => String.t() | nil,
+          :help_url => String.t() | nil,
+          :gate => String.t() | nil,
+          # DIRECTION (D99): tool connectors (github/linear — the OTHER, outbound
+          # direction) carry `direction: :tool`. Channel providers omit the key and
+          # are `:channel` by default (see `direction/1`).
+          optional(:direction) => direction()
         }
 
   @providers [
@@ -167,16 +173,103 @@ defmodule Barkpark.Connectors.Catalog do
     }
   ]
 
-  @doc "Every provider card, in catalog order (connectable first)."
+  # ── TOOL connectors (the OTHER direction — D99/D69/D77) ─────────────────────
+  #
+  # These are OUTBOUND connectors: the agent ACTS on the service (opens a GitHub
+  # PR, files a Linear issue) rather than a human talking to the agent through a
+  # channel. They live in a SEPARATE list, never merged into `@providers`, for
+  # two reasons:
+  #
+  #   * `providers/0` stays the CHANNEL catalog — the two existing `providers()`
+  #     test loops and the drift gate's channel extractor both depend on it being
+  #     channel-only.
+  #   * the connectors drift gate mirrors channel and tool sets INDEPENDENTLY
+  #     (variant B): `@tool_providers` is the catalog side of the tool-set check,
+  #     scanned by `extract_catalog_tools()` exactly as `@providers` is by
+  #     `extract_catalog()`.
+  #
+  # EXACTLY two entries, no speculative future providers (a wired tool-set gate
+  # reds immediately on any catalog-only entry):
+  #
+  #   * github — `connect_mode: :paste` (a fine-grained PAT is pasted, W7),
+  #     `connectable?: true` (it opens the paste modal, reusing the connect loop).
+  #   * linear — `connect_mode: :oauth` (authorize→callback, W8), `connectable?:
+  #     false` (OAuth does not reuse the paste modal, exactly like Slack).
+  @tool_providers [
+    %{
+      id: "github",
+      name: "GitHub",
+      blurb: "Let your agent open pull requests, file issues, and comment on GitHub.",
+      effort:
+        "Paste a fine-grained personal access token — GitHub Settings → Developer settings → " <>
+          "Fine-grained tokens. Scope it to the repos and permissions you want the agent to have.",
+      connectable?: true,
+      connect_mode: :paste,
+      direction: :tool,
+      credential_label: "Personal access token",
+      credential_hint: "Starts with github_pat_… — GitHub shows it once when you create it.",
+      help_url: "https://github.com/settings/tokens?type=beta",
+      gate: nil
+    },
+    %{
+      id: "linear",
+      name: "Linear",
+      blurb: "Let your agent create and update Linear issues from your conversations.",
+      effort:
+        "One click — Connect Linear, authorize Barkpark in Linear, and you are done. " <>
+          "No token to paste.",
+      # OAuth, not paste (mirrors Slack): Linear connects by the authorize
+      # redirect, which does not reuse the paste modal — so `connectable?` (which
+      # drives the paste Connect button) stays false while `connect_mode` names the
+      # real flow. `:oauth` and `:connectable?` are DISJOINT.
+      connectable?: false,
+      connect_mode: :oauth,
+      direction: :tool,
+      credential_label: nil,
+      credential_hint: nil,
+      help_url: "https://linear.app/settings/api",
+      # No gate: the OAuth link IS the connect surface. The card falls back to an
+      # honest "needs a Linear OAuth app configured" note only when the instance
+      # has no Linear client id / public URL (see `connectors_live.ex`).
+      gate: nil
+    }
+  ]
+
+  @doc "Every CHANNEL provider card, in catalog order (connectable first)."
   @spec providers() :: [provider()]
   def providers, do: @providers
 
-  @doc "One provider card by id, or nil."
+  @doc """
+  Every TOOL connector card (the OUTBOUND direction — D99). Disjoint from
+  `providers/0`; rendered in its own Studio section.
+  """
+  @spec tool_providers() :: [provider()]
+  def tool_providers, do: @tool_providers
+
+  @doc "One provider card by id — CHANNEL or TOOL — or nil."
   @spec provider(String.t()) :: provider() | nil
-  def provider(id) when is_binary(id), do: Enum.find(@providers, &(&1.id == id))
+  def provider(id) when is_binary(id),
+    do: Enum.find(@providers ++ @tool_providers, &(&1.id == id))
+
   def provider(_), do: nil
 
-  @doc "True when the bridge declares a paste-mode connect for `id` (D51)."
+  @doc """
+  The DIRECTION of a provider id — `:tool` (outbound; github/linear) or
+  `:channel` (inbound; everything else). An unknown id is `:channel` (the
+  fail-closed default: the connect loop's channel arm mints a chat token, which
+  is strictly safer than skipping the mint for something we cannot classify).
+  """
+  @spec direction(String.t()) :: direction()
+  def direction(id) when is_binary(id) do
+    case provider(id) do
+      %{direction: dir} -> dir
+      _ -> :channel
+    end
+  end
+
+  def direction(_), do: :channel
+
+  @doc "True when the bridge declares a paste-mode connect for `id` (D51). Covers both lists."
   @spec connectable?(String.t()) :: boolean()
   def connectable?(id) do
     case provider(id) do
@@ -241,6 +334,64 @@ defmodule Barkpark.Connectors.Catalog do
       })
 
     @slack_authorize_url <> "?" <> query
+  end
+
+  # Linear's OAuth `read` scope — enough for the agent to create/update issues
+  # via the tool descriptors (D81). Kept minimal on purpose.
+  @linear_scopes ~w(read)
+
+  # The AUTHORIZE host — deliberately NOT the token-exchange host. Linear
+  # authorizes at linear.app/oauth/authorize and exchanges the code at
+  # api.linear.app/oauth/token (the bridge callback's job); do not collapse them.
+  @linear_authorize_url "https://linear.app/oauth/authorize"
+
+  @doc """
+  The Linear OAuth config for THIS instance, or `nil` when it is not configured
+  (mirrors `slack_oauth_config/0`, D103).
+
+  Reads `:linear_client_id` / `:linear_redirect_uri` from the same
+  `Barkpark.Connectors` app config the connect secret lives in — set by the
+  operator as part of the Linear OAuth app human gate
+  (`connectors-linear-live-oauth-gate`). `runtime.exs` plumbs NO oauth client ids
+  for ANY provider today, so this is `nil` at merge and the Linear card renders an
+  honest not-configured note, never a broken button. It lights up for free once
+  the keys are set.
+  """
+  @spec linear_oauth_config() ::
+          %{client_id: String.t(), redirect_uri: String.t(), scopes: [String.t()]} | nil
+  def linear_oauth_config do
+    cfg = Application.get_env(:barkpark, Barkpark.Connectors, [])
+
+    with client_id when is_binary(client_id) and client_id != "" <- cfg[:linear_client_id],
+         redirect when is_binary(redirect) and redirect != "" <- cfg[:linear_redirect_uri] do
+      %{client_id: client_id, redirect_uri: redirect, scopes: @linear_scopes}
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The Linear authorize URL carrying `state` — a signed connect ticket (D103).
+
+  Mirrors `slack_authorize_url/2` with ONE load-bearing delta: Linear REQUIRES
+  `response_type=code` (Slack omits it). `state` is minted by `ConnectTicket.sign`
+  and the public callback `/connectors/oauth/linear/callback` verifies it BEFORE
+  spending the code; `redirect_uri` MUST byte-match the bridge's own
+  (`<public>/connectors/oauth/linear/callback`).
+  """
+  @spec linear_authorize_url(String.t(), map()) :: String.t()
+  def linear_authorize_url(state, %{client_id: cid, redirect_uri: redirect, scopes: scopes})
+      when is_binary(state) do
+    query =
+      URI.encode_query(%{
+        "client_id" => cid,
+        "response_type" => "code",
+        "scope" => Enum.join(scopes, ","),
+        "redirect_uri" => redirect,
+        "state" => state
+      })
+
+    @linear_authorize_url <> "?" <> query
   end
 
   @doc """

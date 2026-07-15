@@ -302,7 +302,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end)
   end
 
-  defp order_rank(queryable, parsed, _config) do
+  defp order_rank(queryable, parsed, config) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token. plainto_tsquery AND-chains the words, so a multi-word query ranks
     # on ALL of them; for a single term this is identical to the old hd(terms).
@@ -325,54 +325,174 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # same-timestamp rows can skip or duplicate across page boundaries.
       order_by(queryable, [d], desc: d.updated_at, asc: d.id)
     else
-      order_by(queryable, [d],
-        # 1) Exact title match wins outright — typing a doc's exact title
-        #    guarantees it ranks #1, ahead of any relevance score.
-        desc:
-          fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query),
-        # 2) Relevance over the whole query: best of full-text rank and title
-        #    trigram similarity, PLUS the weighted-tag boost (authoring
-        #    excellence D8/D21): + w·max(strength)/100 over the doc's weighted
-        #    tags whose name matches a query term. ADDITIVE with small w=0.1,
-        #    never a bare GREATEST arm — a normalized strength (0.2–0.95)
-        #    would dwarf typical ts_rank (~0.05) and erase textual relevance.
-        #    Reducer is MAX among matching tags (sum is tag-count-gameable;
-        #    the main tag alone is topic-agnostic). Shape guards make legacy
-        #    content contribute 0 without erroring: non-array `tags` →
-        #    '[]'::jsonb, flat string elements fail jsonb_typeof(e)='object',
-        #    and a non-integer strength fails the digits guard instead of
-        #    blowing up the ::int cast mid-query. Untagged docs get +0, and
-        #    the pool is where_match-gated, so non-matching docs never enter.
-        #    Perf: subplan ~0.032ms/row over the 500-row bounded pool.
-        #
-        #    WHY-LEFT (authoring-excellence D49 — this `similarity()` is NOT
-        #    trgm-index material). It lives in an ORDER BY GREATEST(ts_rank, …)
-        #    composite ranking key, not a WHERE candidate filter. A GIN trgm
-        #    index accelerates set MEMBERSHIP (`% ` / `similarity() > floor`),
-        #    never a KNN/ranked ORDER BY — only a GiST `<->` distance operator
-        #    can drive an ordered index scan, and this is a GREATEST of two
-        #    signals (a scalar composite), not a single-column distance. The
-        #    pool is already bounded to 500 rows upstream, so the per-row cost is
-        #    negligible; leave it. See D49(d).
-        desc:
-          fragment(
-            "GREATEST(ts_rank(?.search_vector, plainto_tsquery('english', ?)), similarity(?, ?)) + 0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
-            d,
-            ^positive_query,
-            d.title,
-            ^positive_query,
-            d.content,
-            d.content,
-            type(^tag_terms, {:array, :string})
-          ),
-        # 3) Recency tiebreak.
-        desc: d.updated_at,
-        # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
-        #    (rank AND recency can both tie); keeps LIMIT/OFFSET paging stable.
-        asc: d.id
+      # Dynamic ORDER BY so the relevance key can fold the ADMIN-CONFIGURED
+      # `searchable_fields` per-field weights into the trigram-similarity arm
+      # (charter W7 / bpb-searchable-fields-dead-config). The knob was echoed in
+      # admin settings but never read on the query path — a lie in the UI. Now a
+      # per-field weight change actually reorders results (Kinsta/Vercel bar).
+      order_by(
+        queryable,
+        ^[
+          # 1) Exact title match wins outright — typing a doc's exact title
+          #    guarantees it ranks #1, ahead of any relevance score.
+          {:desc, exact_title_key(positive_query)},
+          # 2) Relevance: GREATEST(full-text rank, weighted per-field similarity)
+          #    + the weighted-tag boost.
+          {:desc, relevance_key(positive_query, tag_terms, config)},
+          # 3) Recency tiebreak.
+          {:desc, dynamic([d], d.updated_at)},
+          # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
+          #    (rank AND recency can both tie); keeps LIMIT/OFFSET paging stable.
+          {:asc, dynamic([d], d.id)}
+        ]
       )
     end
   end
+
+  # ORDER BY key #1: exact (case-insensitive) title match → 1, else 0.
+  defp exact_title_key(positive_query) do
+    dynamic(
+      [d],
+      fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query)
+    )
+  end
+
+  # ORDER BY key #2: GREATEST(full-text ts_rank, weighted per-field trigram
+  # similarity) PLUS the weighted-tag boost (authoring excellence D8/D21):
+  # + 0.1·max(strength)/100 over the doc's weighted tags whose name matches a
+  # query term. ADDITIVE with small w=0.1, never a bare GREATEST arm — a
+  # normalized strength (0.2–0.95) would dwarf typical ts_rank (~0.05) and erase
+  # textual relevance.
+  #
+  # The similarity arm is no longer hardcoded to `similarity(title, query)`: it
+  # is the weighted composite over `config["searchable_fields"]` (per-field
+  # {path, weight}), max-weight-normalized so the default `[{title,10},…]` still
+  # reduces to title-dominated ranking when no other field matches.
+  #
+  # WHY-LEFT (authoring-excellence D49 — these `similarity()` arms are NOT
+  # trgm-index material). They live in an ORDER BY GREATEST(ts_rank, …)
+  # composite ranking key, not a WHERE candidate filter. A GIN trgm index
+  # accelerates set MEMBERSHIP (`%` / `similarity() > floor`), never a KNN/ranked
+  # ORDER BY — only a GiST `<->` distance operator can drive an ordered index
+  # scan, and this is a GREATEST of scalar signals, not a single-column
+  # distance. The pool is already bounded to 500 rows upstream, so the per-row
+  # cost is negligible; leave it. See D49(d).
+  defp relevance_key(positive_query, tag_terms, config) do
+    ts_rank =
+      dynamic(
+        [d],
+        fragment("ts_rank(?.search_vector, plainto_tsquery('english', ?))", d, ^positive_query)
+      )
+
+    field_sim = weighted_field_similarity(positive_query, config)
+    boost = tag_boost_key(tag_terms)
+
+    dynamic([_d], fragment("GREATEST(?, ?) + ?", ^ts_rank, ^field_sim, ^boost))
+  end
+
+  # Weighted-tag boost subplan. Shape guards make legacy content contribute 0
+  # without erroring: non-array `tags` → '[]'::jsonb, flat string elements fail
+  # jsonb_typeof(e)='object', and a non-integer strength fails the digits guard
+  # instead of blowing up the ::int cast mid-query. Untagged docs get +0.
+  defp tag_boost_key(tag_terms) do
+    dynamic(
+      [d],
+      fragment(
+        "0.1 * COALESCE((SELECT max((e->>'strength')::int) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(?->'tags') = 'array' THEN ?->'tags' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e) = 'object' AND e->>'strength' ~ '^[0-9]+$' AND lower(e->>'tag') = ANY(?)), 0)::float / 100.0",
+        d.content,
+        d.content,
+        type(^tag_terms, {:array, :string})
+      )
+    )
+  end
+
+  # Fold `searchable_fields` per-field weights into a single similarity signal:
+  #   Σ(weight_i · similarity(field_i, query)) / max(weight_i)
+  # Max-weight normalization (not Σ-weight) keeps the default config's dominant
+  # field (title, weight 10) contributing its raw similarity, so an unmatched
+  # secondary field (e.g. content.slug) never dilutes the historical title-only
+  # ranking. A per-field weight change reorders results because each field's
+  # contribution scales linearly with its weight.
+  defp weighted_field_similarity(query, config) do
+    fields = searchable_fields(config)
+    max_weight = fields |> Enum.map(& &1.weight) |> Enum.max()
+
+    sum =
+      Enum.reduce(fields, nil, fn %{path: path, weight: weight}, acc ->
+        term = field_similarity_term(path, weight, query)
+        if acc, do: dynamic([_d], fragment("? + ?", ^acc, ^term)), else: term
+      end)
+
+    dynamic([_d], fragment("(?) / ?", ^sum, ^max_weight))
+  end
+
+  # Per-field weighted trigram-similarity term. `title` is a column; every other
+  # path is a jsonb path into `content` (a leading `content.` prefix is optional,
+  # so both "content.slug" and "slug" resolve to content->>'slug'). Deeper dotted
+  # paths ("a.b") use the `#>>` text-array accessor. All keys are bound params —
+  # no identifier interpolation, so config values can never inject SQL.
+  defp field_similarity_term("title", weight, query) do
+    dynamic(
+      [d],
+      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), d.title, ^query)
+    )
+  end
+
+  defp field_similarity_term(path, weight, query) do
+    keys = content_keys(path)
+
+    dynamic(
+      [d],
+      fragment(
+        "? * similarity(coalesce(?#>>?, ''), ?)",
+        ^(weight * 1.0),
+        d.content,
+        type(^keys, {:array, :string}),
+        ^query
+      )
+    )
+  end
+
+  defp content_keys("content." <> rest), do: String.split(rest, ".")
+  defp content_keys(path), do: String.split(path, ".")
+
+  # Normalize `config["searchable_fields"]` → [%{path, weight}] with positive
+  # numeric weights. Falls back to title-only (weight 1) when the config carries
+  # nothing usable, preserving the legacy single-field ranking.
+  defp searchable_fields(config) do
+    (config || %{})
+    |> Map.get("searchable_fields", [])
+    |> List.wrap()
+    |> Enum.map(&normalize_search_field/1)
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> [%{path: "title", weight: 1.0}]
+      fields -> fields
+    end
+  end
+
+  defp normalize_search_field(%{"path" => path} = field)
+       when is_binary(path) and path != "" do
+    case field_weight(Map.get(field, "weight")) do
+      weight when weight > 0 -> %{path: path, weight: weight}
+      _ -> nil
+    end
+  end
+
+  defp normalize_search_field(_), do: nil
+
+  defp field_weight(weight) when is_number(weight), do: weight * 1.0
+
+  defp field_weight(weight) when is_binary(weight) do
+    case Float.parse(weight) do
+      {parsed, _} -> parsed
+      :error -> 0.0
+    end
+  end
+
+  # A field with no explicit weight defaults to 1 (still ranks, just unweighted).
+  defp field_weight(nil), do: 1.0
+  defp field_weight(_), do: 0.0
 
   # Minimum token length for the pg_trgm fuzzy title arm — reads
   # typo_policy.min_len_1typo, defaulting to 4 when absent. Tokens shorter than

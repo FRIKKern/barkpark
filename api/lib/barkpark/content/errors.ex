@@ -38,7 +38,7 @@ defmodule Barkpark.Content.Errors do
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "label_spine" =>
-      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix.",
+      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "idempotency_key_in_use" =>

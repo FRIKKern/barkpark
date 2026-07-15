@@ -46,7 +46,10 @@ defmodule BarkparkWeb.V1.MediaController do
       source: SearchIntel.source(conn, "explorer"),
       record: SearchIntel.should_record?(conn),
       tags: SearchIntel.tags(conn),
-      metadata: search_metadata(meta)
+      metadata: search_metadata(meta),
+      # Stamp the resolved tenant at ingest so the crystallizer rolls this event
+      # up on its OWN row instead of merging tenants that share a scope.
+      workspace_id: workspace_id(conn)
     ]
 
     record_result =
@@ -96,7 +99,12 @@ defmodule BarkparkWeb.V1.MediaController do
   def search_insights(conn, %{"dataset" => dataset} = params) do
     period = params["period"] || "week"
 
-    opts = [period: period]
+    # Read the caller's resolved `current_workspace`, matching the workspace the
+    # record path stamps at ingest — so insights and events roll up on the SAME
+    # tenant row. On the flat `[:api, :require_admin]` route AssignDefaultScope
+    # resolves the seeded Default workspace; true per-tenant isolation comes via
+    # the scoped `/w/:ws/p/:project` mirror or a workspace-bound token upstream.
+    opts = [period: period, workspace_id: workspace_id(conn)]
 
     opts =
       case SearchIntel.parse_period_start(params["periodStart"]) do
@@ -111,13 +119,13 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def search_synonyms(conn, %{"dataset" => dataset}) do
     json(conn, %{
-      result: Synonyms.list("media", dataset),
+      result: Synonyms.list("media", dataset, workspace_id(conn)),
       syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]
     })
   end
 
   def create_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.create("media", dataset, params) do
+    case Synonyms.create("media", dataset, params, workspace_id(conn)) do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
@@ -127,7 +135,7 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def promote_search_synonym(conn, %{"dataset" => dataset} = params) do
-    case Synonyms.promote("media", dataset, params) do
+    case Synonyms.promote("media", dataset, params, workspace_id(conn)) do
       {:ok, row} ->
         json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
@@ -141,7 +149,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def preview_search_synonym(conn, %{"dataset" => dataset} = params) do
     q = bin(params["q"]) || bin(params["from"])
-    result = Synonyms.preview("media", dataset, q, params)
+    result = Synonyms.preview("media", dataset, q, params, workspace_id(conn))
     json(conn, %{result: result})
   end
 
@@ -153,17 +161,29 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def update_search_settings(conn, %{"dataset" => dataset} = params) do
-    case SurfaceConfigs.upsert("media", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:settings"]})
+    # D58/D71 fail-closed — mirrors the documents surface. `workspace_id(conn)`
+    # reads `:current_workspace`, which `AssignDefaultScope` has ALREADY masked
+    # from nil to Default, so a genuinely nil-workspace admin token would
+    # silently write the Default/global media config. Read the RAW pre-mask token
+    # workspace_id (assigned by `RequireToken`) and refuse when nil, BEFORE the
+    # upsert. A workspace-bound admin token still writes its own row.
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+      _ws_id ->
+        case SurfaceConfigs.upsert("media", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:media:search:settings"]})
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
   def delete_search_synonym(conn, %{"dataset" => dataset, "id" => id}) do
-    case Synonyms.delete(id, "media", dataset) do
+    case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
       :ok ->
         json(conn, %{ok: true, syncTags: ["bp:ds:#{dataset}:media:search:synonyms"]})
 
@@ -181,7 +201,8 @@ defmodule BarkparkWeb.V1.MediaController do
         dataset,
         SearchIntel.actor_key(conn),
         prefix,
-        limit: limit
+        limit: limit,
+        workspace_id: workspace_id(conn)
       )
 
     json(conn, %{
@@ -195,7 +216,8 @@ defmodule BarkparkWeb.V1.MediaController do
       actor_key: SearchIntel.actor_key(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "explorer"),
-      disabled: SearchIntel.recording_disabled?(conn)
+      disabled: SearchIntel.recording_disabled?(conn),
+      workspace_id: workspace_id(conn)
     ]
 
     case MediaIntelligence.record_interaction(dataset, params, record_opts) do
@@ -509,5 +531,28 @@ defmodule BarkparkWeb.V1.MediaController do
       %{id: id} -> id
       _ -> nil
     end
+  end
+
+  # The RAW pre-mask workspace of the calling admin token (assigned by
+  # `RequireToken`, BEFORE `AssignDefaultScope` masks nil → Default). The D58/D71
+  # fail-closed guard reads THIS, not `workspace_id/1`, so a legacy-null token is
+  # refused instead of silently attributing its write to Default.
+  defp token_workspace_id(conn) do
+    case conn.assigns[:api_token] do
+      %{workspace_id: ws_id} -> ws_id
+      _ -> nil
+    end
+  end
+
+  # 422 for a nil-workspace admin settings WRITE (D58/D71). `unprocessable` is a
+  # registered §9 code; the message tells the operator to use a workspace-bound
+  # token rather than have the write land on the global/Default config.
+  defp nil_workspace_write_error(conn) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      422,
+      "unprocessable",
+      "search-settings write requires a workspace-scoped token; this token has no workspace"
+    )
   end
 end

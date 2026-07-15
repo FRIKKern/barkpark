@@ -26,6 +26,28 @@ defmodule Barkpark.Search.QueryPipeline do
 
   @spec search(String.t(), String.t(), map(), keyword()) :: {:ok, result()}
   def search(surface, scope, context, opts \\ []) when is_binary(surface) and is_binary(scope) do
+    # TIMED: the search READ path had ZERO telemetry — it computed `ms` locally
+    # (t0/System.monotonic_time below) for the response body but never fired a
+    # `:telemetry` event, so "what is p95 of a search?" was unanswerable and the
+    # only search event ([:barkpark, :search, :intel, :record]) is a WRITE with no
+    # `workspace_id`. This is the single choke point every documents+media search
+    # caller funnels through, so one `:telemetry.span` here covers them all.
+    # Mirrors the D12 content-write precedent (content/mutations.ex): the span
+    # emits `[:barkpark, :search, :query, :start | :stop | :exception]` with a
+    # `:duration`; BarkparkWeb.Telemetry subscribes a Prometheus histogram to
+    # `:stop` (p95 via histogram_quantile). `workspace_id` — already live in
+    # `opts` via `scope_opts/1` — tags per-workspace search volume/latency; nil
+    # (anonymous / unscoped caller) coerces to "global" so the Prometheus tag is
+    # always present and never crashes the reporter handler.
+    workspace_id = Keyword.get(opts, :workspace_id) || "global"
+    meta = %{surface: surface, scope: scope, workspace_id: workspace_id}
+
+    :telemetry.span([:barkpark, :search, :query], meta, fn ->
+      {do_search(surface, scope, context, opts), meta}
+    end)
+  end
+
+  defp do_search(surface, scope, context, opts) do
     t0 = System.monotonic_time(:microsecond)
     # Resolve the surface config for the CALLER'S workspace (charter D63). The
     # resolved `workspace_id` already rides in `opts` (set by scope_opts/1 from
@@ -36,7 +58,9 @@ defmodule Barkpark.Search.QueryPipeline do
     config = SurfaceConfigs.get(surface, scope, Keyword.get(opts, :workspace_id))
     raw_query = Map.get(context, :query, "") || ""
     parsed = QueryParser.parse(raw_query)
-    {parsed, corrected_to} = expand_synonyms(surface, scope, parsed)
+
+    {parsed, corrected_to} =
+      expand_synonyms(surface, scope, parsed, Keyword.get(opts, :workspace_id))
 
     {hits, total, recovery, engine_meta} =
       case surface do
@@ -72,7 +96,7 @@ defmodule Barkpark.Search.QueryPipeline do
      }}
   end
 
-  defp expand_synonyms(surface, scope, parsed) do
+  defp expand_synonyms(surface, scope, parsed, workspace_id) do
     positive = Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, [])
 
     if positive == [] do
@@ -80,7 +104,7 @@ defmodule Barkpark.Search.QueryPipeline do
     else
       extra =
         positive
-        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term) end)
+        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term, workspace_id) end)
         |> Enum.reject(&(&1 in positive or &1 == ""))
         |> Enum.uniq()
 
@@ -88,7 +112,7 @@ defmodule Barkpark.Search.QueryPipeline do
       # for which an enabled synonym fired — null when nothing matched.
       corrected_to =
         Enum.find_value(positive, fn term ->
-          Synonyms.correction_for(surface, scope, term)
+          Synonyms.correction_for(surface, scope, term, workspace_id)
         end)
 
       {%{parsed | terms: parsed.terms ++ extra}, corrected_to}
