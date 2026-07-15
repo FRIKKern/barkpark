@@ -3,10 +3,12 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
 
   import Barkpark.TenancyFixtures
 
+  alias Barkpark.{CycleFleet, Repo, Tenancy}
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content.Document
+  alias Barkpark.CycleFleet.AssignmentTask
   alias Barkpark.EpicFleet
   alias Barkpark.Plugins.Capabilities
-  alias Barkpark.Repo
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   setup do
@@ -200,8 +202,136 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
 
     open = Enum.find(commands, &(&1["id"] == "cycle.open"))
     seal = Enum.find(commands, &(&1["id"] == "cycle.seal"))
+    assign = Enum.find(commands, &(&1["id"] == "cycle.assign"))
     assert required_arg?(open, "scale_contract_json")
     assert required_arg?(seal, "golden_fixtures_json")
+
+    assert Enum.any?(
+             assign["flags"],
+             &(&1["name"] == "task_id" and &1["type"] == "string")
+           )
+  end
+
+  test "scoped assignment freezes a same-project Task and replays without rebinding", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    epic_id = "cycle-task-binding-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    task = create_task!(workspace, project, "bound")
+    other_task = create_task!(workspace, project, "other")
+    open_epic(base, token, ["unit-1"])
+
+    params = %{
+      "assignment_id" => "build-1",
+      "phase" => "build",
+      "agent_type" => "epic-builder",
+      "effort" => "high",
+      "snapshot_json" => Jason.encode!(%{"unit_ids" => ["unit-1"]}),
+      "task_id" => task.id,
+      "workspace_id" => Ecto.UUID.generate(),
+      "project_id" => Ecto.UUID.generate(),
+      "claim" => %{"worker_id" => "caller-authored"}
+    }
+
+    created =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", params)
+      |> json_response(201)
+
+    assignment_id = created["assignment"]["id"]
+    binding = Repo.get!(AssignmentTask, assignment_id)
+    assert binding.task_id == task.id
+
+    replayed =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", params)
+      |> json_response(201)
+
+    assert replayed == created
+    replayed_binding = Repo.get!(AssignmentTask, assignment_id)
+    assert replayed_binding.task_id == binding.task_id
+    assert replayed_binding.inserted_at == binding.inserted_at
+
+    conflict =
+      build_conn()
+      |> bearer(token)
+      |> post(base <> "/assignments", Map.put(params, "task_id", other_task.id))
+      |> json_response(422)
+
+    assert conflict["error"]["details"]["reason"] == ":assignment_task_conflict"
+    assert Repo.get!(AssignmentTask, assignment_id).task_id == task.id
+  end
+
+  test "missing and cross-project Task authority roll back scoped assignments", %{
+    workspace: workspace,
+    project: project,
+    token: token
+  } do
+    other_project = create_project!(workspace, "cycle-task-binding-other")
+    foreign_task = create_task!(workspace, other_project, "foreign")
+    epic_id = "cycle-task-authority-#{System.unique_integer([:positive])}"
+    base = "/w/#{workspace.slug}/p/#{project.slug}/v1/cycles/#{epic_id}/wave-1"
+    open_epic(base, token, ["unit-1"])
+
+    for {logical_id, task_id} <- [
+          {"missing-task", Ecto.UUID.generate()},
+          {"foreign-task", foreign_task.id}
+        ] do
+      rejected =
+        build_conn()
+        |> bearer(token)
+        |> post(base <> "/assignments", %{
+          "assignment_id" => logical_id,
+          "phase" => "build",
+          "agent_type" => "epic-builder",
+          "effort" => "high",
+          "snapshot_json" => Jason.encode!(%{"unit_ids" => ["unit-1"]}),
+          "task_id" => task_id,
+          "project_id" => other_project.id
+        })
+        |> json_response(422)
+
+      assert rejected["error"]["details"]["reason"] ==
+               ":assignment_task_authority_not_found"
+
+      refute CycleFleet.get_assignment(
+               %{
+                 workspace_id: workspace.id,
+                 project_id: project.id,
+                 epic_id: epic_id,
+                 wave_id: "wave-1"
+               },
+               logical_id
+             )
+    end
+  end
+
+  test "flat projectless legacy assignment remains valid without a Task binding", %{
+    workspace: workspace,
+    token: token
+  } do
+    epic_id = "cycle-task-binding-legacy-#{System.unique_integer([:positive])}"
+    base = "/v1/cycles/#{epic_id}/wave-1"
+    open_epic(base, token, ["unit-1"])
+
+    created = create_http_epic_assignment(base, token, "legacy-build-1")
+    assignment_id = created["assignment"]["id"]
+
+    assert CycleFleet.get_assignment(
+             %{
+               workspace_id: workspace.id,
+               project_id: nil,
+               epic_id: epic_id,
+               wave_id: "wave-1"
+             },
+             "legacy-build-1"
+           )
+
+    refute Repo.get(AssignmentTask, assignment_id)
   end
 
   test "flat route derives its workspace from the bound token", %{conn: conn} do
@@ -865,6 +995,25 @@ defmodule BarkparkWeb.CycleFleetControllerTest do
       "failure_threshold" => "0.05",
       "golden_fixtures_json" => Jason.encode!(["paper://fixtures/good", "paper://fixtures/bad"])
     }
+  end
+
+  defp create_task!(workspace, project, suffix) do
+    {:ok, dataset} = Tenancy.get_or_create_dataset(project, "production")
+
+    %Document{}
+    |> Document.changeset(%{
+      doc_id: "drafts.cycle-http-task-#{suffix}-#{System.unique_integer([:positive])}",
+      type: "task",
+      dataset: "production",
+      title: "Cycle HTTP Task #{suffix}",
+      status: "draft",
+      content: %{"kind" => "task", "lifecycle_status" => "open"},
+      rev: Ecto.UUID.generate(),
+      workspace_id: workspace.id,
+      project_id: project.id,
+      dataset_id: dataset.id
+    })
+    |> Repo.insert!()
   end
 
   defp required_arg?(command, name) do

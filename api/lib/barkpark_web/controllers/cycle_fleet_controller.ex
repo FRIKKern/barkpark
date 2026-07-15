@@ -78,7 +78,7 @@ defmodule BarkparkWeb.CycleFleetController do
         |> Map.merge(
           select(
             params,
-            ~w(assignment_id phase agent_type effort snapshot replaces_assignment_id)
+            ~w(assignment_id phase agent_type effort snapshot task_id replaces_assignment_id)
           )
         )
         |> maybe_decode_json(:snapshot, params["snapshot_json"])

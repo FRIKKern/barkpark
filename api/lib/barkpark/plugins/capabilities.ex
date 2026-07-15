@@ -1881,6 +1881,11 @@ defmodule Barkpark.Plugins.Capabilities do
         ],
         flags: [
           flag(
+            "task_id",
+            "string",
+            "Physical same-project Task row id frozen with this assignment."
+          ),
+          flag(
             "replaces_assignment_id",
             "string",
             "Logical assignment id replaced by this retry."
