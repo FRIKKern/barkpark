@@ -8,7 +8,11 @@ import {
   consumePendingConnect,
   stagePendingConnect,
 } from "./connect/pending-connect.js";
-import { loadConfig, type BridgeConfig } from "./config.js";
+import {
+  loadConfig,
+  DEFAULT_MOUNT_RECONCILE_INTERVAL_MS,
+  type BridgeConfig,
+} from "./config.js";
 import {
   createConnectorRegistry,
   type ConnectorRegistry,
@@ -23,6 +27,7 @@ import type {
 import { createCredentialCipher } from "./crypto/credential-cipher.js";
 import { createDiscordConnector, DISCORD_PROVIDER } from "./connectors/discord.js";
 import { createGithubConnector, GITHUB_PROVIDER } from "./connectors/github.js";
+import { createLinearConnector, LINEAR_PROVIDER } from "./connectors/linear.js";
 import {
   createIMessageConnector,
   IMESSAGE_PROVIDER,
@@ -41,8 +46,13 @@ import {
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
 import type { ConnectDeps } from "./http/connect.js";
+import type { LinearOAuthCallbackDeps } from "./oauth/linear-oauth.js";
 import type { SlackOAuthCallbackDeps } from "./oauth/slack-oauth.js";
 import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
+import {
+  createMountReconcile,
+  type MountReconcile,
+} from "./http/mount-reconcile.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
 import { createBridgeState } from "./state/state-adapter.js";
 import {
@@ -174,6 +184,17 @@ export function registerBuiltinConnectors(
   // second tool connector (Linear) is a second line here.
   if (!registry.has(GITHUB_PROVIDER)) {
     registry.register(createGithubConnector());
+  }
+
+  // Linear — the SECOND tool connector (D77), the proof that "a second tool
+  // connector is a second registry entry with ZERO core-loop change" is TRUE. It
+  // is OAuth-only (no `connect` paste member), so it is never paste-connectable —
+  // it lands through `oauth/linear-oauth.ts`. Registered UNCONDITIONALLY, exactly
+  // like GitHub: registration makes the tool-descriptors/tool-headers seam serve
+  // its installs; the OAuth CALLBACK route is separately gated on app credentials
+  // (see `linearOAuth` below). One registry entry, one more line than GitHub's.
+  if (!registry.has(LINEAR_PROVIDER)) {
+    registry.register(createLinearConnector());
   }
 
   // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
@@ -314,6 +335,13 @@ export interface Bridge {
   /** The inbound HTTP listener, or undefined when `config.webhook.enabled` is false. */
   webhookServer?: WebhookServer;
   /**
+   * The periodic DB reconcile (D83) that lets a second replica rediscover an
+   * install written by the first. Always present — at `intervalMs: 0` its timer
+   * simply never arms — so a boot test can drive `reconcileOnce()` deterministically
+   * instead of waiting for a tick.
+   */
+  mountReconcile: MountReconcile;
+  /**
    * Mount an install that appeared AFTER boot — no restart. This is what makes
    * an OAuth "Add to Slack" callback work: upsertInstall (row) -> addInstall
    * (Chat + webhook mount) and the very next provider event routes. Without it
@@ -344,6 +372,22 @@ function slackDepsFromEnv(
 }
 
 /**
+ * Linear OAuth app credentials from the environment. Absent ⇒ the Connect-to-Linear
+ * callback route is simply NOT MOUNTED (the connector itself is still registered so
+ * the tool seam serves any install written another way). No signing secret: Linear
+ * is a tool connector with no inbound webhook to verify — only the outbound OAuth
+ * code exchange, which needs the client id/secret.
+ */
+function linearDepsFromEnv(
+  env: NodeJS.ProcessEnv,
+): { clientId: string; clientSecret: string } | undefined {
+  const clientId = env["LINEAR_CLIENT_ID"]?.trim();
+  const clientSecret = env["LINEAR_CLIENT_SECRET"]?.trim();
+  if (!clientId || !clientSecret) return undefined;
+  return { clientId, clientSecret };
+}
+
+/**
  * Injection seam for the composition root. Production passes nothing; a test
  * substitutes a registry of stub connectors so the boot path can be proven
  * end-to-end without a real bot token and a real provider on the other end.
@@ -351,6 +395,12 @@ function slackDepsFromEnv(
 export interface StartBridgeOverrides {
   registry?: ConnectorRegistry;
   chatClientForInstall?: BridgeDeps["chatClientForInstall"];
+  /**
+   * Force the mount-reconcile interval (ms), overriding `config`. A boot test
+   * passes `0` to arm nothing and drive `bridge.mountReconcile?.reconcileOnce()`
+   * by hand — the timing-free way to prove convergence.
+   */
+  mountReconcileIntervalMs?: number;
 }
 
 /**
@@ -552,6 +602,40 @@ export async function startBridge(
   }
 
   /**
+   * THE REPLICA-REDISCOVERY RECONCILE (D83). Boot mounted every row THIS process
+   * can see, and `addInstall` mounts anything a connect/OAuth request handled HERE
+   * lands — but a horizontally-scaled bridge has more than one process, and the
+   * mount index is per-process in-memory. This periodic pass re-reads
+   * `connector_installs` and converges the webhook mounts through the very same
+   * `addInstall`/`removeInstall` paths, so a row another replica wrote becomes
+   * routable here without a restart. `intervalMs: 0` disables it (single replica).
+   * It enumerates ONLY webhook connectors: converging a poll/socket channel from a
+   * rediscovered row would start a SECOND poll loop against the same bot — the
+   * separate `connectors-replica-socket-poll-safety` hazard, never this loop.
+   */
+  const mountReconcileIntervalMs =
+    overrides.mountReconcileIntervalMs ??
+    config.mountReconcileIntervalMs ??
+    DEFAULT_MOUNT_RECONCILE_INTERVAL_MS;
+  const mountReconcile = createMountReconcile(
+    {
+      registry,
+      installs,
+      mounts,
+      addInstall,
+      removeInstall: takeDown,
+    },
+    { intervalMs: mountReconcileIntervalMs },
+  );
+  mountReconcile.start();
+  if (mountReconcileIntervalMs > 0) {
+    console.log(
+      `[bridge] mount reconcile armed — re-reading connector_installs every ` +
+        `${mountReconcileIntervalMs}ms so a second replica rediscovers new installs`,
+    );
+  }
+
+  /**
    * The connect loop's deps (D50/D51) — built ONLY when the bridge has a connect
    * secret. Absent ⇒ `connect` is undefined ⇒ the routes are not mounted and every
    * one of their paths is the same opaque 404 as any unknown route.
@@ -622,6 +706,38 @@ export async function startBridge(
     );
   }
 
+  /**
+   * THE CONNECT-TO-LINEAR OAUTH CALLBACK deps (D77/D78) — the OUTBOUND (tool)
+   * mirror of the Slack callback, MINUS consumePendingConnect (a tool install has
+   * no chat token to stage) and MINUS mountInstall (a tool is never a channel).
+   * Mounted only when the bridge has a Linear OAuth app (client id/secret), a
+   * connect secret (the ticket HMAC key), AND a public base URL (Linear redirects a
+   * browser to an exact registered URL — a loopback address could never be that).
+   * Any one missing ⇒ the callback route answers the opaque 404.
+   */
+  const linearApp = linearDepsFromEnv(process.env);
+  const linearOAuth: LinearOAuthCallbackDeps | undefined =
+    linearApp && config.connectSecret && publicBaseUrl
+      ? {
+          clientId: linearApp.clientId,
+          clientSecret: linearApp.clientSecret,
+          redirectUri: `${publicBaseUrl.replace(/\/+$/, "")}${config.webhook.pathPrefix}/oauth/linear/callback`,
+          stateSecret: config.connectSecret,
+          resolveWorkspace: (provider, installKey) =>
+            installs.resolveWorkspace(provider, installKey),
+          upsertInstall: (install) => upsertInstall(pool, cipher, install),
+        }
+      : undefined;
+
+  if (!linearOAuth) {
+    console.warn(
+      "[bridge] Connect-to-Linear OAuth callback is NOT MOUNTED — needs LINEAR_CLIENT_ID/" +
+        "LINEAR_CLIENT_SECRET, CONNECTORS_CONNECT_SECRET, and CONNECTORS_PUBLIC_BASE_URL. " +
+        `${config.webhook.pathPrefix}/oauth/linear/callback answers 404 until they are set. ` +
+        "The Linear tool connector still serves any install written another way.",
+    );
+  }
+
   // The listener comes up even with zero webhook installs today: the whole point
   // of dynamic mounting is that the FIRST install must not need a restart.
   let webhookServer: WebhookServer | undefined;
@@ -632,6 +748,7 @@ export async function startBridge(
       mounts,
       ...(connectDeps ? { connect: connectDeps } : {}),
       ...(slackOAuth ? { slackOAuth } : {}),
+      ...(linearOAuth ? { linearOAuth } : {}),
       // LOOPBACK behind Caddy (D34). Binding every interface would expose the
       // seam — and the x-forwarded-* headers it trusts — straight to the internet.
       host: config.webhook.host,
@@ -670,6 +787,9 @@ export async function startBridge(
     mounted,
     mounts,
     webhookServer,
+    // Always exposed even at interval 0: `start()` self-guards the timer, so a
+    // boot test can drive `reconcileOnce()` by hand without any tick firing.
+    mountReconcile,
 
     addInstall,
 
@@ -683,6 +803,7 @@ export async function startBridge(
     mount: addInstall,
 
     async shutdown() {
+      mountReconcile.stop();
       await webhookServer?.close();
       for (const install of mounted) {
         await install.connector.stopListening?.(install.adapter);

@@ -63,6 +63,10 @@ import {
 import type { ConnectorRegistry } from "../connector/registry.js";
 import type { ConnectorInstall, InstallsLookup } from "../connector/types.js";
 import {
+  handleLinearOAuthCallback,
+  type LinearOAuthCallbackDeps,
+} from "../oauth/linear-oauth.js";
+import {
   handleSlackOAuthCallback,
   type SlackOAuthCallbackDeps,
 } from "../oauth/slack-oauth.js";
@@ -144,6 +148,18 @@ export interface WebhookServerOptions {
    * `state`, not by network topology.
    */
   slackOAuth?: SlackOAuthCallbackDeps;
+  /**
+   * The Connect-to-Linear OAuth callback deps (D77/D78) — the OUTBOUND (tool)
+   * OAuth, the mirror of `slackOAuth` for a TOOL connector. ABSENT ⇒ the callback
+   * route is NOT MOUNTED and answers the same opaque 404 as any unknown path — the
+   * honest state on an instance with no Linear OAuth app configured. Present only
+   * when the bridge has Linear app credentials AND a connect secret (see `index.ts`).
+   *
+   * Like `slackOAuth` this is PUBLIC (Linear redirects a browser to it) and is
+   * NEVER loopback-gated: it authenticates by the signed connect ticket in `state`,
+   * not by network topology.
+   */
+  linearOAuth?: LinearOAuthCallbackDeps;
   /** Node's `server.headersTimeout`, ms. Default 20 s. */
   headersTimeoutMs?: number;
   /** Node's `server.requestTimeout`, ms. Default 30 s. MUST be >= headersTimeout. */
@@ -343,6 +359,30 @@ function isSlackOAuthCallbackRoute(rawTarget: string, pathPrefix: string): boole
 }
 
 /**
+ * `GET {prefix}/oauth/linear/callback` — the Connect-to-Linear OAuth callback
+ * (D77/D78), the OUTBOUND (tool) sibling of the Slack callback above.
+ *
+ * A FIFTH route class, identical in shape to the Slack one: PUBLIC and `GET`,
+ * authenticated by a signed connect ticket in `state` (crypto, not network
+ * topology), never loopback-gated. It reuses the SAME hardened path parsing
+ * (`segmentsUnderPrefix` — dot segments rejected after percent-decoding) so the
+ * traversal defence is not duplicated.
+ */
+function isLinearOAuthCallbackRoute(
+  rawTarget: string,
+  pathPrefix: string,
+): boolean {
+  const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
+  return (
+    rest !== null &&
+    rest.length === 3 &&
+    rest[0] === "oauth" &&
+    rest[1] === "linear" &&
+    rest[2] === "callback"
+  );
+}
+
+/**
  * LOOPBACK-ONLY BY CONSTRUCTION (D50).
  *
  * Caddy appends `x-forwarded-for` and `x-forwarded-host` to everything it proxies,
@@ -423,11 +463,14 @@ function sendOAuthPage(
   status: number,
   installed: boolean,
   error: string | undefined,
+  providerLabel: string,
 ): void {
   if (res.writableEnded) return;
-  const heading = installed ? "Connected to Slack" : "Could not connect Slack";
+  const heading = installed
+    ? `Connected to ${providerLabel}`
+    : `Could not connect ${providerLabel}`;
   const detail = installed
-    ? "Your Slack workspace is now connected to Barkpark. You can close this tab and return to Studio."
+    ? `Your ${providerLabel} account is now connected to Barkpark. You can close this tab and return to Studio.`
     : escapeHtml(
         error ??
           "The connect could not be completed. Return to Studio and try again.",
@@ -601,6 +644,7 @@ export function createWebhookRequestHandler(
     mounts,
     connect,
     slackOAuth,
+    linearOAuth,
     publicBaseUrl,
     onError,
     waitUntil = defaultWaitUntil,
@@ -723,7 +767,28 @@ export function createWebhookRequestHandler(
 
         const request = buildRequest(req, undefined, publicBaseUrl);
         const result = await handleSlackOAuthCallback(request, slackOAuth);
-        sendOAuthPage(res, result.status, result.installed, result.error);
+        sendOAuthPage(res, result.status, result.installed, result.error, "Slack");
+        return;
+      }
+
+      // THE CONNECT-TO-LINEAR OAUTH CALLBACK (D77/D78) — the OUTBOUND (tool)
+      // sibling of the Slack callback above, and identical in shape: PUBLIC and
+      // GET (Linear redirects a browser here through Caddy, so x-forwarded-* is
+      // ALWAYS present — an isProxied gate would 404 it permanently), authenticated
+      // by the signed connect ticket in `state`, never by loopback. No body is read.
+      if (isLinearOAuthCallbackRoute(req.url ?? "/", pathPrefix)) {
+        drain(req);
+        // Not configured (no Linear app / no connect secret) ⇒ indistinguishable
+        // from "there is no such route". A non-GET is the same: a browser redirect
+        // is a GET, and anything else is a probe.
+        if (linearOAuth === undefined || method !== "GET") {
+          notFound(res);
+          return;
+        }
+
+        const request = buildRequest(req, undefined, publicBaseUrl);
+        const result = await handleLinearOAuthCallback(request, linearOAuth);
+        sendOAuthPage(res, result.status, result.installed, result.error, "Linear");
         return;
       }
 
