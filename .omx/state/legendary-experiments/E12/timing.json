@@ -1,0 +1,7 @@
+{
+  "assignment_id": "E12",
+  "fixture_count": 36,
+  "measurement": "two deterministic builds, positive verification, and three caught failure injections",
+  "real_seconds": 0.298499,
+  "schema_version": "legendary-e12-timing/v1"
+}

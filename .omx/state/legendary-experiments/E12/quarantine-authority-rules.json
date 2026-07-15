@@ -1,0 +1,41 @@
+{
+  "assignment_id": "E12",
+  "authority_rules": [
+    {
+      "condition": "source field is authored",
+      "decision": "source remains sole authority; derived values are advisory"
+    },
+    {
+      "condition": "class or authority decision is ambiguous",
+      "decision": "quarantine and require sealed human/authority record"
+    },
+    {
+      "condition": "derived field lacks field-level provenance",
+      "decision": "reject candidate output"
+    }
+  ],
+  "escalation": {
+    "current_records": 0,
+    "required_record": "sealed paired blind record",
+    "required_records_before_scoring": 20
+  },
+  "quarantine_rules": [
+    {
+      "condition": "missing or empty authoritative source",
+      "reason": "empty_source"
+    },
+    {
+      "condition": "malformed authoritative source",
+      "reason": "malformed_authoritative_source"
+    },
+    {
+      "condition": "rollback pre-image absent or mismatched",
+      "reason": "rollback_preimage_failure"
+    },
+    {
+      "condition": "second run changes semantic hash",
+      "reason": "non_idempotent_rerun"
+    }
+  ],
+  "schema_version": "legendary-e12-quarantine-authority-rules/v1"
+}
