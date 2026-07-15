@@ -153,7 +153,9 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 	serverName := ""
 	authTier := ""
 	prod := false
+	var loadedManifest *manifest.Manifest
 	if m, err := loadManifest(g, ctx); err == nil {
+		loadedManifest = m
 		reachable = true
 		serverName = m.Server.Name
 		authTier = m.AuthTier
@@ -216,10 +218,24 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		},
 	}
 	switch out.output {
-	case "json":
-		out.renderJSON(payload)
-		return exitOK
-	case "yaml":
+	case "json", "yaml":
+		// D10: `bp whoami -o json` IS the onboarding receipt SPINE. Merge the
+		// additive tail — instance identity, the MCP tool catalog (version +
+		// names), the read-only tool-call proof, and the client-reload
+		// instruction — that `bp doctor --onboarding` composes over, so the two
+		// never fork into a second receipt shape. It reuses the manifest already
+		// fetched above (no second probe) and is best-effort: the tool-call proof
+		// only leaves the process when the target is reachable, and nothing here
+		// can fail whoami (it still exits 0). Confined to the structured output
+		// so the human report — and its cost — stay exactly as before.
+		cfgSpine, _ := LoadConfig()
+		for k, v := range onboardingWhoamiSpine(g, ctx, cfgSpine, loadedManifest) {
+			payload[k] = v
+		}
+		if out.output == "json" {
+			out.renderJSON(payload)
+			return exitOK
+		}
 		// Round-trip through JSON to a generic value for the YAML emitter.
 		b, _ := json.Marshal(payload)
 		var v any
