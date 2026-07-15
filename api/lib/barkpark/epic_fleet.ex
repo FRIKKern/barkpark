@@ -200,6 +200,14 @@ defmodule Barkpark.EpicFleet do
           {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
   def create_benchmark_experiment(attrs), do: Benchmark.create_experiment(attrs)
 
+  @doc "Create or replay an append-only v2 retrieval-attributed benchmark experiment."
+  def create_retrieval_benchmark_experiment(attrs, attribution) do
+    attrs
+    |> Map.put(:artifact_format, "barkpark-epic-benchmark-v2")
+    |> Map.put(:retrieval_attribution, attribution)
+    |> Benchmark.create_experiment()
+  end
+
   @doc "Record or replay one immutable benchmark execution attempt."
   def record_benchmark_attempt(experiment, attrs), do: Benchmark.record_attempt(experiment, attrs)
 
@@ -211,6 +219,12 @@ defmodule Barkpark.EpicFleet do
 
   @doc "Encode the deterministic benchmark export as canonical JSON bytes."
   def export_benchmark_json(experiment), do: Benchmark.export_json(experiment)
+
+  @doc "Build the canonical v2 benchmark document with its v1 ledger bridge."
+  def export_benchmark_v2(experiment), do: Benchmark.export_v2(experiment)
+
+  @doc "Encode the canonical v2 benchmark document without changing v1 bytes."
+  def export_benchmark_v2_json(experiment), do: Benchmark.export_v2_json(experiment)
 
   @doc "Verify and persist a canonical benchmark JSON artifact atomically."
   def import_benchmark_json(json), do: Benchmark.import_json(json)

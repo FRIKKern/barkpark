@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import importlib.util
+import copy
+import hashlib
 import json
 import os
 import subprocess
@@ -9,9 +11,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "run_concurrency_benchmark.py"
+FIXTURES = Path(__file__).parent / "fixtures"
 SPEC = importlib.util.spec_from_file_location("run_concurrency_benchmark", SCRIPT)
 MODULE = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -61,6 +65,104 @@ def healthy_signals(**changes):
     return MODULE.HostSignals(**values)
 
 
+def retrieval_record(index):
+    assignment_id = MODULE.RETRIEVAL_UNIT_IDS[index - 1]
+    return {
+        "id": assignment_id,
+        "schema_version": MODULE.RETRIEVAL_CORPUS_SCHEMA_VERSION,
+        "repo": {"commit": MODULE.RETRIEVAL_REPO_COMMIT},
+        "gold_claims": [
+            {
+                "claim_id": f"C{claim}",
+                "text": f"claim {claim}",
+                "evidence": [f"S1:L{claim}-L{claim + 1}"],
+            }
+            for claim in range(1, 4)
+        ],
+        "sources": [{"source_id": "S1", "path": f"fixture-{index}.txt"}],
+    }
+
+
+def cycle_attribution(index):
+    value = json.loads(
+        (FIXTURES / "retrieval_cycle_assignment_v1.json").read_text(encoding="utf-8")
+    )
+    assignment_id = MODULE.RETRIEVAL_UNIT_IDS[index - 1]
+    value["assignment_id"] = assignment_id
+    value["unit_ids"] = [assignment_id]
+    value["cycle_assignment_uuid"] = f"00000000-0000-4000-8000-{index:012d}"
+    value["task"]["doc_id"] = f"codex-epic-cycle-w3-survey-{index:02d}"
+    value["task"]["worker_id"] = f"codex-epic-cycle-w3-surveyor-{index:02d}"
+    return value
+
+
+def usage_receipt(index):
+    value = json.loads(
+        (FIXTURES / "retrieval_usage_receipt_v1.json").read_text(encoding="utf-8")
+    )
+    value["provider_session_id"] = f"session-{index:02d}"
+    value["provider_turn_id"] = f"turn-{index:02d}"
+    return value
+
+
+def retrieval_evaluation(index):
+    record = retrieval_record(index)
+    return {
+        "complete": True,
+        "witnesses": [
+            {
+                "claim_id": claim["claim_id"],
+                "verdict": "supported",
+                "evidence": [claim["evidence"][0]],
+            }
+            for claim in record["gold_claims"]
+        ],
+        "attribution": cycle_attribution(index),
+        "usage": usage_receipt(index),
+    }
+
+
+def write_retrieval_corpus(root):
+    raw = "".join(
+        json.dumps(retrieval_record(index), sort_keys=True, separators=(",", ":")) + "\n"
+        for index in range(1, 7)
+    ).encode("utf-8")
+    path = Path(root) / "corpus.jsonl"
+    path.write_bytes(raw)
+    return path, hashlib.sha256(raw).hexdigest()
+
+
+def retrieval_manifest(path, digest):
+    assignments = []
+    for index, assignment_id in enumerate(MODULE.RETRIEVAL_UNIT_IDS, start=1):
+        payload = json.dumps(retrieval_evaluation(index), separators=(",", ":"))
+        assignments.append(
+            {
+                "id": assignment_id,
+                "argv": [sys.executable, "-c", f"print({payload!r})"],
+                "attribution": cycle_attribution(index),
+            }
+        )
+    return {
+        "schema_version": MODULE.RETRIEVAL_SCHEMA_VERSION,
+        "seed": MODULE.SEED,
+        "assignments": assignments,
+        "corpus": {
+            "path": str(path),
+            "sha256": digest,
+            "repo_commit": MODULE.RETRIEVAL_REPO_COMMIT,
+            "schema_version": MODULE.RETRIEVAL_CORPUS_SCHEMA_VERSION,
+            "unit_ids": list(MODULE.RETRIEVAL_UNIT_IDS),
+        },
+        "cold_reset_argv": [sys.executable, "-c", "pass"],
+        "warm_prime_argv": [sys.executable, "-c", "pass"],
+        "primary_pane": "%1",
+        "tmux_panes": ["%1"],
+        "timeout_seconds": 2,
+        "environment": {},
+    }
+
+
 class ScheduleTest(unittest.TestCase):
     def test_complete_williams_cycle_is_all_pair_balanced(self):
         rows = MODULE.complete_williams_rows()
@@ -95,6 +197,21 @@ class ScheduleTest(unittest.TestCase):
         plan["schedule"][0]["width"] = 6
         with self.assertRaisesRegex(MODULE.ProtocolError, "plan_digest"):
             MODULE.verify_replay(plan, source)
+
+    def test_v1_plan_golden_bytes_remain_frozen(self):
+        source = {
+            **manifest(),
+            "assignments": [
+                {"id": f"a{index}", "argv": ["fixture", f"a{index}"]}
+                for index in range(1, 7)
+            ],
+            "cold_reset_argv": ["fixture", "cold"],
+            "warm_prime_argv": ["fixture", "warm"],
+        }
+        self.assertEqual(
+            "e11ca3cea9fd23284e209331c047f947b5ee8719af8df9693e7a8570ec39929b",
+            hashlib.sha256(MODULE.canonical_json(MODULE.plan_artifact(source)).encode()).hexdigest(),
+        )
 
 
 class ManifestTest(unittest.TestCase):
@@ -132,6 +249,135 @@ class ManifestTest(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertEqual(16, len(json.loads(output.read_text(encoding="utf-8"))["schedule"]))
+
+    def test_v2_admits_only_the_exact_preregistered_corpus_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path, digest = write_retrieval_corpus(temporary)
+            with mock.patch.object(MODULE, "RETRIEVAL_CORPUS_SHA256", digest):
+                source = retrieval_manifest(path, digest)
+                normalized = MODULE.validate_manifest(source)
+                self.assertEqual(MODULE.RETRIEVAL_SCHEMA_VERSION, normalized["schema_version"])
+                path.write_bytes(path.read_bytes() + b" ")
+                with self.assertRaisesRegex(MODULE.ProtocolError, "bytes"):
+                    MODULE.validate_manifest(source)
+
+    def test_v2_rejects_attribution_scope_task_and_fence_mismatches(self):
+        record = retrieval_record(1)
+        expected = cycle_attribution(1)
+        for path, replacement in (
+            (("cycle_assignment_uuid",), "00000000-0000-4000-8000-000000000099"),
+            (("wave_id",), "foreign-wave"),
+            (("task", "doc_id"), "foreign-task"),
+            (("task", "claim_epoch"), 6),
+            (("task", "work_digest"), "ffffffffffffffff"),
+        ):
+            with self.subTest(path=path):
+                evaluation = retrieval_evaluation(1)
+                target = evaluation["attribution"]
+                for key in path[:-1]:
+                    target = target[key]
+                target[path[-1]] = replacement
+                parsed = MODULE.parse_retrieval_evaluation(
+                    json.dumps(evaluation), record, expected
+                )
+                self.assertEqual("invalid", parsed["vui"]["state"])
+                self.assertEqual("invalid", parsed["usage"]["state"])
+
+
+class RetrievalEvidenceTest(unittest.TestCase):
+    def test_vui_scoring_distinguishes_complete_absent_contradictory_and_tampered_evidence(self):
+        record = retrieval_record(1)
+        complete, contradiction = MODULE.score_vui(record, retrieval_evaluation(1)["witnesses"])
+        self.assertEqual(("observed", 3, False), (complete["state"], complete["value"], contradiction))
+
+        absent, contradiction = MODULE.score_vui(record, retrieval_evaluation(1)["witnesses"][:-1])
+        self.assertEqual("missing", absent["state"])
+        self.assertTrue(contradiction)
+
+        witnesses = retrieval_evaluation(1)["witnesses"]
+        witnesses[0]["verdict"] = "contradicted"
+        contradicted, contradiction = MODULE.score_vui(record, witnesses)
+        self.assertEqual("invalid", contradicted["state"])
+        self.assertTrue(contradiction)
+
+        witnesses = retrieval_evaluation(1)["witnesses"]
+        witnesses[0]["evidence"] = ["S9:L1-L999"]
+        tampered, _ = MODULE.score_vui(record, witnesses)
+        self.assertEqual("invalid", tampered["state"])
+
+    def test_usage_receipts_preserve_unsupported_missing_invalid_and_observed(self):
+        observed = MODULE.validate_usage_receipt(usage_receipt(1))
+        self.assertEqual("observed", observed["state"])
+        for state in ("unsupported", "missing", "invalid"):
+            self.assertEqual(
+                state,
+                MODULE.validate_usage_receipt({"state": state, "reason": "fixture"})["state"],
+            )
+        decreasing = usage_receipt(1)
+        decreasing["terminal_tokens"] = 99
+        self.assertEqual("invalid", MODULE.validate_usage_receipt(decreasing)["state"])
+
+    def test_semantic_cold_and_warm_postconditions_are_exact(self):
+        corpus = {
+            "sha256": "a" * 64,
+            "unit_ids": list(MODULE.RETRIEVAL_UNIT_IDS),
+        }
+        cold = {
+            "schema_version": MODULE.RETRIEVAL_CONTROL_SCHEMA_VERSION,
+            "state": "cold",
+            "corpus_sha256": corpus["sha256"],
+            "unit_ids": corpus["unit_ids"],
+            "cache_entries": 0,
+        }
+        warm = {
+            "schema_version": MODULE.RETRIEVAL_CONTROL_SCHEMA_VERSION,
+            "state": "warm",
+            "corpus_sha256": corpus["sha256"],
+            "unit_ids": corpus["unit_ids"],
+            "primed_unit_ids": corpus["unit_ids"],
+        }
+        self.assertEqual("measured", MODULE.validate_control_proof(json.dumps(cold), "cold", corpus)["kind"])
+        self.assertEqual("measured", MODULE.validate_control_proof(json.dumps(warm), "warm", corpus)["kind"])
+        cold["cache_entries"] = 1
+        with self.assertRaises(MODULE.SafetyError):
+            MODULE.validate_control_proof(json.dumps(cold), "cold", corpus)
+
+    def test_end_to_end_v2_assignment_fixture_scores_costs_and_redacts_native_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path, digest = write_retrieval_corpus(temporary)
+            with mock.patch.object(MODULE, "RETRIEVAL_CORPUS_SHA256", digest):
+                source = MODULE.validate_manifest(retrieval_manifest(path, digest))
+                result = MODULE.run_assignment_set(
+                    source["assignments"],
+                    list(MODULE.RETRIEVAL_UNIT_IDS),
+                    3,
+                    timeout_seconds=2,
+                    environment={},
+                    corpus=source["corpus"],
+                )
+        self.assertEqual("observed", result["metrics"]["token_cost"]["state"])
+        self.assertEqual(270, result["metrics"]["token_cost"]["value"])
+        self.assertEqual("observed", result["metrics"]["verified_unique_information"]["state"])
+        self.assertEqual(18, result["metrics"]["verified_unique_information"]["value"])
+        self.assertEqual("unsupported", result["metrics"]["context_cost"]["state"])
+        self.assertTrue(
+            all(item["stdout_tail"].startswith("[REDACTED") for item in result["assignment_results"])
+        )
+
+    def test_duplicate_provider_identity_is_invalid_and_secret_bearing_payload_is_not_echoed(self):
+        first = {"usage": usage_receipt(1), "complete": True, "contradiction_unsupported": False}
+        second = {"usage": usage_receipt(1), "complete": True, "contradiction_unsupported": False}
+        MODULE.reject_duplicate_usage_identities([first, second])
+        self.assertEqual("invalid", first["usage"]["state"])
+        self.assertEqual("invalid", second["usage"]["state"])
+
+        evaluation = retrieval_evaluation(1)
+        evaluation["api_token"] = "must-not-survive"
+        parsed = MODULE.parse_retrieval_evaluation(
+            json.dumps(evaluation), retrieval_record(1), cycle_attribution(1)
+        )
+        self.assertEqual("invalid", parsed["usage"]["state"])
+        self.assertNotIn("must-not-survive", MODULE.canonical_json(parsed))
 
 
 class IdentityAndAdmissionTest(unittest.TestCase):

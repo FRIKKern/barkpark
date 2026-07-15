@@ -1,0 +1,16 @@
+{
+  "baseline_tokens": 100,
+  "context_occupancy": {
+    "reason": "provider does not expose exact context occupancy",
+    "state": "unsupported"
+  },
+  "counter_domain": "provider.total_tokens",
+  "provider_session_id": "session-01",
+  "provider_turn_id": "turn-01",
+  "state": "observed",
+  "terminal_tokens": 145,
+  "token_count": {
+    "state": "observed",
+    "value": 45
+  }
+}

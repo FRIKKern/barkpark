@@ -7,20 +7,36 @@ defmodule Barkpark.EpicFleet.Benchmark do
   alias Barkpark.Repo
 
   @format "barkpark-epic-benchmark-v1"
-  @experiment_fields ~w(workspace_id epic_id wave_id experiment_id phase protocol_version manifest)
+  @format_v2 "barkpark-epic-benchmark-v2"
+  @attribution_schema "barkpark.epic-retrieval-attribution.v2"
+  @contract_schema "barkpark.epic-retrieval-contract.v2"
+  @experiment_fields ~w(
+    workspace_id epic_id wave_id experiment_id phase protocol_version manifest artifact_format
+    retrieval_attribution retrieval_attribution_digest
+  )
   @attempt_fields ~w(attempt_id replaces_attempt_id ordinal treatment status costs provenance payload)
   @document_keys ~w(
     format experiment manifest manifest_digest attempts attempts_digest summary summary_digest ledger_digest
   )
   @experiment_document_keys ~w(workspace_id epic_id wave_id experiment_id phase protocol_version)
   @attempt_document_keys @attempt_fields ++ ["attempt_digest"]
+  @v2_document_keys ~w(format ledger attribution attribution_digest ledger_digest)
+  @contract_keys ~w(schema_version corpus assignments)
+  @attribution_keys ~w(schema_version epic_id wave_id corpus assignments trials)
+  @corpus_keys ~w(sha256 repo_commit schema_version unit_ids)
+  @cycle_attribution_keys ~w(
+    epic_id wave_id cycle_assignment_uuid assignment_id unit_ids inventory_digest snapshot_digest task
+  )
+  @task_fence_keys ~w(doc_id worker_id claim_epoch work_digest)
+  @trial_keys ~w(trial_id sensitivity_of assignments)
+  @trial_assignment_keys ~w(assignment_id attribution usage vui)
   @sensitive_exact ~w(
-    token access_token refresh_token auth_token id_token session_token api_key apikey secret
+    token api_token access_token refresh_token auth_token id_token session_token api_key apikey secret
     client_secret webhook_secret secret_key password authorization cookie set_cookie private_key
     signing_key bearer credential credentials dsn database_url database_uri connection_string
   )
   @sensitive_suffixes ~w(
-    _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
+    _api_token _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
     _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
     _dsn _database_url _database_uri _connection_string
   )
@@ -30,10 +46,10 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @spec create_experiment(map()) ::
           {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
   def create_experiment(attrs) when is_map(attrs) do
-    attrs = attrs |> select_attrs(@experiment_fields) |> sanitize_map()
-    manifest = Map.get(attrs, "manifest", %{})
+    raw_attrs = attrs |> select_attrs(@experiment_fields) |> CanonicalJSON.stringify_keys()
 
-    if is_map(manifest) do
+    with {:ok, attrs} <- prepare_experiment_attrs(raw_attrs) do
+      manifest = Map.get(attrs, "manifest", %{})
       attrs = Map.put(attrs, "manifest_digest", CanonicalJSON.digest(manifest))
 
       case Repo.insert(Experiment.insert_changeset(attrs),
@@ -43,8 +59,6 @@ defmodule Barkpark.EpicFleet.Benchmark do
         {:ok, _candidate} -> reconcile_experiment(attrs)
         {:error, changeset} -> {:error, changeset}
       end
-    else
-      {:error, :invalid_manifest}
     end
   end
 
@@ -114,6 +128,27 @@ defmodule Barkpark.EpicFleet.Benchmark do
     end
   end
 
+  @spec export_v2(Ecto.UUID.t() | Experiment.t()) ::
+          {:ok, map()} | {:error, :experiment_not_found | :retrieval_attribution_missing}
+  def export_v2(%Experiment{artifact_format: @format_v2} = experiment),
+    do: {:ok, document_v2(experiment, list_attempts(experiment))}
+
+  def export_v2(%Experiment{}), do: {:error, :retrieval_attribution_missing}
+
+  def export_v2(experiment_id) when is_binary(experiment_id) do
+    case Repo.get(Experiment, experiment_id) do
+      nil -> {:error, :experiment_not_found}
+      experiment -> export_v2(experiment)
+    end
+  end
+
+  @spec export_v2_json(Ecto.UUID.t() | Experiment.t()) :: {:ok, binary()} | {:error, term()}
+  def export_v2_json(experiment) do
+    with {:ok, document} <- export_v2(experiment) do
+      {:ok, CanonicalJSON.encode!(document)}
+    end
+  end
+
   @spec document(Experiment.t(), [Attempt.t() | map()]) :: map()
   def document(%Experiment{} = experiment, attempts) do
     manifest = sanitize_map(experiment.manifest)
@@ -144,12 +179,31 @@ defmodule Barkpark.EpicFleet.Benchmark do
     Map.put(base, "ledger_digest", CanonicalJSON.digest(base))
   end
 
+  @spec document_v2(Experiment.t(), [Attempt.t() | map()]) :: map()
+  def document_v2(%Experiment{} = experiment, attempts) do
+    ledger = document(experiment, attempts)
+    attribution = sanitize_map(experiment.retrieval_attribution)
+
+    base = %{
+      "format" => @format_v2,
+      "ledger" => ledger,
+      "attribution" => attribution,
+      "attribution_digest" => CanonicalJSON.digest(attribution)
+    }
+
+    Map.put(base, "ledger_digest", CanonicalJSON.digest(base))
+  end
+
   @spec import_json(binary()) :: {:ok, map()} | {:error, term()}
   def import_json(json) when is_binary(json) do
     case Jason.decode(json) do
       {:ok, document} ->
         if json == CanonicalJSON.encode!(document) do
-          import_document(document)
+          case document["format"] do
+            @format -> import_document(document)
+            @format_v2 -> import_v2_document(document)
+            _other -> {:error, :unsupported_format}
+          end
         else
           {:error, :non_canonical_json}
         end
@@ -190,6 +244,16 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   def import_document(_document), do: {:error, :invalid_document}
 
+  @spec import_v2_document(map()) :: {:ok, map()} | {:error, term()}
+  def import_v2_document(document) when is_map(document) do
+    with :ok <- verify_v2_document(document),
+         {:ok, stats} <- persist_v2_document(document) do
+      {:ok, stats}
+    end
+  end
+
+  def import_v2_document(_document), do: {:error, :invalid_document}
+
   @spec summary([map()]) :: map()
   def summary(attempts) do
     outcome_counts = counts(attempts, "status", Attempt.statuses())
@@ -212,6 +276,52 @@ defmodule Barkpark.EpicFleet.Benchmark do
       "cost_states" => cost_state_counts,
       "treatments" => treatment_counts
     }
+  end
+
+  defp prepare_experiment_attrs(raw_attrs) do
+    manifest = Map.get(raw_attrs, "manifest", %{})
+    format = Map.get(raw_attrs, "artifact_format", @format)
+
+    cond do
+      not is_map(manifest) ->
+        {:error, :invalid_manifest}
+
+      format == @format ->
+        {:ok,
+         raw_attrs
+         |> sanitize_map()
+         |> Map.put("artifact_format", @format)
+         |> Map.drop(["retrieval_attribution", "retrieval_attribution_digest"])}
+
+      format == @format_v2 ->
+        attribution = raw_attrs["retrieval_attribution"]
+        safe_attribution = sanitize_map(attribution)
+
+        ledger = %{
+          "experiment" => Map.take(raw_attrs, @experiment_document_keys),
+          "manifest" => manifest
+        }
+
+        cond do
+          not is_map(attribution) ->
+            {:error, :retrieval_attribution_missing}
+
+          attribution != safe_attribution ->
+            {:error, :attribution_secrets_not_redacted}
+
+          true ->
+            with :ok <- validate_retrieval_attribution(attribution, ledger) do
+              {:ok,
+               raw_attrs
+               |> sanitize_map()
+               |> Map.put("artifact_format", @format_v2)
+               |> Map.put("retrieval_attribution_digest", CanonicalJSON.digest(attribution))}
+            end
+        end
+
+      true ->
+        {:error, :unsupported_format}
+    end
   end
 
   defp verify_document(%{"format" => @format} = document) do
@@ -273,8 +383,307 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   defp verify_document(_document), do: {:error, :unsupported_format}
 
-  defp persist_document(document) do
-    experiment_attrs = Map.put(document["experiment"], "manifest", document["manifest"])
+  defp verify_v2_document(%{"format" => @format_v2} = document) do
+    attribution = document["attribution"]
+    ledger = document["ledger"]
+    base = Map.delete(document, "ledger_digest")
+
+    cond do
+      not exact_keys?(document, @v2_document_keys) ->
+        {:error, :invalid_v2_document_shape}
+
+      not is_map(ledger) ->
+        {:error, :invalid_v1_ledger_bridge}
+
+      verify_document(ledger) != :ok ->
+        {:error, :invalid_v1_ledger_bridge}
+
+      not is_map(attribution) or not exact_keys?(attribution, @attribution_keys) ->
+        {:error, :invalid_attribution_shape}
+
+      attribution != sanitize_map(attribution) ->
+        {:error, :attribution_secrets_not_redacted}
+
+      document["attribution_digest"] != CanonicalJSON.digest(attribution) ->
+        {:error, :attribution_digest_mismatch}
+
+      document["ledger_digest"] != CanonicalJSON.digest(base) ->
+        {:error, :ledger_digest_mismatch}
+
+      true ->
+        validate_retrieval_attribution(attribution, ledger)
+    end
+  rescue
+    _error -> {:error, :invalid_document}
+  end
+
+  defp verify_v2_document(_document), do: {:error, :unsupported_format}
+
+  defp validate_retrieval_attribution(attribution, ledger) do
+    experiment = ledger["experiment"] || %{}
+    manifest = ledger["manifest"] || %{}
+    contract = manifest["retrieval_attribution_contract"]
+
+    with :ok <- validate_attribution_scope(attribution, experiment),
+         :ok <- validate_attribution_contract(attribution, contract),
+         :ok <- validate_attribution_trials(attribution) do
+      :ok
+    end
+  end
+
+  defp validate_attribution_scope(attribution, experiment) do
+    if attribution["schema_version"] == @attribution_schema and
+         attribution["epic_id"] == experiment["epic_id"] and
+         attribution["wave_id"] == experiment["wave_id"] do
+      :ok
+    else
+      {:error, :attribution_scope_mismatch}
+    end
+  end
+
+  defp validate_attribution_contract(attribution, contract) do
+    cond do
+      not is_map(contract) or not exact_keys?(contract, @contract_keys) or
+          contract["schema_version"] != @contract_schema ->
+        {:error, :attribution_contract_missing}
+
+      not valid_corpus?(contract["corpus"]) or attribution["corpus"] != contract["corpus"] ->
+        {:error, :attribution_corpus_mismatch}
+
+      not is_list(contract["assignments"]) or length(contract["assignments"]) != 6 or
+          not Enum.all?(contract["assignments"], &valid_cycle_attribution?/1) ->
+        {:error, :attribution_contract_invalid}
+
+      attribution["assignments"] != contract["assignments"] ->
+        {:error, :attribution_assignment_mismatch}
+
+      not unique_contract_assignments?(contract["assignments"], contract["corpus"]) ->
+        {:error, :duplicate_attribution}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_attribution_trials(attribution) do
+    trials = attribution["trials"]
+    expected = Map.new(attribution["assignments"], &{&1["assignment_id"], &1})
+
+    cond do
+      not is_list(trials) or trials == [] ->
+        {:error, :attribution_trials_missing}
+
+      not unique_strings?(Enum.map(trials, &(is_map(&1) && &1["trial_id"]))) ->
+        {:error, :duplicate_attribution}
+
+      true ->
+        validate_trial_rows(trials, expected, MapSet.new())
+    end
+  end
+
+  defp validate_trial_rows([], _expected, _usage_ids), do: :ok
+
+  defp validate_trial_rows([trial | rest], expected, usage_ids) do
+    rows = is_map(trial) && trial["assignments"]
+
+    cond do
+      not is_map(trial) or not exact_keys?(trial, @trial_keys) or
+        not is_binary(trial["trial_id"]) or trial["trial_id"] == "" or
+          not (is_nil(trial["sensitivity_of"]) or
+                   (is_binary(trial["sensitivity_of"]) and trial["sensitivity_of"] != "")) ->
+        {:error, :invalid_attribution_trial}
+
+      not is_list(rows) or length(rows) != map_size(expected) ->
+        {:error, :incomplete_attribution_trial}
+
+      true ->
+        case validate_one_trial(rows, expected, usage_ids) do
+          {:ok, updated_usage_ids} -> validate_trial_rows(rest, expected, updated_usage_ids)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  defp validate_one_trial(rows, expected, usage_ids) do
+    ids = Enum.map(rows, &(is_map(&1) && &1["assignment_id"]))
+
+    if not unique_strings?(ids) or MapSet.new(ids) != MapSet.new(Map.keys(expected)) do
+      {:error, :duplicate_attribution}
+    else
+      Enum.reduce_while(rows, {:ok, usage_ids}, fn row, {:ok, seen_usage} ->
+        assignment_id = row["assignment_id"]
+        usage = row["usage"]
+
+        cond do
+          row != sanitize_map(row) ->
+            {:halt, {:error, :attribution_secrets_not_redacted}}
+
+          not exact_keys?(row, @trial_assignment_keys) ->
+            {:halt, {:error, :invalid_attribution_trial}}
+
+          row["attribution"] != expected[assignment_id] ->
+            {:halt, {:error, :attribution_assignment_mismatch}}
+
+          not valid_usage?(usage) ->
+            {:halt, {:error, :attribution_usage_invalid}}
+
+          not valid_vui?(row["vui"]) ->
+            {:halt, {:error, :attribution_vui_invalid}}
+
+          true ->
+            case usage_identity(usage) do
+              nil ->
+                {:cont, {:ok, seen_usage}}
+
+              identity ->
+                if MapSet.member?(seen_usage, identity) do
+                  {:halt, {:error, :duplicate_attribution}}
+                else
+                  {:cont, {:ok, MapSet.put(seen_usage, identity)}}
+                end
+            end
+        end
+      end)
+    end
+  end
+
+  defp valid_corpus?(corpus) do
+    is_map(corpus) and exact_keys?(corpus, @corpus_keys) and
+      sha256?(corpus["sha256"]) and hex?(corpus["repo_commit"], 40) and
+      is_binary(corpus["schema_version"]) and corpus["schema_version"] != "" and
+      is_list(corpus["unit_ids"]) and length(corpus["unit_ids"]) == 6 and
+      unique_strings?(corpus["unit_ids"])
+  end
+
+  defp valid_cycle_attribution?(value) do
+    task = is_map(value) && value["task"]
+
+    is_map(value) and exact_keys?(value, @cycle_attribution_keys) and
+      is_binary(value["epic_id"]) and value["epic_id"] != "" and
+      is_binary(value["wave_id"]) and value["wave_id"] != "" and
+      match?({:ok, _}, Ecto.UUID.cast(value["cycle_assignment_uuid"])) and
+      is_binary(value["assignment_id"]) and value["assignment_id"] != "" and
+      is_list(value["unit_ids"]) and value["unit_ids"] != [] and
+      unique_strings?(value["unit_ids"]) and sha256?(value["inventory_digest"]) and
+      sha256?(value["snapshot_digest"]) and is_map(task) and
+      exact_keys?(task, @task_fence_keys) and is_binary(task["doc_id"]) and
+      task["doc_id"] != "" and is_binary(task["worker_id"]) and task["worker_id"] != "" and
+      is_integer(task["claim_epoch"]) and task["claim_epoch"] > 0 and
+      hex?(task["work_digest"], 16)
+  end
+
+  defp unique_contract_assignments?(assignments, corpus) do
+    assignment_ids = Enum.map(assignments, & &1["assignment_id"])
+    cycle_ids = Enum.map(assignments, & &1["cycle_assignment_uuid"])
+    task_ids = Enum.map(assignments, & &1["task"]["doc_id"])
+
+    unique_strings?(assignment_ids) and unique_strings?(cycle_ids) and unique_strings?(task_ids) and
+      MapSet.new(assignment_ids) == MapSet.new(corpus["unit_ids"]) and
+      Enum.all?(assignments, fn assignment ->
+        assignment["unit_ids"] == [assignment["assignment_id"]] and
+          assignment["epic_id"] != "" and assignment["wave_id"] != ""
+      end)
+  end
+
+  defp valid_usage?(%{"state" => "observed"} = usage) do
+    expected = ~w(
+      state provider_session_id provider_turn_id counter_domain baseline_tokens terminal_tokens
+      token_count context_occupancy
+    )
+    token_count = usage["token_count"]
+    baseline = usage["baseline_tokens"]
+    terminal = usage["terminal_tokens"]
+
+    exact_keys?(usage, expected) and opaque_id?(usage["provider_session_id"]) and
+      opaque_id?(usage["provider_turn_id"]) and opaque_id?(usage["counter_domain"]) and
+      is_integer(baseline) and baseline >= 0 and is_integer(terminal) and terminal >= baseline and
+      token_count == %{"state" => "observed", "value" => terminal - baseline} and
+      valid_context_occupancy?(usage["context_occupancy"])
+  end
+
+  defp valid_usage?(%{"state" => state, "reason" => reason, "unit" => "tokens"} = usage)
+       when state in ~w(unsupported missing invalid) and is_binary(reason) and reason != "",
+       do: exact_keys?(usage, ~w(state reason unit))
+
+  defp valid_usage?(_usage), do: false
+
+  defp valid_context_occupancy?(%{"state" => "observed", "value" => value}),
+    do: is_integer(value) and value >= 0
+
+  defp valid_context_occupancy?(%{"state" => state, "reason" => reason})
+       when state in ~w(unsupported missing invalid),
+       do: is_binary(reason) and reason != ""
+
+  defp valid_context_occupancy?(_value), do: false
+
+  defp valid_vui?(%{"state" => "observed", "value" => value, "unit" => "claims"} = vui) do
+    value >= 0 and
+      exact_keys?(vui, ~w(
+        state value unit verified_claim_ids missing_claim_ids contradicted_claim_ids unsupported_claim_ids
+      )) and valid_claim_lists?(vui)
+  end
+
+  defp valid_vui?(%{"state" => state, "reason" => reason, "unit" => "claims"} = vui)
+       when state in ~w(unsupported missing invalid) and is_binary(reason) and reason != "" do
+    allowed = [
+      ~w(state reason unit),
+      ~w(
+        state reason unit verified_claim_ids missing_claim_ids contradicted_claim_ids unsupported_claim_ids
+      )
+    ]
+
+    Enum.any?(allowed, &exact_keys?(vui, &1)) and
+      (not Map.has_key?(vui, "verified_claim_ids") or valid_claim_lists?(vui))
+  end
+
+  defp valid_vui?(_vui), do: false
+
+  defp valid_claim_lists?(vui) do
+    Enum.all?(
+      ~w(verified_claim_ids missing_claim_ids contradicted_claim_ids unsupported_claim_ids),
+      fn key -> is_list(vui[key]) and unique_strings?(vui[key]) end
+    )
+  end
+
+  defp usage_identity(%{"state" => "observed"} = usage),
+    do: {usage["provider_session_id"], usage["provider_turn_id"]}
+
+  defp usage_identity(_usage), do: nil
+
+  defp unique_strings?(values) when is_list(values) do
+    Enum.all?(values, &(is_binary(&1) and &1 != "")) and
+      length(values) == MapSet.size(MapSet.new(values))
+  end
+
+  defp unique_strings?(_values), do: false
+
+  defp opaque_id?(value) when is_binary(value) and byte_size(value) in 1..200,
+    do: String.match?(value, ~r/^[A-Za-z0-9._:-]+$/)
+
+  defp opaque_id?(_value), do: false
+
+  defp sha256?(value), do: hex?(value, 64)
+
+  defp hex?(value, size) when is_binary(value) and byte_size(value) == size,
+    do: String.match?(value, ~r/^[0-9a-f]+$/)
+
+  defp hex?(_value, _size), do: false
+
+  defp persist_document(document), do: persist_ledger(document, %{})
+
+  defp persist_v2_document(document) do
+    persist_ledger(document["ledger"], %{
+      "artifact_format" => @format_v2,
+      "retrieval_attribution" => document["attribution"],
+      "retrieval_attribution_digest" => document["attribution_digest"]
+    })
+  end
+
+  defp persist_ledger(document, extra_experiment_attrs) do
+    experiment_attrs =
+      document["experiment"]
+      |> Map.put("manifest", document["manifest"])
+      |> Map.merge(extra_experiment_attrs)
 
     Repo.transaction(fn ->
       case create_experiment(experiment_attrs) do
@@ -359,7 +768,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
         {:error, :experiment_insert_failed}
 
       existing.phase == attrs["phase"] and existing.protocol_version == attrs["protocol_version"] and
-          existing.manifest_digest == attrs["manifest_digest"] ->
+        existing.manifest_digest == attrs["manifest_digest"] and
+        existing.artifact_format == Map.get(attrs, "artifact_format", @format) and
+          existing.retrieval_attribution_digest == attrs["retrieval_attribution_digest"] ->
         {:ok, existing}
 
       true ->

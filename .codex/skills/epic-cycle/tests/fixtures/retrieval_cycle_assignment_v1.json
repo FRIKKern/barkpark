@@ -1,0 +1,17 @@
+{
+  "assignment_id": "survey-2-1-01",
+  "cycle_assignment_uuid": "00000000-0000-4000-8000-000000000001",
+  "epic_id": "codex-epic-cycle-w3-real-corpus-usage-join",
+  "inventory_digest": "1111111111111111111111111111111111111111111111111111111111111111",
+  "snapshot_digest": "2222222222222222222222222222222222222222222222222222222222222222",
+  "task": {
+    "claim_epoch": 7,
+    "doc_id": "codex-epic-cycle-w3-survey-01",
+    "work_digest": "1234567890abcdef",
+    "worker_id": "codex-epic-cycle-w3-surveyor-01"
+  },
+  "unit_ids": [
+    "survey-2-1-01"
+  ],
+  "wave_id": "codex-epic-cycle-wave-3-real-corpus-usage-join-2026-07-15"
+}

@@ -25,12 +25,20 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional, Sequence
 
 
 SCHEMA_VERSION = "epic-cycle-concurrency-v1"
+RETRIEVAL_SCHEMA_VERSION = "epic-cycle-concurrency-v2"
+RETRIEVAL_CORPUS_SCHEMA_VERSION = "barkpark.retrieval-corpus.v1"
+RETRIEVAL_CONTROL_SCHEMA_VERSION = "epic-cycle-control-proof-v2"
+RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION = "barkpark.epic-retrieval-attribution.v2"
+RETRIEVAL_CORPUS_SHA256 = "a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26"
+RETRIEVAL_REPO_COMMIT = "55519257db1377e4e747683204fe902fe8d562a9"
+RETRIEVAL_UNIT_IDS = tuple(f"survey-2-1-{index:02d}" for index in range(1, 7))
 SEED = 20260715
 TREATMENTS = (1, 2, 3, 6)
 ASSIGNMENT_COUNT = 6
@@ -220,7 +228,7 @@ def build_schedule(assignment_ids: Sequence[str], seed: int = SEED) -> list[dict
     return schedule
 
 
-def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+def _validate_v1_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize the intentionally narrow benchmark manifest."""
     allowed = {
         "schema_version",
@@ -288,6 +296,192 @@ def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def validate_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate either the byte-stable v1 protocol or the opt-in retrieval v2 protocol."""
+    if manifest.get("schema_version") == RETRIEVAL_SCHEMA_VERSION:
+        return validate_retrieval_manifest(manifest)
+    return _validate_v1_manifest(manifest)
+
+
+def validate_retrieval_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "schema_version",
+        "seed",
+        "assignments",
+        "corpus",
+        "cold_reset_argv",
+        "warm_prime_argv",
+        "primary_pane",
+        "tmux_panes",
+        "timeout_seconds",
+        "environment",
+    }
+    unknown = sorted(set(manifest) - allowed)
+    if unknown:
+        raise ProtocolError(f"unsupported retrieval manifest fields: {', '.join(unknown)}")
+    if manifest.get("seed", SEED) != SEED:
+        raise ProtocolError(f"seed must be {SEED}")
+
+    corpus = admit_retrieval_corpus(manifest.get("corpus"))
+    assignments = manifest.get("assignments")
+    if not isinstance(assignments, list) or len(assignments) != ASSIGNMENT_COUNT:
+        raise ProtocolError("retrieval manifest must contain exactly six assignments")
+    normalized_assignments = []
+    ids: list[str] = []
+    for assignment in assignments:
+        if not isinstance(assignment, dict) or set(assignment) != {"id", "argv", "attribution"}:
+            raise ProtocolError("each retrieval assignment must contain only id, argv, and attribution")
+        assignment_id = assignment.get("id")
+        if not isinstance(assignment_id, str) or not assignment_id:
+            raise ProtocolError("retrieval assignment id must be a non-empty string")
+        attribution = validate_cycle_attribution(assignment.get("attribution"), assignment_id)
+        ids.append(assignment_id)
+        normalized_assignments.append(
+            {
+                "id": assignment_id,
+                "argv": validate_argv(assignment.get("argv"), f"assignment {assignment_id}"),
+                "attribution": attribution,
+            }
+        )
+    if tuple(ids) != RETRIEVAL_UNIT_IDS or ids != corpus["unit_ids"]:
+        raise ProtocolError("retrieval assignments must exactly match the preregistered corpus order")
+    if len({assignment["attribution"]["cycle_assignment_uuid"] for assignment in normalized_assignments}) != ASSIGNMENT_COUNT:
+        raise ProtocolError("cycle assignment UUIDs must be unique")
+    scopes = {
+        (assignment["attribution"]["epic_id"], assignment["attribution"]["wave_id"])
+        for assignment in normalized_assignments
+    }
+    if len(scopes) != 1:
+        raise ProtocolError("all retrieval assignments must belong to one epic/wave scope")
+
+    # The v1 validator intentionally rejects every extra field. Rebuild only its
+    # exact input rather than weakening that legacy boundary.
+    common = _validate_v1_manifest(
+        {
+            key: value
+            for key, value in {
+                "schema_version": SCHEMA_VERSION,
+                "seed": manifest.get("seed", SEED),
+                "assignments": [
+                    {"id": assignment["id"], "argv": assignment["argv"]}
+                    for assignment in normalized_assignments
+                ],
+                "cold_reset_argv": manifest.get("cold_reset_argv"),
+                "warm_prime_argv": manifest.get("warm_prime_argv"),
+                "primary_pane": manifest.get("primary_pane"),
+                "tmux_panes": manifest.get("tmux_panes"),
+                "timeout_seconds": manifest.get("timeout_seconds", 1800.0),
+                "environment": manifest.get("environment", {}),
+            }.items()
+            if value is not None
+        }
+    )
+    return {
+        **common,
+        "schema_version": RETRIEVAL_SCHEMA_VERSION,
+        "assignments": normalized_assignments,
+        "corpus": corpus,
+    }
+
+
+def admit_retrieval_corpus(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != {
+        "path",
+        "sha256",
+        "repo_commit",
+        "schema_version",
+        "unit_ids",
+    }:
+        raise ProtocolError("retrieval corpus must contain the exact admission fields")
+    path = value.get("path")
+    if not isinstance(path, str) or not path:
+        raise ProtocolError("retrieval corpus path must be non-empty")
+    if value.get("sha256") != RETRIEVAL_CORPUS_SHA256:
+        raise ProtocolError("retrieval corpus digest is not the preregistered digest")
+    if value.get("repo_commit") != RETRIEVAL_REPO_COMMIT:
+        raise ProtocolError("retrieval corpus commit is not the frozen commit")
+    if value.get("schema_version") != RETRIEVAL_CORPUS_SCHEMA_VERSION:
+        raise ProtocolError("retrieval corpus schema is unsupported")
+    if tuple(value.get("unit_ids", ())) != RETRIEVAL_UNIT_IDS:
+        raise ProtocolError("retrieval corpus unit ids are not the preregistered six")
+    try:
+        raw = Path(path).read_bytes()
+    except OSError as error:
+        raise ProtocolError(f"retrieval corpus is unavailable: {error}") from error
+    actual_digest = hashlib.sha256(raw).hexdigest()
+    if actual_digest != RETRIEVAL_CORPUS_SHA256:
+        raise ProtocolError("retrieval corpus bytes do not match the preregistered digest")
+    records = []
+    try:
+        for line in raw.decode("utf-8").splitlines():
+            if not line:
+                raise ProtocolError("retrieval corpus contains a blank record")
+            records.append(json.loads(line))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ProtocolError(f"retrieval corpus is not valid UTF-8 JSONL: {error}") from error
+    if len(records) != ASSIGNMENT_COUNT:
+        raise ProtocolError("retrieval corpus must contain exactly six records")
+    if [record.get("id") for record in records] != list(RETRIEVAL_UNIT_IDS):
+        raise ProtocolError("retrieval corpus records are not in preregistered order")
+    for record in records:
+        if record.get("schema_version") != RETRIEVAL_CORPUS_SCHEMA_VERSION:
+            raise ProtocolError("retrieval corpus record schema mismatch")
+        if record.get("repo", {}).get("commit") != RETRIEVAL_REPO_COMMIT:
+            raise ProtocolError("retrieval corpus record commit mismatch")
+        claims = record.get("gold_claims")
+        sources = record.get("sources")
+        if not isinstance(claims, list) or not claims or not isinstance(sources, list) or not sources:
+            raise ProtocolError("retrieval corpus records require gold claims and sources")
+    return {
+        "path": str(Path(path).resolve()),
+        "sha256": actual_digest,
+        "repo_commit": RETRIEVAL_REPO_COMMIT,
+        "schema_version": RETRIEVAL_CORPUS_SCHEMA_VERSION,
+        "unit_ids": list(RETRIEVAL_UNIT_IDS),
+    }
+
+
+def validate_cycle_attribution(value: Any, assignment_id: str) -> dict[str, Any]:
+    expected_keys = {
+        "epic_id",
+        "wave_id",
+        "cycle_assignment_uuid",
+        "assignment_id",
+        "unit_ids",
+        "inventory_digest",
+        "snapshot_digest",
+        "task",
+    }
+    if not isinstance(value, dict) or set(value) != expected_keys:
+        raise ProtocolError("cycle attribution has an invalid shape")
+    if value.get("assignment_id") != assignment_id or value.get("unit_ids") != [assignment_id]:
+        raise ProtocolError("cycle attribution assignment/unit mismatch")
+    for key in ("epic_id", "wave_id"):
+        if not isinstance(value.get(key), str) or not value[key]:
+            raise ProtocolError(f"cycle attribution {key} must be non-empty")
+    try:
+        parsed_uuid = str(uuid.UUID(value.get("cycle_assignment_uuid", "")))
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ProtocolError("cycle assignment UUID is invalid") from error
+    if parsed_uuid != value["cycle_assignment_uuid"]:
+        raise ProtocolError("cycle assignment UUID must use canonical lowercase text")
+    for key in ("inventory_digest", "snapshot_digest"):
+        digest = value.get(key)
+        if not isinstance(digest, str) or len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise ProtocolError(f"cycle attribution {key} must be lowercase SHA-256")
+    task = value.get("task")
+    if not isinstance(task, dict) or set(task) != {"doc_id", "worker_id", "claim_epoch", "work_digest"}:
+        raise ProtocolError("cycle attribution task fence has an invalid shape")
+    if not all(isinstance(task.get(key), str) and task[key] for key in ("doc_id", "worker_id")):
+        raise ProtocolError("cycle attribution task identity is invalid")
+    if isinstance(task.get("claim_epoch"), bool) or not isinstance(task.get("claim_epoch"), int) or task["claim_epoch"] < 1:
+        raise ProtocolError("cycle attribution task claim epoch is invalid")
+    work_digest = task.get("work_digest")
+    if not isinstance(work_digest, str) or len(work_digest) != 16 or any(char not in "0123456789abcdef" for char in work_digest):
+        raise ProtocolError("cycle attribution task work digest is invalid")
+    return json.loads(canonical_json(value))
+
+
 def validate_argv(argv: Any, label: str) -> list[str]:
     if not isinstance(argv, list) or not argv or not all(isinstance(item, str) and item for item in argv):
         raise ProtocolError(f"{label} argv must be a non-empty string list")
@@ -306,7 +500,7 @@ def plan_artifact(manifest: Mapping[str, Any]) -> dict[str, Any]:
     normalized = validate_manifest(manifest)
     ids = [assignment["id"] for assignment in normalized["assignments"]]
     frozen = {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": normalized["schema_version"],
         "seed": SEED,
         "treatments": list(TREATMENTS),
         "assignments_per_trial": ASSIGNMENT_COUNT,
@@ -315,13 +509,22 @@ def plan_artifact(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "schedule": build_schedule(ids),
         "manifest_digest": digest_json(normalized),
     }
+    if normalized["schema_version"] == RETRIEVAL_SCHEMA_VERSION:
+        corpus = normalized["corpus"]
+        frozen["retrieval_admission"] = {
+            key: corpus[key]
+            for key in ("sha256", "repo_commit", "schema_version", "unit_ids")
+        }
+        frozen["attribution_contract_digest"] = digest_json(
+            [assignment["attribution"] for assignment in normalized["assignments"]]
+        )
     frozen["plan_digest"] = digest_json(frozen)
     return frozen
 
 
 def verify_replay(plan: Mapping[str, Any], manifest: Mapping[str, Any]) -> None:
     expected = plan_artifact(manifest)
-    if plan.get("schema_version") != SCHEMA_VERSION:
+    if plan.get("schema_version") != expected["schema_version"]:
         raise ProtocolError("replay artifact has the wrong schema")
     supplied_digest = plan.get("plan_digest")
     without_digest = dict(plan)
@@ -716,6 +919,196 @@ def _parse_assignment_evaluation(stdout: str) -> tuple[Optional[bool], Optional[
     return complete, contradiction, ""
 
 
+def typed_observation(state: str, *, value: Optional[int] = None, unit: str, reason: Optional[str] = None, **extra: Any) -> dict[str, Any]:
+    """Return the v2 ledger state vocabulary without coercing unknowns to zero."""
+    if state not in {"observed", "unsupported", "missing", "invalid"}:
+        raise ProtocolError(f"unknown observation state: {state}")
+    if state == "observed":
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ProtocolError("observed retrieval values require a non-negative integer")
+        result = {"state": state, "value": value, "unit": unit}
+    else:
+        if value is not None or not isinstance(reason, str) or not reason:
+            raise ProtocolError(f"{state} retrieval values require only a reason")
+        result = {"state": state, "reason": reason, "unit": unit}
+    result.update(extra)
+    return result
+
+
+def retrieval_record(corpus: Mapping[str, Any], assignment_id: str) -> dict[str, Any]:
+    admitted = admit_retrieval_corpus(corpus)
+    raw = Path(admitted["path"]).read_text(encoding="utf-8")
+    for line in raw.splitlines():
+        record = json.loads(line)
+        if record.get("id") == assignment_id:
+            return record
+    raise ProtocolError(f"retrieval corpus has no record for {assignment_id}")
+
+
+def score_vui(record: Mapping[str, Any], witnesses: Any) -> tuple[dict[str, Any], bool]:
+    """Score preregistered claim witnesses; prose similarity never earns credit."""
+    claims = record.get("gold_claims")
+    if not isinstance(witnesses, list):
+        return typed_observation("missing", unit="claims", reason="witnesses are absent"), True
+    gold = {claim.get("claim_id"): claim for claim in claims if isinstance(claim, dict)}
+    seen: dict[str, Mapping[str, Any]] = {}
+    for witness in witnesses:
+        if not isinstance(witness, dict) or set(witness) != {"claim_id", "verdict", "evidence"}:
+            return typed_observation("invalid", unit="claims", reason="witness shape is invalid"), True
+        claim_id = witness.get("claim_id")
+        if claim_id not in gold:
+            return typed_observation("invalid", unit="claims", reason="witness names an unknown claim"), True
+        if claim_id in seen:
+            return typed_observation("invalid", unit="claims", reason="duplicate claim witness"), True
+        verdict = witness.get("verdict")
+        evidence = witness.get("evidence")
+        if verdict not in {"supported", "contradicted", "unsupported"}:
+            return typed_observation("invalid", unit="claims", reason="witness verdict is invalid"), True
+        if not isinstance(evidence, list) or not evidence or len(evidence) != len(set(evidence)):
+            return typed_observation("invalid", unit="claims", reason="witness evidence is absent or duplicated"), True
+        if not all(item in gold[claim_id].get("evidence", []) for item in evidence):
+            return typed_observation("invalid", unit="claims", reason="witness evidence is outside the frozen gold set"), True
+        seen[claim_id] = witness
+
+    missing = sorted(set(gold) - set(seen))
+    contradicted = sorted(
+        claim_id for claim_id, witness in seen.items() if witness["verdict"] == "contradicted"
+    )
+    unsupported = sorted(
+        claim_id for claim_id, witness in seen.items() if witness["verdict"] == "unsupported"
+    )
+    verified = sorted(
+        claim_id for claim_id, witness in seen.items() if witness["verdict"] == "supported"
+    )
+    detail = {
+        "verified_claim_ids": verified,
+        "missing_claim_ids": missing,
+        "contradicted_claim_ids": contradicted,
+        "unsupported_claim_ids": unsupported,
+    }
+    if contradicted:
+        return typed_observation("invalid", unit="claims", reason="gold claim contradicted", **detail), True
+    if missing:
+        return typed_observation("missing", unit="claims", reason="gold claim witness absent", **detail), True
+    if unsupported:
+        return typed_observation("unsupported", unit="claims", reason="gold claim unsupported", **detail), True
+    return typed_observation("observed", value=len(verified), unit="claims", **detail), False
+
+
+def validate_usage_receipt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict) or "state" not in value:
+        return typed_observation("missing", unit="tokens", reason="provider usage receipt is absent")
+    state = value.get("state")
+    if state in {"unsupported", "missing", "invalid"}:
+        if set(value) != {"state", "reason"} or not isinstance(value.get("reason"), str) or not value["reason"]:
+            return typed_observation("invalid", unit="tokens", reason="typed provider usage state is malformed")
+        return typed_observation(state, unit="tokens", reason=value["reason"])
+    expected = {
+        "state",
+        "provider_session_id",
+        "provider_turn_id",
+        "counter_domain",
+        "baseline_tokens",
+        "terminal_tokens",
+        "token_count",
+        "context_occupancy",
+    }
+    if state != "observed" or set(value) != expected:
+        return typed_observation("invalid", unit="tokens", reason="observed provider usage receipt has an invalid shape")
+    opaque = (value.get("provider_session_id"), value.get("provider_turn_id"), value.get("counter_domain"))
+    if not all(
+        isinstance(item, str)
+        and item
+        and len(item) <= 200
+        and all(char.isalnum() or char in "._:-" for char in item)
+        for item in opaque
+    ):
+        return typed_observation("invalid", unit="tokens", reason="provider usage identity is not opaque allowlisted text")
+    baseline = value.get("baseline_tokens")
+    terminal = value.get("terminal_tokens")
+    token_count = value.get("token_count")
+    if (
+        isinstance(baseline, bool)
+        or not isinstance(baseline, int)
+        or baseline < 0
+        or isinstance(terminal, bool)
+        or not isinstance(terminal, int)
+        or terminal < baseline
+        or not isinstance(token_count, dict)
+        or token_count != {"state": "observed", "value": terminal - baseline}
+    ):
+        return typed_observation("invalid", unit="tokens", reason="provider counters are non-monotonic or inconsistent")
+    context = value.get("context_occupancy")
+    if not isinstance(context, dict) or set(context) not in ({"state", "value"}, {"state", "reason"}):
+        return typed_observation("invalid", unit="tokens", reason="context occupancy state is malformed")
+    if context.get("state") == "observed":
+        context_value = context.get("value")
+        if isinstance(context_value, bool) or not isinstance(context_value, int) or context_value < 0:
+            return typed_observation("invalid", unit="tokens", reason="context occupancy value is invalid")
+    elif context.get("state") not in {"unsupported", "missing", "invalid"} or not isinstance(context.get("reason"), str) or not context["reason"]:
+        return typed_observation("invalid", unit="tokens", reason="context occupancy state is invalid")
+    return json.loads(canonical_json(value))
+
+
+def parse_retrieval_evaluation(
+    stdout: str,
+    record: Mapping[str, Any],
+    expected_attribution: Mapping[str, Any],
+) -> dict[str, Any]:
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        return {
+            "complete": False,
+            "contradiction_unsupported": True,
+            "vui": typed_observation("missing", unit="claims", reason="assignment emitted no evaluation"),
+            "usage": typed_observation("missing", unit="tokens", reason="assignment emitted no evaluation"),
+            "attribution": None,
+            "reason": "assignment emitted no JSON evaluation",
+        }
+    try:
+        value = json.loads(lines[-1])
+    except json.JSONDecodeError:
+        value = None
+    if not isinstance(value, dict) or set(value) != {"complete", "witnesses", "attribution", "usage"}:
+        return {
+            "complete": False,
+            "contradiction_unsupported": True,
+            "vui": typed_observation("invalid", unit="claims", reason="retrieval evaluation shape is invalid"),
+            "usage": typed_observation("invalid", unit="tokens", reason="retrieval evaluation shape is invalid"),
+            "attribution": None,
+            "reason": "retrieval evaluation shape is invalid",
+        }
+    if not isinstance(value.get("complete"), bool):
+        return {
+            "complete": False,
+            "contradiction_unsupported": True,
+            "vui": typed_observation("invalid", unit="claims", reason="complete must be boolean"),
+            "usage": typed_observation("invalid", unit="tokens", reason="complete must be boolean"),
+            "attribution": None,
+            "reason": "complete must be boolean",
+        }
+    if value.get("attribution") != expected_attribution:
+        return {
+            "complete": False,
+            "contradiction_unsupported": True,
+            "vui": typed_observation("invalid", unit="claims", reason="cycle/task attribution mismatch"),
+            "usage": typed_observation("invalid", unit="tokens", reason="cycle/task attribution mismatch"),
+            "attribution": None,
+            "reason": "cycle/task attribution mismatch",
+        }
+    vui, contradiction = score_vui(record, value.get("witnesses"))
+    usage = validate_usage_receipt(value.get("usage"))
+    complete = value["complete"] and vui["state"] == "observed"
+    return {
+        "complete": complete,
+        "contradiction_unsupported": contradiction,
+        "vui": vui,
+        "usage": usage,
+        "attribution": json.loads(canonical_json(expected_attribution)),
+        "reason": "" if complete else "retrieval evidence is incomplete, contradictory, or unsupported",
+    }
+
+
 def launch_owned_process(
     argv: Sequence[str],
     *,
@@ -795,7 +1188,15 @@ def terminate_owned_group(pgid: int, grace_seconds: float = 1.0) -> None:
             pass
 
 
-def run_control_command(argv: Sequence[str], env: Mapping[str, str], timeout_seconds: float, label: str) -> dict[str, Any]:
+def run_control_command(
+    argv: Sequence[str],
+    env: Mapping[str, str],
+    timeout_seconds: float,
+    label: str,
+    *,
+    semantic_state: Optional[str] = None,
+    corpus: Optional[Mapping[str, Any]] = None,
+) -> dict[str, Any]:
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="epic-cycle-control-") as temporary:
         root = Path(temporary)
@@ -819,16 +1220,60 @@ def run_control_command(argv: Sequence[str], env: Mapping[str, str], timeout_sec
             if returncode != 0:
                 stderr = stderr_path.read_text(encoding="utf-8", errors="replace")
                 raise SafetyError(f"{label} failed with exit {returncode}: {stderr[-500:]}")
-            return {
+            result = {
                 "status": "passed",
                 "wall_seconds": time.monotonic() - started,
                 "process_identity": asdict(process_identity),
                 "pgid": pgid,
             }
+            if semantic_state is not None:
+                if corpus is None:
+                    raise SafetyError(f"{label} semantic proof has no admitted corpus")
+                stdout = stdout_path.read_text(encoding="utf-8", errors="replace")
+                result["semantic_verification"] = validate_control_proof(
+                    stdout, semantic_state, corpus
+                )
+            return result
         finally:
             if process is not None and process.poll() is None and pgid is not None:
                 terminate_owned_group(pgid)
                 process.wait(timeout=2.0)
+
+
+def validate_control_proof(stdout: str, expected_state: str, corpus: Mapping[str, Any]) -> dict[str, Any]:
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    if not lines:
+        raise SafetyError(f"{expected_state} control emitted no semantic proof")
+    try:
+        proof = json.loads(lines[-1])
+    except json.JSONDecodeError as error:
+        raise SafetyError(f"{expected_state} control semantic proof is not JSON") from error
+    if expected_state == "cold":
+        expected = {
+            "schema_version": RETRIEVAL_CONTROL_SCHEMA_VERSION,
+            "state": "cold",
+            "corpus_sha256": corpus["sha256"],
+            "unit_ids": corpus["unit_ids"],
+            "cache_entries": 0,
+        }
+    elif expected_state == "warm":
+        expected = {
+            "schema_version": RETRIEVAL_CONTROL_SCHEMA_VERSION,
+            "state": "warm",
+            "corpus_sha256": corpus["sha256"],
+            "unit_ids": corpus["unit_ids"],
+            "primed_unit_ids": corpus["unit_ids"],
+        }
+    else:
+        raise ProtocolError(f"unsupported semantic control state: {expected_state}")
+    if proof != expected:
+        raise SafetyError(f"{expected_state} control semantic proof mismatch")
+    return measured(
+        1,
+        "boolean",
+        f"{RETRIEVAL_CONTROL_SCHEMA_VERSION} final stdout JSON",
+        f"pre-treatment {expected_state} postcondition",
+    )
 
 
 class HeavyCapacityLease:
@@ -876,6 +1321,71 @@ class HeavyCapacityLease:
         self.slot_index = None
 
 
+def reject_duplicate_usage_identities(results: Sequence[dict[str, Any]]) -> None:
+    seen: dict[tuple[str, str], dict[str, Any]] = {}
+    for result in results:
+        usage = result.get("usage")
+        if not isinstance(usage, dict) or usage.get("state") != "observed":
+            continue
+        identity = (usage["provider_session_id"], usage["provider_turn_id"])
+        previous = seen.get(identity)
+        if previous is None:
+            seen[identity] = result
+            continue
+        for duplicate in (previous, result):
+            duplicate["complete"] = False
+            duplicate["contradiction_unsupported"] = True
+            duplicate["usage"] = typed_observation(
+                "invalid", unit="tokens", reason="duplicate provider session/turn attribution"
+            )
+            duplicate["reason"] = "duplicate provider session/turn attribution"
+
+
+def aggregate_typed_observations(
+    results: Sequence[Mapping[str, Any]], field: str, unit: str
+) -> dict[str, Any]:
+    observations = [result.get(field) for result in results]
+    states = [value.get("state") for value in observations if isinstance(value, dict)]
+    for state in ("invalid", "missing", "unsupported"):
+        if state in states:
+            return typed_observation(
+                state,
+                unit=unit,
+                reason=f"one or more assignment {field} observations are {state}",
+            )
+    if len(observations) != ASSIGNMENT_COUNT or not all(
+        isinstance(value, dict) and value.get("state") == "observed" for value in observations
+    ):
+        return typed_observation("missing", unit=unit, reason=f"assignment {field} observations are incomplete")
+    if field == "usage":
+        value = sum(observation["token_count"]["value"] for observation in observations)
+    else:
+        value = sum(observation["value"] for observation in observations)
+    return typed_observation("observed", value=value, unit=unit)
+
+
+def aggregate_context_occupancy(results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    contexts = []
+    for result in results:
+        usage = result.get("usage")
+        if not isinstance(usage, dict) or usage.get("state") != "observed":
+            state = usage.get("state") if isinstance(usage, dict) else "missing"
+            return typed_observation(
+                state if state in {"unsupported", "missing", "invalid"} else "missing",
+                unit="tokens",
+                reason="provider usage does not expose a complete context occupancy set",
+            )
+        contexts.append(usage["context_occupancy"])
+    for state in ("invalid", "missing", "unsupported"):
+        if any(context.get("state") == state for context in contexts):
+            return typed_observation(
+                state, unit="tokens", reason=f"one or more context occupancy values are {state}"
+            )
+    return typed_observation(
+        "observed", value=sum(context["value"] for context in contexts), unit="tokens"
+    )
+
+
 def run_assignment_set(
     assignments: Sequence[Mapping[str, Any]],
     assignment_order: Sequence[str],
@@ -883,6 +1393,7 @@ def run_assignment_set(
     *,
     timeout_seconds: float,
     environment: Mapping[str, str],
+    corpus: Optional[Mapping[str, Any]] = None,
 ) -> dict[str, Any]:
     """Run six FIFO-dispatched assignments, retaining every crash and timeout (ITT)."""
     if width not in TREATMENTS:
@@ -935,6 +1446,18 @@ def run_assignment_set(
                             "process_identity": None,
                             "pgid": None,
                         }
+                        if corpus is not None:
+                            results[assignment_id].update(
+                                {
+                                    "vui": typed_observation(
+                                        "missing", unit="claims", reason="assignment launch failed"
+                                    ),
+                                    "usage": typed_observation(
+                                        "missing", unit="tokens", reason="assignment launch failed"
+                                    ),
+                                    "attribution": assignment["attribution"],
+                                }
+                            )
                     else:
                         sampler.register(pgid)
                         launched_at = time.monotonic()
@@ -966,12 +1489,23 @@ def run_assignment_set(
                         status = "success" if returncode == 0 else "failure"
                     stdout = state["stdout"].read_text(encoding="utf-8", errors="replace")
                     stderr = state["stderr"].read_text(encoding="utf-8", errors="replace")
-                    complete, contradiction, evaluation_reason = _parse_assignment_evaluation(stdout)
+                    retrieval_evaluation = None
+                    if corpus is None:
+                        complete, contradiction, evaluation_reason = _parse_assignment_evaluation(stdout)
+                    else:
+                        retrieval_evaluation = parse_retrieval_evaluation(
+                            stdout,
+                            retrieval_record(corpus, assignment_id),
+                            by_id[assignment_id]["attribution"],
+                        )
+                        complete = retrieval_evaluation["complete"]
+                        contradiction = retrieval_evaluation["contradiction_unsupported"]
+                        evaluation_reason = retrieval_evaluation["reason"]
                     if status != "success":
                         complete = False
                     if contradiction is None:
                         contradiction = True
-                    results[assignment_id] = {
+                    assignment_result = {
                         "assignment_id": assignment_id,
                         "status": status,
                         "complete": bool(complete),
@@ -982,9 +1516,26 @@ def run_assignment_set(
                         "reason": evaluation_reason,
                         "process_identity": asdict(state["identity"]),
                         "pgid": state["pgid"],
-                        "stdout_tail": stdout[-2000:],
-                        "stderr_tail": stderr[-2000:],
+                        "stdout_tail": (
+                            stdout[-2000:]
+                            if corpus is None
+                            else "[REDACTED: retrieval evaluation consumed]"
+                        ),
+                        "stderr_tail": (
+                            stderr[-2000:]
+                            if corpus is None
+                            else "[REDACTED: retrieval stderr withheld]"
+                        ),
                     }
+                    if retrieval_evaluation is not None:
+                        assignment_result.update(
+                            {
+                                "vui": retrieval_evaluation["vui"],
+                                "usage": retrieval_evaluation["usage"],
+                                "attribution": retrieval_evaluation["attribution"],
+                            }
+                        )
+                    results[assignment_id] = assignment_result
                     completed.append(assignment_id)
                 for assignment_id in completed:
                     active.pop(assignment_id)
@@ -1000,6 +1551,8 @@ def run_assignment_set(
     system_seconds = max(0.0, system_after - system_before)
     cpu_percent = (user_seconds + system_seconds) / wall_seconds * 100.0 if wall_seconds > 0 else None
     ordered_results = [results[assignment_id] for assignment_id in assignment_order]
+    if corpus is not None:
+        reject_duplicate_usage_identities(ordered_results)
     metrics = {
         "wall": measured(wall_seconds, "seconds", "time.monotonic", "six-assignment treatment trial"),
         "user": measured(user_seconds, "seconds", "resource.getrusage(RUSAGE_CHILDREN)", "owned child process groups"),
@@ -1024,25 +1577,40 @@ def run_assignment_set(
                 "platform sampler did not expose instantaneous CPU",
             )
         ),
-        "token_cost": unsupported_metric(
-            "tokens",
-            "assignment evaluation contract",
-            "six-assignment treatment trial",
-            "the narrow assignment evaluation payload does not expose token accounting",
-        ),
-        "context_cost": unsupported_metric(
-            "tokens",
-            "assignment evaluation contract",
-            "six-assignment treatment trial",
-            "the narrow assignment evaluation payload does not expose context accounting",
-        ),
-        "verified_unique_information": unsupported_metric(
-            "items",
-            "assignment evaluation contract",
-            "six-assignment treatment trial",
-            "no preregistered unique-information verifier is part of this benchmark",
-        ),
     }
+    if corpus is None:
+        metrics.update(
+            {
+                "token_cost": unsupported_metric(
+                    "tokens",
+                    "assignment evaluation contract",
+                    "six-assignment treatment trial",
+                    "the narrow assignment evaluation payload does not expose token accounting",
+                ),
+                "context_cost": unsupported_metric(
+                    "tokens",
+                    "assignment evaluation contract",
+                    "six-assignment treatment trial",
+                    "the narrow assignment evaluation payload does not expose context accounting",
+                ),
+                "verified_unique_information": unsupported_metric(
+                    "items",
+                    "assignment evaluation contract",
+                    "six-assignment treatment trial",
+                    "no preregistered unique-information verifier is part of this benchmark",
+                ),
+            }
+        )
+    else:
+        metrics.update(
+            {
+                "token_cost": aggregate_typed_observations(ordered_results, "usage", "tokens"),
+                "context_cost": aggregate_context_occupancy(ordered_results),
+                "verified_unique_information": aggregate_typed_observations(
+                    ordered_results, "vui", "claims"
+                ),
+            }
+        )
     return {
         "assignment_results": ordered_results,
         "dispatch_sequence": dispatch_sequence,
@@ -1064,15 +1632,33 @@ def default_treatment_runner(
             "BARKPARK_BENCH_SENSITIVITY_OF": sensitivity_of or "",
         }
     )
-    reset = run_control_command(manifest["cold_reset_argv"], env, manifest["timeout_seconds"], "cold reset")
-    prime = run_control_command(manifest["warm_prime_argv"], env, manifest["timeout_seconds"], "warm prime")
+    retrieval = manifest["schema_version"] == RETRIEVAL_SCHEMA_VERSION
+    reset = run_control_command(
+        manifest["cold_reset_argv"],
+        env,
+        manifest["timeout_seconds"],
+        "cold reset",
+        semantic_state="cold" if retrieval else None,
+        corpus=manifest.get("corpus"),
+    )
+    prime = run_control_command(
+        manifest["warm_prime_argv"],
+        env,
+        manifest["timeout_seconds"],
+        "warm prime",
+        semantic_state="warm" if retrieval else None,
+        corpus=manifest.get("corpus"),
+    )
     measured_work = run_assignment_set(
         manifest["assignments"],
         trial["assignment_order"],
         trial["width"],
         timeout_seconds=manifest["timeout_seconds"],
         environment=env,
+        corpus=manifest.get("corpus"),
     )
+    if retrieval:
+        return {"cold_reset": reset, "warm_prime": prime, **measured_work}
     return {
         "cold_reset": {
             **reset,
@@ -1228,6 +1814,44 @@ def trials_for_analysis(originals: Sequence[Mapping[str, Any]], reruns: Sequence
     return [clean_reruns.get(original.get("trial_id"), original) for original in originals]
 
 
+def build_epicfleet_attribution(
+    manifest: Mapping[str, Any],
+    originals: Sequence[Mapping[str, Any]],
+    reruns: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    assignments = [assignment["attribution"] for assignment in manifest["assignments"]]
+    corpus = manifest["corpus"]
+    trials = []
+    for trial in [*originals, *reruns]:
+        rows = [
+            {
+                "assignment_id": result["assignment_id"],
+                "attribution": result.get("attribution"),
+                "usage": result.get("usage"),
+                "vui": result.get("vui"),
+            }
+            for result in trial.get("assignment_results", [])
+        ]
+        trials.append(
+            {
+                "trial_id": trial["trial_id"],
+                "sensitivity_of": trial.get("sensitivity_of"),
+                "assignments": rows,
+            }
+        )
+    return {
+        "schema_version": RETRIEVAL_ATTRIBUTION_SCHEMA_VERSION,
+        "epic_id": assignments[0]["epic_id"],
+        "wave_id": assignments[0]["wave_id"],
+        "corpus": {
+            key: corpus[key]
+            for key in ("sha256", "repo_commit", "schema_version", "unit_ids")
+        },
+        "assignments": assignments,
+        "trials": trials,
+    }
+
+
 def execute_protocol(
     manifest: Mapping[str, Any],
     admission: AdmissionDecision,
@@ -1301,7 +1925,7 @@ def execute_protocol(
                 "decision_binding": look == FIXED_LOOKS[-1],
             }
         )
-    return {
+    result = {
         **plan,
         "admission": admission_json(admission),
         "original_trials": originals,
@@ -1311,6 +1935,14 @@ def execute_protocol(
         "fixed_look_results": fixed_look_results,
         "final_selection": fixed_look_results[-1]["selection"],
     }
+    if normalized["schema_version"] == RETRIEVAL_SCHEMA_VERSION:
+        result["epicfleet_attribution"] = build_epicfleet_attribution(
+            normalized, originals, reruns
+        )
+        result["epicfleet_attribution_digest"] = digest_json(
+            result["epicfleet_attribution"]
+        )
+    return result
 
 
 def snapshot_json(snapshot: PaneSnapshot) -> dict[str, Any]:

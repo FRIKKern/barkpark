@@ -442,6 +442,186 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     end
   end
 
+  describe "canonical retrieval benchmark v2 bridge" do
+    test "round-trips attribution while preserving the nested v1 ledger", %{attrs: attrs} do
+      contract = retrieval_contract(attrs)
+      attribution = retrieval_attribution(contract, attrs)
+      attrs = %{attrs | manifest: Map.put(manifest(), "retrieval_attribution_contract", contract)}
+
+      assert {:ok, experiment} =
+               EpicFleet.create_retrieval_benchmark_experiment(attrs, attribution)
+
+      assert experiment.artifact_format == "barkpark-epic-benchmark-v2"
+      assert experiment.retrieval_attribution_digest == EpicFleet.canonical_digest(attribution)
+      assert {:ok, _attempt} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
+
+      assert {:ok, v1_json} = EpicFleet.export_benchmark_json(experiment)
+      assert Jason.decode!(v1_json)["format"] == "barkpark-epic-benchmark-v1"
+
+      assert {:ok, v2_json} = EpicFleet.export_benchmark_v2_json(experiment)
+      document = Jason.decode!(v2_json)
+      assert document["format"] == "barkpark-epic-benchmark-v2"
+      assert document["ledger"] == Jason.decode!(v1_json)
+      assert document["attribution"] == attribution
+
+      assert {:ok, %{experiment: replay, attempts: 1}} =
+               EpicFleet.import_benchmark_json(v2_json)
+
+      assert replay.id == experiment.id
+      assert {:ok, ^v2_json} = EpicFleet.export_benchmark_v2_json(replay)
+    end
+
+    test "pins the v2 cross-runtime attribution and outer ledger digests", %{attrs: attrs} do
+      attrs = %{attrs | epic_id: "epic-v2-golden", wave_id: "wave-v2-golden"}
+      contract = retrieval_contract(attrs)
+      attribution = retrieval_attribution(contract, attrs)
+
+      experiment = %Experiment{
+        id: "00000000-0000-0000-0000-000000000001",
+        workspace_id: "00000000-0000-0000-0000-000000000002",
+        epic_id: attrs.epic_id,
+        wave_id: attrs.wave_id,
+        experiment_id: "experiment-v2-golden",
+        phase: "legendary",
+        protocol_version: 2,
+        manifest: Map.put(manifest(), "retrieval_attribution_contract", contract),
+        artifact_format: "barkpark-epic-benchmark-v2",
+        retrieval_attribution: attribution,
+        retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
+      }
+
+      document = Benchmark.document_v2(experiment, [attempt_attrs()])
+
+      assert document["attribution_digest"] ==
+               "83e3f02cf45c9119b43edebbb0614abf3e4e5d5227006e77d753c5550c2a6b3b"
+
+      assert document["ledger_digest"] ==
+               "f493b893274a58bd6d1fb429d4f60f80fd0331573c0065e09eff6a25bed1fb78"
+    end
+
+    test "rejects tamper, scope, task, duplicate, receipt, and secret-bearing attribution", %{
+      attrs: attrs
+    } do
+      document = v2_document_fixture(attrs)
+
+      tampered = put_in(document, ["attribution", "epic_id"], "tampered")
+      assert {:error, :attribution_digest_mismatch} = import_document(tampered)
+
+      scope = tampered |> resign_v2_document()
+      assert {:error, :attribution_scope_mismatch} = import_document(scope)
+
+      task_mismatch =
+        document
+        |> put_in(
+          [
+            "attribution",
+            "trials",
+            Access.at(0),
+            "assignments",
+            Access.at(0),
+            "attribution",
+            "task",
+            "claim_epoch"
+          ],
+          99
+        )
+        |> resign_v2_document()
+
+      assert {:error, :attribution_assignment_mismatch} = import_document(task_mismatch)
+
+      duplicate_row =
+        document
+        |> update_in(
+          ["attribution", "trials", Access.at(0), "assignments"],
+          fn [first | rest] -> [first, first | Enum.drop(rest, 1)] end
+        )
+        |> resign_v2_document()
+
+      assert {:error, :duplicate_attribution} = import_document(duplicate_row)
+
+      duplicate_usage =
+        document
+        |> put_in(
+          [
+            "attribution",
+            "trials",
+            Access.at(0),
+            "assignments",
+            Access.at(1),
+            "usage",
+            "provider_session_id"
+          ],
+          "session-01"
+        )
+        |> put_in(
+          [
+            "attribution",
+            "trials",
+            Access.at(0),
+            "assignments",
+            Access.at(1),
+            "usage",
+            "provider_turn_id"
+          ],
+          "turn-01"
+        )
+        |> resign_v2_document()
+
+      assert {:error, :duplicate_attribution} = import_document(duplicate_usage)
+
+      invalid_usage =
+        document
+        |> put_in(
+          [
+            "attribution",
+            "trials",
+            Access.at(0),
+            "assignments",
+            Access.at(0),
+            "usage",
+            "terminal_tokens"
+          ],
+          99
+        )
+        |> resign_v2_document()
+
+      assert {:error, :attribution_usage_invalid} = import_document(invalid_usage)
+
+      secret =
+        document
+        |> put_in(
+          ["attribution", "trials", Access.at(0), "assignments", Access.at(0), "api_token"],
+          "must-not-cross"
+        )
+        |> resign_v2_document()
+
+      assert {:error, :attribution_secrets_not_redacted} = import_document(secret)
+      assert Repo.aggregate(Experiment, :count) == 0
+      assert Repo.aggregate(Attempt, :count) == 0
+    end
+
+    test "preserves unsupported missing and invalid typed attribution states", %{attrs: attrs} do
+      document = v2_document_fixture(attrs)
+
+      typed =
+        Enum.with_index(~w(unsupported missing invalid))
+        |> Enum.reduce(document, fn {state, index}, current ->
+          current
+          |> put_in(
+            ["attribution", "trials", Access.at(0), "assignments", Access.at(index), "usage"],
+            %{"state" => state, "reason" => "fixture", "unit" => "tokens"}
+          )
+          |> put_in(
+            ["attribution", "trials", Access.at(0), "assignments", Access.at(index), "vui"],
+            %{"state" => state, "reason" => "fixture", "unit" => "claims"}
+          )
+        end)
+        |> resign_v2_document()
+
+      assert {:ok, %{attempts: 1}} = import_document(typed)
+    end
+  end
+
   test "forward migration repairs replacement boundaries after the original ledger migration" do
     original_version = 20_260_715_000_400
     repair_version = 20_260_715_000_510
@@ -485,6 +665,23 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
     assert predicate =~ "replaces_attempt_id IS NOT NULL"
   end
 
+  test "forward migration reserves the v2 attribution boundary after build 2" do
+    version = 20_260_715_001_000
+
+    assert %{rows: [[^version]]} =
+             Repo.query!("SELECT version FROM schema_migrations WHERE version = $1", [version])
+
+    assert %{rows: [[definition]]} =
+             Repo.query!("""
+             SELECT pg_get_constraintdef(oid)
+             FROM pg_constraint
+             WHERE conname = 'epic_benchmark_experiments_retrieval_attribution'
+             """)
+
+    assert definition =~ "barkpark-epic-benchmark-v2"
+    assert definition =~ "retrieval_attribution_digest"
+  end
+
   defp manifest do
     %{
       "seed" => 20_260_715,
@@ -509,6 +706,127 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       provenance: %{"sampler" => "stdlib", "host" => "fixture"},
       payload: %{"complete" => true, "verified_yield" => 6}
     }
+  end
+
+  defp retrieval_contract(attrs) do
+    corpus = %{
+      "sha256" => "a3a22c78d90e76fe00473b6434b2a025df51da7844d9022959c3f25eb0ee8a26",
+      "repo_commit" => "55519257db1377e4e747683204fe902fe8d562a9",
+      "schema_version" => "barkpark.retrieval-corpus.v1",
+      "unit_ids" => Enum.map(1..6, &"survey-2-1-0#{&1}")
+    }
+
+    %{
+      "schema_version" => "barkpark.epic-retrieval-contract.v2",
+      "corpus" => corpus,
+      "assignments" => Enum.map(1..6, &retrieval_assignment(&1, attrs))
+    }
+  end
+
+  defp retrieval_assignment(index, attrs) do
+    assignment_id = "survey-2-1-0#{index}"
+
+    %{
+      "epic_id" => attrs.epic_id,
+      "wave_id" => attrs.wave_id,
+      "cycle_assignment_uuid" =>
+        "00000000-0000-4000-8000-#{index |> Integer.to_string() |> String.pad_leading(12, "0")}",
+      "assignment_id" => assignment_id,
+      "unit_ids" => [assignment_id],
+      "inventory_digest" => String.duplicate(Integer.to_string(index), 64),
+      "snapshot_digest" => String.duplicate(Integer.to_string(index + 1), 64),
+      "task" => %{
+        "doc_id" => "codex-epic-cycle-w3-survey-0#{index}",
+        "worker_id" => "codex-epic-cycle-w3-surveyor-0#{index}",
+        "claim_epoch" => 7,
+        "work_digest" => String.duplicate(Integer.to_string(index), 16)
+      }
+    }
+  end
+
+  defp retrieval_attribution(contract, attrs) do
+    rows =
+      contract["assignments"]
+      |> Enum.with_index(1)
+      |> Enum.map(fn {attribution, index} ->
+        %{
+          "assignment_id" => attribution["assignment_id"],
+          "attribution" => attribution,
+          "usage" => usage_receipt(index),
+          "vui" => %{
+            "state" => "observed",
+            "value" => 3,
+            "unit" => "claims",
+            "verified_claim_ids" => ~w(C1 C2 C3),
+            "missing_claim_ids" => [],
+            "contradicted_claim_ids" => [],
+            "unsupported_claim_ids" => []
+          }
+        }
+      end)
+
+    %{
+      "schema_version" => "barkpark.epic-retrieval-attribution.v2",
+      "epic_id" => attrs.epic_id,
+      "wave_id" => attrs.wave_id,
+      "corpus" => contract["corpus"],
+      "assignments" => contract["assignments"],
+      "trials" => [
+        %{
+          "trial_id" => "look-1-position-1-width-1",
+          "sensitivity_of" => nil,
+          "assignments" => rows
+        }
+      ]
+    }
+  end
+
+  defp usage_receipt(index) do
+    %{
+      "state" => "observed",
+      "provider_session_id" => "session-0#{index}",
+      "provider_turn_id" => "turn-0#{index}",
+      "counter_domain" => "provider.total_tokens",
+      "baseline_tokens" => 100,
+      "terminal_tokens" => 145,
+      "token_count" => %{"state" => "observed", "value" => 45},
+      "context_occupancy" => %{
+        "state" => "unsupported",
+        "reason" => "provider omitted exact context occupancy"
+      }
+    }
+  end
+
+  defp v2_document_fixture(attrs) do
+    contract = retrieval_contract(attrs)
+    attribution = retrieval_attribution(contract, attrs)
+
+    experiment =
+      struct!(
+        Experiment,
+        Map.merge(attrs, %{
+          id: Ecto.UUID.generate(),
+          manifest: Map.put(manifest(), "retrieval_attribution_contract", contract),
+          artifact_format: "barkpark-epic-benchmark-v2",
+          retrieval_attribution: attribution,
+          retrieval_attribution_digest: EpicFleet.canonical_digest(attribution)
+        })
+      )
+
+    Benchmark.document_v2(experiment, [attempt_attrs()])
+  end
+
+  defp import_document(document) do
+    document |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
+  end
+
+  defp resign_v2_document(document) do
+    base =
+      document
+      |> Map.delete("ledger_digest")
+      |> Map.put("attribution_digest", EpicFleet.canonical_digest(document["attribution"]))
+
+    Map.put(base, "ledger_digest", EpicFleet.canonical_digest(base))
   end
 
   defp resign_document(document) do
