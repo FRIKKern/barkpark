@@ -1,0 +1,54 @@
+{
+  "accepted_captures": 0,
+  "attempt_artifacts": 180,
+  "candidate_id": "candidate-lossless-semantic-tree",
+  "cells": 180,
+  "duplicate_cells": 0,
+  "fixtures": 36,
+  "formula": "36 fixtures x 5 real surfaces = 180 cells",
+  "missing_cells": 0,
+  "schema_version": "legendary-e17-reconciliation/v1",
+  "surface_rows": [
+    {
+      "accepted_captures": 0,
+      "attempts": 36,
+      "blocked": 36,
+      "cells": 36,
+      "status": "FAIL",
+      "surface": "authenticated_studio"
+    },
+    {
+      "accepted_captures": 0,
+      "attempts": 36,
+      "blocked": 36,
+      "cells": 36,
+      "status": "FAIL",
+      "surface": "public_reader"
+    },
+    {
+      "accepted_captures": 0,
+      "attempts": 36,
+      "blocked": 36,
+      "cells": 36,
+      "status": "FAIL",
+      "surface": "tui"
+    },
+    {
+      "accepted_captures": 0,
+      "attempts": 36,
+      "blocked": 36,
+      "cells": 36,
+      "status": "FAIL",
+      "surface": "real_client_email"
+    },
+    {
+      "accepted_captures": 0,
+      "attempts": 36,
+      "blocked": 36,
+      "cells": 36,
+      "status": "FAIL",
+      "surface": "cli_api"
+    }
+  ],
+  "surfaces": 5
+}

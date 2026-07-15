@@ -1,0 +1,11 @@
+{
+  "clean_replays": 3,
+  "excluded_from_deterministic_hashes": true,
+  "median_seconds": 0.048765,
+  "schema_version": "legendary-e17-replay-timing/v1",
+  "seconds": [
+    0.049831,
+    0.048765,
+    0.045336
+  ]
+}
