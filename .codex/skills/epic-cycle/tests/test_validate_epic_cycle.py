@@ -309,6 +309,8 @@ class EpicCyclePreflightTest(unittest.TestCase):
             for attempt in ledger["attempts"]
             if attempt["payload"]["fleet_assignment"]["assignment_id"] != "build-3"
         ]
+        for ordinal, attempt in enumerate(ledger["attempts"], start=1):
+            attempt["ordinal"] = ordinal
         self.resign_ledger(ledger)
         self.assertIn(
             "fleet ledger build terminal completions do not match the Paper projection",
