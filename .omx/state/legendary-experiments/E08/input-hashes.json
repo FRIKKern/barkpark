@@ -1,0 +1,14 @@
+{
+  "assignment_id": "E08",
+  "schema_version": "legendary-e08-input-hashes/v1",
+  "sha256": {
+    "E03/failure-taxonomy.json": "29fbb60a099ff6607efd87716887f592e2443498c5b65f2b87317ba3e1807ce9",
+    "E03/fixture-manifest.json": "0ab24d0a38f9d8db97073accaea37f02786d9c47f7dac3471e858907d5c308df",
+    "E03/thresholds.json": "4117e563cb8d261b3256823fc90f16fb0e3d57a51fa84ab8b0a609d3684ecd6b",
+    "E04/output/repair-packet.json": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+    "E05/outputs/envelopes.jsonl": "7a97214f78f53a8c4c16d5d753990fa861e0475aac89e01573fe37b17a96ef5c",
+    "E06/fixture-manifest.json": "dcbc11e320a6c94d7f521bf748ea00af5b4ca3f3c70b5776c91c78311374161b",
+    "E06/outputs/candidates.json": "19e18b5c2bb1ee12b7e1bcd78865889b35df5560f9021534d64b5547d4cc05b9",
+    "legendary-experiment-roster.json": "8d85d11957495af88f829f2f439ba9c6f4e3015629cdcf72966fd8dfa3d8cfde"
+  }
+}

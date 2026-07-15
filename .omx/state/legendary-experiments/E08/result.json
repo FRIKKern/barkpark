@@ -1,0 +1,138 @@
+{
+  "artifact_hashes": {
+    "README.md": "1c63b05bd93fa3625b5b0f55dced95ee747d803ac3c22b7df2f73f202693c8b6",
+    "attack-matrix.json": "2c0b87e2754dbf7260779cdd1cf2474b3f6e2f0b9c320ae8b768b0ebc4621975",
+    "candidate-scorecards.json": "21c56bf135fca93a2f1bbb6e2fdd1408c8c5b7ea9ad8c12322864094a2b8739a",
+    "input-hashes.json": "94dc641687eb25611847fd61a03dc79fbabc3622c2f7cdcafdc95e3ac8995821",
+    "rejection-evidence.json": "8e83f72732728b5d1a8daf835bf2b05704cb24b1eb6d8783817363a773b9c24f",
+    "scripts/attack.py": "e594729746ae638908947642db7606a5e59522176c81fcffc725a89e3954c1a7",
+    "scripts/run.sh": "beeebff977d6afe1f920c2f173733f9db9392ed2379c3c26b29b97f1c2675ace",
+    "scripts/verify.py": "32d3e25e6562617c37031dc2725f45e1c26008a7fc4e235d2efd972612308b36",
+    "timing.json": "a5091baa8625502b753144d8ddf62f23c3492b50ee88ef64fc67c675f0626e98"
+  },
+  "assignment_id": "E08",
+  "attack_axes": [
+    "semantic reading order",
+    "heading and list hierarchy",
+    "non-visual status meaning",
+    "malformed-node containment",
+    "structure preservation at narrow widths"
+  ],
+  "candidate_ids": [
+    "candidate-canonical-native",
+    "candidate-preservation-envelope",
+    "candidate-cohort-rails"
+  ],
+  "candidate_outcomes": [
+    {
+      "candidate_id": "candidate-canonical-native",
+      "counts": {
+        "BLOCKED": 3,
+        "FAIL": 2,
+        "PASS": 5
+      },
+      "hard_gate_failures": 5,
+      "source_assignment": "E04",
+      "verdict": "REJECT"
+    },
+    {
+      "candidate_id": "candidate-preservation-envelope",
+      "counts": {
+        "BLOCKED": 2,
+        "FAIL": 2,
+        "PARTIAL": 1,
+        "PASS": 5
+      },
+      "hard_gate_failures": 5,
+      "source_assignment": "E05",
+      "verdict": "REJECT"
+    },
+    {
+      "candidate_id": "candidate-cohort-rails",
+      "counts": {
+        "BLOCKED": 8,
+        "FAIL": 1
+      },
+      "hard_gate_failures": 9,
+      "source_assignment": "E06",
+      "verdict": "REJECT"
+    }
+  ],
+  "capability_blocks": [
+    "authenticated Studio content proof unavailable",
+    "real-client email proof unavailable",
+    "real TUI/narrow-width assistive-technology proof unavailable",
+    "no frozen unsupported-alias fixture exists in E03"
+  ],
+  "commands_or_probes": [
+    "python3 scripts/attack.py",
+    "python3 scripts/verify.py",
+    "scripts/run.sh"
+  ],
+  "counts": {
+    "adversarial_fixtures": 6,
+    "blocked": 13,
+    "candidates": 3,
+    "fail": 5,
+    "partial": 1,
+    "pass": 10,
+    "probes": 29,
+    "rejected_candidates": 3
+  },
+  "objective": "Attack accessibility, structure, and hostile content behavior",
+  "rejected_candidates": [
+    {
+      "candidate_id": "candidate-canonical-native",
+      "reasons": [
+        "authored content preservation:adv-long-content:FAIL",
+        "heading and list hierarchy:adv-nested-list-table:FAIL",
+        "structure at narrow widths:adv-narrow-width:BLOCKED",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "source_assignment": "E04"
+    },
+    {
+      "candidate_id": "candidate-preservation-envelope",
+      "reasons": [
+        "authored content preservation:adv-long-content:FAIL",
+        "heading and list hierarchy:adv-nested-list-table:FAIL",
+        "structure at narrow widths:adv-narrow-width:PARTIAL",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "source_assignment": "E05"
+    },
+    {
+      "candidate_id": "candidate-cohort-rails",
+      "reasons": [
+        "fixture coverage:all:FAIL",
+        "hostile-content execution:adv-narrow-width:BLOCKED",
+        "hostile-content execution:adv-long-content:BLOCKED",
+        "hostile-content execution:adv-missing-fields:BLOCKED",
+        "hostile-content execution:adv-malformed-legacy:BLOCKED",
+        "hostile-content execution:adv-nested-list-table:BLOCKED",
+        "hostile-content execution:adv-long-token:BLOCKED",
+        "semantic reading order and non-visual status:all:BLOCKED",
+        "unsupported alias containment:all:BLOCKED"
+      ],
+      "source_assignment": "E06"
+    }
+  ],
+  "round": 3,
+  "schema_version": "legendary-e08-result/v1",
+  "stop_condition": "Triggered: inaccessible real-surface evidence and E06 missing hostile outputs prevent a bounded complete attack.",
+  "threshold_outcomes": {
+    "accessibility": "FAIL_BLOCKED_ALL_CANDIDATES",
+    "malformed_node_containment": "PASS_E04_E05; BLOCKED_E06_NO_ADVERSARIAL_OUTPUT",
+    "reader_visibility": "BLOCKED_REAL_SURFACES",
+    "structural_completeness": "FAIL_E04_E05_NESTED_HIERARCHY; BLOCKED_E06_NO_ADVERSARIAL_OUTPUT",
+    "surface_exercise": "BLOCKED_STUDIO_EMAIL_TUI",
+    "width_overflow": "BLOCKED_REAL_TUI_AND_EMAIL"
+  },
+  "verdict": {
+    "action": "REWORK",
+    "quality": "REJECT_ALL_ROUND_2_CANDIDATES",
+    "reason": "No candidate clears the frozen E03 hard accessibility/structure/surface thresholds."
+  }
+}

@@ -1,0 +1,296 @@
+{
+  "assignment_id": "E08",
+  "rows": [
+    {
+      "axis": "fixture coverage",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "6/6 accounted: 4 accepted, 2 quarantined",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "all",
+      "severity": "none",
+      "source_assignment": "E04",
+      "status": "PASS"
+    },
+    {
+      "axis": "authored content preservation",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "source/output characters 7500/7499",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-long-content",
+      "severity": "critical",
+      "source_assignment": "E04",
+      "status": "FAIL"
+    },
+    {
+      "axis": "authored content preservation",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "source/output characters 4096/4096",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-long-token",
+      "severity": "none",
+      "source_assignment": "E04",
+      "status": "PASS"
+    },
+    {
+      "axis": "authored content preservation",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "source/output characters 30/30",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-narrow-width",
+      "severity": "none",
+      "source_assignment": "E04",
+      "status": "PASS"
+    },
+    {
+      "axis": "heading and list hierarchy",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "source types={'table': 1, 'bullet_list': 1, 'text': 1} output types={'table': 1}; nested bullet_list was flattened to scalar table text",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-nested-list-table",
+      "severity": "high",
+      "source_assignment": "E04",
+      "status": "FAIL"
+    },
+    {
+      "axis": "malformed-node containment",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "explicit malformed_source quarantine with preimage",
+      "failure_taxonomy_id": "F04",
+      "fixture_id": "adv-malformed-legacy",
+      "severity": "none",
+      "source_assignment": "E04",
+      "status": "PASS"
+    },
+    {
+      "axis": "missing-field containment",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "explicit empty_or_schema_failure quarantine with preimage",
+      "failure_taxonomy_id": "F05",
+      "fixture_id": "adv-missing-fields",
+      "severity": "none",
+      "source_assignment": "E04",
+      "status": "PASS"
+    },
+    {
+      "axis": "structure at narrow widths",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "local HTML preserves text, but no real TUI/email width evidence",
+      "failure_taxonomy_id": "F08",
+      "fixture_id": "adv-narrow-width",
+      "severity": "high",
+      "source_assignment": "E04",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "semantic reading order and non-visual status",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "authenticated Studio, real email, and assistive-technology evidence unavailable",
+      "failure_taxonomy_id": "F09",
+      "fixture_id": "all",
+      "severity": "high",
+      "source_assignment": "E04",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "unsupported alias containment",
+      "candidate_id": "candidate-canonical-native",
+      "evidence": "E03 has no frozen unsupported-alias fixture; no replacement evidence invented",
+      "failure_taxonomy_id": "F04",
+      "fixture_id": "all",
+      "severity": "high",
+      "source_assignment": "E04",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "fixture coverage",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "6/6 adversarial envelopes",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "all",
+      "severity": "none",
+      "source_assignment": "E05",
+      "status": "PASS"
+    },
+    {
+      "axis": "authored content preservation",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "source/output characters 7500/7499",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-long-content",
+      "severity": "critical",
+      "source_assignment": "E05",
+      "status": "FAIL"
+    },
+    {
+      "axis": "authored content preservation",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "source/output characters 4096/4096",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-long-token",
+      "severity": "none",
+      "source_assignment": "E05",
+      "status": "PASS"
+    },
+    {
+      "axis": "authored content preservation",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "source/output characters 30/30",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-narrow-width",
+      "severity": "none",
+      "source_assignment": "E05",
+      "status": "PASS"
+    },
+    {
+      "axis": "heading and list hierarchy",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "source types={'table': 1, 'bullet_list': 1, 'text': 1}; all five derived views collapse nested table/list to plain 'nested'",
+      "failure_taxonomy_id": "F06",
+      "fixture_id": "adv-nested-list-table",
+      "severity": "high",
+      "source_assignment": "E05",
+      "status": "FAIL"
+    },
+    {
+      "axis": "malformed-node containment",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "status=supported_error; five explicit supported-error views",
+      "failure_taxonomy_id": "F04",
+      "fixture_id": "adv-malformed-legacy",
+      "severity": "none",
+      "source_assignment": "E05",
+      "status": "PASS"
+    },
+    {
+      "axis": "missing-field containment",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "status=supported_error; five explicit supported-error views",
+      "failure_taxonomy_id": "F05",
+      "fixture_id": "adv-missing-fields",
+      "severity": "none",
+      "source_assignment": "E05",
+      "status": "PASS"
+    },
+    {
+      "axis": "structure at narrow widths",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "20-column scratch TUI output preserves words; no real TUI/email client evidence",
+      "failure_taxonomy_id": "F08",
+      "fixture_id": "adv-narrow-width",
+      "severity": "high",
+      "source_assignment": "E05",
+      "status": "PARTIAL"
+    },
+    {
+      "axis": "semantic reading order and non-visual status",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "plain-text derived views cannot prove heading/table/list/status semantics; real surfaces unavailable",
+      "failure_taxonomy_id": "F09",
+      "fixture_id": "all",
+      "severity": "high",
+      "source_assignment": "E05",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "unsupported alias containment",
+      "candidate_id": "candidate-preservation-envelope",
+      "evidence": "E03 has no frozen unsupported-alias fixture; no replacement evidence invented",
+      "failure_taxonomy_id": "F04",
+      "fixture_id": "all",
+      "severity": "high",
+      "source_assignment": "E05",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "fixture coverage",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "0/6 adversarial candidate outputs; missing=['adv-long-content', 'adv-long-token', 'adv-malformed-legacy', 'adv-missing-fields', 'adv-narrow-width', 'adv-nested-list-table']",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "all",
+      "severity": "critical",
+      "source_assignment": "E06",
+      "status": "FAIL"
+    },
+    {
+      "axis": "hostile-content execution",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "fixture is hashed in the manifest but absent from outputs/candidates.json and dispatch decisions",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "adv-narrow-width",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "hostile-content execution",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "fixture is hashed in the manifest but absent from outputs/candidates.json and dispatch decisions",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "adv-long-content",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "hostile-content execution",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "fixture is hashed in the manifest but absent from outputs/candidates.json and dispatch decisions",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "adv-missing-fields",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "hostile-content execution",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "fixture is hashed in the manifest but absent from outputs/candidates.json and dispatch decisions",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "adv-malformed-legacy",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "hostile-content execution",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "fixture is hashed in the manifest but absent from outputs/candidates.json and dispatch decisions",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "adv-nested-list-table",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "hostile-content execution",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "fixture is hashed in the manifest but absent from outputs/candidates.json and dispatch decisions",
+      "failure_taxonomy_id": "F02",
+      "fixture_id": "adv-long-token",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "semantic reading order and non-visual status",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "no adversarial output plus authenticated Studio/email/TUI evidence unavailable",
+      "failure_taxonomy_id": "F09",
+      "fixture_id": "all",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    },
+    {
+      "axis": "unsupported alias containment",
+      "candidate_id": "candidate-cohort-rails",
+      "evidence": "E03 has no frozen unsupported-alias fixture; no replacement evidence invented",
+      "failure_taxonomy_id": "F04",
+      "fixture_id": "all",
+      "severity": "high",
+      "source_assignment": "E06",
+      "status": "BLOCKED"
+    }
+  ],
+  "schema_version": "legendary-e08-attack-matrix/v1"
+}
