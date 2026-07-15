@@ -1430,16 +1430,32 @@ func runInstance(out *writer, args []string) int {
 // <id> is the instance id shown by `bp barkparks` (-o json carries `id`). Treats
 // the response as a secret: it prints once and is never written to config.
 func runInstanceCredentials(out *writer, args []string) int {
-	var id string
-	for _, a := range args {
-		if a == "" || strings.HasPrefix(a, "-") {
+	var id, teamArg string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--team":
+			// `--team <slug|id>` — read credentials in an explicit team context
+			// rather than the active team (cfg.CloudTeam). Needs a value.
+			if i+1 >= len(args) {
+				return useError(out, "usage", "--team needs a value (a team slug or id — see 'bp teams')", exitUsage)
+			}
+			teamArg = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--team="):
+			teamArg = strings.TrimPrefix(a, "--team=")
+		case a == "":
 			continue
+		case strings.HasPrefix(a, "-"):
+			continue
+		default:
+			if id == "" {
+				id = a
+			}
 		}
-		id = a
-		break
 	}
 	if id == "" {
-		return useError(out, "usage", "bp instance credentials <id> — the instance id (see 'bp barkparks')", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> [--team <slug|id>] — the instance id (see 'bp barkparks')", exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -1447,7 +1463,36 @@ func runInstanceCredentials(out *writer, args []string) int {
 		return exitAuth
 	}
 
-	creds, err := cfg.CloudClient().GetCredentials(cloudCtx(), id)
+	// Team context resolution: an explicit --team (slug or UUID) wins, else the
+	// active team persisted by `bp team use` (cfg.CloudTeam). A slug is resolved
+	// to its UUID against the caller's membership list (GET /v1/me) because the
+	// control plane's get_team/1 is UUID-only — a slug can't be resolved
+	// server-side. An empty context is the plain, primary-team behaviour.
+	//
+	// CAVEAT (auth model): the X-Barkpark-Team header this sends is honoured only
+	// for SESSION-token auth — the `bp login` device flow mints a session token,
+	// so this switch works there. A personal access token (PAT) is hard-bound to
+	// its own pat.team_id server-side (auth.ex require_user_or_pat) and IGNORES
+	// the header, so `--team` has no effect under a PAT: use `bp login` for
+	// cross-team credential reads.
+	teamID := strings.TrimSpace(cfg.CloudTeam)
+	if t := strings.TrimSpace(teamArg); t != "" {
+		me, merr := cfg.CloudClient().Me(cloudCtx())
+		if merr != nil {
+			return cloudFail(out, "resolve team", merr)
+		}
+		match, found := resolveTeam(me.Teams, t)
+		if !found {
+			msg := fmt.Sprintf("not a member of team %q", t)
+			if names := teamHandles(me.Teams); names != "" {
+				msg += " — you can use: " + names
+			}
+			return useError(out, "failed", msg, exitGeneric)
+		}
+		teamID = match.ID
+	}
+
+	creds, err := cfg.CloudClient().GetCredentialsForTeam(cloudCtx(), id, teamID)
 	if err != nil {
 		// no_admin_token (404) is an expected, actionable state — surface it plainly.
 		if strings.Contains(err.Error(), "no_admin_token") {
@@ -1487,7 +1532,7 @@ func printInstanceHelp(out *writer) {
 	const help = `bp instance — manage one of your managed Barkpark instances.
 
 USAGE
-  bp instance credentials <id>
+  bp instance credentials <id> [--team <slug|id>]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
@@ -1497,6 +1542,10 @@ WHAT IT DOES
                instance id from 'bp barkparks' (-o json shows 'id').
 
 FLAGS
+  --team <t>   read credentials in an explicit team context (a team slug or id
+               from 'bp teams'); defaults to your active team ('bp team use').
+               An instance owned by a non-active team 404s without this. Honoured
+               for session-token auth ('bp login'); a PAT ignores it.
   -o json      emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }

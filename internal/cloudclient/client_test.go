@@ -264,6 +264,59 @@ func TestGetCredentials404SurfacesNoAdminToken(t *testing.T) {
 	}
 }
 
+func TestMeReturnsTeamsMembershipList(t *testing.T) {
+	var gotMethod, gotPath, gotAuth string
+	c := newFake(t, "sess-xyz", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{
+			"user":{"id":"u-1","email":"ada@example.com","confirmed":true,"two_factor_enabled":false},
+			"team":{"id":"team-1","name":"Primary","slug":"primary"},
+			"teams":[
+				{"id":"team-1","name":"Primary","slug":"primary","role":"owner"},
+				{"id":"team-2","name":"Docs","slug":"docs","role":"admin"}
+			],
+			"role":"owner"
+		}`)
+	})
+
+	me, err := c.Me(context.Background())
+	if err != nil {
+		t.Fatalf("Me: %v", err)
+	}
+	if gotMethod != "GET" || gotPath != "/v1/me" {
+		t.Fatalf("request = %s %s, want GET /v1/me", gotMethod, gotPath)
+	}
+	if gotAuth != "Bearer sess-xyz" {
+		t.Fatalf("Me must send the session bearer; got %q", gotAuth)
+	}
+	if me.User.Email != "ada@example.com" || me.Role != "owner" {
+		t.Fatalf("decoded identity = %+v", me)
+	}
+	if len(me.Teams) != 2 {
+		t.Fatalf("teams len = %d, want 2 (%+v)", len(me.Teams), me.Teams)
+	}
+	if me.Teams[1].ID != "team-2" || me.Teams[1].Slug != "docs" || me.Teams[1].Role != "admin" {
+		t.Fatalf("second membership decoded wrong: %+v", me.Teams[1])
+	}
+	if me.Team == nil || me.Team.ID != "team-1" {
+		t.Fatalf("current team decoded wrong: %+v", me.Team)
+	}
+}
+
+func TestMe401SurfacesAuthError(t *testing.T) {
+	c := newFake(t, "bad", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid_token"}`)
+	})
+	_, err := c.Me(context.Background())
+	if err == nil {
+		t.Fatal("Me on a 401 returned nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("error = %v, want it prefixed unauthorized", err)
+	}
+}
+
 func TestConnectProvider(t *testing.T) {
 	var gotBody map[string]any
 	var gotMethod, gotPath, gotAuth string

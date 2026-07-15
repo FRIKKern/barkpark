@@ -247,6 +247,23 @@ func Execute(args []string) int {
 	case "servers":
 		// `bp servers` — list saved servers.
 		return runServers(out, rest[1:])
+	case "teams":
+		// `bp teams` — list the Cloud team memberships (GET /v1/me), starring the
+		// active team. The switcher's read half; the write half is `bp team use`.
+		// Requires `bp login`.
+		if g.help {
+			printTeamsHelp(out)
+			return exitOK
+		}
+		return runTeams(out, rest[1:])
+	case "team":
+		// `bp team use <slug|id>` — switch the active Cloud team (persists
+		// cfg.CloudTeam). The switcher's write half. Requires `bp login`.
+		if g.help {
+			printTeamHelp(out)
+			return exitOK
+		}
+		return runTeam(out, rest[1:])
 	case "barkparks":
 		// `bp barkparks` — the fleet view. AUTHORITATIVE control-plane registry
 		// (cloud-12) when a Cloud token is present; the local KnownServers view

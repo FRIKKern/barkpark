@@ -488,6 +488,54 @@ func (c *Client) CreateCheckout(ctx context.Context, plan string) (CheckoutResp,
 	return out, nil
 }
 
+// MeUser is the account identity block of GET /v1/me — who the session token
+// belongs to. Only the non-secret columns the control plane serializes (never a
+// password hash / 2FA secret): id, email, and the two boot booleans the SPA
+// reads.
+type MeUser struct {
+	ID               string `json:"id"`
+	Email            string `json:"email"`
+	Confirmed        bool   `json:"confirmed"`
+	TwoFactorEnabled bool   `json:"two_factor_enabled"`
+}
+
+// MeResult is the decoded GET /v1/me identity envelope: who the caller is
+// (User), the team the session is currently acting in (Team, nil when teamless),
+// EVERY team membership (Teams — the full switcher list the SPA renders so a
+// user invited into a second team is never stranded on their signup team), and
+// the caller's Role in the current team. `bp teams` renders Teams; `bp team use`
+// resolves a slug against Teams because the control plane's get_team/1 is
+// UUID-only, so slug→UUID resolution is done CLIENT-SIDE from this list. The
+// onboarding summary the SPA folds in is intentionally NOT decoded here — the
+// CLI's team surface has no use for it.
+type MeResult struct {
+	User  MeUser `json:"user"`
+	Team  *Team  `json:"team"`
+	Teams []Team `json:"teams"`
+	Role  string `json:"role"`
+}
+
+// Me fetches the signed-in identity via GET /v1/me (Bearer). The Teams array is
+// the authoritative membership list — one row per team the user belongs to, each
+// carrying {id, name, slug, role} — which the CLI's team switcher uses both to
+// list memberships (`bp teams`) and to resolve a human-typed slug to its team
+// UUID (`bp team use <slug>`). A 401 surfaces the honest auth error via
+// cloudError; any decode failure is wrapped, never swallowed.
+func (c *Client) Me(ctx context.Context) (MeResult, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/me", true, nil)
+	if err != nil {
+		return MeResult{}, err
+	}
+	if !ok(status) {
+		return MeResult{}, cloudError(status, body)
+	}
+	var out MeResult
+	if err := json.Unmarshal(body, &out); err != nil {
+		return MeResult{}, fmt.Errorf("decode me response: %w", err)
+	}
+	return out, nil
+}
+
 // ListBarkparks returns the user's whole fleet via GET /v1/barkparks (Bearer).
 // This is the AUTHORITATIVE registry view `bp barkparks` renders when a cloud
 // token is present (vs. the local KnownServers fallback in cloud-11).
