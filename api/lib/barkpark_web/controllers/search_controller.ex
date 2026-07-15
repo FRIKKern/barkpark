@@ -278,12 +278,26 @@ defmodule BarkparkWeb.SearchController do
   end
 
   def update_search_settings(conn, %{"dataset" => dataset} = params) do
-    case SurfaceConfigs.upsert("documents", dataset, params, workspace_id(conn)) do
-      {:ok, row} ->
-        json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:documents:search:settings"]})
+    # D58/D71 fail-closed. The admin settings WRITE attributes the config row to
+    # a `(workspace_id, surface, scope)` key. `workspace_id(conn)` reads
+    # `:current_workspace`, which `AssignDefaultScope` has ALREADY masked from
+    # nil to the Default Workspace — so a genuinely nil-workspace admin token
+    # would silently write the Default/global row (an operator footgun). Read
+    # the RAW pre-mask token workspace_id (assigned by `RequireToken`) and refuse
+    # the write when it is nil, BEFORE any upsert. A workspace-bound admin token
+    # is unaffected — it writes its own row. (READs stay global-legacy by D59.)
+    case token_workspace_id(conn) do
+      nil ->
+        nil_workspace_write_error(conn)
 
-      {:error, %Ecto.Changeset{} = changeset} ->
-        validation_error(conn, changeset)
+      _ws_id ->
+        case SurfaceConfigs.upsert("documents", dataset, params, workspace_id(conn)) do
+          {:ok, row} ->
+            json(conn, %{result: row, syncTags: ["bp:ds:#{dataset}:documents:search:settings"]})
+
+          {:error, %Ecto.Changeset{} = changeset} ->
+            validation_error(conn, changeset)
+        end
     end
   end
 
@@ -422,5 +436,28 @@ defmodule BarkparkWeb.SearchController do
       %{id: id} -> id
       _ -> nil
     end
+  end
+
+  # The RAW pre-mask workspace of the calling admin token (assigned by
+  # `RequireToken`, BEFORE `AssignDefaultScope` masks nil → Default). The D58/D71
+  # fail-closed guard reads THIS, not `workspace_id/1`, so a legacy-null token
+  # can be refused instead of silently attributing its write to Default.
+  defp token_workspace_id(conn) do
+    case conn.assigns[:api_token] do
+      %{workspace_id: ws_id} -> ws_id
+      _ -> nil
+    end
+  end
+
+  # 422 for a nil-workspace admin settings WRITE (D58/D71). `unprocessable` is a
+  # registered §9 code; the message tells the operator to use a workspace-bound
+  # token rather than have the write land on the global/Default config.
+  defp nil_workspace_write_error(conn) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      422,
+      "unprocessable",
+      "search-settings write requires a workspace-scoped token; this token has no workspace"
+    )
   end
 end
