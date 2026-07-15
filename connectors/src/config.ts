@@ -61,6 +61,19 @@ export interface BridgeConfig {
   userName: string;
   /** The inbound HTTP transport for webhook channels (Slack/Teams/WhatsApp). */
   webhook: WebhookConfig;
+  /**
+   * How often the webhook mount index re-reads `connector_installs` and converges
+   * against it (`CONNECTORS_MOUNT_RECONCILE_INTERVAL_MS`, charter D83). This is
+   * what makes a horizontally-scaled bridge survive: replica A handles an OAuth
+   * callback and mounts the new install in ITS OWN in-memory index; replica B,
+   * which never saw the request, is stale until it rediscovers the row on a tick.
+   *
+   * `0` DISABLES the reconcile entirely — a single-replica deploy needs nothing
+   * more than the boot mount + the connect-time `addInstall`, and the loop would
+   * only burn a query. Optional in the TYPE so a hand-built test config can omit
+   * it; `loadConfig` always sets it, and `startBridge` falls back to the default.
+   */
+  mountReconcileIntervalMs?: number;
 }
 
 /**
@@ -105,6 +118,12 @@ const DEFAULT_WEBHOOK_HOST = "127.0.0.1";
 const DEFAULT_WEBHOOK_PORT = 4020;
 const DEFAULT_WEBHOOK_PATH_PREFIX = "/connectors";
 const DEFAULT_WEBHOOK_MAX_BODY_BYTES = 1_048_576;
+/**
+ * 30s: fast enough that a second replica picks up a new install within one poll
+ * of the OAuth callback that wrote it, slow enough that the reconcile query is
+ * noise against real traffic. `0` in the env disables it.
+ */
+export const DEFAULT_MOUNT_RECONCILE_INTERVAL_MS = 30_000;
 
 export class MissingConfigError extends Error {
   constructor(key: string) {
@@ -173,6 +192,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): BridgeConfig {
     ...(connectSecret ? { connectSecret } : {}),
     userName: env["BRIDGE_USER_NAME"]?.trim() || "barkpark",
     webhook: loadWebhookConfig(env),
+    mountReconcileIntervalMs: intFromEnv(
+      env,
+      "CONNECTORS_MOUNT_RECONCILE_INTERVAL_MS",
+      DEFAULT_MOUNT_RECONCILE_INTERVAL_MS,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
   };
 }
 
