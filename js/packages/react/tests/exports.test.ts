@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { PortableText, BarkparkImage, BarkparkReference, imageUrl, toPlainText } from '../src'
+import {
+  PortableText,
+  PortableDoc,
+  renderPortableDocument,
+  BarkparkImage,
+  BarkparkReference,
+  imageUrl,
+  toPlainText,
+} from '../src'
 import type {
   PortableTextProps,
   PortableTextComponents,
@@ -8,6 +16,9 @@ import type {
   PortableTextSpan,
   PortableTextMarkDef,
   CustomBlock,
+  PortableDocProps,
+  Block,
+  Inline,
   BarkparkImageProps,
   ImageAsset,
   ImageAssetRef,
@@ -23,8 +34,11 @@ import type {
 } from '../src'
 
 describe('public exports', () => {
-  it('exports the three components at runtime', () => {
+  it('exports the components + renderers at runtime', () => {
     expect(typeof PortableText).toBe('function')
+    // The canonical type-keyed PortableDocument renderer (charter D2).
+    expect(typeof PortableDoc).toBe('function')
+    expect(typeof renderPortableDocument).toBe('function')
     expect(typeof BarkparkImage).toBe('function')
     expect(typeof BarkparkReference).toBe('function')
     expect(typeof imageUrl).toBe('function')
@@ -42,6 +56,9 @@ describe('public exports', () => {
       | PortableTextSpan
       | PortableTextMarkDef
       | CustomBlock
+      | PortableDocProps
+      | Block
+      | Inline
       | BarkparkImageProps
       | ImageAsset
       | ImageAssetRef
