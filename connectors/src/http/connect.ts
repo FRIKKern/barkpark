@@ -1,10 +1,12 @@
 import {
   verifyConnectTicket,
+  verifyToolTicket,
   type ConnectTicket,
   type VerifyConnectTicketOptions,
 } from "../connect/ticket.js";
 import type { ConnectorRegistry } from "../connector/registry.js";
 import type {
+  Connector,
   ConnectorConnect,
   ConnectorInstall,
   InstallsLookup,
@@ -96,11 +98,32 @@ export interface ConnectDeps {
     provider: string;
     chatToken: string;
   }): Promise<void>;
+  /**
+   * The bridge's OWN loopback base URL (e.g. `http://127.0.0.1:4020/connectors`),
+   * baked into the `headersHelper` command the `tool-descriptors` route hands the
+   * runner (charter D69/D71). The helper POSTs back to `{base}/tool-headers/:provider`
+   * to fetch the sealed PAT at MCP-connect. Absent ⇒ the tool routes are the opaque
+   * 404 (a bridge with no loopback base cannot mint a working helper).
+   */
+  toolHeadersBaseUrl?: string;
   now?: () => number;
 }
 
-/** The routes, named by the thing they do. */
-export type ConnectAction = "validate" | "connect" | "disconnect" | "pending";
+/**
+ * The routes, named by the thing they do.
+ *
+ * `tool-descriptors` / `tool-headers` are the OUTBOUND (tool) direction (D69/D71):
+ * the first lists a workspace's tool connectors as MCP descriptors for the runner;
+ * the second opens a sealed PAT at MCP-connect. Both are loopback-only, exactly
+ * like the paste-connect family.
+ */
+export type ConnectAction =
+  | "validate"
+  | "connect"
+  | "disconnect"
+  | "pending"
+  | "tool-descriptors"
+  | "tool-headers";
 
 /**
  * A rendered answer — or `null`, meaning "answer the caller's OWN opaque 404".
@@ -188,6 +211,7 @@ export async function handleConnectRequest(
   action: ConnectAction,
   rawBody: string,
   deps: ConnectDeps,
+  pathProvider?: string,
 ): Promise<ConnectReply> {
   const body = parseBody(rawBody);
   // A malformed body is a 400, never a 500 and never a stack trace.
@@ -195,6 +219,17 @@ export async function handleConnectRequest(
 
   const rawTicket = stringField(body, "ticket");
   if (rawTicket === null) return UNAUTHORIZED;
+
+  // TOOL routes (D69/D71) verify a SESSION ticket bound to the reserved
+  // tool-session provider — NOT the paste ticket read below. They select the
+  // concrete provider from the route path (tool-headers) or list every one
+  // (tool-descriptors); the workspace is proven by the ticket signature.
+  if (action === "tool-descriptors") {
+    return toolDescriptors(rawTicket, deps);
+  }
+  if (action === "tool-headers") {
+    return toolHeaders(rawTicket, pathProvider, deps);
+  }
 
   const ticket = readTicket(rawTicket, deps);
   if (ticket === null) return UNAUTHORIZED;
@@ -215,10 +250,136 @@ export async function handleConnectRequest(
     case "validate":
       return validate(body, ticket, connector.connect);
     case "connect":
-      return connect(body, ticket, connector.connect, deps);
+      return connect(body, ticket, connector, deps);
     case "disconnect":
       return disconnect(body, ticket, deps);
   }
+}
+
+/** Verify a tool-session ticket, or `null` — every failure is the same refusal. */
+function readToolTicket(raw: string, deps: ConnectDeps): ConnectTicket | null {
+  try {
+    return verifyToolTicket(raw, deps.secret, deps.now ? { now: deps.now } : {});
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * TOOL-DESCRIPTORS (D69/D71) — the OUTBOUND direction's list.
+ *
+ * The runner (Elixir) mints ONE session-length tool ticket and asks: "which MCP
+ * servers may this workspace's agent connect to?" We answer with a NON-SECRET
+ * descriptor per tool connector the workspace actually has an install of — provider,
+ * transport, url, and a `headersHelper` command. The helper carries THIS same
+ * ticket and points at our loopback `tool-headers` route, so the PAT is fetched at
+ * MCP-connect and NEVER travels through Elixir or sits in the config file (D38).
+ */
+async function toolDescriptors(
+  rawTicket: string,
+  deps: ConnectDeps,
+): Promise<ConnectReply> {
+  const ticket = readToolTicket(rawTicket, deps);
+  if (ticket === null) return UNAUTHORIZED;
+
+  // Without a loopback base we cannot mint a working helper — so we mint none.
+  // The runner sees an empty list and the agent simply has no tool servers.
+  const base = deps.toolHeadersBaseUrl;
+  if (base === undefined || base.trim() === "") {
+    return { status: 200, body: { descriptors: [] } };
+  }
+
+  const descriptors: Array<{
+    provider: string;
+    type: string;
+    url: string;
+    headersHelper: string;
+  }> = [];
+
+  for (const connector of deps.registry.tools()) {
+    const descriptor = connector.toolDescriptor;
+    if (!descriptor) continue;
+    // Only surface a tool the workspace has actually connected — an install proves
+    // both the intent and that there is a sealed PAT for `tool-headers` to open.
+    const install = await deps.installs.lookupByWorkspace(
+      connector.id,
+      ticket.workspaceId,
+    );
+    if (install === null) continue;
+
+    descriptors.push({
+      provider: connector.id,
+      type: descriptor.type,
+      url: descriptor.url,
+      headersHelper: buildHeadersHelper(base, connector.id, rawTicket),
+    });
+  }
+
+  return { status: 200, body: { descriptors } };
+}
+
+/**
+ * Build the `headersHelper` command claude runs at MCP-connect (D69/D71).
+ *
+ * Its STDOUT must be a JSON object of string headers — which is EXACTLY the
+ * `tool-headers` route's success body — so the whole helper is one `curl` that
+ * POSTs the ticket to that loopback route and prints its response. The ticket is
+ * base64url + a single `.` and the provider is a registry id (`[a-z0-9_-]`); both
+ * are single-quote-safe, so the JSON body and URL interpolate without a shell
+ * injection surface.
+ */
+function buildHeadersHelper(
+  base: string,
+  provider: string,
+  ticket: string,
+): string {
+  const url = `${base.replace(/\/+$/, "")}/connect/tool-headers/${provider}`;
+  const payload = JSON.stringify({ ticket });
+  return `curl -sS -X POST -H 'content-type: application/json' -d '${payload}' ${url}`;
+}
+
+/**
+ * TOOL-HEADERS (D69/D71) — open ONE workspace's sealed PAT at MCP-connect.
+ *
+ * The concrete provider comes from the ROUTE path (a non-secret selector), the
+ * workspace from the TICKET signature. We open the PAT keyed on `(provider,
+ * workspace)` — the seal's AAD binds `workspace_id`, so a row that belongs to a
+ * different tenant cannot be opened here. The reply is a flat header object the
+ * runner's `headersHelper` prints verbatim into claude's MCP transport.
+ *
+ * Every failure — bad ticket aside — is the SAME opaque 404 an unknown route gets:
+ * unknown provider, a channel provider (no `toolDescriptor`), no install for this
+ * workspace, or an install with no sealed credential. None of them reveal whether
+ * any given install exists.
+ */
+async function toolHeaders(
+  rawTicket: string,
+  pathProvider: string | undefined,
+  deps: ConnectDeps,
+): Promise<ConnectReply> {
+  const ticket = readToolTicket(rawTicket, deps);
+  if (ticket === null) return UNAUTHORIZED;
+
+  if (pathProvider === undefined || pathProvider.trim() === "") return null;
+
+  const connector = deps.registry.get(pathProvider);
+  // A tool connector, and only a tool connector. A channel provider named here is
+  // the opaque 404 — the tool routes must not leak the channel registry either.
+  if (!connector?.toolDescriptor) return null;
+
+  const install = await deps.installs.lookupByWorkspace(
+    pathProvider,
+    ticket.workspaceId,
+  );
+  if (install === null) return null;
+
+  const pat = install.credentialRef;
+  if (pat === null || pat === undefined || pat.trim() === "") return null;
+
+  // The runner's headersHelper prints THIS object straight into claude's MCP
+  // config as the server's request headers. A flat { header: string } map is the
+  // shape claude 2.1.209 requires.
+  return { status: 200, body: { Authorization: `Bearer ${pat}` } };
 }
 
 /**
@@ -295,12 +456,27 @@ async function validate(
 async function connect(
   body: Record<string, unknown>,
   ticket: ConnectTicket,
-  connectSpec: ConnectorConnect,
+  connector: Connector,
   deps: ConnectDeps,
 ): Promise<ConnectReply> {
+  const connectSpec = connector.connect;
+  // Reached only through the `connector.connect` gate in handleConnectRequest.
+  if (!connectSpec) return null;
+
+  // A TOOL connector (GitHub, D69) seals ONLY its provider credential — the PAT.
+  // It has no chat token (its `chat_token_ref` stays NULL) and no Chat to mount
+  // (`registry.channels()` excludes it), so the flow BRANCHES ON DIRECTION, never
+  // on the provider id. A channel connector still needs both secrets and a live
+  // mount, exactly as before.
+  const isTool = connector.direction === "tool";
+
   const credential = stringField(body, "credential");
   const chatToken = stringField(body, "chat_token");
-  if (credential === null || chatToken === null) return BAD_REQUEST;
+  // Both a channel's chat token and a tool's absence of one are required shapes:
+  // a channel with no chat_token is a 400; a tool that supplied one is ignored
+  // (it has nowhere to go — `chat_token_ref` is NULL for a tool install).
+  if (credential === null) return BAD_REQUEST;
+  if (!isTool && chatToken === null) return BAD_REQUEST;
 
   // NEVER trust `body.install_key`. The key is whatever the PROVIDER says this
   // credential is — anything else lets a valid ticket seize another workspace's
@@ -354,10 +530,29 @@ async function connect(
     installKey: verdict.installKey,
     workspaceId: ticket.workspaceId,
     credentialRef: credential,
-    chatToken,
+    // A tool install has no chat token — `chat_token_ref` stays NULL. A channel
+    // install carries the workspace-bound token its /v1/chat traffic travels on.
+    ...(isTool ? {} : { chatToken }),
   };
 
   await deps.upsertInstall(install);
+
+  // A TOOL install is never mounted as a Chat (D69): it has no inbound transport,
+  // and the agent reaches its service through the MCP `tool-descriptors` seam, not
+  // through this bridge. The write IS the connect — there is nothing to bring up.
+  if (isTool) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        provider: install.provider,
+        install_key: install.installKey,
+        workspace_id: install.workspaceId,
+        display_name: verdict.displayName,
+        mounted: false,
+      },
+    };
+  }
 
   try {
     // Live, with no restart. The very next message from the channel routes.

@@ -379,15 +379,19 @@ describe("slack connector — registration shape (zero core change)", () => {
 
     // Every P3 channel is a peer here — Slack has no privileged position in the
     // registry, which is the whole claim. (iMessage is absent: it registers only
-    // under CONNECTORS_PROFILE=self-hosted, D44.)
+    // under CONNECTORS_PROFILE=self-hosted, D44.) `github` is present as the FIRST
+    // tool connector (D69) — the OTHER direction — but it is NOT a channel, so it
+    // is excluded from `registry.channels()` below.
     expect(registry.list().map((c) => c.id)).toEqual([
       "telegram",
       "slack",
       "discord",
       "teams",
       "whatsapp",
+      "github",
     ]);
     expect(registry.channels().map((c) => c.id)).toContain("slack");
+    expect(registry.channels().map((c) => c.id)).not.toContain("github");
   });
 
   it("is NOT registered when the app credentials are absent — no half-wired adapter", () => {

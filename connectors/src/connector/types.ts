@@ -173,6 +173,25 @@ export interface InstallsLookup {
   ): Promise<WorkspaceId | null>;
   /** Every install of a connector — the boot path mounts one Chat per install. */
   listInstalls(provider: string): Promise<ConnectorInstall[]>;
+  /**
+   * `(provider, workspaceId)` -> the full OPENED install, or `null` when that
+   * workspace has no install of that provider (charter D69, tool connectors).
+   *
+   * This is the tool-connector seam's read: the runtime `tool-headers` route
+   * proves the caller's WORKSPACE by verifying a signed session ticket, then opens
+   * exactly THAT workspace's sealed PAT for the named provider — never a caller
+   * -supplied install key. Because the seal's AAD binds `workspace_id`, a row that
+   * belongs to another tenant cannot be opened here even if its `(provider,
+   * install_key)` were guessed: this lookup keys on the workspace itself.
+   *
+   * Fail-closed: a blank provider/workspace, an unknown pair, or a blob that does
+   * not open for the row's own identity all yield `null` — the tool-headers route
+   * turns that into the same opaque 404 as any unknown route.
+   */
+  lookupByWorkspace(
+    provider: string,
+    workspaceId: string | null | undefined,
+  ): Promise<ConnectorInstall | null>;
 }
 
 /**
@@ -203,6 +222,35 @@ export type MutableInstallsLookup = InstallsLookup & InstallsWriter;
 export type ConnectValidation =
   | { ok: true; installKey: string; displayName: string }
   | { ok: false; reason: string };
+
+/**
+ * A TOOL connector's MCP transport descriptor (charter D69/D71) — the OTHER
+ * direction of the epic. A channel connector is inbound (a human talks to the
+ * agent); a tool connector is OUTBOUND (the agent ACTS on a service), and it does
+ * so by being an additional MCP server the runner's `claude` subprocess connects
+ * to, exactly the way it already connects to the loopback `bp mcp serve` server.
+ *
+ * This is the STATIC, NON-SECRET half a connector declares: which MCP transport,
+ * and where. The credential never appears here — the runner fetches
+ * `{"Authorization":"Bearer <pat>"}` at MCP-connect time via the bridge's
+ * loopback `tool-headers` route (D38: no Elixir ever holds the plaintext PAT).
+ * The `headersHelper` command that does that fetch is minted by the bridge's
+ * `tool-descriptors` route (it bakes in the loopback URL + the session ticket),
+ * NOT by the connector — so this descriptor stays credential-free and reusable.
+ *
+ * `type: "http"` is the only transport a tool connector uses today: GitHub's MCP
+ * server (`https://api.githubcopilot.com/mcp/`) speaks Streamable HTTP, and claude
+ * 2.1.209's `--mcp-config` accepts `{type:"http", url, headersHelper}` for exactly
+ * this. A second tool connector (Linear) is a second registry entry with its own
+ * `toolDescriptor` — ZERO core-loop change, the same acceptance bar the channel
+ * connectors meet.
+ */
+export interface ToolDescriptor {
+  /** The MCP transport. `"http"` (Streamable HTTP) is the only one v1 uses. */
+  type: "http";
+  /** The MCP server endpoint the agent's subprocess connects to. Non-secret. */
+  url: string;
+}
 
 /**
  * PASTE-MODE CONNECT (charter D51) — the optional member that makes a connector
@@ -340,6 +388,18 @@ export interface Connector<TPayload = unknown> {
    * connect routes answer the same opaque 404 they answer for an unknown provider.
    */
   connect?: ConnectorConnect;
+  /**
+   * TOOL connector's MCP transport (charter D69/D71). Present ONLY on a `tool`
+   * (or `both`) connector: it declares the MCP server the agent's `claude`
+   * subprocess connects to when this workspace has an install. Absent on every
+   * channel connector — a channel is inbound, it has no tool transport.
+   *
+   * A connector with a `toolDescriptor` seals ONLY its provider credential on
+   * `/connect` (a PAT), never a chat token, and is NEVER mounted as a channel
+   * (`registry.channels()` excludes it) — the connect loop branches on
+   * `direction`, never on the provider id.
+   */
+  toolDescriptor?: ToolDescriptor;
   /**
    * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
    * Called once per install; the adapter is handed to `new Chat({ adapters })`.

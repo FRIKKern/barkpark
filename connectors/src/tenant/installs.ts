@@ -99,6 +99,24 @@ const SELECT_INSTALLS_FOR_PROVIDER = `
 `;
 
 /**
+ * The TOOL-connector lookup (charter D69): which install does THIS workspace hold
+ * of THIS provider? A tool connector (GitHub) is one-per-workspace — the workspace
+ * IS the tenant key, not a provider-side install key — so the `tool-headers` route
+ * keys on `(provider, workspace_id)` after proving the workspace from a signed
+ * ticket. `LIMIT 1` because a workspace holds at most one install of a tool
+ * provider (nothing enforces it in the PK, so this is belt-and-braces + a stable
+ * pick by `install_key` if a stray duplicate ever exists).
+ */
+const SELECT_INSTALL_BY_WORKSPACE = `
+  SELECT provider, install_key, workspace_id, credential_ref, chat_token_ref
+    FROM chat_bridge.connector_installs
+   WHERE provider = $1
+     AND workspace_id = $2
+   ORDER BY install_key
+   LIMIT 1
+`;
+
+/**
  * The write path (charter D52) — one atomic statement, NO read-modify-write.
  *
  * A NULL parameter now means PRESERVE, not "wipe" — but ONLY where preserving is
@@ -338,6 +356,20 @@ export function createInstallsLookup(
         .map((row) => toInstall(row, cipher))
         .filter((install): install is ConnectorInstall => install !== null);
     },
+
+    async lookupByWorkspace(provider, workspaceId) {
+      // Fail closed BEFORE touching the database — a blank workspace must never
+      // match a NULL-workspace half-row and hand out its credential.
+      if (isBlankKey(provider) || isBlankKey(workspaceId)) return null;
+
+      const { rows } = await db.query<InstallRow>(SELECT_INSTALL_BY_WORKSPACE, [
+        provider,
+        workspaceId,
+      ]);
+
+      // Unknown pair, or a row whose seal does not open for its own identity -> null.
+      return toInstall(rows[0], cipher);
+    },
   };
 }
 
@@ -500,6 +532,17 @@ export function createInMemoryInstallsLookup(
     async listInstalls(provider) {
       if (isBlankKey(provider)) return [];
       return [...table.values()].filter((install) => install.provider === provider);
+    },
+
+    async lookupByWorkspace(provider, workspaceId) {
+      if (isBlankKey(provider) || isBlankKey(workspaceId)) return null;
+      // Same fail-closed contract as the SQL lookup: the workspace is the key.
+      return (
+        [...table.values()].find(
+          (install) =>
+            install.provider === provider && install.workspaceId === workspaceId,
+        ) ?? null
+      );
     },
   };
 }

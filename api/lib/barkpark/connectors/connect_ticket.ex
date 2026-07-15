@@ -43,12 +43,59 @@ defmodule Barkpark.Connectors.ConnectTicket do
 
   @ttl_ms 600_000
 
+  # ── The TOOL-SESSION ticket (Connectors D69/D73) — the OTHER direction ──────
+  #
+  # A paste ticket authorizes ONE Studio connect and lives 600 s. A TOOL ticket
+  # authorizes the runner's `claude` subprocess to fetch a workspace's sealed
+  # tool credentials (a GitHub PAT) at MCP-connect, so it must outlive a paste
+  # window: it is baked into the per-session `--mcp-config` file's `headersHelper`
+  # and fired every time the subprocess (re)connects the tool MCP server, for the
+  # whole chat session. It binds the RESERVED provider `tool-session` (never a
+  # concrete tool provider) — one ticket lists ALL of a workspace's tool
+  # connectors and opens each one; the concrete provider rides the ROUTE path on
+  # the bridge, never the ticket. These two constants MIRROR the bridge's
+  # `TOOL_TICKET_PROVIDER` / `TOOL_TICKET_TTL_MS` (connectors/src/connect/ticket.ts);
+  # the bridge is the enforcer of the 8 h age — Elixir only signs.
+  @tool_provider "tool-session"
+  @tool_ttl_ms 28_800_000
+
   @uuid_re ~r/\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z/
   @provider_re ~r/\A[a-z0-9_-]{1,64}\z/
 
   @doc "The ticket TTL the bridge enforces (ms). Exposed so tests pin ONE number."
   @spec ttl_ms() :: pos_integer()
   def ttl_ms, do: @ttl_ms
+
+  @doc """
+  The reserved provider a TOOL-SESSION ticket binds (connectors D69). MIRRORS
+  the bridge's `TOOL_TICKET_PROVIDER`; a mismatch would 401 every tool fetch.
+  """
+  @spec tool_ticket_provider() :: String.t()
+  def tool_ticket_provider, do: @tool_provider
+
+  @doc """
+  The TOOL-SESSION ticket age the bridge tolerates (ms, 8 h). MIRRORS the
+  bridge's `TOOL_TICKET_TTL_MS`. Elixir does not enforce it (it only signs `t`);
+  the bridge's `verifyToolTicket` is the enforcer.
+  """
+  @spec tool_ttl_ms() :: pos_integer()
+  def tool_ttl_ms, do: @tool_ttl_ms
+
+  @doc """
+  Sign a TOOL-SESSION ticket for `workspace_id` (connectors D69/D73).
+
+  A thin specialisation of `sign/3` that pins the reserved provider
+  `tool-session` so a short paste ticket for a concrete provider can never be
+  replayed at the bridge's tool routes. Same fail-closed input validation and
+  same `{:error, :not_configured}` on an instance with no connect secret.
+
+  Options mirror `sign/3` (`:secret`, `:nonce`, `:issued_at_ms`) — tests only.
+  """
+  @spec sign_tool(binary(), keyword()) ::
+          {:ok, String.t()} | {:error, :not_configured | :invalid_workspace | :invalid_provider}
+  def sign_tool(workspace_id, opts \\ []) do
+    sign(workspace_id, @tool_provider, opts)
+  end
 
   @doc """
   Sign a connect ticket for `workspace_id` + `provider`.

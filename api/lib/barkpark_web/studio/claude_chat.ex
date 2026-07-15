@@ -323,31 +323,86 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def result_success?(_), do: false
 
   @doc """
-  The per-session MCP config map (charter D63/D64) — `Session.init` serializes
-  it into a temp file that `--mcp-config` references. ONE server: Barkpark
-  itself, through `bp mcp serve --tools all` (`all` because the paper + search
-  legs need the bridged verbs, not just the curated task six). The env block
-  is the credential seam: BOTH `BARKPARK_API_URL` and `BARKPARK_API_TOKEN` are
-  set so the child `bp` NEVER falls back to the host's saved config — the
-  host's credential is typically ADMIN (proven live, wave-12 V1), and the
-  short-lived minted session token is the whole point. Pure (data in, data
-  out) so the shape is unit-testable without a session.
+  The per-session MCP config map (charter D63/D64; connectors D69/D73) —
+  `Session.init` serializes it into a temp file that `--mcp-config` references.
+
+  ALWAYS one server: Barkpark itself, through `bp mcp serve --tools all` (`all`
+  because the paper + search legs need the bridged verbs, not just the curated
+  task six). The env block is the credential seam: BOTH `BARKPARK_API_URL` and
+  `BARKPARK_API_TOKEN` are set so the child `bp` NEVER falls back to the host's
+  saved config — the host's credential is typically ADMIN (proven live, wave-12
+  V1), and the short-lived minted session token is the whole point.
+
+  PLUS, once per TOOL connector the session's workspace has connected: a SECOND
+  (third, …) `mcpServers` key, DERIVED from the bridge's descriptor
+  (`%{"provider", "type", "url", "headersHelper"}`) — this is the epic's OTHER
+  direction (connectors D69). The agent talks to a human through a channel AND
+  ACTS on GitHub, because a tool connector is simply another `mcpServers` entry.
+
+  Two invariants make the fold safe: it is keyed on `descriptor["provider"]` (a
+  registry id, never a provider special-case), and it uses `Map.put_new` so a
+  rogue descriptor can never SHADOW the loopback `barkpark` server whose env
+  carries the minted token. The descriptor is NON-SECRET (D38): the PAT rides
+  the `headersHelper` at MCP-connect, never this file. Pure (data in, data out)
+  so the shape is unit-testable without a session or a bridge.
   """
   @spec mcp_config(String.t()) :: map()
-  def mcp_config(raw_token) when is_binary(raw_token) do
-    %{
-      "mcpServers" => %{
-        "barkpark" => %{
-          "command" => Keyword.get(config(), :bp_binary, "bp"),
-          "args" => ["mcp", "serve", "--tools", "all"],
-          "env" => %{
-            "BARKPARK_API_URL" => mcp_api_url(),
-            "BARKPARK_API_TOKEN" => raw_token
-          }
+  def mcp_config(raw_token) when is_binary(raw_token), do: mcp_config(raw_token, [])
+
+  @spec mcp_config(String.t(), [map()]) :: map()
+  def mcp_config(raw_token, tool_descriptors)
+      when is_binary(raw_token) and is_list(tool_descriptors) do
+    barkpark = %{
+      "barkpark" => %{
+        "command" => Keyword.get(config(), :bp_binary, "bp"),
+        "args" => ["mcp", "serve", "--tools", "all"],
+        "env" => %{
+          "BARKPARK_API_URL" => mcp_api_url(),
+          "BARKPARK_API_TOKEN" => raw_token
         }
       }
     }
+
+    servers =
+      Enum.reduce(tool_descriptors, barkpark, fn descriptor, acc ->
+        case tool_server_entry(descriptor) do
+          {name, entry} -> Map.put_new(acc, name, entry)
+          :skip -> acc
+        end
+      end)
+
+    %{"mcpServers" => servers}
   end
+
+  # One tool descriptor -> one `mcpServers` entry, or `:skip`. Fail-closed: a
+  # descriptor missing its provider/url, naming a non-http transport, or
+  # colliding with the reserved `barkpark` name is DROPPED — a malformed bridge
+  # answer degrades the toolset, never poisons the loopback server. `type: "http"`
+  # is the only transport a tool connector uses today (D71); `headersHelper` is
+  # folded in only when present (the non-secret command that fetches the PAT).
+  defp tool_server_entry(%{"provider" => provider, "type" => "http", "url" => url} = descriptor)
+       when is_binary(provider) and provider != "" and provider != "barkpark" and
+              is_binary(url) and url != "" do
+    entry = %{"type" => "http", "url" => url}
+
+    # The credential seam (D38): the subprocess runs `headersHelper` at
+    # MCP-connect and prints `{"Authorization":"Bearer <pat>"}` into the
+    # transport. Folded in ONLY when present — Elixir writes the command, never
+    # the token. A descriptor with no helper is a URL-only server (harmless; an
+    # unauthenticated MCP server, which GitHub's is not, but the type allows it).
+    entry =
+      case descriptor["headersHelper"] do
+        helper when is_binary(helper) and helper != "" ->
+          Map.put(entry, "headersHelper", helper)
+
+        _ ->
+          entry
+      end
+
+    {provider, entry}
+  end
+
+  defp tool_server_entry(_), do: :skip
 
   @doc """
   The API URL the loopback `bp mcp serve` child talks to. Config
@@ -1103,7 +1158,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
       case Barkpark.Auth.create_claude_session_token(minter, session_id) do
         {:ok, {raw, token}} ->
-          %{mint: :minted, raw: raw, token: token, config_path: write_mcp_config(opts, raw)}
+          # The OTHER direction (connectors D69): fetch this workspace's TOOL
+          # connectors from the bridge and fold them into the config as extra
+          # `mcpServers` keys. Scoped to the MINTED token's workspace — the SAME
+          # workspace the loopback bp token authorizes — so tool scope and chat
+          # scope agree by construction, not by hope. Fail-soft: an instance with
+          # no connect seam (or an unreachable bridge) simply gets no tool
+          # servers, exactly as before this wave.
+          descriptors = tool_descriptors_for(token.workspace_id)
+
+          %{
+            mint: :minted,
+            raw: raw,
+            token: token,
+            config_path: write_mcp_config(opts, raw, descriptors)
+          }
 
         {:error, reason} ->
           Logger.warning(
@@ -1122,14 +1191,53 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp setup_mcp(_opts, _session_opts),
       do: %{mint: :not_attempted, raw: nil, token: nil, config_path: nil}
 
+    # The tool-connector fetch (connectors D69/D73) — the outbound direction. Sign
+    # a session-length tool ticket for `workspace_id` and ask the bridge which MCP
+    # servers this workspace's agent may connect to. Every step is FAIL-SOFT to an
+    # empty list, because a missing/broken tool seam must NEVER poison a chat
+    # session (the loopback `barkpark` server is what makes the chat useful; tool
+    # connectors are additive):
+    #
+    #   * no connect secret (the default instance)      -> {:error, :not_configured}
+    #   * the bridge does not implement the callback     -> function_exported? false
+    #   * the bridge is unreachable / refuses            -> {:error, _}
+    #   * any crash                                      -> rescued
+    #
+    # ONLY a `{:ok, list}` yields tool servers. D38 holds: the bridge returns
+    # NON-SECRET descriptors; the subprocess fetches the PAT via `headersHelper`;
+    # Elixir never decrypts and never holds plaintext.
+    defp tool_descriptors_for(workspace_id) when is_binary(workspace_id) do
+      alias Barkpark.Connectors
+      alias Barkpark.Connectors.ConnectTicket
+
+      with {:ok, ticket} <- ConnectTicket.sign_tool(workspace_id),
+           bridge when is_atom(bridge) and not is_nil(bridge) <- Connectors.bridge(),
+           true <- Code.ensure_loaded?(bridge),
+           true <- function_exported?(bridge, :fetch_tool_descriptors, 1),
+           {:ok, descriptors} when is_list(descriptors) <- bridge.fetch_tool_descriptors(ticket) do
+        descriptors
+      else
+        _ -> []
+      end
+    rescue
+      e ->
+        Logger.warning(
+          "claude chat: tool-descriptor fetch crashed (#{inspect(e)}) — no tool servers"
+        )
+
+        []
+    end
+
+    defp tool_descriptors_for(_), do: []
+
     # Serialize the mcp-config to its per-session temp file. Fail-soft to nil
     # (the MCP lane is lost, the spawn-env lane keeps the SAME token): the
     # mint stays valid, so a transient tmp-dir problem degrades hands, never
     # revokes them. Rescues internally so a post-mint crash can't leak the
     # token past setup_mcp's return.
-    defp write_mcp_config(opts, raw) do
+    defp write_mcp_config(opts, raw, tool_descriptors) do
       path = mcp_config_path(opts)
-      json = Jason.encode!(ClaudeChat.mcp_config(raw))
+      json = Jason.encode!(ClaudeChat.mcp_config(raw, tool_descriptors))
 
       # 0600 BEFORE the secret lands: create empty, clamp perms, then write.
       with :ok <- File.touch(path),
