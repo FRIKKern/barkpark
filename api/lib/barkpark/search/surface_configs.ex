@@ -24,8 +24,14 @@ defmodule Barkpark.Search.SurfaceConfigs do
     * a real `workspace_id` → that tenant's own config. The admin
       GET/PUT controllers pass `conn.assigns.current_workspace.id`, so workspace
       A's write can no longer overwrite workspace B's config on a shared dataset
-      slug (the LIVE cross-tenant bleed this closes). Falls back to the code
-      default when the tenant has not customised its config.
+      slug (the LIVE cross-tenant bleed this closes). On a miss it FALLS THROUGH
+      to the nil-workspace global row (the operator's admin-tuned default) before
+      the hardcoded code default — see `load_or_default/3` (charter D64/D65).
+
+  The scoped search READ path resolves this per-caller: `QueryPipeline.search/4`
+  threads `Keyword.get(opts, :workspace_id)` (from `scope_opts/1`) into `get/3`,
+  so a per-workspace admin's tuning actually reaches results rather than being
+  attributed on write yet resolved workspace-blind on read (charter D63).
   """
 
   import Ecto.Query, only: [from: 2]
@@ -259,9 +265,25 @@ defmodule Barkpark.Search.SurfaceConfigs do
   def default_for("media"), do: @default_media
   def default_for(_), do: @default_documents
 
+  # Two-tier resolution (charter D64). A per-workspace read that misses falls
+  # through to the nil-workspace GLOBAL row — the operator's admin-tuned default
+  # — BEFORE the hardcoded code default, so a tenant that has not customised a
+  # surface still inherits the instance-wide tuning (and an anonymous flat-route
+  # caller, which resolves the seeded Default workspace's REAL id, reaches it the
+  # same way — charter D65). The fallthrough MUST call the `is_nil` get_row/3
+  # clause, never `Repo.get_by(workspace_id: nil)`: the latter raises "expected
+  # at most one result" once a (surface, scope) has both a nil-global row and one
+  # or more per-workspace rows.
+  defp load_or_default(surface, scope, nil) do
+    case get_row(surface, scope, nil) do
+      nil -> default_for(surface)
+      row -> payload(row)
+    end
+  end
+
   defp load_or_default(surface, scope, workspace_id) do
     case get_row(surface, scope, workspace_id) do
-      nil -> default_for(surface)
+      nil -> load_or_default(surface, scope, nil)
       row -> payload(row)
     end
   end

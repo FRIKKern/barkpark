@@ -27,7 +27,13 @@ defmodule Barkpark.Search.QueryPipeline do
   @spec search(String.t(), String.t(), map(), keyword()) :: {:ok, result()}
   def search(surface, scope, context, opts \\ []) when is_binary(surface) and is_binary(scope) do
     t0 = System.monotonic_time(:microsecond)
-    config = SurfaceConfigs.get(surface, scope)
+    # Resolve the surface config for the CALLER'S workspace (charter D63). The
+    # resolved `workspace_id` already rides in `opts` (set by scope_opts/1 from
+    # `current_workspace`); thread it STRAIGHT — never coerce to nil, or a
+    # per-workspace admin's search tuning would be attributed on write yet never
+    # reach the read path (the W5 functional regression this closes). A nil
+    # `workspace_id` (anonymous / unscoped) still resolves the global row.
+    config = SurfaceConfigs.get(surface, scope, Keyword.get(opts, :workspace_id))
     raw_query = Map.get(context, :query, "") || ""
     parsed = QueryParser.parse(raw_query)
     {parsed, corrected_to} = expand_synonyms(surface, scope, parsed)
