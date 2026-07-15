@@ -24,11 +24,15 @@ defmodule Mix.Tasks.Barkpark.EpicFleet.Export do
 
     case Barkpark.EpicFleet.export_benchmark_json(experiment_id) do
       {:ok, json} ->
-        output = json <> "\n"
-
         case Keyword.get(opts, :out) do
-          nil -> IO.write(output)
-          path -> File.write!(path, output)
+          nil ->
+            IO.write(json)
+
+          path ->
+            case Barkpark.EpicFleet.write_benchmark_json_file(path, json) do
+              :ok -> :ok
+              {:error, reason} -> Mix.raise("atomic export failed: #{:file.format_error(reason)}")
+            end
         end
 
       {:error, reason} ->
