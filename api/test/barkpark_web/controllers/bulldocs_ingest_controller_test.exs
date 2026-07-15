@@ -1058,4 +1058,40 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       refute Map.has_key?(resp, "warnings")
     end
   end
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ae-ingest-learn-pointer — teach WHERE the authoring standards live. The
+  # legacy body_html leg emits a NON-BLOCKING advisory (the D36/D42 Warnings
+  # channel's first content-shape consumer) naming the preferred `blocks` path
+  # and the doctrine papers. Advisory only — never a 4xx (charter D5). The
+  # native blocks path stays byte-identical (proven by the D36 no-advisory test
+  # above, which uses blocks).
+  # ───────────────────────────────────────────────────────────────────────────
+  describe "ae-ingest-learn-pointer body_html advisory" do
+    test "the legacy body_html leg rides a learn-pointer advisory naming the doctrine papers",
+         %{conn: conn} do
+      slug = "learn-pointer-#{System.unique_integer([:positive])}"
+
+      # body/1 is a wall-compliant body_html payload (registered weighted tags +
+      # description), so the paper is BORN (200) and the advisory can ride the
+      # success envelope.
+      conn = auth_ingest(conn, body(slug))
+      resp = json_response(conn, 200)
+
+      assert resp["ok"] == true
+      assert resp["slug"] == slug
+      assert Content.get_paper(slug)
+
+      assert is_list(resp["warnings"])
+
+      entry = Enum.find(resp["warnings"], &(&1["code"] == "legacy_body_html"))
+      assert entry, "expected a legacy_body_html advisory in #{inspect(resp["warnings"])}"
+      # Advisory, never an error — promotion is charter-forbidden (D5).
+      assert entry["severity"] == "advisory"
+      # It names the preferred blocks path AND both doctrine paper slugs.
+      assert entry["message"] =~ "blocks"
+      assert entry["message"] =~ "portabledoc-doctrine"
+      assert entry["message"] =~ "composition-doctrine-plan"
+    end
+  end
 end
