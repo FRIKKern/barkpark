@@ -74,6 +74,23 @@ const ORG_A = "12345678-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const ORG_URLKEY = "acme";
 /** The OAuth access token the fake Linear returns for a good code. */
 const ACCESS_TOKEN = "lin_oauth_access_token_A";
+/** The rotating refresh token the fake Linear returns (D90 bundle). */
+const REFRESH_TOKEN = "lin_oauth_refresh_token_A";
+/** The lifetime the fake Linear reports — ~24h, so expires_at = now + this*1000. */
+const EXPIRES_IN = 86399;
+
+/** Parse the bundle a callback sealed into `credential_ref` (D90). */
+function parseBundle(credentialRef: string | null | undefined): {
+  access_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
+} {
+  return JSON.parse(credentialRef as string) as {
+    access_token?: string;
+    refresh_token?: string;
+    expires_at?: number;
+  };
+}
 
 const jsonResp = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), {
@@ -107,7 +124,8 @@ function linearFetch(cfg: {
           jsonResp({
             access_token: ACCESS_TOKEN,
             token_type: "Bearer",
-            expires_in: 86399,
+            expires_in: EXPIRES_IN,
+            refresh_token: REFRESH_TOKEN,
             scope: "read",
           }))
       )();
@@ -266,11 +284,16 @@ describe("the FIFTH webhook-server route class — GET {prefix}/oauth/linear/cal
       expect(res.headers.get("content-type")).toContain("text/html");
       const html = await res.text();
       expect(html).toContain("Connected to Linear");
-      // The install the route wrote is a TOOL install: bare token, NO chat token.
+      // The install the route wrote is a TOOL install: a credential BUNDLE (D90),
+      // NO chat token. The bundle carries the rotating refresh token so tool-headers
+      // can re-token before expiry; the generic read-path extracts .access_token.
       expect(written?.provider).toBe(LINEAR_PROVIDER);
       expect(written?.installKey).toBe(ORG_A);
       expect(written?.workspaceId).toBe(WS_A);
-      expect(written?.credentialRef).toBe(ACCESS_TOKEN);
+      const writtenBundle = parseBundle(written?.credentialRef);
+      expect(writtenBundle.access_token).toBe(ACCESS_TOKEN);
+      expect(writtenBundle.refresh_token).toBe(REFRESH_TOKEN);
+      expect(typeof writtenBundle.expires_at).toBe("number");
       expect(written?.chatToken).toBeUndefined();
     } finally {
       await server.close();
@@ -432,11 +455,16 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
         `https://example.test/connectors/oauth/linear/callback?code=${code}&state=${encodeURIComponent(state)}${extra}`,
       );
 
-    it("writes ONE tool install: credential_ref sealed to the bare token, chat_token_ref NULL, and it OPENS", async () => {
-      const state = signConnectTicket(WS_A, LINEAR_PROVIDER, CONNECT_SECRET);
+    it("writes ONE tool install: credential_ref sealed to a JSON BUNDLE, chat_token_ref NULL, and it OPENS", async () => {
+      const now = 1_700_000_000_000;
+      // Sign the state AT `now` so it verifies under the callback's injected clock —
+      // the same `now` that stamps the bundle's expires_at.
+      const state = signConnectTicket(WS_A, LINEAR_PROVIDER, CONNECT_SECRET, {
+        now: () => now,
+      });
       const result = await handleLinearOAuthCallback(
         callbackReq(state),
-        depsWith(),
+        depsWith({ now: () => now }),
       );
 
       expect(result.installed).toBe(true);
@@ -449,16 +477,21 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       const raw = await rawRow(ORG_A);
       expect(raw?.workspace_id).toBe(WS_A);
       expect(raw?.credential_ref).not.toBeNull();
-      // SEALED — the same cipher every channel uses; the raw token is not stored.
+      // SEALED — the same cipher every channel uses; no plaintext token is stored.
       expect(raw?.credential_ref).not.toContain(ACCESS_TOKEN);
       // A TOOL install has NO chat token (D78).
       expect(raw?.chat_token_ref).toBeNull();
 
-      // …and it opens, against this row's identity, to the BARE access token (D80) —
-      // so the RAW `Bearer ${credentialRef}` the generic tool-headers route prints
-      // is a working MCP bearer.
+      // …and it opens, against this row's identity, to the JSON BUNDLE (D90) —
+      // {access_token, refresh_token, expires_at}. The generic tool-headers read-path
+      // extracts .access_token for a working `Bearer`, and the refresh_token is what
+      // lets it re-token before expiry (D89/D92).
       const install = await lookup().lookupByWorkspace("linear", WS_A);
-      expect(install?.credentialRef).toBe(ACCESS_TOKEN);
+      const bundle = parseBundle(install?.credentialRef);
+      expect(bundle.access_token).toBe(ACCESS_TOKEN);
+      expect(bundle.refresh_token).toBe(REFRESH_TOKEN);
+      // expires_at = now + expires_in*1000 (epoch-ms).
+      expect(bundle.expires_at).toBe(now + EXPIRES_IN * 1000);
       expect(install?.chatToken).toBeNull();
 
       expect(await countLinear()).toBe(1);
@@ -680,13 +713,38 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
     const toolTicket = (workspaceId: WorkspaceId) =>
       signConnectTicket(workspaceId, TOOL_TICKET_PROVIDER, CONNECT_SECRET);
 
-    /** Exactly the row the OAuth callback writes — seed it directly for the seam. */
+    /**
+     * A BARE-STRING install exactly as a PRE-W9 callback (or a paste connector)
+     * wrote it — proves the dual-shape read-path serves a legacy row byte-for-byte
+     * (D89 backward-compat).
+     */
     async function seedLinearInstall(workspaceId: WorkspaceId): Promise<void> {
       await upsertInstall(pool, cipher, {
         provider: LINEAR_PROVIDER,
         installKey: ORG_A,
         workspaceId,
         credentialRef: ACCESS_TOKEN,
+      });
+    }
+
+    /**
+     * A BUNDLE install exactly as the W9 callback writes it (D90) — the SECOND seed
+     * shape. tool-headers must extract `.access_token` from the sealed bundle and
+     * emit the same flat Bearer as the bare-string row does.
+     */
+    async function seedLinearBundleInstall(
+      workspaceId: WorkspaceId,
+    ): Promise<void> {
+      await upsertInstall(pool, cipher, {
+        provider: LINEAR_PROVIDER,
+        installKey: ORG_A,
+        workspaceId,
+        credentialRef: JSON.stringify({
+          access_token: ACCESS_TOKEN,
+          refresh_token: REFRESH_TOKEN,
+          // Far future: no refresh fires, so the seam serves the stored token.
+          expires_at: Date.now() + 30 * 24 * 3_600_000,
+        }),
       });
     }
 
@@ -719,7 +777,7 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       ).toBe(WS_A);
     });
 
-    it("TOOL-HEADERS opens linear's sealed token and returns the flat Bearer (D80)", async () => {
+    it("TOOL-HEADERS opens linear's sealed BARE-string token and returns the flat Bearer (D80/D89 legacy)", async () => {
       const base = await boot();
       await seedLinearInstall(WS_A);
 
@@ -728,6 +786,23 @@ describe.skipIf(!reachable && !REQUIRE_DB)(
       });
       expect(response.status).toBe(200);
       // EXACTLY the shape claude's headersHelper prints — the BARE token as Bearer.
+      expect(await response.json()).toEqual({
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+      });
+    });
+
+    it("TOOL-HEADERS opens linear's sealed BUNDLE and returns the SAME flat Bearer (D89/D90 dual-shape)", async () => {
+      const base = await boot();
+      await seedLinearBundleInstall(WS_A);
+
+      const response = await post(base, "/connectors/connect/tool-headers/linear", {
+        ticket: toolTicket(WS_A),
+      });
+      expect(response.status).toBe(200);
+      // The read-path extracted .access_token from the bundle — byte-identical to
+      // what the bare-string row above emits. The bridge here has NO Linear OAuth
+      // creds (startBridge reads none in this test), so no refresh fires and the
+      // stored token is served: the bundle is served exactly like the legacy row.
       expect(await response.json()).toEqual({
         Authorization: `Bearer ${ACCESS_TOKEN}`,
       });
