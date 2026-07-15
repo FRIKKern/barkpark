@@ -137,6 +137,21 @@ const (
 	// Cloudflare error 526 (invalid SSL certificate). A CF-fronted site MUST
 	// present a pre-issued Origin CA cert instead. Requires CertPath + KeyPath.
 	TLSModeOriginCA = "origin_ca"
+
+	// TLSModeInternal terminates TLS with a self-signed certificate Caddy mints
+	// and rotates locally (`tls internal`) — no cert files on disk, no ACME, no
+	// challenge at handshake time.
+	//
+	// This is the mode for a site proxied through Cloudflare in Full (NON-Strict)
+	// mode: Cloudflare connects to the box over TLS but does not validate the
+	// origin certificate, so a locally-minted cert is sufficient. It shares the
+	// 526-avoidance property with Origin CA — a proxied origin must NEVER run
+	// on-demand ACME, whose TLS-ALPN-01 challenge cannot complete through the
+	// proxy — but needs no cert/key pair to provision, so unlike Origin CA it is
+	// always renderable (no CertPath/KeyPath, so tlsReady never skips it). It is
+	// the zero-provisioning CF-Full path a `bp provider add cloudflare` flow can
+	// switch on without the box operator ever handling a PEM file.
+	TLSModeInternal = "internal"
 )
 
 // cloudflareIPRanges is Cloudflare's published edge network — the only peers
@@ -196,9 +211,11 @@ type Site struct {
 	// `current` release symlink). Ignored for reverse_proxy sites.
 	Root string
 
-	// TLSMode is the TLS termination strategy: "" / TLSModeOnDemand (default)
-	// or TLSModeOriginCA. Any other value is treated as on-demand. Orthogonal
-	// to Kind — a static site and a proxied site can each be CF-fronted or not.
+	// TLSMode is the TLS termination strategy: "" / TLSModeOnDemand (default),
+	// TLSModeOriginCA (CF Full-Strict, cert files from disk), or TLSModeInternal
+	// (CF Full, self-signed, no files). Any unrecognized value is treated as
+	// on-demand. Orthogonal to Kind — a static site and a proxied site can each
+	// be CF-fronted or not.
 	TLSMode string
 	// CertPath and KeyPath are the on-box PEM files for a TLSModeOriginCA site
 	// (the Cloudflare Origin CA cert and its private key). Both are REQUIRED in
@@ -214,28 +231,45 @@ type Site struct {
 // proxying to a container port.
 func (s Site) isStatic() bool { return s.Kind == KindStatic }
 
-// isCloudflareFronted reports whether s sits behind the Cloudflare proxy and so
-// terminates TLS with a pre-issued Origin CA cert instead of on-demand ACME.
-func (s Site) isCloudflareFronted() bool { return s.TLSMode == TLSModeOriginCA }
+// usesOriginCA reports whether s terminates TLS with a pre-issued Cloudflare
+// Origin CA cert loaded from disk (TLSModeOriginCA) — the CF Full-Strict path.
+// This is the only mode that needs a CertPath/KeyPath pair.
+func (s Site) usesOriginCA() bool { return s.TLSMode == TLSModeOriginCA }
+
+// usesInternalTLS reports whether s terminates TLS with a self-signed cert Caddy
+// mints locally (TLSModeInternal) — the CF Full (non-Strict) path. No cert files,
+// no ACME challenge (which the proxy would block → error 526).
+func (s Site) usesInternalTLS() bool { return s.TLSMode == TLSModeInternal }
+
+// isCloudflareFronted reports whether s sits behind the Cloudflare proxy (orange
+// cloud) at all — either Full-Strict with an Origin CA cert (usesOriginCA) or
+// Full with a self-signed internal cert (usesInternalTLS). Both mean the box
+// never sees the visitor's address directly, so the global block must trust the
+// CF edge ranges to believe CF-Connecting-IP. Both also forbid on-demand ACME,
+// whose challenge cannot complete through the proxy.
+func (s Site) isCloudflareFronted() bool { return s.usesOriginCA() || s.usesInternalTLS() }
 
 // tlsReady reports whether s's TLS configuration can actually be rendered. An
-// on-demand site (the default) needs nothing. A Cloudflare-fronted site needs a
-// cert/key pair that is safe to splice into a `tls <cert> <key>` directive.
+// on-demand site (the default) and an internal-TLS site (self-signed, no files)
+// each need nothing. Only an Origin-CA site needs a cert/key pair that is safe
+// to splice into a `tls <cert> <key>` directive.
 //
-// This gate FAILS CLOSED: an Origin-CA site with a missing or unsafe pair is
+// This gate FAILS CLOSED for Origin CA: a site with a missing or unsafe pair is
 // skipped entirely rather than falling back to `tls { on_demand }`. That
 // fallback would look like a harmless default and behave like an outage —
 // ACME cannot complete through the Cloudflare proxy, so every visitor to that
-// host would get error 526.
+// host would get error 526. An internal-TLS site provisions no files, so it is
+// always ready (the same 526-safety with zero operator setup).
 func (s Site) tlsReady() bool {
-	if !s.isCloudflareFronted() {
+	if !s.usesOriginCA() {
 		return true
 	}
 	return safeCaddyPath(s.CertPath) && safeCaddyPath(s.KeyPath)
 }
 
-// anyCloudflareFronted reports whether any site in sites is served with an
-// Origin CA cert, i.e. whether the box sits behind Cloudflare at all.
+// anyCloudflareFronted reports whether any site in sites sits behind the
+// Cloudflare proxy — served with either an Origin CA cert or a self-signed
+// internal cert — i.e. whether the box sits behind Cloudflare at all.
 //
 // This is a pre-pass because the global block is written BEFORE the site loop
 // runs (and before sites are even sorted), while `trusted_proxies` is a global
@@ -358,11 +392,19 @@ func Render(box Box) string {
 			fmt.Fprintf(&sb, "# site %s (port %d)\n", s.Slug, s.Port)
 		}
 		fmt.Fprintf(&sb, "%s {\n", strings.Join(clean, ", "))
-		if s.isCloudflareFronted() {
-			// Pre-issued Cloudflare Origin CA cert: load it from disk, never ask
-			// ACME. tlsReady() has already vetted both paths for splice safety.
+		switch {
+		case s.usesOriginCA():
+			// Pre-issued Cloudflare Origin CA cert (CF Full-Strict): load it from
+			// disk, never ask ACME. tlsReady() has already vetted both paths for
+			// splice safety.
 			fmt.Fprintf(&sb, "  tls %s %s\n", s.CertPath, s.KeyPath)
-		} else {
+		case s.usesInternalTLS():
+			// Self-signed cert Caddy mints locally (CF Full, non-Strict): no cert
+			// files, no ACME. The on-demand challenge could not complete through
+			// the CF proxy (error 526), and CF does not validate the origin cert
+			// in Full mode, so a locally-minted cert is exactly right.
+			sb.WriteString("  tls internal\n")
+		default:
 			sb.WriteString("  tls {\n")
 			sb.WriteString("    on_demand\n")
 			sb.WriteString("  }\n")
