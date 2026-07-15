@@ -249,11 +249,15 @@ class MetricsAndSamplerTest(unittest.TestCase):
         linux = MODULE.parse_linux_group_sample([], 77, 100, 4096)
         self.assertEqual((), linux.pids)
         self.assertIsNone(linux.rss_bytes)
-        sampler = MODULE.OwnedGroupSampler(sample=lambda pgid: linux)
+        sampler = MODULE.OwnedGroupSampler()
+
+        def sample_once(pgid):
+            sampler._stop.set()
+            return linux
+
+        sampler._sample = sample_once
         sampler.register(77)
-        sampler.start()
-        time.sleep(MODULE.SAMPLE_INTERVAL_SECONDS * 1.5)
-        sampler.stop()
+        sampler._loop()
         self.assertIsNone(sampler.peak_rss_bytes)
 
 
