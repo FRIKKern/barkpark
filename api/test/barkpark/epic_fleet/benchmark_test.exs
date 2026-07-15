@@ -129,7 +129,12 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       {:ok, _} =
         EpicFleet.record_benchmark_attempt(
           experiment,
-          %{attempt_attrs() | attempt_id: "attempt-b", ordinal: 2}
+          %{
+            attempt_attrs()
+            | attempt_id: "attempt-b",
+              replaces_attempt_id: "attempt-a",
+              ordinal: 2
+          }
         )
 
       {:ok, _} =
@@ -201,6 +206,7 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
   defp attempt_attrs do
     %{
       attempt_id: "attempt-a",
+      replaces_attempt_id: nil,
       ordinal: 1,
       treatment: "width-1",
       status: "completed",

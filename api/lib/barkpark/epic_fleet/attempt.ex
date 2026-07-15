@@ -13,6 +13,7 @@ defmodule Barkpark.EpicFleet.Attempt do
   schema "epic_benchmark_attempts" do
     belongs_to :experiment, Barkpark.EpicFleet.Experiment
     field :attempt_id, :string
+    field :replaces_attempt_id, :string
     field :ordinal, :integer
     field :treatment, :string
     field :status, :string
@@ -32,6 +33,7 @@ defmodule Barkpark.EpicFleet.Attempt do
     |> cast(attrs, [
       :experiment_id,
       :attempt_id,
+      :replaces_attempt_id,
       :ordinal,
       :treatment,
       :status,
@@ -54,6 +56,7 @@ defmodule Barkpark.EpicFleet.Attempt do
     |> validate_number(:ordinal, greater_than: 0)
     |> validate_inclusion(:status, @statuses)
     |> validate_format(:attempt_digest, @digest_format)
+    |> validate_not_self_replacement()
     |> validate_costs()
     |> foreign_key_constraint(:experiment_id)
     |> unique_constraint([:experiment_id, :attempt_id],
@@ -100,4 +103,12 @@ defmodule Barkpark.EpicFleet.Attempt do
        do: true
 
   defp valid_cost?(_value), do: false
+
+  defp validate_not_self_replacement(changeset) do
+    if get_field(changeset, :attempt_id) == get_field(changeset, :replaces_attempt_id) do
+      add_error(changeset, :replaces_attempt_id, "cannot replace itself")
+    else
+      changeset
+    end
+  end
 end

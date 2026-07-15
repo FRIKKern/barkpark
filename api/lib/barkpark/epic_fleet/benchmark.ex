@@ -8,7 +8,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   @format "barkpark-epic-benchmark-v1"
   @experiment_fields ~w(workspace_id epic_id wave_id experiment_id phase protocol_version manifest)
-  @attempt_fields ~w(attempt_id ordinal treatment status costs provenance payload)
+  @attempt_fields ~w(attempt_id replaces_attempt_id ordinal treatment status costs provenance payload)
   @sensitive_exact ~w(
     token access_token refresh_token api_key apikey secret client_secret password authorization
     cookie set-cookie private_key signing_key bearer
@@ -23,10 +23,13 @@ defmodule Barkpark.EpicFleet.Benchmark do
     if is_map(manifest) do
       attrs = Map.put(attrs, "manifest_digest", CanonicalJSON.digest(manifest))
 
-      attrs
-      |> Experiment.insert_changeset()
-      |> Repo.insert()
-      |> reconcile_experiment(attrs)
+      case Repo.insert(Experiment.insert_changeset(attrs),
+             on_conflict: :nothing,
+             conflict_target: [:workspace_id, :epic_id, :wave_id, :experiment_id]
+           ) do
+        {:ok, _candidate} -> reconcile_experiment(attrs)
+        {:error, changeset} -> {:error, changeset}
+      end
     else
       {:error, :invalid_manifest}
     end
@@ -38,7 +41,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
     do: record_attempt(experiment_id, attrs)
 
   def record_attempt(experiment_id, attrs) when is_binary(experiment_id) and is_map(attrs) do
-    attrs = attrs |> select_attrs(@attempt_fields) |> sanitize_map()
+    attrs =
+      attrs
+      |> select_attrs(@attempt_fields)
+      |> sanitize_map()
+      |> Map.put_new("replaces_attempt_id", nil)
 
     attrs =
       attrs
@@ -211,15 +218,18 @@ defmodule Barkpark.EpicFleet.Benchmark do
     Repo.transaction(fn ->
       case create_experiment(experiment_attrs) do
         {:ok, experiment} ->
-          Enum.reduce_while(document["attempts"], %{experiment: experiment, attempts: 0}, fn row,
-                                                                                             stats ->
+          Enum.reduce_while(
+            Enum.sort_by(document["attempts"], &{&1["ordinal"], &1["attempt_id"]}),
+            %{experiment: experiment, attempts: 0},
+            fn row, stats ->
             attrs = Map.drop(row, ["attempt_digest"])
 
             case record_attempt(experiment, attrs) do
               {:ok, _attempt} -> {:cont, %{stats | attempts: stats.attempts + 1}}
               {:error, reason} -> Repo.rollback(reason)
             end
-          end)
+            end
+          )
 
         {:error, reason} ->
           Repo.rollback(reason)
@@ -243,6 +253,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp attempt_map(%Attempt{} = attempt) do
     semantic = %{
       "attempt_id" => attempt.attempt_id,
+      "replaces_attempt_id" => attempt.replaces_attempt_id,
       "ordinal" => attempt.ordinal,
       "treatment" => attempt.treatment,
       "status" => attempt.status,
@@ -255,7 +266,12 @@ defmodule Barkpark.EpicFleet.Benchmark do
   end
 
   defp attempt_map(attempt) when is_map(attempt) do
-    semantic = attempt |> select_attrs(@attempt_fields) |> sanitize_map()
+    semantic =
+      attempt
+      |> select_attrs(@attempt_fields)
+      |> sanitize_map()
+      |> Map.put_new("replaces_attempt_id", nil)
+
     Map.put(semantic, "attempt_digest", CanonicalJSON.digest(semantic))
   end
 
@@ -265,9 +281,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
     end)
   end
 
-  defp reconcile_experiment({:ok, experiment}, _attrs), do: {:ok, experiment}
-
-  defp reconcile_experiment({:error, changeset}, attrs) do
+  defp reconcile_experiment(attrs) do
     existing =
       Repo.get_by(Experiment,
         workspace_id: attrs["workspace_id"],
@@ -278,7 +292,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
     cond do
       is_nil(existing) ->
-        {:error, changeset}
+        {:error, :experiment_insert_failed}
 
       existing.phase == attrs["phase"] and existing.protocol_version == attrs["protocol_version"] and
           existing.manifest_digest == attrs["manifest_digest"] ->

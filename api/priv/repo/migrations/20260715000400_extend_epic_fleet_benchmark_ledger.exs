@@ -81,6 +81,7 @@ defmodule Barkpark.Repo.Migrations.ExtendEpicFleetBenchmarkLedger do
           null: false
 
       add :attempt_id, :text, null: false
+      add :replaces_attempt_id, :text
       add :ordinal, :integer, null: false
       add :treatment, :text, null: false
       add :status, :text, null: false
@@ -96,6 +97,19 @@ defmodule Barkpark.Repo.Migrations.ExtendEpicFleetBenchmarkLedger do
            )
 
     create index(:epic_benchmark_attempts, [:experiment_id, :ordinal])
+
+    execute """
+    ALTER TABLE epic_benchmark_attempts
+      ADD CONSTRAINT epic_benchmark_attempts_replacement_fkey
+      FOREIGN KEY (experiment_id, replaces_attempt_id)
+      REFERENCES epic_benchmark_attempts(experiment_id, attempt_id)
+      ON DELETE CASCADE
+      DEFERRABLE INITIALLY DEFERRED;
+    """
+
+    create constraint(:epic_benchmark_attempts, :epic_benchmark_attempts_not_self_replacement,
+             check: "replaces_attempt_id IS NULL OR replaces_attempt_id <> attempt_id"
+           )
 
     create constraint(:epic_benchmark_attempts, :epic_benchmark_attempts_ordinal,
              check: "ordinal > 0"
