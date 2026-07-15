@@ -1,0 +1,355 @@
+PERFECT PLAN BUILD — WAVE 5: CLOSE THE LIVE CROSS-TENANT BLEEDS
+───────────────────────────────────────────────────────────────
+
+▌
+
+The wish (verbatim intent)
+
+
+
+Where the wave stands
+
+
+
+Strategic direction
+
+
+
+
+
+The crux Decide must resolve: the held #3065 dependency
+
+
+
+
+
+Regression discipline (the W4 lesson, non-negotiable)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Survey plan (why each question changes the plan)
+
+
+
+Slices this wave drives
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Constraints (lead notes)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Survey digest — 16 reports folded (Digest phase, 2026-07-14)
+
+
+
+
+
+
+
+Coverage map — checked and FOUND
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Coverage map — checked and NOT FOUND (decisions-in-waiting)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Corners no surveyor reached
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Verify fleet — in flight (Digest → Verify)
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Wave 5 REDUX — re-strategize (crash recovery, 2026-07-14)
+
+
+
+
+
+
+
+
+
+Redux survey plan (ledger-first, lean — terrain already mapped)
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+DECIDE (2026-07-14) — verification proven, decisions locked, wave in flight
+
+
+
+Verification results
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Decisions (D49–D57 — full text in the charter)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Wave plan — 3 slices, all opus (Fable exhausted), build parallel / merge A→C→B
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Wave 5 REDUX-3 — Strategize (2026-07-14, third host-saturation recovery)
+
+This paper already carries a full Decide (D49–D57, a 3-slice A/C/B plan) — yet
+nothing built. Two prior runs (wf_8cc3a111, wf_e412d81f) died under host
+saturation before a single Build byte committed; this is the third attempt. The
+lesson is now loud: the 3-slice ambition is what keeps starving under load. This
+run REJECTS the wide plan and executes ONLY the single highest-leverage, self-
+contained piece — Slice A — so a saturated host cannot rob it of output a third
+time. One slice. One LIVE security bug closed. Survivable.
+
+LEDGER TRUTH (re-verified now, not from the stale Decide): Slice A — bpb-search-
+config-workspace-attribution (task 198cf04a-4411-46a0-9db2-2962aa89ce17) is
+OPEN, unclaimed, with NO branch or worktree among 40+ live worktrees. Slice C —
+bpb-datakeys-write-path-workspace-attribution (fe06b44f) OPEN. Slice B — bpb-
+sync-cursors-workspace-attribution (2e76b85e) OPEN. Critically, #3065 (loop-
+epic/shared-slug-dek-export-delete-gap-data-k-0-r) is still OPEN and was updated
+MINUTES before this run — actively under LOW-18 repair.
+
+SCOPE VERDICT — Slice A ONLY. The wish permits also taking the datakeys slice
+'if genuinely file-disjoint.' It is NOT: charter D51 defines Slice C as the SAME
+data_keys migration + catalog @pinned_e1 re-pin + export/delete work that #3065
+is repairing right now (it supersedes #3065). Taking it would collide with an
+actively-repaired in-flight PR, violate the wish's explicit 'do NOT touch the
+data_keys export/delete migration' guard, and re-inflate the very blast radius
+that has crashed twice. The conditional resolves to NO. Slice B (dormant sync_*)
+is out of this wish. Deferred-not-built this run: Slice C (fe06b44f), Slice B
+(2e76b85e) — recorded here, untouched.
+
+DIRECTION (D49/D50 already ratified — confirm against origin/main, do not
+relitigate): tenant B can no longer read OR overwrite tenant A's
+search_surface_config, across BOTH documents and media, proven by RUNNING.
+Runtime key → (workspace_id, surface, scope): migration +
+SurfaceConfigs.get/upsert + both controllers (documents query path +
+media_controller.ex:150,156). A bespoke admin pipeline mirroring :media_mutate
+(router.ex:536-568) inserts DeriveWorkspaceFromToken BEFORE AssignDefaultScope
+on both flat settings routes (documents router.ex:1614, media ~:1767) — a naive
+append after :api is a pure no-op (AssignDefaultScope stamps Default first); the
+rebuilt pipeline re-includes :api's security plugs. search_surface_config moves
+@allowlist→@pinned_e1 so export/delete attribute it per-workspace via E1. NO
+openapi regen (D50).
+
+QUALITY BAR / D57 regression discipline (the #3065 LOW-18 lesson, MANDATORY):
+fail-before test RED first — V1's cross-tenant upsert/get probe covering
+documents AND media, minting PER-WORKSPACE admin tokens via
+create_token(...,ws.id) (a nil-workspace token resolves to Default and can't
+distinguish tenants) — then green. Run the FULL affected files:
+test/barkpark/search/ whole + workspace_bundle_test.exs +
+tenancy_delete_workspace_test.exs. Preserve every existing index/uniqueness
+invariant or update its test WITH a rationale. ecto.migrate a CLEAN DB (the
+shared one is diverged — it carried #3065's schema). Merge-time only (steward,
+not builder): catalog @pinned_e1 E1 19→20 + workspace_bundle_test.exs:22 collide
+with #3065/B/C per D56 — build off origin/main, rebase the count literal at
+merge. Builders COMMIT to their worktree branch, do NOT push; steward pushes
+green + files the PR.
+
+SURVIVAL: every phase OPUS ONLY (Fable exhausted; never Haiku). Branch from
+ORIGIN/main; isolated worktree; CC=/usr/bin/clang. Fresh-worktree recipe (W4-
+proven): mkdir -p _build FIRST, then cp -a $MAIN/api/_build/test _build/test,
+symlink deps, ecto.migrate clean. Gate: CC=/usr/bin/clang mix test
+test/barkpark/search/ test/barkpark/tenancy/workspace_bundle_test.exs
+test/barkpark/tenancy_delete_workspace_test.exs.
+
+Redux-3 survey plan — confirmation + precise file-mapping (12 surveyors)
+
+This is a redux of a ratified plan; the survey CONFIRMS D45/D49/D50 against
+CURRENT origin/main and pins every edit to file:line so Build starts instantly
+and a mid-crash leaves a crisp spec. (1) ledger-dedup: re-scan open PRs + all
+worktrees + foreign claims for any Slice-A work in flight; confirm 198cf04a
+unclaimed; capture #3065's current state + whether it touches catalog
+@pinned_e1. (2) bleed-reproduce: locate SurfaceConfigs.upsert/get; confirm
+today's physical key (surface,scope) with no workspace filter; lock the exact V1
+run-proof recipe for the fail-before RED. (3) runtime-key-map: every read/write
+site keyed (surface,scope) — SurfaceConfigs + documents query path +
+media_controller.ex:150,156 + the table's unique-index migration. (4) router-
+pipeline: the two flat settings routes (router.ex 1610/1614 docs PUT, ~1767
+media), :api plug order, the :media_mutate precedent 536-568,
+DeriveWorkspaceFromToken behavior — confirm D49's bespoke-pipeline shape on
+origin/main. (5) catalog-repin: @pinned_e1/@allowlist current membership + E1
+count + workspace_bundle_test.exs:22 literal + how search_surface_config is
+classified today. (6) token-derivation: how admin tokens carry workspace_id;
+create_token(...,ws.id) minting for per-workspace admin tokens in the fail-
+before. (7) fail-before-seam: search/ test files + seed_two_workspaces! +
+tenancy helpers (tenancy_delete_workspace_test.exs:625-676) — where the leak-
+negative test plugs in. (8) openapi-drift: confirm D50 — both routes absent from
+openapi.json + Capabilities.manifest (no regen). (9) media-vs-docs parity:
+confirm the bleed spans BOTH surfaces so fail-before covers both. (10) worktree-
+recipe: confirm the borrow recipe green off origin/main under a migration+new-
+pipeline diff. (11) crash-forensics: what saturated wf_8cc3a111/wf_e412d81f;
+confirm zero partial artifacts; the minimal survivable single-slice build. (12)
+prior-art: reuse D45/D49/D50 evidence + the wave-4 V1 proof recipe verbatim.
+
+Redux-3 drives: epic 77b74f03-32eb-40d7-bd05-989c8d7b25e4; Slice A 198cf04a-
+4411-46a0-9db2-2962aa89ce17. Digest appends the survey digest + verify plan
+BEFORE verifiers fly; Decide appends the final Slice-A build spec BEFORE the
+builder flies; Review closes this Paper as the debrief.
+
+W5 REDUX DIGEST — 9 surveys folded (Digest phase, 2026-07-14, redux)
+
+
+
+
+
+
+
+
+
+
+
+
+
+W5 REDUX — Coverage map: checked and FOUND
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+W5 REDUX — Coverage map: checked and NOT FOUND (decisions-in-waiting)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+W5 REDUX — Corners no surveyor reached
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+W5 REDUX — Verify fleet: in flight (Digest -> Verify, 2026-07-14)
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+
+WAVE 5 REDUX — DECIDE (2026-07-14): REBUILD THE ONE FLAGSHIP
+────────────────────────────────────────────────────────────
+
+
+
+Verification results (the deep round — proofs run, not read)
+
+
+
+
+
+
+
+
+
+
+
+Decisions (D58–D62 — mirror the charter)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Wave plan — 1 slice (opus; Fable exhausted)
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+
+
+
+Review debrief (2026-07-14) — grade A-
+
+
+
+Slice A (PRIMARY) — bpb-search-config-workspace-attribution
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Slice C — bpb-datakeys-write-path-workspace-attribution
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Slice B — bpb-sync-cursors-workspace-attribution
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Reviewer fixes applied in place
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Integration — the one non-trivial merge lift (read before merging)
+
+
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Grade — A-
+
+
+
+Ledger audit outcome
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ unknown block: bullet_list                                                   │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+Next wave should take

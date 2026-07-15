@@ -1,0 +1,77 @@
+{
+  "child_count": 0,
+  "children": [],
+  "doc": {
+    "assignee": null,
+    "claim": {
+      "epoch": 2,
+      "expired_at": "2026-07-08T05:13:00.427028Z",
+      "previous_worker": "pdrender-spinner",
+      "ts_iso": "2026-07-08T05:13:00.427028Z",
+      "work_digest": "1eaa4ec8bc8e4a01",
+      "work_field_digests": {
+        "acceptance_criteria": "fc95eee81c37e480",
+        "description": "b7d8f4a1412fe31a",
+        "title": "fc95eee81c37e480"
+      },
+      "worker": null
+    },
+    "comment_count": 0,
+    "content": {
+      "assignee": null,
+      "claim": {
+        "epoch": 2,
+        "expired_at": "2026-07-08T05:13:00.427028Z",
+        "previous_worker": "pdrender-spinner",
+        "ts_iso": "2026-07-08T05:13:00.427028Z",
+        "work_digest": "1eaa4ec8bc8e4a01",
+        "work_field_digests": {
+          "acceptance_criteria": "fc95eee81c37e480",
+          "description": "b7d8f4a1412fe31a",
+          "title": "fc95eee81c37e480"
+        },
+        "worker": null
+      },
+      "description": "String.to_existing_atom/1 in board_theme_parity_test.exs raises ArgumentError when a lifecycle atom (:in_progress etc) is not yet interned — load-order-dependent under async:true. Passes 186/0 in isolation, fails ~1/8106 under concurrent load. Fix: intern the canonical lifecycle atoms at compile time from Board.glyphs/0 (source of truth), removing the runtime to_existing_atom dependency while keeping GUI<->TUI glyph parity intact.",
+      "github": {
+        "issue": 1384,
+        "repo": "FRIKKern/barkpark",
+        "state": "synced",
+        "synced_fingerprint": 124763292,
+        "synced_rev": "c9b977964ef720a8d233cc5bbc5eeb4e"
+      },
+      "kind": "task",
+      "labels": [
+        "test",
+        "flake",
+        "ci"
+      ],
+      "lifecycle_status": "open",
+      "priority": 2,
+      "title": "fix: board_theme_parity flake — to_existing_atom load-order under async"
+    },
+    "dataset": "production",
+    "dependency_count": 0,
+    "dependent_count": 0,
+    "doc_id": "drafts.task-a54820a835b6d0e2",
+    "execution_policy": null,
+    "id": "7506cc00-df1a-4bff-9132-b47116064ea1",
+    "inserted_at": "2026-07-08T05:07:19.120488Z",
+    "kind": "task",
+    "labels": [
+      "test",
+      "flake",
+      "ci"
+    ],
+    "lifecycle_status": "open",
+    "papers": [],
+    "parent_id": null,
+    "priority": 2,
+    "rev": "01f99314bbb3790499283873c376a78e",
+    "status": "draft",
+    "title": null,
+    "type": "task",
+    "updated_at": "2026-07-08T05:13:46.370038Z"
+  },
+  "ok": true
+}
