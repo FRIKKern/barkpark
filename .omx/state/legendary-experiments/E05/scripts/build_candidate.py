@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -112,19 +114,30 @@ def main() -> None:
     )
     candidate_semantic_sha256 = semantic_hash(envelopes)
     elapsed = time.perf_counter() - started
-    write_json(
-        OUTPUTS / "timing.json",
-        {
-            "schema_version": "legendary-e05-timing/v1",
-            "fixture_count": len(envelopes),
-            "build_real_seconds": round(elapsed, 6),
-            "milliseconds_per_fixture": round(elapsed * 1000 / len(envelopes), 6),
-            "under_60_minutes": elapsed < 3600,
-        },
+    timing = {
+        "schema_version": "legendary-e05-timing/v1",
+        "fixture_count": len(envelopes),
+        "build_real_seconds": round(elapsed, 6),
+        "milliseconds_per_fixture": round(elapsed * 1000 / len(envelopes), 6),
+        "under_60_minutes": elapsed < 3600,
+    }
+    # Committed timing.json is the preserved evidence measurement. Ordinary replay
+    # writes its volatile observation outside the repository so verification is
+    # byte-stable. An intentional evidence refresh must be explicit.
+    volatile_timing_path = Path(
+        os.environ.get(
+            "E05_VOLATILE_TIMING_PATH",
+            str(Path(tempfile.gettempdir()) / "barkpark-e05-last-timing.json"),
+        )
     )
+    write_json(volatile_timing_path, timing)
+    committed_timing_path = OUTPUTS / "timing.json"
+    if not committed_timing_path.exists() or os.environ.get("E05_REFRESH_TIMING") == "1":
+        write_json(committed_timing_path, timing)
     print(
         f"E05 BUILD PASS fixtures={len(envelopes)} cells={len(matrix)} "
-        f"candidate_sha256={candidate_semantic_sha256} quarantined={len(quarantine_rows)}"
+        f"candidate_sha256={candidate_semantic_sha256} quarantined={len(quarantine_rows)} "
+        f"observed_seconds={timing['build_real_seconds']} volatile_timing={volatile_timing_path}"
     )
 
 

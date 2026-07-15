@@ -57,6 +57,7 @@ def main() -> None:
     rollback = load_json(OUTPUTS / "rollback-manifest.json")["rows"]
     quarantine = load_json(OUTPUTS / "quarantine.json")["rows"]
     matrix = load_json(OUTPUTS / "surface-matrix.json")
+    committed_timing = load_json(OUTPUTS / "timing.json")
     require(len(envelopes) == 36, "envelope count")
     require(all(row["schema_version"] == SCHEMA_VERSION for row in envelopes), "envelope schema")
     require(all(row["authority"] == {"source_of_truth": "source", "derived_views_authoritative": False, "single_truth_count": 1} for row in envelopes), "single source of truth")
@@ -80,6 +81,12 @@ def main() -> None:
     require(matrix["status_counts"] == {"PASS": 108, "BLOCKED": 72, "FAIL": 0}, "surface statuses")
     require(all(row["nonblank_or_explicit_error"] for row in matrix["rows"]), "silent blank output")
     require(not any(row["status"] == "PASS" and row["surface"] in {"Studio", "email"} for row in matrix["rows"]), "blocked surface promoted to PASS")
+    require(
+        committed_timing["schema_version"] == "legendary-e05-timing/v1"
+        and committed_timing["fixture_count"] == 36
+        and committed_timing["under_60_minutes"] is True,
+        "committed timing evidence",
+    )
 
     frozen_thresholds = load_json(FIXTURES / "e03-thresholds.json")["thresholds"]
     threshold_results = {
@@ -171,7 +178,12 @@ def main() -> None:
         "counts": {"fixtures": 36, "papers": 12, "tasks": 18, "adversarial": 6, "surface_cells": 180, "surface_pass": 108, "surface_blocked": 72, "surface_fail": 0, "quarantined": len(quarantine)},
         "candidate_semantic_sha256": candidate_hash,
         "artifact_hashes": artifact_hashes,
-        "timing": load_json(OUTPUTS / "timing.json"),
+        "timing": committed_timing,
+        "timing_policy": {
+            "committed": "outputs/timing.json preserves the accepted measured evidence and is immutable on ordinary replay",
+            "volatile": "ordinary replay writes its current observation to $E05_VOLATILE_TIMING_PATH or the system temporary directory",
+            "refresh": "set E05_REFRESH_TIMING=1 only for an intentional evidence refresh",
+        },
         "verdict": {"quality": "PARTIAL", "action": "REWORK", "self_selected_as_winner": False},
     }
     require(REQUIRED_RESULT_FIELDS <= set(result), "required result fields")
