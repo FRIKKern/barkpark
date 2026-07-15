@@ -215,7 +215,7 @@ def main() -> None:
     write("candidate-scorecards.json", {"schema_version": "legendary-e07-candidate-scorecards/v1", "assignment_id": "E07", "candidates": scorecards})
     write("threshold-outcomes.json", {"schema_version": "legendary-e07-threshold-outcomes/v1", "assignment_id": "E07", "frozen_thresholds_sha256": sha(E03 / "thresholds.json"), "outcomes": outcomes})
     write("rejection-evidence.json", rejections)
-    write("timing.json", {"schema_version": "legendary-e07-timing/v1", "assignment_id": "E07", "wall_seconds": round(time.perf_counter() - started, 6), "fixtures": 36, "candidates": 3, "cells": len(cells), "policy": "informational wall clock; excluded from stable idempotence hash set"})
+    write(".replay/timing.json", {"schema_version": "legendary-e07-volatile-timing/v1", "assignment_id": "E07", "wall_seconds": round(time.perf_counter() - started, 6), "fixtures": 36, "candidates": 3, "cells": len(cells), "tracked": False, "policy": "volatile replay measurement; tracked timing.json preserves the original E07 measured evidence"})
     print(f"E07 ATTACK BUILT candidates=3 fixtures=36 surfaces=5 cells={len(cells)} pass={matrix['status_counts']['pass']} fail={matrix['status_counts']['fail']} blocked={matrix['status_counts']['blocked']}")
 
 
