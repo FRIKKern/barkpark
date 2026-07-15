@@ -1,0 +1,5 @@
+---
+'@barkpark/react': patch
+---
+
+Add the Layer-2 cross-surface DOM-shape parity harness for `PortableDoc` (test-only; no runtime/API change). `tests/support/dom-shape.ts` is a net-new node-for-node comparator that parses two HTML strings with a real DOM (happy-dom) and asserts they are *shape*-equal — tag name + class SET (order-insensitive) + `data-*` + the `style` attribute (order-insensitive; for inline marks and the chat family) + whitespace-collapsed text, recursively — so an Elixir HEEx snapshot and JS SSR output compare on structure, never bytes. `tests/PortableDoc.parity.test.tsx` renders each frozen Elixir golden fixture (`tests/fixtures/pd-golden/<type>.golden.json`) through `PortableDoc` and asserts DOM-shape equality across every non-plugin block type — the Wave-1 render-parity capstone. The comparator carries unconditional self-tests including a distrust-vacuous-green protective proof (a corrupted tag/class/data/style/text/child-order turns the comparison red); the 42-type suite self-arms and fires once the golden mirror and `PortableDoc` export land.
