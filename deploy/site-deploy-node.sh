@@ -849,7 +849,13 @@ if [ "$SKIP_BUILD" = 0 ]; then
     cap=(command)
   fi
   BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/site-node-build.XXXXXX")"
-  "${cap[@]}" "${scrub[@]}" bash -euo pipefail -c 'npm ci --no-audit --no-fund && npm run build' 2>&1 | tee "$BUILD_LOG"
+  # --include=dev is LOAD-BEARING: the scrubbed env sets NODE_ENV=production, under
+  # which `npm ci` OMITS devDependencies — but the BUILD needs them (typescript,
+  # @types/*, and any framework build tooling live in devDependencies). Without it
+  # `next build` dies "Please install typescript, @types/react, @types/node" →
+  # "build worker exited with code: 1". The RUNTIME stays lean: Next's standalone
+  # output bundles only what serving needs, so the release never ships devDeps.
+  "${cap[@]}" "${scrub[@]}" bash -euo pipefail -c 'npm ci --no-audit --no-fund --include=dev && npm run build' 2>&1 | tee "$BUILD_LOG"
   build_rc="${PIPESTATUS[0]}"
   if [ "$build_rc" -ne 0 ]; then
     reason="$(build_failure_reason "$BUILD_LOG")"
