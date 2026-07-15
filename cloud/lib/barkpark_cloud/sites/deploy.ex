@@ -559,7 +559,16 @@ defmodule BarkparkCloud.Sites.Deploy do
   def rollback(%Site{} = site, %Barkpark{} = bp) do
     was = site.current_deployment_id
 
-    case BoxRelay.rollback(bp, %{mode: "rollback", slug: site.slug}) do
+    # Carry the runtime_target so the box dispatches to the RIGHT rollback engine
+    # (charter D63/D71): a node site rolls back by flipping the Caddy port to its
+    # warm previous slot (site-deploy-node.sh --rollback), NOT the static engine's
+    # symlink swap — which has no `current` symlink for a node site and exits 22
+    # "not_supported". The deploy payload already carries this; rollback must too.
+    case BoxRelay.rollback(bp, %{
+           mode: "rollback",
+           slug: site.slug,
+           runtime_target: runtime_target(site)
+         }) do
       {:ok, status, body} when status in 200..299 ->
         target = body["build_id"] || body["target_build"] || body["current_build"]
         finish_rollback(site, bp, was, target)
