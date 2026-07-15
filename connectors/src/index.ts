@@ -23,6 +23,7 @@ import type {
 import { createCredentialCipher } from "./crypto/credential-cipher.js";
 import { createDiscordConnector, DISCORD_PROVIDER } from "./connectors/discord.js";
 import { createGithubConnector, GITHUB_PROVIDER } from "./connectors/github.js";
+import { createLinearConnector, LINEAR_PROVIDER } from "./connectors/linear.js";
 import {
   createIMessageConnector,
   IMESSAGE_PROVIDER,
@@ -41,6 +42,7 @@ import {
 import { dispatchInbound, type DispatchOutcome } from "./core/dispatch.js";
 import { createBridgePool, ensureBridgeSchema } from "./db/pool.js";
 import type { ConnectDeps } from "./http/connect.js";
+import type { LinearOAuthCallbackDeps } from "./oauth/linear-oauth.js";
 import type { SlackOAuthCallbackDeps } from "./oauth/slack-oauth.js";
 import { createWebhookMountIndex, type WebhookMountIndex } from "./http/mounts.js";
 import { startWebhookServer, type WebhookServer } from "./http/webhook-server.js";
@@ -174,6 +176,17 @@ export function registerBuiltinConnectors(
   // second tool connector (Linear) is a second line here.
   if (!registry.has(GITHUB_PROVIDER)) {
     registry.register(createGithubConnector());
+  }
+
+  // Linear — the SECOND tool connector (D77), the proof that "a second tool
+  // connector is a second registry entry with ZERO core-loop change" is TRUE. It
+  // is OAuth-only (no `connect` paste member), so it is never paste-connectable —
+  // it lands through `oauth/linear-oauth.ts`. Registered UNCONDITIONALLY, exactly
+  // like GitHub: registration makes the tool-descriptors/tool-headers seam serve
+  // its installs; the OAuth CALLBACK route is separately gated on app credentials
+  // (see `linearOAuth` below). One registry entry, one more line than GitHub's.
+  if (!registry.has(LINEAR_PROVIDER)) {
+    registry.register(createLinearConnector());
   }
 
   // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
@@ -341,6 +354,22 @@ function slackDepsFromEnv(
   const clientSecret = env["SLACK_CLIENT_SECRET"]?.trim();
   if (!signingSecret || !clientId || !clientSecret) return undefined;
   return { signingSecret, clientId, clientSecret };
+}
+
+/**
+ * Linear OAuth app credentials from the environment. Absent ⇒ the Connect-to-Linear
+ * callback route is simply NOT MOUNTED (the connector itself is still registered so
+ * the tool seam serves any install written another way). No signing secret: Linear
+ * is a tool connector with no inbound webhook to verify — only the outbound OAuth
+ * code exchange, which needs the client id/secret.
+ */
+function linearDepsFromEnv(
+  env: NodeJS.ProcessEnv,
+): { clientId: string; clientSecret: string } | undefined {
+  const clientId = env["LINEAR_CLIENT_ID"]?.trim();
+  const clientSecret = env["LINEAR_CLIENT_SECRET"]?.trim();
+  if (!clientId || !clientSecret) return undefined;
+  return { clientId, clientSecret };
 }
 
 /**
@@ -622,6 +651,38 @@ export async function startBridge(
     );
   }
 
+  /**
+   * THE CONNECT-TO-LINEAR OAUTH CALLBACK deps (D77/D78) — the OUTBOUND (tool)
+   * mirror of the Slack callback, MINUS consumePendingConnect (a tool install has
+   * no chat token to stage) and MINUS mountInstall (a tool is never a channel).
+   * Mounted only when the bridge has a Linear OAuth app (client id/secret), a
+   * connect secret (the ticket HMAC key), AND a public base URL (Linear redirects a
+   * browser to an exact registered URL — a loopback address could never be that).
+   * Any one missing ⇒ the callback route answers the opaque 404.
+   */
+  const linearApp = linearDepsFromEnv(process.env);
+  const linearOAuth: LinearOAuthCallbackDeps | undefined =
+    linearApp && config.connectSecret && publicBaseUrl
+      ? {
+          clientId: linearApp.clientId,
+          clientSecret: linearApp.clientSecret,
+          redirectUri: `${publicBaseUrl.replace(/\/+$/, "")}${config.webhook.pathPrefix}/oauth/linear/callback`,
+          stateSecret: config.connectSecret,
+          resolveWorkspace: (provider, installKey) =>
+            installs.resolveWorkspace(provider, installKey),
+          upsertInstall: (install) => upsertInstall(pool, cipher, install),
+        }
+      : undefined;
+
+  if (!linearOAuth) {
+    console.warn(
+      "[bridge] Connect-to-Linear OAuth callback is NOT MOUNTED — needs LINEAR_CLIENT_ID/" +
+        "LINEAR_CLIENT_SECRET, CONNECTORS_CONNECT_SECRET, and CONNECTORS_PUBLIC_BASE_URL. " +
+        `${config.webhook.pathPrefix}/oauth/linear/callback answers 404 until they are set. ` +
+        "The Linear tool connector still serves any install written another way.",
+    );
+  }
+
   // The listener comes up even with zero webhook installs today: the whole point
   // of dynamic mounting is that the FIRST install must not need a restart.
   let webhookServer: WebhookServer | undefined;
@@ -632,6 +693,7 @@ export async function startBridge(
       mounts,
       ...(connectDeps ? { connect: connectDeps } : {}),
       ...(slackOAuth ? { slackOAuth } : {}),
+      ...(linearOAuth ? { linearOAuth } : {}),
       // LOOPBACK behind Caddy (D34). Binding every interface would expose the
       // seam — and the x-forwarded-* headers it trusts — straight to the internet.
       host: config.webhook.host,
