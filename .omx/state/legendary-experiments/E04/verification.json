@@ -1,0 +1,16 @@
+{
+  "accepted_paper_and_adversarial_count": 16,
+  "class_count": 6,
+  "failures": [],
+  "first_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+  "idempotent": true,
+  "quarantine_count": 2,
+  "second_sha256": "33ec828b11b3f5b32578c770c9aeb7979a0a9e52559cdbab88fa38b40b25fd74",
+  "status": "PASS",
+  "task_count": 18,
+  "timings_seconds": [
+    0.179179,
+    0.171201
+  ],
+  "total_fixture_count": 36
+}
