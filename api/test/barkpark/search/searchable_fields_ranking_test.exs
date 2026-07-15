@@ -46,10 +46,20 @@ defmodule Barkpark.Search.SearchableFieldsRankingTest do
   @docs_query "#{@docs_anchor} borealis"
 
   defp doc_title_heavy,
-    do: %{"searchable_fields" => [%{"path" => "title", "weight" => 10}, %{"path" => "content.body", "weight" => 1}]}
+    do: %{
+      "searchable_fields" => [
+        %{"path" => "title", "weight" => 10},
+        %{"path" => "content.body", "weight" => 1}
+      ]
+    }
 
   defp doc_body_heavy,
-    do: %{"searchable_fields" => [%{"path" => "title", "weight" => 1}, %{"path" => "content.body", "weight" => 10}]}
+    do: %{
+      "searchable_fields" => [
+        %{"path" => "title", "weight" => 1},
+        %{"path" => "content.body", "weight" => 10}
+      ]
+    }
 
   defp make_doc!(id, title, body) do
     {:ok, _} =
@@ -107,10 +117,20 @@ defmodule Barkpark.Search.SearchableFieldsRankingTest do
   @media_query "borealis"
 
   defp media_name_heavy,
-    do: %{"searchableFields" => [%{"path" => "original_name", "weight" => 10}, %{"path" => "filename", "weight" => 1}]}
+    do: %{
+      "searchableFields" => [
+        %{"path" => "original_name", "weight" => 10},
+        %{"path" => "filename", "weight" => 1}
+      ]
+    }
 
   defp media_file_heavy,
-    do: %{"searchableFields" => [%{"path" => "original_name", "weight" => 1}, %{"path" => "filename", "weight" => 10}]}
+    do: %{
+      "searchableFields" => [
+        %{"path" => "original_name", "weight" => 1},
+        %{"path" => "filename", "weight" => 10}
+      ]
+    }
 
   defp media_ranked_ids(ws, proj) do
     {files, _total, _facets, _meta} =

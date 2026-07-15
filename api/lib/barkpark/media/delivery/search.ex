@@ -709,7 +709,10 @@ defmodule Barkpark.Media.Delivery.Search do
   # [m (media_files), d (linked mediaAsset document)]. Returns nil for a path
   # this surface does not expose (skipped from the weighted sum).
   defp media_field_term("title", weight, q_text) do
-    dynamic([_m, d], fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), d.title, ^q_text))
+    dynamic(
+      [_m, d],
+      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), d.title, ^q_text)
+    )
   end
 
   defp media_field_term("original_name", weight, q_text) do
