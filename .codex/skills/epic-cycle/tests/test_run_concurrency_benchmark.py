@@ -246,6 +246,16 @@ class MetricsAndSamplerTest(unittest.TestCase):
 
 
 class ExecutionAndAnalysisTest(unittest.TestCase):
+    def test_fast_control_command_is_fenced_before_exec(self):
+        result = MODULE.run_control_command(
+            [sys.executable, "-c", "pass"],
+            dict(os.environ),
+            1.0,
+            "fixture reset",
+        )
+        self.assertEqual("passed", result["status"])
+        self.assertEqual(result["process_identity"]["pid"], result["pgid"])
+
     def test_fifo_dispatch_retains_crashes_and_metric_provenance(self):
         assignments = [assignment(f"a{index}") for index in range(1, 7)]
         assignments[1] = assignment("a2", exit_code=9, complete=False)
@@ -266,7 +276,9 @@ class ExecutionAndAnalysisTest(unittest.TestCase):
     def test_timeout_is_retained_in_itt_denominator(self):
         assignments = [assignment(f"a{index}", delay=0.08) for index in range(1, 7)]
         assignments[0] = assignment("a1", delay=0.5)
-        result = MODULE.run_assignment_set(assignments, [f"a{index}" for index in range(1, 7)], 3, timeout_seconds=0.2, environment={})
+        # Width one isolates the timeout assertion from concurrent process-start
+        # fencing cost on slower Darwin CI hosts.
+        result = MODULE.run_assignment_set(assignments, [f"a{index}" for index in range(1, 7)], 1, timeout_seconds=0.2, environment={})
         self.assertEqual(6, len(result["assignment_results"]))
         self.assertEqual("timeout", result["assignment_results"][0]["status"])
         rates = MODULE._trial_rates(result)

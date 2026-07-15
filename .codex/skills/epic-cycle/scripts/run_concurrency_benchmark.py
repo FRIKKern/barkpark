@@ -49,6 +49,20 @@ COMPLETENESS_MARGIN_PP = 5.0
 CONTRADICTION_MARGIN_PP = 2.0
 FAILURE_MARGIN_PP = 5.0
 SAMPLE_INTERVAL_SECONDS = 0.1
+EXEC_GATE_CODE = """
+import os
+import sys
+import time
+
+gate = sys.argv[1]
+deadline = time.monotonic() + 10.0
+while not os.path.exists(gate):
+    if time.monotonic() >= deadline:
+        raise SystemExit(125)
+    time.sleep(0.005)
+argv = sys.argv[2:]
+os.execvpe(argv[0], argv, os.environ)
+"""
 
 
 class ProtocolError(ValueError):
@@ -709,9 +723,10 @@ def launch_owned_process(
 ) -> tuple[subprocess.Popen[str], ProcessIdentity, int]:
     stdout_handle = stdout_path.open("w", encoding="utf-8")
     stderr_handle = stderr_path.open("w", encoding="utf-8")
+    gate_path = stdout_path.with_suffix(stdout_path.suffix + ".start")
     try:
         process = subprocess.Popen(
-            list(argv),
+            [sys.executable, "-c", EXEC_GATE_CODE, str(gate_path), *argv],
             stdin=subprocess.DEVNULL,
             stdout=stdout_handle,
             stderr=stderr_handle,
@@ -735,6 +750,7 @@ def launch_owned_process(
             raise SafetyError("child did not become leader of its owned process group")
         if not identity_is_live(identity):
             raise SafetyError("child process identity could not be fenced after launch")
+        gate_path.touch(exist_ok=False)
     except BaseException:
         if process.poll() is None:
             terminate_owned_group(process.pid)
@@ -918,12 +934,13 @@ def run_assignment_set(
                         }
                     else:
                         sampler.register(pgid)
+                        launched_at = time.monotonic()
                         active[assignment_id] = {
                             "process": process,
                             "identity": identity,
                             "pgid": pgid,
-                            "started": dispatched_at,
-                            "deadline": dispatched_at + timeout_seconds,
+                            "started": launched_at,
+                            "deadline": launched_at + timeout_seconds,
                             "stdout": stdout_path,
                             "stderr": stderr_path,
                         }
