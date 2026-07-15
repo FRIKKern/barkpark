@@ -10,7 +10,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   export, so a new tenant table is picked up automatically instead of being
   silently dropped:
 
-    * **E1** — every table carrying a `workspace_id` column (29 today; the three
+    * **E1** — every table carrying a `workspace_id` column (32 today; the three
+      epic-cycle ledgers `cycle_waves` / `epic_assignments` /
+      `epic_benchmark_experiments` (the 20260715 cycle-fleet schema) ride the
+      generic `WHERE workspace_id = $ws` path, the three
       registered Chat host / execution tables are workspace-owned, the two
       zero-FK audit tables `audit_events` / `audit_export_sinks` carry the
       column with no FK to `workspaces`, `roles` is one, both
@@ -23,10 +26,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
       shared-slug row travels via the `workspace_id` path instead of a bare,
       project-ambiguous `scope`/`dataset`).
     * **E2** — the recursive `pg_constraint` FK descendants of `workspaces`
-      that do NOT themselves carry `workspace_id` (6: `content_edges`,
+      that do NOT themselves carry `workspace_id` (12: `content_edges`,
       `datasets`, `plugin_doc_state`, `role_permissions`, `task_edges`,
-      `webhook_deliveries`). Reached via a real FK, extracted through a
-      parent-join to the nearest `workspace_id`-bearing ancestor.
+      `webhook_deliveries`, plus the six 20260715 cycle-fleet children
+      `chat_runtime_usage_receipts`, `cycle_build_plans`,
+      `epic_assignment_results`, `epic_assignment_runtime_attempts`,
+      `epic_assignment_tasks`, `epic_benchmark_attempts`). Reached via a real FK,
+      extracted through a parent-join to the nearest `workspace_id`-bearing
+      ancestor.
     * **E3** — the `dataset`-column tables minus E1 (4), keyed by a `dataset`
       slug (and, for two of them, a `doc_id`). The `scope`-column allowlist is
       now EMPTY: both former members (`search_surface_config`, `data_keys`)
@@ -66,9 +73,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # attribution promoted `workspace_id` into their primary keys, moving the whole
   # dormant family from E3 → E1 (export keys `WHERE workspace_id=$ws`, delete
   # rides the FK cascade — the same clean path every other E1 table uses).
+  # cycle_waves / epic_assignments / epic_benchmark_experiments carry a
+  # workspace_id column (the 20260715 epic-cycle / cycle-fleet ledgers). They
+  # ride the generic E1 path like every other workspace_id table — exported via
+  # `WHERE workspace_id = $ws`, torn down the same way — so a workspace's own
+  # cycle/assignment/benchmark rows travel in its bundle and never orphan on
+  # teardown. Pinned here to clear the partition sentinel (they were
+  # live-detected but unpinned, which is exactly what the sentinel raises on).
   @pinned_e1 ~w(
     access_grants api_tokens audit_events audit_export_sinks chat_execution_events
-    chat_execution_leases data_keys documents media_files mutation_events paper_events
+    chat_execution_leases cycle_waves data_keys documents epic_assignments
+    epic_benchmark_experiments media_files mutation_events paper_events
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
@@ -76,7 +91,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     sync_push_cursors sync_push_doc_revs webhooks workspace_memberships
   )
 
-  @pinned_e2 ~w(content_edges datasets plugin_doc_state role_permissions task_edges webhook_deliveries)
+  # The six 20260715 cycle-fleet children are FK-transitive descendants of
+  # `workspaces` that carry NO `workspace_id` of their own — each reaches the
+  # tenant grain through a single many-to-one FK to a workspace_id-bearing parent
+  # (see @e2_joins). They are pinned E2 so the sentinel is satisfied and their
+  # rows travel in the owning workspace's bundle instead of exporting empty:
+  #   * chat_runtime_usage_receipts       → documents (task_id)
+  #   * cycle_build_plans                 → cycle_waves (wave_id)
+  #   * epic_assignment_results           → epic_assignments (assignment_id)
+  #   * epic_assignment_runtime_attempts  → epic_assignments (assignment_id)
+  #   * epic_assignment_tasks             → epic_assignments (assignment_id)
+  #   * epic_benchmark_attempts           → epic_benchmark_experiments (experiment_id)
+  @pinned_e2 ~w(
+    chat_runtime_usage_receipts content_edges cycle_build_plans datasets
+    epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
+    epic_benchmark_attempts plugin_doc_state role_permissions task_edges
+    webhook_deliveries
+  )
 
   # E3 tables that carry a `doc_id` → filtered by a (doc_id, dataset) semi-join.
   # (`sync_push_conflicts` / `sync_push_doc_revs` moved to E1 — charter D55.)
@@ -103,8 +134,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # D5): global codelists, admin/host state, the org tier, job queue, metrics,
   # user/auth tier, and the residual *_backup tables. A base table that is
   # neither live-tenant nor in this list makes the sentinel RAISE.
+  # chat_runtime_telemetry_events (20260715 cycle-fleet) FK-references
+  # chat_sessions only — it is NOT reachable from `workspaces` by any FK path, so
+  # the live E1/E2/E3 scans never surface it. Like chat_sessions / chat_messages
+  # it is host/admin-scoped runtime telemetry that rolls OUTSIDE the workspace
+  # grain; pinned non-tenant so the "unaccounted base table" sentinel is clear.
   @pinned_non_tenant ~w(
-    chat_messages chat_sessions codelist_value_translations codelist_values
+    chat_messages chat_runtime_telemetry_events chat_sessions
+    codelist_value_translations codelist_values
     codelists collapsed_schema_definitions_backup idempotency_keys login_tickets
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
@@ -123,7 +160,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     "webhook_deliveries" => {"JOIN webhooks w ON w.id = t.endpoint_id", "w.workspace_id"},
     "content_edges" => {"JOIN documents d ON d.id = t.from_id", "d.workspace_id"},
     "task_edges" => {"JOIN documents d ON d.id = t.from_id", "d.workspace_id"},
-    "plugin_doc_state" => {"JOIN documents d ON d.id = t.doc_id", "d.workspace_id"}
+    "plugin_doc_state" => {"JOIN documents d ON d.id = t.doc_id", "d.workspace_id"},
+    # 20260715 cycle-fleet children. Each FK column is NOT NULL, so the plain
+    # (many-to-one) parent-join neither fans out nor drops a row — the same
+    # shape as every other E2 spec above.
+    "chat_runtime_usage_receipts" =>
+      {"JOIN documents d ON d.id = t.task_id", "d.workspace_id"},
+    "cycle_build_plans" =>
+      {"JOIN cycle_waves cw ON cw.id = t.wave_id", "cw.workspace_id"},
+    "epic_assignment_results" =>
+      {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
+    "epic_assignment_runtime_attempts" =>
+      {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
+    "epic_assignment_tasks" =>
+      {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
+    "epic_benchmark_attempts" =>
+      {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"}
   }
 
   def root_table, do: @root_table
