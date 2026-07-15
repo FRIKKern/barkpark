@@ -138,3 +138,47 @@ Wave 2+ (filed as published backlog children of the epic task):
   (`nn-bl-disable-class`).
 
 ## Wave log
+
+### Wave 1 — 2026-07-15 (founding wave) — grade A-
+
+**Landed (built + review-hardened; lead merges in this order, all plain merges):**
+1. `nn-w1-sizer-truth` → `loop-epic/internal-sizer-apfs-truth-sizing-st-bloc-0` (ac77b84, unchanged
+   by review). internal/sizer: Blocks / UniqueAllocated (F_LOG2PHYS_EXT, byte-exact 20-byte pack(4)
+   pin) / FreedByDelete. Live discovery beyond the brief: APFS holes do NOT errno — the fcntl
+   SUCCEEDS with devoffset=-1 spanning the hole; handled + tested.
+2. `nn-w1-audit-ledger` → `loop-epic/auto-clean-audit-trail-readable-auto-cle-1-r` (f0f55fe).
+   auto_clean_events single-sourced into schema.sql v2; store owns the row types (aliases dodge the
+   import cycle); Status-always-zero bug fixed with a real end-to-end store regression test.
+   Review fix: one stale interface doc.
+3. `nn-w1-leaks-registry` → `loop-epic/internal-leaks-data-driven-leak-signatur-2-r` (0e93232,
+   stacked on sizer). Data-driven registry (Chrome code_sign_clone lsof-only; /private/tmp scratch
+   aged+lsof), fail-safe probe, apply-time TOCTOU re-check, generic CanDelete wall untouched.
+   Review fixes: categorical leak wall CASE-FOLDED (APFS is case-insensitive — `/library/*` reached
+   real /Library past the case-sensitive check), /private/etc/ added to the wall, `leaks` listed in
+   CLI usage; all pinned in safety_probe_test.go.
+4. `nn-w1-offload-module` → `loop-epic/internal-modules-offload-playbook-driven-3-r` (6365f5a;
+   contains sizer + leaks-r merges so the train is conflict-free). Volguard (UUID + live
+   write-probe), playbooks-as-data, copy→verify→swap→symlink→verify→drop-bak with restore,
+   NeverDelete structural. Review fix: the SizeFns seam now DEFAULTS to sizer.UniqueAllocated —
+   the clone-blind st_blocks fallback would have made "really reclaimable" a du-fiction in the
+   epic's own newest module.
+
+Integration proof: all four merged onto b6b9644 in order = zero conflicts, `go test -race` + vet
+green. Live host smoke (diagnose-only): leaks names the surviving Chrome clone LIVE with lsof
+proof + du-fiction delta; offload scan reports pnpm 4.3G/colima 13G/.claude 8.3G/blueprints
+14.8G/vm_bundles 10G with exact native commands + flags the unguarded Desktop/Documents/Downloads
+symlinks.
+
+**Stalled:** `nn-w1-velocity-live` — 0 commits, honestly held in_progress. Its brief required
+branching after two siblings were ON MAIN, impossible mid-wave. Correct worker behavior; a
+dispatch-design flaw (merge-dependent slices belong to the NEXT wave by construction).
+
+**Ledger:** cleanest audited to date — zero fixes; all built slices in_progress with only
+merge-gate criteria open, every met criterion evidence-stamped, velocity's stall stamped with
+misses + handoff.
+
+**Next wave takes:** (1) lead merge train + close the five merge-gate criteria; (2) re-dispatch
+velocity-live immediately after; (3) make offload REAL for the user — pin SATECHI
+(UUID 0DBD1B63-0377-450B-A340-7E72D0925EBC) in [offload], run the 3 native-config relocations
+(~25G) + 2 guarded relocates (~25G) — this is the wish's actual space relief; (4)
+nn-bl-daemon-leak-alerts; then nn-bl-home-symlink-guard / nn-bl-volume-health (Kompis data risk).
