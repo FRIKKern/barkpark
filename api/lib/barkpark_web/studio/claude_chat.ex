@@ -1235,7 +1235,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # mint stays valid, so a transient tmp-dir problem degrades hands, never
     # revokes them. Rescues internally so a post-mint crash can't leak the
     # token past setup_mcp's return.
-    defp write_mcp_config(opts, raw, tool_descriptors \\ []) do
+    defp write_mcp_config(opts, raw, tool_descriptors) do
       path = mcp_config_path(opts)
       json = Jason.encode!(ClaudeChat.mcp_config(raw, tool_descriptors))
 
