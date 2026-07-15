@@ -82,10 +82,20 @@ defmodule Barkpark.Search.SurfaceConfigReadPathWorkspaceTest do
       # Each workspace owns its OWN identical komquat doc — so a workspace-only
       # narrowing cannot collapse both to zero (the vacuous trap).
       {:ok, _} =
-        Content.create_document("post", %{"doc_id" => "a-komquat", "title" => @doc_title}, @scope, scope_a)
+        Content.create_document(
+          "post",
+          %{"doc_id" => "a-komquat", "title" => @doc_title},
+          @scope,
+          scope_a
+        )
 
       {:ok, _} =
-        Content.create_document("post", %{"doc_id" => "b-komquat", "title" => @doc_title}, @scope, scope_b)
+        Content.create_document(
+          "post",
+          %{"doc_id" => "b-komquat", "title" => @doc_title},
+          @scope,
+          scope_b
+        )
 
       {:ok, ws_a: ws_a, ws_b: ws_b, scope_a: scope_a, scope_b: scope_b}
     end
@@ -93,7 +103,9 @@ defmodule Barkpark.Search.SurfaceConfigReadPathWorkspaceTest do
     test "A's high similarity_threshold EXCLUDES the fuzzy near-miss; B (default) INCLUDES it",
          %{ws_a: ws_a, scope_a: scope_a, scope_b: scope_b} do
       # Workspace A tunes its OWN config to exclude the near-miss.
-      {:ok, _} = SurfaceConfigs.upsert("documents", @scope, %{"typoPolicy" => exclude_policy()}, ws_a.id)
+      {:ok, _} =
+        SurfaceConfigs.upsert("documents", @scope, %{"typoPolicy" => exclude_policy()}, ws_a.id)
+
       SurfaceConfigs.__reset_cache_for_test__()
 
       {_a_hits, a_total, _} =
@@ -116,7 +128,9 @@ defmodule Barkpark.Search.SurfaceConfigReadPathWorkspaceTest do
     test "witness the mechanism: the blind (get/2 nil) resolution is the SAME for A and B; only the threaded get/3 diverges",
          %{ws_a: ws_a, ws_b: ws_b} do
       # A tunes its own config; B stays untuned.
-      {:ok, _} = SurfaceConfigs.upsert("documents", @scope, %{"typoPolicy" => exclude_policy()}, ws_a.id)
+      {:ok, _} =
+        SurfaceConfigs.upsert("documents", @scope, %{"typoPolicy" => exclude_policy()}, ws_a.id)
+
       SurfaceConfigs.__reset_cache_for_test__()
 
       # The pre-D63 read path resolved config workspace-blind (get/2 → nil
@@ -128,8 +142,13 @@ defmodule Barkpark.Search.SurfaceConfigReadPathWorkspaceTest do
       # The threaded (D63) resolution diverges: A sees its OWN 0.9, B falls
       # through (D64) to the nil-global 0.25 — the divergence that makes results
       # differ per workspace in the GREEN test above.
-      assert SurfaceConfigs.get("documents", @scope, ws_a.id)["typo_policy"]["similarity_threshold"] == 0.9
-      assert SurfaceConfigs.get("documents", @scope, ws_b.id)["typo_policy"]["similarity_threshold"] == 0.25
+      assert SurfaceConfigs.get("documents", @scope, ws_a.id)["typo_policy"][
+               "similarity_threshold"
+             ] == 0.9
+
+      assert SurfaceConfigs.get("documents", @scope, ws_b.id)["typo_policy"][
+               "similarity_threshold"
+             ] == 0.25
     end
   end
 
