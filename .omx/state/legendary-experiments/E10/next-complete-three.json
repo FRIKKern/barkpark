@@ -1,0 +1,40 @@
+{
+  "assignment_count": 3,
+  "assignment_id": "E10",
+  "assignments": [
+    {
+      "assignment_key": "real-five-surface-proof",
+      "gate": "PASS only with 180/180 real traceable cells, zero critical/high accessibility defects, zero silent blanks, and zero clipping/content loss; proxy or scratch renders are BLOCKED.",
+      "minimum_counts": {
+        "fixtures": 36,
+        "surface_cells": 180,
+        "surfaces_per_fixture": 5
+      },
+      "objective": "Materialize the unchanged E05 candidate on real representative fixtures and capture authenticated Studio, deterministic TUI, public reader, CLI/API, and real-client email evidence including assistive reading order and narrow-width overflow."
+    },
+    {
+      "assignment_key": "preservation-structure-alias-repair",
+      "gate": "PASS only with 100% authored preservation, semantic hierarchy preservation, valid schema, explicit alias containment, identical second-run semantic hashes, and residue-free rollback for every fixture.",
+      "minimum_counts": {
+        "existing_adversarial": 6,
+        "new_unsupported_alias": 1,
+        "two_run_replays": 2
+      },
+      "objective": "Repair E05 without changing source authority so adv-long-content preserves 7500/7500 characters, adv-nested-list-table retains heading/list/table hierarchy, and a newly frozen unsupported-alias adversarial fixture degrades explicitly."
+    },
+    {
+      "assignment_key": "sealed-blind-authority-proof",
+      "gate": "PASS only with at least 20 pre-sealed paired records, zero guessed/fabricated authority decisions, complete raw reproduction, identical second-run semantic hashes, and 36/36 pre-image restoration.",
+      "minimum_counts": {
+        "candidate_runs": 2,
+        "frozen_fixtures": 36,
+        "sealed_paired_records": 20
+      },
+      "objective": "Seal and independently score paired Task classification/authority records before revealing expected labels, then replay candidate provenance, quarantine, idempotence, and rollback from raw captures."
+    }
+  ],
+  "canonical_id_policy": "The leader allocates authoritative ids; E10 does not invent or publish Task ids.",
+  "dispatch_rule": "Dispatch all three assignments as one complete experiment round. Do not start a pilot or builder fan-out unless all three independently PASS every applicable frozen E03 hard threshold.",
+  "schema_version": "legendary-e10-next-complete-three/v1",
+  "stop_condition": "If any assignment FAILS or is BLOCKED, keep convergence open and schedule another complete three-assignment round; never promote the strongest partial candidate."
+}
