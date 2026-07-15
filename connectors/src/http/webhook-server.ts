@@ -278,20 +278,46 @@ function isHealthRoute(rawTarget: string, pathPrefix: string): boolean {
  * mounted elsewhere would have to duplicate all of it, and the copy is where the
  * traversal bug would live.
  */
+interface ConnectRoute {
+  action: ConnectAction;
+  /** The provider segment, present only on `tool-headers/:provider` (D69). */
+  pathProvider?: string;
+}
+
 function parseConnectRoute(
   rawTarget: string,
   pathPrefix: string,
-): ConnectAction | null {
+): ConnectRoute | null {
   const rest = segmentsUnderPrefix(rawTarget, pathPrefix);
   if (rest === null) return null;
 
-  if (rest.length === 1 && rest[0] === "connect") return "connect";
-  if (rest.length === 1 && rest[0] === "disconnect") return "disconnect";
+  if (rest.length === 1 && rest[0] === "connect") return { action: "connect" };
+  if (rest.length === 1 && rest[0] === "disconnect") {
+    return { action: "disconnect" };
+  }
   if (rest.length === 2 && rest[0] === "connect" && rest[1] === "validate") {
-    return "validate";
+    return { action: "validate" };
   }
   if (rest.length === 2 && rest[0] === "connect" && rest[1] === "pending") {
-    return "pending";
+    return { action: "pending" };
+  }
+  // The OUTBOUND (tool) direction (D69/D71): list a workspace's tool connectors,
+  // and open ONE provider's sealed PAT at MCP-connect. Same loopback gate below.
+  if (
+    rest.length === 2 &&
+    rest[0] === "connect" &&
+    rest[1] === "tool-descriptors"
+  ) {
+    return { action: "tool-descriptors" };
+  }
+  if (
+    rest.length === 3 &&
+    rest[0] === "connect" &&
+    rest[1] === "tool-headers" &&
+    rest[2] !== undefined &&
+    rest[2] !== ""
+  ) {
+    return { action: "tool-headers", pathProvider: rest[2] };
   }
   return null;
 }
@@ -638,11 +664,13 @@ export function createWebhookRequestHandler(
       // The connect loop (D50/D51). Every refusal below is the SAME opaque 404 the
       // webhook demux gives, and it is reached BEFORE any body is read whenever
       // that is possible at all.
-      const connectAction = parseConnectRoute(req.url ?? "/", pathPrefix);
-      if (connectAction !== null) {
+      const connectRoute = parseConnectRoute(req.url ?? "/", pathPrefix);
+      if (connectRoute !== null) {
         // Not mounted (no CONNECTORS_CONNECT_SECRET), came through the proxy, or
         // arrived as a GET: indistinguishable from "there is no such route". A
-        // stranger cannot even learn that a connect seam exists here.
+        // stranger cannot even learn that a connect seam exists here. The tool
+        // routes (D69) ride this SAME loopback gate — a `tool-headers` fetch is
+        // never reachable from the public path.
         if (connect === undefined || isProxied(req) || method !== "POST") {
           drain(req);
           notFound(res);
@@ -661,9 +689,10 @@ export function createWebhookRequestHandler(
         }
 
         const reply = await handleConnectRequest(
-          connectAction,
+          connectRoute.action,
           read.body.toString("utf8"),
           connect,
+          connectRoute.pathProvider,
         );
         // `null` => the handler declined (unknown/unconnectable provider, or a
         // cross-tenant disconnect). It never spells the 404 itself, so it cannot

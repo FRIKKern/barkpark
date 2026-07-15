@@ -58,6 +58,33 @@ import type { WorkspaceId } from "../connector/types.js";
 export const CONNECT_TICKET_TTL_MS = 600_000;
 
 /**
+ * THE TOOL-SESSION TICKET (charter D69/D73) — the OTHER direction.
+ *
+ * A paste-mode connect ticket is short (600 s: long enough to paste, no longer)
+ * and binds ONE provider. A TOOL ticket is different in both dimensions:
+ *
+ *   - It lives for a whole chat SESSION (8 h), because it is baked into the
+ *     per-session `--mcp-config` file the runner's `claude` subprocess reads, and
+ *     the subprocess runs its `headersHelper` — which carries this ticket — every
+ *     time it (re)connects the GitHub MCP server, for as long as the session runs.
+ *   - It binds the reserved provider {@link TOOL_TICKET_PROVIDER}, NOT a concrete
+ *     tool provider, because ONE ticket authorizes BOTH the `tool-descriptors`
+ *     list (all of a workspace's tool connectors) AND each `tool-headers` fetch
+ *     (a specific provider named in the ROUTE path). The workspace is proven by the
+ *     signature; the provider selector rides the path, never the ticket.
+ *
+ * This capability is meaningfully broader than a paste ticket (it opens sealed
+ * PATs), so it is protected the same way the connect routes are: `tool-headers` is
+ * loopback-only (an `x-forwarded-*` request is the opaque 404), and the config file
+ * that holds it is written 0600 in a per-session temp dir. A leaked tool ticket is
+ * useless off the box.
+ */
+export const TOOL_TICKET_PROVIDER = "tool-session";
+
+/** A tool ticket lives for a chat session (8 h), not a paste window. */
+export const TOOL_TICKET_TTL_MS = 28_800_000;
+
+/**
  * How far into the FUTURE a ticket may be dated before we refuse it.
  *
  * Not zero (the BEAM and the bridge share a host, but not a monotonic clock, and
@@ -263,4 +290,26 @@ export function verifyConnectTicket(
     nonce: typeof n === "string" ? n : "",
     issuedAt: t,
   };
+}
+
+/**
+ * Verify a TOOL-SESSION ticket (D69/D73), or THROW.
+ *
+ * A thin, deliberate specialisation of {@link verifyConnectTicket}: it demands the
+ * ticket bind the reserved {@link TOOL_TICKET_PROVIDER} (so a short paste ticket
+ * for a concrete provider can never be replayed against the tool routes) and it
+ * allows the 8 h {@link TOOL_TICKET_TTL_MS} rather than the 600 s paste window. The
+ * concrete tool provider is chosen by the ROUTE path, never the ticket — this
+ * verify only proves "the bearer is authorized to act as tools for workspace <w>".
+ */
+export function verifyToolTicket(
+  raw: string | null | undefined,
+  secret: string,
+  options: { now?: () => number; maxAgeMs?: number } = {},
+): ConnectTicket {
+  return verifyConnectTicket(raw, secret, {
+    provider: TOOL_TICKET_PROVIDER,
+    ...(options.now ? { now: options.now } : {}),
+    maxAgeMs: options.maxAgeMs ?? TOOL_TICKET_TTL_MS,
+  });
 }
