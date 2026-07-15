@@ -943,7 +943,7 @@ def run_assignment_set(
                             "identity": identity,
                             "pgid": pgid,
                             "wall_started": dispatched_at,
-                            "deadline": dispatched_at + timeout_seconds,
+                            "deadline": launched_at + timeout_seconds,
                             "stdout": stdout_path,
                             "stderr": stderr_path,
                         }
