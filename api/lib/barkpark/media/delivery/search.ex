@@ -27,7 +27,13 @@ defmodule Barkpark.Media.Delivery.Search do
   """
   @spec search(String.t(), keyword()) :: {[MediaFile.t()], non_neg_integer(), map(), map()}
   def search(dataset, opts \\ []) when is_binary(dataset) do
-    config = SurfaceConfigs.get("media", dataset)
+    # Thread the resolved workspace_id (rides in opts via scope_opts(conn) on the
+    # scoped media search route) into the surface-config read so per-workspace
+    # media tuning (typo_policy.similarity_threshold et al.) actually reaches
+    # media RESULTS — not just the settings echo (charter D59/D63). A nil
+    # workspace_id (flat/anonymous path) reads the documented global-legacy
+    # default row, matching the SurfaceConfigs.get/3 contract.
+    config = SurfaceConfigs.get("media", dataset, Keyword.get(opts, :workspace_id))
 
     # Resolve the dataset STRING → dataset_id ONCE per request and thread it
     # through opts. The dataset_id is INVARIANT within a search — without this,
@@ -683,7 +689,18 @@ defmodule Barkpark.Media.Delivery.Search do
 
   defp maybe_filter_text(query, dataset, opts) do
     parsed = Keyword.get(opts, :parsed)
-    config = Keyword.get(opts, :pipeline_config, SurfaceConfigs.get("media", dataset))
+    # Default-arg trap: compute_facets re-fetches the config per facet field
+    # because the facet opts never carry :pipeline_config (only search/2's inner
+    # pass threads it). Thread workspace_id here too (charter D63) — else the
+    # facet path stays workspace-blind while the primary results path (line 30)
+    # is per-workspace, and the two diverge on a shared dataset slug.
+    config =
+      Keyword.get(
+        opts,
+        :pipeline_config,
+        SurfaceConfigs.get("media", dataset, Keyword.get(opts, :workspace_id))
+      )
+
     relaxed = Keyword.get(opts, :relaxed, false)
 
     # Thread the tenancy scope into the text-match retriever. Its inner
