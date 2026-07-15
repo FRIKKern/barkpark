@@ -39,8 +39,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   def record_attempt(experiment_id, attrs) when is_binary(experiment_id) and is_map(attrs) do
     attrs = attrs |> select(@attempt_fields) |> sanitize_map()
-    semantic = Map.put(attrs, "experiment_id", experiment_id)
-    attrs = Map.put(semantic, "attempt_digest", CanonicalJSON.digest(semantic))
+
+    attrs =
+      attrs
+      |> Map.put("attempt_digest", CanonicalJSON.digest(attrs))
+      |> Map.put("experiment_id", experiment_id)
 
     Repo.transaction(fn ->
       experiment =
@@ -69,7 +72,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
   end
 
   @spec export(Ecto.UUID.t() | Experiment.t()) :: {:ok, map()} | {:error, :experiment_not_found}
-  def export(%Experiment{} = experiment), do: {:ok, document(experiment, list_attempts(experiment))}
+  def export(%Experiment{} = experiment),
+    do: {:ok, document(experiment, list_attempts(experiment))}
 
   def export(experiment_id) when is_binary(experiment_id) do
     case Repo.get(Experiment, experiment_id) do
@@ -89,7 +93,10 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @spec document(Experiment.t(), [Attempt.t() | map()]) :: map()
   def document(%Experiment{} = experiment, attempts) do
     manifest = sanitize_map(experiment.manifest)
-    attempt_maps = attempts |> Enum.map(&attempt_map/1) |> Enum.sort_by(&{&1["ordinal"], &1["attempt_id"]})
+
+    attempt_maps =
+      attempts |> Enum.map(&attempt_map/1) |> Enum.sort_by(&{&1["ordinal"], &1["attempt_id"]})
+
     summary = summary(attempt_maps)
 
     base = %{
@@ -162,16 +169,35 @@ defmodule Barkpark.EpicFleet.Benchmark do
     base = Map.delete(document, "ledger_digest")
 
     cond do
-      not is_map(document["experiment"]) -> {:error, :invalid_experiment}
-      not is_map(manifest) -> {:error, :invalid_manifest}
-      not is_list(attempts) -> {:error, :invalid_attempts}
-      not Enum.all?(attempts, &valid_attempt_map?/1) -> {:error, :invalid_attempt}
-      document["manifest_digest"] != CanonicalJSON.digest(manifest) -> {:error, :manifest_digest_mismatch}
-      document["attempts_digest"] != CanonicalJSON.digest(attempts) -> {:error, :attempts_digest_mismatch}
-      summary != summary(attempts) -> {:error, :summary_mismatch}
-      document["summary_digest"] != CanonicalJSON.digest(summary) -> {:error, :summary_digest_mismatch}
-      document["ledger_digest"] != CanonicalJSON.digest(base) -> {:error, :ledger_digest_mismatch}
-      true -> :ok
+      not is_map(document["experiment"]) ->
+        {:error, :invalid_experiment}
+
+      not is_map(manifest) ->
+        {:error, :invalid_manifest}
+
+      not is_list(attempts) ->
+        {:error, :invalid_attempts}
+
+      not Enum.all?(attempts, &valid_attempt_map?/1) ->
+        {:error, :invalid_attempt}
+
+      document["manifest_digest"] != CanonicalJSON.digest(manifest) ->
+        {:error, :manifest_digest_mismatch}
+
+      document["attempts_digest"] != CanonicalJSON.digest(attempts) ->
+        {:error, :attempts_digest_mismatch}
+
+      summary != summary(attempts) ->
+        {:error, :summary_mismatch}
+
+      document["summary_digest"] != CanonicalJSON.digest(summary) ->
+        {:error, :summary_digest_mismatch}
+
+      document["ledger_digest"] != CanonicalJSON.digest(base) ->
+        {:error, :ledger_digest_mismatch}
+
+      true ->
+        :ok
     end
   rescue
     _error -> {:error, :invalid_document}
@@ -185,7 +211,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
     Repo.transaction(fn ->
       case create_experiment(experiment_attrs) do
         {:ok, experiment} ->
-          Enum.reduce_while(document["attempts"], %{experiment: experiment, attempts: 0}, fn row, stats ->
+          Enum.reduce_while(document["attempts"], %{experiment: experiment, attempts: 0}, fn row,
+                                                                                             stats ->
             attrs = Map.drop(row, ["attempt_digest"])
 
             case record_attempt(experiment, attrs) do
@@ -250,10 +277,15 @@ defmodule Barkpark.EpicFleet.Benchmark do
       )
 
     cond do
-      is_nil(existing) -> {:error, changeset}
+      is_nil(existing) ->
+        {:error, changeset}
+
       existing.phase == attrs["phase"] and existing.protocol_version == attrs["protocol_version"] and
-          existing.manifest_digest == attrs["manifest_digest"] -> {:ok, existing}
-      true -> {:error, :experiment_conflict}
+          existing.manifest_digest == attrs["manifest_digest"] ->
+        {:ok, existing}
+
+      true ->
+        {:error, :experiment_conflict}
     end
   end
 
@@ -277,7 +309,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp unwrap_attempt({:error, reason}), do: {:error, reason}
 
   defp select(attrs, fields) do
-    Map.new(fields, fn field -> {field, Map.get(attrs, field, Map.get(attrs, String.to_atom(field)))} end)
+    Map.new(fields, fn field ->
+      {field, Map.get(attrs, field, Map.get(attrs, String.to_atom(field)))}
+    end)
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
@@ -300,7 +334,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
     key = String.downcase(key)
 
     key in @sensitive_exact or
-      Enum.any?(~w(_access_token _refresh_token _api_key _secret _password _private_key),
+      Enum.any?(
+        ~w(_access_token _refresh_token _api_key _secret _password _private_key),
         &String.ends_with?(key, &1)
       )
   end

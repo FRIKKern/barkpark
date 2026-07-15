@@ -42,7 +42,10 @@ defmodule Barkpark.EpicFleet.CanonicalJSON do
   end
 
   def stringify_keys(term) when is_list(term), do: Enum.map(term, &stringify_keys/1)
-  def stringify_keys(term) when is_atom(term) and term not in [true, false, nil], do: to_string(term)
+
+  def stringify_keys(term) when is_atom(term) and term not in [true, false, nil],
+    do: to_string(term)
+
   def stringify_keys(term), do: term
 
   defp encode_iodata(term) when is_map(term) and not is_struct(term) do

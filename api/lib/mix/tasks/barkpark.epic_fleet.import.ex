@@ -23,9 +23,7 @@ defmodule Mix.Tasks.Barkpark.EpicFleet.Import do
 
     case Barkpark.EpicFleet.import_benchmark_json(json) do
       {:ok, %{experiment: experiment, attempts: attempts}} ->
-        Mix.shell().info(
-          "imported experiment=#{experiment.experiment_id} attempts=#{attempts}"
-        )
+        Mix.shell().info("imported experiment=#{experiment.experiment_id} attempts=#{attempts}")
 
       {:error, reason} ->
         Mix.raise("EpicFleet benchmark import failed: #{inspect(reason)}")
