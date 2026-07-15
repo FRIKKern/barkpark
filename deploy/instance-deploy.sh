@@ -582,6 +582,13 @@ log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 # discipline used for the $APP/.env durable flags above: preserve what the prior
 # file held, never hardcode the flag on (absent stays absent — fail-closed).
 install -m 0644 "$APP/deploy/systemd/barkpark-slot@.service" /etc/systemd/system/barkpark-slot@.service
+# The node-slot SSR template unit (site-spawner W7): site-deploy-node.sh drives
+# `systemctl start barkpark-site@<slug>__<slot>` for container-framework (kind=node)
+# sites, but that unit template must be INSTALLED on the box first — without it a
+# node deploy dies at HEALTH ("the node process would not boot"). Install it here
+# alongside barkpark-slot@ so every box that can deploy can serve a node site.
+[ -f "$APP/deploy/systemd/barkpark-site@.service" ] && \
+  install -m 0644 "$APP/deploy/systemd/barkpark-site@.service" /etc/systemd/system/barkpark-site@.service
 mkdir -p "$APP/.slots"
 write_slot_env() { # $1=slot  $2=port  $3=build_root
   local f="$APP/.slots/$1.env" apply=""
