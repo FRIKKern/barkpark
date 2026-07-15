@@ -25,10 +25,30 @@
  * monorepo path) both when built in-repo and when the Provisioner materializes
  * the template standalone on the box.
  *
+ * Sub-path hosting (`assetPrefix`): the site is served at
+ * `https://<instance>/sites/<slug>/`, and Caddy `handle_path /sites/<slug>/*`
+ * STRIPS that prefix before proxying to the node (so the SSR app itself routes
+ * at ROOT — health probes and the page render at `/`). But Next emits its
+ * static-chunk URLs (`/_next/static/…`) ROOT-relative, so the browser fetches
+ * them at the domain root, Caddy has no route there, and they 404 (the blank
+ * un-hydrated page + red chunk 404s). `assetPrefix` fixes exactly that: it
+ * PREFIXES the referenced asset URLs with the site base (`/sites/<slug>/_next/…`)
+ * while Next still SERVES them at `/_next/…` — so the browser's prefixed request
+ * hits `handle_path`, gets stripped back to `/_next/…`, and the node serves it.
+ * NO basePath: keeping the app at root means no Caddy/health-probe rework, and a
+ * single-page content blog does no client-side RSC navigation. (Full multi-route
+ * apps under a sub-path would need basePath + a non-stripping Caddy handle — see
+ * the PortableDoc-blog rendering paper.) `BARKPARK_SITE_BASE` is `/sites/<slug>/`
+ * with both slashes; assetPrefix wants NO trailing slash.
+ *
  * @type {import('next').NextConfig}
  */
+const rawBase = (process.env.BARKPARK_SITE_BASE || '').trim()
+const assetPrefix = rawBase && rawBase !== '/' ? '/' + rawBase.replace(/^\/+|\/+$/g, '') : ''
+
 const nextConfig = {
   output: 'standalone',
+  ...(assetPrefix ? { assetPrefix } : {}),
   outputFileTracingRoot: import.meta.dirname,
   turbopack: {
     root: import.meta.dirname,
