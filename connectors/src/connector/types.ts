@@ -287,6 +287,20 @@ export interface TenantContext {
 }
 
 /**
+ * Per-refresh context handed to a connector's optional {@link Connector.refreshCredential}
+ * (charter D90/D92).
+ *
+ * `now` is injected (not read as `Date.now()` inside the hook) so the skew-window
+ * decision — "refresh when `expires_at − now < SKEW`" — is deterministic under
+ * test: a fixed `now` proves both the "still fresh, no refresh" and the "inside the
+ * window, refresh" branches without racing the wall clock.
+ */
+export interface RefreshContext {
+  /** Current time as epoch-ms. Injectable so the skew window is testable. */
+  now: number;
+}
+
+/**
  * Where the inbound HTTP transport finds the install key (charter D39).
  *
  * - `path` — the provider registers a per-install URL, so the key IS a path
@@ -400,6 +414,41 @@ export interface Connector<TPayload = unknown> {
    * `direction`, never on the provider id.
    */
   toolDescriptor?: ToolDescriptor;
+  /**
+   * Refresh this install's credential at header-build time (charter D90/D92) —
+   * the OPTIONAL, CONNECTOR-OWNED half of the dual-shape credential seam.
+   *
+   * `tool-headers` (`http/connect.ts`) calls this generically —
+   * `connector.refreshCredential?.(install, ctx)` — for whatever tool connector a
+   * runner is (re)connecting. The connector, not the shared route, owns the whole
+   * decision: it parses its own credential shape, decides whether the token is
+   * inside its skew window, and — if so — exchanges a fresh one. The shared route
+   * stays provider-agnostic; only the connector knows Linear's bundle shape and its
+   * `grant_type=refresh_token` exchange.
+   *
+   * Contract:
+   *   - return `null` when NO refresh is needed or POSSIBLE — a bare-string paste
+   *     credential (GitHub's PAT, which cannot refresh), a bundle still comfortably
+   *     inside its lifetime, or a bundle with no `refresh_token`. `null` is the
+   *     common case and must be cheap;
+   *   - return a FRESH PLAINTEXT credential (Linear: the re-serialised
+   *     `{access_token, refresh_token?, expires_at?}` JSON bundle) when a refresh
+   *     succeeded. The route write-backs it via `upsertInstall` (which performs the
+   *     single seal — the hook returns PLAINTEXT, never a pre-sealed blob) and
+   *     builds the Bearer from it;
+   *   - THROW on a refresh FAILURE (network, non-2xx, `invalid_grant`). The route
+   *     catches it, logs LOUDLY, and serves the STORED credential (serve-stale-loud,
+   *     D90): a failed refresh must never turn a maybe-stale header into a hard
+   *     connect failure. There is NO on-401 leg — the bridge only PRINTS headers and
+   *     never sees the provider's 401.
+   *
+   * Absent on every connector that has no refreshable credential (every channel;
+   * GitHub, whose PAT never rotates) — its credential is served byte-for-byte.
+   */
+  refreshCredential?(
+    install: ConnectorInstall,
+    ctx: RefreshContext,
+  ): Promise<string | null>;
   /**
    * Build the Chat SDK adapter for ONE install's credentials (D1 isolation).
    * Called once per install; the adapter is handed to `new Chat({ adapters })`.

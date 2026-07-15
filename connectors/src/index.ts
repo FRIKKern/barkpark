@@ -114,6 +114,18 @@ export interface BuiltinConnectorDeps {
     clientId: string;
     clientSecret: string;
   };
+  /**
+   * Linear OAuth client credentials (charter D92). Present ⇒ the Linear connector
+   * carries a `refreshCredential` hook that re-tokens an expiring install at
+   * header-build time. Absent ⇒ Linear still registers (the tool seam serves any
+   * install written another way) but WITHOUT the refresh hook — a bare-string or
+   * bundle credential is served as-is. Threaded exactly as `slack` is: a generic
+   * need of the connector, never an `if (provider === "linear")`.
+   */
+  linear?: {
+    clientId: string;
+    clientSecret: string;
+  };
   /** Read for the operator-profile gate (`CONNECTORS_PROFILE=self-hosted`, D44). */
   env?: NodeJS.ProcessEnv;
 }
@@ -194,7 +206,14 @@ export function registerBuiltinConnectors(
   // its installs; the OAuth CALLBACK route is separately gated on app credentials
   // (see `linearOAuth` below). One registry entry, one more line than GitHub's.
   if (!registry.has(LINEAR_PROVIDER)) {
-    registry.register(createLinearConnector());
+    // The refresh hook (D92) is attached ONLY when Linear OAuth client creds were
+    // threaded in — otherwise the connector still registers and serves any install,
+    // just without header-build refresh. `refresh` needs the client id/secret to
+    // drive `grant_type=refresh_token`; `installs` is not required (the route hands
+    // the hook the already-opened install).
+    registry.register(
+      createLinearConnector(deps.linear ? { refresh: deps.linear } : {}),
+    );
   }
 
   // iMessage is a self-hosted OPERATOR PROFILE, never a Cloud product (D3/D44):
@@ -441,15 +460,21 @@ export async function startBridge(
   // The Slack app credentials, read ONCE — the registry needs them to build the
   // adapter, and the OAuth callback deps below need them to exchange the code.
   const slackApp = slackDepsFromEnv(process.env);
+  // The Linear OAuth client credentials, read ONCE and HOISTED here (D92) — the
+  // registry needs them to attach the refresh hook, and the OAuth callback deps
+  // further down reference this same variable to exchange the authorization code.
+  const linearApp = linearDepsFromEnv(process.env);
 
   const registry = overrides.registry ?? createConnectorRegistry();
   if (!overrides.registry) {
     registerBuiltinConnectors(registry, {
       installs,
       env: process.env,
-      // Absent SLACK_* env ⇒ Slack is simply not registered. Spreading rather than
-      // passing `undefined` keeps `exactOptionalPropertyTypes` happy.
+      // Absent SLACK_*/LINEAR_* env ⇒ the connector registers without that
+      // capability. Spreading rather than passing `undefined` keeps
+      // `exactOptionalPropertyTypes` happy.
       ...(slackApp ? { slack: slackApp } : {}),
+      ...(linearApp ? { linear: linearApp } : {}),
     });
   }
 
@@ -715,7 +740,8 @@ export async function startBridge(
    * browser to an exact registered URL — a loopback address could never be that).
    * Any one missing ⇒ the callback route answers the opaque 404.
    */
-  const linearApp = linearDepsFromEnv(process.env);
+  // `linearApp` is read once and HOISTED beside `slackApp` (D92) so the registry can
+  // attach the refresh hook from the same credentials this callback uses.
   const linearOAuth: LinearOAuthCallbackDeps | undefined =
     linearApp && config.connectSecret && publicBaseUrl
       ? {
