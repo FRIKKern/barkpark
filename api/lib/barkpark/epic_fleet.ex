@@ -166,6 +166,9 @@ defmodule Barkpark.EpicFleet do
   @doc "Verify and persist a canonical benchmark JSON artifact atomically."
   def import_benchmark_json(json), do: Benchmark.import_json(json)
 
+  @doc "Atomically replace a file with exact canonical benchmark JSON bytes."
+  def write_benchmark_json_file(path, json), do: Benchmark.write_json_file(path, json)
+
   @doc "Return a stable lowercase SHA-256 digest over canonical JSON bytes."
   @spec canonical_digest(term()) :: String.t()
   def canonical_digest(term), do: CanonicalJSON.digest(term)

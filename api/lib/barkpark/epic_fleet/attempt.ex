@@ -66,6 +66,9 @@ defmodule Barkpark.EpicFleet.Attempt do
     |> check_constraint(:status, name: :epic_benchmark_attempts_status)
     |> check_constraint(:costs, name: :epic_benchmark_attempts_costs)
     |> check_constraint(:attempt_digest, name: :epic_benchmark_attempts_digest)
+    |> check_constraint(:replaces_attempt_id,
+      name: :epic_benchmark_attempts_not_self_replacement
+    )
   end
 
   @doc "The terminal attempt outcome vocabulary."

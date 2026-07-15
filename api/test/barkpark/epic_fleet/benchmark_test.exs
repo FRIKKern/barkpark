@@ -119,6 +119,23 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert EpicFleet.list_benchmark_attempts(experiment) == []
     end
 
+    test "requires a replacement attempt to advance the predecessor ordinal", %{attrs: attrs} do
+      {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
+      {:ok, _original} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
+
+      assert {:error, :replacement_ordinal_invalid} =
+               EpicFleet.record_benchmark_attempt(experiment, %{
+                 attempt_attrs()
+                 | attempt_id: "attempt-retry",
+                   replaces_attempt_id: "attempt-a",
+                   ordinal: 1
+               })
+
+      assert Enum.map(EpicFleet.list_benchmark_attempts(experiment), & &1.attempt_id) == [
+               "attempt-a"
+             ]
+    end
+
     test "database rejects direct attempt UPDATE and DELETE", %{attrs: attrs} do
       {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
       {:ok, attempt} = EpicFleet.record_benchmark_attempt(experiment, attempt_attrs())
@@ -197,6 +214,115 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       assert Repo.aggregate(Attempt, :count) == 2
     end
 
+    test "redacts normalized and suffixed secret-key variants", %{attrs: attrs} do
+      manifest = %{
+        "api-key" => "api-secret",
+        "runner_credentials" => "credential-secret",
+        "runner_secret" => "generic-secret",
+        "nested" => %{"webhook_secret" => "hook-secret"}
+      }
+
+      {:ok, experiment} =
+        EpicFleet.create_benchmark_experiment(%{attrs | manifest: manifest})
+
+      assert experiment.manifest == %{
+               "api-key" => "[REDACTED]",
+               "runner_credentials" => "[REDACTED]",
+               "runner_secret" => "[REDACTED]",
+               "nested" => %{"webhook_secret" => "[REDACTED]"}
+             }
+
+      {:ok, json} = EpicFleet.export_benchmark_json(experiment)
+      refute json =~ "api-secret"
+      refute json =~ "credential-secret"
+      refute json =~ "generic-secret"
+      refute json =~ "hook-secret"
+    end
+
+    test "rejects non-canonical bytes and shape-changing fields before any write", %{attrs: attrs} do
+      experiment = struct!(Experiment, Map.merge(attrs, %{id: Ecto.UUID.generate()}))
+      document = Benchmark.document(experiment, [attempt_attrs()])
+      canonical = EpicFleet.canonical_json(document)
+
+      assert {:error, :non_canonical_json} = EpicFleet.import_benchmark_json(canonical <> "\n")
+
+      with_extra_field = document |> Map.put("ignored", true) |> resign_document()
+
+      assert {:error, :invalid_document_shape} =
+               with_extra_field |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
+
+      assert Repo.aggregate(Experiment, :count) == 0
+      assert Repo.aggregate(Attempt, :count) == 0
+    end
+
+    test "rejects signed but non-canonical attempt ordering and unredacted secrets", %{
+      attrs: attrs
+    } do
+      experiment = struct!(Experiment, Map.merge(attrs, %{id: Ecto.UUID.generate()}))
+
+      document =
+        Benchmark.document(experiment, [
+          attempt_attrs(),
+          %{attempt_attrs() | attempt_id: "attempt-b", ordinal: 2}
+        ])
+
+      unsorted =
+        document
+        |> Map.update!("attempts", &Enum.reverse/1)
+        |> resign_document()
+
+      assert {:error, :attempts_not_canonical} =
+               unsorted |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
+
+      unredacted =
+        document
+        |> put_in(["manifest", "operator", "secret_key"], "must-not-cross-boundary")
+        |> resign_document()
+
+      assert {:error, :secrets_not_redacted} =
+               unredacted |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
+
+      assert Repo.aggregate(Experiment, :count) == 0
+      assert Repo.aggregate(Attempt, :count) == 0
+    end
+
+    test "rolls back earlier attempt inserts when a later replay conflicts", %{attrs: attrs} do
+      {:ok, experiment} = EpicFleet.create_benchmark_experiment(attrs)
+
+      existing = %{attempt_attrs() | attempt_id: "attempt-b", ordinal: 2}
+      {:ok, _attempt} = EpicFleet.record_benchmark_attempt(experiment, existing)
+
+      conflicting = put_in(existing, [:payload, "complete"], false)
+
+      document =
+        Benchmark.document(experiment, [
+          attempt_attrs(),
+          conflicting
+        ])
+
+      assert {:error, :attempt_conflict} =
+               document |> EpicFleet.canonical_json() |> EpicFleet.import_benchmark_json()
+
+      refute Repo.get_by(Attempt, experiment_id: experiment.id, attempt_id: "attempt-a")
+      assert Repo.aggregate(Attempt, :count) == 1
+    end
+
+    test "atomically replaces artifact files with exact canonical bytes" do
+      path =
+        Path.join(
+          System.tmp_dir!(),
+          "barkpark-epic-fleet-#{System.unique_integer([:positive, :monotonic])}.json"
+        )
+
+      on_exit(fn -> File.rm(path) end)
+      File.write!(path, "stale")
+
+      json = EpicFleet.canonical_json(%{"benchmark" => true})
+      assert :ok = EpicFleet.write_benchmark_json_file(path, json)
+      assert File.read!(path) == json
+      assert Path.wildcard(Path.join(Path.dirname(path), ".#{Path.basename(path)}.tmp-*")) == []
+    end
+
     test "rejects tampered artifacts before any write", %{attrs: attrs} do
       experiment = struct!(Experiment, Map.merge(attrs, %{id: Ecto.UUID.generate()}))
       document = Benchmark.document(experiment, [attempt_attrs()])
@@ -224,6 +350,16 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
              """)
 
     assert definition =~ "barkpark_epic_costs_valid"
+
+    assert %{rows: [[true]]} =
+             Repo.query!("""
+             SELECT EXISTS (
+               SELECT 1
+               FROM pg_trigger
+               WHERE tgname = 'epic_benchmark_attempts_replacement_ordinal'
+                 AND NOT tgisinternal
+             )
+             """)
   end
 
   defp manifest do
@@ -250,5 +386,21 @@ defmodule Barkpark.EpicFleet.BenchmarkTest do
       provenance: %{"sampler" => "stdlib", "host" => "fixture"},
       payload: %{"complete" => true, "verified_yield" => 6}
     }
+  end
+
+  defp resign_document(document) do
+    manifest = document["manifest"]
+    attempts = document["attempts"]
+    summary = Benchmark.summary(attempts)
+
+    base =
+      document
+      |> Map.delete("ledger_digest")
+      |> Map.put("manifest_digest", EpicFleet.canonical_digest(manifest))
+      |> Map.put("attempts_digest", EpicFleet.canonical_digest(attempts))
+      |> Map.put("summary", summary)
+      |> Map.put("summary_digest", EpicFleet.canonical_digest(summary))
+
+    Map.put(base, "ledger_digest", EpicFleet.canonical_digest(base))
   end
 end

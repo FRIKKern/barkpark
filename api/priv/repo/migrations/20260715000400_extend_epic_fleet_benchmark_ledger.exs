@@ -128,6 +128,38 @@ defmodule Barkpark.Repo.Migrations.ExtendEpicFleetBenchmarkLedger do
            )
 
     execute """
+    CREATE FUNCTION barkpark_epic_replacement_ordinal_valid()
+    RETURNS trigger AS $$
+    DECLARE
+      previous_ordinal integer;
+    BEGIN
+      IF NEW.replaces_attempt_id IS NULL THEN
+        RETURN NEW;
+      END IF;
+
+      SELECT ordinal INTO previous_ordinal
+      FROM epic_benchmark_attempts
+      WHERE experiment_id = NEW.experiment_id
+        AND attempt_id = NEW.replaces_attempt_id;
+
+      IF previous_ordinal IS NULL OR NEW.ordinal <= previous_ordinal THEN
+        RAISE EXCEPTION 'replacement attempt must have a greater ordinal'
+          USING ERRCODE = 'check_violation',
+                CONSTRAINT = 'epic_benchmark_attempts_replacement_ordinal';
+      END IF;
+
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+    """
+
+    execute """
+    CREATE TRIGGER epic_benchmark_attempts_replacement_ordinal
+    BEFORE INSERT ON epic_benchmark_attempts
+    FOR EACH ROW EXECUTE FUNCTION barkpark_epic_replacement_ordinal_valid();
+    """
+
+    execute """
     CREATE TRIGGER epic_benchmark_experiments_no_update_delete
     BEFORE UPDATE OR DELETE ON epic_benchmark_experiments
     FOR EACH ROW EXECUTE FUNCTION barkpark_epic_ledger_immutable();
@@ -141,6 +173,9 @@ defmodule Barkpark.Repo.Migrations.ExtendEpicFleetBenchmarkLedger do
   end
 
   def down do
+    execute "DROP TRIGGER IF EXISTS epic_benchmark_attempts_replacement_ordinal ON epic_benchmark_attempts;"
+    execute "DROP FUNCTION IF EXISTS barkpark_epic_replacement_ordinal_valid();"
+
     execute "DROP TRIGGER IF EXISTS epic_benchmark_attempts_no_update_delete ON epic_benchmark_attempts;"
 
     execute "DROP TRIGGER IF EXISTS epic_benchmark_experiments_no_update_delete ON epic_benchmark_experiments;"

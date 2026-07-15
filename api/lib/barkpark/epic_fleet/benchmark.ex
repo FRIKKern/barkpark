@@ -9,9 +9,20 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @format "barkpark-epic-benchmark-v1"
   @experiment_fields ~w(workspace_id epic_id wave_id experiment_id phase protocol_version manifest)
   @attempt_fields ~w(attempt_id replaces_attempt_id ordinal treatment status costs provenance payload)
+  @document_keys ~w(
+    format experiment manifest manifest_digest attempts attempts_digest summary summary_digest ledger_digest
+  )
+  @experiment_document_keys ~w(workspace_id epic_id wave_id experiment_id phase protocol_version)
+  @attempt_document_keys @attempt_fields ++ ["attempt_digest"]
   @sensitive_exact ~w(
-    token access_token refresh_token api_key apikey secret client_secret password authorization
-    cookie set-cookie private_key signing_key bearer
+    token access_token refresh_token auth_token id_token session_token api_key apikey secret
+    client_secret webhook_secret secret_key password authorization cookie set_cookie private_key
+    signing_key bearer credential credentials dsn database_url database_uri connection_string
+  )
+  @sensitive_suffixes ~w(
+    _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
+    _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
+    _dsn _database_url _database_uri _connection_string
   )
 
   @spec create_experiment(map()) ::
@@ -134,8 +145,36 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @spec import_json(binary()) :: {:ok, map()} | {:error, term()}
   def import_json(json) when is_binary(json) do
     case Jason.decode(json) do
-      {:ok, document} -> import_document(document)
-      {:error, _reason} -> {:error, :invalid_json}
+      {:ok, document} ->
+        if json == CanonicalJSON.encode!(document) do
+          import_document(document)
+        else
+          {:error, :non_canonical_json}
+        end
+
+      {:error, _reason} ->
+        {:error, :invalid_json}
+    end
+  end
+
+  @doc "Atomically replace a benchmark artifact with exact canonical JSON bytes."
+  @spec write_json_file(Path.t(), binary()) :: :ok | {:error, File.posix()}
+  def write_json_file(path, json) when is_binary(path) and is_binary(json) do
+    temporary_path =
+      Path.join(
+        Path.dirname(path),
+        ".#{Path.basename(path)}.tmp-#{System.unique_integer([:positive, :monotonic])}"
+      )
+
+    case File.write(temporary_path, json, [:binary, :exclusive, :sync]) do
+      :ok ->
+        case File.rename(temporary_path, path) do
+          :ok -> :ok
+          {:error, _reason} = error -> cleanup_temporary_file(temporary_path, error)
+        end
+
+      {:error, _reason} = error ->
+        cleanup_temporary_file(temporary_path, error)
     end
   end
 
@@ -180,7 +219,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
     base = Map.delete(document, "ledger_digest")
 
     cond do
-      not is_map(document["experiment"]) ->
+      not exact_keys?(document, @document_keys) ->
+        {:error, :invalid_document_shape}
+
+      not is_map(document["experiment"]) or
+          not exact_keys?(document["experiment"], @experiment_document_keys) ->
         {:error, :invalid_experiment}
 
       not is_map(manifest) ->
@@ -191,6 +234,15 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
       not Enum.all?(attempts, &valid_attempt_map?/1) ->
         {:error, :invalid_attempt}
+
+      attempts != Enum.sort_by(attempts, &{&1["ordinal"], &1["attempt_id"]}) ->
+        {:error, :attempts_not_canonical}
+
+      not valid_replacement_ancestry?(attempts) ->
+        {:error, :invalid_replacement_ancestry}
+
+      manifest != sanitize_map(manifest) or attempts != Enum.map(attempts, &sanitize_map/1) ->
+        {:error, :secrets_not_redacted}
 
       document["manifest_digest"] != CanonicalJSON.digest(manifest) ->
         {:error, :manifest_digest_mismatch}
@@ -243,8 +295,11 @@ defmodule Barkpark.EpicFleet.Benchmark do
 
   defp valid_attempt_map?(attempt) when is_map(attempt) do
     semantic = Map.drop(attempt, ["attempt_digest"])
+    replacement_id = attempt["replaces_attempt_id"]
 
-    is_binary(attempt["attempt_id"]) and attempt["attempt_id"] != "" and
+    exact_keys?(attempt, @attempt_document_keys) and is_binary(attempt["attempt_id"]) and
+      attempt["attempt_id"] != "" and
+      (is_nil(replacement_id) or (is_binary(replacement_id) and replacement_id != "")) and
       is_integer(attempt["ordinal"]) and attempt["ordinal"] > 0 and
       is_binary(attempt["treatment"]) and attempt["treatment"] != "" and
       attempt["status"] in Attempt.statuses() and Attempt.valid_costs?(attempt["costs"]) and
@@ -332,16 +387,23 @@ defmodule Barkpark.EpicFleet.Benchmark do
        }),
        do: {:error, :attempt_cannot_replace_itself}
 
-  defp validate_attempt_replacement(experiment_id, %{"replaces_attempt_id" => replacement_id})
+  defp validate_attempt_replacement(experiment_id, %{
+         "ordinal" => ordinal,
+         "replaces_attempt_id" => replacement_id
+       })
        when is_binary(replacement_id) do
-    if Repo.exists?(
-         from attempt in Attempt,
-           where:
-             attempt.experiment_id == ^experiment_id and attempt.attempt_id == ^replacement_id
-       ) do
-      :ok
-    else
-      {:error, :replacement_attempt_not_found}
+    previous_ordinal =
+      Repo.one(
+        from attempt in Attempt,
+          where:
+            attempt.experiment_id == ^experiment_id and attempt.attempt_id == ^replacement_id,
+          select: attempt.ordinal
+      )
+
+    cond do
+      is_nil(previous_ordinal) -> {:error, :replacement_attempt_not_found}
+      ordinal <= previous_ordinal -> {:error, :replacement_ordinal_invalid}
+      true -> :ok
     end
   end
 
@@ -374,12 +436,39 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp sanitize(value), do: value
 
   defp sensitive_key?(key) do
-    key = String.downcase(key)
+    key = key |> String.downcase() |> String.replace("-", "_")
 
     key in @sensitive_exact or
-      Enum.any?(
-        ~w(_access_token _refresh_token _api_key _secret _password _private_key),
-        &String.ends_with?(key, &1)
-      )
+      Enum.any?(@sensitive_suffixes, &String.ends_with?(key, &1))
+  end
+
+  defp valid_replacement_ancestry?(attempts) do
+    attempts
+    |> Enum.reduce_while(%{}, fn attempt, seen ->
+      ordinal = attempt["ordinal"]
+
+      case attempt["replaces_attempt_id"] do
+        nil ->
+          {:cont, Map.put(seen, attempt["attempt_id"], ordinal)}
+
+        replacement_id ->
+          case Map.fetch(seen, replacement_id) do
+            {:ok, previous_ordinal} when previous_ordinal < ordinal ->
+              {:cont, Map.put(seen, attempt["attempt_id"], ordinal)}
+
+            _ ->
+              {:halt, :invalid}
+          end
+      end
+    end)
+    |> is_map()
+  end
+
+  defp exact_keys?(map, expected) when is_map(map),
+    do: Map.keys(map) |> Enum.sort() == Enum.sort(expected)
+
+  defp cleanup_temporary_file(path, error) do
+    _ = File.rm(path)
+    error
   end
 end
